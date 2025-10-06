@@ -1,0 +1,26 @@
+﻿# NanoGUI Material Theme Config
+# This file helps CMake find and configure the Fluent Design theme
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find NanoGUI dependency
+find_dependency(NanoGUI REQUIRED)
+
+# Include the targets file
+include("${CMAKE_CURRENT_LIST_DIR}/NanoGUIMaterialThemeTargets.cmake")
+
+# Check that all required components are present
+check_required_components(NanoGUIMaterialTheme)
+
+# Set variables for convenience
+set(NANOGUI_MATERIAL_THEME_FOUND TRUE)
+set(NANOGUI_MATERIAL_THEME_VERSION @PROJECT_VERSION@)
+set(NANOGUI_MATERIAL_THEME_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@/nanogui/material")
+set(NANOGUI_MATERIAL_THEME_LIBRARIES NanoGUI::FluentTheme)
+
+# Print found message
+if(NOT NanoGUIMaterialTheme_FIND_QUIETLY)
+    message(STATUS "Found NanoGUI Material Theme: ${NANOGUI_MATERIAL_THEME_VERSION}")
+endif()

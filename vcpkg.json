@@ -1,0 +1,102 @@
+{
+  "name": "vcpkg-example",
+  "version-semver": "0.1.0",
+  "dependencies": [
+    {
+      "name": "fmt",
+      "version>=": "11.0.2#1"
+    },
+    {
+      "name": "range-v3",
+      "version>=": "0.12.0"
+    },
+    {
+      "name": "ctre",
+      "version>=": "3.9.0"
+    },
+    {
+      "name": "stringzilla",
+      "version>=": "3.12.5"
+    },
+    {
+      "name": "effolkronium-random",
+      "version>=": "1.5.0"
+    },
+    {
+      "name": "yaml-cpp",
+      "version>=": "0.8.0#3"
+    },
+    {
+      "name": "zlib",
+      "version>=": "1.3.1"
+    },
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.12.0"
+    },
+    {
+      "name": "pegtl",
+      "version>=": "3.2.8"
+    },
+    {
+      "name": "magic-enum",
+      "version>=": "0.9.7"
+    },
+    {
+      "name": "mimalloc",
+      "version>=": "2.2.3"
+    },
+    {
+      "name": "catch2",
+      "version>=": "3.7.1"
+    },
+    {
+      "name": "nanobench",
+      "version>=": "4.3.11"
+    },
+    {
+      "name": "xxhash",
+      "version>=": "0.8.3"
+    },
+    {
+      "name": "quickjs-ng",
+      "version>=": "0.10.1"
+    },
+    {
+      "name": "nu-book-zxing-cpp",
+      "version>=": "2.3.0"
+    },
+    {
+      "name": "glfw3",
+      "version>=": "3.4#1"
+    },
+    {
+      "name": "glad",
+      "version>=": "0.1.36"
+    },
+    {
+      "name": "robin-map",
+      "version>=": "1.4.0"
+    },
+    {
+      "name": "sdl3",
+      "version>=": "3.2.20"
+    },
+    {
+      "name": "sdl3-image",
+      "version>=": "3.2.4"
+    },
+    {
+      "name": "sdl3-ttf",
+      "version>=": "3.2.2"
+    },
+    {
+      "name": "lunasvg",
+      "version>=": "3.4.0"
+    },
+    {
+      "name": "rlottie"
+    } 
+  ],
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}
