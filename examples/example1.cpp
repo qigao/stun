@@ -11,38 +11,14 @@
     BSD-style license that can be found in the LICENSE.txt file.
 */
 
-#include <nanogui/button.h>
-#include <nanogui/checkbox.h>
-#include <nanogui/combobox.h>
-#include <nanogui/icons.h>
-#include <nanogui/imagepanel.h>
-#include <nanogui/imageview.h>
-#include <nanogui/label.h>
-#include <nanogui/layout.h>
-#include <nanogui/messagedialog.h>
-#include <nanogui/opengl.h>
-#include <nanogui/popupbutton.h>
-#include <nanogui/progressbar.h>
-#include <nanogui/screen.h>
-#include <nanogui/slider.h>
-#include <nanogui/textbox.h>
-#include <nanogui/toolbutton.h>
-#include <nanogui/window.h>
+#include <nanogui.h> 
 
 #if defined(_WIN32)
   #define NOMINMAX
   #include <windows.h>
 #endif
 #include <iostream>
-#include <memory>
-#include <nanogui/colorpicker.h>
-#include <nanogui/colorwheel.h>
-#include <nanogui/graph.h>
-#include <nanogui/renderpass.h>
-#include <nanogui/shader.h>
-#include <nanogui/tabwidget.h>
-#include <nanogui/texture.h>
-#include <nanogui/vscrollpanel.h>
+#include <memory> 
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION

@@ -1,17 +1,22 @@
 /*
-    examples/example_node_editor.cpp -- Visual node editor with drag & drop
+    examples/example_node_editor.cpp -- Visual node editor with NEW Fluent Components
 
-    This example demonstrates a node-based editor similar to ImGui node editor:
+    This example demonstrates a node-based editor with NEW Fluent v2.2 components:
+    - FluentMenuBar for File/Edit/View menus
+    - FluentCommandBar for node operations
+    - FluentPivot for node categories
+    - FluentExpander for node properties
+    - FluentNumberBox for node parameters
+    - FluentInfoBar for status notifications
     - Draggable nodes using Window widgets
-    - Visual node graph
-    - Fluent Design styling
+    - Visual node graph with bezier connections
 
     NanoGUI was developed by Wenzel Jakob <wenzel.jakob@epfl.ch>.
 */
 
 #include <iostream>
-#include <nanogui/fluent_theme.h>
-#include <nanogui/nanogui.h>
+#include <nanogui.h>
+#include <nanogui/fluent.h>
 #include <nanogui/opengl.h>
 #include <nanovg.h>
 #include <vector>
@@ -128,25 +133,34 @@ public:
 
     // Create connection canvas (behind nodes)
     m_canvas = new ConnectionCanvas(this);
-    m_canvas->set_position(Vector2i(0, 50));
-    m_canvas->set_fixed_size(Vector2i(width(), height() - 80));
+    m_canvas->set_position(Vector2i(0, 85));
+    m_canvas->set_fixed_size(Vector2i(width(), height() - 85));
     m_canvas->connections = &m_connections;
     m_canvas->nodes = &m_nodes;
 
     // Create sample nodes
     create_sample_nodes();
 
-    // Create status bar
-    create_status_bar();
+    // Show welcome notification
+    show_notification("Welcome to Node Editor! Drag nodes to move them.", 
+                     FluentInfoBar::Severity::Informational);
 
     perform_layout();
 
     std::cout << "\n╔════════════════════════════════════════╗" << std::endl;
-    std::cout << "║   Node Editor - Drag & Drop           ║" << std::endl;
+    std::cout << "║   Node Editor - NEW Fluent v2.2       ║" << std::endl;
     std::cout << "╚════════════════════════════════════════╝" << std::endl;
+    std::cout << "\nNew Components Showcased:" << std::endl;
+    std::cout << "  ✨ FluentMenuBar - File/Edit/View menus" << std::endl;
+    std::cout << "  ✨ FluentCommandBar - Node operations" << std::endl;
+    std::cout << "  ✨ FluentPivot - Node categories" << std::endl;
+    std::cout << "  ✨ FluentExpander - Node properties" << std::endl;
+    std::cout << "  ✨ FluentNumberBox - Parameter controls" << std::endl;
+    std::cout << "  ✨ FluentInfoBar - Status notifications" << std::endl;
     std::cout << "\nControls:" << std::endl;
     std::cout << "  • Drag nodes to move them" << std::endl;
-    std::cout << "  • Click to select nodes" << std::endl;
+    std::cout << "  • Use command bar for operations" << std::endl;
+    std::cout << "  • Browse node categories with pivot" << std::endl;
     std::cout << "  • ESC to exit\n" << std::endl;
   }
 
@@ -174,7 +188,94 @@ private:
   std::vector<NodeWindow *> m_nodes;
   std::vector<Connection> m_connections;
   ConnectionCanvas *m_canvas = nullptr;
-  Label *m_status_label = nullptr;
+  FluentInfoBar *m_info_bar = nullptr;
+  
+  void show_notification(const std::string &message, FluentInfoBar::Severity severity) {
+    if (m_info_bar) {
+      m_info_bar->set_visible(false);
+      remove_child(m_info_bar);
+    }
+    
+    m_info_bar = new FluentInfoBar(this, message, severity);
+    m_info_bar->set_position(Vector2i(10, height() - 70));
+    m_info_bar->set_fixed_width(350);
+    m_info_bar->set_closable(true);
+    m_info_bar->set_close_callback([this]() {
+      if (m_info_bar) {
+        m_info_bar->set_visible(false);
+      }
+    });
+    
+    perform_layout();
+  }
+  
+  void create_node_palette() {
+    // Create sidebar with node categories using FluentPivot!
+    Window *sidebar = new Window(this, "Node Palette");
+    sidebar->set_position(Vector2i(width() - 250, 85));
+    sidebar->set_fixed_size(Vector2i(250, 400));
+    sidebar->set_layout(new BoxLayout(Orientation::Vertical, Alignment::Fill, 5, 5));
+    
+    // Use NEW FluentPivot for node categories!
+    auto *pivot = new FluentPivot(sidebar);
+    pivot->add_item("Input", FA_SIGN_IN_ALT);
+    pivot->add_item("Math", FA_CALCULATOR);
+    pivot->add_item("Output", FA_SIGN_OUT_ALT);
+    
+    // Input nodes category
+    auto *input_content = pivot->get_content(0);
+    input_content->set_layout(new GroupLayout(5));
+    
+    auto *input_exp = new FluentExpander(input_content, "Input Nodes");
+    input_exp->set_icon(FA_SIGN_IN_ALT);
+    input_exp->set_expanded(true);
+    
+    Button *float_btn = new Button(input_exp->content(), "Float", FA_HASHTAG);
+    float_btn->set_callback([this]() {
+      add_node("Float", Vector2i(100, 150), Color(0, 120, 215, 255));
+      show_notification("Float node added", FluentInfoBar::Severity::Success);
+    });
+    
+    Button *vector_btn = new Button(input_exp->content(), "Vector", FA_ARROWS_ALT);
+    vector_btn->set_callback([this]() {
+      add_node("Vector", Vector2i(100, 250), Color(0, 120, 215, 255));
+      show_notification("Vector node added", FluentInfoBar::Severity::Success);
+    });
+    
+    // Math nodes category
+    auto *math_content = pivot->get_content(1);
+    math_content->set_layout(new GroupLayout(5));
+    
+    auto *math_exp = new FluentExpander(math_content, "Math Nodes");
+    math_exp->set_icon(FA_CALCULATOR);
+    math_exp->set_expanded(true);
+    
+    Button *add_btn = new Button(math_exp->content(), "Add", FA_PLUS);
+    add_btn->set_callback([this]() {
+      add_node("Add", Vector2i(300, 150), Color(16, 137, 62, 255));
+      show_notification("Add node added", FluentInfoBar::Severity::Success);
+    });
+    
+    Button *mult_btn = new Button(math_exp->content(), "Multiply", FA_TIMES);
+    mult_btn->set_callback([this]() {
+      add_node("Multiply", Vector2i(300, 250), Color(136, 23, 152, 255));
+      show_notification("Multiply node added", FluentInfoBar::Severity::Success);
+    });
+    
+    // Output nodes category
+    auto *output_content = pivot->get_content(2);
+    output_content->set_layout(new GroupLayout(5));
+    
+    auto *output_exp = new FluentExpander(output_content, "Output Nodes");
+    output_exp->set_icon(FA_SIGN_OUT_ALT);
+    output_exp->set_expanded(true);
+    
+    Button *display_btn = new Button(output_exp->content(), "Display", FA_DESKTOP);
+    display_btn->set_callback([this]() {
+      add_node("Display", Vector2i(500, 150), Color(247, 99, 12, 255));
+      show_notification("Display node added", FluentInfoBar::Severity::Success);
+    });
+  }
 
   void create_sample_nodes() {
     // Input node - Bright Blue (Fluent accent color)
@@ -219,62 +320,110 @@ private:
   }
 
   void create_toolbar() {
+    // Create menu bar window
+    Window *menu_window = new Window(this, "");
+    menu_window->set_position(Vector2i(0, 0));
+    menu_window->set_fixed_size(Vector2i(width(), 35));
+    menu_window->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 5, 5));
+    
+    // Use NEW FluentMenuBar!
+    auto *menu_bar = new FluentMenuBar(menu_window);
+    
+    // File menu
+    auto *file = menu_bar->add_menu("File");
+    menu_bar->add_item(file, "New Graph", FA_FILE, [this]() {
+      show_notification("New graph created", FluentInfoBar::Severity::Success);
+    }, "Ctrl+N");
+    menu_bar->add_item(file, "Open", FA_FOLDER_OPEN, [this]() {
+      show_notification("Open not implemented", FluentInfoBar::Severity::Informational);
+    }, "Ctrl+O");
+    menu_bar->add_item(file, "Save", FA_SAVE, [this]() {
+      show_notification("Graph saved", FluentInfoBar::Severity::Success);
+    }, "Ctrl+S");
+    menu_bar->add_separator(file);
+    menu_bar->add_item(file, "Exit", FA_TIMES, [this]() {
+      set_visible(false);
+    }, "Alt+F4");
+    
+    // Edit menu
+    auto *edit = menu_bar->add_menu("Edit");
+    menu_bar->add_item(edit, "Undo", FA_UNDO, [this]() {
+      show_notification("Undo", FluentInfoBar::Severity::Informational);
+    }, "Ctrl+Z");
+    menu_bar->add_item(edit, "Redo", FA_REDO, [this]() {
+      show_notification("Redo", FluentInfoBar::Severity::Informational);
+    }, "Ctrl+Y");
+    menu_bar->add_separator(edit);
+    menu_bar->add_item(edit, "Delete Node", FA_TRASH, [this]() {
+      show_notification("Delete selected node", FluentInfoBar::Severity::Warning);
+    }, "Delete");
+    
+    // View menu
+    auto *view = menu_bar->add_menu("View");
+    menu_bar->add_item(view, "Zoom In", FA_SEARCH_PLUS, [this]() {
+      show_notification("Zoom in", FluentInfoBar::Severity::Informational);
+    }, "Ctrl++");
+    menu_bar->add_item(view, "Zoom Out", FA_SEARCH_MINUS, [this]() {
+      show_notification("Zoom out", FluentInfoBar::Severity::Informational);
+    }, "Ctrl+-");
+    menu_bar->add_item(view, "Reset View", FA_HOME, [this]() {
+      show_notification("View reset", FluentInfoBar::Severity::Informational);
+    }, "Home");
+    menu_bar->add_separator(view);
+    menu_bar->add_item(view, "Light Theme", FA_SUN, [this]() {
+      set_theme(new FluentTheme(nvg_context(), FluentTheme::Palette::Light));
+      show_notification("Light theme applied", FluentInfoBar::Severity::Success);
+    });
+    menu_bar->add_item(view, "Dark Theme", FA_MOON, [this]() {
+      set_theme(new FluentTheme(nvg_context(), FluentTheme::Palette::Dark));
+      show_notification("Dark theme applied", FluentInfoBar::Severity::Success);
+    });
+    
+    // Create command bar window
     Window *toolbar = new Window(this, "");
-    toolbar->set_position(Vector2i(0, 0));
+    toolbar->set_position(Vector2i(0, 35));
     toolbar->set_fixed_size(Vector2i(width(), 50));
     toolbar->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 10, 5));
 
     new Label(toolbar, "Node Editor", "sans-bold", 16);
-
-    new Label(toolbar, " | ");
-
-    Button *add_btn = new Button(toolbar, "Add Node", FA_PLUS);
-    add_btn->set_background_color(Color(0, 120, 212, 255));
-    add_btn->set_text_color(Color(255, 255, 255, 255));
-    add_btn->set_callback([this] {
-      // Add random node
+    
+    // Use NEW FluentCommandBar for node operations!
+    auto *cmd_bar = new FluentCommandBar(toolbar);
+    
+    // Node operations
+    cmd_bar->add_command("Add Node", FA_PLUS, [this]() {
       int x = 100 + (rand() % 400);
       int y = 100 + (rand() % 300);
       Color color(100 + rand() % 155, 100 + rand() % 155, 100 + rand() % 155, 255);
       add_node("New Node", Vector2i(x, y), color);
-      update_status("Added new node");
+      show_notification("Node added", FluentInfoBar::Severity::Success);
     });
-
-    Button *clear_btn = new Button(toolbar, "Clear", FA_TRASH);
-    clear_btn->set_callback([this] { update_status("Clear not implemented"); });
-
-    new Label(toolbar, " | ");
-
-    Button *light_theme = new Button(toolbar, "", FA_SUN);
-    light_theme->set_tooltip("Light Theme");
-    light_theme->set_callback([this] {
-      set_theme(new FluentTheme(nvg_context(), FluentTheme::Palette::Light));
-      update_status("Light theme");
+    
+    cmd_bar->add_command("Delete", FA_TRASH, [this]() {
+      show_notification("Delete selected node", FluentInfoBar::Severity::Warning);
     });
-
-    Button *dark_theme = new Button(toolbar, "", FA_MOON);
-    dark_theme->set_tooltip("Dark Theme");
-    dark_theme->set_callback([this] {
-      set_theme(new FluentTheme(nvg_context(), FluentTheme::Palette::Dark));
-      update_status("Dark theme");
+    
+    cmd_bar->add_separator();
+    
+    cmd_bar->add_command("Connect", FA_LINK, [this]() {
+      show_notification("Connection mode", FluentInfoBar::Severity::Informational);
     });
+    
+    cmd_bar->add_command("Disconnect", FA_UNLINK, [this]() {
+      show_notification("Disconnect mode", FluentInfoBar::Severity::Informational);
+    });
+    
+    cmd_bar->add_separator();
+    
+    cmd_bar->add_command("Run", FA_PLAY, [this]() {
+      show_notification("Graph executed", FluentInfoBar::Severity::Success);
+    });
+    
+    // Create node palette sidebar
+    create_node_palette();
   }
 
-  void create_status_bar() {
-    Window *status_bar = new Window(this, "");
-    status_bar->set_position(Vector2i(0, height() - 30));
-    status_bar->set_fixed_size(Vector2i(width(), 30));
-    status_bar->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 10, 5));
 
-    m_status_label = new Label(status_bar, "Ready - Drag nodes to move them", "sans", 12);
-  }
-
-  void update_status(const std::string &msg) {
-    if (m_status_label) {
-      m_status_label->set_caption(msg);
-      std::cout << "Status: " << msg << std::endl;
-    }
-  }
 };
 
 int main(int argc, char **argv) {

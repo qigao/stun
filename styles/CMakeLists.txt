@@ -1,0 +1,5 @@
+set(folder_name nanogui/styles)
+add_subdirectory(m3) 
+add_subdirectory(apple)
+add_subdirectory(fluent-ios)
+add_subdirectory(fluent-web)

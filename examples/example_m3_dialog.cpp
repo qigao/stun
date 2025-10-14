@@ -9,27 +9,21 @@
     - Callbacks (onShow and onDismiss)
 */
 
-#include <nanogui/screen.h>
-#include <nanogui/window.h>
-#include <nanogui/layout.h>
-#include <nanogui/label.h>
-#include <nanogui/button.h>
-#include <nanogui/textbox.h>
-#include <nanogui/checkbox.h>
-#include <nanogui/slider.h>
-#include <nanogui/combobox.h>
-#include <nanogui/m3_theme.h>
-#include <nanogui/m3_dialog.h>
+#include <nanogui.h>
+#include <nanogui/m3.h>
 #include <iostream>
 
 using namespace nanogui;
 
 int main(int /* argc */, char ** /* argv */) {
+#if defined(NANOGUI_BUILD_GLFW)
     nanogui::init();
+#endif
 
     {
         // Create main screen
         Screen *screen = new Screen(Vector2i(1000, 700), "M3 Dialog Examples");
+        screen->inc_ref();
 
         // Create M3 theme with purple seed
         auto *theme = new M3Theme(
@@ -419,9 +413,18 @@ int main(int /* argc */, char ** /* argv */) {
         screen->perform_layout();
         screen->draw_all();
 
+#if defined(NANOGUI_BUILD_GLFW)
         nanogui::run();
+#else
+        while (screen->process_events()) {
+            screen->draw_all();
+        }
+#endif
+        screen->dec_ref();
     }
 
+#if defined(NANOGUI_BUILD_GLFW)
     nanogui::shutdown();
+#endif
     return 0;
 }

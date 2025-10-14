@@ -11,7 +11,7 @@
     BSD-style license that can be found in the LICENSE.txt file.
 */
 
-#include <nanogui/nanogui.h>
+#include <nanogui.h>
 #include <memory>
 #include <iostream>
 

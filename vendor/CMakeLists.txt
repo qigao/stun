@@ -7,7 +7,7 @@ set(NFD_INSTALL OFF CACHE BOOL " " FORCE)
 set(NFD_PORTAL ON CACHE BOOL " " FORCE)
 set(NFD_APPEND_EXTENSION ON CACHE BOOL " " FORCE)
 set(NFD_CASE_SENSITIVE_FILTER ON CACHE BOOL " " FORCE)
-add_subdirectory(nativefiledialog-extended)
+add_subdirectory(nfd)
 
 mark_as_advanced(
   APPKIT_LIBRARY

@@ -6,14 +6,7 @@
 */
 
 #include <iostream>
-#include <nanogui/button.h>
-#include <nanogui/checkbox.h>
-#include <nanogui/label.h>
-#include <nanogui/layout.h>
-#include <nanogui/screen.h>
-#include <nanogui/slider.h>
-#include <nanogui/textbox.h>
-#include <nanogui/window.h>
+#include <nanogui.h>
 
 // Include backend-specific headers for key codes
 #if defined(NANOGUI_USE_SDL3)

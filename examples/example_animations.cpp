@@ -6,7 +6,6 @@
 */
 
 #include <iostream>
-#include <GLFW/glfw3.h>
 #include <nanogui/button.h>
 #include <nanogui/checkbox.h>
 #include <nanogui/label.h>
@@ -14,7 +13,7 @@
 #include <nanogui/m3_menu.h>
 #include <nanogui/m3_theme.h>
 #include <nanogui/m3_tooltip.h>
-#include <nanogui/nanogui.h>
+#include <nanogui.h>
 
 using namespace nanogui;
 

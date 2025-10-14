@@ -3,7 +3,7 @@ cmake_minimum_required (VERSION 3.13..3.18)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # macOS Big Sur (released Nov 2020, EOL Sep 2023)
 
 # Extract project version from source
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/nanogui/common.h"
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/nanogui/include/nanogui/common.h"
   nanogui_version_defines REGEX "#define NANOGUI_VERSION_(MAJOR|MINOR|PATCH) ")
 
 foreach(ver ${nanogui_version_defines})
@@ -55,7 +55,7 @@ else()
   set(NANOGUI_BUILD_GLAD_DEFAULT OFF)
 endif()
 
-set(NANOGUI_BUILD_SHARED_DEFAULT ON) 
+set(NANOGUI_BUILD_SHARED_DEFAULT OFF) 
 set(NANOGUI_USE_SDL2_DEFAULT OFF)
 
 if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$")
@@ -76,9 +76,8 @@ endif()
 option(NANOGUI_BUILD_EXAMPLES            "Build NanoGUI example application?" ON)
 option(NANOGUI_BUILD_SHARED              "Build NanoGUI as a shared library?" ${NANOGUI_BUILD_SHARED_DEFAULT})
 option(NANOGUI_BUILD_GLAD                "Build GLAD OpenGL loader library? (needed on Windows)" ${NANOGUI_BUILD_GLAD_DEFAULT})
-option(NANOGUI_INSTALL                   "Install NanoGUI on `make install`?" ON)
-option(NANOGUI_WITH_RLOTTIE              "Enable rlottie integration for demos?" OFF)
-
+option(NANOGUI_INSTALL                   "Install NanoGUI on `make install`?" OFF)
+ 
 # Backend selection (mutually exclusive)
 include(CMakeDependentOption)
 option(NANOGUI_BUILD_GLFW "Use GLFW backend (desktop support)" ${NANOGUI_BUILD_GLFW_DEFAULT})
@@ -95,18 +94,6 @@ if (NOT NANOGUI_BUILD_GLFW AND NOT NANOGUI_USE_SDL3)
   message(FATAL_ERROR "NanoGUI: At least one backend must be enabled:\n"
                       "  -DNANOGUI_BUILD_GLFW=ON   (for GLFW backend)\n"
                       "  -DNANOGUI_USE_SDL3=ON     (for SDL3 backend)")
-endif()
-
-set(NANOGUI_RLOTTIE_FOUND OFF)
-if (NANOGUI_WITH_RLOTTIE)
-  find_path(RLOTTIE_INCLUDE_DIR rlottie.h)
-  find_library(RLOTTIE_LIBRARY NAMES rlottie)
-  if (RLOTTIE_INCLUDE_DIR AND RLOTTIE_LIBRARY)
-    set(NANOGUI_RLOTTIE_FOUND ON)
-  else()
-    message(WARNING "rlottie not found; disabling rlottie integration")
-    set(NANOGUI_WITH_RLOTTIE OFF)
-  endif()
 endif()
 
 option(NANOGUI_SKIP_METAL_SHADER_PRECOMPILATION "Compile Metal shaders at runtime instead of precompiling them while nanogui is built." OFF)
@@ -144,14 +131,6 @@ macro(CHECK_CXX_COMPILER_AND_LINKER_FLAGS _RESULT _CXX_FLAGS _LINKER_FLAGS)
   set(CMAKE_REQUIRED_LIBRARIES "")
 endmacro()
 
-if (NANOGUI_BACKEND MATCHES "(OpenGL|GLES 2|GLES 3)")
-  list(APPEND NANOGUI_EXTRA
-    src/texture_gl.cpp src/shader_gl.cpp
-    src/renderpass_gl.cpp src/opengl.cpp
-    src/opengl_check.h
-  )
-endif()
-
 if (NANOGUI_BACKEND STREQUAL "OpenGL")
   set(NANOGUI_BACKEND_DEFS -DNANOGUI_USE_OPENGL)
   set(NANOGUI_GLOB "resources/*.gl")
@@ -166,9 +145,6 @@ elseif (NANOGUI_BACKEND STREQUAL "GLES 3")
   message(STATUS "NanoGUI: using GLES 3 backend.")
 elseif (NANOGUI_BACKEND STREQUAL "Metal")
   set(NANOGUI_BACKEND_DEFS -DNANOGUI_USE_METAL)
-  list(APPEND NANOGUI_EXTRA
-    src/texture_metal.mm src/shader_metal.mm src/renderpass_metal.mm
-  )
   set(NANOGUI_GLOB "resources/*.metal")
   message(STATUS "NanoGUI: using Metal backend.")
 endif()
@@ -295,53 +271,6 @@ elseif (CMAKE_SYSTEM MATCHES "Linux" OR CMAKE_SYSTEM_NAME MATCHES "BSD")
   endif()
 endif()
 
-# Glob up resource files
-file(GLOB resources
-  "${CMAKE_CURRENT_SOURCE_DIR}/resources/*.ttf"
-  "${NANOGUI_GLOB}")
-
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/resources")
-
-# Precompile .metal shaders to .metallib files
-foreach(fname_in IN LISTS resources)
-  if (NOT NANOGUI_SKIP_METAL_SHADER_PRECOMPILATION AND NANOGUI_BACKEND STREQUAL "Metal" AND fname_in MATCHES "\\.metal")
-    get_filename_component(fname_out ${fname_in} NAME)
-    set(fname_out "${CMAKE_CURRENT_BINARY_DIR}/resources/${fname_out}lib")
-    add_custom_command(
-        OUTPUT ${fname_out}
-        DEPENDS ${fname_in}
-        COMMAND xcrun -sdk macosx metal -std=osx-metal2.0 -O3 "${fname_in}" -o "${fname_out}"
-        VERBATIM
-    )
-  else()
-    set(fname_out "${fname_in}")
-  endif()
-  list(APPEND resources_processed ${fname_out})
-endforeach()
-
-# Concatenate resource files into a comma separated string
-string(REGEX REPLACE "([^\\]|^);" "\\1," resources_string "${resources_processed}")
-string(REGEX REPLACE "[\\](.)" "\\1" resources_string "${resources_string}")
-
-# Create command line for running bin2c cmake script
-set(bin2c_cmdline
-  -DOUTPUT_C=nanogui_resources.cpp
-  -DOUTPUT_H=nanogui_resources.h
-  "-DINPUT_FILES=${resources_string}"
-  -P "${CMAKE_CURRENT_SOURCE_DIR}/resources/bin2c.cmake")
-
-
-# Run bin2c on resource files
-add_custom_command(
-  OUTPUT nanogui_resources.cpp nanogui_resources.h
-  COMMAND ${CMAKE_COMMAND} ARGS ${bin2c_cmdline}
-  DEPENDS ${resources} ${resources_processed}
-  COMMENT "Running bin2c"
-  VERBATIM)
-
-# Needed to generated files
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
-
 # Set library type
 if (NANOGUI_BUILD_SHARED)
   set(NANOGUI_LIBRARY_TYPE "SHARED")
@@ -349,101 +278,6 @@ else()
   set(NANOGUI_LIBRARY_TYPE "STATIC")
 endif()
 
-# Add vendor libraries before creating nanogui target
-add_subdirectory(vendor)
-
-# Compile main NanoGUI library
-set(NANOGUI_CORE_SOURCES
-  # Backend-specific sources
-  ${NANOGUI_EXTRA}
-
-  # Fonts etc.
-  nanogui_resources.cpp
-  src/rtimer.cpp src/rtimer.h
-  include/nanogui/common.h src/common.cpp
-  include/nanogui/widget.h src/widget.cpp
-  include/nanogui/theme.h src/theme.cpp
- 
-  include/nanogui/layout.h src/layout.cpp
-  include/nanogui/label.h src/label.cpp
-  include/nanogui/window.h src/window.cpp
-  include/nanogui/popup.h src/popup.cpp
-  include/nanogui/checkbox.h src/checkbox.cpp
-  include/nanogui/button.h src/button.cpp
-  include/nanogui/popupbutton.h src/popupbutton.cpp
-  include/nanogui/combobox.h src/combobox.cpp
-  include/nanogui/progressbar.h src/progressbar.cpp
-  include/nanogui/slider.h src/slider.cpp
-  include/nanogui/messagedialog.h src/messagedialog.cpp
-  include/nanogui/textbox.h src/textbox.cpp
-  include/nanogui/textarea.h src/textarea.cpp
-  include/nanogui/imagepanel.h src/imagepanel.cpp
-  include/nanogui/vscrollpanel.h src/vscrollpanel.cpp
-  include/nanogui/colorwheel.h src/colorwheel.cpp
-  include/nanogui/colorpicker.h src/colorpicker.cpp
-  include/nanogui/graph.h src/graph.cpp
-  include/nanogui/tabwidget.h src/tabwidget.cpp
-  include/nanogui/canvas.h src/canvas.cpp
-  include/nanogui/chroma.h src/chroma.cpp
-  include/nanogui/texture.h src/texture.cpp
-  include/nanogui/shader.h src/shader.cpp
-  include/nanogui/quad.h src/quad.cpp
-  include/nanogui/imageview.h src/imageview.cpp
-  include/nanogui/traits.h src/traits.cpp
-  include/nanogui/colorpass.h src/colorpass.cpp
-  include/nanogui/renderpass.h
-  include/nanogui/formhelper.h
-  include/nanogui/icons.h
-  include/nanogui/toolbutton.h
-  include/nanogui/opengl.h
-  include/nanogui/nanogui.h
-)
-
-# Add the appropriate backend source files
-# Both backends use include/nanogui/screen.h but different implementations
-if (NANOGUI_BUILD_GLFW)
-  list(APPEND NANOGUI_CORE_SOURCES
-    include/nanogui/screen.h
-    include/nanogui/screen_glfw.h
-    src/screen.cpp
-    src/screen_glfw.cpp
-  )
-  message(STATUS "NanoGUI: Using GLFW backend (Screen class)")
-endif()
-
-if (NANOGUI_USE_SDL3)
-  list(APPEND NANOGUI_CORE_SOURCES
-    include/nanogui/screen.h
-    include/nanogui/screen_sdl.h
-    src/screen.cpp
-    src/screen_sdl.cpp
-  )
-  message(STATUS "NanoGUI: Using SDL3 backend (Screen class)")
-endif()
-
-add_library(nanogui ${NANOGUI_LIBRARY_TYPE} ${NANOGUI_CORE_SOURCES})
-
-if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  # Use automatic reference counting for Objective-C portions
-  target_compile_options(nanogui PRIVATE -fobjc-arc)
-endif()
-
-target_compile_definitions(nanogui
-  PUBLIC
-    ${NANOGUI_BACKEND_DEFS}
-
-  PRIVATE
-    -DNANOGUI_BUILD
-)
-
-if (NANOGUI_SKIP_STB_IMAGE_IMPLEMENTATION)
-  # Frameworks that statically link to nanobind and which already include the
-  # stb_image implementation bits can set this flag to avoid duplicate symbol
-  # errors.
-
-  target_compile_definitions(nanogui
-    PRIVATE -DNVG_NO_STB_IMPLEMENTATION)
-endif()
 # Link GLFW backend (legacy desktop support)
 if (NANOGUI_BUILD_GLFW)
   set(_nanogui_glfw_target "")
@@ -466,15 +300,10 @@ if (NANOGUI_BUILD_GLFW)
     elseif (DEFINED GLFW3_LIBRARIES)
       set(_nanogui_glfw_target ${GLFW3_LIBRARIES})
     endif()
-    if (DEFINED GLFW3_INCLUDE_DIRS)
-      target_include_directories(nanogui PUBLIC ${GLFW3_INCLUDE_DIRS})
-    endif()
   endif()
   if (_nanogui_glfw_target STREQUAL "")
     message(FATAL_ERROR "NanoGUI: unable to locate a GLFW target to link against.")
   endif()
-  target_link_libraries(nanogui PUBLIC ${_nanogui_glfw_target})
-  target_compile_definitions(nanogui PUBLIC -DNANOGUI_BUILD_GLFW)
   message(STATUS "NanoGUI: GLFW backend linked - Screen available for desktop support.")
 endif()
 
@@ -500,146 +329,15 @@ if (NANOGUI_USE_SDL3)
     elseif (DEFINED SDL3_LIBRARIES)
       set(_nanogui_sdl3_target ${SDL3_LIBRARIES})
     endif()
-    if (DEFINED SDL3_INCLUDE_DIRS)
-      target_include_directories(nanogui PUBLIC ${SDL3_INCLUDE_DIRS})
-    endif()
   endif()
   if (_nanogui_sdl3_target STREQUAL "")
     message(FATAL_ERROR "NanoGUI: unable to locate an SDL3 target to link against.")
   endif()
-  target_link_libraries(nanogui PUBLIC ${_nanogui_sdl3_target})
-  target_compile_definitions(nanogui PUBLIC -DNANOGUI_USE_SDL3)
   message(STATUS "NanoGUI: SDL3 backend linked - Screen available for cross-platform support.")
-endif()
-
-if (NANOGUI_SKIP_METAL_SHADER_PRECOMPILATION)
-  message(STATUS "NanoGUI: skipping precompilation of Metal shaders.")
-  target_compile_definitions(nanogui
-    PUBLIC -DNANOGUI_SKIP_METAL_SHADER_PRECOMPILATION)
 endif()
 
 # Use robin-map from vcpkg
 find_package(tsl-robin-map CONFIG REQUIRED)
-target_link_libraries(nanogui PRIVATE tsl::robin_map)
-
-target_include_directories(nanogui
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-
-  PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-if (NANOGUI_BUILD_SHARED)
-  target_compile_definitions(nanogui
-    PUBLIC
-      -DNANOGUI_SHARED -DNVG_SHARED
-    PRIVATE
-      -DNVG_BUILD
-  )
-
-  if (NANOGUI_BUILD_GLAD)
-    target_compile_definitions(nanogui
-      PUBLIC
-        -DGLAD_GLAPI_EXPORT
-      PRIVATE
-        -DGLAD_GLAPI_EXPORT_BUILD
-    )
-  endif()
-endif()
-
-if (NANOGUI_BUILD_GLAD)
-  target_compile_definitions(nanogui PUBLIC -DNANOGUI_GLAD)
-  target_link_libraries(nanogui PUBLIC glad::glad)
-endif()
-
-# Link nanovg library
-target_link_libraries(nanogui PUBLIC nanovg::nanovg)
-
-# Link nanovg_metal library if using Metal backend
-if (NANOGUI_BACKEND STREQUAL "Metal")
-  target_link_libraries(nanogui PRIVATE nanovg_metal::nanovg_metal)
-endif()
-
-# Link native file dialog library
-target_link_libraries(nanogui PRIVATE $<BUILD_INTERFACE:nfd>)
-
-if (NANOGUI_BUILD_SHARED)
-  target_link_libraries(nanogui PRIVATE ${NANOGUI_LIBS})
-  set_property(TARGET nanogui PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
-  set_property(TARGET nanogui PROPERTY INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL ON)
-  set_property(TARGET nanogui PROPERTY DEFINE_SYMBOL "")
-  set_target_properties(nfd PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  
-  # Set output directories for nanogui DLL
-  set_target_properties(nanogui PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-  )
-  
-  # For multi-config generators
-  foreach(CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
-    string(TOUPPER ${CONFIG_TYPE} CONFIG_TYPE_UPPER)
-    set_target_properties(nanogui PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} "${CMAKE_BINARY_DIR}/bin"
-      LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} "${CMAKE_BINARY_DIR}/bin"
-      ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} "${CMAKE_BINARY_DIR}/bin"
-    )
-  endforeach()
-else()
-  target_link_libraries(nanogui PUBLIC ${NANOGUI_LIBS})
-endif()
-
-if (MSVC)
-  # warning C4324: "...": structure was padded due to alignment specifier
-  target_compile_options(nanogui PRIVATE /wd4324)
-endif()
-
-# Auto-detect GLES include directory on Raspberry PI
-if (EXISTS /opt/vc/include)
-  target_include_directories(nanogui PUBLIC /opt/vc/include)
-endif()
-
-if (NANOGUI_INSTALL)
-  include(GNUInstallDirs)
-  include(CMakePackageConfigHelpers)
-
-  install(TARGETS nanogui
-          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-
-  install(DIRECTORY include/nanogui DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-          FILES_MATCHING PATTERN "*.h")
-
-  install(DIRECTORY vendor/nanovg/src/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nanovg
-          FILES_MATCHING PATTERN "*.h")
-
-  install(TARGETS nanogui nanovg EXPORT nanoguiTargets)
-
-  set(NANOGUI_CMAKECONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATAROOTDIR}/cmake/nanogui")
-
-  configure_package_config_file(
-    resources/nanoguiConfig.cmake.in nanoguiConfig.cmake
-    INSTALL_DESTINATION ${NANOGUI_CMAKECONFIG_INSTALL_DIR})
-
-  write_basic_package_version_file(
-    nanoguiConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY AnyNewerVersion ARCH_INDEPENDENT)
-
-  install(
-    EXPORT nanoguiTargets
-    DESTINATION ${NANOGUI_CMAKECONFIG_INSTALL_DIR})
-
-  install(
-    FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/nanoguiConfigVersion.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/nanoguiConfig.cmake
-    DESTINATION ${NANOGUI_CMAKECONFIG_INSTALL_DIR})
-endif()
-
 # Output files directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_EXECUTABLE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -653,7 +351,12 @@ foreach(CONFIG_TYPE ${CMAKE_CONFIGURATION_TYPES})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_TYPE_UPPER} "${CMAKE_BINARY_DIR}/bin")
 endforeach()
 
-add_subdirectory(theme)
+
+# Add vendor libraries before creating nanogui target
+add_subdirectory(vendor) 
+add_subdirectory(nanogui)
+add_subdirectory(styles)
 add_subdirectory(examples)
-add_subdirectory(ffmpeg)
-# vim: set et ts=2 sw=2 ft=cmake nospell:
+add_subdirectory(AVPlayer)
+add_subdirectory(whiteboard)
+add_subdirectory(labX)

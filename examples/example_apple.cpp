@@ -8,9 +8,9 @@
     BSD-style license that can be found in the LICENSE.txt file.
 */
 
-#include <nanogui/nanogui.h>
-#include <nanogui/apple.h>
 #include <iostream>
+#include <nanogui.h>
+#include <nanogui/apple.h>
 
 using namespace nanogui;
 
@@ -36,41 +36,31 @@ public:
     new Label(window, "Buttons", "sans-bold", 18);
 
     Widget *button_row = new Widget(window);
-    button_row->set_layout(
-        new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
+    button_row->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
 
-    auto primary_btn =
-        new AppleButton(button_row, "Primary", 0, AppleButton::Style::Primary);
-    primary_btn->set_callback(
-        []() { std::cout << "Primary button clicked" << std::endl; });
+    auto primary_btn = new AppleButton(button_row, "Primary", 0, AppleButton::Style::Primary);
+    primary_btn->set_callback([]() { std::cout << "Primary button clicked" << std::endl; });
 
-    auto secondary_btn = new AppleButton(button_row, "Secondary", 0,
-                                         AppleButton::Style::Secondary);
-    secondary_btn->set_callback(
-        []() { std::cout << "Secondary button clicked" << std::endl; });
+    auto secondary_btn = new AppleButton(button_row, "Secondary", 0, AppleButton::Style::Secondary);
+    secondary_btn->set_callback([]() { std::cout << "Secondary button clicked" << std::endl; });
 
-    auto tertiary_btn = new AppleButton(button_row, "Tertiary", 0,
-                                        AppleButton::Style::Tertiary);
-    tertiary_btn->set_callback(
-        []() { std::cout << "Tertiary button clicked" << std::endl; });
+    auto tertiary_btn = new AppleButton(button_row, "Tertiary", 0, AppleButton::Style::Tertiary);
+    tertiary_btn->set_callback([]() { std::cout << "Tertiary button clicked" << std::endl; });
 
-    auto destructive_btn = new AppleButton(button_row, "Delete", 0,
-                                           AppleButton::Style::Destructive);
-    destructive_btn->set_callback(
-        []() { std::cout << "Destructive button clicked" << std::endl; });
+    auto destructive_btn =
+        new AppleButton(button_row, "Delete", 0, AppleButton::Style::Destructive);
+    destructive_btn->set_callback([]() { std::cout << "Destructive button clicked" << std::endl; });
 
     // Toggle section
     new Label(window, "Toggle Switch", "sans-bold", 18);
 
     Widget *toggle_row = new Widget(window);
-    toggle_row->set_layout(
-        new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
+    toggle_row->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
 
     new Label(toggle_row, "Enable notifications");
     auto toggle = new AppleToggle(toggle_row, "");
-    toggle->set_callback([](bool state) {
-      std::cout << "Toggle: " << (state ? "ON" : "OFF") << std::endl;
-    });
+    toggle->set_callback(
+        [](bool state) { std::cout << "Toggle: " << (state ? "ON" : "OFF") << std::endl; });
 
     // Checkbox section
     new Label(window, "Checkbox", "sans-bold", 18);
@@ -83,9 +73,7 @@ public:
     new Label(window, "Slider", "sans-bold", 18);
     auto slider = new AppleSlider(window);
     slider->set_value(0.5f);
-    slider->set_callback([](float value) {
-      std::cout << "Slider: " << value << std::endl;
-    });
+    slider->set_callback([](float value) { std::cout << "Slider: " << value << std::endl; });
 
     // Progress section
     new Label(window, "Progress", "sans-bold", 18);
@@ -95,39 +83,34 @@ public:
     // Segmented Control section
     new Label(window, "Segmented Control", "sans-bold", 18);
     auto segmented = new AppleSegmentedControl(window, {"Day", "Week", "Month"});
-    segmented->set_callback([](int index) {
-      std::cout << "Selected segment: " << index << std::endl;
-    });
+    segmented->set_callback(
+        [](int index) { std::cout << "Selected segment: " << index << std::endl; });
 
     // Badge section
     new Label(window, "Badge", "sans-bold", 18);
     Widget *badge_row = new Widget(window);
-    badge_row->set_layout(
-        new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 12));
-    
+    badge_row->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 12));
+
     auto badge1 = new AppleBadge(badge_row, "");
     badge1->set_count(5);
-    
+
     auto badge2 = new AppleBadge(badge_row, "");
     badge2->set_count(99);
-    
+
     auto badge3 = new AppleBadge(badge_row, "");
     badge3->set_count(150);
 
     // Stepper section
     new Label(window, "Stepper", "sans-bold", 18);
     Widget *stepper_row = new Widget(window);
-    stepper_row->set_layout(
-        new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 12));
-    
+    stepper_row->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 12));
+
     new Label(stepper_row, "Quantity:");
     auto stepper = new AppleStepper(stepper_row);
     stepper->set_value(5);
     stepper->set_min_value(0);
     stepper->set_max_value(10);
-    stepper->set_callback([](int value) {
-      std::cout << "Stepper value: " << value << std::endl;
-    });
+    stepper->set_callback([](int value) { std::cout << "Stepper value: " << value << std::endl; });
 
     // List section
     new Label(window, "List", "sans-bold", 18);
@@ -135,26 +118,22 @@ public:
     list->add_item("Home", "", FA_HOME, true);
     list->add_item("Settings", "", FA_COG, true);
     list->add_item("Profile", "", FA_USER, true);
-    list->set_callback([](int index) {
-      std::cout << "List item selected: " << index << std::endl;
-    });
+    list->set_callback(
+        [](int index) { std::cout << "List item selected: " << index << std::endl; });
 
     // Appearance switcher
     new Label(window, "Appearance", "sans-bold", 18);
 
     Widget *appearance_row = new Widget(window);
-    appearance_row->set_layout(
-        new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
+    appearance_row->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
 
-    auto light_btn = new AppleButton(appearance_row, "Light", 0,
-                                     AppleButton::Style::Secondary);
+    auto light_btn = new AppleButton(appearance_row, "Light", 0, AppleButton::Style::Secondary);
     light_btn->set_callback([this]() {
       m_apple_theme->apply_appearance(AppleTheme::Appearance::Light);
       std::cout << "Switched to light mode" << std::endl;
     });
 
-    auto dark_btn = new AppleButton(appearance_row, "Dark", 0,
-                                    AppleButton::Style::Secondary);
+    auto dark_btn = new AppleButton(appearance_row, "Dark", 0, AppleButton::Style::Secondary);
     dark_btn->set_callback([this]() {
       m_apple_theme->apply_appearance(AppleTheme::Appearance::Dark);
       std::cout << "Switched to dark mode" << std::endl;
@@ -164,32 +143,27 @@ public:
     new Label(window, "Accent Color", "sans-bold", 18);
 
     Widget *accent_row = new Widget(window);
-    accent_row->set_layout(
-        new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
+    accent_row->set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 0, 8));
 
-    auto blue_btn =
-        new AppleButton(accent_row, "Blue", 0, AppleButton::Style::Tertiary);
+    auto blue_btn = new AppleButton(accent_row, "Blue", 0, AppleButton::Style::Tertiary);
     blue_btn->set_callback([this]() {
       m_apple_theme->set_accent_color(AppleTheme::AccentColor::Blue);
       std::cout << "Accent: Blue" << std::endl;
     });
 
-    auto purple_btn =
-        new AppleButton(accent_row, "Purple", 0, AppleButton::Style::Tertiary);
+    auto purple_btn = new AppleButton(accent_row, "Purple", 0, AppleButton::Style::Tertiary);
     purple_btn->set_callback([this]() {
       m_apple_theme->set_accent_color(AppleTheme::AccentColor::Purple);
       std::cout << "Accent: Purple" << std::endl;
     });
 
-    auto green_btn =
-        new AppleButton(accent_row, "Green", 0, AppleButton::Style::Tertiary);
+    auto green_btn = new AppleButton(accent_row, "Green", 0, AppleButton::Style::Tertiary);
     green_btn->set_callback([this]() {
       m_apple_theme->set_accent_color(AppleTheme::AccentColor::Green);
       std::cout << "Accent: Green" << std::endl;
     });
 
-    auto red_btn =
-        new AppleButton(accent_row, "Red", 0, AppleButton::Style::Tertiary);
+    auto red_btn = new AppleButton(accent_row, "Red", 0, AppleButton::Style::Tertiary);
     red_btn->set_callback([this]() {
       m_apple_theme->set_accent_color(AppleTheme::AccentColor::Red);
       std::cout << "Accent: Red" << std::endl;

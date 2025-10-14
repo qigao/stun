@@ -16,7 +16,7 @@
  * was generated, so the scripts that generated it needs to update as well.
  */
 
-#include <nanogui/nanogui.h>
+#include <nanogui.h>
 using namespace nanogui;
 
 // add a button to the wrapper with a fixed size

@@ -4,7 +4,7 @@
     Demonstrates all M3 components with proper styling and interactions.
 */
 
-#include <nanogui/nanogui.h>
+#include <nanogui.h>
 #include <nanogui/m3.h>
 #include <iostream>
 using namespace nanogui;

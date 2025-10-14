@@ -18,13 +18,8 @@
 */
 
 #include <iostream>
-#include <nanogui/button.h>
-#include <nanogui/label.h>
-#include <nanogui/layout.h>
-#include <nanogui/m3_theme.h>
-#include <nanogui/m3_menu.h>
-#include <nanogui/screen.h>
-#include <nanogui/window.h>
+#include <nanogui.h>
+#include <nanogui/m3.h>
 
 using namespace nanogui;
 

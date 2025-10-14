@@ -4,8 +4,8 @@
     Demonstrates the M3 theme with dynamic color generation from a seed color.
 */
 
+#include <nanogui.h>
 #include <nanogui/m3_theme.h>
-#include <nanogui/nanogui.h>
 
 using namespace nanogui;
 

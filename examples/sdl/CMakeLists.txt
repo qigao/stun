@@ -16,7 +16,7 @@ foreach(example_source ${SOURCES})
         
        target_include_directories(${EXAMPLE_NAME}  PRIVATE   ${CMAKE_SOURCE_DIR}/vendor/nanovg/src )
         set_target_properties(
-            ${EXAMPLE_NAME} PROPERTIES FOLDER sdl/example
+            ${EXAMPLE_NAME} PROPERTIES FOLDER nanogui/example/sdl
         )
  
 endforeach()

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.15)
 
 project(nanovg LANGUAGES C)
 
@@ -15,7 +15,7 @@ add_library(nanovg STATIC
 
 # Create an alias for consistent naming
 add_library(nanovg::nanovg ALIAS nanovg)
-
+set_target_properties(  nanovg PROPERTIES FOLDER vendor/)
 # Set C standard
 set_target_properties(nanovg PROPERTIES
     C_STANDARD 99
