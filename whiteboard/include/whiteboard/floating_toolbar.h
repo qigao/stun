@@ -10,7 +10,6 @@
 #include <nanogui/layout.h>
 #include <nanogui/widget.h>
 
-
 namespace whiteboard {
 
 /**
@@ -31,9 +30,14 @@ public:
    * Show toolbar at specified position with relevant actions
    */
   void show_at(const nanogui::Vector2i &pos, bool can_group, bool can_ungroup, int num_selected) {
-    // Clear existing buttons
-    while (!children().empty()) {
-      remove_child(children().back());
+    // Clear existing buttons by removing all children
+    // Store children in temp vector to avoid iterator invalidation
+    std::vector<nanogui::Widget *> to_remove;
+    for (auto child : m_children) {
+      to_remove.push_back(child);
+    }
+    for (auto child : to_remove) {
+      remove_child(child);
     }
 
     // Add relevant buttons based on selection state

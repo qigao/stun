@@ -1,5 +1,5 @@
 #include "whiteboard/modern_whiteboard_app.h"
-
+#include <fmtlog.h>
 #include <nanogui.h>
 #include <nanogui/fluent_web_theme.h>
 
@@ -11,16 +11,33 @@ ModernWhiteboardApp::ModernWhiteboardApp()
   set_theme(m_theme);
   set_background(Color(250, 250, 250, 255));
 
+  // Initialize Native File Dialog
+  NFD_Init();
+
   TemplateLibrary::instance().initialize(nvg_context());
 
   // Create the shared document model (MVC)
   m_document = new WhiteboardDocument();
+
+  // Initialize SVG Shape Library
+  logi("ModernWhiteboardApp: Initializing SVG Shape Library");
+  m_shape_library = new SVGShapeLibrary();
+  bool library_loaded = m_shape_library->load_library("shapes/library.json");
+  if (library_loaded) {
+    logi("ModernWhiteboardApp: Shape library loaded successfully");
+  } else {
+    loge("ModernWhiteboardApp: Failed to load shape library!");
+  }
+
+  // Register app as document observer for floating toolbar updates
+  m_document->add_observer(this);
 
   // Create Canvas MVC triad
   m_canvas_view = new CanvasView(this, m_document);
   m_canvas_view->set_background_color(Color(245, 245, 245, 255));
   m_canvas_controller = new CanvasController(m_document, m_canvas_view);
   m_canvas_view->set_controller(m_canvas_controller);
+  m_canvas_controller->set_shape_library(m_shape_library);
 
   // Create Toolbar MVC triad
   m_toolbar_view = new ToolbarView(this, m_document);
@@ -46,12 +63,57 @@ ModernWhiteboardApp::ModernWhiteboardApp()
   m_text_view->set_controller(m_text_controller);
   m_text_view->set_visible(false); // Hidden, using legacy text module
 
+  // Create Shape Panel Module (custom-drawn, like text panel)
+  logi("ModernWhiteboardApp: Creating Shape Panel Module");
+  m_shape_panel = new ShapePanelModule(this, m_shape_library);
+  m_shape_panel->set_position(Vector2i(100, 100));
+  m_shape_panel->set_visible(false); // Hidden by default, toggle with menu
+  logi("ModernWhiteboardApp: Shape Panel Module created at position (100, 100)");
+
+  // Set callback for shape selection
+  m_shape_panel->set_shape_callback([this](const std::string &shape_id) {
+    try {
+      logi("ModernWhiteboardApp: Shape callback triggered for '{}'", shape_id);
+
+      // Validate pointers
+      if (!m_shape_library) {
+        loge("ModernWhiteboardApp: Shape library is null!");
+        return;
+      }
+
+      if (!m_document) {
+        loge("ModernWhiteboardApp: Document is null!");
+        return;
+      }
+
+      // Create shape at canvas center with slight offset for each new shape
+      static int shape_offset_counter = 0;
+      float offset = (shape_offset_counter++ % 10) * 30.0f; // Offset by 30px for each shape
+      Point position = {400.0f + offset, 300.0f + offset};
+      logi("ModernWhiteboardApp: Creating shape at ({}, {})", position.x, position.y);
+
+      Stroke shape = m_shape_library->create_shape(shape_id, position);
+
+      logi("ModernWhiteboardApp: Shape created - Name: '{}', Tool: {}, SVG data size: {}",
+           shape.name, static_cast<int>(shape.tool), shape.svg_data.size());
+
+      m_document->add_stroke(shape);
+      logi("ModernWhiteboardApp: Shape added to document");
+
+    } catch (const std::exception &e) {
+      loge("ModernWhiteboardApp: Exception in shape callback: {}", e.what());
+    } catch (...) {
+      loge("ModernWhiteboardApp: Unknown exception in shape callback!");
+    }
+  });
+
   create_menu_toolbar();
   create_left_sidebar();
   create_floating_panels();
   create_zoom_controls();
   create_properties_panel();
   create_text_panel();
+  create_floating_toolbar();
 
   // Callbacks are now handled by observer pattern in MVC components
 
@@ -86,6 +148,12 @@ ModernWhiteboardApp::~ModernWhiteboardApp() {
 
   delete m_text_controller;
   m_text_controller = nullptr;
+
+  delete m_shape_library;
+  m_shape_library = nullptr;
+
+  // Quit Native File Dialog
+  NFD_Quit();
 
   // Views and document are deleted by parent widget cleanup
 }
@@ -124,10 +192,11 @@ void ModernWhiteboardApp::create_menu_toolbar() {
     update_properties_panel();
   });
 
-  m_menu_toolbar->add_menu_item("Save", FA_SAVE, [this]() {
-    if (m_auto_save_manager)
-      m_auto_save_manager->save_now();
-  });
+  m_menu_toolbar->add_menu_item("Open", FA_FOLDER_OPEN, [this]() { open_file(); });
+
+  m_menu_toolbar->add_menu_item("Save", FA_SAVE, [this]() { save_file(); });
+
+  m_menu_toolbar->add_menu_item("Save As", FA_SAVE, [this]() { save_file_as(); });
 
   m_menu_toolbar->add_menu_item("Templates", FA_IMAGES, [this]() {
     if (!m_template_gallery) {
@@ -172,6 +241,8 @@ void ModernWhiteboardApp::create_menu_toolbar() {
     update_layout();
   });
 
+  m_menu_toolbar->add_menu_item("Shape Library", FA_SHAPES, [this]() { toggle_shape_library(); });
+
   m_menu_toolbar->add_menu_item("Export", FA_DOWNLOAD, []() {});
 
   m_menu_toolbar->add_separator();
@@ -208,34 +279,44 @@ void ModernWhiteboardApp::create_left_sidebar() {
 
     switch (button_id) {
     case 1:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Pan);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Pan);
       break;
     case 2:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Select);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Select);
       break;
     case 3:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Rectangle);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Rectangle);
       break;
     case 4:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Diamond);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Diamond);
       break;
     case 5:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Circle);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Circle);
       break;
     case 6:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Arrow);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Arrow);
       break;
     case 7:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Line);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Line);
       break;
     case 8:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Pen);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Pen);
       break;
     case 9:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Text);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Text);
       break;
     case 10:
-      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Image);
+      if (m_toolbar_controller)
+        m_toolbar_controller->select_tool(Tool::Image);
       break;
     default:
       break; // Lock, rotate, tree not implemented
@@ -298,7 +379,8 @@ void ModernWhiteboardApp::create_text_panel() {
   // Connect color callback
   m_text_panel->set_color_callback([this](NVGcolor color) {
     if (m_document) {
-      m_document->set_stroke_color(Color(color.r * 255, color.g * 255, color.b * 255, color.a * 255));
+      m_document->set_stroke_color(
+          Color(color.r * 255, color.g * 255, color.b * 255, color.a * 255));
     }
   });
 
@@ -396,5 +478,481 @@ void ModernWhiteboardApp::update_layout() {
     m_saving_indicator->set_position(Vector2i(width() - 150, 30));
   }
 }
+
+bool ModernWhiteboardApp::keyboard_event(int key, int scancode, int action, int modifiers) {
+  if (Screen::keyboard_event(key, scancode, action, modifiers))
+    return true;
+
+  // Handle keyboard shortcuts
+  if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+    // Ctrl+O - Open
+    if (key == GLFW_KEY_O && (modifiers & GLFW_MOD_CONTROL)) {
+      open_file();
+      return true;
+    }
+    // Ctrl+S - Save
+    if (key == GLFW_KEY_S && (modifiers & GLFW_MOD_CONTROL)) {
+      // Shift+Ctrl+S - Save As
+      if (modifiers & GLFW_MOD_SHIFT) {
+        save_file_as();
+      } else {
+        save_file();
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void ModernWhiteboardApp::open_file() {
+  nfdchar_t *out_path = nullptr;
+  nfdfilteritem_t filter_item[1] = {{"Whiteboard Files", "whiteboard"}};
+
+  nfdopendialogu8args_t args = {0};
+  args.filterList = filter_item;
+  args.filterCount = 1;
+  args.defaultPath = m_last_directory.empty() ? nullptr : m_last_directory.c_str();
+
+  nfdresult_t result = NFD_OpenDialogU8_With(&out_path, &args);
+
+  if (result == NFD_OKAY) {
+    std::string file_path(out_path);
+    NFD_FreePathU8(out_path);
+
+    // Load the file
+    if (m_document && m_document->load_from_file(file_path)) {
+      m_current_file_path = file_path;
+
+      // Extract directory for next time
+      size_t last_slash = file_path.find_last_of("/\\");
+      if (last_slash != std::string::npos) {
+        m_last_directory = file_path.substr(0, last_slash);
+      }
+
+      // Update UI
+      update_layers_panel();
+      update_properties_panel();
+
+      // Show success message
+      std::cout << "Loaded file: " << file_path << std::endl;
+    } else {
+      // Show error dialog
+      auto *dialog = new MessageDialog(
+          this, MessageDialog::Type::Warning, "Open Failed",
+          "Failed to load file. The file may be corrupted or in an invalid format.", "OK", "",
+          true);
+      dialog->center();
+      dialog->set_visible(true);
+    }
+  } else if (result == NFD_ERROR) {
+    std::cerr << "NFD Error: " << NFD_GetError() << std::endl;
+  }
+  // NFD_CANCEL - user cancelled, do nothing
+}
+
+void ModernWhiteboardApp::save_file() {
+  if (m_current_file_path.empty()) {
+    // No file path set, use Save As
+    save_file_as();
+    return;
+  }
+
+  // Save to current file
+  if (m_document && m_document->save_to_file(m_current_file_path)) {
+    // Show saving indicator briefly
+    set_saving_indicator_visible(true);
+
+    // Hide after a short delay (this is a simple approach)
+    // In a real app, you might use a timer
+    std::cout << "Saved file: " << m_current_file_path << std::endl;
+
+    // Schedule hiding the indicator
+    // For now, just hide it immediately after a brief moment
+    // (In production, you'd use a proper timer mechanism)
+  } else {
+    // Show error dialog
+    auto *dialog = new MessageDialog(this, MessageDialog::Type::Warning, "Save Failed",
+                                     "Failed to save file. Check that you have write permissions.",
+                                     "OK", "", true);
+    dialog->center();
+    dialog->set_visible(true);
+  }
+}
+
+void ModernWhiteboardApp::save_file_as() {
+  nfdchar_t *out_path = nullptr;
+  nfdfilteritem_t filter_item[1] = {{"Whiteboard Files", "whiteboard"}};
+
+  nfdsavedialogu8args_t args = {0};
+  args.filterList = filter_item;
+  args.filterCount = 1;
+  args.defaultPath = m_last_directory.empty() ? nullptr : m_last_directory.c_str();
+  args.defaultName = "untitled.whiteboard";
+
+  nfdresult_t result = NFD_SaveDialogU8_With(&out_path, &args);
+
+  if (result == NFD_OKAY) {
+    std::string file_path(out_path);
+    NFD_FreePathU8(out_path);
+
+    // Ensure .whiteboard extension
+    if (file_path.length() < 11 || file_path.substr(file_path.length() - 11) != ".whiteboard") {
+      file_path += ".whiteboard";
+    }
+
+    // Save the file
+    if (m_document && m_document->save_to_file(file_path)) {
+      m_current_file_path = file_path;
+
+      // Extract directory for next time
+      size_t last_slash = file_path.find_last_of("/\\");
+      if (last_slash != std::string::npos) {
+        m_last_directory = file_path.substr(0, last_slash);
+      }
+
+      // Show saving indicator briefly
+      set_saving_indicator_visible(true);
+      std::cout << "Saved file: " << file_path << std::endl;
+    } else {
+      // Show error dialog
+      auto *dialog = new MessageDialog(
+          this, MessageDialog::Type::Warning, "Save Failed",
+          "Failed to save file. Check that you have write permissions.", "OK", "", true);
+      dialog->center();
+      dialog->set_visible(true);
+    }
+  } else if (result == NFD_ERROR) {
+    std::cerr << "NFD Error: " << NFD_GetError() << std::endl;
+  }
+  // NFD_CANCEL - user cancelled, do nothing
+}
+
+void ModernWhiteboardApp::toggle_shape_library() {
+  if (m_shape_panel) {
+    bool is_visible = m_shape_panel->visible();
+    bool new_state = !is_visible;
+    logi("ModernWhiteboardApp: Toggling shape panel visibility: {} -> {}",
+         is_visible ? "visible" : "hidden", new_state ? "visible" : "hidden");
+    m_shape_panel->set_visible(new_state);
+  } else {
+    loge("ModernWhiteboardApp: Shape panel is null, cannot toggle!");
+  }
+}
+
+void ModernWhiteboardApp::create_floating_toolbar() {
+  m_floating_toolbar = new FloatingToolbar(this);
+  m_floating_toolbar->set_visible(false);
+
+  // Wire up callbacks
+  m_floating_toolbar->set_delete_callback([this]() {
+    if (m_document) {
+      // Delete selected strokes
+      auto selected = m_document->get_selected_indices();
+      if (!selected.empty()) {
+        m_document->remove_strokes(selected);
+      }
+    }
+  });
+
+  m_floating_toolbar->set_duplicate_callback([this]() {
+    if (m_document) {
+      // Duplicate selected strokes with offset
+      auto selected = m_document->get_selected_indices();
+      if (!selected.empty()) {
+        auto strokes = m_document->get_strokes();
+        std::vector<Stroke> duplicates;
+
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            Stroke duplicate = strokes[idx];
+            // Offset by 20 pixels
+            for (auto &pt : duplicate.points) {
+              pt.x += 20.0f;
+              pt.y += 20.0f;
+            }
+            duplicates.push_back(duplicate);
+          }
+        }
+
+        // Add duplicates and select them
+        std::vector<int> new_indices;
+        for (const auto &dup : duplicates) {
+          m_document->add_stroke(dup);
+          new_indices.push_back(static_cast<int>(m_document->get_strokes().size()) - 1);
+        }
+        m_document->set_selection(new_indices);
+      }
+    }
+  });
+
+  m_floating_toolbar->set_group_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (selected.size() > 1) {
+        // Find next available group ID
+        const auto &strokes = m_document->get_strokes();
+        int max_group_id = -1;
+        for (const auto &stroke : strokes) {
+          if (stroke.group_id > max_group_id) {
+            max_group_id = stroke.group_id;
+          }
+        }
+        int new_group_id = max_group_id + 1;
+
+        // Assign group ID to all selected strokes
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            Stroke updated = strokes[idx];
+            updated.group_id = new_group_id;
+            m_document->update_stroke(idx, updated);
+          }
+        }
+        logi("Grouped {} shapes with ID {}", selected.size(), new_group_id);
+      }
+    }
+  });
+
+  m_floating_toolbar->set_ungroup_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      const auto &strokes = m_document->get_strokes();
+
+      for (int idx : selected) {
+        if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+          if (strokes[idx].group_id >= 0) {
+            Stroke updated = strokes[idx];
+            updated.group_id = -1;
+            m_document->update_stroke(idx, updated);
+          }
+        }
+      }
+      logi("Ungrouped {} shapes", selected.size());
+    }
+  });
+
+  m_floating_toolbar->set_bring_forward_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (!selected.empty()) {
+        // Sort in descending order to move from back to front
+        std::sort(selected.begin(), selected.end(), std::greater<int>());
+
+        for (int idx : selected) {
+          int new_idx = std::min(idx + 1, static_cast<int>(m_document->get_strokes().size()) - 1);
+          if (new_idx != idx) {
+            m_document->reorder_stroke(idx, new_idx);
+          }
+        }
+        logi("Brought {} shapes forward", selected.size());
+      }
+    }
+  });
+
+  m_floating_toolbar->set_send_backward_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (!selected.empty()) {
+        // Sort in ascending order to move from front to back
+        std::sort(selected.begin(), selected.end());
+
+        for (int idx : selected) {
+          int new_idx = std::max(idx - 1, 0);
+          if (new_idx != idx) {
+            m_document->reorder_stroke(idx, new_idx);
+          }
+        }
+        logi("Sent {} shapes backward", selected.size());
+      }
+    }
+  });
+
+  m_floating_toolbar->set_align_left_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (selected.size() > 1) {
+        auto strokes = m_document->get_strokes();
+
+        // Find leftmost position
+        float min_x = std::numeric_limits<float>::max();
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            min_x = std::min(min_x, s_min_x);
+          }
+        }
+
+        // Align all to leftmost
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            float offset = min_x - s_min_x;
+
+            for (auto &pt : strokes[idx].points) {
+              pt.x += offset;
+            }
+            m_document->update_stroke(idx, strokes[idx]);
+          }
+        }
+        logi("Aligned {} shapes to left", selected.size());
+      }
+    }
+  });
+
+  m_floating_toolbar->set_align_right_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (selected.size() > 1) {
+        auto strokes = m_document->get_strokes();
+
+        // Find rightmost position
+        float max_x = std::numeric_limits<float>::lowest();
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            max_x = std::max(max_x, s_max_x);
+          }
+        }
+
+        // Align all to rightmost
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            float offset = max_x - s_max_x;
+
+            for (auto &pt : strokes[idx].points) {
+              pt.x += offset;
+            }
+            m_document->update_stroke(idx, strokes[idx]);
+          }
+        }
+        logi("Aligned {} shapes to right", selected.size());
+      }
+    }
+  });
+
+  m_floating_toolbar->set_align_top_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (selected.size() > 1) {
+        auto strokes = m_document->get_strokes();
+
+        // Find topmost position
+        float min_y = std::numeric_limits<float>::max();
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            min_y = std::min(min_y, s_min_y);
+          }
+        }
+
+        // Align all to topmost
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            float offset = min_y - s_min_y;
+
+            for (auto &pt : strokes[idx].points) {
+              pt.y += offset;
+            }
+            m_document->update_stroke(idx, strokes[idx]);
+          }
+        }
+        logi("Aligned {} shapes to top", selected.size());
+      }
+    }
+  });
+
+  m_floating_toolbar->set_align_bottom_callback([this]() {
+    if (m_document) {
+      auto selected = m_document->get_selected_indices();
+      if (selected.size() > 1) {
+        auto strokes = m_document->get_strokes();
+
+        // Find bottommost position
+        float max_y = std::numeric_limits<float>::lowest();
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            max_y = std::max(max_y, s_max_y);
+          }
+        }
+
+        // Align all to bottommost
+        for (int idx : selected) {
+          if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+            float s_min_x, s_min_y, s_max_x, s_max_y;
+            strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+            float offset = max_y - s_max_y;
+
+            for (auto &pt : strokes[idx].points) {
+              pt.y += offset;
+            }
+            m_document->update_stroke(idx, strokes[idx]);
+          }
+        }
+        logi("Aligned {} shapes to bottom", selected.size());
+      }
+    }
+  });
+
+  logi("ModernWhiteboardApp: Floating toolbar created");
+}
+
+void ModernWhiteboardApp::update_floating_toolbar() {
+  if (!m_floating_toolbar || !m_document) {
+    return;
+  }
+
+  const auto &selected = m_document->get_selected_indices();
+
+  if (selected.empty()) {
+    m_floating_toolbar->hide();
+    return;
+  }
+
+  // Calculate center of selection for toolbar position
+  const auto &strokes = m_document->get_strokes();
+  float min_x = std::numeric_limits<float>::max();
+  float min_y = std::numeric_limits<float>::max();
+  float max_x = std::numeric_limits<float>::lowest();
+  float max_y = std::numeric_limits<float>::lowest();
+
+  bool can_ungroup = false;
+  for (int idx : selected) {
+    if (idx >= 0 && idx < static_cast<int>(strokes.size())) {
+      float s_min_x, s_min_y, s_max_x, s_max_y;
+      strokes[idx].get_bounds(s_min_x, s_min_y, s_max_x, s_max_y);
+      min_x = std::min(min_x, s_min_x);
+      min_y = std::min(min_y, s_min_y);
+      max_x = std::max(max_x, s_max_x);
+      max_y = std::max(max_y, s_max_y);
+
+      if (strokes[idx].group_id >= 0) {
+        can_ungroup = true;
+      }
+    }
+  }
+
+  // Convert to screen coordinates
+  if (m_canvas_view) {
+    nanogui::Vector2f center_canvas((min_x + max_x) / 2.0f, min_y);
+    nanogui::Vector2f center_screen = m_canvas_view->canvas_to_global(center_canvas);
+
+    bool can_group = selected.size() > 1;
+    m_floating_toolbar->show_at(
+        nanogui::Vector2i(static_cast<int>(center_screen.x()), static_cast<int>(center_screen.y())),
+        can_group, can_ungroup, static_cast<int>(selected.size()));
+  }
+}
+
+void ModernWhiteboardApp::on_selection_changed() { update_floating_toolbar(); }
 
 } // namespace whiteboard

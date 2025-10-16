@@ -6,7 +6,7 @@
 #include <nanogui/opengl.h>
 #include <nanovg.h>
 #include <string>
-#include <thorvg.h>
+#include <lunasvg.h>
 #include <vector>
 
 using namespace nanogui;
@@ -52,16 +52,16 @@ private:
   void loadPortSvgs();
   void drawScrew(NVGcontext *ctx, float cx, float cy);
   void drawKnob(NVGcontext *ctx, float cx, float cy, float radius, float value, const char *label);
-  void renderSvgKnob(NVGcontext *ctx, tvg::Picture *svg, float cx, float cy, float size,
+  void renderSvgKnob(NVGcontext *ctx, lunasvg::Document *svg, float cx, float cy, float size,
                      float value);
   void drawCable(NVGcontext *ctx, const Cable &cable);
   void drawPort(NVGcontext *ctx, float cx, float cy, const char *label, bool input);
-  void renderSvgPort(NVGcontext *ctx, tvg::Picture *svg, float x, float y, float size);
+  void renderSvgPort(NVGcontext *ctx, lunasvg::Document *svg, float x, float y, float size);
 
-  std::unique_ptr<tvg::Picture> m_inputPortSvg;
-  std::unique_ptr<tvg::Picture> m_outputPortSvg;
-  std::unique_ptr<tvg::Picture> m_largeKnobSvg;
-  std::unique_ptr<tvg::Picture> m_smallKnobSvg;
+  std::unique_ptr<lunasvg::Document> m_inputPortSvg;
+  std::unique_ptr<lunasvg::Document> m_outputPortSvg;
+  std::unique_ptr<lunasvg::Document> m_largeKnobSvg;
+  std::unique_ptr<lunasvg::Document> m_smallKnobSvg;
 
   std::vector<Knob> m_knobs;
   int m_activeKnob = -1;

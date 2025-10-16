@@ -74,15 +74,8 @@ void SpeedometerModule::draw(NVGcontext *ctx) {
 }
 
 void SpeedometerModule::loadSvgAssets() {
-  m_gaugeSvg = tvg::Picture::gen();
-  if (m_gaugeSvg) {
-    m_gaugeSvg->load(kSpeedometerGaugeSvg, std::strlen(kSpeedometerGaugeSvg), "svg", true);
-  }
-
-  m_needleSvg = tvg::Picture::gen();
-  if (m_needleSvg) {
-    m_needleSvg->load(kSpeedometerNeedleSvg, std::strlen(kSpeedometerNeedleSvg), "svg", true);
-  }
+  m_gaugeSvg = lunasvg::Document::loadFromData(kSpeedometerGaugeSvg);
+  m_needleSvg = lunasvg::Document::loadFromData(kSpeedometerNeedleSvg);
 }
 
 void SpeedometerModule::drawScrew(NVGcontext *ctx, float cx, float cy) {
@@ -125,12 +118,13 @@ void SpeedometerModule::drawSpeedGauge(NVGcontext *ctx, float cx, float cy, floa
   drawNeedle(ctx, cx, cy, radius, needleAngle);
 }
 
-void SpeedometerModule::renderSvgGauge(NVGcontext *ctx, tvg::Picture *svg, float cx, float cy,
+void SpeedometerModule::renderSvgGauge(NVGcontext *ctx, lunasvg::Document *svg, float cx, float cy,
                                        float size) {
-  float svgX, svgY, svgW, svgH;
-  if (svg->bounds(&svgX, &svgY, &svgW, &svgH) != tvg::Result::Success) {
-    return;
-  }
+  if (!svg) return;
+  
+  float svgW = static_cast<float>(svg->width());
+  float svgH = static_cast<float>(svg->height());
+  if (svgW == 0 || svgH == 0) return;
 
   float scale = size / std::max(svgW, svgH);
 

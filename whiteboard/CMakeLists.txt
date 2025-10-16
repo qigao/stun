@@ -1,11 +1,15 @@
 find_package(lunasvg REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(thorvg REQUIRED IMPORTED_TARGET thorvg)
+find_package(nlohmann_json CONFIG REQUIRED) 
 
 set(WHITEBOARD_SOURCES
     # Model layer
     src/model/whiteboard_document.cpp
+    src/serialization.cpp
+    
+    # SVG rendering
+    src/svg/svg_renderer.cpp
+    src/svg/svg_shape_library.cpp
+    src/svg/svg_parameter_editor.cpp
     
     # Canvas MVC
     src/canvas/canvas_view.cpp
@@ -22,6 +26,8 @@ set(WHITEBOARD_SOURCES
     src/panels/properties_controller.cpp
     src/panels/text_view.cpp
     src/panels/text_controller.cpp
+    src/panels/shape_library_view.cpp
+    src/panels/shape_library_controller.cpp
     
     # Existing sources
     src/auto_save_manager.cpp
@@ -31,6 +37,7 @@ set(WHITEBOARD_SOURCES
     src/modern_whiteboard_app.cpp
     src/properties_panel_module.cpp
     src/search_bar.cpp
+    src/shape_panel_module.cpp
     src/stb_image_write.cpp
     src/template_gallery.cpp
     src/template_library.cpp
@@ -61,8 +68,7 @@ target_link_libraries(
         NanoGUI::FluentIOSTheme
         NanoGUI::FluentWebTheme
         nlohmann_json::nlohmann_json
-        nfd
-        PkgConfig::thorvg
+        nfd 
 )
 
 set_target_properties(modern_whiteboard PROPERTIES FOLDER whiteboard/)

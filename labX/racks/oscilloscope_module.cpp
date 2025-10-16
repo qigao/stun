@@ -170,10 +170,7 @@ void OscilloscopeModule::draw(NVGcontext *ctx) {
 }
 
 void OscilloscopeModule::loadSvgAssets() {
-  m_bezelSvg = tvg::Picture::gen();
-  if (m_bezelSvg) {
-    m_bezelSvg->load(kOscilloscopeBezelSvg, std::strlen(kOscilloscopeBezelSvg), "svg", true);
-  }
+  m_bezelSvg = lunasvg::Document::loadFromData(kOscilloscopeBezelSvg);
 }
 
 void OscilloscopeModule::drawScrew(NVGcontext *ctx, float cx, float cy) {

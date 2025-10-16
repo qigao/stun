@@ -23,6 +23,7 @@ public:
   void change_position(float x, float y);
   void change_size(float width, float height);
   void change_rotation(float angle);
+  void edit_svg_parameters(int stroke_index);
 
 private:
   WhiteboardDocument *m_document;

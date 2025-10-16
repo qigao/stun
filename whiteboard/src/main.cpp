@@ -3,7 +3,6 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <thorvg.h>
 
 #if defined(_WIN32)
   #ifndef NOMINMAX
@@ -19,15 +18,7 @@ namespace {
 static int whiteboard_entry(int argc, char **argv) {
   try {
     std::cout << "=== Modern Whiteboard Starting ===" << std::endl;
-    std::cout << "Initializing ThorVG (Software Canvas Engine, 4 threads)..." << std::endl;
-
-    tvg::Result initResult = tvg::Initializer::init(tvg::CanvasEngine::Sw, 4);
-    if (initResult != tvg::Result::Success) {
-      std::cerr << "ERROR: ThorVG initialization failed. Result code: "
-                << static_cast<int>(initResult) << std::endl;
-      return -1;
-    }
-    std::cout << "ThorVG initialized successfully!" << std::endl;
+    std::cout << "Using LunaSVG for SVG rendering (clean RAII, no init/term needed)" << std::endl;
 
     std::cout << "Initializing NanoGUI..." << std::endl;
     nanogui::init();
@@ -42,8 +33,6 @@ static int whiteboard_entry(int argc, char **argv) {
 
     std::cout << "Shutting down NanoGUI..." << std::endl;
     nanogui::shutdown();
-    std::cout << "Terminating ThorVG..." << std::endl;
-    tvg::Initializer::term(tvg::CanvasEngine::Sw);
     std::cout << "=== Modern Whiteboard closed cleanly ===" << std::endl;
 
   } catch (const std::exception &e) {

@@ -9,7 +9,9 @@
 #include "whiteboard/canvas/canvas_controller.h"
 #include "whiteboard/canvas/canvas_view.h"
 #include "whiteboard/common.h"
+#include "whiteboard/floating_toolbar.h"
 #include "whiteboard/menu_toolbar_module.h"
+#include "whiteboard/model/document_observer.h"
 #include "whiteboard/model/whiteboard_document.h"
 #include "whiteboard/panels/layers_controller.h"
 #include "whiteboard/panels/layers_view.h"
@@ -17,8 +19,10 @@
 #include "whiteboard/panels/properties_view.h"
 #include "whiteboard/panels/text_controller.h"
 #include "whiteboard/panels/text_view.h"
+#include "whiteboard/shape_panel_module.h"
 #include "whiteboard/properties_panel_module.h"
 #include "whiteboard/search_bar.h"
+#include "whiteboard/svg/svg_shape_library.h"
 #include "whiteboard/template_gallery.h"
 #include "whiteboard/text_panel_module.h"
 #include "whiteboard/toolbar/toolbar_controller.h"
@@ -39,7 +43,7 @@ class ModernWhiteboardApp;
  * services. It also brokers access to undo/redo stacks, guide snaps, and
  * changes in active tools.
  */
-class ModernWhiteboardApp : public Screen {
+class ModernWhiteboardApp : public Screen, public IDocumentObserver {
 public:
   /**
    * \struct CanvasPage
@@ -75,10 +79,18 @@ public:
 
   std::vector<CanvasPage> &get_pages() { return m_pages; }
   int get_current_page() const { return m_current_page; }
+  WhiteboardDocument* get_document() { return m_document; }
   void set_saving_indicator_visible(bool visible);
+  
+  // IDocumentObserver interface
+  void on_strokes_changed() override {}
+  void on_selection_changed() override;
+  void on_tool_changed() override {}
+  void on_properties_changed() override {}
 
 protected:
   bool resize_event(const Vector2i &size) override;
+  bool keyboard_event(int key, int scancode, int action, int modifiers) override;
 
 private:
   void create_menu_toolbar();
@@ -87,10 +99,18 @@ private:
   void create_zoom_controls();
   void create_properties_panel();
   void create_text_panel();
+  void create_floating_toolbar();
+  void update_floating_toolbar();
   void update_properties_panel();
   void update_layers_panel();
   void show_restore_prompt();
   void update_layout();
+  
+  // File operations
+  void open_file();
+  void save_file();
+  void save_file_as();
+  void toggle_shape_library();
 
   // MVC Architecture
   WhiteboardDocument *m_document = nullptr;
@@ -104,6 +124,11 @@ private:
   PropertiesController *m_properties_controller = nullptr;
   TextView *m_text_view = nullptr;
   TextController *m_text_controller = nullptr;
+  ShapePanelModule *m_shape_panel = nullptr;
+  FloatingToolbar *m_floating_toolbar = nullptr;
+
+  // SVG Shape Library
+  SVGShapeLibrary *m_shape_library = nullptr;
 
   // Services and Legacy Modules (kept for compatibility)
   AutoSaveManager *m_auto_save_manager = nullptr;
@@ -119,6 +144,10 @@ private:
 
   std::vector<CanvasPage> m_pages;
   int m_current_page = 0;
+  
+  // File management
+  std::string m_current_file_path;
+  std::string m_last_directory;
 };
 
 } // namespace whiteboard

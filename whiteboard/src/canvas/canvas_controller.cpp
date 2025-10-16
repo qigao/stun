@@ -5,12 +5,19 @@
 
 #include "whiteboard/canvas/canvas_controller.h"
 #include "whiteboard/canvas/canvas_view.h"
+#include "whiteboard/svg/svg_parameter_editor.h"
+#include "whiteboard/svg/svg_shape_library.h"
 #include <cmath>
+#include <chrono>
+#include <iostream>
 
 namespace whiteboard {
 
 CanvasController::CanvasController(WhiteboardDocument *document, CanvasView *view)
-    : m_document(document), m_view(view), m_mode(Mode::None) {}
+    : m_document(document), m_view(view), m_shape_library(nullptr), 
+      m_mode(Mode::None), m_last_clicked_stroke(-1) {
+  m_last_click_time = std::chrono::steady_clock::now();
+}
 
 // === Input Handling ===
 
@@ -39,6 +46,10 @@ bool CanvasController::handle_mouse_down(const nanogui::Vector2f &canvas_pos, in
     handle_pan_tool_down(canvas_pos);
     return true;
 
+  case Tool::SVGShape:
+    handle_svg_shape_tool_down(canvas_pos);
+    return true;
+
   case Tool::Text:
   case Tool::Sticky:
   case Tool::Image:
@@ -56,6 +67,8 @@ bool CanvasController::handle_mouse_drag(const nanogui::Vector2f &canvas_pos, in
   case Mode::Drawing:
     if (m_document->get_current_tool() == Tool::Pen) {
       handle_pen_tool_drag(canvas_pos);
+    } else if (m_document->get_current_tool() == Tool::SVGShape) {
+      handle_svg_shape_tool_drag(canvas_pos);
     } else {
       handle_shape_tool_drag(canvas_pos);
     }
@@ -83,6 +96,8 @@ bool CanvasController::handle_mouse_up(const nanogui::Vector2f &canvas_pos, int 
   case Mode::Drawing:
     if (m_document->get_current_tool() == Tool::Pen) {
       handle_pen_tool_up(canvas_pos);
+    } else if (m_document->get_current_tool() == Tool::SVGShape) {
+      handle_svg_shape_tool_up(canvas_pos);
     } else {
       handle_shape_tool_up(canvas_pos);
     }
@@ -222,6 +237,15 @@ void CanvasController::handle_select_tool_down(const nanogui::Vector2f &pos, int
   bool is_shift = (modifiers & 1) != 0; // SHIFT modifier
 
   if (clicked_stroke >= 0) {
+    // Check for double-click on SVG shape
+    if (is_double_click(pos, clicked_stroke)) {
+      const auto& strokes = m_document->get_strokes();
+      if (clicked_stroke < static_cast<int>(strokes.size()) && 
+          strokes[clicked_stroke].tool == Tool::SVGShape) {
+        handle_svg_double_click(clicked_stroke, pos);
+        return;
+      }
+    }
     // Clicked on a stroke
     if (is_shift) {
       // Multi-select: toggle selection
@@ -315,6 +339,72 @@ void CanvasController::handle_pan_tool_up(const nanogui::Vector2f &pos) {
   // Panning complete
 }
 
+void CanvasController::handle_svg_shape_tool_down(const nanogui::Vector2f &pos) {
+  // Start placing an SVG shape
+  m_mode = Mode::Drawing;
+  m_interaction_start = pos;
+
+  // Create new stroke for SVG shape
+  m_temp_stroke = Stroke();
+  m_temp_stroke.tool = Tool::SVGShape;
+  m_temp_stroke.color = m_document->get_stroke_color();
+  m_temp_stroke.width = m_document->get_stroke_width();
+  
+  // For now, create a placeholder SVG (will be replaced by shape library)
+  m_temp_stroke.svg_data = R"(<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="10" width="80" height="80" fill="lightblue" stroke="black" stroke-width="2"/>
+  </svg>)";
+  m_temp_stroke.svg_shape_id = "basic.rectangle";
+  m_temp_stroke.svg_scale_x = 1.0f;
+  m_temp_stroke.svg_scale_y = 1.0f;
+
+  // Add position point (with snapping)
+  Point snapped = snap_point(Point(pos.x(), pos.y()));
+  m_temp_stroke.points.push_back(snapped);
+  m_temp_stroke.points.push_back(snapped); // End point for sizing
+
+  // Update view
+  m_view->set_current_stroke(m_temp_stroke);
+}
+
+void CanvasController::handle_svg_shape_tool_drag(const nanogui::Vector2f &pos) {
+  // Update size/scale of SVG shape based on drag
+  Point snapped = snap_point(Point(pos.x(), pos.y()));
+
+  if (m_temp_stroke.points.size() >= 2) {
+    m_temp_stroke.points[1] = snapped;
+    
+    // Calculate scale based on drag distance
+    float dx = snapped.x - m_temp_stroke.points[0].x;
+    float dy = snapped.y - m_temp_stroke.points[0].y;
+    
+    // Update scale (minimum 0.1 to avoid invisible shapes)
+    m_temp_stroke.svg_scale_x = std::max(0.1f, std::abs(dx) / 100.0f);
+    m_temp_stroke.svg_scale_y = std::max(0.1f, std::abs(dy) / 100.0f);
+  }
+
+  // Update view
+  m_view->set_current_stroke(m_temp_stroke);
+}
+
+void CanvasController::handle_svg_shape_tool_up(const nanogui::Vector2f &pos) {
+  // Finalize the SVG shape
+  if (m_temp_stroke.points.size() >= 1) {
+    // If barely dragged, use default scale
+    if (m_temp_stroke.svg_scale_x < 0.2f) {
+      m_temp_stroke.svg_scale_x = 1.0f;
+    }
+    if (m_temp_stroke.svg_scale_y < 0.2f) {
+      m_temp_stroke.svg_scale_y = 1.0f;
+    }
+    
+    m_document->add_stroke(m_temp_stroke);
+  }
+
+  // Clear temporary stroke from view
+  m_view->clear_current_stroke();
+}
+
 // === Helper Methods ===
 
 Point CanvasController::snap_point(const Point &p) {
@@ -340,6 +430,49 @@ bool CanvasController::is_clicking_rotation_handle(const nanogui::Vector2f &pos)
   // TODO: Implement proper rotation handle detection
   // This requires calculating rotation handle position based on selection bounds
   return false;
+}
+
+bool CanvasController::is_double_click(const nanogui::Vector2f &pos, int stroke_index) {
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_click_time);
+  
+  // Double-click threshold: 500ms and within 5 pixels
+  bool is_double = (elapsed.count() < 500) && 
+                   (m_last_clicked_stroke == stroke_index) &&
+                   (std::abs(pos.x() - m_last_click_pos.x()) < 5.0f) &&
+                   (std::abs(pos.y() - m_last_click_pos.y()) < 5.0f);
+  
+  // Update last click info
+  m_last_click_time = now;
+  m_last_click_pos = pos;
+  m_last_clicked_stroke = stroke_index;
+  
+  return is_double;
+}
+
+void CanvasController::handle_svg_double_click(int stroke_index, const nanogui::Vector2f &pos) {
+  std::cout << "Double-click detected on SVG shape at index " << stroke_index << std::endl;
+  
+  // Get the stroke to check if it has a shape library definition
+  const auto &strokes = m_document->get_strokes();
+  if (stroke_index < 0 || stroke_index >= static_cast<int>(strokes.size())) {
+    return;
+  }
+  
+  const Stroke &stroke = strokes[stroke_index];
+  if (stroke.svg_shape_id.empty()) {
+    std::cout << "SVG shape has no shape_id, cannot edit parameters" << std::endl;
+    return;
+  }
+  
+  if (!m_shape_library) {
+    std::cout << "No shape library available for editing" << std::endl;
+    return;
+  }
+  
+  // Create and show parameter editor
+  auto *editor = new SVGParameterEditor(m_view->parent(), m_document, m_shape_library, stroke_index);
+  editor->show();
 }
 
 } // namespace whiteboard

@@ -5,6 +5,7 @@
 
 #include "whiteboard/panels/properties_controller.h"
 #include "whiteboard/panels/properties_view.h"
+#include <iostream>
 
 namespace whiteboard {
 
@@ -68,6 +69,31 @@ void PropertiesController::apply_to_selected(std::function<void(Stroke &)> modif
       modifier(modified);
       m_document->update_stroke(idx, modified);
     }
+  }
+}
+
+void PropertiesController::edit_svg_parameters(int stroke_index) {
+  if (!m_document)
+    return;
+
+  const auto &strokes = m_document->get_strokes();
+  if (stroke_index < 0 || stroke_index >= static_cast<int>(strokes.size()))
+    return;
+
+  const auto &stroke = strokes[stroke_index];
+  
+  // Only edit SVG shapes
+  if (stroke.tool != Tool::SVGShape)
+    return;
+
+  // TODO: Show parameter editor dialog
+  // This will be implemented when the SVGParameterEditor is integrated
+  // For now, just log that the feature was requested
+  std::cout << "Edit SVG parameters for stroke " << stroke_index << std::endl;
+  std::cout << "Shape ID: " << stroke.svg_shape_id << std::endl;
+  std::cout << "Parameters:" << std::endl;
+  for (const auto &param : stroke.svg_parameters) {
+    std::cout << "  " << param.first << " = " << param.second << std::endl;
   }
 }
 

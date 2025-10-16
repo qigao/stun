@@ -25,8 +25,14 @@ public:
   void set_controller(PropertiesController *controller) { m_controller = controller; }
 
 private:
+  void rebuild_properties();
+  void add_property_label(const std::string &name, const std::string &value);
+  void add_separator();
+  std::string get_tool_name(Tool tool) const;
+
   WhiteboardDocument *m_document;
   PropertiesController *m_controller;
+  nanogui::Widget *m_properties_container;
 };
 
 } // namespace whiteboard

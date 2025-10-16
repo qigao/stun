@@ -10,6 +10,7 @@
 #include "whiteboard/types.h"
 #include <nanogui/common.h>
 #include <nanogui/vector.h>
+#include <nlohmann/json.hpp>
 #include <stack>
 #include <string>
 #include <vector>
@@ -387,6 +388,39 @@ public:
    * Notifies observers via on_strokes_changed().
    */
   void reorder_stroke(int from_index, int to_index);
+
+  // === Serialization ===
+
+  /**
+   * \brief Serialize document to JSON.
+   * \return JSON representation of entire document state
+   *
+   * Serializes all strokes, canvas state, tool state, guides, etc.
+   */
+  nlohmann::json to_json() const;
+
+  /**
+   * \brief Deserialize document from JSON.
+   * \param j JSON object to deserialize
+   *
+   * Clears current state and loads from JSON.
+   * Notifies observers after loading.
+   */
+  void from_json(const nlohmann::json& j);
+
+  /**
+   * \brief Save document to file.
+   * \param filename Path to save file (.whiteboard extension)
+   * \return True if successful, false on error
+   */
+  bool save_to_file(const std::string& filename);
+
+  /**
+   * \brief Load document from file.
+   * \param filename Path to load file
+   * \return True if successful, false on error
+   */
+  bool load_from_file(const std::string& filename);
 
   // === Observer Pattern ===
 

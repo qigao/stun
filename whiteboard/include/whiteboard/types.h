@@ -5,12 +5,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <string>
 #include <vector>
 
 namespace whiteboard {
 
-enum class Tool { Select, Pan, Pen, Text, Sticky, Rectangle, Diamond, Circle, Line, Arrow, Image };
+enum class Tool { Select, Pan, Pen, Text, Sticky, Rectangle, Diamond, Circle, Line, Arrow, Image, SVGShape };
 
 enum class FillStyle { None, Solid };
 
@@ -56,15 +57,47 @@ struct Stroke {
   bool locked;
   int group_id;
 
+  // SVG-specific fields
+  std::string svg_data;           // SVG content as string
+  std::string svg_shape_id;       // Shape identifier (e.g., "uml.class", "flowchart.decision")
+  std::map<std::string, std::string> svg_parameters;  // Editable parameters (e.g., {"className": "Customer"})
+  float svg_scale_x;              // Horizontal scale factor
+  float svg_scale_y;              // Vertical scale factor
+
   Stroke()
       : width(3.0f), tool(Tool::Pen), fill_style(FillStyle::None), selected(false), rotation(0.0f),
         font_face("sans"), font_size(16.0f), text_align(NVG_ALIGN_LEFT | NVG_ALIGN_TOP),
         is_editing(false), nvg_image_handle(-1), image_width(0.0f), image_height(0.0f), name(),
-        visible(true), locked(false), group_id(-1) {}
+        visible(true), locked(false), group_id(-1), svg_scale_x(1.0f), svg_scale_y(1.0f) {}
 
   void get_bounds(float &min_x, float &min_y, float &max_x, float &max_y) const {
     if (points.empty())
       return;
+
+    // Special handling for SVG shapes
+    if (tool == Tool::SVGShape && !svg_data.empty()) {
+      // For SVG shapes, we need to calculate bounds based on SVG dimensions and scale
+      // Default SVG size (will be overridden by actual SVG bounds in full implementation)
+      float svg_width = 100.0f;
+      float svg_height = 100.0f;
+      
+      // Apply scale factors
+      float scaled_width = svg_width * svg_scale_x;
+      float scaled_height = svg_height * svg_scale_y;
+      
+      // Position is at first point
+      float pos_x = points[0].x;
+      float pos_y = points[0].y;
+      
+      // Calculate bounds (simplified - doesn't account for rotation)
+      // TODO: Query ThorVG for actual picture bounds
+      // TODO: Apply rotation transform to bounds
+      min_x = pos_x;
+      min_y = pos_y;
+      max_x = pos_x + scaled_width;
+      max_y = pos_y + scaled_height;
+      return;
+    }
 
     // Special handling for text - estimate bounds based on text length
     if (tool == Tool::Text && !text.empty()) {
@@ -107,6 +140,20 @@ struct Stroke {
   }
 
   bool contains_point(float x, float y, float margin = 10.0f) const {
+    // Special handling for SVG shapes
+    if (tool == Tool::SVGShape && !svg_data.empty() && !points.empty()) {
+      // Use bounding box for SVG shapes
+      // In a full implementation, we would query ThorVG for precise hit testing
+      float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
+      get_bounds(min_x, min_y, max_x, max_y);
+      
+      // Apply rotation if needed (simplified - assumes axis-aligned for now)
+      // TODO: Implement proper rotated rectangle hit testing
+      return x >= min_x - margin && x <= max_x + margin && 
+             y >= min_y - margin && y <= max_y + margin;
+    }
+    
+    // Default bounding box hit testing for other shapes
     float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
     get_bounds(min_x, min_y, max_x, max_y);
     return x >= min_x - margin && x <= max_x + margin && y >= min_y - margin && y <= max_y + margin;

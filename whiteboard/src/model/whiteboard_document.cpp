@@ -4,8 +4,11 @@
  */
 
 #include "whiteboard/model/whiteboard_document.h"
+#include "whiteboard/serialization.h"
 #include <algorithm>
 #include <iostream>
+#include <fstream>
+#include <chrono>
 #include <nanovg.h>
 
 namespace whiteboard {
@@ -428,6 +431,150 @@ void WhiteboardDocument::reorder_stroke(int from_index, int to_index) {
   m_selected_indices = new_selection;
 
   notify_strokes_changed();
+}
+
+// === Serialization ===
+
+nlohmann::json WhiteboardDocument::to_json() const {
+  nlohmann::json j;
+  
+  // Metadata
+  j["version"] = "1.0";
+  j["created"] = std::chrono::system_clock::now().time_since_epoch().count();
+  
+  // Canvas state
+  j["zoom"] = m_zoom;
+  j["pan_offset"] = {m_pan_offset.x(), m_pan_offset.y()};
+  j["grid_visible"] = m_grid_visible;
+  j["guides_visible"] = m_guides_visible;
+  j["snap_enabled"] = m_snap_enabled;
+  
+  // Tool state
+  j["current_tool"] = static_cast<int>(m_current_tool);
+  j["stroke_color"] = color_to_json(m_stroke_color);
+  j["stroke_width"] = m_stroke_width;
+  j["fill_style"] = static_cast<int>(m_fill_style);
+  j["fill_color"] = color_to_json(m_fill_color);
+  
+  // Text properties
+  j["font_face"] = m_font_face;
+  j["font_size"] = m_font_size;
+  j["text_align"] = m_text_align;
+  
+  // Guides
+  j["guides"] = nlohmann::json::array();
+  for (const auto& guide : m_guides) {
+    nlohmann::json g;
+    g["type"] = static_cast<int>(guide.type);
+    g["position"] = guide.position;
+    g["visible"] = guide.visible;
+    j["guides"].push_back(g);
+  }
+  
+  // Strokes
+  j["strokes"] = nlohmann::json::array();
+  for (const auto& stroke : m_strokes) {
+    j["strokes"].push_back(stroke_to_json(stroke));
+  }
+  
+  // Note: Selection is not saved (runtime state)
+  
+  return j;
+}
+
+void WhiteboardDocument::from_json(const nlohmann::json& j) {
+  // Clear current state
+  m_strokes.clear();
+  m_guides.clear();
+  m_selected_indices.clear();
+  
+  // Clear undo/redo stacks
+  while (!m_undo_stack.empty()) m_undo_stack.pop();
+  while (!m_redo_stack.empty()) m_redo_stack.pop();
+  
+  // Canvas state
+  m_zoom = j.value("zoom", 1.0f);
+  auto pan = j.value("pan_offset", std::vector<float>{0, 0});
+  m_pan_offset = nanogui::Vector2f(pan[0], pan[1]);
+  m_grid_visible = j.value("grid_visible", true);
+  m_guides_visible = j.value("guides_visible", false);
+  m_snap_enabled = j.value("snap_enabled", false);
+  
+  // Tool state
+  m_current_tool = static_cast<Tool>(j.value("current_tool", static_cast<int>(Tool::Pen)));
+  if (j.contains("stroke_color")) {
+    m_stroke_color = color_from_json(j["stroke_color"]);
+  }
+  m_stroke_width = j.value("stroke_width", 3.0f);
+  m_fill_style = static_cast<FillStyle>(j.value("fill_style", static_cast<int>(FillStyle::None)));
+  if (j.contains("fill_color")) {
+    m_fill_color = color_from_json(j["fill_color"]);
+  }
+  
+  // Text properties
+  m_font_face = j.value("font_face", "sans");
+  m_font_size = j.value("font_size", 16.0f);
+  m_text_align = j.value("text_align", 0);
+  
+  // Guides
+  if (j.contains("guides")) {
+    for (const auto& g : j["guides"]) {
+      Guide guide(
+        static_cast<Guide::Type>(g["type"].get<int>()),
+        g["position"].get<float>()
+      );
+      guide.visible = g.value("visible", true);
+      m_guides.push_back(guide);
+    }
+  }
+  
+  // Strokes
+  if (j.contains("strokes")) {
+    for (const auto& s : j["strokes"]) {
+      m_strokes.push_back(stroke_from_json(s));
+    }
+  }
+  
+  // Notify observers
+  notify_strokes_changed();
+  notify_view_changed();
+  notify_tool_changed();
+}
+
+bool WhiteboardDocument::save_to_file(const std::string& filename) {
+  try {
+    nlohmann::json j = to_json();
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+      std::cerr << "Failed to open file for writing: " << filename << std::endl;
+      return false;
+    }
+    file << j.dump(2);  // Pretty print with 2-space indent
+    file.close();
+    return true;
+  } catch (const std::exception& e) {
+    std::cerr << "Save error: " << e.what() << std::endl;
+    return false;
+  }
+}
+
+bool WhiteboardDocument::load_from_file(const std::string& filename) {
+  try {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+      std::cerr << "Failed to open file for reading: " << filename << std::endl;
+      return false;
+    }
+    nlohmann::json j;
+    file >> j;
+    file.close();
+    
+    from_json(j);
+    return true;
+  } catch (const std::exception& e) {
+    std::cerr << "Load error: " << e.what() << std::endl;
+    return false;
+  }
 }
 
 } // namespace whiteboard

@@ -56,11 +56,19 @@ public:
   void set_controller(LayersController *controller) { m_controller = controller; }
 
 private:
+  /**
+   * \brief Rebuild the layer list UI.
+   */
+  void rebuild_layer_list();
+  
+  /**
+   * \brief Get display name for a stroke/layer.
+   */
+  std::string get_layer_display_name(const Stroke &stroke) const;
+
   WhiteboardDocument *m_document;
   LayersController *m_controller;
-
-  // UI will be created by the existing LayersPanel
-  // This is a thin wrapper that observes the model
+  nanogui::Widget *m_layer_container;
 };
 
 } // namespace whiteboard

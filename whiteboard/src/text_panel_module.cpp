@@ -12,8 +12,7 @@ TextPanelModule::TextPanelModule(Widget *parent) : Widget(parent) {
                                       nvgRGBA(240, 160, 40, 255), nvgRGBA(30, 30, 35, 255)};
   for (size_t i = 0; i < strokeCols.size(); i++) {
     float x = padding + i * (buttonSize + spacing);
-    m_strokeColors.push_back(
-        {x, y, buttonSize, strokeCols[i], i == 0, false, static_cast<int>(i)});
+    m_strokeColors.push_back({x, y, buttonSize, strokeCols[i], i == 0, false, static_cast<int>(i)});
   }
 
   // Background colors (背景)
@@ -93,8 +92,7 @@ Vector2i TextPanelModule::preferred_size_impl(NVGcontext *) const {
   return {370, 1200}; // Vertical panel
 }
 
-bool TextPanelModule::mouse_button_event(const Vector2i &p, int button, bool down,
-                                         int modifiers) {
+bool TextPanelModule::mouse_button_event(const Vector2i &p, int button, bool down, int modifiers) {
   if (button == GLFW_MOUSE_BUTTON_1 && down) {
     Vector2f localPos = Vector2f(p.x() - m_pos.x(), p.y() - m_pos.y());
 
@@ -106,12 +104,12 @@ bool TextPanelModule::mouse_button_event(const Vector2i &p, int button, bool dow
         for (auto &b : m_strokeColors)
           b.selected = false;
         btn.selected = true;
-        
+
         // Call color callback
         if (m_color_callback) {
           m_color_callback(btn.color);
         }
-        
+
         screen()->redraw();
         return true;
       }
@@ -191,13 +189,13 @@ bool TextPanelModule::mouse_button_event(const Vector2i &p, int button, bool dow
         for (auto &b : m_fontButtons)
           b.selected = false;
         btn.selected = true;
-        
+
         // Call font face callback
         if (m_font_face_callback) {
           std::string fonts[] = {"sans", "sans-bold", "mono", "sans-bold"};
           m_font_face_callback(fonts[i]);
         }
-        
+
         screen()->redraw();
         return true;
       }
@@ -212,13 +210,13 @@ bool TextPanelModule::mouse_button_event(const Vector2i &p, int button, bool dow
         for (auto &b : m_textSizeButtons)
           b.selected = false;
         btn.selected = true;
-        
+
         // Call font size callback
         if (m_font_size_callback) {
           float sizes[] = {12.0f, 16.0f, 20.0f, 24.0f}; // S, M, L, XL
           m_font_size_callback(sizes[i]);
         }
-        
+
         screen()->redraw();
         return true;
       }
@@ -233,17 +231,14 @@ bool TextPanelModule::mouse_button_event(const Vector2i &p, int button, bool dow
         for (auto &b : m_alignButtons)
           b.selected = false;
         btn.selected = true;
-        
+
         // Call alignment callback
         if (m_align_callback) {
-          int aligns[] = {
-            NVG_ALIGN_LEFT | NVG_ALIGN_TOP,
-            NVG_ALIGN_CENTER | NVG_ALIGN_TOP,
-            NVG_ALIGN_RIGHT | NVG_ALIGN_TOP
-          };
+          int aligns[] = {NVG_ALIGN_LEFT | NVG_ALIGN_TOP, NVG_ALIGN_CENTER | NVG_ALIGN_TOP,
+                          NVG_ALIGN_RIGHT | NVG_ALIGN_TOP};
           m_align_callback(aligns[i]);
         }
-        
+
         screen()->redraw();
         return true;
       }
@@ -375,8 +370,8 @@ void TextPanelModule::draw(NVGcontext *ctx) {
   for (size_t i = 0; i < m_cornerButtons.size(); i++) {
     const auto &btn = m_cornerButtons[i];
     drawIconButton(ctx, px + btn.x, py + btn.y, btn.size, btn.icon.c_str(), btn.selected);
-    drawCornerIcon(ctx, px + btn.x + btn.size * 0.5f, py + btn.y + btn.size * 0.5f,
-                   btn.size * 0.4f, i == 1);
+    drawCornerIcon(ctx, px + btn.x + btn.size * 0.5f, py + btn.y + btn.size * 0.5f, btn.size * 0.4f,
+                   i == 1);
   }
   yOffset += 80.f;
 
@@ -409,8 +404,8 @@ void TextPanelModule::draw(NVGcontext *ctx) {
   for (size_t i = 0; i < m_alignButtons.size(); i++) {
     const auto &btn = m_alignButtons[i];
     drawIconButton(ctx, px + btn.x, py + btn.y, btn.size, btn.icon.c_str(), btn.selected);
-    drawAlignIcon(ctx, px + btn.x + btn.size * 0.5f, py + btn.y + btn.size * 0.5f,
-                  btn.size * 0.4f, static_cast<int>(i));
+    drawAlignIcon(ctx, px + btn.x + btn.size * 0.5f, py + btn.y + btn.size * 0.5f, btn.size * 0.4f,
+                  static_cast<int>(i));
   }
   yOffset += 80.f;
 
@@ -440,9 +435,8 @@ void TextPanelModule::drawLabel(NVGcontext *ctx, float x, float y, const char *t
   nvgText(ctx, x, y, text, nullptr);
 }
 
-void TextPanelModule::drawColorButton(NVGcontext *ctx, float x, float y, float size,
-                                      NVGcolor color, bool selected, bool hasBorder,
-                                      bool hasPattern) {
+void TextPanelModule::drawColorButton(NVGcontext *ctx, float x, float y, float size, NVGcolor color,
+                                      bool selected, bool hasBorder, bool hasPattern) {
   // Button background
   nvgBeginPath(ctx);
   nvgRoundedRect(ctx, x, y, size, size, 8.f);
@@ -592,8 +586,7 @@ void TextPanelModule::drawBorderStyleIcon(NVGcontext *ctx, float cx, float cy, f
   }
 }
 
-void TextPanelModule::drawLineStyleIcon(NVGcontext *ctx, float cx, float cy, float size,
-                                        int type) {
+void TextPanelModule::drawLineStyleIcon(NVGcontext *ctx, float cx, float cy, float size, int type) {
   nvgStrokeColor(ctx, nvgRGBA(60, 60, 80, 255));
   nvgStrokeWidth(ctx, 2.5f);
   nvgLineCap(ctx, NVG_ROUND);
@@ -668,7 +661,7 @@ void TextPanelModule::drawFontIcon(NVGcontext *ctx, float cx, float cy, float si
     nvgTextAlign(ctx, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgText(ctx, cx, cy, "A", nullptr);
   } else if (type == 2) {
-    // Code icon </> 
+    // Code icon </>
     nvgFontFace(ctx, "sans");
     nvgFontSize(ctx, size * 0.9f);
     nvgTextAlign(ctx, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);

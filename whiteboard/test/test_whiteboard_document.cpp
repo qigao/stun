@@ -1,6 +1,6 @@
 /**
  * \file test_whiteboard_document.cpp
- * \brief Unit tests for WhiteboardDocument model.
+ * \brief Unit tests for WhiteboardDocument model.vgzl
  */
 
 #include "whiteboard/model/whiteboard_document.h"
@@ -11,10 +11,10 @@ using namespace whiteboard;
 
 // Simple test framework (replace with Catch2 if available)
 #define TEST(name) void test_##name()
-#define ASSERT(condition) \
-  if (!(condition)) { \
-    std::cerr << "FAILED: " << #condition << " at line " << __LINE__ << std::endl; \
-    exit(1); \
+#define ASSERT(condition)                                                                          \
+  if (!(condition)) {                                                                              \
+    std::cerr << "FAILED: " << #condition << " at line " << __LINE__ << std::endl;                 \
+    exit(1);                                                                                       \
   }
 
 // Mock observer for testing

@@ -96,12 +96,6 @@
       "version>=": "3.4.0"
     }, 
     {
-      "name": "eigen3"
-    },
-    {
-      "name": "cereal"
-    },
-    {
       "name": "libdatachannel"
     },
     {
@@ -111,17 +105,10 @@
       "name": "zstd"
     },
     {
-      "name": "tbb"
+      "name": "pkgconf"
     },
     {
-      "name": "skia"
-    },
-    {
-      "name": "nanosvg"
-    },
-    {
-      "name": "thorvg",
-      "version>=": "0.15.14"
+      "name": "rlottie"
     },
     {
       "name": "libass",

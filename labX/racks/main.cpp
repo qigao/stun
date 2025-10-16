@@ -13,7 +13,6 @@
 #include <iostream>
 #include <nanogui.h>
 #include <nanogui/opengl.h>
-#include <thorvg.h>
 
 using namespace nanogui;
 
@@ -101,11 +100,10 @@ public:
     Screen::draw_all();
   }
 
-  void cleanup_thorvg_resources() {
-    std::cout << "Cleaning up ThorVG resources..." << std::endl;
+  void cleanup_resources() {
+    std::cout << "Cleaning up resources..." << std::endl;
 
     // Clear all children to trigger cleanup of windows and their child widgets
-    // This ensures ThorVG Pictures are released while ThorVG is still initialized
     m_children.clear();
 
     // Clear all widget pointers
@@ -122,7 +120,7 @@ public:
     m_waspFilter = nullptr;
     m_module2 = nullptr;
 
-    std::cout << "ThorVG resources cleanup complete" << std::endl;
+    std::cout << "Resources cleanup complete" << std::endl;
   }
 
   virtual bool keyboard_event(int key, int scancode, int action, int modifiers) override {
@@ -155,14 +153,6 @@ static int vcv_entry(int argc, char **argv) {
   try {
     std::cout << "=== VCV Rack Style Module Demo ===" << std::endl;
 
-    std::cout << "Initializing ThorVG..." << std::endl;
-    tvg::Result initResult = tvg::Initializer::init(tvg::CanvasEngine::Sw, 4);
-    if (initResult != tvg::Result::Success) {
-      std::cerr << "WARNING: ThorVG initialization failed." << std::endl;
-    } else {
-      std::cout << "ThorVG initialized successfully!" << std::endl;
-    }
-
     std::cout << "Initializing NanoGUI..." << std::endl;
     nanogui::init();
     {
@@ -172,16 +162,11 @@ static int vcv_entry(int argc, char **argv) {
       app->set_visible(true);
       std::cout << "Starting main loop..." << std::endl;
       nanogui::run(nanogui::RunMode::VSync);
-      app->cleanup_thorvg_resources();
+      app->cleanup_resources();
  
     }
     std::cout << "Shutting down NanoGUI..." << std::endl;
     nanogui::shutdown();
-
-    if (initResult == tvg::Result::Success) {
-      std::cout << "Terminating ThorVG..." << std::endl;
-      tvg::Initializer::term(tvg::CanvasEngine::Sw);
-    }
 
     std::cout << "=== Application exited cleanly ===" << std::endl;
   } catch (const std::exception &e) {

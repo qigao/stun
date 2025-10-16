@@ -1,6 +1,4 @@
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(thorvg REQUIRED IMPORTED_TARGET thorvg)
-
+find_package(lunasvg REQUIRED)
 # Modular VCV rack demo with window adsorption
 add_executable(vcv_rack_modular
     main.cpp
@@ -18,14 +16,13 @@ add_executable(vcv_rack_modular
 target_link_libraries(vcv_rack_modular
     PRIVATE
         nanogui
-        PkgConfig::thorvg
+        lunasvg::lunasvg
 )
 
 target_include_directories(vcv_rack_modular
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${THORVG_INCLUDE_DIRS}
 )
 
 set_target_properties(vcv_rack_modular PROPERTIES

@@ -7,12 +7,14 @@
 
 #include "whiteboard/model/whiteboard_document.h"
 #include "whiteboard/types.h"
+#include <chrono>
 #include <nanogui/vector.h>
 
 namespace whiteboard {
 
-// Forward declaration
+// Forward declarations
 class CanvasView;
+class SVGShapeLibrary;
 
 /**
  * \class CanvasController
@@ -89,10 +91,17 @@ public:
    */
   bool handle_key_release(int key, int modifiers);
 
+  /**
+   * \brief Set the shape library for SVG shape operations.
+   * \param library Shape library instance
+   */
+  void set_shape_library(SVGShapeLibrary *library) { m_shape_library = library; }
+
 private:
   // === Model and View ===
   WhiteboardDocument *m_document;
   CanvasView *m_view;
+  SVGShapeLibrary *m_shape_library;
 
   // === Interaction State ===
   enum class Mode {
@@ -113,6 +122,11 @@ private:
   std::vector<Point> m_original_positions;
   float m_rotation_start_angle;
   nanogui::Vector2f m_rotation_center;
+
+  // === Double-click Detection ===
+  std::chrono::steady_clock::time_point m_last_click_time;
+  nanogui::Vector2f m_last_click_pos;
+  int m_last_clicked_stroke;
 
   // === Tool Handlers ===
 
@@ -176,6 +190,21 @@ private:
    */
   void handle_pan_tool_up(const nanogui::Vector2f &pos);
 
+  /**
+   * \brief Handle SVG shape tool mouse down.
+   */
+  void handle_svg_shape_tool_down(const nanogui::Vector2f &pos);
+
+  /**
+   * \brief Handle SVG shape tool mouse drag.
+   */
+  void handle_svg_shape_tool_drag(const nanogui::Vector2f &pos);
+
+  /**
+   * \brief Handle SVG shape tool mouse up.
+   */
+  void handle_svg_shape_tool_up(const nanogui::Vector2f &pos);
+
   // === Helper Methods ===
 
   /**
@@ -198,6 +227,21 @@ private:
    * \return True if clicking on handle
    */
   bool is_clicking_rotation_handle(const nanogui::Vector2f &pos);
+
+  /**
+   * \brief Check if this is a double-click.
+   * \param pos Current click position
+   * \param stroke_index Clicked stroke index
+   * \return True if double-click detected
+   */
+  bool is_double_click(const nanogui::Vector2f &pos, int stroke_index);
+
+  /**
+   * \brief Handle double-click on SVG shape.
+   * \param stroke_index Index of clicked stroke
+   * \param pos Click position in canvas coordinates
+   */
+  void handle_svg_double_click(int stroke_index, const nanogui::Vector2f &pos);
 };
 
 } // namespace whiteboard

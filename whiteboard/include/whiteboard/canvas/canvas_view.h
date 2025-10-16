@@ -13,8 +13,9 @@
 
 namespace whiteboard {
 
-// Forward declaration
+// Forward declarations
 class CanvasController;
+class SVGRenderer;
 
 /**
  * \class CanvasView
@@ -157,6 +158,9 @@ private:
   WhiteboardDocument *m_document;
   CanvasController *m_controller;
 
+  // === SVG Rendering ===
+  SVGRenderer *m_svg_renderer;
+
   // === Temporary State (not persisted in model) ===
   Stroke m_current_stroke;
   bool m_has_current_stroke;
@@ -190,7 +194,12 @@ private:
   /**
    * \brief Draw a single stroke.
    */
-  void draw_stroke(NVGcontext *ctx, const Stroke &stroke);
+  void draw_stroke(NVGcontext *ctx, const Stroke &stroke, int stroke_index);
+
+  /**
+   * \brief Draw an SVG stroke.
+   */
+  void draw_svg_stroke(NVGcontext *ctx, const Stroke &stroke, int stroke_index);
 
   /**
    * \brief Draw selection box around selected strokes.

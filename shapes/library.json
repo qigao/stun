@@ -1,0 +1,282 @@
+{
+  "version": "1.0",
+  "name": "Whiteboard Shape Library",
+  "shapes": [
+    {
+      "id": "basic.rectangle",
+      "name": "Rectangle",
+      "category": "Basic",
+      "svg_file": "basic/rectangle.svg",
+      "thumbnail": "basic/rectangle_thumb.png",
+      "description": "Simple rectangle shape"
+    },
+    {
+      "id": "basic.circle",
+      "name": "Circle",
+      "category": "Basic",
+      "svg_file": "basic/circle.svg",
+      "thumbnail": "basic/circle_thumb.png",
+      "description": "Simple circle shape"
+    },
+    {
+      "id": "basic.triangle",
+      "name": "Triangle",
+      "category": "Basic",
+      "svg_file": "basic/triangle.svg",
+      "thumbnail": "basic/triangle_thumb.png",
+      "description": "Simple triangle shape"
+    },
+    {
+      "id": "basic.star",
+      "name": "Star",
+      "category": "Basic",
+      "svg_file": "basic/star.svg",
+      "thumbnail": "basic/star_thumb.png",
+      "description": "Five-pointed star"
+    },
+    {
+      "id": "uml.class",
+      "name": "Class",
+      "category": "UML",
+      "svg_file": "uml/class.svg",
+      "thumbnail": "uml/class_thumb.png",
+      "description": "UML class diagram",
+      "parameters": [
+        {
+          "name": "className",
+          "type": "text",
+          "default": "ClassName",
+          "label": "Class Name"
+        },
+        {
+          "name": "attributes",
+          "type": "list",
+          "default": "- attribute: type",
+          "label": "Attributes"
+        },
+        {
+          "name": "methods",
+          "type": "list",
+          "default": "+ method(): void",
+          "label": "Methods"
+        }
+      ]
+    },
+    {
+      "id": "uml.interface",
+      "name": "Interface",
+      "category": "UML",
+      "svg_file": "uml/interface.svg",
+      "thumbnail": "uml/interface_thumb.png",
+      "description": "UML interface diagram",
+      "parameters": [
+        {
+          "name": "interfaceName",
+          "type": "text",
+          "default": "IInterface",
+          "label": "Interface Name"
+        },
+        {
+          "name": "methods",
+          "type": "list",
+          "default": "+ method(): void",
+          "label": "Methods"
+        }
+      ]
+    },
+    {
+      "id": "uml.actor",
+      "name": "Actor",
+      "category": "UML",
+      "svg_file": "uml/actor.svg",
+      "thumbnail": "uml/actor_thumb.png",
+      "description": "UML actor (stick figure)",
+      "parameters": [
+        {
+          "name": "actorName",
+          "type": "text",
+          "default": "Actor",
+          "label": "Actor Name"
+        }
+      ]
+    },
+    {
+      "id": "uml.usecase",
+      "name": "Use Case",
+      "category": "UML",
+      "svg_file": "uml/usecase.svg",
+      "thumbnail": "uml/usecase_thumb.png",
+      "description": "UML use case (oval)",
+      "parameters": [
+        {
+          "name": "useCaseName",
+          "type": "text",
+          "default": "Use Case",
+          "label": "Use Case Name"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.process",
+      "name": "Process",
+      "category": "Flowchart",
+      "svg_file": "flowchart/process.svg",
+      "thumbnail": "flowchart/process_thumb.png",
+      "description": "Flowchart process box",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "text",
+          "default": "Process",
+          "label": "Text"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.decision",
+      "name": "Decision",
+      "category": "Flowchart",
+      "svg_file": "flowchart/decision.svg",
+      "thumbnail": "flowchart/decision_thumb.png",
+      "description": "Flowchart decision diamond",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "text",
+          "default": "Decision?",
+          "label": "Text"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.data",
+      "name": "Data",
+      "category": "Flowchart",
+      "svg_file": "flowchart/data.svg",
+      "thumbnail": "flowchart/data_thumb.png",
+      "description": "Flowchart data (parallelogram)",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "text",
+          "default": "Data",
+          "label": "Text"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.start",
+      "name": "Start/End",
+      "category": "Flowchart",
+      "svg_file": "flowchart/start.svg",
+      "thumbnail": "flowchart/start_thumb.png",
+      "description": "Flowchart start/end (rounded rectangle)",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "text",
+          "default": "Start",
+          "label": "Text"
+        }
+      ]
+    },
+    {
+      "id": "table.2x2",
+      "name": "Table 2x2",
+      "category": "Table",
+      "svg_file": "table/table_2x2.svg",
+      "thumbnail": "table/table_2x2_thumb.png",
+      "description": "2x2 table",
+      "parameters": [
+        {
+          "name": "cell_0_0",
+          "type": "text",
+          "default": "Header 1",
+          "label": "Cell (0,0)"
+        },
+        {
+          "name": "cell_0_1",
+          "type": "text",
+          "default": "Header 2",
+          "label": "Cell (0,1)"
+        },
+        {
+          "name": "cell_1_0",
+          "type": "text",
+          "default": "Data 1",
+          "label": "Cell (1,0)"
+        },
+        {
+          "name": "cell_1_1",
+          "type": "text",
+          "default": "Data 2",
+          "label": "Cell (1,1)"
+        }
+      ]
+    },
+    {
+      "id": "table.3x3",
+      "name": "Table 3x3",
+      "category": "Table",
+      "svg_file": "table/table_3x3.svg",
+      "thumbnail": "table/table_3x3_thumb.png",
+      "description": "3x3 table",
+      "parameters": [
+        {
+          "name": "cell_0_0",
+          "type": "text",
+          "default": "H1",
+          "label": "Cell (0,0)"
+        },
+        {
+          "name": "cell_0_1",
+          "type": "text",
+          "default": "H2",
+          "label": "Cell (0,1)"
+        },
+        {
+          "name": "cell_0_2",
+          "type": "text",
+          "default": "H3",
+          "label": "Cell (0,2)"
+        },
+        {
+          "name": "cell_1_0",
+          "type": "text",
+          "default": "D1",
+          "label": "Cell (1,0)"
+        },
+        {
+          "name": "cell_1_1",
+          "type": "text",
+          "default": "D2",
+          "label": "Cell (1,1)"
+        },
+        {
+          "name": "cell_1_2",
+          "type": "text",
+          "default": "D3",
+          "label": "Cell (1,2)"
+        },
+        {
+          "name": "cell_2_0",
+          "type": "text",
+          "default": "D4",
+          "label": "Cell (2,0)"
+        },
+        {
+          "name": "cell_2_1",
+          "type": "text",
+          "default": "D5",
+          "label": "Cell (2,1)"
+        },
+        {
+          "name": "cell_2_2",
+          "type": "text",
+          "default": "D6",
+          "label": "Cell (2,2)"
+        }
+      ]
+    }
+  ]
+}

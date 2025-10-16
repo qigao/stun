@@ -56,10 +56,21 @@ std::string AutoSaveManager::get_auto_save_path() {
 }
 
 void AutoSaveManager::save_to_local_storage() {
+  if (!m_app)
+    return;
+    
   try {
-    json j;
-    j["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
-    j["current_page"] = m_app ? m_app->get_current_page() : 0;
+    // Get document and serialize it
+    auto* document = m_app->get_document();
+    if (!document)
+      return;
+      
+    json j = document->to_json();
+    
+    // Add auto-save metadata
+    j["autosave"] = true;
+    j["autosave_timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
+    j["current_page"] = m_app->get_current_page();
 
     std::string path = get_auto_save_path();
     size_t pos = path.find_last_of("/\\");
@@ -104,19 +115,25 @@ bool AutoSaveManager::has_auto_save_data() {
 }
 
 void AutoSaveManager::load_from_local_storage() {
+  if (!m_app)
+    return;
+    
   try {
     std::ifstream file(get_auto_save_path());
-    if (!file.is_open() || !m_app)
+    if (!file.is_open())
       return;
 
     json j;
     file >> j;
     file.close();
 
-    // Minimal restore: just log the presence of an auto-save.
-    if (j.contains("current_page")) {
-      m_app->set_saving_indicator_visible(false);
+    // Load document from auto-save
+    auto* document = m_app->get_document();
+    if (document && j.contains("strokes")) {
+      document->from_json(j);
     }
+    
+    m_app->set_saving_indicator_visible(false);
   } catch (const std::exception &e) {
     std::cerr << "Error loading auto-save: " << e.what() << std::endl;
   }

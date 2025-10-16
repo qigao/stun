@@ -5,7 +5,7 @@
 #include <nanogui.h>
 #include <nanogui/opengl.h>
 #include <nanovg.h>
-#include <thorvg.h>
+#include <lunasvg.h>
 #include <vector>
 
 using namespace nanogui;
@@ -35,7 +35,7 @@ private:
   void drawChannelIndicator(NVGcontext *ctx, float cx, float cy, int channel, bool enabled);
   void drawPort(NVGcontext *ctx, float cx, float cy, const char *label);
 
-  std::unique_ptr<tvg::Picture> m_bezelSvg;
+  std::unique_ptr<lunasvg::Document> m_bezelSvg;
   std::vector<float> m_waveformCh1;
   std::vector<float> m_waveformCh2;
   float m_time;

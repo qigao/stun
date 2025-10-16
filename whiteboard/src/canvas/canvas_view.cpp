@@ -5,15 +5,20 @@
 
 #include "whiteboard/canvas/canvas_view.h"
 #include "whiteboard/canvas/canvas_controller.h"
+#include "whiteboard/svg/svg_renderer.h"
+#include <fmtlog.h>
 #include <nanovg.h>
 
 namespace whiteboard {
 
 CanvasView::CanvasView(nanogui::Widget *parent, WhiteboardDocument *document)
     : nanogui::Canvas(parent, 1, false, false, false), m_document(document), m_controller(nullptr),
-      m_has_current_stroke(false), m_has_marquee(false) {
+      m_svg_renderer(nullptr), m_has_current_stroke(false), m_has_marquee(false) {
 
   set_draw_border(false);
+
+  // Create SVG renderer
+  m_svg_renderer = new SVGRenderer();
 
   // Register as observer
   if (m_document) {
@@ -26,6 +31,9 @@ CanvasView::~CanvasView() {
   if (m_document) {
     m_document->remove_observer(this);
   }
+
+  // Clean up SVG renderer
+  delete m_svg_renderer;
 }
 
 // === Temporary State ===
@@ -163,6 +171,9 @@ bool CanvasView::keyboard_event(int key, int scancode, int action, int modifiers
 // === Main Draw Method ===
 
 void CanvasView::draw(NVGcontext *ctx) {
+  // Note: We don't clear m_frame_pictures here because canvas might still have references
+  // Pictures are released (not deleted) and will be cleaned up by ThorVG::term()
+  
   nanogui::Canvas::draw(ctx);
 
   // Draw in layers from back to front
@@ -260,17 +271,67 @@ void CanvasView::draw_guides(NVGcontext *ctx) {
 
 void CanvasView::draw_strokes(NVGcontext *ctx) {
   const auto &strokes = m_document->get_strokes();
+  
+  logd("CanvasView: Drawing {} strokes", strokes.size());
+  
+  // Calculate visible viewport in canvas coordinates for culling
+  nanogui::Vector2f viewport_min = local_to_canvas(nanogui::Vector2i(0, 0));
+  nanogui::Vector2f viewport_max = local_to_canvas(m_size);
+  
+  // Add margin to account for stroke width and transforms
+  float cull_margin = 100.0f / m_document->get_zoom();
+  viewport_min.x() -= cull_margin;
+  viewport_min.y() -= cull_margin;
+  viewport_max.x() += cull_margin;
+  viewport_max.y() += cull_margin;
+  
+  int stroke_index = 0;
   for (const auto &stroke : strokes) {
-    if (stroke.visible) {
-      draw_stroke(ctx, stroke);
+    logd("CanvasView: Processing stroke {} of {}: '{}'", stroke_index + 1, strokes.size(), stroke.name);
+    
+    if (!stroke.visible) {
+      logd("CanvasView: Stroke '{}' is not visible, skipping", stroke.name);
+      stroke_index++;
+      continue;
     }
+    
+    // Viewport culling: skip strokes that are completely outside the viewport
+    float stroke_min_x, stroke_min_y, stroke_max_x, stroke_max_y;
+    stroke.get_bounds(stroke_min_x, stroke_min_y, stroke_max_x, stroke_max_y);
+    
+    // Check if stroke bounds intersect with viewport
+    bool is_visible = !(stroke_max_x < viewport_min.x() || 
+                       stroke_min_x > viewport_max.x() ||
+                       stroke_max_y < viewport_min.y() || 
+                       stroke_min_y > viewport_max.y());
+    
+    if (is_visible) {
+      logd("CanvasView: Stroke '{}' is in viewport, drawing...", stroke.name);
+      fmtlog::poll();
+      
+      draw_stroke(ctx, stroke, stroke_index);
+      
+      logi("CanvasView: Stroke '{}' drawn, continuing to next stroke", stroke.name);
+      fmtlog::poll();
+    } else {
+      logd("CanvasView: Stroke '{}' is outside viewport, skipping", stroke.name);
+    }
+    
+    stroke_index++;
   }
+  
+  logi("CanvasView: All {} strokes processed", strokes.size());
+  fmtlog::poll();
 }
 
-void CanvasView::draw_stroke(NVGcontext *ctx, const Stroke &stroke) {
+void CanvasView::draw_stroke(NVGcontext *ctx, const Stroke &stroke, int stroke_index) {
   if (stroke.points.empty()) {
+    logw("CanvasView: Stroke '{}' has no points, skipping", stroke.name);
     return;
   }
+
+  logd("CanvasView: Drawing stroke '{}', tool={}, points={}", 
+       stroke.name, static_cast<int>(stroke.tool), stroke.points.size());
 
   float zoom = m_document->get_zoom();
 
@@ -364,6 +425,34 @@ void CanvasView::draw_stroke(NVGcontext *ctx, const Stroke &stroke) {
     break;
   }
 
+  case Tool::SVGShape: {
+    logi("CanvasView: Drawing SVG shape stroke '{}' at canvas pos ({}, {})", 
+         stroke.name, stroke.points[0].x, stroke.points[0].y);
+    fmtlog::poll(); // Flush before rendering
+    
+    try {
+      // Delegate to SVG rendering
+      draw_svg_stroke(ctx, stroke, stroke_index);
+      logi("CanvasView: draw_svg_stroke returned");
+      fmtlog::poll();
+    } catch (const std::exception &e) {
+      loge("CanvasView: Exception in draw_svg_stroke: {}", e.what());
+      fmtlog::poll();
+      break;
+    } catch (...) {
+      loge("CanvasView: Unknown exception in draw_svg_stroke!");
+      fmtlog::poll();
+      break;
+    }
+    
+    logi("CanvasView: ✓ SVG shape stroke '{}' drawn successfully!", stroke.name);
+    fmtlog::poll();
+    
+    logi("CanvasView: Breaking from SVG case...");
+    fmtlog::poll();
+    break;
+  }
+
   case Tool::Pen:
   default: {
     // Draw freehand path
@@ -384,7 +473,79 @@ void CanvasView::draw_stroke(NVGcontext *ctx, const Stroke &stroke) {
   }
   }
 
+  logi("CanvasView: Restoring NVG context after drawing stroke '{}'...", stroke.name);
+  fmtlog::poll();
+  
   nvgRestore(ctx);
+  
+  logi("CanvasView: draw_stroke complete for '{}'", stroke.name);
+  fmtlog::poll();
+}
+
+void CanvasView::draw_svg_stroke(NVGcontext *ctx, const Stroke &stroke, int stroke_index) {
+  if (!m_svg_renderer) {
+    logw("CanvasView: SVG renderer is null");
+    return;
+  }
+  
+  if (stroke.svg_data.empty()) {
+    logw("CanvasView: SVG data is empty for stroke '{}'", stroke.name);
+    return;
+  }
+  
+  if (stroke.points.empty()) {
+    logw("CanvasView: No position points for SVG stroke '{}'", stroke.name);
+    return;
+  }
+
+  logd("CanvasView: Rendering SVG stroke '{}' ({} bytes) at ({}, {})", 
+       stroke.name, stroke.svg_data.size(), stroke.points[0].x, stroke.points[0].y);
+  fmtlog::poll();
+
+  // Load SVG document with LunaSVG (clean RAII, no memory issues!)
+  logd("CanvasView: Loading SVG document for stroke '{}'...", stroke.name);
+  
+  auto document = m_svg_renderer->load_svg(stroke.svg_data);
+  
+  if (!document) {
+    loge("CanvasView: Failed to load SVG document for stroke '{}'", stroke.name);
+    // Failed to load SVG - draw placeholder
+    float min_x, min_y, max_x, max_y;
+    stroke.get_bounds(min_x, min_y, max_x, max_y);
+    nanogui::Vector2f top_left = canvas_to_global(nanogui::Vector2f(min_x, min_y));
+    nanogui::Vector2f bottom_right = canvas_to_global(nanogui::Vector2f(max_x, max_y));
+
+    nvgSave(ctx);
+    nvgBeginPath(ctx);
+    nvgRect(ctx, top_left.x(), top_left.y(), 
+            bottom_right.x() - top_left.x(), bottom_right.y() - top_left.y());
+    nvgStrokeColor(ctx, nvgRGBA(255, 0, 0, 255));
+    nvgStrokeWidth(ctx, 2.0f);
+    nvgStroke(ctx);
+    nvgRestore(ctx);
+    return;
+  }
+
+  // Get position from first point
+  nanogui::Vector2f pos = canvas_to_global(to_vec(stroke.points[0]));
+
+  // Apply zoom to scale factors
+  float zoom = m_document->get_zoom();
+  float scale_x = stroke.svg_scale_x * zoom;
+  float scale_y = stroke.svg_scale_y * zoom;
+
+  // Render the SVG (LunaSVG handles all memory automatically!)
+  try {
+    m_svg_renderer->render(ctx, document.get(), pos, scale_x, scale_y, stroke.rotation);
+    logd("CanvasView: SVG rendered successfully");
+  } catch (const std::exception &e) {
+    loge("CanvasView: Exception from SVG renderer: {}", e.what());
+    return;
+  } catch (...) {
+    loge("CanvasView: Unknown exception from SVG renderer!");
+    fmtlog::poll();
+    return;
+  }
 }
 
 void CanvasView::draw_selection(NVGcontext *ctx) {
@@ -435,7 +596,8 @@ void CanvasView::draw_current_stroke(NVGcontext *ctx) {
     return;
   }
 
-  draw_stroke(ctx, m_current_stroke);
+  // Use -1 as stroke index for current stroke (not yet in document)
+  draw_stroke(ctx, m_current_stroke, -1);
 }
 
 void CanvasView::draw_marquee(NVGcontext *ctx) {

@@ -113,25 +113,10 @@ bool VCVModulePanel::mouse_enter_event(const Vector2i &p, bool enter) {
 }
 
 void VCVModulePanel::loadPortSvgs() {
-  m_inputPortSvg = tvg::Picture::gen();
-  if (m_inputPortSvg) {
-    m_inputPortSvg->load(kInputPortSvg, std::strlen(kInputPortSvg), "svg", true);
-  }
-
-  m_outputPortSvg = tvg::Picture::gen();
-  if (m_outputPortSvg) {
-    m_outputPortSvg->load(kOutputPortSvg, std::strlen(kOutputPortSvg), "svg", true);
-  }
-
-  m_largeKnobSvg = tvg::Picture::gen();
-  if (m_largeKnobSvg) {
-    m_largeKnobSvg->load(kLargeKnobSvg, std::strlen(kLargeKnobSvg), "svg", true);
-  }
-
-  m_smallKnobSvg = tvg::Picture::gen();
-  if (m_smallKnobSvg) {
-    m_smallKnobSvg->load(kSmallKnobSvg, std::strlen(kSmallKnobSvg), "svg", true);
-  }
+  m_inputPortSvg = lunasvg::Document::loadFromData(kInputPortSvg);
+  m_outputPortSvg = lunasvg::Document::loadFromData(kOutputPortSvg);
+  m_largeKnobSvg = lunasvg::Document::loadFromData(kLargeKnobSvg);
+  m_smallKnobSvg = lunasvg::Document::loadFromData(kSmallKnobSvg);
 }
 
 void VCVModulePanel::draw(NVGcontext *ctx) {
@@ -227,7 +212,7 @@ void VCVModulePanel::drawScrew(NVGcontext *ctx, float cx, float cy) {
 
 void VCVModulePanel::drawKnob(NVGcontext *ctx, float cx, float cy, float radius, float value,
                                const char *label) {
-  tvg::Picture *knobSvg = (radius > 25.f) ? m_largeKnobSvg.get() : m_smallKnobSvg.get();
+  lunasvg::Document *knobSvg = (radius > 25.f) ? m_largeKnobSvg.get() : m_smallKnobSvg.get();
   renderSvgKnob(ctx, knobSvg, cx, cy, radius * 2.f, value);
 
   nvgFontFace(ctx, "sans");
@@ -237,12 +222,13 @@ void VCVModulePanel::drawKnob(NVGcontext *ctx, float cx, float cy, float radius,
   nvgText(ctx, cx, cy + radius + 8.f, label, nullptr);
 }
 
-void VCVModulePanel::renderSvgKnob(NVGcontext *ctx, tvg::Picture *svg, float cx, float cy, float size,
+void VCVModulePanel::renderSvgKnob(NVGcontext *ctx, lunasvg::Document *svg, float cx, float cy, float size,
                                    float value) {
-  float svgX, svgY, svgW, svgH;
-  if (svg->bounds(&svgX, &svgY, &svgW, &svgH) != tvg::Result::Success) {
-    return;
-  }
+  if (!svg) return;
+  
+  float svgW = static_cast<float>(svg->width());
+  float svgH = static_cast<float>(svg->height());
+  if (svgW == 0 || svgH == 0) return;
 
   const float angle = -2.356f + value * 4.712f;
 
@@ -393,7 +379,7 @@ void VCVModulePanel::drawCable(NVGcontext *ctx, const Cable &cable) {
 void VCVModulePanel::drawPort(NVGcontext *ctx, float cx, float cy, const char *label, bool input) {
   const float portSize = 24.f;
 
-  tvg::Picture *portSvg = input ? m_inputPortSvg.get() : m_outputPortSvg.get();
+  lunasvg::Document *portSvg = input ? m_inputPortSvg.get() : m_outputPortSvg.get();
   renderSvgPort(ctx, portSvg, cx - portSize * 0.5f, cy - portSize * 0.5f, portSize);
 
   nvgFontFace(ctx, "sans");
@@ -403,11 +389,12 @@ void VCVModulePanel::drawPort(NVGcontext *ctx, float cx, float cy, const char *l
   nvgText(ctx, cx, cy - 12.f - 5.f, label, nullptr);
 }
 
-void VCVModulePanel::renderSvgPort(NVGcontext *ctx, tvg::Picture *svg, float x, float y, float size) {
-  float svgX, svgY, svgW, svgH;
-  if (svg->bounds(&svgX, &svgY, &svgW, &svgH) != tvg::Result::Success) {
-    return;
-  }
+void VCVModulePanel::renderSvgPort(NVGcontext *ctx, lunasvg::Document *svg, float x, float y, float size) {
+  if (!svg) return;
+  
+  float svgW = static_cast<float>(svg->width());
+  float svgH = static_cast<float>(svg->height());
+  if (svgW == 0 || svgH == 0) return;
 
   float scale = size / std::max(svgW, svgH);
 
