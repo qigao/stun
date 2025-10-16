@@ -5,50 +5,30 @@
 
 #pragma once
 
+#include "whiteboard/auto_save_manager.h"
+#include "whiteboard/canvas/canvas_controller.h"
+#include "whiteboard/canvas/canvas_view.h"
 #include "whiteboard/common.h"
-#include "whiteboard/layers_panel.h"
-#include "whiteboard/modern_canvas.h"
-#include "whiteboard/properties_panel.h"
+#include "whiteboard/menu_toolbar_module.h"
+#include "whiteboard/model/whiteboard_document.h"
+#include "whiteboard/panels/layers_controller.h"
+#include "whiteboard/panels/layers_view.h"
+#include "whiteboard/panels/properties_controller.h"
+#include "whiteboard/panels/properties_view.h"
+#include "whiteboard/panels/text_controller.h"
+#include "whiteboard/panels/text_view.h"
+#include "whiteboard/properties_panel_module.h"
 #include "whiteboard/search_bar.h"
 #include "whiteboard/template_gallery.h"
+#include "whiteboard/text_panel_module.h"
+#include "whiteboard/toolbar/toolbar_controller.h"
+#include "whiteboard/toolbar/toolbar_view.h"
+#include "whiteboard/toolbar_panel_module.h"
+#include "whiteboard/zoom_panel_module.h"
 
 namespace whiteboard {
 
 class ModernWhiteboardApp;
-
-/**
- * \class AutoSaveManager
- * \brief Coordinates background persistence for whiteboard sessions.
- *
- * The manager owns a lightweight timer loop that snapshots the active canvas
- * to local storage whenever content changes. It exposes hooks so UI code can
- * start or suspend auto-save, force an immediate save, and restore sessions
- * after crashes.
- */
-class AutoSaveManager {
-public:
-  explicit AutoSaveManager(ModernWhiteboardApp *app);
-
-  void start();
-  void stop();
-  void mark_changed();
-  void update();
-  void save_now();
-  bool has_auto_save_data();
-  void load_from_local_storage();
-  void clear_auto_save();
-  bool is_saving() const { return m_is_saving; }
-
-private:
-  std::string get_auto_save_path();
-  void save_to_local_storage();
-
-  ModernWhiteboardApp *m_app;
-  std::chrono::steady_clock::time_point m_last_change_time;
-  bool m_has_unsaved_changes;
-  bool m_is_saving;
-  bool m_auto_save_enabled;
-};
 
 /**
  * \class ModernWhiteboardApp
@@ -101,25 +81,39 @@ protected:
   bool resize_event(const Vector2i &size) override;
 
 private:
-  void create_top_toolbar();
+  void create_menu_toolbar();
   void create_left_sidebar();
   void create_floating_panels();
   void create_zoom_controls();
   void create_properties_panel();
+  void create_text_panel();
   void update_properties_panel();
   void update_layers_panel();
   void show_restore_prompt();
   void update_layout();
 
-  ModernCanvas *m_canvas = nullptr;
+  // MVC Architecture
+  WhiteboardDocument *m_document = nullptr;
+  CanvasView *m_canvas_view = nullptr;
+  CanvasController *m_canvas_controller = nullptr;
+  ToolbarView *m_toolbar_view = nullptr;
+  ToolbarController *m_toolbar_controller = nullptr;
+  LayersView *m_layers_view = nullptr;
+  LayersController *m_layers_controller = nullptr;
+  PropertiesView *m_properties_view = nullptr;
+  PropertiesController *m_properties_controller = nullptr;
+  TextView *m_text_view = nullptr;
+  TextController *m_text_controller = nullptr;
+
+  // Services and Legacy Modules (kept for compatibility)
   AutoSaveManager *m_auto_save_manager = nullptr;
-  PropertiesPanel *m_properties_panel = nullptr;
-  LayersPanel *m_layers_panel = nullptr;
+  PropertiesPanelModule *m_properties_panel = nullptr;
   SearchBar *m_search_bar = nullptr;
   TemplateGallery *m_template_gallery = nullptr;
-  Widget *m_top_toolbar = nullptr;
-  Widget *m_left_sidebar = nullptr;
-  Window *m_zoom_window = nullptr;
+  MenuToolbarModule *m_menu_toolbar = nullptr;
+  ToolbarPanelModule *m_left_sidebar = nullptr;
+  TextPanelModule *m_text_panel = nullptr;
+  ZoomPanelModule *m_zoom_panel = nullptr;
   Label *m_saving_indicator = nullptr;
   std::vector<Button *> m_tool_buttons;
 

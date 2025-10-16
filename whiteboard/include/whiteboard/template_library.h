@@ -538,8 +538,8 @@ private:
       lane.tool = Tool::Rectangle;
       lane.color = Color(150, 150, 150, 255);
       lane.width = 1.0f;
-      lane.points.push_back(Point(50, 120 + i * 100));
-      lane.points.push_back(Point(550, 200 + i * 100));
+      lane.points.push_back(Point(50.f, 120.f + i * 100.f));
+      lane.points.push_back(Point(550.f, 200.f + i * 100.f));
       tmpl.strokes.push_back(lane);
 
       // Story cards in lane
@@ -564,5 +564,4 @@ private:
   std::vector<Template> m_templates;
 };
 
-
-}
+} // namespace whiteboard

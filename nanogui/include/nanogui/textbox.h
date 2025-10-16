@@ -156,6 +156,10 @@ public:
     enum class SpinArea { None, Top, Bottom };
     SpinArea spin_area(const Vector2i &pos);
 
+    // UTF-8 helper functions
+    static int utf8_char_count(const std::string& str);
+    static size_t char_to_byte_index(const std::string& str, int char_index);
+
 protected:
     bool m_editable;
     bool m_spinnable;

@@ -1,16 +1,16 @@
 #pragma once
 
 #include "whiteboard/common.h"
-#include "whiteboard/modern_canvas.h"
+#include "whiteboard/model/whiteboard_document.h"
 #include "whiteboard/template_library.h"
 
 namespace whiteboard {
 
 class TemplateGallery : public Window {
 public:
-  TemplateGallery(Widget *parent, ModernCanvas *canvas,
+  TemplateGallery(Widget *parent, WhiteboardDocument *document,
                   std::function<void(const Template &)> on_template_selected)
-      : Window(parent, "Templates"), m_canvas(canvas), m_on_template_selected(on_template_selected),
+      : Window(parent, "Templates"), m_document(document), m_on_template_selected(on_template_selected),
         m_current_category("All") {
     set_layout(new BoxLayout(Orientation::Vertical, Alignment::Fill, 10, 10));
     set_fixed_size(Vector2i(700, 500));
@@ -112,7 +112,7 @@ public:
   }
 
 private:
-  ModernCanvas *m_canvas;
+  WhiteboardDocument *m_document;
   std::function<void(const Template &)> m_on_template_selected;
   std::string m_current_category;
   VScrollPanel *m_scroll_panel;

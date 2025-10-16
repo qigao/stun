@@ -3,128 +3,7 @@
 #include <nanogui.h>
 #include <nanogui/fluent_web_theme.h>
 
-#ifdef _WIN32
-  #include <direct.h>
-#else
-  #include <sys/stat.h>
-  #include <sys/types.h>
-#endif
-
 namespace whiteboard {
-
-AutoSaveManager::AutoSaveManager(ModernWhiteboardApp *app)
-    : m_app(app), m_has_unsaved_changes(false), m_is_saving(false), m_auto_save_enabled(false) {
-  m_last_change_time = std::chrono::steady_clock::now();
-}
-
-void AutoSaveManager::start() {
-  m_auto_save_enabled = true;
-  m_last_change_time = std::chrono::steady_clock::now();
-}
-
-void AutoSaveManager::stop() { m_auto_save_enabled = false; }
-
-void AutoSaveManager::mark_changed() {
-  if (!m_auto_save_enabled)
-    return;
-  m_has_unsaved_changes = true;
-  m_last_change_time = std::chrono::steady_clock::now();
-}
-
-void AutoSaveManager::update() {
-  if (!m_auto_save_enabled || !m_has_unsaved_changes || m_is_saving)
-    return;
-
-  auto now = std::chrono::steady_clock::now();
-  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_change_time);
-  if (elapsed.count() >= 30)
-    save_now();
-}
-
-std::string AutoSaveManager::get_auto_save_path() {
-#ifdef _WIN32
-  const char *appdata = std::getenv("LOCALAPPDATA");
-  if (appdata)
-    return std::string(appdata) + "\\ModernWhiteboard\\autosave.json";
-  return "autosave.json";
-#else
-  const char *home = std::getenv("HOME");
-  if (home)
-    return std::string(home) + "/.local/share/ModernWhiteboard/autosave.json";
-  return "autosave.json";
-#endif
-}
-
-void AutoSaveManager::save_to_local_storage() {
-  try {
-    json j;
-    j["timestamp"] = std::chrono::system_clock::now().time_since_epoch().count();
-    j["current_page"] = m_app ? m_app->get_current_page() : 0;
-
-    std::string path = get_auto_save_path();
-    size_t pos = path.find_last_of("/\\");
-    if (pos != std::string::npos) {
-      std::string dir = path.substr(0, pos);
-#ifdef _WIN32
-      _mkdir(dir.c_str());
-#else
-      mkdir(dir.c_str(), 0755);
-#endif
-    }
-
-    std::ofstream file(path);
-    if (file.is_open()) {
-      file << j.dump(2);
-      file.close();
-    }
-  } catch (const std::exception &e) {
-    std::cerr << "Auto-save error: " << e.what() << std::endl;
-  }
-}
-
-void AutoSaveManager::save_now() {
-  if (m_is_saving)
-    return;
-
-  m_is_saving = true;
-  if (m_app)
-    m_app->set_saving_indicator_visible(true);
-
-  save_to_local_storage();
-
-  m_has_unsaved_changes = false;
-  m_is_saving = false;
-  if (m_app)
-    m_app->set_saving_indicator_visible(false);
-}
-
-bool AutoSaveManager::has_auto_save_data() {
-  std::ifstream file(get_auto_save_path());
-  return file.good();
-}
-
-void AutoSaveManager::load_from_local_storage() {
-  try {
-    std::ifstream file(get_auto_save_path());
-    if (!file.is_open() || !m_app)
-      return;
-
-    json j;
-    file >> j;
-    file.close();
-
-    // Minimal restore: just log the presence of an auto-save.
-    if (j.contains("current_page")) {
-      m_app->set_saving_indicator_visible(false);
-    }
-  } catch (const std::exception &e) {
-    std::cerr << "Error loading auto-save: " << e.what() << std::endl;
-  }
-}
-
-void AutoSaveManager::clear_auto_save() {
-  std::remove(get_auto_save_path().c_str());
-}
 
 ModernWhiteboardApp::ModernWhiteboardApp()
     : Screen(Vector2i(1400, 900), "Modern Whiteboard - Collaborative Design") {
@@ -134,23 +13,47 @@ ModernWhiteboardApp::ModernWhiteboardApp()
 
   TemplateLibrary::instance().initialize(nvg_context());
 
-  m_canvas = new ModernCanvas(this);
-  m_canvas->set_background_color(Color(245, 245, 245, 255));
+  // Create the shared document model (MVC)
+  m_document = new WhiteboardDocument();
 
-  create_top_toolbar();
+  // Create Canvas MVC triad
+  m_canvas_view = new CanvasView(this, m_document);
+  m_canvas_view->set_background_color(Color(245, 245, 245, 255));
+  m_canvas_controller = new CanvasController(m_document, m_canvas_view);
+  m_canvas_view->set_controller(m_canvas_controller);
+
+  // Create Toolbar MVC triad
+  m_toolbar_view = new ToolbarView(this, m_document);
+  m_toolbar_controller = new ToolbarController(m_document, m_toolbar_view);
+  m_toolbar_view->set_controller(m_toolbar_controller);
+  m_toolbar_view->set_visible(false); // Hidden, using legacy toolbar module
+
+  // Create Layers Panel MVC triad
+  m_layers_view = new LayersView(this, m_document);
+  m_layers_controller = new LayersController(m_document, m_layers_view);
+  m_layers_view->set_controller(m_layers_controller);
+  m_layers_view->set_visible(true); // Now using MVC component
+
+  // Create Properties Panel MVC triad
+  m_properties_view = new PropertiesView(this, m_document);
+  m_properties_controller = new PropertiesController(m_document, m_properties_view);
+  m_properties_view->set_controller(m_properties_controller);
+  m_properties_view->set_visible(false); // Hidden, using legacy properties module
+
+  // Create Text Panel MVC triad
+  m_text_view = new TextView(this, m_document);
+  m_text_controller = new TextController(m_document, m_text_view);
+  m_text_view->set_controller(m_text_controller);
+  m_text_view->set_visible(false); // Hidden, using legacy text module
+
+  create_menu_toolbar();
   create_left_sidebar();
   create_floating_panels();
   create_zoom_controls();
   create_properties_panel();
+  create_text_panel();
 
-  if (m_canvas) {
-    m_canvas->set_selection_changed_callback([this]() { update_properties_panel(); });
-    m_canvas->set_strokes_changed_callback([this]() {
-      update_layers_panel();
-      if (m_auto_save_manager)
-        m_auto_save_manager->mark_changed();
-    });
-  }
+  // Callbacks are now handled by observer pattern in MVC components
 
   m_auto_save_manager = new AutoSaveManager(this);
   if (m_auto_save_manager->has_auto_save_data())
@@ -168,6 +71,23 @@ ModernWhiteboardApp::ModernWhiteboardApp()
 ModernWhiteboardApp::~ModernWhiteboardApp() {
   delete m_auto_save_manager;
   m_auto_save_manager = nullptr;
+
+  delete m_canvas_controller;
+  m_canvas_controller = nullptr;
+
+  delete m_toolbar_controller;
+  m_toolbar_controller = nullptr;
+
+  delete m_layers_controller;
+  m_layers_controller = nullptr;
+
+  delete m_properties_controller;
+  m_properties_controller = nullptr;
+
+  delete m_text_controller;
+  m_text_controller = nullptr;
+
+  // Views and document are deleted by parent widget cleanup
 }
 
 void ModernWhiteboardApp::set_saving_indicator_visible(bool visible) {
@@ -182,66 +102,39 @@ bool ModernWhiteboardApp::resize_event(const Vector2i &size) {
   return handled;
 }
 
-void ModernWhiteboardApp::create_top_toolbar() {
-  const int toolbar_height = 60;
-  m_top_toolbar = new Widget(this);
-  m_top_toolbar->set_layout(
-      new BoxLayout(Orientation::Horizontal, Alignment::Middle, 12, 12));
-  m_top_toolbar->set_fixed_height(toolbar_height);
+void ModernWhiteboardApp::create_menu_toolbar() {
+  m_menu_toolbar = new MenuToolbarModule(this);
+  m_menu_toolbar->clear_items();
 
-  auto *title = new Label(m_top_toolbar, "Modern Whiteboard", "sans-bold", 20);
-  title->set_color(Color(45, 45, 45, 255));
-
-  auto *button_container = new Widget(m_top_toolbar);
-  button_container->set_layout(
-      new BoxLayout(Orientation::Horizontal, Alignment::Middle, 6, 0));
-
-  auto add_button = [button_container](const std::string &caption, int icon,
-                                       const std::string &tooltip,
-                                       std::function<void()> callback) {
-    auto *btn = new Button(button_container, caption, icon);
-    btn->set_tooltip(tooltip);
-    btn->set_fixed_height(36);
-    btn->set_callback(std::move(callback));
-    return btn;
-  };
-
-  add_button("", FA_FILE, "New board", [this]() {
-    if (!m_canvas)
-      return;
-    m_canvas->clear_canvas();
+  // File operations
+  m_menu_toolbar->add_menu_item("New", FA_FILE, [this]() {
+    if (m_document) {
+      // Clear all strokes
+      m_document->remove_strokes(std::vector<int>());
+      // Actually, we need to remove all strokes, let me fix this properly
+      std::vector<int> all_indices;
+      for (size_t i = 0; i < m_document->get_strokes().size(); ++i) {
+        all_indices.push_back(static_cast<int>(i));
+      }
+      if (!all_indices.empty()) {
+        m_document->remove_strokes(all_indices);
+      }
+    }
     update_layers_panel();
     update_properties_panel();
   });
 
-  add_button("", FA_SAVE, "Save snapshot", [this]() {
+  m_menu_toolbar->add_menu_item("Save", FA_SAVE, [this]() {
     if (m_auto_save_manager)
       m_auto_save_manager->save_now();
   });
 
-  add_button("", FA_UNDO, "Undo", [this]() {
-    if (!m_canvas)
-      return;
-    m_canvas->undo();
-    update_layers_panel();
-    update_properties_panel();
-  });
-
-  add_button("", FA_REDO, "Redo", [this]() {
-    if (!m_canvas)
-      return;
-    m_canvas->redo();
-    update_layers_panel();
-    update_properties_panel();
-  });
-
-  add_button("Templates", 0, "Open template gallery", [this]() {
+  m_menu_toolbar->add_menu_item("Templates", FA_IMAGES, [this]() {
     if (!m_template_gallery) {
-      m_template_gallery = new TemplateGallery(
-          this, m_canvas, [this](const Template &) {
-            update_layers_panel();
-            update_properties_panel();
-          });
+      m_template_gallery = new TemplateGallery(this, m_document, [this](const Template &) {
+        update_layers_panel();
+        update_properties_panel();
+      });
     }
     if (m_template_gallery) {
       m_template_gallery->refresh_templates();
@@ -250,112 +143,202 @@ void ModernWhiteboardApp::create_top_toolbar() {
     }
   });
 
-  add_button("", FA_SEARCH, "Toggle search", [this]() {
+  m_menu_toolbar->add_separator();
+
+  // Edit operations
+  m_menu_toolbar->add_menu_item("Undo", FA_UNDO, [this]() {
+    if (m_document) {
+      m_document->undo();
+    }
+    update_layers_panel();
+    update_properties_panel();
+  });
+
+  m_menu_toolbar->add_menu_item("Redo", FA_REDO, [this]() {
+    if (m_document) {
+      m_document->redo();
+    }
+    update_layers_panel();
+    update_properties_panel();
+  });
+
+  m_menu_toolbar->add_separator();
+
+  // View operations
+  m_menu_toolbar->add_menu_item("Search", FA_SEARCH, [this]() {
     if (!m_search_bar)
       return;
     m_search_bar->set_visible(!m_search_bar->visible());
     update_layout();
   });
+
+  m_menu_toolbar->add_menu_item("Export", FA_DOWNLOAD, []() {});
+
+  m_menu_toolbar->add_separator();
+
+  m_menu_toolbar->add_menu_item("Settings", FA_COG, []() {});
+  m_menu_toolbar->add_menu_item("Help", FA_QUESTION_CIRCLE, []() {});
+
+  m_menu_toolbar->layout_items();
+
+  // Update widget size to match calculated preferred size
+  Vector2i pref_size = m_menu_toolbar->preferred_size(nvg_context());
+  m_menu_toolbar->set_size(pref_size);
 }
 
 void ModernWhiteboardApp::create_left_sidebar() {
-  m_left_sidebar = new Widget(this);
-  m_left_sidebar->set_layout(
-      new BoxLayout(Orientation::Vertical, Alignment::Middle, 8, 8));
-  m_left_sidebar->set_fixed_width(70);
+  m_left_sidebar = new ToolbarPanelModule(this, Orientation::Vertical);
 
-  struct ToolInfo {
-    Tool tool;
-    int icon;
-    const char *tooltip;
-  };
+  // Map toolbar buttons to canvas tools
+  m_left_sidebar->set_tool_callback([this](int button_id) {
+    // Button mapping:
+    // 0: lock (not implemented)
+    // 1: hand -> Pan
+    // 2: cursor -> Select
+    // 3: square -> Rectangle
+    // 4: diamond -> Rectangle (rotated)
+    // 5: circle -> Circle
+    // 6: arrow -> Arrow
+    // 7: line -> Line
+    // 8: pen -> Pen
+    // 9: text -> Text
+    // 10: image -> Image
+    // 11: rotate (not implemented)
+    // 12: tree (not implemented)
 
-  std::vector<ToolInfo> tools = {
-      {Tool::Select, FA_MOUSE_POINTER, "Select"},
-      {Tool::Pan, FA_HAND_PAPER, "Pan"},
-      {Tool::Pen, FA_PEN, "Pen"},
-      {Tool::Text, FA_FONT, "Text"},
-      {Tool::Sticky, FA_STICKY_NOTE, "Sticky note"},
-      {Tool::Rectangle, FA_SQUARE, "Rectangle"},
-      {Tool::Circle, FA_CIRCLE, "Circle"},
-      {Tool::Line, FA_MINUS, "Line"},
-      {Tool::Arrow, FA_ARROW_RIGHT, "Arrow"},
-      {Tool::Image, FA_IMAGE, "Image"},
-  };
+    switch (button_id) {
+    case 1:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Pan);
+      break;
+    case 2:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Select);
+      break;
+    case 3:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Rectangle);
+      break;
+    case 4:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Diamond);
+      break;
+    case 5:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Circle);
+      break;
+    case 6:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Arrow);
+      break;
+    case 7:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Line);
+      break;
+    case 8:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Pen);
+      break;
+    case 9:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Text);
+      break;
+    case 10:
+      if (m_toolbar_controller) m_toolbar_controller->select_tool(Tool::Image);
+      break;
+    default:
+      break; // Lock, rotate, tree not implemented
+    }
+  });
 
-  for (const auto &entry : tools) {
-    auto *btn = new Button(m_left_sidebar, "", entry.icon);
-    btn->set_tooltip(entry.tooltip);
-    btn->set_flags(Button::RadioButton);
-    btn->set_fixed_size(Vector2i(50, 40));
-    btn->set_callback([this, entry]() {
-      if (m_canvas)
-        m_canvas->set_tool(entry.tool);
-    });
-    if (entry.tool == Tool::Pen)
-      btn->set_pushed(true);
-    m_tool_buttons.push_back(btn);
+  // Perform layout to calculate size based on children
+  m_left_sidebar->perform_layout(nvg_context());
+
+  // Position it at the top left
+  m_left_sidebar->set_position(Vector2i(20, 100));
+
+  // Set initial tool to match the default selected button (cursor/Select)
+  if (m_toolbar_controller) {
+    m_toolbar_controller->select_tool(Tool::Select);
   }
 }
 
 void ModernWhiteboardApp::create_floating_panels() {
-  m_layers_panel = new LayersPanel(this, m_canvas);
-  m_layers_panel->set_visible(true);
-
-  m_search_bar = new SearchBar(this, m_canvas);
+  // Legacy search bar (kept for search functionality)
+  m_search_bar = new SearchBar(this, m_document);
   m_search_bar->set_visible(false);
 }
 
 void ModernWhiteboardApp::create_zoom_controls() {
-  m_zoom_window = new Window(this, "Zoom");
-  m_zoom_window->set_layout(
-      new BoxLayout(Orientation::Horizontal, Alignment::Middle, 6, 6));
-  m_zoom_window->set_fixed_size(Vector2i(200, 60));
+  m_zoom_panel = new ZoomPanelModule(this);
+  m_zoom_panel->set_zoom_callback([this](float action) {
+    if (m_document) {
+      float current_zoom = m_document->get_zoom();
+      if (action < 0) {
+        // Zoom out
+        float new_zoom = current_zoom / 1.2f;
+        m_document->set_zoom(std::max(0.25f, new_zoom));
+      } else if (action > 0) {
+        // Zoom in
+        float new_zoom = current_zoom * 1.2f;
+        m_document->set_zoom(std::min(6.0f, new_zoom));
+      } else {
+        // Reset zoom
+        m_document->set_zoom(1.0f);
+      }
+      m_zoom_panel->set_zoom_level(m_document->get_zoom());
+    }
+  });
 
-  auto make_button = [this](Window *wnd, int icon, const std::string &tooltip,
-                            std::function<void()> callback) {
-    auto *btn = new Button(wnd, "", icon);
-    btn->set_tooltip(tooltip);
-    btn->set_fixed_size(Vector2i(48, 36));
-    btn->set_callback(std::move(callback));
-    return btn;
-  };
+  // Perform layout to calculate size
+  m_zoom_panel->perform_layout(nvg_context());
 
-  make_button(m_zoom_window, FA_SEARCH_MINUS, "Zoom out", [this]() {
-    if (m_canvas)
-      m_canvas->zoom_out();
-  });
-  make_button(m_zoom_window, FA_EXPAND, "Reset zoom", [this]() {
-    if (m_canvas)
-      m_canvas->reset_zoom();
-  });
-  make_button(m_zoom_window, FA_SEARCH_PLUS, "Zoom in", [this]() {
-    if (m_canvas)
-      m_canvas->zoom_in();
-  });
+  m_zoom_panel->set_visible(true);
 }
 
 void ModernWhiteboardApp::create_properties_panel() {
-  m_properties_panel = new PropertiesPanel(this, m_canvas);
-  update_properties_panel();
+  m_properties_panel = new PropertiesPanelModule(this);
+  m_properties_panel->set_visible(true);
+}
+
+void ModernWhiteboardApp::create_text_panel() {
+  m_text_panel = new TextPanelModule(this);
+
+  // Connect color callback
+  m_text_panel->set_color_callback([this](NVGcolor color) {
+    if (m_document) {
+      m_document->set_stroke_color(Color(color.r * 255, color.g * 255, color.b * 255, color.a * 255));
+    }
+  });
+
+  // Connect font size callback
+  m_text_panel->set_font_size_callback([this](float size) {
+    if (m_text_controller) {
+      m_text_controller->change_font_size(size);
+    }
+  });
+
+  // Connect alignment callback
+  m_text_panel->set_align_callback([this](int align) {
+    if (m_text_controller) {
+      m_text_controller->set_alignment(align);
+    }
+  });
+
+  // Connect font face callback
+  m_text_panel->set_font_face_callback([this](const std::string &face) {
+    if (m_text_controller) {
+      m_text_controller->change_font_face(face);
+    }
+  });
+
+  m_text_panel->set_visible(true);
 }
 
 void ModernWhiteboardApp::update_properties_panel() {
-  if (m_properties_panel && m_canvas) {
-    m_properties_panel->update_for_selection(m_canvas->get_selected_indices(),
-                                             m_canvas->get_strokes());
-  }
+  // PropertiesPanelModule is self-contained and doesn't need updates from canvas
+  // It manages its own state through button interactions
 }
 
 void ModernWhiteboardApp::update_layers_panel() {
-  if (m_layers_panel)
-    m_layers_panel->refresh();
+  // No longer needed - MVC LayersView updates automatically via observer pattern
 }
 
 void ModernWhiteboardApp::show_restore_prompt() {
-  auto *dialog = new MessageDialog(this, MessageDialog::Type::Question, "Restore Session",
-                                   "A previous auto-save was found. Restore it?",
-                                   "Restore", "Discard", true);
+  auto *dialog =
+      new MessageDialog(this, MessageDialog::Type::Question, "Restore Session",
+                        "A previous auto-save was found. Restore it?", "Restore", "Discard", true);
   dialog->set_callback([this](int choice) {
     if (!m_auto_save_manager)
       return;
@@ -370,41 +353,43 @@ void ModernWhiteboardApp::show_restore_prompt() {
 }
 
 void ModernWhiteboardApp::update_layout() {
-  const int toolbar_height = m_top_toolbar ? m_top_toolbar->fixed_height() : 0;
-  const int sidebar_width = m_left_sidebar ? m_left_sidebar->fixed_width() : 0;
-
-  if (m_top_toolbar) {
-    m_top_toolbar->set_position(Vector2i(0, 0));
-    m_top_toolbar->set_fixed_size(Vector2i(width(), toolbar_height));
+  // Menu toolbar positioned at top
+  if (m_menu_toolbar) {
+    m_menu_toolbar->set_position(Vector2i(20, 20));
   }
 
+  // Left sidebar positioned below menu toolbar
   if (m_left_sidebar) {
-    m_left_sidebar->set_position(Vector2i(0, toolbar_height));
-    m_left_sidebar->set_fixed_size(Vector2i(sidebar_width, height() - toolbar_height));
+    int menu_offset = m_menu_toolbar ? 80 : 0;
+    m_left_sidebar->set_position(Vector2i(20, 20 + menu_offset));
   }
 
-  if (m_canvas) {
-    m_canvas->set_position(Vector2i(sidebar_width, toolbar_height));
-    m_canvas->set_fixed_size(Vector2i(width() - sidebar_width, height() - toolbar_height));
+  // Canvas takes full width and height
+  if (m_canvas_view) {
+    m_canvas_view->set_position(Vector2i(0, 0));
+    m_canvas_view->set_fixed_size(Vector2i(width(), height()));
   }
 
-  if (m_layers_panel) {
-    m_layers_panel->set_position(Vector2i(width() - m_layers_panel->fixed_width() - 20,
-                                          toolbar_height + 20));
+  // Position MVC LayersView on the right side
+  if (m_layers_view) {
+    m_layers_view->set_position(Vector2i(width() - 240, 20));
   }
 
   if (m_properties_panel) {
-    m_properties_panel->set_position(Vector2i(width() - m_properties_panel->fixed_width() - 20,
-                                              toolbar_height + 260));
+    m_properties_panel->set_position(Vector2i(width() - 390, 260));
   }
 
-  if (m_zoom_window) {
-    m_zoom_window->set_position(Vector2i(width() - m_zoom_window->fixed_width() - 20,
-                                         height() - m_zoom_window->fixed_height() - 20));
+  if (m_text_panel) {
+    // Position text panel on the left side, below the toolbar
+    m_text_panel->set_position(Vector2i(110, 20));
+  }
+
+  if (m_zoom_panel) {
+    m_zoom_panel->set_position(Vector2i(width() / 2 - 120, height() - 112));
   }
 
   if (m_search_bar) {
-    m_search_bar->set_position(Vector2i(sidebar_width + 20, height() - 240));
+    m_search_bar->set_position(Vector2i(20, height() - 240));
   }
 
   if (m_saving_indicator) {

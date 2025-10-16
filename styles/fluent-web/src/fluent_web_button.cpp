@@ -273,12 +273,14 @@ void FluentWebButton::draw(NVGcontext *ctx) {
       nvgImageSize(ctx, m_icon, &iw, &ih);
       icon_width = iw * icon_height / ih;
     }
-    if (!m_caption.empty())
-      icon_width += font_size * 0.25f;
   }
 
+  // Calculate spacing between icon and text
+  float icon_text_spacing = (!m_caption.empty() && has_icon) ? font_size * 0.4f : 0.f;
+  float total_width = tw + (has_icon ? icon_width + icon_text_spacing : 0.f);
+
   Vector2f center = Vector2f(m_pos) + Vector2f(m_size) * 0.5f;
-  Vector2f label_pos = text_position(center, tw + icon_width);
+  Vector2f label_pos = text_position(center, total_width);
   NVGcolor text_color = to_nvg(text);
 
   if (has_icon) {
@@ -286,16 +288,17 @@ void FluentWebButton::draw(NVGcontext *ctx) {
     icon_pos.y() -= 1.f;
 
     if (m_icon_position == IconPosition::LeftCentered) {
-      icon_pos.x() -= (tw + icon_width) * 0.5f;
-      label_pos.x() += icon_width * 0.5f;
+      icon_pos.x() -= total_width * 0.5f;
+      label_pos.x() = icon_pos.x() + icon_width + icon_text_spacing;
     } else if (m_icon_position == IconPosition::RightCentered) {
-      label_pos.x() -= icon_width * 0.5f;
-      icon_pos.x() += tw * 0.5f;
+      label_pos.x() -= total_width * 0.5f;
+      icon_pos.x() = label_pos.x() + tw + icon_text_spacing;
     } else if (m_icon_position == IconPosition::Left) {
-      icon_pos.x() = x + m_padding.x() - font_size * 0.25f;
-      label_pos.x() = icon_pos.x() + icon_width;
+      icon_pos.x() = x + m_padding.x();
+      label_pos.x() = icon_pos.x() + icon_width + icon_text_spacing;
     } else if (m_icon_position == IconPosition::Right) {
-      icon_pos.x() = x + w - icon_width - m_padding.x() + font_size * 0.25f;
+      icon_pos.x() = x + w - icon_width - m_padding.x();
+      label_pos.x() = icon_pos.x() - tw - icon_text_spacing;
     }
 
     nvgFillColor(ctx, text_color);

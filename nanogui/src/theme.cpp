@@ -87,9 +87,23 @@ Theme::Theme(NVGcontext *ctx) {
                                     fontawesome_solid_ttf_size, 0);
     m_font_mono_regular = nvgCreateFontMem(ctx, "mono", (uint8_t *) inconsolata_regular_ttf,
                                            inconsolata_regular_ttf_size, 0);
+    
+    // Load Fluent System Icons for modern UI components
+    int fluent_icons = nvgCreateFontMem(ctx, "fluent-icons", (uint8_t *) fluentsystemicons_resizable_ttf,
+                                        fluentsystemicons_resizable_ttf_size, 0);
+    
+    // Load Noto Sans CJK for Chinese/Japanese/Korean support
+    int font_cjk = nvgCreateFontMem(ctx, "sans-cjk", (uint8_t *) notosanssc_regular_ttf,
+                                    notosanssc_regular_ttf_size, 0);
+    
+    // Set CJK font as fallback for sans fonts
+    if (font_cjk != -1) {
+        nvgAddFallbackFontId(ctx, m_font_sans_regular, font_cjk);
+        nvgAddFallbackFontId(ctx, m_font_sans_bold, font_cjk);
+    }
 
     if (m_font_sans_regular == -1 || m_font_sans_bold == -1 ||
-        m_font_icons == -1 || m_font_mono_regular == -1)
+        m_font_icons == -1 || m_font_mono_regular == -1 || fluent_icons == -1 || font_cjk == -1)
         throw std::runtime_error("Could not load fonts!");
 }
 

@@ -1,12 +1,12 @@
 #include "whiteboard/export_manager.h"
 
+#include "../../vendor/nanovg/example/stb_image_write.h"
+#include "whiteboard/common.h"
+#include <cstring>
+#include <memory>
 #include <nanogui.h>
 #include <nanogui/opengl.h>
 #include <vector>
-#include <cstring>
-#include <memory>
-#include "whiteboard/common.h"
-#include "../../vendor/nanovg/example/stb_image_write.h"
 
 namespace whiteboard {
 
@@ -14,8 +14,8 @@ bool ExportManager::export_to_png(const std::string &filename, const std::vector
                                   NVGcontext *vg, bool /*visible_area_only*/, int width,
                                   int height) {
   try {
-    std::unique_ptr<unsigned char[]> pixels(new unsigned char[static_cast<size_t>(width) *
-                                                              static_cast<size_t>(height) * 4]);
+    std::unique_ptr<unsigned char[]> pixels(
+        new unsigned char[static_cast<size_t>(width) * static_cast<size_t>(height) * 4]);
 
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
@@ -124,8 +124,8 @@ void ExportManager::draw_stroke_to_context(NVGcontext *vg, const Stroke &stroke)
     nvgTranslate(vg, -center_x, -center_y);
   }
 
-  nvgStrokeColor(vg, nvgRGBAf(stroke.color.r(), stroke.color.g(), stroke.color.b(),
-                              stroke.color.w()));
+  nvgStrokeColor(vg,
+                 nvgRGBAf(stroke.color.r(), stroke.color.g(), stroke.color.b(), stroke.color.w()));
   nvgStrokeWidth(vg, stroke.width);
 
   switch (stroke.tool) {
@@ -149,8 +149,8 @@ void ExportManager::draw_stroke_to_context(NVGcontext *vg, const Stroke &stroke)
     nvgBeginPath(vg);
     nvgRect(vg, x, y, w, h);
     if (stroke.fill_style == FillStyle::Solid) {
-      nvgFillColor(vg, nvgRGBAf(stroke.fill_color.r(), stroke.fill_color.g(),
-                                stroke.fill_color.b(), stroke.fill_color.w()));
+      nvgFillColor(vg, nvgRGBAf(stroke.fill_color.r(), stroke.fill_color.g(), stroke.fill_color.b(),
+                                stroke.fill_color.w()));
       nvgFill(vg);
     }
     nvgStroke(vg);
@@ -168,8 +168,8 @@ void ExportManager::draw_stroke_to_context(NVGcontext *vg, const Stroke &stroke)
     nvgBeginPath(vg);
     nvgCircle(vg, cx, cy, r);
     if (stroke.fill_style == FillStyle::Solid) {
-      nvgFillColor(vg, nvgRGBAf(stroke.fill_color.r(), stroke.fill_color.g(),
-                                stroke.fill_color.b(), stroke.fill_color.w()));
+      nvgFillColor(vg, nvgRGBAf(stroke.fill_color.r(), stroke.fill_color.g(), stroke.fill_color.b(),
+                                stroke.fill_color.w()));
       nvgFill(vg);
     }
     nvgStroke(vg);
@@ -208,8 +208,8 @@ void ExportManager::draw_stroke_to_context(NVGcontext *vg, const Stroke &stroke)
     nvgBeginPath(vg);
     nvgFontFace(vg, stroke.font_face.c_str());
     nvgFontSize(vg, stroke.font_size);
-    nvgFillColor(vg, nvgRGBAf(stroke.color.r(), stroke.color.g(), stroke.color.b(),
-                              stroke.color.w()));
+    nvgFillColor(vg,
+                 nvgRGBAf(stroke.color.r(), stroke.color.g(), stroke.color.b(), stroke.color.w()));
     nvgTextAlign(vg, stroke.text_align);
     nvgText(vg, stroke.points[0].x, stroke.points[0].y, stroke.text.c_str(), nullptr);
     break;
@@ -288,8 +288,9 @@ void ExportManager::convert_stroke_to_svg(std::ofstream &file, const Stroke &str
     stroke.get_bounds(min_x, min_y, max_x, max_y);
     float cx = (min_x + max_x) / 2.0f;
     float cy = (min_y + max_y) / 2.0f;
-    return " transform=\"rotate(" + std::to_string(stroke.rotation * 180.0f / static_cast<float>(M_PI)) +
-           " " + std::to_string(cx) + " " + std::to_string(cy) + ")\"";
+    return " transform=\"rotate(" +
+           std::to_string(stroke.rotation * 180.0f / static_cast<float>(M_PI)) + " " +
+           std::to_string(cx) + " " + std::to_string(cy) + ")\"";
   };
 
   switch (stroke.tool) {

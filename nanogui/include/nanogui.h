@@ -15,6 +15,8 @@
   #include <process.h> // Required for _beginthreadex on Windows
 #endif
 
+#include <nanovg.h>
+
 #include <nanogui/button.h>
 #include <nanogui/canvas.h>
 #include <nanogui/checkbox.h>
@@ -46,4 +48,4 @@
 #include <nanogui/toolbutton.h>
 #include <nanogui/vscrollpanel.h>
 #include <nanogui/widget.h>
-#include <nanogui/window.h>
+#include <nanogui/window.h> 

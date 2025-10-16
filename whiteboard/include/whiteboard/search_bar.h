@@ -1,14 +1,14 @@
 #pragma once
 
 #include "whiteboard/common.h"
-#include "whiteboard/modern_canvas.h"
+#include "whiteboard/model/whiteboard_document.h"
 
 namespace whiteboard {
 
 class SearchBar : public Window {
 public:
-  SearchBar(Widget *parent, ModernCanvas *canvas)
-      : Window(parent, ""), m_canvas(canvas), m_current_result_index(-1) {
+  SearchBar(Widget *parent, WhiteboardDocument *document)
+      : Window(parent, ""), m_document(document), m_current_result_index(-1) {
     set_layout(new BoxLayout(Orientation::Horizontal, Alignment::Middle, 10, 10));
     set_fixed_size(Vector2i(400, 50));
 
@@ -51,7 +51,7 @@ public:
   }
 
   void on_search_query_changed(const std::string &query) {
-    if (!m_canvas)
+    if (!m_document)
       return;
 
     m_search_results.clear();
@@ -59,7 +59,7 @@ public:
 
     if (query.empty()) {
       m_result_label->set_caption("0 of 0");
-      m_canvas->clear_search_highlights();
+      // Clear highlights - would need to be implemented in document
       return;
     }
 
@@ -68,7 +68,7 @@ public:
     std::transform(lower_query.begin(), lower_query.end(), lower_query.begin(), ::tolower);
 
     // Search through all strokes
-    const auto &strokes = m_canvas->get_strokes();
+    const auto &strokes = m_document->get_strokes();
     for (int i = 0; i < (int)strokes.size(); i++) {
       const auto &stroke = strokes[i];
 
@@ -111,12 +111,15 @@ public:
     // Update result label
     if (m_search_results.empty()) {
       m_result_label->set_caption("0 of 0");
-      m_canvas->clear_search_highlights();
     } else {
       m_current_result_index = 0;
       m_result_label->set_caption(std::to_string(m_current_result_index + 1) + " of " +
                                   std::to_string(m_search_results.size()));
-      m_canvas->set_search_highlights(m_search_results, m_current_result_index);
+      // Set selection to highlight the result
+      if (!m_search_results.empty()) {
+        std::vector<int> selection = {m_search_results[m_current_result_index]};
+        m_document->set_selection(selection);
+      }
       pan_to_current_result();
     }
   }
@@ -128,7 +131,10 @@ public:
     m_current_result_index = (m_current_result_index + 1) % m_search_results.size();
     m_result_label->set_caption(std::to_string(m_current_result_index + 1) + " of " +
                                 std::to_string(m_search_results.size()));
-    m_canvas->set_search_highlights(m_search_results, m_current_result_index);
+    if (m_document) {
+      std::vector<int> selection = {m_search_results[m_current_result_index]};
+      m_document->set_selection(selection);
+    }
     pan_to_current_result();
   }
 
@@ -142,7 +148,10 @@ public:
     }
     m_result_label->set_caption(std::to_string(m_current_result_index + 1) + " of " +
                                 std::to_string(m_search_results.size()));
-    m_canvas->set_search_highlights(m_search_results, m_current_result_index);
+    if (m_document) {
+      std::vector<int> selection = {m_search_results[m_current_result_index]};
+      m_document->set_selection(selection);
+    }
     pan_to_current_result();
   }
 
@@ -151,8 +160,8 @@ public:
     m_search_results.clear();
     m_current_result_index = -1;
     m_result_label->set_caption("0 of 0");
-    if (m_canvas) {
-      m_canvas->clear_search_highlights();
+    if (m_document) {
+      m_document->clear_selection();
     }
   }
 
@@ -167,8 +176,8 @@ public:
       return false;
 
     // Handle Enter to cycle forward
-    if (key == KEY_ENTER) {
-      if (modifiers & MOD_SHIFT) {
+    if (key == NANOGUI_KEY_ENTER) {
+      if (modifiers & NANOGUI_MOD_SHIFT) {
         previous_result();
       } else {
         next_result();
@@ -177,7 +186,7 @@ public:
     }
 
     // Handle Escape to close
-    if (key == KEY_ESCAPE) {
+    if (key == NANOGUI_KEY_ESCAPE) {
       clear_search();
       set_visible(false);
       return true;
@@ -187,7 +196,7 @@ public:
   }
 
 private:
-  ModernCanvas *m_canvas;
+  WhiteboardDocument *m_document;
   TextBox *m_search_input;
   Label *m_result_label;
   std::vector<int> m_search_results;
@@ -256,12 +265,24 @@ private:
   }
 
   void pan_to_current_result() {
-    if (!m_canvas || m_current_result_index < 0 ||
+    if (!m_document || m_current_result_index < 0 ||
         m_current_result_index >= (int)m_search_results.size()) {
       return;
     }
 
-    m_canvas->pan_to_stroke(m_search_results[m_current_result_index]);
+    // Pan to stroke - would need to calculate bounds and update pan offset
+    // For now, this is a placeholder
+    const auto &strokes = m_document->get_strokes();
+    int stroke_idx = m_search_results[m_current_result_index];
+    if (stroke_idx >= 0 && stroke_idx < static_cast<int>(strokes.size())) {
+      const auto &stroke = strokes[stroke_idx];
+      if (!stroke.points.empty()) {
+        // Center on first point of the stroke
+        Vector2f center(stroke.points[0].x, stroke.points[0].y);
+        // This would need canvas dimensions to properly center
+        // m_document->set_pan_offset(center);
+      }
+    }
   }
 };
 
