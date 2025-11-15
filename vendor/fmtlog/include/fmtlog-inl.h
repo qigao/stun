@@ -68,15 +68,16 @@ public:
         num /= 10;
       }
       switch (Size & -2) {
-        case 18: *(uint16_t*)(s + 16) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 16: *(uint16_t*)(s + 14) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 14: *(uint16_t*)(s + 12) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 12: *(uint16_t*)(s + 10) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 10: *(uint16_t*)(s + 8) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 8: *(uint16_t*)(s + 6) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 6: *(uint16_t*)(s + 4) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 4: *(uint16_t*)(s + 2) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
-        case 2: *(uint16_t*)(s + 0) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100;
+        case 18: *(uint16_t*)(s + 16) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 16: *(uint16_t*)(s + 14) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 14: *(uint16_t*)(s + 12) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 12: *(uint16_t*)(s + 10) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 10: *(uint16_t*)(s + 8) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 8: *(uint16_t*)(s + 6) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 6: *(uint16_t*)(s + 4) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 4: *(uint16_t*)(s + 2) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        case 2: *(uint16_t*)(s + 0) = *(uint16_t*)(digit_pairs + ((num % 100) << 1)); num /= 100; [[fallthrough]];
+        default: break;
       }
     }
 
@@ -164,8 +165,6 @@ public:
   public:
     explicit ThreadBufferDestroyer() {}
 
-    void threadBufferCreated() {}
-
     ~ThreadBufferDestroyer() {
       if (fmtlog::threadBuffer != nullptr) {
         fmtlog::threadBuffer->shouldDeallocate = true;
@@ -228,6 +227,8 @@ public:
   fmtlog::LogLevel flushLogLevel = fmtlog::OFF;
   std::mutex bufferMutex;
   std::vector<fmtlog::ThreadBuffer*> threadBuffers;
+  std::once_flag autoStartFlag;
+  std::mutex pollMutex;
   struct HeapNode
   {
     HeapNode(fmtlog::ThreadBuffer* buffer)
@@ -253,7 +254,7 @@ public:
   Str<3> weekdayName;
   Str<3> monthName;
   Str<4> year;
-  char dash1 = '-';
+  char dash1 = '-'; // separators live in the struct to allow contiguous slices
   Str<2> month;
   char dash2 = '-';
   Str<2> day;
@@ -295,10 +296,15 @@ public:
 #endif
     fmtlog::threadBuffer->nameSize =
       fmt::format_to_n(fmtlog::threadBuffer->name, sizeof(fmtlog::threadBuffer->name), "{}", tid).size;
-    sbc.threadBufferCreated();
 
     std::unique_lock<std::mutex> guard(bufferMutex);
     threadBuffers.push_back(fmtlog::threadBuffer);
+  }
+
+  void ensurePollingThreadRunning() {
+    if (threadRunning) return;
+    std::call_once(autoStartFlag,
+                   [this]() { startPollingThread(fmtlog::TSCNS::NsPerSec); });
   }
 
   template<size_t I, typename T>
@@ -420,6 +426,7 @@ public:
   }
 
   void poll(bool forceFlush) {
+    std::lock_guard<std::mutex> lock(pollMutex);
     fmtlogWrapper<>::impl.tscns.calibrate();
     int64_t tsc = fmtlogWrapper<>::impl.tscns.rdtsc();
     if (logInfos.size()) {
@@ -524,16 +531,11 @@ template<int _>
 typename fmtlogT<_>::SPSCVarQueueOPT::MsgHeader* fmtlogT<_>::allocMsg(uint32_t size,
                                                                       bool q_full_cb) noexcept {
   auto& d = fmtlogDetailWrapper<>::impl;
+  d.ensurePollingThreadRunning();
   if (threadBuffer == nullptr) preallocate();
   auto ret = threadBuffer->varq.alloc(size);
   if ((ret == nullptr) & q_full_cb) d.logQFullCB(d.logQFullCBArg);
   return ret;
-}
-
-template<int _>
-typename fmtlogT<_>::SPSCVarQueueOPT::MsgHeader*
-fmtlogT<_>::SPSCVarQueueOPT::allocMsg(uint32_t size) noexcept {
-  return alloc(size);
 }
 
 template<int _>
@@ -587,13 +589,13 @@ void fmtlogT<_>::setFlushBufSize(uint32_t bytes) noexcept {
 }
 
 template<int _>
-void fmtlogT<_>::closeLogFile() noexcept {
-  fmtlogDetailWrapper<>::impl.closeLogFile();
+void fmtlogT<_>::flush(bool forceFlush) noexcept {
+  fmtlogDetailWrapper<>::impl.poll(forceFlush);
 }
 
 template<int _>
-void fmtlogT<_>::poll(bool forceFlush) {
-  fmtlogDetailWrapper<>::impl.poll(forceFlush);
+void fmtlogT<_>::closeLogFile() noexcept {
+  fmtlogDetailWrapper<>::impl.closeLogFile();
 }
 
 template<int _>
@@ -627,9 +629,11 @@ void fmtlogT<_>::startPollingThread(int64_t pollInterval) noexcept {
 }
 
 template<int _>
-void fmtlogT<_>::stopPollingThread() noexcept {
-  fmtlogDetailWrapper<>::impl.stopPollingThread();
+void fmtlogT<_>::shutdown() noexcept {
+  auto& d = fmtlogDetailWrapper<>::impl;
+  d.stopPollingThread();
+  d.poll(true);
+  d.closeLogFile();
 }
 
 template class fmtlogT<0>;
-

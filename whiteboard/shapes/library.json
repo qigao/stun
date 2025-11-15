@@ -1,0 +1,1222 @@
+{
+  "version": "1.0",
+  "name": "Whiteboard Shape Library",
+  "shapes": [
+    {
+      "id": "basic.rectangle",
+      "name": "Rectangle",
+      "category": "Basic",
+      "svg_file": "basic/rectangle.svgshape",
+      "thumbnail": "basic/rectangle_thumb.png",
+      "description": "Simple rectangle shape (DDF format)"
+    },
+    {
+      "id": "basic.circle",
+      "name": "Circle",
+      "category": "Basic",
+      "svg_file": "basic/circle.svgshape",
+      "thumbnail": "basic/circle_thumb.png",
+      "description": "Simple circle shape (DDF format)"
+    },
+    {
+      "id": "basic.triangle",
+      "name": "Triangle",
+      "category": "Basic",
+      "svg_file": "basic/triangle.svg",
+      "thumbnail": "basic/triangle_thumb.png",
+      "description": "Simple triangle shape"
+    },
+    {
+      "id": "basic.star",
+      "name": "Star",
+      "category": "Basic",
+      "svg_file": "basic/star.svg",
+      "thumbnail": "basic/star_thumb.png",
+      "description": "Five-pointed star"
+    },
+    {
+      "id": "basic.pentagon",
+      "name": "Pentagon",
+      "category": "Basic",
+      "svg_file": "basic/pentagon.svg",
+      "thumbnail": "basic/pentagon_thumb.png",
+      "description": "Five-sided polygon"
+    },
+    {
+      "id": "basic.hexagon",
+      "name": "Hexagon",
+      "category": "Basic",
+      "svg_file": "basic/hexagon.svg",
+      "thumbnail": "basic/hexagon_thumb.png",
+      "description": "Six-sided polygon"
+    },
+    {
+      "id": "basic.diamond",
+      "name": "Diamond",
+      "category": "Basic",
+      "svg_file": "basic/diamond.svgshape",
+      "thumbnail": "basic/diamond_thumb.png",
+      "description": "Diamond shape (DDF format)"
+    },
+    {
+      "id": "basic.ellipse",
+      "name": "Ellipse",
+      "category": "Basic",
+      "svg_file": "basic/ellipse.svg",
+      "thumbnail": "basic/ellipse_thumb.png",
+      "description": "Ellipse shape"
+    },
+    {
+      "id": "basic.parallelogram",
+      "name": "Parallelogram",
+      "category": "Basic",
+      "svg_file": "basic/parallelogram.svg",
+      "thumbnail": "basic/parallelogram_thumb.png",
+      "description": "Parallelogram shape"
+    },
+    {
+      "id": "basic.trapezoid",
+      "name": "Trapezoid",
+      "category": "Basic",
+      "svg_file": "basic/trapezoid.svg",
+      "thumbnail": "basic/trapezoid_thumb.png",
+      "description": "Trapezoid shape"
+    },
+    {
+      "id": "basic.cross",
+      "name": "Cross",
+      "category": "Basic",
+      "svg_file": "basic/cross.svg",
+      "thumbnail": "basic/cross_thumb.png",
+      "description": "Cross/plus shape"
+    },
+    {
+      "id": "basic.octagon",
+      "name": "Octagon",
+      "category": "Basic",
+      "svg_file": "basic/octagon.svg",
+      "thumbnail": "basic/octagon_thumb.png",
+      "description": "Octagon shape"
+    },
+    {
+      "id": "basic.heart",
+      "name": "Heart",
+      "category": "Basic",
+      "svg_file": "basic/heart.svg",
+      "thumbnail": "basic/heart_thumb.png",
+      "description": "Heart shape"
+    },
+    {
+      "id": "uml.class",
+      "name": "Class",
+      "category": "UML",
+      "svg_file": "uml/class.svg",
+      "thumbnail": "uml/class_thumb.png",
+      "description": "UML class diagram",
+      "parameters": [
+        {
+          "name": "className",
+          "type": "text",
+          "default": "ClassName",
+          "label": "Class Name"
+        },
+        {
+          "name": "attributes",
+          "type": "list",
+          "default": "- attribute: type",
+          "label": "Attributes"
+        },
+        {
+          "name": "methods",
+          "type": "list",
+          "default": "+ method(): void",
+          "label": "Methods"
+        }
+      ]
+    },
+    {
+      "id": "uml.interface",
+      "name": "Interface",
+      "category": "UML",
+      "svg_file": "uml/interface.svg",
+      "thumbnail": "uml/interface_thumb.png",
+      "description": "UML interface diagram",
+      "parameters": [
+        {
+          "name": "interfaceName",
+          "type": "text",
+          "default": "IInterface",
+          "label": "Interface Name"
+        },
+        {
+          "name": "methods",
+          "type": "list",
+          "default": "+ method(): void",
+          "label": "Methods"
+        }
+      ]
+    },
+    {
+      "id": "uml.actor",
+      "name": "Actor",
+      "category": "UML",
+      "svg_file": "uml/actor.svg",
+      "thumbnail": "uml/actor_thumb.png",
+      "description": "UML actor (stick figure)",
+      "parameters": [
+        {
+          "name": "actorName",
+          "type": "text",
+          "default": "Actor",
+          "label": "Actor Name"
+        }
+      ]
+    },
+    {
+      "id": "uml.usecase",
+      "name": "Use Case",
+      "category": "UML",
+      "svg_file": "uml/usecase.svg",
+      "thumbnail": "uml/usecase_thumb.png",
+      "description": "UML use case (oval)",
+      "parameters": [
+        {
+          "name": "useCaseName",
+          "type": "text",
+          "default": "Use Case",
+          "label": "Use Case Name"
+        }
+      ]
+    },
+    {
+      "id": "uml.component",
+      "name": "Component",
+      "category": "UML",
+      "svg_file": "uml/component.svg",
+      "thumbnail": "uml/component_thumb.png",
+      "description": "UML component"
+    },
+    {
+      "id": "uml.package",
+      "name": "Package",
+      "category": "UML",
+      "svg_file": "uml/package.svg",
+      "thumbnail": "uml/package_thumb.png",
+      "description": "UML package"
+    },
+    {
+      "id": "uml.note",
+      "name": "Note",
+      "category": "UML",
+      "svg_file": "uml/note.svg",
+      "thumbnail": "uml/note_thumb.png",
+      "description": "UML note/comment"
+    },
+    {
+      "id": "uml.state",
+      "name": "State",
+      "category": "UML",
+      "svg_file": "uml/state.svg",
+      "thumbnail": "uml/state_thumb.png",
+      "description": "UML state"
+    },
+    {
+      "id": "uml.object",
+      "name": "Object",
+      "category": "UML",
+      "svg_file": "uml/object.svg",
+      "thumbnail": "uml/object_thumb.png",
+      "description": "UML object instance"
+    },
+    {
+      "id": "uml.boundary",
+      "name": "Boundary",
+      "category": "UML",
+      "svg_file": "uml/boundary.svg",
+      "thumbnail": "uml/boundary_thumb.png",
+      "description": "UML boundary class"
+    },
+    {
+      "id": "uml.control",
+      "name": "Control",
+      "category": "UML",
+      "svg_file": "uml/control.svg",
+      "thumbnail": "uml/control_thumb.png",
+      "description": "UML control class"
+    },
+    {
+      "id": "uml.entity",
+      "name": "Entity",
+      "category": "UML",
+      "svg_file": "uml/entity.svg",
+      "thumbnail": "uml/entity_thumb.png",
+      "description": "UML entity class"
+    },
+    {
+      "id": "flowchart.process",
+      "name": "Process",
+      "category": "Flowchart",
+      "svg_file": "flowchart/process.svgshape",
+      "thumbnail": "flowchart/process_thumb.png",
+      "description": "Flowchart process box (DDF format)",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Process",
+          "label": "Label"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.decision",
+      "name": "Decision",
+      "category": "Flowchart",
+      "svg_file": "flowchart/decision.svgshape",
+      "thumbnail": "flowchart/decision_thumb.png",
+      "description": "Flowchart decision diamond (DDF format)",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Decision?",
+          "label": "Label"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.data",
+      "name": "Data",
+      "category": "Flowchart",
+      "svg_file": "flowchart/data.svg",
+      "thumbnail": "flowchart/data_thumb.png",
+      "description": "Flowchart data (parallelogram)",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "text",
+          "default": "Data",
+          "label": "Text"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.start",
+      "name": "Start/End",
+      "category": "Flowchart",
+      "svg_file": "flowchart/start.svg",
+      "thumbnail": "flowchart/start_thumb.png",
+      "description": "Flowchart start/end (rounded rectangle)",
+      "parameters": [
+        {
+          "name": "text",
+          "type": "text",
+          "default": "Start",
+          "label": "Text"
+        }
+      ]
+    },
+    {
+      "id": "flowchart.document",
+      "name": "Document",
+      "category": "Flowchart",
+      "svg_file": "flowchart/document.svg",
+      "thumbnail": "flowchart/document_thumb.png",
+      "description": "Flowchart document shape"
+    },
+    {
+      "id": "flowchart.database",
+      "name": "Database",
+      "category": "Flowchart",
+      "svg_file": "flowchart/database.svg",
+      "thumbnail": "flowchart/database_thumb.png",
+      "description": "Database cylinder shape"
+    },
+    {
+      "id": "flowchart.cloud",
+      "name": "Cloud",
+      "category": "Flowchart",
+      "svg_file": "flowchart/cloud.svg",
+      "thumbnail": "flowchart/cloud_thumb.png",
+      "description": "Cloud shape"
+    },
+    {
+      "id": "flowchart.manual_input",
+      "name": "Manual Input",
+      "category": "Flowchart",
+      "svg_file": "flowchart/manual_input.svg",
+      "thumbnail": "flowchart/manual_input_thumb.png",
+      "description": "Manual input shape"
+    },
+    {
+      "id": "flowchart.preparation",
+      "name": "Preparation",
+      "category": "Flowchart",
+      "svg_file": "flowchart/preparation.svg",
+      "thumbnail": "flowchart/preparation_thumb.png",
+      "description": "Preparation step"
+    },
+    {
+      "id": "flowchart.delay",
+      "name": "Delay",
+      "category": "Flowchart",
+      "svg_file": "flowchart/delay.svg",
+      "thumbnail": "flowchart/delay_thumb.png",
+      "description": "Delay shape"
+    },
+    {
+      "id": "flowchart.merge",
+      "name": "Merge",
+      "category": "Flowchart",
+      "svg_file": "flowchart/merge.svg",
+      "thumbnail": "flowchart/merge_thumb.png",
+      "description": "Merge/combine"
+    },
+    {
+      "id": "flowchart.connector",
+      "name": "Connector",
+      "category": "Flowchart",
+      "svg_file": "flowchart/connector.svg",
+      "thumbnail": "flowchart/connector_thumb.png",
+      "description": "On-page connector"
+    },
+    {
+      "id": "arrows.right",
+      "name": "Right Arrow",
+      "category": "Arrows",
+      "svg_file": "arrows/right.svg",
+      "thumbnail": "arrows/right_thumb.png",
+      "description": "Arrow pointing right"
+    },
+    {
+      "id": "arrows.left",
+      "name": "Left Arrow",
+      "category": "Arrows",
+      "svg_file": "arrows/left.svg",
+      "thumbnail": "arrows/left_thumb.png",
+      "description": "Arrow pointing left"
+    },
+    {
+      "id": "arrows.up",
+      "name": "Up Arrow",
+      "category": "Arrows",
+      "svg_file": "arrows/up.svg",
+      "thumbnail": "arrows/up_thumb.png",
+      "description": "Arrow pointing up"
+    },
+    {
+      "id": "arrows.down",
+      "name": "Down Arrow",
+      "category": "Arrows",
+      "svg_file": "arrows/down.svg",
+      "thumbnail": "arrows/down_thumb.png",
+      "description": "Arrow pointing down"
+    },
+    {
+      "id": "arrows.curved_right",
+      "name": "Curved Arrow",
+      "category": "Arrows",
+      "svg_file": "arrows/curved_right.svg",
+      "thumbnail": "arrows/curved_right_thumb.png",
+      "description": "Curved arrow"
+    },
+    {
+      "id": "arrows.bidirectional",
+      "name": "Bidirectional",
+      "category": "Arrows",
+      "svg_file": "arrows/bidirectional.svg",
+      "thumbnail": "arrows/bidirectional_thumb.png",
+      "description": "Two-way arrow"
+    },
+    {
+      "id": "arrows.circular",
+      "name": "Circular Arrow",
+      "category": "Arrows",
+      "svg_file": "arrows/circular.svg",
+      "thumbnail": "arrows/circular_thumb.png",
+      "description": "Circular/refresh arrow"
+    },
+    {
+      "id": "network.server",
+      "name": "Server",
+      "category": "Network",
+      "svg_file": "network/server.svg",
+      "thumbnail": "network/server_thumb.png",
+      "description": "Server rack"
+    },
+    {
+      "id": "network.router",
+      "name": "Router",
+      "category": "Network",
+      "svg_file": "network/router.svg",
+      "thumbnail": "network/router_thumb.png",
+      "description": "Network router"
+    },
+    {
+      "id": "network.laptop",
+      "name": "Laptop",
+      "category": "Network",
+      "svg_file": "network/laptop.svg",
+      "thumbnail": "network/laptop_thumb.png",
+      "description": "Laptop computer"
+    },
+    {
+      "id": "network.firewall",
+      "name": "Firewall",
+      "category": "Network",
+      "svg_file": "network/firewall.svg",
+      "thumbnail": "network/firewall_thumb.png",
+      "description": "Network firewall"
+    },
+    {
+      "id": "network.cloud_storage",
+      "name": "Cloud Storage",
+      "category": "Network",
+      "svg_file": "network/cloud_storage.svg",
+      "thumbnail": "network/cloud_storage_thumb.png",
+      "description": "Cloud storage service"
+    },
+    {
+      "id": "network.load_balancer",
+      "name": "Load Balancer",
+      "category": "Network",
+      "svg_file": "network/load_balancer.svg",
+      "thumbnail": "network/load_balancer_thumb.png",
+      "description": "Load balancer"
+    },
+    {
+      "id": "network.mobile",
+      "name": "Mobile Device",
+      "category": "Network",
+      "svg_file": "network/mobile.svg",
+      "thumbnail": "network/mobile_thumb.png",
+      "description": "Mobile phone/device"
+    },
+    {
+      "id": "network.switch",
+      "name": "Switch",
+      "category": "Network",
+      "svg_file": "network/switch.svg",
+      "thumbnail": "network/switch_thumb.png",
+      "description": "Network switch"
+    },
+    {
+      "id": "network.printer",
+      "name": "Printer",
+      "category": "Network",
+      "svg_file": "network/printer.svg",
+      "thumbnail": "network/printer_thumb.png",
+      "description": "Printer device"
+    },
+    {
+      "id": "network.monitor",
+      "name": "Monitor",
+      "category": "Network",
+      "svg_file": "network/monitor.svg",
+      "thumbnail": "network/monitor_thumb.png",
+      "description": "Computer monitor"
+    },
+    {
+      "id": "ui.button",
+      "name": "Modern Button",
+      "category": "UI",
+      "svg_file": "ui/modern_button.svgshape",
+      "thumbnail": "ui/button_thumb.png",
+      "description": "Modern button with shadow and gradient (DDF format)",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Button",
+          "label": "Button Text"
+        }
+      ]
+    },
+    {
+      "id": "ui.textbox",
+      "name": "Text Input",
+      "category": "UI",
+      "svg_file": "ui/text_input.svgshape",
+      "thumbnail": "ui/textbox_thumb.png",
+      "description": "Modern text input field (DDF format)",
+      "parameters": [
+        {
+          "name": "placeholder",
+          "type": "text",
+          "default": "Enter text...",
+          "label": "Placeholder"
+        }
+      ]
+    },
+    {
+      "id": "ui.checkbox",
+      "name": "Checkbox",
+      "category": "UI",
+      "svg_file": "ui/checkbox.svgshape",
+      "thumbnail": "ui/checkbox_thumb.png",
+      "description": "Modern checkbox with checkmark (DDF format)"
+    },
+    {
+      "id": "ui.window",
+      "name": "Window",
+      "category": "UI",
+      "svg_file": "ui/window.svg",
+      "thumbnail": "ui/window_thumb.png",
+      "description": "Application window"
+    },
+    {
+      "id": "ui.dropdown",
+      "name": "Dropdown",
+      "category": "UI",
+      "svg_file": "ui/dropdown.svgshape",
+      "thumbnail": "ui/dropdown_thumb.png",
+      "description": "Modern dropdown select (DDF format)",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Select option",
+          "label": "Label"
+        }
+      ]
+    },
+    {
+      "id": "ui.radio",
+      "name": "Radio Button",
+      "category": "UI",
+      "svg_file": "ui/radio.svg",
+      "thumbnail": "ui/radio_thumb.png",
+      "description": "Radio button"
+    },
+    {
+      "id": "ui.slider",
+      "name": "Slider",
+      "category": "UI",
+      "svg_file": "ui/slider.svg",
+      "thumbnail": "ui/slider_thumb.png",
+      "description": "Range slider"
+    },
+    {
+      "id": "ui.toggle",
+      "name": "Toggle Switch",
+      "category": "UI",
+      "svg_file": "ui/toggle_switch.svgshape",
+      "thumbnail": "ui/toggle_thumb.png",
+      "description": "Modern toggle switch (DDF format)"
+    },
+    {
+      "id": "ui.menu",
+      "name": "Menu",
+      "category": "UI",
+      "svg_file": "ui/menu.svg",
+      "thumbnail": "ui/menu_thumb.png",
+      "description": "Hamburger menu icon"
+    },
+    {
+      "id": "ui.card",
+      "name": "Card",
+      "category": "UI",
+      "svg_file": "ui/card.svgshape",
+      "thumbnail": "ui/card_thumb.png",
+      "description": "Modern card with header and content (DDF format)",
+      "parameters": [
+        {
+          "name": "title",
+          "type": "text",
+          "default": "Card Title",
+          "label": "Title"
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "default": "Card content goes here",
+          "label": "Content"
+        }
+      ]
+    },
+    {
+      "id": "ui.modal",
+      "name": "Modal",
+      "category": "UI",
+      "svg_file": "ui/modal.svg",
+      "thumbnail": "ui/modal_thumb.png",
+      "description": "Modal dialog"
+    },
+    {
+      "id": "ui.tabs",
+      "name": "Tabs",
+      "category": "UI",
+      "svg_file": "ui/tabs.svg",
+      "thumbnail": "ui/tabs_thumb.png",
+      "description": "Tab navigation"
+    },
+    {
+      "id": "ui.navbar",
+      "name": "Navigation Bar",
+      "category": "UI",
+      "svg_file": "ui/navbar.svg",
+      "thumbnail": "ui/navbar_thumb.png",
+      "description": "Navigation bar"
+    },
+    {
+      "id": "ui.image",
+      "name": "Image",
+      "category": "UI",
+      "svg_file": "ui/image.svg",
+      "thumbnail": "ui/image_thumb.png",
+      "description": "Image placeholder"
+    },
+    {
+      "id": "ui.list",
+      "name": "List",
+      "category": "UI",
+      "svg_file": "ui/list.svg",
+      "thumbnail": "ui/list_thumb.png",
+      "description": "List component"
+    },
+    {
+      "id": "ui.icon",
+      "name": "Icon",
+      "category": "UI",
+      "svg_file": "ui/icon.svg",
+      "thumbnail": "ui/icon_thumb.png",
+      "description": "Icon placeholder"
+    },
+    {
+      "id": "ui.fab",
+      "name": "FAB",
+      "category": "UI",
+      "svg_file": "ui/fab.svg",
+      "thumbnail": "ui/fab_thumb.png",
+      "description": "Material 3 Floating Action Button"
+    },
+    {
+      "id": "ui.chip",
+      "name": "Chip",
+      "category": "UI",
+      "svg_file": "ui/chip.svg",
+      "thumbnail": "ui/chip_thumb.png",
+      "description": "Material 3 Chip"
+    },
+    {
+      "id": "ui.snackbar",
+      "name": "Snackbar",
+      "category": "UI",
+      "svg_file": "ui/snackbar.svg",
+      "thumbnail": "ui/snackbar_thumb.png",
+      "description": "Material 3 Snackbar"
+    },
+    {
+      "id": "ui.bottom_sheet",
+      "name": "Bottom Sheet",
+      "category": "UI",
+      "svg_file": "ui/bottom_sheet.svg",
+      "thumbnail": "ui/bottom_sheet_thumb.png",
+      "description": "Material 3 Bottom Sheet"
+    },
+    {
+      "id": "ui.segmented_button",
+      "name": "Segmented Button",
+      "category": "UI",
+      "svg_file": "ui/segmented_button.svg",
+      "thumbnail": "ui/segmented_button_thumb.png",
+      "description": "Material 3 Segmented Button"
+    },
+    {
+      "id": "ui.fluent_button",
+      "name": "Fluent Button",
+      "category": "UI",
+      "svg_file": "ui/fluent_button.svg",
+      "thumbnail": "ui/fluent_button_thumb.png",
+      "description": "Fluent 2 Button"
+    },
+    {
+      "id": "ui.fluent_card",
+      "name": "Fluent Card",
+      "category": "UI",
+      "svg_file": "ui/fluent_card.svg",
+      "thumbnail": "ui/fluent_card_thumb.png",
+      "description": "Fluent 2 Card"
+    },
+    {
+      "id": "ui.fluent_toggle",
+      "name": "Fluent Toggle",
+      "category": "UI",
+      "svg_file": "ui/fluent_toggle.svg",
+      "thumbnail": "ui/fluent_toggle_thumb.png",
+      "description": "Fluent 2 Toggle"
+    },
+    {
+      "id": "ui.ios_button",
+      "name": "iOS Button",
+      "category": "UI",
+      "svg_file": "ui/ios_button.svg",
+      "thumbnail": "ui/ios_button_thumb.png",
+      "description": "iOS Button"
+    },
+    {
+      "id": "ui.ios_switch",
+      "name": "iOS Switch",
+      "category": "UI",
+      "svg_file": "ui/ios_switch.svg",
+      "thumbnail": "ui/ios_switch_thumb.png",
+      "description": "iOS Switch"
+    },
+    {
+      "id": "ui.ios_card",
+      "name": "iOS Card",
+      "category": "UI",
+      "svg_file": "ui/ios_card.svg",
+      "thumbnail": "ui/ios_card_thumb.png",
+      "description": "iOS Card"
+    },
+    {
+      "id": "ui.ios_list_item",
+      "name": "iOS List Item",
+      "category": "UI",
+      "svg_file": "ui/ios_list_item.svg",
+      "thumbnail": "ui/ios_list_item_thumb.png",
+      "description": "iOS List Item"
+    },
+    {
+      "id": "ui.ios_tab_bar",
+      "name": "iOS Tab Bar",
+      "category": "UI",
+      "svg_file": "ui/ios_tab_bar.svg",
+      "thumbnail": "ui/ios_tab_bar_thumb.png",
+      "description": "iOS Tab Bar"
+    },
+    {
+      "id": "ui.progress_bar",
+      "name": "Progress Bar",
+      "category": "UI",
+      "svg_file": "ui/progress_bar.svgshape",
+      "thumbnail": "ui/progress_bar_thumb.png",
+      "description": "Modern progress bar with percentage (DDF format)",
+      "parameters": [
+        {
+          "name": "percentage",
+          "type": "text",
+          "default": "60",
+          "label": "Percentage"
+        }
+      ]
+    },
+    {
+      "id": "ui.badge",
+      "name": "Badge",
+      "category": "UI",
+      "svg_file": "ui/badge.svgshape",
+      "thumbnail": "ui/badge_thumb.png",
+      "description": "Notification badge with count (DDF format)",
+      "parameters": [
+        {
+          "name": "count",
+          "type": "text",
+          "default": "5",
+          "label": "Count"
+        }
+      ]
+    },
+    {
+      "id": "ui.alert",
+      "name": "Alert Box",
+      "category": "UI",
+      "svg_file": "ui/alert_box.svgshape",
+      "thumbnail": "ui/alert_thumb.png",
+      "description": "Alert/notification box (DDF format)",
+      "parameters": [
+        {
+          "name": "title",
+          "type": "text",
+          "default": "Error",
+          "label": "Title"
+        },
+        {
+          "name": "message",
+          "type": "text",
+          "default": "Something went wrong",
+          "label": "Message"
+        }
+      ]
+    },
+    {
+      "id": "ui.avatar",
+      "name": "Avatar",
+      "category": "UI",
+      "svg_file": "ui/avatar.svg",
+      "thumbnail": "ui/avatar_thumb.png",
+      "description": "User avatar"
+    },
+    {
+      "id": "ui.tooltip",
+      "name": "Tooltip",
+      "category": "UI",
+      "svg_file": "ui/tooltip.svg",
+      "thumbnail": "ui/tooltip_thumb.png",
+      "description": "Tooltip"
+    },
+    {
+      "id": "math.plus",
+      "name": "Plus",
+      "category": "Math",
+      "svg_file": "math/plus.svg",
+      "thumbnail": "math/plus_thumb.png",
+      "description": "Plus sign"
+    },
+    {
+      "id": "math.minus",
+      "name": "Minus",
+      "category": "Math",
+      "svg_file": "math/minus.svg",
+      "thumbnail": "math/minus_thumb.png",
+      "description": "Minus sign"
+    },
+    {
+      "id": "math.multiply",
+      "name": "Multiply",
+      "category": "Math",
+      "svg_file": "math/multiply.svg",
+      "thumbnail": "math/multiply_thumb.png",
+      "description": "Multiplication sign"
+    },
+    {
+      "id": "math.equals",
+      "name": "Equals",
+      "category": "Math",
+      "svg_file": "math/equals.svg",
+      "thumbnail": "math/equals_thumb.png",
+      "description": "Equals sign"
+    },
+    {
+      "id": "business.person",
+      "name": "Person",
+      "category": "Business",
+      "svg_file": "business/person.svg",
+      "thumbnail": "business/person_thumb.png",
+      "description": "Person/user"
+    },
+    {
+      "id": "business.team",
+      "name": "Team",
+      "category": "Business",
+      "svg_file": "business/team.svg",
+      "thumbnail": "business/team_thumb.png",
+      "description": "Team/group"
+    },
+    {
+      "id": "business.calendar",
+      "name": "Calendar",
+      "category": "Business",
+      "svg_file": "business/calendar.svg",
+      "thumbnail": "business/calendar_thumb.png",
+      "description": "Calendar/schedule"
+    },
+    {
+      "id": "business.chart",
+      "name": "Chart",
+      "category": "Business",
+      "svg_file": "business/chart.svg",
+      "thumbnail": "business/chart_thumb.png",
+      "description": "Bar chart"
+    },
+    {
+      "id": "business.document",
+      "name": "Document",
+      "category": "Business",
+      "svg_file": "business/document.svg",
+      "thumbnail": "business/document_thumb.png",
+      "description": "Document/file"
+    },
+    {
+      "id": "business.task",
+      "name": "Task",
+      "category": "Business",
+      "svg_file": "business/task.svg",
+      "thumbnail": "business/task_thumb.png",
+      "description": "BPMN task"
+    },
+    {
+      "id": "business.gateway",
+      "name": "Gateway",
+      "category": "Business",
+      "svg_file": "business/gateway.svg",
+      "thumbnail": "business/gateway_thumb.png",
+      "description": "BPMN gateway"
+    },
+    {
+      "id": "business.event",
+      "name": "Event",
+      "category": "Business",
+      "svg_file": "business/event.svg",
+      "thumbnail": "business/event_thumb.png",
+      "description": "BPMN event"
+    },
+    {
+      "id": "electrical.resistor",
+      "name": "Resistor",
+      "category": "Electrical",
+      "svg_file": "electrical/resistor.svg",
+      "thumbnail": "electrical/resistor_thumb.png",
+      "description": "Resistor symbol"
+    },
+    {
+      "id": "electrical.capacitor",
+      "name": "Capacitor",
+      "category": "Electrical",
+      "svg_file": "electrical/capacitor.svg",
+      "thumbnail": "electrical/capacitor_thumb.png",
+      "description": "Capacitor symbol"
+    },
+    {
+      "id": "electrical.battery",
+      "name": "Battery",
+      "category": "Electrical",
+      "svg_file": "electrical/battery.svg",
+      "thumbnail": "electrical/battery_thumb.png",
+      "description": "Battery symbol"
+    },
+    {
+      "id": "electrical.ground",
+      "name": "Ground",
+      "category": "Electrical",
+      "svg_file": "electrical/ground.svg",
+      "thumbnail": "electrical/ground_thumb.png",
+      "description": "Ground symbol"
+    },
+    {
+      "id": "symbols.check",
+      "name": "Check",
+      "category": "Symbols",
+      "svg_file": "symbols/check.svg",
+      "thumbnail": "symbols/check_thumb.png",
+      "description": "Checkmark"
+    },
+    {
+      "id": "symbols.cross",
+      "name": "Cross",
+      "category": "Symbols",
+      "svg_file": "symbols/cross.svg",
+      "thumbnail": "symbols/cross_thumb.png",
+      "description": "X mark"
+    },
+    {
+      "id": "symbols.warning",
+      "name": "Warning",
+      "category": "Symbols",
+      "svg_file": "symbols/warning.svg",
+      "thumbnail": "symbols/warning_thumb.png",
+      "description": "Warning sign"
+    },
+    {
+      "id": "symbols.info",
+      "name": "Info",
+      "category": "Symbols",
+      "svg_file": "symbols/info.svg",
+      "thumbnail": "symbols/info_thumb.png",
+      "description": "Information icon"
+    },
+    {
+      "id": "symbols.question",
+      "name": "Question",
+      "category": "Symbols",
+      "svg_file": "symbols/question.svg",
+      "thumbnail": "symbols/question_thumb.png",
+      "description": "Question mark"
+    },
+    {
+      "id": "symbols.lightbulb",
+      "name": "Lightbulb",
+      "category": "Symbols",
+      "svg_file": "symbols/lightbulb.svg",
+      "thumbnail": "symbols/lightbulb_thumb.png",
+      "description": "Idea/lightbulb"
+    },
+    {
+      "id": "table.2x2",
+      "name": "Table 2x2",
+      "category": "Table",
+      "svg_file": "table/table_2x2.svg",
+      "thumbnail": "table/table_2x2_thumb.png",
+      "description": "2x2 table",
+      "parameters": [
+        {
+          "name": "cell_0_0",
+          "type": "text",
+          "default": "Header 1",
+          "label": "Cell (0,0)"
+        },
+        {
+          "name": "cell_0_1",
+          "type": "text",
+          "default": "Header 2",
+          "label": "Cell (0,1)"
+        },
+        {
+          "name": "cell_1_0",
+          "type": "text",
+          "default": "Data 1",
+          "label": "Cell (1,0)"
+        },
+        {
+          "name": "cell_1_1",
+          "type": "text",
+          "default": "Data 2",
+          "label": "Cell (1,1)"
+        }
+      ]
+    },
+    {
+      "id": "table.3x3",
+      "name": "Table 3x3",
+      "category": "Table",
+      "svg_file": "table/table_3x3.svg",
+      "thumbnail": "table/table_3x3_thumb.png",
+      "description": "3x3 table",
+      "parameters": [
+        {
+          "name": "cell_0_0",
+          "type": "text",
+          "default": "H1",
+          "label": "Cell (0,0)"
+        },
+        {
+          "name": "cell_0_1",
+          "type": "text",
+          "default": "H2",
+          "label": "Cell (0,1)"
+        },
+        {
+          "name": "cell_0_2",
+          "type": "text",
+          "default": "H3",
+          "label": "Cell (0,2)"
+        },
+        {
+          "name": "cell_1_0",
+          "type": "text",
+          "default": "D1",
+          "label": "Cell (1,0)"
+        },
+        {
+          "name": "cell_1_1",
+          "type": "text",
+          "default": "D2",
+          "label": "Cell (1,1)"
+        },
+        {
+          "name": "cell_1_2",
+          "type": "text",
+          "default": "D3",
+          "label": "Cell (1,2)"
+        },
+        {
+          "name": "cell_2_0",
+          "type": "text",
+          "default": "D4",
+          "label": "Cell (2,0)"
+        },
+        {
+          "name": "cell_2_1",
+          "type": "text",
+          "default": "D5",
+          "label": "Cell (2,1)"
+        },
+        {
+          "name": "cell_2_2",
+          "type": "text",
+          "default": "D6",
+          "label": "Cell (2,2)"
+        }
+      ]
+    },
+    {
+      "id": "examples.comprehensive",
+      "name": "Comprehensive Shape",
+      "category": "Examples",
+      "svg_file": "examples/comprehensive_shape.svgshape",
+      "thumbnail": "examples/comprehensive_thumb.png",
+      "description": "Example showing styles, lines, text, and multiple shapes",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Label",
+          "label": "Main Label"
+        },
+        {
+          "name": "subtitle",
+          "type": "text",
+          "default": "Subtitle",
+          "label": "Subtitle"
+        }
+      ]
+    },
+    {
+      "id": "examples.styled_button",
+      "name": "Styled Button",
+      "category": "Examples",
+      "svg_file": "examples/styled_button.svgshape",
+      "thumbnail": "examples/styled_button_thumb.png",
+      "description": "Button with gradient-like styling and shadow",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Button",
+          "label": "Button Text"
+        }
+      ]
+    },
+    {
+      "id": "examples.network_device",
+      "name": "Network Device",
+      "category": "Examples",
+      "svg_file": "examples/network_device.svgshape",
+      "thumbnail": "examples/network_device_thumb.png",
+      "description": "Network device with icon, label, and status",
+      "parameters": [
+        {
+          "name": "label",
+          "type": "text",
+          "default": "Device",
+          "label": "Device Name"
+        },
+        {
+          "name": "status_color",
+          "type": "text",
+          "default": "#2ecc71",
+          "label": "Status Color"
+        }
+      ]
+    },
+    {
+      "id": "examples.flowchart_advanced",
+      "name": "Advanced Process",
+      "category": "Examples",
+      "svg_file": "examples/flowchart_advanced.svgshape",
+      "thumbnail": "examples/flowchart_advanced_thumb.png",
+      "description": "Process box with icon, title, description, and status",
+      "parameters": [
+        {
+          "name": "title",
+          "type": "text",
+          "default": "Process",
+          "label": "Title"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "default": "Description",
+          "label": "Description"
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "default": "Ready",
+          "label": "Status"
+        }
+      ]
+    }
+  ]
+}

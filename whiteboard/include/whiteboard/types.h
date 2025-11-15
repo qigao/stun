@@ -15,6 +15,8 @@ enum class Tool { Select, Pan, Pen, Text, Sticky, Rectangle, Diamond, Circle, Li
 
 enum class FillStyle { None, Solid };
 
+enum class StrokeStyle { Solid, Dashed, Dotted };
+
 struct Point {
   float x;
   float y;
@@ -63,12 +65,33 @@ struct Stroke {
   std::map<std::string, std::string> svg_parameters;  // Editable parameters (e.g., {"className": "Customer"})
   float svg_scale_x;              // Horizontal scale factor
   float svg_scale_y;              // Vertical scale factor
+  float svg_width;                // Actual SVG document width
+  float svg_height;               // Actual SVG document height
+
+  // Enhanced visual properties (Task 12)
+  float opacity;                  // Opacity (0.0 to 1.0, default 1.0)
+  StrokeStyle stroke_style;       // Stroke style (Solid, Dashed, Dotted)
+  float corner_radius;            // Corner radius for rectangles (default 0.0)
+
+  // DDF integration fields (Task 15)
+  std::string ddf_shape_id;              // ID of corresponding DDF shape (if any)
+  std::string ddf_component_instance_id; // ID of DDF component instance (if any)
 
   Stroke()
       : width(3.0f), tool(Tool::Pen), fill_style(FillStyle::None), selected(false), rotation(0.0f),
         font_face("sans"), font_size(16.0f), text_align(NVG_ALIGN_LEFT | NVG_ALIGN_TOP),
         is_editing(false), nvg_image_handle(-1), image_width(0.0f), image_height(0.0f), name(),
-        visible(true), locked(false), group_id(-1), svg_scale_x(1.0f), svg_scale_y(1.0f) {}
+        visible(true), locked(false), group_id(-1), svg_scale_x(1.0f), svg_scale_y(1.0f),
+        svg_width(100.0f), svg_height(100.0f),
+        opacity(1.0f), stroke_style(StrokeStyle::Solid), corner_radius(0.0f) {}
+
+  /**
+   * \brief Check if this stroke is a DDF element.
+   * \return True if this stroke is linked to a DDF shape or component instance
+   */
+  bool is_ddf_element() const {
+    return !ddf_shape_id.empty() || !ddf_component_instance_id.empty();
+  }
 
   void get_bounds(float &min_x, float &min_y, float &max_x, float &max_y) const {
     if (points.empty())
@@ -76,26 +99,59 @@ struct Stroke {
 
     // Special handling for SVG shapes
     if (tool == Tool::SVGShape && !svg_data.empty()) {
-      // For SVG shapes, we need to calculate bounds based on SVG dimensions and scale
-      // Default SVG size (will be overridden by actual SVG bounds in full implementation)
-      float svg_width = 100.0f;
-      float svg_height = 100.0f;
-      
-      // Apply scale factors
+      // For SVG shapes, use actual SVG dimensions and scale
       float scaled_width = svg_width * svg_scale_x;
       float scaled_height = svg_height * svg_scale_y;
       
-      // Position is at first point
+      // Position is at first point (top-left of unrotated shape)
       float pos_x = points[0].x;
       float pos_y = points[0].y;
       
-      // Calculate bounds (simplified - doesn't account for rotation)
-      // TODO: Query ThorVG for actual picture bounds
-      // TODO: Apply rotation transform to bounds
-      min_x = pos_x;
-      min_y = pos_y;
-      max_x = pos_x + scaled_width;
-      max_y = pos_y + scaled_height;
+      // If no rotation, use simple axis-aligned bounds
+      if (std::abs(rotation) < 0.001f) {
+        min_x = pos_x;
+        min_y = pos_y;
+        max_x = pos_x + scaled_width;
+        max_y = pos_y + scaled_height;
+        return;
+      }
+      
+      // Calculate rotated bounding box (rotation around center)
+      float center_x = pos_x + scaled_width / 2.0f;
+      float center_y = pos_y + scaled_height / 2.0f;
+      
+      // Get the four corners of the unrotated rectangle
+      float corners_x[4] = {pos_x, pos_x + scaled_width, pos_x + scaled_width, pos_x};
+      float corners_y[4] = {pos_y, pos_y, pos_y + scaled_height, pos_y + scaled_height};
+      
+      // Rotate each corner around the center
+      float cos_r = std::cos(rotation);
+      float sin_r = std::sin(rotation);
+      
+      min_x = std::numeric_limits<float>::max();
+      min_y = std::numeric_limits<float>::max();
+      max_x = std::numeric_limits<float>::lowest();
+      max_y = std::numeric_limits<float>::lowest();
+      
+      for (int i = 0; i < 4; i++) {
+        // Translate to origin (center is pivot)
+        float tx = corners_x[i] - center_x;
+        float ty = corners_y[i] - center_y;
+        
+        // Rotate
+        float rx = tx * cos_r - ty * sin_r;
+        float ry = tx * sin_r + ty * cos_r;
+        
+        // Translate back
+        float final_x = rx + center_x;
+        float final_y = ry + center_y;
+        
+        // Update bounds
+        min_x = std::min(min_x, final_x);
+        min_y = std::min(min_y, final_y);
+        max_x = std::max(max_x, final_x);
+        max_y = std::max(max_y, final_y);
+      }
       return;
     }
 
@@ -163,6 +219,19 @@ struct Stroke {
     for (auto &p : points) {
       p.x += dx;
       p.y += dy;
+    }
+  }
+
+  // Get dash pattern for NanoVG based on stroke style
+  std::vector<float> get_dash_pattern() const {
+    switch (stroke_style) {
+      case StrokeStyle::Dashed:
+        return {10.0f, 5.0f};  // 10px dash, 5px gap
+      case StrokeStyle::Dotted:
+        return {2.0f, 4.0f};   // 2px dot, 4px gap
+      case StrokeStyle::Solid:
+      default:
+        return {};  // Empty = solid line
     }
   }
 };

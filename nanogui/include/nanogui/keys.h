@@ -40,6 +40,12 @@
   #define NANOGUI_KEY_DELETE SDLK_DELETE
   #define NANOGUI_KEY_BACKSPACE SDLK_BACKSPACE
 
+  // Function keys
+  #define NANOGUI_KEY_F1 SDLK_F1
+
+  // Special keys
+  #define NANOGUI_KEY_SLASH SDLK_SLASH
+
   // Arrow keys
   #define NANOGUI_KEY_UP SDLK_UP
   #define NANOGUI_KEY_DOWN SDLK_DOWN
@@ -51,7 +57,10 @@
   #define NANOGUI_KEY_C SDLK_C
   #define NANOGUI_KEY_D SDLK_D
   #define NANOGUI_KEY_F SDLK_F
+  #define NANOGUI_KEY_G SDLK_G
   #define NANOGUI_KEY_M SDLK_M
+  #define NANOGUI_KEY_O SDLK_O
+  #define NANOGUI_KEY_R SDLK_R
   #define NANOGUI_KEY_S SDLK_S
   #define NANOGUI_KEY_V SDLK_V
   #define NANOGUI_KEY_X SDLK_X
@@ -61,6 +70,9 @@
   // Bracket keys
   #define NANOGUI_KEY_LEFTBRACKET SDLK_LEFTBRACKET
   #define NANOGUI_KEY_RIGHTBRACKET SDLK_RIGHTBRACKET
+
+  // Punctuation keys
+  #define NANOGUI_KEY_SEMICOLON SDLK_SEMICOLON
 
   // Key actions
   #define NANOGUI_KEY_PRESS 1
@@ -82,6 +94,12 @@
   #define NANOGUI_KEY_DELETE GLFW_KEY_DELETE
   #define NANOGUI_KEY_BACKSPACE GLFW_KEY_BACKSPACE
 
+  // Function keys
+  #define NANOGUI_KEY_F1 GLFW_KEY_F1
+
+  // Special keys
+  #define NANOGUI_KEY_SLASH GLFW_KEY_SLASH
+
   // Arrow keys
   #define NANOGUI_KEY_UP GLFW_KEY_UP
   #define NANOGUI_KEY_DOWN GLFW_KEY_DOWN
@@ -93,7 +111,10 @@
   #define NANOGUI_KEY_C GLFW_KEY_C
   #define NANOGUI_KEY_D GLFW_KEY_D
   #define NANOGUI_KEY_F GLFW_KEY_F
+  #define NANOGUI_KEY_G GLFW_KEY_G
   #define NANOGUI_KEY_M GLFW_KEY_M
+  #define NANOGUI_KEY_O GLFW_KEY_O
+  #define NANOGUI_KEY_R GLFW_KEY_R
   #define NANOGUI_KEY_S GLFW_KEY_S
   #define NANOGUI_KEY_V GLFW_KEY_V
   #define NANOGUI_KEY_X GLFW_KEY_X
@@ -103,6 +124,9 @@
   // Bracket keys
   #define NANOGUI_KEY_LEFTBRACKET GLFW_KEY_LEFT_BRACKET
   #define NANOGUI_KEY_RIGHTBRACKET GLFW_KEY_RIGHT_BRACKET
+
+  // Punctuation keys
+  #define NANOGUI_KEY_SEMICOLON GLFW_KEY_SEMICOLON
 
   // Key actions
   #define NANOGUI_KEY_PRESS GLFW_PRESS

@@ -20,6 +20,9 @@ LayersView::LayersView(nanogui::Widget *parent, WhiteboardDocument *document)
     m_document->add_observer(this);
   }
   
+  // Set fixed size
+  set_fixed_size(nanogui::Vector2i(240, 500));
+  
   // Set up layout
   set_layout(new nanogui::BoxLayout(nanogui::Orientation::Vertical, nanogui::Alignment::Fill, 5, 5));
   
@@ -45,6 +48,24 @@ LayersView::~LayersView() {
   if (m_document) {
     m_document->remove_observer(this);
   }
+}
+
+void LayersView::draw(NVGcontext *ctx) {
+  // Draw background
+  nvgBeginPath(ctx);
+  nvgRect(ctx, m_pos.x(), m_pos.y(), m_size.x(), m_size.y());
+  nvgFillColor(ctx, nvgRGBA(250, 250, 252, 255));
+  nvgFill(ctx);
+  
+  // Draw border
+  nvgBeginPath(ctx);
+  nvgRect(ctx, m_pos.x(), m_pos.y(), m_size.x(), m_size.y());
+  nvgStrokeColor(ctx, nvgRGBA(200, 200, 210, 255));
+  nvgStrokeWidth(ctx, 1.5f);
+  nvgStroke(ctx);
+  
+  // Draw children
+  Widget::draw(ctx);
 }
 
 void LayersView::on_strokes_changed() {

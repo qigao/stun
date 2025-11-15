@@ -1,0 +1,90 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "title": "Card Component",
+    "category": "UI",
+    "description": "Modern card with shadow, header, and content area"
+  },
+  "shapes": [
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 4,
+        "y": 4,
+        "width": 280,
+        "height": 200,
+        "rx": 12
+      },
+      "style": {
+        "fill": "#000000",
+        "fill-opacity": "0.1"
+      }
+    },
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 280,
+        "height": 200,
+        "rx": 12
+      },
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#e2e8f0",
+        "stroke-width": "1"
+      }
+    },
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 280,
+        "height": 60,
+        "rx": 12
+      },
+      "style": {
+        "fill": "#f7fafc"
+      }
+    },
+    {
+      "type": "path",
+      "path_data": "M 0 60 L 280 60",
+      "style": {
+        "stroke": "#e2e8f0",
+        "stroke-width": "1",
+        "fill": "none"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 20,
+        "y": 30
+      },
+      "text": "{{title}}",
+      "style": {
+        "fill": "#2d3748",
+        "font-size": "18px",
+        "font-family": "Arial, sans-serif",
+        "font-weight": "600",
+        "dominant-baseline": "middle"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 20,
+        "y": 100
+      },
+      "text": "{{content}}",
+      "style": {
+        "fill": "#4a5568",
+        "font-size": "14px",
+        "font-family": "Arial, sans-serif",
+        "dominant-baseline": "middle"
+      }
+    }
+  ]
+}

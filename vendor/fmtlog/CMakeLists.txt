@@ -18,7 +18,6 @@ target_compile_features(fmtlog PUBLIC cxx_std_11)
 # Suppress MSVC warnings in fmtlog vendor code
 if(MSVC)
     target_compile_options(fmtlog PUBLIC
-        /wd4702  # unreachable code
         /wd4267  # conversion from 'size_t' to smaller type
         /wd4244  # conversion from larger to smaller type
     )

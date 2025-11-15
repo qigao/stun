@@ -97,6 +97,119 @@ public:
    */
   void set_shape_library(SVGShapeLibrary *library) { m_shape_library = library; }
 
+  /**
+   * \brief Get the shape library.
+   * \return Pointer to shape library, or nullptr if not set
+   */
+  SVGShapeLibrary *get_shape_library() const { return m_shape_library; }
+
+  /**
+   * \brief Start creating a guide from ruler.
+   * \param type Guide type (Horizontal or Vertical)
+   * \param pos Initial position in canvas coordinates
+   */
+  void start_guide_creation(Guide::Type type, const nanogui::Vector2f &pos);
+
+  /**
+   * \brief Check if clicking on a guide.
+   * \param pos Position in canvas coordinates
+   * \return Guide index, or -1 if none found
+   */
+  int find_guide_at_point(const nanogui::Vector2f &pos) const;
+
+  // === Alignment Operations ===
+
+  /**
+   * \brief Align selected shapes to the left.
+   */
+  void align_selection_left();
+
+  /**
+   * \brief Align selected shapes to the right.
+   */
+  void align_selection_right();
+
+  /**
+   * \brief Align selected shapes to the top.
+   */
+  void align_selection_top();
+
+  /**
+   * \brief Align selected shapes to the bottom.
+   */
+  void align_selection_bottom();
+
+  /**
+   * \brief Align selected shapes to horizontal center.
+   */
+  void align_selection_center_horizontal();
+
+  /**
+   * \brief Align selected shapes to vertical center.
+   */
+  void align_selection_center_vertical();
+
+  // === Shape Operations ===
+
+  /**
+   * \brief Group selected shapes together.
+   */
+  void group_selected_shapes();
+
+  /**
+   * \brief Ungroup selected shapes.
+   */
+  void ungroup_selected_shapes();
+
+  /**
+   * \brief Duplicate selected shapes.
+   */
+  void duplicate_selected_shapes();
+
+  /**
+   * \brief Delete selected shapes.
+   */
+  void delete_selected_shapes();
+
+  /**
+   * \brief Get all shapes that belong to a group.
+   * \param group_id Group ID
+   * \return Vector of stroke indices in the group
+   */
+  std::vector<int> get_group_members(int group_id) const;
+
+  /**
+   * \brief Copy selected shapes to clipboard.
+   */
+  void copy_selected_shapes();
+
+  /**
+   * \brief Cut selected shapes to clipboard.
+   */
+  void cut_selected_shapes();
+
+  /**
+   * \brief Paste shapes from clipboard.
+   */
+  void paste_shapes();
+
+  /**
+   * \brief Nudge selected shapes by offset.
+   * \param dx Horizontal offset
+   * \param dy Vertical offset
+   */
+  void nudge_selection(float dx, float dy);
+
+  /**
+   * \brief Export canvas to PNG file.
+   */
+  void export_to_png();
+
+  /**
+   * \brief Export canvas to SVG file.
+   */
+  void export_to_svg();
+
 private:
   // === Model and View ===
   WhiteboardDocument *m_document;
@@ -122,6 +235,31 @@ private:
   std::vector<Point> m_original_positions;
   float m_rotation_start_angle;
   nanogui::Vector2f m_rotation_center;
+  
+  // === Clipboard ===
+  std::vector<Stroke> m_clipboard;
+  
+  // === Resize Handle Data ===
+  enum class ResizeHandle {
+    None = -1,
+    TopLeft = 0,
+    TopRight = 1,
+    BottomRight = 2,
+    BottomLeft = 3,
+    Top = 4,
+    Right = 5,
+    Bottom = 6,
+    Left = 7
+  };
+  ResizeHandle m_active_resize_handle;
+  float m_original_width;
+  float m_original_height;
+  nanogui::Vector2f m_resize_anchor;  // Opposite corner from the handle being dragged
+  
+  // === Guide Creation ===
+  Guide::Type m_guide_type;
+  float m_temp_guide_position;
+  int m_dragging_guide_index;
 
   // === Double-click Detection ===
   std::chrono::steady_clock::time_point m_last_click_time;
@@ -168,7 +306,7 @@ private:
   /**
    * \brief Handle select tool mouse drag.
    */
-  void handle_select_tool_drag(const nanogui::Vector2f &pos);
+  void handle_select_tool_drag(const nanogui::Vector2f &pos, int modifiers);
 
   /**
    * \brief Handle select tool mouse up.
@@ -227,6 +365,26 @@ private:
    * \return True if clicking on handle
    */
   bool is_clicking_rotation_handle(const nanogui::Vector2f &pos);
+  
+  /**
+   * \brief Get which resize handle is clicked.
+   * \param pos Position in canvas coordinates
+   * \return The resize handle, or None if not clicking any handle
+   */
+  ResizeHandle get_clicked_resize_handle(const nanogui::Vector2f &pos);
+  
+  /**
+   * \brief Start resize operation.
+   * \param pos Starting position
+   * \param handle Which handle is being dragged
+   */
+  void start_resize(const nanogui::Vector2f &pos, ResizeHandle handle);
+  
+  /**
+   * \brief Perform resize during drag.
+   * \param pos Current drag position
+   */
+  void perform_resize(const nanogui::Vector2f &pos);
 
   /**
    * \brief Check if this is a double-click.

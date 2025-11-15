@@ -33,103 +33,11 @@ project(nanogui
 
 # Dependencies are now managed by vcpkg (see vcpkg.json)
 
-if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified.")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-    "MinSizeRel" "RelWithDebInfo")
-endif()
-string(TOUPPER "${CMAKE_BUILD_TYPE}" U_CMAKE_BUILD_TYPE)
-
-set(NANOGUI_MASTER_PROJECT OFF)
-if (${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
-  set(NANOGUI_MASTER_PROJECT ON)
-endif()
-
-set(NANOGUI_BUILD_GLFW_DEFAULT OFF)
-set(NANOGUI_USE_SDL3_DEFAULT ON)
-
-if (WIN32)
-  set(NANOGUI_BUILD_GLAD_DEFAULT ON)
-else()
-  set(NANOGUI_BUILD_GLAD_DEFAULT OFF)
-endif()
-
-set(NANOGUI_BUILD_SHARED_DEFAULT OFF) 
-set(NANOGUI_USE_SDL2_DEFAULT OFF)
-
-if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$")
-  set(CMAKE_CXX_COMPILER_ID "Emscripten")
-  set(NANOGUI_BUILD_SHARED_DEFAULT OFF)
-  set(NANOGUI_BUILD_GLAD_DEFAULT   OFF) 
-  set(NANOGUI_BUILD_GLFW_DEFAULT  OFF)
-  set(NANOGUI_USE_SDL3_DEFAULT     ON)
-
-  set(CMAKE_STATIC_LIBRARY_SUFFIX ".bc")
-  set(CMAKE_EXECUTABLE_SUFFIX ".bc")
-  set(CMAKE_CXX_CREATE_STATIC_LIBRARY "<CMAKE_CXX_COMPILER> -o <TARGET> <LINK_FLAGS> <OBJECTS>")
-  if (U_CMAKE_BUILD_TYPE MATCHES REL)
-    add_compile_options(-O3 -DNDEBUG)
-  endif()
-endif()
-
-option(NANOGUI_BUILD_EXAMPLES            "Build NanoGUI example application?" ON)
-option(NANOGUI_BUILD_SHARED              "Build NanoGUI as a shared library?" ${NANOGUI_BUILD_SHARED_DEFAULT})
-option(NANOGUI_BUILD_GLAD                "Build GLAD OpenGL loader library? (needed on Windows)" ${NANOGUI_BUILD_GLAD_DEFAULT})
-option(NANOGUI_INSTALL                   "Install NanoGUI on `make install`?" OFF)
- 
-# Backend selection (mutually exclusive)
-include(CMakeDependentOption)
-option(NANOGUI_BUILD_GLFW "Use GLFW backend (desktop support)" ${NANOGUI_BUILD_GLFW_DEFAULT})
-option(NANOGUI_USE_SDL3 "Use SDL3 backend (cross-platform support)" ${NANOGUI_USE_SDL3_DEFAULT})
-
-# Validate backend selection - exactly one backend must be enabled
-if (NANOGUI_BUILD_GLFW AND NANOGUI_USE_SDL3)
-  message(FATAL_ERROR "NanoGUI: Cannot enable both GLFW and SDL3 backends. Choose one:\n"
-                      "  -DNANOGUI_BUILD_GLFW=ON   (for GLFW backend)\n"
-                      "  -DNANOGUI_USE_SDL3=ON     (for SDL3 backend)")
-endif()
-
-if (NOT NANOGUI_BUILD_GLFW AND NOT NANOGUI_USE_SDL3)
-  message(FATAL_ERROR "NanoGUI: At least one backend must be enabled:\n"
-                      "  -DNANOGUI_BUILD_GLFW=ON   (for GLFW backend)\n"
-                      "  -DNANOGUI_USE_SDL3=ON     (for SDL3 backend)")
-endif()
-
-option(NANOGUI_SKIP_METAL_SHADER_PRECOMPILATION "Compile Metal shaders at runtime instead of precompiling them while nanogui is built." OFF)
-option(NANOGUI_SKIP_STB_IMAGE_IMPLEMENTATION    "Do not compile stb_image's implementation into nanogui. If enabled, user code must do this instead." OFF)
-
-if (NOT NANOGUI_BACKEND)
-  if (CMAKE_CXX_COMPILER MATCHES "/em\\+\\+(-[a-zA-Z0-9.])?$")
-    set(NANOGUI_BACKEND_DEFAULT "GLES 2")
-  elseif (APPLE)
-    set(NANOGUI_BACKEND_DEFAULT "Metal")
-  elseif (CMAKE_SYSTEM_NAME MATCHES "Linux" OR
-          CMAKE_SYSTEM_NAME MATCHES "BSD")
-    set(NANOGUI_BACKEND_DEFAULT "OpenGL")
-  else()
-    set(NANOGUI_BACKEND_DEFAULT "OpenGL")
-  endif()
-
-  set(NANOGUI_BACKEND ${NANOGUI_BACKEND_DEFAULT} CACHE STRING "Choose the backend used for rendering (OpenGL/GLES 2/GLES 3/Metal)" FORCE)
-endif()
-
-set_property(CACHE NANOGUI_BACKEND PROPERTY STRINGS "OpenGL" "GLES 2" "GLES 3" "Metal")
+# Include build options configuration
+include(CMakeOptions.cmake)
 
 # Required libraries, flags, and include files for compiling and linking against nanogui (all targets)
 set(NANOGUI_EXTRA_INCS "")
-
-include(CheckCXXCompilerFlag)
-include(CheckCXXSourceRuns)
-
-macro(CHECK_CXX_COMPILER_AND_LINKER_FLAGS _RESULT _CXX_FLAGS _LINKER_FLAGS)
-  set(CMAKE_REQUIRED_FLAGS ${_CXX_FLAGS})
-  set(CMAKE_REQUIRED_LIBRARIES ${_LINKER_FLAGS})
-  set(CMAKE_REQUIRED_QUIET TRUE)
-  check_cxx_source_runs("#include <iostream>\nint main(int argc, char **argv) { std::cout << \"test\"; return 0; }" ${_RESULT})
-  set(CMAKE_REQUIRED_FLAGS "")
-  set(CMAKE_REQUIRED_LIBRARIES "")
-endmacro()
 
 if (NANOGUI_BACKEND STREQUAL "OpenGL")
   set(NANOGUI_BACKEND_DEFS -DNANOGUI_USE_OPENGL)
@@ -156,53 +64,11 @@ else()
   message(STATUS "NanoGUI: building static library.")
 endif()
 
-if (MSVC)
-  # Disable annoying MSVC warnings (all targets)
-  add_definitions(/D "_CRT_SECURE_NO_WARNINGS")
-
-  # Parallel build on MSVC (all targets)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
-endif()
-
-# Compile with compiler warnings turned on
-if (MSVC)
-  if (CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
-    string(REGEX REPLACE "/W[0-4]" "/W4" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-  else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
-  endif()
-elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-endif()
-
-# Use C++17, visibility=hidden by default, interprocedural optimization
+# Compiler flags are defined in presets/CompilerFlags.json
+# Use C++17, visibility=hidden by default
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-
-# Prefer libc++ in conjunction with Clang
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT CMAKE_CXX_FLAGS MATCHES "-stdlib=libc\\+\\+")
-  CHECK_CXX_COMPILER_AND_LINKER_FLAGS(HAS_LIBCPP "-stdlib=libc++" "-stdlib=libc++")
-  if (APPLE OR HAS_LIBCPP)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -D_LIBCPP_VERSION")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
-    message(STATUS "NanoGUI: using libc++.")
-  else()
-    CHECK_CXX_COMPILER_AND_LINKER_FLAGS(HAS_LIBCPP_AND_CPPABI "-stdlib=libc++" "-stdlib=libc++ -lc++abi")
-    if (HAS_LIBCPP_AND_CPPABI)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -D_LIBCPP_VERSION")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
-      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
-      message(STATUS "NanoGUI: using libc++ and libc++abi.")
-    else()
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libstdc++")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libstdc++")
-      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libstdc++")
-      message(STATUS "NanoGUI: using libstdc++.")
-    endif()
-  endif()
-endif()
 
 if (NANOGUI_BUILD_GLAD)
   # Use GLAD from vcpkg
@@ -353,10 +219,19 @@ endforeach()
 
 
 # Add vendor libraries before creating nanogui target
-add_subdirectory(vendor) 
+add_subdirectory(vendor)
+add_subdirectory(nanovg)
+add_subdirectory(nanovg_css)
+
+# Metal backend (Apple platforms only)
+if(APPLE AND NANOGUI_BACKEND STREQUAL "Metal")
+  add_subdirectory(nanovg_metal)
+endif()
+
 add_subdirectory(nanogui)
 add_subdirectory(styles)
 add_subdirectory(examples)
 add_subdirectory(AVPlayer)
 add_subdirectory(whiteboard)
 add_subdirectory(labX)
+add_subdirectory(flexui)

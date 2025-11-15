@@ -1,0 +1,248 @@
+/* Dark Theme Stylesheet for DDF Diagrams */
+
+/* Base styles for all shapes */
+* {
+  font-family: "Inter", "Roboto", sans-serif;
+  font-size: 12px;
+}
+
+/* Shape type defaults */
+rect {
+  fill: #2d3748;
+  stroke: #4a5568;
+  stroke-width: 1;
+  rx: 4;
+  ry: 4;
+}
+
+circle {
+  fill: #2d3748;
+  stroke: #4a5568;
+  stroke-width: 1;
+}
+
+ellipse {
+  fill: #2d3748;
+  stroke: #4a5568;
+  stroke-width: 1;
+}
+
+path {
+  fill: none;
+  stroke: #4a5568;
+  stroke-width: 1;
+}
+
+text {
+  fill: #e2e8f0;
+  font-size: 12px;
+  text-anchor: middle;
+}
+
+/* Interactive states */
+*:hover {
+  stroke: #718096;
+  stroke-width: 2;
+  opacity: 0.9;
+}
+
+*:selected {
+  stroke: #63b3ed;
+  stroke-width: 3;
+}
+
+*:active {
+  opacity: 0.8;
+}
+
+*:focus {
+  stroke: #63b3ed;
+  stroke-width: 2;
+  stroke-dasharray: 4,2;
+}
+
+/* Card components */
+.card {
+  fill: #1a202c;
+  stroke: #2d3748;
+  stroke-width: 1;
+  rx: 8;
+  ry: 8;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.3));
+}
+
+.card:hover {
+  fill: #2d3748;
+  stroke: #4a5568;
+  stroke-width: 2;
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,0.4));
+}
+
+.card-header {
+  fill: #2d3748;
+  stroke: none;
+}
+
+.card-title {
+  fill: #f7fafc;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.card-subtitle {
+  fill: #cbd5e0;
+  font-size: 11px;
+}
+
+.card-body {
+  fill: #a0aec0;
+  font-size: 12px;
+}
+
+/* Color variants */
+.primary {
+  fill: #3182ce;
+  stroke: #2c5282;
+}
+
+.primary text {
+  fill: #ffffff;
+}
+
+.secondary {
+  fill: #4a5568;
+  stroke: #2d3748;
+}
+
+.secondary text {
+  fill: #e2e8f0;
+}
+
+.success {
+  fill: #38a169;
+  stroke: #2f855a;
+}
+
+.success text {
+  fill: #ffffff;
+}
+
+.warning {
+  fill: #ed8936;
+  stroke: #dd6b20;
+}
+
+.warning text {
+  fill: #ffffff;
+}
+
+.danger {
+  fill: #e53e3e;
+  stroke: #c53030;
+}
+
+.danger text {
+  fill: #ffffff;
+}
+
+.info {
+  fill: #4299e1;
+  stroke: #3182ce;
+}
+
+.info text {
+  fill: #ffffff;
+}
+
+/* Connector styles */
+.connector {
+  stroke: #718096;
+  stroke-width: 2;
+  fill: none;
+}
+
+.connector:hover {
+  stroke: #a0aec0;
+  stroke-width: 3;
+}
+
+.connector-dashed {
+  stroke-dasharray: 5,5;
+}
+
+.connector-dotted {
+  stroke-dasharray: 2,3;
+}
+
+.connector-label {
+  fill: #cbd5e0;
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* Group styles */
+.group {
+  fill: none;
+  stroke: #4a5568;
+  stroke-width: 1;
+  stroke-dasharray: 4,4;
+}
+
+.group-label {
+  fill: #a0aec0;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+/* Status indicators */
+.status-online {
+  fill: #48bb78;
+}
+
+.status-offline {
+  fill: #f56565;
+}
+
+.status-warning {
+  fill: #ed8936;
+}
+
+.status-unknown {
+  fill: #718096;
+}
+
+/* Badge styles */
+.badge {
+  fill: #2d3748;
+  stroke: #4a5568;
+  stroke-width: 1;
+  rx: 12;
+  ry: 12;
+}
+
+.badge text {
+  fill: #e2e8f0;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+/* Icon styles */
+.icon {
+  fill: #cbd5e0;
+  stroke: none;
+}
+
+.icon-small {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-medium {
+  width: 24px;
+  height: 24px;
+}
+
+.icon-large {
+  width: 32px;
+  height: 32px;
+}

@@ -1,0 +1,9 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Main component box -->
+  <rect x="20" y="25" width="70" height="50" fill="#E3F2FD" stroke="#2196F3" stroke-width="2" rx="3"/>
+  <!-- Component symbol (two small rectangles on left) -->
+  <rect x="10" y="35" width="15" height="10" fill="#E3F2FD" stroke="#2196F3" stroke-width="1.5"/>
+  <rect x="10" y="55" width="15" height="10" fill="#E3F2FD" stroke="#2196F3" stroke-width="1.5"/>
+  <!-- Component name -->
+  <text x="55" y="55" font-family="Arial" font-size="12" fill="#1976D2" text-anchor="middle">Component</text>
+</svg>

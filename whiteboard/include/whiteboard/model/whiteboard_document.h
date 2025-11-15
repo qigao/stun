@@ -137,6 +137,40 @@ public:
    */
   void set_current_tool(Tool tool);
 
+  /**
+   * \brief Get pending SVG shape ID (for drag-and-drop placement).
+   */
+  std::string get_pending_svg_shape() const { return m_pending_svg_shape; }
+
+  /**
+   * \brief Set pending SVG shape ID for next placement.
+   * \param shape_id Shape ID from library
+   */
+  void set_pending_svg_shape(const std::string& shape_id) { m_pending_svg_shape = shape_id; }
+
+  /**
+   * \brief Clear pending SVG shape.
+   */
+  void clear_pending_svg_shape() { m_pending_svg_shape.clear(); }
+
+  // === Export ===
+
+  /**
+   * \brief Export canvas to PNG file.
+   * \param file_path Output file path
+   * \param width Image width (0 = use canvas size)
+   * \param height Image height (0 = use canvas size)
+   * \return True if successful
+   */
+  bool export_to_png(const std::string& file_path, int width = 0, int height = 0);
+
+  /**
+   * \brief Export canvas to SVG file.
+   * \param file_path Output file path
+   * \return True if successful
+   */
+  bool export_to_svg(const std::string& file_path);
+
   // === Tool Properties ===
 
   /**
@@ -271,7 +305,10 @@ public:
    *
    * Notifies observers via on_view_changed().
    */
-  void set_grid_visible(bool visible);
+  void set_grid_visible(bool visible) {
+    m_grid_visible = visible;
+    notify_view_changed();
+  }
 
   /**
    * \brief Check if guides are visible.
@@ -284,7 +321,30 @@ public:
    *
    * Notifies observers via on_view_changed().
    */
-  void set_guides_visible(bool visible);
+  void set_guides_visible(bool visible) {
+    m_guides_visible = visible;
+    notify_view_changed();
+  }
+
+  /**
+   * \brief Check if dark mode is enabled.
+   */
+  bool get_dark_mode() const { return m_dark_mode; }
+
+  /**
+   * \brief Set dark mode.
+   * \param enabled New dark mode state
+   *
+   * Notifies observers via on_view_changed().
+   */
+  void set_dark_mode(bool enabled);
+
+  /**
+   * \brief Get canvas background color based on current theme.
+   */
+  nanogui::Color get_canvas_background() const {
+    return m_dark_mode ? m_canvas_bg_dark : m_canvas_bg_light;
+  }
 
   /**
    * \brief Check if snap to grid is enabled.
@@ -298,6 +358,17 @@ public:
    * Notifies observers via on_view_changed().
    */
   void set_snap_enabled(bool enabled);
+
+  /**
+   * \brief Get snap distance in pixels.
+   */
+  float get_snap_distance() const { return m_snap_distance; }
+
+  /**
+   * \brief Set snap distance in pixels.
+   * \param distance New snap distance
+   */
+  void set_snap_distance(float distance) { m_snap_distance = distance; }
 
   // === Guide Management ===
 
@@ -321,6 +392,15 @@ public:
    * Notifies observers via on_strokes_changed().
    */
   void remove_guide(int index);
+
+  /**
+   * \brief Update a guide's position.
+   * \param index Guide index
+   * \param position New position
+   *
+   * Notifies observers via on_strokes_changed().
+   */
+  void update_guide(int index, float position);
 
   // === History (Undo/Redo) ===
 
@@ -406,21 +486,21 @@ public:
    * Clears current state and loads from JSON.
    * Notifies observers after loading.
    */
-  void from_json(const nlohmann::json& j);
+  void from_json(const nlohmann::json &j);
 
   /**
    * \brief Save document to file.
    * \param filename Path to save file (.whiteboard extension)
    * \return True if successful, false on error
    */
-  bool save_to_file(const std::string& filename);
+  bool save_to_file(const std::string &filename);
 
   /**
    * \brief Load document from file.
    * \param filename Path to load file
    * \return True if successful, false on error
    */
-  bool load_from_file(const std::string& filename);
+  bool load_from_file(const std::string &filename);
 
   // === Observer Pattern ===
 
@@ -458,6 +538,13 @@ private:
   bool m_grid_visible;
   bool m_guides_visible;
   bool m_snap_enabled;
+  float m_snap_distance;
+  bool m_dark_mode;
+  nanogui::Color m_canvas_bg_light;
+  nanogui::Color m_canvas_bg_dark;
+  
+  // === SVG Shape Placement ===
+  std::string m_pending_svg_shape;
 
   // === History ===
   std::stack<DocumentState> m_undo_stack;

@@ -1,18 +1,14 @@
 #pragma once
 #include <nanogui.h>
-#include <nanovg.h>
-#include <vector>
 
 using namespace nanogui;
 
 class SpeedometerRack : public Widget {
 public:
   SpeedometerRack(Widget *parent);
-  ~SpeedometerRack() override = default;
-
   Vector2i preferred_size_impl(NVGcontext *ctx) const override;
-  void draw(NVGcontext *ctx) override;
   void update(float dt);
+  void draw(NVGcontext *ctx) override;
 
 private:
   void drawRackPanel(NVGcontext *ctx, float x, float y, float w, float h);

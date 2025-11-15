@@ -1,0 +1,103 @@
+:root {
+  --primary-color: #4a90e2;
+  --success-color: #5cb85c;
+  --danger-color: #d9534f;
+  --warning-color: #f0ad4e;
+}
+
+.button {
+  width: 150px;
+  height: 50px;
+  background: var(--primary-color);
+  border-radius: 5px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  color: #fff;
+  font-size: 16px;
+  text-align: center;
+  line-height: 50px;
+  transition: all 0.3s ease-in-out;
+}
+
+.button:hover {
+  background: #5aa0f2;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  transform: translateY(-2px);
+}
+
+.button:active {
+  background: #3a70c2;
+  transform: translateY(0px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.gradient-box {
+  width: 200px;
+  height: 150px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  color: white;
+  font-size: 18px;
+  text-align: center;
+}
+
+.gradient-box:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  transform: scale(1.05);
+  transition: all 0.4s ease-in-out;
+}
+
+.transform-box {
+  width: 100px;
+  height: 100px;
+  background: var(--success-color);
+  border-radius: 15px;
+  transform: rotate(0deg);
+  transition: transform 0.5s ease-in-out;
+  color: white;
+  font-size: 14px;
+  text-align: center;
+  line-height: 100px;
+}
+
+.transform-box:hover {
+  transform: rotate(45deg) scale(1.2);
+}
+
+.card {
+  width: 250px;
+  height: 180px;
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  color: #333;
+  font-size: 16px;
+  text-align: center;
+  line-height: 140px;
+}
+
+.card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 4px 16px rgba(74, 144, 226, 0.2);
+}
+
+.circle {
+  width: 80px;
+  height: 80px;
+  background: radial-gradient(circle at center, #ff6b6b, #ee5a6f);
+  border-radius: 40px;
+}
+
+.circle:hover {
+  background: radial-gradient(circle at center, #ee5a6f, #c44569);
+  transform: scale(1.15);
+  transition: all 0.3s ease;
+}
+
+.label {
+  font-size: 14px;
+  color: #333;
+}

@@ -1,0 +1,11 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Bulb -->
+  <circle cx="50" cy="35" r="18" fill="#FFF9C4" stroke="#FBC02D" stroke-width="2"/>
+  <!-- Base -->
+  <rect x="45" y="50" width="10" height="8" fill="#FBC02D" stroke="#F57C00" stroke-width="1"/>
+  <rect x="43" y="58" width="14" height="4" fill="#F57C00" stroke="none"/>
+  <!-- Light rays -->
+  <line x1="50" y1="12" x2="50" y2="5" stroke="#FBC02D" stroke-width="2"/>
+  <line x1="70" y1="20" x2="75" y2="15" stroke="#FBC02D" stroke-width="2"/>
+  <line x1="30" y1="20" x2="25" y2="15" stroke="#FBC02D" stroke-width="2"/>
+</svg>

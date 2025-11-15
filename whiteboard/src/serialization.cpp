@@ -52,12 +52,19 @@ json stroke_to_json(const Stroke& stroke) {
     j["svg_shape_id"] = stroke.svg_shape_id;
     j["svg_scale_x"] = stroke.svg_scale_x;
     j["svg_scale_y"] = stroke.svg_scale_y;
+    j["svg_width"] = stroke.svg_width;
+    j["svg_height"] = stroke.svg_height;
     
     // Serialize SVG parameters
     if (!stroke.svg_parameters.empty()) {
       j["svg_parameters"] = stroke.svg_parameters;
     }
   }
+  
+  // Enhanced visual properties (Task 12)
+  j["opacity"] = stroke.opacity;
+  j["stroke_style"] = static_cast<int>(stroke.stroke_style);
+  j["corner_radius"] = stroke.corner_radius;
   
   return j;
 }
@@ -104,10 +111,17 @@ Stroke stroke_from_json(const json& j) {
   stroke.svg_shape_id = j.value("svg_shape_id", "");
   stroke.svg_scale_x = j.value("svg_scale_x", 1.0f);
   stroke.svg_scale_y = j.value("svg_scale_y", 1.0f);
+  stroke.svg_width = j.value("svg_width", 100.0f);
+  stroke.svg_height = j.value("svg_height", 100.0f);
   
   if (j.contains("svg_parameters")) {
     stroke.svg_parameters = j["svg_parameters"].get<std::map<std::string, std::string>>();
   }
+  
+  // Enhanced visual properties (Task 12) - with defaults for backward compatibility
+  stroke.opacity = j.value("opacity", 1.0f);
+  stroke.stroke_style = static_cast<StrokeStyle>(j.value("stroke_style", 0));  // 0 = Solid
+  stroke.corner_radius = j.value("corner_radius", 0.0f);
   
   // Runtime properties (not serialized)
   stroke.selected = false;

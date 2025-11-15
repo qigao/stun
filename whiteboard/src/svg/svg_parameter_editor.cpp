@@ -4,6 +4,7 @@
  */
 
 #include "whiteboard/svg/svg_parameter_editor.h"
+#include <fmtlog.h>
 #include <nanogui/layout.h>
 #include <nanogui/label.h>
 #include <iostream>
@@ -116,18 +117,26 @@ void SVGParameterEditor::commit_changes() {
     stroke.svg_parameters[pair.first] = pair.second->value();
   }
 
+  // Log parameters before regeneration
+  logi("SVGParameterEditor: Updating stroke {} with {} parameters", m_stroke_index, stroke.svg_parameters.size());
+  for (const auto &pair : stroke.svg_parameters) {
+    logi("  Parameter '{}' = '{}'", pair.first, pair.second);
+  }
+
   // Regenerate SVG with new parameters
   stroke.svg_data = m_library->generate_svg(stroke.svg_shape_id, stroke.svg_parameters);
 
   if (stroke.svg_data.empty()) {
-    std::cerr << "Failed to regenerate SVG for shape: " << stroke.svg_shape_id << std::endl;
+    loge("Failed to regenerate SVG for shape: {}", stroke.svg_shape_id);
     return;
   }
+
+  logi("Successfully regenerated SVG ({} bytes)", stroke.svg_data.size());
 
   // Update stroke in document
   m_document->update_stroke(m_stroke_index, stroke);
 
-  std::cout << "Updated SVG shape parameters for stroke " << m_stroke_index << std::endl;
+  logi("Updated SVG shape parameters for stroke {}", m_stroke_index);
 }
 
 } // namespace whiteboard

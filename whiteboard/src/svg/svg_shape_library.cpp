@@ -4,10 +4,13 @@
  */
 
 #include "whiteboard/svg/svg_shape_library.h"
+#include "whiteboard/svg/svg_generator.h"
 #include <algorithm>
 #include <fmtlog.h>
 #include <fstream>
 #include <iostream>
+#include <lunasvg.h>
+#include <nlohmann/json.hpp>
 #include <sstream>
 
 namespace whiteboard {
@@ -183,6 +186,18 @@ Stroke SVGShapeLibrary::create_shape(const std::string &shape_id, const Point &p
     loge("SVGShapeLibrary: Failed to generate SVG data for '{}'", shape_id);
   } else {
     logi("SVGShapeLibrary: Generated SVG data ({} bytes)", stroke.svg_data.size());
+    
+    // Parse SVG to get dimensions
+    auto svg_doc = lunasvg::Document::loadFromData(stroke.svg_data);
+    if (svg_doc) {
+      stroke.svg_width = svg_doc->width();
+      stroke.svg_height = svg_doc->height();
+      logi("SVGShapeLibrary: SVG dimensions: {}x{}", stroke.svg_width, stroke.svg_height);
+    } else {
+      logw("SVGShapeLibrary: Failed to parse SVG for dimensions, using defaults");
+      stroke.svg_width = 100.0f;
+      stroke.svg_height = 100.0f;
+    }
   }
 
   // Set stroke name
@@ -218,6 +233,17 @@ std::string SVGShapeLibrary::generate_svg(const std::string &shape_id,
 }
 
 std::string SVGShapeLibrary::load_svg_file(const std::string &svg_path) {
+  // Check if this is a .svgshape file (DDF format)
+  if (svg_path.size() >= 9 && svg_path.substr(svg_path.size() - 9) == ".svgshape") {
+    logi("SVGShapeLibrary: Loading DDF-format shape from '{}'", svg_path);
+    return load_svgshape_file(svg_path);
+  }
+  if (svg_path.size() >= 14 && svg_path.substr(svg_path.size() - 14) == ".svgshape.json") {
+    logi("SVGShapeLibrary: Loading DDF-format shape from '{}'", svg_path);
+    return load_svgshape_file(svg_path);
+  }
+  
+  // Load regular SVG file
   std::ifstream file(svg_path);
   if (!file.is_open()) {
     std::cerr << "Failed to open SVG file: " << svg_path << std::endl;
@@ -229,24 +255,124 @@ std::string SVGShapeLibrary::load_svg_file(const std::string &svg_path) {
   return buffer.str();
 }
 
+std::string SVGShapeLibrary::load_svgshape_file(const std::string &filepath) {
+  try {
+    // Load JSON file
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+      loge("SVGShapeLibrary: Failed to open .svgshape file: {}", filepath);
+      return "";
+    }
+    
+    nlohmann::json j;
+    file >> j;
+    
+    logi("SVGShapeLibrary: Loaded .svgshape JSON from '{}'", filepath);
+    
+    // Check if it's a single shape or multiple shapes
+    SVGGenerator generator;
+    std::string svg_data;
+    
+    if (j.contains("shapes")) {
+      // Multiple shapes
+      std::vector<SVGShapeDesc> shapes = parse_svgshape_array(j["shapes"]);
+      svg_data = generator.generate_multi(shapes);
+      logi("SVGShapeLibrary: Generated SVG from {} shapes", shapes.size());
+    } else {
+      // Single shape
+      SVGShapeDesc shape = parse_svgshape_json(j);
+      svg_data = generator.generate(shape);
+      logi("SVGShapeLibrary: Generated SVG from single shape");
+    }
+    
+    return svg_data;
+    
+  } catch (const std::exception& e) {
+    loge("SVGShapeLibrary: Exception loading .svgshape file: {}", e.what());
+    return "";
+  }
+}
+
 std::string
 SVGShapeLibrary::replace_placeholders(const std::string &svg_template,
                                       const std::map<std::string, std::string> &parameters) {
   std::string result = svg_template;
+
+  logd("SVGShapeLibrary: Replacing placeholders - {} parameters", parameters.size());
 
   // Replace {{placeholder}} syntax
   for (const auto &pair : parameters) {
     std::string placeholder = "{{" + pair.first + "}}";
     std::string value = pair.second;
 
+    logd("SVGShapeLibrary: Looking for '{}' to replace with '{}'", placeholder, value);
+
     size_t pos = 0;
+    int replacements = 0;
     while ((pos = result.find(placeholder, pos)) != std::string::npos) {
       result.replace(pos, placeholder.length(), value);
       pos += value.length();
+      replacements++;
+    }
+
+    if (replacements > 0) {
+      logi("SVGShapeLibrary: Replaced '{}' {} times", placeholder, replacements);
+    } else {
+      logw("SVGShapeLibrary: Placeholder '{}' not found in template!", placeholder);
     }
   }
 
   return result;
+}
+
+SVGShapeDesc SVGShapeLibrary::parse_svgshape_json(const nlohmann::json& j) {
+  SVGShapeDesc shape;
+  
+  if (j.contains("type")) {
+    shape.type = j["type"];
+  }
+  
+  if (j.contains("geometry")) {
+    for (auto& [key, value] : j["geometry"].items()) {
+      if (value.is_number()) {
+        shape.geometry[key] = value.get<float>();
+      }
+    }
+  }
+  
+  if (j.contains("style")) {
+    for (auto& [key, value] : j["style"].items()) {
+      if (value.is_string()) {
+        shape.style[key] = value.get<std::string>();
+      }
+    }
+  }
+  
+  if (j.contains("text")) {
+    shape.text = j["text"];
+  }
+  
+  if (j.contains("path_data")) {
+    shape.path_data = j["path_data"];
+  }
+  
+  if (j.contains("children")) {
+    for (auto& child_json : j["children"]) {
+      shape.children.push_back(parse_svgshape_json(child_json));
+    }
+  }
+  
+  return shape;
+}
+
+std::vector<SVGShapeDesc> SVGShapeLibrary::parse_svgshape_array(const nlohmann::json& j) {
+  std::vector<SVGShapeDesc> shapes;
+  
+  for (auto& shape_json : j) {
+    shapes.push_back(parse_svgshape_json(shape_json));
+  }
+  
+  return shapes;
 }
 
 } // namespace whiteboard

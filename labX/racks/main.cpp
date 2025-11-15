@@ -1,11 +1,6 @@
 #include "adsorbing_window.h"
 #include "oscilloscope_module.h"
-#include "properties_panel_module.h"
-#include "speedometer_module.h"
 #include "speedometer_rack.h"
-#include "style_panel_module.h"
-#include "text_panel_module.h"
-#include "toolbar_panel_module.h"
 #include "vcv_module_panel.h"
 #include "wasp_filter_module.h"
 #include "window_adsorption.h"
@@ -57,22 +52,6 @@ public:
     m_speedometerWindow->setAdsorptionManager(m_adsorption);
     m_speedometerRack = new SpeedometerRack(m_speedometerWindow);
 
-    // Toolbar panel - directly on screen (no window border)
-    m_toolbar = new ToolbarPanelModule(this);
-    m_toolbar->set_position(Vector2i(400, 700));
-
-    // Properties panel - directly on screen (no window border)
-    m_propertiesPanel = new PropertiesPanelModule(this);
-    m_propertiesPanel->set_position(Vector2i(1200, 50));
-
-    // Style panel - directly on screen (no window border)
-    m_stylePanel = new StylePanelModule(this);
-    m_stylePanel->set_position(Vector2i(50, 50));
-
-    // Text panel - directly on screen (no window border)
-    m_textPanel = new TextPanelModule(this);
-    m_textPanel->set_position(Vector2i(450, 50));
-
     // Register windows for adsorption
     m_adsorption->registerWindow(m_mainWindow);
     m_adsorption->registerWindow(m_scopeWindow);
@@ -107,10 +86,6 @@ public:
     m_children.clear();
 
     // Clear all widget pointers
-    m_textPanel = nullptr;
-    m_stylePanel = nullptr;
-    m_propertiesPanel = nullptr;
-    m_toolbar = nullptr;
     m_speedometerWindow = nullptr;
     m_speedometerRack = nullptr;
     m_scopeWindow = nullptr;
@@ -136,10 +111,6 @@ public:
 private:
   OscilloscopeModule *m_scope = nullptr;
   SpeedometerRack *m_speedometerRack = nullptr;
-  ToolbarPanelModule *m_toolbar = nullptr;
-  PropertiesPanelModule *m_propertiesPanel = nullptr;
-  StylePanelModule *m_stylePanel = nullptr;
-  TextPanelModule *m_textPanel = nullptr;
   WaspFilterModule *m_waspFilter = nullptr;
   VCVModulePanel *m_module1 = nullptr;
   VCVModulePanel *m_module2 = nullptr;
@@ -163,7 +134,6 @@ static int vcv_entry(int argc, char **argv) {
       std::cout << "Starting main loop..." << std::endl;
       nanogui::run(nanogui::RunMode::VSync);
       app->cleanup_resources();
- 
     }
     std::cout << "Shutting down NanoGUI..." << std::endl;
     nanogui::shutdown();
@@ -176,7 +146,4 @@ static int vcv_entry(int argc, char **argv) {
   return 0;
 }
 
-int main(int argc, char **argv) {
-  return vcv_entry(argc, argv);
-
-}
+int main(int argc, char **argv) { return vcv_entry(argc, argv); }

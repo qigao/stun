@@ -1,0 +1,6 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Toggle background (on state) -->
+  <rect x="30" y="40" width="40" height="20" fill="#4CAF50" stroke="none" rx="10"/>
+  <!-- Toggle knob -->
+  <circle cx="60" cy="50" r="8" fill="white" stroke="none"/>
+</svg>

@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "title": "Checkbox",
+    "category": "UI",
+    "description": "Modern checkbox with checkmark"
+  },
+  "shapes": [
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 24,
+        "height": 24,
+        "rx": 4
+      },
+      "style": {
+        "fill": "#3498db",
+        "stroke": "#2980b9",
+        "stroke-width": "2"
+      }
+    },
+    {
+      "type": "path",
+      "path_data": "M 6 12 L 10 16 L 18 8",
+      "style": {
+        "stroke": "#ffffff",
+        "stroke-width": "3",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+        "fill": "none"
+      }
+    }
+  ]
+}

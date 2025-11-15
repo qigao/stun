@@ -10,8 +10,12 @@
 #include <lunasvg.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace whiteboard {
+
+// Forward declaration
+struct SVGShapeDesc;
 
 /**
  * \class SVGRenderer
@@ -21,6 +25,9 @@ namespace whiteboard {
  * It uses LunaSVG to parse and rasterize SVG content, then renders the
  * result to a NanoVG context. LunaSVG provides clean RAII semantics
  * and avoids the memory management issues of ThorVG.
+ * 
+ * Also supports rendering from DDF-like shape descriptions for easier
+ * programmatic SVG generation.
  */
 class SVGRenderer {
 public:
@@ -45,13 +52,49 @@ public:
    * \param scale_x Horizontal scale factor
    * \param scale_y Vertical scale factor
    * \param rotation Rotation angle in radians
+   * \param tint_color Optional color tint to apply (nullptr for no tint)
    *
    * Renders the LunaSVG document by rasterizing it to a bitmap,
    * creating a NanoVG image, and drawing it with transforms applied.
+   * If tint_color is provided, applies color modulation to the SVG.
    * Memory is automatically managed via RAII.
    */
   void render(NVGcontext* ctx, lunasvg::Document* document,
-              const nanogui::Vector2f& pos, float scale_x, float scale_y, float rotation);
+              const nanogui::Vector2f& pos, float scale_x, float scale_y, float rotation,
+              const NVGcolor* tint_color = nullptr);
+
+  /**
+   * \brief Render from DDF-like shape description.
+   * \param ctx NanoVG context
+   * \param shape Shape description (DDF-like format)
+   * \param pos Position in canvas coordinates
+   * \param scale_x Horizontal scale factor
+   * \param scale_y Vertical scale factor
+   * \param rotation Rotation angle in radians
+   * \param tint_color Optional color tint to apply (nullptr for no tint)
+   * 
+   * Generates SVG from the shape description and renders it.
+   * This allows creating SVG shapes programmatically without writing XML.
+   */
+  void render_shape(NVGcontext* ctx, const SVGShapeDesc& shape,
+                   const nanogui::Vector2f& pos, float scale_x, float scale_y, float rotation,
+                   const NVGcolor* tint_color = nullptr);
+
+  /**
+   * \brief Render multiple shapes from DDF-like descriptions.
+   * \param ctx NanoVG context
+   * \param shapes Vector of shape descriptions
+   * \param pos Position in canvas coordinates
+   * \param scale_x Horizontal scale factor
+   * \param scale_y Vertical scale factor
+   * \param rotation Rotation angle in radians
+   * \param tint_color Optional color tint to apply (nullptr for no tint)
+   * 
+   * Generates SVG from multiple shape descriptions and renders them as one document.
+   */
+  void render_shapes(NVGcontext* ctx, const std::vector<SVGShapeDesc>& shapes,
+                    const nanogui::Vector2f& pos, float scale_x, float scale_y, float rotation,
+                    const NVGcolor* tint_color = nullptr);
 
   /**
    * \brief Deprecated - no longer needed with LunaSVG.

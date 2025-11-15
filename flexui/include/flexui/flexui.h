@@ -1,0 +1,15 @@
+#pragma once
+#include "flexui/app.h"
+#include "flexui/controller.h"
+#include "flexui/document.h"
+#include "flexui/node.h"
+#include "flexui/view.h"
+// widgets
+#include "flexui/widget_factory.h"
+#include "flexui/widgets/checkbox.h"
+#include "flexui/widgets/dropdown.h"
+#include "flexui/widgets/interaction.h"
+#include "flexui/widgets/radio.h"
+#include "flexui/widgets/slider.h"
+#include "flexui/widgets/text_input.h"
+#include "flexui/widgets/toggle.h"

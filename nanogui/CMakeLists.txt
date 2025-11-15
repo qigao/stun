@@ -322,7 +322,7 @@ if(NANOGUI_INSTALL)
     PATTERN "*.h")
 
   install(
-    DIRECTORY vendor/nanovg/src/
+    DIRECTORY ${CMAKE_SOURCE_DIR}/nanovg/src/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nanovg
     FILES_MATCHING
     PATTERN "*.h")

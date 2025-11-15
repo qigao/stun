@@ -6,6 +6,7 @@
 #pragma once
 
 #include "whiteboard/types.h"
+#include "whiteboard/svg/svg_generator.h"
 #include <nlohmann/json.hpp>
 #include <map>
 #include <string>
@@ -142,6 +143,27 @@ private:
    */
   std::string replace_placeholders(const std::string& svg_template,
                                    const std::map<std::string, std::string>& parameters);
+
+  /**
+   * \brief Load and generate SVG from .svgshape file (DDF format).
+   * \param filepath Path to .svgshape file
+   * \return Generated SVG content
+   */
+  std::string load_svgshape_file(const std::string& filepath);
+
+  /**
+   * \brief Parse JSON into SVGShapeDesc structure.
+   * \param j JSON object
+   * \return Parsed shape description
+   */
+  SVGShapeDesc parse_svgshape_json(const nlohmann::json& j);
+
+  /**
+   * \brief Parse JSON array into vector of SVGShapeDesc.
+   * \param j JSON array
+   * \return Vector of parsed shape descriptions
+   */
+  std::vector<SVGShapeDesc> parse_svgshape_array(const nlohmann::json& j);
 };
 
 } // namespace whiteboard

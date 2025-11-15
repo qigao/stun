@@ -1,0 +1,10 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Load balancer box -->
+  <rect x="25" y="35" width="50" height="30" fill="#E8F5E9" stroke="#4CAF50" stroke-width="2" rx="3"/>
+  <!-- Distribution arrows -->
+  <path d="M 50,35 L 50,20 M 45,25 L 50,20 L 55,25" stroke="#4CAF50" stroke-width="2" fill="none"/>
+  <path d="M 50,65 L 35,80 M 40,75 L 35,80 L 40,85" stroke="#4CAF50" stroke-width="2" fill="none"/>
+  <path d="M 50,65 L 65,80 M 60,75 L 65,80 L 60,85" stroke="#4CAF50" stroke-width="2" fill="none"/>
+  <!-- LB text -->
+  <text x="50" y="53" font-family="Arial" font-size="10" fill="#2E7D32" text-anchor="middle">LB</text>
+</svg>

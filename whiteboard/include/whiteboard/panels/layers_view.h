@@ -55,6 +55,11 @@ public:
    */
   void set_controller(LayersController *controller) { m_controller = controller; }
 
+  /**
+   * \brief Draw the panel with border.
+   */
+  void draw(NVGcontext *ctx) override;
+
 private:
   /**
    * \brief Rebuild the layer list UI.

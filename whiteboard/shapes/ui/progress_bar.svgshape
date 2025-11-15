@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "title": "Progress Bar",
+    "category": "UI",
+    "description": "Modern progress bar with percentage"
+  },
+  "shapes": [
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 200,
+        "height": 20,
+        "rx": 10
+      },
+      "style": {
+        "fill": "#e2e8f0",
+        "stroke": "#cbd5e0",
+        "stroke-width": "1"
+      }
+    },
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 2,
+        "y": 2,
+        "width": 120,
+        "height": 16,
+        "rx": 8
+      },
+      "style": {
+        "fill": "#48bb78"
+      }
+    },
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 4,
+        "y": 4,
+        "width": 116,
+        "height": 8,
+        "rx": 4
+      },
+      "style": {
+        "fill": "#ffffff",
+        "fill-opacity": "0.3"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 100,
+        "y": 10
+      },
+      "text": "{{percentage}}%",
+      "style": {
+        "fill": "white",
+        "font-size": "10px",
+        "font-family": "Arial, sans-serif",
+        "font-weight": "bold",
+        "text-anchor": "middle",
+        "dominant-baseline": "middle"
+      }
+    }
+  ]
+}

@@ -19,16 +19,23 @@
 #include "whiteboard/panels/properties_view.h"
 #include "whiteboard/panels/text_controller.h"
 #include "whiteboard/panels/text_view.h"
-#include "whiteboard/shape_panel_module.h"
 #include "whiteboard/properties_panel_module.h"
 #include "whiteboard/search_bar.h"
+#include "whiteboard/shape_panel_module.h"
 #include "whiteboard/svg/svg_shape_library.h"
-#include "whiteboard/template_gallery.h"
-#include "whiteboard/text_panel_module.h"
 #include "whiteboard/toolbar/toolbar_controller.h"
 #include "whiteboard/toolbar/toolbar_view.h"
 #include "whiteboard/toolbar_panel_module.h"
+#include "whiteboard/types.h"
+#include "whiteboard/ui/context_menu_module.h"
+#include "whiteboard/ui/export_dialog.h"
+#include "whiteboard/ui/help_panel_module.h"
+#include "whiteboard/ui/toast_notification.h"
 #include "whiteboard/zoom_panel_module.h"
+
+#include <stack>
+#include <string>
+#include <vector>
 
 namespace whiteboard {
 
@@ -39,9 +46,8 @@ class ModernWhiteboardApp;
  * \brief Top-level window combining the canvas, tool panels, and async services.
  *
  * The application wraps NanoGUI's `Screen` to provide a multi-panel whiteboard
- * UI with layer management, template galleries, search, and background export
- * services. It also brokers access to undo/redo stacks, guide snaps, and
- * changes in active tools.
+ * UI with layer management, search, and background export services. It also
+ * brokers access to undo/redo stacks, guide snaps, and changes in active tools.
  */
 class ModernWhiteboardApp : public Screen, public IDocumentObserver {
 public:
@@ -79,9 +85,9 @@ public:
 
   std::vector<CanvasPage> &get_pages() { return m_pages; }
   int get_current_page() const { return m_current_page; }
-  WhiteboardDocument* get_document() { return m_document; }
+  WhiteboardDocument *get_document() { return m_document; }
   void set_saving_indicator_visible(bool visible);
-  
+
   // IDocumentObserver interface
   void on_strokes_changed() override {}
   void on_selection_changed() override;
@@ -91,6 +97,7 @@ public:
 protected:
   bool resize_event(const Vector2i &size) override;
   bool keyboard_event(int key, int scancode, int action, int modifiers) override;
+  bool drop_event(const std::vector<std::string> &filenames) override;
 
 private:
   void create_menu_toolbar();
@@ -98,19 +105,39 @@ private:
   void create_floating_panels();
   void create_zoom_controls();
   void create_properties_panel();
-  void create_text_panel();
   void create_floating_toolbar();
   void update_floating_toolbar();
   void update_properties_panel();
   void update_layers_panel();
   void show_restore_prompt();
   void update_layout();
-  
+
   // File operations
   void open_file();
   void save_file();
   void save_file_as();
+  void import_ddf_file();
+  void load_ddf_from_path(const std::string& filepath);
   void toggle_shape_library();
+  void show_export_dialog();
+  void handle_export(ExportDialog::Format format, ExportDialog::Scope scope, int quality);
+
+  // Toast notifications
+  void show_toast(const std::string &message,
+                  ToastNotification::Type type = ToastNotification::Type::Info);
+
+  // Help panel
+  void toggle_help_panel();
+
+  // Context menu
+  void show_context_menu(const nanogui::Vector2i &pos);
+  void add_svg_line(int stroke_index, const std::string &param_name, const std::string &default_value);
+  void remove_svg_line(int stroke_index, const std::string &param_name, int line_index);
+  void edit_svg_line(int stroke_index, const std::string &param_name, int line_index);
+  void delete_svg_line(int stroke_index, const std::string &param_name, int line_index);
+  void insert_svg_line_above(int stroke_index, const std::string &param_name, int line_index);
+  void insert_svg_line_below(int stroke_index, const std::string &param_name, int line_index);
+  void duplicate_svg_line(int stroke_index, const std::string &param_name, int line_index);
 
   // MVC Architecture
   WhiteboardDocument *m_document = nullptr;
@@ -134,20 +161,30 @@ private:
   AutoSaveManager *m_auto_save_manager = nullptr;
   PropertiesPanelModule *m_properties_panel = nullptr;
   SearchBar *m_search_bar = nullptr;
-  TemplateGallery *m_template_gallery = nullptr;
   MenuToolbarModule *m_menu_toolbar = nullptr;
   ToolbarPanelModule *m_left_sidebar = nullptr;
-  TextPanelModule *m_text_panel = nullptr;
   ZoomPanelModule *m_zoom_panel = nullptr;
   Label *m_saving_indicator = nullptr;
   std::vector<Button *> m_tool_buttons;
 
   std::vector<CanvasPage> m_pages;
   int m_current_page = 0;
-  
+
   // File management
   std::string m_current_file_path;
   std::string m_last_directory;
+
+  // Toast notifications
+  std::vector<ToastNotification *> m_toast_stack;
+
+  // Help panel
+  HelpPanelModule *m_help_panel = nullptr;
+
+  // Export dialog
+  ExportDialog *m_export_dialog = nullptr;
+
+  // Context menu
+  ContextMenuModule *m_context_menu = nullptr;
 };
 
 } // namespace whiteboard

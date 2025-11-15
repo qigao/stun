@@ -1,8 +1,9 @@
 #include "whiteboard/export_manager.h"
 
-#include "../../vendor/nanovg/example/stb_image_write.h"
+#include "../../nanovg/example/stb_image_write.h"
 #include "whiteboard/common.h"
 #include <cstring>
+#include <hpdf.h>
 #include <memory>
 #include <nanogui.h>
 #include <nanogui/opengl.h>
@@ -391,6 +392,172 @@ void ExportManager::convert_stroke_to_svg(std::ofstream &file, const Stroke &str
   }
   default:
     break;
+  }
+}
+
+bool ExportManager::export_to_pdf(const std::string &filename, const std::vector<Stroke> &strokes,
+                                  bool /*visible_area_only*/, int width, int height) {
+  try {
+    HPDF_Doc pdf = HPDF_New(nullptr, nullptr);
+    if (!pdf) {
+      return false;
+    }
+
+    HPDF_Page page = HPDF_AddPage(pdf);
+    HPDF_Page_SetWidth(page, static_cast<HPDF_REAL>(width));
+    HPDF_Page_SetHeight(page, static_cast<HPDF_REAL>(height));
+
+    // Set background
+    HPDF_Page_SetRGBFill(page, 0.96f, 0.96f, 0.96f);
+    HPDF_Page_Rectangle(page, 0, 0, static_cast<HPDF_REAL>(width), static_cast<HPDF_REAL>(height));
+    HPDF_Page_Fill(page);
+
+    // Helper to convert Y coordinate (PDF has origin at bottom-left)
+    auto convert_y = [height](float y) -> HPDF_REAL { return static_cast<HPDF_REAL>(height) - y; };
+
+    // Render each stroke
+    for (const auto &stroke : strokes) {
+      if (!stroke.visible || stroke.points.empty())
+        continue;
+
+      // Set stroke color
+      HPDF_Page_SetRGBStroke(page, stroke.color.r(), stroke.color.g(), stroke.color.b());
+      HPDF_Page_SetLineWidth(page, stroke.width);
+
+      switch (stroke.tool) {
+      case Tool::Pen: {
+        HPDF_Page_MoveTo(page, stroke.points[0].x, convert_y(stroke.points[0].y));
+        for (size_t i = 1; i < stroke.points.size(); ++i) {
+          HPDF_Page_LineTo(page, stroke.points[i].x, convert_y(stroke.points[i].y));
+        }
+        HPDF_Page_Stroke(page);
+        break;
+      }
+
+      case Tool::Rectangle: {
+        if (stroke.points.size() < 2)
+          break;
+        float x = std::min(stroke.points[0].x, stroke.points[1].x);
+        float y = std::min(stroke.points[0].y, stroke.points[1].y);
+        float w = std::abs(stroke.points[1].x - stroke.points[0].x);
+        float h = std::abs(stroke.points[1].y - stroke.points[0].y);
+
+        if (stroke.fill_style == FillStyle::Solid) {
+          HPDF_Page_SetRGBFill(page, stroke.fill_color.r(), stroke.fill_color.g(),
+                               stroke.fill_color.b());
+          HPDF_Page_Rectangle(page, x, convert_y(y + h), w, h);
+          HPDF_Page_FillStroke(page);
+        } else {
+          HPDF_Page_Rectangle(page, x, convert_y(y + h), w, h);
+          HPDF_Page_Stroke(page);
+        }
+        break;
+      }
+
+      case Tool::Circle: {
+        if (stroke.points.size() < 2)
+          break;
+        float cx = (stroke.points[0].x + stroke.points[1].x) / 2.0f;
+        float cy = (stroke.points[0].y + stroke.points[1].y) / 2.0f;
+        float rx = std::abs(stroke.points[1].x - stroke.points[0].x) / 2.0f;
+        float ry = std::abs(stroke.points[1].y - stroke.points[0].y) / 2.0f;
+        float r = std::max(rx, ry);
+
+        if (stroke.fill_style == FillStyle::Solid) {
+          HPDF_Page_SetRGBFill(page, stroke.fill_color.r(), stroke.fill_color.g(),
+                               stroke.fill_color.b());
+          HPDF_Page_Circle(page, cx, convert_y(cy), r);
+          HPDF_Page_FillStroke(page);
+        } else {
+          HPDF_Page_Circle(page, cx, convert_y(cy), r);
+          HPDF_Page_Stroke(page);
+        }
+        break;
+      }
+
+      case Tool::Line:
+      case Tool::Arrow: {
+        if (stroke.points.size() < 2)
+          break;
+        HPDF_Page_MoveTo(page, stroke.points[0].x, convert_y(stroke.points[0].y));
+        HPDF_Page_LineTo(page, stroke.points[1].x, convert_y(stroke.points[1].y));
+        HPDF_Page_Stroke(page);
+
+        if (stroke.tool == Tool::Arrow) {
+          float dx = stroke.points[1].x - stroke.points[0].x;
+          float dy = stroke.points[1].y - stroke.points[0].y;
+          float angle = std::atan2(dy, dx);
+          float arrow_size = 15.0f;
+          float x1 =
+              stroke.points[1].x - arrow_size * std::cos(angle - static_cast<float>(M_PI) / 6);
+          float y1 =
+              stroke.points[1].y - arrow_size * std::sin(angle - static_cast<float>(M_PI) / 6);
+          float x2 =
+              stroke.points[1].x - arrow_size * std::cos(angle + static_cast<float>(M_PI) / 6);
+          float y2 =
+              stroke.points[1].y - arrow_size * std::sin(angle + static_cast<float>(M_PI) / 6);
+
+          HPDF_Page_MoveTo(page, x1, convert_y(y1));
+          HPDF_Page_LineTo(page, stroke.points[1].x, convert_y(stroke.points[1].y));
+          HPDF_Page_LineTo(page, x2, convert_y(y2));
+          HPDF_Page_Stroke(page);
+        }
+        break;
+      }
+
+      case Tool::Text: {
+        if (stroke.points.empty() || stroke.text.empty())
+          break;
+
+        HPDF_Font font = HPDF_GetFont(pdf, "Helvetica", nullptr);
+        HPDF_Page_SetFontAndSize(page, font, stroke.font_size);
+        HPDF_Page_SetRGBFill(page, stroke.color.r(), stroke.color.g(), stroke.color.b());
+
+        HPDF_Page_BeginText(page);
+        HPDF_Page_TextOut(page, stroke.points[0].x, convert_y(stroke.points[0].y),
+                          stroke.text.c_str());
+        HPDF_Page_EndText(page);
+        break;
+      }
+
+      case Tool::Sticky: {
+        if (stroke.points.size() < 2)
+          break;
+        float x = std::min(stroke.points[0].x, stroke.points[1].x);
+        float y = std::min(stroke.points[0].y, stroke.points[1].y);
+        float w = std::abs(stroke.points[1].x - stroke.points[0].x);
+        float h = std::abs(stroke.points[1].y - stroke.points[0].y);
+
+        // Draw rounded rectangle (approximate with rectangle for now)
+        HPDF_Page_SetRGBFill(page, stroke.fill_color.r(), stroke.fill_color.g(),
+                             stroke.fill_color.b());
+        HPDF_Page_Rectangle(page, x, convert_y(y + h), w, h);
+        HPDF_Page_FillStroke(page);
+
+        if (!stroke.text.empty()) {
+          HPDF_Font font = HPDF_GetFont(pdf, "Helvetica", nullptr);
+          HPDF_Page_SetFontAndSize(page, font, 14.0f);
+          HPDF_Page_SetRGBFill(page, 0.2f, 0.2f, 0.2f);
+
+          HPDF_Page_BeginText(page);
+          HPDF_Page_TextOut(page, x + 10.0f, convert_y(y + 24.0f), stroke.text.c_str());
+          HPDF_Page_EndText(page);
+        }
+        break;
+      }
+
+      default:
+        break;
+      }
+    }
+
+    // Save the PDF
+    HPDF_STATUS status = HPDF_SaveToFile(pdf, filename.c_str());
+    HPDF_Free(pdf);
+
+    return status == HPDF_OK;
+  } catch (...) {
+    return false;
   }
 }
 

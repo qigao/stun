@@ -11,6 +11,7 @@ using namespace nanogui;
 
 namespace whiteboard {
 class SVGShapeLibrary;
+class SVGRenderer;
 }
 
 class ShapePanelModule : public Widget {
@@ -62,4 +63,7 @@ private:
   float m_max_scroll;
 
   ShapeCallback m_shape_callback;
+  
+  // SVG renderer for drawing shape icons
+  std::unique_ptr<whiteboard::SVGRenderer> m_svg_renderer;
 };

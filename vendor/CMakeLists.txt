@@ -1,5 +1,4 @@
 add_subdirectory(fmtlog)
-add_subdirectory(nanovg)
 
 # Native file dialog library
 set(BUILD_SHARED_LIBS OFF)
@@ -22,7 +21,4 @@ mark_as_advanced(
   NFD_USE_ALLOWEDCONTENTTYPES_IF_AVAILABLE
 )
 
-# Metal backend (Apple platforms only)
-if(APPLE AND NANOGUI_BACKEND STREQUAL "Metal")
-  add_subdirectory(nanovg_metal)
-endif()
+add_subdirectory(lemon)

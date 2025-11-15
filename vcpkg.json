@@ -94,7 +94,7 @@
     {
       "name": "lunasvg",
       "version>=": "3.4.0"
-    }, 
+    },
     {
       "name": "libdatachannel"
     },
@@ -113,6 +113,22 @@
     {
       "name": "libass",
       "version>=": "0.17.4"
+    },
+    {
+      "name": "libmupdf",
+      "version>=": "1.25.4"
+    },
+    {
+      "name": "libharu",
+      "version>=": "2.4.4"
+    },
+    {
+      "name": "pugixml",
+      "version>=": "1.14"
+    },
+    {
+      "name": "lexbor",
+      "version>=": "2.3.0"
     }
   ],
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"

@@ -20,21 +20,12 @@ void ShapeLibraryController::place_shape(const std::string& shape_id) {
     return;
   }
 
-  // Get default position (center of canvas)
-  Point position = get_default_position();
+  // Switch to SVG Shape tool and set the pending shape
+  m_document->set_current_tool(Tool::SVGShape);
+  m_document->set_pending_svg_shape(shape_id);
 
-  // Create stroke from shape
-  Stroke stroke = m_library->create_shape(shape_id, position);
-
-  if (stroke.svg_data.empty()) {
-    std::cerr << "Failed to create shape: " << shape_id << std::endl;
-    return;
-  }
-
-  // Add to document
-  m_document->add_stroke(stroke);
-
-  std::cout << "Placed shape: " << shape_id << " at (" << position.x << ", " << position.y << ")" << std::endl;
+  std::cout << "✓ Shape library: Set pending shape '" << shape_id << "'" << std::endl;
+  std::cout << "  Tool switched to SVGShape, move mouse over canvas to see preview" << std::endl;
 }
 
 void ShapeLibraryController::select_category(const std::string& category) {

@@ -1,0 +1,180 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "title": "Comprehensive Diagram Example",
+    "description": "Shows various styled shapes with text, lines, and effects",
+    "author": "DDF System"
+  },
+  "shapes": [
+    {
+      "id": "styled_box",
+      "type": "rect",
+      "geometry": {
+        "x": 50,
+        "y": 50,
+        "width": 200,
+        "height": 100,
+        "rx": 10
+      },
+      "inline_style": {
+        "fill": "#3498db",
+        "fill-opacity": "0.8",
+        "stroke": "#2c3e50",
+        "stroke-width": "3"
+      },
+      "text": "Styled Rectangle",
+      "classes": ["primary-box"]
+    },
+    {
+      "id": "dashed_line",
+      "type": "path",
+      "inline_style": {
+        "d": "M 150 150 L 150 250"
+      },
+      "inline_style": {
+        "stroke": "#e74c3c",
+        "stroke-width": "3",
+        "stroke-dasharray": "10,5",
+        "stroke-linecap": "round",
+        "fill": "none"
+      }
+    },
+    {
+      "id": "status_circle",
+      "type": "circle",
+      "geometry": {
+        "cx": 150,
+        "cy": 280,
+        "r": 20
+      },
+      "inline_style": {
+        "fill": "#2ecc71",
+        "stroke": "#27ae60",
+        "stroke-width": "3"
+      },
+      "text": "OK"
+    },
+    {
+      "id": "text_label",
+      "type": "text",
+      "geometry": {
+        "x": 150,
+        "y": 320
+      },
+      "text": "Status: Active",
+      "inline_style": {
+        "fill": "#34495e",
+        "font-size": "16px",
+        "font-weight": "bold"
+      }
+    },
+    {
+      "id": "button_shape",
+      "type": "rect",
+      "geometry": {
+        "x": 300,
+        "y": 50,
+        "width": 120,
+        "height": 40,
+        "rx": 8
+      },
+      "inline_style": {
+        "fill": "#9b59b6",
+        "stroke": "#8e44ad",
+        "stroke-width": "2"
+      },
+      "text": "Click Me",
+      "classes": ["button"]
+    },
+    {
+      "id": "network_box",
+      "type": "rect",
+      "geometry": {
+        "x": 300,
+        "y": 150,
+        "width": 150,
+        "height": 100,
+        "rx": 5
+      },
+      "inline_style": {
+        "fill": "#34495e",
+        "stroke": "#2c3e50",
+        "stroke-width": "2"
+      },
+      "text": "Network Device",
+      "classes": ["device"]
+    }
+  ],
+  "connectors": [
+    {
+      "id": "conn1",
+      "from": {
+        "shape_id": "styled_box",
+        "connection_point": "bottom"
+      },
+      "to": {
+        "shape_id": "status_circle",
+        "connection_point": "top"
+      },
+      "style": {
+        "stroke": "#95a5a6",
+        "stroke-width": "2"
+      },
+      "arrow_end": "arrow"
+    },
+    {
+      "id": "conn2",
+      "from": {
+        "shape_id": "button_shape",
+        "connection_point": "bottom"
+      },
+      "to": {
+        "shape_id": "network_box",
+        "connection_point": "top"
+      },
+      "style": {
+        "stroke": "#3498db",
+        "stroke-width": "2",
+        "stroke-dasharray": "5,5"
+      },
+      "arrow_end": "arrow"
+    }
+  ],
+  "styles": {
+    "rules": [
+      {
+        "selector": ".primary-box",
+        "properties": {
+          "stroke": "#2980b9",
+          "stroke-width": "3"
+        }
+      },
+      {
+        "selector": ".primary-box:hover",
+        "properties": {
+          "fill": "#5dade2",
+          "stroke-width": "4"
+        }
+      },
+      {
+        "selector": ".button",
+        "properties": {
+          "cursor": "pointer"
+        }
+      },
+      {
+        "selector": ".button:hover",
+        "properties": {
+          "fill": "#a569bd",
+          "stroke-width": "3"
+        }
+      },
+      {
+        "selector": ".device",
+        "properties": {
+          "opacity": "0.9"
+        }
+      }
+    ]
+  }
+}

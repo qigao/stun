@@ -1,0 +1,94 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "title": "Alert Box",
+    "category": "UI",
+    "description": "Alert/notification box with icon and message"
+  },
+  "shapes": [
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 60,
+        "rx": 8
+      },
+      "style": {
+        "fill": "#fff5f5",
+        "stroke": "#fc8181",
+        "stroke-width": "2"
+      }
+    },
+    {
+      "type": "rect",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 8,
+        "height": 60,
+        "rx": 8
+      },
+      "style": {
+        "fill": "#e53e3e"
+      }
+    },
+    {
+      "type": "circle",
+      "geometry": {
+        "cx": 30,
+        "cy": 30,
+        "r": 12
+      },
+      "style": {
+        "fill": "#e53e3e"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 30,
+        "y": 30
+      },
+      "text": "!",
+      "style": {
+        "fill": "white",
+        "font-size": "16px",
+        "font-family": "Arial, sans-serif",
+        "font-weight": "bold",
+        "text-anchor": "middle",
+        "dominant-baseline": "middle"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 55,
+        "y": 20
+      },
+      "text": "{{title}}",
+      "style": {
+        "fill": "#742a2a",
+        "font-size": "14px",
+        "font-family": "Arial, sans-serif",
+        "font-weight": "600",
+        "dominant-baseline": "middle"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 55,
+        "y": 40
+      },
+      "text": "{{message}}",
+      "style": {
+        "fill": "#9b2c2c",
+        "font-size": "12px",
+        "font-family": "Arial, sans-serif",
+        "dominant-baseline": "middle"
+      }
+    }
+  ]
+}

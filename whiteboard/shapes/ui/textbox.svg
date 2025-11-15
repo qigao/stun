@@ -1,0 +1,5 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Text input box -->
+  <rect x="10" y="40" width="80" height="20" fill="white" stroke="#9E9E9E" stroke-width="2" rx="3"/>
+  <text x="15" y="54" font-family="Arial" font-size="10" fill="#757575">Enter text...</text>
+</svg>

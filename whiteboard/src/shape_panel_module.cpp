@@ -1,12 +1,15 @@
 #include "whiteboard/shape_panel_module.h"
 #include "whiteboard/svg/svg_shape_library.h"
+#include "whiteboard/svg/svg_renderer.h"
 #include <fmtlog.h>
 #include <cstdio>
+#include <fstream>
 #include <map>
 
 ShapePanelModule::ShapePanelModule(Widget *parent, whiteboard::SVGShapeLibrary *library)
     : Widget(parent), m_library(library), m_dragging(false),
-      m_scroll_offset(0.f), m_max_scroll(0.f) {
+      m_scroll_offset(0.f), m_max_scroll(0.f),
+      m_svg_renderer(std::make_unique<whiteboard::SVGRenderer>()) {
 
   logi("ShapePanelModule: Initializing shape panel");
   if (!library) {
@@ -167,11 +170,9 @@ bool ShapePanelModule::mouse_button_event(const Vector2i &p, int button, bool do
             std::string selectedShapeName = m_all_shapes[shapeIdx].name;
             logi("ShapePanelModule: Shape selected - ID: '{}', Name: '{}'", 
                  selectedShapeId, selectedShapeName);
-            fmtlog::poll(); // Flush logs immediately
             
             if (m_shape_callback) {
               logi("ShapePanelModule: Calling shape callback");
-              fmtlog::poll(); // Flush before callback
               
               try {
                 m_shape_callback(selectedShapeId);
@@ -181,7 +182,6 @@ bool ShapePanelModule::mouse_button_event(const Vector2i &p, int button, bool do
               } catch (...) {
                 loge("ShapePanelModule: Unknown exception in callback!");
               }
-              fmtlog::poll(); // Flush after callback
             } else {
               logw("ShapePanelModule: No shape callback set!");
             }
@@ -250,9 +250,16 @@ void ShapePanelModule::draw(NVGcontext *ctx) {
 
   // Draw rounded panel background
   nvgBeginPath(ctx);
-  nvgRoundedRect(ctx, px, py, pw, ph, 16.f);
+  nvgRoundedRect(ctx, px, py, pw, ph, 8.f);
   nvgFillColor(ctx, nvgRGBA(248, 248, 252, 255));
   nvgFill(ctx);
+  
+  // Draw border
+  nvgBeginPath(ctx);
+  nvgRoundedRect(ctx, px, py, pw, ph, 8.f);
+  nvgStrokeColor(ctx, nvgRGBA(200, 200, 210, 255));
+  nvgStrokeWidth(ctx, 1.5f);
+  nvgStroke(ctx);
 
   // Title
   drawLabel(ctx, px + 20.f, py + 20.f, "形状库");
@@ -381,54 +388,41 @@ void ShapePanelModule::drawShapeButton(NVGcontext *ctx, const ShapeButton &btn, 
     nvgStroke(ctx);
   }
 
-  // Draw shape icon/preview in the center
-  float centerX = px + btn.x + btn.size * 0.5f;
-  float centerY = py + btn.y + btn.size * 0.5f;
-  float iconSize = btn.size * 0.5f;
-
-  // Draw a simple shape icon based on name
-  nvgStrokeColor(ctx, nvgRGBA(60, 60, 80, 255));
-  nvgStrokeWidth(ctx, 2.f);
-  nvgFillColor(ctx, nvgRGBA(200, 200, 220, 100));
-
-  // Simple shape preview based on common shape names
-  if (btn.name.find("Circle") != std::string::npos || btn.name.find("circle") != std::string::npos) {
-    nvgBeginPath(ctx);
-    nvgCircle(ctx, centerX, centerY, iconSize * 0.4f);
-    nvgFill(ctx);
-    nvgStroke(ctx);
-  } else if (btn.name.find("Triangle") != std::string::npos || btn.name.find("triangle") != std::string::npos) {
-    nvgBeginPath(ctx);
-    nvgMoveTo(ctx, centerX, centerY - iconSize * 0.4f);
-    nvgLineTo(ctx, centerX - iconSize * 0.35f, centerY + iconSize * 0.3f);
-    nvgLineTo(ctx, centerX + iconSize * 0.35f, centerY + iconSize * 0.3f);
-    nvgClosePath(ctx);
-    nvgFill(ctx);
-    nvgStroke(ctx);
-  } else if (btn.name.find("Star") != std::string::npos || btn.name.find("star") != std::string::npos) {
-    // Draw a simple star
-    nvgBeginPath(ctx);
-    for (int i = 0; i < 5; i++) {
-      float angle = (i * 4.0f * 3.14159f / 5.0f) - 3.14159f / 2.0f;
-      float r = (i % 2 == 0) ? iconSize * 0.4f : iconSize * 0.2f;
-      float x = centerX + r * std::cos(angle);
-      float y = centerY + r * std::sin(angle);
-      if (i == 0) nvgMoveTo(ctx, x, y);
-      else nvgLineTo(ctx, x, y);
+  // Draw SVG icon in the center
+  if (m_library && m_svg_renderer) {
+    auto shape_info = m_library->get_shape(btn.id);
+    if (shape_info && !shape_info->svg_file.empty()) {
+      // Prepend shapes/ directory to the path
+      std::string svg_path = "shapes/" + shape_info->svg_file;
+      
+      // Read the SVG file
+      std::ifstream file(svg_path);
+      if (file.is_open()) {
+        std::string svg_data((std::istreambuf_iterator<char>(file)),
+                             std::istreambuf_iterator<char>());
+        file.close();
+        
+        // Load and render the SVG
+        auto svg_doc = m_svg_renderer->load_svg(svg_data);
+        if (svg_doc) {
+          // Calculate icon size and position (centered in button with padding)
+          float iconSize = btn.size * 0.6f;  // 60% of button size
+          float centerX = px + btn.x + (btn.size - iconSize) * 0.5f;
+          float centerY = py + btn.y + (btn.size - iconSize) * 0.5f;
+          
+          // Render the SVG icon
+          m_svg_renderer->render(ctx, svg_doc.get(), 
+                                nanogui::Vector2f(centerX, centerY),
+                                iconSize / svg_doc->width(),  // scale to fit
+                                iconSize / svg_doc->height(),
+                                0.0f);  // no rotation
+        }
+      }
     }
-    nvgClosePath(ctx);
-    nvgFill(ctx);
-    nvgStroke(ctx);
-  } else {
-    // Default: rectangle
-    nvgBeginPath(ctx);
-    nvgRect(ctx, centerX - iconSize * 0.35f, centerY - iconSize * 0.35f, 
-            iconSize * 0.7f, iconSize * 0.7f);
-    nvgFill(ctx);
-    nvgStroke(ctx);
   }
 
   // Draw label below icon
+  float centerX = px + btn.x + btn.size * 0.5f;
   nvgFontFace(ctx, "sans");
   nvgFontSize(ctx, 9.f);
   nvgFillColor(ctx, nvgRGBA(80, 80, 100, 255));

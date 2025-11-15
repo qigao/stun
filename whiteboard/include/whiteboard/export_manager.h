@@ -31,6 +31,9 @@ public:
   static bool export_to_svg(const std::string &filename, const std::vector<Stroke> &strokes,
                             bool visible_area_only, int width, int height);
 
+  static bool export_to_pdf(const std::string &filename, const std::vector<Stroke> &strokes,
+                            bool visible_area_only, int width, int height);
+
 private:
   static void render_strokes_to_context(NVGcontext *vg, const std::vector<Stroke> &strokes,
                                         int width, int height);

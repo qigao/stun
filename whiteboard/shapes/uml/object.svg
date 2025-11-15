@@ -1,0 +1,9 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Object box -->
+  <rect x="15" y="25" width="70" height="50" fill="#F3E5F5" stroke="#9C27B0" stroke-width="2" rx="3"/>
+  <!-- Underlined object name -->
+  <text x="50" y="45" font-family="Arial" font-size="12" fill="#7B1FA2" text-anchor="middle" text-decoration="underline">:Object</text>
+  <!-- Attribute line -->
+  <line x1="15" y1="50" x2="85" y2="50" stroke="#9C27B0" stroke-width="1"/>
+  <text x="50" y="65" font-family="Arial" font-size="10" fill="#7B1FA2" text-anchor="middle">attribute = value</text>
+</svg>

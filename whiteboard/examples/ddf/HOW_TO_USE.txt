@@ -1,0 +1,131 @@
+================================================================================
+  HOW TO USE DDF EXAMPLES WITH modern_whiteboard.exe
+================================================================================
+
+GOOD NEWS: The Import DDF button has been added! ✅
+
+The DDF (Diagram Definition Format) system is fully implemented and you can
+now load the example JSON files directly from the application UI!
+
+================================================================================
+  WHAT ARE THESE FILES?
+================================================================================
+
+This directory contains example DDF documents:
+
+  - org_chart.json        : Organization chart with hierarchical layout
+  - network_diagram.json  : Network topology with force-directed layout
+  - flowchart.json        : Process flowchart with orthogonal connectors
+
+These are JSON files that define diagrams using the DDF format.
+
+================================================================================
+  HOW CAN I USE THEM?
+================================================================================
+
+Option 1: USE THE IMPORT BUTTON (Recommended) ✅
+-------------------------------------------------
+The easiest way - use the built-in Import DDF button!
+
+1. Build the application:
+     cd build
+     cmake --build . --config Release --target modern_whiteboard
+
+2. Launch the application:
+     cd build\Release
+     modern_whiteboard.exe
+
+3. Click File menu → Import DDF
+
+4. Browse to whiteboard\examples\ddf\
+
+5. Select an example file (org_chart.json, network_diagram.json, flowchart.json)
+
+6. Click Open - the diagram loads automatically!
+
+
+Option 2: VIEW THE JSON
+------------------------
+Open the files in a text editor to see the DDF format structure:
+
+  notepad flowchart.json
+
+This shows you how DDF documents are structured.
+
+
+Option 3: PROGRAMMATIC LOADING
+-------------------------------
+If you're a developer, modify the application code to load examples:
+
+  // In ModernWhiteboardApp or CanvasView initialization
+  #include "whiteboard/ddf/ddf_document.h"
+  
+  auto ddf_doc = std::make_shared<whiteboard::ddf::DDFDocument>();
+  if (ddf_doc->load_from_file("../../whiteboard/examples/ddf/flowchart.json")) {
+      // Document loaded successfully
+  }
+
+Then rebuild:
+  cd build
+  cmake --build . --config Release
+
+
+Option 4: RUN TESTS
+-------------------
+The examples are tested in the unit test suite:
+
+  cd build\Release
+  ctest -R ddf -V
+
+This verifies the examples load and render correctly.
+
+================================================================================
+  DOCUMENTATION
+================================================================================
+
+Full documentation is available in docs\ddf\:
+
+  - USER_GUIDE.md              : Complete DDF user guide
+  - API_REFERENCE.md           : C++ API documentation
+  - CSS_STYLING.md             : Styling guide
+  - EXPRESSIONS.md             : Expression language guide
+  - COMPONENTS.md              : Component system guide
+  - ADDING_IMPORT_BUTTON.md    : How to add UI import button
+
+================================================================================
+  EXAMPLE STYLESHEETS
+================================================================================
+
+The styles\ directory contains example CSS stylesheets:
+
+  - theme_light.css   : Light theme
+  - theme_dark.css    : Dark theme
+  - components.css    : Component-specific styles
+
+These can be referenced in DDF documents or loaded separately.
+
+================================================================================
+  FUTURE ENHANCEMENTS
+================================================================================
+
+To make these examples usable from the UI, the application needs:
+
+  1. File menu with "Import DDF..." option
+  2. File dialog to select .json files
+  3. DDF document loading and rendering
+  4. Zoom-to-fit for imported diagrams
+
+See ADDING_IMPORT_BUTTON.md for implementation details.
+
+================================================================================
+  QUESTIONS?
+================================================================================
+
+Check the documentation:
+  - README.md in this directory
+  - QUICK_START.md for quick reference
+  - Full docs in docs\ddf\
+
+The DDF system is fully functional - it just needs a UI button to load files!
+
+================================================================================

@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# Find dependencies
+find_dependency(lexbor REQUIRED)
+
+# Include targets
+include("${CMAKE_CURRENT_LIST_DIR}/FlexUITargets.cmake")
+
+check_required_components(FlexUI)

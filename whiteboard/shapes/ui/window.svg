@@ -1,0 +1,10 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Window frame -->
+  <rect x="10" y="15" width="80" height="70" fill="#F5F5F5" stroke="#9E9E9E" stroke-width="2" rx="3"/>
+  <!-- Title bar -->
+  <rect x="10" y="15" width="80" height="15" fill="#2196F3" stroke="#1976D2" stroke-width="2" rx="3"/>
+  <!-- Window buttons -->
+  <circle cx="78" cy="22" r="3" fill="#F44336"/>
+  <circle cx="68" cy="22" r="3" fill="#FFC107"/>
+  <circle cx="58" cy="22" r="3" fill="#4CAF50"/>
+</svg>

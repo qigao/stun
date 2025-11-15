@@ -3,14 +3,9 @@ find_package(lunasvg REQUIRED)
 add_executable(vcv_rack_modular
     main.cpp
     vcv_module_panel.cpp
-    speedometer_module.cpp
-    speedometer_rack.cpp
+    speedometer_rack.cpp 
     wasp_filter_module.cpp
     oscilloscope_module.cpp
-    toolbar_panel_module.cpp
-    properties_panel_module.cpp
-    style_panel_module.cpp
-    text_panel_module.cpp
 )
 
 target_link_libraries(vcv_rack_modular

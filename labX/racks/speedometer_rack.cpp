@@ -1,3 +1,6 @@
+// Pure NanoVG rendering implementation
+// Beautiful industrial rack-mounted aesthetic
+
 #include "speedometer_rack.h"
 #include <algorithm>
 #include <cmath>
@@ -52,8 +55,8 @@ void SpeedometerRack::drawRackPanel(NVGcontext *ctx, float x, float y, float w, 
   // Rack panel background
   nvgBeginPath(ctx);
   nvgRect(ctx, x, y, w, h);
-  NVGpaint bgPaint = nvgLinearGradient(ctx, x, y, x, y + h, nvgRGBA(70, 70, 75, 255),
-                                       nvgRGBA(50, 50, 55, 255));
+  NVGpaint bgPaint =
+      nvgLinearGradient(ctx, x, y, x, y + h, nvgRGBA(70, 70, 75, 255), nvgRGBA(50, 50, 55, 255));
   nvgFillPaint(ctx, bgPaint);
   nvgFill(ctx);
 
@@ -100,9 +103,9 @@ void SpeedometerRack::drawRpmGauge(NVGcontext *ctx, float cx, float cy, float ra
   // Gauge face
   nvgBeginPath(ctx);
   nvgCircle(ctx, cx, cy, radius);
-  NVGpaint rimPaint = nvgRadialGradient(ctx, cx - radius * 0.3f, cy - radius * 0.3f,
-                                        radius * 0.7f, radius, nvgRGBA(120, 120, 125, 255),
-                                        nvgRGBA(80, 80, 85, 255));
+  NVGpaint rimPaint =
+      nvgRadialGradient(ctx, cx - radius * 0.3f, cy - radius * 0.3f, radius * 0.7f, radius,
+                        nvgRGBA(120, 120, 125, 255), nvgRGBA(80, 80, 85, 255));
   nvgFillPaint(ctx, rimPaint);
   nvgFill(ctx);
 
@@ -124,9 +127,9 @@ void SpeedometerRack::drawSpeedGauge(NVGcontext *ctx, float cx, float cy, float 
   // Gauge face
   nvgBeginPath(ctx);
   nvgCircle(ctx, cx, cy, radius);
-  NVGpaint rimPaint = nvgRadialGradient(ctx, cx - radius * 0.3f, cy - radius * 0.3f,
-                                        radius * 0.7f, radius, nvgRGBA(120, 120, 125, 255),
-                                        nvgRGBA(80, 80, 85, 255));
+  NVGpaint rimPaint =
+      nvgRadialGradient(ctx, cx - radius * 0.3f, cy - radius * 0.3f, radius * 0.7f, radius,
+                        nvgRGBA(120, 120, 125, 255), nvgRGBA(80, 80, 85, 255));
   nvgFillPaint(ctx, rimPaint);
   nvgFill(ctx);
 

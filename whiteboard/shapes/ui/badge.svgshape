@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "title": "Badge",
+    "category": "UI",
+    "description": "Notification badge with count"
+  },
+  "shapes": [
+    {
+      "type": "circle",
+      "geometry": {
+        "cx": 15,
+        "cy": 15,
+        "r": 15
+      },
+      "style": {
+        "fill": "#e53e3e",
+        "stroke": "#c53030",
+        "stroke-width": "2"
+      }
+    },
+    {
+      "type": "text",
+      "geometry": {
+        "x": 15,
+        "y": 15
+      },
+      "text": "{{count}}",
+      "style": {
+        "fill": "white",
+        "font-size": "12px",
+        "font-family": "Arial, sans-serif",
+        "font-weight": "bold",
+        "text-anchor": "middle",
+        "dominant-baseline": "middle"
+      }
+    }
+  ]
+}

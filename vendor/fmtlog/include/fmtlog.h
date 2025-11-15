@@ -104,11 +104,6 @@ public:
   // buffer log internally and will not close the FILE*
   static void setLogFile(FILE *fp, bool manageFp = false);
 
-  // Collect log msgs from all threads and write to log file
-  // If forceFlush = true, internal file buffer is flushed
-  // User need to call poll() repeatedly if startPollingThread is not used
-  static void poll(bool forceFlush = false);
-
   // Set flush delay in nanosecond
   // If there's msg older than ns in the buffer, flush will be triggered
   static void setFlushDelay(int64_t ns) noexcept;
@@ -118,6 +113,10 @@ public:
 
   // If file buffer has more than specified bytes, flush will be triggered
   static void setFlushBufSize(uint32_t bytes) noexcept;
+
+  // Flush queued log messages immediately. If forceFlush is true, the file
+  // buffer is flushed even if the polling thread would normally defer it.
+  static void flush(bool forceFlush = false) noexcept;
 
   // callback signature user can register
   // ns: nanosecond timestamp
@@ -158,12 +157,13 @@ public:
   // return true if passed log level is not lower than current log level
   static inline bool checkLogLevel(LogLevel logLevel) noexcept;
 
-  // Run a polling thread in the background with a polling interval in ns
-  // Note that user must not call poll() himself when the thread is running
+  // Run (or restart) the polling thread in the background with a polling
+  // interval in ns. fmtlog automatically starts this thread on first use.
   static void startPollingThread(int64_t pollInterval = 1000000000) noexcept;
 
-  // Stop the polling thread
-  static void stopPollingThread() noexcept;
+  // Stop the polling thread, flush pending log records, and close the log file.
+  // After shutdown(), further logging requires reinitialization.
+  static void shutdown() noexcept;
 
   // https://github.com/MengRao/SPSC_Queue
   class SPSCVarQueueOPT {
@@ -177,8 +177,6 @@ public:
       uint32_t logId;
     };
     static constexpr uint32_t BLK_CNT = FMTLOG_QUEUE_SIZE / sizeof(MsgHeader);
-
-    MsgHeader *allocMsg(uint32_t size) noexcept;
 
     MsgHeader *alloc(uint32_t size) {
       size += sizeof(MsgHeader);
@@ -304,8 +302,6 @@ public:
       return duration_cast<nanoseconds>(system_clock::now().time_since_epoch())
           .count();
     }
-
-    double getTscGhz() const { return 1.0 / ns_per_tsc_; }
 
     // Linux kernel sync time by finding the first trial with tsc diff < 50000
     // We try several times and return the one with the mininum tsc diff.

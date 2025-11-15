@@ -29,7 +29,8 @@ public:
   /**
    * Show toolbar at specified position with relevant actions
    */
-  void show_at(const nanogui::Vector2i &pos, bool can_group, bool can_ungroup, int num_selected) {
+  void show_at(const nanogui::Vector2i &pos, bool can_group, bool can_ungroup, int num_selected, bool has_clipboard = false) {
+    m_has_clipboard_content = has_clipboard;
     // Clear existing buttons by removing all children
     // Store children in temp vector to avoid iterator invalidation
     std::vector<nanogui::Widget *> to_remove;
@@ -170,6 +171,8 @@ public:
   }
 
   // Callback setters
+  void set_copy_callback(std::function<void()> cb) { m_copy_callback = cb; }
+  void set_paste_callback(std::function<void()> cb) { m_paste_callback = cb; }
   void set_group_callback(std::function<void()> cb) { m_group_callback = cb; }
   void set_ungroup_callback(std::function<void()> cb) { m_ungroup_callback = cb; }
   void set_duplicate_callback(std::function<void()> cb) { m_duplicate_callback = cb; }
@@ -267,6 +270,8 @@ private:
     return pos;
   }
 
+  std::function<void()> m_copy_callback;
+  std::function<void()> m_paste_callback;
   std::function<void()> m_group_callback;
   std::function<void()> m_ungroup_callback;
   std::function<void()> m_duplicate_callback;
@@ -282,6 +287,7 @@ private:
   float m_corner_radius;
   float m_current_alpha;
   float m_target_alpha;
+  bool m_has_clipboard_content = false;
 };
 
 } // namespace whiteboard

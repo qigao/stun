@@ -4,11 +4,14 @@
  */
 
 #include "whiteboard/model/whiteboard_document.h"
+#include "whiteboard/export_manager.h"
 #include "whiteboard/serialization.h"
 #include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <chrono>
+#include <limits>
+#include <fmtlog.h>
 #include <nanovg.h>
 
 namespace whiteboard {
@@ -18,7 +21,9 @@ WhiteboardDocument::WhiteboardDocument()
       m_fill_style(FillStyle::None), m_fill_color(255, 182, 193, 255), m_font_face("sans"),
       m_font_size(16.0f), m_text_align(NVG_ALIGN_LEFT | NVG_ALIGN_TOP), m_zoom(1.0f),
       m_pan_offset(0.0f, 0.0f), m_grid_visible(false), m_guides_visible(false),
-      m_snap_enabled(false) {}
+      m_snap_enabled(false), m_snap_distance(20.0f), m_dark_mode(false), 
+      m_canvas_bg_light(245, 245, 245, 255), m_canvas_bg_dark(43, 43, 43, 255),
+      m_pending_svg_shape("") {}
 
 // === Helper Methods ===
 
@@ -108,8 +113,33 @@ void WhiteboardDocument::remove_observer(IDocumentObserver *observer) {
 // These will be implemented in subsequent tasks
 
 void WhiteboardDocument::add_stroke(const Stroke &stroke) {
+  const char* tool_name = "Unknown";
+  switch (stroke.tool) {
+    case Tool::Pen: tool_name = "Pen"; break;
+    case Tool::Rectangle: tool_name = "Rectangle"; break;
+    case Tool::Circle: tool_name = "Circle"; break;
+    case Tool::Diamond: tool_name = "Diamond"; break;
+    case Tool::Line: tool_name = "Line"; break;
+    case Tool::Arrow: tool_name = "Arrow"; break;
+    case Tool::Text: tool_name = "Text"; break;
+    case Tool::Sticky: tool_name = "Sticky"; break;
+    case Tool::Image: tool_name = "Image"; break;
+    case Tool::SVGShape: tool_name = "SVGShape"; break;
+    default: break;
+  }
+  
+  logi("WhiteboardDocument::add_stroke - Tool: {}, Name: '{}', Points: {}", 
+       tool_name, stroke.name, stroke.points.size());
+  
+  if (stroke.tool == Tool::SVGShape) {
+    logi("   SVG Shape ID: '{}', SVG data: {} bytes", 
+         stroke.svg_shape_id, stroke.svg_data.size());
+  }
+  
   push_undo_state();
   m_strokes.push_back(stroke);
+  
+  logi("   Total strokes in document: {}", m_strokes.size());
   notify_strokes_changed();
 }
 
@@ -161,14 +191,21 @@ void WhiteboardDocument::remove_strokes(const std::vector<int> &indices) {
 }
 
 void WhiteboardDocument::update_stroke(int index, const Stroke &stroke) {
+  logi("WhiteboardDocument::update_stroke - index: {}, tool: {}, points: {}", 
+       index, static_cast<int>(stroke.tool), stroke.points.size());
   if (index < 0 || index >= static_cast<int>(m_strokes.size())) {
-    std::cerr << "Invalid stroke index: " << index << std::endl;
+    loge("Invalid stroke index: {} (size: {})", index, m_strokes.size());
     return;
   }
 
   push_undo_state();
+  logi("   Replacing stroke at index {}", index);
   m_strokes[index] = stroke;
+  
+  logi("   Stroke updated, notifying observers");
   notify_strokes_changed();
+  
+  logi("   Update complete");
 }
 
 int WhiteboardDocument::find_stroke_at_point(float x, float y, float margin) const {
@@ -300,16 +337,9 @@ void WhiteboardDocument::set_pan_offset(const nanogui::Vector2f &offset) {
   notify_view_changed();
 }
 
-void WhiteboardDocument::set_grid_visible(bool visible) {
-  if (m_grid_visible != visible) {
-    m_grid_visible = visible;
-    notify_view_changed();
-  }
-}
-
-void WhiteboardDocument::set_guides_visible(bool visible) {
-  if (m_guides_visible != visible) {
-    m_guides_visible = visible;
+void WhiteboardDocument::set_dark_mode(bool enabled) {
+  if (m_dark_mode != enabled) {
+    m_dark_mode = enabled;
     notify_view_changed();
   }
 }
@@ -329,6 +359,13 @@ void WhiteboardDocument::add_guide(const Guide &guide) {
 void WhiteboardDocument::remove_guide(int index) {
   if (index >= 0 && index < static_cast<int>(m_guides.size())) {
     m_guides.erase(m_guides.begin() + index);
+    notify_strokes_changed();
+  }
+}
+
+void WhiteboardDocument::update_guide(int index, float position) {
+  if (index >= 0 && index < static_cast<int>(m_guides.size())) {
+    m_guides[index].position = position;
     notify_strokes_changed();
   }
 }
@@ -573,6 +610,57 @@ bool WhiteboardDocument::load_from_file(const std::string& filename) {
     return true;
   } catch (const std::exception& e) {
     std::cerr << "Load error: " << e.what() << std::endl;
+    return false;
+  }
+}
+
+// === Export Methods ===
+
+bool WhiteboardDocument::export_to_png(const std::string& file_path, int width, int height) {
+  // PNG export requires NVGcontext which is not available at the document level
+  // This should be called from the view/controller layer where NVGcontext is available
+  loge("PNG export must be called from the view layer with NVGcontext");
+  loge("Use ExportManager::export_to_png() directly from the view/controller");
+  return false;
+}
+
+bool WhiteboardDocument::export_to_svg(const std::string& file_path) {
+  try {
+    // Calculate canvas bounds
+    float min_x = 0, min_y = 0, max_x = 800, max_y = 600;
+    
+    if (!m_strokes.empty()) {
+      min_x = std::numeric_limits<float>::max();
+      min_y = std::numeric_limits<float>::max();
+      max_x = std::numeric_limits<float>::lowest();
+      max_y = std::numeric_limits<float>::lowest();
+      
+      for (const auto& stroke : m_strokes) {
+        float sx1, sy1, sx2, sy2;
+        stroke.get_bounds(sx1, sy1, sx2, sy2);
+        min_x = std::min(min_x, sx1);
+        min_y = std::min(min_y, sy1);
+        max_x = std::max(max_x, sx2);
+        max_y = std::max(max_y, sy2);
+      }
+      
+      // Add padding
+      float padding = 20.0f;
+      min_x -= padding;
+      min_y -= padding;
+      max_x += padding;
+      max_y += padding;
+    }
+    
+    int canvas_width = static_cast<int>(max_x - min_x);
+    int canvas_height = static_cast<int>(max_y - min_y);
+    
+    // Use ExportManager for consistent SVG export
+    logi("Exporting to SVG: {} ({}x{})", file_path, canvas_width, canvas_height);
+    return ExportManager::export_to_svg(file_path, m_strokes, false, canvas_width, canvas_height);
+    
+  } catch (const std::exception& e) {
+    loge("SVG export error: {}", e.what());
     return false;
   }
 }
