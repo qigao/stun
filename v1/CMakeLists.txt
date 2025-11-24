@@ -1,0 +1,7 @@
+add_subdirectory(nanovg)
+add_subdirectory(nanogui)
+add_subdirectory(styles)
+add_subdirectory(examples)
+add_subdirectory(AVPlayer)
+add_subdirectory(whiteboard)
+add_subdirectory(labX)

@@ -1,5 +1,6 @@
 #include "flexui/widgets/slider.h"
 
+#include <nanovg_css.h>
 #include "flexui/document.h"
 
 #include <algorithm>
@@ -15,6 +16,13 @@ std::string px(float value) {
 }
 } // namespace
 
+void FlexSlider::onDocumentAttached(FlexDocument *document) {
+  FlexNode::onDocumentAttached(document); // Call base class implementation
+  for (auto &entry : m_sliders) {
+    updateStyles(entry.second);
+  }
+}
+
 void FlexSlider::registerSlider(FlexSliderBinding binding) {
   if (binding.track_id.empty()) {
     return;
@@ -25,13 +33,11 @@ void FlexSlider::registerSlider(FlexSliderBinding binding) {
   state.binding.value = std::clamp(state.binding.value, 0.0f, 1.0f);
   m_sliders[state.binding.track_id] = std::move(state);
 
-  if (document()) {
-    updateStyles(m_sliders[state.binding.track_id]);
-  }
 }
 
 void FlexSlider::handleEvent(const SDL_Event &event) {
-  if (!document()) {
+  auto doc = this->document();
+  if (!doc) {
     return;
   }
 
@@ -39,8 +45,15 @@ void FlexSlider::handleEvent(const SDL_Event &event) {
   case SDL_EVENT_MOUSE_BUTTON_DOWN: {
     auto *state = hitTest(static_cast<float>(event.button.x), static_cast<float>(event.button.y));
     if (state) {
-      setValue(*state, (static_cast<float>(event.button.x) - state->binding.track_left) /
-                           state->binding.track_width);
+      // Get actual track position from computed layout
+      float track_left = state->binding.track_left;
+      float track_width = state->binding.track_width;
+      auto track_node = doc->findNode(state->binding.track_id);
+      if (track_node && track_node->element()) {
+        track_left = track_node->element()->computed.x;
+        track_width = track_node->element()->computed.width;
+      }
+      setValue(*state, (static_cast<float>(event.button.x) - track_left) / track_width);
       state->dragging = true;
       m_active_id = state->binding.track_id;
     }
@@ -59,8 +72,15 @@ void FlexSlider::handleEvent(const SDL_Event &event) {
     if (!m_active_id.empty()) {
       auto it = m_sliders.find(m_active_id);
       if (it != m_sliders.end() && it->second.dragging) {
-        setValue(it->second, (static_cast<float>(event.motion.x) - it->second.binding.track_left) /
-                                 it->second.binding.track_width);
+        // Get actual track position from computed layout
+        float track_left = it->second.binding.track_left;
+        float track_width = it->second.binding.track_width;
+        auto track_node = doc->findNode(it->second.binding.track_id);
+        if (track_node && track_node->element()) {
+          track_left = track_node->element()->computed.x;
+          track_width = track_node->element()->computed.width;
+        }
+        setValue(it->second, (static_cast<float>(event.motion.x) - track_left) / track_width);
       }
     }
     break;
@@ -82,15 +102,14 @@ void FlexSlider::setValue(SliderState &state, float value) {
 }
 
 FlexSlider::SliderState *FlexSlider::hitTest(float x, float y) {
+  auto doc = this->document();
+  if (!doc) {
+    return nullptr;
+  }
   for (auto &entry : m_sliders) {
-    const auto &binding = entry.second.binding;
-    const float thumb_left =
-        binding.track_left + binding.value * binding.track_width - binding.thumb_size * 0.5f;
-    const float thumb_right = thumb_left + binding.thumb_size;
-    if (x >= thumb_left && x <= thumb_right) {
-      return &entry.second;
-    }
-    if (x >= binding.track_left && x <= binding.track_left + binding.track_width) {
+    // Use document hitTest for proper bounds checking
+    if (doc->hitTest(entry.second.binding.track_id, x, y) ||
+        doc->hitTest(entry.second.binding.thumb_id, x, y)) {
       return &entry.second;
     }
   }
@@ -98,15 +117,25 @@ FlexSlider::SliderState *FlexSlider::hitTest(float x, float y) {
 }
 
 void FlexSlider::updateStyles(SliderState &state) {
-  if (!document()) {
+  auto doc = this->document();
+  if (!doc) {
     return;
   }
 
-  const float fill_width = state.binding.value * state.binding.track_width;
-  document()->setStyle(state.binding.fill_id, "width", px(fill_width));
+  // Get actual track position from computed layout
+  float track_left = state.binding.track_left;
+  float track_width = state.binding.track_width;
+  auto track_node = doc->findNode(state.binding.track_id);
+  if (track_node && track_node->element()) {
+    track_left = track_node->element()->computed.x;
+    track_width = track_node->element()->computed.width;
+  }
 
-  const float thumb_left = state.binding.track_left + fill_width - state.binding.thumb_size * 0.5f;
-  document()->setStyle(state.binding.thumb_id, "left", px(thumb_left));
+  const float fill_width = state.binding.value * track_width;
+  doc->setAttribute(state.binding.fill_id, "style", "width: " + px(fill_width) + ";");
+
+  const float thumb_left = track_left + fill_width - state.binding.thumb_size * 0.5f;
+  doc->setAttribute(state.binding.thumb_id, "style", "left: " + px(thumb_left) + ";");
 }
 
 } // namespace flexui

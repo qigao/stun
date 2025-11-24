@@ -93,9 +93,7 @@ body {
 .slider-track,
 .slider-fill,
 .slider-thumb,
-.dropdown,
 .dropdown-label,
-.dropdown-menu,
 .dropdown-option {
   position: absolute;
 }
@@ -193,9 +191,12 @@ body {
   box-shadow: 0 14px 30px rgba(74, 144, 226, 0.35);
 }
 
+.dropdown-wrapper {
+  /* Wrapper provides positioning */
+}
+
 .dropdown {
-  width: 220px;
-  height: 52px;
+  position: absolute;
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.1);
@@ -212,9 +213,8 @@ body {
 }
 
 .dropdown-menu {
-  width: 220px;
-  top: 60px;
-  left: 0;
+  position: absolute;
+  /* left, top, and width are set via inline styles from widget factory */
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 25px 60px rgba(15, 23, 42, 0.2);
@@ -223,6 +223,7 @@ body {
   transition: opacity 0.15s ease, transform 0.15s ease;
   transform: translateY(-6px);
   padding: 8px 0;
+  z-index: 1000;
 }
 
 .dropdown-open .dropdown-menu {

@@ -1,39 +1,25 @@
 #pragma once
 
-#include "flexui/controller.h"
-
+#include "flexui/node.h"
 #include <functional>
-#include <string>
-#include <unordered_map>
 
 namespace flexui {
 
-struct FlexToggleBinding {
-  std::string track_id;
-  std::string handle_id;
-  std::string handle_property = "left";
-  std::string handle_on_value;
-  std::string handle_off_value;
-  bool initial_on = true;
-  std::function<void(bool)> on_change;
-};
-
-class FlexToggle : public Flex {
+class FlexToggle : public FlexNode {
 public:
-  void registerToggle(FlexToggleBinding binding);
+    using FlexNode::FlexNode; // Inherit constructor
 
-  void handleEvent(const SDL_Event &event) override;
+    void setOn(bool on);
+    bool isOn() const { return m_on; }
+
+    void setOnChange(std::function<void(bool)> callback) { m_on_change = callback; }
+
+    // Override handleEvent to handle clicks
+    void handleEvent(const SDL_Event& event) override;
 
 private:
-  struct ToggleState {
-    FlexToggleBinding binding;
-    bool on = true;
-  };
-
-  void setState(ToggleState &state, bool on);
-  ToggleState *hitTest(float x, float y);
-
-  std::unordered_map<std::string, ToggleState> m_toggles;
+    bool m_on = false;
+    std::function<void(bool)> m_on_change;
 };
 
 } // namespace flexui

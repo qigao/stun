@@ -22,6 +22,7 @@
 #include <nanovg_gl.h>
 
 #include <nanovg_css.h>
+#include "nanovg_css_internal.h"  // For dynamic animation via inline_style
 #include <fmtlog.h>
 #include <chrono>
 
@@ -150,66 +151,86 @@ private:
 
     void setup_css() {
         const char* css = R"(
-            /* Base box styling */
-            .ease-box {
+            /* ===== Easing Function Boxes ===== */
+            #linear-box {
+                x: 50px;
+                y: 120px;
                 width: 120px;
                 height: 120px;
                 border-radius: 10px;
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-            }
-
-            /* Linear easing */
-            .linear {
                 background: #3498db;
                 transition: all 0.8s linear;
             }
-            .linear:hover {
+            #linear-box:hover {
                 transform: translateX(200px);
                 background: #2980b9;
             }
 
-            /* Ease easing */
-            .ease {
+            #ease-box {
+                x: 50px;
+                y: 260px;
+                width: 120px;
+                height: 120px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
                 background: #9b59b6;
                 transition: all 0.8s ease;
             }
-            .ease:hover {
+            #ease-box:hover {
                 transform: translateX(200px);
                 background: #8e44ad;
             }
 
-            /* Ease-in easing */
-            .ease-in {
+            #ease-in-box {
+                x: 50px;
+                y: 400px;
+                width: 120px;
+                height: 120px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
                 background: #e74c3c;
                 transition: all 0.8s ease-in;
             }
-            .ease-in:hover {
+            #ease-in-box:hover {
                 transform: translateX(200px);
                 background: #c0392b;
             }
 
-            /* Ease-out easing */
-            .ease-out {
+            #ease-out-box {
+                x: 50px;
+                y: 540px;
+                width: 120px;
+                height: 120px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
                 background: #2ecc71;
                 transition: all 0.8s ease-out;
             }
-            .ease-out:hover {
+            #ease-out-box:hover {
                 transform: translateX(200px);
                 background: #27ae60;
             }
 
-            /* Ease-in-out easing */
-            .ease-in-out {
+            #ease-in-out-box {
+                x: 50px;
+                y: 680px;
+                width: 120px;
+                height: 120px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
                 background: #f39c12;
                 transition: all 0.8s ease-in-out;
             }
-            .ease-in-out:hover {
+            #ease-in-out-box:hover {
                 transform: translateX(200px);
                 background: #d68910;
             }
 
-            /* Pulse animation */
-            .pulse {
+            /* ===== Auto-Animated Elements ===== */
+            #pulse {
+                x: 700px;
+                y: 120px;
                 width: 100px;
                 height: 100px;
                 background: radial-gradient(circle, #ff6b6b, #ee5a6f);
@@ -217,8 +238,9 @@ private:
                 transition: transform 0.6s ease-in-out, opacity 0.6s ease-in-out;
             }
 
-            /* Rotate animation */
-            .rotate {
+            #rotate {
+                x: 850px;
+                y: 120px;
                 width: 100px;
                 height: 100px;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -226,16 +248,20 @@ private:
                 transition: transform 1.0s ease-in-out;
             }
 
-            /* Color morph */
-            .color-morph {
+            #color-morph {
+                x: 1000px;
+                y: 120px;
                 width: 120px;
                 height: 120px;
                 border-radius: 60px;
+                background: #3498db;
                 transition: background 1.5s ease-in-out;
             }
 
-            /* Multi-property transition */
-            .card {
+            /* ===== Multi-Property Card ===== */
+            #hover-card {
+                x: 700px;
+                y: 400px;
                 width: 200px;
                 height: 150px;
                 background: white;
@@ -246,7 +272,7 @@ private:
                 transition: all 0.4s ease;
             }
 
-            .card:hover {
+            #hover-card:hover {
                 transform: translateY(-10px) scale(1.05);
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
                 border-color: #3498db;
@@ -261,62 +287,19 @@ private:
 
     void create_elements() {
         // Section 1: Easing functions demonstration
-        float start_x = 50.0f;
-        float start_y = 120.0f;
-        float spacing = 140.0f;
-
         linear_box = nvgcssCreateElement(renderer, "linear-box", "rect");
-        nvgcssAddClass(linear_box, "ease-box");
-        nvgcssAddClass(linear_box, "linear");
-        nvgcssSetStyle(linear_box, "x", std::to_string(start_x).c_str());
-        nvgcssSetStyle(linear_box, "y", std::to_string(start_y).c_str());
-
         ease_box = nvgcssCreateElement(renderer, "ease-box", "rect");
-        nvgcssAddClass(ease_box, "ease-box");
-        nvgcssAddClass(ease_box, "ease");
-        nvgcssSetStyle(ease_box, "x", std::to_string(start_x).c_str());
-        nvgcssSetStyle(ease_box, "y", std::to_string(start_y + spacing).c_str());
-
         ease_in_box = nvgcssCreateElement(renderer, "ease-in-box", "rect");
-        nvgcssAddClass(ease_in_box, "ease-box");
-        nvgcssAddClass(ease_in_box, "ease-in");
-        nvgcssSetStyle(ease_in_box, "x", std::to_string(start_x).c_str());
-        nvgcssSetStyle(ease_in_box, "y", std::to_string(start_y + spacing * 2).c_str());
-
         ease_out_box = nvgcssCreateElement(renderer, "ease-out-box", "rect");
-        nvgcssAddClass(ease_out_box, "ease-box");
-        nvgcssAddClass(ease_out_box, "ease-out");
-        nvgcssSetStyle(ease_out_box, "x", std::to_string(start_x).c_str());
-        nvgcssSetStyle(ease_out_box, "y", std::to_string(start_y + spacing * 3).c_str());
-
         ease_in_out_box = nvgcssCreateElement(renderer, "ease-in-out-box", "rect");
-        nvgcssAddClass(ease_in_out_box, "ease-box");
-        nvgcssAddClass(ease_in_out_box, "ease-in-out");
-        nvgcssSetStyle(ease_in_out_box, "x", std::to_string(start_x).c_str());
-        nvgcssSetStyle(ease_in_out_box, "y", std::to_string(start_y + spacing * 4).c_str());
 
         // Section 2: Auto-animated elements
         pulse_circle = nvgcssCreateElement(renderer, "pulse", "circle");
-        nvgcssAddClass(pulse_circle, "pulse");
-        nvgcssSetStyle(pulse_circle, "x", "700px");
-        nvgcssSetStyle(pulse_circle, "y", "120px");
-
         rotate_square = nvgcssCreateElement(renderer, "rotate", "rect");
-        nvgcssAddClass(rotate_square, "rotate");
-        nvgcssSetStyle(rotate_square, "x", "850px");
-        nvgcssSetStyle(rotate_square, "y", "120px");
-
         color_morph = nvgcssCreateElement(renderer, "color-morph", "circle");
-        nvgcssAddClass(color_morph, "color-morph");
-        nvgcssSetStyle(color_morph, "x", "1000px");
-        nvgcssSetStyle(color_morph, "y", "120px");
-        nvgcssSetStyle(color_morph, "background", "#3498db");
 
         // Section 3: Multi-property card
         NVGCSSElement* card = nvgcssCreateElement(renderer, "hover-card", "rect");
-        nvgcssAddClass(card, "card");
-        nvgcssSetStyle(card, "x", "700px");
-        nvgcssSetStyle(card, "y", "400px");
     }
 
     void handle_event(const SDL_Event& event) {
@@ -348,21 +331,22 @@ private:
     }
 
     void animate_elements(float time) {
+        // NOTE: These use inline_style for DYNAMIC animation (frame-by-frame updates)
+        // This is a legitimate use case - not static styling
+
         // Pulse animation (scale + opacity)
         if (pulse_circle) {
             float pulse = (std::sin(time * 2.0f) + 1.0f) * 0.5f; // 0 to 1
             float scale = 1.0f + pulse * 0.3f;
             float opacity = 1.0f - pulse * 0.3f;
-            nvgcssSetStyle(pulse_circle, "transform",
-                           ("scale(" + std::to_string(scale) + ")").c_str());
-            nvgcssSetStyle(pulse_circle, "opacity", std::to_string(opacity).c_str());
+            pulse_circle->inline_style["transform"] = "scale(" + std::to_string(scale) + ")";
+            pulse_circle->inline_style["opacity"] = std::to_string(opacity);
         }
 
         // Continuous rotation
         if (rotate_square) {
             float angle = std::fmod(time * 60.0f, 360.0f); // Rotate 60 deg/sec
-            nvgcssSetStyle(rotate_square, "transform",
-                           ("rotate(" + std::to_string(angle) + "deg)").c_str());
+            rotate_square->inline_style["transform"] = "rotate(" + std::to_string(angle) + "deg)";
         }
 
         // Color morphing
@@ -376,7 +360,7 @@ private:
 
             char color[32];
             snprintf(color, sizeof(color), "rgb(%d, %d, %d)", r, g, b);
-            nvgcssSetStyle(color_morph, "background", color);
+            color_morph->inline_style["background"] = color;
         }
     }
 

@@ -6,6 +6,7 @@
  */
 
 #include "nanovg_css_internal.h"
+#include <fmtlog.h>
 #include <algorithm>
 #include <sstream>
 #include <cmath>
@@ -230,7 +231,8 @@ int parse_grid_position_value(
             try {
                 int span_count = std::stoi(span_str);
                 return -span_count;  // Negative indicates span
-            } catch (...) {
+            } catch (const std::exception&) {
+                // Invalid span value, treat as auto
                 return 0;
             }
         }
@@ -252,7 +254,8 @@ int parse_grid_position_value(
     if (is_number) {
         try {
             return std::stoi(trimmed);
-        } catch (...) {
+        } catch (const std::exception&) {
+            // Parse error, treat as auto
             return 0;
         }
     }
@@ -559,7 +562,8 @@ GridTrack parse_single_track(const std::string& token, float container_size = 0.
             float value = std::stof(token);
             track.type = GridTrack::FIXED;
             track.value = value;
-        } catch (...) {
+        } catch (const std::exception&) {
+            // Invalid number, use default
             track.type = GridTrack::FIXED;
             track.value = 100.0f;
         }
@@ -615,7 +619,8 @@ bool parse_repeat_function(const std::string& token, RepeatPattern& pattern) {
         try {
             pattern.count_type = RepeatPattern::FIXED;
             pattern.count = std::stoi(count_str);
-        } catch (...) {
+        } catch (const std::exception&) {
+            // Invalid repeat count
             return false;
         }
 
@@ -687,7 +692,8 @@ bool parse_minmax_track(const std::string& token, GridTrack& track) {
         try {
             track.minmax.min_type = GridTrack::FIXED;
             track.minmax.min_value = std::stof(min_str);
-        } catch (...) {
+        } catch (const std::exception&) {
+            // Invalid minmax minimum value
             return false;
         }
     }
@@ -707,7 +713,8 @@ bool parse_minmax_track(const std::string& token, GridTrack& track) {
         try {
             track.minmax.max_type = GridTrack::FIXED;
             track.minmax.max_value = std::stof(max_str);
-        } catch (...) {
+        } catch (const std::exception&) {
+            // Invalid minmax maximum value
             return false;
         }
     }
@@ -999,10 +1006,15 @@ float measure_content_width(NVGCSSElement* element, NVGCSSRenderer* renderer) {
         content_width = bounds[2] - bounds[0];
     }
     // For containers, measure children
-    else if (!element->children.empty()) {
+    // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+    // uses a static cache that gets overwritten by recursive calls
+    int child_count = 0;
+    NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+    std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+    if (!children_copy.empty()) {
         // For flex/grid containers, sum or max children depending on direction
         // For now, use max width of children
-        for (auto* child : element->children) {
+        for (NVGCSSElement* child : children_copy) {
             float child_width = measure_content_width(child, renderer);
             content_width = std::max(content_width, child_width);
         }
@@ -1038,9 +1050,14 @@ float measure_content_height(NVGCSSElement* element, NVGCSSRenderer* renderer) {
         content_height = bounds[3] - bounds[1];
     }
     // For containers, measure children
-    else if (!element->children.empty()) {
+    // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+    // uses a static cache that gets overwritten by recursive calls
+    int child_count = 0;
+    NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+    std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+    if (!children_copy.empty()) {
         // Use max height of children
-        for (auto* child : element->children) {
+        for (NVGCSSElement* child : children_copy) {
             float child_height = measure_content_height(child, renderer);
             content_height = std::max(content_height, child_height);
         }
@@ -1232,6 +1249,10 @@ void compute_track_sizes(
     // Step 7: Calculate size per fr
     float fr_size = (total_fr > 0) ? (available_space / total_fr) : 0;
 
+    // DEBUG: Log fr calculation
+    // logi("compute_track_sizes: container={}, fixed={}, auto={}, gaps={}, available={}, total_fr={}, fr_size={}",
+    //      container_size, fixed_space, auto_space, total_gaps, available_space, total_fr, fr_size);
+
     // Step 8: Set computed sizes for all tracks
     for (auto& track : tracks) {
         if (track.type == GridTrack::FIXED) {
@@ -1276,9 +1297,7 @@ void compute_track_sizes(
 /**
  * @brief Parse grid container properties
  */
-GridContainer parse_grid_container(
-    NVGCSSElement* element,
-    const std::map<std::string, std::string>& style)
+GridContainer parse_grid_container(NVGCSSElement* element)
 {
     GridContainer grid;
 
@@ -1286,25 +1305,94 @@ GridContainer parse_grid_container(
     // (needed for auto-fill/auto-fit calculation)
 
     // Container dimensions and position
-    grid.container_x = element->box.x;
-    grid.container_y = element->box.y;
-    grid.container_width = element->box.width > 0 ? element->box.width : 400.0f;
-    grid.container_height = element->box.height > 0 ? element->box.height : 300.0f;
+    // FIX: Account for padding - children should be positioned inside the content area
+    float padding_top = element->explicit_style.padding[0];
+    float padding_right = element->explicit_style.padding[1];
+    float padding_bottom = element->explicit_style.padding[2];
+    float padding_left = element->explicit_style.padding[3];
 
-    // Parse gaps
-    grid.row_gap = element->explicit_style.grid_row_gap;
-    grid.column_gap = element->explicit_style.grid_column_gap;
+    grid.container_x = element->computed.x + padding_left;
+    grid.container_y = element->computed.y + padding_top;
+    grid.container_width = (element->computed.width > 0 ? element->computed.width : 400.0f)
+                           - padding_left - padding_right;
+    grid.container_height = (element->computed.height > 0 ? element->computed.height : 300.0f)
+                            - padding_top - padding_bottom;
 
-    // Now parse grid-template-rows (Sprint 26: with named lines)
-    if (!element->explicit_style.grid_template_rows.empty()) {
+    // DEBUG: Log container dimensions
+    // logi("Grid container '{}': computed size = {}x{}, using size = {}x{}",
+    //      element->id, element->computed.width, element->computed.height,
+    //      grid.container_width, grid.container_height);
+
+    // Parse gaps from TYPED properties (60fps refactor)
+    grid.row_gap = element->style.grid_row_gap.resolve(grid.container_height, 16.0f, grid.container_height);
+    grid.column_gap = element->style.grid_column_gap.resolve(grid.container_width, 16.0f, grid.container_width);
+
+    // Read grid-template-rows from TYPED properties (60fps refactor)
+    if (!element->style.grid_template_rows.empty()) {
+        // Convert typed GridTrack to local GridTrack
+        for (const auto& typed_track : element->style.grid_template_rows) {
+            GridTrack track;
+            switch (typed_track.type) {
+                case nvgcss::GridTrack::Type::PX:
+                    track.type = GridTrack::FIXED;
+                    track.value = typed_track.value;
+                    break;
+                case nvgcss::GridTrack::Type::FR:
+                    track.type = GridTrack::FRACTIONAL;
+                    track.value = typed_track.value;
+                    break;
+                case nvgcss::GridTrack::Type::AUTO:
+                    track.type = GridTrack::AUTO;
+                    track.value = 0;
+                    break;
+                case nvgcss::GridTrack::Type::MINMAX:
+                    track.type = GridTrack::MINMAX;
+                    track.minmax.min_type = GridTrack::FIXED;
+                    track.minmax.min_value = typed_track.min_val;
+                    track.minmax.max_type = GridTrack::FIXED;
+                    track.minmax.max_value = typed_track.max_val;
+                    break;
+            }
+            grid.rows.push_back(track);
+        }
+    } else if (!element->explicit_style.grid_template_rows.empty()) {
+        // Fallback: parse from string (for tests using inline_style)
         auto result = parse_track_list_with_names(element->explicit_style.grid_template_rows,
                                                   grid.container_height, grid.row_gap);
         grid.rows = result.tracks;
         grid.row_line_names = result.line_names;
     }
 
-    // Parse grid-template-columns (Sprint 26: with named lines)
-    if (!element->explicit_style.grid_template_columns.empty()) {
+    // Read grid-template-columns from TYPED properties (60fps refactor)
+    if (!element->style.grid_template_columns.empty()) {
+        // Convert typed GridTrack to local GridTrack
+        for (const auto& typed_track : element->style.grid_template_columns) {
+            GridTrack track;
+            switch (typed_track.type) {
+                case nvgcss::GridTrack::Type::PX:
+                    track.type = GridTrack::FIXED;
+                    track.value = typed_track.value;
+                    break;
+                case nvgcss::GridTrack::Type::FR:
+                    track.type = GridTrack::FRACTIONAL;
+                    track.value = typed_track.value;
+                    break;
+                case nvgcss::GridTrack::Type::AUTO:
+                    track.type = GridTrack::AUTO;
+                    track.value = 0;
+                    break;
+                case nvgcss::GridTrack::Type::MINMAX:
+                    track.type = GridTrack::MINMAX;
+                    track.minmax.min_type = GridTrack::FIXED;
+                    track.minmax.min_value = typed_track.min_val;
+                    track.minmax.max_type = GridTrack::FIXED;
+                    track.minmax.max_value = typed_track.max_val;
+                    break;
+            }
+            grid.columns.push_back(track);
+        }
+    } else if (!element->explicit_style.grid_template_columns.empty()) {
+        // Fallback: parse from string (for tests using inline_style)
         auto result = parse_track_list_with_names(element->explicit_style.grid_template_columns,
                                                   grid.container_width, grid.column_gap);
         grid.columns = result.tracks;
@@ -1319,18 +1407,39 @@ GridContainer parse_grid_container(
         grid.columns.push_back(GridTrack(GridTrack::FIXED, 100.0f));
     }
 
-    // Parse alignment properties (Sprint 8)
-    if (style.count("justify-items")) {
-        grid.justify_items = style.at("justify-items");
+    // Parse alignment properties (Sprint 8) - from typed properties
+    // TODO: justify-items not yet in typed system - reading from inline_style
+    if (element->inline_style.count("justify-items")) {
+        grid.justify_items = element->inline_style.at("justify-items");
     }
-    if (style.count("align-items")) {
-        grid.align_items = style.at("align-items");
+
+    // align-items from typed enum
+    switch (element->style.align_items) {
+        case nvgcss::AlignItems::FLEX_START: grid.align_items = "flex-start"; break;
+        case nvgcss::AlignItems::FLEX_END: grid.align_items = "flex-end"; break;
+        case nvgcss::AlignItems::CENTER: grid.align_items = "center"; break;
+        case nvgcss::AlignItems::BASELINE: grid.align_items = "baseline"; break;
+        case nvgcss::AlignItems::STRETCH: grid.align_items = "stretch"; break;
     }
-    if (style.count("justify-content")) {
-        grid.justify_content = style.at("justify-content");
+
+    // justify-content from typed enum
+    switch (element->style.justify_content) {
+        case nvgcss::JustifyContent::FLEX_START: grid.justify_content = "flex-start"; break;
+        case nvgcss::JustifyContent::FLEX_END: grid.justify_content = "flex-end"; break;
+        case nvgcss::JustifyContent::CENTER: grid.justify_content = "center"; break;
+        case nvgcss::JustifyContent::SPACE_BETWEEN: grid.justify_content = "space-between"; break;
+        case nvgcss::JustifyContent::SPACE_AROUND: grid.justify_content = "space-around"; break;
+        case nvgcss::JustifyContent::SPACE_EVENLY: grid.justify_content = "space-evenly"; break;
     }
-    if (style.count("align-content")) {
-        grid.align_content = style.at("align-content");
+
+    // align-content from typed enum
+    switch (element->style.align_content) {
+        case nvgcss::AlignContent::FLEX_START: grid.align_content = "flex-start"; break;
+        case nvgcss::AlignContent::FLEX_END: grid.align_content = "flex-end"; break;
+        case nvgcss::AlignContent::CENTER: grid.align_content = "center"; break;
+        case nvgcss::AlignContent::SPACE_BETWEEN: grid.align_content = "space-between"; break;
+        case nvgcss::AlignContent::SPACE_AROUND: grid.align_content = "space-around"; break;
+        case nvgcss::AlignContent::STRETCH: grid.align_content = "stretch"; break;
     }
     // Sprint 32: Grid auto-flow
     grid.grid_auto_flow = element->explicit_style.grid_auto_flow;
@@ -1348,7 +1457,10 @@ void collect_grid_items(
     const GridTemplateAreas& template_areas,
     NVGCSSRenderer* renderer)
 {
-    for (auto* child : container->children) {
+    int child_count = 0;
+    NVGCSSElement** children = nvgcssGetChildren(renderer, container, &child_count);
+    for (int i = 0; i < child_count; ++i) {
+        NVGCSSElement* child = children[i];
         if (!child->visible) continue;
 
         GridItemPlacement item;
@@ -1357,11 +1469,12 @@ void collect_grid_items(
         // Compute style for child to get raw CSS values
         auto child_style = renderer->stylesheet->compute_style(
             child->id, child->type, child->classes,
-            child->attributes, child->pseudo_states, child->inline_style);
+            child->attributes, child->pseudo_states, child->inline_style, {},
+            child->child_index, child->total_siblings);
 
         // Sprint 13: Check for grid-area first
         if (!child->explicit_style.grid_area.empty() && template_areas.is_valid()) {
-            const std::string& area_name = child->explicit_style.grid_area;
+            std::string area_name = child->explicit_style.grid_area;
 
             // Look up area in template
             auto it = template_areas.areas.find(area_name);
@@ -1601,8 +1714,33 @@ void auto_place_items(GridContainer& grid)
                         mark_occupied(found_row, found_col, row_span, col_span);
                         placed = true;
                     }
+                } else if (is_column) {
+                    // Column-first normal mode: advance column first, then row
+                    while (current_col < num_cols && !placed) {
+                        while (current_row < num_rows) {
+                            if (can_place_span(current_row, current_col, row_span, col_span)) {
+                                // Found space for item
+                                item.row_start = current_row + 1;
+                                item.row_end = item.row_start + row_span;
+                                item.column_start = current_col + 1;
+                                item.column_end = item.column_start + col_span;
+
+                                mark_occupied(current_row, current_col, row_span, col_span);
+                                current_row += row_span;  // Advance by span height
+                                placed = true;
+                                break;
+                            }
+                            current_row++;
+                        }
+
+                        if (!placed) {
+                            // Move to next column
+                            current_col++;
+                            current_row = 0;
+                        }
+                    }
                 } else {
-                    // Normal mode: Find next available position from cursor
+                    // Row-first normal mode (default): advance row first, then column
                     while (current_row < num_rows && !placed) {
                         while (current_col < num_cols) {
                             if (can_place_span(current_row, current_col, row_span, col_span)) {
@@ -1629,12 +1767,19 @@ void auto_place_items(GridContainer& grid)
                 }
             }
 
-            // If we ran out of space, place at end
-            if (!placed && current_row >= num_rows) {
-                item.row_start = num_rows;
-                item.row_end = num_rows + row_span;
-                item.column_start = current_col + 1;
-                item.column_end = current_col + 1 + col_span;
+            // If we ran out of space, place at end (create implicit tracks)
+            if (!placed) {
+                if (is_column) {
+                    item.column_start = current_col + 1;
+                    item.column_end = item.column_start + col_span;
+                    item.row_start = current_row + 1;
+                    item.row_end = item.row_start + row_span;
+                } else {
+                    item.row_start = current_row + 1;
+                    item.row_end = item.row_start + row_span;
+                    item.column_start = current_col + 1;
+                    item.column_end = item.column_start + col_span;
+                }
             }
         }
     }
@@ -1757,8 +1902,11 @@ void position_grid_items(GridContainer& grid)
         float height = 0;
 
         // Sum columns this item spans
+        // BUG FIX: Use column_span() when column_end is not set
         int c_start = item.column_start - 1;
-        int c_end = item.column_end >= 1 ? item.column_end - 1 : item.column_start;
+        int c_end = item.column_end >= 1
+            ? item.column_end - 1
+            : c_start + item.column_span();  // Use span instead of fallback to start
 
         for (int c = c_start; c < c_end && c < (int)grid.columns.size(); c++) {
             width += grid.columns[c].computed_size;
@@ -1768,8 +1916,11 @@ void position_grid_items(GridContainer& grid)
         }
 
         // Sum rows this item spans
+        // BUG FIX: Use row_span() when row_end is not set
         int r_start = item.row_start - 1;
-        int r_end = item.row_end >= 1 ? item.row_end - 1 : item.row_start;
+        int r_end = item.row_end >= 1
+            ? item.row_end - 1
+            : r_start + item.row_span();  // Use span instead of fallback to start
 
         for (int r = r_start; r < r_end && r < (int)grid.rows.size(); r++) {
             height += grid.rows[r].computed_size;
@@ -1853,12 +2004,17 @@ void write_computed_layout(const GridContainer& grid)
             // Sprint 19: Apply box-sizing to calculate content dimensions
             // Grid assigns "total" dimensions (may include padding/border if border-box)
             float content_width, content_height;
-            float border[4] = {0.0f, 0.0f, 0.0f, 0.0f};  // TODO: border-width support
+            float border[4] = {
+                item.element->explicit_style.border_width[0],  // top
+                item.element->explicit_style.border_width[1],  // right
+                item.element->explicit_style.border_width[2],  // bottom
+                item.element->explicit_style.border_width[3]   // left
+            };
 
             calculate_content_dimensions(
                 width,
                 height,
-                item.element->box.padding,
+                item.element->explicit_style.padding,
                 border,
                 item.element->explicit_style.box_sizing,
                 content_width,
@@ -1871,13 +2027,17 @@ void write_computed_layout(const GridContainer& grid)
 
         // PHASE 4 SPRINT 4: Write to computed (OUTPUT)
         // Sprint 37: Apply margin offsets
-        float margin_left = item.element->box.margin[3];  // left
-        float margin_top = item.element->box.margin[0];   // top
+        float margin_left = item.element->explicit_style.margin[3];  // left
+        float margin_top = item.element->explicit_style.margin[0];   // top
 
         item.element->computed.x = item.x + margin_left;
         item.element->computed.y = item.y + margin_top;
         item.element->computed.width = width;
         item.element->computed.height = height;
+
+        // DEBUG: Log what we're writing
+        // logi("write_computed_layout: element '{}' -> x={}, y={}, width={}, height={}",
+        //      item.element->id, item.element->computed.x, item.element->computed.y, width, height);
 
         // Set content dimensions
         item.element->computed.content_width = width;
@@ -1886,12 +2046,6 @@ void write_computed_layout(const GridContainer& grid)
         // Mark as computed by grid (SPRINT 4 SOURCE TRACKING)
         item.element->computed.source = NVGCSSComputedLayout::GRID;
         item.element->computed.is_computed = true;
-
-        // Sync to deprecated box field for backward compatibility
-        item.element->box.x = item.element->computed.x;
-        item.element->box.y = item.element->computed.y;
-        item.element->box.width = item.element->computed.width;
-        item.element->box.height = item.element->computed.height;
     }
 }
 
@@ -1900,11 +2054,10 @@ void write_computed_layout(const GridContainer& grid)
  */
 void compute_grid_layout(
     NVGCSSElement* element,
-    const std::map<std::string, std::string>& computed_style,
     NVGCSSRenderer* renderer)
 {
     // Step 1: Parse grid container properties
-    GridContainer grid = parse_grid_container(element, computed_style);
+    GridContainer grid = parse_grid_container(element);
 
     // Sprint 13: Parse grid-template-areas if present
     GridTemplateAreas template_areas;
@@ -1933,22 +2086,43 @@ void compute_grid_layout(
         return;  // No items to layout
     }
 
-    // NEW: Pre-create implicit rows based on grid-auto-rows BEFORE auto-placement
-    // Estimate how many rows we'll need based on number of items and columns
-    int num_items = grid.items.size();
-    int num_cols = grid.columns.size();
-    if (num_cols > 0) {
-        // Estimate rows needed: divide items by columns, round up
-        int estimated_rows = (num_items + num_cols - 1) / num_cols;
+    // Parse grid-auto-flow to determine primary direction
+    bool is_column_flow = (grid.grid_auto_flow.find("column") != std::string::npos);
 
-        // Create implicit rows if we need more than explicit rows
-        while ((int)grid.rows.size() < estimated_rows) {
-            std::string auto_rows = element->explicit_style.grid_auto_rows;
-            if (auto_rows.empty()) {
-                auto_rows = "auto";  // Default to auto sizing
+    // Pre-create implicit tracks based on grid-auto-rows/columns BEFORE auto-placement
+    int num_items = grid.items.size();
+
+    if (is_column_flow) {
+        // Column-first flow: estimate columns needed
+        int num_rows = grid.rows.size();
+        if (num_rows > 0) {
+            int estimated_cols = (num_items + num_rows - 1) / num_rows;
+
+            // Create implicit columns if we need more than explicit columns
+            while ((int)grid.columns.size() < estimated_cols) {
+                std::string auto_cols = element->explicit_style.grid_auto_columns;
+                if (auto_cols.empty()) {
+                    auto_cols = "auto";  // Default to auto sizing
+                }
+                GridTrack track = parse_single_track(auto_cols, grid.container_width);
+                grid.columns.push_back(track);
             }
-            GridTrack track = parse_single_track(auto_rows, grid.container_height);
-            grid.rows.push_back(track);
+        }
+    } else {
+        // Row-first flow (default): estimate rows needed
+        int num_cols = grid.columns.size();
+        if (num_cols > 0) {
+            int estimated_rows = (num_items + num_cols - 1) / num_cols;
+
+            // Create implicit rows if we need more than explicit rows
+            while ((int)grid.rows.size() < estimated_rows) {
+                std::string auto_rows = element->explicit_style.grid_auto_rows;
+                if (auto_rows.empty()) {
+                    auto_rows = "auto";  // Default to auto sizing
+                }
+                GridTrack track = parse_single_track(auto_rows, grid.container_height);
+                grid.rows.push_back(track);
+            }
         }
     }
 

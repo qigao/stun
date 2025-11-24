@@ -1,35 +1,31 @@
 #pragma once
 
-#include "flexui/controller.h"
-
+#include "flexui/node.h"
 #include <functional>
-#include <string>
-#include <unordered_map>
 
 namespace flexui {
 
-struct FlexCheckboxBinding {
-  std::string element_id;
-  bool initial_checked = false;
-  std::function<void(bool)> on_change;
-};
+// We can reuse FlexCheckboxBinding or simpler Props, but let's stick to node properties.
+// Actually, the factory uses FlexCheckboxProps.
+// But here we are defining the Node class.
 
-class FlexCheckbox : public Flex {
+class FlexCheckbox : public FlexNode {
 public:
-  void registerCheckbox(FlexCheckboxBinding binding);
+    using FlexNode::FlexNode; // Inherit constructor
 
-  void handleEvent(const SDL_Event &event) override;
+    void setChecked(bool checked);
+    bool isChecked() const { return m_checked; }
+    
+    void setOnChange(std::function<void(bool)> callback) { m_on_change = callback; }
+
+    // Override handleEvent to handle clicks
+    void handleEvent(const SDL_Event& event) override;
+
+    // Optional: update method if needed, but not for now.
 
 private:
-  struct CheckboxState {
-    FlexCheckboxBinding binding;
-    bool checked = false;
-  };
-
-  CheckboxState *hitTest(float x, float y);
-  void setState(CheckboxState &state, bool checked);
-
-  std::unordered_map<std::string, CheckboxState> m_checkboxes;
+    bool m_checked = false;
+    std::function<void(bool)> m_on_change;
 };
 
 } // namespace flexui

@@ -2,6 +2,7 @@
 
 #include "flexui/controller.h"
 
+#include <SDL3/SDL.h> // Required for SDL_Event
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -25,7 +26,7 @@ struct FlexDropdownBinding {
   std::function<void(const std::string &value)> on_select;
 };
 
-class FlexDropdown : public Flex {
+class FlexDropdown : public FlexController {
 public:
   void registerDropdown(FlexDropdownBinding binding);
 

@@ -22,7 +22,7 @@
 
 #include <nanovg_css.h>
 #include <fmtlog.h>
-#include <chrono> 
+#include <chrono>
 
 
 
@@ -38,7 +38,7 @@ public:
 
     ~NanoVGCSSLayoutsDemo() {
         if (renderer) nvgcssDeleteRenderer(renderer);
-       
+
         if (gl_context) SDL_GL_DestroyContext(gl_context);
         if (window) SDL_DestroyWindow(window);
         SDL_Quit();
@@ -133,26 +133,32 @@ private:
 
     void setup_css() {
         const char* css = R"(
-            /* Flexbox Containers */
-            .flex-row {
+            /* ===== Flexbox Container Styles ===== */
+            #flex-row-container {
                 display: flex;
                 flex-direction: row;
                 gap: 10px;
                 background: #ecf0f1;
                 padding: 15px;
                 border-radius: 8px;
+                left: 50px;
+                top: 100px;
+                width: 40%;
             }
 
-            .flex-column {
+            #flex-col-container {
                 display: flex;
                 flex-direction: column;
                 gap: 10px;
                 background: #ecf0f1;
                 padding: 15px;
                 border-radius: 8px;
+                left: 45%;
+                top: 100px;
+                width: 140px;
             }
 
-            .flex-wrap {
+            #flex-wrap-container {
                 display: flex;
                 flex-direction: row;
                 flex-wrap: wrap;
@@ -160,9 +166,12 @@ private:
                 background: #ecf0f1;
                 padding: 15px;
                 border-radius: 8px;
+                left: 57%;
+                top: 100px;
+                width: 40%;
             }
 
-            /* Flex Items */
+            /* ===== Flex Item Styles ===== */
             .flex-item {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 border-radius: 5px;
@@ -183,12 +192,12 @@ private:
             }
 
             .flex-item-fixed {
-                width: 80px;
-                height: 60px;
+                width: 100px;
+                height: 80px;
             }
 
-            /* Grid Containers */
-            .grid-container {
+            /* ===== Grid Container Styles ===== */
+            #grid-container {
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
                 grid-auto-rows: 100px;
@@ -196,9 +205,13 @@ private:
                 background: #ecf0f1;
                 padding: 20px;
                 border-radius: 8px;
+                left: 50px;
+                top: 500px;
+                width: 40%;
+                height: auto;
             }
 
-            .grid-container-auto {
+            #grid-auto-container {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                 grid-auto-rows: 90px;
@@ -206,9 +219,13 @@ private:
                 background: #ecf0f1;
                 padding: 20px;
                 border-radius: 8px;
+                left: 45%;
+                top: 500px;
+                width: 53%;
+                height: auto;
             }
 
-            /* Grid Items */
+            /* ===== Grid Item Styles ===== */
             .grid-item {
                 background: linear-gradient(to bottom, #3498db, #2980b9);
                 border-radius: 8px;
@@ -233,29 +250,7 @@ private:
                 grid-column: span 3;
             }
 
-            /* Card Layouts */
-            .card {
-                background: white;
-                border: 1px solid #ddd;
-                border-radius: 8px;
-                padding: 15px;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
-
-            .card-header {
-                background: #34495e;
-                color: white;
-                padding: 10px;
-                border-radius: 5px 5px 0 0;
-                font-size: 16px;
-                font-weight: bold;
-            }
-
-            .card-body {
-                padding: 15px;
-            }
-
-            /* Color variations */
+            /* ===== Color Variations ===== */
             .bg-primary {
                 background: linear-gradient(135deg, #3498db, #2980b9);
             }
@@ -283,12 +278,8 @@ private:
     }
 
     void create_flexbox_example() {
-        // Create flexbox row container - use percentage for responsive width
+        // Create flexbox row container
         NVGCSSElement* flex_row_container = nvgcssCreateElement(renderer, "flex-row-container", "div");
-        nvgcssAddClass(flex_row_container, "flex-row");
-        nvgcssSetStyle(flex_row_container, "left", "50px");
-        nvgcssSetStyle(flex_row_container, "top", "100px");
-        nvgcssSetStyle(flex_row_container, "width", "40%");  // Simple percentage
 
         // Create row items and append to container
         for (int i = 0; i < 4; i++) {
@@ -296,9 +287,6 @@ private:
             NVGCSSElement* item = nvgcssCreateElement(renderer, id.c_str(), "rect");
             nvgcssAddClass(item, "flex-item");
             nvgcssAddClass(item, i == 2 ? "flex-item-grow" : "flex-item-fixed");
-
-            nvgcssSetStyle(item, "width", "150px");
-            nvgcssSetStyle(item, "height", "80px");
 
             // Apply different colors
             const char* color_classes[] = {"bg-primary", "bg-success", "bg-warning", "bg-danger"};
@@ -312,20 +300,14 @@ private:
             nvgcssAppendChild(renderer, flex_row_container, item);
         }
 
-        // Create flexbox column container - responsive positioning
+        // Create flexbox column container
         NVGCSSElement* flex_col_container = nvgcssCreateElement(renderer, "flex-col-container", "div");
-        nvgcssAddClass(flex_col_container, "flex-column");
-        nvgcssSetStyle(flex_col_container, "left", "45%");  // Percentage positioning
-        nvgcssSetStyle(flex_col_container, "top", "100px");
-        nvgcssSetStyle(flex_col_container, "width", "140px");
 
         // Column layout elements
         for (int i = 0; i < 4; i++) {
             std::string id = "flex-col-item-" + std::to_string(i);
             NVGCSSElement* item = nvgcssCreateElement(renderer, id.c_str(), "rect");
             nvgcssAddClass(item, "flex-item");
-            nvgcssSetStyle(item, "width", "140px");
-            nvgcssSetStyle(item, "height", "60px");
 
             const char* color_classes[] = {"bg-info", "bg-primary", "bg-success", "bg-warning"};
             nvgcssAddClass(item, color_classes[i % 4]);
@@ -338,20 +320,14 @@ private:
             nvgcssAppendChild(renderer, flex_col_container, item);
         }
 
-        // Create flexbox wrap container - responsive width and position
+        // Create flexbox wrap container
         NVGCSSElement* flex_wrap_container = nvgcssCreateElement(renderer, "flex-wrap-container", "div");
-        nvgcssAddClass(flex_wrap_container, "flex-wrap");
-        nvgcssSetStyle(flex_wrap_container, "left", "57%");  // Percentage position
-        nvgcssSetStyle(flex_wrap_container, "top", "100px");
-        nvgcssSetStyle(flex_wrap_container, "width", "40%");  // Simple percentage
 
         // Wrap layout elements
         for (int i = 0; i < 8; i++) {
             std::string id = "flex-wrap-item-" + std::to_string(i);
             NVGCSSElement* item = nvgcssCreateElement(renderer, id.c_str(), "rect");
             nvgcssAddClass(item, "flex-item");
-            nvgcssSetStyle(item, "width", "100px");
-            nvgcssSetStyle(item, "height", "70px");
 
             const char* color_classes[] = {"bg-primary", "bg-success", "bg-warning", "bg-danger", "bg-info"};
             nvgcssAddClass(item, color_classes[i % 5]);
@@ -366,21 +342,14 @@ private:
     }
 
     void create_grid_example() {
-        // Create 3-column grid container - use percentage width with auto height
+        // Create 3-column grid container
         NVGCSSElement* grid_container = nvgcssCreateElement(renderer, "grid-container", "div");
-        nvgcssAddClass(grid_container, "grid-container");
-        nvgcssSetStyle(grid_container, "left", "50px");
-        nvgcssSetStyle(grid_container, "top", "500px");
-        nvgcssSetStyle(grid_container, "width", "40%");  // Simple percentage
-        nvgcssSetStyle(grid_container, "height", "auto");  // Auto height to fit content
 
         // Create grid items and append to container
         for (int i = 0; i < 6; i++) {
             std::string id = "grid-item-" + std::to_string(i);
             NVGCSSElement* item = nvgcssCreateElement(renderer, id.c_str(), "rect");
             nvgcssAddClass(item, "grid-item");
-
-            nvgcssSetStyle(item, "height", "100px");
 
             // Make some items span multiple columns
             if (i == 0) {
@@ -400,20 +369,14 @@ private:
             nvgcssAppendChild(renderer, grid_container, item);
         }
 
-        // Create auto-fill grid container - use percentage width with auto height
+        // Create auto-fill grid container
         NVGCSSElement* grid_auto_container = nvgcssCreateElement(renderer, "grid-auto-container", "div");
-        nvgcssAddClass(grid_auto_container, "grid-container-auto");
-        nvgcssSetStyle(grid_auto_container, "left", "45%");  // Percentage positioning
-        nvgcssSetStyle(grid_auto_container, "top", "500px");
-        nvgcssSetStyle(grid_auto_container, "width", "53%");  // Simple percentage
-        nvgcssSetStyle(grid_auto_container, "height", "auto");  // Auto height to fit all items
 
         // Auto-fill grid elements
         for (int i = 0; i < 9; i++) {
             std::string id = "grid-auto-item-" + std::to_string(i);
             NVGCSSElement* item = nvgcssCreateElement(renderer, id.c_str(), "rect");
             nvgcssAddClass(item, "grid-item");
-            nvgcssSetStyle(item, "height", "90px");
 
             const char* color_classes[] = {"bg-info", "bg-primary", "bg-success", "bg-warning", "bg-danger"};
             nvgcssAddClass(item, color_classes[i % 5]);

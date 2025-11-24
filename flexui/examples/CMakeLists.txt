@@ -39,7 +39,7 @@ foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
         flexui_core
         SDL3::SDL3
         OpenGL::GL
-        glad::glad fmtlog
+        glad::glad fmtlog::fmtlog
     )
 
     # Include directories

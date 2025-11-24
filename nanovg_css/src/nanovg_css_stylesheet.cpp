@@ -135,6 +135,10 @@ bool SimpleStyleSheet::parse_css(const std::string& css) {
             value.erase(0, value.find_first_not_of(" \t\n\r"));
             value.erase(value.find_last_not_of(" \t\n\r") + 1);
 
+            // Normalize property name to lowercase
+            std::transform(prop.begin(), prop.end(), prop.begin(),
+                           [](unsigned char c){ return std::tolower(c); });
+
             if (!prop.empty() && !value.empty()) {
                 // Sprint 23: Check if this is a CSS variable definition (starts with --)
                 if (prop.length() >= 2 && prop.substr(0, 2) == "--") {

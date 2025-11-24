@@ -1,92 +1,162 @@
 #include "flexui/app.h"
+#include "flexui/document.h"
+#include "flexui/controller.h"
+#include <algorithm>
+#include <chrono>
 
+#include <nanovg.h>
+#define NANOVG_GL3 1
+#include <nanovg_gl.h>
 #include <SDL3/SDL.h>
 #include <fmtlog.h>
-#include <nanovg_css.h>
-
-#include <chrono>
-#include <utility>
+#include <glad/glad.h>
 
 namespace flexui {
 
-bool FlexApp::init(const FlexAppConfig &config) {
-  m_config = config;
-  if (!m_view.initialize(config.view)) {
-    return false;
-  }
-
-  if (m_document && m_view.renderer()) {
-    m_document->setRenderer(m_view.renderer());
-  }
-
-  for (auto &controller : m_controllers) {
-    controller->attachDocument(m_document.get());
-  }
-
-  return true;
+FlexApp::FlexApp()
+{
 }
 
-void FlexApp::setDocument(std::shared_ptr<FlexDocument> document) {
-  m_document = std::move(document);
-  if (m_document && m_view.renderer()) {
-    m_document->setRenderer(m_view.renderer());
-  }
-
-  for (auto &controller : m_controllers) {
-    controller->attachDocument(m_document.get());
-  }
+FlexApp::~FlexApp()
+{
+  deinit();
 }
 
-void FlexApp::addController(
-    const std::shared_ptr<Flex> &controller) {
-  m_controllers.push_back(controller);
-  controller->attachDocument(m_document.get());
+bool FlexApp::init(const FlexAppConfig& config)
+{
+    return m_view.initialize(config);
 }
 
-void FlexApp::setOverlayCallback(OverlayDrawCallback callback) {
-  m_overlay_callback = std::move(callback);
+void FlexApp::deinit()
+{
+    m_view.shutdown();
 }
 
-void FlexApp::run() {
-  if (!m_document) {
-    loge("FlexApp: document must be set before run()");
-    return;
-  }
-
-  for (auto &controller : m_controllers) {
-    controller->onBeforeRun();
-  }
-
-  bool running = true;
-  auto last_time = std::chrono::steady_clock::now();
-
-  while (running) {
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-      if (event.type == SDL_EVENT_QUIT && m_config.quit_on_close) {
-        running = false;
-      }
-
-      for (auto &controller : m_controllers) {
-        controller->handleEvent(event);
-      }
-    }
-
-    auto now = std::chrono::steady_clock::now();
-    const float dt =
-        std::chrono::duration<float>(now - last_time).count();
-    last_time = now;
-
-    for (auto &controller : m_controllers) {
-      controller->update(dt);
-    }
-
+void FlexApp::setDocument(FlexDocument& document)
+{
+    m_document = &document;
     if (m_view.renderer()) {
-      nvgcssUpdate(m_view.renderer(), dt);
+        m_document->setRenderer(m_view.renderer());
     }
 
-    m_view.render(*m_document, m_overlay_callback);
-  }
+    // Notify owned controllers
+    for (auto& controller : m_controllers) {
+        if (controller) {
+            controller->attachDocument(m_document);
+        }
+    }
+    // Notify non-owning controller references
+    for (auto* controller : m_controller_refs) {
+        if (controller) {
+            controller->attachDocument(m_document);
+        }
+    }
 }
+
+void FlexApp::setDocument(FlexDocument* document) {
+    if (!document) {
+        loge("FlexApp::setDocument: document must not be null");
+        return;
+    }
+    setDocument(*document);
+}
+
+void FlexApp::addController(std::shared_ptr<FlexController> controller)
+{
+    if (controller) {
+        m_controllers.push_back(controller);
+        if (m_document) {
+            controller->attachDocument(m_document);
+        }
+    }
+}
+
+void FlexApp::addController(FlexController& controller)
+{
+    m_controller_refs.push_back(&controller);
+    if (m_document) {
+        controller.attachDocument(m_document);
+    }
+}
+
+void FlexApp::setOverlayCallback(OverlayDrawCallback callback)
+{
+    m_overlay_callback = callback;
+}
+
+void FlexApp::quit()
+{
+    m_running = false;
+}
+
+void FlexApp::run()
+{
+    if (!m_document) {
+        loge("FlexApp: document must be set before run()");
+        return;
+    }
+
+    m_running = true;
+    auto last_time = std::chrono::steady_clock::now();
+
+    // Notify before run - owned controllers
+    for (auto& controller : m_controllers) {
+        if (controller) controller->onBeforeRun();
+    }
+    // Notify before run - non-owning controller references
+    for (auto* controller : m_controller_refs) {
+        if (controller) controller->onBeforeRun();
+    }
+    onBeforeRun();
+
+    while (m_running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                m_running = false;
+            }
+
+            // Dispatch events to owned controllers
+            for (auto& controller : m_controllers) {
+                if (controller) controller->handleEvent(event);
+            }
+            // Dispatch events to non-owning controller references
+            for (auto* controller : m_controller_refs) {
+                if (controller) controller->handleEvent(event);
+            }
+
+            // Dispatch event to document (centralized dispatch)
+            if (m_document) {
+                m_document->handleEvent(event);
+            }
+
+            handleEvent(event);
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        const float dt = std::chrono::duration<float>(now - last_time).count();
+        last_time = now;
+
+        // Update owned controllers
+        for (auto& controller : m_controllers) {
+            if (controller) controller->update(dt);
+        }
+        // Update non-owning controller references
+        for (auto* controller : m_controller_refs) {
+            if (controller) controller->update(dt);
+        }
+
+        // Render
+        m_view.render(*m_document, dt, m_overlay_callback);
+
+        onFrame();
+        onAfterFrame();
+    }
+}
+
+void FlexApp::onBeforeRun() {}
+void FlexApp::onFrame() {}
+void FlexApp::onAfterFrame() {}
+void FlexApp::handleEvent(const SDL_Event& event) { (void)event; }
 
 } // namespace flexui

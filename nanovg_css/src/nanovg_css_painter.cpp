@@ -5,8 +5,11 @@
  */
 
 #include "nanovg_css_internal.h"
-#include <sstream>
+#include <fmtlog.h>
 #include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <sstream>
  // PHASE 4 SPRINT 4: Helper to create NVGCSSBox from computed layout
   static NVGCSSBox computed_to_box(const NVGCSSComputedLayout& computed) {
       NVGCSSBox box;
@@ -28,14 +31,229 @@ static float safe_stof(const std::string& value, float fallback = 0.f) {
         size_t processed = 0;
         float parsed = std::stof(value, &processed);
         return processed == 0 ? fallback : parsed;
-    } catch (...) {
+    } catch (const std::exception&) {
         return fallback;
     }
 }
 
+namespace {
+
+using StrokeStyle = NVGCSSPainter::StrokeStyle;
+constexpr float kPi = 3.14159265358979323846f;
+
+struct Vec2 {
+    float x;
+    float y;
+};
+
+Vec2 operator+(const Vec2& a, const Vec2& b) {
+    return {a.x + b.x, a.y + b.y};
+}
+
+Vec2 operator-(const Vec2& a, const Vec2& b) {
+    return {a.x - b.x, a.y - b.y};
+}
+
+Vec2 operator*(const Vec2& v, float scalar) {
+    return {v.x * scalar, v.y * scalar};
+}
+
+float length(const Vec2& v) {
+    return std::sqrt(v.x * v.x + v.y * v.y);
+}
+
+Vec2 normalize(const Vec2& v) {
+    float len = length(v);
+    if (len < 1e-4f) {
+        return {0.0f, 0.0f};
+    }
+    return {v.x / len, v.y / len};
+}
+
+Vec2 perpendicular(const Vec2& v) {
+    return {-v.y, v.x};
+}
+
+float salted_noise(float seed) {
+    float value = std::sinf(seed * 12.9898f) * 43758.5453f;
+    return value - std::floor(value);
+}
+
+Vec2 jitter_with_salt(const Vec2& v, float salt, float amplitude, float channel) {
+    float nx = salted_noise(salt + channel * 17.0f) - 0.5f;
+    float ny = salted_noise(salt + channel * 31.0f) - 0.5f;
+    return {v.x + nx * amplitude, v.y + ny * amplitude};
+}
+
+class DashPen {
+public:
+    explicit DashPen(const StrokeStyle& style)
+        : style_(style) {
+        if (!style_.dash_array.empty()) {
+            for (float entry : style_.dash_array) {
+                if (entry > 0.0f) {
+                    pattern_.push_back(entry);
+                    total_pattern_length_ += entry;
+                }
+            }
+        }
+        if (pattern_.empty() || total_pattern_length_ <= 0.0f) {
+            solid_ = true;
+        } else {
+            solid_ = false;
+            float offset = std::fmod(style_.dash_offset, total_pattern_length_);
+            if (offset < 0.0f) offset += total_pattern_length_;
+            skip(offset);
+        }
+    }
+
+    bool solid() const { return solid_; }
+
+    void stroke_segment(NVGcontext* vg, const Vec2& start, const Vec2& end) {
+        Vec2 dir = end - start;
+        float seg_len = length(dir);
+        if (seg_len < 1e-4f) return;
+        if (solid_) {
+            nvgBeginPath(vg);
+            nvgMoveTo(vg, start.x, start.y);
+            nvgLineTo(vg, end.x, end.y);
+            nvgStroke(vg);
+            return;
+        }
+
+        Vec2 unit = dir * (1.0f / seg_len);
+        float remaining = seg_len;
+        Vec2 cursor = start;
+
+        while (remaining > 1e-4f) {
+            float current = pattern_[pattern_index_];
+            float available = current - segment_pos_;
+            float step = std::min(remaining, available);
+            Vec2 next = cursor + unit * step;
+            if (draw_segment_) {
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, cursor.x, cursor.y);
+                nvgLineTo(vg, next.x, next.y);
+                nvgStroke(vg);
+            }
+
+            remaining -= step;
+            cursor = next;
+            segment_pos_ += step;
+
+            if (segment_pos_ >= current - 1e-4f) {
+                segment_pos_ = 0.0f;
+                pattern_index_ = (pattern_index_ + 1) % pattern_.size();
+                draw_segment_ = !draw_segment_;
+            }
+        }
+    }
+
+private:
+    void skip(float length_to_skip) {
+        if (solid_) return;
+        float remaining = length_to_skip;
+        while (remaining > 1e-4f) {
+            float current = pattern_[pattern_index_];
+            float available = current - segment_pos_;
+            float step = std::min(remaining, available);
+            remaining -= step;
+            segment_pos_ += step;
+            if (segment_pos_ >= current - 1e-4f) {
+                segment_pos_ = 0.0f;
+                pattern_index_ = (pattern_index_ + 1) % pattern_.size();
+                draw_segment_ = !draw_segment_;
+            }
+        }
+    }
+
+    const StrokeStyle& style_;
+    std::vector<float> pattern_;
+    size_t pattern_index_ = 0;
+    float segment_pos_ = 0.0f;
+    bool draw_segment_ = true;
+    bool solid_ = true;
+    float total_pattern_length_ = 0.0f;
+};
+
+void apply_stroke_state(NVGcontext* vg, const StrokeStyle& stroke) {
+    nvgStrokeWidth(vg, stroke.width);
+    nvgStrokeColor(vg, stroke.color);
+    nvgLineCap(vg, stroke.line_cap);
+    nvgLineJoin(vg, stroke.line_join);
+    nvgMiterLimit(vg, stroke.miter_limit);
+}
+
+void stroke_polyline(NVGcontext* vg,
+                     const StrokeStyle& stroke,
+                     const std::vector<Vec2>& points,
+                     bool closed) {
+    if (points.size() < 2 || !stroke.enabled) return;
+
+    apply_stroke_state(vg, stroke);
+
+    if (stroke.dash_array.empty()) {
+        nvgBeginPath(vg);
+        nvgMoveTo(vg, points[0].x, points[0].y);
+        for (size_t i = 1; i < points.size(); ++i) {
+            nvgLineTo(vg, points[i].x, points[i].y);
+        }
+        if (closed) {
+            nvgLineTo(vg, points[0].x, points[0].y);
+        }
+        nvgStroke(vg);
+        return;
+    }
+
+    DashPen pen(stroke);
+    for (size_t i = 0; i + 1 < points.size(); ++i) {
+        pen.stroke_segment(vg, points[i], points[i + 1]);
+    }
+    if (closed) {
+        pen.stroke_segment(vg, points.back(), points.front());
+    }
+}
+
+std::vector<Vec2> build_freehand_outline(const std::vector<Vec2>& raw_points,
+                                         float stroke_width,
+                                         float salt) {
+    if (raw_points.size() < 2) return {};
+
+    std::vector<Vec2> left;
+    std::vector<Vec2> right;
+    left.reserve(raw_points.size());
+    right.reserve(raw_points.size());
+
+    for (size_t i = 0; i < raw_points.size(); ++i) {
+        Vec2 prev = (i == 0) ? raw_points[i] : raw_points[i - 1];
+        Vec2 next = (i + 1 >= raw_points.size()) ? raw_points[i] : raw_points[i + 1];
+        Vec2 dir = normalize(next - prev);
+        Vec2 normal = perpendicular(dir);
+        if (length(normal) < 1e-4f) {
+            normal = {0.0f, 1.0f};
+        } else {
+            normal = normalize(normal);
+        }
+
+        float noise = salted_noise(salt + static_cast<float>(i) * 0.37f) - 0.5f;
+        float thickness = stroke_width * (0.55f + 0.35f * noise);
+        left.push_back(raw_points[i] + normal * thickness);
+        right.push_back(raw_points[i] - normal * thickness);
+    }
+
+    std::vector<Vec2> outline;
+    outline.reserve(left.size() + right.size());
+    outline.insert(outline.end(), left.begin(), left.end());
+    for (auto it = right.rbegin(); it != right.rend(); ++it) {
+        outline.push_back(*it);
+    }
+    return outline;
+}
+
+}  // namespace
+
 // Forward declaration for Sprint 31 background image rendering
 static void render_background_image(const NVGCSSElement* element,
-                                    const std::map<std::string, std::string>& style,
                                     const NVGCSSBox& box,
                                     NVGCSSRenderer* renderer);
 NVGCSSPainter::NVGCSSPainter(NVGcontext* vg, NVGCSSRenderer* renderer) : vg_(vg), renderer_(renderer) {
@@ -173,16 +391,16 @@ static void render_border_side(NVGcontext* vg,
 
 // Sprint 34: Helper to parse per-side border color with fallback
 static NVGcolor parse_border_color(const std::string& explicit_color,
-                                    const std::map<std::string, std::string>& computed_style)
+                                    const NVGCSSElement* element)
 {
     // Use explicit per-side color if set
     if (!explicit_color.empty()) {
         return nvgcss_utils::parse_color(explicit_color);
     }
 
-    // Fallback to general border-color from computed_style
-    auto it = computed_style.find("border-color");
-    if (it != computed_style.end()) {
+    // TODO: border-color not yet in typed system - reading from inline_style
+    auto it = element->inline_style.find("border-color");
+    if (it != element->inline_style.end()) {
         return nvgcss_utils::parse_color(it->second);
     }
 
@@ -193,8 +411,7 @@ static NVGcolor parse_border_color(const std::string& explicit_color,
 // Sprint 33: Render borders with per-side styles
 // Sprint 34: Enhanced with per-side colors
 static void render_styled_borders(NVGcontext* vg, const NVGCSSElement* element,
-                                  const NVGCSSBox& box,
-                                  const std::map<std::string, std::string>& computed_style)
+                                  const NVGCSSBox& box)
 {
     // Get border properties from element
     float top_width = box.border_width[0];
@@ -202,11 +419,11 @@ static void render_styled_borders(NVGcontext* vg, const NVGCSSElement* element,
     float bottom_width = box.border_width[2];
     float left_width = box.border_width[3];
 
-    // Sprint 34: Parse per-side colors (fallback to general border-color)
-    NVGcolor top_color = parse_border_color(element->explicit_style.border_top_color, computed_style);
-    NVGcolor right_color = parse_border_color(element->explicit_style.border_right_color, computed_style);
-    NVGcolor bottom_color = parse_border_color(element->explicit_style.border_bottom_color, computed_style);
-    NVGcolor left_color = parse_border_color(element->explicit_style.border_left_color, computed_style);
+    // Sprint 34: Parse per-side colors (fallback to general border-color from typed style)
+    NVGcolor top_color = parse_border_color(element->explicit_style.border_top_color, element);
+    NVGcolor right_color = parse_border_color(element->explicit_style.border_right_color, element);
+    NVGcolor bottom_color = parse_border_color(element->explicit_style.border_bottom_color, element);
+    NVGcolor left_color = parse_border_color(element->explicit_style.border_left_color, element);
 
     // Get per-side styles
     const std::string& top_style = element->explicit_style.border_top_style;
@@ -252,8 +469,11 @@ static void render_styled_borders(NVGcontext* vg, const NVGCSSElement* element,
             left_width, left_color, left_style);
     }
 }
-void NVGCSSPainter::paint_element(const NVGCSSElement* element,
-                                   const std::map<std::string, std::string>& computed_style) {
+void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
+    // Check visibility from typed property
+    if (element->style.display == nvgcss::Display::NONE) {
+        return;
+    }
     if (!element->visible) return;
 
     // Save state
@@ -265,8 +485,8 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element,
                  element->transform[2], element->transform[3],
                  element->transform[4], element->transform[5]);
 
-    // Apply opacity
-    nvgGlobalAlpha(vg_, element->opacity);
+    // Apply opacity from typed property
+    nvgGlobalAlpha(vg_, element->style.opacity);
 
     // Draw based on element type
     // HTML elements (div, button, span with text) are treated as boxes
@@ -276,9 +496,24 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element,
                           element->type == "screen" || element->type == "window" ||
                           element->type == "widget");
 
-    if (is_box_element) {
+    if (!element->stroke_points.empty()) {
+        paint_freehand_path(element);
+    }
+    else if (is_box_element) {
         // Use computed layout for dimensions (PHASE 4 SPRINT 4)
         const auto& box = computed_to_box(element->computed);
+
+        // DEBUG: Uncomment to trace element rendering
+        // logd("[PAINTER] Rendering type='{}' id='{}' class='{}' at ({:.1f}, {:.1f}) size ({:.1f} x {:.1f})",
+        //      element->type, element->id.empty() ? "(empty)" : element->id,
+        //      element->classes.empty() ? "(no-class)" : element->classes[0],
+        //      box.x, box.y, box.width, box.height);
+
+        // Skip rendering if size is zero
+        if (box.width <= 0 || box.height <= 0) {
+            nvgRestore(vg_);
+            return;
+        }
 
         // Sprint 27: Render box-shadows first (so they're behind the element)
         paint_box_shadows(element, box);
@@ -287,41 +522,32 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element,
         create_rounded_rect_path(box);
 
         // Fill background
-        apply_background(computed_style, box);
+        apply_background(element, box);
         // Sprint 31: Render background image (on top of color/gradient)
-        render_background_image(element, computed_style, box, renderer_);
+        render_background_image(element, box, renderer_);
 
         // Stroke border
-        // apply_border(computed_style, box);  // Replaced by render_styled_borders (Sprint 33)
         // Sprint 33: Render borders with per-side styles
-        render_styled_borders(vg_, element, box, computed_style);
+        render_styled_borders(vg_, element, box);
+        if (element->type == "rect") {
+            paint_rect_stroke(element, box);
+        }
         // Render text content if present (for buttons, labels, etc.)
         if (!element->text_content.empty()) {
-            // Get text color
-            auto color_it = computed_style.find("color");
-            if (color_it == computed_style.end()) {
-                color_it = computed_style.find("fill");  // SVG-style
-            }
+            // Get text color from typed property
+            NVGcolor text_color = element->style.color;
 
-            NVGcolor text_color = (color_it != computed_style.end()) ?
-                nvgcss_utils::parse_color(color_it->second) : nvgRGB(0, 0, 0);
-
-            // Font size (with em, rem, %, keyword support)
-            float parent_size = 16.0f;  // Default parent size
-            float font_size = parse_font_size(computed_style, parent_size);
+            // Font size from typed property (already in pixels)
+            float font_size = element->style.font_size;
 
             // Font face (with font-weight and font-style)
-            std::string font_face = compute_font_face(computed_style);
+            std::string font_face = compute_font_face(element);
 
-            // Text alignment (horizontal and vertical)
-            int align = compute_text_align(computed_style);
+            // Text alignment from typed enum
+            int align = compute_text_align(element);
 
-            // Apply text transform
+            // TODO: text-transform not yet in typed system
             std::string text_content = element->text_content;
-            auto transform_it = computed_style.find("text-transform");
-            if (transform_it != computed_style.end()) {
-                text_content = apply_text_transform(text_content, transform_it->second);
-            }
 
             // Apply typography settings to NanoVG
             nvgFontSize(vg_, font_size);
@@ -382,38 +608,27 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element,
             nvgText(vg_, text_x, text_y, text_content.c_str(), nullptr);
 
             // Apply text decoration (underline, line-through, overline)
-            apply_text_decoration(element, computed_style, text_x, text_y, text_color);
+            apply_text_decoration(element, text_x, text_y, text_color);
         }
     }
     else if (element->type == "text" || element->type == "span") {
         // Phase 3: Text rendering with Sprint 11 typography support
         const auto& box = computed_to_box(element->computed);
 
-        // Get text color
-        auto color_it = computed_style.find("color");
-        if (color_it == computed_style.end()) {
-            color_it = computed_style.find("fill");  // SVG-style
-        }
+        // Get text color from typed property
+        NVGcolor text_color = element->style.color;
 
-        NVGcolor text_color = (color_it != computed_style.end()) ?
-            nvgcss_utils::parse_color(color_it->second) : nvgRGB(0, 0, 0);
-
-        // Font size (with em, rem, %, keyword support)
-        float parent_size = 16.0f;  // Default parent size
-        float font_size = parse_font_size(computed_style, parent_size);
+        // Font size from typed property (already in pixels)
+        float font_size = element->style.font_size;
 
         // Font face (with font-weight and font-style)
-        std::string font_face = compute_font_face(computed_style);
+        std::string font_face = compute_font_face(element);
 
-        // Text alignment (horizontal and vertical)
-        int align = compute_text_align(computed_style);
+        // Text alignment from typed enum
+        int align = compute_text_align(element);
 
-        // Apply text transform
+        // TODO: text-transform not yet in typed system
         std::string text_content = element->text_content;
-        auto transform_it = computed_style.find("text-transform");
-        if (transform_it != computed_style.end()) {
-            text_content = apply_text_transform(text_content, transform_it->second);
-        }
 
         // Apply typography settings to NanoVG
         nvgFontSize(vg_, font_size);
@@ -474,40 +689,53 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element,
         nvgText(vg_, text_x, text_y, text_content.c_str(), nullptr);
 
         // Apply text decoration (underline, line-through, overline)
-        apply_text_decoration(element, computed_style, text_x, text_y, text_color);
+        apply_text_decoration(element, text_x, text_y, text_color);
+    }
+    else if (element->type == "line") {
+        const auto& box = computed_to_box(element->computed);
+        paint_line_shape(element, box);
+    }
+    else if (element->type == "circle" || element->type == "ellipse") {
+        const auto& box = computed_to_box(element->computed);
+        paint_circle_shape(element, box);
     }
 
     // Call custom paint callback if provided
     if (element->custom_paint) {
-        element->custom_paint(vg_, element, computed_style);
+        // TODO: custom_paint signature should be updated to not need computed_style
+        element->custom_paint(vg_, element, element->inline_style);
     }
 
     // Restore state
     nvgRestore(vg_);
 }
 
-void NVGCSSPainter::apply_background(const std::map<std::string, std::string>& style,
+void NVGCSSPainter::apply_background(const NVGCSSElement* element,
                                       const NVGCSSBox& box) {
-    auto it = style.find("background");
-    if (it == style.end()) {
-        it = style.find("background-color");
-    }
+    // 60fps: Read from TYPED property (not inline_style!)
+    const auto& bg = element->style.background;
 
-    if (it != style.end()) {
-        const std::string& value = it->second;
+    // Handle different background types
+    if (bg.type == nvgcss::BackgroundType::COLOR) {
+        NVGcolor bg_color = bg.color;
 
-        // Check if it's a gradient (linear or radial)
-        if (value.find("linear-gradient") != std::string::npos ||
-            value.find("radial-gradient") != std::string::npos) {
-            NVGpaint paint = create_gradient(value, box);
-            nvgFillPaint(vg_, paint);
-        } else {
-            // Solid color
-            NVGcolor color = nvgcss_utils::parse_color(value);
-            nvgFillColor(vg_, color);
+        // Check if background color is transparent (alpha == 0)
+        if (bg_color.a <= 0.001f) {
+            return;  // Skip transparent backgrounds
         }
+
+        nvgFillColor(vg_, bg_color);
         nvgFill(vg_);
     }
+    else if (bg.type == nvgcss::BackgroundType::GRADIENT) {
+        // TODO: Implement gradient rendering
+        // bg.gradient contains the gradient definition
+    }
+    else if (bg.type == nvgcss::BackgroundType::IMAGE) {
+        // TODO: Implement background image rendering
+        // bg.image_handle contains the NanoVG image handle
+    }
+    // If type == NONE, skip (transparent background)
 }
 
 void NVGCSSPainter::apply_border(const std::map<std::string, std::string>& style,
@@ -965,65 +1193,24 @@ void NVGCSSPainter::create_rounded_rect_path(const NVGCSSBox& box) {
 // Typography Support (Sprint 11)
 // ============================================================================
 
-std::string NVGCSSPainter::compute_font_face(const std::map<std::string, std::string>& style) {
-    // Get base font family
-    std::string family = "sans-serif";
-    auto family_it = style.find("font-family");
-    if (family_it != style.end()) {
-        // Parse first font from comma-separated list
-        std::string font_list = family_it->second;
-        size_t comma_pos = font_list.find(',');
-        if (comma_pos != std::string::npos) {
-            family = font_list.substr(0, comma_pos);
-        } else {
-            family = font_list;
-        }
+std::string NVGCSSPainter::compute_font_face(const NVGCSSElement* element) {
+    // Get base font family from typed property
+    std::string family = element->style.font_family;
 
-        // Remove quotes if present
-        if (!family.empty() && (family.front() == '"' || family.front() == '\'')) {
-            family = family.substr(1, family.length() - 2);
-        }
+    // font_weight is typed enum - check if bold
+    bool is_bold = (element->style.font_weight >= nvgcss::FontWeight::BOLD);  // 700+
 
-        // Trim whitespace
-        size_t start = family.find_first_not_of(" \t");
-        size_t end = family.find_last_not_of(" \t");
-        if (start != std::string::npos) {
-            family = family.substr(start, end - start + 1);
-        }
-    }
+    // font_style is typed enum
+    bool is_italic = (element->style.font_style == nvgcss::FontStyle::ITALIC ||
+                     element->style.font_style == nvgcss::FontStyle::OBLIQUE);
 
-    // Check for font-weight (append suffix for bold)
-    auto weight_it = style.find("font-weight");
-    if (weight_it != style.end()) {
-        const std::string& weight = weight_it->second;
-        if (weight == "bold" || weight == "700" || weight == "800" || weight == "900") {
-            // Check for font-style first (Bold-Italic ordering)
-            auto style_it = style.find("font-style");
-            if (style_it != style.end() && style_it->second == "italic") {
-                family += "-BoldItalic";
-                return family;  // Both weight and style applied
-            }
-            family += "-Bold";
-        }
-    }
-
-    // Check for font-style (append suffix for italic)
-    auto style_it = style.find("font-style");
-    if (style_it != style.end()) {
-        const std::string& font_style = style_it->second;
-        if (font_style == "italic") {
-            // Only add Italic if not already added as BoldItalic
-            if (family.find("-BoldItalic") == std::string::npos &&
-                family.find("-Bold") == std::string::npos) {
-                family += "-Italic";
-            }
-        } else if (font_style == "oblique") {
-            // Treat oblique same as italic
-            if (family.find("-BoldItalic") == std::string::npos &&
-                family.find("-Bold") == std::string::npos) {
-                family += "-Italic";
-            }
-        }
+    // Apply weight and style suffixes
+    if (is_bold && is_italic) {
+        family += "-BoldItalic";
+    } else if (is_bold) {
+        family += "-Bold";
+    } else if (is_italic) {
+        family += "-Italic";
     }
 
     return family;
@@ -1072,36 +1259,26 @@ float NVGCSSPainter::parse_font_size(const std::map<std::string, std::string>& s
     return nvgcss_utils::parse_length(value, parent_size);
 }
 
-int NVGCSSPainter::compute_text_align(const std::map<std::string, std::string>& style) {
+int NVGCSSPainter::compute_text_align(const NVGCSSElement* element) {
     int h_align = NVG_ALIGN_LEFT;
     int v_align = NVG_ALIGN_TOP;
 
-    // Horizontal alignment
-    auto align_it = style.find("text-align");
-    if (align_it != style.end()) {
-        const std::string& align = align_it->second;
-        if (align == "center") {
-            h_align = NVG_ALIGN_CENTER;
-        } else if (align == "right") {
-            h_align = NVG_ALIGN_RIGHT;
-        } else if (align == "left") {
-            h_align = NVG_ALIGN_LEFT;
-        }
+    // Horizontal alignment from typed enum
+    switch (element->style.text_align) {
+        case nvgcss::TextAlign::LEFT:   h_align = NVG_ALIGN_LEFT; break;
+        case nvgcss::TextAlign::CENTER: h_align = NVG_ALIGN_CENTER; break;
+        case nvgcss::TextAlign::RIGHT:  h_align = NVG_ALIGN_RIGHT; break;
+        case nvgcss::TextAlign::JUSTIFY: h_align = NVG_ALIGN_LEFT; break;  // NanoVG doesn't support justify
     }
 
-    // Vertical alignment
-    auto v_align_it = style.find("vertical-align");
-    if (v_align_it != style.end()) {
-        const std::string& valign = v_align_it->second;
-        if (valign == "middle") {
-            v_align = NVG_ALIGN_MIDDLE;
-        } else if (valign == "bottom") {
-            v_align = NVG_ALIGN_BOTTOM;
-        } else if (valign == "baseline") {
-            v_align = NVG_ALIGN_BASELINE;
-        } else if (valign == "top") {
-            v_align = NVG_ALIGN_TOP;
-        }
+    // TODO: vertical-align not yet in typed system - reading from inline_style
+    auto valign_it = element->inline_style.find("vertical-align");
+    if (valign_it != element->inline_style.end()) {
+        const std::string& valign = valign_it->second;
+        if (valign == "top") v_align = NVG_ALIGN_TOP;
+        else if (valign == "middle") v_align = NVG_ALIGN_MIDDLE;
+        else if (valign == "bottom") v_align = NVG_ALIGN_BOTTOM;
+        else if (valign == "baseline") v_align = NVG_ALIGN_BASELINE;
     }
 
     return h_align | v_align;
@@ -1141,13 +1318,16 @@ std::string NVGCSSPainter::apply_text_transform(const std::string& text,
 }
 
 void NVGCSSPainter::apply_text_decoration(const NVGCSSElement* element,
-                                           const std::map<std::string, std::string>& style,
                                            float text_x, float text_y,
                                            NVGcolor text_color) {
-    auto it = style.find("text-decoration");
-    if (it == style.end() || it->second == "none") return;
+    // TODO: text-decoration not yet in typed system - reading from inline_style
+    auto decoration_it = element->inline_style.find("text-decoration");
+    if (decoration_it == element->inline_style.end()) {
+        return;  // No text decoration
+    }
 
-    const std::string& decoration = it->second;
+    const std::string& decoration = decoration_it->second;
+    if (decoration == "none") return;
 
     // Get text bounds
     float bounds[4];
@@ -1171,6 +1351,259 @@ void NVGCSSPainter::apply_text_decoration(const NVGCSSElement* element,
     nvgStrokeColor(vg_, text_color);
     nvgStrokeWidth(vg_, 1.0f);
     nvgStroke(vg_);
+}
+
+NVGCSSPainter::StrokeStyle NVGCSSPainter::resolve_stroke_style(
+    const NVGCSSElement* element,
+    const NVGCSSBox* box,
+    float absolute_hint) const {
+
+    StrokeStyle stroke;
+    float reference = absolute_hint;
+    if (box) {
+        reference = std::max(box->width, box->height);
+    }
+
+    // TODO: stroke properties not yet in typed system
+    // Reading from inline_style temporarily until we add them to ComputedStyle
+
+    bool stroke_forced_none = false;
+    auto stroke_it = element->inline_style.find("stroke");
+    if (stroke_it != element->inline_style.end()) {
+        const std::string& value = stroke_it->second;
+        if (value != "none" && value != "transparent") {
+            stroke.color = nvgcss_utils::parse_color(value);
+            stroke.enabled = true;
+        } else {
+            stroke_forced_none = true;
+            stroke.enabled = false;
+        }
+    }
+
+    auto width_it = element->inline_style.find("stroke-width");
+    if (width_it != element->inline_style.end()) {
+        float parsed_width = nvgcss_utils::parse_length(width_it->second, reference);
+        if (parsed_width > 0.0f) {
+            stroke.width = parsed_width;
+            stroke.enabled = true;
+        }
+    }
+
+    auto cap_it = element->inline_style.find("stroke-linecap");
+    if (cap_it != element->inline_style.end()) {
+        const std::string& cap = cap_it->second;
+        if (cap == "round") stroke.line_cap = NVG_ROUND;
+        else if (cap == "square") stroke.line_cap = NVG_SQUARE;
+        else stroke.line_cap = NVG_BUTT;
+    }
+
+    auto join_it = element->inline_style.find("stroke-linejoin");
+    if (join_it != element->inline_style.end()) {
+        const std::string& join = join_it->second;
+        if (join == "round") stroke.line_join = NVG_ROUND;
+        else if (join == "bevel") stroke.line_join = NVG_BEVEL;
+        else stroke.line_join = NVG_MITER;
+    }
+
+    auto miter_it = element->inline_style.find("stroke-miterlimit");
+    if (miter_it != element->inline_style.end()) {
+        float limit = safe_stof(miter_it->second, stroke.miter_limit);
+        if (limit > 0.0f) stroke.miter_limit = limit;
+    }
+
+    auto dash_it = element->inline_style.find("stroke-dasharray");
+    if (dash_it != element->inline_style.end()) {
+        std::string value = dash_it->second;
+        stroke.dash_array.clear();
+        if (!value.empty() && value != "none") {
+            std::string normalized = value;
+            std::replace(normalized.begin(), normalized.end(), ',', ' ');
+            std::stringstream ss(normalized);
+            std::string token;
+            while (ss >> token) {
+                float dash_value = nvgcss_utils::parse_length(token, stroke.width);
+                if (dash_value > 0.0f) {
+                    stroke.dash_array.push_back(dash_value);
+                }
+            }
+        }
+    }
+
+    auto offset_it = element->inline_style.find("stroke-dashoffset");
+    if (offset_it != element->inline_style.end()) {
+        stroke.dash_offset = nvgcss_utils::parse_length(offset_it->second, stroke.width);
+    }
+
+    if (stroke_forced_none) {
+        stroke.enabled = false;
+    }
+    return stroke;
+}
+
+void NVGCSSPainter::paint_rect_stroke(const NVGCSSElement* element,
+                                      const NVGCSSBox& box) {
+    auto stroke = resolve_stroke_style(element, &box, std::max(box.width, box.height));
+    if (!stroke.enabled || stroke.width <= 0.0f) return;
+
+    std::vector<Vec2> corners = {
+        {box.x, box.y},
+        {box.x + box.width, box.y},
+        {box.x + box.width, box.y + box.height},
+        {box.x, box.y + box.height}
+    };
+
+    stroke_polyline(vg_, stroke, corners, true);
+}
+
+static bool extract_coordinate(const NVGCSSElement* element,
+                               const char* key,
+                               float context,
+                               float origin,
+                               float& out_value) {
+    // TODO: SVG coordinate properties not in typed system
+    // Reading from inline_style temporarily
+    auto it = element->inline_style.find(key);
+    if (it == element->inline_style.end()) {
+        return false;
+    }
+    out_value = origin + nvgcss_utils::parse_length(it->second, context);
+    return true;
+}
+
+void NVGCSSPainter::paint_line_shape(const NVGCSSElement* element,
+                                     const NVGCSSBox& box) {
+    float diagonal = std::sqrt(box.width * box.width + box.height * box.height);
+    auto stroke = resolve_stroke_style(element, &box, diagonal);
+    if (!stroke.enabled || stroke.width <= 0.0f) return;
+
+    Vec2 start {box.x, box.y};
+    Vec2 end {box.x + box.width, box.y + box.height};
+
+    if (element->line_geometry.defined) {
+        start = {element->line_geometry.x1, element->line_geometry.y1};
+        end = {element->line_geometry.x2, element->line_geometry.y2};
+    } else {
+        extract_coordinate(element, "x1", box.width, box.x, start.x);
+        extract_coordinate(element, "y1", box.height, box.y, start.y);
+        extract_coordinate(element, "x2", box.width, box.x, end.x);
+        extract_coordinate(element, "y2", box.height, box.y, end.y);
+    }
+
+    if (element->has_stroke_salt) {
+        float amplitude = stroke.width * 0.35f;
+        start = jitter_with_salt(start, element->stroke_salt, amplitude, 1.0f);
+        end = jitter_with_salt(end, element->stroke_salt, amplitude, 2.0f);
+    }
+
+    std::vector<Vec2> line = {start, end};
+    stroke_polyline(vg_, stroke, line, false);
+}
+
+void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
+                                       const NVGCSSBox& box) {
+    float cx = box.x + box.width * 0.5f;
+    float cy = box.y + box.height * 0.5f;
+    float rx = box.width * 0.5f;
+    float ry = box.height * 0.5f;
+
+    if (element->circle_geometry.defined) {
+        cx = element->circle_geometry.cx;
+        cy = element->circle_geometry.cy;
+        rx = element->circle_geometry.rx > 0 ? element->circle_geometry.rx : rx;
+        ry = element->circle_geometry.ry > 0 ? element->circle_geometry.ry : ry;
+    }
+
+    extract_coordinate(element, "cx", box.width, box.x, cx);
+    extract_coordinate(element, "cy", box.height, box.y, cy);
+
+    // TODO: SVG radius properties not in typed system - reading from inline_style
+    auto r_it = element->inline_style.find("r");
+    if (r_it != element->inline_style.end()) {
+        float r_value = nvgcss_utils::parse_length(r_it->second, std::max(box.width, box.height));
+        if (r_value > 0.0f) {
+            rx = ry = r_value;
+        }
+    }
+    auto rx_it = element->inline_style.find("rx");
+    if (rx_it != element->inline_style.end()) {
+        rx = nvgcss_utils::parse_length(rx_it->second, box.width);
+    }
+    auto ry_it = element->inline_style.find("ry");
+    if (ry_it != element->inline_style.end()) {
+        ry = nvgcss_utils::parse_length(ry_it->second, box.height);
+    }
+
+    if (element->has_stroke_salt) {
+        float amplitude = std::max(rx, ry) * 0.05f;
+        Vec2 center = jitter_with_salt({cx, cy}, element->stroke_salt, amplitude, 5.0f);
+        cx = center.x;
+        cy = center.y;
+    }
+
+    // TODO: SVG fill property not in typed system - reading from inline_style
+    auto fill_it = element->inline_style.find("fill");
+    if (fill_it != element->inline_style.end() && fill_it->second != "none") {
+        NVGcolor fill_color = nvgcss_utils::parse_color(fill_it->second);
+        nvgBeginPath(vg_);
+        if (std::abs(rx - ry) < 0.001f) {
+            nvgCircle(vg_, cx, cy, rx);
+        } else {
+            nvgEllipse(vg_, cx, cy, rx, ry);
+        }
+        nvgFillColor(vg_, fill_color);
+        nvgFill(vg_);
+    }
+
+    auto stroke = resolve_stroke_style(element, &box, std::max(rx, ry));
+    if (!stroke.enabled || stroke.width <= 0.0f) return;
+
+    if (stroke.dash_array.empty()) {
+        apply_stroke_state(vg_, stroke);
+        nvgBeginPath(vg_);
+        if (std::abs(rx - ry) < 0.001f) {
+            nvgCircle(vg_, cx, cy, rx);
+        } else {
+            nvgEllipse(vg_, cx, cy, rx, ry);
+        }
+        nvgStroke(vg_);
+    } else {
+        const int segments = 96;
+        std::vector<Vec2> outline;
+        outline.reserve(segments);
+        for (int i = 0; i < segments; ++i) {
+            float t = static_cast<float>(i) / segments;
+            float angle = t * 2.0f * kPi;
+            float x = cx + std::cos(angle) * rx;
+            float y = cy + std::sin(angle) * ry;
+            outline.push_back({x, y});
+        }
+        stroke_polyline(vg_, stroke, outline, true);
+    }
+}
+
+void NVGCSSPainter::paint_freehand_path(const NVGCSSElement* element) {
+    if (element->stroke_points.size() < 2) return;
+    auto stroke = resolve_stroke_style(element, nullptr, 1.0f);
+    if (!stroke.enabled || stroke.width <= 0.0f) return;
+
+    std::vector<Vec2> raw;
+    raw.reserve(element->stroke_points.size());
+    for (const auto& point : element->stroke_points) {
+        raw.push_back({point.x, point.y});
+    }
+
+    float salt = element->has_stroke_salt ? element->stroke_salt : 0.0f;
+    auto outline = build_freehand_outline(raw, stroke.width, salt);
+    if (outline.empty()) return;
+
+    nvgBeginPath(vg_);
+    nvgMoveTo(vg_, outline[0].x, outline[0].y);
+    for (size_t i = 1; i < outline.size(); ++i) {
+        nvgLineTo(vg_, outline[i].x, outline[i].y);
+    }
+    nvgClosePath(vg_);
+    nvgFillColor(vg_, stroke.color);
+    nvgFill(vg_);
 }
 
 // ============================================================================
@@ -1212,17 +1645,16 @@ static int load_background_image(const std::string& path, NVGCSSRenderer* render
  * Called from apply_background() when background-image is present.
  *
  * @param element Element to render background for
- * @param style Computed style map
  * @param box Element's box dimensions
  * @param renderer Renderer (for image cache access)
  */
 static void render_background_image(const NVGCSSElement* element,
-                                    const std::map<std::string, std::string>& style,
                                     const NVGCSSBox& box,
                                     NVGCSSRenderer* renderer) {
-    // Get background-image property
-    auto image_it = style.find("background-image");
-    if (image_it == style.end() || image_it->second.empty() || image_it->second == "none") {
+    // Get background-image from element's inline style (not yet in typed system)
+    // TODO: Add background_image to typed ComputedStyle
+    auto image_it = element->inline_style.find("background-image");
+    if (image_it == element->inline_style.end() || image_it->second.empty() || image_it->second == "none") {
         return;  // No background image
     }
 
@@ -1243,11 +1675,11 @@ static void render_background_image(const NVGCSSElement* element,
     int img_width, img_height;
     nvgImageSize(renderer->vg, image, &img_width, &img_height);
 
-    // Parse background-size
+    // Parse background-size from element's explicit style (not yet in typed system)
+    // TODO: Add background_size to typed ComputedStyle
     BackgroundSize size_mode;
     float size_width, size_height;
-    auto size_it = style.find("background-size");
-    std::string size_str = (size_it != style.end()) ? size_it->second : "auto";
+    std::string size_str = element->explicit_style.background_size;
     nvgcss_utils::parse_background_size(size_str, size_mode, size_width, size_height);
 
     // Calculate final image dimensions based on size mode
@@ -1288,9 +1720,9 @@ static void render_background_image(const NVGCSSElement* element,
             break;
     }
 
-    // Parse background-position
-    auto pos_it = style.find("background-position");
-    std::string pos_str = (pos_it != style.end()) ? pos_it->second : "0% 0%";
+    // Parse background-position from element's explicit style (not yet in typed system)
+    // TODO: Add background_position to typed ComputedStyle
+    std::string pos_str = element->explicit_style.background_position;
     BackgroundPosition position = nvgcss_utils::parse_background_position(pos_str);
 
     // Calculate position offset
@@ -1308,9 +1740,9 @@ static void render_background_image(const NVGCSSElement* element,
         offset_y = box.y + position.y;
     }
 
-    // Parse background-repeat
-    auto repeat_it = style.find("background-repeat");
-    std::string repeat_str = (repeat_it != style.end()) ? repeat_it->second : "repeat";
+    // Parse background-repeat from element's explicit style (not yet in typed system)
+    // TODO: Add background_repeat to typed ComputedStyle
+    std::string repeat_str = element->explicit_style.background_repeat;
     BackgroundRepeat repeat = nvgcss_utils::parse_background_repeat(repeat_str);
 
     // Render based on repeat mode

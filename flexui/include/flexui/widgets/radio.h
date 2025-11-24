@@ -16,7 +16,7 @@ struct FlexRadioBinding {
   std::function<void()> on_selected;
 };
 
-class FlexRadio : public Flex {
+class FlexRadio : public FlexController {
 public:
   void registerRadio(FlexRadioBinding binding);
 
@@ -33,6 +33,6 @@ private:
 
   std::unordered_map<std::string, RadioState> m_radios;
   std::unordered_map<std::string, std::vector<std::string>> m_groups;
-};
+}; // Don't forget the semicolon after class definition
 
 } // namespace flexui

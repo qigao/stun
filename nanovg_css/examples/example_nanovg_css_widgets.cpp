@@ -22,6 +22,7 @@
 #include <nanovg_gl.h>
 
 #include <nanovg_css.h>
+#include "nanovg_css_internal.h"  // For inline_style access
 #include <fmtlog.h>
 #include <chrono>
 #include <string>
@@ -139,6 +140,52 @@ private:
 
     void setup_css() {
         const char* css = R"(
+            /* ===== Button Positioning ===== */
+            #button-0 { left: 50px; top: 120px; width: 120px; height: 40px; }
+            #button-1 { left: 190px; top: 120px; width: 120px; height: 40px; }
+            #button-2 { left: 330px; top: 120px; width: 120px; height: 40px; }
+            #button-3 { left: 470px; top: 120px; width: 120px; height: 40px; }
+            #button-4 { left: 50px; top: 180px; width: 120px; height: 40px; }
+            #button-5 { left: 190px; top: 180px; width: 120px; height: 40px; }
+            #button-6 { left: 330px; top: 180px; width: 120px; height: 40px; }
+
+            /* ===== Input Positioning ===== */
+            #input-0 { left: 50px; top: 280px; width: 250px; height: 40px; }
+            #input-1 { left: 330px; top: 280px; width: 250px; height: 40px; }
+            #input-2 { left: 610px; top: 280px; width: 250px; height: 40px; }
+
+            /* ===== Slider Positioning ===== */
+            #slider-track { left: 50px; top: 360px; width: 300px; }
+            #slider-fill { left: 50px; top: 360px; }
+            #slider-thumb { left: 230px; top: 354px; }
+
+            /* ===== Selection Widget Positioning ===== */
+            #checkbox-0 { left: 450px; top: 360px; }
+            #checkbox-1 { left: 490px; top: 360px; }
+            #checkbox-2 { left: 530px; top: 360px; }
+            #radio-0 { left: 610px; top: 360px; }
+            #radio-1 { left: 650px; top: 360px; }
+            #radio-2 { left: 690px; top: 360px; }
+            #toggle { left: 750px; top: 360px; }
+            #toggle-handle { left: 776px; top: 362px; }
+
+            /* ===== Progress Bar Positioning ===== */
+            #progress-bg-0, #progress-bar-0 { left: 50px; top: 480px; width: 300px; }
+            #progress-bg-1, #progress-bar-1 { left: 50px; top: 510px; width: 300px; }
+            #progress-bg-2, #progress-bar-2 { left: 50px; top: 540px; width: 300px; }
+
+            /* ===== Badge Positioning ===== */
+            #badge-0 { left: 400px; top: 480px; width: 70px; height: 24px; }
+            #badge-1 { left: 485px; top: 480px; width: 70px; height: 24px; }
+            #badge-2 { left: 570px; top: 480px; width: 70px; height: 24px; }
+            #badge-3 { left: 655px; top: 480px; width: 70px; height: 24px; }
+            #badge-4 { left: 740px; top: 480px; width: 70px; height: 24px; }
+
+            /* ===== Card Positioning ===== */
+            #card-0 { left: 50px; top: 620px; width: 320px; height: 140px; }
+            #card-1 { left: 400px; top: 620px; width: 320px; height: 140px; }
+            #card-2 { left: 750px; top: 620px; width: 320px; height: 140px; }
+
             /* Button styles */
             .button {
                 display: inline-block;
@@ -362,34 +409,17 @@ private:
             "Danger", "Warning", "Info", "Outline"
         };
 
-        float x = 50;
-        float y = 120;
-
         for (int i = 0; i < 7; i++) {
             std::string id = "button-" + std::to_string(i);
             NVGCSSElement* button = nvgcssCreateElement(renderer, id.c_str(), "button");
             nvgcssAddClass(button, "button");
             nvgcssAddClass(button, button_types[i]);
 
-            nvgcssSetStyle(button, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(button, "top", std::to_string((int)y).c_str());
-            nvgcssSetStyle(button, "width", "120px");
-            nvgcssSetStyle(button, "height", "40px");
-
             nvgcssSetText(button, button_labels[i]);
-
-            x += 140;
-            if (i == 3) {
-                x = 50;
-                y += 60;
-            }
         }
     }
 
     void create_input_widgets() {
-        float x = 50;
-        float y = 280;
-
         // Text inputs
         const char* input_states[] = {"", "input-error", "input-success"};
         const char* placeholders[] = {"Normal input", "Error state", "Success state"};
@@ -402,45 +432,23 @@ private:
                 nvgcssAddClass(input, input_states[i]);
             }
 
-            nvgcssSetStyle(input, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(input, "top", std::to_string((int)y).c_str());
-            nvgcssSetStyle(input, "width", "250px");
-            nvgcssSetStyle(input, "height", "40px");
-
             nvgcssSetText(input, placeholders[i]);
-
-            x += 280;
         }
-
-        // Slider
-        y += 80;
-        x = 50;
 
         // Slider track
         NVGCSSElement* slider_track = nvgcssCreateElement(renderer, "slider-track", "rect");
         nvgcssAddClass(slider_track, "slider-track");
-        nvgcssSetStyle(slider_track, "left", std::to_string((int)x).c_str());
-        nvgcssSetStyle(slider_track, "top", std::to_string((int)y).c_str());
-        nvgcssSetStyle(slider_track, "width", "300px");
 
         // Slider fill
         NVGCSSElement* slider_fill = nvgcssCreateElement(renderer, "slider-fill", "rect");
         nvgcssAddClass(slider_fill, "slider-fill");
-        nvgcssSetStyle(slider_fill, "left", std::to_string((int)x).c_str());
-        nvgcssSetStyle(slider_fill, "top", std::to_string((int)y).c_str());
-        nvgcssSetStyle(slider_fill, "width", std::to_string((int)(slider_value * 300)).c_str());
 
         // Slider thumb
         NVGCSSElement* slider_thumb = nvgcssCreateElement(renderer, "slider-thumb", "circle");
         nvgcssAddClass(slider_thumb, "slider-thumb");
-        nvgcssSetStyle(slider_thumb, "left", std::to_string((int)(x + slider_value * 300 - 10)).c_str());
-        nvgcssSetStyle(slider_thumb, "top", std::to_string((int)(y - 6)).c_str());
     }
 
     void create_selection_widgets() {
-        float x = 450;
-        float y = 360;
-
         // Checkboxes
         for (int i = 0; i < 3; i++) {
             std::string id = "checkbox-" + std::to_string(i);
@@ -449,15 +457,9 @@ private:
             if (checkbox_states[i]) {
                 nvgcssAddClass(checkbox, "checkbox-checked");
             }
-
-            nvgcssSetStyle(checkbox, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(checkbox, "top", std::to_string((int)y).c_str());
-
-            x += 40;
         }
 
         // Radio buttons
-        x += 60;
         for (int i = 0; i < 3; i++) {
             std::string id = "radio-" + std::to_string(i);
             NVGCSSElement* radio = nvgcssCreateElement(renderer, id.c_str(), "circle");
@@ -465,35 +467,21 @@ private:
             if (i == radio_selected) {
                 nvgcssAddClass(radio, "radio-checked");
             }
-
-            nvgcssSetStyle(radio, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(radio, "top", std::to_string((int)y).c_str());
-
-            x += 40;
         }
 
         // Toggle switch
-        x += 60;
         NVGCSSElement* toggle = nvgcssCreateElement(renderer, "toggle", "rect");
         nvgcssAddClass(toggle, "toggle");
         if (toggle_state) {
             nvgcssAddClass(toggle, "toggle-on");
         }
-        nvgcssSetStyle(toggle, "left", std::to_string((int)x).c_str());
-        nvgcssSetStyle(toggle, "top", std::to_string((int)y).c_str());
 
         // Toggle handle
         NVGCSSElement* handle = nvgcssCreateElement(renderer, "toggle-handle", "circle");
         nvgcssAddClass(handle, "toggle-handle");
-        int handle_x = toggle_state ? x + 26 : x + 2;
-        nvgcssSetStyle(handle, "left", std::to_string(handle_x).c_str());
-        nvgcssSetStyle(handle, "top", std::to_string((int)(y + 2)).c_str());
     }
 
     void create_feedback_widgets() {
-        float x = 50;
-        float y = 480;
-
         // Progress bars
         float progress_values[] = {0.33f, 0.66f, 1.0f};
         const char* progress_classes[] = {"progress-bar-1", "progress-bar-2", "progress-bar-3"};
@@ -503,24 +491,14 @@ private:
             std::string bg_id = "progress-bg-" + std::to_string(i);
             NVGCSSElement* bg = nvgcssCreateElement(renderer, bg_id.c_str(), "rect");
             nvgcssAddClass(bg, "progress-bg");
-            nvgcssSetStyle(bg, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(bg, "top", std::to_string((int)y).c_str());
-            nvgcssSetStyle(bg, "width", "300px");
 
             // Progress bar
             std::string bar_id = "progress-bar-" + std::to_string(i);
             NVGCSSElement* bar = nvgcssCreateElement(renderer, bar_id.c_str(), "rect");
             nvgcssAddClass(bar, progress_classes[i]);
-            nvgcssSetStyle(bar, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(bar, "top", std::to_string((int)y).c_str());
-            nvgcssSetStyle(bar, "width", std::to_string((int)(progress_values[i] * 300)).c_str());
-
-            y += 30;
         }
 
         // Badges
-        x = 400;
-        y = 480;
         const char* badge_types[] = {"badge-primary", "badge-success", "badge-danger", "badge-warning", "badge-info"};
         const char* badge_labels[] = {"Primary", "Success", "Danger", "Warning", "Info"};
 
@@ -530,31 +508,15 @@ private:
             nvgcssAddClass(badge, "badge");
             nvgcssAddClass(badge, badge_types[i]);
 
-            nvgcssSetStyle(badge, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(badge, "top", std::to_string((int)y).c_str());
-            nvgcssSetStyle(badge, "width", "70px");
-            nvgcssSetStyle(badge, "height", "24px");
-
             nvgcssSetText(badge, badge_labels[i]);
-
-            x += 85;
         }
     }
 
     void create_card_widgets() {
-        float x = 50;
-        float y = 620;
-
         for (int i = 0; i < 3; i++) {
             std::string id = "card-" + std::to_string(i);
             NVGCSSElement* card = nvgcssCreateElement(renderer, id.c_str(), "rect");
             nvgcssAddClass(card, "card");
-            nvgcssSetStyle(card, "left", std::to_string((int)x).c_str());
-            nvgcssSetStyle(card, "top", std::to_string((int)y).c_str());
-            nvgcssSetStyle(card, "width", "320px");
-            nvgcssSetStyle(card, "height", "140px");
-
-            x += 350;
         }
     }
 
@@ -633,9 +595,11 @@ private:
             }
         }
 
+        // NOTE: This uses inline_style for DYNAMIC positioning (based on toggle state)
+        // This is a legitimate use case - handle position must change in response to interaction
         if (handle) {
-            int handle_x = toggle_state ? 690 + 26 : 690 + 2;
-            nvgcssSetStyle(handle, "left", std::to_string(handle_x).c_str());
+            int handle_x = toggle_state ? 750 + 26 : 750 + 2;
+            handle->inline_style["left"] = std::to_string(handle_x) + "px";
         }
     }
 

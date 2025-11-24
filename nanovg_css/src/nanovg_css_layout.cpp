@@ -14,7 +14,7 @@ float safe_stof(const std::string &value, float fallback = 0.f) {
     size_t processed = 0;
     float parsed = std::stof(value, &processed);
     return processed == 0 ? fallback : parsed;
-  } catch (...) {
+  } catch (const std::exception&) {
     return fallback;
   }
 }
@@ -117,17 +117,17 @@ void calculate_content_dimensions(float total_width, float total_height,
 /**
  * @brief Find nearest positioned ancestor
  */
-NVGCSSElement *find_positioned_ancestor(NVGCSSElement *element) {
+NVGCSSElement *find_positioned_ancestor(NVGCSSRenderer *renderer, NVGCSSElement *element) {
   if (!element)
     return nullptr;
 
-  element = element->parent; // Start with parent
-  while (element) {
-    std::string pos = element->explicit_style.position;
+  NVGCSSElement *parent = nvgcssGetParent(renderer, element); // Start with parent
+  while (parent) {
+    std::string pos = parent->explicit_style.position;
     if (pos == "relative" || pos == "absolute" || pos == "fixed") {
-      return element;
+      return parent;
     }
-    element = element->parent;
+    parent = nvgcssGetParent(renderer, parent);
   }
   return nullptr;
 }
@@ -135,7 +135,7 @@ NVGCSSElement *find_positioned_ancestor(NVGCSSElement *element) {
 /**
  * @brief Apply CSS positioning (relative, absolute, fixed)
  */
-void apply_positioning(NVGCSSElement *element, float viewport_width, float viewport_height) {
+void apply_positioning(NVGCSSRenderer *renderer, NVGCSSElement *element, float viewport_width, float viewport_height) {
   std::string pos = element->explicit_style.position;
 
   if (pos == "static") {
@@ -162,18 +162,24 @@ void apply_positioning(NVGCSSElement *element, float viewport_width, float viewp
     // If no explicit position, inherit from parent as starting point
     if (element->explicit_style.x >= 0) {
       element->computed.x = element->explicit_style.x;
-    } else if (element->parent && element->parent->computed.is_computed) {
-      element->computed.x = element->parent->computed.x;
     } else {
-      element->computed.x = 0.0f;
+      NVGCSSElement *parent = nvgcssGetParent(renderer, element);
+      if (parent && parent->computed.is_computed) {
+        element->computed.x = parent->computed.x;
+      } else {
+        element->computed.x = 0.0f;
+      }
     }
 
     if (element->explicit_style.y >= 0) {
       element->computed.y = element->explicit_style.y;
-    } else if (element->parent && element->parent->computed.is_computed) {
-      element->computed.y = element->parent->computed.y;
     } else {
-      element->computed.y = 0.0f;
+      NVGCSSElement *parent = nvgcssGetParent(renderer, element);
+      if (parent && parent->computed.is_computed) {
+        element->computed.y = parent->computed.y;
+      } else {
+        element->computed.y = 0.0f;
+      }
     }
 
     element->computed.is_computed = true;
@@ -188,9 +194,10 @@ void apply_positioning(NVGCSSElement *element, float viewport_width, float viewp
   // For positioned elements without explicit x/y, inherit parent position
   // This needs to happen AFTER layout but BEFORE applying offsets
   if (pos != "static" && element->explicit_style.x < 0 && element->explicit_style.y < 0) {
-    if (element->parent && element->parent->computed.is_computed) {
-      x = element->parent->computed.x;
-      y = element->parent->computed.y;
+    NVGCSSElement *parent = nvgcssGetParent(renderer, element);
+    if (parent && parent->computed.is_computed) {
+      x = parent->computed.x;
+      y = parent->computed.y;
     }
   }
 
@@ -209,7 +216,7 @@ void apply_positioning(NVGCSSElement *element, float viewport_width, float viewp
     }
   } else if (pos == "absolute") {
     // Find nearest positioned ancestor
-    NVGCSSElement *positioned_parent = find_positioned_ancestor(element);
+    NVGCSSElement *positioned_parent = find_positioned_ancestor(renderer, element);
 
     float container_x = 0;
     float container_y = 0;
@@ -223,17 +230,23 @@ void apply_positioning(NVGCSSElement *element, float viewport_width, float viewp
       container_height = positioned_parent->computed.height;
     }
 
-    // Position relative to container
+    // Position relative to container (computed.x/y are absolute screen coordinates)
     if (element->explicit_style.left >= 0) {
       x = container_x + element->explicit_style.left;
     } else if (element->explicit_style.right >= 0) {
       x = container_x + container_width - width - element->explicit_style.right;
+    } else {
+      // No left/right specified - default to left edge of container
+      x = container_x;
     }
 
     if (element->explicit_style.top >= 0) {
       y = container_y + element->explicit_style.top;
     } else if (element->explicit_style.bottom >= 0) {
       y = container_y + container_height - height - element->explicit_style.bottom;
+    } else {
+      // No top/bottom specified - default to top edge of container
+      y = container_y;
     }
   } else if (pos == "fixed") {
     // Position relative to viewport
@@ -253,23 +266,24 @@ void apply_positioning(NVGCSSElement *element, float viewport_width, float viewp
   // Update computed position
   element->computed.x = x;
   element->computed.y = y;
-
-  // Sync to box for compatibility
-  element->box.x = x;
-  element->box.y = y;
 }
 
 /**
  * @brief Apply positioning recursively to all elements
  */
-void apply_positioning_recursive(NVGCSSElement *element, float viewport_width,
+void apply_positioning_recursive(NVGCSSRenderer *renderer, NVGCSSElement *element, float viewport_width,
                                  float viewport_height) {
   // Apply positioning to this element
-  apply_positioning(element, viewport_width, viewport_height);
+  apply_positioning(renderer, element, viewport_width, viewport_height);
 
   // Recursively apply to children
-  for (auto *child : element->children) {
-    apply_positioning_recursive(child, viewport_width, viewport_height);
+  // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+  // uses a static cache that gets overwritten by recursive calls
+  int child_count = 0;
+  NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+  std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+  for (NVGCSSElement* child : children_copy) {
+    apply_positioning_recursive(renderer, child, viewport_width, viewport_height);
   }
 }
 
@@ -280,12 +294,12 @@ void NVGCSSLayoutEngine::compute_layout(const std::vector<NVGCSSElement *> &root
     auto *root = roots[i];
 
     try {
-      // Get computed style for this element
-      auto computed_style = renderer->stylesheet->compute_style(
+      // Compute TYPED style (60fps refactor - NO string maps!)
+      root->style = renderer->stylesheet->compute_style_typed(
           root->id, root->type, root->classes, root->attributes, root->pseudo_states,
-          root->inline_style, {}, root->child_index, root->total_siblings);
+          root->inline_style, nullptr, root->child_index, root->total_siblings);
 
-      compute_element_layout(root, computed_style, renderer);
+      compute_element_layout(root, renderer);
 
     } catch (const std::exception &e) {
       //
@@ -294,12 +308,12 @@ void NVGCSSLayoutEngine::compute_layout(const std::vector<NVGCSSElement *> &root
 
   // Sprint 9: Apply positioning (relative, absolute, fixed) after layout
   for (auto *root : roots) {
-    apply_positioning_recursive(root, viewport_width_, viewport_height_);
+    apply_positioning_recursive(renderer, root, viewport_width_, viewport_height_);
   }
 }
 
 void NVGCSSLayoutEngine::compute_element_layout(
-    NVGCSSElement *element, const std::map<std::string, std::string> &computed_style,
+    NVGCSSElement *element,
     NVGCSSRenderer *renderer) {
   static int recursion_depth = 0;
   static int element_count = 0;
@@ -313,128 +327,192 @@ void NVGCSSLayoutEngine::compute_element_layout(
     return;
   }
 
-  // Step 1: Compute box model
-  try {
-    compute_box_model(element, computed_style);
-  } catch (const std::exception &e) {
-
+  // 60fps Optimization: Check dirty flags - skip if layout is clean
+  if (!(element->dirty_flags & nvgcss::DIRTY_LAYOUT)) {
+    // Layout is clean - skip computation, but still process children
+    // (children might be dirty even if parent is clean)
+    int child_count = 0;
+    NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+    std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+    for (auto* child : children_copy) {
+      compute_element_layout(child, renderer);
+    }
     recursion_depth--;
     return;
-  } catch (...) {
+  }
 
+  // Step 1: Compute box model
+  try {
+    compute_box_model(element, renderer);
+  } catch (const std::exception &e) {
+    // Log error but continue - element will use default box model
     recursion_depth--;
     return;
   }
 
   // Step 2: Check for flexbox or grid layout
-  auto display_it = computed_style.find("display");
+  // NEW: Use typed property instead of string comparison
+  if (element->style.display == nvgcss::Display::GRID) {
 
-  // PHASE 4 SPRINT 5: Check for grid layout
-  if (display_it != computed_style.end() &&
-      (display_it->second == "grid" || display_it->second == "inline-grid")) {
+    // FIX: Apply positioning to the grid container BEFORE laying out children
+    // This ensures children are positioned relative to the correct parent coordinates
+    if (element->explicit_style.position != "static") {
+      apply_positioning(renderer, element, viewport_width_, viewport_height_);
+    }
 
     // Pre-compute children's box models
-    for (auto *child : element->children) {
-      auto child_style = renderer->stylesheet->compute_style(
+    // IMPORTANT: Copy children locally before processing, because nvgcssGetChildren
+    // uses a static cache that gets overwritten by recursive calls
+    int child_count = 0;
+    NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+    std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+    for (auto* child : children_copy) {
+      // Compute typed style
+      child->style = renderer->stylesheet->compute_style_typed(
           child->id, child->type, child->classes, child->attributes, child->pseudo_states,
-          child->inline_style, computed_style, child->child_index, child->total_siblings);
-      compute_box_model(child, child_style);
+          child->inline_style, &element->style, child->child_index, child->total_siblings);
+
+      compute_box_model(child, renderer);
     }
 
     // Use grid layout for this container
-    compute_grid_layout(element, computed_style, renderer);
+    compute_grid_layout(element, renderer);
+
+    // FIX: Recursively layout ALL children (not just flex/grid containers)
+    // Children may have their own children that need layout, or percentage-based dimensions
+    for (auto* child : children_copy) {
+      // Typed style already computed above
+      compute_element_layout(child, renderer);
+    }
 
     // Apply transforms to this element
-    compute_transforms(element, computed_style);
+    compute_transforms(element, renderer);
 
     recursion_depth--;
     return;
   }
   // Check for flexbox layout
-  else if (display_it != computed_style.end() &&
-           (display_it->second == "flex" || display_it->second == "inline-flex")) {
+  else if (element->style.display == nvgcss::Display::FLEX) {
+
+    // FIX: Apply positioning to the flex container BEFORE laying out children
+    // This ensures children are positioned relative to the correct parent coordinates
+    if (element->explicit_style.position != "static") {
+      apply_positioning(renderer, element, viewport_width_, viewport_height_);
+    }
 
     // IMPORTANT: Pre-compute children's box models so flexbox knows their sizes
-    for (auto *child : element->children) {
-      auto child_style = renderer->stylesheet->compute_style(
+    // Copy children locally before processing, because nvgcssGetChildren
+    // uses a static cache that gets overwritten by recursive calls
+    int child_count = 0;
+    NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+    std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+    for (auto* child : children_copy) {
+      // Compute typed style
+      child->style = renderer->stylesheet->compute_style_typed(
           child->id, child->type, child->classes, child->attributes, child->pseudo_states,
-          child->inline_style, computed_style, child->child_index, child->total_siblings);
-      compute_box_model(child, child_style);
+          child->inline_style, &element->style, child->child_index, child->total_siblings);
+
+      compute_box_model(child, renderer);
     }
 
     // Use flexbox layout for this container
-    compute_flexbox_layout(element, computed_style, renderer);
+    compute_flexbox_layout(element, renderer);
+
+    // FIX: Recursively layout ALL children (not just flex/grid containers)
+    // Children may have their own children that need layout, or percentage-based dimensions
+    for (auto* child : children_copy) {
+      // Typed style already computed above
+      compute_element_layout(child, renderer);
+    }
 
     // Apply transforms to this element
-    compute_transforms(element, computed_style);
+    compute_transforms(element, renderer);
+
+    // 60fps: Clear layout dirty flag - computation complete
+    element->dirty_flags &= ~nvgcss::DIRTY_LAYOUT;
 
     recursion_depth--;
     return;
   }
 
-  // Step 4: Apply transforms
-  compute_transforms(element, computed_style);
-
   // Recursively layout children
-  for (auto *child : element->children) {
+  // IMPORTANT: Copy children locally before processing, because nvgcssGetChildren
+  // uses a static cache that gets overwritten by recursive calls
+  int child_count = 0;
+  NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+  std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+  for (auto* child : children_copy) {
     try {
-      auto child_style = renderer->stylesheet->compute_style(
+      // Compute typed style
+      child->style = renderer->stylesheet->compute_style_typed(
           child->id, child->type, child->classes, child->attributes, child->pseudo_states,
-          child->inline_style,
-          computed_style, // parent style for inheritance
-          child->child_index, child->total_siblings);
+          child->inline_style, &element->style, child->child_index, child->total_siblings);
 
-      compute_element_layout(child, child_style, renderer);
+      compute_element_layout(child, renderer);
     } catch (const std::exception &e) {
     }
   }
+
+  // Step 4: Apply transforms
+  compute_transforms(element, renderer);
+
+  // 60fps: Clear layout dirty flag - computation complete
+  element->dirty_flags &= ~nvgcss::DIRTY_LAYOUT;
 
   recursion_depth--;
 }
 
 void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
-                                           const std::map<std::string, std::string> &style) {
+                                           NVGCSSRenderer *renderer) {
   static int box_model_count = 0;
   box_model_count++;
 
-  auto &box = element->box;
-
-  // Position (absolute by default)
-  // Support both "left"/"top" (standard CSS) and "x"/"y" (legacy)
-  if (style.count("left")) {
-    std::string x_str = style.at("left");
-
-    float x = resolve_length(x_str, viewport_width_, root_font_size_);
-
-    box.x = x;
-    element->explicit_style.x = x; // PHASE 4: Set explicit_style
-  } else if (style.count("x")) {
-    std::string x_str = style.at("x");
-
-    float x = resolve_length(x_str, viewport_width_, root_font_size_);
-
-    box.x = x;
-    element->explicit_style.x = x; // PHASE 4: Set explicit_style
-  } else {
-    element->explicit_style.x = -1.0f; // auto
+  // NEW: Use typed position property (no string comparison!)
+  // Map typed enum to legacy string (temporary - will remove explicit_style later)
+  switch (element->style.position) {
+    case nvgcss::Position::STATIC:   element->explicit_style.position = "static"; break;
+    case nvgcss::Position::RELATIVE: element->explicit_style.position = "relative"; break;
+    case nvgcss::Position::ABSOLUTE: element->explicit_style.position = "absolute"; break;
+    case nvgcss::Position::FIXED:    element->explicit_style.position = "fixed"; break;
   }
 
-  if (style.count("top")) {
-    std::string y_str = style.at("top");
+  // NEW: Use typed properties for positioning
+  bool is_positioned = (element->style.position != nvgcss::Position::STATIC);
 
-    float y = resolve_length(y_str, viewport_height_, root_font_size_);
+  // Parse positioning offsets from typed properties
+  if (!is_positioned) {
+    // Static: left/top are absolute coordinates
+    // Also check for non-standard "x" property for backward compatibility
+    auto x_it = element->inline_style.find("x");
+    if (x_it != element->inline_style.end()) {
+      float x = nvgcss_utils::parse_length(x_it->second, viewport_width_);
+      element->computed.x = x;
+      element->explicit_style.x = x;
+    } else if (!element->style.left.is_auto()) {
+      float x = element->style.left.resolve(viewport_width_, root_font_size_, viewport_width_);
+      element->computed.x = x;
+      element->explicit_style.x = x;
+    } else {
+      element->explicit_style.x = -1.0f; // auto
+    }
 
-    box.y = y;
-    element->explicit_style.y = y; // PHASE 4: Set explicit_style
-  } else if (style.count("y")) {
-    std::string y_str = style.at("y");
-
-    float y = resolve_length(y_str, viewport_height_, root_font_size_);
-
-    box.y = y;
-    element->explicit_style.y = y; // PHASE 4: Set explicit_style
+    // Also check for non-standard "y" property for backward compatibility
+    auto y_it = element->inline_style.find("y");
+    if (y_it != element->inline_style.end()) {
+      float y = nvgcss_utils::parse_length(y_it->second, viewport_height_);
+      element->computed.y = y;
+      element->explicit_style.y = y;
+    } else if (!element->style.top.is_auto()) {
+      float y = element->style.top.resolve(viewport_height_, root_font_size_, viewport_height_);
+      element->computed.y = y;
+      element->explicit_style.y = y;
+    } else {
+      element->explicit_style.y = -1.0f; // auto
+    }
   } else {
-    element->explicit_style.y = -1.0f; // auto
+    // Positioned: offsets will be applied later by apply_positioning
+    element->explicit_style.x = -1.0f;
+    element->explicit_style.y = -1.0f;
   }
 
   // Dimensions (parse as "total" dimensions - may include padding/border depending on box-sizing)
@@ -445,529 +523,234 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
   float context_width = viewport_width_;
   float context_height = viewport_height_;
 
-  if (element->parent && element->parent->computed.is_computed) {
+  NVGCSSElement *parent = nvgcssGetParent(renderer, element);
+  if (parent && parent->computed.is_computed) {
     // Use parent's computed content dimensions for percentage resolution
-    context_width = element->parent->computed.content_width;
-    context_height = element->parent->computed.content_height;
+    context_width = parent->computed.content_width;
+    context_height = parent->computed.content_height;
   }
 
-  if (style.count("width")) {
-    std::string width_str = style.at("width");
+  // FIX: If element was already laid out by flexbox/grid, preserve its intrinsic dimensions
+  // Only parse dimensions from CSS if not already computed
+  bool preserve_width = (element->computed.is_computed &&
+                        (element->computed.source == NVGCSSComputedLayout::FLEXBOX ||
+                         element->computed.source == NVGCSSComputedLayout::GRID));
+  bool preserve_height = (element->computed.is_computed &&
+                         (element->computed.source == NVGCSSComputedLayout::FLEXBOX ||
+                          element->computed.source == NVGCSSComputedLayout::GRID));
 
-    total_width = resolve_length(width_str, context_width, root_font_size_);
-
-    element->explicit_style.width = total_width; // PHASE 4: Set explicit_style
+  // NEW: Use TYPED properties (NO string parsing!)
+  if (!element->style.width.is_auto()) {
+    total_width = element->style.width.resolve(context_width, root_font_size_, viewport_width_);
+    element->explicit_style.width = total_width;
   } else {
-
     element->explicit_style.width = -1.0f; // auto
   }
 
-  if (style.count("height")) {
-    std::string height_str = style.at("height");
-
-    total_height = resolve_length(height_str, context_height, root_font_size_);
-
-    element->explicit_style.height = total_height; // PHASE 4: Set explicit_style
+  if (!element->style.height.is_auto()) {
+    total_height = element->style.height.resolve(context_height, root_font_size_, viewport_height_);
+    element->explicit_style.height = total_height;
   } else {
-
     element->explicit_style.height = -1.0f; // auto
   }
 
-  // Parse padding BEFORE applying box-sizing (needed for calculation)
-  if (style.count("padding")) {
-    auto padding = parse_box_values(style.at("padding"));
-    box.padding[0] = padding.top;
-    box.padding[1] = padding.right;
-    box.padding[2] = padding.bottom;
-    box.padding[3] = padding.left;
-
-    // Sprint 24: Also store in explicit_style for test access
-    element->explicit_style.padding[0] = padding.top;
-    element->explicit_style.padding[1] = padding.right;
-    element->explicit_style.padding[2] = padding.bottom;
-    element->explicit_style.padding[3] = padding.left;
-  } else {
-    // Initialize to zero
-    for (int i = 0; i < 4; i++) {
-      box.padding[i] = 0.0f;
-      element->explicit_style.padding[i] = 0.0f;
-    }
+  // NEW: Padding from TYPED properties (already resolved in ComputedStyle)
+  for (int i = 0; i < 4; i++) {
+    element->explicit_style.padding[i] = element->style.padding[i].resolve(
+        context_width, root_font_size_, viewport_width_);
   }
 
-  // Sprint 37: Parse margin (shorthand with 1-4 values)
-  if (style.count("margin")) {
-    auto margin = parse_box_values(style.at("margin"));
-    box.margin[0] = margin.top;
-    box.margin[1] = margin.right;
-    box.margin[2] = margin.bottom;
-    box.margin[3] = margin.left;
-
-    // Also store in explicit_style
-    element->explicit_style.margin[0] = margin.top;
-    element->explicit_style.margin[1] = margin.right;
-    element->explicit_style.margin[2] = margin.bottom;
-    element->explicit_style.margin[3] = margin.left;
-  } else {
-    // Initialize to zero
-    for (int i = 0; i < 4; i++) {
-      box.margin[i] = 0.0f;
-      element->explicit_style.margin[i] = 0.0f;
-    }
+  // NEW: Margin from TYPED properties
+  for (int i = 0; i < 4; i++) {
+    element->explicit_style.margin[i] = element->style.margin[i].resolve(
+        context_width, root_font_size_, viewport_width_);
   }
 
-  // Sprint 35: Parse border-width BEFORE box-sizing (needed for content calculation)
-  if (style.count("border-width")) {
-    auto border = parse_box_values(style.at("border-width"));
-    box.border_width[0] = border.top;
-    box.border_width[1] = border.right;
-    box.border_width[2] = border.bottom;
-    box.border_width[3] = border.left;
-
-    // Also store in explicit_style for test access
-    element->explicit_style.border_width[0] = border.top;
-    element->explicit_style.border_width[1] = border.right;
-    element->explicit_style.border_width[2] = border.bottom;
-    element->explicit_style.border_width[3] = border.left;
-  } else {
-    // Initialize to zero if not set by any shorthand
-    for (int i = 0; i < 4; i++) {
-      box.border_width[i] = 0.0f;
-      element->explicit_style.border_width[i] = 0.0f;
-    }
+  // NEW: Border width from TYPED properties (already in pixels in ComputedStyle)
+  for (int i = 0; i < 4; i++) {
+    element->explicit_style.border_width[i] = element->style.border.width[i];
   }
 
-  // Parse box-sizing (Sprint 19)
-  if (style.count("box-sizing")) {
-    element->explicit_style.box_sizing = style.at("box-sizing");
-  } else {
-    element->explicit_style.box_sizing = "content-box"; // CSS default
+  // NEW: Box-sizing from TYPED property (enum to string for backward compat)
+  switch (element->style.box_sizing) {
+    case nvgcss::BoxSizing::BORDER_BOX:
+      element->explicit_style.box_sizing = "border-box";
+      break;
+    case nvgcss::BoxSizing::CONTENT_BOX:
+    default:
+      element->explicit_style.box_sizing = "content-box";
+      break;
   }
 
   // Sprint 19: Calculate content dimensions based on box-sizing
   float content_width, content_height;
-  calculate_content_dimensions(total_width, total_height, box.padding,
-                               box.border_width, // Sprint 35: Use parsed border width
+  calculate_content_dimensions(total_width, total_height, element->explicit_style.padding,
+                               element->explicit_style.border_width, // Sprint 35: Use parsed border width
                                element->explicit_style.box_sizing, content_width, content_height);
 
-  // Store content dimensions in box
-  box.width = content_width;
-  box.height = content_height;
+  // Store content dimensions in computed
+  // FIX: Preserve flexbox/grid computed dimensions to avoid layout loop
+  if (!preserve_width) {
+    element->computed.width = content_width;
+  }
+  if (!preserve_height) {
+    element->computed.height = content_height;
+  }
 
-  // Min/Max Dimensions (Sprint 18) - Parse constraints
-  if (style.count("min-width")) {
-    float min_width = resolve_length(style.at("min-width"), viewport_width_, root_font_size_);
-    element->explicit_style.min_width = min_width;
+  // NEW: Min/Max dimensions from TYPED properties
+  if (!element->style.min_width.is_auto()) {
+    element->explicit_style.min_width = element->style.min_width.resolve(
+        viewport_width_, root_font_size_, viewport_width_);
   } else {
     element->explicit_style.min_width = -1.0f; // no minimum
   }
 
-  if (style.count("max-width")) {
-    float max_width = resolve_length(style.at("max-width"), viewport_width_, root_font_size_);
-    element->explicit_style.max_width = max_width;
+  if (!element->style.max_width.is_auto()) {
+    element->explicit_style.max_width = element->style.max_width.resolve(
+        viewport_width_, root_font_size_, viewport_width_);
   } else {
     element->explicit_style.max_width = -1.0f; // no maximum
   }
 
-  if (style.count("min-height")) {
-    float min_height = resolve_length(style.at("min-height"), viewport_height_, root_font_size_);
-    element->explicit_style.min_height = min_height;
+  if (!element->style.min_height.is_auto()) {
+    element->explicit_style.min_height = element->style.min_height.resolve(
+        viewport_height_, root_font_size_, viewport_height_);
   } else {
     element->explicit_style.min_height = -1.0f; // no minimum
   }
 
-  if (style.count("max-height")) {
-    float max_height = resolve_length(style.at("max-height"), viewport_height_, root_font_size_);
-    element->explicit_style.max_height = max_height;
+  if (!element->style.max_height.is_auto()) {
+    element->explicit_style.max_height = element->style.max_height.resolve(
+        viewport_height_, root_font_size_, viewport_height_);
   } else {
     element->explicit_style.max_height = -1.0f; // no maximum
   }
 
   // Sprint 18: Apply min/max constraints to computed dimensions
-  box.width = apply_dimension_constraints(box.width, element->explicit_style.min_width,
-                                          element->explicit_style.max_width);
-  box.height = apply_dimension_constraints(box.height, element->explicit_style.min_height,
-                                           element->explicit_style.max_height);
+  // FIX: Only apply constraints if not already computed by flexbox/grid
+  if (!preserve_width) {
+    element->computed.width = apply_dimension_constraints(element->computed.width, element->explicit_style.min_width,
+                                            element->explicit_style.max_width);
+  }
+  if (!preserve_height) {
+    element->computed.height = apply_dimension_constraints(element->computed.height, element->explicit_style.min_height,
+                                             element->explicit_style.max_height);
+  }
+
+  // FIX: Initialize computed.x and computed.y for positioned elements
+  // These will be adjusted later by apply_positioning, but need initial values
+  if (element->explicit_style.position != "static") {
+    // For positioned elements, initialize to parent's position or 0
+    NVGCSSElement *parent = nvgcssGetParent(renderer, element);
+    if (element->explicit_style.x >= 0) {
+      element->computed.x = element->explicit_style.x;
+    } else if (parent && parent->computed.is_computed) {
+      element->computed.x = parent->computed.x;
+    } else {
+      element->computed.x = 0.0f;
+    }
+
+    if (element->explicit_style.y >= 0) {
+      element->computed.y = element->explicit_style.y;
+    } else if (parent && parent->computed.is_computed) {
+      element->computed.y = parent->computed.y;
+    } else {
+      element->computed.y = 0.0f;
+    }
+  }
 
   // Sprint 18: Write constrained dimensions to computed for regular elements
   // (Grid and Flexbox will override this with their own layouts)
   if (!element->computed.is_computed) {
-    element->computed.x = box.x;
-    element->computed.y = box.y;
-    element->computed.width = box.width;
-    element->computed.height = box.height;
-    element->computed.content_width = box.width;
-    element->computed.content_height = box.height;
+    element->computed.content_width = element->computed.width;
+    element->computed.content_height = element->computed.height;
     element->computed.source = NVGCSSComputedLayout::CSS_EXPLICIT;
     element->computed.is_computed = true;
   }
 
-  // Sprint 36: Border radius (shorthand with 1-4 values)
-  // Order: top-left, top-right, bottom-right, bottom-left (clockwise from top-left)
-  if (style.count("border-radius")) {
-    std::string value = style.at("border-radius");
-    auto parts = nvgcss_utils::split(value, ' ');
-
-    // Border-radius percentages are relative to box width (CSS spec)
-    if (parts.size() == 1) {
-      // All corners same
-      float r = resolve_length(parts[0], box.width, root_font_size_);
-      box.border_radius[0] = box.border_radius[1] = box.border_radius[2] = box.border_radius[3] = r;
-    } else if (parts.size() == 2) {
-      // Diagonal: TL/BR, TR/BL
-      float r1 = resolve_length(parts[0], box.width, root_font_size_);
-      float r2 = resolve_length(parts[1], box.width, root_font_size_);
-      box.border_radius[0] = r1; // top-left
-      box.border_radius[1] = r2; // top-right
-      box.border_radius[2] = r1; // bottom-right
-      box.border_radius[3] = r2; // bottom-left
-    } else if (parts.size() == 4) {
-      // All four corners specified
-      box.border_radius[0] = resolve_length(parts[0], box.width, root_font_size_); // top-left
-      box.border_radius[1] = resolve_length(parts[1], box.width, root_font_size_); // top-right
-      box.border_radius[2] = resolve_length(parts[2], box.width, root_font_size_); // bottom-right
-      box.border_radius[3] = resolve_length(parts[3], box.width, root_font_size_); // bottom-left
-    }
-  } else {
-    // Initialize to zero
-    for (int i = 0; i < 4; i++) {
-      box.border_radius[i] = 0.0f;
-    }
-  }
-
-  // Individual corner properties override shorthand
-  if (style.count("border-top-left-radius")) {
-    box.border_radius[0] =
-        resolve_length(style.at("border-top-left-radius"), box.width, root_font_size_);
-  }
-  if (style.count("border-top-right-radius")) {
-    box.border_radius[1] =
-        resolve_length(style.at("border-top-right-radius"), box.width, root_font_size_);
-  }
-  if (style.count("border-bottom-right-radius")) {
-    box.border_radius[2] =
-        resolve_length(style.at("border-bottom-right-radius"), box.width, root_font_size_);
-  }
-  if (style.count("border-bottom-left-radius")) {
-    box.border_radius[3] =
-        resolve_length(style.at("border-bottom-left-radius"), box.width, root_font_size_);
-  }
-  // Sprint 38: Full border shorthand (border: width style color)
-  // Process before individual properties so they can override
-  if (style.count("border")) {
-    std::string value = style.at("border");
-
-    // Parse border shorthand: width style color (any order, all optional)
-    // Examples: "2px solid red", "solid", "3px", "dashed #ff0000"
-    std::string width_str, style_str, color_str;
-
-    // Split by whitespace
-    std::vector<std::string> tokens;
-    std::stringstream ss(value);
-    std::string token;
-    while (ss >> token) {
-      tokens.push_back(token);
-    }
-
-    // Identify each component by type
-    for (const auto &t : tokens) {
-      // Check if it's a border style keyword
-      if (t == "none" || t == "hidden" || t == "solid" || t == "dashed" || t == "dotted" ||
-          t == "double") {
-        style_str = t;
-      }
-      // Check if it's a color (starts with #, rgb, rgba, hsl, or is a named color)
-      else if (t[0] == '#' || t.find("rgb") == 0 || t.find("hsl") == 0 || t == "red" ||
-               t == "green" || t == "blue" || t == "black" || t == "white" || t == "gray" ||
-               t == "yellow" || t == "cyan" || t == "magenta" || t == "orange" || t == "purple" ||
-               t == "pink" || t == "brown" || t == "transparent") {
-        color_str = t;
-      }
-      // Otherwise assume it's a width (with or without unit)
-      else if (t.find("px") != std::string::npos ||
-               std::isdigit(static_cast<unsigned char>(t[0]))) {
-        width_str = t;
-      }
-    }
-
-    // Apply to all four sides
-    // Width
-    if (!width_str.empty()) {
-      auto border = parse_box_values(width_str);
-      box.border_width[0] = border.top;
-      box.border_width[1] = border.right;
-      box.border_width[2] = border.bottom;
-      box.border_width[3] = border.left;
-
-      element->explicit_style.border_width[0] = border.top;
-      element->explicit_style.border_width[1] = border.right;
-      element->explicit_style.border_width[2] = border.bottom;
-      element->explicit_style.border_width[3] = border.left;
-    }
-
-    // Style
-    if (!style_str.empty()) {
-      element->explicit_style.border_top_style = style_str;
-      element->explicit_style.border_right_style = style_str;
-      element->explicit_style.border_bottom_style = style_str;
-      element->explicit_style.border_left_style = style_str;
-    }
-
-    // Color
-    if (!color_str.empty()) {
-      element->explicit_style.border_top_color = color_str;
-      element->explicit_style.border_right_color = color_str;
-      element->explicit_style.border_bottom_color = color_str;
-      element->explicit_style.border_left_color = color_str;
-    }
-  }
-
-  // Sprint 35: Parse border-width (shorthand with 1-4 values)
-  // Process BEFORE per-side shorthands
-  if (style.count("border-width")) {
-    auto border = parse_box_values(style.at("border-width"));
-    box.border_width[0] = border.top;
-    box.border_width[1] = border.right;
-    box.border_width[2] = border.bottom;
-    box.border_width[3] = border.left;
-
-    // Also store in explicit_style for test access
-    element->explicit_style.border_width[0] = border.top;
-    element->explicit_style.border_width[1] = border.right;
-    element->explicit_style.border_width[2] = border.bottom;
-    element->explicit_style.border_width[3] = border.left;
-  } else {
-    // Initialize to zero if not set by any shorthand
-    bool has_any_border = false;
-    for (int i = 0; i < 4; i++) {
-      if (box.border_width[i] != 0.0f) {
-        has_any_border = true;
-        break;
-      }
-    }
-    if (!has_any_border) {
-      for (int i = 0; i < 4; i++) {
-        box.border_width[i] = 0.0f;
-        element->explicit_style.border_width[i] = 0.0f;
-      }
-    }
-  }
-
-  // Sprint 33: Border styles (shorthand with 1-4 values)
-  if (style.count("border-style")) {
-    std::string value = style.at("border-style");
-
-    // Split by whitespace
-    std::vector<std::string> styles;
-    std::stringstream ss(value);
-    std::string s;
-    while (ss >> s) {
-      styles.push_back(s);
-    }
-
-    // CSS box model order: top right bottom left
-    if (styles.size() == 1) {
-      // All sides
-      element->explicit_style.border_top_style = styles[0];
-      element->explicit_style.border_right_style = styles[0];
-      element->explicit_style.border_bottom_style = styles[0];
-      element->explicit_style.border_left_style = styles[0];
-    } else if (styles.size() == 2) {
-      // Vertical | Horizontal
-      element->explicit_style.border_top_style = styles[0];
-      element->explicit_style.border_bottom_style = styles[0];
-      element->explicit_style.border_right_style = styles[1];
-      element->explicit_style.border_left_style = styles[1];
-    } else if (styles.size() == 3) {
-      // Top | Horizontal | Bottom
-      element->explicit_style.border_top_style = styles[0];
-      element->explicit_style.border_right_style = styles[1];
-      element->explicit_style.border_left_style = styles[1];
-      element->explicit_style.border_bottom_style = styles[2];
-    } else if (styles.size() >= 4) {
-      // Top Right Bottom Left
-      element->explicit_style.border_top_style = styles[0];
-      element->explicit_style.border_right_style = styles[1];
-      element->explicit_style.border_bottom_style = styles[2];
-      element->explicit_style.border_left_style = styles[3];
-    }
-  }
-
-  // Sprint 34: Border colors (shorthand with 1-4 values)
-  if (style.count("border-color")) {
-    std::string value = style.at("border-color");
-
-    // Split by whitespace
-    std::vector<std::string> colors;
-    std::stringstream ss(value);
-    std::string color;
-    while (ss >> color) {
-      colors.push_back(color);
-    }
-
-    // CSS box model order: top right bottom left
-    if (colors.size() == 1) {
-      // All sides
-      element->explicit_style.border_top_color = colors[0];
-      element->explicit_style.border_right_color = colors[0];
-      element->explicit_style.border_bottom_color = colors[0];
-      element->explicit_style.border_left_color = colors[0];
-    } else if (colors.size() == 2) {
-      // Vertical | Horizontal
-      element->explicit_style.border_top_color = colors[0];
-      element->explicit_style.border_bottom_color = colors[0];
-      element->explicit_style.border_right_color = colors[1];
-      element->explicit_style.border_left_color = colors[1];
-    } else if (colors.size() == 3) {
-      // Top | Horizontal | Bottom
-      element->explicit_style.border_top_color = colors[0];
-      element->explicit_style.border_right_color = colors[1];
-      element->explicit_style.border_left_color = colors[1];
-      element->explicit_style.border_bottom_color = colors[2];
-    } else if (colors.size() >= 4) {
-      // Top Right Bottom Left
-      element->explicit_style.border_top_color = colors[0];
-      element->explicit_style.border_right_color = colors[1];
-      element->explicit_style.border_bottom_color = colors[2];
-      element->explicit_style.border_left_color = colors[3];
-    }
-  }
-
-  // Sprint 40: Per-side border shorthands (border-top, border-right, border-bottom, border-left)
-  // Process AFTER main border shorthand AND property shorthands so they can override
-  const char *sides[] = {"border-top", "border-right", "border-bottom", "border-left"};
-  int side_indices[] = {0, 1, 2, 3}; // top, right, bottom, left
-
+  // NEW: Border radius from TYPED properties (already resolved in ComputedStyle)
   for (int i = 0; i < 4; i++) {
-    if (style.count(sides[i])) {
-      std::string value = style.at(sides[i]);
-      std::string width_str, style_str, color_str;
+    element->explicit_style.border_radius[i] = element->style.border.radius[i];
+  }
+  // NEW: Border styles from TYPED properties (enum to string for backward compat)
+  auto border_style_to_string = [](nvgcss::BorderStyle s) -> std::string {
+    switch (s) {
+      case nvgcss::BorderStyle::SOLID: return "solid";
+      case nvgcss::BorderStyle::DASHED: return "dashed";
+      case nvgcss::BorderStyle::DOTTED: return "dotted";
+      case nvgcss::BorderStyle::DOUBLE: return "double";
+      case nvgcss::BorderStyle::HIDDEN: return "hidden";
+      case nvgcss::BorderStyle::NONE:
+      default: return "none";
+    }
+  };
 
-      // Split by whitespace
-      std::vector<std::string> tokens;
-      std::stringstream ss(value);
-      std::string token;
-      while (ss >> token) {
-        tokens.push_back(token);
-      }
+  element->explicit_style.border_top_style = border_style_to_string(element->style.border.style[0]);
+  element->explicit_style.border_right_style = border_style_to_string(element->style.border.style[1]);
+  element->explicit_style.border_bottom_style = border_style_to_string(element->style.border.style[2]);
+  element->explicit_style.border_left_style = border_style_to_string(element->style.border.style[3]);
 
-      // Identify each component by type (same logic as main border shorthand)
-      for (const auto &t : tokens) {
-        if (t == "none" || t == "hidden" || t == "solid" || t == "dashed" || t == "dotted" ||
-            t == "double") {
-          style_str = t;
-        } else if (t[0] == '#' || t.find("rgb") == 0 || t.find("hsl") == 0 || t == "red" ||
-                   t == "green" || t == "blue" || t == "black" || t == "white" || t == "gray" ||
-                   t == "yellow" || t == "cyan" || t == "magenta" || t == "orange" ||
-                   t == "purple" || t == "pink" || t == "brown" || t == "transparent") {
-          color_str = t;
-        } else if (t.find("px") != std::string::npos ||
-                   std::isdigit(static_cast<unsigned char>(t[0]))) {
-          width_str = t;
-        }
-      }
+  // NEW: Border colors from TYPED properties (NVGcolor to string for backward compat)
+  // TODO: Refactor explicit_style to use NVGcolor directly instead of strings
+  auto color_to_hex = [](NVGcolor c) -> std::string {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "#%02x%02x%02x", (int)(c.r * 255), (int)(c.g * 255), (int)(c.b * 255));
+    return std::string(buf);
+  };
 
-      // Apply to the specific side
-      int side_idx = side_indices[i];
+  element->explicit_style.border_top_color = color_to_hex(element->style.border.color[0]);
+  element->explicit_style.border_right_color = color_to_hex(element->style.border.color[1]);
+  element->explicit_style.border_bottom_color = color_to_hex(element->style.border.color[2]);
+  element->explicit_style.border_left_color = color_to_hex(element->style.border.color[3]);
 
-      // Width
-      if (!width_str.empty()) {
-        float width = safe_stof(width_str.substr(0, width_str.find("px")));
-        box.border_width[side_idx] = width;
-        element->explicit_style.border_width[side_idx] = width;
-      }
+  // NEW: Visibility from TYPED property
+  element->visible = (element->style.display != nvgcss::Display::NONE);
 
-      // Style
-      if (!style_str.empty()) {
-        if (i == 0)
-          element->explicit_style.border_top_style = style_str;
-        else if (i == 1)
-          element->explicit_style.border_right_style = style_str;
-        else if (i == 2)
-          element->explicit_style.border_bottom_style = style_str;
-        else if (i == 3)
-          element->explicit_style.border_left_style = style_str;
-      }
+  // TODO: Move box-shadow and text-shadow to typed property system
+  // Not critical for 60fps - these are not in hot path
+  element->box_shadows.clear();
+  element->text_shadows.clear();
 
-      // Color
-      if (!color_str.empty()) {
-        if (i == 0)
-          element->explicit_style.border_top_color = color_str;
-        else if (i == 1)
-          element->explicit_style.border_right_color = color_str;
-        else if (i == 2)
-          element->explicit_style.border_bottom_color = color_str;
-        else if (i == 3)
-          element->explicit_style.border_left_color = color_str;
+  // Grid properties: Read from typed system (grid.cpp reads element->style.grid_template_rows directly)
+  // Fallback to inline_style for backward compatibility with tests
+  if (element->inline_style.count("grid-template-rows")) {
+    element->explicit_style.grid_template_rows = element->inline_style.at("grid-template-rows");
+  }
+  if (element->inline_style.count("grid-template-columns")) {
+    element->explicit_style.grid_template_columns = element->inline_style.at("grid-template-columns");
+  }
+  if (element->inline_style.count("grid-auto-rows")) {
+    element->explicit_style.grid_auto_rows = element->inline_style.at("grid-auto-rows");
+  }
+  if (element->inline_style.count("grid-auto-columns")) {
+    element->explicit_style.grid_auto_columns = element->inline_style.at("grid-auto-columns");
+  }
+
+  // grid-auto-rows/columns not in typed system yet - read from CSS computed style
+  // TODO: Add to typed ComputedStyle in future phase
+  if (element->explicit_style.grid_auto_rows.empty() ||
+      element->explicit_style.grid_auto_columns.empty()) {
+    auto css_style = renderer->stylesheet->compute_style(
+        element->id, element->type, element->classes, element->attributes,
+        element->pseudo_states, element->inline_style, {},
+        element->child_index, element->total_siblings);
+    if (element->explicit_style.grid_auto_rows.empty()) {
+      auto it = css_style.find("grid-auto-rows");
+      if (it != css_style.end()) {
+        element->explicit_style.grid_auto_rows = it->second;
       }
     }
-  }
-
-  // Individual sides override shorthand
-  if (style.count("border-top-style")) {
-    element->explicit_style.border_top_style = style.at("border-top-style");
-  }
-  if (style.count("border-right-style")) {
-    element->explicit_style.border_right_style = style.at("border-right-style");
-  }
-  if (style.count("border-bottom-style")) {
-    element->explicit_style.border_bottom_style = style.at("border-bottom-style");
-  }
-  if (style.count("border-left-style")) {
-    element->explicit_style.border_left_style = style.at("border-left-style");
-  }
-
-  // Individual border color sides override shorthand
-  if (style.count("border-top-color")) {
-    element->explicit_style.border_top_color = style.at("border-top-color");
-  }
-  if (style.count("border-right-color")) {
-    element->explicit_style.border_right_color = style.at("border-right-color");
-  }
-  if (style.count("border-bottom-color")) {
-    element->explicit_style.border_bottom_color = style.at("border-bottom-color");
-  }
-  if (style.count("border-left-color")) {
-    element->explicit_style.border_left_color = style.at("border-left-color");
-  }
-
-  // Visibility
-  if (style.count("display") && style.at("display") == "none") {
-    element->visible = false;
-  } else {
-    element->visible = true;
-  }
-
-  // Sprint 27: Parse box-shadow
-  if (style.count("box-shadow")) {
-    element->box_shadows = nvgcss_utils::parse_box_shadow(style.at("box-shadow"));
-  } else {
-    element->box_shadows.clear();
-  }
-
-  // Sprint 28: Parse text-shadow
-  if (style.count("text-shadow")) {
-    element->text_shadows = nvgcss_utils::parse_text_shadow(style.at("text-shadow"));
-  } else {
-    element->text_shadows.clear();
-  }
-
-  // PHASE 4 SPRINT 5: Parse grid container properties into explicit_style
-  if (style.count("grid-template-rows")) {
-    element->explicit_style.grid_template_rows = style.at("grid-template-rows");
-  }
-  if (style.count("grid-template-columns")) {
-    element->explicit_style.grid_template_columns = style.at("grid-template-columns");
-  }
-  if (style.count("grid-auto-rows")) {
-    element->explicit_style.grid_auto_rows = style.at("grid-auto-rows");
-  }
-  if (style.count("grid-auto-columns")) {
-    element->explicit_style.grid_auto_columns = style.at("grid-auto-columns");
+    if (element->explicit_style.grid_auto_columns.empty()) {
+      auto it = css_style.find("grid-auto-columns");
+      if (it != css_style.end()) {
+        element->explicit_style.grid_auto_columns = it->second;
+      }
+    }
   }
 
   // Gap Shorthand (Sprint 21) - Parse BEFORE individual gap properties
-  if (style.count("gap")) {
-    std::string gap_value = style.at("gap");
+  if (element->inline_style.count("gap")) {
+    std::string gap_value = element->inline_style.at("gap");
     auto gap_parts = nvgcss_utils::split(gap_value, ' ');
 
     if (gap_parts.size() == 1) {
@@ -991,15 +774,15 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
   }
 
   // Longhand properties override shorthand
-  if (style.count("row-gap") || style.count("grid-row-gap")) {
-    std::string gap_str = style.count("row-gap") ? style.at("row-gap") : style.at("grid-row-gap");
+  if (element->inline_style.count("row-gap") || element->inline_style.count("grid-row-gap")) {
+    std::string gap_str = element->inline_style.count("row-gap") ? element->inline_style.at("row-gap") : element->inline_style.at("grid-row-gap");
     if (gap_str.find("px") != std::string::npos) {
       element->explicit_style.grid_row_gap = safe_stof(gap_str.substr(0, gap_str.find("px")));
     }
   }
-  if (style.count("column-gap") || style.count("grid-column-gap")) {
+  if (element->inline_style.count("column-gap") || element->inline_style.count("grid-column-gap")) {
     std::string gap_str =
-        style.count("column-gap") ? style.at("column-gap") : style.at("grid-column-gap");
+        element->inline_style.count("column-gap") ? element->inline_style.at("column-gap") : element->inline_style.at("grid-column-gap");
     if (gap_str.find("px") != std::string::npos) {
       element->explicit_style.grid_column_gap = safe_stof(gap_str.substr(0, gap_str.find("px")));
     }
@@ -1021,7 +804,8 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
         num_str.erase(0, num_str.find_first_not_of(" 	"));
         span = std::stoi(num_str);
         line = -1; // Mark as auto-placed with span
-      } catch (...) {
+      } catch (const std::exception&) {
+        // Invalid span value, default to 1
         span = 1;
       }
     } else {
@@ -1043,7 +827,8 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
         try {
           line = std::stoi(val);
           span = 1;
-        } catch (...) {
+        } catch (const std::exception&) {
+          // Invalid line number - leave at default
         }
       }
       // If not a number, it's a line name - leave line as 0 (will be resolved in grid layout)
@@ -1051,8 +836,8 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
   };
 
   // Parse shorthand grid-row and grid-column first (can be overridden by longhands)
-  if (style.count("grid-row")) {
-    std::string value = style.at("grid-row");
+  if (element->inline_style.count("grid-row")) {
+    std::string value = element->inline_style.at("grid-row");
     size_t slash_pos = value.find('/');
     if (slash_pos != std::string::npos) {
       // grid-row: start / end
@@ -1073,8 +858,8 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
                        element->explicit_style.grid_row_span);
     }
   }
-  if (style.count("grid-column")) {
-    std::string value = style.at("grid-column");
+  if (element->inline_style.count("grid-column")) {
+    std::string value = element->inline_style.at("grid-column");
     size_t slash_pos = value.find('/');
     if (slash_pos != std::string::npos) {
       // grid-column: start / end
@@ -1097,252 +882,139 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
   }
 
   // Longhand properties override shorthand
-  if (style.count("grid-row-start")) {
-    parse_grid_value(style.at("grid-row-start"), element->explicit_style.grid_row_start,
+  if (element->inline_style.count("grid-row-start")) {
+    parse_grid_value(element->inline_style.at("grid-row-start"), element->explicit_style.grid_row_start,
                      element->explicit_style.grid_row_span);
   }
-  if (style.count("grid-row-end")) {
+  if (element->inline_style.count("grid-row-end")) {
     // For -end properties, if it contains "span", update the span field
-    parse_grid_value(style.at("grid-row-end"), element->explicit_style.grid_row_end,
+    parse_grid_value(element->inline_style.at("grid-row-end"), element->explicit_style.grid_row_end,
                      element->explicit_style.grid_row_span);
   }
-  if (style.count("grid-column-start")) {
-    parse_grid_value(style.at("grid-column-start"), element->explicit_style.grid_column_start,
+  if (element->inline_style.count("grid-column-start")) {
+    parse_grid_value(element->inline_style.at("grid-column-start"), element->explicit_style.grid_column_start,
                      element->explicit_style.grid_column_span);
   }
-  if (style.count("grid-column-end")) {
+  if (element->inline_style.count("grid-column-end")) {
     // For -end properties, if it contains "span", update the span field
-    parse_grid_value(style.at("grid-column-end"), element->explicit_style.grid_column_end,
+    parse_grid_value(element->inline_style.at("grid-column-end"), element->explicit_style.grid_column_end,
                      element->explicit_style.grid_column_span);
   }
 
   // Grid template areas (Sprint 13)
-  if (style.count("grid-template-areas")) {
-    element->explicit_style.grid_template_areas = style.at("grid-template-areas");
+  if (element->inline_style.count("grid-template-areas")) {
+    element->explicit_style.grid_template_areas = element->inline_style.at("grid-template-areas");
   }
-  if (style.count("grid-area")) {
-    element->explicit_style.grid_area = style.at("grid-area");
-  }
-
-  if (style.count("grid-auto-flow")) {
-    element->explicit_style.grid_auto_flow = style.at("grid-auto-flow");
+  if (element->inline_style.count("grid-area")) {
+    element->explicit_style.grid_area = element->inline_style.at("grid-area");
   }
 
-  // Positioning (Sprint 9)
-  if (style.count("position")) {
-    element->explicit_style.position = style.at("position");
+  if (element->inline_style.count("grid-auto-flow")) {
+    element->explicit_style.grid_auto_flow = element->inline_style.at("grid-auto-flow");
   }
 
-  // Parse offset properties
-  if (style.count("top")) {
-    element->explicit_style.top =
-        resolve_length(style.at("top"), viewport_height_, root_font_size_);
-  }
-  if (style.count("right")) {
-    element->explicit_style.right =
-        resolve_length(style.at("right"), viewport_width_, root_font_size_);
-  }
-  if (style.count("bottom")) {
-    element->explicit_style.bottom =
-        resolve_length(style.at("bottom"), viewport_height_, root_font_size_);
-  }
-  if (style.count("left")) {
-    element->explicit_style.left =
-        resolve_length(style.at("left"), viewport_width_, root_font_size_);
-  }
-
-  // Parse z-index
-  if (style.count("z-index")) {
-    std::string z_str = style.at("z-index");
-    if (z_str != "auto") {
-      try {
-        element->explicit_style.z_index = std::stoi(z_str);
-      } catch (...) {
-        element->explicit_style.z_index = 0;
+  // grid-template-areas/grid-area/grid-auto-flow not in typed system yet - read from CSS computed style
+  // TODO: Add to typed ComputedStyle in future phase
+  if (element->explicit_style.grid_template_areas.empty() ||
+      element->explicit_style.grid_area.empty() ||
+      element->explicit_style.grid_auto_flow.empty()) {
+    auto css_style = renderer->stylesheet->compute_style(
+        element->id, element->type, element->classes, element->attributes,
+        element->pseudo_states, element->inline_style, {},
+        element->child_index, element->total_siblings);
+    if (element->explicit_style.grid_template_areas.empty()) {
+      auto it = css_style.find("grid-template-areas");
+      if (it != css_style.end()) {
+        element->explicit_style.grid_template_areas = it->second;
+      }
+    }
+    if (element->explicit_style.grid_area.empty()) {
+      auto it = css_style.find("grid-area");
+      if (it != css_style.end()) {
+        element->explicit_style.grid_area = it->second;
+      }
+    }
+    if (element->explicit_style.grid_auto_flow.empty()) {
+      auto it = css_style.find("grid-auto-flow");
+      if (it != css_style.end()) {
+        element->explicit_style.grid_auto_flow = it->second;
       }
     }
   }
 
-  // Overflow (Sprint 20)
-  if (style.count("overflow")) {
-    element->explicit_style.overflow = style.at("overflow");
-    // Shorthand sets both x and y
-    element->explicit_style.overflow_x = style.at("overflow");
-    element->explicit_style.overflow_y = style.at("overflow");
+  // NEW: Positioning offsets from TYPED properties
+  if (!element->style.top.is_auto()) {
+    element->explicit_style.top = element->style.top.resolve(
+        viewport_height_, root_font_size_, viewport_height_);
   } else {
-    element->explicit_style.overflow = "visible";
-    element->explicit_style.overflow_x = "visible";
-    element->explicit_style.overflow_y = "visible";
+    element->explicit_style.top = -1.0f; // auto
   }
 
-  // Longhand properties override shorthand
-  if (style.count("overflow-x")) {
-    element->explicit_style.overflow_x = style.at("overflow-x");
-  }
-  if (style.count("overflow-y")) {
-    element->explicit_style.overflow_y = style.at("overflow-y");
+  if (!element->style.right.is_auto()) {
+    element->explicit_style.right = element->style.right.resolve(
+        viewport_width_, root_font_size_, viewport_width_);
+  } else {
+    element->explicit_style.right = -1.0f; // auto
   }
 
-  // Opacity
-  if (style.count("opacity")) {
-    element->opacity = safe_stof(style.at("opacity"), 1.f);
+  if (!element->style.bottom.is_auto()) {
+    element->explicit_style.bottom = element->style.bottom.resolve(
+        viewport_height_, root_font_size_, viewport_height_);
   } else {
-    element->opacity = 1.0f;
+    element->explicit_style.bottom = -1.0f; // auto
+  }
+
+  if (!element->style.left.is_auto()) {
+    element->explicit_style.left = element->style.left.resolve(
+        viewport_width_, root_font_size_, viewport_width_);
+  } else {
+    element->explicit_style.left = -1.0f; // auto
+  }
+
+  // NEW: Z-index from TYPED property
+  element->explicit_style.z_index = element->style.z_index;
+
+  // NEW: Overflow from TYPED properties (enum to string for backward compat)
+  auto overflow_to_string = [](nvgcss::Overflow o) -> std::string {
+    switch (o) {
+      case nvgcss::Overflow::HIDDEN: return "hidden";
+      case nvgcss::Overflow::SCROLL: return "scroll";
+      case nvgcss::Overflow::AUTO: return "auto";
+      case nvgcss::Overflow::VISIBLE:
+      default: return "visible";
+    }
+  };
+
+  element->explicit_style.overflow_x = overflow_to_string(element->style.overflow_x);
+  element->explicit_style.overflow_y = overflow_to_string(element->style.overflow_y);
+  // Set overflow shorthand to x value (convention)
+  element->explicit_style.overflow = element->explicit_style.overflow_x;
+
+  // NEW: Opacity from TYPED property
+  element->opacity = element->style.opacity;
+
+  // Copy box model properties from explicit_style to computed
+  // This ensures computed values are available for rendering
+  for (int i = 0; i < 4; i++) {
+    element->computed.padding[i] = element->explicit_style.padding[i];
+    element->computed.margin[i] = element->explicit_style.margin[i];
+    element->computed.border[i] = element->explicit_style.border_width[i];
+    element->computed.border_radius[i] = element->explicit_style.border_radius[i];
   }
 }
 
-void NVGCSSLayoutEngine::position_children(NVGCSSElement *element,
-                                           const std::map<std::string, std::string> &style) {
+void NVGCSSLayoutEngine::position_children(NVGCSSElement *element) {
   // TODO: Flow and stack layouts in phase 2
 }
 
 void NVGCSSLayoutEngine::compute_transforms(NVGCSSElement *element,
-                                            const std::map<std::string, std::string> &style) {
+                                            NVGCSSRenderer *renderer) {
   // Start with identity transform
   nvgTransformIdentity(element->transform);
 
-  // Check for transform property
-  auto it = style.find("transform");
-  if (it == style.end())
-    return;
-
-  const std::string &transform_str = it->second;
-
-  // Parse transform-origin (default: center center)
-  float origin_x = element->box.x + element->box.width / 2.0f;
-  float origin_y = element->box.y + element->box.height / 2.0f;
-
-  auto origin_it = style.find("transform-origin");
-  if (origin_it != style.end()) {
-    std::istringstream origin_stream(origin_it->second);
-    std::string x_str, y_str;
-    origin_stream >> x_str >> y_str;
-
-    // Parse X origin
-    if (x_str == "left")
-      origin_x = element->box.x;
-    else if (x_str == "center")
-      origin_x = element->box.x + element->box.width / 2.0f;
-    else if (x_str == "right")
-      origin_x = element->box.x + element->box.width;
-    else if (x_str.find('%') != std::string::npos) {
-      float percent = safe_stof(x_str) / 100.0f;
-      origin_x = element->box.x + element->box.width * percent;
-    } else if (x_str.find("px") != std::string::npos) {
-      origin_x = element->box.x + safe_stof(x_str);
-    }
-
-    // Parse Y origin
-    if (!y_str.empty()) {
-      if (y_str == "top")
-        origin_y = element->box.y;
-      else if (y_str == "center")
-        origin_y = element->box.y + element->box.height / 2.0f;
-      else if (y_str == "bottom")
-        origin_y = element->box.y + element->box.height;
-      else if (y_str.find('%') != std::string::npos) {
-        float percent = safe_stof(y_str) / 100.0f;
-        origin_y = element->box.y + element->box.height * percent;
-      } else if (y_str.find("px") != std::string::npos) {
-        origin_y = element->box.y + safe_stof(y_str);
-      }
-    }
-  }
-
-  // Translate to origin
-  float temp[6];
-  nvgTransformTranslate(temp, -origin_x, -origin_y);
-  nvgTransformMultiply(element->transform, temp);
-
-  // Parse and apply transform functions
-  size_t pos = 0;
-  while (pos < transform_str.length()) {
-    // Skip whitespace
-    while (pos < transform_str.length() && std::isspace(transform_str[pos])) {
-      pos++;
-    }
-
-    // Find function name
-    size_t paren_pos = transform_str.find('(', pos);
-    if (paren_pos == std::string::npos)
-      break;
-
-    std::string func_name = transform_str.substr(pos, paren_pos - pos);
-
-    // Find matching closing parenthesis
-    size_t close_paren = transform_str.find(')', paren_pos);
-    if (close_paren == std::string::npos)
-      break;
-
-    std::string args = transform_str.substr(paren_pos + 1, close_paren - paren_pos - 1);
-
-    // Parse arguments
-    auto arg_list = nvgcss_utils::split(args, ',');
-
-    // Apply transform based on function name
-    float temp[6];
-    if (func_name == "translate" && arg_list.size() >= 1) {
-      float tx = resolve_length(arg_list[0], viewport_width_, root_font_size_);
-      float ty = arg_list.size() >= 2
-                     ? resolve_length(arg_list[1], viewport_height_, root_font_size_)
-                     : 0.0f;
-
-      nvgTransformTranslate(temp, tx, ty);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "translateX" && arg_list.size() >= 1) {
-      float tx = resolve_length(arg_list[0], viewport_width_, root_font_size_);
-      nvgTransformTranslate(temp, tx, 0);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "translateY" && arg_list.size() >= 1) {
-      float ty = resolve_length(arg_list[0], viewport_height_, root_font_size_);
-      nvgTransformTranslate(temp, 0, ty);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "rotate" && arg_list.size() >= 1) {
-      std::string angle_str = arg_list[0];
-      angle_str.erase(0, angle_str.find_first_not_of(" \t"));
-      angle_str.erase(angle_str.find_last_not_of(" \t") + 1);
-
-      float angle = 0.0f;
-      if (angle_str.find("deg") != std::string::npos) {
-        angle = safe_stof(angle_str) * 3.14159f / 180.0f; // Convert to radians
-      } else if (angle_str.find("rad") != std::string::npos) {
-        angle = safe_stof(angle_str);
-      } else {
-        angle = safe_stof(angle_str) * 3.14159f / 180.0f; // Assume degrees
-      }
-
-      nvgTransformRotate(temp, angle);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "scale" && arg_list.size() >= 1) {
-      float sx = safe_stof(arg_list[0], 1.f);
-      float sy = arg_list.size() >= 2 ? safe_stof(arg_list[1], sx) : sx;
-
-      nvgTransformScale(temp, sx, sy);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "scaleX" && arg_list.size() >= 1) {
-      float sx = safe_stof(arg_list[0], 1.f);
-      nvgTransformScale(temp, sx, 1.0f);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "scaleY" && arg_list.size() >= 1) {
-      float sy = safe_stof(arg_list[0], 1.f);
-      nvgTransformScale(temp, 1.0f, sy);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "skewX" && arg_list.size() >= 1) {
-      float angle = safe_stof(arg_list[0]) * 3.14159f / 180.0f;
-      nvgTransformSkewX(temp, angle);
-      nvgTransformMultiply(element->transform, temp);
-    } else if (func_name == "skewY" && arg_list.size() >= 1) {
-      float angle = safe_stof(arg_list[0]) * 3.14159f / 180.0f;
-      nvgTransformSkewY(temp, angle);
-      nvgTransformMultiply(element->transform, temp);
-    }
-
-    pos = close_paren + 1;
-  }
-
-  // Translate back from origin
-  nvgTransformTranslate(temp, origin_x, origin_y);
-  nvgTransformMultiply(element->transform, temp);
+  // TODO: Port transforms to typed property system
+  // Transforms are complex and not critical for initial 60fps work
+  // Will be added in future phase
 }
 
 float NVGCSSLayoutEngine::resolve_length(const std::string &value, float context_value,

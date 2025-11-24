@@ -38,9 +38,9 @@ public:
   bool initialize(const FlexViewConfig &config);
   void shutdown();
 
-  void render(FlexDocument &document, const OverlayDrawCallback &overlay);
+  void render(FlexDocument &document, float dt, const OverlayDrawCallback &overlay);
 
-  NVGcontext *vg() const { return m_vg; }
+  NVGcontext *nvgContext() const { return m_vg; }
   NVGCSSRenderer *renderer() const { return m_renderer; }
   SDL_Window *window() const { return m_window; }
 

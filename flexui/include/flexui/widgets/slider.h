@@ -1,6 +1,7 @@
 #pragma once
 
 #include "flexui/controller.h"
+#include "flexui/node.h" // Needed for FlexNode definition
 
 #include <functional>
 #include <string>
@@ -19,11 +20,13 @@ struct FlexSliderBinding {
   std::function<void(float)> on_change;
 };
 
-class FlexSlider : public Flex {
+class FlexSlider : public FlexNode {
 public:
+  explicit FlexSlider(FlexNodeDesc desc = FlexNodeDesc{}) : FlexNode(desc) {}
   void registerSlider(FlexSliderBinding binding);
 
   void handleEvent(const SDL_Event &event) override;
+  void onDocumentAttached(FlexDocument *document) override;
 
 private:
   struct SliderState {

@@ -10,8 +10,12 @@
 #include <functional>
 #include <optional>
 
-// Forward declaration
+// Forward declarations
 struct KeyframeAnimation;
+
+namespace nvgcss {
+    struct ComputedStyle;  // NEW: Typed property system
+}
 
 namespace nanovg_css {
 namespace lexbor {
@@ -374,6 +378,34 @@ public:
         const std::map<std::string, std::string>& parent_style = {},
         int child_index = 0,
         int total_siblings = 1);
+
+    /**
+     * @brief Compute TYPED style for a shape (NEW: 60fps refactor)
+     *
+     * This is the new API that returns typed properties instead of strings.
+     * Uses the same caching as compute_style() but returns nvgcss::ComputedStyle.
+     *
+     * @param shape_id Shape ID
+     * @param shape_type Shape type
+     * @param classes CSS classes
+     * @param attributes Shape attributes
+     * @param pseudo_states Pseudo-states
+     * @param inline_style Inline styles (still string-based for now)
+     * @param parent_style Parent's computed style (for inheritance)
+     * @param child_index Child index for structural pseudo-classes
+     * @param total_siblings Total number of siblings
+     * @return Typed computed style (zero runtime parsing!)
+     */
+    nvgcss::ComputedStyle compute_style_typed(
+        const std::string& shape_id,
+        const std::string& shape_type,
+        const std::vector<std::string>& classes,
+        const std::map<std::string, std::string>& attributes,
+        const std::set<std::string>& pseudo_states,
+        const std::map<std::string, std::string>& inline_style,
+        const nvgcss::ComputedStyle* parent_style = nullptr,
+        int child_index = 0,
+        int total_siblings = 1);
     
     /**
      * @brief Clear cache
@@ -420,6 +452,8 @@ public:
      */
     void set_variable(const std::string& name, const std::string& value) {
         variable_resolver_.set_variable(name, value);
+        // Clear cache because all cached styles with var() references are now invalid
+        clear_cache();
     }
 
     /**
@@ -464,7 +498,9 @@ private:
         const std::string& shape_id,
         const std::string& shape_type,
         const std::vector<std::string>& classes,
-        const std::set<std::string>& pseudo_states) const;
+        const std::set<std::string>& pseudo_states,
+        const std::map<std::string, std::string>& attributes,
+        const std::map<std::string, std::string>& inline_style) const;
     
     /**
      * @brief Evict LRU cache entry

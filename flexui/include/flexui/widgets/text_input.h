@@ -13,7 +13,7 @@ struct FlexTextInputBinding {
   std::function<void(const std::string &)> on_change;
 };
 
-class FlexTextInput : public Flex {
+class FlexTextInput : public FlexController {
 public:
   void registerInput(FlexTextInputBinding binding);
 

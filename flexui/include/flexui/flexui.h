@@ -10,6 +10,8 @@
 #include "flexui/widgets/dropdown.h"
 #include "flexui/widgets/interaction.h"
 #include "flexui/widgets/radio.h"
+#include "flexui/widgets/scrollbar.h"
 #include "flexui/widgets/slider.h"
 #include "flexui/widgets/text_input.h"
+#include "flexui/widgets/text_label.h"
 #include "flexui/widgets/toggle.h"

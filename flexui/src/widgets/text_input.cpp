@@ -45,21 +45,21 @@ void FlexTextInput::registerInput(FlexTextInputBinding binding) {
   InputState state;
   state.binding = std::move(binding);
 
-  if (document()) {
-    if (auto *node = document()->findNode(state.binding.element_id)) {
+  if (getDocument()) {
+    if (auto *node = getDocument()->findNode(state.binding.element_id)) {
       state.value = node->text();
     }
   }
 
   m_inputs[state.binding.element_id] = std::move(state);
 
-  if (document()) {
+  if (getDocument()) {
     StartTextInputSession(m_text_input_active);
   }
 }
 
 void FlexTextInput::handleEvent(const SDL_Event &event) {
-  if (!document()) {
+  if (!getDocument()) {
     return;
   }
 
@@ -86,7 +86,7 @@ void FlexTextInput::handleEvent(const SDL_Event &event) {
 }
 
 void FlexTextInput::onDocumentAttached(FlexDocument *doc) {
-  Flex::onDocumentAttached(doc);
+  FlexController::onDocumentAttached(doc);
   if (doc && !m_inputs.empty()) {
     StartTextInputSession(m_text_input_active);
   } else if (!doc) {
@@ -97,7 +97,7 @@ void FlexTextInput::onDocumentAttached(FlexDocument *doc) {
 void FlexTextInput::focusInputAt(float x, float y) {
   std::string hit_id;
   for (auto &entry : m_inputs) {
-    if (document()->hitTest(entry.first, x, y)) {
+    if (getDocument()->hitTest(entry.first, x, y)) {
       hit_id = entry.first;
       break;
     }
@@ -106,18 +106,18 @@ void FlexTextInput::focusInputAt(float x, float y) {
 }
 
 void FlexTextInput::setFocusedId(const std::string &id) {
-  if (m_focused_id == id || !document()) {
+  if (m_focused_id == id || !getDocument()) {
     return;
   }
 
   if (!m_focused_id.empty()) {
-    document()->setClass(m_focused_id, "text-input-focused", false);
+    getDocument()->setClass(m_focused_id, "text-input-focused", false);
   }
 
   m_focused_id = id;
 
   if (!m_focused_id.empty()) {
-    document()->setClass(m_focused_id, "text-input-focused", true);
+    getDocument()->setClass(m_focused_id, "text-input-focused", true);
   }
 }
 
@@ -133,10 +133,10 @@ FlexTextInput::InputState *FlexTextInput::focusedState() {
 }
 
 void FlexTextInput::commitValue(InputState &state) {
-  if (!document()) {
+  if (!getDocument()) {
     return;
   }
-  document()->setText(state.binding.element_id, state.value);
+  getDocument()->setText(state.binding.element_id, state.value);
   if (state.binding.on_change) {
     state.binding.on_change(state.value);
   }

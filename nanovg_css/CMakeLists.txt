@@ -80,12 +80,14 @@ set(NANOVG_CSS_SOURCES
     src/nanovg_css_grid.cpp
     src/lexbor_css_parser.cpp)
 
-set(NANOVG_CSS_HEADERS 
- include/nanovg_css.h 
+set(NANOVG_CSS_HEADERS
+ include/nanovg_css.h
  include/nanovg_css_internal.h
- include/nanovg_css_background.h 
+ include/nanovg_css_types.h         # NEW: Typed property system
+ include/nanovg_css_conversion.h    # NEW: String-to-type conversion
+ include/nanovg_css_background.h
  include/lexbor_css_parser.h
- include/lexbor_wrapper.h 
+ include/lexbor_wrapper.h
  )
 
 # Create CSS extension library
@@ -110,7 +112,7 @@ target_include_directories(
 target_link_libraries(
   nanovg_css
   PUBLIC nanovg_internal   # Use internal NanoVG build
-  PRIVATE ${LEXBOR_LIBRARY})
+  PRIVATE ${LEXBOR_LIBRARY} fmtlog)
 
 # Create an alias for compatibility
 add_library(nanovg::css ALIAS nanovg_css)
@@ -118,3 +120,4 @@ add_library(nanovg::css ALIAS nanovg_css)
 message(STATUS "NanoVG CSS extension configured")
 
 add_subdirectory(tests)
+add_subdirectory(examples)

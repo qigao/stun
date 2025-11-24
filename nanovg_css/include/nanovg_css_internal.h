@@ -7,7 +7,9 @@
 #ifndef NANOVG_CSS_INTERNAL_H
 #define NANOVG_CSS_INTERNAL_H
 
+#include <nanovg.h>
 #include <nanovg_css.h>
+#include <nanovg_css_types.h>  // NEW: Typed property system
 #include <map>
 #include <string>
 #include <vector>
@@ -23,6 +25,198 @@
 
 class NVGCSSPainter;
 class NVGCSSLayoutEngine;
+
+// ============================================================================
+// Element Structure Types (REFACTORED)
+// ============================================================================
+
+/**
+ * @brief Explicit CSS properties (input, never overwritten by layout)
+ *
+ * DEPRECATED: This struct is being phased out in favor of nvgcss::ComputedStyle.
+ * Kept temporarily for backward compatibility during refactor.
+ */
+struct NVGCSSExplicitStyle {
+    // Dimensions (-1 = auto/unset)
+    float width, height, min_width, min_height, max_width, max_height;
+    float x, y;
+
+    // Positioning
+    std::string position;
+    float top, right, bottom, left;
+    int z_index;
+
+    // Box model
+    std::string box_sizing;
+    float padding[4], margin[4], border_width[4], border_radius[4];
+
+    // Overflow
+    std::string overflow, overflow_x, overflow_y;
+
+    // Flex properties
+    float flex_grow, flex_shrink, flex_basis;
+    int order;
+
+    // Grid properties
+    std::string grid_template_rows, grid_template_columns;
+    std::string grid_auto_rows, grid_auto_columns;
+    float grid_row_gap, grid_column_gap;
+    int grid_row_start, grid_row_end, grid_column_start, grid_column_end;
+    int grid_row_span, grid_column_span;
+    std::string grid_template_areas, grid_area, grid_auto_flow;
+
+    // Background images
+    std::string background_image, background_size, background_position, background_repeat;
+
+    // Border styles and colors
+    std::string border_top_style, border_right_style, border_bottom_style, border_left_style;
+    std::string border_top_color, border_right_color, border_bottom_color, border_left_color;
+
+    NVGCSSExplicitStyle();
+};
+
+/**
+ * @brief Computed layout results (output, computed by layout engine)
+ *
+ * DEPRECATED: Use nvgcss::ResolvedLayout instead.
+ * Kept temporarily for backward compatibility during refactor.
+ */
+struct NVGCSSComputedLayout {
+    float width, height, x, y;
+    float content_width, content_height;
+    float padding[4], border[4], margin[4], border_radius[4];
+
+    enum LayoutSource {
+        UNCOMPUTED, CSS_EXPLICIT, FLEXBOX, GRID, FLOW, ABSOLUTE, RELATIVE
+    };
+    LayoutSource source;
+    bool is_computed;
+
+    NVGCSSComputedLayout();
+};
+
+/**
+ * @brief Simple 2D point for stroke geometry
+ */
+struct NVGCSSPoint {
+    float x, y;
+    NVGCSSPoint() : x(0.0f), y(0.0f) {}
+    NVGCSSPoint(float px, float py) : x(px), y(py) {}
+};
+
+/**
+ * @brief Line geometry
+ */
+struct NVGCSSLineGeometry {
+    float x1, y1, x2, y2;
+    bool defined;
+    NVGCSSLineGeometry() : x1(0), y1(0), x2(0), y2(0), defined(false) {}
+};
+
+/**
+ * @brief Circle/ellipse geometry
+ */
+struct NVGCSSCircleGeometry {
+    float cx, cy, rx, ry;
+    bool defined;
+    NVGCSSCircleGeometry() : cx(0), cy(0), rx(0), ry(0), defined(false) {}
+};
+
+/**
+ * @brief CSS Element (full internal definition)
+ *
+ * REFACTORED for 60fps:
+ * - Typed properties instead of string maps
+ * - Dirty flags for incremental updates
+ * - No more void* pointers
+ */
+struct NVGCSSElement {
+    // === Identity ===
+    /**
+     * @brief Unique internal identifier (auto-assigned, always unique)
+     *
+     * This is the PRIMARY KEY for element storage and tree relationships.
+     * - Auto-incremented by renderer (starts at 1)
+     * - Used for parent-child relationships (parent_internal_id, children_internal_ids)
+     * - Guarantees uniqueness even when user doesn't provide an id
+     *
+     * DO NOT confuse with 'id' field below!
+     */
+    int internal_id;
+
+    /**
+     * @brief User-provided id (optional, for CSS #id selector)
+     *
+     * This is OPTIONAL and used ONLY for:
+     * - CSS #id selector matching
+     * - User-facing API (nvgcssGetElement by id)
+     *
+     * Can be empty! Elements without user id still work via internal_id.
+     */
+    std::string id;
+
+    std::string type;        // Element type (div, button, etc.)
+    std::vector<std::string> classes;
+    std::map<std::string, std::string> attributes;
+    std::set<std::string> pseudo_states;
+
+    // === NEW: Typed CSS properties (replaces string maps) ===
+    nvgcss::ComputedStyle style;         // Parsed CSS properties
+    nvgcss::ResolvedLayout layout;       // Resolved layout (in pixels)
+
+    // === DEPRECATED: Old string-based system (will be removed) ===
+    NVGCSSExplicitStyle explicit_style;  // DEPRECATED
+    NVGCSSComputedLayout computed;       // DEPRECATED
+    std::map<std::string, std::string> inline_style;  // DEPRECATED
+
+    // === NEW: Dirty flags for 60fps optimization ===
+    nvgcss::DirtyFlags dirty_flags = nvgcss::DIRTY_ALL;
+
+    // === Transform & Visibility ===
+    float transform[6];
+    float opacity;
+    bool visible;
+
+    // === Tree Structure ===
+    /**
+     * @brief Parent's internal_id (-1 if root element)
+     *
+     * Tree relationships use internal_id (NOT user id) for reliability.
+     * This allows elements without user id to still have parent-child relationships.
+     */
+    int parent_internal_id;
+
+    /**
+     * @brief Children's internal_ids
+     *
+     * Stores child elements by their internal_id for fast, reliable lookup.
+     */
+    std::vector<int> children_internal_ids;
+
+    int child_index, total_siblings;  // Position among siblings
+
+    // === Content ===
+    std::string text_content;
+
+    // === State pointers (Phase 2: will replace with std::unique_ptr<TransitionState>) ===
+    void* transition_state;
+    void* animation_state;
+
+    // === DEPRECATED: Old shadow storage (kept for backward compat during refactor) ===
+    std::vector<BoxShadow> box_shadows;      // DEPRECATED: will move to style.box_shadows
+    std::vector<TextShadow> text_shadows;    // DEPRECATED: will move to typed system
+
+    // === Geometry (for custom shapes) ===
+    NVGCSSLineGeometry line_geometry;
+    NVGCSSCircleGeometry circle_geometry;
+    std::vector<NVGCSSPoint> stroke_points;
+    float stroke_salt;
+    bool has_stroke_salt;
+
+    // === Custom Rendering ===
+    void (*custom_paint)(NVGcontext*, const NVGCSSElement*, const std::map<std::string, std::string>&);
+    void* user_data;
+};
 
 // ============================================================================
 // Gradient Data Structures (Phase 3)
@@ -320,8 +514,31 @@ struct NVGCSSRenderer {
     // Stylesheet management (using lexbor-powered EnhancedStyleSheet)
     std::unique_ptr<nanovg_css::lexbor::EnhancedStyleSheet> stylesheet;
 
-    // Element tree
-    std::map<std::string, std::unique_ptr<NVGCSSElement>> elements;
+    // === Element Tree (Internal ID System) ===
+    /**
+     * @brief Auto-incrementing ID counter (0 reserved for invalid)
+     *
+     * Every element gets a unique internal_id from this counter.
+     * Starts at 1, increments on each nvgcssCreateElement() call.
+     */
+    int next_internal_id = 1;
+
+    /**
+     * @brief Primary element storage: internal_id -> element
+     *
+     * This is the AUTHORITATIVE storage for all elements.
+     * Key = internal_id (always unique, never empty, never conflicts)
+     */
+    std::map<int, std::unique_ptr<NVGCSSElement>> elements;
+
+    /**
+     * @brief User id lookup table: user id -> internal_id
+     *
+     * Optional mapping for CSS #id selector support.
+     * Only contains entries for elements with non-empty user id.
+     */
+    std::map<std::string, int> id_to_internal_id;
+
     std::vector<NVGCSSElement*> root_elements;  // Top-level elements
 
     // Rendering components
@@ -337,10 +554,13 @@ struct NVGCSSRenderer {
 
     // Dirty flags
     bool layout_dirty = true;
+    bool style_dirty = true;
+
     // Image cache (Sprint 31)
     std::unordered_map<std::string, int> image_cache;  // path -> NanoVG image handle
 
-    bool style_dirty = true;
+    // CSS file tracking (v2 API: for hot-reload)
+    std::vector<std::string> css_files;  // Loaded CSS file paths
 
     NVGCSSRenderer(NVGcontext* vg);
     ~NVGCSSRenderer();
@@ -355,10 +575,9 @@ public:
     NVGCSSPainter(NVGcontext* vg, NVGCSSRenderer* renderer);
 
     /**
-     * @brief Paint an element with computed styles
+     * @brief Paint an element (uses element->style typed properties)
      */
-    void paint_element(const NVGCSSElement* element,
-                      const std::map<std::string, std::string>& computed_style);
+    void paint_element(const NVGCSSElement* element);
 
     /**
      * @brief Get NanoVG context (Sprint 22: for scissor clipping)
@@ -370,18 +589,38 @@ public:
      */
     GradientData parse_gradient(const std::string& gradient_css);
 
+    struct StrokeStyle {
+        NVGcolor color;
+        float width;
+        int line_cap;
+        int line_join;
+        float miter_limit;
+        std::vector<float> dash_array;
+        float dash_offset;
+        bool enabled;
+
+        StrokeStyle()
+            : color(nvgRGBA(0, 0, 0, 255)),
+              width(1.0f),
+              line_cap(NVG_BUTT),
+              line_join(NVG_MITER),
+              miter_limit(10.0f),
+              dash_offset(0.0f),
+              enabled(false) {}
+    };
+
 private:
     NVGcontext* vg_;
     NVGCSSRenderer* renderer_;  // Sprint 31: for image cache access
 
-    // Property handlers
-    void apply_background(const std::map<std::string, std::string>& style,
+    // Property handlers (using typed properties from element->style)
+    void apply_background(const NVGCSSElement* element,
                          const NVGCSSBox& box);
     void apply_border(const std::map<std::string, std::string>& style,
-                     const NVGCSSBox& box);
+                     const NVGCSSBox& box);  // DEPRECATED: not yet migrated
     void apply_shadow(const std::map<std::string, std::string>& style,
-                     const NVGCSSBox& box);  // DEPRECATED: kept for backward compatibility
-    void apply_opacity(const std::map<std::string, std::string>& style);
+                     const NVGCSSBox& box);  // DEPRECATED: use paint_box_shadows()
+    void apply_opacity(const std::map<std::string, std::string>& style);  // DEPRECATED: use element->style.opacity
 
     // Sprint 27: Box shadow rendering
     void paint_box_shadows(const NVGCSSElement* element, const NVGCSSBox& box);
@@ -397,15 +636,26 @@ private:
     // Path generation
     void create_rounded_rect_path(const NVGCSSBox& box);
 
-    // Typography support (Sprint 11)
-    std::string compute_font_face(const std::map<std::string, std::string>& style);
-    float parse_font_size(const std::map<std::string, std::string>& style, float parent_size);
-    int compute_text_align(const std::map<std::string, std::string>& style);
+    // Typography support (Sprint 11) - using typed properties
+    std::string compute_font_face(const NVGCSSElement* element);
+    float parse_font_size(const std::map<std::string, std::string>& style, float parent_size);  // DEPRECATED
+    int compute_text_align(const NVGCSSElement* element);
     std::string apply_text_transform(const std::string& text, const std::string& transform);
     void apply_text_decoration(const NVGCSSElement* element,
-                              const std::map<std::string, std::string>& style,
                               float text_x, float text_y,
                               NVGcolor text_color);
+
+    // Vector shape helpers - using typed/inline properties
+    StrokeStyle resolve_stroke_style(const NVGCSSElement* element,
+                                     const NVGCSSBox* box,
+                                     float absolute_hint = 1.0f) const;
+    void paint_rect_stroke(const NVGCSSElement* element,
+                           const NVGCSSBox& box);
+    void paint_line_shape(const NVGCSSElement* element,
+                          const NVGCSSBox& box);
+    void paint_circle_shape(const NVGCSSElement* element,
+                            const NVGCSSBox& box);
+    void paint_freehand_path(const NVGCSSElement* element);
 };
 
 // ============================================================================
@@ -426,7 +676,6 @@ public:
      * @brief Compute layout for single element and children
      */
     void compute_element_layout(NVGCSSElement* element,
-                               const std::map<std::string, std::string>& computed_style,
                                NVGCSSRenderer* renderer);
 
     void set_viewport(float width, float height);
@@ -436,13 +685,12 @@ private:
     float viewport_height_;
     float root_font_size_ = 16.0f;
 
-    // Layout steps
+    // Layout steps (60fps refactor - NO string maps!)
     void compute_box_model(NVGCSSElement* element,
-                          const std::map<std::string, std::string>& style);
-    void position_children(NVGCSSElement* element,
-                          const std::map<std::string, std::string>& style);
+                          NVGCSSRenderer* renderer);
+    void position_children(NVGCSSElement* element);
     void compute_transforms(NVGCSSElement* element,
-                           const std::map<std::string, std::string>& style);
+                           NVGCSSRenderer* renderer);
 
     // Unit conversion
     float resolve_length(const std::string& value,
@@ -462,21 +710,20 @@ private:
 
 /**
  * @brief Compute flexbox layout for a container
- * @param element Container element with display: flex
- * @param computed_style Container's computed style
+ * @param element Container element with display: flex (uses element->style)
  * @param renderer Renderer for accessing stylesheet
  */
 void compute_flexbox_layout(
     NVGCSSElement* element,
-    const std::map<std::string, std::string>& computed_style,
     NVGCSSRenderer* renderer);
 
 /**
- * @brief Compute CSS Grid layout for a container (PHASE 4 SPRINT 5)
+ * @brief Compute CSS Grid layout for a container
+ * @param element Container element with display: grid (uses element->style)
+ * @param renderer Renderer for accessing stylesheet
  */
 void compute_grid_layout(
     NVGCSSElement* element,
-    const std::map<std::string, std::string>& computed_style,
     NVGCSSRenderer* renderer);
 
 // ============================================================================

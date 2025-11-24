@@ -285,4 +285,4 @@ inline bool has_class(lxb_dom_element_t* element, const std::string& class_name)
 } // namespace utils
 
 } // namespace lexbor
-} // namespace whiteboard
+} // namespace nanovg_css

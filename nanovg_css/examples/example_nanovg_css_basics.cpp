@@ -22,6 +22,7 @@
 #include <nanovg_gl.h>
 
 #include <nanovg_css.h>
+#include "nanovg_css_internal.h"  // For computed layout access
 #include <fmtlog.h>
 #include <fstream>
 #include <sstream>
@@ -40,7 +41,7 @@ public:
 
     ~NanoVGCSSBasicsDemo() {
         if (renderer) nvgcssDeleteRenderer(renderer);
-     
+
         if (gl_context) SDL_GL_DestroyContext(gl_context);
         if (window) SDL_DestroyWindow(window);
         SDL_Quit();
@@ -163,90 +164,135 @@ private:
     }
 
     void setup_css() {
-        nvgcssSetVariable(renderer, "--primary-color", "#4a90e2");
-        nvgcssSetVariable(renderer, "--success-color", "#5cb85c");
-        nvgcssSetVariable(renderer, "--danger-color", "#d9534f");
-        nvgcssSetVariable(renderer, "--warning-color", "#f0ad4e");
-
-        auto load_css = [](const char* path) -> std::string {
-            std::ifstream file(path, std::ios::in | std::ios::binary);
-            if (!file) return {};
-            std::ostringstream ss;
-            ss << file.rdbuf();
-            return ss.str();
-        };
-
-        std::string css = load_css("styles/nanovg_css_basics.css");
-        if (css.empty()) {
+        // Load main CSS file
+        if (!nvgcssLoadCSSFile(renderer, "styles/nanovg_css_basics.css")) {
             loge("Failed to load styles/nanovg_css_basics.css");
             exit(1);
         }
 
-        if (!nvgcssParseCSS(renderer, css.c_str())) {
-            loge("Failed to parse CSS file");
+        // Add example-specific CSS for positioning
+        const char* example_css = R"(
+            /* Row 1: Interactive buttons */
+            #hover-btn {
+                x: 50px;
+                y: 100px;
+                width: 150px;
+                height: 50px;
+            }
+
+            #active-btn {
+                x: 230px;
+                y: 100px;
+                width: 150px;
+                height: 50px;
+            }
+
+            /* Row 2: Gradient and transform boxes */
+            #grad-box {
+                x: 50px;
+                y: 200px;
+                width: 150px;
+                height: 100px;
+            }
+
+            #transform-box {
+                x: 280px;
+                y: 225px;
+                width: 150px;
+                height: 100px;
+            }
+
+            /* Row 3: Card and circle */
+            #card {
+                x: 420px;
+                y: 100px;
+                width: 100px;
+                height: 100px;
+            }
+
+            #circle {
+                x: 700px;
+                y: 120px;
+                width: 80px;
+                height: 80px;
+            }
+
+            /* Row 4: Color-themed buttons */
+            #warning-btn {
+                x: 50px;
+                y: 400px;
+                width: 150px;
+                height: 100px;
+                background: var(--warning-color);
+            }
+
+            #danger-btn {
+                x: 230px;
+                y: 400px;
+                width: 150px;
+                height: 100px;
+                background: var(--danger-color);
+            }
+
+            #success-btn {
+                x: 410px;
+                y: 400px;
+                width: 150px;
+                height: 100px;
+                background: var(--success-color);
+            }
+        )";
+
+        if (!nvgcssParseCSS(renderer, example_css)) {
+            loge("Failed to parse example CSS");
             exit(1);
         }
+
+        // Set CSS variables (override :root values if needed)
+        nvgcssSetVariable(renderer, "--primary-color", "#4a90e2");
+        nvgcssSetVariable(renderer, "--success-color", "#5cb85c");
+        nvgcssSetVariable(renderer, "--danger-color", "#d9534f");
+        nvgcssSetVariable(renderer, "--warning-color", "#f0ad4e");
     }
 
     void create_elements() {
         // Row 1: Interactive buttons
         hover_button = nvgcssCreateElement(renderer, "hover-btn", "rect");
         nvgcssAddClass(hover_button, "button");
-        nvgcssSetStyle(hover_button, "x", "50px");
-        nvgcssSetStyle(hover_button, "y", "100px");
         nvgcssSetText(hover_button, "Hover Me");
 
         active_button = nvgcssCreateElement(renderer, "active-btn", "rect");
         nvgcssAddClass(active_button, "button");
-        nvgcssSetStyle(active_button, "x", "230px");
-        nvgcssSetStyle(active_button, "y", "100px");
         nvgcssSetText(active_button, "Click Me");
 
         // Row 2: Gradient and transform boxes
         gradient_box = nvgcssCreateElement(renderer, "grad-box", "rect");
         nvgcssAddClass(gradient_box, "gradient-box");
-        nvgcssSetStyle(gradient_box, "x", "50px");
-        nvgcssSetStyle(gradient_box, "y", "200px");
         nvgcssSetText(gradient_box, "Gradient");
 
         transform_box = nvgcssCreateElement(renderer, "transform-box", "rect");
-        nvgcssAddClass(transform_box, "transform-box");
-        nvgcssSetStyle(transform_box, "x", "280px");
-        nvgcssSetStyle(transform_box, "y", "225px");
+        nvgcssAddClass(transform_box, "gradient-box");
         nvgcssSetText(transform_box, "Transform");
 
         // Row 3: Card and circle
         NVGCSSElement* card = nvgcssCreateElement(renderer, "card", "rect");
         nvgcssAddClass(card, "card");
-        nvgcssSetStyle(card, "x", "420px");
-        nvgcssSetStyle(card, "y", "100px");
         nvgcssSetText(card, "Card");
 
         NVGCSSElement* circle = nvgcssCreateElement(renderer, "circle", "circle");
         nvgcssAddClass(circle, "circle");
-        nvgcssSetStyle(circle, "x", "700px");
-        nvgcssSetStyle(circle, "y", "120px");
 
-        // Row 4: Additional examples
+        // Row 4: Color-themed buttons
         NVGCSSElement* warning_btn = nvgcssCreateElement(renderer, "warning-btn", "rect");
         nvgcssAddClass(warning_btn, "button");
-        nvgcssSetStyle(warning_btn, "x", "50px");
-        nvgcssSetStyle(warning_btn, "y", "400px");
-        nvgcssSetStyle(warning_btn, "background", "var(--warning-color)");
         nvgcssSetText(warning_btn, "Warning");
 
         NVGCSSElement* danger_btn = nvgcssCreateElement(renderer, "danger-btn", "rect");
         nvgcssAddClass(danger_btn, "button");
-        nvgcssSetStyle(danger_btn, "x", "230px");
-        nvgcssSetStyle(danger_btn, "y", "400px");
-        nvgcssSetStyle(danger_btn, "background", "var(--danger-color)");
         nvgcssSetText(danger_btn, "Danger");
 
         NVGCSSElement* success_btn = nvgcssCreateElement(renderer, "success-btn", "rect");
         nvgcssAddClass(success_btn, "button");
-        nvgcssSetStyle(success_btn, "x", "410px");
-        nvgcssSetStyle(success_btn, "y", "400px");
-        nvgcssSetStyle(success_btn, "background", "var(--success-color)");
         nvgcssSetText(success_btn, "Success");
     }
 

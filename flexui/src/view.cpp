@@ -3,6 +3,7 @@
 #include <fmtlog.h>
 #include <glad/glad.h>
 #include <nanovg_css.h>
+#include "flexui_resources.h"
 
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg_gl.h>
@@ -71,6 +72,26 @@ bool FlexView::initialize(const FlexViewConfig &config) {
     return false;
   }
 
+  // Load default fonts for text rendering from embedded resources
+  if (nvgCreateFontMem(m_vg, "sans-serif", (unsigned char*)roboto_regular_ttf, roboto_regular_ttf_size, 0) == -1) {
+    logw("FlexView: could not load sans-serif font from memory");
+  } else {
+    logi("FlexView: loaded sans-serif font from memory");
+  }
+
+  if (nvgCreateFontMem(m_vg, "sans-serif-Bold", (unsigned char*)roboto_bold_ttf, roboto_bold_ttf_size, 0) == -1) {
+    logw("FlexView: could not load sans-serif-Bold font from memory");
+  } else {
+    logi("FlexView: loaded sans-serif-Bold font from memory");
+  }
+
+  // Load icon font if available
+  if (nvgCreateFontMem(m_vg, "icons", (unsigned char*)fontawesome_solid_ttf, fontawesome_solid_ttf_size, 0) == -1) {
+      logw("FlexView: could not load icons font from memory");
+  } else {
+      logi("FlexView: loaded icons font from memory");
+  }
+
   m_renderer = nvgcssCreateRenderer(m_vg);
   if (!m_renderer) {
     loge("FlexView: failed to create NVGCSS renderer");
@@ -111,7 +132,7 @@ void FlexView::shutdown() {
   m_initialized = false;
 }
 
-void FlexView::render(FlexDocument &document,
+void FlexView::render(FlexDocument &document, float dt,
                       const OverlayDrawCallback &overlay) {
   if (!m_initialized || !m_renderer || !m_window) {
     return;
@@ -140,6 +161,10 @@ void FlexView::render(FlexDocument &document,
   nvgBeginFrame(m_vg, win_width, win_height, pixel_ratio);
   nvgcssSetViewport(m_renderer, static_cast<float>(win_width),
                     static_cast<float>(win_height));
+
+  // Update animations, then compute layout, then render.
+  nvgcssUpdate(m_renderer, dt);
+  nvgcssComputeLayout(m_renderer);
   nvgcssRender(m_renderer);
 
   if (overlay) {

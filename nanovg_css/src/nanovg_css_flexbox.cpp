@@ -7,7 +7,8 @@
 
 #include "nanovg_css_internal.h"
 #include <algorithm>
-#include <cmath> 
+#include <cmath>
+#include <cctype> 
 
 // Forward declarations (Sprint 18 & 19)
 float apply_dimension_constraints(float value, float min_value, float max_value);
@@ -25,13 +26,42 @@ void calculate_content_dimensions(
 // ============================================================================
 
 /**
+ * @brief Parse dimension from style value (e.g., "80px", "10%", "auto")
+ * Returns -1 for "auto", otherwise the numeric value
+ */
+float parse_dimension(const std::string& value, float context_size = 0) {
+    if (value.empty() || value == "auto") {
+        return -1.0f;
+    }
+
+    // Remove whitespace
+    std::string trimmed = value;
+    trimmed.erase(std::remove_if(trimmed.begin(), trimmed.end(), ::isspace), trimmed.end());
+
+    try {
+        if (trimmed.find("px") != std::string::npos) {
+            return std::stof(trimmed.substr(0, trimmed.find("px")));
+        } else if (trimmed.find("%") != std::string::npos) {
+            float percent = std::stof(trimmed.substr(0, trimmed.find("%")));
+            return (percent / 100.0f) * context_size;
+        } else {
+            return std::stof(trimmed);
+        }
+    } catch (const std::exception&) {
+        // Parse error - treat as auto
+        return -1.0f;
+    }
+}
+
+/**
  * @brief Parse flex-grow property
  */
 float parse_flex_grow(const std::string& value) {
     if (value.empty()) return 0.0f;
     try {
         return std::stof(value);
-    } catch (...) {
+    } catch (const std::exception&) {
+        // Parse error - default to 0
         return 0.0f;
     }
 }
@@ -43,7 +73,8 @@ float parse_flex_shrink(const std::string& value) {
     if (value.empty()) return 1.0f;
     try {
         return std::stof(value);
-    } catch (...) {
+    } catch (const std::exception&) {
+        // Parse error - default to 1
         return 1.0f;
     }
 }
@@ -65,8 +96,9 @@ float parse_flex_basis(const std::string& value, float parent_size) {
     // Try as plain number (treat as px)
     try {
         return std::stof(value);
-    } catch (...) {
-        return -1.0f;  // auto
+    } catch (const std::exception&) {
+        // Parse error - treat as auto
+        return -1.0f;
     }
 }
 
@@ -77,7 +109,8 @@ int parse_order(const std::string& value) {
     if (value.empty()) return 0;
     try {
         return std::stoi(value);
-    } catch (...) {
+    } catch (const std::exception&) {
+        // Parse error - default to 0
         return 0;
     }
 }
@@ -94,7 +127,8 @@ float parse_gap(const std::string& value) {
 
     try {
         return std::stof(value);
-    } catch (...) {
+    } catch (const std::exception&) {
+        // Parse error - default to 0
         return 0.0f;
     }
 }
@@ -105,57 +139,116 @@ float parse_gap(const std::string& value) {
 
 /**
  * @brief Compute flexbox layout for a container
- * @param element Container element with display: flex
- * @param computed_style Container's computed style
+ * @param element Container element with display: flex (uses element->style for typed properties)
  * @param renderer Renderer for accessing stylesheet
  */
 void compute_flexbox_layout(
     NVGCSSElement* element,
-    const std::map<std::string, std::string>& computed_style,
     NVGCSSRenderer* renderer)
 {
+    // ========================================================================
+    // DEBUG: Check initial state
+    // ========================================================================
+    // printf("[FLEXBOX] === START === Container '%s'\n", element->id.c_str());
+    // printf("[FLEXBOX]   Initial: is_computed=%d, height=%.1f, source=%d\n",
+    //        element->computed.is_computed, element->computed.height,
+    //        (int)element->computed.source);
+
     // ========================================================================
     // Step 1: Parse container properties
     // ========================================================================
 
     FlexContainer container;
 
-    auto it = computed_style.find("flex-direction");
-    if (it != computed_style.end()) {
-        container.direction = it->second;
+    // DEBUG: Log flex container being laid out
+    // printf("[FLEXBOX] Computing layout for container '%s' at (%.1f, %.1f) size (%.1f x %.1f)\n",
+    //        element->id.c_str(), element->computed.x, element->computed.y,
+    //        element->computed.width, element->computed.height);
+
+    // TODO: Refactor FlexContainer to use typed enums instead of strings
+    // TEMPORARY: Convert typed enums to strings for FlexContainer
+
+    // flex-direction
+    switch (element->style.flex_direction) {
+        case nvgcss::FlexDirection::ROW: container.direction = "row"; break;
+        case nvgcss::FlexDirection::ROW_REVERSE: container.direction = "row-reverse"; break;
+        case nvgcss::FlexDirection::COLUMN: container.direction = "column"; break;
+        case nvgcss::FlexDirection::COLUMN_REVERSE: container.direction = "column-reverse"; break;
     }
 
-    it = computed_style.find("flex-wrap");
-    if (it != computed_style.end()) {
-        container.wrap = it->second;
+    // flex-wrap
+    switch (element->style.flex_wrap) {
+        case nvgcss::FlexWrap::NOWRAP: container.wrap = "nowrap"; break;
+        case nvgcss::FlexWrap::WRAP: container.wrap = "wrap"; break;
+        case nvgcss::FlexWrap::WRAP_REVERSE: container.wrap = "wrap-reverse"; break;
     }
 
-    it = computed_style.find("justify-content");
-    if (it != computed_style.end()) {
-        container.justify_content = it->second;
+    // justify-content
+    switch (element->style.justify_content) {
+        case nvgcss::JustifyContent::FLEX_START: container.justify_content = "flex-start"; break;
+        case nvgcss::JustifyContent::FLEX_END: container.justify_content = "flex-end"; break;
+        case nvgcss::JustifyContent::CENTER: container.justify_content = "center"; break;
+        case nvgcss::JustifyContent::SPACE_BETWEEN: container.justify_content = "space-between"; break;
+        case nvgcss::JustifyContent::SPACE_AROUND: container.justify_content = "space-around"; break;
+        case nvgcss::JustifyContent::SPACE_EVENLY: container.justify_content = "space-evenly"; break;
     }
 
-    it = computed_style.find("align-items");
-    if (it != computed_style.end()) {
-        container.align_items = it->second;
+    // align-items
+    switch (element->style.align_items) {
+        case nvgcss::AlignItems::FLEX_START: container.align_items = "flex-start"; break;
+        case nvgcss::AlignItems::FLEX_END: container.align_items = "flex-end"; break;
+        case nvgcss::AlignItems::CENTER: container.align_items = "center"; break;
+        case nvgcss::AlignItems::BASELINE: container.align_items = "baseline"; break;
+        case nvgcss::AlignItems::STRETCH: container.align_items = "stretch"; break;
     }
 
-    it = computed_style.find("align-content");
-    if (it != computed_style.end()) {
-        container.align_content = it->second;
+    // align-content
+    switch (element->style.align_content) {
+        case nvgcss::AlignContent::FLEX_START: container.align_content = "flex-start"; break;
+        case nvgcss::AlignContent::FLEX_END: container.align_content = "flex-end"; break;
+        case nvgcss::AlignContent::CENTER: container.align_content = "center"; break;
+        case nvgcss::AlignContent::SPACE_BETWEEN: container.align_content = "space-between"; break;
+        case nvgcss::AlignContent::SPACE_AROUND: container.align_content = "space-around"; break;
+        case nvgcss::AlignContent::STRETCH: container.align_content = "stretch"; break;
     }
 
-    it = computed_style.find("gap");
-    if (it != computed_style.end()) {
-        container.gap = parse_gap(it->second);
+    // gap - from typed Length property
+    if (!element->style.gap.is_auto()) {
+        container.gap = element->style.gap.resolve(0, 16, 800);  // Resolve to pixels
     }
 
     // Determine main/cross axes
-    container.is_horizontal = (container.direction == "row" || container.direction == "row-reverse");
-    container.is_reverse = (container.direction.find("reverse") != std::string::npos);
+    // Robust check: default to row unless "column" is explicitly specified
+    // Convert to lowercase to be case-insensitive
+    std::string dir = container.direction;
+    std::transform(dir.begin(), dir.end(), dir.begin(), 
+                   [](unsigned char c){ return std::tolower(c); });
 
-    float container_main_size = container.is_horizontal ? element->box.width : element->box.height;
-    float container_cross_size = container.is_horizontal ? element->box.height : element->box.width;
+    // DEBUG: Print direction to help diagnose test failures
+    // printf("DEBUG: Flex direction raw='%s', normalized='%s'\n", container.direction.c_str(), dir.c_str());
+
+    container.is_horizontal = (dir.find("column") == std::string::npos);
+    container.is_reverse = (dir.find("reverse") != std::string::npos);
+    
+    // FIX: Account for padding - children should be laid out within the content area
+    float padding_top = element->explicit_style.padding[0];
+    float padding_right = element->explicit_style.padding[1];
+    float padding_bottom = element->explicit_style.padding[2];
+    float padding_left = element->explicit_style.padding[3];
+
+    // Defensive check: if computed dims are 0, try to use explicit style
+    if (element->computed.width == 0 && element->explicit_style.width > 0) {
+        element->computed.width = element->explicit_style.width;
+    }
+    if (element->computed.height == 0 && element->explicit_style.height > 0) {
+        element->computed.height = element->explicit_style.height;
+    }
+
+    float content_width = element->computed.width - padding_left - padding_right;
+    float content_height = element->computed.height - padding_top - padding_bottom;
+
+    float container_main_size = container.is_horizontal ? content_width : content_height;
+    float container_cross_size = container.is_horizontal ? content_height : content_width;
 
     // ========================================================================
     // Step 2: Create flex items from children
@@ -163,78 +256,81 @@ void compute_flexbox_layout(
 
     std::vector<FlexItem> flex_items;
 
-    for (auto* child : element->children) {
+    int child_count = 0;
+    NVGCSSElement** children = nvgcssGetChildren(renderer, element, &child_count);
+    for (int i = 0; i < child_count; ++i) {
+        NVGCSSElement* child = children[i];
         if (!child->visible) continue;
 
         FlexItem item;
         item.element = child;
 
-        // Get child's computed style (pass empty parent style since we already have computed_style)
-        auto child_style = renderer->stylesheet->compute_style(
-            child->id,
-            child->type,
-            child->classes,
-            child->attributes,
-            child->pseudo_states,
-            child->inline_style,
-            computed_style  // parent style for inheritance
-        );
+        // DEBUG: Log each flex item being added
+        // printf("[FLEXBOX]   - Child '%s' visible=%d\n", child->id.c_str(), child->visible);
 
-        // Parse flex properties
-        auto prop_it = child_style.find("flex-grow");
-        if (prop_it != child_style.end()) {
-            item.flex_grow = parse_flex_grow(prop_it->second);
+        // Use child's typed properties (already computed in compute_element_layout)
+        // flex-grow
+        item.flex_grow = child->style.flex_grow;
+
+        // flex-shrink
+        item.flex_shrink = child->style.flex_shrink;
+
+        // flex-basis
+        if (!child->style.flex_basis.is_auto()) {
+            item.flex_basis = child->style.flex_basis.resolve(container_main_size, 16, 800);
+        } else {
+            item.flex_basis = -1.0f;  // auto
         }
 
-        prop_it = child_style.find("flex-shrink");
-        if (prop_it != child_style.end()) {
-            item.flex_shrink = parse_flex_shrink(prop_it->second);
+        // TODO: align-self not yet in typed system - item will use container's align_items (default "auto")
+        // Need to add: AlignSelf enum in types.h, parser in lexbor_css_parser.cpp, conversion in conversion.h
+        item.align_self = "auto";
+
+        // order
+        item.order = child->style.order;
+
+        // Parse width and height from typed properties
+        float child_width = -1.0f;
+        float child_height = -1.0f;
+
+        if (!child->style.width.is_auto()) {
+            child_width = child->style.width.resolve(container_main_size, 16, 800);
         }
 
-        prop_it = child_style.find("flex-basis");
-        if (prop_it != child_style.end()) {
-            item.flex_basis = parse_flex_basis(prop_it->second, container_main_size);
+        if (!child->style.height.is_auto()) {
+            child_height = child->style.height.resolve(container_cross_size, 16, 800);
         }
 
-        prop_it = child_style.find("align-self");
-        if (prop_it != child_style.end()) {
-            item.align_self = prop_it->second;
-        }
-
-        prop_it = child_style.find("order");
-        if (prop_it != child_style.end()) {
-            item.order = parse_order(prop_it->second);
-        }
- 
-
-        // PHASE 4 SPRINT 4: Read from explicit_style (INPUT)
-        // Determine hypothetical main size
+        // PHASE 4 SPRINT 4: Determine hypothetical main size
         if (item.flex_basis >= 0) {
             item.hypothetical_main_size = item.flex_basis;
         } else {
-            // Use explicit size or default
+            // Use width/height from style or default
             if (container.is_horizontal) {
-                item.hypothetical_main_size = child->explicit_style.width >= 0 ?
-                    child->explicit_style.width : 100.0f;
+                item.hypothetical_main_size = child_width >= 0 ? child_width : 100.0f;
             } else {
-                item.hypothetical_main_size = child->explicit_style.height >= 0 ?
-                    child->explicit_style.height : 50.0f;
+                item.hypothetical_main_size = child_height >= 0 ? child_height : 50.0f;
             }
         }
 
         // Cross size
         if (container.is_horizontal) {
-            item.cross_size = child->explicit_style.height >= 0 ?
-                child->explicit_style.height : 50.0f;
+            item.cross_size = child_height >= 0 ? child_height : 50.0f;
+            // printf("[FLEXBOX]   - Item '%s' cross_size (height) = %.1f (parsed from CSS: %.1f)\n",
+            //        child->id.c_str(), item.cross_size, child_height);
         } else {
-            item.cross_size = child->explicit_style.width >= 0 ?
-                child->explicit_style.width : 100.0f;
+            item.cross_size = child_width >= 0 ? child_width : 100.0f;
         }
 
         flex_items.push_back(item);
     }
 
-    if (flex_items.empty()) return;
+    if (flex_items.empty()) {
+        // printf("[FLEXBOX] WARNING: No flex items found for container '%s'\n", element->id.c_str());
+        return;
+    }
+
+    // printf("[FLEXBOX] Found %zu flex items\n", flex_items.size());
 
     // ========================================================================
     // Step 3: Sort by order
@@ -317,7 +413,7 @@ void compute_flexbox_layout(
                 if (item.flex_grow > 0) {
                     float ratio = item.flex_grow / total_grow;
                     item.main_size = item.hypothetical_main_size + (free_space * ratio);
-                    #ifdef DEBUG_FLEXBOX
+                    #ifdef DEBUG
                     printf("  Item flex_grow=%.1f, ratio=%.2f, hypo=%.1f, main=%.1f",
                            item.flex_grow, ratio, item.hypothetical_main_size, item.main_size);
                     #endif
@@ -367,15 +463,31 @@ void compute_flexbox_layout(
         // Find maximum cross size in line
         float max_cross = 0;
         for (const auto& item : line.items) {
+            // printf("[FLEXBOX]   - Line item '%s' has cross_size=%.1f\n",
+            //        item.element->id.c_str(), item.cross_size);
             max_cross = std::max(max_cross, item.cross_size);
         }
+        // printf("[FLEXBOX]   - Line max_cross calculated as %.1f\n", max_cross);
 
         // For single-line flexbox, line fills entire container cross axis
-        if (flex_lines.size() == 1) {
+        // UNLESS the container's cross-size is auto, in which case use max of items
+        // Check the CSS style to see if height/width was "auto"
+        bool container_cross_is_auto = false;
+        if (container.is_horizontal) {
+            container_cross_is_auto = element->style.height.is_auto();
+        } else {
+            container_cross_is_auto = element->style.width.is_auto();
+        }
+
+        // printf("[FLEXBOX]   - container_cross_is_auto=%d, flex_lines.size()=%zu, container_cross_size=%.1f\n",
+        //        container_cross_is_auto, flex_lines.size(), container_cross_size);
+
+        if (flex_lines.size() == 1 && !container_cross_is_auto) {
             line.cross_size = container_cross_size;
         } else {
             line.cross_size = max_cross;
         }
+        // printf("[FLEXBOX]   - Line cross_size set to %.1f\n", line.cross_size);
 
         // Apply align-items (stretch)
         for (auto& item : line.items) {
@@ -383,9 +495,12 @@ void compute_flexbox_layout(
                 ? item.align_self
                 : container.align_items;
 
+            float old_cross = item.cross_size;
             if (alignment == "stretch") {
                 item.cross_size = line.cross_size;
             }
+            // printf("[FLEXBOX]   - Item '%s' alignment=%s, cross_size: %.1f -> %.1f (line.cross_size=%.1f)\n",
+            //        item.element->id.c_str(), alignment.c_str(), old_cross, item.cross_size, line.cross_size);
         }
     }
 
@@ -507,6 +622,8 @@ void compute_flexbox_layout(
 
             if (container.is_horizontal) {
                 // Horizontal: main_size = width, cross_size = height
+                // printf("[FLEXBOX]   - Item '%s' before constraints: main_size=%.1f, cross_size=%.1f\n",
+                //        item.element->id.c_str(), item.main_size, item.cross_size);
                 final_width = apply_dimension_constraints(
                     item.main_size,
                     item.element->explicit_style.min_width,
@@ -517,6 +634,8 @@ void compute_flexbox_layout(
                     item.element->explicit_style.min_height,
                     item.element->explicit_style.max_height
                 );
+                // printf("[FLEXBOX]   - Item '%s' after constraints: final_width=%.1f, final_height=%.1f\n",
+                //        item.element->id.c_str(), final_width, final_height);
             } else {
                 // Vertical: main_size = height, cross_size = width
                 final_width = apply_dimension_constraints(
@@ -532,48 +651,57 @@ void compute_flexbox_layout(
             }
 
             // Sprint 19: Apply box-sizing to calculate content dimensions
-            float content_width, content_height;
-            float border[4] = {0.0f, 0.0f, 0.0f, 0.0f};  // TODO: border-width support
+            float item_content_width, item_content_height;
+            float border[4] = {
+                item.element->explicit_style.border_width[0],  // top
+                item.element->explicit_style.border_width[1],  // right
+                item.element->explicit_style.border_width[2],  // bottom
+                item.element->explicit_style.border_width[3]   // left
+            };
 
             calculate_content_dimensions(
                 final_width,
                 final_height,
-                item.element->box.padding,
+                item.element->explicit_style.padding,
                 border,
                 item.element->explicit_style.box_sizing,
-                content_width,
-                content_height
+                item_content_width,
+                item_content_height
             );
 
-            final_width = content_width;
-            final_height = content_height;
+            final_width = item_content_width;
+            final_height = item_content_height;
 
             // PHASE 4 SPRINT 4: Write to computed (OUTPUT)
             // Sprint 37: Get margin values
-            float margin_left = item.element->box.margin[3];  // left
-            float margin_top = item.element->box.margin[0];   // top
-            float margin_right = item.element->box.margin[1];  // right
-            float margin_bottom = item.element->box.margin[2]; // bottom
+            float margin_left = item.element->explicit_style.margin[3];  // left
+            float margin_top = item.element->explicit_style.margin[0];   // top
+            float margin_right = item.element->explicit_style.margin[1];  // right
+            float margin_bottom = item.element->explicit_style.margin[2]; // bottom
 
             if (container.is_horizontal) {
                 // Horizontal layout (row)
+                // FIX: Add padding offset - children should start inside the content area
                 if (container.is_reverse) {
-                    item.element->computed.x = element->box.x + element->box.width -
+                    // Use container's content_width, not item's
+                    item.element->computed.x = element->computed.x + padding_left + content_width -
                                          item.main_position - item.main_size + margin_left;
                 } else {
-                    item.element->computed.x = element->box.x + item.main_position + margin_left;
+                    item.element->computed.x = element->computed.x + padding_left + item.main_position + margin_left;
                 }
-                item.element->computed.y = element->box.y + line.cross_position + item.cross_position + margin_top;
+                item.element->computed.y = element->computed.y + padding_top + line.cross_position + item.cross_position + margin_top;
                 item.element->computed.width = final_width;
                 item.element->computed.height = final_height;
             } else {
                 // Vertical layout (column)
-                item.element->computed.x = element->box.x + line.cross_position + item.cross_position + margin_left;
+                // FIX: Add padding offset - children should start inside the content area
+                item.element->computed.x = element->computed.x + padding_left + line.cross_position + item.cross_position + margin_left;
                 if (container.is_reverse) {
-                    item.element->computed.y = element->box.y + element->box.height -
+                    // Use container's content_height, not item's
+                    item.element->computed.y = element->computed.y + padding_top + content_height -
                                          item.main_position - item.main_size + margin_top;
                 } else {
-                    item.element->computed.y = element->box.y + item.main_position + margin_top;
+                    item.element->computed.y = element->computed.y + padding_top + item.main_position + margin_top;
                 }
                 item.element->computed.width = final_width;
                 item.element->computed.height = final_height;
@@ -586,12 +714,100 @@ void compute_flexbox_layout(
             // Mark as computed by flexbox
             item.element->computed.source = NVGCSSComputedLayout::FLEXBOX;
             item.element->computed.is_computed = true;
-
-            // Sync to deprecated box field for backward compatibility
-            item.element->box.x = item.element->computed.x;
-            item.element->box.y = item.element->computed.y;
-            item.element->box.width = item.element->computed.width;
-            item.element->box.height = item.element->computed.height;
         }
     }
+
+    // ========================================================================
+    // Step 8: Update container intrinsic size if height/width was auto
+    // ========================================================================
+
+    // printf("[FLEXBOX] Step 8: Updating container intrinsic size for '%s'\n", element->id.c_str());
+
+    // FIX: Don't update intrinsic size if this container was already sized by a parent layout
+    // (e.g., this flex container is a child of a grid container that already set its dimensions)
+    bool already_sized_by_parent = (element->computed.is_computed &&
+                                    (element->computed.source == NVGCSSComputedLayout::GRID ||
+                                     element->computed.source == NVGCSSComputedLayout::FLEXBOX));
+
+    if (already_sized_by_parent) {
+        // Skip intrinsic sizing - parent layout already set dimensions
+        // Mark as computed by flexbox but preserve dimensions
+        element->computed.is_computed = true;
+        element->computed.source = NVGCSSComputedLayout::FLEXBOX;
+        return;
+    }
+
+    // Check CSS to determine if dimensions were auto (from typed properties)
+    bool height_is_auto = element->style.height.is_auto();
+    bool width_is_auto = element->style.width.is_auto();
+
+    // printf("[FLEXBOX]   height_is_auto=%d, width_is_auto=%d\n", height_is_auto, width_is_auto);
+
+    // Recalculate container cross-size if it was set to auto
+    if (container.is_horizontal) {
+        // For row direction: height might be auto
+        if (height_is_auto) {
+            float max_cross_size = 0.0f;
+            for (const auto& line : flex_lines) {
+                max_cross_size = std::max(max_cross_size, line.cross_size);
+            }
+            // Add padding
+            max_cross_size += element->explicit_style.padding[0] + element->explicit_style.padding[2];
+            max_cross_size += element->explicit_style.border_width[0] + element->explicit_style.border_width[2];
+            // printf("[FLEXBOX]   Setting container height from %.1f to %.1f\n",
+            //        element->computed.height, max_cross_size);
+            element->computed.height = max_cross_size;
+            element->computed.content_height = max_cross_size;
+        }
+    } else {
+        // For column direction: height might be auto
+        if (height_is_auto) {
+            float total_cross_size = 0.0f;
+            for (const auto& line : flex_lines) {
+                total_cross_size += line.cross_size;
+            }
+            // Add gaps between lines
+            if (flex_lines.size() > 1) {
+                total_cross_size += container.gap * (flex_lines.size() - 1);
+            }
+            // Add padding
+            total_cross_size += element->explicit_style.padding[0] + element->explicit_style.padding[2];
+            total_cross_size += element->explicit_style.border_width[0] + element->explicit_style.border_width[2];
+            element->computed.height = total_cross_size;
+            element->computed.content_height = total_cross_size;
+        }
+    }
+
+    // Similarly for width in column direction
+    if (!container.is_horizontal) {
+        // For column direction: width might be auto
+        if (width_is_auto) {
+            float max_cross_size = 0.0f;
+            for (const auto& line : flex_lines) {
+                max_cross_size = std::max(max_cross_size, line.cross_size);
+            }
+            // Add padding
+            max_cross_size += element->explicit_style.padding[1] + element->explicit_style.padding[3];
+            max_cross_size += element->explicit_style.border_width[1] + element->explicit_style.border_width[3];
+            element->computed.width = max_cross_size;
+            element->computed.content_width = max_cross_size;
+        }
+    } else {
+        // For row direction: width might be auto
+        if (width_is_auto) {
+            float total_main_size = 0.0f;
+            for (const auto& line : flex_lines) {
+                total_main_size = std::max(total_main_size, line.main_size);
+            }
+            // Add padding
+            total_main_size += element->explicit_style.padding[1] + element->explicit_style.padding[3];
+            total_main_size += element->explicit_style.border_width[1] + element->explicit_style.border_width[3];
+            element->computed.width = total_main_size;
+            element->computed.content_width = total_main_size;
+        }
+    }
+
+    // Mark container as computed so its intrinsic size doesn't get reset
+    element->computed.is_computed = true;
+    element->computed.source = NVGCSSComputedLayout::FLEXBOX;
 }

@@ -4,6 +4,9 @@ project(
   VERSION 2.0.0
   LANGUAGES C CXX)
 
+# Define NANOGUI_USE_SDL3 for SDL3 backend
+add_definitions(-DNANOGUI_USE_OPENGL)
+
 # C++17 required
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +14,7 @@ set(CMAKE_C_STANDARD 11)
 
 # Options
 option(FLEXUI_BUILD_EXAMPLES "Build FlexUI examples" ON)
+option(FLEXUI_BUILD_TESTS "Build FlexUI unit tests" ON)
 
 # Collect all FlexUI source files
 file(GLOB_RECURSE FLEXUI_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
@@ -56,6 +60,7 @@ target_include_directories(
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:include>
          ${CMAKE_CURRENT_BINARY_DIR} # For flexui_resources.h
+         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/nanogui/include> # Add nanogui's public headers
 )
 
 # Link to dependencies: - nanovg_css: CSS rendering engine (provides
@@ -81,6 +86,15 @@ if(FLEXUI_BUILD_EXAMPLES)
 endif()
 
 # ============================================================================
+# Unit Tests
+# ============================================================================
+
+if(FLEXUI_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
+
+# ============================================================================
 # Summary
 # ============================================================================
 
@@ -88,4 +102,5 @@ message(STATUS "")
 message(STATUS "FlexUI Configuration:")
 message(STATUS "  Version:              ${PROJECT_VERSION}")
 message(STATUS "  Build examples:       ${FLEXUI_BUILD_EXAMPLES}")
+message(STATUS "  Build tests:          ${FLEXUI_BUILD_TESTS}")
 message(STATUS "")

@@ -15,12 +15,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/catch_approx.hpp>
 #include <nanovg.h>
 #include <nanovg_css.h>
+#include "nanovg_css_internal.h"  // For internal structure access in tests
 #include <cmath>
 
 using Catch::Matchers::WithinAbs;
-
+using Catch::Approx;
 // ============================================================================
 // Test Fixtures
 // ============================================================================
@@ -135,31 +137,6 @@ TEST_CASE("NanoVGCSS Class Management", "[classes]") {
     nvgcssDeleteRenderer(renderer);
 }
 
-// ============================================================================
-// Inline Style Tests
-// ============================================================================
-
-TEST_CASE("NanoVGCSS Inline Styles", "[inline-styles]") {
-    NVGCSSRenderer* renderer = nvgcssCreateRenderer(nullptr);
-    NVGCSSElement* elem = nvgcssCreateElement(renderer, "test", "rect");
-
-    SECTION("Set inline style") {
-        nvgcssSetStyle(elem, "width", "200px");
-        nvgcssSetStyle(elem, "height", "100px");
-
-        REQUIRE(elem->inline_style["width"] == "200px");
-        REQUIRE(elem->inline_style["height"] == "100px");
-    }
-
-    SECTION("Override inline style") {
-        nvgcssSetStyle(elem, "width", "100px");
-        nvgcssSetStyle(elem, "width", "200px");
-
-        REQUIRE(elem->inline_style["width"] == "200px");
-    }
-
-    nvgcssDeleteRenderer(renderer);
-}
 
 // ============================================================================
 // CSS Parsing Tests
@@ -259,9 +236,11 @@ TEST_CASE("NanoVGCSS Tree Manipulation", "[tree]") {
 
         nvgcssAppendChild(renderer, parent, child);
 
-        REQUIRE(child->parent == parent);
-        REQUIRE(parent->children.size() == 1);
-        REQUIRE(parent->children[0] == child);
+        REQUIRE(child->parent_id == parent->id);
+        int child_count = 0;
+        NVGCSSElement** children = nvgcssGetChildren(renderer, parent, &child_count);
+        REQUIRE(child_count == 1);
+        REQUIRE(children[0] == child);
     }
 
     SECTION("Multiple children") {
@@ -274,10 +253,12 @@ TEST_CASE("NanoVGCSS Tree Manipulation", "[tree]") {
         nvgcssAppendChild(renderer, parent, child2);
         nvgcssAppendChild(renderer, parent, child3);
 
-        REQUIRE(parent->children.size() == 3);
-        REQUIRE(parent->children[0] == child1);
-        REQUIRE(parent->children[1] == child2);
-        REQUIRE(parent->children[2] == child3);
+        int child_count = 0;
+        NVGCSSElement** children = nvgcssGetChildren(renderer, parent, &child_count);
+        REQUIRE(child_count == 3);
+        REQUIRE(children[0] == child1);
+        REQUIRE(children[1] == child2);
+        REQUIRE(children[2] == child3);
     }
 
     SECTION("Remove child") {
@@ -285,10 +266,12 @@ TEST_CASE("NanoVGCSS Tree Manipulation", "[tree]") {
         NVGCSSElement* child = nvgcssCreateElement(renderer, "child", "rect");
 
         nvgcssAppendChild(renderer, parent, child);
-        nvgcssRemoveChild(parent, child);
+        nvgcssRemoveChild(renderer, parent, child);
 
-        REQUIRE(parent->children.size() == 0);
-        REQUIRE(child->parent == nullptr);
+        int child_count = 0;
+        NVGCSSElement** children = nvgcssGetChildren(renderer, parent, &child_count);
+        REQUIRE(child_count == 0);
+        REQUIRE(child->parent_id.empty());
     }
 
     nvgcssDeleteRenderer(renderer);
@@ -470,6 +453,8 @@ TEST_CASE("NanoVGCSS Layout Computation", "[layout]") {
             .box {
                 width: 200px;
                 height: 100px;
+                x: 50px;
+                y: 50px;
             }
         )";
 
@@ -479,8 +464,6 @@ TEST_CASE("NanoVGCSS Layout Computation", "[layout]") {
         NVGCSSElement* elem = nvgcssCreateElement(renderer, "test", "rect");
         REQUIRE(elem != nullptr);
         nvgcssAddClass(elem, "box");
-        nvgcssSetStyle(elem, "x", "50px");
-        nvgcssSetStyle(elem, "y", "50px");
 
         // Layout computation should not crash
         nvgcssComputeLayout(renderer);
@@ -515,23 +498,6 @@ TEST_CASE("NanoVGCSS Layout Computation", "[layout]") {
 TEST_CASE("NanoVGCSS Style Cascade", "[cascade]") {
     NVGCSSRenderer* renderer = nvgcssCreateRenderer(nullptr);
     nvgcssSetViewport(renderer, 800, 600);
-
-    SECTION("Inline style application") {
-        const char* css = R"(
-            .button {
-                width: 100px;
-            }
-        )";
-
-        nvgcssParseCSS(renderer, css);
-
-        NVGCSSElement* elem = nvgcssCreateElement(renderer, "test", "rect");
-        nvgcssAddClass(elem, "button");
-        nvgcssSetStyle(elem, "width", "200px");  // Inline style (highest specificity)
-
-        // Verify inline style is stored
-        REQUIRE(elem->inline_style["width"] == "200px");
-    }
 
     SECTION("Multiple selectors parse successfully") {
         const char* css = R"(
@@ -572,20 +538,46 @@ TEST_CASE("NanoVGCSS Attributes", "[attributes]") {
     NVGCSSRenderer* renderer = nvgcssCreateRenderer(nullptr);
     NVGCSSElement* elem = nvgcssCreateElement(renderer, "test", "rect");
 
-    SECTION("Set attribute") {
-        nvgcssSetAttribute(elem, "data-value", "42");
+    SECTION("Set attribute directly") {
+        // Direct attribute manipulation (internal API for testing)
+        elem->attributes["data-value"] = "42";
         REQUIRE(elem->attributes["data-value"] == "42");
     }
 
     SECTION("Multiple attributes") {
-        nvgcssSetAttribute(elem, "role", "button");
-        nvgcssSetAttribute(elem, "aria-label", "Submit");
-        nvgcssSetAttribute(elem, "data-id", "123");
+        // Direct attribute manipulation (internal API for testing)
+        elem->attributes["role"] = "button";
+        elem->attributes["aria-label"] = "Submit";
+        elem->attributes["data-id"] = "123";
 
         REQUIRE(elem->attributes["role"] == "button");
         REQUIRE(elem->attributes["aria-label"] == "Submit");
         REQUIRE(elem->attributes["data-id"] == "123");
     }
+
+    nvgcssDeleteRenderer(renderer);
+}
+
+TEST_CASE("Attribute styles invalidate cache", "[attributes][cache]") {
+    NVGCSSRenderer* renderer = nvgcssCreateRenderer(nullptr);
+    const char* css = R"(
+        [data-tone="warm"] { color: red; }
+        [data-tone="cool"] { color: blue; }
+    )";
+    REQUIRE(nvgcssParseCSS(renderer, css) == 1);
+
+    NVGCSSElement* elem = nvgcssCreateElement(renderer, "tone", "rect");
+    char buffer[32];
+
+    // Direct attribute manipulation (internal API for testing)
+    elem->attributes["data-tone"] = "warm";
+    REQUIRE(nvgcssGetComputedStyle(renderer, elem, "color", buffer, sizeof(buffer)) == 1);
+    REQUIRE(std::string(buffer) == "red");
+
+    // Change attribute and verify style updates
+    elem->attributes["data-tone"] = "cool";
+    REQUIRE(nvgcssGetComputedStyle(renderer, elem, "color", buffer, sizeof(buffer)) == 1);
+    REQUIRE(std::string(buffer) == "blue");
 
     nvgcssDeleteRenderer(renderer);
 }
@@ -660,13 +652,9 @@ TEST_CASE("NanoVGCSS Integration", "[integration]") {
 
         NVGCSSElement* button = nvgcssCreateElement(renderer, "btn1", "rect");
         nvgcssAddClass(button, "button");
-        nvgcssSetStyle(button, "x", "100px");
-        nvgcssSetStyle(button, "y", "50px");
 
         // Verify element setup
         REQUIRE(nvgcssHasClass(button, "button") == 1);
-        REQUIRE(button->inline_style["x"] == "100px");
-        REQUIRE(button->inline_style["y"] == "50px");
 
         // Test state transitions
         nvgcssSetPseudoState(button, "hover", 1);
@@ -680,6 +668,13 @@ TEST_CASE("NanoVGCSS Integration", "[integration]") {
     }
 
     SECTION("Parent-child hierarchy") {
+        const char* css = R"(
+            #container { x: 0px; y: 0px; }
+            #child1 { width: 100px; height: 50px; }
+            #child2 { width: 150px; height: 75px; }
+        )";
+        nvgcssParseCSS(renderer, css);
+
         NVGCSSElement* container = nvgcssCreateElement(renderer, "container", "group");
         NVGCSSElement* child1 = nvgcssCreateElement(renderer, "child1", "rect");
         NVGCSSElement* child2 = nvgcssCreateElement(renderer, "child2", "rect");
@@ -687,18 +682,13 @@ TEST_CASE("NanoVGCSS Integration", "[integration]") {
         nvgcssAppendChild(renderer, container, child1);
         nvgcssAppendChild(renderer, container, child2);
 
-        nvgcssSetStyle(container, "x", "0px");
-        nvgcssSetStyle(container, "y", "0px");
-        nvgcssSetStyle(child1, "width", "100px");
-        nvgcssSetStyle(child1, "height", "50px");
-        nvgcssSetStyle(child2, "width", "150px");
-        nvgcssSetStyle(child2, "height", "75px");
-
         nvgcssComputeLayout(renderer);
 
-        REQUIRE(container->children.size() == 2);
-        REQUIRE(child1->parent == container);
-        REQUIRE(child2->parent == container);
+        int child_count = 0;
+        NVGCSSElement** children = nvgcssGetChildren(renderer, container, &child_count);
+        REQUIRE(child_count == 2);
+        REQUIRE(child1->parent_id == container->id);
+        REQUIRE(child2->parent_id == container->id);
     }
 
     nvgcssDeleteRenderer(renderer);

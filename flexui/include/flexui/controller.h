@@ -1,21 +1,25 @@
 #pragma once
 
+#include "flexui/fwd.h"
 #include "flexui/document.h"
 
 #include <SDL3/SDL.h>
 
 namespace flexui {
 
-class Flex {
+class FlexApp; // Forward declaration
+
+class FlexController {
+  friend class FlexApp; // Declare FlexApp as a friend
 public:
-  virtual ~Flex() = default;
+  virtual ~FlexController() = default;
 
   void attachDocument(FlexDocument *document) {
     m_document = document;
     onDocumentAttached(document);
   }
 
-  FlexDocument *document() const { return m_document; }
+  FlexDocument *getDocument() const { return m_document; }
 
   virtual void onDocumentAttached(FlexDocument *document) { (void)document; }
   virtual void onBeforeRun() {}

@@ -1,9 +1,12 @@
 #include "lexbor_css_parser.h"
 #include "nanovg_css_internal.h"
+#include "nanovg_css_types.h"
+#include "nanovg_css_conversion.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
 #include <memory>
+
 namespace nanovg_css {
 namespace lexbor {
 
@@ -496,7 +499,8 @@ LexborStyleComputer::get_default_styles(const std::string& shape_type) const {
     std::map<std::string, std::string> defaults;
 
     // Common defaults (CSS properties for nanovg_css)
-    defaults["background"] = "#cccccc";  // Light gray default background
+    // CSS default: background is transparent (not inherited)
+    defaults["background"] = "transparent";
     defaults["color"] = "black";
     defaults["opacity"] = "1";
 
@@ -516,8 +520,9 @@ LexborStyleComputer::get_default_styles(const std::string& shape_type) const {
         defaults["background"] = "transparent";  // Text has no background by default
     } else if (shape_type == "rect" || shape_type == "circle" ||
                shape_type == "ellipse" || shape_type == "path") {
-        defaults["background"] = "#cccccc";  // CSS-style
-        defaults["fill"] = "#cccccc";  // SVG-style
+        // SVG shapes default to gray fill (SVG-style)
+        defaults["fill"] = "#cccccc";
+        // But CSS background should still be transparent unless specified
     }
 
     return defaults;
@@ -627,6 +632,10 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
                 prop_name = prop_name.substr(pn_start, pn_end - pn_start + 1);
             }
 
+            // Normalize property name to lowercase
+            std::transform(prop_name.begin(), prop_name.end(), prop_name.begin(),
+                           [](unsigned char c){ return std::tolower(c); });
+
             prop_pos++;  // Skip ':'
 
             // Find property value (before ';' or '}')
@@ -650,6 +659,16 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
 
             if (prop_pos < props_block.size() && props_block[prop_pos] == ';') {
                 prop_pos++;  // Skip ';'
+            }
+        }
+
+        // Extract CSS variables from :root selector
+        if (selector == ":root" && !properties.empty()) {
+            for (const auto& [prop_name, prop_value] : properties) {
+                // CSS variables start with --
+                if (prop_name.length() >= 2 && prop_name.substr(0, 2) == "--") {
+                    variable_resolver_.set_variable(prop_name, prop_value);
+                }
             }
         }
 
@@ -704,17 +723,17 @@ std::map<std::string, std::string> EnhancedStyleSheet::compute_style(
     int total_siblings) {
 
     // Generate cache key
-    std::string cache_key = generate_cache_key(shape_id, shape_type, classes, pseudo_states);
+    std::string cache_key = generate_cache_key(shape_id, shape_type, classes, pseudo_states, attributes, inline_style);
 
     // Check cache
     auto it = cache_.find(cache_key);
     if (it != cache_.end()) {
         cache_stats_.hits++;
 
-        // Merge with inline styles (not cached)
+        // Resolve variables in cached result and return
         auto result = it->second;
-        for (const auto& [key, value] : inline_style) {
-            result[key] = value;
+        for (auto& [key, value] : result) {
+            value = variable_resolver_.resolve(value);
         }
         return result;
     }
@@ -730,16 +749,17 @@ std::map<std::string, std::string> EnhancedStyleSheet::compute_style(
         inline_style, parent_style
     );
 
-    // Store in cache (without inline styles)
+    // Resolve CSS variables in the computed style
+    for (auto& [key, value] : result) {
+        value = variable_resolver_.resolve(value);
+    }
+
+    // Store the full result in the cache
     if (cache_.size() >= MAX_CACHE_SIZE) {
         evict_lru();
     }
-
-    auto cached_result = result;
-    for (const auto& [key, value] : inline_style) {
-        cached_result.erase(key);
-    }
-    cache_[cache_key] = cached_result;
+    
+    cache_[cache_key] = result;
     cache_stats_.size = cache_.size();
 
     return result;
@@ -748,14 +768,17 @@ std::map<std::string, std::string> EnhancedStyleSheet::compute_style(
 void EnhancedStyleSheet::clear_cache() {
     cache_.clear();
     cache_stats_ = CacheStats();
-    rules_.clear();  // Also clear stored CSS rules
+    // DON'T clear rules_! They contain parsed CSS selectors/properties
+    // rules_.clear();  // REMOVED - was causing CSS rules to be deleted on variable update!
 }
 
 std::string EnhancedStyleSheet::generate_cache_key(
     const std::string& shape_id,
     const std::string& shape_type,
     const std::vector<std::string>& classes,
-    const std::set<std::string>& pseudo_states) const {
+    const std::set<std::string>& pseudo_states,
+    const std::map<std::string, std::string>& attributes,
+    const std::map<std::string, std::string>& inline_style) const {
     
     std::ostringstream key;
     key << shape_id << "|" << shape_type << "|";
@@ -767,6 +790,16 @@ std::string EnhancedStyleSheet::generate_cache_key(
     
     for (const auto& state : pseudo_states) {
         key << state << ",";
+    }
+
+    key << "|";
+    for (const auto& [attr_name, attr_value] : attributes) {
+        key << attr_name << "=" << attr_value << ";";
+    }
+    
+    key << "|";
+    for (const auto& [style_name, style_value] : inline_style) {
+        key << style_name << ":" << style_value << ";";
     }
     
     return key.str();
@@ -1209,6 +1242,241 @@ void EnhancedStyleSheet::add_keyframe_animation(const KeyframeAnimation& animati
 const KeyframeAnimation* EnhancedStyleSheet::get_keyframe_animation(const std::string& name) const {
     auto it = keyframe_animations_.find(name);
     return it != keyframe_animations_.end() ? &it->second : nullptr;
+}
+
+// ============================================================================
+// NEW: Typed Style Computation (60fps Refactor)
+// ============================================================================
+
+nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
+    const std::string& shape_id,
+    const std::string& shape_type,
+    const std::vector<std::string>& classes,
+    const std::map<std::string, std::string>& attributes,
+    const std::set<std::string>& pseudo_states,
+    const std::map<std::string, std::string>& inline_style,
+    const nvgcss::ComputedStyle* parent_style,
+    int child_index,
+    int total_siblings) {
+
+    // Step 1: Get string-based style using existing implementation
+    std::map<std::string, std::string> parent_style_map;
+    if (parent_style) {
+        // TODO: Convert ComputedStyle back to map for inheritance
+        // For now, pass empty map (inheritance will be added later)
+    }
+
+    auto style_map = compute_style(
+        shape_id, shape_type, classes, attributes, pseudo_states,
+        inline_style, parent_style_map, child_index, total_siblings
+    );
+
+    // Step 2: Convert string map to typed ComputedStyle
+    nvgcss::ComputedStyle result;
+
+    // Helper lambda to get value with default
+    auto get = [&style_map](const std::string& key) -> std::string {
+        auto it = style_map.find(key);
+        return it != style_map.end() ? it->second : "";
+    };
+
+    // === Display & Positioning ===
+    result.display = nvgcss::convert::parse_display(get("display"));
+    result.position = nvgcss::convert::parse_position(get("position"));
+    result.box_sizing = nvgcss::convert::parse_box_sizing(get("box-sizing"));
+
+    // === Dimensions ===
+    if (auto w = nvgcss::convert::parse_length(get("width"))) result.width = *w;
+    if (auto h = nvgcss::convert::parse_length(get("height"))) result.height = *h;
+    if (auto mw = nvgcss::convert::parse_length(get("min-width"))) result.min_width = *mw;
+    if (auto mh = nvgcss::convert::parse_length(get("min-height"))) result.min_height = *mh;
+    if (auto mxw = nvgcss::convert::parse_length(get("max-width"))) result.max_width = *mxw;
+    if (auto mxh = nvgcss::convert::parse_length(get("max-height"))) result.max_height = *mxh;
+
+    // === Position Offsets ===
+    if (auto t = nvgcss::convert::parse_length(get("top"))) result.top = *t;
+    if (auto r = nvgcss::convert::parse_length(get("right"))) result.right = *r;
+    if (auto b = nvgcss::convert::parse_length(get("bottom"))) result.bottom = *b;
+    if (auto l = nvgcss::convert::parse_length(get("left"))) result.left = *l;
+
+    // Parse z-index
+    std::string z = get("z-index");
+    if (!z.empty() && z != "auto") {
+        result.z_index = std::atoi(z.c_str());
+    }
+
+    // === Box Model ===
+    // Padding (shorthand or individual sides)
+    std::string padding = get("padding");
+    if (!padding.empty()) {
+        result.padding = nvgcss::convert::parse_box_sides(padding);
+    } else {
+        // Individual sides
+        if (auto pt = nvgcss::convert::parse_length(get("padding-top"))) result.padding[0] = *pt;
+        if (auto pr = nvgcss::convert::parse_length(get("padding-right"))) result.padding[1] = *pr;
+        if (auto pb = nvgcss::convert::parse_length(get("padding-bottom"))) result.padding[2] = *pb;
+        if (auto pl = nvgcss::convert::parse_length(get("padding-left"))) result.padding[3] = *pl;
+    }
+
+    // Margin (shorthand or individual sides)
+    std::string margin = get("margin");
+    if (!margin.empty()) {
+        result.margin = nvgcss::convert::parse_box_sides(margin);
+    } else {
+        if (auto mt = nvgcss::convert::parse_length(get("margin-top"))) result.margin[0] = *mt;
+        if (auto mr = nvgcss::convert::parse_length(get("margin-right"))) result.margin[1] = *mr;
+        if (auto mb = nvgcss::convert::parse_length(get("margin-bottom"))) result.margin[2] = *mb;
+        if (auto ml = nvgcss::convert::parse_length(get("margin-left"))) result.margin[3] = *ml;
+    }
+
+    // Border
+    // Border width
+    std::string border_width_str = get("border-width");
+    if (!border_width_str.empty()) {
+        auto widths = nvgcss::convert::parse_box_sides(border_width_str);
+        for (int i = 0; i < 4; ++i) {
+            result.border.width[i] = widths[i].resolve(0, 16, 800);  // Convert to pixels
+        }
+    } else {
+        if (auto btw = nvgcss::convert::parse_length(get("border-top-width")))
+            result.border.width[0] = btw->resolve(0, 16, 800);
+        if (auto brw = nvgcss::convert::parse_length(get("border-right-width")))
+            result.border.width[1] = brw->resolve(0, 16, 800);
+        if (auto bbw = nvgcss::convert::parse_length(get("border-bottom-width")))
+            result.border.width[2] = bbw->resolve(0, 16, 800);
+        if (auto blw = nvgcss::convert::parse_length(get("border-left-width")))
+            result.border.width[3] = blw->resolve(0, 16, 800);
+    }
+
+    // Border style
+    result.border.style[0] = nvgcss::convert::parse_border_style(get("border-top-style"));
+    result.border.style[1] = nvgcss::convert::parse_border_style(get("border-right-style"));
+    result.border.style[2] = nvgcss::convert::parse_border_style(get("border-bottom-style"));
+    result.border.style[3] = nvgcss::convert::parse_border_style(get("border-left-style"));
+
+    // Border color
+    if (auto btc = nvgcss::convert::parse_color(get("border-top-color")))
+        result.border.color[0] = *btc;
+    if (auto brc = nvgcss::convert::parse_color(get("border-right-color")))
+        result.border.color[1] = *brc;
+    if (auto bbc = nvgcss::convert::parse_color(get("border-bottom-color")))
+        result.border.color[2] = *bbc;
+    if (auto blc = nvgcss::convert::parse_color(get("border-left-color")))
+        result.border.color[3] = *blc;
+
+    // Border radius
+    std::string border_radius_str = get("border-radius");
+    if (!border_radius_str.empty()) {
+        auto radii = nvgcss::convert::parse_box_sides(border_radius_str);
+        for (int i = 0; i < 4; ++i) {
+            result.border.radius[i] = radii[i].resolve(0, 16, 800);
+        }
+    }
+
+    // === Overflow ===
+    result.overflow_x = nvgcss::convert::parse_overflow(get("overflow-x"));
+    result.overflow_y = nvgcss::convert::parse_overflow(get("overflow-y"));
+    std::string overflow = get("overflow");
+    if (!overflow.empty()) {
+        auto o = nvgcss::convert::parse_overflow(overflow);
+        result.overflow_x = result.overflow_y = o;
+    }
+
+    // === Background ===
+    std::string bg_color_str = get("background-color");
+    std::string bg_str = get("background");
+    if (!bg_color_str.empty()) {
+        if (auto c = nvgcss::convert::parse_color(bg_color_str)) {
+            result.background = nvgcss::Background::solid(*c);
+        }
+    } else if (!bg_str.empty()) {
+        if (auto c = nvgcss::convert::parse_color(bg_str)) {
+            result.background = nvgcss::Background::solid(*c);
+        }
+        // TODO: Parse gradients, images
+    }
+
+    // Opacity
+    std::string opacity_str = get("opacity");
+    if (!opacity_str.empty()) {
+        result.opacity = std::strtof(opacity_str.c_str(), nullptr);
+    }
+
+    // === Flexbox ===
+    // Only parse if value is non-empty to preserve typed struct defaults
+    std::string flex_direction_str = get("flex-direction");
+    if (!flex_direction_str.empty()) result.flex_direction = nvgcss::convert::parse_flex_direction(flex_direction_str);
+
+    std::string flex_wrap_str = get("flex-wrap");
+    if (!flex_wrap_str.empty()) result.flex_wrap = nvgcss::convert::parse_flex_wrap(flex_wrap_str);
+
+    std::string justify_content_str = get("justify-content");
+    if (!justify_content_str.empty()) result.justify_content = nvgcss::convert::parse_justify_content(justify_content_str);
+
+    std::string align_items_str = get("align-items");
+    if (!align_items_str.empty()) result.align_items = nvgcss::convert::parse_align_items(align_items_str);
+
+    std::string align_content_str = get("align-content");
+    if (!align_content_str.empty()) result.align_content = nvgcss::convert::parse_align_content(align_content_str);
+
+    std::string flex_grow_str = get("flex-grow");
+    if (!flex_grow_str.empty()) result.flex_grow = std::strtof(flex_grow_str.c_str(), nullptr);
+
+    std::string flex_shrink_str = get("flex-shrink");
+    if (!flex_shrink_str.empty()) result.flex_shrink = std::strtof(flex_shrink_str.c_str(), nullptr);
+
+    if (auto fb = nvgcss::convert::parse_length(get("flex-basis"))) result.flex_basis = *fb;
+
+    std::string order_str = get("order");
+    if (!order_str.empty()) result.order = std::atoi(order_str.c_str());
+
+    if (auto g = nvgcss::convert::parse_length(get("gap"))) result.gap = *g;
+
+    // === Text ===
+    if (auto c = nvgcss::convert::parse_color(get("color"))) result.color = *c;
+
+    std::string font_size_str = get("font-size");
+    if (!font_size_str.empty()) {
+        if (auto fs = nvgcss::convert::parse_length(font_size_str)) {
+            result.font_size = fs->resolve(16.0f, 16.0f, 800.0f);  // Resolve to pixels
+        }
+    }
+
+    result.font_weight = nvgcss::convert::parse_font_weight(get("font-weight"));
+    result.font_style = nvgcss::convert::parse_font_style(get("font-style"));
+    result.text_align = nvgcss::convert::parse_text_align(get("text-align"));
+
+    std::string font_family_str = get("font-family");
+    if (!font_family_str.empty()) {
+        result.font_family = font_family_str;
+    }
+
+    // === Grid Properties ===
+    std::string grid_template_rows_str = get("grid-template-rows");
+    if (!grid_template_rows_str.empty()) {
+        result.grid_template_rows = nvgcss::convert::parse_grid_track_list(grid_template_rows_str);
+    }
+
+    std::string grid_template_columns_str = get("grid-template-columns");
+    if (!grid_template_columns_str.empty()) {
+        result.grid_template_columns = nvgcss::convert::parse_grid_track_list(grid_template_columns_str);
+    }
+
+    if (auto row_gap = nvgcss::convert::parse_length(get("grid-row-gap"))) {
+        result.grid_row_gap = *row_gap;
+    } else if (auto row_gap2 = nvgcss::convert::parse_length(get("row-gap"))) {
+        result.grid_row_gap = *row_gap2;
+    }
+
+    if (auto col_gap = nvgcss::convert::parse_length(get("grid-column-gap"))) {
+        result.grid_column_gap = *col_gap;
+    } else if (auto col_gap2 = nvgcss::convert::parse_length(get("column-gap"))) {
+        result.grid_column_gap = *col_gap2;
+    }
+
+    // TODO: box-shadows, text-shadows, transforms, etc.
+
+    return result;
 }
 
 } // namespace lexbor

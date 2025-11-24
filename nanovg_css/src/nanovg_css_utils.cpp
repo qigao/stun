@@ -255,7 +255,7 @@ float parse_calc_expression(const std::string& expr, float context_value, float 
         auto tokens = tokenize_calc(expr);
         CalcParser parser(tokens, context_value, font_size);
         return parser.parse();
-    } catch (...) {
+    } catch (const std::exception&) {
         // Parse error - return 0
         return 0.0f;
     }
@@ -503,7 +503,8 @@ float parse_length(const std::string& length_str, float context_value) {
     // No unit - assume pixels
     try {
         return std::stof(str);
-    } catch (...) {
+    } catch (const std::exception&) {
+        // Parse error, return 0
         return 0.0f;
     }
 }
@@ -639,7 +640,7 @@ std::string interpolate_value(const std::string& start_value,
             snprintf(buf, sizeof(buf), "%.2f%s", result, unit.c_str());
             return buf;
         }
-    } catch (...) {
+    } catch (const std::exception&) {
         // Not numeric, fall through
     }
 
