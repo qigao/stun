@@ -1,7 +1,8 @@
 # ============================================================================
 # Tests
 # ============================================================================
- 
+# Find OpenGL
+find_package(OpenGL REQUIRED)
 # Find Catch2
 find_package(Catch2 3 REQUIRED)
 
@@ -9,7 +10,7 @@ find_package(Catch2 3 REQUIRED)
 add_executable(test_nanovg_css_comprehensive test_nanovg_css_comprehensive.cpp)
 target_link_libraries(test_nanovg_css_comprehensive
     PRIVATE
-        nanovg::css
+        nanovg::css 
         Catch2::Catch2WithMain
 )
 set_target_properties(test_nanovg_css_comprehensive PROPERTIES FOLDER nanovg_css/tests/)
@@ -63,10 +64,8 @@ catch_discover_tests(test_nanovg_css_grid)
 add_executable(test_nanovg_css_computed test_nanovg_css_computed.cpp)
 target_link_libraries(test_nanovg_css_computed
     PRIVATE
-        nanovg::css
+        nanovg::css 
         Catch2::Catch2WithMain
 )
 set_target_properties(test_nanovg_css_computed PROPERTIES FOLDER nanovg_css/tests/)
 catch_discover_tests(test_nanovg_css_computed)
-
- 

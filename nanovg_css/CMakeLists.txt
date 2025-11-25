@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 
 project(nanovg_css LANGUAGES C CXX)
-
+find_package(OpenGL REQUIRED)
+find_package(glad CONFIG REQUIRED)
 # ============================================================================
 # Build NanoVG internally
 # ============================================================================
@@ -78,6 +79,8 @@ set(NANOVG_CSS_SOURCES
     src/nanovg_css_keyframes.cpp
     src/nanovg_css_flexbox.cpp
     src/nanovg_css_grid.cpp
+    src/nanovg_css_filters.cpp
+    src/nanovg_rough.c
     src/lexbor_css_parser.cpp)
 
 set(NANOVG_CSS_HEADERS
@@ -86,6 +89,8 @@ set(NANOVG_CSS_HEADERS
  include/nanovg_css_types.h         # NEW: Typed property system
  include/nanovg_css_conversion.h    # NEW: String-to-type conversion
  include/nanovg_css_background.h
+ include/nanovg_css_filters.h       # NEW: OpenGL shader filters
+ include/nanovg_rough.h             # NEW: RoughJS-style hand-drawn rendering
  include/lexbor_css_parser.h
  include/lexbor_wrapper.h
  )
@@ -110,8 +115,10 @@ target_include_directories(
 
 # Link dependencies
 target_link_libraries(
-  nanovg_css
+  nanovg_css  
   PUBLIC nanovg_internal   # Use internal NanoVG build
+  OpenGL::GL
+  glad::glad
   PRIVATE ${LEXBOR_LIBRARY} fmtlog)
 
 # Create an alias for compatibility

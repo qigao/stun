@@ -20,7 +20,6 @@ extern "C" {
 // Forward declarations
 struct NVGCSSRenderer;
 struct NVGCSSElement;
-struct NVGCSSBox;
 
 typedef struct NVGCSSRenderer NVGCSSRenderer;
 typedef struct NVGCSSElement NVGCSSElement;

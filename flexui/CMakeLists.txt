@@ -16,9 +16,55 @@ set(CMAKE_C_STANDARD 11)
 option(FLEXUI_BUILD_EXAMPLES "Build FlexUI examples" ON)
 option(FLEXUI_BUILD_TESTS "Build FlexUI unit tests" ON)
 
-# Collect all FlexUI source files
-file(GLOB_RECURSE FLEXUI_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
-file(GLOB_RECURSE FLEXUI_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h)
+# FlexUI source files
+set(FLEXUI_SOURCES
+    src/widget.cpp
+    src/screen.cpp
+    src/button.cpp
+    src/checkbox.cpp
+    src/textbox.cpp
+    src/label.cpp
+    src/progressbar.cpp
+    src/slider.cpp
+    src/radiobutton.cpp
+    src/divider.cpp
+    src/imageview.cpp
+    src/tabbar.cpp
+    src/dropdown.cpp
+    src/jsengine.cpp
+    src/switch.cpp
+    src/rating.cpp
+    src/searchbox.cpp
+    src/spinner.cpp
+    src/alert.cpp
+    src/badge.cpp
+    src/card.cpp
+    src/avatar.cpp
+    src/chip.cpp
+    src/toast.cpp
+    src/breadcrumb.cpp
+    src/pagination.cpp
+    src/menu.cpp
+    src/modal.cpp
+    src/table.cpp
+    src/iconbutton.cpp
+    src/calendar.cpp
+    src/colorpicker.cpp
+    src/snackbar.cpp
+    src/tablist.cpp
+)
+
+set(FLEXUI_HEADERS
+    include/flexui.h
+    include/flexui/widget.h
+    include/flexui/screen.h
+    include/flexui/snackbar.h
+    include/flexui/toast.h
+    include/flexui/menu.h
+    include/flexui/pagination.h
+    include/flexui/searchbox.h
+    include/flexui/rating.h
+)
 # ============================================================================
 # Generate embedded font resources
 # ============================================================================
@@ -66,11 +112,15 @@ target_include_directories(
 # Link to dependencies: - nanovg_css: CSS rendering engine (provides
 # nanovg_css.h and NanoVG) - SDL3: Window/event management - fmtlog: Logging
 # (optional, for debugging) - OpenGL: Required for NanoVG rendering backend
+# - pugixml: XML parsing for declarative UI
+# - quickjs: JavaScript engine for scripting support
 find_package(OpenGL REQUIRED)
+find_package(pugixml CONFIG REQUIRED)
+find_package(qjs CONFIG REQUIRED)
 target_link_libraries(
   flexui_core
   PUBLIC nanovg_css SDL3::SDL3 glad::glad OpenGL::GL
-  PRIVATE fmtlog::fmtlog)
+  PRIVATE fmtlog::fmtlog pugixml::pugixml  qjs)
 
 # Core-only alias
 add_library(FlexUI::Core ALIAS flexui_core)
@@ -80,10 +130,9 @@ set_target_properties(flexui_core PROPERTIES FOLDER flexui/)
 # ============================================================================
 # Examples
 # ============================================================================
-
-if(FLEXUI_BUILD_EXAMPLES)
+ 
   add_subdirectory(examples)
-endif()
+
 
 # ============================================================================
 # Unit Tests

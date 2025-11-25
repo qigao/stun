@@ -77,6 +77,15 @@ private:
     void init_nanovg() {
         gladLoadGL();
         vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+
+        // Load fonts (REQUIRED for text rendering!)
+        if (nvgCreateFont(vg, "sans-serif", "resources/Roboto-Regular.ttf") == -1) {
+            loge("Failed to load font 'sans-serif'");
+        }
+        if (nvgCreateFont(vg, "sans-serif-Bold", "resources/Roboto-Bold.ttf") == -1) {
+            loge("Failed to load font 'sans-serif-Bold'");
+        }
+
         renderer = nvgcssCreateRenderer(vg);
     }
 

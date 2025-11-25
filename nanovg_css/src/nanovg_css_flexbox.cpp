@@ -243,6 +243,22 @@ void compute_flexbox_layout(
     if (element->computed.height == 0 && element->explicit_style.height > 0) {
         element->computed.height = element->explicit_style.height;
     }
+    
+    // FIX 1: Use min-width/min-height as fallback when width/height is 0 or auto
+    if (element->computed.width == 0 && element->explicit_style.min_width > 0) {
+        element->computed.width = element->explicit_style.min_width;
+    }
+    if (element->computed.height == 0 && element->explicit_style.min_height > 0) {
+        element->computed.height = element->explicit_style.min_height;
+    }
+    
+    // FIX 2: Use viewport as last resort fallback
+    if (element->computed.width == 0) {
+        element->computed.width = renderer->viewport_width;
+    }
+    if (element->computed.height == 0) {
+        element->computed.height = renderer->viewport_height;
+    }
 
     float content_width = element->computed.width - padding_left - padding_right;
     float content_height = element->computed.height - padding_top - padding_bottom;
@@ -294,11 +310,19 @@ void compute_flexbox_layout(
         float child_height = -1.0f;
 
         if (!child->style.width.is_auto()) {
-            child_width = child->style.width.resolve(container_main_size, 16, 800);
+            // FIX 3: Use viewport as fallback context when container size is 0
+            float width_context = container.is_horizontal ? 
+                (container_main_size > 0 ? container_main_size : renderer->viewport_width) :
+                (container_cross_size > 0 ? container_cross_size : renderer->viewport_width);
+            child_width = child->style.width.resolve(width_context, 16, 800);
         }
 
         if (!child->style.height.is_auto()) {
-            child_height = child->style.height.resolve(container_cross_size, 16, 800);
+            // FIX 3: Use viewport as fallback context when container size is 0
+            float height_context = container.is_horizontal ?
+                (container_cross_size > 0 ? container_cross_size : renderer->viewport_height) :
+                (container_main_size > 0 ? container_main_size : renderer->viewport_height);
+            child_height = child->style.height.resolve(height_context, 16, 800);
         }
 
         // PHASE 4 SPRINT 4: Determine hypothetical main size
@@ -810,4 +834,24 @@ void compute_flexbox_layout(
     // Mark container as computed so its intrinsic size doesn't get reset
     element->computed.is_computed = true;
     element->computed.source = NVGCSSComputedLayout::FLEXBOX;
+
+    // RECURSIVELY compute layout for nested containers
+    // If any flex item is itself a flex or grid container, compute its children
+    for (const auto& line : flex_lines) {
+        for (const auto& item : line.items) {
+            if (!item.element) continue;
+
+            // Check if this item is a layout container (flex or grid)
+            bool is_flex = (item.element->style.display == nvgcss::Display::FLEX);
+            bool is_grid = (item.element->style.display == nvgcss::Display::GRID);
+
+            if (is_flex) {
+                // Recursively compute flexbox layout for this nested container
+                compute_flexbox_layout(item.element, renderer);
+            } else if (is_grid) {
+                // Recursively compute grid layout for this nested container
+                compute_grid_layout(item.element, renderer);
+            }
+        }
+    }
 }

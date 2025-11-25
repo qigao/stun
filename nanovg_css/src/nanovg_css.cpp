@@ -245,7 +245,11 @@ void nvgcssDeleteRenderer(NVGCSSRenderer* renderer) {
 // CSS Management
 
 int nvgcssParseCSS(NVGCSSRenderer* renderer, const char* css) {
-    return renderer->stylesheet->parse_css(css) ? 1 : 0;
+    bool success = renderer->stylesheet->parse_css(css);
+    if (success) {
+        nvgcssMarkAllDirty(renderer, NVGCSS_DIRTY_STYLE);
+    }
+    return success ? 1 : 0;
 }
 
 // ============================================================================
@@ -301,6 +305,9 @@ NVGCSSElement* nvgcssCreateElement(NVGCSSRenderer* renderer,
 
     // Initialize transform to identity
     nvgTransformIdentity(element->transform);
+    
+    // Phase 3: Mark new element as dirty (needs style computation and layout)
+    element->dirty_flags = nvgcss::DIRTY_ALL;
 
     NVGCSSElement* ptr = element.get();
     int internal_id = element->internal_id;
@@ -585,10 +592,17 @@ const char* nvgcssGetText(const NVGCSSElement* element) {
 void nvgcssSetPseudoState(NVGCSSElement* element,
                           const char* state,
                           int active) {
+    if (!element || !state) return;
+    
+    bool changed = false;
     if (active) {
-        element->pseudo_states.insert(state);
+        changed = element->pseudo_states.insert(state).second;
     } else {
-        element->pseudo_states.erase(state);
+        changed = (element->pseudo_states.erase(state) > 0);
+    }
+    
+    if (changed) {
+        element->dirty_flags |= nvgcss::DIRTY_STYLE;
     }
 }
 
@@ -639,6 +653,10 @@ void nvgcssAppendChild(NVGCSSRenderer* renderer, NVGCSSElement* parent, NVGCSSEl
 
     // Sprint 30: Update indices of new parent's children
     update_child_indices(renderer, parent);
+    
+    // Phase 3: Mark dirty
+    parent->dirty_flags |= nvgcss::DIRTY_CHILDREN | nvgcss::DIRTY_LAYOUT;
+    child->dirty_flags |= nvgcss::DIRTY_ALL;
 }
 
 void nvgcssRemoveChild(NVGCSSRenderer* renderer, NVGCSSElement* parent, NVGCSSElement* child) {
@@ -652,6 +670,9 @@ void nvgcssRemoveChild(NVGCSSRenderer* renderer, NVGCSSElement* parent, NVGCSSEl
 
         // Sprint 30: Update indices of remaining children
         update_child_indices(renderer, parent);
+        
+        // Phase 3: Mark parent dirty
+        parent->dirty_flags |= nvgcss::DIRTY_CHILDREN | nvgcss::DIRTY_LAYOUT;
     }
 }
 
@@ -674,24 +695,21 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
         if (!element->visible) return;
 
         TransitionState* trans_state = nullptr;
-        std::map<std::string, std::string> saved_inline_style;
 
-        // First, restore any transition-modified inline styles from previous frame
-        if (element->transition_state) {
-            trans_state = static_cast<TransitionState*>(element->transition_state);
+        // Phase 2: Compute typed style (60fps refactor)
+        element->style = renderer->stylesheet->compute_style_typed(
+            element->id,
+            element->type,
+            element->classes,
+            element->attributes,
+            element->pseudo_states,
+            element->inline_style,
+            nullptr,  // parent_style (TODO: pass parent's style for inheritance)
+            element->child_index,
+            element->total_siblings
+        );
 
-            // Remove transition-applied values from inline_style
-            for (const auto& [prop, trans] : trans_state->active_transitions) {
-                if (trans.active) {
-                    auto it = element->inline_style.find(prop);
-                    if (it != element->inline_style.end()) {
-                        element->inline_style.erase(it);
-                    }
-                }
-            }
-        }
-
-        // Get computed style (now without transition-applied inline styles)
+        // Also get string-based style for transition/animation system (temporary)
         auto computed_style = renderer->stylesheet->compute_style(
             element->id,
             element->type,
@@ -1002,6 +1020,12 @@ void nvgcssRender(NVGCSSRenderer* renderer) {
     for (auto* root : renderer->root_elements) {
         collect_elements_for_render(renderer, root, elements, tree_order);
     }
+    
+    logi("[RENDER] Collected {} elements for rendering", elements.size());
+    for (const auto& [elem, order] : elements) {
+        logi("[RENDER]   - id='{}' type='{}' visible={} display={}", 
+             elem->id, elem->type, elem->visible, (int)elem->style.display);
+    }
 
     // Phase 2: Sort by render order (non-positioned first, then by z-index)
     std::sort(elements.begin(), elements.end(),
@@ -1180,6 +1204,9 @@ int nvgcssReloadCSS(NVGCSSRenderer* renderer) {
 
     renderer->style_dirty = true;
     renderer->layout_dirty = true;
+    
+    // Phase 3: Mark all elements dirty
+    nvgcssMarkAllDirty(renderer, NVGCSS_DIRTY_ALL);
 
     return success_count;
 }

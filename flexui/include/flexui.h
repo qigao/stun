@@ -1,0 +1,33 @@
+#pragma once
+
+#include <flexui/widget.h>
+#include <flexui/screen.h>
+#include <flexui/toggle.h>
+#include <flexui/checkbox.h>
+#include <flexui/button.h>
+#include <flexui/slider.h>
+#include <flexui/progressbar.h>
+#include <flexui/radiobutton.h>
+#include <flexui/label.h>
+#include <flexui/textbox.h>
+#include <flexui/panel.h>
+#include <flexui/dropdown.h>
+#include <flexui/tooltip.h>
+#include <flexui/spinner.h>
+#include <flexui/tabbar.h>
+#include <flexui/imageview.h>
+#include <flexui/badge.h>
+#include <flexui/card.h>
+#include <flexui/divider.h>
+#include <flexui/iconbutton.h>
+#include <flexui/switch.h>
+#include <flexui/chip.h>
+#include <flexui/avatar.h>
+#include <flexui/alert.h>
+#include <flexui/table.h>
+#include <flexui/tablist.h>
+#include <flexui/calendar.h>
+#include <flexui/modal.h>
+#include <flexui/breadcrumb.h>
+#include <flexui/colorpicker.h>
+#include <nanovg_css_internal.h> // For NVGCSSElement definition

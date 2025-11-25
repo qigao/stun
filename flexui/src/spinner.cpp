@@ -1,0 +1,43 @@
+#include <flexui/spinner.h>
+#include <cmath>
+#include <nanovg_css_internal.h>
+namespace flexui {
+
+Spinner::Spinner(NVGCSSRenderer* renderer, const std::string& id, const SpinnerStyle& style)
+    : Widget(renderer, id, "spinner"), style_(style) {
+    start_time_ = std::chrono::steady_clock::now();
+}
+
+void Spinner::draw(NVGcontext* vg) {
+    auto* el = element();
+    float x = el->computed.x;
+    float y = el->computed.y;
+    float w = el->computed.width;
+    float h = el->computed.height;
+
+    if (w == 0 || h == 0) return;
+
+    // Calculate elapsed time for animation
+    auto now = std::chrono::steady_clock::now();
+    float elapsed = std::chrono::duration<float>(now - start_time_).count();
+    float angle = elapsed * style_.speed;
+
+    float cx = x + w / 2;
+    float cy = y + h / 2;
+    float radius = style_.size / 2;
+
+    nvgSave(vg);
+    nvgTranslate(vg, cx, cy);
+    nvgRotate(vg, angle);
+
+    // Draw spinning arc
+    nvgBeginPath(vg);
+    nvgArc(vg, 0, 0, radius, 0, NVG_PI * 1.5f, NVG_CW);
+    nvgStrokeColor(vg, style_.color);
+    nvgStrokeWidth(vg, style_.thickness);
+    nvgStroke(vg);
+
+    nvgRestore(vg);
+}
+
+} // namespace flexui

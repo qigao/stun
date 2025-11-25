@@ -668,9 +668,19 @@ void NVGCSSLayoutEngine::compute_box_model(NVGCSSElement *element,
     element->computed.is_computed = true;
   }
 
-  // NEW: Border radius from TYPED properties (already resolved in ComputedStyle)
+  // NEW: Border radius - resolve percentages marked as negative values
+  // CSS parser stores percentages as negative to defer resolution until layout
   for (int i = 0; i < 4; i++) {
-    element->explicit_style.border_radius[i] = element->style.border.radius[i];
+    float radius = element->style.border.radius[i];
+    if (radius < 0) {
+      // Negative value marks a percentage - resolve based on element dimensions
+      // Use the smaller of width/height for circular corners (CSS spec)
+      float radius_context = std::min(element->computed.width, element->computed.height);
+      element->explicit_style.border_radius[i] = (-radius / 100.0f) * radius_context;
+    } else {
+      // Already resolved (px, em, etc.)
+      element->explicit_style.border_radius[i] = radius;
+    }
   }
   // NEW: Border styles from TYPED properties (enum to string for backward compat)
   auto border_style_to_string = [](nvgcss::BorderStyle s) -> std::string {

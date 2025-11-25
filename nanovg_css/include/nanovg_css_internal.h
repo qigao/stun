@@ -10,6 +10,7 @@
 #include <nanovg.h>
 #include <nanovg_css.h>
 #include <nanovg_css_types.h>  // NEW: Typed property system
+#include <nanovg_css_filters.h>  // Filter context type
 #include <map>
 #include <string>
 #include <vector>
@@ -573,11 +574,24 @@ struct NVGCSSRenderer {
 class NVGCSSPainter {
 public:
     NVGCSSPainter(NVGcontext* vg, NVGCSSRenderer* renderer);
+    ~NVGCSSPainter();
 
     /**
      * @brief Paint an element (uses element->style typed properties)
      */
     void paint_element(const NVGCSSElement* element);
+
+    /**
+     * @brief Apply filter effects to element
+     */
+    void apply_filters(const NVGCSSElement* element, float& opacity);
+
+    /**
+     * @brief Render element with OpenGL filters applied
+     */
+    void render_with_filters(const NVGCSSElement* element, 
+                            const NVGCSSBox& box,
+                            std::function<void()> render_fn);
 
     /**
      * @brief Get NanoVG context (Sprint 22: for scissor clipping)
@@ -612,6 +626,7 @@ public:
 private:
     NVGcontext* vg_;
     NVGCSSRenderer* renderer_;  // Sprint 31: for image cache access
+    NVGCSSFilterContext* filter_context_;  // OpenGL filter context
 
     // Property handlers (using typed properties from element->style)
     void apply_background(const NVGCSSElement* element,
@@ -655,6 +670,8 @@ private:
                           const NVGCSSBox& box);
     void paint_circle_shape(const NVGCSSElement* element,
                             const NVGCSSBox& box);
+    void paint_svg_path(const NVGCSSElement* element,
+                        const NVGCSSBox& box);
     void paint_freehand_path(const NVGCSSElement* element);
 };
 
@@ -942,6 +959,15 @@ std::vector<BoxShadow> parse_box_shadow(const std::string& shadow_css);
  * @return Vector of parsed shadows
  */
 std::vector<TextShadow> parse_text_shadow(const std::string& shadow_css);
+
+/**
+ * @brief Parse CSS filter property
+ *
+ * Supports multiple filters separated by spaces.
+ * @param filter_css CSS filter value (e.g., "blur(5px) brightness(1.2)")
+ * @return Vector of parsed filter effects
+ */
+std::vector<nvgcss::FilterEffect> parse_filter(const std::string& filter_css);
 // ============================================================================
 // Background Image Parsing (Sprint 31)
 // ============================================================================

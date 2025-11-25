@@ -25,6 +25,7 @@
 #include <nanovg_css.h>
 #include <fmtlog.h>
 #include <set>
+#include <string>
 
 class WidgetsDemo {
 public:
@@ -92,6 +93,15 @@ private:
     void init_nanovg() {
         gladLoadGL();
         vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+
+        // Load fonts (REQUIRED for text rendering!)
+        if (nvgCreateFont(vg, "sans-serif", "resources/Roboto-Regular.ttf") == -1) {
+            loge("Failed to load font 'sans-serif'");
+        }
+        if (nvgCreateFont(vg, "sans-serif-Bold", "resources/Roboto-Bold.ttf") == -1) {
+            loge("Failed to load font 'sans-serif-Bold'");
+        }
+
         renderer = nvgcssCreateRenderer(vg);
     }
 
@@ -148,6 +158,8 @@ private:
                 width: 200px;
                 height: 140px;
                 background: white;
+                color: #333333;
+                font-size: 14px;
                 border-radius: 12px;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.1);
                 border: 1px solid #e0e0e0;
@@ -168,6 +180,8 @@ private:
                 width: 250px;
                 height: 45px;
                 background: white;
+                color: #666666;
+                font-size: 14px;
                 border: 2px solid #CCCCCC;
                 border-radius: 6px;
                 padding: 10px;
@@ -321,7 +335,12 @@ private:
     NVGCSSElement* create_card(const char* id, const char* title, const char* content) {
         auto* card = nvgcssCreateElement(renderer, id, "div");
         nvgcssAddClass(card, "card");
-        // Note: In real app, would add child elements for title/content
+
+        // For now, combine title and content into text_content
+        // TODO: Add child elements for richer card layouts
+        std::string card_text = std::string(title) + "\n\n" + content;
+        nvgcssSetText(card, card_text.c_str());
+
         return card;
     }
 

@@ -402,6 +402,9 @@ NVGcolor parse_color(const std::string& color_str) {
     if (color == "white") return nvgRGB(255, 255, 255);
     if (color == "black") return nvgRGB(0, 0, 0);
     if (color == "transparent") return nvgRGBA(0, 0, 0, 0);
+    if (color == "purple") return nvgRGB(128, 0, 128);
+    if (color == "orange") return nvgRGB(255, 165, 0);
+    if (color == "brown") return nvgRGB(165, 42, 42);
 
     // Hex colors: #rgb or #rrggbb
     if (color[0] == '#') {

@@ -5,6 +5,9 @@
  */
 
 #include "nanovg_css_internal.h"
+#include "nanovg_css_filters.h"
+#include <nanovg_css_filters.h>
+#include <nanovg_rough.h>
 #include <fmtlog.h>
 #include <algorithm>
 #include <cmath>
@@ -80,9 +83,21 @@ float salted_noise(float seed) {
 }
 
 Vec2 jitter_with_salt(const Vec2& v, float salt, float amplitude, float channel) {
-    float nx = salted_noise(salt + channel * 17.0f) - 0.5f;
-    float ny = salted_noise(salt + channel * 31.0f) - 0.5f;
-    return {v.x + nx * amplitude, v.y + ny * amplitude};
+    // Excalidraw-style roughness: perpendicular offset with controlled randomness
+    float offset = (salted_noise(salt + channel * 17.0f) - 0.5f) * 2.0f * amplitude;
+    return {v.x + offset, v.y + offset};
+}
+
+Vec2 offset_point(const Vec2& point, const Vec2& tangent, float salt, float roughness, float channel) {
+    // Calculate perpendicular direction (normal)
+    Vec2 normal = perpendicular(normalize(tangent));
+    
+    // Generate offset with multiple frequencies for organic feel
+    float offset = 0.0f;
+    offset += (salted_noise(salt + channel * 1.3f) - 0.5f) * roughness;
+    offset += (salted_noise(salt + channel * 2.7f + 100.0f) - 0.5f) * roughness * 0.5f;
+    
+    return point + normal * offset;
 }
 
 class DashPen {
@@ -176,8 +191,14 @@ private:
     float total_pattern_length_ = 0.0f;
 };
 
-void apply_stroke_state(NVGcontext* vg, const StrokeStyle& stroke) {
-    nvgStrokeWidth(vg, stroke.width);
+void apply_stroke_state(NVGcontext* vg, const StrokeStyle& stroke, float width_variation = 0.0f) {
+    float width = stroke.width;
+    if (width_variation > 0.0f) {
+        // Add random variation to stroke width (±variation)
+        width += (salted_noise(width_variation) - 0.5f) * 2.0f * width_variation;
+        width = std::max(width, stroke.width * 0.5f);  // Don't go below 50% of original
+    }
+    nvgStrokeWidth(vg, width);
     nvgStrokeColor(vg, stroke.color);
     nvgLineCap(vg, stroke.line_cap);
     nvgLineJoin(vg, stroke.line_join);
@@ -256,7 +277,110 @@ std::vector<Vec2> build_freehand_outline(const std::vector<Vec2>& raw_points,
 static void render_background_image(const NVGCSSElement* element,
                                     const NVGCSSBox& box,
                                     NVGCSSRenderer* renderer);
-NVGCSSPainter::NVGCSSPainter(NVGcontext* vg, NVGCSSRenderer* renderer) : vg_(vg), renderer_(renderer) {
+
+NVGCSSPainter::NVGCSSPainter(NVGcontext* vg, NVGCSSRenderer* renderer) 
+    : vg_(vg), renderer_(renderer), filter_context_(nullptr) {
+    // Initialize filter context only if we have a valid NanoVG context
+    if (vg_) {
+        filter_context_ = nvgcssCreateFilterContext();
+    }
+}
+
+NVGCSSPainter::~NVGCSSPainter() {
+    if (filter_context_) {
+        nvgcssDeleteFilterContext(filter_context_);
+    }
+}
+
+void NVGCSSPainter::apply_filters(const NVGCSSElement* element, float& opacity) {
+    if (element->style.filters.empty()) return;
+    
+    // Separate opacity from other filters
+    bool has_advanced_filters = false;
+    for (const auto& filter : element->style.filters) {
+        if (filter.type == nvgcss::FilterType::OPACITY) {
+            opacity *= filter.value;
+        } else {
+            has_advanced_filters = true;
+        }
+    }
+    
+    // If no advanced filters, we're done
+    if (!has_advanced_filters || !filter_context_) return;
+    
+    // Apply advanced filters using OpenGL shaders
+    // This requires rendering to FBO, applying shaders, then compositing
+    // For now, we'll apply them in the render loop when needed
+}
+
+void NVGCSSPainter::render_with_filters(const NVGCSSElement* element, 
+                                        const NVGCSSBox& box,
+                                        std::function<void()> render_fn) {
+    if (element->style.filters.empty() || !filter_context_ || !vg_) {
+        render_fn();
+        return;
+    }
+    
+    // Check if we have any advanced filters (non-opacity)
+    bool has_advanced = false;
+    for (const auto& filter : element->style.filters) {
+        if (filter.type != nvgcss::FilterType::OPACITY) {
+            has_advanced = true;
+            break;
+        }
+    }
+    
+    if (!has_advanced) {
+        render_fn();
+        return;
+    }
+    
+    // Convert filters to C API format
+    std::vector<NVGCSSFilter> c_filters;
+    for (const auto& filter : element->style.filters) {
+        NVGCSSFilterType type;
+        switch (filter.type) {
+            case nvgcss::FilterType::BLUR:
+                type = NVGCSS_FILTER_BLUR;
+                break;
+            case nvgcss::FilterType::BRIGHTNESS:
+                type = NVGCSS_FILTER_BRIGHTNESS;
+                break;
+            case nvgcss::FilterType::CONTRAST:
+                type = NVGCSS_FILTER_CONTRAST;
+                break;
+            case nvgcss::FilterType::GRAYSCALE:
+                type = NVGCSS_FILTER_GRAYSCALE;
+                break;
+            case nvgcss::FilterType::HUE_ROTATE:
+                type = NVGCSS_FILTER_HUE_ROTATE;
+                break;
+            case nvgcss::FilterType::INVERT:
+                type = NVGCSS_FILTER_INVERT;
+                break;
+            case nvgcss::FilterType::SATURATE:
+                type = NVGCSS_FILTER_SATURATE;
+                break;
+            case nvgcss::FilterType::SEPIA:
+                type = NVGCSS_FILTER_SEPIA;
+                break;
+            case nvgcss::FilterType::OPACITY:
+                type = NVGCSS_FILTER_OPACITY;
+                break;
+            default:
+                continue;
+        }
+        c_filters.push_back({type, filter.value});
+    }
+    
+    // Apply filters using framebuffer rendering
+    auto callback = [](NVGcontext* vg, void* user_data) {
+        auto* fn = static_cast<std::function<void()>*>(user_data);
+        (*fn)();
+    };
+    
+    nvgcssApplyFilters(filter_context_, vg_, box.x, box.y, box.width, box.height,
+                       c_filters.data(), (int)c_filters.size(), callback, &render_fn);
 }
 
 // Sprint 33: Helper function to render a single border side with style
@@ -470,11 +594,20 @@ static void render_styled_borders(NVGcontext* vg, const NVGCSSElement* element,
     }
 }
 void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
+    // DEBUG: Log what we're trying to paint
+    logi("[PAINTER] paint_element id='{}' type='{}' display={} visible={} bg_type={}",
+         element->id, element->type, (int)element->style.display, element->visible, 
+         (int)element->style.background.type);
+    
     // Check visibility from typed property
     if (element->style.display == nvgcss::Display::NONE) {
+        logi("[PAINTER] Skipping '{}' - display is NONE", element->id);
         return;
     }
-    if (!element->visible) return;
+    if (!element->visible) {
+        logi("[PAINTER] Skipping '{}' - not visible", element->id);
+        return;
+    }
 
     // Save state
     nvgSave(vg_);
@@ -486,7 +619,12 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
                  element->transform[4], element->transform[5]);
 
     // Apply opacity from typed property
-    nvgGlobalAlpha(vg_, element->style.opacity);
+    float combined_opacity = element->style.opacity;
+    
+    // Apply filter effects
+    apply_filters(element, combined_opacity);
+    
+    nvgGlobalAlpha(vg_, combined_opacity);
 
     // Draw based on element type
     // HTML elements (div, button, span with text) are treated as boxes
@@ -503,11 +641,11 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         // Use computed layout for dimensions (PHASE 4 SPRINT 4)
         const auto& box = computed_to_box(element->computed);
 
-        // DEBUG: Uncomment to trace element rendering
-        // logd("[PAINTER] Rendering type='{}' id='{}' class='{}' at ({:.1f}, {:.1f}) size ({:.1f} x {:.1f})",
-        //      element->type, element->id.empty() ? "(empty)" : element->id,
-        //      element->classes.empty() ? "(no-class)" : element->classes[0],
-        //      box.x, box.y, box.width, box.height);
+        // DEBUG: Trace element rendering
+        logi("[PAINTER] Rendering type='{}' id='{}' class='{}' at ({:.1f}, {:.1f}) size ({:.1f} x {:.1f})",
+             element->type, element->id.empty() ? "(empty)" : element->id,
+             element->classes.empty() ? "(no-class)" : element->classes[0],
+             box.x, box.y, box.width, box.height);
 
         // Skip rendering if size is zero
         if (box.width <= 0 || box.height <= 0) {
@@ -556,19 +694,30 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
             nvgFillColor(vg_, text_color);
 
             // Calculate text position based on alignment
-            float text_x = box.x;
-            float text_y = box.y;
+            // IMPORTANT: Use content box (account for padding), not border box!
+            float padding_left = element->computed.padding[3];   // left
+            float padding_top = element->computed.padding[0];    // top
+            float padding_right = element->computed.padding[1];  // right
+            float padding_bottom = element->computed.padding[2]; // bottom
+
+            float content_x = box.x + padding_left;
+            float content_y = box.y + padding_top;
+            float content_width = box.width - padding_left - padding_right;
+            float content_height = box.height - padding_top - padding_bottom;
+
+            float text_x = content_x;
+            float text_y = content_y;
 
             if (align & NVG_ALIGN_CENTER) {
-                text_x += box.width / 2.0f;
+                text_x += content_width / 2.0f;
             } else if (align & NVG_ALIGN_RIGHT) {
-                text_x += box.width;
+                text_x += content_width;
             }
 
             if (align & NVG_ALIGN_MIDDLE) {
-                text_y += box.height / 2.0f;
+                text_y += content_height / 2.0f;
             } else if (align & NVG_ALIGN_BOTTOM) {
-                text_y += box.height;
+                text_y += content_height;
             }
 
             // Sprint 28: Render text shadows FIRST (so they appear behind text)
@@ -699,6 +848,14 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         const auto& box = computed_to_box(element->computed);
         paint_circle_shape(element, box);
     }
+    else if (element->type == "path") {
+        const auto& box = computed_to_box(element->computed);
+        paint_svg_path(element, box);
+    }
+    else if (element->type == "polygon" || element->type == "polyline") {
+        const auto& box = computed_to_box(element->computed);
+        paint_svg_path(element, box);
+    }
 
     // Call custom paint callback if provided
     if (element->custom_paint) {
@@ -715,6 +872,9 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
     // 60fps: Read from TYPED property (not inline_style!)
     const auto& bg = element->style.background;
 
+    logi("[PAINTER] apply_background id='{}' bg_type={} gradient_css='{}'",
+         element->id, (int)bg.type, bg.gradient_css);
+
     // Handle different background types
     if (bg.type == nvgcss::BackgroundType::COLOR) {
         NVGcolor bg_color = bg.color;
@@ -728,11 +888,21 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
         nvgFill(vg_);
     }
     else if (bg.type == nvgcss::BackgroundType::GRADIENT) {
-        // TODO: Implement gradient rendering
-        // bg.gradient contains the gradient definition
+        // Parse and render gradient from CSS string
+        if (!bg.gradient_css.empty()) {
+            logi("[PAINTER] Creating gradient for box ({}, {}) size {}x{}", 
+                 box.x, box.y, box.width, box.height);
+            NVGpaint gradient_paint = create_gradient(bg.gradient_css, box);
+            logi("[PAINTER] Gradient paint created, applying...");
+            nvgFillPaint(vg_, gradient_paint);
+            nvgFill(vg_);
+            logi("[PAINTER] Gradient filled");
+        } else {
+            logi("[PAINTER] ERROR: gradient_css is EMPTY!");
+        }
     }
     else if (bg.type == nvgcss::BackgroundType::IMAGE) {
-        // TODO: Implement background image rendering
+        // Background image rendering implemented via render_background_image()
         // bg.image_handle contains the NanoVG image handle
     }
     // If type == NONE, skip (transparent background)
@@ -1371,13 +1541,17 @@ NVGCSSPainter::StrokeStyle NVGCSSPainter::resolve_stroke_style(
     auto stroke_it = element->inline_style.find("stroke");
     if (stroke_it != element->inline_style.end()) {
         const std::string& value = stroke_it->second;
+        logi("[PAINTER] resolve_stroke_style id='{}' stroke='{}'", element->id, value);
         if (value != "none" && value != "transparent") {
             stroke.color = nvgcss_utils::parse_color(value);
             stroke.enabled = true;
+            logi("[PAINTER] Stroke enabled: r={} g={} b={} a={}", stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a);
         } else {
             stroke_forced_none = true;
             stroke.enabled = false;
         }
+    } else {
+        logi("[PAINTER] resolve_stroke_style id='{}' - NO stroke property found", element->id);
     }
 
     auto width_it = element->inline_style.find("stroke-width");
@@ -1489,6 +1663,25 @@ void NVGCSSPainter::paint_line_shape(const NVGCSSElement* element,
         extract_coordinate(element, "y2", box.height, box.y, end.y);
     }
 
+    // Check if rough rendering is enabled
+    bool use_rough = (element->style.svg_stroke.rendering == nvgcss::StrokeRendering::ROUGH);
+    
+    if (use_rough) {
+        // Use rough rendering for line
+        NVGRoughOptions opts = nvgRoughDefaultOptions();
+        opts.stroke_enabled = 1;
+        opts.stroke_color = stroke.color;
+        opts.stroke_width = stroke.width;
+        opts.fill_enabled = 0;
+        opts.roughness = element->style.svg_stroke.roughness;
+        opts.bowing = element->style.svg_stroke.bowing;
+        opts.stroke_count = element->style.svg_stroke.stroke_count;
+        opts.seed = element->style.svg_stroke.seed;
+        
+        nvgRoughLine(vg_, start.x, start.y, end.x, end.y, opts);
+        return;
+    }
+
     if (element->has_stroke_salt) {
         float amplitude = stroke.width * 0.35f;
         start = jitter_with_salt(start, element->stroke_salt, amplitude, 1.0f);
@@ -1516,7 +1709,6 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
     extract_coordinate(element, "cx", box.width, box.x, cx);
     extract_coordinate(element, "cy", box.height, box.y, cy);
 
-    // TODO: SVG radius properties not in typed system - reading from inline_style
     auto r_it = element->inline_style.find("r");
     if (r_it != element->inline_style.end()) {
         float r_value = nvgcss_utils::parse_length(r_it->second, std::max(box.width, box.height));
@@ -1533,51 +1725,210 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
         ry = nvgcss_utils::parse_length(ry_it->second, box.height);
     }
 
-    if (element->has_stroke_salt) {
-        float amplitude = std::max(rx, ry) * 0.05f;
-        Vec2 center = jitter_with_salt({cx, cy}, element->stroke_salt, amplitude, 5.0f);
-        cx = center.x;
-        cy = center.y;
-    }
+    // Check if rough rendering is enabled
+    printf("[PAINTER] paint_circle_shape BEFORE CHECK: id='%s' ptr=%p rendering=%d\n",
+           element->id.c_str(), (void*)element, (int)element->style.svg_stroke.rendering);
+    
+    bool use_rough = (element->style.svg_stroke.rendering == nvgcss::StrokeRendering::ROUGH);
+    
+    printf("[PAINTER] paint_circle_shape AFTER CHECK: id='%s' rendering=%d (AUTO=%d, ROUGH=%d) use_rough=%d roughness=%.2f\n",
+           element->id.c_str(), 
+           (int)element->style.svg_stroke.rendering,
+           (int)nvgcss::StrokeRendering::AUTO,
+           (int)nvgcss::StrokeRendering::ROUGH,
+           use_rough, 
+           element->style.svg_stroke.roughness);
 
-    // TODO: SVG fill property not in typed system - reading from inline_style
     auto fill_it = element->inline_style.find("fill");
     if (fill_it != element->inline_style.end() && fill_it->second != "none") {
         NVGcolor fill_color = nvgcss_utils::parse_color(fill_it->second);
-        nvgBeginPath(vg_);
-        if (std::abs(rx - ry) < 0.001f) {
-            nvgCircle(vg_, cx, cy, rx);
+        
+        if (use_rough) {
+            // Use rough rendering for fill
+            NVGRoughOptions opts = nvgRoughDefaultOptions();
+            opts.fill_enabled = 1;
+            opts.fill_color = fill_color;
+            opts.stroke_enabled = 0;
+            opts.roughness = element->style.svg_stroke.roughness;
+            opts.seed = element->style.svg_stroke.seed;
+            
+            if (std::abs(rx - ry) < 0.001f) {
+                nvgRoughCircle(vg_, cx, cy, rx, opts);
+            } else {
+                nvgRoughEllipse(vg_, cx, cy, rx, ry, opts);
+            }
         } else {
-            nvgEllipse(vg_, cx, cy, rx, ry);
+            // Standard smooth rendering
+            nvgBeginPath(vg_);
+            if (std::abs(rx - ry) < 0.001f) {
+                nvgCircle(vg_, cx, cy, rx);
+            } else {
+                nvgEllipse(vg_, cx, cy, rx, ry);
+            }
+            nvgFillColor(vg_, fill_color);
+            nvgFill(vg_);
         }
-        nvgFillColor(vg_, fill_color);
-        nvgFill(vg_);
     }
 
     auto stroke = resolve_stroke_style(element, &box, std::max(rx, ry));
-    if (!stroke.enabled || stroke.width <= 0.0f) return;
-
-    if (stroke.dash_array.empty()) {
-        apply_stroke_state(vg_, stroke);
-        nvgBeginPath(vg_);
+    
+    printf("[PAINTER] Stroke resolved: enabled=%d width=%.2f use_rough=%d\n", 
+           stroke.enabled, stroke.width, use_rough);
+    
+    if (!stroke.enabled || stroke.width <= 0.0f) {
+        printf("[PAINTER] Skipping stroke - not enabled or zero width\n");
+        return;
+    }
+    
+    if (use_rough) {
+        printf("[PAINTER] *** USING ROUGH RENDERING ***\n");
+        // Use rough rendering for stroke
+        NVGRoughOptions opts = nvgRoughDefaultOptions();
+        opts.stroke_enabled = 1;
+        opts.stroke_color = stroke.color;
+        opts.stroke_width = stroke.width;
+        opts.fill_enabled = 0;
+        opts.roughness = element->style.svg_stroke.roughness;
+        opts.bowing = element->style.svg_stroke.bowing;
+        opts.stroke_count = element->style.svg_stroke.stroke_count;
+        opts.seed = element->style.svg_stroke.seed;
+        
         if (std::abs(rx - ry) < 0.001f) {
-            nvgCircle(vg_, cx, cy, rx);
+            nvgRoughCircle(vg_, cx, cy, rx, opts);
         } else {
-            nvgEllipse(vg_, cx, cy, rx, ry);
+            nvgRoughEllipse(vg_, cx, cy, rx, ry, opts);
         }
-        nvgStroke(vg_);
-    } else {
-        const int segments = 96;
-        std::vector<Vec2> outline;
-        outline.reserve(segments);
-        for (int i = 0; i < segments; ++i) {
-            float t = static_cast<float>(i) / segments;
-            float angle = t * 2.0f * kPi;
-            float x = cx + std::cos(angle) * rx;
-            float y = cy + std::sin(angle) * ry;
+        return;
+    }
+
+    // Convert to polyline for hand-drawn effect or dashed strokes
+    const int segments = 96;
+    std::vector<Vec2> outline;
+    outline.reserve(segments);
+    
+    for (int i = 0; i < segments; ++i) {
+        float t = static_cast<float>(i) / segments;
+        float angle = t * 2.0f * kPi;
+        float x = cx + std::cos(angle) * rx;
+        float y = cy + std::sin(angle) * ry;
+        
+        if (element->has_stroke_salt) {
+            // Excalidraw-style: perpendicular offset based on tangent
+            float next_angle = ((i + 1) % segments) * 2.0f * kPi / segments;
+            Vec2 tangent = {
+                std::cos(next_angle) * rx - x,
+                std::sin(next_angle) * ry - y
+            };
+            float roughness = std::max(rx, ry) * 0.015f + stroke.width * 0.4f;
+            Vec2 offset = offset_point({x, y}, tangent, element->stroke_salt, roughness, static_cast<float>(i));
+            outline.push_back(offset);
+        } else {
             outline.push_back({x, y});
         }
+    }
+    
+    // Apply stroke with width variation for hand-drawn effect (Excalidraw-style)
+    if (element->has_stroke_salt && stroke.enabled && stroke.width > 0.0f) {
+        // Draw each segment separately with varying width (like RoughJS roughness)
+        const int passes = 2;
+        
+        for (int pass = 0; pass < passes; ++pass) {
+            NVGcolor color = stroke.color;
+            if (pass > 0) {
+                color.a *= 0.4f;  // More transparent second pass
+            }
+            
+            for (size_t i = 0; i < outline.size(); ++i) {
+                size_t next = (i + 1) % outline.size();
+                
+                // Generate dramatic organic width variation (like hand pressure)
+                float noise1 = salted_noise(element->stroke_salt + static_cast<float>(i) * 0.08f + pass * 100.0f);
+                float noise2 = salted_noise(element->stroke_salt + static_cast<float>(i) * 0.23f + pass * 200.0f);
+                float noise3 = salted_noise(element->stroke_salt + static_cast<float>(i) * 0.47f + pass * 300.0f);
+                
+                // Combine multiple noise frequencies for natural hand-drawn variation
+                // Use much larger coefficients for dramatic effect
+                float combined_noise = (noise1 - 0.5f) * 2.5f + (noise2 - 0.5f) * 1.2f + (noise3 - 0.5f) * 0.6f;
+                float width_var = stroke.width * 0.7f * combined_noise;  // 70% variation range
+                float segment_width = stroke.width + width_var;
+                
+                // Allow very wide range: 30% to 250% of base width (like real hand drawing with pressure)
+                segment_width = std::max(segment_width, stroke.width * 0.3f);
+                segment_width = std::min(segment_width, stroke.width * 2.5f);
+                
+                // Draw individual segment with its own width
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, outline[i].x, outline[i].y);
+                nvgLineTo(vg_, outline[next].x, outline[next].y);
+                nvgStrokeWidth(vg_, segment_width);
+                nvgStrokeColor(vg_, color);
+                nvgLineCap(vg_, NVG_ROUND);  // Round caps for smooth connections
+                nvgLineJoin(vg_, stroke.line_join);
+                nvgStroke(vg_);
+            }
+        }
+    } else {
         stroke_polyline(vg_, stroke, outline, true);
+    }
+}
+
+void NVGCSSPainter::paint_svg_path(const NVGCSSElement* element, const NVGCSSBox& box) {
+    auto d_it = element->inline_style.find("d");
+    if (d_it == element->inline_style.end() || d_it->second.empty()) return;
+
+    const std::string& path_data = d_it->second;
+    nvgBeginPath(vg_);
+
+    // Parse SVG path data
+    float x = 0, y = 0;  // Current position
+    float start_x = 0, start_y = 0;  // Subpath start
+    size_t i = 0;
+    
+    while (i < path_data.length()) {
+        while (i < path_data.length() && std::isspace(path_data[i])) i++;
+        if (i >= path_data.length()) break;
+        
+        char cmd = path_data[i++];
+        std::vector<float> args;
+        
+        // Parse numbers
+        while (i < path_data.length()) {
+            while (i < path_data.length() && (std::isspace(path_data[i]) || path_data[i] == ',')) i++;
+            if (i >= path_data.length() || std::isalpha(path_data[i])) break;
+            
+            size_t end;
+            args.push_back(std::stof(path_data.substr(i), &end));
+            i += end;
+        }
+        
+        // Execute command
+        switch (cmd) {
+            case 'M': if (args.size() >= 2) { x = args[0]; y = args[1]; start_x = x; start_y = y; nvgMoveTo(vg_, x, y); } break;
+            case 'm': if (args.size() >= 2) { x += args[0]; y += args[1]; start_x = x; start_y = y; nvgMoveTo(vg_, x, y); } break;
+            case 'L': if (args.size() >= 2) { x = args[0]; y = args[1]; nvgLineTo(vg_, x, y); } break;
+            case 'l': if (args.size() >= 2) { x += args[0]; y += args[1]; nvgLineTo(vg_, x, y); } break;
+            case 'H': if (args.size() >= 1) { x = args[0]; nvgLineTo(vg_, x, y); } break;
+            case 'h': if (args.size() >= 1) { x += args[0]; nvgLineTo(vg_, x, y); } break;
+            case 'V': if (args.size() >= 1) { y = args[0]; nvgLineTo(vg_, x, y); } break;
+            case 'v': if (args.size() >= 1) { y += args[0]; nvgLineTo(vg_, x, y); } break;
+            case 'C': if (args.size() >= 6) { nvgBezierTo(vg_, args[0], args[1], args[2], args[3], args[4], args[5]); x = args[4]; y = args[5]; } break;
+            case 'c': if (args.size() >= 6) { nvgBezierTo(vg_, x+args[0], y+args[1], x+args[2], y+args[3], x+args[4], y+args[5]); x += args[4]; y += args[5]; } break;
+            case 'Q': if (args.size() >= 4) { nvgQuadTo(vg_, args[0], args[1], args[2], args[3]); x = args[2]; y = args[3]; } break;
+            case 'q': if (args.size() >= 4) { nvgQuadTo(vg_, x+args[0], y+args[1], x+args[2], y+args[3]); x += args[2]; y += args[3]; } break;
+            case 'Z': case 'z': nvgLineTo(vg_, start_x, start_y); x = start_x; y = start_y; break;
+        }
+    }
+
+    auto fill_it = element->inline_style.find("fill");
+    if (fill_it != element->inline_style.end() && fill_it->second != "none") {
+        nvgFillColor(vg_, nvgcss_utils::parse_color(fill_it->second));
+        nvgFill(vg_);
+    }
+
+    auto stroke = resolve_stroke_style(element, &box, std::max(box.width, box.height));
+    if (stroke.enabled && stroke.width > 0.0f) {
+        apply_stroke_state(vg_, stroke);
+        nvgStroke(vg_);
     }
 }
 

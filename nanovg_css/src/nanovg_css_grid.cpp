@@ -1901,12 +1901,13 @@ void position_grid_items(GridContainer& grid)
         float width = 0;
         float height = 0;
 
-        // Sum columns this item spans
-        // BUG FIX: Use column_span() when column_end is not set
+        // FIXED: Properly handle grid-column-span and grid-row-span
         int c_start = item.column_start - 1;
-        int c_end = item.column_end >= 1
-            ? item.column_end - 1
-            : c_start + item.column_span();  // Use span instead of fallback to start
+        int c_span = item.column_span();
+        int c_end = item.column_end >= 1 ? item.column_end - 1 : c_start + c_span;
+
+        // Ensure c_end doesn't exceed grid bounds
+        c_end = std::min(c_end, (int)grid.columns.size());
 
         for (int c = c_start; c < c_end && c < (int)grid.columns.size(); c++) {
             width += grid.columns[c].computed_size;
@@ -1915,12 +1916,13 @@ void position_grid_items(GridContainer& grid)
             }
         }
 
-        // Sum rows this item spans
-        // BUG FIX: Use row_span() when row_end is not set
+        // FIXED: Properly handle grid-row-span
         int r_start = item.row_start - 1;
-        int r_end = item.row_end >= 1
-            ? item.row_end - 1
-            : r_start + item.row_span();  // Use span instead of fallback to start
+        int r_span = item.row_span();
+        int r_end = item.row_end >= 1 ? item.row_end - 1 : r_start + r_span;
+
+        // Ensure r_end doesn't exceed grid bounds
+        r_end = std::min(r_end, (int)grid.rows.size());
 
         for (int r = r_start; r < r_end && r < (int)grid.rows.size(); r++) {
             height += grid.rows[r].computed_size;
@@ -2192,4 +2194,22 @@ void compute_grid_layout(
 
     // Step 6: Write to computed layout (SPRINT 4 OUTPUT)
     write_computed_layout(grid);
+
+    // Step 7: RECURSIVELY compute layout for nested containers
+    // If any grid item is itself a flex or grid container, compute its children
+    for (const auto& item : grid.items) {
+        if (!item.element) continue;
+
+        // Check if this item is a layout container (flex or grid)
+        bool is_flex = (item.element->style.display == nvgcss::Display::FLEX);
+        bool is_grid = (item.element->style.display == nvgcss::Display::GRID);
+
+        if (is_flex) {
+            // Recursively compute flexbox layout for this nested container
+            compute_flexbox_layout(item.element, renderer);
+        } else if (is_grid) {
+            // Recursively compute grid layout for this nested container
+            compute_grid_layout(item.element, renderer);
+        }
+    }
 }

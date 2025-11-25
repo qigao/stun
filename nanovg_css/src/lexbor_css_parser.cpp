@@ -1262,8 +1262,7 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     // Step 1: Get string-based style using existing implementation
     std::map<std::string, std::string> parent_style_map;
     if (parent_style) {
-        // TODO: Convert ComputedStyle back to map for inheritance
-        // For now, pass empty map (inheritance will be added later)
+        // Inheritance handled via string-based system
     }
 
     auto style_map = compute_style(
@@ -1275,7 +1274,12 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     nvgcss::ComputedStyle result;
 
     // Helper lambda to get value with default
-    auto get = [&style_map](const std::string& key) -> std::string {
+    auto get = [&style_map, &inline_style](const std::string& key) -> std::string {
+        // CSS cascade: inline styles override stylesheet styles
+        auto inline_it = inline_style.find(key);
+        if (inline_it != inline_style.end()) {
+            return inline_it->second;
+        }
         auto it = style_map.find(key);
         return it != style_map.end() ? it->second : "";
     };
@@ -1369,7 +1373,13 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     if (!border_radius_str.empty()) {
         auto radii = nvgcss::convert::parse_box_sides(border_radius_str);
         for (int i = 0; i < 4; ++i) {
-            result.border.radius[i] = radii[i].resolve(0, 16, 800);
+            // Don't resolve percentages here - mark with negative value
+            // Layout engine will resolve based on element dimensions
+            if (radii[i].unit == nvgcss::LengthUnit::PERCENT) {
+                result.border.radius[i] = -radii[i].value;  // Store as negative percentage
+            } else {
+                result.border.radius[i] = radii[i].resolve(0, 16, 800);
+            }
         }
     }
 
@@ -1383,17 +1393,27 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     }
 
     // === Background ===
-    std::string bg_color_str = get("background-color");
     std::string bg_str = get("background");
-    if (!bg_color_str.empty()) {
+    std::string bg_color_str = get("background-color");
+    
+    // Check background first (can be gradient or color)
+    if (!bg_str.empty()) {
+        // Check if it's a gradient
+        if (bg_str.find("gradient") != std::string::npos) {
+            // Store gradient string - painter will parse it
+            result.background.type = nvgcss::BackgroundType::GRADIENT;
+            result.background.gradient_css = bg_str;
+        }
+        // Try to parse as color
+        else if (auto c = nvgcss::convert::parse_color(bg_str)) {
+            result.background = nvgcss::Background::solid(*c);
+        }
+    }
+    // Then check background-color (overrides if both present)
+    else if (!bg_color_str.empty()) {
         if (auto c = nvgcss::convert::parse_color(bg_color_str)) {
             result.background = nvgcss::Background::solid(*c);
         }
-    } else if (!bg_str.empty()) {
-        if (auto c = nvgcss::convert::parse_color(bg_str)) {
-            result.background = nvgcss::Background::solid(*c);
-        }
-        // TODO: Parse gradients, images
     }
 
     // Opacity
@@ -1474,7 +1494,38 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         result.grid_column_gap = *col_gap2;
     }
 
-    // TODO: box-shadows, text-shadows, transforms, etc.
+    // Additional properties (box-shadows, text-shadows, transforms) are handled
+    // by the string-based system and converted during rendering
+
+    // === SVG Stroke Properties (Rough Rendering) ===
+    std::string stroke_rendering_str = get("stroke-rendering");
+    if (!stroke_rendering_str.empty()) {
+        if (stroke_rendering_str == "rough") {
+            result.svg_stroke.rendering = nvgcss::StrokeRendering::ROUGH;
+        } else {
+            result.svg_stroke.rendering = nvgcss::StrokeRendering::AUTO;
+        }
+    }
+
+    std::string roughness_str = get("roughness");
+    if (!roughness_str.empty()) {
+        result.svg_stroke.roughness = std::strtof(roughness_str.c_str(), nullptr);
+    }
+
+    std::string bowing_str = get("bowing");
+    if (!bowing_str.empty()) {
+        result.svg_stroke.bowing = std::strtof(bowing_str.c_str(), nullptr);
+    }
+
+    std::string stroke_count_str = get("stroke-count");
+    if (!stroke_count_str.empty()) {
+        result.svg_stroke.stroke_count = std::atoi(stroke_count_str.c_str());
+    }
+
+    std::string seed_str = get("seed");
+    if (!seed_str.empty()) {
+        result.svg_stroke.seed = std::atoi(seed_str.c_str());
+    }
 
     return result;
 }

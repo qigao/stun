@@ -236,7 +236,7 @@ TEST_CASE("NanoVGCSS Tree Manipulation", "[tree]") {
 
         nvgcssAppendChild(renderer, parent, child);
 
-        REQUIRE(child->parent_id == parent->id);
+        REQUIRE(child->parent_internal_id == parent->internal_id);
         int child_count = 0;
         NVGCSSElement** children = nvgcssGetChildren(renderer, parent, &child_count);
         REQUIRE(child_count == 1);
@@ -271,7 +271,7 @@ TEST_CASE("NanoVGCSS Tree Manipulation", "[tree]") {
         int child_count = 0;
         NVGCSSElement** children = nvgcssGetChildren(renderer, parent, &child_count);
         REQUIRE(child_count == 0);
-        REQUIRE(child->parent_id.empty());
+        REQUIRE(child->parent_internal_id == -1);
     }
 
     nvgcssDeleteRenderer(renderer);
@@ -687,8 +687,8 @@ TEST_CASE("NanoVGCSS Integration", "[integration]") {
         int child_count = 0;
         NVGCSSElement** children = nvgcssGetChildren(renderer, container, &child_count);
         REQUIRE(child_count == 2);
-        REQUIRE(child1->parent_id == container->id);
-        REQUIRE(child2->parent_id == container->id);
+        REQUIRE(child1->parent_internal_id == container->internal_id);
+        REQUIRE(child2->parent_internal_id == container->internal_id);
     }
 
     nvgcssDeleteRenderer(renderer);

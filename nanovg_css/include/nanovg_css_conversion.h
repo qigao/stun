@@ -303,6 +303,36 @@ inline FontStyle parse_font_style(std::string_view str) {
     return FontStyle::NORMAL;  // Default
 }
 
+inline TextDecoration parse_text_decoration(std::string_view str) {
+    auto lower = to_lowercase(trim(str));
+    if (lower == "underline") return TextDecoration::UNDERLINE;
+    if (lower == "overline") return TextDecoration::OVERLINE;
+    if (lower == "line-through") return TextDecoration::LINE_THROUGH;
+    return TextDecoration::NONE;  // Default
+}
+
+inline TextTransform parse_text_transform(std::string_view str) {
+    auto lower = to_lowercase(trim(str));
+    if (lower == "uppercase") return TextTransform::UPPERCASE;
+    if (lower == "lowercase") return TextTransform::LOWERCASE;
+    if (lower == "capitalize") return TextTransform::CAPITALIZE;
+    return TextTransform::NONE;  // Default
+}
+
+inline SVGStroke::LineCap parse_stroke_linecap(std::string_view str) {
+    auto lower = to_lowercase(trim(str));
+    if (lower == "round") return SVGStroke::LineCap::ROUND;
+    if (lower == "square") return SVGStroke::LineCap::SQUARE;
+    return SVGStroke::LineCap::BUTT;  // Default
+}
+
+inline SVGStroke::LineJoin parse_stroke_linejoin(std::string_view str) {
+    auto lower = to_lowercase(trim(str));
+    if (lower == "round") return SVGStroke::LineJoin::ROUND;
+    if (lower == "bevel") return SVGStroke::LineJoin::BEVEL;
+    return SVGStroke::LineJoin::MITER;  // Default
+}
+
 // ============================================================================
 // Box Model Shorthand Parsing
 // ============================================================================

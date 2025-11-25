@@ -1,64 +1,57 @@
-cmake_minimum_required(VERSION 3.15)
-
-# Find SDL3
-find_package(SDL3 REQUIRED)
-
-# Find OpenGL
-find_package(OpenGL REQUIRED)
+# FlexUI Examples
 
 # ============================================================================
-# FlexUI Examples - Auto-generated from example_*.cpp files
+# Comprehensive Widget Showcase
 # ============================================================================
 
-# Find all example source files
-file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/example_*.cpp)
-
-# Create an executable for each example
-foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
-    # Get the filename without directory and extension
-    get_filename_component(EXAMPLE_NAME ${EXAMPLE_SOURCE} NAME_WE)
-
-    # Special handling for legacy naming convention
-    # Convert "flexui_example_*" to just "example_*" for consistency
-    string(REPLACE "flexui_example_" "example_" EXAMPLE_TARGET ${EXAMPLE_NAME})
-
-    # If it already starts with "example_", use as-is
-    if(NOT ${EXAMPLE_NAME} MATCHES "^example_")
-        set(EXAMPLE_TARGET "example_${EXAMPLE_NAME}")
-    else()
-        set(EXAMPLE_TARGET ${EXAMPLE_NAME})
-    endif()
-
-    message(STATUS "Adding FlexUI example: ${EXAMPLE_TARGET} (from ${EXAMPLE_NAME}.cpp)")
-
-    # Create executable
-    add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
-
-    # Link libraries
-    target_link_libraries(${EXAMPLE_TARGET} PRIVATE
-        flexui_core
-        SDL3::SDL3
-        OpenGL::GL
-        glad::glad fmtlog::fmtlog
-    )
-
-    # Include directories
-    target_include_directories(${EXAMPLE_TARGET} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        ${CMAKE_CURRENT_BINARY_DIR}/../  # For flexui_resources.h
-    )
-
-    # Set target properties
-    set_target_properties(${EXAMPLE_TARGET} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-        FOLDER flexui/examples
-    )
-endforeach()
+add_executable(all_widgets_showcase all_widgets_showcase.cpp)
+target_link_libraries(all_widgets_showcase PRIVATE flexui_core)
+set_target_properties(all_widgets_showcase PROPERTIES FOLDER flexui/examples)
 
 # ============================================================================
-# Summary
+# Basic Examples
 # ============================================================================
 
-list(LENGTH EXAMPLE_SOURCES EXAMPLE_COUNT)
-message(STATUS "FlexUI: Configured ${EXAMPLE_COUNT} example(s)")
+add_executable(basic_widgets_demo basic_widgets_demo.cpp)
+target_link_libraries(basic_widgets_demo PRIVATE flexui_core)
+set_target_properties(basic_widgets_demo PROPERTIES FOLDER flexui/examples)
+
+add_executable(all_widgets_xml_demo all_widgets_xml_demo.cpp)
+target_link_libraries(all_widgets_xml_demo PRIVATE flexui_core)
+set_target_properties(all_widgets_xml_demo PROPERTIES FOLDER flexui/examples)
+
+# ============================================================================
+# Form Examples
+# ============================================================================
+
+add_executable(login_form_demo login_form_demo.cpp)
+target_link_libraries(login_form_demo PRIVATE flexui_core)
+set_target_properties(login_form_demo PROPERTIES FOLDER flexui/examples)
+
+add_executable(login_form_xml_demo login_form_xml_demo.cpp)
+target_link_libraries(login_form_xml_demo PRIVATE flexui_core)
+set_target_properties(login_form_xml_demo PROPERTIES FOLDER flexui/examples)
+
+add_executable(survey_form_demo survey_form_demo.cpp)
+target_link_libraries(survey_form_demo PRIVATE flexui_core)
+set_target_properties(survey_form_demo PROPERTIES FOLDER flexui/examples)
+
+add_executable(upload_demo upload_demo.cpp)
+target_link_libraries(upload_demo PRIVATE flexui_core)
+set_target_properties(upload_demo PROPERTIES FOLDER flexui/examples)
+
+add_executable(settings_demo settings_demo.cpp)
+target_link_libraries(settings_demo PRIVATE flexui_core)
+set_target_properties(settings_demo PROPERTIES FOLDER flexui/examples)
+
+# ============================================================================
+# Advanced Features
+# ============================================================================
+
+add_executable(javascript_demo javascript_demo.cpp)
+target_link_libraries(javascript_demo PRIVATE flexui_core)
+set_target_properties(javascript_demo PROPERTIES FOLDER flexui/examples)
+
+add_executable(svg_demo svg_demo.cpp)
+target_link_libraries(svg_demo PRIVATE flexui_core)
+set_target_properties(svg_demo PROPERTIES FOLDER flexui/examples)

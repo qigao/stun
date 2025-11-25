@@ -21,6 +21,7 @@
 #include <vector>
 #include <array>
 #include <memory>
+#include <string>
 
 namespace nvgcss {
 
@@ -125,6 +126,7 @@ struct Background {
     Color color;
     std::shared_ptr<Gradient> gradient;  // shared because gradients are big
     int image_handle;  // NanoVG image handle
+    std::string gradient_css;  // Raw CSS gradient string (for painter to parse)
 
     // Background positioning/sizing (for images)
     enum class Size : uint8_t { AUTO, COVER, CONTAIN, EXPLICIT };
@@ -315,6 +317,61 @@ enum class FontStyle : uint8_t {
 };
 
 // ============================================================================
+// CSS Text Decoration
+// ============================================================================
+
+enum class TextDecoration : uint8_t {
+    NONE,
+    UNDERLINE,
+    OVERLINE,
+    LINE_THROUGH
+};
+
+enum class TextTransform : uint8_t {
+    NONE,
+    UPPERCASE,
+    LOWERCASE,
+    CAPITALIZE
+};
+
+// ============================================================================
+// CSS SVG Properties
+// ============================================================================
+
+enum class StrokeRendering : uint8_t {
+    AUTO,      // Default smooth rendering
+    ROUGH      // Hand-drawn style (RoughJS)
+};
+
+struct SVGStroke {
+    Color color = nvgRGBA(0, 0, 0, 255);
+    float width = 1.0f;
+    
+    enum class LineCap : uint8_t { BUTT, ROUND, SQUARE };
+    LineCap line_cap = LineCap::BUTT;
+    
+    enum class LineJoin : uint8_t { MITER, ROUND, BEVEL };
+    LineJoin line_join = LineJoin::MITER;
+    
+    float miter_limit = 4.0f;
+    std::vector<float> dash_array;
+    float dash_offset = 0.0f;
+    bool enabled = false;
+    
+    // Rough rendering properties
+    StrokeRendering rendering = StrokeRendering::AUTO;
+    float roughness = 1.0f;      // 0-10, default 1
+    float bowing = 1.0f;         // 0-10, default 1
+    int stroke_count = 1;        // 1-5, number of overlapping strokes
+    unsigned int seed = 0;       // Random seed for reproducibility
+};
+
+struct SVGFill {
+    Color color = nvgRGBA(128, 128, 128, 255);
+    bool enabled = true;
+};
+
+// ============================================================================
 // COMPUTED STYLE STRUCT - The Heart of the System
 // ============================================================================
 
@@ -390,12 +447,55 @@ struct ComputedStyle {
     FontStyle font_style = FontStyle::NORMAL;
     TextAlign text_align = TextAlign::LEFT;
     std::string font_family = "sans-serif";  // Keep string for NanoVG API
+    TextDecoration text_decoration = TextDecoration::NONE;
+    TextTransform text_transform = TextTransform::NONE;
+
+    // === SVG Properties ===
+    SVGFill svg_fill;
+    SVGStroke svg_stroke;
+
+    // === Filter Effects ===
+    std::vector<struct FilterEffect> filters;
 
     // === Transform (Phase 2) ===
     // TODO: Add transform properties when needed
 
     // === Transition/Animation (Phase 2) ===
     // TODO: Add animation properties when needed
+};
+
+// ============================================================================
+// CSS Filter Effects
+// ============================================================================
+
+enum class FilterType : uint8_t {
+    BLUR,
+    BRIGHTNESS,
+    CONTRAST,
+    GRAYSCALE,
+    HUE_ROTATE,
+    INVERT,
+    OPACITY,
+    SATURATE,
+    SEPIA
+};
+
+struct FilterEffect {
+    FilterType type;
+    float value;  // Interpretation depends on type
+
+    FilterEffect(FilterType t, float v) : type(t), value(v) {}
+
+    // Named constructors for clarity
+    static FilterEffect blur(float radius) { return {FilterType::BLUR, radius}; }
+    static FilterEffect brightness(float amount) { return {FilterType::BRIGHTNESS, amount}; }
+    static FilterEffect contrast(float amount) { return {FilterType::CONTRAST, amount}; }
+    static FilterEffect grayscale(float amount) { return {FilterType::GRAYSCALE, amount}; }
+    static FilterEffect hue_rotate(float degrees) { return {FilterType::HUE_ROTATE, degrees}; }
+    static FilterEffect invert(float amount) { return {FilterType::INVERT, amount}; }
+    static FilterEffect opacity(float amount) { return {FilterType::OPACITY, amount}; }
+    static FilterEffect saturate(float amount) { return {FilterType::SATURATE, amount}; }
+    static FilterEffect sepia(float amount) { return {FilterType::SEPIA, amount}; }
 };
 
 // ============================================================================
