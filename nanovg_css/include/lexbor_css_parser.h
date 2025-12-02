@@ -104,6 +104,7 @@ struct CSSRule {
     std::string selector;
     std::map<std::string, std::string> properties;
     int specificity;
+    std::string media_query;  // e.g., "(min-width: 768px)" or empty for no media query
 };
 
 /**
@@ -316,10 +317,19 @@ private:
     /**
      * @brief Resolve a single var() expression
      * @param expr var() expression (e.g., "var(--color, blue)")
+     * @param resolving_vars Set of variable names currently being resolved (for cycle detection)
      * @return Resolved value
      */
-    std::string resolve_var(const std::string& expr) const;
+    std::string resolve_var(const std::string& expr, std::set<std::string>& resolving_vars) const;
     
+    /**
+     * @brief Recursive helper for resolve() with cycle detection
+     * @param value String containing var() expressions
+     * @param resolving_vars Set of variable names currently being resolved (for cycle detection)
+     * @return String with var() expressions resolved
+     */
+    std::string resolve_recursive(const std::string& value, std::set<std::string>& resolving_vars) const;
+
     /**
      * @brief Parse var() expression to extract variable name and fallback
      * @param expr var() expression
@@ -475,6 +485,29 @@ public:
      */
     const std::vector<CSSRule>& get_rules() const { return rules_; }
 
+    /**
+     * @brief Set viewport dimensions for @media queries
+     * @param width Viewport width in pixels
+     * @param height Viewport height in pixels
+     * @return true if viewport changed (requiring style recomputation)
+     */
+    bool set_viewport(float width, float height) {
+        bool changed = (viewport_width_ != width || viewport_height_ != height);
+        viewport_width_ = width;
+        viewport_height_ = height;
+        if (changed) {
+            clear_cache();  // Media queries may now match differently
+        }
+        return changed;
+    }
+
+    /**
+     * @brief Evaluate if a media query matches current viewport
+     * @param media_query Media query string (e.g., "(min-width: 768px)")
+     * @return true if query matches or is empty
+     */
+    bool evaluate_media_query(const std::string& media_query) const;
+
 private:
     LexborCSSParser parser_;
     LexborStyleComputer computer_;
@@ -488,6 +521,10 @@ private:
     // Cache: cache_key -> computed_style
     std::unordered_map<std::string, std::map<std::string, std::string>> cache_;
     mutable CacheStats cache_stats_;
+
+    // Viewport dimensions for @media queries
+    float viewport_width_ = 800.0f;
+    float viewport_height_ = 600.0f;
 
     static constexpr size_t MAX_CACHE_SIZE = 1000;
     

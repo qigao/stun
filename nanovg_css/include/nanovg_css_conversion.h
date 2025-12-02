@@ -68,12 +68,16 @@ inline std::optional<Length> parse_length(std::string_view str) {
     // Special keyword
     if (str == "auto") return Length::auto_();
 
-    // Parse number
+    // Convert to std::string to ensure null termination for strtof
+    // (string_view::data() is not guaranteed to be null-terminated)
+    std::string str_copy(str);
+    
     char* end_ptr;
-    float value = std::strtof(str.data(), &end_ptr);
+    float value = std::strtof(str_copy.c_str(), &end_ptr);
 
-    // Get unit
-    std::string_view unit(end_ptr, str.data() + str.size() - end_ptr);
+    // Calculate unit offset from the original string_view
+    size_t unit_offset = end_ptr - str_copy.c_str();
+    std::string_view unit = str.substr(unit_offset);
     unit = trim(unit);
 
     if (unit.empty() || unit == "px") return Length::px(value);

@@ -16,6 +16,8 @@ void Divider::draw(NVGcontext* vg) {
     float w = el->computed.width;
     float h = el->computed.height;
 
+    NVGcolor color = cssColor(style_.color);
+
     nvgBeginPath(vg);
 
     if (style_.vertical) {
@@ -30,7 +32,7 @@ void Divider::draw(NVGcontext* vg) {
         nvgLineTo(vg, x + w, cy);
     }
 
-    nvgStrokeColor(vg, style_.color);
+    nvgStrokeColor(vg, color);
     nvgStrokeWidth(vg, style_.thickness);
     nvgStroke(vg);
 }

@@ -18,7 +18,10 @@ void Breadcrumb::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
-    nvgFontSize(vg, style_.fontSize);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
 
@@ -27,7 +30,7 @@ void Breadcrumb::draw(NVGcontext* vg) {
 
     for (size_t i = 0; i < items_.size(); ++i) {
         bool isLast = (i == items_.size() - 1);
-        NVGcolor color = isLast ? style_.activeColor : style_.textColor;
+        NVGcolor color = isLast ? style_.activeColor : textColor;
 
         // Draw item text
         nvgFillColor(vg, color);

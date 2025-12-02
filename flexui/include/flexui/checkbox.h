@@ -32,7 +32,8 @@ public:
     void setChangeCallback(ChangeCallback cb) { change_callback_ = cb; }
     void setCheckboxStyle(const CheckboxStyle& style) { style_ = style; }
 
-    bool handleCheckboxClick(float mx, float my);
+protected:
+    bool onClicked() override;
 
 private:
     bool checked_;

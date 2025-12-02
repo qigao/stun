@@ -20,14 +20,15 @@ void Modal::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
-    // Draw overlay (full screen behind modal)
-    // Note: This draws the overlay at the modal's computed position
-    // For a true full-screen overlay, this should be drawn at screen coordinates
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
 
     // Draw modal background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Draw title bar
@@ -37,9 +38,9 @@ void Modal::draw(NVGcontext* vg) {
     nvgFill(vg);
 
     // Draw title text
-    nvgFontSize(vg, style_.fontSize + 2);
+    nvgFontSize(vg, fontSize + 2);
     nvgFontFace(vg, "sans-serif");
-    nvgFillColor(vg, style_.textColor);
+    nvgFillColor(vg, textColor);
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgText(vg, x + 16, y + style_.titleHeight / 2, title_.c_str(), nullptr);
 
@@ -51,8 +52,8 @@ void Modal::draw(NVGcontext* vg) {
     nvgText(vg, closeX, closeY, "×", nullptr);
 
     // Draw content
-    nvgFontSize(vg, style_.fontSize);
-    nvgFillColor(vg, style_.textColor);
+    nvgFontSize(vg, fontSize);
+    nvgFillColor(vg, textColor);
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     nvgTextBox(vg, x + 16, y + style_.titleHeight + 16,
                w - 32, content_.c_str(), nullptr);

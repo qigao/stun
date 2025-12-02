@@ -251,6 +251,102 @@ void nvgcssDeleteElement(NVGCSSRenderer* renderer, const char* id);
 void nvgcssClearElements(NVGCSSRenderer* renderer);
 
 // ============================================================================
+// SVG Marker Management
+// ============================================================================
+
+/**
+ * @brief Create an SVG marker definition
+ *
+ * Markers are reusable graphical elements that can be placed at path endpoints
+ * and vertices. Common uses include arrow heads, dots, and decorations.
+ *
+ * @param renderer CSS renderer
+ * @param id Marker ID (used in marker-start/mid/end: url(#id))
+ * @param markerWidth Marker viewport width
+ * @param markerHeight Marker viewport height
+ * @param refX Reference point X (where marker attaches to path)
+ * @param refY Reference point Y (where marker attaches to path)
+ * @param orient Orientation: "auto", "auto-start-reverse", or angle in degrees
+ * @return Created marker element (add children to define marker shape)
+ *
+ * @example
+ *   // Create arrow marker
+ *   NVGCSSElement* arrow = nvgcssCreateMarker(renderer, "arrow", 10, 10, 10, 5, "auto");
+ *   NVGCSSElement* path = nvgcssCreateElement(renderer, "arrow-shape", "path");
+ *   nvgcssSetStyle(path, "d", "M 0 0 L 10 5 L 0 10 Z");
+ *   nvgcssSetStyle(path, "fill", "black");
+ *   nvgcssAppendChild(renderer, arrow, path);
+ *
+ *   // Use marker on line
+ *   NVGCSSElement* line = nvgcssCreateElement(renderer, "line1", "line");
+ *   nvgcssSetStyle(line, "marker-end", "url(#arrow)");
+ */
+NVGCSSElement* nvgcssCreateMarker(NVGCSSRenderer* renderer,
+                                   const char* id,
+                                   float markerWidth,
+                                   float markerHeight,
+                                   float refX,
+                                   float refY,
+                                   const char* orient);
+
+/**
+ * @brief Create an SVG clip path definition
+ *
+ * Clip paths define a clipping region that determines what parts of an element are visible.
+ * Add shapes (rect, circle, path, etc.) as children to define the clipping region.
+ *
+ * @param renderer Renderer instance
+ * @param id Clip path ID (referenced via clip-path: url(#id))
+ * @return Clip path element (add shapes as children)
+ *
+ * @example
+ *   // Create circular clip path
+ *   NVGCSSElement* clip = nvgcssCreateClipPath(renderer, "circle-clip");
+ *   NVGCSSElement* circle = nvgcssCreateElement(renderer, "c1", "circle");
+ *   circle->inline_style["r"] = "50px";
+ *   nvgcssAppendChild(renderer, clip, circle);
+ *
+ *   // Apply to element
+ *   NVGCSSElement* rect = nvgcssCreateElement(renderer, "r1", "rect");
+ *   rect->inline_style["clip-path"] = "url(#circle-clip)";
+ */
+NVGCSSElement* nvgcssCreateClipPath(NVGCSSRenderer* renderer, const char* id);
+
+/**
+ * @brief Create an SVG pattern definition
+ *
+ * Patterns define repeating graphical content for fills and strokes.
+ * Add shapes as children to define the pattern content.
+ * Pattern will be rendered to an offscreen FBO and used as a tiled image.
+ *
+ * @param renderer Renderer instance
+ * @param id Pattern ID (referenced via fill: url(#id))
+ * @param x Pattern x offset
+ * @param y Pattern y offset  
+ * @param width Pattern tile width
+ * @param height Pattern tile height
+ * @return Pattern element (add shapes as children)
+ *
+ * @example
+ *   // Create dot pattern
+ *   NVGCSSElement* pattern = nvgcssCreatePattern(renderer, "dots", 0, 0, 20, 20);
+ *   NVGCSSElement* circle = nvgcssCreateElement(renderer, "dot", "circle");
+ *   circle->inline_style["cx"] = "10px";
+ *   circle->inline_style["cy"] = "10px";
+ *   circle->inline_style["r"] = "5px";
+ *   circle->inline_style["fill"] = "blue";
+ *   nvgcssAppendChild(renderer, pattern, circle);
+ *
+ *   // Apply to element
+ *   NVGCSSElement* rect = nvgcssCreateElement(renderer, "r1", "rect");
+ *   rect->inline_style["fill"] = "url(#dots)";
+ */
+NVGCSSElement* nvgcssCreatePattern(NVGCSSRenderer* renderer,
+                                   const char* id,
+                                   float x, float y,
+                                   float width, float height);
+
+// ============================================================================
 // CSS Class Management (For CSS Targeting)
 // ============================================================================
 

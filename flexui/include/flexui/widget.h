@@ -26,8 +26,12 @@ public:
     void setClickCallback(ClickCallback cb) { click_callback_ = cb; }
     void setHoverCallback(HoverCallback cb) { hover_callback_ = cb; }
 
-    bool handleClick(float x, float y);
+    // Mouse event handling (final - do NOT override)
+    virtual bool handleClick(float x, float y) final;
     void handleHover(float x, float y);
+
+    // Override these for widget-specific behavior
+    virtual bool onClicked() { return click_callback_ ? click_callback_(this) : false; }
 
     // SVG-specific styling
     void setStroke(const std::string& color, float width);
@@ -49,10 +53,20 @@ public:
     virtual void draw(NVGcontext* vg) {} // Override for custom drawing
 
     NVGCSSElement* element() { return element_; }
+    const NVGCSSElement* element() const { return element_; }
     const std::string& id() const { return id_; }
 
     // Check if widget should be visible based on inline style
     bool isVisible() const;
+
+    // CSS style helpers - reduce duplication in widget draw() methods
+    NVGcolor cssBackground(const NVGcolor& fallback) const;
+    float cssBorderRadius(float fallback) const;
+    float cssBorderWidth(float fallback) const;
+    float cssFontSize(float fallback) const;
+    NVGcolor cssColor(const NVGcolor& fallback) const;
+    NVGcolor cssBorderColor(const NVGcolor& fallback) const;
+    float cssPaddingLeft(float fallback) const;
 
 private:
     NVGCSSRenderer* renderer_;

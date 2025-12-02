@@ -26,17 +26,22 @@ void Snackbar::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    NVGcolor bgColor = cssBackground(style_.backgroundColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     // Background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.backgroundColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
-    nvgFontSize(vg, style_.fontSize);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
 
     // Message
-    nvgFillColor(vg, style_.textColor);
+    nvgFillColor(vg, textColor);
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgText(vg, x + style_.padding, y + h / 2, message_.c_str(), nullptr);
 

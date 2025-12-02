@@ -9,6 +9,9 @@ Tooltip::Tooltip(const std::string& text, const TooltipStyle& style)
 void Tooltip::draw(NVGcontext* vg, float mx, float my) {
     if (text_.empty()) return;
     
+    // Note: Tooltip doesn't have an element, so we can't read CSS
+    // This is a limitation of the current design
+    
     nvgFontSize(vg, style_.fontSize);
     nvgFontFace(vg, "sans-serif");
     

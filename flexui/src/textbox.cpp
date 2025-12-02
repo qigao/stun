@@ -42,55 +42,60 @@ void TextBox::draw(NVGcontext* vg) {
     float w = el->computed.width;
     float h = el->computed.height;
 
-    NVGcolor borderColor = focused_ ? style_.borderColorFocus : style_.borderColor;
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    NVGcolor fallbackBorder = focused_ ? style_.borderColorFocus : style_.borderColor;
+    NVGcolor borderColor = cssBorderColor(fallbackBorder);
+    float borderWidth = cssBorderWidth(style_.borderWidth);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    NVGcolor textColor = cssColor(style_.textColor);
+    float fontSize = cssFontSize(style_.fontSize);
+    float padding = cssPaddingLeft(style_.padding);
 
     // Background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Border
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
     nvgStrokeColor(vg, borderColor);
-    nvgStrokeWidth(vg, style_.borderWidth);
+    nvgStrokeWidth(vg, borderWidth);
     nvgStroke(vg);
 
     // Text or placeholder
-    nvgFontSize(vg, style_.fontSize);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
 
     if (text_.empty() && !focused_) {
         nvgFillColor(vg, style_.placeholderColor);
-        nvgText(vg, x + style_.padding, y + h / 2, placeholder_.c_str(), nullptr);
+        nvgText(vg, x + padding, y + h / 2, placeholder_.c_str(), nullptr);
     } else {
-        nvgFillColor(vg, style_.textColor);
+        nvgFillColor(vg, textColor);
 
         // Display text or masked password
         const char* displayText = text_.c_str();
         std::string maskedText;
 
         if (style_.passwordMode && !text_.empty()) {
-            // Count UTF-8 characters
             size_t charCount = utf8len(reinterpret_cast<const utf8_int8_t*>(text_.c_str()));
-            // Create masked string with asterisks
             maskedText = std::string(charCount, '*');
             displayText = maskedText.c_str();
         }
 
-        nvgText(vg, x + style_.padding, y + h / 2, displayText, nullptr);
+        nvgText(vg, x + padding, y + h / 2, displayText, nullptr);
 
         // Cursor if focused
         if (focused_) {
             float bounds[4];
-            nvgTextBounds(vg, x + style_.padding, y + h / 2, displayText, nullptr, bounds);
+            nvgTextBounds(vg, x + padding, y + h / 2, displayText, nullptr, bounds);
             float cursorX = bounds[2];
             nvgBeginPath(vg);
             nvgMoveTo(vg, cursorX + 2, y + h * 0.25f);
             nvgLineTo(vg, cursorX + 2, y + h * 0.75f);
-            nvgStrokeColor(vg, style_.textColor);
+            nvgStrokeColor(vg, textColor);
             nvgStrokeWidth(vg, 1);
             nvgStroke(vg);
         }

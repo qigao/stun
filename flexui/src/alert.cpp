@@ -47,19 +47,24 @@ void Alert::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     // Draw background with border
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
     nvgStrokeColor(vg, style_.borderColor);
     nvgStrokeWidth(vg, style_.borderWidth);
     nvgStroke(vg);
 
     // Draw message text
-    nvgFontSize(vg, style_.fontSize);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
-    nvgFillColor(vg, style_.textColor);
+    nvgFillColor(vg, textColor);
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
     nvgTextBox(vg, x + style_.padding, y + style_.padding,
                w - style_.padding * 2, message_.c_str(), nullptr);

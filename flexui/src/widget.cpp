@@ -2,6 +2,7 @@
 #include <nanovg_css_internal.h>
 #include <nanovg_css_types.h>
 #include <fmtlog.h>
+#include <sstream>
 
 namespace flexui {
 
@@ -11,15 +12,29 @@ Widget::Widget(NVGCSSRenderer* renderer, const std::string& id, const std::strin
 }
 
 void Widget::setClass(const std::string& className) {
-    nvgcssAddClass(element_, className.c_str());
+    // Split className on whitespace to support multiple classes
+    // e.g., "btn num" becomes ["btn", "num"]
+    std::istringstream iss(className);
+    std::string singleClass;
+    while (iss >> singleClass) {
+        if (!singleClass.empty()) {
+            nvgcssAddClass(element_, singleClass.c_str());
+        }
+    }
+    renderer_->style_dirty = true;
+    renderer_->layout_dirty = true;
 }
 
 void Widget::addClass(const std::string& className) {
     nvgcssAddClass(element_, className.c_str());
+    renderer_->style_dirty = true;
+    renderer_->layout_dirty = true;
 }
 
 void Widget::removeClass(const std::string& className) {
     nvgcssRemoveClass(element_, className.c_str());
+    renderer_->style_dirty = true;
+    renderer_->layout_dirty = true;
 }
 
 void Widget::setPosition(float x, float y) {
@@ -49,6 +64,8 @@ void Widget::addChild(Widget* child) {
 
 void Widget::setInlineStyle(const std::string& property, const std::string& value) {
     element_->inline_style[property] = value;
+    renderer_->style_dirty = true;
+    renderer_->layout_dirty = true;
 }
 
 bool Widget::handleClick(float x, float y) {
@@ -56,15 +73,17 @@ bool Widget::handleClick(float x, float y) {
     float ey = element_->computed.y;
     float ew = element_->computed.width;
     float eh = element_->computed.height;
-    
-    if (x >= ex && x <= ex + ew && y >= ey && y <= ey + eh) {
-        nvgcssSetPseudoState(element_, "active", 1);
-        if (click_callback_) {
-            return click_callback_(this);
-        }
-        return true;
+
+    // Bounds check - done once in base class
+    if (x < ex || x > ex + ew || y < ey || y > ey + eh) {
+        return false;
     }
-    return false;
+
+    // Set active pseudo-state
+    nvgcssSetPseudoState(element_, "active", 1);
+
+    // Call virtual onClicked() for widget-specific logic
+    return onClicked();
 }
 
 void Widget::handleHover(float x, float y) {
@@ -134,6 +153,37 @@ bool Widget::isVisible() const {
 
     // Check visible flag
     return element_->visible;
+}
+
+NVGcolor Widget::cssBackground(const NVGcolor& fallback) const {
+    if (element_->style.background.type == nvgcss::BackgroundType::COLOR) {
+        return element_->style.background.color;
+    }
+    return fallback;
+}
+
+float Widget::cssBorderRadius(float fallback) const {
+    return element_->style.border.radius[0] > 0 ? element_->style.border.radius[0] : fallback;
+}
+
+float Widget::cssBorderWidth(float fallback) const {
+    return element_->style.border.width[0] > 0 ? element_->style.border.width[0] : fallback;
+}
+
+float Widget::cssFontSize(float fallback) const {
+    return element_->style.font_size > 0 ? element_->style.font_size : fallback;
+}
+
+NVGcolor Widget::cssColor(const NVGcolor& fallback) const {
+    return element_->style.color.a > 0 ? element_->style.color : fallback;
+}
+
+NVGcolor Widget::cssBorderColor(const NVGcolor& fallback) const {
+    return element_->style.border.color[0].a > 0 ? element_->style.border.color[0] : fallback;
+}
+
+float Widget::cssPaddingLeft(float fallback) const {
+    return element_->style.padding[3].value > 0 ? element_->style.padding[3].value : fallback;
 }
 
 } // namespace flexui

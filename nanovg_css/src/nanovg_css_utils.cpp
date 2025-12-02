@@ -65,7 +65,12 @@ std::vector<CalcToken> tokenize_calc(const std::string& expr) {
                 while (i < expr.length() && (std::isdigit(expr[i]) || expr[i] == '.')) {
                     i++;
                 }
-                float value = -std::stof(expr.substr(start, i - start));
+                std::string num_str = expr.substr(start, i - start);
+                if (num_str.empty() || num_str == ".") {
+                    // Invalid number - skip this token
+                    continue;
+                }
+                float value = -std::stof(num_str);
 
                 // Check for unit
                 std::string unit;
@@ -111,7 +116,13 @@ std::vector<CalcToken> tokenize_calc(const std::string& expr) {
             while (i < expr.length() && (std::isdigit(expr[i]) || expr[i] == '.')) {
                 i++;
             }
-            float value = std::stof(expr.substr(start, i - start));
+            std::string num_str = expr.substr(start, i - start);
+            if (num_str.empty() || num_str == ".") {
+                // Invalid number - skip this token
+                i++;
+                continue;
+            }
+            float value = std::stof(num_str);
 
             // Check for unit
             std::string unit;
@@ -408,18 +419,22 @@ NVGcolor parse_color(const std::string& color_str) {
 
     // Hex colors: #rgb or #rrggbb
     if (color[0] == '#') {
-        if (color.length() == 4) {
-            // #rgb
-            int r = std::stoi(color.substr(1, 1), nullptr, 16) * 17;
-            int g = std::stoi(color.substr(2, 1), nullptr, 16) * 17;
-            int b = std::stoi(color.substr(3, 1), nullptr, 16) * 17;
-            return nvgRGB(r, g, b);
-        } else if (color.length() == 7) {
-            // #rrggbb
-            int r = std::stoi(color.substr(1, 2), nullptr, 16);
-            int g = std::stoi(color.substr(3, 2), nullptr, 16);
-            int b = std::stoi(color.substr(5, 2), nullptr, 16);
-            return nvgRGB(r, g, b);
+        try {
+            if (color.length() == 4) {
+                // #rgb
+                int r = std::stoi(color.substr(1, 1), nullptr, 16) * 17;
+                int g = std::stoi(color.substr(2, 1), nullptr, 16) * 17;
+                int b = std::stoi(color.substr(3, 1), nullptr, 16) * 17;
+                return nvgRGB(r, g, b);
+            } else if (color.length() == 7) {
+                // #rrggbb
+                int r = std::stoi(color.substr(1, 2), nullptr, 16);
+                int g = std::stoi(color.substr(3, 2), nullptr, 16);
+                int b = std::stoi(color.substr(5, 2), nullptr, 16);
+                return nvgRGB(r, g, b);
+            }
+        } catch (const std::exception&) {
+            return nvgRGB(255, 255, 255);  // Default to white on invalid hex
         }
     }
 
@@ -431,10 +446,14 @@ NVGcolor parse_color(const std::string& color_str) {
             std::string values = color.substr(start + 1, end - start - 1);
             auto parts = split(values, ',');
             if (parts.size() == 3) {
-                int r = std::stoi(parts[0]);
-                int g = std::stoi(parts[1]);
-                int b = std::stoi(parts[2]);
-                return nvgRGB(r, g, b);
+                try {
+                    int r = std::stoi(parts[0]);
+                    int g = std::stoi(parts[1]);
+                    int b = std::stoi(parts[2]);
+                    return nvgRGB(r, g, b);
+                } catch (const std::exception&) {
+                    return nvgRGB(255, 255, 255);  // Default to white on error
+                }
             }
         }
     }
@@ -447,11 +466,15 @@ NVGcolor parse_color(const std::string& color_str) {
             std::string values = color.substr(start + 1, end - start - 1);
             auto parts = split(values, ',');
             if (parts.size() == 4) {
-                int r = std::stoi(parts[0]);
-                int g = std::stoi(parts[1]);
-                int b = std::stoi(parts[2]);
-                float a = std::stof(parts[3]);
-                return nvgRGBA(r, g, b, (int)(a * 255));
+                try {
+                    int r = std::stoi(parts[0]);
+                    int g = std::stoi(parts[1]);
+                    int b = std::stoi(parts[2]);
+                    float a = std::stof(parts[3]);
+                    return nvgRGBA(r, g, b, (int)(a * 255));
+                } catch (const std::exception&) {
+                    return nvgRGBA(255, 255, 255, 255);  // Default to opaque white
+                }
             }
         }
     }
@@ -494,13 +517,27 @@ float parse_length(const std::string& length_str, float context_value) {
 
     // px (or no unit)
     if (ends_with(str, "px")) {
-        return std::stof(str.substr(0, str.length() - 2));
+        if (str.length() <= 2) {
+            return 0.0f;  // Invalid: just "px" with no number
+        }
+        try {
+            return std::stof(str.substr(0, str.length() - 2));
+        } catch (const std::exception&) {
+            return 0.0f;
+        }
     }
 
     // Percentage
     if (ends_with(str, "%")) {
-        float percent = std::stof(str.substr(0, str.length() - 1));
-        return (percent / 100.0f) * context_value;
+        if (str.length() <= 1) {
+            return 0.0f;  // Invalid: just "%" with no number
+        }
+        try {
+            float percent = std::stof(str.substr(0, str.length() - 1));
+            return (percent / 100.0f) * context_value;
+        } catch (const std::exception&) {
+            return 0.0f;
+        }
     }
 
     // No unit - assume pixels
@@ -571,6 +608,132 @@ NVGcolor interpolate_color(const NVGcolor& start, const NVGcolor& end, float t) 
 }
 
 // Interpolate CSS value
+// Helper: Parse transform function (e.g., "scale(1.2)" -> {"scale", "1.2"})
+static std::pair<std::string, std::string> parse_transform_function(const std::string& transform) {
+    size_t open_paren = transform.find('(');
+    size_t close_paren = transform.find(')');
+
+    if (open_paren == std::string::npos || close_paren == std::string::npos) {
+        return {"", ""};
+    }
+
+    std::string func_name = transform.substr(0, open_paren);
+    std::string args = transform.substr(open_paren + 1, close_paren - open_paren - 1);
+
+    return {trim(func_name), trim(args)};
+}
+
+// Helper: Interpolate transform functions
+static std::string interpolate_transform(const std::string& start_value,
+                                         const std::string& end_value,
+                                         float t) {
+    try {
+        // Parse start transform
+        auto [start_func, start_args] = parse_transform_function(start_value);
+        auto [end_func, end_args] = parse_transform_function(end_value);
+
+        // Validate parsing
+        if (start_func.empty() || end_func.empty() || start_args.empty() || end_args.empty()) {
+            return (t >= 0.5f) ? end_value : start_value;
+        }
+
+        // Functions must match
+        if (start_func != end_func) {
+            return (t >= 0.5f) ? end_value : start_value;
+        }
+
+        // Interpolate based on function type
+        if (start_func == "scale") {
+            // scale(X) or scale(X, Y)
+            if (start_args.empty() || end_args.empty()) {
+                return (t >= 0.5f) ? end_value : start_value;
+            }
+            float start_num = std::stof(start_args);
+            float end_num = std::stof(end_args);
+            float result = interpolate_float(start_num, end_num, t);
+
+            char buf[64];
+            snprintf(buf, sizeof(buf), "scale(%.3f)", result);
+            return buf;
+        }
+        else if (start_func == "rotate") {
+            // rotate(Xdeg)
+            std::string start_clean = start_args;
+            std::string end_clean = end_args;
+
+            // Remove 'deg' suffix
+            if (ends_with(start_clean, "deg")) {
+                start_clean = start_clean.substr(0, start_clean.length() - 3);
+            }
+            if (ends_with(end_clean, "deg")) {
+                end_clean = end_clean.substr(0, end_clean.length() - 3);
+            }
+
+            // Validate after trimming
+            start_clean = trim(start_clean);
+            end_clean = trim(end_clean);
+            if (start_clean.empty() || end_clean.empty()) {
+                return (t >= 0.5f) ? end_value : start_value;
+            }
+
+            float start_angle = std::stof(start_clean);
+            float end_angle = std::stof(end_clean);
+            float result = interpolate_float(start_angle, end_angle, t);
+
+            char buf[64];
+            snprintf(buf, sizeof(buf), "rotate(%.2fdeg)", result);
+            return buf;
+        }
+        else if (start_func == "translate") {
+        // translate(Xpx, Ypx) - parse two values
+        // Simple implementation: assume format "Xpx, Ypx" or "Xpx"
+        auto split_args = [](const std::string& args) -> std::pair<float, float> {
+            size_t comma = args.find(',');
+            if (comma != std::string::npos) {
+                std::string x_str = args.substr(0, comma);
+                std::string y_str = args.substr(comma + 1);
+
+                // Remove 'px' suffix
+                if (ends_with(x_str, "px")) x_str = x_str.substr(0, x_str.length() - 2);
+                if (ends_with(y_str, "px")) y_str = y_str.substr(0, y_str.length() - 2);
+
+                x_str = trim(x_str);
+                y_str = trim(y_str);
+                if (x_str.empty() || y_str.empty()) {
+                    return {0.0f, 0.0f};
+                }
+                return {std::stof(x_str), std::stof(y_str)};
+            } else {
+                // Single value
+                std::string x_str = args;
+                if (ends_with(x_str, "px")) x_str = x_str.substr(0, x_str.length() - 2);
+                x_str = trim(x_str);
+                if (x_str.empty()) {
+                    return {0.0f, 0.0f};
+                }
+                return {std::stof(x_str), 0.0f};
+            }
+        };
+
+        auto [start_x, start_y] = split_args(start_args);
+        auto [end_x, end_y] = split_args(end_args);
+
+        float result_x = interpolate_float(start_x, end_x, t);
+        float result_y = interpolate_float(start_y, end_y, t);
+
+        char buf[64];
+        snprintf(buf, sizeof(buf), "translate(%.2fpx, %.2fpx)", result_x, result_y);
+        return buf;
+        }
+
+        // Unknown transform function - snap at t=0.5
+        return (t >= 0.5f) ? end_value : start_value;
+    } catch (const std::exception& e) {
+        // Failed to parse or interpolate transform - snap at t=0.5
+        return (t >= 0.5f) ? end_value : start_value;
+    }
+}
+
 std::string interpolate_value(const std::string& start_value,
                                const std::string& end_value,
                                float t) {
@@ -595,6 +758,17 @@ std::string interpolate_value(const std::string& start_value,
                     (int)(result.b * 255),
                     result.a);
             return buf;
+        }
+
+        // Check if both values are transform functions
+        if ((start_trimmed.find("scale(") != std::string::npos ||
+             start_trimmed.find("rotate(") != std::string::npos ||
+             start_trimmed.find("translate(") != std::string::npos) &&
+            (end_trimmed.find("scale(") != std::string::npos ||
+             end_trimmed.find("rotate(") != std::string::npos ||
+             end_trimmed.find("translate(") != std::string::npos)) {
+            // Transform interpolation
+            return interpolate_transform(start_trimmed, end_trimmed, t);
         }
 
         // Try numeric interpolation
@@ -674,12 +848,24 @@ bool parse_transition(const std::string& transition_css,
     // Second part: duration
     if (parts.size() > 1) {
         std::string duration_str = parts[1];
-        if (ends_with(duration_str, "s")) {
-            out_duration = std::stof(duration_str.substr(0, duration_str.length() - 1));
-        } else if (ends_with(duration_str, "ms")) {
-            out_duration = std::stof(duration_str.substr(0, duration_str.length() - 2)) / 1000.0f;
-        } else {
-            out_duration = std::stof(duration_str);  // Assume seconds
+        try {
+            if (ends_with(duration_str, "ms")) {
+                if (duration_str.length() > 2) {
+                    out_duration = std::stof(duration_str.substr(0, duration_str.length() - 2)) / 1000.0f;
+                } else {
+                    out_duration = 0.0f;
+                }
+            } else if (ends_with(duration_str, "s")) {
+                if (duration_str.length() > 1) {
+                    out_duration = std::stof(duration_str.substr(0, duration_str.length() - 1));
+                } else {
+                    out_duration = 0.0f;
+                }
+            } else {
+                out_duration = std::stof(duration_str);  // Assume seconds
+            }
+        } catch (const std::exception&) {
+            out_duration = 0.0f;
         }
     } else {
         out_duration = 0.0f;

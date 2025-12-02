@@ -1,5 +1,6 @@
 #include <flexui/tabbar.h>
 #include <nanovg_css_internal.h>
+#include <fmtlog.h>
 #include <algorithm>
 
 namespace flexui {
@@ -20,10 +21,14 @@ void TabBar::draw(NVGcontext* vg) {
 
     float tabWidth = w / tabs_.size();
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     // Background
     nvgBeginPath(vg);
     nvgRect(vg, x, y, w, h);
-    nvgFillColor(vg, style_.bgColor);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Draw each tab
@@ -46,10 +51,10 @@ void TabBar::draw(NVGcontext* vg) {
         }
 
         // Tab text
-        nvgFontSize(vg, style_.fontSize);
+        nvgFontSize(vg, fontSize);
         nvgFontFace(vg, "sans-serif");
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg, isActive ? style_.activeTextColor : style_.textColor);
+        nvgFillColor(vg, isActive ? style_.activeTextColor : textColor);
         nvgText(vg, tx + tabWidth / 2, y + h / 2, tabs_[i].c_str(), nullptr);
 
         // Active indicator (bottom line)
@@ -94,8 +99,44 @@ int TabBar::getTabAtPosition(float mx, float my) {
 void TabBar::setActiveTab(int index) {
     if (index >= 0 && index < (int)tabs_.size() && index != activeTab_) {
         activeTab_ = index;
+        updatePageVisibility();
         if (callback_) {
             callback_(index, tabs_[index]);
+        }
+    }
+}
+
+void TabBar::registerPage(int tabIndex, Widget* page) {
+    if (tabIndex < 0 || !page) return;
+
+    // Expand pages_ vector if needed
+    if (tabIndex >= (int)pages_.size()) {
+        pages_.resize(tabIndex + 1, nullptr);
+    }
+    pages_[tabIndex] = page;
+    updatePageVisibility();
+}
+
+void TabBar::registerPages(const std::vector<Widget*>& pages) {
+    pages_ = pages;
+    updatePageVisibility();
+}
+
+void TabBar::updatePageVisibility() {
+    logi("[TABBAR] updatePageVisibility called, activeTab_={}", activeTab_);
+    for (size_t i = 0; i < pages_.size(); ++i) {
+        if (pages_[i]) {
+            if ((int)i == activeTab_) {
+                // Active page: show with flex display
+                logi("[TABBAR] Page {} '{}': SHOW (display: flex)", i, pages_[i]->id());
+                pages_[i]->removeClass("page-hidden");
+                pages_[i]->setInlineStyle("display", "flex");
+            } else {
+                // Inactive pages: hide with display none
+                logi("[TABBAR] Page {} '{}': HIDE (display: none)", i, pages_[i]->id());
+                pages_[i]->addClass("page-hidden");
+                pages_[i]->setInlineStyle("display", "none");
+            }
         }
     }
 }

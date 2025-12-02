@@ -8,50 +8,63 @@ Checkbox::Checkbox(NVGCSSRenderer* renderer, const std::string& id, bool initial
                    const CheckboxStyle& style)
     : Widget(renderer, id, "checkbox"), checked_(initialState), style_(style) {
 
-    // Set up click handler to toggle state
-    setClickCallback([this](Widget*) {
-        checked_ = !checked_;
-        if (change_callback_) {
-            change_callback_(checked_);
-        }
-        return true;
-    });
+    if (checked_) {
+        addClass("checked");
+    }
 }
 
 void Checkbox::draw(NVGcontext* vg) {
     auto* el = element();
     float x = el->computed.x;
     float y = el->computed.y;
-    float size = std::min(el->computed.width, el->computed.height); // Use smaller dimension
+    float size = std::min(el->computed.width, el->computed.height);
+
+    NVGcolor fallbackBg = checked_ ? style_.bgColorChecked : style_.bgColorUnchecked;
+    NVGcolor bgColor = cssBackground(fallbackBg);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float borderWidth = cssBorderWidth(style_.borderWidth);
+    NVGcolor fallbackBorder = checked_ ? style_.borderColorChecked : style_.borderColorUnchecked;
+    NVGcolor borderColor = cssBorderColor(fallbackBorder);
 
     // Checkbox box
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, size, size, style_.borderRadius);
-    nvgFillColor(vg, checked_ ? style_.bgColorChecked : style_.bgColorUnchecked);
+    nvgRoundedRect(vg, x, y, size, size, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Border
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, size, size, style_.borderRadius);
-    nvgStrokeColor(vg, checked_ ? style_.borderColorChecked : style_.borderColorUnchecked);
-    nvgStrokeWidth(vg, style_.borderWidth);
+    nvgRoundedRect(vg, x, y, size, size, borderRadius);
+    nvgStrokeColor(vg, borderColor);
+    nvgStrokeWidth(vg, borderWidth);
     nvgStroke(vg);
 
     // Checkmark if checked
     if (checked_) {
+        NVGcolor checkColor = cssColor(style_.checkmarkColor);
+        float checkWidth = el->style.svg_stroke.width > 0 ? el->style.svg_stroke.width : style_.checkmarkWidth;
+
         float margin = size * 0.25f;
         nvgBeginPath(vg);
         nvgMoveTo(vg, x + margin, y + size * 0.5f);
         nvgLineTo(vg, x + size * 0.42f, y + size * 0.67f);
         nvgLineTo(vg, x + size - margin, y + size * 0.33f);
-        nvgStrokeColor(vg, style_.checkmarkColor);
-        nvgStrokeWidth(vg, style_.checkmarkWidth);
+        nvgStrokeColor(vg, checkColor);
+        nvgStrokeWidth(vg, checkWidth);
         nvgStroke(vg);
     }
 }
 
-bool Checkbox::handleCheckboxClick(float mx, float my) {
-    return handleClick(mx, my);
+bool Checkbox::onClicked() {
+    // Toggle checked state
+    checked_ = !checked_;
+    if (checked_) addClass("checked"); else removeClass("checked");
+
+    // Trigger change callback
+    if (change_callback_) change_callback_(checked_);
+
+    // Call base to trigger user click callback
+    return Widget::onClicked();
 }
 
 } // namespace flexui

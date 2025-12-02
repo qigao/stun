@@ -34,6 +34,9 @@ public:
     // Set Screen pointer for group management
     void setScreen(class Screen* screen) { screen_ = screen; }
 
+protected:
+    bool onClicked() override;
+
 private:
     std::string group_;   // Radio group name (like HTML name attribute)
     std::string value_;   // Value when selected

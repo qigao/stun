@@ -25,16 +25,21 @@ void Chip::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     // Draw chip background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Draw text
-    nvgFontSize(vg, style_.fontSize);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
-    nvgFillColor(vg, style_.textColor);
+    nvgFillColor(vg, textColor);
     nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
     nvgText(vg, x + style_.padding, y + h / 2, text_.c_str(), nullptr);
 
@@ -47,7 +52,7 @@ void Chip::draw(NVGcontext* vg) {
         nvgLineTo(vg, cx + 4, cy + 4);
         nvgMoveTo(vg, cx + 4, cy - 4);
         nvgLineTo(vg, cx - 4, cy + 4);
-        nvgStrokeColor(vg, style_.textColor);
+        nvgStrokeColor(vg, textColor);
         nvgStrokeWidth(vg, 1.5f);
         nvgStroke(vg);
     }

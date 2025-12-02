@@ -18,16 +18,21 @@ void Badge::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     // Draw badge background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Draw badge text
-    nvgFontSize(vg, style_.fontSize);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
-    nvgFillColor(vg, style_.textColor);
+    nvgFillColor(vg, textColor);
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgText(vg, x + w / 2, y + h / 2, text_.c_str(), nullptr);
 }

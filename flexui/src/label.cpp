@@ -14,10 +14,13 @@ void Label::draw(NVGcontext* vg) {
     float y = el->computed.y;
     float h = el->computed.height;
 
-    nvgFontSize(vg, style_.fontSize);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
     nvgTextAlign(vg, style_.textAlign);
-    nvgFillColor(vg, style_.textColor);
+    nvgFillColor(vg, textColor);
 
     // Center vertically in the element's height
     float textY = y + h / 2;

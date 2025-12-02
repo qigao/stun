@@ -4,13 +4,18 @@
 
 #include "nanovg_css_internal.h"
 #include "lexbor_css_parser.h"
+#include "nanovg_css_quadtree.h"
 #include <fmtlog.h>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
 #include <vector>
-#include <fstream> 
+#include <fstream>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 // ============================================================================
 // Z-Index Rendering (Sprint 10)
 // ============================================================================
@@ -122,6 +127,14 @@ static void collect_elements_for_render(
 {
     if (!element->visible) return;
 
+    // display: none removes element AND all descendants from render tree
+    if (element->style.display == nvgcss::Display::NONE) {
+        if (element->id.find("page-") != std::string::npos) {
+            logi("[RENDER] Skipping '{}' - display=NONE", element->id);
+        }
+        return;
+    }
+
     RenderOrder order;
     order.depth = depth;
     order.is_positioned = (element->explicit_style.position != "static" &&
@@ -216,7 +229,6 @@ NVGCSSComputedLayout::NVGCSSComputedLayout() {
 NVGCSSRenderer::NVGCSSRenderer(NVGcontext* vg) : vg(vg) {
     stylesheet = std::make_unique<nanovg_css::lexbor::EnhancedStyleSheet>();
     painter = std::make_unique<NVGCSSPainter>(vg, this);
-    layout_engine = std::make_unique<NVGCSSLayoutEngine>(viewport_width, viewport_height);
     current_time = 0.0f;
 }
 
@@ -324,6 +336,72 @@ NVGCSSElement* nvgcssCreateElement(NVGCSSRenderer* renderer,
     renderer->layout_dirty = true;
 
     return ptr;
+}
+
+NVGCSSElement* nvgcssCreateMarker(NVGCSSRenderer* renderer,
+                                   const char* id,
+                                   float markerWidth,
+                                   float markerHeight,
+                                   float refX,
+                                   float refY,
+                                   const char* orient) {
+    if (!renderer || !id) return nullptr;
+    
+    // Create marker definition
+    NVGCSSMarker marker;
+    marker.id = id;
+    marker.markerWidth = markerWidth;
+    marker.markerHeight = markerHeight;
+    marker.refX = refX;
+    marker.refY = refY;
+    marker.orient = orient ? orient : "0";
+    
+    // Store marker in registry
+    renderer->markers_[id] = marker;
+    
+    // Create a marker element (container for marker content)
+    NVGCSSElement* marker_element = nvgcssCreateElement(renderer, id, "marker");
+    
+    return marker_element;
+}
+
+NVGCSSElement* nvgcssCreateClipPath(NVGCSSRenderer* renderer, const char* id) {
+    if (!renderer || !id) return nullptr;
+    
+    // Create clip path definition
+    NVGCSSClipPath clip_path;
+    clip_path.id = id;
+    
+    // Store in registry
+    renderer->clip_paths_[id] = clip_path;
+    
+    // Create clip path element (container for clip shapes)
+    NVGCSSElement* clip_element = nvgcssCreateElement(renderer, id, "clipPath");
+    
+    return clip_element;
+}
+
+NVGCSSElement* nvgcssCreatePattern(NVGCSSRenderer* renderer,
+                                   const char* id,
+                                   float x, float y,
+                                   float width, float height) {
+    if (!renderer || !id) return nullptr;
+    
+    // Create pattern definition
+    NVGCSSPattern pattern;
+    pattern.id = id;
+    pattern.x = x;
+    pattern.y = y;
+    pattern.width = width;
+    pattern.height = height;
+    
+    // Store in registry
+    renderer->patterns_[id] = pattern;
+    
+    // Create pattern element (container for pattern content)
+    NVGCSSElement* pattern_element = nvgcssCreateElement(renderer, id, "pattern");
+    
+    return pattern_element;
 }
 
 /**
@@ -443,6 +521,7 @@ void nvgcssAddClass(NVGCSSElement* element, const char* class_name) {
     auto it = std::find(element->classes.begin(), element->classes.end(), class_name);
     if (it == element->classes.end()) {
         element->classes.push_back(class_name);
+        element->dirty_flags |= nvgcss::DIRTY_STYLE | nvgcss::DIRTY_LAYOUT;
     }
 }
 
@@ -450,6 +529,7 @@ void nvgcssRemoveClass(NVGCSSElement* element, const char* class_name) {
     auto it = std::find(element->classes.begin(), element->classes.end(), class_name);
     if (it != element->classes.end()) {
         element->classes.erase(it);
+        element->dirty_flags |= nvgcss::DIRTY_STYLE | nvgcss::DIRTY_LAYOUT;
     }
 }
 
@@ -654,6 +734,31 @@ void nvgcssAppendChild(NVGCSSRenderer* renderer, NVGCSSElement* parent, NVGCSSEl
     // Sprint 30: Update indices of new parent's children
     update_child_indices(renderer, parent);
     
+    // SVG Markers: If parent is a marker, update marker registry
+    if (parent->type == "marker" && !parent->id.empty()) {
+        auto marker_it = renderer->markers_.find(parent->id);
+        if (marker_it != renderer->markers_.end()) {
+            marker_it->second.children_internal_ids = parent->children_internal_ids;
+        }
+    }
+    
+    // SVG ClipPaths: If parent is a clipPath, update clip path registry
+    if (parent->type == "clipPath" && !parent->id.empty()) {
+        auto clip_it = renderer->clip_paths_.find(parent->id);
+        if (clip_it != renderer->clip_paths_.end()) {
+            clip_it->second.children_internal_ids = parent->children_internal_ids;
+        }
+    }
+    
+    // SVG Patterns: If parent is a pattern, update pattern registry
+    if (parent->type == "pattern" && !parent->id.empty()) {
+        auto pattern_it = renderer->patterns_.find(parent->id);
+        if (pattern_it != renderer->patterns_.end()) {
+            pattern_it->second.children_internal_ids = parent->children_internal_ids;
+            pattern_it->second.needs_update = true;  // Mark for re-rendering
+        }
+    }
+    
     // Phase 3: Mark dirty
     parent->dirty_flags |= nvgcss::DIRTY_CHILDREN | nvgcss::DIRTY_LAYOUT;
     child->dirty_flags |= nvgcss::DIRTY_ALL;
@@ -697,6 +802,9 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
         TransitionState* trans_state = nullptr;
 
         // Phase 2: Compute typed style (60fps refactor)
+        // Preserve manually-set background if CSS doesn't override it
+        nvgcss::Background old_background = element->style.background;
+        
         element->style = renderer->stylesheet->compute_style_typed(
             element->id,
             element->type,
@@ -708,6 +816,22 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
             element->child_index,
             element->total_siblings
         );
+        
+        // If CSS returned transparent/none and we had a manually-set color, restore it
+        // Check both NONE and COLOR types since old code may have set color without changing type
+        bool css_has_no_background = (element->style.background.type == nvgcss::BackgroundType::NONE ||
+                                      (element->style.background.type == nvgcss::BackgroundType::COLOR &&
+                                       element->style.background.color.a == 0.0f));
+        bool had_manual_color = (old_background.type == nvgcss::BackgroundType::COLOR || 
+                                 old_background.color.a > 0.0f);
+        
+        if (css_has_no_background && had_manual_color) {
+            element->style.background = old_background;
+            // Fix type if it was NONE but had a color
+            if (element->style.background.type == nvgcss::BackgroundType::NONE) {
+                element->style.background.type = nvgcss::BackgroundType::COLOR;
+            }
+        }
 
         // Also get string-based style for transition/animation system (temporary)
         auto computed_style = renderer->stylesheet->compute_style(
@@ -842,6 +966,8 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
             if (!animation_exists) {
                 RunningAnimation new_anim = parse_animation_from_style(computed_style, renderer->current_time);
                 if (new_anim.active) {
+                    logi("[ANIMATION] Starting animation '{}' on element id='{}' duration={}s iterations={}",
+                         new_anim.animation_name, element->id, new_anim.duration, new_anim.iteration_count);
                     anim_state->running_animations.push_back(new_anim);
                 }
             }
@@ -913,6 +1039,9 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
                     for (const auto& [prop, value] : props) {
                         element->inline_style[prop] = value;
                     }
+                } else {
+                    logw("[ANIMATION] Keyframe animation '{}' not found for element id='{}'",
+                         anim.animation_name, element->id);
                 }
 
                 // Update iteration count
@@ -934,10 +1063,13 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
 
 
         // Recursively update children
+        // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+        // uses a static cache that gets overwritten by recursive calls
         int child_count = 0;
-        NVGCSSElement** children = nvgcssGetChildren(renderer, element, &child_count);
-        for (int i = 0; i < child_count; ++i) {
-            update_element(children[i]);
+        NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+        std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+        for (NVGCSSElement* child : children_copy) {
+            update_element(child);
         }
     };
 
@@ -1005,13 +1137,115 @@ int nvgcssIsDirty(const NVGCSSElement* element, int flags) {
 }
 
 void nvgcssRender(NVGCSSRenderer* renderer) {
- 
+
 
     // Compute layout if dirty
     if (renderer->layout_dirty || renderer->style_dirty) {
- 
+
         nvgcssComputeLayout(renderer);
- 
+
+    }
+
+    // TEMPORARY: Apply animation inline_style to computed layout AFTER layout calculation
+    // This is needed because layout engine overwrites element->computed
+    std::function<void(NVGCSSElement*)> apply_animation_properties = [](NVGCSSElement* element) {
+        // Apply border-radius from ComputedStyle (CSS classes) to deprecated computed layout
+        // The typed style system has border.radius, but painter uses computed.border_radius[]
+        // IMPORTANT: Negative values indicate percentages that need to be resolved
+        for (int i = 0; i < 4; ++i) {
+            if (element->style.border.radius[i] < 0) {
+                // Negative value = percentage (e.g., -50 means 50%)
+                // Resolve based on element dimensions (use smaller dimension for circles)
+                float percent = -element->style.border.radius[i];
+                float size = std::min(element->computed.width, element->computed.height);
+                element->computed.border_radius[i] = (percent / 100.0f) * size;
+            } else {
+                // Positive value = absolute pixels
+                element->computed.border_radius[i] = element->style.border.radius[i];
+            }
+        }
+
+        // Also check inline_style for animation overrides
+        auto border_radius_it = element->inline_style.find("border-radius");
+        if (border_radius_it != element->inline_style.end()) {
+            const std::string& radius_str = border_radius_it->second;
+            float radius = nvgcss_utils::parse_length(radius_str, 100.0f);
+            element->computed.border_radius[0] = radius;
+            element->computed.border_radius[1] = radius;
+            element->computed.border_radius[2] = radius;
+            element->computed.border_radius[3] = radius;
+        }
+
+        // Apply transform from inline_style (set by animations)
+        auto transform_it = element->inline_style.find("transform");
+        if (transform_it != element->inline_style.end()) {
+            const std::string& transform_str = transform_it->second;
+
+            // Reset to identity
+            element->transform[0] = 1.0f; element->transform[1] = 0.0f;
+            element->transform[2] = 0.0f; element->transform[3] = 1.0f;
+            element->transform[4] = 0.0f; element->transform[5] = 0.0f;
+
+            // Parse and apply transform
+            if (transform_str.find("rotate") != std::string::npos) {
+                size_t start = transform_str.find('(');
+                size_t end = transform_str.find("deg");
+                if (start != std::string::npos && end != std::string::npos) {
+                    std::string angle_str = transform_str.substr(start + 1, end - start - 1);
+                    float angle_deg = std::stof(angle_str);
+                    float angle_rad = angle_deg * (M_PI / 180.0f);
+                    float cos_a = std::cos(angle_rad);
+                    float sin_a = std::sin(angle_rad);
+                    element->transform[0] = cos_a;
+                    element->transform[1] = sin_a;
+                    element->transform[2] = -sin_a;
+                    element->transform[3] = cos_a;
+                }
+            } else if (transform_str.find("scale") != std::string::npos) {
+                size_t start = transform_str.find('(');
+                size_t end = transform_str.find(')');
+                if (start != std::string::npos && end != std::string::npos) {
+                    std::string scale_str = transform_str.substr(start + 1, end - start - 1);
+                    float scale = std::stof(scale_str);
+                    element->transform[0] = scale;
+                    element->transform[3] = scale;
+                }
+            } else if (transform_str.find("translateY") != std::string::npos) {
+                size_t start = transform_str.find('(');
+                size_t end = transform_str.find("px");
+                if (start != std::string::npos && end != std::string::npos) {
+                    std::string offset_str = transform_str.substr(start + 1, end - start - 1);
+                    float offset = std::stof(offset_str);
+                    element->transform[5] = offset;  // ty
+                }
+            } else if (transform_str.find("translateX") != std::string::npos) {
+                // Extract X offset from "translateX(-5px)" or "translateX(5px)"
+                size_t start = transform_str.find('(');
+                size_t end = transform_str.find("px");
+                if (start != std::string::npos && end != std::string::npos) {
+                    std::string offset_str = transform_str.substr(start + 1, end - start - 1);
+                    float offset = std::stof(offset_str);
+                    element->transform[4] = offset;  // tx
+                }
+            }
+        }
+    };
+
+    // Apply to all elements recursively
+    std::function<void(NVGCSSElement*)> apply_to_tree = [&](NVGCSSElement* element) {
+        apply_animation_properties(element);
+        // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+        // uses a static cache that gets overwritten by recursive calls
+        int child_count = 0;
+        NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+        std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+        for (NVGCSSElement* child : children_copy) {
+            apply_to_tree(child);
+        }
+    };
+
+    for (auto* root : renderer->root_elements) {
+        apply_to_tree(root);
     }
 
     // Phase 1: Collect all elements for rendering
@@ -1021,9 +1255,9 @@ void nvgcssRender(NVGCSSRenderer* renderer) {
         collect_elements_for_render(renderer, root, elements, tree_order);
     }
     
-    logi("[RENDER] Collected {} elements for rendering", elements.size());
+    logd("[RENDER] Collected {} elements for rendering", elements.size());
     for (const auto& [elem, order] : elements) {
-        logi("[RENDER]   - id='{}' type='{}' visible={} display={}", 
+        logd("[RENDER]   - id='{}' type='{}' visible={} display={}", 
              elem->id, elem->type, elem->visible, (int)elem->style.display);
     }
 
@@ -1065,6 +1299,7 @@ void nvgcssRenderElement(NVGCSSRenderer* renderer, const char* id) {
     // Recursively render element tree
     std::function<void(NVGCSSElement*)> render_tree = [&](NVGCSSElement* elem) {
         if (!elem->visible) return;
+        if (elem->style.display == nvgcss::Display::NONE) return;
 
         // Sprint 22: Check if overflow clipping is needed
         bool has_overflow_clip = (elem->explicit_style.overflow_x != "visible" ||
@@ -1084,10 +1319,13 @@ void nvgcssRenderElement(NVGCSSRenderer* renderer, const char* id) {
         renderer->painter->paint_element(elem);
 
         // Render children (within scissor region if set)
+        // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+        // uses a static cache that gets overwritten by recursive calls
         int child_count = 0;
-        NVGCSSElement** children = nvgcssGetChildren(renderer, elem, &child_count);
-        for (int i = 0; i < child_count; ++i) {
-            render_tree(children[i]);
+        NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, elem, &child_count);
+        std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+        for (NVGCSSElement* child : children_copy) {
+            render_tree(child);
         }
 
         // Restore state if we set scissor
@@ -1099,8 +1337,79 @@ void nvgcssRenderElement(NVGCSSRenderer* renderer, const char* id) {
     render_tree(element);
 }
 
-void nvgcssComputeLayout(NVGCSSRenderer* renderer) { 
-    renderer->layout_engine->compute_layout(renderer->root_elements, renderer);
+void nvgcssComputeLayout(NVGCSSRenderer* renderer) {
+    // Sync viewport dimensions to stylesheet for @media queries
+    bool viewport_changed = renderer->stylesheet->set_viewport(renderer->viewport_width, renderer->viewport_height);
+
+    // If viewport changed, styles must be recomputed (media queries may now match differently)
+    if (viewport_changed) {
+        renderer->style_dirty = true;
+    }
+
+    // Ensure styles are up-to-date before layout
+    if (renderer->style_dirty) {
+        std::function<void(NVGCSSElement*)> update_style = [&](NVGCSSElement* element) {
+            if (!element->visible) return;
+
+            // DEBUG: Log classes and inline styles for page elements
+            if (element->id.find("page-") != std::string::npos) {
+                std::string class_list;
+                for (const auto& cls : element->classes) {
+                    class_list += "'" + cls + "' ";
+                }
+                auto display_it = element->inline_style.find("display");
+                std::string inline_display = (display_it != element->inline_style.end())
+                    ? display_it->second : "(not set)";
+                logi("[LAYOUT] Element id='{}' classes=[{}] inline_style[display]='{}'",
+                     element->id, class_list, inline_display);
+            }
+
+            // Compute typed style
+            element->style = renderer->stylesheet->compute_style_typed(
+                element->id,
+                element->type,
+                element->classes,
+                element->attributes,
+                element->pseudo_states,
+                element->inline_style,
+                nullptr,  // TODO: parent style
+                element->child_index,
+                element->total_siblings
+            );
+
+            // DEBUG: Log computed display and flex-grow for key elements
+            if (element->id == "content" || element->id == "root" || element->id == "header" ||
+                element->id.find("page-") != std::string::npos) {
+                logi("[LAYOUT] Element id='{}' computed display={} flex_grow={:.1f}",
+                     element->id, (int)element->style.display, element->style.flex_grow);
+            }
+
+            // Recursively update children
+            // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
+            // uses a static cache that gets overwritten by recursive calls
+            int child_count = 0;
+            NVGCSSElement** children_ptr = nvgcssGetChildren(renderer, element, &child_count);
+            std::vector<NVGCSSElement*> children_copy(children_ptr, children_ptr + child_count);
+            for (NVGCSSElement* child : children_copy) {
+                update_style(child);
+            }
+        };
+
+        for (auto* root : renderer->root_elements) {
+            update_style(root);
+        }
+    }
+
+    // Use quadtree layout engine for all layouts (flex, grid, and block)
+    nvgcss::QuadtreeLayoutEngine qtEngine(renderer->viewport_width, renderer->viewport_height);
+    
+    for (auto* root : renderer->root_elements) {
+        nvgcss::LayoutNode* tree = qtEngine.build_tree(root, renderer);
+        qtEngine.compute_layout(tree, renderer);
+        qtEngine.write_to_elements(tree);
+        delete tree;
+    }
+    
     renderer->layout_dirty = false;
     renderer->style_dirty = false;
 }
@@ -1143,8 +1452,8 @@ float nvgcssParseLength(const char* length_str, float context_value) {
 void nvgcssSetViewport(NVGCSSRenderer* renderer, float width, float height) {
     renderer->viewport_width = width;
     renderer->viewport_height = height;
-    renderer->layout_engine->set_viewport(width, height);
     renderer->layout_dirty = true;
+    renderer->style_dirty = true;  // @media queries may change element styles
 }
 
 // ============================================================================

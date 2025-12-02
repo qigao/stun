@@ -15,6 +15,7 @@ class Widget;
 class TextBox;
 class RadioButton;
 class JSEngine;
+class SpatialIndex;
 
 class Screen {
 public:
@@ -88,10 +89,12 @@ private:
     std::unordered_map<std::string, EventHandler> event_handlers_;  // Handler name -> function
     std::unordered_map<std::string, std::vector<RadioButton*>> radio_groups_;  // Group name -> RadioButtons
     std::unique_ptr<JSEngine> js_engine_;  // JavaScript engine
+    std::unique_ptr<SpatialIndex> spatial_index_;  // Spatial index for fast widget lookup
     CustomDrawCallback custom_draw_callback_;
     TextBox* focused_textbox_ = nullptr;
     int width_, height_;
     int widget_counter_ = 0;
+    bool spatial_index_dirty_ = true;  // Flag to rebuild spatial index
 
     // XML parsing helpers
     Widget* parseXMLNode(void* node, Widget* parent);  // void* to avoid pugixml dependency in header

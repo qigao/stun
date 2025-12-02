@@ -1,36 +1,7 @@
 #include <flexui/screen.h>
 #include <flexui/widget.h>
 #include <flexui/textbox.h>
-#include <flexui/button.h>
-#include <flexui/checkbox.h>
-#include <flexui/label.h>
-#include <flexui/progressbar.h>
-#include <flexui/slider.h>
 #include <flexui/radiobutton.h>
-#include <flexui/divider.h>
-#include <flexui/imageview.h>
-#include <flexui/tabbar.h>
-#include <flexui/dropdown.h>
-#include <flexui/switch.h>
-#include <flexui/rating.h>
-#include <flexui/searchbox.h>
-#include <flexui/spinner.h>
-#include <flexui/alert.h>
-#include <flexui/badge.h>
-#include <flexui/card.h>
-#include <flexui/avatar.h>
-#include <flexui/chip.h>
-#include <flexui/toast.h>
-#include <flexui/breadcrumb.h>
-#include <flexui/pagination.h>
-#include <flexui/menu.h>
-#include <flexui/modal.h>
-#include <flexui/table.h>
-#include <flexui/iconbutton.h>
-#include <flexui/calendar.h>
-#include <flexui/colorpicker.h>
-#include <flexui/snackbar.h>
-#include <flexui/tablist.h>
 #include <flexui/jsengine.h>
 #include <glad/glad.h>
 
@@ -40,11 +11,15 @@
 #include <nanovg_css_internal.h>
 #include <fmtlog.h>
 #include <pugixml.hpp>
+#include "widget_factory.h"
+#include "xml_utils.h"
+#include "spatial_index.h"
 
 namespace flexui {
 
 Screen::Screen(int width, int height, const std::string& title)
-    : width_(width), height_(height) {
+    : width_(width), height_(height),
+      spatial_index_(std::make_unique<SpatialIndex>((float)width, (float)height)) {
     
     SDL_Init(SDL_INIT_VIDEO);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -210,7 +185,8 @@ bool Screen::pollEvents() {
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             float mx = (float)event.motion.x;
             float my = (float)event.motion.y;
-            for (auto& widget : widgets_) {
+            auto candidates = spatial_index_->query(mx, my);
+            for (auto* widget : candidates) {
                 widget->handleHover(mx, my);
                 widget->handleMouseMove(mx, my);
             }
@@ -219,7 +195,8 @@ bool Screen::pollEvents() {
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             float mx = (float)event.button.x;
             float my = (float)event.button.y;
-            for (auto& widget : widgets_) {
+            auto candidates = spatial_index_->query(mx, my);
+            for (auto* widget : candidates) {
                 widget->handleClick(mx, my);
                 widget->handleMouseDown(mx, my);
             }
@@ -228,7 +205,8 @@ bool Screen::pollEvents() {
         if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
             float mx = (float)event.button.x;
             float my = (float)event.button.y;
-            for (auto& widget : widgets_) {
+            auto candidates = spatial_index_->query(mx, my);
+            for (auto* widget : candidates) {
                 nvgcssSetPseudoState(widget->element(), "active", 0);
                 widget->handleMouseUp(mx, my);
             }
@@ -262,10 +240,35 @@ void Screen::draw() {
     nvgcssComputeLayout(renderer_);
     nvgcssRender(renderer_);
 
+    // Rebuild spatial index if dirty
+    if (spatial_index_dirty_) {
+        spatial_index_->clear();
+        for (auto& widget : widgets_) {
+            auto* elem = widget->element();
+            spatial_index_->insert(widget.get(), 
+                elem->computed.x, elem->computed.y,
+                elem->computed.width, elem->computed.height);
+        }
+        spatial_index_dirty_ = false;
+    }
+
     // Draw all widgets (for custom rendering)
     for (auto& widget : widgets_) {
         // Skip invisible widgets
         if (!widget->isVisible()) {
+            continue;
+        }
+        // Skip widgets with display: none (including those with hidden ancestors)
+        bool is_hidden = false;
+        NVGCSSElement* elem = widget->element();
+        while (elem) {
+            if (elem->style.display == nvgcss::Display::NONE) {
+                is_hidden = true;
+                break;
+            }
+            elem = nvgcssGetParent(renderer_, elem);
+        }
+        if (is_hidden) {
             continue;
         }
         widget->draw(vg_);
@@ -309,238 +312,30 @@ Widget* Screen::parseXMLNode(void* node_ptr, Widget* parent) {
     std::string tag = node.name();
     std::string id = node.attribute("id").as_string();
 
-    // Generate ID if not provided
     if (id.empty()) {
         id = tag + "_" + std::to_string(widget_counter_++);
     }
 
-    Widget* widget = nullptr;
-
-    // Create widget based on tag name
-    if (tag == "div" || tag == "container") {
-        widget = addWidget(id, "div");
-    } else if (tag == "button") {
-        std::string text = node.text().as_string();
-        widget = createWidget<Button>(id, text);
-        widget_map_[id] = widget;
-    } else if (tag == "label") {
-        std::string text = node.text().as_string();
-        widget = createWidget<Label>(id, text);
-        widget_map_[id] = widget;
-    } else if (tag == "input" || tag == "textbox") {
-        std::string placeholder = node.attribute("placeholder").as_string();
-        widget = createWidget<TextBox>(id, placeholder);
-        widget_map_[id] = widget;
-    } else if (tag == "checkbox") {
-        bool checked = node.attribute("checked").as_bool(false);
-        widget = createWidget<Checkbox>(id, checked);
-        widget_map_[id] = widget;
-    } else if (tag == "progressbar") {
-        float progress = node.attribute("value").as_float(0.0f);
-        widget = createWidget<ProgressBar>(id, progress);
-        widget_map_[id] = widget;
-    } else if (tag == "slider") {
-        float value = node.attribute("value").as_float(0.5f);
-        float min = node.attribute("min").as_float(0.0f);
-        float max = node.attribute("max").as_float(1.0f);
-        widget = createWidget<Slider>(id, value, min, max);
-        widget_map_[id] = widget;
-    } else if (tag == "radio") {
-        std::string group = node.attribute("name").as_string();  // HTML uses "name" for grouping
-        std::string value = node.attribute("value").as_string();
-        bool checked = node.attribute("checked").as_bool(false);
-        widget = createWidget<RadioButton>(id, group, value, checked);
-        widget_map_[id] = widget;
-
-        // Set Screen pointer and register
-        auto* radio = static_cast<RadioButton*>(widget);
-        radio->setScreen(this);
-        registerRadioButton(radio);
-    } else if (tag == "hr" || tag == "divider") {
-        bool vertical = node.attribute("vertical").as_bool(false);
-        widget = createWidget<Divider>(id, vertical);
-        widget_map_[id] = widget;
-    } else if (tag == "img" || tag == "image") {
-        std::string src = node.attribute("src").as_string();
-        widget = createWidget<ImageView>(id, src);
-        widget_map_[id] = widget;
-    } else if (tag == "tabbar") {
-        std::vector<std::string> tabs;
-        std::string tabsAttr = node.attribute("tabs").as_string();
-        // Parse comma-separated tab names
-        if (!tabsAttr.empty()) {
-            size_t pos = 0;
-            while ((pos = tabsAttr.find(',')) != std::string::npos) {
-                std::string tab = tabsAttr.substr(0, pos);
-                // Trim whitespace
-                tab.erase(0, tab.find_first_not_of(" \t"));
-                tab.erase(tab.find_last_not_of(" \t") + 1);
-                tabs.push_back(tab);
-                tabsAttr.erase(0, pos + 1);
-            }
-            tabsAttr.erase(0, tabsAttr.find_first_not_of(" \t"));
-            tabsAttr.erase(tabsAttr.find_last_not_of(" \t") + 1);
-            if (!tabsAttr.empty()) tabs.push_back(tabsAttr);
-        }
-        widget = createWidget<TabBar>(id, tabs);
-        widget_map_[id] = widget;
-    } else if (tag == "select" || tag == "dropdown") {
-        std::vector<std::string> items;
-        std::string itemsAttr = node.attribute("items").as_string();
-        // Parse comma-separated items
-        if (!itemsAttr.empty()) {
-            size_t pos = 0;
-            while ((pos = itemsAttr.find(',')) != std::string::npos) {
-                std::string item = itemsAttr.substr(0, pos);
-                item.erase(0, item.find_first_not_of(" \t"));
-                item.erase(item.find_last_not_of(" \t") + 1);
-                items.push_back(item);
-                itemsAttr.erase(0, pos + 1);
-            }
-            itemsAttr.erase(0, itemsAttr.find_first_not_of(" \t"));
-            itemsAttr.erase(itemsAttr.find_last_not_of(" \t") + 1);
-            if (!itemsAttr.empty()) items.push_back(itemsAttr);
-        }
-        widget = createWidget<Dropdown>(id, items);
-        widget_map_[id] = widget;
-    } else if (tag == "switch" || tag == "toggle") {
-        bool on = node.attribute("on").as_bool(false);
-        widget = createWidget<Switch>(id, on);
-        widget_map_[id] = widget;
-    } else if (tag == "rating") {
-        int value = node.attribute("value").as_int(0);
-        widget = createWidget<Rating>(id, value);
-        widget_map_[id] = widget;
-    } else if (tag == "searchbox" || tag == "search") {
-        std::string placeholder = node.attribute("placeholder").as_string("Search...");
-        widget = createWidget<SearchBox>(id, placeholder);
-        widget_map_[id] = widget;
-    } else if (tag == "spinner") {
-        widget = createWidget<Spinner>(id);
-        widget_map_[id] = widget;
-    } else if (tag == "alert") {
-        std::string message = node.text().as_string();
-        std::string typeStr = node.attribute("type").as_string("info");
-        AlertType type = AlertType::Info;
-        if (typeStr == "success") type = AlertType::Success;
-        else if (typeStr == "warning") type = AlertType::Warning;
-        else if (typeStr == "error") type = AlertType::Error;
-        widget = createWidget<Alert>(id, message, type);
-        widget_map_[id] = widget;
-    } else if (tag == "badge") {
-        std::string text = node.text().as_string();
-        widget = createWidget<Badge>(id, text);
-        widget_map_[id] = widget;
-    } else if (tag == "card") {
-        widget = createWidget<Card>(id);
-        widget_map_[id] = widget;
-    } else if (tag == "avatar") {
-        std::string initials = node.text().as_string();
-        widget = createWidget<Avatar>(id, initials);
-        widget_map_[id] = widget;
-    } else if (tag == "chip") {
-        std::string text = node.text().as_string();
-        widget = createWidget<Chip>(id, text);
-        widget_map_[id] = widget;
-    } else if (tag == "toast") {
-        std::string message = node.text().as_string();
-        std::string typeStr = node.attribute("type").as_string("info");
-        ToastType type = ToastType::Info;
-        if (typeStr == "success") type = ToastType::Success;
-        else if (typeStr == "warning") type = ToastType::Warning;
-        else if (typeStr == "error") type = ToastType::Error;
-        widget = createWidget<Toast>(id, message, type);
-        widget_map_[id] = widget;
-    } else if (tag == "breadcrumb") {
-        // Parse items from comma-separated attribute or child elements
-        std::vector<std::string> items;
-        std::string itemsAttr = node.attribute("items").as_string();
-        if (!itemsAttr.empty()) {
-            size_t pos = 0;
-            while ((pos = itemsAttr.find(',')) != std::string::npos) {
-                std::string item = itemsAttr.substr(0, pos);
-                item.erase(0, item.find_first_not_of(" \t"));
-                item.erase(item.find_last_not_of(" \t") + 1);
-                items.push_back(item);
-                itemsAttr.erase(0, pos + 1);
-            }
-            itemsAttr.erase(0, itemsAttr.find_first_not_of(" \t"));
-            itemsAttr.erase(itemsAttr.find_last_not_of(" \t") + 1);
-            if (!itemsAttr.empty()) items.push_back(itemsAttr);
-        }
-        widget = createWidget<Breadcrumb>(id, items);
-        widget_map_[id] = widget;
-    } else if (tag == "pagination") {
-        int totalPages = node.attribute("total").as_int(1);
-        int currentPage = node.attribute("current").as_int(1);
-        widget = createWidget<Pagination>(id, totalPages, currentPage);
-        widget_map_[id] = widget;
-    } else if (tag == "menu") {
-        // Menu items will be added via child nodes or API calls
-        std::vector<MenuItem> items;
-        widget = createWidget<Menu>(id, items);
-        widget_map_[id] = widget;
-    } else if (tag == "modal") {
-        std::string title = node.attribute("title").as_string("Modal");
-        std::string content = node.text().as_string();
-        widget = createWidget<Modal>(id, title, content);
-        widget_map_[id] = widget;
-    } else if (tag == "table") {
-        // Table headers and column widths will be set via API
-        std::vector<std::string> headers;
-        std::vector<float> columnWidths;
-        widget = createWidget<Table>(id, headers, columnWidths);
-        widget_map_[id] = widget;
-    } else if (tag == "iconbutton") {
-        std::string icon = node.attribute("icon").as_string("☰");
-        widget = createWidget<IconButton>(id, icon);
-        widget_map_[id] = widget;
-    } else if (tag == "calendar") {
-        int year = node.attribute("year").as_int(2025);
-        int month = node.attribute("month").as_int(1);
-        widget = createWidget<Calendar>(id, year, month);
-        widget_map_[id] = widget;
-    } else if (tag == "colorpicker") {
-        widget = createWidget<ColorPicker>(id);
-        widget_map_[id] = widget;
-    } else if (tag == "snackbar") {
-        std::string message = node.text().as_string("Notification");
-        widget = createWidget<Snackbar>(id, message);
-        widget_map_[id] = widget;
-    } else if (tag == "tablist") {
-        std::vector<std::string> tabs;
-        std::string tabsAttr = node.attribute("tabs").as_string();
-        if (!tabsAttr.empty()) {
-            size_t pos = 0;
-            while ((pos = tabsAttr.find(',')) != std::string::npos) {
-                std::string tab = tabsAttr.substr(0, pos);
-                tab.erase(0, tab.find_first_not_of(" \t"));
-                tab.erase(tab.find_last_not_of(" \t") + 1);
-                tabs.push_back(tab);
-                tabsAttr.erase(0, pos + 1);
-            }
-            tabsAttr.erase(0, tabsAttr.find_first_not_of(" \t"));
-            tabsAttr.erase(tabsAttr.find_last_not_of(" \t") + 1);
-            if (!tabsAttr.empty()) tabs.push_back(tabsAttr);
-        }
-        widget = createWidget<TabList>(id, tabs);
-        widget_map_[id] = widget;
-    } else {
+    auto it = widget_factories.find(tag);
+    if (it == widget_factories.end()) {
         logw("Unknown tag: {}", tag);
         return nullptr;
     }
 
+    Widget* widget = it->second(renderer_, id, node, this);
     if (!widget) return nullptr;
 
-    // Apply XML attributes
+    widgets_.push_back(std::unique_ptr<Widget>(widget));
+    if (!id.empty()) {
+        widget_map_[id] = widget;
+    }
+
     applyXMLAttributes(widget, &node);
 
-    // Add to parent
     if (parent) {
         parent->addChild(widget);
     }
 
-    // Parse children recursively
     for (pugi::xml_node child : node.children()) {
         if (child.type() == pugi::node_element) {
             parseXMLNode(&child, widget);
@@ -560,28 +355,9 @@ void Screen::applyXMLAttributes(Widget* widget, void* node_ptr) {
 
     // Apply inline style attribute
     if (auto style_attr = node.attribute("style")) {
-        std::string style_str = style_attr.as_string();
-        // Parse style string (e.g., "display:none; color:red")
-        size_t pos = 0;
-        while (pos < style_str.length()) {
-            size_t colon_pos = style_str.find(':', pos);
-            if (colon_pos == std::string::npos) break;
-
-            size_t semicolon_pos = style_str.find(';', colon_pos);
-            if (semicolon_pos == std::string::npos) semicolon_pos = style_str.length();
-
-            std::string property = style_str.substr(pos, colon_pos - pos);
-            std::string value = style_str.substr(colon_pos + 1, semicolon_pos - colon_pos - 1);
-
-            // Trim whitespace
-            property.erase(0, property.find_first_not_of(" \t"));
-            property.erase(property.find_last_not_of(" \t") + 1);
-            value.erase(0, value.find_first_not_of(" \t"));
-            value.erase(value.find_last_not_of(" \t") + 1);
-
+        auto styles = xml_utils::parse_inline_style(style_attr.as_string());
+        for (const auto& [property, value] : styles) {
             widget->setInlineStyle(property, value);
-
-            pos = semicolon_pos + 1;
         }
     }
 

@@ -15,24 +15,27 @@ void Card::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+
     nvgSave(vg);
 
     // Shadow
     NVGpaint shadowPaint = nvgBoxGradient(vg, x, y + 2, w, h,
-                                          style_.borderRadius, style_.shadowBlur,
+                                          borderRadius, style_.shadowBlur,
                                           style_.shadowColor, nvgRGBA(0, 0, 0, 0));
     nvgBeginPath(vg);
     nvgRect(vg, x - style_.shadowBlur, y - style_.shadowBlur,
             w + style_.shadowBlur * 2, h + style_.shadowBlur * 2);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
     nvgPathWinding(vg, NVG_HOLE);
     nvgFillPaint(vg, shadowPaint);
     nvgFill(vg);
 
     // Card background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     nvgRestore(vg);

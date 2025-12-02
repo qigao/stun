@@ -131,19 +131,28 @@ void nvgRoughCircle(NVGcontext* vg, float cx, float cy, float radius, NVGRoughOp
     nvgRoughEllipse(vg, cx, cy, radius, radius, opts);
 }
 
-// Draw rough ellipse
+// Helper to get a point on an ellipse
+static void get_ellipse_point(float cx, float cy, float rx, float ry, float angle, float* out_x, float* out_y) {
+    *out_x = cx + rx * cosf(angle);
+    *out_y = cy + ry * sinf(angle);
+}
+
+// Draw rough ellipse using Bezier curves (closer to rough.js/Excalidraw)
 void nvgRoughEllipse(NVGcontext* vg, float cx, float cy, float rx, float ry, NVGRoughOptions opts) {
     RoughRandom rng;
     rough_random_init(&rng, opts.seed);
     
-    // Fill first if enabled
+    // Fill first if enabled (same as before)
     if (opts.fill_enabled) {
-        // Hachure fill (parallel lines)
+        // ... (keep existing fill logic or simplify) ...
+        // For brevity, keeping the existing fill logic but wrapping it to avoid code duplication if possible.
+        // Actually, let's keep the fill logic as is for now, it's the stroke that needs fixing.
         float angle = rough_random_range(&rng, 0, M_PI);
-        float gap = 4.0f;
+        float gap = 4.0f; // TODO: Make configurable
         
         nvgSave(vg);
-        nvgScissor(vg, cx - rx, cy - ry, rx * 2, ry * 2);
+        nvgScissor(vg, cx - rx - opts.stroke_width, cy - ry - opts.stroke_width, 
+                       rx * 2 + opts.stroke_width * 2, ry * 2 + opts.stroke_width * 2);
         
         nvgStrokeWidth(vg, 1.0f);
         NVGcolor fill_stroke = opts.fill_color;
@@ -168,31 +177,105 @@ void nvgRoughEllipse(NVGcontext* vg, float cx, float cy, float rx, float ry, NVG
     
     // Stroke
     if (opts.stroke_enabled) {
-        int segments = 32;
-        
-        nvgStrokeWidth(vg, opts.stroke_width);
-        nvgStrokeColor(vg, opts.stroke_color);
         nvgLineCap(vg, NVG_ROUND);
         nvgLineJoin(vg, NVG_ROUND);
         
+        float roughness = opts.roughness;
+        
         for (int stroke = 0; stroke < opts.stroke_count; stroke++) {
+            // Randomize stroke width slightly for each pass to create variable thickness effect
+            // Variation: +/- 20% of base width
+            float random_width = opts.stroke_width * rough_random_range(&rng, 0.8f, 1.2f);
+            nvgStrokeWidth(vg, random_width);
+            
+            // Optional: slight color variation could also be added here
+            nvgStrokeColor(vg, opts.stroke_color);
+
+            // Randomize the ellipse parameters slightly for each stroke
+            float current_rx = rx + rough_random_range(&rng, -roughness, roughness);
+            float current_ry = ry + rough_random_range(&rng, -roughness, roughness);
+            float current_cx = cx + rough_random_range(&rng, -roughness, roughness);
+            float current_cy = cy + rough_random_range(&rng, -roughness, roughness);
+            
+            // Random start angle to avoid all strokes starting at 0
+            float start_angle = rough_random_range(&rng, 0, M_PI * 2);
+            
             nvgBeginPath(vg);
             
-            for (int i = 0; i <= segments; i++) {
-                float angle = (float)i / (float)segments * 2.0f * M_PI;
-                float x = cx + cosf(angle) * rx;
-                float y = cy + sinf(angle) * ry;
+            // 4 segments for the ellipse
+            // Kappa for 4-segment bezier approximation of ellipse is (4/3) * tan(pi/8) approx 0.55228
+            const float kappa = 0.55228f;
+            
+            float px, py;
+            get_ellipse_point(current_cx, current_cy, current_rx, current_ry, start_angle, &px, &py);
+            nvgMoveTo(vg, px, py);
+            
+            for (int i = 1; i <= 4; i++) {
+                float angle1 = start_angle + (i - 1) * (M_PI / 2);
+                float angle2 = start_angle + i * (M_PI / 2);
                 
-                // Add roughness
-                float roughness = opts.roughness * 2.0f;
-                x += rough_random_range(&rng, -roughness, roughness);
-                y += rough_random_range(&rng, -roughness, roughness);
+                // Calculate control points for perfect ellipse
+                float p1x, p1y, p2x, p2y, p3x, p3y;
                 
-                if (i == 0) {
-                    nvgMoveTo(vg, x, y);
-                } else {
-                    nvgLineTo(vg, x, y);
+                // Start point (already at p1 from previous move/curve)
+                get_ellipse_point(current_cx, current_cy, current_rx, current_ry, angle1, &p1x, &p1y);
+                
+                // End point
+                get_ellipse_point(current_cx, current_cy, current_rx, current_ry, angle2, &p3x, &p3y);
+                
+                // Derivative vectors for control points
+                // dx/dtheta = -rx sin(theta), dy/dtheta = ry cos(theta)
+                float dx1 = -current_rx * sinf(angle1);
+                float dy1 = current_ry * cosf(angle1);
+                float dx2 = -current_rx * sinf(angle2);
+                float dy2 = current_ry * cosf(angle2);
+                
+                // Control points
+                float cp1x = p1x + dx1 * kappa;
+                float cp1y = p1y + dy1 * kappa;
+                float cp2x = p3x - dx2 * kappa;
+                float cp2y = p3y - dy2 * kappa;
+                
+                // Add roughness to control points and end point
+                // We don't perturb the start point heavily to ensure continuity, 
+                // but we perturb the control points to change the curve shape.
+                
+                float r = roughness * 1.5f; // Scale roughness
+                
+                cp1x += rough_random_range(&rng, -r, r);
+                cp1y += rough_random_range(&rng, -r, r);
+                cp2x += rough_random_range(&rng, -r, r);
+                cp2y += rough_random_range(&rng, -r, r);
+                
+                // Only perturb end point if it's not the very last point (to close the loop somewhat cleanly, 
+                // though Excalidraw often leaves a gap/overlap)
+                // Actually, let's perturb it, and rely on the next segment starting there.
+                // But wait, nvgBezierTo doesn't take a start point, it uses current pos.
+                // So we must NOT perturb the target point of the previous segment if we want C0 continuity.
+                // However, for "sketchy" look, C0 continuity is good.
+                
+                // But we want the *shape* to be rough.
+                // Let's just perturb the control points.
+                
+                // Also, let's add a bit of "bowing" or random offset to the end point, 
+                // but we need to track it for the next segment.
+                // For simplicity in this implementation, we'll stick to perturbed control points 
+                // and slightly perturbed radius/center per stroke (done above).
+                
+                // To make it look more "hand drawn", we can extend the last segment slightly past the start
+                // or leave a gap.
+                
+                if (i == 4) {
+                    // Last segment: close the loop but maybe overshoot slightly
+                    float overshoot = rough_random_range(&rng, -0.1f, 0.2f); // -10% to +20% of segment
+                    if (overshoot > 0) {
+                        // Extend p3 slightly along the tangent
+                        p3x += dx2 * overshoot;
+                        p3y += dy2 * overshoot;
+                    }
                 }
+                
+                nvgBezierTo(vg, cp1x, cp1y, cp2x, cp2y, p3x, p3y);
             }
             
             nvgStroke(vg);

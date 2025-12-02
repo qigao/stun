@@ -15,10 +15,15 @@ void Dropdown::draw(NVGcontext* vg) {
     float w = el->computed.width;
     float h = el->computed.height;
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     // Main button background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
     nvgStrokeColor(vg, style_.borderColor);
     nvgStrokeWidth(vg, 1);
@@ -26,10 +31,10 @@ void Dropdown::draw(NVGcontext* vg) {
 
     // Selected text
     if (selected_index_ >= 0 && selected_index_ < (int)items_.size()) {
-        nvgFontSize(vg, style_.fontSize);
+        nvgFontSize(vg, fontSize);
         nvgFontFace(vg, "sans-serif");
         nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-        nvgFillColor(vg, style_.textColor);
+        nvgFillColor(vg, textColor);
         nvgText(vg, x + style_.padding, y + h / 2, items_[selected_index_].c_str(), nullptr);
     }
 
@@ -61,8 +66,8 @@ void Dropdown::draw(NVGcontext* vg) {
 
         // List background with shadow
         nvgBeginPath(vg);
-        nvgRoundedRect(vg, x, listY, w, listHeight, style_.borderRadius);
-        nvgFillColor(vg, style_.bgColor);
+        nvgRoundedRect(vg, x, listY, w, listHeight, borderRadius);
+        nvgFillColor(vg, bgColor);
         nvgFill(vg);
         nvgStrokeColor(vg, style_.borderColor);
         nvgStrokeWidth(vg, 1);
@@ -75,10 +80,9 @@ void Dropdown::draw(NVGcontext* vg) {
             // Hover background
             if ((int)i == hover_index_) {
                 nvgBeginPath(vg);
-                if (i == 0) {
-                    nvgRoundedRect(vg, x, itemY, w, style_.itemHeight, style_.borderRadius);
-                } else if (i == items_.size() - 1) {
-                    nvgRoundedRect(vg, x, itemY, w, style_.itemHeight, style_.borderRadius);
+                bool isFirstOrLast = (i == 0) || (i == items_.size() - 1);
+                if (isFirstOrLast) {
+                    nvgRoundedRect(vg, x, itemY, w, style_.itemHeight, borderRadius);
                 } else {
                     nvgRect(vg, x, itemY, w, style_.itemHeight);
                 }
@@ -87,10 +91,10 @@ void Dropdown::draw(NVGcontext* vg) {
             }
 
             // Item text
-            nvgFontSize(vg, style_.fontSize);
+            nvgFontSize(vg, fontSize);
             nvgFontFace(vg, "sans-serif");
             nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgFillColor(vg, style_.textColor);
+            nvgFillColor(vg, textColor);
             nvgText(vg, x + style_.padding, itemY + style_.itemHeight / 2, items_[i].c_str(), nullptr);
         }
     }

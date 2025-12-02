@@ -2,10 +2,12 @@
 #include "nanovg_css_internal.h"
 #include "nanovg_css_types.h"
 #include "nanovg_css_conversion.h"
+#include "nanovg_css_defaults.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <fmtlog.h>
 
 namespace nanovg_css {
 namespace lexbor {
@@ -119,10 +121,32 @@ LexborSelectorMatcher::parse_selector(const std::string& selector) const {
             // Class selector
             i++;
             size_t start = i;
-            while (i < trimmed.size() && (std::isalnum(trimmed[i]) || trimmed[i] == '_' || trimmed[i] == '-')) {
-                i++;
+            std::string class_name;
+
+            // Parse class name with support for CSS escapes (\:, \/, etc.)
+            while (i < trimmed.size()) {
+                char ch = trimmed[i];
+
+                // Handle CSS escape sequences
+                if (ch == '\\' && i + 1 < trimmed.size()) {
+                    // Skip backslash and add the escaped character
+                    i++;
+                    class_name += trimmed[i];
+                    i++;
+                }
+                // Valid class name characters (NOTE: ':' is NOT included here, it's a pseudo-class separator)
+                else if (std::isalnum(ch) || ch == '_' || ch == '-' || ch == '/') {
+                    class_name += ch;
+                    i++;
+                }
+                else {
+                    break;  // End of class name (could be ':', '[', etc.)
+                }
             }
-            result.classes.push_back(trimmed.substr(start, i - start));
+
+            if (!class_name.empty()) {
+                result.classes.push_back(class_name);
+            }
         }
         else if (c == '[') {
             // Attribute selector
@@ -441,6 +465,25 @@ std::map<std::string, std::string> LexborStyleComputer::compute_style(
     const std::map<std::string, std::string>& inline_style,
     const std::map<std::string, std::string>& parent_style) const {
 
+    // DEBUG: Log element classes for page elements and content
+    bool debug_this = shape_id.find("page-") != std::string::npos ||
+                      shape_id == "content" || shape_id == "root" || shape_id == "header";
+    // Also debug elements with stat-* classes
+    for (const auto& cls : classes) {
+        if (cls.find("stat-") == 0 || cls == "stats-row") {
+            debug_this = true;
+            break;
+        }
+    }
+    if (debug_this) {
+        std::string class_list;
+        for (const auto& cls : classes) {
+            class_list += cls + ",";
+        }
+        logi("[STYLE] compute_style id='{}' type='{}' classes=[{}] rules_count={}",
+             shape_id, shape_type, class_list, rules.size());
+    }
+
     // 1. Start with default styles
     std::map<std::string, std::string> result = get_default_styles(shape_type);
 
@@ -455,6 +498,10 @@ std::map<std::string, std::string> LexborStyleComputer::compute_style(
         // Check if this rule's selector matches the element
         if (matcher_.matches(rule.selector, shape_id, shape_type, classes, attributes, pseudo_states)) {
             matching_rules.push_back({rule.specificity, &rule});
+            // DEBUG: Log matching rules
+            if (debug_this) {
+                logi("[STYLE]   MATCH: selector='{}' spec={}", rule.selector, rule.specificity);
+            }
         }
     }
 
@@ -474,6 +521,15 @@ std::map<std::string, std::string> LexborStyleComputer::compute_style(
     // 4. Apply inline styles (highest priority)
     for (const auto& [key, value] : inline_style) {
         result[key] = value;
+    }
+
+    // DEBUG: Log final computed style for key elements
+    if (debug_this) {
+        auto display_it = result.find("display");
+        auto height_it = result.find("height");
+        std::string display_val = (display_it != result.end()) ? display_it->second : "(not set)";
+        std::string height_val = (height_it != result.end()) ? height_it->second : "(auto)";
+        logi("[STYLE]   RESULT: id='{}' display='{}' height='{}'", shape_id, display_val, height_val);
     }
 
     return result;
@@ -496,33 +552,34 @@ bool LexborStyleComputer::is_inheritable(const std::string& property) const {
 
 std::map<std::string, std::string>
 LexborStyleComputer::get_default_styles(const std::string& shape_type) const {
+    using namespace nanovg_css::defaults;
+    
     std::map<std::string, std::string> defaults;
 
-    // Common defaults (CSS properties for nanovg_css)
-    // CSS default: background is transparent (not inherited)
-    defaults["background"] = "transparent";
-    defaults["color"] = "black";
-    defaults["opacity"] = "1";
+    // Common CSS defaults (W3C standards)
+    defaults["background"] = BACKGROUND;
+    defaults["color"] = COLOR;
+    defaults["opacity"] = OPACITY;
 
-    // SVG-style properties (for compatibility)
-    defaults["fill"] = "none";
-    defaults["stroke"] = "black";
-    defaults["stroke-width"] = "1";
+    // SVG defaults (SVG 2.0 standard)
+    defaults["fill"] = FILL;
+    defaults["stroke"] = STROKE;
+    defaults["stroke-width"] = STROKE_WIDTH;
 
     // Type-specific defaults
     if (shape_type == "text") {
-        defaults["font-family"] = "sans-serif";
-        defaults["font-size"] = "14";
-        defaults["font-weight"] = "normal";
-        defaults["text-align"] = "left";
-        defaults["color"] = "black";
-        defaults["fill"] = "black";  // SVG-style
-        defaults["background"] = "transparent";  // Text has no background by default
+        defaults["font-family"] = FONT_FAMILY;
+        defaults["font-size"] = FONT_SIZE;      // CSS standard: 16px
+        defaults["font-weight"] = FONT_WEIGHT;
+        defaults["text-align"] = TEXT_ALIGN;
+        defaults["color"] = COLOR;
+        defaults["fill"] = COLOR;               // Text fill matches color
+        defaults["background"] = BACKGROUND;
     } else if (shape_type == "rect" || shape_type == "circle" ||
                shape_type == "ellipse" || shape_type == "path") {
-        // SVG shapes default to gray fill (SVG-style)
-        defaults["fill"] = "#cccccc";
-        // But CSS background should still be transparent unless specified
+        // SVG shapes: SVG 2.0 standard (no default fill)
+        defaults["fill"] = FILL;                // SVG standard: none
+        defaults["stroke"] = STROKE;            // SVG standard: none
     }
 
     return defaults;
@@ -540,11 +597,129 @@ void LexborStyleComputer::apply_inheritance(
 }
 
 // ============================================================================
+// Helper: Expand animation shorthand property
+// ============================================================================
+
+/**
+ * @brief Expand animation shorthand into individual properties
+ *
+ * Format: animation: [name] [duration] [timing-function] [delay] [iteration-count] [direction] [fill-mode];
+ * Example: "spin 1s linear infinite" ->
+ *   - animation-name: spin
+ *   - animation-duration: 1s
+ *   - animation-timing-function: linear
+ *   - animation-iteration-count: infinite
+ */
+static void expand_animation_shorthand(const std::string& value,
+                                       std::map<std::string, std::string>& properties) {
+    std::istringstream iss(value);
+    std::vector<std::string> tokens;
+    std::string token;
+
+    // Split by whitespace
+    while (iss >> token) {
+        tokens.push_back(token);
+    }
+
+    if (tokens.empty()) return;
+
+    // Animation keywords for identification
+    std::set<std::string> timing_functions = {
+        "linear", "ease", "ease-in", "ease-out", "ease-in-out", "step-start", "step-end"
+    };
+    std::set<std::string> directions = {
+        "normal", "reverse", "alternate", "alternate-reverse"
+    };
+    std::set<std::string> fill_modes = {
+        "none", "forwards", "backwards", "both"
+    };
+    std::set<std::string> play_states = {
+        "running", "paused"
+    };
+
+    // Parse tokens
+    std::string name;
+    std::string duration;
+    std::string timing_function;
+    std::string delay;
+    std::string iteration_count;
+    std::string direction;
+    std::string fill_mode;
+
+    for (const auto& tok : tokens) {
+        // Check if it's a time value (duration or delay)
+        // Time values must start with a digit: "1s", "0.5s", "100ms"
+        // This prevents "spin", "pulse" from being treated as time values
+        if (!tok.empty() && std::isdigit(tok[0]) && tok.find('s') != std::string::npos) {
+            if (duration.empty()) {
+                duration = tok;
+            } else if (delay.empty()) {
+                delay = tok;
+            }
+        }
+        // Check if it's a timing function
+        else if (timing_functions.count(tok) || tok.find("cubic-bezier") != std::string::npos) {
+            timing_function = tok;
+        }
+        // Check if it's iteration count
+        else if (tok == "infinite" || std::isdigit(tok[0])) {
+            iteration_count = tok;
+        }
+        // Check if it's direction
+        else if (directions.count(tok)) {
+            direction = tok;
+        }
+        // Check if it's fill mode
+        else if (fill_modes.count(tok)) {
+            fill_mode = tok;
+        }
+        // Otherwise, it's the animation name (first non-keyword token)
+        else if (name.empty()) {
+            name = tok;
+        }
+    }
+
+    // Set properties with defaults
+    if (!name.empty()) {
+        properties["animation-name"] = name;
+    }
+    if (!duration.empty()) {
+        properties["animation-duration"] = duration;
+    }
+    if (!timing_function.empty()) {
+        properties["animation-timing-function"] = timing_function;
+    }
+    if (!delay.empty()) {
+        properties["animation-delay"] = delay;
+    }
+    if (!iteration_count.empty()) {
+        properties["animation-iteration-count"] = iteration_count;
+    }
+    if (!direction.empty()) {
+        properties["animation-direction"] = direction;
+    }
+    if (!fill_mode.empty()) {
+        properties["animation-fill-mode"] = fill_mode;
+    }
+}
+
+// ============================================================================
 // EnhancedStyleSheet Implementation
 // ============================================================================
 
 bool EnhancedStyleSheet::parse_css(const std::string& css) {
     clear_cache();
+
+    // DEBUG: Log CSS content to verify @keyframes are present
+    logi("[CSS PARSE] Starting parse_css, CSS length: {}", css.length());
+    if (css.find("@keyframes") != std::string::npos) {
+        logi("[CSS PARSE] ✓ CSS contains '@keyframes' keyword");
+        size_t kf_pos = css.find("@keyframes");
+        logi("[CSS PARSE]   First @keyframes at position {}", kf_pos);
+        logi("[CSS PARSE]   Context: '{}'", css.substr(kf_pos, std::min(size_t(80), css.length() - kf_pos)));
+    } else {
+        logw("[CSS PARSE] ✗ CSS does NOT contain '@keyframes' keyword");
+    }
 
     // Parse with Lexbor (for validation and internal structures)
     bool success = parser_.parse(css);
@@ -552,13 +727,24 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
     // Extract rules manually (since Lexbor doesn't expose them)
     // Simple CSS parser to extract selector { prop: value; ... } blocks
     size_t pos = 0;
+    int loop_iteration = 0;
     while (pos < css.size()) {
+        loop_iteration++;
+
         // Skip whitespace and comments
         while (pos < css.size() && (css[pos] == ' ' || css[pos] == '\t' || css[pos] == '\n' || css[pos] == '\r')) {
             pos++;
         }
 
         if (pos >= css.size()) break;
+
+        // DEBUG: Show what we're looking at (every 10th iteration to reduce spam)
+        if (loop_iteration % 10 == 0 || (pos + 15 < css.size() && css.substr(pos, 10) == "@keyframes")) {
+            std::string preview = css.substr(pos, std::min(size_t(40), css.size() - pos));
+            // Replace newlines with spaces for cleaner log
+            std::replace(preview.begin(), preview.end(), '\n', ' ');
+            logi("[CSS PARSE] Loop #{}, pos={}, next: '{}'", loop_iteration, pos, preview);
+        }
 
         // Skip comments /* ... */
         if (pos + 1 < css.size() && css[pos] == '/' && css[pos + 1] == '*') {
@@ -571,6 +757,253 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
                 pos++;
             }
             continue;
+        }
+
+        // Check for @media rules
+        if (css.substr(pos, 6) == "@media") {
+            pos += 6;  // Skip "@media"
+
+            // Skip whitespace
+            while (pos < css.size() && (css[pos] == ' ' || css[pos] == '\t' || css[pos] == '\n')) {
+                pos++;
+            }
+
+            // Extract media query (everything before '{')
+            size_t query_start = pos;
+            while (pos < css.size() && css[pos] != '{') {
+                pos++;
+            }
+
+            if (pos >= css.size()) break;
+
+            std::string media_query = css.substr(query_start, pos - query_start);
+            // Trim
+            size_t mq_start = media_query.find_first_not_of(" \t\n\r");
+            size_t mq_end = media_query.find_last_not_of(" \t\n\r");
+            if (mq_start != std::string::npos) {
+                media_query = media_query.substr(mq_start, mq_end - mq_start + 1);
+            }
+
+            pos++;  // Skip '{'
+
+            // Find matching '}' for @media block
+            size_t media_block_start = pos;
+            int brace_count = 1;
+            while (pos < css.size() && brace_count > 0) {
+                if (css[pos] == '{') brace_count++;
+                else if (css[pos] == '}') brace_count--;
+                if (brace_count > 0) pos++;
+            }
+
+            std::string media_block = css.substr(media_block_start, pos - media_block_start);
+            pos++;  // Skip '}'
+
+            // Recursively parse rules inside @media block with media_query set
+            size_t media_pos = 0;
+            while (media_pos < media_block.size()) {
+                // Skip whitespace
+                while (media_pos < media_block.size() && (media_block[media_pos] == ' ' || media_block[media_pos] == '\t' || media_block[media_pos] == '\n' || media_block[media_pos] == '\r')) {
+                    media_pos++;
+                }
+
+                if (media_pos >= media_block.size()) break;
+
+                // Skip comments
+                if (media_pos + 1 < media_block.size() && media_block[media_pos] == '/' && media_block[media_pos + 1] == '*') {
+                    media_pos += 2;
+                    while (media_pos + 1 < media_block.size()) {
+                        if (media_block[media_pos] == '*' && media_block[media_pos + 1] == '/') {
+                            media_pos += 2;
+                            break;
+                        }
+                        media_pos++;
+                    }
+                    continue;
+                }
+
+                // Find selector
+                size_t inner_selector_start = media_pos;
+                while (media_pos < media_block.size() && media_block[media_pos] != '{') {
+                    media_pos++;
+                }
+
+                if (media_pos >= media_block.size()) break;
+
+                std::string inner_selector = media_block.substr(inner_selector_start, media_pos - inner_selector_start);
+                // Trim
+                size_t is_start = inner_selector.find_first_not_of(" \t\n\r");
+                size_t is_end = inner_selector.find_last_not_of(" \t\n\r");
+                if (is_start != std::string::npos) {
+                    inner_selector = inner_selector.substr(is_start, is_end - is_start + 1);
+                }
+
+                media_pos++;  // Skip '{'
+
+                // Find properties block
+                size_t inner_props_start = media_pos;
+                int inner_brace_count = 1;
+                while (media_pos < media_block.size() && inner_brace_count > 0) {
+                    if (media_block[media_pos] == '{') inner_brace_count++;
+                    else if (media_block[media_pos] == '}') inner_brace_count--;
+                    if (inner_brace_count > 0) media_pos++;
+                }
+
+                std::string inner_props_block = media_block.substr(inner_props_start, media_pos - inner_props_start);
+                media_pos++;  // Skip '}'
+
+                // Parse properties (simplified - reuse existing logic below)
+                std::map<std::string, std::string> inner_properties;
+                size_t prop_pos = 0;
+                while (prop_pos < inner_props_block.size()) {
+                    // Skip whitespace
+                    while (prop_pos < inner_props_block.size() && (inner_props_block[prop_pos] == ' ' || inner_props_block[prop_pos] == '\t' || inner_props_block[prop_pos] == '\n' || inner_props_block[prop_pos] == '\r')) {
+                        prop_pos++;
+                    }
+
+                    if (prop_pos >= inner_props_block.size()) break;
+
+                    // Find property name
+                    size_t prop_name_start = prop_pos;
+                    while (prop_pos < inner_props_block.size() && inner_props_block[prop_pos] != ':') {
+                        prop_pos++;
+                    }
+
+                    if (prop_pos >= inner_props_block.size()) break;
+
+                    std::string prop_name = inner_props_block.substr(prop_name_start, prop_pos - prop_name_start);
+                    size_t pn_start = prop_name.find_first_not_of(" \t\n\r");
+                    size_t pn_end = prop_name.find_last_not_of(" \t\n\r");
+                    if (pn_start != std::string::npos) {
+                        prop_name = prop_name.substr(pn_start, pn_end - pn_start + 1);
+                    }
+                    std::transform(prop_name.begin(), prop_name.end(), prop_name.begin(),
+                                   [](unsigned char c){ return std::tolower(c); });
+
+                    prop_pos++;  // Skip ':'
+
+                    // Find property value
+                    size_t prop_value_start = prop_pos;
+                    while (prop_pos < inner_props_block.size() && inner_props_block[prop_pos] != ';' && inner_props_block[prop_pos] != '}') {
+                        prop_pos++;
+                    }
+
+                    std::string prop_value = inner_props_block.substr(prop_value_start, prop_pos - prop_value_start);
+                    size_t pv_start = prop_value.find_first_not_of(" \t\n\r");
+                    size_t pv_end = prop_value.find_last_not_of(" \t\n\r");
+                    if (pv_start != std::string::npos) {
+                        prop_value = prop_value.substr(pv_start, pv_end - pv_start + 1);
+                    }
+
+                    if (!prop_name.empty() && !prop_value.empty()) {
+                        inner_properties[prop_name] = prop_value;
+                    }
+
+                    if (prop_pos < inner_props_block.size() && inner_props_block[prop_pos] == ';') {
+                        prop_pos++;
+                    }
+                }
+
+                // Store rule with media_query - handle comma-separated selectors
+                if (!inner_selector.empty() && !inner_properties.empty()) {
+                    // Split selector on commas
+                    std::vector<std::string> inner_individual_selectors;
+                    size_t isel_pos = 0;
+                    while (isel_pos < inner_selector.size()) {
+                        size_t icomma_pos = inner_selector.find(',', isel_pos);
+                        std::string isingle_sel;
+                        if (icomma_pos != std::string::npos) {
+                            isingle_sel = inner_selector.substr(isel_pos, icomma_pos - isel_pos);
+                            isel_pos = icomma_pos + 1;
+                        } else {
+                            isingle_sel = inner_selector.substr(isel_pos);
+                            isel_pos = inner_selector.size();
+                        }
+                        size_t is_start = isingle_sel.find_first_not_of(" \t\n\r");
+                        size_t is_end = isingle_sel.find_last_not_of(" \t\n\r");
+                        if (is_start != std::string::npos) {
+                            isingle_sel = isingle_sel.substr(is_start, is_end - is_start + 1);
+                        }
+                        if (!isingle_sel.empty()) {
+                            inner_individual_selectors.push_back(isingle_sel);
+                        }
+                    }
+
+                    for (const auto& isingle_sel : inner_individual_selectors) {
+                        CSSRule rule;
+                        rule.selector = isingle_sel;
+                        rule.properties = inner_properties;
+                        rule.specificity = matcher_.calculate_specificity(isingle_sel);
+                        rule.media_query = media_query;
+                        rules_.push_back(rule);
+                    }
+                }
+            }
+
+            continue;  // Continue to next rule
+        }
+
+        // DEBUG: Check what we're seeing before @keyframes check
+        if (pos + 15 < css.size()) {
+            std::string next_10 = css.substr(pos, 10);
+            if (next_10[0] == '@') {
+                logi("[CSS PARSE] Found @ at pos={}, next 15 chars: '{}'", pos, css.substr(pos, 15));
+                if (next_10 == "@keyframes") {
+                    logi("[CSS PARSE] ✓ Matched @keyframes!");
+                } else {
+                    logi("[CSS PARSE] ✗ @ found but not @keyframes, got: '{}'", next_10);
+                }
+            }
+        }
+
+        // Check for @keyframes rules
+        if (css.substr(pos, 10) == "@keyframes") {
+            logi("[CSS PARSE] >>> Entering @keyframes parsing block");
+            pos += 10;  // Skip "@keyframes"
+
+            // Skip whitespace
+            while (pos < css.size() && (css[pos] == ' ' || css[pos] == '\t' || css[pos] == '\n')) {
+                pos++;
+            }
+
+            // Extract animation name (everything before '{')
+            size_t name_start = pos;
+            while (pos < css.size() && css[pos] != '{') {
+                pos++;
+            }
+
+            if (pos >= css.size()) break;
+
+            std::string anim_name = css.substr(name_start, pos - name_start);
+            // Trim
+            size_t an_start = anim_name.find_first_not_of(" \t\n\r");
+            size_t an_end = anim_name.find_last_not_of(" \t\n\r");
+            if (an_start != std::string::npos) {
+                anim_name = anim_name.substr(an_start, an_end - an_start + 1);
+            }
+
+            pos++;  // Skip '{'
+
+            // Find matching '}' for @keyframes block
+            size_t keyframes_block_start = pos;
+            int brace_count = 1;
+            while (pos < css.size() && brace_count > 0) {
+                if (css[pos] == '{') brace_count++;
+                else if (css[pos] == '}') brace_count--;
+                if (brace_count > 0) pos++;
+            }
+
+            std::string keyframes_block = css.substr(keyframes_block_start, pos - keyframes_block_start);
+            pos++;  // Skip '}'
+
+            // Parse and add keyframe animation
+            if (!anim_name.empty()) {
+                logi("[CSS PARSE] Found @keyframes rule: name='{}' block_size={}", anim_name, keyframes_block.size());
+                ::KeyframeAnimation kf_anim = ::parse_keyframes_rule(keyframes_block, anim_name);
+                add_keyframe_animation(kf_anim);
+                logi("[CSS PARSE] Added keyframe animation '{}' with {} keyframes", anim_name, kf_anim.keyframes.size());
+            }
+
+            continue;  // Continue to next rule
         }
 
         // Find selector (everything before '{')
@@ -615,6 +1048,21 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
 
             if (prop_pos >= props_block.size()) break;
 
+            // Skip comments /* ... */ inside properties block (FIX: was missing)
+            if (prop_pos + 1 < props_block.size() && props_block[prop_pos] == '/' && props_block[prop_pos + 1] == '*') {
+                prop_pos += 2;
+                while (prop_pos + 1 < props_block.size()) {
+                    if (props_block[prop_pos] == '*' && props_block[prop_pos + 1] == '/') {
+                        prop_pos += 2;
+                        break;
+                    }
+                    prop_pos++;
+                }
+                continue;  // Skip to next iteration after comment
+            }
+
+            if (prop_pos >= props_block.size()) break;
+
             // Find property name (before ':')
             size_t prop_name_start = prop_pos;
             while (prop_pos < props_block.size() && props_block[prop_pos] != ':') {
@@ -654,7 +1102,12 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
             }
 
             if (!prop_name.empty() && !prop_value.empty()) {
-                properties[prop_name] = prop_value;
+                // Expand animation shorthand property
+                if (prop_name == "animation") {
+                    expand_animation_shorthand(prop_value, properties);
+                } else {
+                    properties[prop_name] = prop_value;
+                }
             }
 
             if (prop_pos < props_block.size() && props_block[prop_pos] == ';') {
@@ -663,22 +1116,56 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
         }
 
         // Extract CSS variables from :root selector
-        if (selector == ":root" && !properties.empty()) {
-            for (const auto& [prop_name, prop_value] : properties) {
-                // CSS variables start with --
-                if (prop_name.length() >= 2 && prop_name.substr(0, 2) == "--") {
-                    variable_resolver_.set_variable(prop_name, prop_value);
+        if (selector == ":root") {
+            // logi("[CSS PARSE] Found :root rule with {} properties", properties.size());
+            if (!properties.empty()) {
+                for (const auto& [prop_name, prop_value] : properties) {
+                    // logi("[CSS PARSE]   Property: '{}' = '{}'", prop_name, prop_value);
+                    // CSS variables start with --
+                    if (prop_name.length() >= 2 && prop_name.substr(0, 2) == "--") {
+                        // logi("[CSS PARSE]   Setting variable: '{}' = '{}'", prop_name, prop_value);
+                        variable_resolver_.set_variable(prop_name, prop_value);
+                    }
                 }
             }
+            // Don't store the :root rule itself, just the variables
+            continue;
         }
 
-        // Store the rule
+        // Store the rule - handle comma-separated selectors
         if (!selector.empty() && !properties.empty()) {
-            CSSRule rule;
-            rule.selector = selector;
-            rule.properties = properties;
-            rule.specificity = matcher_.calculate_specificity(selector);
-            rules_.push_back(rule);
+            // Split selector on commas to handle grouped selectors like "#a, #b, #c { ... }"
+            std::vector<std::string> individual_selectors;
+            size_t sel_pos = 0;
+            while (sel_pos < selector.size()) {
+                size_t comma_pos = selector.find(',', sel_pos);
+                std::string single_sel;
+                if (comma_pos != std::string::npos) {
+                    single_sel = selector.substr(sel_pos, comma_pos - sel_pos);
+                    sel_pos = comma_pos + 1;
+                } else {
+                    single_sel = selector.substr(sel_pos);
+                    sel_pos = selector.size();
+                }
+                // Trim whitespace from individual selector
+                size_t s_start = single_sel.find_first_not_of(" \t\n\r");
+                size_t s_end = single_sel.find_last_not_of(" \t\n\r");
+                if (s_start != std::string::npos) {
+                    single_sel = single_sel.substr(s_start, s_end - s_start + 1);
+                }
+                if (!single_sel.empty()) {
+                    individual_selectors.push_back(single_sel);
+                }
+            }
+
+            // Create a separate rule for each selector
+            for (const auto& single_sel : individual_selectors) {
+                CSSRule rule;
+                rule.selector = single_sel;
+                rule.properties = properties;
+                rule.specificity = matcher_.calculate_specificity(single_sel);
+                rules_.push_back(rule);
+            }
         }
     }
 
@@ -741,10 +1228,24 @@ std::map<std::string, std::string> EnhancedStyleSheet::compute_style(
     // Cache miss - compute style
     cache_stats_.misses++;
 
-    // Pass rules to the computer
+    // Filter rules by media query
+    std::vector<CSSRule> filtered_rules;
+    // logi("[MEDIA] Filtering {} total rules for element id='{}' type='{}'", rules_.size(), shape_id, shape_type);
+    for (const auto& rule : rules_) {
+        bool matches = evaluate_media_query(rule.media_query);
+        if (matches) {
+            filtered_rules.push_back(rule);
+            // logi("[MEDIA] ✓ Rule '{}' with media='{}' INCLUDED", rule.selector, rule.media_query);
+        } else {
+            // logi("[MEDIA] ✗ Rule '{}' with media='{}' EXCLUDED", rule.selector, rule.media_query);
+        }
+    }
+    // logi("[MEDIA] Filtered result: {}/{} rules passed", filtered_rules.size(), rules_.size());
+
+    // Pass filtered rules to the computer
     auto result = computer_.compute_style(
         parser_.get_stylesheet(),
-        rules_,  // Pass our stored rules!
+        filtered_rules,  // Pass filtered rules!
         shape_id, shape_type, classes, attributes, pseudo_states,
         inline_style, parent_style
     );
@@ -754,11 +1255,19 @@ std::map<std::string, std::string> EnhancedStyleSheet::compute_style(
         value = variable_resolver_.resolve(value);
     }
 
+    // DEBUG: Log computed style for critical properties
+    // if (result.count("width") > 0) {
+    //     logi("[STYLE] Computed width='{}' for element id='{}' type='{}'", result["width"], shape_id, shape_type);
+    // }
+    // if (result.count("flex-direction") > 0) {
+    //     logi("[STYLE] Computed flex-direction='{}' for element id='{}' type='{}'", result["flex-direction"], shape_id, shape_type);
+    // }
+
     // Store the full result in the cache
     if (cache_.size() >= MAX_CACHE_SIZE) {
         evict_lru();
     }
-    
+
     cache_[cache_key] = result;
     cache_stats_.size = cache_.size();
 
@@ -1093,16 +1602,28 @@ std::string CSSVariableResolver::get_variable(const std::string& name) const {
 }
 
 std::string CSSVariableResolver::resolve(const std::string& value) const {
+    // Create empty set for cycle detection
+    std::set<std::string> resolving_vars;
+    return resolve_recursive(value, resolving_vars);
+}
+
+std::string CSSVariableResolver::resolve_recursive(const std::string& value, std::set<std::string>& resolving_vars) const {
+    // If the value doesn't contain "var(", no need to resolve.
+    if (value.find("var(") == std::string::npos) {
+        return value;
+    }
+
+    // logi("[CSS VAR] Resolving value: '{}'", value);
     std::string result = value;
     size_t pos = 0;
-    
+
     // Find and resolve all var() expressions
     while ((pos = result.find("var(", pos)) != std::string::npos) {
         // Find the matching closing parenthesis
         size_t start = pos;
         size_t paren_count = 1;
         size_t i = pos + 4;  // Skip "var("
-        
+
         while (i < result.size() && paren_count > 0) {
             if (result[i] == '(') {
                 paren_count++;
@@ -1111,26 +1632,29 @@ std::string CSSVariableResolver::resolve(const std::string& value) const {
             }
             i++;
         }
-        
+
         if (paren_count != 0) {
             // Unmatched parentheses - skip this var()
             pos++;
             continue;
         }
-        
+
         // Extract the var() expression
         std::string var_expr = result.substr(start, i - start);
-        
-        // Resolve it
-        std::string resolved = resolve_var(var_expr);
-        
+
+        // Resolve it with cycle detection
+        std::string resolved = resolve_var(var_expr, resolving_vars);
+
+        // logi("[CSS VAR]   Expression: '{}' -> Resolved: '{}'", var_expr, resolved);
+
         // Replace in result
         result.replace(start, i - start, resolved);
-        
+
         // Continue from after the replacement
         pos = start + resolved.size();
     }
-    
+
+    // logi("[CSS VAR] Final resolved value: '{}'", result);
     return result;
 }
 
@@ -1142,26 +1666,45 @@ void CSSVariableResolver::clear() {
     variables_.clear();
 }
 
-std::string CSSVariableResolver::resolve_var(const std::string& expr) const {
+std::string CSSVariableResolver::resolve_var(const std::string& expr, std::set<std::string>& resolving_vars) const {
     std::string var_name;
     std::string fallback;
-    
+
     if (!parse_var_expression(expr, var_name, fallback)) {
         // Invalid syntax - return as-is
         return expr;
     }
-    
+
+    // Check for circular reference
+    if (resolving_vars.count(var_name) > 0) {
+        logi("[CSS VAR] Circular reference detected for variable: '{}'", var_name);
+        // Return original expression to prevent infinite loop
+        return expr;
+    }
+
     // Check if variable exists
     if (has_variable(var_name)) {
-        return get_variable(var_name);
+        // Add to resolving set
+        resolving_vars.insert(var_name);
+
+        // Get variable value
+        std::string value = get_variable(var_name);
+
+        // Recursively resolve the value (it might contain var() too)
+        std::string resolved = resolve_recursive(value, resolving_vars);
+
+        // Remove from resolving set
+        resolving_vars.erase(var_name);
+
+        return resolved;
     }
-    
+
     // Variable doesn't exist - use fallback
     if (!fallback.empty()) {
         // Recursively resolve fallback (it might contain var() too)
-        return resolve(fallback);
+        return resolve_recursive(fallback, resolving_vars);
     }
-    
+
     // No fallback - return empty or the original expression
     return expr;
 }
@@ -1396,25 +1939,34 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     std::string bg_str = get("background");
     std::string bg_color_str = get("background-color");
     
-    // Check background first (can be gradient or color)
-    if (!bg_str.empty()) {
+    // Only override background if CSS provides a non-transparent value
+    bool has_bg_css = false;
+    
+    // Check background-color first (most specific)
+    if (!bg_color_str.empty() && bg_color_str != "transparent") {
+        if (auto c = nvgcss::convert::parse_color(bg_color_str)) {
+            result.background = nvgcss::Background::solid(*c);
+            has_bg_css = true;
+        }
+    }
+    // Then check background shorthand (can be gradient or color)
+    else if (!bg_str.empty() && bg_str != "transparent") {
         // Check if it's a gradient
         if (bg_str.find("gradient") != std::string::npos) {
             // Store gradient string - painter will parse it
             result.background.type = nvgcss::BackgroundType::GRADIENT;
             result.background.gradient_css = bg_str;
+            has_bg_css = true;
         }
         // Try to parse as color
         else if (auto c = nvgcss::convert::parse_color(bg_str)) {
             result.background = nvgcss::Background::solid(*c);
+            has_bg_css = true;
         }
     }
-    // Then check background-color (overrides if both present)
-    else if (!bg_color_str.empty()) {
-        if (auto c = nvgcss::convert::parse_color(bg_color_str)) {
-            result.background = nvgcss::Background::solid(*c);
-        }
-    }
+    
+    // If no CSS background was set, result.background remains at its default (transparent)
+    // The caller (nvgcssUpdate) should preserve existing element->style.background if result is transparent
 
     // Opacity
     std::string opacity_str = get("opacity");
@@ -1527,6 +2079,64 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         result.svg_stroke.seed = std::atoi(seed_str.c_str());
     }
 
+    return result;
+}
+
+bool EnhancedStyleSheet::evaluate_media_query(const std::string& media_query) const {
+    // Empty media query always matches
+    if (media_query.empty()) {
+        return true;
+    }
+
+    logi("[MEDIA] Evaluating query: '{}' with viewport {}x{}", media_query, viewport_width_, viewport_height_);
+
+    // Simple parser for common media queries: (min-width: Xpx), (max-width: Xpx), etc.
+    std::string query = media_query;
+
+    // Remove outer parentheses if present
+    if (!query.empty() && query.front() == '(' && query.back() == ')') {
+        query = query.substr(1, query.size() - 2);
+    }
+
+    // Parse "feature: value" pairs
+    size_t colon_pos = query.find(':');
+    if (colon_pos == std::string::npos) {
+        logi("[MEDIA] Malformed query, assuming match");
+        return true;  // Malformed query, assume it matches
+    }
+
+    std::string feature = query.substr(0, colon_pos);
+    std::string value_str = query.substr(colon_pos + 1);
+
+    // Trim whitespace
+    feature.erase(0, feature.find_first_not_of(" \t"));
+    feature.erase(feature.find_last_not_of(" \t") + 1);
+    value_str.erase(0, value_str.find_first_not_of(" \t"));
+    value_str.erase(value_str.find_last_not_of(" \t") + 1);
+
+    // Parse value (remove "px" suffix if present)
+    float value = 0.0f;
+    if (value_str.size() >= 2 && value_str.substr(value_str.size() - 2) == "px") {
+        value = std::strtof(value_str.substr(0, value_str.size() - 2).c_str(), nullptr);
+    } else {
+        value = std::strtof(value_str.c_str(), nullptr);
+    }
+
+    logi("[MEDIA] Parsed: feature='{}', value={}", feature, value);
+
+    // Evaluate feature
+    bool result = true;
+    if (feature == "min-width") {
+        result = viewport_width_ >= value;
+    } else if (feature == "max-width") {
+        result = viewport_width_ <= value;
+    } else if (feature == "min-height") {
+        result = viewport_height_ >= value;
+    } else if (feature == "max-height") {
+        result = viewport_height_ <= value;
+    }
+
+    logi("[MEDIA] Query result: {}", result);
     return result;
 }
 

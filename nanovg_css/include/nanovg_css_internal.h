@@ -25,7 +25,6 @@
 // ============================================================================
 
 class NVGCSSPainter;
-class NVGCSSLayoutEngine;
 
 // ============================================================================
 // Element Structure Types (REFACTORED)
@@ -88,7 +87,7 @@ struct NVGCSSComputedLayout {
     float padding[4], border[4], margin[4], border_radius[4];
 
     enum LayoutSource {
-        UNCOMPUTED, CSS_EXPLICIT, FLEXBOX, GRID, FLOW, ABSOLUTE, RELATIVE
+        UNCOMPUTED, CSS_EXPLICIT, FLEXBOX, GRID, FLOW, ABSOLUTE, RELATIVE, QUADTREE
     };
     LayoutSource source;
     bool is_computed;
@@ -121,6 +120,64 @@ struct NVGCSSCircleGeometry {
     float cx, cy, rx, ry;
     bool defined;
     NVGCSSCircleGeometry() : cx(0), cy(0), rx(0), ry(0), defined(false) {}
+};
+
+/**
+ * @brief SVG Marker definition
+ *
+ * Markers are reusable graphical elements that can be placed at:
+ * - marker-start: Beginning of a path
+ * - marker-mid: Each vertex along a path  
+ * - marker-end: End of a path
+ */
+struct NVGCSSMarker {
+    std::string id;
+    float markerWidth = 3.0f;
+    float markerHeight = 3.0f;
+    float refX = 0.0f;
+    float refY = 0.0f;
+    std::string orient = "0";  // "auto", "auto-start-reverse", or angle in degrees
+    std::vector<int> children_internal_ids;  // Marker content (element internal IDs)
+    
+    NVGCSSMarker() = default;
+};
+
+/**
+ * @brief SVG ClipPath definition
+ *
+ * Clip paths define a clipping region that determines what parts of an element are visible.
+ * Content outside the clipping path is not rendered.
+ */
+struct NVGCSSClipPath {
+    std::string id;
+    std::vector<int> children_internal_ids;  // Shapes defining the clip region
+    
+    NVGCSSClipPath() = default;
+};
+
+/**
+ * @brief SVG Pattern definition
+ *
+ * Patterns define repeating graphical content for fills and strokes.
+ * Rendered to offscreen FBO and used as tiled image pattern.
+ */
+struct NVGCSSPattern {
+    std::string id;
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    std::string patternUnits = "objectBoundingBox";  // or "userSpaceOnUse"
+    std::string patternContentUnits = "userSpaceOnUse";
+    std::vector<int> children_internal_ids;  // Pattern content elements
+    
+    // FBO rendering cache
+    int image_handle = -1;     // NanoVG image handle
+    unsigned int fbo = 0;      // OpenGL framebuffer object
+    unsigned int texture = 0;  // OpenGL texture
+    bool needs_update = true;  // Dirty flag for re-rendering
+    
+    NVGCSSPattern() = default;
 };
 
 /**
@@ -544,7 +601,6 @@ struct NVGCSSRenderer {
 
     // Rendering components
     std::unique_ptr<NVGCSSPainter> painter;
-    std::unique_ptr<NVGCSSLayoutEngine> layout_engine;
 
     // Viewport
     float viewport_width = 800.0f;
@@ -559,6 +615,15 @@ struct NVGCSSRenderer {
 
     // Image cache (Sprint 31)
     std::unordered_map<std::string, int> image_cache;  // path -> NanoVG image handle
+
+    // Marker registry (SVG markers)
+    std::unordered_map<std::string, NVGCSSMarker> markers_;  // id -> marker definition
+    
+    // ClipPath registry (SVG clipping paths)
+    std::unordered_map<std::string, NVGCSSClipPath> clip_paths_;  // id -> clip path definition
+    
+    // Pattern registry (SVG patterns)
+    std::unordered_map<std::string, NVGCSSPattern> patterns_;  // id -> pattern definition
 
     // CSS file tracking (v2 API: for hot-reload)
     std::vector<std::string> css_files;  // Loaded CSS file paths
@@ -631,11 +696,6 @@ private:
     // Property handlers (using typed properties from element->style)
     void apply_background(const NVGCSSElement* element,
                          const NVGCSSBox& box);
-    void apply_border(const std::map<std::string, std::string>& style,
-                     const NVGCSSBox& box);  // DEPRECATED: not yet migrated
-    void apply_shadow(const std::map<std::string, std::string>& style,
-                     const NVGCSSBox& box);  // DEPRECATED: use paint_box_shadows()
-    void apply_opacity(const std::map<std::string, std::string>& style);  // DEPRECATED: use element->style.opacity
 
     // Sprint 27: Box shadow rendering
     void paint_box_shadows(const NVGCSSElement* element, const NVGCSSBox& box);
@@ -653,12 +713,14 @@ private:
 
     // Typography support (Sprint 11) - using typed properties
     std::string compute_font_face(const NVGCSSElement* element);
-    float parse_font_size(const std::map<std::string, std::string>& style, float parent_size);  // DEPRECATED
     int compute_text_align(const NVGCSSElement* element);
     std::string apply_text_transform(const std::string& text, const std::string& transform);
     void apply_text_decoration(const NVGCSSElement* element,
                               float text_x, float text_y,
                               NVGcolor text_color);
+    void paint_text_content(const NVGCSSElement* element,
+                           float content_x, float content_y,
+                           float content_width, float content_height);
 
     // Vector shape helpers - using typed/inline properties
     StrokeStyle resolve_stroke_style(const NVGCSSElement* element,
@@ -672,53 +734,26 @@ private:
                             const NVGCSSBox& box);
     void paint_svg_path(const NVGCSSElement* element,
                         const NVGCSSBox& box);
+    void paint_polygon(const NVGCSSElement* element,
+                       const NVGCSSBox& box);
+    void paint_polyline(const NVGCSSElement* element,
+                        const NVGCSSBox& box);
     void paint_freehand_path(const NVGCSSElement* element);
-};
-
-// ============================================================================
-// NVGCSSLayoutEngine - Computes layout and positioning
-// ============================================================================
-
-class NVGCSSLayoutEngine {
-public:
-    NVGCSSLayoutEngine(float viewport_width, float viewport_height);
-
-    /**
-     * @brief Compute layout for entire element tree
-     */
-    void compute_layout(const std::vector<NVGCSSElement*>& roots,
-                       NVGCSSRenderer* renderer);
-
-    /**
-     * @brief Compute layout for single element and children
-     */
-    void compute_element_layout(NVGCSSElement* element,
-                               NVGCSSRenderer* renderer);
-
-    void set_viewport(float width, float height);
-
-private:
-    float viewport_width_;
-    float viewport_height_;
-    float root_font_size_ = 16.0f;
-
-    // Layout steps (60fps refactor - NO string maps!)
-    void compute_box_model(NVGCSSElement* element,
-                          NVGCSSRenderer* renderer);
-    void position_children(NVGCSSElement* element);
-    void compute_transforms(NVGCSSElement* element,
-                           NVGCSSRenderer* renderer);
-
-    // Unit conversion
-    float resolve_length(const std::string& value,
-                        float context_value,
-                        float font_size);
-
-    // Parse helpers
-    struct BoxValues {
-        float top, right, bottom, left;
-    };
-    BoxValues parse_box_values(const std::string& value);
+    
+    // SVG Marker rendering
+    void render_marker(const NVGCSSMarker& marker, float x, float y, float angle);
+    
+    // SVG Text-on-Path rendering
+    void paint_text_path(const NVGCSSElement* element, const NVGCSSBox& box);
+    
+    // SVG Clipping
+    void begin_clip_path(const NVGCSSClipPath& clip_path);
+    void end_clip_path();
+    
+    // SVG Patterns
+    int render_pattern_to_fbo(NVGCSSPattern& pattern);
+    void cleanup_pattern_fbo(NVGCSSPattern& pattern);
+    bool apply_pattern_fill(const std::string& fill_value, const NVGCSSBox& box);
 };
 
 // ============================================================================

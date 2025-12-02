@@ -150,8 +150,15 @@ KeyframeAnimation parse_keyframes_rule(const std::string& keyframes_css, const s
             // Parse percentage
             size_t percent_sign = percent_str.find('%');
             if (percent_sign != std::string::npos) {
-                float percent_value = std::stof(percent_str.substr(0, percent_sign));
-                position = percent_value / 100.0f;
+                std::string num_str = percent_str.substr(0, percent_sign);
+                if (!num_str.empty()) {
+                    try {
+                        float percent_value = std::stof(num_str);
+                        position = percent_value / 100.0f;
+                    } catch (const std::exception&) {
+                        position = 0.0f;  // Default to 0% on error
+                    }
+                }
             }
         }
 
@@ -237,16 +244,24 @@ float parse_animation_duration(const std::string& duration_str) {
 
     if (trimmed.empty()) return 0.0f;
 
-    if (trimmed.find("ms") != std::string::npos) {
-        // Milliseconds
-        float ms = std::stof(trimmed.substr(0, trimmed.find("ms")));
-        return ms / 1000.0f;
-    } else if (trimmed.find("s") != std::string::npos) {
-        // Seconds
-        return std::stof(trimmed.substr(0, trimmed.find("s")));
-    } else {
-        // Assume seconds if no unit
-        return std::stof(trimmed);
+    try {
+        if (trimmed.find("ms") != std::string::npos) {
+            // Milliseconds
+            std::string num_str = trimmed.substr(0, trimmed.find("ms"));
+            if (num_str.empty()) return 0.0f;
+            float ms = std::stof(num_str);
+            return ms / 1000.0f;
+        } else if (trimmed.find("s") != std::string::npos) {
+            // Seconds
+            std::string num_str = trimmed.substr(0, trimmed.find("s"));
+            if (num_str.empty()) return 0.0f;
+            return std::stof(num_str);
+        } else {
+            // Assume seconds if no unit
+            return std::stof(trimmed);
+        }
+    } catch (const std::exception&) {
+        return 0.0f;  // Default to 0 on parse error
     }
 }
 
@@ -258,10 +273,18 @@ int parse_animation_iteration_count(const std::string& count_str) {
     trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
     trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
 
+    if (trimmed.empty()) {
+        return 1;  // Default to 1 iteration
+    }
+
     if (trimmed == "infinite") {
         return -1;  // -1 means infinite
     } else {
-        return std::stoi(trimmed);
+        try {
+            return std::stoi(trimmed);
+        } catch (const std::exception&) {
+            return 1;  // Default to 1 iteration on error
+        }
     }
 }
 

@@ -6,12 +6,8 @@ find_package(SDL3 REQUIRED)
 # Find OpenGL
 find_package(OpenGL REQUIRED)
 
-# ============================================================================
-# FlexUI Examples - Auto-generated from example_*.cpp files
-# ============================================================================
-
 # Find all example source files
-file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/example_*.cpp)
+file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 # Create an executable for each example
 foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
@@ -34,12 +30,18 @@ foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
     # Create executable
     add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
-    # Link libraries
-    target_link_libraries(${EXAMPLE_TARGET} PRIVATE
-        SDL3::SDL3 nanovg_css
-        OpenGL::GL
-        glad::glad fmtlog
-    )
+    # Link libraries (some examples don't need SDL3)
+    if(${EXAMPLE_NAME} STREQUAL "example_svg_path_parser")
+        # Command-line only example (no GUI)
+        target_link_libraries(${EXAMPLE_TARGET} PRIVATE nanovg_css)
+    else()
+        # GUI example with SDL3
+        target_link_libraries(${EXAMPLE_TARGET} PRIVATE
+            SDL3::SDL3 nanovg_css
+            OpenGL::GL
+            glad::glad fmtlog
+        )
+    endif()
 
     # Include directories
     target_include_directories(${EXAMPLE_TARGET} PRIVATE

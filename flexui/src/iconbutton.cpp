@@ -17,8 +17,12 @@ void IconButton::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
-    NVGcolor bgColor = pressed_ ? style_.bgColorPressed :
-                       (hovered_ ? style_.bgColorHover : style_.bgColor);
+    // Determine background with state-aware fallback
+    NVGcolor fallbackBg = pressed_ ? style_.bgColorPressed :
+                          (hovered_ ? style_.bgColorHover : style_.bgColor);
+    NVGcolor bgColor = (!pressed_ && !hovered_) ? cssBackground(fallbackBg) : fallbackBg;
+    NVGcolor iconColor = cssColor(style_.iconColor);
+    float iconSize = cssFontSize(style_.iconSize);
 
     float cx = x + w / 2;
     float cy = y + h / 2;
@@ -29,10 +33,10 @@ void IconButton::draw(NVGcontext* vg) {
     nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
-    nvgFontSize(vg, style_.iconSize);
+    nvgFontSize(vg, iconSize);
     nvgFontFace(vg, "icons");
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-    nvgFillColor(vg, style_.iconColor);
+    nvgFillColor(vg, iconColor);
     nvgText(vg, cx, cy, icon_.c_str(), nullptr);
 }
 

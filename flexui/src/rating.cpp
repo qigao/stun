@@ -31,6 +31,8 @@ void Rating::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    NVGcolor fillColor = cssColor(style_.fillColor);
+
     float cx = x + style_.starSize / 2;
     float cy = y + h / 2;
 
@@ -39,7 +41,7 @@ void Rating::draw(NVGcontext* vg) {
         if (hover_rating_ > 0 && i < hover_rating_) {
             color = style_.hoverColor;
         } else if (i < rating_) {
-            color = style_.fillColor;
+            color = fillColor;
         } else {
             color = style_.emptyColor;
         }

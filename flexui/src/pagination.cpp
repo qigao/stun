@@ -28,6 +28,9 @@ void Pagination::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor textColor = cssColor(style_.textColor);
+
     float currentX = x;
     float buttonY = y + (h - style_.buttonHeight) / 2;
 
@@ -40,8 +43,8 @@ void Pagination::draw(NVGcontext* vg) {
     nvgFillColor(vg, prevColor);
     nvgFill(vg);
 
-    nvgFillColor(vg, style_.textColor);
-    nvgFontSize(vg, style_.fontSize);
+    nvgFillColor(vg, textColor);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgText(vg, currentX + style_.buttonWidth / 2, buttonY + style_.buttonHeight / 2, "<", nullptr);
@@ -63,8 +66,8 @@ void Pagination::draw(NVGcontext* vg) {
         nvgFillColor(vg, buttonColor);
         nvgFill(vg);
 
-        nvgFillColor(vg, style_.textColor);
-        nvgFontSize(vg, style_.fontSize);
+        nvgFillColor(vg, textColor);
+        nvgFontSize(vg, fontSize);
         nvgFontFace(vg, "sans-serif");
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         std::string pageNum = std::to_string(i);
@@ -81,8 +84,8 @@ void Pagination::draw(NVGcontext* vg) {
     nvgFillColor(vg, nextColor);
     nvgFill(vg);
 
-    nvgFillColor(vg, style_.textColor);
-    nvgFontSize(vg, style_.fontSize);
+    nvgFillColor(vg, textColor);
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
     nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
     nvgText(vg, currentX + style_.buttonWidth / 2, buttonY + style_.buttonHeight / 2, ">", nullptr);

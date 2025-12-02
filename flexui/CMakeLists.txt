@@ -109,11 +109,6 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/nanogui/include> # Add nanogui's public headers
 )
 
-# Link to dependencies: - nanovg_css: CSS rendering engine (provides
-# nanovg_css.h and NanoVG) - SDL3: Window/event management - fmtlog: Logging
-# (optional, for debugging) - OpenGL: Required for NanoVG rendering backend
-# - pugixml: XML parsing for declarative UI
-# - quickjs: JavaScript engine for scripting support
 find_package(OpenGL REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 find_package(qjs CONFIG REQUIRED)

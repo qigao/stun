@@ -20,24 +20,29 @@ void Slider::draw(NVGcontext* vg) {
     float w = el->computed.width;
     float h = el->computed.height;
 
+    float borderRadius = cssBorderRadius(style_.trackHeight / 2);
+
     // Track position (centered vertically)
     float trackY = y + (h - style_.trackHeight) / 2;
-    float trackX = x + style_.handleRadius;  // Leave space for handle
+    float trackX = x + style_.handleRadius;
     float trackWidth = w - 2 * style_.handleRadius;
+
+    NVGcolor trackColor = cssBackground(style_.trackColor);
 
     // Track background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, trackX, trackY, trackWidth, style_.trackHeight, style_.trackHeight / 2);
-    nvgFillColor(vg, style_.trackColor);
+    nvgRoundedRect(vg, trackX, trackY, trackWidth, style_.trackHeight, borderRadius);
+    nvgFillColor(vg, trackColor);
     nvgFill(vg);
 
     // Filled track
+    NVGcolor fillColor = cssColor(style_.fillColor);
     float normalized = getNormalizedValue();
     float fillWidth = trackWidth * normalized;
     if (fillWidth > 0) {
         nvgBeginPath(vg);
-        nvgRoundedRect(vg, trackX, trackY, fillWidth, style_.trackHeight, style_.trackHeight / 2);
-        nvgFillColor(vg, style_.fillColor);
+        nvgRoundedRect(vg, trackX, trackY, fillWidth, style_.trackHeight, borderRadius);
+        nvgFillColor(vg, fillColor);
         nvgFill(vg);
     }
 
@@ -45,15 +50,16 @@ void Slider::draw(NVGcontext* vg) {
     float handleX = trackX + fillWidth;
     float handleY = y + h / 2;
 
-    // Handle border (white outline)
+    NVGcolor handleBorderColor = cssBorderColor(style_.handleBorderColor);
     nvgBeginPath(vg);
     nvgCircle(vg, handleX, handleY, style_.handleRadius);
-    nvgFillColor(vg, style_.handleBorderColor);
+    nvgFillColor(vg, handleBorderColor);
     nvgFill(vg);
 
     // Handle inner circle
+    float borderWidth = cssBorderWidth(style_.borderWidth);
     nvgBeginPath(vg);
-    nvgCircle(vg, handleX, handleY, style_.handleRadius - style_.borderWidth);
+    nvgCircle(vg, handleX, handleY, style_.handleRadius - borderWidth);
     nvgFillColor(vg, style_.handleColor);
     nvgFill(vg);
 
@@ -61,8 +67,9 @@ void Slider::draw(NVGcontext* vg) {
     if (style_.showValue) {
         char text[32];
         snprintf(text, sizeof(text), "%.2f", value_);
+        float fontSize = cssFontSize(style_.fontSize);
 
-        nvgFontSize(vg, style_.fontSize);
+        nvgFontSize(vg, fontSize);
         nvgFontFace(vg, "sans-serif");
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
         nvgFillColor(vg, style_.textColor);

@@ -32,7 +32,8 @@ public:
     void setChangeCallback(ChangeCallback cb) { change_callback_ = cb; }
     void setSwitchStyle(const SwitchStyle& style) { style_ = style; }
 
-    bool handleSwitchClick(float mx, float my);
+protected:
+    bool onClicked() override;
 
 private:
     bool on_;

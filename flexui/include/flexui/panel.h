@@ -4,6 +4,17 @@
 
 namespace flexui {
 
+// DEPRECATED: Use Card instead
+// Panel does not inherit from Widget and cannot use CSS styling.
+// Card provides the same functionality with full CSS support.
+// 
+// Migration:
+//   Panel panel(x, y, style);
+//   panel.draw(vg);
+// 
+// Replace with:
+//   <card id="my-card" style="background: #fff; border-radius: 8px;"/>
+
 struct PanelStyle {
     float width = 300;
     float height = 200;

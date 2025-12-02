@@ -5,6 +5,18 @@
 
 namespace flexui {
 
+// DEPRECATED: Use Switch instead
+// Toggle does not inherit from Widget and cannot use CSS styling.
+// Switch provides the same functionality with full CSS support.
+// 
+// Migration:
+//   Toggle toggle(x, y, false, style);
+//   toggle.draw(vg);
+//   toggle.handleClick(mx, my);
+// 
+// Replace with:
+//   <switch id="my-switch" on="false"/>
+
 struct ToggleStyle {
     float width = 60;
     float height = 32;

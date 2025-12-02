@@ -52,32 +52,37 @@ void Toast::draw(NVGcontext *vg) {
   updateTimer();
 
   // Background color based on type
-  NVGcolor bgColor;
+  NVGcolor typeBg;
   switch (type_) {
   case ToastType::Info:
-    bgColor = style_.infoColor;
+    typeBg = style_.infoColor;
     break;
   case ToastType::Success:
-    bgColor = style_.successColor;
+    typeBg = style_.successColor;
     break;
   case ToastType::Warning:
-    bgColor = style_.warningColor;
+    typeBg = style_.warningColor;
     break;
   case ToastType::Error:
-    bgColor = style_.errorColor;
+    typeBg = style_.errorColor;
     break;
   }
 
+  NVGcolor bgColor = cssBackground(typeBg);
+  float borderRadius = cssBorderRadius(style_.borderRadius);
+  float fontSize = cssFontSize(style_.fontSize);
+  NVGcolor textColor = cssColor(style_.textColor);
+
   // Draw background
   nvgBeginPath(vg);
-  nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
+  nvgRoundedRect(vg, x, y, w, h, borderRadius);
   nvgFillColor(vg, bgColor);
   nvgFill(vg);
 
   // Draw message
-  nvgFontSize(vg, style_.fontSize);
+  nvgFontSize(vg, fontSize);
   nvgFontFace(vg, "sans-serif");
-  nvgFillColor(vg, style_.textColor);
+  nvgFillColor(vg, textColor);
   nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
   nvgText(vg, x + w / 2, y + h / 2, message_.c_str(), nullptr);
 }

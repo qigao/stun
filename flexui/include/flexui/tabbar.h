@@ -34,6 +34,12 @@ public:
     int getActiveTab() const { return activeTab_; }
     const std::string& getActiveTabName() const { return tabs_[activeTab_]; }
 
+    // Register a page widget for a tab index - TabBar manages visibility
+    void registerPage(int tabIndex, Widget* page);
+
+    // Register multiple pages at once (order matches tab order)
+    void registerPages(const std::vector<Widget*>& pages);
+
     void setTabChangeCallback(TabChangeCallback cb) { callback_ = cb; }
     void setTabBarStyle(const TabBarStyle& style) { style_ = style; }
 
@@ -42,12 +48,14 @@ public:
 
 private:
     std::vector<std::string> tabs_;
+    std::vector<Widget*> pages_;  // Page widgets, indexed by tab
     TabBarStyle style_;
     int activeTab_ = 0;
     int hoveredTab_ = -1;
     TabChangeCallback callback_;
 
     int getTabAtPosition(float mx, float my);
+    void updatePageVisibility();  // Hide all pages except active
 };
 
 } // namespace flexui

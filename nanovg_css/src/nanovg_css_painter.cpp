@@ -5,14 +5,36 @@
  */
 
 #include "nanovg_css_internal.h"
+#include <glad/glad.h>
 #include "nanovg_css_filters.h"
 #include <nanovg_css_filters.h>
 #include <nanovg_rough.h>
+#include "nanovg_css_svg_path.h"
+#include "nanovg_css_path_sampler.h"
 #include <fmtlog.h>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <sstream>
+#include <vector>
+
+// Helper to extract ID from url(#id) or #id
+static std::string extract_url_id(const std::string& url) {
+    // Handle direct #id format (SVG href attribute)
+    if (url.size() > 1 && url[0] == '#') {
+        return url.substr(1);
+    }
+
+    // Handle url(#id) format (CSS url() function)
+    size_t start_pos = url.find("#");
+    size_t end_pos = url.find(")");
+    if (start_pos != std::string::npos && end_pos != std::string::npos && start_pos < end_pos) {
+        return url.substr(start_pos + 1, end_pos - start_pos - 1);
+    }
+
+    return "";
+}
+
  // PHASE 4 SPRINT 4: Helper to create NVGCSSBox from computed layout
   static NVGCSSBox computed_to_box(const NVGCSSComputedLayout& computed) {
       NVGCSSBox box;
@@ -269,6 +291,66 @@ std::vector<Vec2> build_freehand_outline(const std::vector<Vec2>& raw_points,
         outline.push_back(*it);
     }
     return outline;
+}
+
+// Parse SVG points attribute (e.g., "100,100 200,150 150,250")
+std::vector<Vec2> parse_svg_points(const std::string& points_str) {
+    std::vector<Vec2> points;
+    if (points_str.empty()) return points;
+    
+    const char* p = points_str.c_str();
+    
+    while (*p) {
+        // Skip whitespace and commas
+        while (*p && (isspace(*p) || *p == ',')) p++;
+        if (!*p) break;
+        
+        // Parse x coordinate
+        char* end_x;
+        float x = strtof(p, &end_x);
+        if (p == end_x) break;  // No number found
+        p = end_x;
+        
+        // Skip optional comma/whitespace
+        while (*p && (isspace(*p) || *p == ',')) p++;
+        if (!*p) break;
+        
+        // Parse y coordinate
+        char* end_y;
+        float y = strtof(p, &end_y);
+        if (p == end_y) break;  // No number found
+        p = end_y;
+        
+        points.push_back({x, y});
+    }
+    
+    return points;
+}
+
+// Vertex structure for SVG path marker tracking
+struct PathVertex {
+    float x, y;
+    float angle_in;   // Angle of incoming segment
+    float angle_out;  // Angle of outgoing segment
+};
+
+// Helper to track vertices for marker-mid rendering
+// For simple segments (L, H, V, A): prev_angle_out == angle_out
+// For curves (C, S, Q, T): prev_angle_out is start tangent, angle_out is end tangent
+static void track_path_vertex(std::vector<PathVertex>& vertices, bool has_first,
+                              float curr_x, float curr_y,
+                              float angle_out, float prev_angle_out) {
+    if (vertices.empty() && !has_first) return;
+
+    PathVertex v;
+    v.x = curr_x;
+    v.y = curr_y;
+    v.angle_out = angle_out;
+    if (!vertices.empty()) {
+        vertices.back().angle_out = prev_angle_out;
+    }
+    v.angle_in = angle_out;
+    vertices.push_back(v);
 }
 
 }  // namespace
@@ -593,11 +675,82 @@ static void render_styled_borders(NVGcontext* vg, const NVGCSSElement* element,
             left_width, left_color, left_style);
     }
 }
+
+// Helper function to render text shadows - extracted from duplicated code
+static void render_text_shadows(NVGcontext* vg, const NVGCSSElement* element,
+                                float text_x, float text_y, const std::string& text_content) {
+    if (element->text_shadows.empty()) return;
+
+    // Render each shadow in reverse order (last shadow first, so first shadow is on top)
+    for (auto it = element->text_shadows.rbegin(); it != element->text_shadows.rend(); ++it) {
+        const TextShadow& shadow = *it;
+
+        float shadow_x = text_x + shadow.offset_x;
+        float shadow_y = text_y + shadow.offset_y;
+
+        if (shadow.blur_radius > 0) {
+            // Simple blur approximation: render text multiple times with decreasing alpha
+            int blur_samples = std::min(5, (int)shadow.blur_radius);
+            for (int i = 0; i < blur_samples; i++) {
+                float offset = (i - blur_samples / 2.0f) * (shadow.blur_radius / blur_samples);
+                float alpha_multiplier = 1.0f - (std::abs(i - blur_samples / 2.0f) / (blur_samples / 2.0f));
+
+                NVGcolor blurred_color = shadow.color;
+                blurred_color.a *= alpha_multiplier * 0.3f;
+
+                nvgFillColor(vg, blurred_color);
+                nvgText(vg, shadow_x + offset, shadow_y + offset, text_content.c_str(), nullptr);
+            }
+        } else {
+            nvgFillColor(vg, shadow.color);
+            nvgText(vg, shadow_x, shadow_y, text_content.c_str(), nullptr);
+        }
+    }
+}
+
+// Helper to render text content with proper styling and alignment
+void NVGCSSPainter::paint_text_content(const NVGCSSElement* element,
+                                        float content_x, float content_y,
+                                        float content_width, float content_height) {
+    if (element->text_content.empty()) return;
+
+    NVGcolor text_color = element->style.color;
+    float font_size = element->style.font_size;
+    std::string font_face = compute_font_face(element);
+    int align = compute_text_align(element);
+
+    nvgFontSize(vg_, font_size);
+    nvgFontFace(vg_, font_face.c_str());
+    nvgTextAlign(vg_, align);
+
+    float text_x = content_x;
+    float text_y = content_y;
+
+    if (align & NVG_ALIGN_CENTER) {
+        text_x += content_width / 2.0f;
+    } else if (align & NVG_ALIGN_RIGHT) {
+        text_x += content_width;
+    }
+
+    if (align & NVG_ALIGN_MIDDLE) {
+        text_y += content_height / 2.0f;
+    } else if (align & NVG_ALIGN_BOTTOM) {
+        text_y += content_height;
+    }
+
+    render_text_shadows(vg_, element, text_x, text_y, element->text_content);
+
+    nvgFillColor(vg_, text_color);
+    nvgText(vg_, text_x, text_y, element->text_content.c_str(), nullptr);
+
+    apply_text_decoration(element, text_x, text_y, text_color);
+}
+
 void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
     // DEBUG: Log what we're trying to paint
-    logi("[PAINTER] paint_element id='{}' type='{}' display={} visible={} bg_type={}",
-         element->id, element->type, (int)element->style.display, element->visible, 
-         (int)element->style.background.type);
+    // logd("[PAINTER] paint_element id='{}' type='{}' display={} visible={} bg_type={}",
+    //      element->id, element->type, (int)element->style.display, element->visible, 
+    //      (int)element->style.background.type);
     
     // Check visibility from typed property
     if (element->style.display == nvgcss::Display::NONE) {
@@ -609,8 +762,25 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         return;
     }
 
+    // Skip rendering definition-only elements (they're used by reference only)
+    if (element->type == "pattern" || element->type == "marker" || element->type == "clipPath") {
+        return;
+    }
+
     // Save state
     nvgSave(vg_);
+
+    // Check for clip-path property
+    bool has_clip = false;
+    auto clip_it = element->inline_style.find("clip-path");
+    if (clip_it != element->inline_style.end()) {
+        std::string clip_id = extract_url_id(clip_it->second);
+        auto clip_path_it = renderer_->clip_paths_.find(clip_id);
+        if (clip_path_it != renderer_->clip_paths_.end()) {
+            begin_clip_path(clip_path_it->second);
+            has_clip = true;
+        }
+    }
 
     // Apply transform
     nvgTransform(vg_,
@@ -634,6 +804,13 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
                           element->type == "screen" || element->type == "window" ||
                           element->type == "widget");
 
+    if (element->type == "textPath") {
+        const auto& box = computed_to_box(element->computed);
+        paint_text_path(element, box);
+        nvgRestore(vg_);
+        return;
+    }
+
     if (!element->stroke_points.empty()) {
         paint_freehand_path(element);
     }
@@ -642,7 +819,7 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         const auto& box = computed_to_box(element->computed);
 
         // DEBUG: Trace element rendering
-        logi("[PAINTER] Rendering type='{}' id='{}' class='{}' at ({:.1f}, {:.1f}) size ({:.1f} x {:.1f})",
+        logd("[PAINTER] Rendering type='{}' id='{}' class='{}' at ({:.1f}, {:.1f}) size ({:.1f} x {:.1f})",
              element->type, element->id.empty() ? "(empty)" : element->id,
              element->classes.empty() ? "(no-class)" : element->classes[0],
              box.x, box.y, box.width, box.height);
@@ -671,174 +848,20 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
             paint_rect_stroke(element, box);
         }
         // Render text content if present (for buttons, labels, etc.)
-        if (!element->text_content.empty()) {
-            // Get text color from typed property
-            NVGcolor text_color = element->style.color;
-
-            // Font size from typed property (already in pixels)
-            float font_size = element->style.font_size;
-
-            // Font face (with font-weight and font-style)
-            std::string font_face = compute_font_face(element);
-
-            // Text alignment from typed enum
-            int align = compute_text_align(element);
-
-            // TODO: text-transform not yet in typed system
-            std::string text_content = element->text_content;
-
-            // Apply typography settings to NanoVG
-            nvgFontSize(vg_, font_size);
-            nvgFontFace(vg_, font_face.c_str());
-            nvgTextAlign(vg_, align);
-            nvgFillColor(vg_, text_color);
-
-            // Calculate text position based on alignment
-            // IMPORTANT: Use content box (account for padding), not border box!
-            float padding_left = element->computed.padding[3];   // left
-            float padding_top = element->computed.padding[0];    // top
-            float padding_right = element->computed.padding[1];  // right
-            float padding_bottom = element->computed.padding[2]; // bottom
-
-            float content_x = box.x + padding_left;
-            float content_y = box.y + padding_top;
-            float content_width = box.width - padding_left - padding_right;
-            float content_height = box.height - padding_top - padding_bottom;
-
-            float text_x = content_x;
-            float text_y = content_y;
-
-            if (align & NVG_ALIGN_CENTER) {
-                text_x += content_width / 2.0f;
-            } else if (align & NVG_ALIGN_RIGHT) {
-                text_x += content_width;
-            }
-
-            if (align & NVG_ALIGN_MIDDLE) {
-                text_y += content_height / 2.0f;
-            } else if (align & NVG_ALIGN_BOTTOM) {
-                text_y += content_height;
-            }
-
-            // Sprint 28: Render text shadows FIRST (so they appear behind text)
-            if (!element->text_shadows.empty()) {
-                // Render each shadow in reverse order (last shadow first, so first shadow is on top)
-                for (auto it = element->text_shadows.rbegin(); it != element->text_shadows.rend(); ++it) {
-                    const TextShadow& shadow = *it;
-
-                    // Calculate shadow position
-                    float shadow_x = text_x + shadow.offset_x;
-                    float shadow_y = text_y + shadow.offset_y;
-
-                    // If blur is specified, render multiple times with decreasing alpha
-                    if (shadow.blur_radius > 0) {
-                        // Simple blur approximation: render text multiple times with decreasing alpha
-                        int blur_samples = std::min(5, (int)shadow.blur_radius);
-                        for (int i = 0; i < blur_samples; i++) {
-                            float offset = (i - blur_samples / 2.0f) * (shadow.blur_radius / blur_samples);
-                            float alpha_multiplier = 1.0f - (std::abs(i - blur_samples / 2.0f) / (blur_samples / 2.0f));
-
-                            NVGcolor blurred_color = shadow.color;
-                            blurred_color.a *= alpha_multiplier * 0.3f;  // Reduce alpha for blur
-
-                            nvgFillColor(vg_, blurred_color);
-                            nvgText(vg_, shadow_x + offset, shadow_y + offset, text_content.c_str(), nullptr);
-                        }
-                    } else {
-                        // No blur - just render once
-                        nvgFillColor(vg_, shadow.color);
-                        nvgText(vg_, shadow_x, shadow_y, text_content.c_str(), nullptr);
-                    }
-                }
-            }
-
-            // Render actual text on top
-            nvgFillColor(vg_, text_color);
-            nvgText(vg_, text_x, text_y, text_content.c_str(), nullptr);
-
-            // Apply text decoration (underline, line-through, overline)
-            apply_text_decoration(element, text_x, text_y, text_color);
-        }
+        // Use content box (account for padding), not border box
+        float padding_left = element->computed.padding[3];
+        float padding_top = element->computed.padding[0];
+        float padding_right = element->computed.padding[1];
+        float padding_bottom = element->computed.padding[2];
+        paint_text_content(element,
+                          box.x + padding_left,
+                          box.y + padding_top,
+                          box.width - padding_left - padding_right,
+                          box.height - padding_top - padding_bottom);
     }
     else if (element->type == "text" || element->type == "span") {
-        // Phase 3: Text rendering with Sprint 11 typography support
         const auto& box = computed_to_box(element->computed);
-
-        // Get text color from typed property
-        NVGcolor text_color = element->style.color;
-
-        // Font size from typed property (already in pixels)
-        float font_size = element->style.font_size;
-
-        // Font face (with font-weight and font-style)
-        std::string font_face = compute_font_face(element);
-
-        // Text alignment from typed enum
-        int align = compute_text_align(element);
-
-        // TODO: text-transform not yet in typed system
-        std::string text_content = element->text_content;
-
-        // Apply typography settings to NanoVG
-        nvgFontSize(vg_, font_size);
-        nvgFontFace(vg_, font_face.c_str());
-        nvgTextAlign(vg_, align);
-        nvgFillColor(vg_, text_color);
-
-        // Calculate text position based on alignment
-        float text_x = box.x;
-        float text_y = box.y;
-
-        if (align & NVG_ALIGN_CENTER) {
-            text_x += box.width / 2.0f;
-        } else if (align & NVG_ALIGN_RIGHT) {
-            text_x += box.width;
-        }
-
-        if (align & NVG_ALIGN_MIDDLE) {
-            text_y += box.height / 2.0f;
-        } else if (align & NVG_ALIGN_BOTTOM) {
-            text_y += box.height;
-        }
-
-        // Sprint 28: Render text shadows FIRST (so they appear behind text)
-        if (!element->text_shadows.empty()) {
-            // Render each shadow in reverse order (last shadow first, so first shadow is on top)
-            for (auto it = element->text_shadows.rbegin(); it != element->text_shadows.rend(); ++it) {
-                const TextShadow& shadow = *it;
-
-                // Calculate shadow position
-                float shadow_x = text_x + shadow.offset_x;
-                float shadow_y = text_y + shadow.offset_y;
-
-                // If blur is specified, render multiple times with decreasing alpha
-                if (shadow.blur_radius > 0) {
-                    // Simple blur approximation: render text multiple times with decreasing alpha
-                    int blur_samples = std::min(5, (int)shadow.blur_radius);
-                    for (int i = 0; i < blur_samples; i++) {
-                        float offset = (i - blur_samples / 2.0f) * (shadow.blur_radius / blur_samples);
-                        float alpha_multiplier = 1.0f - (std::abs(i - blur_samples / 2.0f) / (blur_samples / 2.0f));
-
-                        NVGcolor blurred_color = shadow.color;
-                        blurred_color.a *= alpha_multiplier * 0.3f;  // Reduce alpha for blur
-
-                        nvgFillColor(vg_, blurred_color);
-                        nvgText(vg_, shadow_x + offset, shadow_y + offset, text_content.c_str(), nullptr);
-                    }
-                } else {
-                    // No blur - just render once
-                    nvgFillColor(vg_, shadow.color);
-                    nvgText(vg_, shadow_x, shadow_y, text_content.c_str(), nullptr);
-                }
-            }
-        }
-
-        // Render actual text on top
-        nvgFillColor(vg_, text_color);
-        nvgText(vg_, text_x, text_y, text_content.c_str(), nullptr);
-
-        // Apply text decoration (underline, line-through, overline)
-        apply_text_decoration(element, text_x, text_y, text_color);
+        paint_text_content(element, box.x, box.y, box.width, box.height);
     }
     else if (element->type == "line") {
         const auto& box = computed_to_box(element->computed);
@@ -852,15 +875,24 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         const auto& box = computed_to_box(element->computed);
         paint_svg_path(element, box);
     }
-    else if (element->type == "polygon" || element->type == "polyline") {
+    else if (element->type == "polygon") {
         const auto& box = computed_to_box(element->computed);
-        paint_svg_path(element, box);
+        paint_polygon(element, box);
+    }
+    else if (element->type == "polyline") {
+        const auto& box = computed_to_box(element->computed);
+        paint_polyline(element, box);
     }
 
     // Call custom paint callback if provided
     if (element->custom_paint) {
         // TODO: custom_paint signature should be updated to not need computed_style
         element->custom_paint(vg_, element, element->inline_style);
+    }
+
+    // End clip path if needed
+    if (has_clip) {
+        end_clip_path();
     }
 
     // Restore state
@@ -872,20 +904,34 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
     // 60fps: Read from TYPED property (not inline_style!)
     const auto& bg = element->style.background;
 
-    logi("[PAINTER] apply_background id='{}' bg_type={} gradient_css='{}'",
+    logd("[PAINTER] apply_background id='{}' bg_type={} gradient_css='{}'",
          element->id, (int)bg.type, bg.gradient_css);
+
+    // Check for pattern fill (SVG style)
+    auto fill_it = element->inline_style.find("fill");
+    if (fill_it != element->inline_style.end()) {
+        if (apply_pattern_fill(fill_it->second, box)) {
+            logd("[PAINTER] Pattern fill applied");
+            return;
+        }
+    }
 
     // Handle different background types
     if (bg.type == nvgcss::BackgroundType::COLOR) {
         NVGcolor bg_color = bg.color;
 
+        logi("[PAINTER] COLOR background: r={} g={} b={} a={}", 
+             bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+
         // Check if background color is transparent (alpha == 0)
         if (bg_color.a <= 0.001f) {
+            logi("[PAINTER] Skipping transparent background");
             return;  // Skip transparent backgrounds
         }
 
         nvgFillColor(vg_, bg_color);
         nvgFill(vg_);
+        logi("[PAINTER] Background filled");
     }
     else if (bg.type == nvgcss::BackgroundType::GRADIENT) {
         // Parse and render gradient from CSS string
@@ -906,57 +952,6 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
         // bg.image_handle contains the NanoVG image handle
     }
     // If type == NONE, skip (transparent background)
-}
-
-void NVGCSSPainter::apply_border(const std::map<std::string, std::string>& style,
-                                  const NVGCSSBox& box) {
-    // Check for border properties
-    auto color_it = style.find("border-color");
-    auto width_it = style.find("border-width");
-    auto style_it = style.find("border-style");
-
-    // Also check shorthand
-    if (color_it == style.end()) color_it = style.find("border");
-    if (width_it == style.end() && style.count("border")) {
-        // Parse width from shorthand (e.g., "2px solid red")
-        // For simplicity, assume format: width style color
-    }
-
-    // Default values
-    float border_width = 1.0f;
-    NVGcolor border_color = nvgRGBA(0, 0, 0, 255);
-    std::string border_style = "solid";
-
-    if (width_it != style.end()) {
-        border_width = nvgcss_utils::parse_length(width_it->second, box.width);
-    }
-
-    if (color_it != style.end()) {
-        border_color = nvgcss_utils::parse_color(color_it->second);
-    }
-
-    if (style_it != style.end()) {
-        border_style = style_it->second;
-    }
-
-    // Only draw if border width > 0
-    if (border_width > 0 && border_style != "none") {
-        // Recreate path for stroke
-        create_rounded_rect_path(box);
-
-        nvgStrokeWidth(vg_, border_width);
-        nvgStrokeColor(vg_, border_color);
-
-        // Handle dashed/dotted styles
-        if (border_style == "dashed") {
-            // NanoVG doesn't have native dashed lines, but we can approximate
-            // For now, just use solid
-        } else if (border_style == "dotted") {
-            // Same - use solid for now
-        }
-
-        nvgStroke(vg_);
-    }
 }
 
 // Sprint 27: Render box-shadows using parsed BoxShadow data structure
@@ -1067,18 +1062,6 @@ void NVGCSSPainter::paint_box_shadows(const NVGCSSElement* element,
             nvgRestore(vg_);
         }
     }
-}
-
-// DEPRECATED: Old apply_shadow that parsed on every render
-void NVGCSSPainter::apply_shadow(const std::map<std::string, std::string>& style,
-                                  const NVGCSSBox& box) {
-    // Sprint 27: This function is deprecated - use paint_box_shadows() instead
-    // Kept for backward compatibility only
-    // The new implementation uses element->box_shadows which is parsed during layout
-}
-
-void NVGCSSPainter::apply_opacity(const std::map<std::string, std::string>& style) {
-    // Already handled in paint_element
 }
 
 NVGpaint NVGCSSPainter::create_gradient(const std::string& gradient_css,
@@ -1386,49 +1369,6 @@ std::string NVGCSSPainter::compute_font_face(const NVGCSSElement* element) {
     return family;
 }
 
-float NVGCSSPainter::parse_font_size(const std::map<std::string, std::string>& style,
-                                      float parent_size) {
-    auto it = style.find("font-size");
-    if (it == style.end()) return parent_size;
-
-    const std::string& value = it->second;
-
-    // Keywords
-    static const std::map<std::string, float> keywords = {
-        {"xx-small", 9.0f},
-        {"x-small", 10.0f},
-        {"small", 13.0f},
-        {"medium", 16.0f},  // Default
-        {"large", 18.0f},
-        {"x-large", 24.0f},
-        {"xx-large", 32.0f}
-    };
-
-    if (keywords.count(value)) {
-        return keywords.at(value);
-    }
-
-    // Parse length with units
-    if (value.find("em") != std::string::npos) {
-        float multiplier = safe_stof(value, 1.f);
-        return parent_size * multiplier;
-    }
-
-    if (value.find("rem") != std::string::npos) {
-        float multiplier = safe_stof(value, 1.f);
-        // Root font size is typically 16px
-        return 16.0f * multiplier;
-    }
-
-    if (value.find("%") != std::string::npos) {
-        float percent = safe_stof(value, 100.f);
-        return parent_size * (percent / 100.0f);
-    }
-
-    // Default: px
-    return nvgcss_utils::parse_length(value, parent_size);
-}
-
 int NVGCSSPainter::compute_text_align(const NVGCSSElement* element) {
     int h_align = NVG_ALIGN_LEFT;
     int v_align = NVG_ALIGN_TOP;
@@ -1541,17 +1481,17 @@ NVGCSSPainter::StrokeStyle NVGCSSPainter::resolve_stroke_style(
     auto stroke_it = element->inline_style.find("stroke");
     if (stroke_it != element->inline_style.end()) {
         const std::string& value = stroke_it->second;
-        logi("[PAINTER] resolve_stroke_style id='{}' stroke='{}'", element->id, value);
+        logd("[PAINTER] resolve_stroke_style id='{}' stroke='{}'", element->id, value);
         if (value != "none" && value != "transparent") {
             stroke.color = nvgcss_utils::parse_color(value);
             stroke.enabled = true;
-            logi("[PAINTER] Stroke enabled: r={} g={} b={} a={}", stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a);
+            logd("[PAINTER] Stroke enabled: r={} g={} b={} a={}", stroke.color.r, stroke.color.g, stroke.color.b, stroke.color.a);
         } else {
             stroke_forced_none = true;
             stroke.enabled = false;
         }
     } else {
-        logi("[PAINTER] resolve_stroke_style id='{}' - NO stroke property found", element->id);
+        logd("[PAINTER] resolve_stroke_style id='{}' - NO stroke property found", element->id);
     }
 
     auto width_it = element->inline_style.find("stroke-width");
@@ -1690,6 +1630,37 @@ void NVGCSSPainter::paint_line_shape(const NVGCSSElement* element,
 
     std::vector<Vec2> line = {start, end};
     stroke_polyline(vg_, stroke, line, false);
+    
+    // SVG Markers: Render markers at line endpoints
+    auto extract_marker_id = [](const std::string& marker_url) -> std::string {
+        // Extract ID from "url(#id)" format
+        size_t start_pos = marker_url.find("#");
+        size_t end_pos = marker_url.find(")");
+        if (start_pos != std::string::npos && end_pos != std::string::npos && start_pos < end_pos) {
+            return marker_url.substr(start_pos + 1, end_pos - start_pos - 1);
+        }
+        return "";
+    };
+    
+    auto marker_start_it = element->inline_style.find("marker-start");
+    if (marker_start_it != element->inline_style.end()) {
+        std::string marker_id = extract_marker_id(marker_start_it->second);
+        auto marker_it = renderer_->markers_.find(marker_id);
+        if (marker_it != renderer_->markers_.end()) {
+            float angle = atan2f(end.y - start.y, end.x - start.x);
+            render_marker(marker_it->second, start.x, start.y, angle);
+        }
+    }
+    
+    auto marker_end_it = element->inline_style.find("marker-end");
+    if (marker_end_it != element->inline_style.end()) {
+        std::string marker_id = extract_marker_id(marker_end_it->second);
+        auto marker_it = renderer_->markers_.find(marker_id);
+        if (marker_it != renderer_->markers_.end()) {
+            float angle = atan2f(end.y - start.y, end.x - start.x);
+            render_marker(marker_it->second, end.x, end.y, angle);
+        }
+    }
 }
 
 void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
@@ -1726,47 +1697,43 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
     }
 
     // Check if rough rendering is enabled
-    printf("[PAINTER] paint_circle_shape BEFORE CHECK: id='%s' ptr=%p rendering=%d\n",
-           element->id.c_str(), (void*)element, (int)element->style.svg_stroke.rendering);
-    
     bool use_rough = (element->style.svg_stroke.rendering == nvgcss::StrokeRendering::ROUGH);
-    
-    printf("[PAINTER] paint_circle_shape AFTER CHECK: id='%s' rendering=%d (AUTO=%d, ROUGH=%d) use_rough=%d roughness=%.2f\n",
-           element->id.c_str(), 
-           (int)element->style.svg_stroke.rendering,
-           (int)nvgcss::StrokeRendering::AUTO,
-           (int)nvgcss::StrokeRendering::ROUGH,
-           use_rough, 
-           element->style.svg_stroke.roughness);
 
     auto fill_it = element->inline_style.find("fill");
     if (fill_it != element->inline_style.end() && fill_it->second != "none") {
-        NVGcolor fill_color = nvgcss_utils::parse_color(fill_it->second);
-        
-        if (use_rough) {
-            // Use rough rendering for fill
-            NVGRoughOptions opts = nvgRoughDefaultOptions();
-            opts.fill_enabled = 1;
-            opts.fill_color = fill_color;
-            opts.stroke_enabled = 0;
-            opts.roughness = element->style.svg_stroke.roughness;
-            opts.seed = element->style.svg_stroke.seed;
-            
-            if (std::abs(rx - ry) < 0.001f) {
-                nvgRoughCircle(vg_, cx, cy, rx, opts);
-            } else {
-                nvgRoughEllipse(vg_, cx, cy, rx, ry, opts);
-            }
+        // Try pattern fill first
+        nvgBeginPath(vg_);
+        if (std::abs(rx - ry) < 0.001f) {
+            nvgCircle(vg_, cx, cy, rx);
         } else {
-            // Standard smooth rendering
-            nvgBeginPath(vg_);
-            if (std::abs(rx - ry) < 0.001f) {
-                nvgCircle(vg_, cx, cy, rx);
+            nvgEllipse(vg_, cx, cy, rx, ry);
+        }
+        
+        if (apply_pattern_fill(fill_it->second, box)) {
+            // Pattern applied successfully
+        } else {
+            // Fall back to color fill
+            NVGcolor fill_color = nvgcss_utils::parse_color(fill_it->second);
+            
+            if (use_rough) {
+                // Use rough rendering for fill
+                NVGRoughOptions opts = nvgRoughDefaultOptions();
+                opts.fill_enabled = 1;
+                opts.fill_color = fill_color;
+                opts.stroke_enabled = 0;
+                opts.roughness = element->style.svg_stroke.roughness;
+                opts.seed = element->style.svg_stroke.seed;
+                
+                if (std::abs(rx - ry) < 0.001f) {
+                    nvgRoughCircle(vg_, cx, cy, rx, opts);
+                } else {
+                    nvgRoughEllipse(vg_, cx, cy, rx, ry, opts);
+                }
             } else {
-                nvgEllipse(vg_, cx, cy, rx, ry);
+                // Standard smooth rendering
+                nvgFillColor(vg_, fill_color);
+                nvgFill(vg_);
             }
-            nvgFillColor(vg_, fill_color);
-            nvgFill(vg_);
         }
     }
 
@@ -1872,63 +1839,373 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
     }
 }
 
+#ifndef NVG_PI
+#define NVG_PI 3.14159265358979323846264338327f
+#endif
+
+static float nvgcss__sqr(float x) { return x*x; }
+static float nvgcss__vec_mag(float x, float y) { return sqrtf(x*x + y*y); }
+
+static float nvgcss__vec_angle(float ux, float uy, float vx, float vy) {
+    float sign = (ux * vy - uy * vx < 0) ? -1.0f : 1.0f;
+    float um = nvgcss__vec_mag(ux, uy);
+    float vm = nvgcss__vec_mag(vx, vy);
+    float dot = ux * vx + uy * vy;
+    float div = dot / (um * vm);
+    if (div > 1.0f) div = 1.0f;
+    if (div < -1.0f) div = -1.0f;
+    return sign * acosf(div);
+}
+
+static void nvgcss__arc_to(NVGcontext* vg, float x1, float y1, float rx, float ry, 
+                          float angle, bool large_arc, bool sweep, float x2, float y2) {
+    if (rx == 0 || ry == 0) {
+        nvgLineTo(vg, x2, y2);
+        return;
+    }
+    
+    rx = fabsf(rx);
+    ry = fabsf(ry);
+    
+    float dx2 = (x1 - x2) / 2.0f;
+    float dy2 = (y1 - y2) / 2.0f;
+    
+    float x1p = cosf(angle)*dx2 + sinf(angle)*dy2;
+    float y1p = -sinf(angle)*dx2 + cosf(angle)*dy2;
+    
+    float rxs = nvgcss__sqr(rx);
+    float rys = nvgcss__sqr(ry);
+    float x1ps = nvgcss__sqr(x1p);
+    float y1ps = nvgcss__sqr(y1p);
+    
+    float cr = x1ps/rxs + y1ps/rys;
+    if (cr > 1.0f) {
+        float s = sqrtf(cr);
+        rx *= s;
+        ry *= s;
+        rxs = nvgcss__sqr(rx);
+        rys = nvgcss__sqr(ry);
+    }
+    
+    float dq = (rxs*y1ps + rys*x1ps);
+    float pq = (rxs*rys - dq) / dq;
+    float cp = sqrtf(fmaxf(0.0f, pq));
+    if (large_arc == sweep) cp = -cp;
+    
+    float cxp = cp * rx * y1p / ry;
+    float cyp = cp * -ry * x1p / rx;
+    
+    float cx = cosf(angle)*cxp - sinf(angle)*cyp + (x1 + x2)/2.0f;
+    float cy = sinf(angle)*cxp + cosf(angle)*cyp + (y1 + y2)/2.0f;
+    
+    float theta1 = nvgcss__vec_angle(1.0f, 0.0f, (x1p - cxp)/rx, (y1p - cyp)/ry);
+    float dtheta = nvgcss__vec_angle((x1p - cxp)/rx, (y1p - cyp)/ry, (-x1p - cxp)/rx, (-y1p - cyp)/ry);
+    
+    if (!sweep && dtheta > 0) dtheta -= NVG_PI*2;
+    else if (sweep && dtheta < 0) dtheta += NVG_PI*2;
+    
+    int segments = (int)ceilf(fabsf(dtheta) / (NVG_PI/2.0f));
+    float delta = dtheta / segments;
+    float t = theta1;
+    
+    for (int i = 0; i < segments; i++) {
+        float t1 = t;
+        float t2 = t + delta;
+        
+        // Calculate kappa for Bezier approximation
+        // k = 4/3 * tan(delta/4)
+        float k = (4.0f/3.0f) * tanf(delta/4.0f);
+        
+        float cos_t1 = cosf(t1), sin_t1 = sinf(t1);
+        float cos_t2 = cosf(t2), sin_t2 = sinf(t2);
+        
+        // Unit circle points
+        float p1x = cos_t1, p1y = sin_t1;
+        float p2x = cos_t2, p2y = sin_t2;
+        
+        // Control points on unit circle
+        float cp1x = p1x - k * p1y;
+        float cp1y = p1y + k * p1x;
+        float cp2x = p2x + k * p2y;
+        float cp2y = p2y - k * p2x;
+        
+        // Transform to ellipse and rotate/translate
+        auto transform = [&](float px, float py, float& outx, float& outy) {
+            float ex = rx * px;
+            float ey = ry * py;
+            outx = cosf(angle)*ex - sinf(angle)*ey + cx;
+            outy = sinf(angle)*ex + cosf(angle)*ey + cy;
+        };
+        
+        float bez_cp1x, bez_cp1y, bez_cp2x, bez_cp2y, bez_endx, bez_endy;
+        transform(cp1x, cp1y, bez_cp1x, bez_cp1y);
+        transform(cp2x, cp2y, bez_cp2x, bez_cp2y);
+        transform(p2x, p2y, bez_endx, bez_endy);
+        
+        nvgBezierTo(vg, bez_cp1x, bez_cp1y, bez_cp2x, bez_cp2y, bez_endx, bez_endy);
+        
+        t += delta;
+    }
+}
+
 void NVGCSSPainter::paint_svg_path(const NVGCSSElement* element, const NVGCSSBox& box) {
     auto d_it = element->inline_style.find("d");
     if (d_it == element->inline_style.end() || d_it->second.empty()) return;
 
-    const std::string& path_data = d_it->second;
+    auto commands = nvgcss::SVGPathParser::parse(d_it->second);
+    if (commands.empty()) return;
+
     nvgBeginPath(vg_);
 
-    // Parse SVG path data
-    float x = 0, y = 0;  // Current position
-    float start_x = 0, start_y = 0;  // Subpath start
-    size_t i = 0;
-    
-    while (i < path_data.length()) {
-        while (i < path_data.length() && std::isspace(path_data[i])) i++;
-        if (i >= path_data.length()) break;
-        
-        char cmd = path_data[i++];
-        std::vector<float> args;
-        
-        // Parse numbers
-        while (i < path_data.length()) {
-            while (i < path_data.length() && (std::isspace(path_data[i]) || path_data[i] == ',')) i++;
-            if (i >= path_data.length() || std::isalpha(path_data[i])) break;
+    float current_x = 0, current_y = 0;
+    float start_x = 0, start_y = 0;
+    float last_control_x = 0, last_control_y = 0;
+
+    // Track vertices for marker-mid rendering
+    std::vector<PathVertex> vertices;
+    float first_x = 0, first_y = 0;
+    bool has_first = false;
+
+    for (const auto& cmd : commands) {
+        float x, y, x1, y1, x2, y2;
+
+        switch (cmd.type) {
+            case 'M':  // MoveTo
+                x = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                y = cmd.relative ? current_y + cmd.params[1] : cmd.params[1];
+                nvgMoveTo(vg_, x, y);
+                current_x = start_x = x;
+                current_y = start_y = y;
+                last_control_x = current_x;
+                last_control_y = current_y;
+                if (!has_first) {
+                    first_x = x;
+                    first_y = y;
+                    has_first = true;
+                }
+                break;
+
+            case 'L':  // LineTo
+                x = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                y = cmd.relative ? current_y + cmd.params[1] : cmd.params[1];
+                nvgLineTo(vg_, x, y);
+                {
+                    float angle = atan2f(y - current_y, x - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, angle, angle);
+                }
+                current_x = x;
+                current_y = y;
+                last_control_x = current_x;
+                last_control_y = current_y;
+                break;
+
+            case 'H':  // Horizontal line
+                x = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                nvgLineTo(vg_, x, current_y);
+                {
+                    float angle = atan2f(0, x - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, angle, angle);
+                }
+                current_x = x;
+                last_control_x = current_x;
+                last_control_y = current_y;
+                break;
+
+            case 'V':  // Vertical line
+                y = cmd.relative ? current_y + cmd.params[0] : cmd.params[0];
+                nvgLineTo(vg_, current_x, y);
+                {
+                    float angle = atan2f(y - current_y, 0);
+                    track_path_vertex(vertices, has_first, current_x, current_y, angle, angle);
+                }
+                current_y = y;
+                last_control_x = current_x;
+                last_control_y = current_y;
+                break;
+
+            case 'C':  // Cubic Bezier
+                x1 = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                y1 = cmd.relative ? current_y + cmd.params[1] : cmd.params[1];
+                x2 = cmd.relative ? current_x + cmd.params[2] : cmd.params[2];
+                y2 = cmd.relative ? current_y + cmd.params[3] : cmd.params[3];
+                x = cmd.relative ? current_x + cmd.params[4] : cmd.params[4];
+                y = cmd.relative ? current_y + cmd.params[5] : cmd.params[5];
+                nvgBezierTo(vg_, x1, y1, x2, y2, x, y);
+                {
+                    float end_tangent = atan2f(y - y2, x - x2);
+                    float start_tangent = atan2f(y1 - current_y, x1 - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, end_tangent, start_tangent);
+                }
+                last_control_x = x2;
+                last_control_y = y2;
+                current_x = x;
+                current_y = y;
+                break;
             
-            size_t end;
-            args.push_back(std::stof(path_data.substr(i), &end));
-            i += end;
-        }
-        
-        // Execute command
-        switch (cmd) {
-            case 'M': if (args.size() >= 2) { x = args[0]; y = args[1]; start_x = x; start_y = y; nvgMoveTo(vg_, x, y); } break;
-            case 'm': if (args.size() >= 2) { x += args[0]; y += args[1]; start_x = x; start_y = y; nvgMoveTo(vg_, x, y); } break;
-            case 'L': if (args.size() >= 2) { x = args[0]; y = args[1]; nvgLineTo(vg_, x, y); } break;
-            case 'l': if (args.size() >= 2) { x += args[0]; y += args[1]; nvgLineTo(vg_, x, y); } break;
-            case 'H': if (args.size() >= 1) { x = args[0]; nvgLineTo(vg_, x, y); } break;
-            case 'h': if (args.size() >= 1) { x += args[0]; nvgLineTo(vg_, x, y); } break;
-            case 'V': if (args.size() >= 1) { y = args[0]; nvgLineTo(vg_, x, y); } break;
-            case 'v': if (args.size() >= 1) { y += args[0]; nvgLineTo(vg_, x, y); } break;
-            case 'C': if (args.size() >= 6) { nvgBezierTo(vg_, args[0], args[1], args[2], args[3], args[4], args[5]); x = args[4]; y = args[5]; } break;
-            case 'c': if (args.size() >= 6) { nvgBezierTo(vg_, x+args[0], y+args[1], x+args[2], y+args[3], x+args[4], y+args[5]); x += args[4]; y += args[5]; } break;
-            case 'Q': if (args.size() >= 4) { nvgQuadTo(vg_, args[0], args[1], args[2], args[3]); x = args[2]; y = args[3]; } break;
-            case 'q': if (args.size() >= 4) { nvgQuadTo(vg_, x+args[0], y+args[1], x+args[2], y+args[3]); x += args[2]; y += args[3]; } break;
-            case 'Z': case 'z': nvgLineTo(vg_, start_x, start_y); x = start_x; y = start_y; break;
+            case 'S': // Smooth Cubic Bezier
+                // First control point is reflection of last control point
+                x1 = 2 * current_x - last_control_x;
+                y1 = 2 * current_y - last_control_y;
+                x2 = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                y2 = cmd.relative ? current_y + cmd.params[1] : cmd.params[1];
+                x = cmd.relative ? current_x + cmd.params[2] : cmd.params[2];
+                y = cmd.relative ? current_y + cmd.params[3] : cmd.params[3];
+                nvgBezierTo(vg_, x1, y1, x2, y2, x, y);
+                {
+                    float end_tangent = atan2f(y - y2, x - x2);
+                    float start_tangent = atan2f(y1 - current_y, x1 - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, end_tangent, start_tangent);
+                }
+                last_control_x = x2;
+                last_control_y = y2;
+                current_x = x;
+                current_y = y;
+                break;
+
+            case 'Q':  // Quadratic Bezier
+                x1 = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                y1 = cmd.relative ? current_y + cmd.params[1] : cmd.params[1];
+                x = cmd.relative ? current_x + cmd.params[2] : cmd.params[2];
+                y = cmd.relative ? current_y + cmd.params[3] : cmd.params[3];
+                nvgQuadTo(vg_, x1, y1, x, y);
+                {
+                    float end_tangent = atan2f(y - y1, x - x1);
+                    float start_tangent = atan2f(y1 - current_y, x1 - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, end_tangent, start_tangent);
+                }
+                last_control_x = x1;
+                last_control_y = y1;
+                current_x = x;
+                current_y = y;
+                break;
+            
+            case 'T': // Smooth Quadratic Bezier
+                // Control point is reflection of last control point
+                x1 = 2 * current_x - last_control_x;
+                y1 = 2 * current_y - last_control_y;
+                x = cmd.relative ? current_x + cmd.params[0] : cmd.params[0];
+                y = cmd.relative ? current_y + cmd.params[1] : cmd.params[1];
+                nvgQuadTo(vg_, x1, y1, x, y);
+                {
+                    float end_tangent = atan2f(y - y1, x - x1);
+                    float start_tangent = atan2f(y1 - current_y, x1 - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, end_tangent, start_tangent);
+                }
+                last_control_x = x1;
+                last_control_y = y1;
+                current_x = x;
+                current_y = y;
+                break;
+                
+            case 'A': // Arc
+                {
+                    float rx = cmd.params[0];
+                    float ry = cmd.params[1];
+                    float angle = cmd.params[2] * NVG_PI / 180.0f; // Convert to radians
+                    bool large_arc = cmd.params[3] != 0.0f;
+                    bool sweep = cmd.params[4] != 0.0f;
+                    x = cmd.relative ? current_x + cmd.params[5] : cmd.params[5];
+                    y = cmd.relative ? current_y + cmd.params[6] : cmd.params[6];
+
+                    nvgcss__arc_to(vg_, current_x, current_y, rx, ry, angle, large_arc, sweep, x, y);
+
+                    float arc_angle = atan2f(y - current_y, x - current_x);
+                    track_path_vertex(vertices, has_first, current_x, current_y, arc_angle, arc_angle);
+
+                    current_x = x;
+                    current_y = y;
+                    last_control_x = current_x;
+                    last_control_y = current_y;
+                }
+                break;
+
+            case 'Z':  // ClosePath
+                nvgClosePath(vg_);
+                
+                // If closing path, connect last point to first point
+                if (!vertices.empty() && has_first) {
+                    // Update angle_out for the last vertex
+                    vertices.back().angle_out = atan2f(start_y - current_y, start_x - current_x);
+                    // Update angle_in for the first vertex
+                    if (!vertices.empty()) { // Ensure vertices is not empty before accessing front
+                        vertices.front().angle_in = vertices.back().angle_out;
+                    }
+                }
+                
+                current_x = start_x;
+                current_y = start_y;
+                last_control_x = current_x;
+                last_control_y = current_y;
+                break;
         }
     }
 
+    // Apply fill and stroke
+    // Check if fill is enabled
+    // Apply fill and stroke
+    // Check if fill is enabled
     auto fill_it = element->inline_style.find("fill");
     if (fill_it != element->inline_style.end() && fill_it->second != "none") {
-        nvgFillColor(vg_, nvgcss_utils::parse_color(fill_it->second));
-        nvgFill(vg_);
+        if (apply_pattern_fill(fill_it->second, box)) {
+            // Pattern applied successfully
+        } else {
+            NVGcolor fill_color = nvgcss_utils::parse_color(fill_it->second);
+            nvgFillColor(vg_, fill_color);
+            nvgFill(vg_);
+        }
     }
 
     auto stroke = resolve_stroke_style(element, &box, std::max(box.width, box.height));
     if (stroke.enabled && stroke.width > 0.0f) {
         apply_stroke_state(vg_, stroke);
         nvgStroke(vg_);
+    }
+    
+    // Render markers
+    auto extract_marker_id = [](const std::string& marker_url) -> std::string {
+        size_t start_pos = marker_url.find("#");
+        size_t end_pos = marker_url.find(")");
+        if (start_pos != std::string::npos && end_pos != std::string::npos && start_pos < end_pos) {
+            return marker_url.substr(start_pos + 1, end_pos - start_pos - 1);
+        }
+        return "";
+    };
+    
+    // marker-start
+    auto marker_start_it = element->inline_style.find("marker-start");
+    if (marker_start_it != element->inline_style.end() && has_first) {
+        std::string marker_id = extract_marker_id(marker_start_it->second);
+        auto marker_it = renderer_->markers_.find(marker_id);
+        if (marker_it != renderer_->markers_.end()) {
+            float angle = vertices.empty() ? 0.0f : vertices[0].angle_out;
+            render_marker(marker_it->second, first_x, first_y, angle);
+        }
+    }
+    
+    // marker-mid
+    auto marker_mid_it = element->inline_style.find("marker-mid");
+    if (marker_mid_it != element->inline_style.end()) {
+        std::string marker_id = extract_marker_id(marker_mid_it->second);
+        auto marker_it = renderer_->markers_.find(marker_id);
+        if (marker_it != renderer_->markers_.end()) {
+            // Render at all intermediate vertices (skip first and last)
+            for (size_t i = 0; i < vertices.size(); i++) {
+                // Use average of incoming and outgoing angles
+                float angle = (vertices[i].angle_in + vertices[i].angle_out) / 2.0f;
+                render_marker(marker_it->second, vertices[i].x, vertices[i].y, angle);
+            }
+        }
+    }
+    
+    // marker-end
+    auto marker_end_it = element->inline_style.find("marker-end");
+    if (marker_end_it != element->inline_style.end()) {
+        std::string marker_id = extract_marker_id(marker_end_it->second);
+        auto marker_it = renderer_->markers_.find(marker_id);
+        if (marker_it != renderer_->markers_.end()) {
+            float angle = vertices.empty() ? 0.0f : vertices.back().angle_in;
+            render_marker(marker_it->second, current_x, current_y, angle);
+        }
     }
 }
 
@@ -1956,6 +2233,86 @@ void NVGCSSPainter::paint_freehand_path(const NVGCSSElement* element) {
     nvgFillColor(vg_, stroke.color);
     nvgFill(vg_);
 }
+
+void NVGCSSPainter::paint_polygon(const NVGCSSElement* element, const NVGCSSBox& box) {
+    auto it = element->inline_style.find("points");
+    if (it == element->inline_style.end()) return;
+    
+    std::vector<Vec2> points = parse_svg_points(it->second);
+    if (points.size() < 3) return;  // Need at least 3 points for a polygon
+    
+    // Check if fill is enabled
+    bool has_fill = false;
+    NVGcolor fill_color = nvgRGBA(0, 0, 0, 255);
+    
+    auto fill_it = element->inline_style.find("fill");
+    if (fill_it != element->inline_style.end() && fill_it->second != "none") {
+        has_fill = true;
+        fill_color = nvgcss_utils::parse_color(fill_it->second);
+    }
+    
+    // Resolve stroke style
+    float diagonal = std::sqrt(box.width * box.width + box.height * box.height);
+    auto stroke = resolve_stroke_style(element, &box, diagonal);
+    
+    // Fill polygon
+    if (has_fill) {
+        nvgBeginPath(vg_);
+        nvgMoveTo(vg_, points[0].x, points[0].y);
+        for (size_t i = 1; i < points.size(); i++) {
+            nvgLineTo(vg_, points[i].x, points[i].y);
+        }
+        nvgClosePath(vg_);
+        nvgFillColor(vg_, fill_color);
+        nvgFill(vg_);
+    }
+    
+    // Stroke polygon (closed path)
+    if (stroke.enabled && stroke.width > 0) {
+        stroke_polyline(vg_, stroke, points, true);  // closed=true
+    }
+}
+
+void NVGCSSPainter::paint_polyline(const NVGCSSElement* element, const NVGCSSBox& box) {
+    auto it = element->inline_style.find("points");
+    if (it == element->inline_style.end()) return;
+    
+    std::vector<Vec2> points = parse_svg_points(it->second);
+    if (points.size() < 2) return;  // Need at least 2 points for a polyline
+    
+    // Check if fill is enabled (polylines can have fill, though it's uncommon)
+    bool has_fill = false;
+    NVGcolor fill_color = nvgRGBA(0, 0, 0, 255);
+    
+    auto fill_it = element->inline_style.find("fill");
+    if (fill_it != element->inline_style.end() && fill_it->second != "none") {
+        has_fill = true;
+        fill_color = nvgcss_utils::parse_color(fill_it->second);
+    }
+    
+    // Resolve stroke style
+    float diagonal = std::sqrt(box.width * box.width + box.height * box.height);
+    auto stroke = resolve_stroke_style(element, &box, diagonal);
+    
+    // Fill polyline (if specified)
+    if (has_fill) {
+        nvgBeginPath(vg_);
+        nvgMoveTo(vg_, points[0].x, points[0].y);
+        for (size_t i = 1; i < points.size(); i++) {
+            nvgLineTo(vg_, points[i].x, points[i].y);
+        }
+        // Note: polyline fill does NOT close the path automatically
+        nvgFillColor(vg_, fill_color);
+        nvgFill(vg_);
+    }
+    
+    // Stroke polyline (open path)
+    if (stroke.enabled && stroke.width > 0) {
+        stroke_polyline(vg_, stroke, points, false);  // closed=false
+    }
+}
+
+
 
 // ============================================================================
 // Background Image Support (Sprint 31)
@@ -2025,6 +2382,12 @@ static void render_background_image(const NVGCSSElement* element,
     // Get image dimensions
     int img_width, img_height;
     nvgImageSize(renderer->vg, image, &img_width, &img_height);
+
+    // Validate image dimensions to prevent divide-by-zero
+    if (img_width <= 0 || img_height <= 0) {
+        printf("Invalid image dimensions: %dx%d for %s\n", img_width, img_height, image_path.c_str());
+        return;
+    }
 
     // Parse background-size from element's explicit style (not yet in typed system)
     // TODO: Add background_size to typed ComputedStyle
@@ -2184,3 +2547,247 @@ static void render_background_image(const NVGCSSElement* element,
     // Restore context state (remove scissor)
     nvgRestore(vg);
 }
+
+// ============================================================================
+// SVG Clipping Implementation
+// ============================================================================
+
+void NVGCSSPainter::begin_clip_path(const NVGCSSClipPath& clip_path) {
+    nvgSave(vg_);
+
+    // Iterate through clip path shapes
+    // Currently only supports rectangular clipping via nvgIntersectScissor
+    for (int child_id : clip_path.children_internal_ids) {
+        auto it = renderer_->elements.find(child_id);
+        if (it == renderer_->elements.end()) continue;
+        const auto* child = it->second.get();
+
+        if (child->type == "rect") {
+            // Parse rect attributes - support both SVG (x/y) and CSS (left/top) syntax
+            float x = 0, y = 0, w = 0, h = 0;
+
+            auto x_it = child->inline_style.find("x");
+            auto left_it = child->inline_style.find("left");
+            if (x_it != child->inline_style.end()) {
+                x = nvgcss_utils::parse_length(x_it->second, 0);
+            } else if (left_it != child->inline_style.end()) {
+                x = nvgcss_utils::parse_length(left_it->second, 0);
+            }
+
+            auto y_it = child->inline_style.find("y");
+            auto top_it = child->inline_style.find("top");
+            if (y_it != child->inline_style.end()) {
+                y = nvgcss_utils::parse_length(y_it->second, 0);
+            } else if (top_it != child->inline_style.end()) {
+                y = nvgcss_utils::parse_length(top_it->second, 0);
+            }
+
+            auto w_it = child->inline_style.find("width");
+            if (w_it != child->inline_style.end()) {
+                w = nvgcss_utils::parse_length(w_it->second, 0);
+            }
+
+            auto h_it = child->inline_style.find("height");
+            if (h_it != child->inline_style.end()) {
+                h = nvgcss_utils::parse_length(h_it->second, 0);
+            }
+
+            nvgIntersectScissor(vg_, x, y, w, h);
+        }
+    }
+}
+
+void NVGCSSPainter::end_clip_path() {
+    nvgRestore(vg_);
+}
+
+// ============================================================================
+// SVG Pattern Rendering (FBO-based)
+// ============================================================================
+
+int NVGCSSPainter::render_pattern_to_fbo(NVGCSSPattern& pattern) {
+    // Skip if already rendered and not dirty
+    if (!pattern.needs_update && pattern.image_handle >= 0) {
+        return pattern.image_handle;
+    }
+    
+    // Cleanup old resources
+    cleanup_pattern_fbo(pattern);
+    
+    int w = (int)pattern.width;
+    int h = (int)pattern.height;
+    
+    if (w <= 0 || h <= 0) return -1;
+    
+    // Create FBO and texture
+    glGenFramebuffers(1, &pattern.fbo);
+    glGenTextures(1, &pattern.texture);
+    
+    // Setup texture
+    glBindTexture(GL_TEXTURE_2D, pattern.texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    
+    // Attach texture to FBO
+    glBindFramebuffer(GL_FRAMEBUFFER, pattern.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pattern.texture, 0);
+    
+    // Check FBO status
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        cleanup_pattern_fbo(pattern);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return -1;
+    }
+    
+    // Save current viewport
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    
+    // Set viewport to pattern size
+    glViewport(0, 0, w, h);
+    
+    // Clear pattern area
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    
+    // Render pattern content using NanoVG
+    nvgBeginFrame(vg_, w, h, 1.0f);
+    
+    // Render each child element
+    for (int child_id : pattern.children_internal_ids) {
+        auto it = renderer_->elements.find(child_id);
+        if (it != renderer_->elements.end()) {
+            paint_element(it->second.get());
+        }
+    }
+    
+    nvgEndFrame(vg_);
+    
+    // Read pixels from FBO
+    std::vector<unsigned char> pixels(w * h * 4);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    
+    // Restore viewport
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    
+    // Unbind FBO
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    // Create NanoVG image from pixels
+    pattern.image_handle = nvgCreateImageRGBA(vg_, w, h, NVG_IMAGE_REPEATX | NVG_IMAGE_REPEATY, pixels.data());
+    pattern.needs_update = false;
+    
+    // Cleanup FBO and texture (no longer needed after pixel readback)
+    glDeleteTextures(1, &pattern.texture);
+    glDeleteFramebuffers(1, &pattern.fbo);
+    pattern.texture = 0;
+    pattern.fbo = 0;
+    
+    return pattern.image_handle;
+}
+
+void NVGCSSPainter::cleanup_pattern_fbo(NVGCSSPattern& pattern) {
+    if (pattern.image_handle >= 0) {
+        nvgDeleteImage(vg_, pattern.image_handle);
+        pattern.image_handle = -1;
+    }
+    
+    if (pattern.texture > 0) {
+        glDeleteTextures(1, &pattern.texture);
+        pattern.texture = 0;
+    }
+    
+    if (pattern.fbo > 0) {
+        glDeleteFramebuffers(1, &pattern.fbo);
+        pattern.fbo = 0;
+    }
+}
+
+bool NVGCSSPainter::apply_pattern_fill(const std::string& fill_value, const NVGCSSBox& box) {
+    // Check if fill is a pattern reference: url(#pattern-id)
+    if (fill_value.find("url(#") == std::string::npos) {
+        return false;  // Not a pattern
+    }
+    
+    // Extract pattern ID
+    std::string pattern_id = extract_url_id(fill_value);
+    
+    // Find pattern in registry
+    auto pattern_it = renderer_->patterns_.find(pattern_id);
+    if (pattern_it == renderer_->patterns_.end()) {
+        return false;  // Pattern not found
+    }
+    
+    // Render pattern to FBO if needed
+    int img = render_pattern_to_fbo(pattern_it->second);
+    if (img < 0) {
+        return false;  // Failed to render pattern
+    }
+    
+    // Create image pattern paint
+    NVGpaint pattern_paint = nvgImagePattern(
+        vg_,
+        box.x + pattern_it->second.x,
+        box.y + pattern_it->second.y,
+        pattern_it->second.width,
+        pattern_it->second.height,
+        0.0f,  // angle (TODO: support patternTransform)
+        img,
+        1.0f   // alpha
+    );
+    
+    // Apply pattern as fill
+    nvgFillPaint(vg_, pattern_paint);
+    nvgFill(vg_);
+    
+    return true;  // Pattern applied successfully
+}
+
+// ============================================================================
+// SVG Marker Rendering
+// ============================================================================
+
+void NVGCSSPainter::render_marker(const NVGCSSMarker& marker, float x, float y, float angle) {
+    nvgSave(vg_);
+    
+    // Translate to marker position
+    nvgTranslate(vg_, x, y);
+    
+    // Apply orientation
+    if (marker.orient == "auto") {
+        nvgRotate(vg_, angle);
+    } else if (marker.orient == "auto-start-reverse") {
+        nvgRotate(vg_, angle + NVG_PI);  // Reverse direction
+    } else if (marker.orient != "0") {
+        // Parse angle in degrees and convert to radians
+        float orient_angle = std::stof(marker.orient) * NVG_PI / 180.0f;
+        nvgRotate(vg_, orient_angle);
+    }
+    
+    // Offset by reference point
+    nvgTranslate(vg_, -marker.refX, -marker.refY);
+    
+    // Scale to marker size (assuming default viewport is 10x10)
+    float scaleX = marker.markerWidth / 10.0f;
+    float scaleY = marker.markerHeight / 10.0f;
+    nvgScale(vg_, scaleX, scaleY);
+    
+    // Render marker content (children)
+    for (int child_id : marker.children_internal_ids) {
+        auto it = renderer_->elements.find(child_id);
+        if (it != renderer_->elements.end()) {
+            paint_element(it->second.get());
+        }
+    }
+    
+    nvgRestore(vg_);
+}
+
+// ============================================================================
+// Text-on-Path Implementation
+// ============================================================================
+
+#include "nanovg_css_painter_textpath.cpp"

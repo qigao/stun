@@ -11,6 +11,8 @@ find_package(glad CONFIG REQUIRED)
 set(NANOVG_SOURCES
     nanovg/nanovg.c
     nanovg/nanovg.h
+    nanovg/nanovg_rough.c
+    nanovg/nanovg_rough.h
     nanovg/fontstash.h
     nanovg/stb_image.h
     nanovg/stb_truetype.h
@@ -69,28 +71,61 @@ endif()
 message(STATUS "NanoVG CSS: Found Lexbor library: ${LEXBOR_LIBRARY}")
 message(STATUS "NanoVG CSS: Found Lexbor include: ${LEXBOR_INCLUDE_DIR}")
 
+# ============================================================================
+# Generate SVG Path Lexer with re2c
+# ============================================================================
+
+# Find re2c
+find_program(RE2C_EXECUTABLE re2c)
+if(NOT RE2C_EXECUTABLE)
+  message(FATAL_ERROR
+    "NanoVG CSS: re2c not found - required for SVG path parser.\n"
+    "Install re2c:\n"
+    "  Ubuntu/Debian: sudo apt install re2c\n"
+    "  macOS: brew install re2c\n"
+    "  Windows (MSYS2): pacman -S re2c\n"
+    "  Or from source: https://re2c.org/")
+endif()
+
+message(STATUS "NanoVG CSS: Found re2c: ${RE2C_EXECUTABLE}")
+
+# Generate lexer from re2c
+set(SVG_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/svg_path_lexer.re)
+set(SVG_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/svg_path_lexer_gen.c)
+
+add_custom_command(
+  OUTPUT ${SVG_LEXER_GEN}
+  COMMAND ${RE2C_EXECUTABLE} -o ${SVG_LEXER_GEN} ${SVG_LEXER_RE}
+  DEPENDS ${SVG_LEXER_RE}
+  COMMENT "Generating SVG path lexer with re2c"
+  VERBATIM
+)
+
+set(SVG_PATH_SOURCES src/nanovg_css_svg_path.cpp ${SVG_LEXER_GEN})
+
 # CSS extension sources
 set(NANOVG_CSS_SOURCES
     src/nanovg_css.cpp
     src/nanovg_css_stylesheet.cpp
     src/nanovg_css_painter.cpp
-    src/nanovg_css_layout.cpp
     src/nanovg_css_utils.cpp
     src/nanovg_css_keyframes.cpp
     src/nanovg_css_flexbox.cpp
     src/nanovg_css_grid.cpp
     src/nanovg_css_filters.cpp
-    src/nanovg_rough.c
-    src/lexbor_css_parser.cpp)
+    src/nanovg_css_quadtree.cpp
+    src/lexbor_css_parser.cpp
+    ${SVG_PATH_SOURCES}
+    src/nanovg_css_path_sampler.cpp)
 
 set(NANOVG_CSS_HEADERS
  include/nanovg_css.h
  include/nanovg_css_internal.h
- include/nanovg_css_types.h         # NEW: Typed property system
- include/nanovg_css_conversion.h    # NEW: String-to-type conversion
+ include/nanovg_css_types.h       
+ include/nanovg_css_conversion.h     
  include/nanovg_css_background.h
- include/nanovg_css_filters.h       # NEW: OpenGL shader filters
- include/nanovg_rough.h             # NEW: RoughJS-style hand-drawn rendering
+ include/nanovg_css_filters.h
+ include/nanovg_css_quadtree.h
  include/lexbor_css_parser.h
  include/lexbor_wrapper.h
  )
@@ -111,7 +146,9 @@ target_include_directories(
   nanovg_css
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:include>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${LEXBOR_INCLUDE_DIR})
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+          ${CMAKE_CURRENT_BINARY_DIR}
+          ${LEXBOR_INCLUDE_DIR})
 
 # Link dependencies
 target_link_libraries(

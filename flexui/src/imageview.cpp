@@ -32,10 +32,13 @@ void ImageView::draw(NVGcontext* vg) {
         needsLoad_ = false;
     }
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+
     // Draw placeholder or image
     nvgBeginPath(vg);
-    if (style_.borderRadius > 0) {
-        nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
+    if (borderRadius > 0) {
+        nvgRoundedRect(vg, x, y, w, h, borderRadius);
     } else {
         nvgRect(vg, x, y, w, h);
     }
@@ -46,7 +49,7 @@ void ImageView::draw(NVGcontext* vg) {
         nvgFillPaint(vg, imgPaint);
     } else {
         // Draw placeholder
-        nvgFillColor(vg, style_.bgColor);
+        nvgFillColor(vg, bgColor);
     }
     nvgFill(vg);
 }

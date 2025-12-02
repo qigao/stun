@@ -17,13 +17,17 @@ void TabList::draw(NVGcontext* vg) {
 
     if (w == 0 || h == 0) return;
 
-    nvgFontSize(vg, style_.fontSize);
+    float fontSize = cssFontSize(style_.fontSize);
+    NVGcolor defaultBgColor = cssBackground(style_.bgColor);
+    NVGcolor defaultTextColor = cssColor(style_.textColor);
+
+    nvgFontSize(vg, fontSize);
     nvgFontFace(vg, "sans-serif");
 
     float yPos = y;
     for (size_t i = 0; i < tabs_.size(); ++i) {
-        NVGcolor bgColor = style_.bgColor;
-        NVGcolor textColor = style_.textColor;
+        NVGcolor bgColor = defaultBgColor;
+        NVGcolor textColor = defaultTextColor;
 
         if ((int)i == active_tab_) {
             bgColor = style_.activeBg;

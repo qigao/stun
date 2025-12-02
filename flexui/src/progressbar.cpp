@@ -16,18 +16,22 @@ void ProgressBar::draw(NVGcontext* vg) {
     float w = el->computed.width;
     float h = el->computed.height;
 
+    NVGcolor bgColor = cssBackground(style_.bgColor);
+    float borderRadius = cssBorderRadius(style_.borderRadius);
+
     // Background
     nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, style_.borderRadius);
-    nvgFillColor(vg, style_.bgColor);
+    nvgRoundedRect(vg, x, y, w, h, borderRadius);
+    nvgFillColor(vg, bgColor);
     nvgFill(vg);
 
     // Fill (progress)
+    NVGcolor fillColor = cssColor(style_.fillColor);
     float fillWidth = w * progress_;
     if (fillWidth > 0) {
         nvgBeginPath(vg);
-        nvgRoundedRect(vg, x, y, fillWidth, h, style_.borderRadius);
-        nvgFillColor(vg, style_.fillColor);
+        nvgRoundedRect(vg, x, y, fillWidth, h, borderRadius);
+        nvgFillColor(vg, fillColor);
         nvgFill(vg);
     }
 
@@ -35,8 +39,9 @@ void ProgressBar::draw(NVGcontext* vg) {
     if (style_.showPercentage) {
         char text[16];
         snprintf(text, sizeof(text), "%.0f%%", progress_ * 100.0f);
+        float fontSize = cssFontSize(style_.fontSize);
 
-        nvgFontSize(vg, style_.fontSize);
+        nvgFontSize(vg, fontSize);
         nvgFontFace(vg, "sans-serif");
         nvgTextAlign(vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFillColor(vg, style_.textColor);
