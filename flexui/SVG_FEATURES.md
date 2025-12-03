@@ -2,7 +2,83 @@
 
 ## Overview
 
-FlexUI provides **full access to all advanced SVG features** through its integration with `nanovg_css`. This includes the new **re2c-based SVG path parser** (2.6x faster), patterns, markers, text-on-path, and clipping paths.
+FlexUI provides **full access to all advanced SVG features** through its integration with `nanovg_css`. This includes:
+- **XML-based SVG** (RFC 7991/7996 compliant) - Use SVG elements directly in XML
+- **re2c-based SVG path parser** (2.6x faster)
+- Patterns, markers, text-on-path, and clipping paths
+
+---
+
+## 🆕 SVG in XML Format (RFC 7991/7996)
+
+FlexUI now supports SVG elements directly in XML, following RFC 7991/7996 specifications:
+
+```xml
+<div id="root">
+    <svg width="200" height="200" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="50" fill="#3498db" stroke="#2980b9"/>
+        <rect x="20" y="20" width="60" height="40" fill="#e74c3c"/>
+        <path d="M 10 80 Q 100 20 190 80" stroke="#2ecc71" fill="none"/>
+        <polygon points="100,20 150,100 50,100" fill="#f1c40f"/>
+        <text x="100" y="180" text-anchor="middle">SVG Text</text>
+    </svg>
+</div>
+```
+
+### Supported SVG Elements
+
+| Element | Attributes | Description |
+|---------|------------|-------------|
+| `<svg>` | `width`, `height`, `viewBox`, `preserveAspectRatio` | Container element |
+| `<g>` | `transform` | Group container |
+| `<circle>` | `cx`, `cy`, `r` | Circle shape |
+| `<ellipse>` | `cx`, `cy`, `rx`, `ry` | Ellipse shape |
+| `<rect>` | `x`, `y`, `width`, `height`, `rx`, `ry` | Rectangle |
+| `<line>` | `x1`, `y1`, `x2`, `y2` | Line |
+| `<path>` | `d` | Path with SVG path data |
+| `<polygon>` | `points` | Closed polygon |
+| `<polyline>` | `points` | Open polyline |
+| `<text>` | `x`, `y`, `dx`, `dy`, `text-anchor` | Text element |
+| `<textPath>` | `href`, `startOffset` | Text on path |
+| `<defs>` | - | Definition container |
+| `<use>` | `href`, `x`, `y` | Reference element |
+| `<symbol>` | `viewBox` | Reusable symbol |
+| `<marker>` | `markerWidth`, `markerHeight`, `refX`, `refY`, `orient` | Marker definition |
+| `<clipPath>` | `clipPathUnits` | Clipping path |
+| `<pattern>` | `x`, `y`, `width`, `height`, `patternUnits` | Pattern definition |
+| `<linearGradient>` | `x1`, `y1`, `x2`, `y2`, `gradientUnits` | Linear gradient |
+| `<radialGradient>` | `cx`, `cy`, `r`, `fx`, `fy` | Radial gradient |
+| `<stop>` | `offset`, `stop-color`, `stop-opacity` | Gradient stop |
+| `<image>` | `href`, `x`, `y`, `width`, `height` | External image |
+
+### Presentation Attributes (All Elements)
+
+All SVG elements support these presentation attributes:
+- `fill`, `stroke`, `stroke-width`
+- `stroke-linecap`, `stroke-linejoin`, `stroke-dasharray`
+- `opacity`, `transform`
+- `marker-start`, `marker-mid`, `marker-end`
+- `clip-path`, `fill-rule`
+
+### CSS Styling
+
+SVG elements can be styled via CSS:
+
+```css
+.my-circle {
+    fill: #3498db;
+    stroke: #2980b9;
+    stroke-width: 3px;
+}
+
+.my-circle:hover {
+    fill: #5dade2;
+}
+```
+
+### Complete Example
+
+See `flexui/examples/svg_xml_demo.cpp` for a comprehensive demonstration.
 
 ---
 

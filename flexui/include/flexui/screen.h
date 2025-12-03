@@ -26,6 +26,7 @@ public:
     ~Screen();
 
     void setFocusedTextBox(TextBox* textbox) { focused_textbox_ = textbox; }
+    void markSpatialIndexDirty() { spatial_index_dirty_ = true; }
 
     bool loadCSS(const std::string& css);
     bool loadXML(const std::string& xml);  // Load UI from XML
@@ -93,8 +94,8 @@ private:
     CustomDrawCallback custom_draw_callback_;
     TextBox* focused_textbox_ = nullptr;
     int width_, height_;
+    bool spatial_index_dirty_ = true;  // Rebuild spatial index when true
     int widget_counter_ = 0;
-    bool spatial_index_dirty_ = true;  // Flag to rebuild spatial index
 
     // XML parsing helpers
     Widget* parseXMLNode(void* node, Widget* parent);  // void* to avoid pugixml dependency in header

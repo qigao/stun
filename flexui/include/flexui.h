@@ -30,4 +30,5 @@
 #include <flexui/modal.h>
 #include <flexui/breadcrumb.h>
 #include <flexui/colorpicker.h>
+#include <flexui/scrollview.h>
 #include <nanovg_css_internal.h> // For NVGCSSElement definition

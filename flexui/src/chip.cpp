@@ -5,15 +5,13 @@ namespace flexui {
 Chip::Chip(NVGCSSRenderer* renderer, const std::string& id, const std::string& text,
            const ChipStyle& style)
     : Widget(renderer, id, "chip"), text_(text), style_(style) {
+}
 
-    if (style_.closeable) {
-        setClickCallback([this](Widget* w) {
-            if (closeCallback_) {
-                closeCallback_();
-            }
-            return true;
-        });
+bool Chip::onClicked() {
+    if (style_.closeable && closeCallback_) {
+        closeCallback_();
     }
+    return Widget::onClicked();
 }
 
 void Chip::draw(NVGcontext* vg) {

@@ -157,6 +157,8 @@ static void collect_elements_for_render(
 
 /**
  * @brief Compute absolute transform by multiplying parent chain
+ *
+ * Includes scroll offset from ancestors with overflow: scroll/auto
  */
 static void compute_absolute_transform(NVGCSSRenderer* renderer, NVGCSSElement* element, float* abs_xform) {
     // Start with identity
@@ -172,8 +174,60 @@ static void compute_absolute_transform(NVGCSSRenderer* renderer, NVGCSSElement* 
 
     // Apply transforms from root to element (top-down)
     for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-        // nvgTransformMultiply(dst, src) computes dst = dst * src
-        nvgTransformMultiply(abs_xform, (*it)->transform);
+        NVGCSSElement* elem = *it;
+
+        // First apply element's own transform
+        nvgTransformMultiply(abs_xform, elem->transform);
+
+        // Apply SVG viewBox transform if present (affects children)
+        if (it != chain.rbegin() && elem->type == "svg") {
+            auto viewbox_it = elem->inline_style.find("viewBox");
+            if (viewbox_it != elem->inline_style.end()) {
+                float vb_x, vb_y, vb_w, vb_h;
+                if (sscanf(viewbox_it->second.c_str(), "%f %f %f %f", &vb_x, &vb_y, &vb_w, &vb_h) == 4
+                    && vb_w > 0 && vb_h > 0) {
+                    // Get SVG container size from computed layout
+                    float svg_width = elem->computed.width;
+                    float svg_height = elem->computed.height;
+                    if (svg_width > 0 && svg_height > 0) {
+                        // Calculate scale
+                        float scale_x = svg_width / vb_w;
+                        float scale_y = svg_height / vb_h;
+
+                        // Apply viewBox transform: translate → scale → remove viewBox offset
+                        float viewbox_xform[6];
+                        nvgTransformIdentity(viewbox_xform);
+
+                        // Step 1: Translate to SVG container position
+                        float translate1[6];
+                        nvgTransformTranslate(translate1, elem->computed.x, elem->computed.y);
+                        nvgTransformMultiply(viewbox_xform, translate1);
+
+                        // Step 2: Scale from viewBox to container size
+                        float scale[6];
+                        nvgTransformScale(scale, scale_x, scale_y);
+                        nvgTransformMultiply(viewbox_xform, scale);
+
+                        // Step 3: Remove viewBox offset
+                        float translate2[6];
+                        nvgTransformTranslate(translate2, -vb_x, -vb_y);
+                        nvgTransformMultiply(viewbox_xform, translate2);
+
+                        // Apply to absolute transform
+                        nvgTransformMultiply(abs_xform, viewbox_xform);
+                    }
+                }
+            }
+        }
+
+        // Then apply scroll offset if this is a scroll container
+        // (scroll affects children, so apply AFTER this element's transform)
+        if (it != chain.rbegin() && (elem->scroll_x != 0.0f || elem->scroll_y != 0.0f)) {
+            // Only apply scroll to descendants, not to the scroll container itself
+            float scroll_xform[6];
+            nvgTransformTranslate(scroll_xform, -elem->scroll_x, -elem->scroll_y);
+            nvgTransformMultiply(abs_xform, scroll_xform);
+        }
     }
 }
 
@@ -226,18 +280,27 @@ NVGCSSComputedLayout::NVGCSSComputedLayout() {
 // NVGCSSRenderer Implementation
 // ============================================================================
 
-NVGCSSRenderer::NVGCSSRenderer(NVGcontext* vg) : vg(vg) {
+NVGCSSRenderer::NVGCSSRenderer(NVGcontext* vg) 
+    : vg(vg),
+      arena_(4 * 1024 * 1024),  // 4MB arena
+      transition_pool_(arena_),
+      animation_pool_(arena_) {
     stylesheet = std::make_unique<nanovg_css::lexbor::EnhancedStyleSheet>();
     painter = std::make_unique<NVGCSSPainter>(vg, this);
     current_time = 0.0f;
+    frame_mark_ = 0;
 }
 
 NVGCSSRenderer::~NVGCSSRenderer() {
-    // Clean up transition states
+    // Clean up transition and animation states using object pools
     for (auto& [id, element] : elements) {
         if (element->transition_state) {
-            delete static_cast<TransitionState*>(element->transition_state);
+            transition_pool_.deallocate(static_cast<TransitionState*>(element->transition_state));
             element->transition_state = nullptr;
+        }
+        if (element->animation_state) {
+            animation_pool_.deallocate(static_cast<AnimationState*>(element->animation_state));
+            element->animation_state = nullptr;
         }
     }
 }
@@ -690,6 +753,30 @@ int nvgcssHasPseudoState(const NVGCSSElement* element, const char* state) {
     return element->pseudo_states.count(state) > 0 ? 1 : 0;
 }
 
+// Scroll Support
+
+void nvgcssSetScroll(NVGCSSElement* element, float scroll_x, float scroll_y) {
+    if (!element) return;
+    element->scroll_x = scroll_x;
+    element->scroll_y = scroll_y;
+}
+
+void nvgcssGetScroll(const NVGCSSElement* element, float* out_scroll_x, float* out_scroll_y) {
+    if (!element) return;
+    if (out_scroll_x) *out_scroll_x = element->scroll_x;
+    if (out_scroll_y) *out_scroll_y = element->scroll_y;
+}
+
+void nvgcssSetContentHeight(NVGCSSElement* element, float content_height) {
+    if (!element) return;
+    element->content_height = content_height;
+}
+
+float nvgcssGetContentHeight(const NVGCSSElement* element) {
+    if (!element) return 0.0f;
+    return element->content_height;
+}
+
 // Tree Manipulation
 
 // Sprint 30: Helper function to update child indices
@@ -788,9 +875,9 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
     renderer->current_time += delta_time;
 
     // Helper function to get or create transition state
-    auto get_transition_state = [](NVGCSSElement* element) -> TransitionState* {
+    auto get_transition_state = [renderer](NVGCSSElement* element) -> TransitionState* {
         if (!element->transition_state) {
-            element->transition_state = new TransitionState();
+            element->transition_state = renderer->transition_pool_.allocate();
         }
         return static_cast<TransitionState*>(element->transition_state);
     };
@@ -941,9 +1028,9 @@ void nvgcssUpdate(NVGCSSRenderer* renderer, float delta_time) {
         // ====================================================================
 
         // Helper function to get or create animation state
-        auto get_animation_state = [](NVGCSSElement* elem) -> AnimationState* {
+        auto get_animation_state = [renderer](NVGCSSElement* elem) -> AnimationState* {
             if (!elem->animation_state) {
-                elem->animation_state = new AnimationState();
+                elem->animation_state = renderer->animation_pool_.allocate();
             }
             return static_cast<AnimationState*>(elem->animation_state);
         };
@@ -1254,12 +1341,12 @@ void nvgcssRender(NVGCSSRenderer* renderer) {
     for (auto* root : renderer->root_elements) {
         collect_elements_for_render(renderer, root, elements, tree_order);
     }
-    
-    logd("[RENDER] Collected {} elements for rendering", elements.size());
-    for (const auto& [elem, order] : elements) {
-        logd("[RENDER]   - id='{}' type='{}' visible={} display={}", 
-             elem->id, elem->type, elem->visible, (int)elem->style.display);
-    }
+
+    // logi("[RENDER] Collected {} elements for rendering", elements.size());
+    // for (const auto& [elem, order] : elements) {
+    //     // logi("[RENDER]   - id='{}' type='{}' visible={} display={}",
+    //     //      elem->id, elem->type, elem->visible, (int)elem->style.display);
+    // }
 
     // Phase 2: Sort by render order (non-positioned first, then by z-index)
     std::sort(elements.begin(), elements.end(),
@@ -1269,6 +1356,8 @@ void nvgcssRender(NVGCSSRenderer* renderer) {
 
     // Phase 3: Render in sorted order
     for (const auto& [element, order] : elements) {
+        //logi("[RENDER LOOP] Iteration start - id='{}' type='{}'", element->id, element->type);
+
         // DEBUG: Log render order (skip grid items for clarity)
         if (element->id.find("grid") == std::string::npos) {
             // printf("[RENDER] Painting '%s' (depth=%d, z_index=%d, tree_order=%d, is_positioned=%d)\n",
@@ -1285,7 +1374,9 @@ void nvgcssRender(NVGCSSRenderer* renderer) {
         memcpy(element->transform, abs_transform, sizeof(float) * 6);
 
         // Paint this element (uses element->style, already computed in layout phase)
+//        logi("[RENDER LOOP] About to call paint_element for id='{}' type='{}'", element->id, element->type);
         renderer->painter->paint_element(element);
+        //logi("[RENDER LOOP] paint_element completed for id='{}' type='{}'", element->id, element->type);
 
         // Restore original transform
         memcpy(element->transform, original_transform, sizeof(float) * 6);
@@ -1305,8 +1396,11 @@ void nvgcssRenderElement(NVGCSSRenderer* renderer, const char* id) {
         bool has_overflow_clip = (elem->explicit_style.overflow_x != "visible" ||
                                   elem->explicit_style.overflow_y != "visible");
 
+        // Check if this element has scroll offset
+        bool has_scroll = (elem->scroll_x != 0.0f || elem->scroll_y != 0.0f);
+
         // Apply scissor clipping if overflow is hidden/scroll/auto
-        if (has_overflow_clip) {
+        if (has_overflow_clip || has_scroll) {
             nvgSave(renderer->painter->get_context());
             nvgScissor(renderer->painter->get_context(),
                       elem->computed.x,
@@ -1318,6 +1412,11 @@ void nvgcssRenderElement(NVGCSSRenderer* renderer, const char* id) {
         // Paint this element (uses elem->style, already computed in layout phase)
         renderer->painter->paint_element(elem);
 
+        // Apply scroll offset before rendering children
+        if (has_scroll) {
+            nvgTranslate(renderer->painter->get_context(), -elem->scroll_x, -elem->scroll_y);
+        }
+
         // Render children (within scissor region if set)
         // IMPORTANT: Copy children locally before recursing, because nvgcssGetChildren
         // uses a static cache that gets overwritten by recursive calls
@@ -1328,8 +1427,8 @@ void nvgcssRenderElement(NVGCSSRenderer* renderer, const char* id) {
             render_tree(child);
         }
 
-        // Restore state if we set scissor
-        if (has_overflow_clip) {
+        // Restore state if we set scissor or scroll
+        if (has_overflow_clip || has_scroll) {
             nvgRestore(renderer->painter->get_context());
         }
     };
@@ -1352,6 +1451,19 @@ void nvgcssComputeLayout(NVGCSSRenderer* renderer) {
             if (!element->visible) return;
 
             // DEBUG: Log classes and inline styles for page elements
+            // DEBUG: Log SVG elements inline_style
+            if (element->type == "svg" || element->type == "circle" || element->type == "rect") {
+                std::string class_list;
+                for (const auto& cls : element->classes) {
+                    class_list += "'" + cls + "' ";
+                }
+                // auto display_it = element->inline_style.find("display");
+                // std::string inline_display = (display_it != element->inline_style.end())
+                //     ? display_it->second : "(not set)";
+                // logi("[LAYOUT] SVG Element id='{}' type='{}' classes=[{}] inline_style[display]='{}'",
+                //      element->id, element->type, class_list, inline_display);
+            }
+
             if (element->id.find("page-") != std::string::npos) {
                 std::string class_list;
                 for (const auto& cls : element->classes) {
@@ -1380,8 +1492,8 @@ void nvgcssComputeLayout(NVGCSSRenderer* renderer) {
             // DEBUG: Log computed display and flex-grow for key elements
             if (element->id == "content" || element->id == "root" || element->id == "header" ||
                 element->id.find("page-") != std::string::npos) {
-                logi("[LAYOUT] Element id='{}' computed display={} flex_grow={:.1f}",
-                     element->id, (int)element->style.display, element->style.flex_grow);
+                // logi("[LAYOUT] Element id='{}' computed display={} flex_grow={:.1f}",
+                //      element->id, (int)element->style.display, element->style.flex_grow);
             }
 
             // Recursively update children

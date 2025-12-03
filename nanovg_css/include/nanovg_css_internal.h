@@ -11,6 +11,7 @@
 #include <nanovg_css.h>
 #include <nanovg_css_types.h>  // NEW: Typed property system
 #include <nanovg_css_filters.h>  // Filter context type
+#include <nanovg_css_memory.h>  // Memory pool system
 #include <map>
 #include <string>
 #include <vector>
@@ -25,6 +26,7 @@
 // ============================================================================
 
 class NVGCSSPainter;
+struct GradientData;  // Forward declaration for gradient cache
 
 // ============================================================================
 // Element Structure Types (REFACTORED)
@@ -235,6 +237,11 @@ struct NVGCSSElement {
     float opacity;
     bool visible;
 
+    // === Scroll Offset (for overflow: scroll/auto containers) ===
+    float scroll_x = 0.0f;
+    float scroll_y = 0.0f;
+    float content_height = 0.0f;  // Total content height (for scrollbar calculation)
+
     // === Tree Structure ===
     /**
      * @brief Parent's internal_id (-1 if root element)
@@ -274,6 +281,11 @@ struct NVGCSSElement {
     // === Custom Rendering ===
     void (*custom_paint)(NVGcontext*, const NVGCSSElement*, const std::map<std::string, std::string>&);
     void* user_data;
+
+    // === Gradient Cache (Performance Optimization) ===
+    // Cache resolved gradient pointers to avoid repeated map lookups every frame
+    const GradientData* cached_fill_gradient = nullptr;
+    const GradientData* cached_stroke_gradient = nullptr;
 };
 
 // ============================================================================
@@ -569,6 +581,12 @@ private:
 struct NVGCSSRenderer {
     NVGcontext* vg;
 
+    // Memory management (high-performance arena allocator)
+    nvgcss::MemoryArena arena_;
+    nvgcss::ObjectPool<TransitionState> transition_pool_;
+    nvgcss::ObjectPool<AnimationState> animation_pool_;
+    size_t frame_mark_ = 0;
+
     // Stylesheet management (using lexbor-powered EnhancedStyleSheet)
     std::unique_ptr<nanovg_css::lexbor::EnhancedStyleSheet> stylesheet;
 
@@ -624,6 +642,9 @@ struct NVGCSSRenderer {
     
     // Pattern registry (SVG patterns)
     std::unordered_map<std::string, NVGCSSPattern> patterns_;  // id -> pattern definition
+    
+    // Gradient registry (SVG gradients)
+    std::unordered_map<std::string, GradientData> gradients_;  // id -> gradient definition
 
     // CSS file tracking (v2 API: for hot-reload)
     std::vector<std::string> css_files;  // Loaded CSS file paths
@@ -732,6 +753,8 @@ private:
                           const NVGCSSBox& box);
     void paint_circle_shape(const NVGCSSElement* element,
                             const NVGCSSBox& box);
+    void paint_rect_shape(const NVGCSSElement* element,
+                          const NVGCSSBox& box);
     void paint_svg_path(const NVGCSSElement* element,
                         const NVGCSSBox& box);
     void paint_polygon(const NVGCSSElement* element,

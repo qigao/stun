@@ -3,164 +3,35 @@
  */
 
 #include "nanovg_css_internal.h"
+#include "nanovg_css_conversion.h"  // Unified parsing implementation
 #include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <sstream>
 #include <limits>  // Sprint 25: for std::numeric_limits
 
+// Include re2c-generated lexer
+extern "C" {
+#include "css_calc_lexer_gen.c"
+}
+
 namespace nvgcss_utils {
 
 // ============================================================================
-// Sprint 24: CSS calc() Function - Expression Parser
+// Sprint 24: CSS calc() Function - Expression Parser (re2c-based)
 // ============================================================================
 
-// Token types for calc() expressions
-enum class CalcTokenType {
-    NUMBER,
-    PLUS,
-    MINUS,
-    MULTIPLY,
-    DIVIDE,
-    LPAREN,
-    RPAREN,
-    END
-};
-
-struct CalcToken {
-    CalcTokenType type;
-    float value;
-    std::string unit;
-};
-
-// Tokenizer for calc() expressions
-std::vector<CalcToken> tokenize_calc(const std::string& expr) {
-    std::vector<CalcToken> tokens;
-    size_t i = 0;
-
-    while (i < expr.length()) {
-        // Skip whitespace
-        while (i < expr.length() && std::isspace(expr[i])) i++;
-        if (i >= expr.length()) break;
-
-        // Operators and parentheses
-        if (expr[i] == '+') {
-            tokens.push_back({CalcTokenType::PLUS, 0, ""});
-            i++;
-        }
-        else if (expr[i] == '-') {
-            // Check if this is a negative number or subtraction operator
-            // Negative if: start of expression, after operator, or after (
-            bool is_negative = (tokens.empty() ||
-                               tokens.back().type == CalcTokenType::PLUS ||
-                               tokens.back().type == CalcTokenType::MINUS ||
-                               tokens.back().type == CalcTokenType::MULTIPLY ||
-                               tokens.back().type == CalcTokenType::DIVIDE ||
-                               tokens.back().type == CalcTokenType::LPAREN);
-
-            if (is_negative && i + 1 < expr.length() && (std::isdigit(expr[i + 1]) || expr[i + 1] == '.')) {
-                // Parse as negative number
-                i++;  // skip '-'
-                size_t start = i;
-                while (i < expr.length() && (std::isdigit(expr[i]) || expr[i] == '.')) {
-                    i++;
-                }
-                std::string num_str = expr.substr(start, i - start);
-                if (num_str.empty() || num_str == ".") {
-                    // Invalid number - skip this token
-                    continue;
-                }
-                float value = -std::stof(num_str);
-
-                // Check for unit
-                std::string unit;
-                if (i < expr.length() && expr[i] == '%') {
-                    unit = "%";
-                    i++;
-                } else if (i + 1 < expr.length() && expr.substr(i, 2) == "px") {
-                    unit = "px";
-                    i += 2;
-                } else if (i + 1 < expr.length() && expr.substr(i, 2) == "em") {
-                    unit = "em";
-                    i += 2;
-                } else if (i + 2 < expr.length() && expr.substr(i, 3) == "rem") {
-                    unit = "rem";
-                    i += 3;
-                }
-
-                tokens.push_back({CalcTokenType::NUMBER, value, unit});
-            } else {
-                tokens.push_back({CalcTokenType::MINUS, 0, ""});
-                i++;
-            }
-        }
-        else if (expr[i] == '*') {
-            tokens.push_back({CalcTokenType::MULTIPLY, 0, ""});
-            i++;
-        }
-        else if (expr[i] == '/') {
-            tokens.push_back({CalcTokenType::DIVIDE, 0, ""});
-            i++;
-        }
-        else if (expr[i] == '(') {
-            tokens.push_back({CalcTokenType::LPAREN, 0, ""});
-            i++;
-        }
-        else if (expr[i] == ')') {
-            tokens.push_back({CalcTokenType::RPAREN, 0, ""});
-            i++;
-        }
-        // Numbers
-        else if (std::isdigit(expr[i]) || expr[i] == '.') {
-            size_t start = i;
-            while (i < expr.length() && (std::isdigit(expr[i]) || expr[i] == '.')) {
-                i++;
-            }
-            std::string num_str = expr.substr(start, i - start);
-            if (num_str.empty() || num_str == ".") {
-                // Invalid number - skip this token
-                i++;
-                continue;
-            }
-            float value = std::stof(num_str);
-
-            // Check for unit
-            std::string unit;
-            if (i < expr.length() && expr[i] == '%') {
-                unit = "%";
-                i++;
-            } else if (i + 1 < expr.length() && expr.substr(i, 2) == "px") {
-                unit = "px";
-                i += 2;
-            } else if (i + 1 < expr.length() && expr.substr(i, 2) == "em") {
-                unit = "em";
-                i += 2;
-            } else if (i + 2 < expr.length() && expr.substr(i, 3) == "rem") {
-                unit = "rem";
-                i += 3;
-            }
-
-            tokens.push_back({CalcTokenType::NUMBER, value, unit});
-        }
-        else {
-            // Unknown character, skip it
-            i++;
-        }
-    }
-
-    tokens.push_back({CalcTokenType::END, 0, ""});
-    return tokens;
-}
-
-// Recursive descent parser for calc() expressions
+// Recursive descent parser using re2c-generated lexer
 class CalcParser {
 public:
-    CalcParser(const std::vector<CalcToken>& tokens, float context_value, float font_size)
-        : tokens_(tokens), pos_(0), context_value_(context_value), font_size_(font_size) {}
+    CalcParser(const char* expr, float context_value, float font_size)
+        : context_value_(context_value), font_size_(font_size) {
+        CSSCalcLexer_init(&lexer_, expr);
+        advance();  // Prime the first token
+    }
 
     float parse() {
-        float result = parse_expression();
-        return result;
+        return parse_expression();
     }
 
 private:
@@ -168,13 +39,12 @@ private:
     float parse_expression() {
         float result = parse_term();
 
-        while (current_token().type == CalcTokenType::PLUS ||
-               current_token().type == CalcTokenType::MINUS) {
-            CalcTokenType op = current_token().type;
+        while (current_.type == CALC_PLUS || current_.type == CALC_MINUS) {
+            CSSCalcTokenType op = current_.type;
             advance();
             float right = parse_term();
 
-            if (op == CalcTokenType::PLUS) {
+            if (op == CALC_PLUS) {
                 result += right;
             } else {
                 result -= right;
@@ -188,19 +58,17 @@ private:
     float parse_term() {
         float result = parse_factor();
 
-        while (current_token().type == CalcTokenType::MULTIPLY ||
-               current_token().type == CalcTokenType::DIVIDE) {
-            CalcTokenType op = current_token().type;
+        while (current_.type == CALC_MULTIPLY || current_.type == CALC_DIVIDE) {
+            CSSCalcTokenType op = current_.type;
             advance();
             float right = parse_factor();
 
-            if (op == CalcTokenType::MULTIPLY) {
+            if (op == CALC_MULTIPLY) {
                 result *= right;
             } else {
                 if (right != 0.0f) {
                     result /= right;
                 } else {
-                    // Division by zero - return 0
                     result = 0.0f;
                 }
             }
@@ -209,65 +77,49 @@ private:
         return result;
     }
 
-    // factor := number unit? | '(' expression ')'
+    // factor := number | '(' expression ')'
     float parse_factor() {
-        if (current_token().type == CalcTokenType::LPAREN) {
+        // Handle unary minus
+        bool negate = false;
+        if (current_.type == CALC_MINUS) {
+            negate = true;
+            advance();
+        }
+
+        float result = 0.0f;
+
+        if (current_.type == CALC_LPAREN) {
             advance();  // consume '('
-            float result = parse_expression();
-            if (current_token().type == CalcTokenType::RPAREN) {
+            result = parse_expression();
+            if (current_.type == CALC_RPAREN) {
                 advance();  // consume ')'
             }
-            return result;
         }
-
-        if (current_token().type == CalcTokenType::NUMBER) {
-            float value = current_token().value;
-            std::string unit = current_token().unit;
+        else if (CSSCalcToken_is_number(current_.type)) {
+            result = CSSCalcToken_to_pixels(&current_, context_value_, font_size_,
+                                            context_value_, context_value_);
             advance();
-
-            // Convert to pixels based on unit
-            if (unit == "%") {
-                return (value / 100.0f) * context_value_;
-            } else if (unit == "px" || unit.empty()) {
-                return value;
-            } else if (unit == "em") {
-                return value * font_size_;
-            } else if (unit == "rem") {
-                // Use font_size as base (assuming root font size)
-                return value * font_size_;
-            }
         }
 
-        return 0.0f;
-    }
-
-    CalcToken current_token() const {
-        if (pos_ < tokens_.size()) {
-            return tokens_[pos_];
-        }
-        return {CalcTokenType::END, 0, ""};
+        return negate ? -result : result;
     }
 
     void advance() {
-        if (pos_ < tokens_.size()) {
-            pos_++;
-        }
+        current_ = CSSCalcLexer_next_token(&lexer_);
     }
 
-    std::vector<CalcToken> tokens_;
-    size_t pos_;
+    CSSCalcLexer lexer_;
+    CSSCalcToken current_;
     float context_value_;
     float font_size_;
 };
 
-// Parse and evaluate calc() expression
+// Parse and evaluate calc() expression using re2c lexer
 float parse_calc_expression(const std::string& expr, float context_value, float font_size) {
     try {
-        auto tokens = tokenize_calc(expr);
-        CalcParser parser(tokens, context_value, font_size);
+        CalcParser parser(expr.c_str(), context_value, font_size);
         return parser.parse();
     } catch (const std::exception&) {
-        // Parse error - return 0
         return 0.0f;
     }
 }
@@ -402,88 +254,17 @@ std::vector<std::string> split(const std::string& str, char delim) {
     return result;
 }
 
-// Parse color - minimal implementation
+// Parse color - delegates to unified implementation in nanovg_css_conversion.h
 NVGcolor parse_color(const std::string& color_str) {
-    std::string color = trim(color_str);
-
-    // Named colors (minimal set)
-    if (color == "red") return nvgRGB(255, 0, 0);
-    if (color == "green") return nvgRGB(0, 255, 0);
-    if (color == "blue") return nvgRGB(0, 0, 255);
-    if (color == "white") return nvgRGB(255, 255, 255);
-    if (color == "black") return nvgRGB(0, 0, 0);
-    if (color == "transparent") return nvgRGBA(0, 0, 0, 0);
-    if (color == "purple") return nvgRGB(128, 0, 128);
-    if (color == "orange") return nvgRGB(255, 165, 0);
-    if (color == "brown") return nvgRGB(165, 42, 42);
-
-    // Hex colors: #rgb or #rrggbb
-    if (color[0] == '#') {
-        try {
-            if (color.length() == 4) {
-                // #rgb
-                int r = std::stoi(color.substr(1, 1), nullptr, 16) * 17;
-                int g = std::stoi(color.substr(2, 1), nullptr, 16) * 17;
-                int b = std::stoi(color.substr(3, 1), nullptr, 16) * 17;
-                return nvgRGB(r, g, b);
-            } else if (color.length() == 7) {
-                // #rrggbb
-                int r = std::stoi(color.substr(1, 2), nullptr, 16);
-                int g = std::stoi(color.substr(3, 2), nullptr, 16);
-                int b = std::stoi(color.substr(5, 2), nullptr, 16);
-                return nvgRGB(r, g, b);
-            }
-        } catch (const std::exception&) {
-            return nvgRGB(255, 255, 255);  // Default to white on invalid hex
-        }
+    auto result = nvgcss::convert::parse_color(color_str);
+    if (result) {
+        return *result;
     }
-
-    // rgb(r, g, b)
-    if (color.substr(0, 4) == "rgb(") {
-        size_t start = color.find('(');
-        size_t end = color.find(')');
-        if (start != std::string::npos && end != std::string::npos) {
-            std::string values = color.substr(start + 1, end - start - 1);
-            auto parts = split(values, ',');
-            if (parts.size() == 3) {
-                try {
-                    int r = std::stoi(parts[0]);
-                    int g = std::stoi(parts[1]);
-                    int b = std::stoi(parts[2]);
-                    return nvgRGB(r, g, b);
-                } catch (const std::exception&) {
-                    return nvgRGB(255, 255, 255);  // Default to white on error
-                }
-            }
-        }
-    }
-
-    // rgba(r, g, b, a)
-    if (color.substr(0, 5) == "rgba(") {
-        size_t start = color.find('(');
-        size_t end = color.find(')');
-        if (start != std::string::npos && end != std::string::npos) {
-            std::string values = color.substr(start + 1, end - start - 1);
-            auto parts = split(values, ',');
-            if (parts.size() == 4) {
-                try {
-                    int r = std::stoi(parts[0]);
-                    int g = std::stoi(parts[1]);
-                    int b = std::stoi(parts[2]);
-                    float a = std::stof(parts[3]);
-                    return nvgRGBA(r, g, b, (int)(a * 255));
-                } catch (const std::exception&) {
-                    return nvgRGBA(255, 255, 255, 255);  // Default to opaque white
-                }
-            }
-        }
-    }
-
-    // Default: white
+    // Default: white (for backward compatibility)
     return nvgRGB(255, 255, 255);
 }
 
-// Parse length - minimal implementation
+// Parse length - handles calc/min/max/clamp, delegates simple cases to conversion.h
 float parse_length(const std::string& length_str, float context_value) {
     std::string str = trim(length_str);
 
@@ -515,36 +296,32 @@ float parse_length(const std::string& length_str, float context_value) {
         return parse_calc_expression(calc_expr, context_value);
     }
 
-    // px (or no unit)
-    if (ends_with(str, "px")) {
-        if (str.length() <= 2) {
-            return 0.0f;  // Invalid: just "px" with no number
-        }
-        try {
-            return std::stof(str.substr(0, str.length() - 2));
-        } catch (const std::exception&) {
-            return 0.0f;
-        }
-    }
-
-    // Percentage
-    if (ends_with(str, "%")) {
-        if (str.length() <= 1) {
-            return 0.0f;  // Invalid: just "%" with no number
-        }
-        try {
-            float percent = std::stof(str.substr(0, str.length() - 1));
-            return (percent / 100.0f) * context_value;
-        } catch (const std::exception&) {
-            return 0.0f;
+    // Delegate simple cases to unified implementation
+    auto length = nvgcss::convert::parse_length(str);
+    if (length) {
+        // Resolve Length to pixels based on unit type
+        switch (length->unit) {
+            case nvgcss::LengthUnit::PX:
+                return length->value;
+            case nvgcss::LengthUnit::PERCENT:
+                return (length->value / 100.0f) * context_value;
+            case nvgcss::LengthUnit::EM:
+                return length->value * 16.0f;  // Assume 16px base font
+            case nvgcss::LengthUnit::REM:
+                return length->value * 16.0f;  // Assume 16px root font
+            case nvgcss::LengthUnit::VW:
+            case nvgcss::LengthUnit::VH:
+                return length->value * (context_value / 100.0f);
+            case nvgcss::LengthUnit::AUTO:
+            default:
+                return 0.0f;
         }
     }
 
-    // No unit - assume pixels
+    // Fallback: try parsing as plain number (pixels)
     try {
         return std::stof(str);
     } catch (const std::exception&) {
-        // Parse error, return 0
         return 0.0f;
     }
 }

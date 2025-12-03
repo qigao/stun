@@ -2,6 +2,7 @@
 #include <flexui/widget.h>
 #include <flexui/textbox.h>
 #include <flexui/radiobutton.h>
+#include <flexui/scrollview.h>
 #include <flexui/jsengine.h>
 #include <glad/glad.h>
 
@@ -9,6 +10,7 @@
 #include <nanovg_gl.h>
 
 #include <nanovg_css_internal.h>
+#include <nanovg_css_svg_xml.h>
 #include <fmtlog.h>
 #include <pugixml.hpp>
 #include "widget_factory.h"
@@ -172,7 +174,23 @@ Widget* Screen::addWidget(const std::string& id, const std::string& tag) {
         widget_map_[id] = ptr;
     }
 
+    spatial_index_dirty_ = true;  // New widget added
     return ptr;
+}
+
+// Helper function to calculate accumulated scroll offset from all ancestor containers
+static void getAccumulatedScrollOffset(NVGCSSRenderer* renderer, NVGCSSElement* element,
+                                        float& scroll_x, float& scroll_y) {
+    scroll_x = 0.0f;
+    scroll_y = 0.0f;
+
+    // Walk up the parent chain and accumulate scroll offsets
+    NVGCSSElement* parent = nvgcssGetParent(renderer, element);
+    while (parent) {
+        scroll_x += parent->scroll_x;
+        scroll_y += parent->scroll_y;
+        parent = nvgcssGetParent(renderer, parent);
+    }
 }
 
 bool Screen::pollEvents() {
@@ -195,6 +213,25 @@ bool Screen::pollEvents() {
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             float mx = (float)event.button.x;
             float my = (float)event.button.y;
+
+            // Blur focused textbox if clicking outside of it
+            if (focused_textbox_) {
+                auto* el = focused_textbox_->element();
+                // Calculate visual position with scroll offset
+                float scroll_x, scroll_y;
+                getAccumulatedScrollOffset(renderer_, el, scroll_x, scroll_y);
+                float visual_x = el->computed.x - scroll_x;
+                float visual_y = el->computed.y - scroll_y;
+
+                bool inside = mx >= visual_x &&
+                              mx <= visual_x + el->computed.width &&
+                              my >= visual_y &&
+                              my <= visual_y + el->computed.height;
+                if (!inside) {
+                    focused_textbox_->blur();
+                }
+            }
+
             auto candidates = spatial_index_->query(mx, my);
             for (auto* widget : candidates) {
                 widget->handleClick(mx, my);
@@ -221,6 +258,21 @@ bool Screen::pollEvents() {
         if (event.type == SDL_EVENT_KEY_DOWN && focused_textbox_) {
             focused_textbox_->handleKeyPress(event.key.key);
         }
+
+        // Handle mouse wheel scrolling
+        if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            float mx, my;
+            SDL_GetMouseState(&mx, &my);
+            float deltaX = event.wheel.x * 30.0f;  // Scale for smoother scrolling
+            float deltaY = event.wheel.y * 30.0f;
+            auto candidates = spatial_index_->query(mx, my);
+            for (auto* widget : candidates) {
+                if (widget->handleScroll(mx, my, deltaX, deltaY)) {
+                    spatial_index_dirty_ = true;  // Scroll changed, rebuild index
+                    break;  // Stop if a widget consumed the scroll
+                }
+            }
+        }
     }
     return true;
 }
@@ -231,23 +283,46 @@ void Screen::draw() {
     SDL_GetWindowSizeInPixels(window_, &fb_w, &fb_h);
     float pixel_ratio = (float)fb_w / (float)win_w;
 
+    // Check if window size changed
+    if (win_w != width_ || win_h != height_) {
+        width_ = win_w;
+        height_ = win_h;
+        spatial_index_dirty_ = true;
+    }
+
     glViewport(0, 0, fb_w, fb_h);
     glClearColor(0.98f, 0.98f, 0.98f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     nvgBeginFrame(vg_, win_w, win_h, pixel_ratio);
+
+    // Check if layout will be recomputed
+    if (renderer_->layout_dirty || renderer_->style_dirty) {
+        spatial_index_dirty_ = true;
+    }
+
     nvgcssSetViewport(renderer_, (float)win_w, (float)win_h);
     nvgcssComputeLayout(renderer_);
     nvgcssRender(renderer_);
 
-    // Rebuild spatial index if dirty
+    // Rebuild spatial index only when dirty
     if (spatial_index_dirty_) {
         spatial_index_->clear();
         for (auto& widget : widgets_) {
             auto* elem = widget->element();
-            spatial_index_->insert(widget.get(), 
-                elem->computed.x, elem->computed.y,
-                elem->computed.width, elem->computed.height);
+            // Skip widgets with zero dimensions
+            if (elem->computed.width > 0 && elem->computed.height > 0) {
+                // Calculate visual position by subtracting accumulated scroll offset
+                float scroll_x, scroll_y;
+                getAccumulatedScrollOffset(renderer_, elem, scroll_x, scroll_y);
+
+                float visual_x = elem->computed.x - scroll_x;
+                float visual_y = elem->computed.y - scroll_y;
+
+                spatial_index_->insert(widget.get(),
+                    visual_x, visual_y,
+                    elem->computed.width, elem->computed.height);
+            }
         }
         spatial_index_dirty_ = false;
     }
@@ -303,6 +378,13 @@ bool Screen::loadXML(const std::string& xml) {
         parseXMLNode(&node, nullptr);
     }
 
+    // Resolve gradient references after all elements are created
+    // This caches gradient pointers in elements for O(1) lookup during rendering
+    for (auto* root : renderer_->root_elements) {
+        nvgcss::SVGXMLParser::resolve_gradient_references(renderer_, root);
+    }
+
+    spatial_index_dirty_ = true;  // Widgets added via XML
     return true;
 }
 

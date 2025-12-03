@@ -18,6 +18,11 @@
 #include <sstream>
 #include <vector>
 
+// Include re2c-generated gradient lexer
+extern "C" {
+#include "css_gradient_lexer_gen.c"
+}
+
 // Helper to extract ID from url(#id) or #id
 static std::string extract_url_id(const std::string& url) {
     // Handle direct #id format (SVG href attribute)
@@ -748,10 +753,11 @@ void NVGCSSPainter::paint_text_content(const NVGCSSElement* element,
 
 void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
     // DEBUG: Log what we're trying to paint
-    // logd("[PAINTER] paint_element id='{}' type='{}' display={} visible={} bg_type={}",
-    //      element->id, element->type, (int)element->style.display, element->visible, 
-    //      (int)element->style.background.type);
-    
+    if (element->type == "svg" || element->type == "circle" || element->type == "rect") {
+        logd("[PAINTER] paint_element id='{}' type='{}' display={} visible={}",
+             element->id, element->type, (int)element->style.display, element->visible);
+    }
+
     // Check visibility from typed property
     if (element->style.display == nvgcss::Display::NONE) {
         logi("[PAINTER] Skipping '{}' - display is NONE", element->id);
@@ -788,6 +794,9 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
                  element->transform[2], element->transform[3],
                  element->transform[4], element->transform[5]);
 
+    // Note: SVG viewBox transform is now handled in compute_absolute_transform
+    // (nanovg_css.cpp), so we don't need to apply it again here
+
     // Apply opacity from typed property
     float combined_opacity = element->style.opacity;
     
@@ -798,11 +807,14 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
 
     // Draw based on element type
     // HTML elements (div, button, span with text) are treated as boxes
-    bool is_box_element = (element->type == "rect" || element->type == "group" ||
+    // SVG containers (svg, g) are also treated as boxes
+    // NOTE: SVG <rect> is NOT a box element - it has its own paint_rect_shape()
+    bool is_box_element = (element->type == "group" ||
                           element->type == "div" || element->type == "button" ||
                           element->type == "input" || element->type == "panel" ||
                           element->type == "screen" || element->type == "window" ||
-                          element->type == "widget");
+                          element->type == "widget" || element->type == "svg" ||
+                          element->type == "g" || element->type == "symbol");
 
     if (element->type == "textPath") {
         const auto& box = computed_to_box(element->computed);
@@ -833,8 +845,21 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         // Sprint 27: Render box-shadows first (so they're behind the element)
         paint_box_shadows(element, box);
 
-        // Create path (rounded rectangle if border-radius specified)
-        create_rounded_rect_path(box);
+        // Create path for background fill
+        nvgBeginPath(vg_);
+        bool has_radius = (box.border_radius[0] > 0 || box.border_radius[1] > 0 ||
+                           box.border_radius[2] > 0 || box.border_radius[3] > 0);
+        if (has_radius) {
+            float avg_radius = (box.border_radius[0] + box.border_radius[1] +
+                                box.border_radius[2] + box.border_radius[3]) / 4.0f;
+            nvgRoundedRect(vg_, box.x, box.y, box.width, box.height, avg_radius);
+            printf("[PATH] Created rounded rect for id='%s' at (%.1f,%.1f) size (%.1f x %.1f) radius=%.1f\n",
+                   element->id.c_str(), box.x, box.y, box.width, box.height, avg_radius);
+        } else {
+            nvgRect(vg_, box.x, box.y, box.width, box.height);
+            printf("[PATH] Created rect for id='%s' at (%.1f,%.1f) size (%.1f x %.1f)\n",
+                   element->id.c_str(), box.x, box.y, box.width, box.height);
+        }
 
         // Fill background
         apply_background(element, box);
@@ -871,6 +896,10 @@ void NVGCSSPainter::paint_element(const NVGCSSElement* element) {
         const auto& box = computed_to_box(element->computed);
         paint_circle_shape(element, box);
     }
+    else if (element->type == "rect") {
+        const auto& box = computed_to_box(element->computed);
+        paint_rect_shape(element, box);
+    }
     else if (element->type == "path") {
         const auto& box = computed_to_box(element->computed);
         paint_svg_path(element, box);
@@ -904,14 +933,30 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
     // 60fps: Read from TYPED property (not inline_style!)
     const auto& bg = element->style.background;
 
-    logd("[PAINTER] apply_background id='{}' bg_type={} gradient_css='{}'",
-         element->id, (int)bg.type, bg.gradient_css);
+    logd("[PAINTER] apply_background id='{}' bg_type={} gradient_css='{}' cached_ptr={}",
+         element->id, (int)bg.type, bg.gradient_css, (void*)element->cached_fill_gradient);
 
+    // Use cached gradient pointer (O(1) instead of O(log n) map lookup)
+    if (element->cached_fill_gradient) {
+        printf("[APPLY_BG] Using cached gradient for element id='%s'\n", element->id.c_str());
+        NVGpaint gradient_paint;
+        if (element->cached_fill_gradient->type == GradientData::LINEAR) {
+            gradient_paint = create_linear_gradient(*element->cached_fill_gradient, box);
+        } else {
+            gradient_paint = create_radial_gradient(*element->cached_fill_gradient, box);
+        }
+        nvgFillPaint(vg_, gradient_paint);
+        printf("[APPLY_BG] About to nvgFill() for id='%s'\n", element->id.c_str());
+        nvgFill(vg_);
+        printf("[APPLY_BG] nvgFill() completed for id='%s'\n", element->id.c_str());
+        return;
+    }
+    
     // Check for pattern fill (SVG style)
     auto fill_it = element->inline_style.find("fill");
-    if (fill_it != element->inline_style.end()) {
+    if (fill_it != element->inline_style.end() && fill_it->second.find("url(#") != std::string::npos) {
+        // Try pattern (patterns are not cached yet, less common than gradients)
         if (apply_pattern_fill(fill_it->second, box)) {
-            logd("[PAINTER] Pattern fill applied");
             return;
         }
     }
@@ -920,8 +965,8 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
     if (bg.type == nvgcss::BackgroundType::COLOR) {
         NVGcolor bg_color = bg.color;
 
-        logi("[PAINTER] COLOR background: r={} g={} b={} a={}", 
-             bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+        // logi("[PAINTER] COLOR background: r={} g={} b={} a={}", 
+        //      bg_color.r, bg_color.g, bg_color.b, bg_color.a);
 
         // Check if background color is transparent (alpha == 0)
         if (bg_color.a <= 0.001f) {
@@ -931,7 +976,7 @@ void NVGCSSPainter::apply_background(const NVGCSSElement* element,
 
         nvgFillColor(vg_, bg_color);
         nvgFill(vg_);
-        logi("[PAINTER] Background filled");
+        // logi("[PAINTER] Background filled");
     }
     else if (bg.type == nvgcss::BackgroundType::GRADIENT) {
         // Parse and render gradient from CSS string
@@ -1076,127 +1121,176 @@ NVGpaint NVGCSSPainter::create_gradient(const std::string& gradient_css,
     }
 }
 
+// Helper: Parse color from gradient lexer tokens
+static NVGcolor parse_gradient_color(CSSGradientLexer* lexer, CSSGradientToken* token) {
+    if (token->type == GRAD_HEX_COLOR) {
+        std::string hex(token->start, token->length);
+        return nvgcss_utils::parse_color(hex);
+    }
+    else if (token->type == GRAD_NAMED_COLOR) {
+        std::string name(token->start, token->length);
+        return nvgcss_utils::parse_color(name);
+    }
+    else if (token->type == GRAD_RGB || token->type == GRAD_RGBA) {
+        // Collect rgb(r,g,b) or rgba(r,g,b,a)
+        std::string color_str(token->start, token->length);
+        *token = CSSGradientLexer_next_token(lexer);
+        if (token->type == GRAD_LPAREN) {
+            color_str += "(";
+            while (token->type != GRAD_END) {
+                *token = CSSGradientLexer_next_token(lexer);
+                if (token->type == GRAD_RPAREN) {
+                    color_str += ")";
+                    break;
+                }
+                color_str += std::string(token->start, token->length);
+            }
+        }
+        return nvgcss_utils::parse_color(color_str);
+    }
+    return nvgRGB(0, 0, 0);
+}
+
 GradientData NVGCSSPainter::parse_gradient(const std::string& gradient_css) {
     GradientData result;
+    CSSGradientLexer lexer;
+    CSSGradientLexer_init(&lexer, gradient_css.c_str());
+
+    CSSGradientToken token = CSSGradientLexer_next_token(&lexer);
 
     // Determine gradient type
-    if (gradient_css.find("radial-gradient") != std::string::npos) {
+    if (token.type == GRAD_LINEAR || token.type == GRAD_REPEATING_LINEAR) {
+        result.type = GradientData::LINEAR;
+    } else if (token.type == GRAD_RADIAL || token.type == GRAD_REPEATING_RADIAL) {
         result.type = GradientData::RADIAL;
     } else {
-        result.type = GradientData::LINEAR;
+        return result;
     }
 
-    std::string gradient = gradient_css;
+    // Skip opening parenthesis
+    token = CSSGradientLexer_next_token(&lexer);
+    if (token.type != GRAD_LPAREN) return result;
 
-    // Remove function name and parentheses
-    size_t start_pos = gradient.find('(');
-    size_t end_pos = gradient.rfind(')');
-    if (start_pos != std::string::npos && end_pos != std::string::npos) {
-        gradient = gradient.substr(start_pos + 1, end_pos - start_pos - 1);
-    }
+    token = CSSGradientLexer_next_token(&lexer);
 
-    // Split by commas (but be careful with rgba commas)
-    std::vector<std::string> parts;
-    std::string current;
-    int paren_depth = 0;
+    // Parse direction/shape/position
+    if (result.type == GradientData::LINEAR) {
+        // Linear gradient: check for "to" direction or angle
+        if (token.type == GRAD_TO) {
+            token = CSSGradientLexer_next_token(&lexer);
+            float angle = 180.0f;  // default: to bottom
 
-    for (char c : gradient) {
-        if (c == '(') paren_depth++;
-        else if (c == ')') paren_depth--;
-        else if (c == ',' && paren_depth == 0) {
-            parts.push_back(current);
-            current.clear();
-            continue;
-        }
-        current += c;
-    }
-    if (!current.empty()) parts.push_back(current);
-
-    // Trim all parts
-    for (auto& part : parts) {
-        part.erase(0, part.find_first_not_of(" \t"));
-        part.erase(part.find_last_not_of(" \t") + 1);
-    }
-
-    if (parts.empty()) return result;
-
-    size_t color_start_idx = 0;
-
-    // Parse direction/position (first part might not be a color)
-    if (!parts.empty()) {
-        const std::string& first = parts[0];
-
-        if (result.type == GradientData::LINEAR) {
-            // Linear gradient direction
-            if (first.find("to ") == 0) {
-                // Named direction
-                if (first == "to bottom") result.angle = 180.0f;
-                else if (first == "to top") result.angle = 0.0f;
-                else if (first == "to right") result.angle = 90.0f;
-                else if (first == "to left") result.angle = 270.0f;
-                else if (first == "to bottom right") result.angle = 135.0f;
-                else if (first == "to bottom left") result.angle = 225.0f;
-                else if (first == "to top right") result.angle = 45.0f;
-                else if (first == "to top left") result.angle = 315.0f;
-                color_start_idx = 1;
-            } else if (first.find("deg") != std::string::npos) {
-                // Angle in degrees
-                result.angle = safe_stof(first);
-                color_start_idx = 1;
+            // Collect direction keywords
+            bool has_top = false, has_bottom = false, has_left = false, has_right = false;
+            while (token.type == GRAD_TOP || token.type == GRAD_BOTTOM ||
+                   token.type == GRAD_LEFT || token.type == GRAD_RIGHT) {
+                if (token.type == GRAD_TOP) has_top = true;
+                else if (token.type == GRAD_BOTTOM) has_bottom = true;
+                else if (token.type == GRAD_LEFT) has_left = true;
+                else if (token.type == GRAD_RIGHT) has_right = true;
+                token = CSSGradientLexer_next_token(&lexer);
             }
-        } else {
-            // Radial gradient shape/position
-            if (first.find("circle") != std::string::npos) {
-                result.shape = "circle";
-                // Check for position
-                if (first.find(" at ") != std::string::npos) {
-                    size_t at_pos = first.find(" at ");
-                    result.position = first.substr(at_pos + 4);
-                }
-                color_start_idx = 1;
-            } else if (first.find("ellipse") != std::string::npos) {
-                result.shape = "ellipse";
-                if (first.find(" at ") != std::string::npos) {
-                    size_t at_pos = first.find(" at ");
-                    result.position = first.substr(at_pos + 4);
-                }
-                color_start_idx = 1;
-            } else if (first.find("at ") != std::string::npos) {
-                result.position = first.substr(3);  // Remove "at "
-                color_start_idx = 1;
-            }
+
+            // Convert to angle
+            if (has_top && has_right) angle = 45.0f;
+            else if (has_top && has_left) angle = 315.0f;
+            else if (has_bottom && has_right) angle = 135.0f;
+            else if (has_bottom && has_left) angle = 225.0f;
+            else if (has_top) angle = 0.0f;
+            else if (has_bottom) angle = 180.0f;
+            else if (has_right) angle = 90.0f;
+            else if (has_left) angle = 270.0f;
+
+            result.angle = angle;
         }
+        else if (token.type == GRAD_DEG) {
+            result.angle = token.value;
+            token = CSSGradientLexer_next_token(&lexer);
+        }
+        else if (token.type == GRAD_RAD) {
+            result.angle = token.value * 180.0f / 3.14159f;
+            token = CSSGradientLexer_next_token(&lexer);
+        }
+        else if (token.type == GRAD_TURN) {
+            result.angle = token.value * 360.0f;
+            token = CSSGradientLexer_next_token(&lexer);
+        }
+    }
+    else {
+        // Radial gradient: check for shape and position
+        if (token.type == GRAD_CIRCLE) {
+            result.shape = "circle";
+            token = CSSGradientLexer_next_token(&lexer);
+        } else if (token.type == GRAD_ELLIPSE) {
+            result.shape = "ellipse";
+            token = CSSGradientLexer_next_token(&lexer);
+        }
+
+        // Check for "at" position
+        if (token.type == GRAD_AT) {
+            token = CSSGradientLexer_next_token(&lexer);
+            std::string position;
+            while (token.type != GRAD_COMMA && token.type != GRAD_END && token.type != GRAD_RPAREN) {
+                if (!position.empty()) position += " ";
+                position += std::string(token.start, token.length);
+                token = CSSGradientLexer_next_token(&lexer);
+            }
+            result.position = position;
+        }
+    }
+
+    // Skip comma after direction/shape if present
+    if (token.type == GRAD_COMMA) {
+        token = CSSGradientLexer_next_token(&lexer);
     }
 
     // Parse color stops
-    for (size_t i = color_start_idx; i < parts.size(); ++i) {
-        std::string stop_str = parts[i];
+    std::vector<std::pair<NVGcolor, float>> stops;
+    float position = -1.0f;
 
-        GradientStop stop;
-        stop.position = static_cast<float>(i - color_start_idx) /
-                       static_cast<float>(parts.size() - color_start_idx - 1);
+    while (token.type != GRAD_END && token.type != GRAD_RPAREN) {
+        NVGcolor color = nvgRGB(0, 0, 0);
+        position = -1.0f;
 
-        // Check if stop has explicit position (e.g., "red 50%")
-        size_t space_pos = stop_str.find_last_of(' ');
-        if (space_pos != std::string::npos) {
-            std::string pos_str = stop_str.substr(space_pos + 1);
-            if (pos_str.find('%') != std::string::npos) {
-                // Percentage position
-                stop.position = safe_stof(pos_str) / 100.0f;
-                stop_str = stop_str.substr(0, space_pos);
-                stop_str.erase(stop_str.find_last_not_of(" \t") + 1);
-            } else if (pos_str.find("px") != std::string::npos) {
-                // Pixel position - convert to percentage (needs box size, skip for now)
-                stop_str = stop_str.substr(0, space_pos);
-                stop_str.erase(stop_str.find_last_not_of(" \t") + 1);
-            }
+        // Parse color
+        if (token.type == GRAD_HEX_COLOR || token.type == GRAD_NAMED_COLOR ||
+            token.type == GRAD_RGB || token.type == GRAD_RGBA) {
+            color = parse_gradient_color(&lexer, &token);
+            token = CSSGradientLexer_next_token(&lexer);
         }
 
-        stop.color = nvgcss_utils::parse_color(stop_str);
-        result.stops.push_back(stop);
+        // Parse optional position
+        if (token.type == GRAD_PERCENT) {
+            position = token.value / 100.0f;
+            token = CSSGradientLexer_next_token(&lexer);
+        } else if (token.type == GRAD_PX) {
+            // Pixel positions need box context, store raw for now
+            position = token.value / 100.0f;  // Approximate
+            token = CSSGradientLexer_next_token(&lexer);
+        }
+
+        stops.push_back({color, position});
+
+        // Skip comma
+        if (token.type == GRAD_COMMA) {
+            token = CSSGradientLexer_next_token(&lexer);
+        }
     }
 
-    // Ensure we have at least 2 stops
+    // Distribute positions for stops without explicit position
+    size_t num_stops = stops.size();
+    for (size_t i = 0; i < num_stops; ++i) {
+        if (stops[i].second < 0.0f) {
+            stops[i].second = (num_stops > 1) ? static_cast<float>(i) / (num_stops - 1) : 0.0f;
+        }
+    }
+
+    // Convert to GradientStop
+    for (const auto& [color, pos] : stops) {
+        result.stops.push_back({pos, color});
+    }
+
+    // Ensure at least 2 stops
     if (result.stops.size() < 2) {
         if (result.stops.empty()) {
             result.stops.push_back({0.0f, nvgRGB(0, 0, 0)});
@@ -1580,7 +1674,10 @@ static bool extract_coordinate(const NVGCSSElement* element,
     if (it == element->inline_style.end()) {
         return false;
     }
-    out_value = origin + nvgcss_utils::parse_length(it->second, context);
+
+    // SVG coordinates are relative to viewBox, not screen
+    // The origin offset is only added if there's no parent SVG transform
+    out_value = nvgcss_utils::parse_length(it->second, context);
     return true;
 }
 
@@ -1699,9 +1796,31 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
     // Check if rough rendering is enabled
     bool use_rough = (element->style.svg_stroke.rendering == nvgcss::StrokeRendering::ROUGH);
 
+    // Debug: Log element classes and fill from typed style
+    std::string classes_str;
+    for (const auto& cls : element->classes) {
+        classes_str += cls + " ";
+    }
+
+    // logi("[PAINTER] paint_circle id='{}' classes='{}' svg_fill.enabled={} svg_fill.color=({:.2f},{:.2f},{:.2f},{:.2f})",
+    //      element->id, classes_str,
+    //      element->style.svg_fill.enabled,
+    //      element->style.svg_fill.color.r, element->style.svg_fill.color.g,
+    //      element->style.svg_fill.color.b, element->style.svg_fill.color.a);
+
+    // Use cached gradient pointer (O(1) instead of O(log n) map lookup)
+    bool has_gradient_fill = false;
+    
+    // DEBUG: Check cache status
     auto fill_it = element->inline_style.find("fill");
-    if (fill_it != element->inline_style.end() && fill_it->second != "none") {
-        // Try pattern fill first
+    if (fill_it != element->inline_style.end()) {
+        printf("[PAINTER] paint_circle id='%s' fill='%s' cached_ptr=%p\n", 
+               element->id.c_str(), fill_it->second.c_str(), 
+               (void*)element->cached_fill_gradient);
+    }
+    
+    if (element->cached_fill_gradient) {
+        // Create path
         nvgBeginPath(vg_);
         if (std::abs(rx - ry) < 0.001f) {
             nvgCircle(vg_, cx, cy, rx);
@@ -1709,46 +1828,70 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
             nvgEllipse(vg_, cx, cy, rx, ry);
         }
         
-        if (apply_pattern_fill(fill_it->second, box)) {
-            // Pattern applied successfully
+        // Apply gradient paint
+        NVGCSSBox gradient_box;
+        gradient_box.x = cx - rx;
+        gradient_box.y = cy - ry;
+        gradient_box.width = rx * 2;
+        gradient_box.height = ry * 2;
+        
+        NVGpaint gradient_paint;
+        if (element->cached_fill_gradient->type == GradientData::LINEAR) {
+            gradient_paint = create_linear_gradient(*element->cached_fill_gradient, gradient_box);
         } else {
-            // Fall back to color fill
-            NVGcolor fill_color = nvgcss_utils::parse_color(fill_it->second);
-            
-            if (use_rough) {
-                // Use rough rendering for fill
-                NVGRoughOptions opts = nvgRoughDefaultOptions();
-                opts.fill_enabled = 1;
-                opts.fill_color = fill_color;
-                opts.stroke_enabled = 0;
-                opts.roughness = element->style.svg_stroke.roughness;
-                opts.seed = element->style.svg_stroke.seed;
-                
-                if (std::abs(rx - ry) < 0.001f) {
-                    nvgRoughCircle(vg_, cx, cy, rx, opts);
-                } else {
-                    nvgRoughEllipse(vg_, cx, cy, rx, ry, opts);
-                }
+            gradient_paint = create_radial_gradient(*element->cached_fill_gradient, gradient_box);
+        }
+        
+        nvgFillPaint(vg_, gradient_paint);
+        nvgFill(vg_);
+        has_gradient_fill = true;
+    }
+    
+    // Use typed style for fill (CSS styles are already computed here)
+    if (!has_gradient_fill && element->style.svg_fill.enabled) {
+        NVGcolor fill_color = element->style.svg_fill.color;
+
+        // Create path
+        nvgBeginPath(vg_);
+        if (std::abs(rx - ry) < 0.001f) {
+            nvgCircle(vg_, cx, cy, rx);
+        } else {
+            nvgEllipse(vg_, cx, cy, rx, ry);
+        }
+
+        if (use_rough) {
+            // Use rough rendering for fill
+            NVGRoughOptions opts = nvgRoughDefaultOptions();
+            opts.fill_enabled = 1;
+            opts.fill_color = fill_color;
+            opts.stroke_enabled = 0;
+            opts.roughness = element->style.svg_stroke.roughness;
+            opts.seed = element->style.svg_stroke.seed;
+
+            if (std::abs(rx - ry) < 0.001f) {
+                nvgRoughCircle(vg_, cx, cy, rx, opts);
             } else {
-                // Standard smooth rendering
-                nvgFillColor(vg_, fill_color);
-                nvgFill(vg_);
+                nvgRoughEllipse(vg_, cx, cy, rx, ry, opts);
             }
+        } else {
+            // Standard smooth rendering
+            nvgFillColor(vg_, fill_color);
+            nvgFill(vg_);
         }
     }
 
     auto stroke = resolve_stroke_style(element, &box, std::max(rx, ry));
     
-    printf("[PAINTER] Stroke resolved: enabled=%d width=%.2f use_rough=%d\n", 
-           stroke.enabled, stroke.width, use_rough);
+    // printf("[PAINTER] Stroke resolved: enabled=%d width=%.2f use_rough=%d\n", 
+    //        stroke.enabled, stroke.width, use_rough);
     
     if (!stroke.enabled || stroke.width <= 0.0f) {
-        printf("[PAINTER] Skipping stroke - not enabled or zero width\n");
+        // printf("[PAINTER] Skipping stroke - not enabled or zero width\n");
         return;
     }
     
     if (use_rough) {
-        printf("[PAINTER] *** USING ROUGH RENDERING ***\n");
+        // printf("[PAINTER] *** USING ROUGH RENDERING ***\n");
         // Use rough rendering for stroke
         NVGRoughOptions opts = nvgRoughDefaultOptions();
         opts.stroke_enabled = 1;
@@ -1836,6 +1979,85 @@ void NVGCSSPainter::paint_circle_shape(const NVGCSSElement* element,
         }
     } else {
         stroke_polyline(vg_, stroke, outline, true);
+    }
+}
+
+void NVGCSSPainter::paint_rect_shape(const NVGCSSElement* element,
+                                     const NVGCSSBox& box) {
+    float x = box.x;
+    float y = box.y;
+    float w = box.width;
+    float h = box.height;
+    float rx = 0.0f;
+    float ry = 0.0f;
+
+    extract_coordinate(element, "x", box.width, box.x, x);
+    extract_coordinate(element, "y", box.height, box.y, y);
+    extract_coordinate(element, "width", box.width, 0, w);
+    extract_coordinate(element, "height", box.height, 0, h);
+
+    auto rx_it = element->inline_style.find("rx");
+    if (rx_it != element->inline_style.end()) {
+        rx = nvgcss_utils::parse_length(rx_it->second, w);
+    }
+    auto ry_it = element->inline_style.find("ry");
+    if (ry_it != element->inline_style.end()) {
+        ry = nvgcss_utils::parse_length(ry_it->second, h);
+    }
+
+    bool has_gradient_fill = false;
+    
+    if (element->cached_fill_gradient) {
+        nvgBeginPath(vg_);
+        if (rx > 0 || ry > 0) {
+            float radius = (rx > 0 && ry > 0) ? std::max(rx, ry) : (rx > 0 ? rx : ry);
+            nvgRoundedRect(vg_, x, y, w, h, radius);
+        } else {
+            nvgRect(vg_, x, y, w, h);
+        }
+        
+        NVGCSSBox gradient_box;
+        gradient_box.x = x;
+        gradient_box.y = y;
+        gradient_box.width = w;
+        gradient_box.height = h;
+        
+        NVGpaint gradient_paint;
+        if (element->cached_fill_gradient->type == GradientData::LINEAR) {
+            gradient_paint = create_linear_gradient(*element->cached_fill_gradient, gradient_box);
+        } else {
+            gradient_paint = create_radial_gradient(*element->cached_fill_gradient, gradient_box);
+        }
+        
+        nvgFillPaint(vg_, gradient_paint);
+        nvgFill(vg_);
+        has_gradient_fill = true;
+    }
+    
+    if (!has_gradient_fill && element->style.svg_fill.enabled) {
+        nvgBeginPath(vg_);
+        if (rx > 0 || ry > 0) {
+            float radius = (rx > 0 && ry > 0) ? std::max(rx, ry) : (rx > 0 ? rx : ry);
+            nvgRoundedRect(vg_, x, y, w, h, radius);
+        } else {
+            nvgRect(vg_, x, y, w, h);
+        }
+        nvgFillColor(vg_, element->style.svg_fill.color);
+        nvgFill(vg_);
+    }
+
+    NVGCSSBox stroke_box;
+    stroke_box.x = x;
+    stroke_box.y = y;
+    stroke_box.width = w;
+    stroke_box.height = h;
+    auto stroke = resolve_stroke_style(element, &stroke_box, std::max(w, h));
+    
+    if (stroke.enabled && stroke.width > 0.0f) {
+        std::vector<Vec2> corners = {
+            {x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}
+        };
+        stroke_polyline(vg_, stroke, corners, true);
     }
 }
 

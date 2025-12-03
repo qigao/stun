@@ -23,6 +23,15 @@ void Toast::show(float duration) {
   show_time_ = std::chrono::steady_clock::now();
 }
 
+void Toast::hide() {
+  if (visible_) {
+    visible_ = false;
+    if (dismiss_callback_) {
+      dismiss_callback_();
+    }
+  }
+}
+
 void Toast::updateTimer() {
   if (!visible_)
     return;

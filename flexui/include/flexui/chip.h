@@ -28,6 +28,11 @@ public:
     const std::string& getChipText() const { return text_; }
     void setCloseCallback(CloseCallback cb) { closeCallback_ = cb; }
     void setChipStyle(const ChipStyle& style) { style_ = style; }
+    void setCloseable(bool closeable) { style_.closeable = closeable; }
+    bool isCloseable() const { return style_.closeable; }
+
+protected:
+    bool onClicked() override;
 
 private:
     std::string text_;

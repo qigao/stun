@@ -71,6 +71,10 @@ endif()
 message(STATUS "NanoVG CSS: Found Lexbor library: ${LEXBOR_LIBRARY}")
 message(STATUS "NanoVG CSS: Found Lexbor include: ${LEXBOR_INCLUDE_DIR}")
 
+# Find pugixml for SVG XML parsing
+find_package(pugixml CONFIG REQUIRED)
+message(STATUS "NanoVG CSS: Found pugixml for SVG XML parsing")
+
 # ============================================================================
 # Generate SVG Path Lexer with re2c
 # ============================================================================
@@ -101,7 +105,33 @@ add_custom_command(
   VERBATIM
 )
 
+# Generate CSS gradient lexer from re2c
+set(GRADIENT_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/css_gradient_lexer.re)
+set(GRADIENT_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/css_gradient_lexer_gen.c)
+
+add_custom_command(
+  OUTPUT ${GRADIENT_LEXER_GEN}
+  COMMAND ${RE2C_EXECUTABLE} -o ${GRADIENT_LEXER_GEN} ${GRADIENT_LEXER_RE}
+  DEPENDS ${GRADIENT_LEXER_RE}
+  COMMENT "Generating CSS gradient lexer with re2c"
+  VERBATIM
+)
+
+# Generate CSS calc() lexer from re2c
+set(CALC_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/css_calc_lexer.re)
+set(CALC_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/css_calc_lexer_gen.c)
+
+add_custom_command(
+  OUTPUT ${CALC_LEXER_GEN}
+  COMMAND ${RE2C_EXECUTABLE} -o ${CALC_LEXER_GEN} ${CALC_LEXER_RE}
+  DEPENDS ${CALC_LEXER_RE}
+  COMMENT "Generating CSS calc() lexer with re2c"
+  VERBATIM
+)
+
 set(SVG_PATH_SOURCES src/nanovg_css_svg_path.cpp ${SVG_LEXER_GEN})
+set(GRADIENT_SOURCES ${GRADIENT_LEXER_GEN})
+set(CALC_SOURCES ${CALC_LEXER_GEN})
 
 # CSS extension sources
 set(NANOVG_CSS_SOURCES
@@ -115,17 +145,21 @@ set(NANOVG_CSS_SOURCES
     src/nanovg_css_filters.cpp
     src/nanovg_css_quadtree.cpp
     src/lexbor_css_parser.cpp
+    src/nanovg_css_svg_xml.cpp
     ${SVG_PATH_SOURCES}
+    ${GRADIENT_SOURCES}
+    ${CALC_SOURCES}
     src/nanovg_css_path_sampler.cpp)
 
 set(NANOVG_CSS_HEADERS
  include/nanovg_css.h
  include/nanovg_css_internal.h
- include/nanovg_css_types.h       
- include/nanovg_css_conversion.h     
+ include/nanovg_css_types.h
+ include/nanovg_css_conversion.h
  include/nanovg_css_background.h
  include/nanovg_css_filters.h
  include/nanovg_css_quadtree.h
+ include/nanovg_css_svg_xml.h
  include/lexbor_css_parser.h
  include/lexbor_wrapper.h
  )
@@ -152,11 +186,13 @@ target_include_directories(
 
 # Link dependencies
 target_link_libraries(
-  nanovg_css  
+  nanovg_css
   PUBLIC nanovg_internal   # Use internal NanoVG build
   OpenGL::GL
-  glad::glad
-  PRIVATE ${LEXBOR_LIBRARY} fmtlog)
+  glad::glad TurboMemory
+  PRIVATE ${LEXBOR_LIBRARY}
+  pugixml::pugixml
+  fmtlog)
 
 # Create an alias for compatibility
 add_library(nanovg::css ALIAS nanovg_css)

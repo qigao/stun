@@ -1,7 +1,7 @@
 #include <flexui/screen.h>
 
 int main() {
-    flexui::Screen screen(800, 600, "FlexUI Tailwind Features Demo");
+    flexui::Screen screen(800, 800, "FlexUI Tailwind Features Demo");
 
     // CSS with Tailwind-inspired features
     screen.loadCSS(R"(
@@ -188,7 +188,7 @@ int main() {
             <div class="form-group">
                 <label class="input-label">Email Address</label>
                 <input class="input" placeholder="Enter your email"/>
-                
+
                 <label class="input-label">Full Name</label>
                 <input class="input" placeholder="Enter your name"/>
             </div>

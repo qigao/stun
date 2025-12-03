@@ -21,6 +21,7 @@ public:
               const SearchBoxStyle& style = SearchBoxStyle());
 
     void draw(NVGcontext* vg) override;
+    void handleKeyPress(int key) override;
 
     void setSearchCallback(SearchCallback cb) { search_callback_ = cb; }
     void setSearchBoxStyle(const SearchBoxStyle& style) { style_ = style; }

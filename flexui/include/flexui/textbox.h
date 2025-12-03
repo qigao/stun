@@ -31,7 +31,7 @@ public:
     void draw(NVGcontext* vg) override;
 
     void handleTextInput(const std::string& text);
-    void handleKeyPress(int key);
+    virtual void handleKeyPress(int key);
     void blur();
 
     void setInputText(const std::string& text) { text_ = text; }

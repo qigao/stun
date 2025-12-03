@@ -27,17 +27,20 @@ struct ToastStyle {
 
 class Toast : public Widget {
 public:
+    using DismissCallback = std::function<void()>;
+
     Toast(NVGCSSRenderer* renderer, const std::string& id, const std::string& message,
           ToastType type = ToastType::Info, const ToastStyle& style = ToastStyle());
 
     void draw(NVGcontext* vg) override;
     void show(float duration = 2.0f);
-    void hide() { visible_ = false; }
+    void hide();
     bool isVisible() const { return visible_; }
     void updateTimer();
     void setMessage(const std::string& message) { message_ = message; }
     const std::string& getMessage() const { return message_; }
     void setType(ToastType type);
+    void setDismissCallback(DismissCallback cb) { dismiss_callback_ = cb; }
 
 private:
     std::string message_;
@@ -46,6 +49,7 @@ private:
     bool visible_ = false;
     float duration_ = 2.0f;
     std::chrono::steady_clock::time_point show_time_;
+    DismissCallback dismiss_callback_;
 
     void updateStyleForType();
 };

@@ -1,4 +1,5 @@
 #include <flexui/searchbox.h>
+#include <SDL3/SDL.h>
 #include <cmath>
 #include <nanovg_css_internal.h>
 namespace flexui {
@@ -6,6 +7,14 @@ namespace flexui {
 SearchBox::SearchBox(NVGCSSRenderer* renderer, const std::string& id,
                      const std::string& placeholder, const SearchBoxStyle& style)
     : TextBox(renderer, id, placeholder), style_(style) {
+}
+
+void SearchBox::handleKeyPress(int key) {
+    TextBox::handleKeyPress(key);
+
+    if (key == SDLK_RETURN && search_callback_) {
+        search_callback_(getInputText());
+    }
 }
 
 void SearchBox::draw(NVGcontext* vg) {

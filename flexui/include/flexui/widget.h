@@ -49,6 +49,7 @@ public:
     virtual bool handleMouseDown(float x, float y) { return false; }
     virtual bool handleMouseMove(float x, float y) { return false; }
     virtual bool handleMouseUp(float x, float y) { return false; }
+    virtual bool handleScroll(float x, float y, float deltaX, float deltaY) { return false; }
 
     virtual void draw(NVGcontext* vg) {} // Override for custom drawing
 

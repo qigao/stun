@@ -2079,6 +2079,19 @@ nvgcss::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         result.svg_stroke.seed = std::atoi(seed_str.c_str());
     }
 
+    // === SVG Fill Property ===
+    std::string fill_str = get("fill");
+    if (!fill_str.empty()) {
+        if (fill_str == "none") {
+            result.svg_fill.enabled = false;
+        } else {
+            if (auto fill_color = nvgcss::convert::parse_color(fill_str)) {
+                result.svg_fill.color = *fill_color;
+                result.svg_fill.enabled = true;
+            }
+        }
+    }
+
     return result;
 }
 

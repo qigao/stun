@@ -172,12 +172,28 @@ inline std::optional<Color> parse_color(std::string_view str) {
         return nvgRGBA(r, g, b, a);
     }
 
-    // Named colors
+    // Named colors (CSS Color Level 4 - common subset)
     if (str == "black") return nvgRGB(0, 0, 0);
     if (str == "white") return nvgRGB(255, 255, 255);
     if (str == "red") return nvgRGB(255, 0, 0);
     if (str == "green") return nvgRGB(0, 128, 0);
     if (str == "blue") return nvgRGB(0, 0, 255);
+    if (str == "yellow") return nvgRGB(255, 255, 0);
+    if (str == "cyan") return nvgRGB(0, 255, 255);
+    if (str == "magenta") return nvgRGB(255, 0, 255);
+    if (str == "gray" || str == "grey") return nvgRGB(128, 128, 128);
+    if (str == "orange") return nvgRGB(255, 165, 0);
+    if (str == "purple") return nvgRGB(128, 0, 128);
+    if (str == "brown") return nvgRGB(165, 42, 42);
+    if (str == "pink") return nvgRGB(255, 192, 203);
+    if (str == "lime") return nvgRGB(0, 255, 0);
+    if (str == "navy") return nvgRGB(0, 0, 128);
+    if (str == "teal") return nvgRGB(0, 128, 128);
+    if (str == "olive") return nvgRGB(128, 128, 0);
+    if (str == "maroon") return nvgRGB(128, 0, 0);
+    if (str == "aqua") return nvgRGB(0, 255, 255);
+    if (str == "silver") return nvgRGB(192, 192, 192);
+    if (str == "fuchsia") return nvgRGB(255, 0, 255);
     if (str == "transparent") return nvgRGBA(0, 0, 0, 0);
 
     // TODO: Add more named colors if needed

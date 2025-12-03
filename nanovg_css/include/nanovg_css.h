@@ -484,6 +484,50 @@ void nvgcssSetPseudoState(NVGCSSElement* element, const char* state, int active)
 int nvgcssHasPseudoState(const NVGCSSElement* element, const char* state);
 
 // ============================================================================
+// Scroll Support
+// ============================================================================
+
+/**
+ * @brief Set scroll offset for an element
+ *
+ * For elements with overflow: scroll/auto, this sets the scroll position.
+ * Children will be offset by this amount during rendering.
+ *
+ * @param element Element to scroll
+ * @param scroll_x Horizontal scroll offset (positive = scrolled right)
+ * @param scroll_y Vertical scroll offset (positive = scrolled down)
+ */
+void nvgcssSetScroll(NVGCSSElement* element, float scroll_x, float scroll_y);
+
+/**
+ * @brief Get scroll offset for an element
+ *
+ * @param element Element to query
+ * @param out_scroll_x Output horizontal scroll offset
+ * @param out_scroll_y Output vertical scroll offset
+ */
+void nvgcssGetScroll(const NVGCSSElement* element, float* out_scroll_x, float* out_scroll_y);
+
+/**
+ * @brief Set content height for scroll calculations
+ *
+ * This is the total height of the content inside the element.
+ * Used to calculate scrollbar size and maximum scroll offset.
+ *
+ * @param element Element to set content height for
+ * @param content_height Total content height in pixels
+ */
+void nvgcssSetContentHeight(NVGCSSElement* element, float content_height);
+
+/**
+ * @brief Get content height
+ *
+ * @param element Element to query
+ * @return Content height in pixels
+ */
+float nvgcssGetContentHeight(const NVGCSSElement* element);
+
+// ============================================================================
 // Rendering Pipeline
 // ============================================================================
 

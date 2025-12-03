@@ -52,6 +52,7 @@ set(FLEXUI_SOURCES
     src/colorpicker.cpp
     src/snackbar.cpp
     src/tablist.cpp
+    src/scrollview.cpp
 )
 
 set(FLEXUI_HEADERS

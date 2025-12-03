@@ -1620,11 +1620,11 @@ void QuadtreeLayoutEngine::write_to_elements(LayoutNode* root) {
     root->element->computed.is_computed = true;
 
     // DEBUG: Log positions for key elements
-    if (!root->element->id.empty() && root->element->id.find("_") == std::string::npos) {
-        logi("[POSITION] id='{}' pos=({:.0f}, {:.0f}) size=({:.0f}x{:.0f}) display={}",
-             root->element->id, root->x, root->y, root->width, root->height,
-             (int)root->element->style.display);
-    }
+    // if (!root->element->id.empty() && root->element->id.find("_") == std::string::npos) {
+    //     logi("[POSITION] id='{}' pos=({:.0f}, {:.0f}) size=({:.0f}x{:.0f}) display={}",
+    //          root->element->id, root->x, root->y, root->width, root->height,
+    //          (int)root->element->style.display);
+    // }
     // DEBUG: Also log class-based elements for troubleshooting
     for (const auto& cls : root->element->classes) {
         if (cls == "stat-card" || cls == "stat-label" || cls == "stat-value" || cls == "stats-row") {
