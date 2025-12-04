@@ -1,9 +1,9 @@
-#include <flexui/spinner.h>
+﻿#include <flexui/spinner.h>
 #include <cmath>
-#include <nanovg_css_internal.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Spinner::Spinner(NVGCSSRenderer* renderer, const std::string& id, const SpinnerStyle& style)
+Spinner::Spinner(cssboxRenderer* renderer, const std::string& id, const SpinnerStyle& style)
     : Widget(renderer, id, "spinner"), style_(style) {
     start_time_ = std::chrono::steady_clock::now();
 }

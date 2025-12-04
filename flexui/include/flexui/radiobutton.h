@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -17,7 +17,7 @@ struct RadioButtonStyle {
 
 class RadioButton : public Widget {
 public:
-    RadioButton(NVGCSSRenderer* renderer, const std::string& id,
+    RadioButton(cssboxRenderer* renderer, const std::string& id,
                 const std::string& group, const std::string& value,
                 bool checked = false, const RadioButtonStyle& style = RadioButtonStyle());
 

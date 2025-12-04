@@ -1,14 +1,14 @@
-#include <flexui/widget.h>
-#include <nanovg_css_internal.h>
-#include <nanovg_css_types.h>
+﻿#include <flexui/widget.h>
+#include <cssbox_internal.h>
+#include <cssbox_types.h>
 #include <fmtlog.h>
 #include <sstream>
 
 namespace flexui {
 
-Widget::Widget(NVGCSSRenderer* renderer, const std::string& id, const std::string& tag)
+Widget::Widget(cssboxRenderer* renderer, const std::string& id, const std::string& tag)
     : renderer_(renderer), id_(id) {
-    element_ = nvgcssCreateElement(renderer_, id.c_str(), tag.c_str());
+    element_ = cssboxCreateElement(renderer_, id.c_str(), tag.c_str());
 }
 
 void Widget::setClass(const std::string& className) {
@@ -18,7 +18,7 @@ void Widget::setClass(const std::string& className) {
     std::string singleClass;
     while (iss >> singleClass) {
         if (!singleClass.empty()) {
-            nvgcssAddClass(element_, singleClass.c_str());
+            cssboxAddClass(element_, singleClass.c_str());
         }
     }
     renderer_->style_dirty = true;
@@ -26,13 +26,13 @@ void Widget::setClass(const std::string& className) {
 }
 
 void Widget::addClass(const std::string& className) {
-    nvgcssAddClass(element_, className.c_str());
+    cssboxAddClass(element_, className.c_str());
     renderer_->style_dirty = true;
     renderer_->layout_dirty = true;
 }
 
 void Widget::removeClass(const std::string& className) {
-    nvgcssRemoveClass(element_, className.c_str());
+    cssboxRemoveClass(element_, className.c_str());
     renderer_->style_dirty = true;
     renderer_->layout_dirty = true;
 }
@@ -55,11 +55,11 @@ void Widget::setSize(float w, float h) {
 }
 
 void Widget::setText(const std::string& text) {
-    nvgcssSetText(element_, text.c_str());
+    cssboxSetText(element_, text.c_str());
 }
 
 void Widget::addChild(Widget* child) {
-    nvgcssAppendChild(renderer_, element_, child->element());
+    cssboxAppendChild(renderer_, element_, child->element());
 }
 
 void Widget::setInlineStyle(const std::string& property, const std::string& value) {
@@ -80,13 +80,13 @@ bool Widget::handleClick(float x, float y) {
     }
 
     // Set active pseudo-state
-    nvgcssSetPseudoState(element_, "active", 1);
+    cssboxSetPseudoState(element_, "active", 1);
 
     // Call virtual onClicked() for widget-specific logic
     return onClicked();
 }
 
-void Widget::handleHover(float x, float y) {
+bool Widget::handleHover(float x, float y) {
     float ex = element_->computed.x;
     float ey = element_->computed.y;
     float ew = element_->computed.width;
@@ -96,11 +96,13 @@ void Widget::handleHover(float x, float y) {
 
     if (inside != hovered_) {
         hovered_ = inside;
-        nvgcssSetPseudoState(element_, "hover", inside ? 1 : 0);
+        cssboxSetPseudoState(element_, "hover", inside ? 1 : 0);
         if (hover_callback_) {
             hover_callback_(this, inside);
         }
+        return true;  // Hover state changed
     }
+    return false;  // No change
 }
 
 void Widget::setStroke(const std::string& color, float width) {
@@ -147,7 +149,7 @@ bool Widget::isVisible() const {
     }
 
     // Check computed style
-    if (element_->style.display == nvgcss::Display::NONE) {
+    if (element_->style.display == cssbox::Display::NONE) {
         return false;
     }
 
@@ -156,7 +158,7 @@ bool Widget::isVisible() const {
 }
 
 NVGcolor Widget::cssBackground(const NVGcolor& fallback) const {
-    if (element_->style.background.type == nvgcss::BackgroundType::COLOR) {
+    if (element_->style.background.type == cssbox::BackgroundType::COLOR) {
         return element_->style.background.color;
     }
     return fallback;
@@ -184,6 +186,10 @@ NVGcolor Widget::cssBorderColor(const NVGcolor& fallback) const {
 
 float Widget::cssPaddingLeft(float fallback) const {
     return element_->style.padding[3].value > 0 ? element_->style.padding[3].value : fallback;
+}
+
+const char* Widget::cssFontFamily(const char* fallback) const {
+    return !element_->style.font_family.empty() ? element_->style.font_family.c_str() : fallback;
 }
 
 } // namespace flexui

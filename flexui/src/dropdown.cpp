@@ -1,9 +1,9 @@
-#include <flexui/dropdown.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/dropdown.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-Dropdown::Dropdown(NVGCSSRenderer* renderer, const std::string& id,
+Dropdown::Dropdown(cssboxRenderer* renderer, const std::string& id,
                    const std::vector<std::string>& items, const DropdownStyle& style)
     : Widget(renderer, id, "select"), items_(items), style_(style) {
 }

@@ -1,4 +1,4 @@
-file(GLOB SOURCES *.cpp)
+﻿file(GLOB SOURCES *.cpp)
 
 foreach(example_source ${SOURCES})
   get_filename_component(source_name ${example_source} NAME_WE)
@@ -7,7 +7,7 @@ foreach(example_source ${SOURCES})
   add_executable(${EXAMPLE_NAME} ${example_source})
   target_link_libraries(  ${EXAMPLE_NAME}
     PRIVATE fmtlog::fmtlog
-            nanovg_css
+            cssbox
             flexui_core
            )
   target_include_directories(${EXAMPLE_NAME} PRIVATE ../include)

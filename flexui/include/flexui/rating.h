@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -19,7 +19,7 @@ class Rating : public Widget {
 public:
     using ChangeCallback = std::function<void(int)>;
 
-    Rating(NVGCSSRenderer* renderer, const std::string& id, int initialRating = 0,
+    Rating(cssboxRenderer* renderer, const std::string& id, int initialRating = 0,
            const RatingStyle& style = RatingStyle());
 
     void draw(NVGcontext* vg) override;

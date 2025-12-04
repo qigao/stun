@@ -1,9 +1,9 @@
-#include <flexui/button.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/button.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-Button::Button(NVGCSSRenderer *renderer, const std::string &id, const std::string &text,
+Button::Button(cssboxRenderer *renderer, const std::string &id, const std::string &text,
                const ButtonStyle &style)
     : Widget(renderer, id, "button"), text_(text), style_(style) {}
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+﻿cmake_minimum_required(VERSION 3.15)
 project(
   FlexUI
   VERSION 2.0.0
@@ -53,6 +53,7 @@ set(FLEXUI_SOURCES
     src/snackbar.cpp
     src/tablist.cpp
     src/scrollview.cpp
+    src/font_manager.cpp
 )
 
 set(FLEXUI_HEADERS
@@ -115,7 +116,7 @@ find_package(pugixml CONFIG REQUIRED)
 find_package(qjs CONFIG REQUIRED)
 target_link_libraries(
   flexui_core
-  PUBLIC nanovg_css SDL3::SDL3 glad::glad OpenGL::GL
+  PUBLIC cssbox SDL3::SDL3 glad::glad OpenGL::GL
   PRIVATE fmtlog::fmtlog pugixml::pugixml  qjs)
 
 # Core-only alias

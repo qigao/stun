@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -20,7 +20,7 @@ class Breadcrumb : public Widget {
 public:
     using ItemCallback = std::function<void(int)>;
 
-    Breadcrumb(NVGCSSRenderer* renderer, const std::string& id,
+    Breadcrumb(cssboxRenderer* renderer, const std::string& id,
                const std::vector<std::string>& items,
                const BreadcrumbStyle& style = BreadcrumbStyle());
 

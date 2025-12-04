@@ -1,16 +1,16 @@
-#include <flexui/searchbox.h>
+﻿#include <flexui/searchbox.h>
 #include <SDL3/SDL.h>
 #include <cmath>
-#include <nanovg_css_internal.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-SearchBox::SearchBox(NVGCSSRenderer* renderer, const std::string& id,
+SearchBox::SearchBox(cssboxRenderer* renderer, const std::string& id,
                      const std::string& placeholder, const SearchBoxStyle& style)
     : TextBox(renderer, id, placeholder), style_(style) {
 }
 
-void SearchBox::handleKeyPress(int key) {
-    TextBox::handleKeyPress(key);
+void SearchBox::handleKeyPress(int key, bool shift, bool ctrl) {
+    TextBox::handleKeyPress(key, shift, ctrl);
 
     if (key == SDLK_RETURN && search_callback_) {
         search_callback_(getInputText());

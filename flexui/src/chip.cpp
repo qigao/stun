@@ -1,8 +1,8 @@
-#include <flexui/chip.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/chip.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Chip::Chip(NVGCSSRenderer* renderer, const std::string& id, const std::string& text,
+Chip::Chip(cssboxRenderer* renderer, const std::string& id, const std::string& text,
            const ChipStyle& style)
     : Widget(renderer, id, "chip"), text_(text), style_(style) {
 }

@@ -1,22 +1,25 @@
-#include <flexui/screen.h>
+﻿#include <flexui/screen.h>
 #include <flexui/widget.h>
 #include <flexui/textbox.h>
 #include <flexui/radiobutton.h>
 #include <flexui/scrollview.h>
 #include <flexui/jsengine.h>
+#include <flexui/font_manager.h>
 #include <glad/glad.h>
 
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg_gl.h>
 
-#include <nanovg_css_internal.h>
-#include <nanovg_css_svg_xml.h>
+#include <cssbox_internal.h>
+#include <cssbox_svg_xml.h>
 #include <fmtlog.h>
 #include <pugixml.hpp>
 #include "widget_factory.h"
 #include "xml_utils.h"
 #include "spatial_index.h"
-
+#include <SDL3/SDL.h>
+#include <fstream>
+#include <sstream>
 namespace flexui {
 
 Screen::Screen(int width, int height, const std::string& title)
@@ -34,16 +37,19 @@ Screen::Screen(int width, int height, const std::string& title)
     gl_context_ = SDL_GL_CreateContext(window_);
     SDL_GL_MakeCurrent(window_, gl_context_);
     SDL_GL_SetSwapInterval(1);
+    
+    // Start text input globally for IME support
+    SDL_StartTextInput(window_);
 
     gladLoadGL();
     vg_ = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
     
-    if (nvgCreateFont(vg_, "sans-serif", "resources/Roboto-Regular.ttf") == -1) {
-        loge("Failed to load font");
-    }
+    // Initialize font manager and load default fonts
+    font_manager_ = std::make_unique<FontManager>(vg_);
+    font_manager_->loadDefaultFonts();
     
-    renderer_ = nvgcssCreateRenderer(vg_);
-    nvgcssSetViewport(renderer_, (float)width, (float)height);
+    renderer_ = cssboxCreateRenderer(vg_);
+    cssboxSetViewport(renderer_, (float)width, (float)height);
 
     // Initialize JavaScript engine
     js_engine_ = std::make_unique<JSEngine>();
@@ -52,7 +58,7 @@ Screen::Screen(int width, int height, const std::string& title)
 
 Screen::~Screen() {
     widgets_.clear();
-    if (renderer_) nvgcssDeleteRenderer(renderer_);
+    if (renderer_) cssboxDeleteRenderer(renderer_);
     if (vg_) nvgDeleteGL3(vg_);
     if (gl_context_) SDL_GL_DestroyContext(gl_context_);
     if (window_) SDL_DestroyWindow(window_);
@@ -60,16 +66,21 @@ Screen::~Screen() {
 }
 
 bool Screen::loadCSS(const std::string& css) {
-    return nvgcssParseCSS(renderer_, css.c_str()) != 0;
+    bool result = cssboxParseCSS(renderer_, css.c_str()) != 0;
+    if (result) {
+        needs_redraw_ = true;  // CSS changes require redraw
+    }
+    return result;
 }
 
 void Screen::setCSSVariable(const std::string& name, const std::string& value) {
-    nvgcssSetVariable(renderer_, name.c_str(), value.c_str());
+    cssboxSetVariable(renderer_, name.c_str(), value.c_str());
+    needs_redraw_ = true;  // CSS variable change requires redraw
 }
 
 std::string Screen::getCSSVariable(const std::string& name) {
     char buffer[256];
-    if (nvgcssGetVariable(renderer_, name.c_str(), buffer, sizeof(buffer))) {
+    if (cssboxGetVariable(renderer_, name.c_str(), buffer, sizeof(buffer))) {
         return std::string(buffer);
     }
     return "";
@@ -84,6 +95,7 @@ Widget* Screen::createLine(const std::string& id, float x1, float y1, float x2, 
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -95,6 +107,7 @@ Widget* Screen::createCircle(const std::string& id, float cx, float cy, float r)
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -107,6 +120,7 @@ Widget* Screen::createEllipse(const std::string& id, float cx, float cy, float r
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -119,6 +133,7 @@ Widget* Screen::createRect(const std::string& id, float x, float y, float w, flo
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -127,6 +142,7 @@ Widget* Screen::createPath(const std::string& id) {
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -142,6 +158,7 @@ Widget* Screen::createPolygon(const std::string& id, const std::vector<std::pair
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -153,6 +170,7 @@ Widget* Screen::createPolyline(const std::string& id, const std::vector<std::pai
     Widget* ptr = widget.get();
     widgets_.push_back(std::move(widget));
     if (!id.empty()) widget_map_[id] = ptr;
+    needs_redraw_ = true;  // New SVG element requires redraw
     return ptr;
 }
 
@@ -162,6 +180,34 @@ bool Screen::loadJS(const std::string& code) {
 
 bool Screen::loadJSFile(const std::string& path) {
     return js_engine_ ? js_engine_->loadFile(path) : false;
+}
+
+bool Screen::loadJSModule(const std::string& path) {
+    return js_engine_ ? js_engine_->loadModule(path) : false;
+}
+
+bool Screen::loadCSSFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        loge("Failed to open CSS file: {}", path);
+        return false;
+    }
+    
+    std::string css((std::istreambuf_iterator<char>(file)),
+                    std::istreambuf_iterator<char>());
+    return loadCSS(css);
+}
+
+bool Screen::loadXMLFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        loge("Failed to open XML file: {}", path);
+        return false;
+    }
+    
+    std::string xml((std::istreambuf_iterator<char>(file)),
+                    std::istreambuf_iterator<char>());
+    return loadXML(xml);
 }
 
 Widget* Screen::addWidget(const std::string& id, const std::string& tag) {
@@ -175,26 +221,28 @@ Widget* Screen::addWidget(const std::string& id, const std::string& tag) {
     }
 
     spatial_index_dirty_ = true;  // New widget added
+    needs_redraw_ = true;  // New widget requires redraw
     return ptr;
 }
 
 // Helper function to calculate accumulated scroll offset from all ancestor containers
-static void getAccumulatedScrollOffset(NVGCSSRenderer* renderer, NVGCSSElement* element,
+static void getAccumulatedScrollOffset(cssboxRenderer* renderer, cssboxElement* element,
                                         float& scroll_x, float& scroll_y) {
     scroll_x = 0.0f;
     scroll_y = 0.0f;
 
     // Walk up the parent chain and accumulate scroll offsets
-    NVGCSSElement* parent = nvgcssGetParent(renderer, element);
+    cssboxElement* parent = cssboxGetParent(renderer, element);
     while (parent) {
         scroll_x += parent->scroll_x;
         scroll_y += parent->scroll_y;
-        parent = nvgcssGetParent(renderer, parent);
+        parent = cssboxGetParent(renderer, parent);
     }
 }
 
 bool Screen::pollEvents() {
     SDL_Event event;
+    
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_QUIT) {
             return false;
@@ -208,6 +256,7 @@ bool Screen::pollEvents() {
                 widget->handleHover(mx, my);
                 widget->handleMouseMove(mx, my);
             }
+            needs_redraw_ = true;  // Mouse motion may change hover states
         }
 
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
@@ -237,6 +286,7 @@ bool Screen::pollEvents() {
                 widget->handleClick(mx, my);
                 widget->handleMouseDown(mx, my);
             }
+            needs_redraw_ = true;  // Mouse click may change UI state
         }
 
         if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
@@ -244,19 +294,26 @@ bool Screen::pollEvents() {
             float my = (float)event.button.y;
             auto candidates = spatial_index_->query(mx, my);
             for (auto* widget : candidates) {
-                nvgcssSetPseudoState(widget->element(), "active", 0);
+                cssboxSetPseudoState(widget->element(), "active", 0);
                 widget->handleMouseUp(mx, my);
+            }
+            needs_redraw_ = true;  // Mouse release may change UI state
+        }
+
+        // Handle text input for focused textbox (support both old and new SDL3 event values)
+        if (event.type == SDL_EVENT_TEXT_INPUT || event.type == 0x203) {
+            if (focused_textbox_) {
+                focused_textbox_->handleTextInput(event.text.text);
+                needs_redraw_ = true;  // Text input changes UI
             }
         }
 
-        // Handle text input for focused textbox
-        if (event.type == SDL_EVENT_TEXT_INPUT && focused_textbox_) {
-            focused_textbox_->handleTextInput(event.text.text);
-        }
-
-        // Handle key presses for focused textbox
-        if (event.type == SDL_EVENT_KEY_DOWN && focused_textbox_) {
-            focused_textbox_->handleKeyPress(event.key.key);
+        // Handle key presses for focused textbox (support both old and new SDL3 event values)
+        if ((event.type == SDL_EVENT_KEY_DOWN || event.type == 0x20d) && focused_textbox_) {
+            bool shift = (event.key.mod & SDL_KMOD_SHIFT) != 0;
+            bool ctrl = (event.key.mod & SDL_KMOD_CTRL) != 0;
+            focused_textbox_->handleKeyPress(event.key.key, shift, ctrl);
+            needs_redraw_ = true;  // Key press changes UI
         }
 
         // Handle mouse wheel scrolling
@@ -269,6 +326,7 @@ bool Screen::pollEvents() {
             for (auto* widget : candidates) {
                 if (widget->handleScroll(mx, my, deltaX, deltaY)) {
                     spatial_index_dirty_ = true;  // Scroll changed, rebuild index
+                    needs_redraw_ = true;  // Scroll changes UI
                     break;  // Stop if a widget consumed the scroll
                 }
             }
@@ -288,6 +346,17 @@ void Screen::draw() {
         width_ = win_w;
         height_ = win_h;
         spatial_index_dirty_ = true;
+        needs_redraw_ = true;  // Window resize requires redraw
+    }
+
+    // Check if UI state changed (widgets modified styles/layout)
+    if (renderer_->layout_dirty || renderer_->style_dirty) {
+        needs_redraw_ = true;
+    }
+
+    // Retained Mode: Skip redraw if nothing changed
+    if (!needs_redraw_) {
+        return;
     }
 
     glViewport(0, 0, fb_w, fb_h);
@@ -301,9 +370,9 @@ void Screen::draw() {
         spatial_index_dirty_ = true;
     }
 
-    nvgcssSetViewport(renderer_, (float)win_w, (float)win_h);
-    nvgcssComputeLayout(renderer_);
-    nvgcssRender(renderer_);
+    cssboxSetViewport(renderer_, (float)win_w, (float)win_h);
+    cssboxComputeLayout(renderer_);
+    cssboxRender(renderer_);
 
     // Rebuild spatial index only when dirty
     if (spatial_index_dirty_) {
@@ -335,13 +404,13 @@ void Screen::draw() {
         }
         // Skip widgets with display: none (including those with hidden ancestors)
         bool is_hidden = false;
-        NVGCSSElement* elem = widget->element();
+        cssboxElement* elem = widget->element();
         while (elem) {
-            if (elem->style.display == nvgcss::Display::NONE) {
+            if (elem->style.display == cssbox::Display::NONE) {
                 is_hidden = true;
                 break;
             }
-            elem = nvgcssGetParent(renderer_, elem);
+            elem = cssboxGetParent(renderer_, elem);
         }
         if (is_hidden) {
             continue;
@@ -362,6 +431,9 @@ void Screen::draw() {
     }
 
     SDL_GL_SwapWindow(window_);
+    
+    // Reset dirty flag after successful redraw
+    needs_redraw_ = false;
 }
 
 bool Screen::loadXML(const std::string& xml) {
@@ -381,10 +453,11 @@ bool Screen::loadXML(const std::string& xml) {
     // Resolve gradient references after all elements are created
     // This caches gradient pointers in elements for O(1) lookup during rendering
     for (auto* root : renderer_->root_elements) {
-        nvgcss::SVGXMLParser::resolve_gradient_references(renderer_, root);
+        cssbox::SVGXMLParser::resolve_gradient_references(renderer_, root);
     }
 
     spatial_index_dirty_ = true;  // Widgets added via XML
+    needs_redraw_ = true;  // XML changes require redraw
     return true;
 }
 
@@ -503,6 +576,7 @@ void Screen::setRadioGroupValue(const std::string& group, const std::string& val
             radio->setChecked(false);
         }
     }
+    needs_redraw_ = true;  // Radio button state change requires redraw
 }
 
 std::string Screen::getRadioGroupValue(const std::string& group) const {

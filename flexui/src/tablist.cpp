@@ -1,9 +1,9 @@
-#include <flexui/tablist.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/tablist.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-TabList::TabList(NVGCSSRenderer* renderer, const std::string& id,
+TabList::TabList(cssboxRenderer* renderer, const std::string& id,
                  const std::vector<std::string>& tabs, const TabListStyle& style)
     : Widget(renderer, id, "tablist"), tabs_(tabs), style_(style) {
 }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <flexui/widget.h>
 #include <nanovg.h>
 #include <string>
@@ -26,7 +26,7 @@ struct MenuStyle {
 
 class Menu : public Widget {
 public:
-    Menu(NVGCSSRenderer* renderer, const std::string& id,
+    Menu(cssboxRenderer* renderer, const std::string& id,
          const std::vector<MenuItem>& items = std::vector<MenuItem>(),
          const MenuStyle& style = MenuStyle());
 

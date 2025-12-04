@@ -1,4 +1,4 @@
-# flexui Architecture: Multi-Paradigm UI Framework
+﻿# flexui Architecture: Multi-Paradigm UI Framework
 
 ## 🎯 Design Philosophy
 
@@ -34,7 +34,7 @@ flexui is a **multi-paradigm UI framework** that combines the best of web techno
 │  │  System    │  (pugixml)   │  (QuickJS)  │  System      │ │
 │  └────────────┴──────────────┴─────────────┴──────────────┘ │
 ├──────────────────────────────────────────────────────────────┤
-│                    nanovg_css Layer                           │
+│                    cssbox Layer                           │
 │  ┌────────────┬──────────────┬─────────────┬──────────────┐ │
 │  │  CSS       │  Layout      │  Rendering  │  Spatial     │ │
 │  │  Parser    │  Engine      │  Engine     │  Index       │ │

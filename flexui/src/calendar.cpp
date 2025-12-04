@@ -1,10 +1,10 @@
-#include <flexui/calendar.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/calendar.h>
+#include <cssbox_internal.h>
 #include <ctime>
 
 namespace flexui {
 
-Calendar::Calendar(NVGCSSRenderer* renderer, const std::string& id,
+Calendar::Calendar(cssboxRenderer* renderer, const std::string& id,
                    int year, int month, const CalendarStyle& style)
     : Widget(renderer, id, "calendar"), year_(year), month_(month), style_(style) {
 }

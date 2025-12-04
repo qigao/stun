@@ -1,4 +1,4 @@
-# FlexUI Widget CSS Support Audit
+﻿# FlexUI Widget CSS Support Audit
 
 ## Philosophy
 Both Canvas (direct drawing) and CSS are first-class citizens in FlexUI.
@@ -83,7 +83,7 @@ void Widget::draw(NVGcontext* vg) {
     
     // Read background from CSS, fallback to style
     NVGcolor bgColor = style_.bgColor;
-    if (el->style.background.type == nvgcss::BackgroundType::COLOR) {
+    if (el->style.background.type == cssbox::BackgroundType::COLOR) {
         bgColor = el->style.background.color;
     }
     

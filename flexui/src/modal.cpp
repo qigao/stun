@@ -1,9 +1,9 @@
-#include <flexui/modal.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/modal.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-Modal::Modal(NVGCSSRenderer* renderer, const std::string& id,
+Modal::Modal(cssboxRenderer* renderer, const std::string& id,
              const std::string& title, const std::string& content,
              const ModalStyle& style)
     : Widget(renderer, id, "modal"), title_(title), content_(content), style_(style) {

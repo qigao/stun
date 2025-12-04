@@ -1,8 +1,8 @@
-#include <flexui/badge.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/badge.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Badge::Badge(NVGCSSRenderer* renderer, const std::string& id, const std::string& text,
+Badge::Badge(cssboxRenderer* renderer, const std::string& id, const std::string& text,
              const BadgeStyle& style)
     : Widget(renderer, id, "badge"), text_(text), style_(style) {
 }

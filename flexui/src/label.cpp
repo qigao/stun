@@ -1,9 +1,9 @@
-#include <flexui/label.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/label.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-Label::Label(NVGCSSRenderer* renderer, const std::string& id, const std::string& text,
+Label::Label(cssboxRenderer* renderer, const std::string& id, const std::string& text,
              const LabelStyle& style)
     : Widget(renderer, id, "label"), text_(text), style_(style) {
 }

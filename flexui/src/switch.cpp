@@ -1,9 +1,9 @@
-#include <flexui/switch.h>
-#include <nanovg_css.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/switch.h>
+#include <cssbox.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Switch::Switch(NVGCSSRenderer* renderer, const std::string& id, bool initialState,
+Switch::Switch(cssboxRenderer* renderer, const std::string& id, bool initialState,
                const SwitchStyle& style)
     : Widget(renderer, id, "input"), on_(initialState), style_(style) {
 

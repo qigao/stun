@@ -1,4 +1,4 @@
-/*
+﻿/*
  * FlexUI Advanced SVG Demo
  *
  * Demonstrates all advanced SVG features in FlexUI:
@@ -10,7 +10,7 @@
  */
 
 #include <flexui.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 #include <iostream>
 
 int main() {
@@ -70,15 +70,15 @@ int main() {
 
     // Create a dots pattern
     auto* renderer = screen.renderer();
-    auto* dotsPattern = nvgcssCreatePattern(renderer, "dots", 0, 0, 20, 20);
-    auto* dot = nvgcssCreateElement(renderer, "pattern_dot", "circle");
+    auto* dotsPattern = cssboxCreatePattern(renderer, "dots", 0, 0, 20, 20);
+    auto* dot = cssboxCreateElement(renderer, "pattern_dot", "circle");
     dot->inline_style["cx"] = "10px";
     dot->inline_style["cy"] = "10px";
     dot->inline_style["r"] = "4px";
     dot->inline_style["fill"] = "#4a90e2";
     dot->inline_style["width"] = "20px";
     dot->inline_style["height"] = "20px";
-    nvgcssAppendChild(renderer, dotsPattern, dot);
+    cssboxAppendChild(renderer, dotsPattern, dot);
 
     // Rectangle filled with pattern
     auto* patternRect = screen.createRect("pattern_rect", 650, 50, 200, 150);
@@ -120,22 +120,22 @@ int main() {
     markerLabel->setInlineStyle("class", "label");
 
     // Create arrow marker
-    auto* arrowMarker = nvgcssCreateMarker(renderer, "arrow", 10, 10, 5, 5, "auto");
-    auto* arrowPath = nvgcssCreateElement(renderer, "arrow_shape", "path");
+    auto* arrowMarker = cssboxCreateMarker(renderer, "arrow", 10, 10, 5, 5, "auto");
+    auto* arrowPath = cssboxCreateElement(renderer, "arrow_shape", "path");
     arrowPath->inline_style["d"] = "M 0 0 L 10 5 L 0 10 Z";
     arrowPath->inline_style["fill"] = "#27ae60";
-    nvgcssAppendChild(renderer, arrowMarker, arrowPath);
+    cssboxAppendChild(renderer, arrowMarker, arrowPath);
 
     // Create dot marker
-    auto* dotMarker = nvgcssCreateMarker(renderer, "dot_marker", 8, 8, 4, 4, "0");
-    auto* markerCircle = nvgcssCreateElement(renderer, "marker_dot_shape", "circle");
+    auto* dotMarker = cssboxCreateMarker(renderer, "dot_marker", 8, 8, 4, 4, "0");
+    auto* markerCircle = cssboxCreateElement(renderer, "marker_dot_shape", "circle");
     markerCircle->inline_style["cx"] = "4px";
     markerCircle->inline_style["cy"] = "4px";
     markerCircle->inline_style["r"] = "3px";
     markerCircle->inline_style["fill"] = "#e74c3c";
     markerCircle->inline_style["width"] = "8px";
     markerCircle->inline_style["height"] = "8px";
-    nvgcssAppendChild(renderer, dotMarker, markerCircle);
+    cssboxAppendChild(renderer, dotMarker, markerCircle);
 
     // Path with markers
     auto* markerPath = screen.createPath("marker_demo_path");
@@ -157,10 +157,10 @@ int main() {
     clipLabel->setInlineStyle("class", "label");
 
     // Create clip path (star shape)
-    auto* clipPath = nvgcssCreateClipPath(renderer, "star_clip");
-    auto* clipShape = nvgcssCreateElement(renderer, "clip_star_shape", "path");
+    auto* clipPath = cssboxCreateClipPath(renderer, "star_clip");
+    auto* clipShape = cssboxCreateElement(renderer, "clip_star_shape", "path");
     clipShape->inline_style["d"] = "M 750,620 L 765,665 L 812,665 L 775,692 L 790,738 L 750,710 L 710,738 L 725,692 L 688,665 L 735,665 Z";
-    nvgcssAppendChild(renderer, clipPath, clipShape);
+    cssboxAppendChild(renderer, clipPath, clipShape);
 
     // Circle clipped by star
     auto* clippedCircle = screen.createCircle("clipped_circle", 750, 680, 60);

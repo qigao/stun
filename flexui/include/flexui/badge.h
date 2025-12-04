@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -16,7 +16,7 @@ struct BadgeStyle {
 
 class Badge : public Widget {
 public:
-    Badge(NVGCSSRenderer* renderer, const std::string& id, const std::string& text,
+    Badge(cssboxRenderer* renderer, const std::string& id, const std::string& text,
           const BadgeStyle& style = BadgeStyle());
 
     void draw(NVGcontext* vg) override;

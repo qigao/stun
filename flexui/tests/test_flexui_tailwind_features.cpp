@@ -1,23 +1,23 @@
-#include <catch2/catch_test_macros.hpp>
+﻿#include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <nanovg.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 #include <string>
 
 using Catch::Matchers::WithinAbs;
 
 
 // Helper to get computed style as string
-std::string get_style(NVGCSSRenderer* renderer, NVGCSSElement* element, const char* prop) {
+std::string get_style(cssboxRenderer* renderer, cssboxElement* element, const char* prop) {
     char buf[64];
-    if (nvgcssGetComputedStyle(renderer, element, prop, buf, sizeof(buf))) {
+    if (cssboxGetComputedStyle(renderer, element, prop, buf, sizeof(buf))) {
         return std::string(buf);
     }
     return "";
 }
 
 TEST_CASE("FlexUI Tailwind Support", "[flexui][tailwind]") {
-    NVGCSSRenderer* renderer = nvgcssCreateRenderer(nullptr);
+    cssboxRenderer* renderer = cssboxCreateRenderer(nullptr);
     
     // ========================================================================
     // 1. Responsive Layout (Button Gallery)
@@ -38,19 +38,19 @@ TEST_CASE("FlexUI Tailwind Support", "[flexui][tailwind]") {
             }
         )";
 
-        nvgcssParseCSS(renderer, css);
+        cssboxParseCSS(renderer, css);
 
-        NVGCSSElement* group = nvgcssCreateElement(renderer, "group", "div");
-        nvgcssAddClass(group, "button-group");
+        cssboxElement* group = cssboxCreateElement(renderer, "group", "div");
+        cssboxAddClass(group, "button-group");
 
         // Test Desktop (> 600px)
-        nvgcssSetViewport(renderer, 1024, 768);
-        nvgcssComputeLayout(renderer);
+        cssboxSetViewport(renderer, 1024, 768);
+        cssboxComputeLayout(renderer);
         REQUIRE(get_style(renderer, group, "flex-direction") == "row");
 
         // Test Mobile (< 600px)
-        nvgcssSetViewport(renderer, 400, 800);
-        nvgcssComputeLayout(renderer);
+        cssboxSetViewport(renderer, 400, 800);
+        cssboxComputeLayout(renderer);
         REQUIRE(get_style(renderer, group, "flex-direction") == "column");
     }
 
@@ -71,18 +71,18 @@ TEST_CASE("FlexUI Tailwind Support", "[flexui][tailwind]") {
             }
         )";
 
-        nvgcssParseCSS(renderer, css);
+        cssboxParseCSS(renderer, css);
 
-        NVGCSSElement* btn = nvgcssCreateElement(renderer, "btn", "button");
-        nvgcssAddClass(btn, "btn-primary");
+        cssboxElement* btn = cssboxCreateElement(renderer, "btn", "button");
+        cssboxAddClass(btn, "btn-primary");
 
         // Normal State
-        nvgcssComputeLayout(renderer);
+        cssboxComputeLayout(renderer);
         REQUIRE(get_style(renderer, btn, "background-color") == "#3b82f6");
 
         // Hover State
-        nvgcssSetPseudoState(btn, "hover", 1);
-        nvgcssComputeLayout(renderer); // Recompute to apply pseudo-state styles
+        cssboxSetPseudoState(btn, "hover", 1);
+        cssboxComputeLayout(renderer); // Recompute to apply pseudo-state styles
         REQUIRE(get_style(renderer, btn, "background-color") == "#2563eb");
     }
 
@@ -106,21 +106,21 @@ TEST_CASE("FlexUI Tailwind Support", "[flexui][tailwind]") {
             }
         )";
 
-        nvgcssParseCSS(renderer, css);
+        cssboxParseCSS(renderer, css);
 
-        NVGCSSElement* input = nvgcssCreateElement(renderer, "input", "input");
-        nvgcssAddClass(input, "input");
+        cssboxElement* input = cssboxCreateElement(renderer, "input", "input");
+        cssboxAddClass(input, "input");
 
         // Normal State
-        nvgcssComputeLayout(renderer);
+        cssboxComputeLayout(renderer);
         REQUIRE(get_style(renderer, input, "border-color") == "#d1d5db"); // var(--gray-300)
 
         // Focus State
-        nvgcssSetPseudoState(input, "focus", 1);
-        nvgcssComputeLayout(renderer);
+        cssboxSetPseudoState(input, "focus", 1);
+        cssboxComputeLayout(renderer);
         REQUIRE(get_style(renderer, input, "border-color") == "#3b82f6"); // var(--blue-500)
         REQUIRE(get_style(renderer, input, "border-width") == "2px");
     }
 
-    nvgcssDeleteRenderer(renderer);
+    cssboxDeleteRenderer(renderer);
 }

@@ -1,10 +1,10 @@
-#include <flexui/progressbar.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/progressbar.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-ProgressBar::ProgressBar(NVGCSSRenderer* renderer, const std::string& id, float progress,
+ProgressBar::ProgressBar(cssboxRenderer* renderer, const std::string& id, float progress,
                          const ProgressBarStyle& style)
     : Widget(renderer, id, "progressbar"), progress_(std::clamp(progress, 0.0f, 1.0f)), style_(style) {
 }

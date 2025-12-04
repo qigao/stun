@@ -1,11 +1,11 @@
-#include <flexui/scrollview.h>
-#include <nanovg_css_internal.h>
-#include <nanovg_css.h>
+﻿#include <flexui/scrollview.h>
+#include <cssbox_internal.h>
+#include <cssbox.h>
 #include <algorithm>
 
 namespace flexui {
 
-ScrollView::ScrollView(NVGCSSRenderer* renderer, const std::string& id,
+ScrollView::ScrollView(cssboxRenderer* renderer, const std::string& id,
                        const ScrollViewStyle& style)
     : Widget(renderer, id, "div"), style_(style) {
     // Set overflow style for clipping
@@ -55,14 +55,14 @@ void ScrollView::setScrollY(float scrollY) {
     scroll_y_ = std::clamp(scrollY, 0.0f, max_scroll);
 
     // Sync with CSS element
-    nvgcssSetScroll(element(), 0.0f, scroll_y_);
+    cssboxSetScroll(element(), 0.0f, scroll_y_);
 }
 
 void ScrollView::setContentHeight(float height) {
     content_height_ = height;
 
     // Sync with CSS element
-    nvgcssSetContentHeight(element(), height);
+    cssboxSetContentHeight(element(), height);
 
     // Re-clamp scroll position
     setScrollY(scroll_y_);

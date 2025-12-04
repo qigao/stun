@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -23,7 +23,7 @@ class Calendar : public Widget {
 public:
     using SelectCallback = std::function<void(int, int, int)>;
 
-    Calendar(NVGCSSRenderer* renderer, const std::string& id,
+    Calendar(cssboxRenderer* renderer, const std::string& id,
              int year, int month, const CalendarStyle& style = CalendarStyle());
 
     void draw(NVGcontext* vg) override;

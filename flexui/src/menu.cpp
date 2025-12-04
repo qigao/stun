@@ -1,10 +1,10 @@
-#include <flexui/menu.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/menu.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-Menu::Menu(NVGCSSRenderer* renderer, const std::string& id,
+Menu::Menu(cssboxRenderer* renderer, const std::string& id,
            const std::vector<MenuItem>& items, const MenuStyle& style)
     : Widget(renderer, id, "menu"), items_(items), style_(style) {
 }

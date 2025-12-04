@@ -1,10 +1,10 @@
-#include <flexui/pagination.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/pagination.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-Pagination::Pagination(NVGCSSRenderer* renderer, const std::string& id, int totalPages,
+Pagination::Pagination(cssboxRenderer* renderer, const std::string& id, int totalPages,
                        int currentPage, const PaginationStyle& style)
     : Widget(renderer, id, "pagination"), total_pages_(totalPages),
       current_page_(currentPage), style_(style) {

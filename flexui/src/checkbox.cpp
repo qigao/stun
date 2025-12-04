@@ -1,10 +1,10 @@
-#include <flexui/checkbox.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/checkbox.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-Checkbox::Checkbox(NVGCSSRenderer* renderer, const std::string& id, bool initialState,
+Checkbox::Checkbox(cssboxRenderer* renderer, const std::string& id, bool initialState,
                    const CheckboxStyle& style)
     : Widget(renderer, id, "checkbox"), checked_(initialState), style_(style) {
 

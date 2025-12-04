@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -16,7 +16,7 @@ struct ProgressBarStyle {
 
 class ProgressBar : public Widget {
 public:
-    ProgressBar(NVGCSSRenderer* renderer, const std::string& id, float progress = 0.0f,
+    ProgressBar(cssboxRenderer* renderer, const std::string& id, float progress = 0.0f,
                 const ProgressBarStyle& style = ProgressBarStyle());
 
     void draw(NVGcontext* vg) override;

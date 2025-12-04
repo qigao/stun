@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -20,7 +20,7 @@ struct SnackbarStyle {
 
 class Snackbar : public Widget {
 public:
-    Snackbar(NVGCSSRenderer* renderer, const std::string& id,
+    Snackbar(cssboxRenderer* renderer, const std::string& id,
              const std::string& message, const SnackbarStyle& style = SnackbarStyle());
 
     void draw(NVGcontext* vg) override;

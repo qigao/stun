@@ -1,9 +1,9 @@
-#include <flexui/iconbutton.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/iconbutton.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-IconButton::IconButton(NVGCSSRenderer* renderer, const std::string& id,
+IconButton::IconButton(cssboxRenderer* renderer, const std::string& id,
                        const std::string& icon, const IconButtonStyle& style)
     : Widget(renderer, id, "iconbutton"), icon_(icon), style_(style) {
 }

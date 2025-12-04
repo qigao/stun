@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -20,7 +20,7 @@ class Chip : public Widget {
 public:
     using CloseCallback = std::function<void()>;
 
-    Chip(NVGCSSRenderer* renderer, const std::string& id, const std::string& text,
+    Chip(cssboxRenderer* renderer, const std::string& id, const std::string& text,
          const ChipStyle& style = ChipStyle());
 
     void draw(NVGcontext* vg) override;

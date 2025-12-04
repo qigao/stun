@@ -12,6 +12,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 
 namespace flexui {
 
@@ -256,6 +257,7 @@ JSEngine::~JSEngine() {
 
 void JSEngine::init(Screen* screen) {
     screen_ = screen;
+    basePath_ = std::filesystem::current_path().string();
     JS_SetContextOpaque(ctx_, this);
 
     // Register Widget class (without designated initializers for C++17 compatibility)
@@ -289,6 +291,7 @@ void JSEngine::init(Screen* screen) {
 
     setupGlobalFunctions();
     setupConsole();
+    setupModuleLoader();
 }
 
 void JSEngine::setupGlobalFunctions() {
@@ -419,6 +422,49 @@ bool JSEngine::callFunction(const std::string& name, const std::string& arg) {
     return success;
 }
 
+bool JSEngine::evalModule(const std::string& code, const std::string& filename) {
+    JSValue result = JS_Eval(ctx_, code.c_str(), code.size(), filename.c_str(),
+                             JS_EVAL_TYPE_MODULE);
+
+    if (JS_IsException(result)) {
+        JSValue exception = JS_GetException(ctx_);
+        const char* str = JS_ToCString(ctx_, exception);
+        if (str) {
+            loge("[JS Module Error] {}", str);
+            std::cerr << "[JS Module Error] " << str << std::endl;
+            JS_FreeCString(ctx_, str);
+        }
+        JS_FreeValue(ctx_, exception);
+        JS_FreeValue(ctx_, result);
+        return false;
+    }
+
+    JS_FreeValue(ctx_, result);
+    return true;
+}
+
+bool JSEngine::loadModule(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        loge("[JS] Failed to open module: {}", path);
+        return false;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    
+    // Update base path for relative imports - use absolute path
+    std::filesystem::path p(path);
+    std::filesystem::path abs_path = std::filesystem::absolute(p);
+    
+    if (abs_path.has_parent_path()) {
+        basePath_ = abs_path.parent_path().string();
+        logi("[JS] Set base path to: {}", basePath_);
+    }
+    
+    return evalModule(buffer.str(), abs_path.string());
+}
+
 bool JSEngine::hasFunction(const std::string& name) {
     JSValue global = JS_GetGlobalObject(ctx_);
     JSValue func = JS_GetPropertyStr(ctx_, global, name.c_str());
@@ -481,6 +527,175 @@ void JSEngine::processPendingTimers() {
         JS_FreeValue(ctx_, global);
         JS_FreeValue(ctx_, timer.callback);
     }
+}
+
+// ============================================================================
+// Built-in modules
+// ============================================================================
+
+static const char* FLEXUI_STDLIB = R"JS(
+export const FlexUI = {
+    getWidget: (id) => getWidget(id),
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
+    log: (...args) => console.log(...args),
+    info: (...args) => console.info(...args),
+    warn: (...args) => console.warn(...args),
+    error: (...args) => console.error(...args)
+};
+
+export class WidgetHelper {
+    static setText(id, text) {
+        const widget = getWidget(id);
+        if (widget) widget.setText(text);
+    }
+    
+    static getText(id) {
+        const widget = getWidget(id);
+        return widget ? widget.getText() : '';
+    }
+    
+    static setValue(id, value) {
+        const widget = getWidget(id);
+        if (widget) widget.setValue(value);
+    }
+    
+    static getValue(id) {
+        const widget = getWidget(id);
+        return widget ? widget.getValue() : null;
+    }
+    
+    static setChecked(id, checked) {
+        const widget = getWidget(id);
+        if (widget) widget.setChecked(checked);
+    }
+    
+    static isChecked(id) {
+        const widget = getWidget(id);
+        return widget ? widget.isChecked() : false;
+    }
+}
+
+export class Animation {
+    static lerp(start, end, t) {
+        return start + (end - start) * t;
+    }
+    
+    static easeInOut(t) {
+        return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    }
+    
+    static animate(duration, callback) {
+        const startTime = Date.now();
+        
+        function tick() {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            callback(progress);
+            
+            if (progress < 1) {
+                setTimeout(tick, 16);
+            }
+        }
+        
+        tick();
+    }
+}
+
+export class EventBus {
+    constructor() {
+        this.listeners = {};
+    }
+    
+    on(event, callback) {
+        if (!this.listeners[event]) {
+            this.listeners[event] = [];
+        }
+        this.listeners[event].push(callback);
+    }
+    
+    off(event, callback) {
+        if (!this.listeners[event]) return;
+        this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
+    }
+    
+    emit(event, data) {
+        if (!this.listeners[event]) return;
+        this.listeners[event].forEach(cb => cb(data));
+    }
+}
+
+export default FlexUI;
+)JS";
+
+// ============================================================================
+// Module loader implementation
+// ============================================================================
+
+static JSModuleDef* js_module_loader(JSContext* ctx, const char* module_name, void* opaque) {
+    JSEngine* engine = static_cast<JSEngine*>(opaque);
+    
+    // Check for built-in modules
+    std::string name(module_name);
+    std::string code;
+    std::string resolved_name;
+    
+    if (name == "flexui" || name == "flexui.js") {
+        code = FLEXUI_STDLIB;
+        resolved_name = "flexui";
+    } else {
+        // Load from file system
+        std::filesystem::path module_path(module_name);
+        
+        // Handle relative paths - resolve against basePath_ (parent module directory)
+        if (module_path.is_relative()) {
+            const std::string& base = engine->basePath();
+            if (base.empty()) {
+                loge("[JS] Cannot resolve relative module '{}' without base path", module_name);
+                return nullptr;
+            }
+            module_path = std::filesystem::path(base) / module_path;
+            logi("[JS] Resolved '{}' to '{}'", module_name, module_path.string());
+        }
+        
+        module_path = module_path.lexically_normal();
+        resolved_name = module_path.string();
+        
+        // Read file
+        std::ifstream file(module_path);
+        if (!file.is_open()) {
+            loge("[JS] Module not found: {}", module_path.string());
+            return nullptr;
+        }
+        
+        code = std::string((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    }
+    
+    // Compile module
+    JSValue func = JS_Eval(ctx, code.c_str(), code.size(),
+                           resolved_name.c_str(),
+                           JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    
+    if (JS_IsException(func)) {
+        JSValue exception = JS_GetException(ctx);
+        const char* str = JS_ToCString(ctx, exception);
+        if (str) {
+            loge("[JS] Module compile error in {}: {}", resolved_name, str);
+            JS_FreeCString(ctx, str);
+        }
+        JS_FreeValue(ctx, exception);
+        return nullptr;
+    }
+    
+    JSModuleDef* m = static_cast<JSModuleDef*>(JS_VALUE_GET_PTR(func));
+    JS_FreeValue(ctx, func);
+    return m;
+}
+
+void JSEngine::setupModuleLoader() {
+    JS_SetModuleLoaderFunc(rt_, nullptr, js_module_loader, this);
 }
 
 } // namespace flexui

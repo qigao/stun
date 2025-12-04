@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <functional>
 #include <map>
@@ -45,7 +45,7 @@ namespace flexui {
 
 class Screen;
 
-using WidgetFactory = std::function<Widget*(NVGCSSRenderer*, const std::string&, pugi::xml_node&, Screen*)>;
+using WidgetFactory = std::function<Widget*(cssboxRenderer*, const std::string&, pugi::xml_node&, Screen*)>;
 
 // Enum mappings
 static const std::map<std::string, AlertType> alert_type_map = {
@@ -77,37 +77,37 @@ inline std::pair<int, int> get_current_year_month() {
 
 // Widget factory registry
 static const std::map<std::string, WidgetFactory> widget_factories = {
-    {"div", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"div", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Widget(r, id, "div");
     }},
-    {"container", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"container", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Widget(r, id, "div");
     }},
-    {"button", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"button", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Button(r, id, n.text().as_string());
     }},
-    {"label", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"label", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Label(r, id, n.text().as_string());
     }},
-    {"input", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"input", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new TextBox(r, id, n.attribute("placeholder").as_string());
     }},
-    {"textbox", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"textbox", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new TextBox(r, id, n.attribute("placeholder").as_string());
     }},
-    {"checkbox", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"checkbox", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Checkbox(r, id, n.attribute("checked").as_bool(false));
     }},
-    {"progressbar", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"progressbar", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new ProgressBar(r, id, n.attribute("value").as_float(0.0f));
     }},
-    {"slider", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"slider", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Slider(r, id, 
             n.attribute("value").as_float(0.5f),
             n.attribute("min").as_float(0.0f),
             n.attribute("max").as_float(1.0f));
     }},
-    {"radio", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"radio", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* radio = new RadioButton(r, id,
             n.attribute("name").as_string(),
             n.attribute("value").as_string(),
@@ -116,20 +116,20 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         s->registerRadioButton(radio);
         return radio;
     }},
-    {"hr", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"hr", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Divider(r, id, n.attribute("vertical").as_bool(false));
     }},
-    {"divider", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"divider", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Divider(r, id, n.attribute("vertical").as_bool(false));
     }},
-    {"img", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"img", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         if (!n.attribute("src")) {
             logw("ImageView '{}' missing required 'src' attribute", id);
             return nullptr;
         }
         return new ImageView(r, id, n.attribute("src").as_string());
     }},
-    {"image", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"image", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         // Check if it's an HTML-style image (src attribute) or SVG image (href attribute)
         if (auto src = n.attribute("src")) {
             // HTML-style: <image src="..."/>
@@ -150,103 +150,103 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
             return nullptr;
         }
     }},
-    {"tabbar", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"tabbar", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto tabs = xml_utils::parse_comma_separated(n.attribute("tabs").as_string());
         return new TabBar(r, id, tabs);
     }},
-    {"select", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"select", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto items = xml_utils::parse_comma_separated(n.attribute("items").as_string());
         return new Dropdown(r, id, items);
     }},
-    {"dropdown", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"dropdown", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto items = xml_utils::parse_comma_separated(n.attribute("items").as_string());
         return new Dropdown(r, id, items);
     }},
-    {"switch", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"switch", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Switch(r, id, n.attribute("on").as_bool(false));
     }},
-    {"toggle", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"toggle", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Switch(r, id, n.attribute("on").as_bool(false));
     }},
-    {"rating", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"rating", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Rating(r, id, n.attribute("value").as_int(0));
     }},
-    {"searchbox", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"searchbox", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new SearchBox(r, id, n.attribute("placeholder").as_string());
     }},
-    {"search", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"search", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new SearchBox(r, id, n.attribute("placeholder").as_string());
     }},
-    {"spinner", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"spinner", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Spinner(r, id);
     }},
-    {"alert", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"alert", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto type = xml_utils::parse_enum(n.attribute("type").as_string("info"), alert_type_map, AlertType::Info);
         return new Alert(r, id, n.text().as_string(), type);
     }},
-    {"badge", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"badge", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Badge(r, id, n.text().as_string());
     }},
-    {"card", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"card", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Card(r, id);
     }},
-    {"avatar", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"avatar", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Avatar(r, id, n.text().as_string());
     }},
-    {"chip", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"chip", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Chip(r, id, n.text().as_string());
     }},
-    {"toast", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"toast", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto type = xml_utils::parse_enum(n.attribute("type").as_string("info"), toast_type_map, ToastType::Info);
         return new Toast(r, id, n.text().as_string(), type);
     }},
-    {"breadcrumb", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"breadcrumb", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto items = xml_utils::parse_comma_separated(n.attribute("items").as_string());
         return new Breadcrumb(r, id, items);
     }},
-    {"pagination", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"pagination", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Pagination(r, id, 
             n.attribute("total").as_int(1),
             n.attribute("current").as_int(1));
     }},
-    {"menu", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"menu", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Menu(r, id, std::vector<MenuItem>());
     }},
-    {"modal", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"modal", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Modal(r, id, 
             n.attribute("title").as_string(),
             n.text().as_string());
     }},
-    {"table", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"table", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Table(r, id, std::vector<std::string>(), std::vector<float>());
     }},
-    {"iconbutton", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"iconbutton", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         if (!n.attribute("icon")) {
             logw("IconButton '{}' missing required 'icon' attribute", id);
             return nullptr;
         }
         return new IconButton(r, id, n.attribute("icon").as_string());
     }},
-    {"calendar", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"calendar", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto [year, month] = get_current_year_month();
         return new Calendar(r, id,
             n.attribute("year").as_int(year),
             n.attribute("month").as_int(month));
     }},
-    {"colorpicker", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"colorpicker", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new ColorPicker(r, id);
     }},
-    {"snackbar", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"snackbar", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new Snackbar(r, id, n.text().as_string());
     }},
-    {"tablist", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"tablist", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto tabs = xml_utils::parse_comma_separated(n.attribute("tabs").as_string());
         return new TabList(r, id, tabs);
     }},
-    {"scrollview", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"scrollview", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new ScrollView(r, id);
     }},
-    {"scroll", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"scroll", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         return new ScrollView(r, id);
     }},
 
@@ -254,7 +254,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
     // SVG Elements (RFC 7991/7996 compliant)
     // ========================================================================
 
-    {"svg", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"svg", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "svg");
         widget->setInlineStyle("display", "block");  // SVG containers must be visible
         // Handle viewBox attribute
@@ -274,7 +274,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"g", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"g", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "g");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -284,7 +284,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"circle", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"circle", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "circle");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -300,7 +300,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"ellipse", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"ellipse", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "ellipse");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -317,7 +317,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"rect", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"rect", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "rect");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -336,7 +336,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"line", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"line", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "line");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -358,7 +358,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"path", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"path", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "path");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -382,7 +382,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"polygon", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"polygon", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "polygon");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -401,7 +401,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"polyline", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"polyline", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "polyline");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -421,7 +421,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"text", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"text", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "text");
         widget->setInlineStyle("display", "block");  // SVG elements must be visible
         widget->addClass("svg-element");  // Enable CSS targeting
@@ -442,7 +442,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"textPath", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"textPath", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "textPath");
         widget->setText(n.text().as_string());
         if (auto href = n.attribute("href")) widget->setInlineStyle("href", href.as_string());
@@ -456,13 +456,13 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"defs", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"defs", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "defs");
         widget->setInlineStyle("display", "none");  // defs content is not rendered directly
         return widget;
     }},
 
-    {"use", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"use", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "use");
         if (auto href = n.attribute("href")) widget->setInlineStyle("href", href.as_string());
         if (auto xhref = n.attribute("xlink:href")) widget->setInlineStyle("href", xhref.as_string());
@@ -473,14 +473,14 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"symbol", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"symbol", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "symbol");
         if (auto viewBox = n.attribute("viewBox")) widget->setInlineStyle("viewBox", viewBox.as_string());
         widget->setInlineStyle("display", "none");  // symbols are not rendered directly
         return widget;
     }},
 
-    {"marker", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"marker", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "marker");
         if (auto mw = n.attribute("markerWidth")) widget->setInlineStyle("markerWidth", mw.as_string());
         if (auto mh = n.attribute("markerHeight")) widget->setInlineStyle("markerHeight", mh.as_string());
@@ -492,14 +492,14 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"clipPath", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"clipPath", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "clipPath");
         if (auto cu = n.attribute("clipPathUnits")) widget->setInlineStyle("clipPathUnits", cu.as_string());
         widget->setInlineStyle("display", "none");  // clipPaths are not rendered directly
         return widget;
     }},
 
-    {"pattern", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"pattern", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "pattern");
         if (auto x = n.attribute("x")) widget->setInlineStyle("x", x.as_string());
         if (auto y = n.attribute("y")) widget->setInlineStyle("y", y.as_string());
@@ -512,7 +512,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"linearGradient", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"linearGradient", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "linearGradient");
         if (auto x1 = n.attribute("x1")) widget->setInlineStyle("x1", x1.as_string());
         if (auto y1 = n.attribute("y1")) widget->setInlineStyle("y1", y1.as_string());
@@ -543,7 +543,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
             
             // Parse stop-color
             if (auto color_attr = stop_node.attribute("stop-color")) {
-                stop.color = nvgcss_utils::parse_color(color_attr.as_string());
+                stop.color = cssbox_utils::parse_color(color_attr.as_string());
             }
             
             // Parse stop-opacity
@@ -561,7 +561,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"radialGradient", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"radialGradient", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "radialGradient");
         if (auto cx = n.attribute("cx")) widget->setInlineStyle("cx", cx.as_string());
         if (auto cy = n.attribute("cy")) widget->setInlineStyle("cy", cy.as_string());
@@ -593,7 +593,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
             
             // Parse stop-color
             if (auto color_attr = stop_node.attribute("stop-color")) {
-                stop.color = nvgcss_utils::parse_color(color_attr.as_string());
+                stop.color = cssbox_utils::parse_color(color_attr.as_string());
             }
             
             // Parse stop-opacity
@@ -611,7 +611,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"stop", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"stop", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         auto* widget = new Widget(r, id, "stop");
         if (auto offset = n.attribute("offset")) widget->setInlineStyle("offset", offset.as_string());
         if (auto sc = n.attribute("stop-color")) widget->setInlineStyle("stop-color", sc.as_string());
@@ -619,7 +619,7 @@ static const std::map<std::string, WidgetFactory> widget_factories = {
         return widget;
     }},
 
-    {"svgImage", [](NVGCSSRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
+    {"svgImage", [](cssboxRenderer* r, const std::string& id, pugi::xml_node& n, Screen* s) -> Widget* {
         // Alias for SVG image element (use <image> with href for standard SVG)
         auto* widget = new Widget(r, id, "image");
         if (auto href = n.attribute("href")) widget->setInlineStyle("href", href.as_string());

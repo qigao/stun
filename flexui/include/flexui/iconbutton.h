@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -21,7 +21,7 @@ class IconButton : public Widget {
 public:
     using ClickCallback = std::function<void()>;
 
-    IconButton(NVGCSSRenderer* renderer, const std::string& id,
+    IconButton(cssboxRenderer* renderer, const std::string& id,
                const std::string& icon, const IconButtonStyle& style = IconButtonStyle());
 
     void draw(NVGcontext* vg) override;

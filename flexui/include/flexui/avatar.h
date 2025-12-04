@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -14,7 +14,7 @@ struct AvatarStyle {
 
 class Avatar : public Widget {
 public:
-    Avatar(NVGCSSRenderer* renderer, const std::string& id, const std::string& initials,
+    Avatar(cssboxRenderer* renderer, const std::string& id, const std::string& initials,
            const AvatarStyle& style = AvatarStyle());
 
     void draw(NVGcontext* vg) override;

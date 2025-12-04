@@ -1,8 +1,8 @@
-#include <flexui/card.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/card.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Card::Card(NVGCSSRenderer* renderer, const std::string& id, const CardStyle& style)
+Card::Card(cssboxRenderer* renderer, const std::string& id, const CardStyle& style)
     : Widget(renderer, id, "card"), style_(style) {
 }
 

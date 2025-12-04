@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -15,7 +15,7 @@ struct SpinnerStyle {
 
 class Spinner : public Widget {
 public:
-    Spinner(NVGCSSRenderer* renderer, const std::string& id,
+    Spinner(cssboxRenderer* renderer, const std::string& id,
             const SpinnerStyle& style = SpinnerStyle());
 
     void draw(NVGcontext* vg) override;

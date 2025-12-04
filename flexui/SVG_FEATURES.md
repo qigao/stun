@@ -1,8 +1,8 @@
-# SVG Features in FlexUI
+﻿# SVG Features in FlexUI
 
 ## Overview
 
-FlexUI provides **full access to all advanced SVG features** through its integration with `nanovg_css`. This includes:
+FlexUI provides **full access to all advanced SVG features** through its integration with `cssbox`. This includes:
 - **XML-based SVG** (RFC 7991/7996 compliant) - Use SVG elements directly in XML
 - **re2c-based SVG path parser** (2.6x faster)
 - Patterns, markers, text-on-path, and clipping paths
@@ -189,7 +189,7 @@ Fill shapes with repeating patterns.
 
 ```cpp
 #include <flexui.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 
 flexui::Screen screen(800, 600, "Pattern Demo");
 
@@ -197,17 +197,17 @@ flexui::Screen screen(800, 600, "Pattern Demo");
 auto* renderer = screen.renderer();
 
 // Create a dots pattern
-auto* dotsPattern = nvgcssCreatePattern(renderer, "dots", 0, 0, 20, 20);
+auto* dotsPattern = cssboxCreatePattern(renderer, "dots", 0, 0, 20, 20);
 
 // Add a circle to the pattern
-auto* dot = nvgcssCreateElement(renderer, "pattern_dot", "circle");
+auto* dot = cssboxCreateElement(renderer, "pattern_dot", "circle");
 dot->inline_style["cx"] = "10px";
 dot->inline_style["cy"] = "10px";
 dot->inline_style["r"] = "4px";
 dot->inline_style["fill"] = "#4a90e2";
 dot->inline_style["width"] = "20px";   // Pattern tile needs dimensions
 dot->inline_style["height"] = "20px";
-nvgcssAppendChild(renderer, dotsPattern, dot);
+cssboxAppendChild(renderer, dotsPattern, dot);
 
 // Use the pattern to fill a rectangle
 auto* rect = screen.createRect("pattern_rect", 50, 50, 200, 150);
@@ -228,28 +228,28 @@ Add arrows, dots, or custom shapes to path endpoints.
 
 ```cpp
 #include <flexui.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 
 flexui::Screen screen(800, 600, "Marker Demo");
 auto* renderer = screen.renderer();
 
 // Create arrow marker
-auto* arrowMarker = nvgcssCreateMarker(renderer, "arrow", 10, 10, 5, 5, "auto");
-auto* arrowShape = nvgcssCreateElement(renderer, "arrow_path", "path");
+auto* arrowMarker = cssboxCreateMarker(renderer, "arrow", 10, 10, 5, 5, "auto");
+auto* arrowShape = cssboxCreateElement(renderer, "arrow_path", "path");
 arrowShape->inline_style["d"] = "M 0 0 L 10 5 L 0 10 Z";
 arrowShape->inline_style["fill"] = "#27ae60";
-nvgcssAppendChild(renderer, arrowMarker, arrowShape);
+cssboxAppendChild(renderer, arrowMarker, arrowShape);
 
 // Create dot marker
-auto* dotMarker = nvgcssCreateMarker(renderer, "dot", 8, 8, 4, 4, "0");
-auto* dotShape = nvgcssCreateElement(renderer, "dot_circle", "circle");
+auto* dotMarker = cssboxCreateMarker(renderer, "dot", 8, 8, 4, 4, "0");
+auto* dotShape = cssboxCreateElement(renderer, "dot_circle", "circle");
 dotShape->inline_style["cx"] = "4px";
 dotShape->inline_style["cy"] = "4px";
 dotShape->inline_style["r"] = "3px";
 dotShape->inline_style["fill"] = "#e74c3c";
 dotShape->inline_style["width"] = "8px";
 dotShape->inline_style["height"] = "8px";
-nvgcssAppendChild(renderer, dotMarker, dotShape);
+cssboxAppendChild(renderer, dotMarker, dotShape);
 
 // Use markers on a path
 auto* path = screen.createPath("marker_path");
@@ -274,17 +274,17 @@ Clip shapes to custom paths.
 
 ```cpp
 #include <flexui.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 
 flexui::Screen screen(800, 600, "Clipping Demo");
 auto* renderer = screen.renderer();
 
 // Create a star-shaped clip path
-auto* clipPath = nvgcssCreateClipPath(renderer, "star_clip");
-auto* starShape = nvgcssCreateElement(renderer, "star", "path");
+auto* clipPath = cssboxCreateClipPath(renderer, "star_clip");
+auto* starShape = cssboxCreateElement(renderer, "star", "path");
 starShape->inline_style["d"] =
     "M 50,0 L 61,35 L 98,35 L 68,57 L 79,91 L 50,70 L 21,91 L 32,57 L 2,35 L 39,35 Z";
-nvgcssAppendChild(renderer, clipPath, starShape);
+cssboxAppendChild(renderer, clipPath, starShape);
 
 // Apply clipping to a circle
 auto* circle = screen.createCircle("clipped_circle", 50, 50, 60);
@@ -358,7 +358,7 @@ public:
     Widget* addWidget(const std::string& id, const std::string& tag);
 
     // Access underlying renderer for advanced features
-    NVGCSSRenderer* renderer();
+    cssboxRenderer* renderer();
 };
 ```
 
@@ -387,26 +387,26 @@ public:
 };
 ```
 
-### Advanced Features (via nanovg_css API)
+### Advanced Features (via cssbox API)
 
 ```cpp
 // Patterns
-NVGCSSElement* nvgcssCreatePattern(NVGCSSRenderer* r, const char* id,
+cssboxElement* cssboxCreatePattern(cssboxRenderer* r, const char* id,
                                     float x, float y, float w, float h);
 
 // Markers
-NVGCSSElement* nvgcssCreateMarker(NVGCSSRenderer* r, const char* id,
+cssboxElement* cssboxCreateMarker(cssboxRenderer* r, const char* id,
                                    float w, float h, float refX, float refY,
                                    const char* orient);
 
 // Clipping
-NVGCSSElement* nvgcssCreateClipPath(NVGCSSRenderer* r, const char* id);
+cssboxElement* cssboxCreateClipPath(cssboxRenderer* r, const char* id);
 
 // Element creation
-NVGCSSElement* nvgcssCreateElement(NVGCSSRenderer* r, const char* id, const char* type);
+cssboxElement* cssboxCreateElement(cssboxRenderer* r, const char* id, const char* type);
 
 // Parent-child relationship
-void nvgcssAppendChild(NVGCSSRenderer* r, NVGCSSElement* parent, NVGCSSElement* child);
+void cssboxAppendChild(cssboxRenderer* r, cssboxElement* parent, cssboxElement* child);
 ```
 
 ---
@@ -418,7 +418,7 @@ FlexUI Widget API
        ↓
   Widget::setInlineStyle("d", "M 10 20 L 30 40")
        ↓
-  nanovg_css Layer
+  cssbox Layer
        ↓
   re2c SVG Path Parser (2.6x faster!)
        ↓
@@ -444,7 +444,7 @@ The new re2c-based SVG path parser is **2.6x faster** than the old hand-written 
 
 ## 📚 See Also
 
-- **nanovg_css docs**: `nanovg_css/docs/SVG_PATH_PARSER_RE2C.md`
+- **cssbox docs**: `cssbox/docs/SVG_PATH_PARSER_RE2C.md`
 - **re2c implementation**: `SVG_PATH_RE2C_IMPLEMENTATION.md`
 - **Basic SVG demo**: `flexui/examples/svg_demo.cpp`
 - **Advanced SVG demo**: `flexui/examples/svg_advanced_demo.cpp`
@@ -454,7 +454,7 @@ The new re2c-based SVG path parser is **2.6x faster** than the old hand-written 
 
 ## ✅ Summary
 
-FlexUI provides **complete access to all SVG features** through its nanovg_css integration:
+FlexUI provides **complete access to all SVG features** through its cssbox integration:
 
 - ✅ All SVG elements (path, circle, rect, line, ellipse, polygon, polyline)
 - ✅ SVG path `d` attribute with **re2c parser** (2.6x faster)

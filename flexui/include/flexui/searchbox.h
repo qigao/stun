@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/textbox.h>
 #include <nanovg.h>
@@ -16,12 +16,12 @@ class SearchBox : public TextBox {
 public:
     using SearchCallback = std::function<void(const std::string&)>;
 
-    SearchBox(NVGCSSRenderer* renderer, const std::string& id,
+    SearchBox(cssboxRenderer* renderer, const std::string& id,
               const std::string& placeholder = "Search...",
               const SearchBoxStyle& style = SearchBoxStyle());
 
     void draw(NVGcontext* vg) override;
-    void handleKeyPress(int key) override;
+    void handleKeyPress(int key, bool shift, bool ctrl) override;
 
     void setSearchCallback(SearchCallback cb) { search_callback_ = cb; }
     void setSearchBoxStyle(const SearchBoxStyle& style) { style_ = style; }

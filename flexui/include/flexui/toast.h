@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -29,7 +29,7 @@ class Toast : public Widget {
 public:
     using DismissCallback = std::function<void()>;
 
-    Toast(NVGCSSRenderer* renderer, const std::string& id, const std::string& message,
+    Toast(cssboxRenderer* renderer, const std::string& id, const std::string& message,
           ToastType type = ToastType::Info, const ToastStyle& style = ToastStyle());
 
     void draw(NVGcontext* vg) override;

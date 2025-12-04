@@ -1,6 +1,6 @@
-# FlexUI - CSS-Driven GUI Library
+﻿# FlexUI - CSS-Driven GUI Library
 
-A minimal GUI library built on top of nanovg_css, providing CSS-based styling for interactive applications.
+A minimal GUI library built on top of cssbox, providing CSS-based styling for interactive applications.
 
 ## Features
 
@@ -8,7 +8,7 @@ A minimal GUI library built on top of nanovg_css, providing CSS-based styling fo
 - **Simple Widget System**: Minimal C++ API for creating UI elements
 - **SVG Support**: Create vector graphics with lines, circles, ellipses, rectangles, and paths
 - **Event Handling**: Mouse events with callbacks
-- **Flexbox/Grid Layouts**: Full CSS layout support via nanovg_css
+- **Flexbox/Grid Layouts**: Full CSS layout support via cssbox
 - **CSS Variables**: Dynamic theming support
 - **SDL3 Backend**: Cross-platform window management
 
@@ -82,7 +82,7 @@ cmake --build build --config Release
 ```
 FlexUI (C++ Widget API)
     ↓
-nanovg_css (CSS Engine)
+cssbox (CSS Engine)
     ↓
 NanoVG (Vector Graphics)
     ↓

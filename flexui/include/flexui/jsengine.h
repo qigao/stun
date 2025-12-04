@@ -28,7 +28,9 @@ public:
 
     // Load and execute JavaScript
     bool eval(const std::string& code, const std::string& filename = "<eval>");
+    bool evalModule(const std::string& code, const std::string& filename = "<module>");
     bool loadFile(const std::string& path);
+    bool loadModule(const std::string& path);
 
     // Call a JavaScript function by name
     bool callFunction(const std::string& name);
@@ -43,6 +45,7 @@ public:
     JSRuntime* runtime() { return rt_; }
     JSContext* context() { return ctx_; }
     Screen* screen() { return screen_; }
+    const std::string& basePath() const { return basePath_; }
 
     // Timer management
     int addTimer(int delayMs, JSValue callback);
@@ -55,10 +58,12 @@ private:
 
     std::vector<TimerEntry> timers_;
     int nextTimerId_ = 1;
+    std::string basePath_;  // Base path for module resolution
 
     void setupGlobalFunctions();
     void setupConsole();
     void setupWidgetAPI();
+    void setupModuleLoader();
 };
 
 } // namespace flexui

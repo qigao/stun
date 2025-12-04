@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -14,7 +14,7 @@ struct ImageViewStyle {
 
 class ImageView : public Widget {
 public:
-    ImageView(NVGCSSRenderer* renderer, const std::string& id,
+    ImageView(cssboxRenderer* renderer, const std::string& id,
               const std::string& imagePath = "",
               const ImageViewStyle& style = ImageViewStyle());
     ~ImageView();

@@ -1,5 +1,6 @@
 #include <flexui/screen.h>
 #include <flexui/tabbar.h>
+#include <flexui/table.h>
 
 int main() {
     flexui::Screen screen(1200, 800, "Fluent UI 2 Dashboard");
@@ -272,6 +273,7 @@ int main() {
             display: flex;
             flex-direction: column;
             width: 100%;
+            height: 250px;
             background: var(--table-bg);
             border-radius: 8px;
             border-width: 2px;
@@ -412,28 +414,7 @@ int main() {
                 </div>
                 <div id="page-analytics" class="page-hidden">
                     <label class="section-title">Recent Activity</label>
-                    <div class="table-container">
-                        <div class="table-row">
-                            <label class="table-cell table-header">User</label>
-                            <label class="table-cell table-header">Action</label>
-                            <label class="table-cell table-header">Time</label>
-                        </div>
-                        <div class="table-row">
-                            <label class="table-cell">john@example.com</label>
-                            <label class="table-cell">Created report</label>
-                            <label class="table-cell">2 min ago</label>
-                        </div>
-                        <div class="table-row">
-                            <label class="table-cell">sarah@example.com</label>
-                            <label class="table-cell">Updated settings</label>
-                            <label class="table-cell">15 min ago</label>
-                        </div>
-                        <div class="table-row">
-                            <label class="table-cell">mike@example.com</label>
-                            <label class="table-cell">Exported data</label>
-                            <label class="table-cell">1 hour ago</label>
-                        </div>
-                    </div>
+                    <div id="activity-table-container" class="table-container"></div>
                 </div>
                 <div id="page-settings" class="page-hidden">
                     <label class="section-title">Account Settings</label>
@@ -476,6 +457,32 @@ int main() {
     if (navTabs && pageOverview && pageAnalytics && pageSettings) {
         // TabBar now manages page visibility automatically
         navTabs->registerPages({pageOverview, pageAnalytics, pageSettings});
+    }
+
+    // Create activity table programmatically
+    auto* tableContainer = screen.findWidget("activity-table-container");
+    if (tableContainer) {
+        std::vector<std::string> headers = {"User", "Action", "Time"};
+        std::vector<float> widths = {300.0f, 250.0f, 150.0f};
+        
+        auto* table = screen.createWidget<flexui::Table>(
+            "activity-table",
+            headers,
+            widths
+        );
+        
+        table->setInlineStyle("height", "200px");
+        
+        table->addRow({"john@example.com", "Created report", "2 min ago"});
+        table->addRow({"sarah@example.com", "Updated settings", "15 min ago"});
+        table->addRow({"mike@example.com", "Exported data", "1 hour ago"});
+        table->addRow({"alice@example.com", "Logged in", "2 hours ago"});
+        
+        table->setSelectionCallback([](int row, int col) {
+            printf("Selected row %d, column %d\n", row, col);
+        });
+        
+        tableContainer->addChild(table);
     }
 
     while (screen.pollEvents()) {

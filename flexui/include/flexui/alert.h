@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -25,7 +25,7 @@ struct AlertStyle {
 
 class Alert : public Widget {
 public:
-    Alert(NVGCSSRenderer* renderer, const std::string& id, const std::string& message,
+    Alert(cssboxRenderer* renderer, const std::string& id, const std::string& message,
           AlertType type = AlertType::Info);
 
     void draw(NVGcontext* vg) override;

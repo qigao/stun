@@ -1,10 +1,10 @@
-#include <flexui/colorpicker.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/colorpicker.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-ColorPicker::ColorPicker(NVGCSSRenderer* renderer, const std::string& id,
+ColorPicker::ColorPicker(cssboxRenderer* renderer, const std::string& id,
                          const ColorPickerStyle& style)
     : Widget(renderer, id, "colorpicker"), style_(style) {
 }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -24,7 +24,7 @@ class Dropdown : public Widget {
 public:
     using ChangeCallback = std::function<void(int, const std::string&)>;
 
-    Dropdown(NVGCSSRenderer* renderer, const std::string& id,
+    Dropdown(cssboxRenderer* renderer, const std::string& id,
              const std::vector<std::string>& items,
              const DropdownStyle& style = DropdownStyle());
 

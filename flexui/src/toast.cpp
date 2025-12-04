@@ -1,8 +1,8 @@
-#include <flexui/toast.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/toast.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Toast::Toast(NVGCSSRenderer *renderer, const std::string &id, const std::string &message,
+Toast::Toast(cssboxRenderer *renderer, const std::string &id, const std::string &message,
              ToastType type, const ToastStyle &style)
     : Widget(renderer, id, "toast"), message_(message), type_(type), style_(style) {
   updateStyleForType();

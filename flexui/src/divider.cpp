@@ -1,9 +1,9 @@
-#include <flexui/divider.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/divider.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-Divider::Divider(NVGCSSRenderer* renderer, const std::string& id,
+Divider::Divider(cssboxRenderer* renderer, const std::string& id,
                  bool vertical, const DividerStyle& style)
     : Widget(renderer, id, "hr"), style_(style) {
     style_.vertical = vertical;

@@ -1,22 +1,22 @@
-#include <catch2/catch_test_macros.hpp>
+﻿#include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <nanovg.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 #include <string>
 
 using Catch::Matchers::WithinAbs;
 
-std::string get_style(NVGCSSRenderer* renderer, NVGCSSElement* element, const char* prop) {
+std::string get_style(cssboxRenderer* renderer, cssboxElement* element, const char* prop) {
     char buf[64];
-    if (nvgcssGetComputedStyle(renderer, element, prop, buf, sizeof(buf))) {
+    if (cssboxGetComputedStyle(renderer, element, prop, buf, sizeof(buf))) {
         return std::string(buf);
     }
     return "";
 }
 
 TEST_CASE("Fluent Dashboard Layout", "[flexui][fluent][dashboard]") {
-    NVGCSSRenderer* renderer = nvgcssCreateRenderer(nullptr);
-    nvgcssSetViewport(renderer, 1200, 800);
+    cssboxRenderer* renderer = cssboxCreateRenderer(nullptr);
+    cssboxSetViewport(renderer, 1200, 800);
     
     SECTION("Form Row with Switch") {
         const char* css = R"(
@@ -37,19 +37,19 @@ TEST_CASE("Fluent Dashboard Layout", "[flexui][fluent][dashboard]") {
             }
         )";
         
-        nvgcssParseCSS(renderer, css);
+        cssboxParseCSS(renderer, css);
         
-        NVGCSSElement* row = nvgcssCreateElement(renderer, "row", "div");
-        nvgcssAddClass(row, "form-row");
+        cssboxElement* row = cssboxCreateElement(renderer, "row", "div");
+        cssboxAddClass(row, "form-row");
         
-        NVGCSSElement* label = nvgcssCreateElement(renderer, "label", "label");
-        nvgcssAddClass(label, "form-label");
-        nvgcssAppendChild(row, label);
+        cssboxElement* label = cssboxCreateElement(renderer, "label", "label");
+        cssboxAddClass(label, "form-label");
+        cssboxAppendChild(row, label);
         
-        NVGCSSElement* sw = nvgcssCreateElement(renderer, "switch", "switch");
-        nvgcssAppendChild(row, sw);
+        cssboxElement* sw = cssboxCreateElement(renderer, "switch", "switch");
+        cssboxAppendChild(row, sw);
         
-        nvgcssComputeLayout(renderer);
+        cssboxComputeLayout(renderer);
         
         // Check row layout
         REQUIRE(get_style(renderer, row, "display") == "flex");
@@ -79,15 +79,15 @@ TEST_CASE("Fluent Dashboard Layout", "[flexui][fluent][dashboard]") {
             }
         )";
         
-        nvgcssParseCSS(renderer, css);
+        cssboxParseCSS(renderer, css);
         
-        NVGCSSElement* container = nvgcssCreateElement(renderer, "container", "div");
-        nvgcssAddClass(container, "table-container");
+        cssboxElement* container = cssboxCreateElement(renderer, "container", "div");
+        cssboxAddClass(container, "table-container");
         
-        NVGCSSElement* progress = nvgcssCreateElement(renderer, "progress1", "progressbar");
-        nvgcssAppendChild(container, progress);
+        cssboxElement* progress = cssboxCreateElement(renderer, "progress1", "progressbar");
+        cssboxAppendChild(container, progress);
         
-        nvgcssComputeLayout(renderer);
+        cssboxComputeLayout(renderer);
         
         // Check progress bar takes full width
         REQUIRE(get_style(renderer, progress, "width") == "100%");
@@ -109,16 +109,16 @@ TEST_CASE("Fluent Dashboard Layout", "[flexui][fluent][dashboard]") {
             }
         )";
         
-        nvgcssParseCSS(renderer, css);
+        cssboxParseCSS(renderer, css);
         
-        NVGCSSElement* row = nvgcssCreateElement(renderer, "row", "div");
-        nvgcssAddClass(row, "widget-row");
+        cssboxElement* row = cssboxCreateElement(renderer, "row", "div");
+        cssboxAddClass(row, "widget-row");
         
-        NVGCSSElement* label = nvgcssCreateElement(renderer, "label", "label");
-        nvgcssAddClass(label, "widget-label");
-        nvgcssAppendChild(row, label);
+        cssboxElement* label = cssboxCreateElement(renderer, "label", "label");
+        cssboxAddClass(label, "widget-label");
+        cssboxAppendChild(row, label);
         
-        nvgcssComputeLayout(renderer);
+        cssboxComputeLayout(renderer);
         
         // Verify flexbox layout
         REQUIRE(get_style(renderer, row, "display") == "flex");
@@ -126,5 +126,5 @@ TEST_CASE("Fluent Dashboard Layout", "[flexui][fluent][dashboard]") {
         REQUIRE(get_style(renderer, row, "gap") == "20px");
     }
     
-    nvgcssDeleteRenderer(renderer);
+    cssboxDeleteRenderer(renderer);
 }

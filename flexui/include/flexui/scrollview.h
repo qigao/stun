@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -15,7 +15,7 @@ namespace flexui {
  * - Tracks scroll offset
  *
  * Limitations (TODO):
- * - Visual content scrolling not yet implemented (requires nanovg_css changes)
+ * - Visual content scrolling not yet implemented (requires cssbox changes)
  * - For now, use larger window sizes or paginated layouts to handle overflow
  * - setContentHeight() must be called manually to enable scrolling
  *
@@ -35,7 +35,7 @@ struct ScrollViewStyle {
 
 class ScrollView : public Widget {
 public:
-    ScrollView(NVGCSSRenderer* renderer, const std::string& id,
+    ScrollView(cssboxRenderer* renderer, const std::string& id,
                const ScrollViewStyle& style = ScrollViewStyle());
 
     void draw(NVGcontext* vg) override;

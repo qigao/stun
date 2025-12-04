@@ -1,10 +1,10 @@
-#include <flexui/snackbar.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/snackbar.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-Snackbar::Snackbar(NVGCSSRenderer* renderer, const std::string& id,
+Snackbar::Snackbar(cssboxRenderer* renderer, const std::string& id,
                    const std::string& message, const SnackbarStyle& style)
     : Widget(renderer, id, "snackbar"), message_(message), style_(style) {
 }

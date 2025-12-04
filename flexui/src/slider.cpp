@@ -1,10 +1,10 @@
-#include <flexui/slider.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/slider.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-Slider::Slider(NVGCSSRenderer* renderer, const std::string& id,
+Slider::Slider(cssboxRenderer* renderer, const std::string& id,
                float value, float min, float max, const SliderStyle& style)
     : Widget(renderer, id, "input"),
       value_(std::clamp(value, min, max)),

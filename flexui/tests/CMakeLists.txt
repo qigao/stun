@@ -1,4 +1,4 @@
-# FlexUI Unit Tests
+﻿# FlexUI Unit Tests
 
 # Find Catch2
 find_package(Catch2 3 REQUIRED)
@@ -19,7 +19,7 @@ target_link_libraries(
 target_include_directories(
   test_flexui
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../nanovg_css/include
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../cssbox/include
 )
 
 set_target_properties(

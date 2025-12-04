@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -22,7 +22,7 @@ class Pagination : public Widget {
 public:
     using PageChangeCallback = std::function<void(int)>;
 
-    Pagination(NVGCSSRenderer* renderer, const std::string& id, int totalPages,
+    Pagination(cssboxRenderer* renderer, const std::string& id, int totalPages,
                int currentPage = 1, const PaginationStyle& style = PaginationStyle());
 
     void draw(NVGcontext* vg) override;

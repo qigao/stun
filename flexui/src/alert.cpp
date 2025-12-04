@@ -1,8 +1,8 @@
-#include <flexui/alert.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/alert.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Alert::Alert(NVGCSSRenderer* renderer, const std::string& id, const std::string& message,
+Alert::Alert(cssboxRenderer* renderer, const std::string& id, const std::string& message,
              AlertType type)
     : Widget(renderer, id, "alert"), message_(message), type_(type) {
     updateStyleForType();

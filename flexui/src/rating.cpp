@@ -1,13 +1,13 @@
-#include <flexui/rating.h>
+﻿#include <flexui/rating.h>
 #include <cmath>
-#include <nanovg_css_internal.h>
+#include <cssbox_internal.h>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
 namespace flexui {
 
-Rating::Rating(NVGCSSRenderer* renderer, const std::string& id, int initialRating,
+Rating::Rating(cssboxRenderer* renderer, const std::string& id, int initialRating,
                const RatingStyle& style)
     : Widget(renderer, id, "rating"), rating_(initialRating), style_(style) {
 

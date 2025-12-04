@@ -1,4 +1,4 @@
-# Tailwind CSS Examples
+﻿# Tailwind CSS Examples
 
 This directory contains example applications demonstrating Tailwind CSS-style functionality in FlexUI.
 
@@ -211,7 +211,7 @@ cd build/Ninja/Msvc/bin
 All features demonstrated in these examples are covered by unit tests:
 ```bash
 cd build/Ninja/Msvc/bin
-./test_nanovg_css_tailwind.exe
+./test_cssbox_tailwind.exe
 ```
 
 **Test Coverage:**

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <flexui/screen.h>
@@ -31,4 +31,4 @@
 #include <flexui/breadcrumb.h>
 #include <flexui/colorpicker.h>
 #include <flexui/scrollview.h>
-#include <nanovg_css_internal.h> // For NVGCSSElement definition
+#include <cssbox_internal.h> // For cssboxElement definition

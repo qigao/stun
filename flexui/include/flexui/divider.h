@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -13,7 +13,7 @@ struct DividerStyle {
 
 class Divider : public Widget {
 public:
-    Divider(NVGCSSRenderer* renderer, const std::string& id,
+    Divider(cssboxRenderer* renderer, const std::string& id,
             bool vertical = false, const DividerStyle& style = DividerStyle());
 
     void draw(NVGcontext* vg) override;

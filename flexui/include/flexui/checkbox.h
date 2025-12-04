@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -21,7 +21,7 @@ class Checkbox : public Widget {
 public:
     using ChangeCallback = std::function<void(bool)>;
 
-    Checkbox(NVGCSSRenderer* renderer, const std::string& id, bool initialState = false,
+    Checkbox(cssboxRenderer* renderer, const std::string& id, bool initialState = false,
              const CheckboxStyle& style = CheckboxStyle());
 
     void draw(NVGcontext* vg) override;

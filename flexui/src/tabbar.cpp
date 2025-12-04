@@ -1,11 +1,11 @@
-#include <flexui/tabbar.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/tabbar.h>
+#include <cssbox_internal.h>
 #include <fmtlog.h>
 #include <algorithm>
 
 namespace flexui {
 
-TabBar::TabBar(NVGCSSRenderer* renderer, const std::string& id,
+TabBar::TabBar(cssboxRenderer* renderer, const std::string& id,
                const std::vector<std::string>& tabs, const TabBarStyle& style)
     : Widget(renderer, id, "tabbar"), tabs_(tabs), style_(style) {
 }

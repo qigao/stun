@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -19,7 +19,7 @@ struct ModalStyle {
 
 class Modal : public Widget {
 public:
-    Modal(NVGCSSRenderer* renderer, const std::string& id,
+    Modal(cssboxRenderer* renderer, const std::string& id,
           const std::string& title, const std::string& content,
           const ModalStyle& style = ModalStyle());
 

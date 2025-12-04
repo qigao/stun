@@ -1,8 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <SDL3/SDL.h>
 #include <nanovg.h>
-#include <nanovg_css.h>
+#include <cssbox.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -16,6 +16,7 @@ class TextBox;
 class RadioButton;
 class JSEngine;
 class SpatialIndex;
+class FontManager;
 
 class Screen {
 public:
@@ -27,11 +28,15 @@ public:
 
     void setFocusedTextBox(TextBox* textbox) { focused_textbox_ = textbox; }
     void markSpatialIndexDirty() { spatial_index_dirty_ = true; }
+    void markDirty() { needs_redraw_ = true; }  // Mark screen for redraw
 
     bool loadCSS(const std::string& css);
+    bool loadCSSFile(const std::string& path);  // Load CSS from file
     bool loadXML(const std::string& xml);  // Load UI from XML
+    bool loadXMLFile(const std::string& path);  // Load XML from file
     bool loadJS(const std::string& code);  // Load JavaScript code
     bool loadJSFile(const std::string& path);  // Load JavaScript from file
+    bool loadJSModule(const std::string& path);  // Load ES6 module from file
     Widget* addWidget(const std::string& id, const std::string& tag);
 
     // CSS Variables
@@ -76,14 +81,15 @@ public:
     void setCustomDrawCallback(CustomDrawCallback cb) { custom_draw_callback_ = cb; }
     
     NVGcontext* vg() { return vg_; }
-    NVGCSSRenderer* renderer() { return renderer_; }
+    cssboxRenderer* renderer() { return renderer_; }
     SDL_Window* window() { return window_; }
+    FontManager* fontManager() { return font_manager_.get(); }
 
 private:
     SDL_Window* window_ = nullptr;
     SDL_GLContext gl_context_ = nullptr;
     NVGcontext* vg_ = nullptr;
-    NVGCSSRenderer* renderer_ = nullptr;
+    cssboxRenderer* renderer_ = nullptr;
 
     std::vector<std::unique_ptr<Widget>> widgets_;
     std::unordered_map<std::string, Widget*> widget_map_;  // ID -> Widget lookup
@@ -91,10 +97,12 @@ private:
     std::unordered_map<std::string, std::vector<RadioButton*>> radio_groups_;  // Group name -> RadioButtons
     std::unique_ptr<JSEngine> js_engine_;  // JavaScript engine
     std::unique_ptr<SpatialIndex> spatial_index_;  // Spatial index for fast widget lookup
+    std::unique_ptr<FontManager> font_manager_;  // Font manager
     CustomDrawCallback custom_draw_callback_;
     TextBox* focused_textbox_ = nullptr;
     int width_, height_;
     bool spatial_index_dirty_ = true;  // Rebuild spatial index when true
+    bool needs_redraw_ = true;  // Redraw screen when true (Retained Mode)
     int widget_counter_ = 0;
 
     // XML parsing helpers

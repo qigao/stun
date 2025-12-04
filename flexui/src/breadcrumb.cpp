@@ -1,8 +1,8 @@
-#include <flexui/breadcrumb.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/breadcrumb.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Breadcrumb::Breadcrumb(NVGCSSRenderer* renderer, const std::string& id,
+Breadcrumb::Breadcrumb(cssboxRenderer* renderer, const std::string& id,
                        const std::vector<std::string>& items, const BreadcrumbStyle& style)
     : Widget(renderer, id, "breadcrumb"), items_(items), style_(style) {
 }

@@ -1,8 +1,8 @@
-#include <catch2/catch_test_macros.hpp>
+﻿#include <catch2/catch_test_macros.hpp>
 #include <flexui/screen.h>
 #include <flexui/widget.h>
-#include <nanovg_css.h>
-#include <nanovg_css_internal.h>
+#include <cssbox.h>
+#include <cssbox_internal.h>
 TEST_CASE("SVG rect creation and properties", "[svg][rect]") {
     flexui::Screen screen(800, 600, "SVG Test");
 

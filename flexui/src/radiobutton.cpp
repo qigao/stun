@@ -1,11 +1,11 @@
-#include <flexui/radiobutton.h>
+﻿#include <flexui/radiobutton.h>
 #include <flexui/screen.h>
-#include <nanovg_css_internal.h>
+#include <cssbox_internal.h>
 #include <algorithm>
 
 namespace flexui {
 
-RadioButton::RadioButton(NVGCSSRenderer* renderer, const std::string& id,
+RadioButton::RadioButton(cssboxRenderer* renderer, const std::string& id,
                          const std::string& group, const std::string& value,
                          bool checked, const RadioButtonStyle& style)
     : Widget(renderer, id, "radio"),

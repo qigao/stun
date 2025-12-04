@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -17,7 +17,7 @@ class ColorPicker : public Widget {
 public:
     using ChangeCallback = std::function<void(NVGcolor)>;
 
-    ColorPicker(NVGCSSRenderer* renderer, const std::string& id,
+    ColorPicker(cssboxRenderer* renderer, const std::string& id,
                 const ColorPickerStyle& style = ColorPickerStyle());
 
     void draw(NVGcontext* vg) override;

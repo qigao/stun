@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -23,7 +23,7 @@ class TabBar : public Widget {
 public:
     using TabChangeCallback = std::function<void(int, const std::string&)>;
 
-    TabBar(NVGCSSRenderer* renderer, const std::string& id,
+    TabBar(cssboxRenderer* renderer, const std::string& id,
            const std::vector<std::string>& tabs,
            const TabBarStyle& style = TabBarStyle());
 

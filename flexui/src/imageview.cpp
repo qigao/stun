@@ -1,9 +1,9 @@
-#include <flexui/imageview.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/imageview.h>
+#include <cssbox_internal.h>
 
 namespace flexui {
 
-ImageView::ImageView(NVGCSSRenderer* renderer, const std::string& id,
+ImageView::ImageView(cssboxRenderer* renderer, const std::string& id,
                      const std::string& imagePath, const ImageViewStyle& style)
     : Widget(renderer, id, "img"),
       imagePath_(imagePath),

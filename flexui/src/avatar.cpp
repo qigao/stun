@@ -1,8 +1,8 @@
-#include <flexui/avatar.h>
-#include <nanovg_css_internal.h>
+﻿#include <flexui/avatar.h>
+#include <cssbox_internal.h>
 namespace flexui {
 
-Avatar::Avatar(NVGCSSRenderer* renderer, const std::string& id, const std::string& initials,
+Avatar::Avatar(cssboxRenderer* renderer, const std::string& id, const std::string& initials,
                const AvatarStyle& style)
     : Widget(renderer, id, "avatar"), initials_(initials), style_(style) {
 }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <flexui/widget.h>
 #include <nanovg.h>
@@ -21,7 +21,7 @@ struct SliderStyle {
 
 class Slider : public Widget {
 public:
-    Slider(NVGCSSRenderer* renderer, const std::string& id,
+    Slider(cssboxRenderer* renderer, const std::string& id,
            float value = 0.5f, float min = 0.0f, float max = 1.0f,
            const SliderStyle& style = SliderStyle());
 
