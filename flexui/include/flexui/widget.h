@@ -43,7 +43,6 @@ public:
     // Path manipulation
     void addPathPoint(float x, float y);
     void clearPath();
-    void setHandDrawn(bool enabled, float seed = 42.0f);
 
     // Virtual mouse event handlers for drag-based widgets (like Slider)
     virtual bool handleMouseDown(float x, float y) { return false; }
@@ -59,6 +58,9 @@ public:
 
     // Check if widget should be visible based on inline style
     bool isVisible() const;
+    
+    // Check if widget is currently hovered
+    bool isHovered() const { return hovered_; }
 
     // CSS style helpers - reduce duplication in widget draw() methods
     NVGcolor cssBackground(const NVGcolor& fallback) const;
@@ -69,6 +71,12 @@ public:
     NVGcolor cssBorderColor(const NVGcolor& fallback) const;
     float cssPaddingLeft(float fallback) const;
     const char* cssFontFamily(const char* fallback = "sans-serif") const;
+    
+    // Get visual position (layout position adjusted for scroll offset)
+    void getVisualPosition(float& vx, float& vy) const;
+
+protected:
+    cssboxRenderer* renderer() { return renderer_; }
 
 private:
     cssboxRenderer* renderer_;

@@ -147,10 +147,10 @@ TEST_CASE("SVG rect computed layout", "[svg][rect][layout]") {
         screen.draw();
 
         // After draw(), computed values should be set
-        REQUIRE(element->computed.x >= 0);
-        REQUIRE(element->computed.y >= 0);
-        REQUIRE(element->computed.width > 0);
-        REQUIRE(element->computed.height > 0);
+        REQUIRE(element->layout.x >= 0);
+        REQUIRE(element->layout.y >= 0);
+        REQUIRE(element->layout.width > 0);
+        REQUIRE(element->layout.height > 0);
     }
 }
 

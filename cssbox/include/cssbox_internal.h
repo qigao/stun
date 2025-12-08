@@ -28,6 +28,8 @@
 #include <unordered_set>
 #include "cssbox_background.h"
 #include "lexbor_css_parser.h"
+
+
 // Windows macro cleanup (wingdi.h defines RELATIVE/ABSOLUTE)
 #ifdef RELATIVE
 #undef RELATIVE
@@ -247,6 +249,15 @@ struct cssboxElement {
     // Cache resolved gradient pointers to avoid repeated map lookups every frame
     const GradientData* cached_fill_gradient = nullptr;
     const GradientData* cached_stroke_gradient = nullptr;
+    
+    // === SVG Path Cache (Avoid re-parsing every frame) ===
+    mutable std::string cached_path_d;           // Last parsed 'd' attribute value
+    mutable void* cached_path_commands = nullptr; // std::vector<PathCommand>* - opaque to avoid header dep
+    mutable std::string cached_points_str;       // Last parsed 'points' attribute
+    mutable std::vector<std::pair<float,float>> cached_points;  // Parsed polygon points
+    
+    // Destructor to clean up opaque cache pointers
+    ~cssboxElement();
 };
 
 // ============================================================================
@@ -313,6 +324,10 @@ struct Transition {
     std::string end_value;      // Target value
     bool active;                // Is this transition running?
 
+    // Custom cubic-bezier control points (only used when easing == CUBIC_BEZIER)
+    float bezier_x1 = 0.0f, bezier_y1 = 0.0f;
+    float bezier_x2 = 1.0f, bezier_y2 = 1.0f;
+
     Transition() : start_time(0), duration(0), easing(EasingFunction::LINEAR), active(false) {}
 };
 
@@ -327,6 +342,10 @@ struct TransitionState {
     std::string transition_property;  // "all" or comma-separated properties
     float transition_duration;        // Duration in seconds
     EasingFunction transition_easing; // Easing function
+
+    // Custom cubic-bezier control points (when transition_easing == CUBIC_BEZIER)
+    float bezier_x1 = 0.0f, bezier_y1 = 0.0f;
+    float bezier_x2 = 1.0f, bezier_y2 = 1.0f;
 
     TransitionState() : transition_property("none"), transition_duration(0), transition_easing(EasingFunction::EASE) {}
 };
@@ -354,6 +373,17 @@ struct KeyframeAnimation {
 
     // Get interpolated properties at a specific position [0, 1]
     std::map<std::string, std::string> get_properties_at(float position) const;
+    
+    // Get all property names that are animated by this animation
+    std::set<std::string> get_animated_properties() const {
+        std::set<std::string> props;
+        for (const auto& kf : keyframes) {
+            for (const auto& [prop, value] : kf.properties) {
+                props.insert(prop);
+            }
+        }
+        return props;
+    }
 };
 
 /**
@@ -952,6 +982,27 @@ bool parse_transition(const std::string& transition_css,
                      std::string& out_property,
                      float& out_duration,
                      EasingFunction& out_easing);
+
+/**
+ * @brief Parse transition CSS property with cubic-bezier support
+ * @param transition_css CSS transition property value (e.g., "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)")
+ * @param out_property Output: property name
+ * @param out_duration Output: duration in seconds
+ * @param out_easing Output: easing function
+ * @param out_bezier_x1 Output: cubic-bezier x1 control point
+ * @param out_bezier_y1 Output: cubic-bezier y1 control point
+ * @param out_bezier_x2 Output: cubic-bezier x2 control point
+ * @param out_bezier_y2 Output: cubic-bezier y2 control point
+ * @return true if successfully parsed
+ */
+bool parse_transition(const std::string& transition_css,
+                     std::string& out_property,
+                     float& out_duration,
+                     EasingFunction& out_easing,
+                     float& out_bezier_x1,
+                     float& out_bezier_y1,
+                     float& out_bezier_x2,
+                     float& out_bezier_y2);
 
 // ============================================================================
 // Box Shadow Parsing (Sprint 27)

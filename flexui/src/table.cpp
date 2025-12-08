@@ -12,10 +12,10 @@ Table::Table(cssboxRenderer* renderer, const std::string& id,
 
 void Table::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -130,7 +130,7 @@ void Table::setSelectedRow(int row) {
 
 int Table::getRowAtPosition(float y) const {
     auto* el = element();
-    float tableY = el->computed.y;
+    float tableY = el->layout.y;
     float headerEnd = tableY + style_.headerHeight;
     
     if (y < headerEnd) return -1;  // Clicked on header
@@ -141,7 +141,7 @@ int Table::getRowAtPosition(float y) const {
 
 int Table::getColumnAtPosition(float x) const {
     auto* el = element();
-    float tableX = el->computed.x;
+    float tableX = el->layout.x;
     float xPos = tableX;
     
     for (size_t i = 0; i < columnWidths_.size(); ++i) {

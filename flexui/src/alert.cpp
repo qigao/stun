@@ -5,6 +5,8 @@ namespace flexui {
 Alert::Alert(cssboxRenderer* renderer, const std::string& id, const std::string& message,
              AlertType type)
     : Widget(renderer, id, "alert"), message_(message), type_(type) {
+    // Set text_content for layout engine to calculate intrinsic size
+    element()->text_content = message;
     updateStyleForType();
 }
 
@@ -39,35 +41,8 @@ void Alert::setType(AlertType type) {
 }
 
 void Alert::draw(NVGcontext* vg) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
-
-    if (w == 0 || h == 0) return;
-
-    NVGcolor bgColor = cssBackground(style_.bgColor);
-    float borderRadius = cssBorderRadius(style_.borderRadius);
-    float fontSize = cssFontSize(style_.fontSize);
-    NVGcolor textColor = cssColor(style_.textColor);
-
-    // Draw background with border
-    nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, borderRadius);
-    nvgFillColor(vg, bgColor);
-    nvgFill(vg);
-    nvgStrokeColor(vg, style_.borderColor);
-    nvgStrokeWidth(vg, style_.borderWidth);
-    nvgStroke(vg);
-
-    // Draw message text
-    nvgFontSize(vg, fontSize);
-    nvgFontFace(vg, "sans-serif");
-    nvgFillColor(vg, textColor);
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_TOP);
-    nvgTextBox(vg, x + style_.padding, y + style_.padding,
-               w - style_.padding * 2, message_.c_str(), nullptr);
+    // REMOVED: cssbox renders background, border, and text_content
+    // Style with CSS: .alert { background: #e5f6fd; border: 1px solid #90caf9; }
 }
 
 } // namespace flexui

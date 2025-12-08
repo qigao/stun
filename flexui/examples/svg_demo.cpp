@@ -81,7 +81,11 @@ int main() {
     auto rect = screen.createRect("rect1", 450, 200, 100, 80);
     rect->setFill("#9b59b6");
     rect->setStroke("#8e44ad", 2);
-    rect->setHandDrawn(true, 987.0f);  // Rects still use old hand-drawn
+    rect->setInlineStyle("stroke-rendering", "rough");
+    rect->setInlineStyle("roughness", "2.0");
+    rect->setInlineStyle("bowing", "2.0");
+    rect->setInlineStyle("stroke-count", "1");
+    rect->setInlineStyle("seed", "987");
 
     // Create a hand-drawn path
     auto path = screen.createPath("path1");
@@ -91,7 +95,11 @@ int main() {
     path->addPathPoint(200, 310);
     path->addPathPoint(250, 350);
     path->setStroke("black", 3);
-    path->setHandDrawn(true, 42.0f);  // Paths still use old hand-drawn
+    path->setInlineStyle("stroke-rendering", "rough");
+    path->setInlineStyle("roughness", "2.0");
+    path->setInlineStyle("bowing", "2.0");
+    path->setInlineStyle("stroke-count", "1");
+    path->setInlineStyle("seed", "42");
 
     // Create a smooth path
     auto smoothPath = screen.createPath("path2");
@@ -109,7 +117,11 @@ int main() {
         {600.0f, 100.0f}, {650.0f, 150.0f}, {550.0f, 150.0f}
     });
     polygon->setStroke("#e74c3c", 3);
-    polygon->setHandDrawn(true, 654.0f);  // Polygons still use old hand-drawn
+    polygon->setInlineStyle("stroke-rendering", "rough");
+    polygon->setInlineStyle("roughness", "2.0");
+    polygon->setInlineStyle("bowing", "2.0");
+    polygon->setInlineStyle("stroke-count", "1");
+    polygon->setInlineStyle("seed", "654");
 
     // Create a polyline (zigzag) - open path
     auto polyline = screen.createPolyline("polyline1", {

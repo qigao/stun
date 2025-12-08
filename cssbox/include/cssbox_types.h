@@ -29,6 +29,8 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <cmath>
+#include <unordered_map>
 
 // Windows macro cleanup (must be after includes)
 // wingdi.h defines RELATIVE and ABSOLUTE as macros
@@ -53,25 +55,31 @@ enum class LengthUnit : uint8_t {
     REM,       // Relative to root font size
     VW,        // Viewport width
     VH,        // Viewport height
+    CALC,      // calc() expression (stores px + percent components)
 };
 
 struct Length {
     LengthUnit unit;
     float value;
+    float calc_percent = 0.0f;  // For CALC: percentage component
 
     // Constructors (good taste: named constructors)
-    static Length auto_() { return {LengthUnit::AUTO, 0.0f}; }
-    static Length px(float v) { return {LengthUnit::PX, v}; }
-    static Length percent(float v) { return {LengthUnit::PERCENT, v}; }
-    static Length em(float v) { return {LengthUnit::EM, v}; }
-    static Length rem(float v) { return {LengthUnit::REM, v}; }
-    static Length vw(float v) { return {LengthUnit::VW, v}; }
-    static Length vh(float v) { return {LengthUnit::VH, v}; }
+    static Length auto_() { return {LengthUnit::AUTO, 0.0f, 0.0f}; }
+    static Length px(float v) { return {LengthUnit::PX, v, 0.0f}; }
+    static Length percent(float v) { return {LengthUnit::PERCENT, v, 0.0f}; }
+    static Length em(float v) { return {LengthUnit::EM, v, 0.0f}; }
+    static Length rem(float v) { return {LengthUnit::REM, v, 0.0f}; }
+    static Length vw(float v) { return {LengthUnit::VW, v, 0.0f}; }
+    static Length vh(float v) { return {LengthUnit::VH, v, 0.0f}; }
+    static Length calc(float px_val, float percent_val) {
+        return {LengthUnit::CALC, px_val, percent_val};
+    }
 
     // Query (better than checking >= 0)
     bool is_auto() const { return unit == LengthUnit::AUTO; }
     bool is_absolute() const { return unit == LengthUnit::PX; }
-    bool is_relative() const { return unit >= LengthUnit::PERCENT; }
+    bool is_relative() const { return unit >= LengthUnit::PERCENT && unit != LengthUnit::CALC; }
+    bool is_calc() const { return unit == LengthUnit::CALC; }
 
     // Resolve to pixels (context = parent size, font_size, viewport)
     float resolve(float context, float font_size, float viewport_size) const {
@@ -83,6 +91,9 @@ struct Length {
             case LengthUnit::REM:     return value * font_size;  // TODO: root font
             case LengthUnit::VW:      return value * viewport_size / 100.0f;
             case LengthUnit::VH:      return value * viewport_size / 100.0f;
+            case LengthUnit::CALC:
+                // calc() stores px in value and percent in calc_percent
+                return value + (calc_percent * context / 100.0f);
         }
         return 0.0f;
     }
@@ -286,20 +297,144 @@ enum class AlignContent : uint8_t {
     SPACE_AROUND
 };
 
+// Grid/Flex item self-alignment (align-self, justify-self)
+enum class AlignSelf : uint8_t {
+    AUTO,       // Inherit from container's align-items
+    START,
+    END,
+    CENTER,
+    STRETCH,
+    BASELINE
+};
+
+enum class JustifySelf : uint8_t {
+    AUTO,       // Inherit from container's justify-items
+    START,
+    END,
+    CENTER,
+    STRETCH
+};
+
+// Grid container item alignment (justify-items)
+enum class JustifyItems : uint8_t {
+    START,
+    END,
+    CENTER,
+    STRETCH     // Default
+};
+
 // ============================================================================
 // CSS Grid Properties
 // ============================================================================
 
-struct GridTrack {
-    enum class Type : uint8_t { PX, FR, AUTO, MINMAX };
-    Type type;
-    float value;          // for PX/FR
-    float min_val, max_val;  // for MINMAX
+// Size type for minmax() parameters
+enum class GridSize : uint8_t {
+    PX,           // Fixed pixel value
+    FR,           // Flexible fraction
+    PERCENT,      // Percentage of container
+    AUTO,         // auto
+    MIN_CONTENT,  // min-content
+    MAX_CONTENT,  // max-content
+};
 
-    static GridTrack px(float v) { return {Type::PX, v, 0, 0}; }
-    static GridTrack fr(float v) { return {Type::FR, v, 0, 0}; }
-    static GridTrack auto_() { return {Type::AUTO, 0, 0, 0}; }
-    static GridTrack minmax(float min, float max) { return {Type::MINMAX, 0, min, max}; }
+// Single size value (used in minmax, fit-content)
+struct GridSizeValue {
+    GridSize type = GridSize::AUTO;
+    float value = 0;
+
+    static GridSizeValue px(float v) { return {GridSize::PX, v}; }
+    static GridSizeValue fr(float v) { return {GridSize::FR, v}; }
+    static GridSizeValue percent(float v) { return {GridSize::PERCENT, v}; }
+    static GridSizeValue auto_() { return {GridSize::AUTO, 0}; }
+    static GridSizeValue min_content() { return {GridSize::MIN_CONTENT, 0}; }
+    static GridSizeValue max_content() { return {GridSize::MAX_CONTENT, 0}; }
+};
+
+struct GridTrack {
+    enum class Type : uint8_t {
+        PX,           // Fixed pixel: 100px
+        FR,           // Flexible: 1fr
+        AUTO,         // auto
+        MINMAX,       // minmax(min, max)
+        FIT_CONTENT,  // fit-content(limit)
+        MIN_CONTENT,  // min-content
+        MAX_CONTENT,  // max-content
+    };
+
+    Type type = Type::AUTO;
+    float value = 0;              // for PX/FR/FIT_CONTENT
+    GridSizeValue min_size;       // for MINMAX
+    GridSizeValue max_size;       // for MINMAX
+
+    // Named grid lines that come BEFORE this track
+    // Example: [sidebar-start] 200px -> line_names = {"sidebar-start"}
+    std::vector<std::string> line_names;
+
+    // Simple constructors
+    static GridTrack px(float v) { return {Type::PX, v, {}, {}, {}}; }
+    static GridTrack fr(float v) { return {Type::FR, v, {}, {}, {}}; }
+    static GridTrack auto_() { return {Type::AUTO, 0, {}, {}, {}}; }
+    static GridTrack min_content() { return {Type::MIN_CONTENT, 0, {}, {}, {}}; }
+    static GridTrack max_content() { return {Type::MAX_CONTENT, 0, {}, {}, {}}; }
+    static GridTrack fit_content(float limit) { return {Type::FIT_CONTENT, limit, {}, {}, {}}; }
+
+    // minmax() with flexible parameters
+    static GridTrack minmax(GridSizeValue min, GridSizeValue max) {
+        GridTrack t;
+        t.type = Type::MINMAX;
+        t.min_size = min;
+        t.max_size = max;
+        return t;
+    }
+
+    // Convenience: minmax(px, px)
+    static GridTrack minmax(float min_px, float max_px) {
+        return minmax(GridSizeValue::px(min_px), GridSizeValue::px(max_px));
+    }
+};
+
+// repeat() function support
+struct GridRepeat {
+    enum class CountType : uint8_t {
+        INTEGER,    // repeat(3, ...)
+        AUTO_FILL,  // repeat(auto-fill, ...)
+        AUTO_FIT,   // repeat(auto-fit, ...)
+    };
+
+    CountType count_type = CountType::INTEGER;
+    int count = 1;                        // for INTEGER type
+    std::vector<GridTrack> tracks;        // tracks to repeat
+
+    static GridRepeat integer(int n, std::vector<GridTrack> t) {
+        return {CountType::INTEGER, n, std::move(t)};
+    }
+    static GridRepeat auto_fill(std::vector<GridTrack> t) {
+        return {CountType::AUTO_FILL, 0, std::move(t)};
+    }
+    static GridRepeat auto_fit(std::vector<GridTrack> t) {
+        return {CountType::AUTO_FIT, 0, std::move(t)};
+    }
+};
+
+// A template item can be either a track or a repeat
+struct GridTemplateItem {
+    enum class Kind : uint8_t { TRACK, REPEAT };
+    Kind kind = Kind::TRACK;
+    GridTrack track;
+    GridRepeat repeat;
+
+    static GridTemplateItem from_track(GridTrack t) {
+        GridTemplateItem item;
+        item.kind = Kind::TRACK;
+        item.track = t;
+        return item;
+    }
+    static GridTemplateItem from_repeat(GridRepeat r) {
+        GridTemplateItem item;
+        item.kind = Kind::REPEAT;
+        item.repeat = std::move(r);
+        return item;
+    }
 };
 
 struct GridPlacement {
@@ -307,7 +442,33 @@ struct GridPlacement {
     int end;    // 1-based, -1 = auto
     int span;   // >= 1
 
+    // Named line references (used when start/end is -1 but name is set)
+    // Example: grid-column: sidebar-start / content-end
+    std::string start_name;
+    std::string end_name;
+
     GridPlacement() : start(-1), end(-1), span(1) {}
+
+    // Check if using named lines
+    bool has_named_start() const { return !start_name.empty(); }
+    bool has_named_end() const { return !end_name.empty(); }
+};
+
+/**
+ * @brief Grid template area definition
+ *
+ * Represents a named area in grid-template-areas.
+ * Example: "header header" "sidebar main" creates areas for header, sidebar, main
+ */
+struct GridAreaDef {
+    int row_start = 0;   // 0-based row index
+    int col_start = 0;   // 0-based column index
+    int row_end = 1;     // Exclusive end row
+    int col_end = 1;     // Exclusive end column
+
+    GridAreaDef() = default;
+    GridAreaDef(int rs, int cs, int re, int ce)
+        : row_start(rs), col_start(cs), row_end(re), col_end(ce) {}
 };
 
 // ============================================================================
@@ -395,6 +556,226 @@ struct SVGFill {
 };
 
 // ============================================================================
+// CSS Transform System
+// ============================================================================
+
+enum class TransformType : uint8_t {
+    TRANSLATE,
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    ROTATE,
+    SCALE,
+    SCALE_X,
+    SCALE_Y,
+    SKEW,
+    SKEW_X,
+    SKEW_Y,
+    MATRIX
+};
+
+struct TransformFunction {
+    TransformType type;
+    float values[6];  // Up to 6 values for matrix()
+
+    // Named constructors
+    static TransformFunction translate(float x, float y) {
+        TransformFunction t;
+        t.type = TransformType::TRANSLATE;
+        t.values[0] = x;
+        t.values[1] = y;
+        return t;
+    }
+
+    static TransformFunction translateX(float x) {
+        TransformFunction t;
+        t.type = TransformType::TRANSLATE_X;
+        t.values[0] = x;
+        return t;
+    }
+
+    static TransformFunction translateY(float y) {
+        TransformFunction t;
+        t.type = TransformType::TRANSLATE_Y;
+        t.values[0] = y;
+        return t;
+    }
+
+    static TransformFunction rotate(float angle_deg) {
+        TransformFunction t;
+        t.type = TransformType::ROTATE;
+        t.values[0] = angle_deg;
+        return t;
+    }
+
+    static TransformFunction scale(float sx, float sy) {
+        TransformFunction t;
+        t.type = TransformType::SCALE;
+        t.values[0] = sx;
+        t.values[1] = sy;
+        return t;
+    }
+
+    static TransformFunction scaleX(float sx) {
+        TransformFunction t;
+        t.type = TransformType::SCALE_X;
+        t.values[0] = sx;
+        return t;
+    }
+
+    static TransformFunction scaleY(float sy) {
+        TransformFunction t;
+        t.type = TransformType::SCALE_Y;
+        t.values[0] = sy;
+        return t;
+    }
+
+    static TransformFunction skewX(float angle_deg) {
+        TransformFunction t;
+        t.type = TransformType::SKEW_X;
+        t.values[0] = angle_deg;
+        return t;
+    }
+
+    static TransformFunction skewY(float angle_deg) {
+        TransformFunction t;
+        t.type = TransformType::SKEW_Y;
+        t.values[0] = angle_deg;
+        return t;
+    }
+
+    static TransformFunction matrix(float a, float b, float c, float d, float e, float f) {
+        TransformFunction t;
+        t.type = TransformType::MATRIX;
+        t.values[0] = a;
+        t.values[1] = b;
+        t.values[2] = c;
+        t.values[3] = d;
+        t.values[4] = e;
+        t.values[5] = f;
+        return t;
+    }
+};
+
+struct Transform {
+    std::vector<TransformFunction> functions;
+    float origin_x = 0.5f;  // 0-1 normalized (0.5 = center)
+    float origin_y = 0.5f;
+
+    bool empty() const { return functions.empty(); }
+
+    // Compute the composed 2D affine matrix [a, b, c, d, e, f]
+    // | a c e |   | x |   | a*x + c*y + e |
+    // | b d f | * | y | = | b*x + d*y + f |
+    // | 0 0 1 |   | 1 |   |       1       |
+    void compose_matrix(float result[6]) const {
+        // Start with identity
+        result[0] = 1.0f; result[1] = 0.0f;
+        result[2] = 0.0f; result[3] = 1.0f;
+        result[4] = 0.0f; result[5] = 0.0f;
+
+        for (const auto& fn : functions) {
+            float m[6];
+            function_to_matrix(fn, m);
+            multiply_matrix(result, m, result);
+        }
+    }
+
+private:
+    static void function_to_matrix(const TransformFunction& fn, float m[6]) {
+        // Initialize to identity
+        m[0] = 1.0f; m[1] = 0.0f;
+        m[2] = 0.0f; m[3] = 1.0f;
+        m[4] = 0.0f; m[5] = 0.0f;
+
+        constexpr float DEG_TO_RAD = 3.14159265358979323846f / 180.0f;
+
+        switch (fn.type) {
+            case TransformType::TRANSLATE:
+                m[4] = fn.values[0];
+                m[5] = fn.values[1];
+                break;
+
+            case TransformType::TRANSLATE_X:
+                m[4] = fn.values[0];
+                break;
+
+            case TransformType::TRANSLATE_Y:
+                m[5] = fn.values[0];
+                break;
+
+            case TransformType::ROTATE: {
+                float rad = fn.values[0] * DEG_TO_RAD;
+                float c = std::cos(rad);
+                float s = std::sin(rad);
+                m[0] = c;  m[1] = s;
+                m[2] = -s; m[3] = c;
+                break;
+            }
+
+            case TransformType::SCALE:
+                m[0] = fn.values[0];
+                m[3] = fn.values[1];
+                break;
+
+            case TransformType::SCALE_X:
+                m[0] = fn.values[0];
+                break;
+
+            case TransformType::SCALE_Y:
+                m[3] = fn.values[0];
+                break;
+
+            case TransformType::SKEW_X: {
+                float rad = fn.values[0] * DEG_TO_RAD;
+                m[2] = std::tan(rad);
+                break;
+            }
+
+            case TransformType::SKEW_Y: {
+                float rad = fn.values[0] * DEG_TO_RAD;
+                m[1] = std::tan(rad);
+                break;
+            }
+
+            case TransformType::SKEW: {
+                float radX = fn.values[0] * DEG_TO_RAD;
+                float radY = fn.values[1] * DEG_TO_RAD;
+                m[1] = std::tan(radY);
+                m[2] = std::tan(radX);
+                break;
+            }
+
+            case TransformType::MATRIX:
+                m[0] = fn.values[0];
+                m[1] = fn.values[1];
+                m[2] = fn.values[2];
+                m[3] = fn.values[3];
+                m[4] = fn.values[4];
+                m[5] = fn.values[5];
+                break;
+        }
+    }
+
+    // Matrix multiplication: result = a * b
+    static void multiply_matrix(const float a[6], const float b[6], float result[6]) {
+        float temp[6];
+        temp[0] = a[0] * b[0] + a[2] * b[1];
+        temp[1] = a[1] * b[0] + a[3] * b[1];
+        temp[2] = a[0] * b[2] + a[2] * b[3];
+        temp[3] = a[1] * b[2] + a[3] * b[3];
+        temp[4] = a[0] * b[4] + a[2] * b[5] + a[4];
+        temp[5] = a[1] * b[4] + a[3] * b[5] + a[5];
+
+        result[0] = temp[0];
+        result[1] = temp[1];
+        result[2] = temp[2];
+        result[3] = temp[3];
+        result[4] = temp[4];
+        result[5] = temp[5];
+    }
+};
+
+// ============================================================================
 // COMPUTED STYLE STRUCT - The Heart of the System
 // ============================================================================
 
@@ -458,10 +839,31 @@ struct ComputedStyle {
     // === Grid ===
     std::vector<GridTrack> grid_template_rows;
     std::vector<GridTrack> grid_template_columns;
+    GridTrack grid_auto_rows = GridTrack::auto_();    // Implicit row sizing
+    GridTrack grid_auto_columns = GridTrack::auto_(); // Implicit column sizing
     Length grid_row_gap = Length::px(0);
     Length grid_column_gap = Length::px(0);
     GridPlacement grid_row;
     GridPlacement grid_column;
+
+    // Named grid lines after the last track
+    // Example: [sidebar-start] 200px [sidebar-end] -> trailing = {"sidebar-end"}
+    std::vector<std::string> grid_row_trailing_names;
+    std::vector<std::string> grid_column_trailing_names;
+
+    // Grid template areas (container property)
+    // Maps area name -> GridAreaDef for "grid-template-areas" CSS property
+    // Example: "header header" "sidebar main" "footer footer"
+    std::unordered_map<std::string, GridAreaDef> grid_template_areas;
+
+    // Grid area name (item property)
+    // The named area this item should be placed in (from "grid-area" CSS property)
+    std::string grid_area;
+
+    // Grid/Flex item alignment
+    JustifyItems justify_items = JustifyItems::STRETCH;  // Container default
+    AlignSelf align_self = AlignSelf::AUTO;              // Item alignment (cross-axis)
+    JustifySelf justify_self = JustifySelf::AUTO;        // Item alignment (main-axis)
 
     // === Text ===
     Color color = nvgRGBA(0, 0, 0, 255);
@@ -473,6 +875,12 @@ struct ComputedStyle {
     std::string font_family = "sans-serif";  // Keep string for NanoVG API
     TextDecoration text_decoration = TextDecoration::NONE;
     TextTransform text_transform = TextTransform::NONE;
+    float letter_spacing = 0.0f;  // Extra space between characters (px)
+    float word_spacing = 0.0f;    // Extra space between words (px)
+
+    // === Pseudo-element content (::before/::after) ===
+    std::string content;          // CSS content property value
+    bool has_content = false;     // True if content property is set (even if empty string)
 
     // === SVG Properties ===
     SVGFill svg_fill;
@@ -481,11 +889,388 @@ struct ComputedStyle {
     // === Filter Effects ===
     std::vector<struct FilterEffect> filters;
 
-    // === Transform (Phase 2) ===
-    // TODO: Add transform properties when needed
+    // === Transform ===
+    Transform transform;
 
-    // === Transition/Animation (Phase 2) ===
-    // TODO: Add animation properties when needed
+    // === Transition Properties ===
+    std::vector<struct Transition> transitions;
+
+    // === Animation Properties ===
+    std::vector<struct Animation> animations;
+};
+
+// ============================================================================
+// CSS Transitions
+// ============================================================================
+
+/**
+ * @brief CSS timing function for transitions and animations
+ *
+ * All timing functions are ultimately cubic-bezier curves.
+ * Named functions are pre-defined cubic-bezier values.
+ */
+struct TimingFunction {
+    enum class Type : uint8_t {
+        LINEAR,       // cubic-bezier(0, 0, 1, 1)
+        EASE,         // cubic-bezier(0.25, 0.1, 0.25, 1.0) - default
+        EASE_IN,      // cubic-bezier(0.42, 0, 1.0, 1.0)
+        EASE_OUT,     // cubic-bezier(0, 0, 0.58, 1.0)
+        EASE_IN_OUT,  // cubic-bezier(0.42, 0, 0.58, 1.0)
+        CUBIC_BEZIER, // Custom cubic-bezier(x1, y1, x2, y2)
+        STEPS,        // steps(n, start|end)
+    };
+
+    Type type = Type::EASE;
+
+    // Cubic bezier control points (x1, y1, x2, y2)
+    // Only used when type == CUBIC_BEZIER
+    float x1 = 0.25f, y1 = 0.1f, x2 = 0.25f, y2 = 1.0f;
+
+    // Steps parameters (only used when type == STEPS)
+    int steps = 1;
+    bool step_start = false;  // true = step-start, false = step-end
+
+    // Named constructors
+    static TimingFunction linear() { return {Type::LINEAR, 0, 0, 1, 1, 1, false}; }
+    static TimingFunction ease() { return {Type::EASE, 0.25f, 0.1f, 0.25f, 1.0f, 1, false}; }
+    static TimingFunction ease_in() { return {Type::EASE_IN, 0.42f, 0, 1.0f, 1.0f, 1, false}; }
+    static TimingFunction ease_out() { return {Type::EASE_OUT, 0, 0, 0.58f, 1.0f, 1, false}; }
+    static TimingFunction ease_in_out() { return {Type::EASE_IN_OUT, 0.42f, 0, 0.58f, 1.0f, 1, false}; }
+    static TimingFunction cubic_bezier(float x1, float y1, float x2, float y2) {
+        return {Type::CUBIC_BEZIER, x1, y1, x2, y2, 1, false};
+    }
+    static TimingFunction step(int n, bool start = false) {
+        return {Type::STEPS, 0, 0, 1, 1, n, start};
+    }
+
+    /**
+     * @brief Evaluate the timing function at time t (0 to 1)
+     * @param t Progress through the transition (0 = start, 1 = end)
+     * @return Eased value (usually 0 to 1, but can overshoot for some curves)
+     */
+    float evaluate(float t) const {
+        if (t <= 0) return 0;
+        if (t >= 1) return 1;
+
+        switch (type) {
+            case Type::LINEAR:
+                return t;
+
+            case Type::STEPS: {
+                if (step_start) {
+                    return std::ceil(t * steps) / steps;
+                } else {
+                    return std::floor(t * steps) / steps;
+                }
+            }
+
+            case Type::EASE:
+            case Type::EASE_IN:
+            case Type::EASE_OUT:
+            case Type::EASE_IN_OUT:
+            case Type::CUBIC_BEZIER:
+            default:
+                return evaluate_cubic_bezier(t);
+        }
+    }
+
+private:
+    // Solve cubic bezier using Newton-Raphson method
+    float evaluate_cubic_bezier(float t) const {
+        // Get the actual control points based on type
+        float cx1 = x1, cy1 = y1, cx2 = x2, cy2 = y2;
+
+        switch (type) {
+            case Type::EASE:
+                cx1 = 0.25f; cy1 = 0.1f; cx2 = 0.25f; cy2 = 1.0f;
+                break;
+            case Type::EASE_IN:
+                cx1 = 0.42f; cy1 = 0.0f; cx2 = 1.0f; cy2 = 1.0f;
+                break;
+            case Type::EASE_OUT:
+                cx1 = 0.0f; cy1 = 0.0f; cx2 = 0.58f; cy2 = 1.0f;
+                break;
+            case Type::EASE_IN_OUT:
+                cx1 = 0.42f; cy1 = 0.0f; cx2 = 0.58f; cy2 = 1.0f;
+                break;
+            default:
+                break;
+        }
+
+        // Newton-Raphson to find parameter s where bezier_x(s) = t
+        float s = t;  // Initial guess
+        for (int i = 0; i < 8; i++) {
+            float x = bezier(s, cx1, cx2) - t;
+            if (std::abs(x) < 0.0001f) break;
+            float dx = bezier_derivative(s, cx1, cx2);
+            if (std::abs(dx) < 0.0001f) break;
+            s -= x / dx;
+        }
+
+        // Clamp s to [0, 1]
+        s = std::max(0.0f, std::min(1.0f, s));
+
+        // Return y value at parameter s
+        return bezier(s, cy1, cy2);
+    }
+
+    // Cubic bezier: B(t) = 3(1-t)²t·P1 + 3(1-t)t²·P2 + t³
+    static float bezier(float t, float p1, float p2) {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        float mt = 1.0f - t;
+        float mt2 = mt * mt;
+        return 3.0f * mt2 * t * p1 + 3.0f * mt * t2 * p2 + t3;
+    }
+
+    // Derivative: B'(t) = 3(1-t)²·P1 + 6(1-t)t·(P2-P1) + 3t²·(1-P2)
+    static float bezier_derivative(float t, float p1, float p2) {
+        float mt = 1.0f - t;
+        return 3.0f * mt * mt * p1 + 6.0f * mt * t * (p2 - p1) + 3.0f * t * t * (1.0f - p2);
+    }
+};
+
+/**
+ * @brief CSS Transition Property Identifier
+ *
+ * Used to identify which property a transition applies to.
+ * "all" matches any animatable property.
+ */
+enum class TransitionProperty : uint16_t {
+    NONE,
+    ALL,              // transition: all
+
+    // Layout
+    WIDTH,
+    HEIGHT,
+    MIN_WIDTH,
+    MIN_HEIGHT,
+    MAX_WIDTH,
+    MAX_HEIGHT,
+    PADDING,
+    PADDING_TOP,
+    PADDING_RIGHT,
+    PADDING_BOTTOM,
+    PADDING_LEFT,
+    MARGIN,
+    MARGIN_TOP,
+    MARGIN_RIGHT,
+    MARGIN_BOTTOM,
+    MARGIN_LEFT,
+
+    // Position
+    TOP,
+    RIGHT,
+    BOTTOM,
+    LEFT,
+
+    // Visual
+    OPACITY,
+    BACKGROUND_COLOR,
+    COLOR,
+    BORDER_COLOR,
+    BORDER_WIDTH,
+    BORDER_RADIUS,
+
+    // Transform
+    TRANSFORM,
+
+    // Flex
+    FLEX_GROW,
+    FLEX_SHRINK,
+    GAP,
+
+    // SVG
+    FILL,
+    STROKE,
+    STROKE_WIDTH,
+
+    // Filters
+    FILTER,
+};
+
+/**
+ * @brief A single CSS transition definition
+ *
+ * Represents: transition: property duration timing-function delay
+ * Example: transition: opacity 0.3s ease-in-out 0.1s
+ */
+struct Transition {
+    TransitionProperty property = TransitionProperty::ALL;
+    float duration = 0.0f;          // seconds
+    float delay = 0.0f;             // seconds
+    TimingFunction timing;
+
+    Transition() = default;
+    Transition(TransitionProperty prop, float dur, TimingFunction tf = TimingFunction::ease(), float del = 0.0f)
+        : property(prop), duration(dur), delay(del), timing(tf) {}
+
+    // Convenience constructors
+    static Transition all(float duration, TimingFunction tf = TimingFunction::ease()) {
+        return {TransitionProperty::ALL, duration, tf, 0.0f};
+    }
+
+    static Transition opacity(float duration, TimingFunction tf = TimingFunction::ease()) {
+        return {TransitionProperty::OPACITY, duration, tf, 0.0f};
+    }
+
+    static Transition transform(float duration, TimingFunction tf = TimingFunction::ease()) {
+        return {TransitionProperty::TRANSFORM, duration, tf, 0.0f};
+    }
+
+    static Transition background(float duration, TimingFunction tf = TimingFunction::ease()) {
+        return {TransitionProperty::BACKGROUND_COLOR, duration, tf, 0.0f};
+    }
+};
+
+// ============================================================================
+// CSS Animations (@keyframes)
+// ============================================================================
+
+/**
+ * @brief Animation direction for animation-direction property
+ */
+enum class AnimationDirection : uint8_t {
+    NORMAL,           // 0% -> 100%
+    REVERSE,          // 100% -> 0%
+    ALTERNATE,        // 0% -> 100% -> 0% -> ...
+    ALTERNATE_REVERSE // 100% -> 0% -> 100% -> ...
+};
+
+/**
+ * @brief Animation fill mode for animation-fill-mode property
+ */
+enum class AnimationFillMode : uint8_t {
+    NONE,      // No styles applied outside animation
+    FORWARDS,  // Retain end state after animation
+    BACKWARDS, // Apply start state during delay
+    BOTH       // Both forwards and backwards
+};
+
+/**
+ * @brief Animation play state
+ */
+enum class AnimationPlayState : uint8_t {
+    RUNNING,
+    PAUSED
+};
+
+/**
+ * @brief A single keyframe in an animation
+ *
+ * Represents a point in time (0-100%) with associated style values.
+ * Multiple properties can be animated at each keyframe.
+ */
+struct Keyframe {
+    float percentage;  // 0.0 to 1.0 (0% to 100%)
+
+    // Animated property values at this keyframe
+    // Using optional to indicate which properties are set
+    std::optional<float> opacity;
+    std::optional<Color> background_color;
+    std::optional<Color> color;
+    std::optional<Transform> transform;
+    std::optional<Length> width;
+    std::optional<Length> height;
+    std::optional<std::array<Length, 4>> padding;
+    std::optional<std::array<Length, 4>> margin;
+    std::optional<std::array<float, 4>> border_radius;
+    std::optional<Color> border_color;
+    std::optional<float> border_width;
+
+    Keyframe(float pct = 0.0f) : percentage(pct) {}
+
+    // Convenience constructors
+    static Keyframe at(float pct) { return Keyframe(pct); }
+    static Keyframe from() { return Keyframe(0.0f); }
+    static Keyframe to() { return Keyframe(1.0f); }
+
+    // Fluent API for setting properties
+    Keyframe& with_opacity(float v) { opacity = v; return *this; }
+    Keyframe& with_background(Color c) { background_color = c; return *this; }
+    Keyframe& with_color(Color c) { color = c; return *this; }
+    Keyframe& with_transform(Transform t) { transform = t; return *this; }
+};
+
+/**
+ * @brief A named keyframes animation definition
+ *
+ * Represents @keyframes rule:
+ * @keyframes fadeIn {
+ *   0% { opacity: 0; }
+ *   100% { opacity: 1; }
+ * }
+ */
+struct KeyframesDefinition {
+    std::string name;
+    std::vector<Keyframe> keyframes;
+
+    KeyframesDefinition() = default;
+    KeyframesDefinition(const std::string& n) : name(n) {}
+
+    // Add a keyframe (maintains sorted order by percentage)
+    void add_keyframe(const Keyframe& kf) {
+        auto it = std::lower_bound(keyframes.begin(), keyframes.end(), kf,
+            [](const Keyframe& a, const Keyframe& b) {
+                return a.percentage < b.percentage;
+            });
+        keyframes.insert(it, kf);
+    }
+
+    // Get keyframes surrounding a given progress (0-1)
+    std::pair<const Keyframe*, const Keyframe*> get_surrounding(float progress) const {
+        if (keyframes.empty()) return {nullptr, nullptr};
+        if (keyframes.size() == 1) return {&keyframes[0], &keyframes[0]};
+
+        for (size_t i = 0; i < keyframes.size() - 1; i++) {
+            if (progress >= keyframes[i].percentage && progress <= keyframes[i + 1].percentage) {
+                return {&keyframes[i], &keyframes[i + 1]};
+            }
+        }
+
+        // Edge cases
+        if (progress <= keyframes.front().percentage) {
+            return {&keyframes.front(), &keyframes.front()};
+        }
+        return {&keyframes.back(), &keyframes.back()};
+    }
+};
+
+/**
+ * @brief CSS animation property definition
+ *
+ * Represents animation shorthand:
+ * animation: fadeIn 0.5s ease-in-out 0.1s infinite alternate forwards;
+ */
+struct Animation {
+    std::string name;                                    // animation-name (references @keyframes)
+    float duration = 0.0f;                               // animation-duration (seconds)
+    TimingFunction timing;                               // animation-timing-function
+    float delay = 0.0f;                                  // animation-delay (seconds)
+    float iteration_count = 1.0f;                        // animation-iteration-count (INFINITY for infinite)
+    AnimationDirection direction = AnimationDirection::NORMAL;
+    AnimationFillMode fill_mode = AnimationFillMode::NONE;
+    AnimationPlayState play_state = AnimationPlayState::RUNNING;
+
+    Animation() = default;
+    Animation(const std::string& n, float dur, TimingFunction tf = TimingFunction::ease())
+        : name(n), duration(dur), timing(tf) {}
+
+    // Check if animation loops forever
+    bool is_infinite() const {
+        return iteration_count == std::numeric_limits<float>::infinity();
+    }
+
+    // Convenience constructors
+    static Animation create(const std::string& name, float duration) {
+        return Animation(name, duration);
+    }
+
+    static Animation infinite(const std::string& name, float duration) {
+        Animation a(name, duration);
+        a.iteration_count = std::numeric_limits<float>::infinity();
+        return a;
+    }
 };
 
 // ============================================================================

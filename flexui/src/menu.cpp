@@ -26,10 +26,10 @@ void Menu::draw(NVGcontext* vg) {
     if (!visible_) return;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -68,9 +68,9 @@ bool Menu::handleMouseMove(float mx, float my) {
     if (!visible_) return false;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
 
     hovered_index_ = -1;
     for (size_t i = 0; i < items_.size(); ++i) {
@@ -88,10 +88,10 @@ bool Menu::handleMouseDown(float mx, float my) {
     if (!visible_) return false;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
         if (hovered_index_ != -1 && hovered_index_ < static_cast<int>(items_.size()) &&

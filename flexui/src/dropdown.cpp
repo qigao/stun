@@ -3,6 +3,19 @@
 
 namespace flexui {
 
+// Helper to get accumulated scroll offset from parent chain
+static void getScrollOffset(cssboxRenderer* renderer, cssboxElement* element,
+                            float& scroll_x, float& scroll_y) {
+    scroll_x = 0.0f;
+    scroll_y = 0.0f;
+    cssboxElement* parent = cssboxGetParent(renderer, element);
+    while (parent) {
+        scroll_x += parent->scroll_x;
+        scroll_y += parent->scroll_y;
+        parent = cssboxGetParent(renderer, parent);
+    }
+}
+
 Dropdown::Dropdown(cssboxRenderer* renderer, const std::string& id,
                    const std::vector<std::string>& items, const DropdownStyle& style)
     : Widget(renderer, id, "select"), items_(items), style_(style) {
@@ -10,10 +23,10 @@ Dropdown::Dropdown(cssboxRenderer* renderer, const std::string& id,
 
 void Dropdown::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     NVGcolor bgColor = cssBackground(style_.bgColor);
     float borderRadius = cssBorderRadius(style_.borderRadius);
@@ -59,10 +72,10 @@ void Dropdown::draw(NVGcontext* vg) {
     nvgLineJoin(vg, NVG_ROUND);
     nvgStroke(vg);
 
-    // Dropdown list (rendered when open)
+    // Dropdown list (rendered when open) - opens ABOVE the button
     if (open_ && !items_.empty()) {
-        float listY = y + h + 2;
         float listHeight = items_.size() * style_.itemHeight;
+        float listY = y - listHeight - 2;  // Position above the button
 
         // List background with shadow
         nvgBeginPath(vg);
@@ -102,10 +115,16 @@ void Dropdown::draw(NVGcontext* vg) {
 
 bool Dropdown::handleMouseDown(float mx, float my) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+
+    // Get scroll offset to convert layout coords to visual coords
+    float scroll_x, scroll_y;
+    getScrollOffset(renderer(), el, scroll_x, scroll_y);
+
+    // Visual position (where widget appears on screen)
+    float x = el->layout.x - scroll_x;
+    float y = el->layout.y - scroll_y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     // Check main button
     if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
@@ -113,10 +132,10 @@ bool Dropdown::handleMouseDown(float mx, float my) {
         return true;
     }
 
-    // Check dropdown items when open
+    // Check dropdown items when open - list is ABOVE the button
     if (open_ && !items_.empty()) {
-        float listY = y + h + 2;
         float listHeight = items_.size() * style_.itemHeight;
+        float listY = y - listHeight - 2;  // Position above the button
 
         if (mx >= x && mx <= x + w && my >= listY && my <= listY + listHeight) {
             int index = (int)((my - listY) / style_.itemHeight);
@@ -141,13 +160,18 @@ bool Dropdown::handleMouseMove(float mx, float my) {
     }
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
 
-    float listY = y + h + 2;
+    // Get scroll offset to convert layout coords to visual coords
+    float scroll_x, scroll_y;
+    getScrollOffset(renderer(), el, scroll_x, scroll_y);
+
+    // Visual position (where widget appears on screen)
+    float x = el->layout.x - scroll_x;
+    float y = el->layout.y - scroll_y;
+    float w = el->layout.width;
+
     float listHeight = items_.size() * style_.itemHeight;
+    float listY = y - listHeight - 2;  // Position above the button
 
     hover_index_ = -1;
     if (mx >= x && mx <= x + w && my >= listY && my <= listY + listHeight) {

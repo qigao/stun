@@ -98,6 +98,15 @@ private:
 };
 
 /**
+ * @brief Pseudo-element type for CSS rules
+ */
+enum class CSSPseudoElement : uint8_t {
+    NONE,
+    BEFORE,
+    AFTER
+};
+
+/**
  * @brief CSS Rule structure (used by EnhancedStyleSheet)
  */
 struct CSSRule {
@@ -105,6 +114,7 @@ struct CSSRule {
     std::map<std::string, std::string> properties;
     int specificity;
     std::string media_query;  // e.g., "(min-width: 768px)" or empty for no media query
+    CSSPseudoElement pseudo_element = CSSPseudoElement::NONE;  // ::before, ::after
 };
 
 /**
@@ -162,6 +172,24 @@ public:
     
 private:
     /**
+     * @brief Represents a functional pseudo-class with arguments
+     * Examples: :nth-child(2n+1), :nth-of-type(odd), :not(.hidden)
+     */
+    struct FunctionalPseudoClass {
+        std::string name;       // e.g., "nth-child", "nth-of-type", "not"
+        std::string argument;   // e.g., "2n+1", "odd", ".hidden"
+    };
+
+    /**
+     * @brief Pseudo-element type
+     */
+    enum class PseudoElement : uint8_t {
+        NONE,
+        BEFORE,
+        AFTER
+    };
+
+    /**
      * @brief Parse selector string into components
      */
     struct SelectorComponents {
@@ -169,7 +197,9 @@ private:
         std::string id;             // ID selector (e.g., "shape1")
         std::vector<std::string> classes;  // Class selectors
         std::map<std::string, std::string> attributes;  // Attribute selectors
-        std::vector<std::string> pseudo_classes;  // Pseudo-classes
+        std::vector<std::string> pseudo_classes;  // Simple pseudo-classes (hover, active)
+        std::vector<FunctionalPseudoClass> functional_pseudo_classes;  // :nth-child(), :not(), etc.
+        PseudoElement pseudo_element = PseudoElement::NONE;  // ::before, ::after
         char combinator = '\0';     // Combinator (>, +, ~, or space)
     };
     
@@ -184,13 +214,23 @@ private:
     
     SelectorComponents parse_selector(const std::string& selector) const;
     ComplexSelector parse_complex_selector(const std::string& selector) const;
-    
+
     bool matches_simple_selector(const SelectorComponents& sel,
                                  const std::string& shape_id,
                                  const std::string& shape_type,
                                  const std::vector<std::string>& classes,
                                  const std::map<std::string, std::string>& attributes,
-                                 const std::set<std::string>& pseudo_states) const;
+                                 const std::set<std::string>& pseudo_states,
+                                 int child_index = 0,
+                                 int total_siblings = 1) const;
+
+    /**
+     * @brief Evaluate :nth-child() / :nth-of-type() expression
+     * @param expr Expression like "2n+1", "odd", "even", "3"
+     * @param child_index 0-based index of the element
+     * @return true if expression matches
+     */
+    bool evaluate_nth_expression(const std::string& expr, int child_index) const;
 };
 
 /**
@@ -223,6 +263,34 @@ public:
         const std::set<std::string>& pseudo_states,
         const std::map<std::string, std::string>& inline_style,
         const std::map<std::string, std::string>& parent_style = {}) const;
+
+    /**
+     * @brief Compute final style with element hierarchy support
+     * @param stylesheet Parsed CSS stylesheet
+     * @param rules Vector of CSS rules to apply
+     * @param shape_id Shape ID
+     * @param shape_type Shape type
+     * @param classes CSS classes
+     * @param attributes Shape attributes
+     * @param pseudo_states Pseudo-states
+     * @param inline_style Inline styles (highest priority)
+     * @param parent_style Parent's computed style (for inheritance)
+     * @param parent_id Parent element ID for combinator matching
+     * @param get_element_func Function to get element by ID (for traversing hierarchy)
+     * @return Computed style map
+     */
+    std::map<std::string, std::string> compute_style_with_hierarchy(
+        lxb_css_stylesheet_t* stylesheet,
+        const std::vector<CSSRule>& rules,
+        const std::string& shape_id,
+        const std::string& shape_type,
+        const std::vector<std::string>& classes,
+        const std::map<std::string, std::string>& attributes,
+        const std::set<std::string>& pseudo_states,
+        const std::map<std::string, std::string>& inline_style,
+        const std::map<std::string, std::string>& parent_style,
+        const std::string& parent_id,
+        std::function<const void*(const std::string&)> get_element_func) const;
     
 private:
     LexborSelectorMatcher matcher_;
@@ -364,7 +432,7 @@ public:
      */
     void add_rule(const std::string& selector,
                   const std::map<std::string, std::string>& properties);
-    
+
     /**
      * @brief Compute style for a shape (with caching)
      * @param shape_id Shape ID
@@ -386,6 +454,34 @@ public:
         const std::set<std::string>& pseudo_states,
         const std::map<std::string, std::string>& inline_style,
         const std::map<std::string, std::string>& parent_style = {},
+        int child_index = 0,
+        int total_siblings = 1);
+
+    /**
+     * @brief Compute style with element hierarchy support for combinator matching
+     * @param shape_id Shape ID
+     * @param shape_type Shape type
+     * @param classes CSS classes
+     * @param attributes Shape attributes
+     * @param pseudo_states Pseudo-states
+     * @param inline_style Inline styles
+     * @param parent_style Parent's computed style
+     * @param parent_id Parent element ID for combinator matching
+     * @param get_element_func Function to get element by ID (for hierarchy traversal)
+     * @param child_index Child index for structural pseudo-classes
+     * @param total_siblings Total number of siblings
+     * @return Computed style map
+     */
+    std::map<std::string, std::string> compute_style_with_hierarchy(
+        const std::string& shape_id,
+        const std::string& shape_type,
+        const std::vector<std::string>& classes,
+        const std::map<std::string, std::string>& attributes,
+        const std::set<std::string>& pseudo_states,
+        const std::map<std::string, std::string>& inline_style,
+        const std::map<std::string, std::string>& parent_style,
+        const std::string& parent_id,
+        std::function<const void*(const std::string&)> get_element_func,
         int child_index = 0,
         int total_siblings = 1);
 
@@ -417,6 +513,28 @@ public:
         int child_index = 0,
         int total_siblings = 1);
     
+    /**
+     * @brief Compute style for a pseudo-element (::before/::after)
+     *
+     * Returns the computed style for a pseudo-element of the given element.
+     * Only returns styles from rules targeting ::before or ::after.
+     *
+     * @param pseudo Which pseudo-element (BEFORE or AFTER)
+     * @param shape_id Shape ID
+     * @param shape_type Shape type
+     * @param classes CSS classes
+     * @param attributes Shape attributes
+     * @param pseudo_states Pseudo-states
+     * @return Computed style map (empty if no matching rules)
+     */
+    std::map<std::string, std::string> compute_pseudo_element_style(
+        CSSPseudoElement pseudo,
+        const std::string& shape_id,
+        const std::string& shape_type,
+        const std::vector<std::string>& classes,
+        const std::map<std::string, std::string>& attributes,
+        const std::set<std::string>& pseudo_states);
+
     /**
      * @brief Clear cache
      */

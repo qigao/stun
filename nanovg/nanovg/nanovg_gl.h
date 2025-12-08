@@ -15,7 +15,6 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 //
-#include <glad/glad.h> // Added to define GLuint and other OpenGL types
 #ifndef NANOVG_GL_H
 #define NANOVG_GL_H
 

@@ -10,6 +10,9 @@ namespace flexui {
 Rating::Rating(cssboxRenderer* renderer, const std::string& id, int initialRating,
                const RatingStyle& style)
     : Widget(renderer, id, "rating"), rating_(initialRating), style_(style) {
+    // Set text_content for layout engine to calculate intrinsic size
+    // Use star symbols as placeholder for width estimation
+    element()->text_content = std::string(style.maxRating, '*');
 
     setClickCallback([this](Widget* w) {
         if (hover_rating_ > 0) {
@@ -24,10 +27,10 @@ Rating::Rating(cssboxRenderer* renderer, const std::string& id, int initialRatin
 
 void Rating::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -77,11 +80,10 @@ void Rating::drawStar(NVGcontext* vg, float cx, float cy, float r, const NVGcolo
 }
 
 bool Rating::handleMouseMove(float mx, float my) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x, y;
+    getVisualPosition(x, y);
+    float w = element()->layout.width;
+    float h = element()->layout.height;
 
     if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
         float offsetX = mx - x;

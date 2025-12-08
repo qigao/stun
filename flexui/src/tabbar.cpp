@@ -14,10 +14,10 @@ void TabBar::draw(NVGcontext* vg) {
     if (tabs_.empty()) return;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     float tabWidth = w / tabs_.size();
 
@@ -77,11 +77,10 @@ bool TabBar::handleMouseDown(float mx, float my) {
 }
 
 int TabBar::getTabAtPosition(float mx, float my) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x, y;
+    getVisualPosition(x, y);
+    float w = element()->layout.width;
+    float h = element()->layout.height;
 
     if (mx < x || mx > x + w || my < y || my > y + h) {
         return -1;

@@ -21,10 +21,10 @@ RadioButton::RadioButton(cssboxRenderer* renderer, const std::string& id,
 
 void RadioButton::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     float size = std::min(w, h);
     float radius = size / 2;

@@ -19,10 +19,10 @@ void Snackbar::draw(NVGcontext* vg) {
     if (!visible_) return;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -57,10 +57,10 @@ bool Snackbar::handleMouseDown(float mx, float my) {
     if (!visible_ || action_text_.empty()) return false;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
         if (action_callback_) {

@@ -11,50 +11,44 @@ file(GLOB EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 # Create an executable for each example
 foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
-    # Get the filename without directory and extension
-    get_filename_component(EXAMPLE_NAME ${EXAMPLE_SOURCE} NAME_WE)
+  # Get the filename without directory and extension
+  get_filename_component(EXAMPLE_NAME ${EXAMPLE_SOURCE} NAME_WE)
 
-    # Special handling for legacy naming convention
-    # Convert "flexui_example_*" to just "example_*" for consistency
-    string(REPLACE "flexui_example_" "example_" EXAMPLE_TARGET ${EXAMPLE_NAME})
+  # Special handling for legacy naming convention Convert "flexui_example_*" to
+  # just "example_*" for consistency
+  string(REPLACE "flexui_example_" "example_" EXAMPLE_TARGET ${EXAMPLE_NAME})
 
-    # If it already starts with "example_", use as-is
-    if(NOT ${EXAMPLE_NAME} MATCHES "^example_")
-        set(EXAMPLE_TARGET "example_${EXAMPLE_NAME}")
-    else()
-        set(EXAMPLE_TARGET ${EXAMPLE_NAME})
-    endif()
+  # If it already starts with "example_", use as-is
+  if(NOT ${EXAMPLE_NAME} MATCHES "^example_")
+    set(EXAMPLE_TARGET "example_${EXAMPLE_NAME}")
+  else()
+    set(EXAMPLE_TARGET ${EXAMPLE_NAME})
+  endif()
 
-    message(STATUS "Adding FlexUI example: ${EXAMPLE_TARGET} (from ${EXAMPLE_NAME}.cpp)")
+  message(
+    STATUS "Adding FlexUI example: ${EXAMPLE_TARGET} (from ${EXAMPLE_NAME}.cpp)"
+  )
 
-    # Create executable
-    add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+  # Create executable
+  add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+  # GUI example with SDL3
+  target_link_libraries(${EXAMPLE_TARGET} PRIVATE SDL3::SDL3 cssbox OpenGL::GL
+                                                  glad::glad fmtlog)
 
-    # Link libraries (some examples don't need SDL3)
-    if(${EXAMPLE_NAME} STREQUAL "example_svg_path_parser")
-        # Command-line only example (no GUI)
-        target_link_libraries(${EXAMPLE_TARGET} PRIVATE cssbox)
-    else()
-        # GUI example with SDL3
-        target_link_libraries(${EXAMPLE_TARGET} PRIVATE
-            SDL3::SDL3 cssbox
-            OpenGL::GL
-            glad::glad fmtlog
-        )
-    endif()
+  # Include directories
+  target_include_directories(
+    ${EXAMPLE_TARGET}
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src
+            ${CMAKE_CURRENT_SOURCE_DIR}/../include
+            ${CMAKE_CURRENT_BINARY_DIR}/../ # For flexui_resources.h
+  )
 
-    # Include directories
-    target_include_directories(${EXAMPLE_TARGET} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        ${CMAKE_CURRENT_BINARY_DIR}/../  # For flexui_resources.h
-    )
-
-    # Set target properties
-    set_target_properties(${EXAMPLE_TARGET} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-        FOLDER cssbox/examples
-    )
+  # Set target properties
+  set_target_properties(
+    ${EXAMPLE_TARGET}
+    PROPERTIES CXX_STANDARD 20
+               RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+               FOLDER cssbox/examples)
 endforeach()
 
 # ============================================================================

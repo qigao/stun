@@ -86,9 +86,35 @@ add_custom_command(
   VERBATIM
 )
 
+# Generate CSS grid track lexer from re2c
+set(GRID_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/css_grid_lexer.re)
+set(GRID_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/css_grid_lexer_gen.c)
+
+add_custom_command(
+  OUTPUT ${GRID_LEXER_GEN}
+  COMMAND ${RE2C_EXECUTABLE} -o ${GRID_LEXER_GEN} ${GRID_LEXER_RE}
+  DEPENDS ${GRID_LEXER_RE}
+  COMMENT "Generating CSS grid track lexer with re2c"
+  VERBATIM
+)
+
+# Generate CSS keyword lexer from re2c (for fast enum parsing)
+set(KEYWORD_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/css_keyword_lexer.re)
+set(KEYWORD_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/css_keyword_lexer_gen.c)
+
+add_custom_command(
+  OUTPUT ${KEYWORD_LEXER_GEN}
+  COMMAND ${RE2C_EXECUTABLE} -i -o ${KEYWORD_LEXER_GEN} ${KEYWORD_LEXER_RE}
+  DEPENDS ${KEYWORD_LEXER_RE}
+  COMMENT "Generating CSS keyword lexer with re2c"
+  VERBATIM
+)
+
 set(SVG_PATH_SOURCES src/cssbox_svg_path.cpp ${SVG_LEXER_GEN})
 set(GRADIENT_SOURCES ${GRADIENT_LEXER_GEN})
 set(CALC_SOURCES ${CALC_LEXER_GEN})
+set(GRID_SOURCES ${GRID_LEXER_GEN})
+set(KEYWORD_SOURCES ${KEYWORD_LEXER_GEN})
 
 # CSS extension sources
 set(cssbox_SOURCES
@@ -101,9 +127,12 @@ set(cssbox_SOURCES
     src/cssbox_quadtree.cpp
     src/lexbor_css_parser.cpp
     src/cssbox_svg_xml.cpp
+    src/css_grid_parser.cpp
     ${SVG_PATH_SOURCES}
     ${GRADIENT_SOURCES}
     ${CALC_SOURCES}
+    ${GRID_SOURCES}
+    ${KEYWORD_SOURCES}
     src/cssbox_path_sampler.cpp)
 
 set(cssbox_HEADERS

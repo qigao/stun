@@ -5,6 +5,7 @@
  */
 
 #include "cssbox_internal.h"
+#include "css_keyword_lexer.h"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -168,9 +169,8 @@ bool SimpleStyleSheet::parse_css(const std::string& css) {
                             part.find("rem") != std::string::npos) {
                             width = part;
                         }
-                        // Check if it's a style keyword
-                        else if (part == "solid" || part == "dashed" ||
-                                 part == "dotted" || part == "none") {
+                        // Check if it's a style keyword (use DFA for fast matching)
+                        else if (cssbox::fast::parse_border_style(part) != CSS_BORDER_STYLE_UNKNOWN) {
                             style = part;
                         }
                         // Otherwise it's probably a color
@@ -259,22 +259,24 @@ struct NthChildPattern {
     }
 };
 
-// Sprint 30: Parse nth-child expression
+// Sprint 30: Parse nth-child expression (optimized with re2c for odd/even)
 static NthChildPattern parse_nth_child(const std::string& expr) {
     std::string str = expr;
-    str.erase(0, str.find_first_not_of(" 	"));
-    str.erase(str.find_last_not_of(" 	") + 1);
+    str.erase(0, str.find_first_not_of(" \t"));
+    str.erase(str.find_last_not_of(" \t") + 1);
 
     NthChildPattern result = {0, 0};
 
-    if (str == "odd") {
-        result.a = 2;
-        result.b = 1;
-        return result;
-    } else if (str == "even") {
-        result.a = 2;
-        result.b = 0;
-        return result;
+    // Use DFA for odd/even keywords
+    switch (cssbox::fast::parse_nth_keyword(str)) {
+        case CSS_NTH_ODD:
+            result.a = 2;
+            result.b = 1;
+            return result;
+        case CSS_NTH_EVEN:
+            result.a = 2;
+            result.b = 0;
+            return result;
     }
 
     size_t n_pos = str.find('n');
@@ -307,25 +309,32 @@ static NthChildPattern parse_nth_child(const std::string& expr) {
     return result;
 }
 
-// Sprint 30: Check if pseudo-class matches (structural pseudo-classes)
+// Sprint 30: Check if pseudo-class matches (optimized with re2c DFA)
 static bool match_structural_pseudo(const std::string& pseudo, int child_index, int total_siblings) {
-    if (pseudo == "first-child") {
-        return child_index == 0;
+    // Check for nth-child() with expression first (has parentheses)
+    if (pseudo.length() > 11 && pseudo[9] == '(') {
+        // Extract the base pseudo-class name (before the parenthesis)
+        std::string_view base(pseudo.data(), 9);
+        if (cssbox::fast::parse_structural_pseudo(base) == CSS_PSEUDO_NTH_CHILD) {
+            size_t close = pseudo.find(')');
+            if (close == std::string::npos) return false;
+            std::string expr = pseudo.substr(10, close - 10);
+            NthChildPattern pattern = parse_nth_child(expr);
+            return pattern.matches(child_index);
+        }
     }
-    if (pseudo == "last-child") {
-        return child_index == total_siblings - 1;
+    
+    // Use DFA for simple structural pseudo-classes
+    switch (cssbox::fast::parse_structural_pseudo(pseudo)) {
+        case CSS_PSEUDO_FIRST_CHILD:
+            return child_index == 0;
+        case CSS_PSEUDO_LAST_CHILD:
+            return child_index == total_siblings - 1;
+        case CSS_PSEUDO_ONLY_CHILD:
+            return total_siblings == 1;
+        default:
+            return false;
     }
-    if (pseudo == "only-child") {
-        return total_siblings == 1;
-    }
-    if (pseudo.length() > 11 && pseudo.substr(0, 10) == "nth-child(") {
-        size_t close = pseudo.find(')');
-        if (close == std::string::npos) return false;
-        std::string expr = pseudo.substr(10, close - 10);
-        NthChildPattern pattern = parse_nth_child(expr);
-        return pattern.matches(child_index);
-    }
-    return false;
 }
 
 std::map<std::string, std::string> SimpleStyleSheet::compute_style(

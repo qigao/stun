@@ -5,6 +5,8 @@ namespace flexui {
 Chip::Chip(cssboxRenderer* renderer, const std::string& id, const std::string& text,
            const ChipStyle& style)
     : Widget(renderer, id, "chip"), text_(text), style_(style) {
+    // Set text_content for layout engine to calculate intrinsic size
+    element()->text_content = text;
 }
 
 bool Chip::onClicked() {
@@ -15,34 +17,16 @@ bool Chip::onClicked() {
 }
 
 void Chip::draw(NVGcontext* vg) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
-
-    if (w == 0 || h == 0) return;
-
-    NVGcolor bgColor = cssBackground(style_.bgColor);
-    float borderRadius = cssBorderRadius(style_.borderRadius);
-    float fontSize = cssFontSize(style_.fontSize);
-    NVGcolor textColor = cssColor(style_.textColor);
-
-    // Draw chip background
-    nvgBeginPath(vg);
-    nvgRoundedRect(vg, x, y, w, h, borderRadius);
-    nvgFillColor(vg, bgColor);
-    nvgFill(vg);
-
-    // Draw text
-    nvgFontSize(vg, fontSize);
-    nvgFontFace(vg, "sans-serif");
-    nvgFillColor(vg, textColor);
-    nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-    nvgText(vg, x + style_.padding, y + h / 2, text_.c_str(), nullptr);
-
-    // Draw close icon if closeable
+    // REMOVED: cssbox renders background + text_content
+    // Only keep close icon rendering for closeable chips
     if (style_.closeable) {
+        auto* el = element();
+        float x = el->layout.x;
+        float y = el->layout.y;
+        float w = el->layout.width;
+        float h = el->layout.height;
+        NVGcolor textColor = cssColor(style_.textColor);
+        
         float cx = x + w - 16;
         float cy = y + h / 2;
         nvgBeginPath(vg);

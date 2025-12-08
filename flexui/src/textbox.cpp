@@ -26,10 +26,10 @@ void TextBox::setFocused(bool focused) {
                 // Set text input area for IME
                 auto* el = element();
                 SDL_Rect rect;
-                rect.x = static_cast<int>(el->computed.x);
-                rect.y = static_cast<int>(el->computed.y);
-                rect.w = static_cast<int>(el->computed.width);
-                rect.h = static_cast<int>(el->computed.height);
+                rect.x = static_cast<int>(el->layout.x);
+                rect.y = static_cast<int>(el->layout.y);
+                rect.w = static_cast<int>(el->layout.width);
+                rect.h = static_cast<int>(el->layout.height);
                 SDL_SetTextInputArea(screen_->window(), &rect, 0);
                 
                 // Start text input
@@ -136,7 +136,7 @@ void TextBox::clearSelection() {
 size_t TextBox::positionToCharIndex(float x) const {
     auto* el = element();
     float padding = cssPaddingLeft(style_.padding);
-    float textX = el->computed.x + padding;
+    float textX = el->layout.x + padding;
     
     if (x <= textX) return 0;
     
@@ -224,10 +224,10 @@ bool TextBox::handleMouseUp(float mx, float my) {
 
 void TextBox::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     NVGcolor bgColor = cssBackground(style_.bgColor);
     NVGcolor fallbackBorder = focused_ ? style_.borderColorFocus : style_.borderColor;

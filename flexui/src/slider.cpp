@@ -15,10 +15,10 @@ Slider::Slider(cssboxRenderer* renderer, const std::string& id,
 
 void Slider::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     float borderRadius = cssBorderRadius(style_.trackHeight / 2);
 
@@ -85,11 +85,11 @@ void Slider::setValue(float value) {
 }
 
 void Slider::updateValueFromPosition(float mouseX) {
-    auto* el = element();
-    float x = el->computed.x;
-    float w = el->computed.width;
+    float visual_x, visual_y;
+    getVisualPosition(visual_x, visual_y);
+    float w = element()->layout.width;
 
-    float trackX = x + style_.handleRadius;
+    float trackX = visual_x + style_.handleRadius;
     float trackWidth = w - 2 * style_.handleRadius;
 
     float t = std::clamp((mouseX - trackX) / trackWidth, 0.0f, 1.0f);
@@ -98,17 +98,10 @@ void Slider::updateValueFromPosition(float mouseX) {
 }
 
 bool Slider::handleMouseDown(float x, float y) {
-    auto* el = element();
-
-    // Check if click is within widget bounds
-    if (x >= el->computed.x && x <= el->computed.x + el->computed.width &&
-        y >= el->computed.y && y <= el->computed.y + el->computed.height) {
-
-        dragging_ = true;
-        updateValueFromPosition(x);
-        return true;
-    }
-    return false;
+    // Spatial index already guarantees mouse is within visual bounds
+    dragging_ = true;
+    updateValueFromPosition(x);
+    return true;
 }
 
 bool Slider::handleMouseMove(float x, float y) {

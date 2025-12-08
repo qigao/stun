@@ -327,6 +327,74 @@ float parse_length(const std::string& length_str, float context_value) {
 }
 
 // ============================================================================
+// Cubic Bezier Implementation
+// ============================================================================
+
+/**
+ * Evaluate a cubic bezier curve at parameter t.
+ * Control points: P0=(0,0), P1=(x1,y1), P2=(x2,y2), P3=(1,1)
+ *
+ * The bezier curve maps input time t to output progress y.
+ * We need to find the y value for a given x (time).
+ */
+
+// Helper: Evaluate bezier polynomial
+static float bezier_sample(float t, float a, float b, float c) {
+    return ((a * t + b) * t + c) * t;
+}
+
+// Helper: Derivative of bezier polynomial
+static float bezier_slope(float t, float a, float b, float c) {
+    return (3.0f * a * t + 2.0f * b) * t + c;
+}
+
+/**
+ * Evaluate cubic-bezier easing function.
+ *
+ * @param t Input time [0, 1]
+ * @param x1, y1 First control point
+ * @param x2, y2 Second control point
+ * @return Output progress [0, 1]
+ */
+float cubic_bezier(float t, float x1, float y1, float x2, float y2) {
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+
+    // Coefficients for x(t) = ax*t^3 + bx*t^2 + cx*t
+    // Derived from Bernstein form: (1-t)^3*0 + 3*(1-t)^2*t*x1 + 3*(1-t)*t^2*x2 + t^3*1
+    float cx = 3.0f * x1;
+    float bx = 3.0f * (x2 - x1) - cx;
+    float ax = 1.0f - cx - bx;
+
+    // Coefficients for y(t)
+    float cy = 3.0f * y1;
+    float by = 3.0f * (y2 - y1) - cy;
+    float ay = 1.0f - cy - by;
+
+    // Newton-Raphson iteration to solve for parameter given x
+    // We need to find bezier_t such that x(bezier_t) = t
+    float bezier_t = t;  // Initial guess
+
+    // Newton iterations (usually converges in 4-8 iterations)
+    for (int i = 0; i < 8; ++i) {
+        float x = bezier_sample(bezier_t, ax, bx, cx) - t;
+        if (std::abs(x) < 1e-6f) break;
+
+        float dx = bezier_slope(bezier_t, ax, bx, cx);
+        if (std::abs(dx) < 1e-6f) break;
+
+        bezier_t -= x / dx;
+    }
+
+    // Clamp to valid range
+    if (bezier_t < 0.0f) bezier_t = 0.0f;
+    if (bezier_t > 1.0f) bezier_t = 1.0f;
+
+    // Return y(bezier_t)
+    return bezier_sample(bezier_t, ay, by, cy);
+}
+
+// ============================================================================
 // Animation & Transition Utilities (Phase 4)
 // ============================================================================
 
@@ -342,31 +410,37 @@ float apply_easing(float t, EasingFunction easing) {
 
         case EasingFunction::EASE:
             // cubic-bezier(0.25, 0.1, 0.25, 1.0)
-            return t * t * (3.0f - 2.0f * t);  // Smoothstep approximation
+            return cubic_bezier(t, 0.25f, 0.1f, 0.25f, 1.0f);
 
         case EasingFunction::EASE_IN:
             // cubic-bezier(0.42, 0, 1.0, 1.0)
-            return t * t;
+            return cubic_bezier(t, 0.42f, 0.0f, 1.0f, 1.0f);
 
         case EasingFunction::EASE_OUT:
             // cubic-bezier(0, 0, 0.58, 1.0)
-            return t * (2.0f - t);
+            return cubic_bezier(t, 0.0f, 0.0f, 0.58f, 1.0f);
 
         case EasingFunction::EASE_IN_OUT:
             // cubic-bezier(0.42, 0, 0.58, 1.0)
-            if (t < 0.5f) {
-                return 2.0f * t * t;
-            } else {
-                return 1.0f - 2.0f * (1.0f - t) * (1.0f - t);
-            }
+            return cubic_bezier(t, 0.42f, 0.0f, 0.58f, 1.0f);
 
         case EasingFunction::CUBIC_BEZIER:
-            // TODO: Custom cubic-bezier implementation
-            return t;
+            // For custom cubic-bezier, use apply_easing_with_bezier() instead
+            // Fall back to ease curve
+            return cubic_bezier(t, 0.25f, 0.1f, 0.25f, 1.0f);
 
         default:
             return t;
     }
+}
+
+/**
+ * Apply custom cubic-bezier easing with explicit control points.
+ */
+float apply_easing_with_bezier(float t, float x1, float y1, float x2, float y2) {
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return cubic_bezier(t, x1, y1, x2, y2);
 }
 
 // Interpolate float
@@ -511,6 +585,9 @@ static std::string interpolate_transform(const std::string& start_value,
     }
 }
 
+// Forward declaration for box-shadow interpolation
+BoxShadow parse_single_box_shadow(const std::string& shadow_str);
+
 std::string interpolate_value(const std::string& start_value,
                                const std::string& end_value,
                                float t) {
@@ -546,6 +623,68 @@ std::string interpolate_value(const std::string& start_value,
              end_trimmed.find("translate(") != std::string::npos)) {
             // Transform interpolation
             return interpolate_transform(start_trimmed, end_trimmed, t);
+        }
+
+        // Check if both values look like box-shadows (contain px values or start with numbers)
+        // Box shadow format: [inset?] <offset-x> <offset-y> [blur] [spread] [color]
+        auto looks_like_shadow = [](const std::string& s) {
+            if (s.empty() || s == "none") return true;  // "none" is valid
+            // Must contain at least 2 numeric values (offset-x, offset-y)
+            int num_count = 0;
+            size_t i = 0;
+            while (i < s.length()) {
+                // Skip whitespace
+                while (i < s.length() && std::isspace(s[i])) i++;
+                if (i >= s.length()) break;
+                // Check if this token starts with a digit or minus sign
+                if (std::isdigit(s[i]) || (s[i] == '-' && i + 1 < s.length() && std::isdigit(s[i + 1]))) {
+                    num_count++;
+                }
+                // Skip to next whitespace or end
+                while (i < s.length() && !std::isspace(s[i])) {
+                    if (s[i] == '(') {
+                        int depth = 1;
+                        i++;
+                        while (i < s.length() && depth > 0) {
+                            if (s[i] == '(') depth++;
+                            else if (s[i] == ')') depth--;
+                            i++;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+            }
+            return num_count >= 2;
+        };
+
+        if (looks_like_shadow(start_trimmed) && looks_like_shadow(end_trimmed)) {
+            // Handle "none" cases
+            if (start_trimmed == "none" && end_trimmed == "none") {
+                return "none";
+            }
+            // If transitioning from/to "none", snap at t=0.5
+            if (start_trimmed == "none" || end_trimmed == "none") {
+                return (t >= 0.5f) ? end_trimmed : start_trimmed;
+            }
+
+            // Parse both shadows (only handle single shadows for now)
+            BoxShadow start_shadow = parse_single_box_shadow(start_trimmed);
+            BoxShadow end_shadow = parse_single_box_shadow(end_trimmed);
+
+            // Interpolate each component
+            float offset_x = interpolate_float(start_shadow.offset_x, end_shadow.offset_x, t);
+            float offset_y = interpolate_float(start_shadow.offset_y, end_shadow.offset_y, t);
+            float blur = interpolate_float(start_shadow.blur_radius, end_shadow.blur_radius, t);
+            float spread = interpolate_float(start_shadow.spread_radius, end_shadow.spread_radius, t);
+            NVGcolor color = interpolate_color(start_shadow.color, end_shadow.color, t);
+
+            // Build result string
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%.1fpx %.1fpx %.1fpx %.1fpx rgba(%d,%d,%d,%.2f)",
+                    offset_x, offset_y, blur, spread,
+                    (int)(color.r * 255), (int)(color.g * 255), (int)(color.b * 255), color.a);
+            return buf;
         }
 
         // Try numeric interpolation
@@ -606,15 +745,37 @@ std::string interpolate_value(const std::string& start_value,
 bool parse_transition(const std::string& transition_css,
                      std::string& out_property,
                      float& out_duration,
-                     EasingFunction& out_easing) {
+                     EasingFunction& out_easing,
+                     float& out_bezier_x1,
+                     float& out_bezier_y1,
+                     float& out_bezier_x2,
+                     float& out_bezier_y2) {
     std::string css = trim(transition_css);
     if (css.empty() || css == "none") {
         return false;
     }
 
-    // Parse: "property duration timing-function"
+    // Initialize bezier defaults
+    out_bezier_x1 = 0.0f;
+    out_bezier_y1 = 0.0f;
+    out_bezier_x2 = 1.0f;
+    out_bezier_y2 = 1.0f;
+
+    // Parse: "property duration timing-function [delay]"
     // Example: "all 0.3s ease-in-out"
-    // Example: "opacity 0.5s linear"
+    // Example: "opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)"
+
+    // Handle cubic-bezier specially since it contains commas and parentheses
+    std::string easing_str;
+    size_t cubic_start = css.find("cubic-bezier(");
+    if (cubic_start != std::string::npos) {
+        size_t cubic_end = css.find(')', cubic_start);
+        if (cubic_end != std::string::npos) {
+            easing_str = css.substr(cubic_start, cubic_end - cubic_start + 1);
+            // Remove cubic-bezier from css for further parsing
+            css = css.substr(0, cubic_start) + css.substr(cubic_end + 1);
+        }
+    }
 
     auto parts = split(css, ' ');
     if (parts.empty()) return false;
@@ -648,18 +809,42 @@ bool parse_transition(const std::string& transition_css,
         out_duration = 0.0f;
     }
 
-    // Third part: easing function
-    if (parts.size() > 2) {
-        std::string easing_str = parts[2];
-        if (easing_str == "linear") {
-            out_easing = EasingFunction::LINEAR;
-        } else if (easing_str == "ease") {
+    // Parse easing function
+    if (!easing_str.empty()) {
+        // Parse cubic-bezier(x1, y1, x2, y2)
+        size_t paren_start = easing_str.find('(');
+        size_t paren_end = easing_str.find(')');
+        if (paren_start != std::string::npos && paren_end != std::string::npos) {
+            std::string args = easing_str.substr(paren_start + 1, paren_end - paren_start - 1);
+            auto values = split(args, ',');
+            if (values.size() >= 4) {
+                try {
+                    out_bezier_x1 = std::stof(trim(values[0]));
+                    out_bezier_y1 = std::stof(trim(values[1]));
+                    out_bezier_x2 = std::stof(trim(values[2]));
+                    out_bezier_y2 = std::stof(trim(values[3]));
+                    out_easing = EasingFunction::CUBIC_BEZIER;
+                } catch (const std::exception&) {
+                    out_easing = EasingFunction::EASE;
+                }
+            } else {
+                out_easing = EasingFunction::EASE;
+            }
+        } else {
             out_easing = EasingFunction::EASE;
-        } else if (easing_str == "ease-in") {
+        }
+    } else if (parts.size() > 2) {
+        // Check for named easing function
+        std::string easing_name = parts[2];
+        if (easing_name == "linear") {
+            out_easing = EasingFunction::LINEAR;
+        } else if (easing_name == "ease") {
+            out_easing = EasingFunction::EASE;
+        } else if (easing_name == "ease-in") {
             out_easing = EasingFunction::EASE_IN;
-        } else if (easing_str == "ease-out") {
+        } else if (easing_name == "ease-out") {
             out_easing = EasingFunction::EASE_OUT;
-        } else if (easing_str == "ease-in-out") {
+        } else if (easing_name == "ease-in-out") {
             out_easing = EasingFunction::EASE_IN_OUT;
         } else {
             out_easing = EasingFunction::EASE;  // Default
@@ -669,6 +854,16 @@ bool parse_transition(const std::string& transition_css,
     }
 
     return true;
+}
+
+// Overload for backward compatibility (without bezier output params)
+bool parse_transition(const std::string& transition_css,
+                     std::string& out_property,
+                     float& out_duration,
+                     EasingFunction& out_easing) {
+    float bx1, by1, bx2, by2;
+    return parse_transition(transition_css, out_property, out_duration, out_easing,
+                           bx1, by1, bx2, by2);
 }
 
 // ============================================================================

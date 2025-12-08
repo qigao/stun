@@ -5,6 +5,7 @@
  */
 
 #include "cssbox_internal.h"
+#include "css_keyword_lexer.h"
 #include <glad/glad.h>
 #include "cssbox_filters.h"
 #include <cssbox_filters.h>
@@ -825,6 +826,34 @@ static void render_text_shadows(NVGcontext* vg, const cssboxElement* element,
     }
 }
 
+// Helper to render text with letter-spacing (renders character by character)
+static void render_text_with_letter_spacing(NVGcontext* vg, float x, float y,
+                                            const std::string& text, float letter_spacing) {
+    float cursor_x = x;
+    for (size_t i = 0; i < text.size(); ) {
+        // Handle UTF-8: determine character byte length
+        unsigned char c = text[i];
+        size_t char_len = 1;
+        if ((c & 0xF8) == 0xF0) char_len = 4;      // 4-byte UTF-8
+        else if ((c & 0xF0) == 0xE0) char_len = 3; // 3-byte UTF-8
+        else if ((c & 0xE0) == 0xC0) char_len = 2; // 2-byte UTF-8
+
+        // Extract single character
+        std::string single_char = text.substr(i, char_len);
+
+        // Render character
+        nvgText(vg, cursor_x, y, single_char.c_str(), nullptr);
+
+        // Get character width and advance cursor
+        float bounds[4];
+        nvgTextBounds(vg, cursor_x, y, single_char.c_str(), nullptr, bounds);
+        float char_width = bounds[2] - bounds[0];
+        cursor_x += char_width + letter_spacing;
+
+        i += char_len;
+    }
+}
+
 // Helper to render text content with proper styling and alignment
 void cssboxPainter::paint_text_content(const cssboxElement* element,
                                         float content_x, float content_y,
@@ -833,6 +862,7 @@ void cssboxPainter::paint_text_content(const cssboxElement* element,
 
     NVGcolor text_color = element->style.color;
     float font_size = element->style.font_size;
+    float letter_spacing = element->style.letter_spacing;
     std::string font_face = compute_font_face(element);
     int align = compute_text_align(element);
 
@@ -858,7 +888,15 @@ void cssboxPainter::paint_text_content(const cssboxElement* element,
     render_text_shadows(vg_, element, text_x, text_y, element->text_content);
 
     nvgFillColor(vg_, text_color);
-    nvgText(vg_, text_x, text_y, element->text_content.c_str(), nullptr);
+
+    // Use letter-spacing rendering if non-zero
+    if (std::abs(letter_spacing) > 0.001f) {
+        // For letter-spacing, we need left alignment to render char by char
+        nvgTextAlign(vg_, NVG_ALIGN_LEFT | (align & (NVG_ALIGN_TOP | NVG_ALIGN_MIDDLE | NVG_ALIGN_BOTTOM | NVG_ALIGN_BASELINE)));
+        render_text_with_letter_spacing(vg_, text_x, text_y, element->text_content, letter_spacing);
+    } else {
+        nvgText(vg_, text_x, text_y, element->text_content.c_str(), nullptr);
+    }
 
     apply_text_decoration(element, text_x, text_y, text_color);
 }
@@ -928,7 +966,9 @@ void cssboxPainter::paint_element(const cssboxElement* element) {
     // Retain mode: Use static hash set for O(1) lookup instead of 12 string comparisons
     static const std::unordered_set<std::string> box_element_types = {
         "group", "div", "button", "input", "panel",
-        "screen", "window", "widget", "svg", "g", "symbol"
+        "screen", "window", "widget", "svg", "g", "symbol",
+        "label", "badge", "alert", "card", "chip", "toast", "snackbar",
+        "breadcrumb", "hr", "avatar"
     };
     bool is_box_element = (box_element_types.find(element->type) != box_element_types.end());
 
@@ -1001,33 +1041,36 @@ void cssboxPainter::paint_element(const cssboxElement* element) {
                           box.width - padding_left - padding_right,
                           box.height - padding_top - padding_bottom);
     }
-    else if (element->type == "text" || element->type == "span") {
+    else {
+        // Use re2c DFA for element type dispatch (replaces sequential if-else chain)
         const auto& box = element_to_box(element);
-        paint_text_content(element, box.x, box.y, box.width, box.height);
-    }
-    else if (element->type == "line") {
-        const auto& box = element_to_box(element);
-        paint_line_shape(element, box);
-    }
-    else if (element->type == "circle" || element->type == "ellipse") {
-        const auto& box = element_to_box(element);
-        paint_circle_shape(element, box);
-    }
-    else if (element->type == "rect") {
-        const auto& box = element_to_box(element);
-        paint_rect_shape(element, box);
-    }
-    else if (element->type == "path") {
-        const auto& box = element_to_box(element);
-        paint_svg_path(element, box);
-    }
-    else if (element->type == "polygon") {
-        const auto& box = element_to_box(element);
-        paint_polygon(element, box);
-    }
-    else if (element->type == "polyline") {
-        const auto& box = element_to_box(element);
-        paint_polyline(element, box);
+        switch (cssbox::fast::parse_element_type(element->type)) {
+            case CSS_ELEM_TEXT:
+            case CSS_ELEM_SPAN:
+                paint_text_content(element, box.x, box.y, box.width, box.height);
+                break;
+            case CSS_ELEM_LINE:
+                paint_line_shape(element, box);
+                break;
+            case CSS_ELEM_CIRCLE:
+            case CSS_ELEM_ELLIPSE:
+                paint_circle_shape(element, box);
+                break;
+            case CSS_ELEM_RECT:
+                paint_rect_shape(element, box);
+                break;
+            case CSS_ELEM_PATH:
+                paint_svg_path(element, box);
+                break;
+            case CSS_ELEM_POLYGON:
+                paint_polygon(element, box);
+                break;
+            case CSS_ELEM_POLYLINE:
+                paint_polyline(element, box);
+                break;
+            default:
+                break;
+        }
     }
 
     // Call custom paint callback if provided
@@ -1079,12 +1122,8 @@ void cssboxPainter::apply_background(const cssboxElement* element,
     if (bg.type == cssbox::BackgroundType::COLOR) {
         NVGcolor bg_color = bg.color;
 
-        // logi("[PAINTER] COLOR background: r={} g={} b={} a={}", 
-        //      bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-
         // Check if background color is transparent (alpha == 0)
         if (bg_color.a <= 0.001f) {
-            logi("[PAINTER] Skipping transparent background");
             return;  // Skip transparent backgrounds
         }
 
@@ -1462,24 +1501,32 @@ NVGpaint cssboxPainter::create_radial_gradient(const GradientData& gradient,
         std::string x_pos, y_pos;
         pos_stream >> x_pos >> y_pos;
 
-        // Parse X position
-        if (x_pos == "left") cx = box.x;
-        else if (x_pos == "center") cx = box.x + box.width / 2.0f;
-        else if (x_pos == "right") cx = box.x + box.width;
-        else if (x_pos.find('%') != std::string::npos) {
-            cx = box.x + (safe_stof(x_pos) / 100.0f) * box.width;
-        } else if (x_pos.find("px") != std::string::npos) {
-            cx = box.x + safe_stof(x_pos);
+        // Parse X position (use re2c DFA for keyword matching)
+        switch (cssbox::fast::parse_position_keyword(x_pos)) {
+            case CSS_POS_LEFT:   cx = box.x; break;
+            case CSS_POS_CENTER: cx = box.x + box.width / 2.0f; break;
+            case CSS_POS_RIGHT:  cx = box.x + box.width; break;
+            default:
+                if (x_pos.find('%') != std::string::npos) {
+                    cx = box.x + (safe_stof(x_pos) / 100.0f) * box.width;
+                } else if (x_pos.find("px") != std::string::npos) {
+                    cx = box.x + safe_stof(x_pos);
+                }
+                break;
         }
 
-        // Parse Y position
-        if (y_pos == "top") cy = box.y;
-        else if (y_pos == "center") cy = box.y + box.height / 2.0f;
-        else if (y_pos == "bottom") cy = box.y + box.height;
-        else if (y_pos.find('%') != std::string::npos) {
-            cy = box.y + (safe_stof(y_pos) / 100.0f) * box.height;
-        } else if (y_pos.find("px") != std::string::npos) {
-            cy = box.y + safe_stof(y_pos);
+        // Parse Y position (use re2c DFA for keyword matching)
+        switch (cssbox::fast::parse_position_keyword(y_pos)) {
+            case CSS_POS_TOP:    cy = box.y; break;
+            case CSS_POS_CENTER: cy = box.y + box.height / 2.0f; break;
+            case CSS_POS_BOTTOM: cy = box.y + box.height; break;
+            default:
+                if (y_pos.find('%') != std::string::npos) {
+                    cy = box.y + (safe_stof(y_pos) / 100.0f) * box.height;
+                } else if (y_pos.find("px") != std::string::npos) {
+                    cy = box.y + safe_stof(y_pos);
+                }
+                break;
         }
     }
 
@@ -2355,7 +2402,25 @@ void cssboxPainter::paint_svg_path(const cssboxElement* element, const cssboxBox
     auto d_it = element->inline_style.find("d");
     if (d_it == element->inline_style.end() || d_it->second.empty()) return;
 
-    auto commands = cssbox::SVGPathParser::parse(d_it->second);
+    // Use cached path commands if 'd' attribute hasn't changed
+    const std::vector<cssbox::PathCommand>* commands_ptr = nullptr;
+    if (element->cached_path_d == d_it->second && element->cached_path_commands) {
+        commands_ptr = static_cast<std::vector<cssbox::PathCommand>*>(element->cached_path_commands);
+    } else {
+        // Parse and cache
+        auto parsed = cssbox::SVGPathParser::parse(d_it->second);
+        if (parsed.empty()) return;
+        
+        // Update cache (mutable fields)
+        element->cached_path_d = d_it->second;
+        if (element->cached_path_commands) {
+            delete static_cast<std::vector<cssbox::PathCommand>*>(element->cached_path_commands);
+        }
+        element->cached_path_commands = new std::vector<cssbox::PathCommand>(std::move(parsed));
+        commands_ptr = static_cast<std::vector<cssbox::PathCommand>*>(element->cached_path_commands);
+    }
+    
+    const auto& commands = *commands_ptr;
     if (commands.empty()) return;
 
     nvgBeginPath(vg_);
@@ -2652,7 +2717,25 @@ void cssboxPainter::paint_polygon(const cssboxElement* element, const cssboxBox&
     auto it = element->inline_style.find("points");
     if (it == element->inline_style.end()) return;
     
-    std::vector<Vec2> points = parse_svg_points(it->second);
+    // Use cached points if 'points' attribute hasn't changed
+    std::vector<Vec2> points;
+    if (element->cached_points_str == it->second && !element->cached_points.empty()) {
+        points.reserve(element->cached_points.size());
+        for (const auto& p : element->cached_points) {
+            points.push_back({p.first, p.second});
+        }
+    } else {
+        points = parse_svg_points(it->second);
+        if (points.size() < 3) return;
+        
+        // Update cache
+        element->cached_points_str = it->second;
+        element->cached_points.clear();
+        element->cached_points.reserve(points.size());
+        for (const auto& p : points) {
+            element->cached_points.emplace_back(p.x, p.y);
+        }
+    }
     if (points.size() < 3) return;  // Need at least 3 points for a polygon
     
     // Check if fill is enabled
@@ -2691,7 +2774,25 @@ void cssboxPainter::paint_polyline(const cssboxElement* element, const cssboxBox
     auto it = element->inline_style.find("points");
     if (it == element->inline_style.end()) return;
     
-    std::vector<Vec2> points = parse_svg_points(it->second);
+    // Use cached points if 'points' attribute hasn't changed
+    std::vector<Vec2> points;
+    if (element->cached_points_str == it->second && !element->cached_points.empty()) {
+        points.reserve(element->cached_points.size());
+        for (const auto& p : element->cached_points) {
+            points.push_back({p.first, p.second});
+        }
+    } else {
+        points = parse_svg_points(it->second);
+        if (points.size() < 2) return;
+        
+        // Update cache
+        element->cached_points_str = it->second;
+        element->cached_points.clear();
+        element->cached_points.reserve(points.size());
+        for (const auto& p : points) {
+            element->cached_points.emplace_back(p.x, p.y);
+        }
+    }
     if (points.size() < 2) return;  // Need at least 2 points for a polyline
     
     // Check if fill is enabled (polylines can have fill, though it's uncommon)

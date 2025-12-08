@@ -8,6 +8,7 @@
 #include "cssbox_internal.h"
 #include "lexbor_css_parser.h"
 #include "cssbox_quadtree.h"
+#include "cssbox_svg_path.h"
 #include <fmtlog.h>
 #include <algorithm>
 #include <cmath>
@@ -24,6 +25,70 @@
 #define NOMINMAX
 #endif
 #endif
+// ============================================================================
+// Transition Helpers - Apply interpolated values to typed style
+// ============================================================================
+
+// Apply interpolated transition value directly to typed style (avoids string storage)
+// Returns true if applied to typed style, false if needs inline_style fallback
+static bool apply_transition_to_typed_style(
+    cssboxElement* element,
+    const std::string& property,
+    const std::string& value)
+{
+    if (property == "opacity") {
+        element->style.opacity = std::strtof(value.c_str(), nullptr);
+        return true;
+    }
+    if (property == "background" || property == "background-color") {
+        element->style.background.color = cssbox_utils::parse_color(value);
+        element->style.background.type = cssbox::BackgroundType::COLOR;
+        return true;
+    }
+    if (property == "border-color") {
+        NVGcolor c = cssbox_utils::parse_color(value);
+        for (int i = 0; i < 4; ++i) element->style.border.color[i] = c;
+        return true;
+    }
+    if (property == "border-radius") {
+        float r = cssbox_utils::parse_length(value, 100.0f);
+        for (int i = 0; i < 4; ++i) element->layout.radius[i] = r;
+        return true;
+    }
+    if (property == "border-width") {
+        float w = cssbox_utils::parse_length(value, 100.0f);
+        for (int i = 0; i < 4; ++i) element->style.border.width[i] = w;
+        return true;
+    }
+    if (property == "transform") {
+        // DISABLED: Causing SVG positioning issues - need to investigate
+        // For now, let Phase 3 handle animated transforms only
+        return false;
+    }
+    if (property == "box-shadow") {
+        // Parse and apply directly to element->box_shadows
+        if (value.empty() || value == "none") {
+            element->box_shadows.clear();
+        } else {
+            element->box_shadows = cssbox_utils::parse_box_shadow(value);
+        }
+        return true;
+    }
+    // Fallback to inline_style for other properties
+    return false;
+}
+
+// ============================================================================
+// Element Destructor (clean up opaque cache pointers)
+// ============================================================================
+
+cssboxElement::~cssboxElement() {
+    // Clean up SVG path cache
+    if (cached_path_commands) {
+        delete static_cast<std::vector<cssbox::PathCommand>*>(cached_path_commands);
+    }
+}
+
 // ============================================================================
 // Z-Index Rendering (Sprint 10)
 // ============================================================================
@@ -165,10 +230,11 @@ static void compute_absolute_transform(cssboxRenderer* renderer, cssboxElement* 
             }
         }
 
-        // Then apply scroll offset if this is a scroll container
-        // (scroll affects children, so apply AFTER this element's transform)
-        if (it != chain.rbegin() && (elem->scroll_x != 0.0f || elem->scroll_y != 0.0f)) {
-            // Only apply scroll to descendants, not to the scroll container itself
+        // Apply scroll offset from this element to its descendants (not to itself)
+        // Check if we're NOT at the final element (the one we're computing transform for)
+        auto next_it = it;
+        ++next_it;
+        if (next_it != chain.rend() && (elem->scroll_x != 0.0f || elem->scroll_y != 0.0f)) {
             float scroll_xform[6];
             nvgTransformTranslate(scroll_xform, -elem->scroll_x, -elem->scroll_y);
             nvgTransformMultiply(abs_xform, scroll_xform);
@@ -779,6 +845,7 @@ void cssboxGetScroll(const cssboxElement* element, float* out_scroll_x, float* o
 void cssboxSetContentHeight(cssboxElement* element, float content_height) {
     if (!element) return;
     element->content_height = content_height;
+    element->layout.content_height = content_height;  // Also set resolved layout for ScrollView
 }
 
 float cssboxGetContentHeight(const cssboxElement* element) {
@@ -883,6 +950,10 @@ void cssboxRemoveChild(cssboxRenderer* renderer, cssboxElement* parent, cssboxEl
 
 // Rendering
 
+// Forward declarations for helper functions
+static bool element_has_active_animations(cssboxElement* element);
+static void cleanup_animated_elements(cssboxRenderer* renderer);
+
 void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
     // Update current time
     renderer->current_time += delta_time;
@@ -979,7 +1050,26 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         // Clear DIRTY_STYLE since we just computed it
         element->dirty_flags &= ~cssbox::DIRTY_STYLE;
 
-        // Get string-based style for transition/animation system
+        // OPTIMIZATION: Only compute string-based style if element has transitions OR animations
+        // This avoids double computation for static elements (majority of UI)
+        bool has_css_transitions = !element->style.transitions.empty();
+        bool has_css_animations = !element->style.animations.empty();
+        bool has_transition_state = element->transition_state != nullptr;
+        bool has_animation_state = element->animation_state != nullptr;
+        
+        // Skip only if element has no transitions AND no animations in CSS or runtime
+        if (!has_css_transitions && !has_css_animations && !has_transition_state && !has_animation_state) {
+            // Static element - skip expensive string-based style computation
+            for (int child_id : element->children_internal_ids) {
+                auto child_it = renderer->elements.find(child_id);
+                if (child_it != renderer->elements.end()) {
+                    update_element(child_it->second.get());
+                }
+            }
+            return;
+        }
+
+        // Get string-based style for transition system (only for elements with transitions)
         auto computed_style = renderer->stylesheet->compute_style(
             element->id,
             element->type,
@@ -1008,6 +1098,15 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
             // Check for property changes and start transitions
             for (const auto& [property, value] : computed_style) {
                 if (property == "transition") continue;  // Skip transition property itself
+
+                // Skip properties that can't be properly interpolated
+                // These will just snap to the new value without animation
+                if (property == "text-shadow" ||
+                    property == "font-family" || property == "font-weight" ||
+                    property == "display" || property == "visibility" ||
+                    property == "overflow" || property == "position") {
+                    continue;
+                }
 
                 // Check if this property should be transitioned
                 bool should_transition = (trans_state->transition_property == "all" ||
@@ -1068,6 +1167,11 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                     trans.active = false;
                     // Update previous_values to final value
                     trans_state->previous_values[trans.property] = trans.end_value;
+                    // Clear inline_style so stylesheet computed value takes over
+                    element->inline_style.erase(trans.property);
+                    // Mark element for style recomputation so box-shadow etc. get updated
+                    element->dirty_flags |= cssbox::DIRTY_STYLE;
+                    renderer->style_dirty = true;
                     ++it;
                 } else {
                     // Interpolate
@@ -1078,8 +1182,10 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                         eased_t
                     );
 
-                    // Apply interpolated value as inline style (temporary, for this frame)
-                    element->inline_style[trans.property] = interpolated;
+                    // Apply to typed style if supported, otherwise fallback to inline_style
+                    if (!apply_transition_to_typed_style(element, trans.property, interpolated)) {
+                        element->inline_style[trans.property] = interpolated;
+                    }
                     ++it;
                 }
             }
@@ -1139,7 +1245,9 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                         if (kf_anim) {
                             auto props = kf_anim->get_properties_at(1.0f);  // Final position
                             for (const auto& [prop, value] : props) {
-                                element->inline_style[prop] = value;
+                                if (!apply_transition_to_typed_style(element, prop, value)) {
+                                    element->inline_style[prop] = value;
+                                }
                             }
                         }
                     }
@@ -1187,9 +1295,11 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                 if (kf_anim) {
                     auto props = kf_anim->get_properties_at(eased_position);
 
-                    // Apply to element inline style (for this frame)
+                    // Apply to typed style if supported, fallback to inline_style
                     for (const auto& [prop, value] : props) {
-                        element->inline_style[prop] = value;
+                        if (!apply_transition_to_typed_style(element, prop, value)) {
+                            element->inline_style[prop] = value;
+                        }
                     }
                 } else {
                     logw("[ANIMATION] Keyframe animation '{}' not found for element id='{}'",
@@ -1203,14 +1313,23 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
             }
 
             // Remove finished animations (if not infinite and fill-mode is none)
-            anim_state->running_animations.erase(
-                std::remove_if(anim_state->running_animations.begin(),
-                             anim_state->running_animations.end(),
-                             [](const RunningAnimation& a) {
-                                 return !a.active && a.fill_mode == "none";
-                             }),
-                anim_state->running_animations.end()
-            );
+            // Also clear inline_style for properties animated by removed animations
+            for (auto it = anim_state->running_animations.begin();
+                 it != anim_state->running_animations.end(); ) {
+                if (!it->active && it->fill_mode == "none") {
+                    // Clear inline_style for this animation's properties
+                    const KeyframeAnimation* kf_anim =
+                        renderer->stylesheet->get_keyframe_animation(it->animation_name);
+                    if (kf_anim) {
+                        for (const auto& prop : kf_anim->get_animated_properties()) {
+                            element->inline_style.erase(prop);
+                        }
+                    }
+                    it = anim_state->running_animations.erase(it);
+                } else {
+                    ++it;
+                }
+            }
         }
 
 
@@ -1228,43 +1347,37 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         update_element(root);
     }
 
-    // Retain Mode: Clean up animated_elements_ - remove elements with no active animations
-    // Only iterate over animated_elements_, not all elements
+    // Clean up animated_elements_ set
+    cleanup_animated_elements(renderer);
+}
+
+// Helper: Check if element has active animations or transitions
+static bool element_has_active_animations(cssboxElement* element) {
+    if (element->transition_state) {
+        TransitionState* ts = static_cast<TransitionState*>(element->transition_state);
+        for (const auto& [prop, trans] : ts->active_transitions) {
+            if (trans.active) return true;
+        }
+    }
+    if (element->animation_state) {
+        AnimationState* as = static_cast<AnimationState*>(element->animation_state);
+        for (const auto& anim : as->running_animations) {
+            if (anim.active) return true;
+        }
+    }
+    return false;
+}
+
+// Helper: Remove elements with no active animations from tracking set
+static void cleanup_animated_elements(cssboxRenderer* renderer) {
     for (auto it = renderer->animated_elements_.begin(); it != renderer->animated_elements_.end(); ) {
-        int internal_id = *it;
-        auto elem_it = renderer->elements.find(internal_id);
+        auto elem_it = renderer->elements.find(*it);
         if (elem_it == renderer->elements.end()) {
-            // Element was deleted
             it = renderer->animated_elements_.erase(it);
             continue;
         }
-
-        cssboxElement* element = elem_it->second.get();
-        bool still_active = false;
-
-        // Check transitions
-        if (element->transition_state) {
-            TransitionState* trans_state = static_cast<TransitionState*>(element->transition_state);
-            for (const auto& [prop, trans] : trans_state->active_transitions) {
-                if (trans.active) {
-                    still_active = true;
-                    break;
-                }
-            }
-        }
-
-        // Check animations
-        if (!still_active && element->animation_state) {
-            AnimationState* anim_state = static_cast<AnimationState*>(element->animation_state);
-            for (const auto& anim : anim_state->running_animations) {
-                if (anim.active || anim.fill_mode == "forwards" || anim.fill_mode == "both") {
-                    still_active = true;
-                    break;
-                }
-            }
-        }
-
-        if (!still_active) {
+        
+        if (!element_has_active_animations(elem_it->second.get())) {
             it = renderer->animated_elements_.erase(it);
         } else {
             ++it;
@@ -1272,7 +1385,7 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
     }
 
     if (!renderer->animated_elements_.empty()) {
-        renderer->layout_dirty = true;
+        renderer->paint_dirty_ = true;
     }
 }
 
@@ -1349,74 +1462,42 @@ void cssboxRender(cssboxRenderer* renderer) {
         return;  // Nothing to paint, skip entire render loop
     }
 
-    // Phase 3: Apply animation overrides (ONLY for animated elements)
+    // Phase 3: Handle animated element transforms
+    // Note: box-shadow is now computed in compute_style_typed during cssboxComputeLayout
     for (int internal_id : renderer->animated_elements_) {
         auto it = renderer->elements.find(internal_id);
         if (it == renderer->elements.end()) continue;
         cssboxElement* element = it->second.get();
 
-        // Check inline_style for animation overrides
-        auto border_radius_it = element->inline_style.find("border-radius");
-        if (border_radius_it != element->inline_style.end()) {
-            float radius = cssbox_utils::parse_length(border_radius_it->second, 100.0f);
-            for (int i = 0; i < 4; ++i) {
-                element->layout.radius[i] = radius;
-            }
-        }
-
-        // Apply transform from inline_style (set by animations)
+        // Apply transform from inline_style (fallback for SVG/legacy)
         auto transform_it = element->inline_style.find("transform");
         if (transform_it != element->inline_style.end()) {
-            const std::string& transform_str = transform_it->second;
-
-            // Reset to identity
-            element->transform[0] = 1.0f; element->transform[1] = 0.0f;
-            element->transform[2] = 0.0f; element->transform[3] = 1.0f;
-            element->transform[4] = 0.0f; element->transform[5] = 0.0f;
-
-            // Parse and apply transform
-            if (transform_str.find("rotate") != std::string::npos) {
-                size_t start = transform_str.find('(');
-                size_t end = transform_str.find("deg");
-                if (start != std::string::npos && end != std::string::npos) {
-                    float angle_deg = std::stof(transform_str.substr(start + 1, end - start - 1));
-                    float angle_rad = angle_deg * (M_PI / 180.0f);
-                    element->transform[0] = std::cos(angle_rad);
-                    element->transform[1] = std::sin(angle_rad);
-                    element->transform[2] = -std::sin(angle_rad);
-                    element->transform[3] = std::cos(angle_rad);
-                }
-            } else if (transform_str.find("scale") != std::string::npos) {
-                size_t start = transform_str.find('(');
-                size_t end = transform_str.find(')');
-                if (start != std::string::npos && end != std::string::npos) {
-                    float scale = std::stof(transform_str.substr(start + 1, end - start - 1));
-                    element->transform[0] = scale;
-                    element->transform[3] = scale;
-                }
-            } else if (transform_str.find("translateY") != std::string::npos) {
-                size_t start = transform_str.find('(');
-                size_t end = transform_str.find("px");
-                if (start != std::string::npos && end != std::string::npos) {
-                    element->transform[5] = std::stof(transform_str.substr(start + 1, end - start - 1));
-                }
-            } else if (transform_str.find("translateX") != std::string::npos) {
-                size_t start = transform_str.find('(');
-                size_t end = transform_str.find("px");
-                if (start != std::string::npos && end != std::string::npos) {
-                    element->transform[4] = std::stof(transform_str.substr(start + 1, end - start - 1));
-                }
-            }
-
-            // Transform changed, invalidate cached abs_transform
-            element->abs_transform_valid_ = false;
+            apply_transition_to_typed_style(element, "transform", transform_it->second);
         }
     }
 
     // Phase 5: Render using cached list and transforms
+    NVGcontext* vg = renderer->painter->get_context();
+
     for (cssboxElement* element : renderer->render_list_) {
         // Lazy compute absolute transform
         ensure_abs_transform(renderer, element);
+
+        // Check if element is inside a scroll container and apply scissor
+        bool has_scissor = false;
+        cssboxElement* parent = cssboxGetParent(renderer, element);
+        while (parent) {
+            if (parent->scroll_x != 0.0f || parent->scroll_y != 0.0f ||
+                parent->style.overflow_x != cssbox::Overflow::VISIBLE ||
+                parent->style.overflow_y != cssbox::Overflow::VISIBLE) {
+                nvgSave(vg);
+                nvgScissor(vg, parent->layout.x, parent->layout.y,
+                          parent->layout.width, parent->layout.height);
+                has_scissor = true;
+                break;
+            }
+            parent = cssboxGetParent(renderer, parent);
+        }
 
         // Use cached transform directly
         float original_transform[6];
@@ -1426,6 +1507,10 @@ void cssboxRender(cssboxRenderer* renderer) {
         renderer->painter->paint_element(element);
 
         memcpy(element->transform, original_transform, sizeof(float) * 6);
+
+        if (has_scissor) {
+            nvgRestore(vg);
+        }
     }
 
     // Clear paint dirty flag after successful paint
@@ -1442,6 +1527,8 @@ int cssboxNeedsPaint(cssboxRenderer* renderer) {
     }
 
     // Need paint if there are active animations
+    // NOTE: Custom widget animations (like Spinner) don't use CSS animations
+    // and should use cssboxInvalidatePaint() to request redraws
     if (!renderer->animated_elements_.empty()) {
         return 1;
     }
@@ -1521,33 +1608,20 @@ void cssboxComputeLayout(cssboxRenderer* renderer) {
         std::function<void(cssboxElement*)> update_style = [&](cssboxElement* element) {
             if (!element->visible) return;
 
-            // DEBUG: Log classes and inline styles for page elements
-            // DEBUG: Log SVG elements inline_style
-            if (element->type == "svg" || element->type == "circle" || element->type == "rect") {
-                std::string class_list;
-                for (const auto& cls : element->classes) {
-                    class_list += "'" + cls + "' ";
+            // OPTIMIZATION: Only recompute style for elements with DIRTY_STYLE flag
+            bool needs_style_update = (element->dirty_flags & cssbox::DIRTY_STYLE) != 0;
+            if (!needs_style_update) {
+                // Still need to traverse children
+                for (int child_id : element->children_internal_ids) {
+                    auto child_it = renderer->elements.find(child_id);
+                    if (child_it != renderer->elements.end()) {
+                        update_style(child_it->second.get());
+                    }
                 }
-                // auto display_it = element->inline_style.find("display");
-                // std::string inline_display = (display_it != element->inline_style.end())
-                //     ? display_it->second : "(not set)";
-                // logi("[LAYOUT] SVG Element id='{}' type='{}' classes=[{}] inline_style[display]='{}'",
-                //      element->id, element->type, class_list, inline_display);
+                return;
             }
 
-            if (element->id.find("page-") != std::string::npos) {
-                std::string class_list;
-                for (const auto& cls : element->classes) {
-                    class_list += "'" + cls + "' ";
-                }
-                auto display_it = element->inline_style.find("display");
-                std::string inline_display = (display_it != element->inline_style.end())
-                    ? display_it->second : "(not set)";
-                logi("[LAYOUT] Element id='{}' classes=[{}] inline_style[display]='{}'",
-                     element->id, class_list, inline_display);
-            }
-
-            // Compute typed style
+            // Compute typed style (includes box-shadow)
             element->style = renderer->stylesheet->compute_style_typed(
                 element->id,
                 element->type,
@@ -1560,12 +1634,21 @@ void cssboxComputeLayout(cssboxRenderer* renderer) {
                 element->total_siblings
             );
 
-            // DEBUG: Log computed display and flex-grow for key elements
-            if (element->id == "content" || element->id == "root" || element->id == "header" ||
-                element->id.find("page-") != std::string::npos) {
-                // logi("[LAYOUT] Element id='{}' computed display={} flex_grow={:.1f}",
-                //      element->id, (int)element->style.display, element->style.flex_grow);
+            // Copy box-shadows from typed style to element (convert cssbox::BoxShadow to BoxShadow)
+            element->box_shadows.clear();
+            for (const auto& shadow : element->style.box_shadows) {
+                BoxShadow bs;
+                bs.offset_x = shadow.offset_x;
+                bs.offset_y = shadow.offset_y;
+                bs.blur_radius = shadow.blur_radius;
+                bs.spread_radius = shadow.spread_radius;
+                bs.color = {shadow.color.r, shadow.color.g, shadow.color.b, shadow.color.a};
+                bs.inset = shadow.inset;
+                element->box_shadows.push_back(bs);
             }
+
+            // Clear DIRTY_STYLE flag after computing
+            element->dirty_flags &= ~cssbox::DIRTY_STYLE;
 
             // Recursively update children (avoid cssboxGetChildren to skip vector copy)
             for (int child_id : element->children_internal_ids) {

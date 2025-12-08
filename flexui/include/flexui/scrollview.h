@@ -44,6 +44,8 @@ public:
     bool handleMouseMove(float x, float y) override;
     bool handleMouseUp(float x, float y) override;
 
+    // ImGui-style: direct size control (no layout dependency)
+    void setViewportSize(float w, float h);
     void setContentHeight(float height);
     float getContentHeight() const { return content_height_; }
 
@@ -56,8 +58,12 @@ public:
     float getScrollOffsetY() const { return scroll_y_; }
 
 private:
+    // ImGui-style: store sizes directly
+    float viewport_w_ = 0.0f;
+    float viewport_h_ = 0.0f;
+    float content_height_ = 0.0f;
+
     float scroll_y_ = 0.0f;
-    float content_height_ = 0.0f;  // Total content height
     ScrollViewStyle style_;
     bool scrollbar_dragging_ = false;
     float drag_start_y_ = 0.0f;
@@ -66,7 +72,6 @@ private:
     float getMaxScrollY() const;
     float getScrollbarHeight() const;
     float getScrollbarY() const;
-    bool isInsideScrollbar(float x, float y) const;
 };
 
 } // namespace flexui

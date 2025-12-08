@@ -8,6 +8,14 @@ Pagination::Pagination(cssboxRenderer* renderer, const std::string& id, int tota
                        int currentPage, const PaginationStyle& style)
     : Widget(renderer, id, "pagination"), total_pages_(totalPages),
       current_page_(currentPage), style_(style) {
+    // Set text_content for layout engine to calculate intrinsic size
+    // Placeholder for width estimation: "< 1 2 3 ... n >"
+    std::string content = "< ";
+    for (int i = 1; i <= totalPages; ++i) {
+        content += std::to_string(i) + " ";
+    }
+    content += ">";
+    element()->text_content = content;
 }
 
 void Pagination::setCurrentPage(int currentPage) {
@@ -21,10 +29,10 @@ void Pagination::setCurrentPage(int currentPage) {
 
 void Pagination::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -92,10 +100,9 @@ void Pagination::draw(NVGcontext* vg) {
 }
 
 bool Pagination::handleMouseDown(float mx, float my) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float h = el->computed.height;
+    float x, y;
+    getVisualPosition(x, y);
+    float h = element()->layout.height;
 
     float currentX = x;
     float buttonY = y + (h - style_.buttonHeight) / 2;

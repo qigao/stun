@@ -54,6 +54,7 @@ set(FLEXUI_SOURCES
     src/tablist.cpp
     src/scrollview.cpp
     src/font_manager.cpp
+    src/sparkline.cpp
 )
 
 set(FLEXUI_HEADERS

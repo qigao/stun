@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13..3.18)
+﻿cmake_minimum_required(VERSION 3.13..3.18)
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # macOS Big Sur (released Nov 2020, EOL
                                       # Sep 2023)
@@ -231,11 +231,7 @@ endforeach()
 
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
-add_subdirectory(nanovg_css)
-
-# Metal backend (Apple platforms only)
-if(APPLE AND NANOGUI_BACKEND STREQUAL "Metal")
-  add_subdirectory(nanovg_metal)
-endif()
- 
+add_subdirectory(cssbox)
+add_subdirectory(nanovg)
 add_subdirectory(flexui)
+add_subdirectory(flexchart)

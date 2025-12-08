@@ -15,9 +15,9 @@ Checkbox::Checkbox(cssboxRenderer* renderer, const std::string& id, bool initial
 
 void Checkbox::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float size = std::min(el->computed.width, el->computed.height);
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float size = std::min(el->layout.width, el->layout.height);
 
     NVGcolor fallbackBg = checked_ ? style_.bgColorChecked : style_.bgColorUnchecked;
     NVGcolor bgColor = cssBackground(fallbackBg);

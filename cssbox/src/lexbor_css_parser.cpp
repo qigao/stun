@@ -13,6 +13,48 @@ namespace cssbox {
 namespace lexbor {
 
 // ============================================================================
+// Helper: Extract pseudo-element from selector
+// ============================================================================
+
+/**
+ * @brief Extract pseudo-element (::before, ::after) from a selector
+ * @param selector The CSS selector string
+ * @param base_selector Output: selector without the pseudo-element part
+ * @return The pseudo-element type
+ */
+static CSSPseudoElement extract_pseudo_element(const std::string& selector, std::string& base_selector) {
+    // Look for ::before or ::after
+    size_t pos = selector.find("::before");
+    if (pos != std::string::npos) {
+        base_selector = selector.substr(0, pos);
+        return CSSPseudoElement::BEFORE;
+    }
+
+    pos = selector.find("::after");
+    if (pos != std::string::npos) {
+        base_selector = selector.substr(0, pos);
+        return CSSPseudoElement::AFTER;
+    }
+
+    // Also check old single-colon syntax (:before, :after)
+    // but make sure it's not part of another pseudo-class like :hover
+    pos = selector.rfind(":before");
+    if (pos != std::string::npos && (pos == 0 || selector[pos - 1] != ':')) {
+        base_selector = selector.substr(0, pos);
+        return CSSPseudoElement::BEFORE;
+    }
+
+    pos = selector.rfind(":after");
+    if (pos != std::string::npos && (pos == 0 || selector[pos - 1] != ':')) {
+        base_selector = selector.substr(0, pos);
+        return CSSPseudoElement::AFTER;
+    }
+
+    base_selector = selector;
+    return CSSPseudoElement::NONE;
+}
+
+// ============================================================================
 // LexborCSSParser Implementation
 // ============================================================================
 
@@ -70,28 +112,39 @@ bool LexborSelectorMatcher::matches(
 
 int LexborSelectorMatcher::calculate_specificity(const std::string& selector) const {
     auto sel = parse_selector(selector);
-    
+
     int specificity = 0;
-    
+
     // ID selector: 100
     if (!sel.id.empty()) {
         specificity += 100;
     }
-    
+
     // Class selectors: 10 each
     specificity += static_cast<int>(sel.classes.size()) * 10;
-    
+
     // Attribute selectors: 10 each
     specificity += static_cast<int>(sel.attributes.size()) * 10;
-    
-    // Pseudo-classes: 10 each
+
+    // Simple pseudo-classes: 10 each
     specificity += static_cast<int>(sel.pseudo_classes.size()) * 10;
-    
+
+    // Functional pseudo-classes: 10 each (except :not() which uses inner selector specificity)
+    for (const auto& fpc : sel.functional_pseudo_classes) {
+        if (fpc.name == "not") {
+            // :not() specificity is the specificity of its argument
+            specificity += calculate_specificity(fpc.argument);
+        } else {
+            // :nth-child(), :nth-of-type(), etc. count as 10
+            specificity += 10;
+        }
+    }
+
     // Type selector: 1
     if (!sel.type.empty() && sel.type != "*") {
         specificity += 1;
     }
-    
+
     return specificity;
 }
 
@@ -217,13 +270,66 @@ LexborSelectorMatcher::parse_selector(const std::string& selector) const {
             if (i < trimmed.size()) i++; // Skip ]
         }
         else if (c == ':') {
-            // Pseudo-class
-            i++;
+            // Check for pseudo-element (:: syntax) vs pseudo-class (: syntax)
+            bool is_pseudo_element = (i + 1 < trimmed.size() && trimmed[i + 1] == ':');
+            if (is_pseudo_element) {
+                i += 2;  // Skip '::'
+            } else {
+                i++;  // Skip ':'
+            }
+
             size_t start = i;
             while (i < trimmed.size() && (std::isalnum(trimmed[i]) || trimmed[i] == '_' || trimmed[i] == '-')) {
                 i++;
             }
-            result.pseudo_classes.push_back(trimmed.substr(start, i - start));
+            std::string pseudo_name = trimmed.substr(start, i - start);
+
+            if (is_pseudo_element) {
+                // Pseudo-element: ::before, ::after
+                if (pseudo_name == "before") {
+                    result.pseudo_element = PseudoElement::BEFORE;
+                } else if (pseudo_name == "after") {
+                    result.pseudo_element = PseudoElement::AFTER;
+                }
+                // Other pseudo-elements (::first-line, ::first-letter, etc.) not yet supported
+            } else if (i < trimmed.size() && trimmed[i] == '(') {
+                // Functional pseudo-class: :nth-child(...), :not(...), etc.
+                i++;  // Skip '('
+                size_t arg_start = i;
+                int paren_depth = 1;
+
+                // Find matching closing paren
+                while (i < trimmed.size() && paren_depth > 0) {
+                    if (trimmed[i] == '(') paren_depth++;
+                    else if (trimmed[i] == ')') paren_depth--;
+                    if (paren_depth > 0) i++;
+                }
+
+                std::string argument = trimmed.substr(arg_start, i - arg_start);
+                // Trim whitespace from argument
+                size_t arg_trim_start = argument.find_first_not_of(" \t");
+                size_t arg_trim_end = argument.find_last_not_of(" \t");
+                if (arg_trim_start != std::string::npos) {
+                    argument = argument.substr(arg_trim_start, arg_trim_end - arg_trim_start + 1);
+                }
+
+                FunctionalPseudoClass fpc;
+                fpc.name = pseudo_name;
+                fpc.argument = argument;
+                result.functional_pseudo_classes.push_back(fpc);
+
+                if (i < trimmed.size()) i++;  // Skip ')'
+            } else {
+                // Simple pseudo-class: :hover, :active, etc.
+                // Also handle :before/:after (old single-colon syntax)
+                if (pseudo_name == "before") {
+                    result.pseudo_element = PseudoElement::BEFORE;
+                } else if (pseudo_name == "after") {
+                    result.pseudo_element = PseudoElement::AFTER;
+                } else {
+                    result.pseudo_classes.push_back(pseudo_name);
+                }
+            }
         }
         else if (std::isalpha(c) || c == '*') {
             // Type selector
@@ -302,25 +408,27 @@ bool LexborSelectorMatcher::matches_simple_selector(
     const std::string& shape_type,
     const std::vector<std::string>& classes,
     const std::map<std::string, std::string>& attributes,
-    const std::set<std::string>& pseudo_states) const {
-    
+    const std::set<std::string>& pseudo_states,
+    int child_index,
+    int total_siblings) const {
+
     // Check ID
     if (!sel.id.empty() && sel.id != shape_id) {
         return false;
     }
-    
+
     // Check type
     if (!sel.type.empty() && sel.type != "*" && sel.type != shape_type) {
         return false;
     }
-    
+
     // Check classes
     for (const auto& cls : sel.classes) {
         if (std::find(classes.begin(), classes.end(), cls) == classes.end()) {
             return false;
         }
     }
-    
+
     // Check attributes
     for (const auto& [attr_key, attr_value] : sel.attributes) {
         // Parse operator and attribute name from key (format: "operator:attr_name")
@@ -333,12 +441,12 @@ bool LexborSelectorMatcher::matches_simple_selector(
             }
             continue;
         }
-        
+
         std::string op = attr_key.substr(0, colon_pos);
         std::string attr_name = attr_key.substr(colon_pos + 1);
-        
+
         auto it = attributes.find(attr_name);
-        
+
         if (op == "exists") {
             // [attr] - just check if attribute exists
             if (it == attributes.end()) {
@@ -356,7 +464,7 @@ bool LexborSelectorMatcher::matches_simple_selector(
             }
         } else if (op == "$=") {
             // [attr$=value] - ends with
-            if (it == attributes.end() || 
+            if (it == attributes.end() ||
                 it->second.size() < attr_value.size() ||
                 it->second.substr(it->second.size() - attr_value.size()) != attr_value) {
                 return false;
@@ -375,7 +483,7 @@ bool LexborSelectorMatcher::matches_simple_selector(
             // Words are separated by spaces
             const std::string& value_str = it->second;
             bool found = false;
-            
+
             // Check if it's the only word
             if (value_str == attr_value) {
                 found = true;
@@ -394,7 +502,7 @@ bool LexborSelectorMatcher::matches_simple_selector(
                     found = true;
                 }
             }
-            
+
             if (!found) {
                 return false;
             }
@@ -403,21 +511,168 @@ bool LexborSelectorMatcher::matches_simple_selector(
             if (it == attributes.end()) {
                 return false;
             }
-            if (it->second != attr_value && 
+            if (it->second != attr_value &&
                 it->second.find(attr_value + "-") != 0) {
                 return false;
             }
         }
     }
-    
-    // Check pseudo-classes
+
+    // Check simple pseudo-classes (hover, active, focus, etc.)
     for (const auto& pseudo : sel.pseudo_classes) {
-        if (pseudo_states.find(pseudo) == pseudo_states.end()) {
+        // Handle structural pseudo-classes that don't need arguments
+        if (pseudo == "first-child") {
+            if (child_index != 0) return false;
+        } else if (pseudo == "last-child") {
+            if (child_index != total_siblings - 1) return false;
+        } else if (pseudo == "only-child") {
+            if (total_siblings != 1) return false;
+        } else {
+            // Regular pseudo-class - check against pseudo_states
+            if (pseudo_states.find(pseudo) == pseudo_states.end()) {
+                return false;
+            }
+        }
+    }
+
+    // Check functional pseudo-classes (:nth-child(), :nth-of-type(), :not(), etc.)
+    for (const auto& fpc : sel.functional_pseudo_classes) {
+        if (fpc.name == "nth-child" || fpc.name == "nth-of-type") {
+            // Evaluate nth expression against child_index
+            // Note: CSS uses 1-based indexing, our child_index is 0-based
+            if (!evaluate_nth_expression(fpc.argument, child_index)) {
+                return false;
+            }
+        } else if (fpc.name == "nth-last-child" || fpc.name == "nth-last-of-type") {
+            // Count from the end
+            int index_from_end = total_siblings - 1 - child_index;
+            if (!evaluate_nth_expression(fpc.argument, index_from_end)) {
+                return false;
+            }
+        } else if (fpc.name == "not") {
+            // :not() - the argument should NOT match
+            // Parse the argument as a simple selector and check if it matches
+            auto not_sel = parse_selector(fpc.argument);
+            if (matches_simple_selector(not_sel, shape_id, shape_type, classes, attributes, pseudo_states, child_index, total_siblings)) {
+                return false;  // If inner selector matches, :not() fails
+            }
+        }
+        // Add more functional pseudo-classes as needed
+    }
+
+    return true;
+}
+
+/**
+ * @brief Evaluate :nth-child() / :nth-of-type() expression
+ *
+ * Parses and evaluates CSS nth expressions:
+ * - "odd"     → 1st, 3rd, 5th... (CSS 1-based: 1, 3, 5)
+ * - "even"    → 2nd, 4th, 6th... (CSS 1-based: 2, 4, 6)
+ * - "3"       → only the 3rd child
+ * - "2n"      → every 2nd child (2, 4, 6...)
+ * - "2n+1"    → every odd child (1, 3, 5...)
+ * - "3n+2"    → 2nd, 5th, 8th... (2, 5, 8)
+ * - "-n+3"    → first 3 children (1, 2, 3)
+ * - "n+4"     → 4th child and after (4, 5, 6...)
+ *
+ * @param expr The nth expression string
+ * @param child_index 0-based index of the element
+ * @return true if expression matches
+ */
+bool LexborSelectorMatcher::evaluate_nth_expression(const std::string& expr, int child_index) const {
+    // CSS uses 1-based indexing
+    int css_index = child_index + 1;
+
+    // Trim whitespace
+    std::string e = expr;
+    e.erase(0, e.find_first_not_of(" \t"));
+    e.erase(e.find_last_not_of(" \t") + 1);
+
+    // Handle keywords
+    if (e == "odd") {
+        return css_index % 2 == 1;  // 1, 3, 5, ...
+    }
+    if (e == "even") {
+        return css_index % 2 == 0;  // 2, 4, 6, ...
+    }
+
+    // Parse An+B format
+    int a = 0;  // Coefficient of n
+    int b = 0;  // Constant offset
+
+    // Check if expression contains 'n'
+    size_t n_pos = e.find('n');
+    if (n_pos == std::string::npos) {
+        // Just a number: matches only that specific index
+        try {
+            b = std::stoi(e);
+            return css_index == b;
+        } catch (...) {
             return false;
         }
     }
-    
-    return true;
+
+    // Parse coefficient A (before 'n')
+    if (n_pos == 0) {
+        // "n+B" or "n" → A = 1
+        a = 1;
+    } else if (n_pos == 1 && e[0] == '-') {
+        // "-n+B" → A = -1
+        a = -1;
+    } else if (n_pos == 1 && e[0] == '+') {
+        // "+n+B" → A = 1
+        a = 1;
+    } else {
+        // "An+B" → parse A
+        try {
+            a = std::stoi(e.substr(0, n_pos));
+        } catch (...) {
+            return false;
+        }
+    }
+
+    // Parse constant B (after 'n')
+    if (n_pos + 1 < e.size()) {
+        std::string rest = e.substr(n_pos + 1);
+        // Remove whitespace around operator
+        rest.erase(0, rest.find_first_not_of(" \t"));
+
+        if (!rest.empty()) {
+            try {
+                // Handle +B or -B
+                if (rest[0] == '+') {
+                    b = std::stoi(rest.substr(1));
+                } else if (rest[0] == '-') {
+                    b = -std::stoi(rest.substr(1));
+                } else {
+                    b = std::stoi(rest);
+                }
+            } catch (...) {
+                b = 0;
+            }
+        }
+    }
+
+    // Evaluate: check if css_index = a*k + b for some non-negative integer k
+    // Rearrange: k = (css_index - b) / a
+    if (a == 0) {
+        // "0n+B" → matches only index B
+        return css_index == b;
+    }
+
+    int diff = css_index - b;
+
+    // k must be non-negative integer
+    if (a > 0) {
+        // a positive: k = diff / a must be >= 0 and integer
+        if (diff < 0) return false;
+        return diff % a == 0;
+    } else {
+        // a negative: k = diff / a must be >= 0, so diff must be <= 0
+        if (diff > 0) return false;
+        return diff % a == 0;
+    }
 }
 
 bool LexborSelectorMatcher::matches_with_hierarchy(
@@ -429,10 +684,10 @@ bool LexborSelectorMatcher::matches_with_hierarchy(
     const std::set<std::string>& pseudo_states,
     const std::string& parent_shape_id,
     std::function<const void*(const std::string&)> get_shape_func) const {
-    
+
     // Parse complex selector
     auto complex = parse_complex_selector(selector);
-    
+
     // If no combinators, just match simple selector
     if (complex.combinators.empty()) {
         if (!complex.components.empty()) {
@@ -440,14 +695,102 @@ bool LexborSelectorMatcher::matches_with_hierarchy(
         }
         return false;
     }
-    
-    // TODO: Implement full combinator matching with shape hierarchy
-    // For now, just match the rightmost selector (the target element)
-    if (!complex.components.empty()) {
-        return matches_simple_selector(complex.components.back(), shape_id, shape_type, classes, attributes, pseudo_states);
+
+    // Full combinator matching with element hierarchy
+    // Match from right to left (target element first, then ancestors)
+    if (complex.components.empty()) return false;
+
+    // First, check if the rightmost selector matches the current element
+    if (!matches_simple_selector(complex.components.back(), shape_id, shape_type, classes, attributes, pseudo_states)) {
+        return false;  // Target element doesn't match
     }
-    
-    return false;
+
+    // If only one component, we're done
+    if (complex.components.size() == 1) {
+        return true;
+    }
+
+    // Now traverse backwards through combinators and components
+    // We need to walk up the element hierarchy to match parent selectors
+    if (!get_shape_func) {
+        // No hierarchy function provided - fall back to simple match
+        return true;  // Already matched the rightmost selector
+    }
+
+    // Start from the parent of current element
+    std::string current_id = parent_shape_id;
+
+    // Traverse from second-to-last component to first
+    for (int i = static_cast<int>(complex.components.size()) - 2; i >= 0; --i) {
+        const auto& component = complex.components[i];
+        char combinator = complex.combinators[i];  // Combinator AFTER this component
+
+        if (current_id.empty()) {
+            return false;  // Ran out of ancestors
+        }
+
+        // Get the current ancestor element
+        const void* ancestor = get_shape_func(current_id);
+        if (!ancestor) {
+            return false;  // Ancestor not found
+        }
+
+        // Cast to cssboxElement to get its properties
+        const cssboxElement* elem = static_cast<const cssboxElement*>(ancestor);
+
+        switch (combinator) {
+            case '>':  // Direct child combinator - parent must match
+                if (!matches_simple_selector(component, elem->id, elem->type,
+                                            elem->classes, elem->attributes, elem->pseudo_states)) {
+                    return false;  // Direct parent doesn't match
+                }
+                // Move to grandparent for next iteration
+                current_id = "";  // Will be set from parent_internal_id lookup
+                // Note: We'd need renderer access to look up parent by internal_id
+                // For now, signal we need more hierarchy info
+                break;
+
+            case ' ':  // Descendant combinator - any ancestor must match
+            {
+                bool found = false;
+                std::string check_id = current_id;
+                int max_depth = 100;  // Prevent infinite loops
+
+                while (!check_id.empty() && max_depth-- > 0) {
+                    const void* check_elem = get_shape_func(check_id);
+                    if (!check_elem) break;
+
+                    const cssboxElement* e = static_cast<const cssboxElement*>(check_elem);
+                    if (matches_simple_selector(component, e->id, e->type,
+                                               e->classes, e->attributes, e->pseudo_states)) {
+                        found = true;
+                        current_id = check_id;  // Continue from this ancestor
+                        break;
+                    }
+
+                    // Move to parent - we need internal_id lookup here
+                    // For now, break if we can't traverse further
+                    break;  // TODO: proper parent traversal
+                }
+
+                if (!found) {
+                    return false;
+                }
+                break;
+            }
+
+            case '+':  // Adjacent sibling combinator
+            case '~':  // General sibling combinator
+                // Sibling combinators require sibling information
+                // For now, return false (not implemented)
+                return false;
+
+            default:
+                return false;  // Unknown combinator
+        }
+    }
+
+    return true;
 }
 
 // ============================================================================
@@ -530,6 +873,61 @@ std::map<std::string, std::string> LexborStyleComputer::compute_style(
         std::string display_val = (display_it != result.end()) ? display_it->second : "(not set)";
         std::string height_val = (height_it != result.end()) ? height_it->second : "(auto)";
         logi("[STYLE]   RESULT: id='{}' display='{}' height='{}'", shape_id, display_val, height_val);
+    }
+
+    return result;
+}
+
+std::map<std::string, std::string> LexborStyleComputer::compute_style_with_hierarchy(
+    lxb_css_stylesheet_t* stylesheet,
+    const std::vector<CSSRule>& rules,
+    const std::string& shape_id,
+    const std::string& shape_type,
+    const std::vector<std::string>& classes,
+    const std::map<std::string, std::string>& attributes,
+    const std::set<std::string>& pseudo_states,
+    const std::map<std::string, std::string>& inline_style,
+    const std::map<std::string, std::string>& parent_style,
+    const std::string& parent_id,
+    std::function<const void*(const std::string&)> get_element_func) const {
+
+    // 1. Start with default styles
+    std::map<std::string, std::string> result = get_default_styles(shape_type);
+
+    // 2. Apply inheritance
+    apply_inheritance(result, parent_style);
+
+    // 3. Apply stylesheet rules with hierarchy-aware matching
+    std::vector<std::pair<int, const CSSRule*>> matching_rules;
+
+    for (const auto& rule : rules) {
+        // Use hierarchy-aware matching for complex selectors
+        bool matches = matcher_.matches_with_hierarchy(
+            rule.selector, shape_id, shape_type, classes, attributes, pseudo_states,
+            parent_id, get_element_func
+        );
+
+        if (matches) {
+            matching_rules.push_back({rule.specificity, &rule});
+        }
+    }
+
+    // Sort by specificity (lowest to highest)
+    std::sort(matching_rules.begin(), matching_rules.end(),
+        [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+
+    // Apply matching rules in order of specificity
+    for (const auto& [spec, rule_ptr] : matching_rules) {
+        for (const auto& [key, value] : rule_ptr->properties) {
+            result[key] = value;
+        }
+    }
+
+    // 4. Apply inline styles (highest priority)
+    for (const auto& [key, value] : inline_style) {
+        result[key] = value;
     }
 
     return result;
@@ -930,9 +1328,12 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
 
                     for (const auto& isingle_sel : inner_individual_selectors) {
                         CSSRule rule;
-                        rule.selector = isingle_sel;
+                        // Extract pseudo-element from selector
+                        std::string base_selector;
+                        rule.pseudo_element = extract_pseudo_element(isingle_sel, base_selector);
+                        rule.selector = base_selector.empty() ? isingle_sel : base_selector;
                         rule.properties = inner_properties;
-                        rule.specificity = matcher_.calculate_specificity(isingle_sel);
+                        rule.specificity = matcher_.calculate_specificity(rule.selector);
                         rule.media_query = media_query;
                         rules_.push_back(rule);
                     }
@@ -1161,9 +1562,12 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
             // Create a separate rule for each selector
             for (const auto& single_sel : individual_selectors) {
                 CSSRule rule;
-                rule.selector = single_sel;
+                // Extract pseudo-element from selector
+                std::string base_selector;
+                rule.pseudo_element = extract_pseudo_element(single_sel, base_selector);
+                rule.selector = base_selector.empty() ? single_sel : base_selector;
                 rule.properties = properties;
-                rule.specificity = matcher_.calculate_specificity(single_sel);
+                rule.specificity = matcher_.calculate_specificity(rule.selector);
                 rules_.push_back(rule);
             }
         }
@@ -1178,9 +1582,12 @@ void EnhancedStyleSheet::add_rule(
 
     // Store the rule for later application
     CSSRule rule;
-    rule.selector = selector;
+    // Extract pseudo-element from selector
+    std::string base_selector;
+    rule.pseudo_element = extract_pseudo_element(selector, base_selector);
+    rule.selector = base_selector.empty() ? selector : base_selector;
     rule.properties = properties;
-    rule.specificity = matcher_.calculate_specificity(selector);
+    rule.specificity = matcher_.calculate_specificity(rule.selector);
     rules_.push_back(rule);
 
     // Build CSS string from rule
@@ -1270,6 +1677,108 @@ std::map<std::string, std::string> EnhancedStyleSheet::compute_style(
 
     cache_[cache_key] = result;
     cache_stats_.size = cache_.size();
+
+    return result;
+}
+
+std::map<std::string, std::string> EnhancedStyleSheet::compute_style_with_hierarchy(
+    const std::string& shape_id,
+    const std::string& shape_type,
+    const std::vector<std::string>& classes,
+    const std::map<std::string, std::string>& attributes,
+    const std::set<std::string>& pseudo_states,
+    const std::map<std::string, std::string>& inline_style,
+    const std::map<std::string, std::string>& parent_style,
+    const std::string& parent_id,
+    std::function<const void*(const std::string&)> get_element_func,
+    int child_index,
+    int total_siblings) {
+
+    // Generate cache key (includes parent_id for hierarchy-aware caching)
+    std::string cache_key = generate_cache_key(shape_id, shape_type, classes, pseudo_states, attributes, inline_style);
+    cache_key += "|parent:" + parent_id;
+
+    // Check cache
+    auto it = cache_.find(cache_key);
+    if (it != cache_.end()) {
+        cache_stats_.hits++;
+        auto result = it->second;
+        for (auto& [key, value] : result) {
+            value = variable_resolver_.resolve(value);
+        }
+        return result;
+    }
+
+    // Cache miss - compute with hierarchy
+    cache_stats_.misses++;
+
+    // Filter rules by media query
+    std::vector<CSSRule> filtered_rules;
+    for (const auto& rule : rules_) {
+        if (evaluate_media_query(rule.media_query)) {
+            filtered_rules.push_back(rule);
+        }
+    }
+
+    // Use hierarchy-aware style computation
+    auto result = computer_.compute_style_with_hierarchy(
+        parser_.get_stylesheet(),
+        filtered_rules,
+        shape_id, shape_type, classes, attributes, pseudo_states,
+        inline_style, parent_style, parent_id, get_element_func
+    );
+
+    // Resolve CSS variables
+    for (auto& [key, value] : result) {
+        value = variable_resolver_.resolve(value);
+    }
+
+    // Cache the result
+    if (cache_.size() >= MAX_CACHE_SIZE) {
+        evict_lru();
+    }
+    cache_[cache_key] = result;
+    cache_stats_.size = cache_.size();
+
+    return result;
+}
+
+std::map<std::string, std::string> EnhancedStyleSheet::compute_pseudo_element_style(
+    CSSPseudoElement pseudo,
+    const std::string& shape_id,
+    const std::string& shape_type,
+    const std::vector<std::string>& classes,
+    const std::map<std::string, std::string>& attributes,
+    const std::set<std::string>& pseudo_states) {
+
+    std::map<std::string, std::string> result;
+    if (pseudo == CSSPseudoElement::NONE) return result;
+
+    // Collect matching rules for the pseudo-element
+    std::vector<std::pair<int, const CSSRule*>> matching_rules;
+
+    for (const auto& rule : rules_) {
+        // Only consider rules targeting the requested pseudo-element
+        if (rule.pseudo_element != pseudo) continue;
+
+        // Check if the base selector matches the element
+        if (matcher_.matches(rule.selector, shape_id, shape_type, classes, attributes, pseudo_states)) {
+            matching_rules.push_back({rule.specificity, &rule});
+        }
+    }
+
+    // Sort by specificity (lowest to highest)
+    std::sort(matching_rules.begin(), matching_rules.end(),
+        [](const auto& a, const auto& b) {
+            return a.first < b.first;
+        });
+
+    // Apply matching rules in order of specificity
+    for (const auto& [spec, rule_ptr] : matching_rules) {
+        for (const auto& [key, value] : rule_ptr->properties) {
+            result[key] = variable_resolver_.resolve(value);
+        }
+    }
 
     return result;
 }
@@ -2020,12 +2529,99 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     result.vertical_align = cssbox::convert::parse_vertical_align(get("vertical-align"));
     result.text_decoration = cssbox::convert::parse_text_decoration(get("text-decoration"));
 
+    // letter-spacing and word-spacing
+    std::string letter_spacing_str = get("letter-spacing");
+    if (!letter_spacing_str.empty() && letter_spacing_str != "normal") {
+        if (auto ls = cssbox::convert::parse_length(letter_spacing_str)) {
+            result.letter_spacing = ls->resolve(0, 16.0f, 800.0f);
+        }
+    }
+
+    std::string word_spacing_str = get("word-spacing");
+    if (!word_spacing_str.empty() && word_spacing_str != "normal") {
+        if (auto ws = cssbox::convert::parse_length(word_spacing_str)) {
+            result.word_spacing = ws->resolve(0, 16.0f, 800.0f);
+        }
+    }
+
+    // content property (for ::before/::after pseudo-elements)
+    std::string content_str = get("content");
+    if (!content_str.empty()) {
+        result.has_content = true;
+        // Remove quotes if present: "text" or 'text' -> text
+        if ((content_str.front() == '"' && content_str.back() == '"') ||
+            (content_str.front() == '\'' && content_str.back() == '\'')) {
+            result.content = content_str.substr(1, content_str.size() - 2);
+        } else if (content_str == "none" || content_str == "normal") {
+            result.has_content = false;
+            result.content.clear();
+        } else {
+            result.content = content_str;
+        }
+    }
+
     std::string font_family_str = get("font-family");
     if (!font_family_str.empty()) {
         result.font_family = font_family_str;
     }
 
     // === Grid Properties ===
+
+    // grid-template shorthand: <rows> / <columns>
+    // Example: "100px 1fr / 200px 1fr 1fr"
+    std::string grid_template_str = get("grid-template");
+    if (!grid_template_str.empty()) {
+        size_t slash_pos = grid_template_str.find('/');
+        if (slash_pos != std::string::npos) {
+            std::string rows_str = grid_template_str.substr(0, slash_pos);
+            std::string cols_str = grid_template_str.substr(slash_pos + 1);
+
+            // Trim whitespace
+            size_t rs = rows_str.find_first_not_of(" \t");
+            size_t re = rows_str.find_last_not_of(" \t");
+            if (rs != std::string::npos) rows_str = rows_str.substr(rs, re - rs + 1);
+
+            size_t cs = cols_str.find_first_not_of(" \t");
+            size_t ce = cols_str.find_last_not_of(" \t");
+            if (cs != std::string::npos) cols_str = cols_str.substr(cs, ce - cs + 1);
+
+            if (!rows_str.empty()) {
+                result.grid_template_rows = cssbox::convert::parse_grid_track_list(rows_str);
+            }
+            if (!cols_str.empty()) {
+                result.grid_template_columns = cssbox::convert::parse_grid_track_list(cols_str);
+            }
+        }
+    }
+
+    // grid shorthand (simplified): same as grid-template for now
+    // Full syntax: <grid-template> | <grid-auto-flow> [<grid-auto-rows> [ / <grid-auto-columns>]]
+    std::string grid_str = get("grid");
+    if (!grid_str.empty()) {
+        size_t slash_pos = grid_str.find('/');
+        if (slash_pos != std::string::npos) {
+            std::string rows_str = grid_str.substr(0, slash_pos);
+            std::string cols_str = grid_str.substr(slash_pos + 1);
+
+            // Trim whitespace
+            size_t rs = rows_str.find_first_not_of(" \t");
+            size_t re = rows_str.find_last_not_of(" \t");
+            if (rs != std::string::npos) rows_str = rows_str.substr(rs, re - rs + 1);
+
+            size_t cs = cols_str.find_first_not_of(" \t");
+            size_t ce = cols_str.find_last_not_of(" \t");
+            if (cs != std::string::npos) cols_str = cols_str.substr(cs, ce - cs + 1);
+
+            if (!rows_str.empty()) {
+                result.grid_template_rows = cssbox::convert::parse_grid_track_list(rows_str);
+            }
+            if (!cols_str.empty()) {
+                result.grid_template_columns = cssbox::convert::parse_grid_track_list(cols_str);
+            }
+        }
+    }
+
+    // Individual properties override shorthand
     std::string grid_template_rows_str = get("grid-template-rows");
     if (!grid_template_rows_str.empty()) {
         result.grid_template_rows = cssbox::convert::parse_grid_track_list(grid_template_rows_str);
@@ -2034,6 +2630,37 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
     std::string grid_template_columns_str = get("grid-template-columns");
     if (!grid_template_columns_str.empty()) {
         result.grid_template_columns = cssbox::convert::parse_grid_track_list(grid_template_columns_str);
+    }
+
+    // gap shorthand sets both row-gap and column-gap
+    // Format: <row-gap> [<column-gap>]
+    std::string gap_str = get("gap");
+    if (!gap_str.empty()) {
+        // Check if it's a two-value shorthand (row col) or single value
+        std::string gap_trimmed = gap_str;
+        size_t space_pos = gap_trimmed.find(' ');
+        if (space_pos != std::string::npos) {
+            // Two values: row column
+            std::string row_str = gap_trimmed.substr(0, space_pos);
+            std::string col_str = gap_trimmed.substr(space_pos + 1);
+
+            // Trim
+            size_t cs = col_str.find_first_not_of(" \t");
+            if (cs != std::string::npos) col_str = col_str.substr(cs);
+
+            if (auto rg = cssbox::convert::parse_length(row_str)) {
+                result.grid_row_gap = *rg;
+            }
+            if (auto cg = cssbox::convert::parse_length(col_str)) {
+                result.grid_column_gap = *cg;
+            }
+        } else {
+            // Single value: applies to both
+            if (auto g = cssbox::convert::parse_length(gap_str)) {
+                result.grid_row_gap = *g;
+                result.grid_column_gap = *g;
+            }
+        }
     }
 
     if (auto row_gap = cssbox::convert::parse_length(get("grid-row-gap"))) {
@@ -2048,8 +2675,125 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         result.grid_column_gap = *col_gap2;
     }
 
-    // Additional properties (box-shadows, text-shadows, transforms) are handled
-    // by the string-based system and converted during rendering
+    // grid-auto-rows: Sizing for implicit rows
+    std::string grid_auto_rows_str = get("grid-auto-rows");
+    if (!grid_auto_rows_str.empty()) {
+        auto tracks = cssbox::convert::parse_grid_track_list(grid_auto_rows_str);
+        if (!tracks.empty()) {
+            result.grid_auto_rows = tracks[0];
+        }
+    }
+
+    // grid-auto-columns: Sizing for implicit columns
+    std::string grid_auto_columns_str = get("grid-auto-columns");
+    if (!grid_auto_columns_str.empty()) {
+        auto tracks = cssbox::convert::parse_grid_track_list(grid_auto_columns_str);
+        if (!tracks.empty()) {
+            result.grid_auto_columns = tracks[0];
+        }
+    }
+
+    // grid-template-areas: Named grid areas
+    // Format: "header header" "sidebar main" "footer footer"
+    std::string grid_template_areas_str = get("grid-template-areas");
+    if (!grid_template_areas_str.empty()) {
+        result.grid_template_areas.clear();
+        std::istringstream iss(grid_template_areas_str);
+        std::string line;
+        int row = 0;
+        while (std::getline(iss, line, '"')) {
+            // Skip empty/whitespace-only segments
+            if (line.find_first_not_of(" \t\n\r") == std::string::npos) continue;
+
+            std::istringstream line_stream(line);
+            std::string area_name;
+            int col = 0;
+            while (line_stream >> area_name) {
+                if (area_name != ".") {  // "." means empty cell
+                    auto it = result.grid_template_areas.find(area_name);
+                    if (it == result.grid_template_areas.end()) {
+                        // New area - create entry
+                        result.grid_template_areas[area_name] = cssbox::GridAreaDef(row, col, row + 1, col + 1);
+                    } else {
+                        // Existing area - expand bounds
+                        it->second.row_end = std::max(it->second.row_end, row + 1);
+                        it->second.col_end = std::max(it->second.col_end, col + 1);
+                    }
+                }
+                col++;
+            }
+            row++;
+        }
+    }
+
+    // grid-area: Place item in a named area
+    std::string grid_area_str = get("grid-area");
+    if (!grid_area_str.empty()) {
+        result.grid_area = grid_area_str;
+    }
+
+    // Grid/Flex item alignment properties
+    std::string justify_items_str = get("justify-items");
+    if (!justify_items_str.empty()) {
+        result.justify_items = cssbox::convert::parse_justify_items(justify_items_str);
+    }
+
+    std::string align_self_str = get("align-self");
+    if (!align_self_str.empty()) {
+        result.align_self = cssbox::convert::parse_align_self(align_self_str);
+    }
+
+    std::string justify_self_str = get("justify-self");
+    if (!justify_self_str.empty()) {
+        result.justify_self = cssbox::convert::parse_justify_self(justify_self_str);
+    }
+
+    // place-items shorthand: align-items justify-items
+    std::string place_items_str = get("place-items");
+    if (!place_items_str.empty()) {
+        // Parse "align justify" or single value for both
+        size_t space_pos = place_items_str.find(' ');
+        if (space_pos != std::string::npos) {
+            std::string align_part = place_items_str.substr(0, space_pos);
+            std::string justify_part = place_items_str.substr(space_pos + 1);
+            result.align_items = cssbox::convert::parse_align_items(align_part);
+            result.justify_items = cssbox::convert::parse_justify_items(justify_part);
+        } else {
+            result.align_items = cssbox::convert::parse_align_items(place_items_str);
+            result.justify_items = cssbox::convert::parse_justify_items(place_items_str);
+        }
+    }
+
+    // place-self shorthand: align-self justify-self
+    std::string place_self_str = get("place-self");
+    if (!place_self_str.empty()) {
+        size_t space_pos = place_self_str.find(' ');
+        if (space_pos != std::string::npos) {
+            std::string align_part = place_self_str.substr(0, space_pos);
+            std::string justify_part = place_self_str.substr(space_pos + 1);
+            result.align_self = cssbox::convert::parse_align_self(align_part);
+            result.justify_self = cssbox::convert::parse_justify_self(justify_part);
+        } else {
+            result.align_self = cssbox::convert::parse_align_self(place_self_str);
+            result.justify_self = cssbox::convert::parse_justify_self(place_self_str);
+        }
+    }
+
+    // === Box Shadow ===
+    std::string box_shadow_str = get("box-shadow");
+    if (!box_shadow_str.empty() && box_shadow_str != "none") {
+        auto parsed = cssbox_utils::parse_box_shadow(box_shadow_str);
+        for (const auto& s : parsed) {
+            cssbox::BoxShadow bs;
+            bs.offset_x = s.offset_x;
+            bs.offset_y = s.offset_y;
+            bs.blur_radius = s.blur_radius;
+            bs.spread_radius = s.spread_radius;
+            bs.color = {s.color.r, s.color.g, s.color.b, s.color.a};
+            bs.inset = s.inset;
+            result.box_shadows.push_back(bs);
+        }
+    }
 
     // === SVG Stroke Properties (Rough Rendering) ===
     std::string stroke_rendering_str = get("stroke-rendering");
@@ -2094,6 +2838,91 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         }
     }
 
+    // === Transition Properties ===
+    std::string transition_str = get("transition");
+    if (!transition_str.empty()) {
+        result.transitions = cssbox::convert::parse_transitions(transition_str);
+    } else {
+        // Try individual properties
+        std::string transition_property_str = get("transition-property");
+        std::string transition_duration_str = get("transition-duration");
+        std::string transition_timing_str = get("transition-timing-function");
+        std::string transition_delay_str = get("transition-delay");
+
+        if (!transition_property_str.empty() || !transition_duration_str.empty()) {
+            cssbox::Transition t;
+
+            // Parse property
+            if (!transition_property_str.empty()) {
+                t.property = cssbox::convert::parse_transition_property(transition_property_str);
+            }
+
+            // Parse duration
+            if (!transition_duration_str.empty()) {
+                t.duration = cssbox::convert::parse_time(transition_duration_str);
+            }
+
+            // Parse timing function
+            if (!transition_timing_str.empty()) {
+                t.timing = cssbox::convert::parse_timing_function(transition_timing_str);
+            }
+
+            // Parse delay
+            if (!transition_delay_str.empty()) {
+                t.delay = cssbox::convert::parse_time(transition_delay_str);
+            }
+
+            if (t.duration > 0) {
+                result.transitions.push_back(t);
+            }
+        }
+    }
+
+    // === Animation Properties ===
+    std::string animation_str = get("animation");
+    if (!animation_str.empty() && animation_str != "none") {
+        result.animations = cssbox::convert::parse_animations(animation_str);
+    } else {
+        // Try individual properties
+        std::string animation_name_str = get("animation-name");
+        std::string animation_duration_str = get("animation-duration");
+        std::string animation_timing_str = get("animation-timing-function");
+        std::string animation_delay_str = get("animation-delay");
+        std::string animation_iteration_str = get("animation-iteration-count");
+        std::string animation_direction_str = get("animation-direction");
+        std::string animation_fill_str = get("animation-fill-mode");
+        std::string animation_play_str = get("animation-play-state");
+
+        if (!animation_name_str.empty() && animation_name_str != "none") {
+            cssbox::Animation anim;
+            anim.name = animation_name_str;
+
+            if (!animation_duration_str.empty()) {
+                anim.duration = cssbox::convert::parse_time(animation_duration_str);
+            }
+            if (!animation_timing_str.empty()) {
+                anim.timing = cssbox::convert::parse_timing_function(animation_timing_str);
+            }
+            if (!animation_delay_str.empty()) {
+                anim.delay = cssbox::convert::parse_time(animation_delay_str);
+            }
+            if (!animation_iteration_str.empty()) {
+                anim.iteration_count = cssbox::convert::parse_animation_iteration_count(animation_iteration_str);
+            }
+            if (!animation_direction_str.empty()) {
+                anim.direction = cssbox::convert::parse_animation_direction(animation_direction_str);
+            }
+            if (!animation_fill_str.empty()) {
+                anim.fill_mode = cssbox::convert::parse_animation_fill_mode(animation_fill_str);
+            }
+            if (!animation_play_str.empty()) {
+                anim.play_state = cssbox::convert::parse_animation_play_state(animation_play_str);
+            }
+
+            result.animations.push_back(anim);
+        }
+    }
+
     return result;
 }
 
@@ -2103,7 +2932,7 @@ bool EnhancedStyleSheet::evaluate_media_query(const std::string& media_query) co
         return true;
     }
 
-    logi("[MEDIA] Evaluating query: '{}' with viewport {}x{}", media_query, viewport_width_, viewport_height_);
+    // logi("[MEDIA] Evaluating query: '{}' with viewport {}x{}", media_query, viewport_width_, viewport_height_);
 
     // Simple parser for common media queries: (min-width: Xpx), (max-width: Xpx), etc.
     std::string query = media_query;
@@ -2137,7 +2966,7 @@ bool EnhancedStyleSheet::evaluate_media_query(const std::string& media_query) co
         value = std::strtof(value_str.c_str(), nullptr);
     }
 
-    logi("[MEDIA] Parsed: feature='{}', value={}", feature, value);
+    // logi("[MEDIA] Parsed: feature='{}', value={}", feature, value);
 
     // Evaluate feature
     bool result = true;
@@ -2151,7 +2980,7 @@ bool EnhancedStyleSheet::evaluate_media_query(const std::string& media_query) co
         result = viewport_height_ <= value;
     }
 
-    logi("[MEDIA] Query result: {}", result);
+    // logi("[MEDIA] Query result: {}", result);
     return result;
 }
 

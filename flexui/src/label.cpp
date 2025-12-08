@@ -6,25 +6,13 @@ namespace flexui {
 Label::Label(cssboxRenderer* renderer, const std::string& id, const std::string& text,
              const LabelStyle& style)
     : Widget(renderer, id, "label"), text_(text), style_(style) {
+    // Set text_content for layout engine to calculate intrinsic size
+    element()->text_content = text;
 }
 
 void Label::draw(NVGcontext* vg) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float h = el->computed.height;
-
-    float fontSize = cssFontSize(style_.fontSize);
-    NVGcolor textColor = cssColor(style_.textColor);
-
-    nvgFontSize(vg, fontSize);
-    nvgFontFace(vg, "sans-serif");
-    nvgTextAlign(vg, style_.textAlign);
-    nvgFillColor(vg, textColor);
-
-    // Center vertically in the element's height
-    float textY = y + h / 2;
-    nvgText(vg, x + 5, textY, text_.c_str(), nullptr);
+    // REMOVED: cssbox already renders text_content via paint_text_content()
+    // The text is set in constructor: element()->text_content = text;
 }
 
 } // namespace flexui

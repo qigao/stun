@@ -129,6 +129,9 @@
     {
       "name": "lexbor",
       "version>=": "2.3.0"
+    },
+    {
+      "name": "md4c"
     }
   ],
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"

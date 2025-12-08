@@ -58,6 +58,12 @@ int main() {
             display: block;
         }
 
+        /* SVG containers must respect their width/height attributes */
+        svg {
+            flex-shrink: 0;
+            flex-grow: 0;
+        }
+
         /* SVG element styling via CSS */
         .blue-circle {
             fill: var(--primary);

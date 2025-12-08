@@ -81,7 +81,7 @@ TEST_CASE("FlexUI Tailwind Support", "[flexui][tailwind]") {
         REQUIRE(get_style(renderer, btn, "background-color") == "#3b82f6");
 
         // Hover State
-        cssboxSetPseudoState(btn, "hover", 1);
+        cssboxSetPseudoStateEx(renderer, btn, "hover", 1);
         cssboxComputeLayout(renderer); // Recompute to apply pseudo-state styles
         REQUIRE(get_style(renderer, btn, "background-color") == "#2563eb");
     }
@@ -116,7 +116,7 @@ TEST_CASE("FlexUI Tailwind Support", "[flexui][tailwind]") {
         REQUIRE(get_style(renderer, input, "border-color") == "#d1d5db"); // var(--gray-300)
 
         // Focus State
-        cssboxSetPseudoState(input, "focus", 1);
+        cssboxSetPseudoStateEx(renderer, input, "focus", 1);
         cssboxComputeLayout(renderer);
         REQUIRE(get_style(renderer, input, "border-color") == "#3b82f6"); // var(--blue-500)
         REQUIRE(get_style(renderer, input, "border-width") == "2px");

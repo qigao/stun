@@ -69,34 +69,34 @@ void Widget::setInlineStyle(const std::string& property, const std::string& valu
 }
 
 bool Widget::handleClick(float x, float y) {
-    float ex = element_->computed.x;
-    float ey = element_->computed.y;
-    float ew = element_->computed.width;
-    float eh = element_->computed.height;
-
-    // Bounds check - done once in base class
-    if (x < ex || x > ex + ew || y < ey || y > ey + eh) {
-        return false;
-    }
-
+    // Spatial index already guarantees mouse is within visual bounds
     // Set active pseudo-state
-    cssboxSetPseudoState(element_, "active", 1);
+    cssboxSetPseudoStateEx(renderer_, element_, "active", 1);
 
     // Call virtual onClicked() for widget-specific logic
     return onClicked();
 }
 
 bool Widget::handleHover(float x, float y) {
-    float ex = element_->computed.x;
-    float ey = element_->computed.y;
-    float ew = element_->computed.width;
-    float eh = element_->computed.height;
+    // Calculate visual position accounting for scroll offset
+    float scroll_x = 0.0f, scroll_y = 0.0f;
+    cssboxElement* parent = cssboxGetParent(renderer_, element_);
+    while (parent) {
+        scroll_x += parent->scroll_x;
+        scroll_y += parent->scroll_y;
+        parent = cssboxGetParent(renderer_, parent);
+    }
+
+    float ex = element_->layout.x - scroll_x;
+    float ey = element_->layout.y - scroll_y;
+    float ew = element_->layout.width;
+    float eh = element_->layout.height;
 
     bool inside = (x >= ex && x <= ex + ew && y >= ey && y <= ey + eh);
 
     if (inside != hovered_) {
         hovered_ = inside;
-        cssboxSetPseudoState(element_, "hover", inside ? 1 : 0);
+        cssboxSetPseudoStateEx(renderer_, element_, "hover", inside ? 1 : 0);
         if (hover_callback_) {
             hover_callback_(this, inside);
         }
@@ -132,13 +132,6 @@ void Widget::addPathPoint(float x, float y) {
 
 void Widget::clearPath() {
     element_->stroke_points.clear();
-}
-
-void Widget::setHandDrawn(bool enabled, float seed) {
-    element_->has_stroke_salt = enabled;
-    if (enabled) {
-        element_->stroke_salt = seed;
-    }
 }
 
 bool Widget::isVisible() const {
@@ -190,6 +183,18 @@ float Widget::cssPaddingLeft(float fallback) const {
 
 const char* Widget::cssFontFamily(const char* fallback) const {
     return !element_->style.font_family.empty() ? element_->style.font_family.c_str() : fallback;
+}
+
+void Widget::getVisualPosition(float& vx, float& vy) const {
+    float scroll_x = 0.0f, scroll_y = 0.0f;
+    cssboxElement* parent = cssboxGetParent(renderer_, element_);
+    while (parent) {
+        scroll_x += parent->scroll_x;
+        scroll_y += parent->scroll_y;
+        parent = cssboxGetParent(renderer_, parent);
+    }
+    vx = element_->layout.x - scroll_x;
+    vy = element_->layout.y - scroll_y;
 }
 
 } // namespace flexui

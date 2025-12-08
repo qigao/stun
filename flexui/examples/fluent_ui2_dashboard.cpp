@@ -5,7 +5,7 @@
 int main() {
     flexui::Screen screen(1200, 800, "Fluent UI 2 Dashboard");
 
-    // Load all CSS with Fluent UI 2 design tokens
+    // Load all CSS with Fluent UI 2 design tokens + CSS3 features
     std::string css = R"(
         :root {
             --brand: #0078d4;
@@ -53,6 +53,23 @@ int main() {
             --positive-bg: #e8f5e9;
             --negative-text: #c62828;
             --negative-bg: #ffebee;
+
+            /* Responsive spacing */
+            --sidebar-width: 200px;
+            --content-padding: 32px;
+            --card-gap: 20px;
+        }
+
+        /* @keyframes for loading states (use .skeleton or .loading class) */
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
         }
 
         #root {
@@ -102,6 +119,8 @@ int main() {
             align-items: center;
             padding: 6px 12px;
             border-radius: 18px;
+            /* CSS3: Smooth background transition */
+            transition: background 0.2s ease-out;
         }
 
         #user-section:hover {
@@ -131,17 +150,20 @@ int main() {
             display: flex;
             flex-direction: column;
             flex-grow: 1;
-            padding: 32px;
+            padding: var(--content-padding);
             gap: 24px;
             overflow-y: auto;
+            /* CSS3: calc() for responsive height minus header */
+            height: calc(100% - 56px);
         }
 
         .stats-row {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
-            gap: 20px;
+            gap: var(--card-gap);
             width: 100%;
-            height: 140px;
+            /* CSS3: calc() for responsive height */
+            height: calc(140px + 8px);
         }
 
         .stat-card {
@@ -155,11 +177,13 @@ int main() {
             border-style: solid;
             border-color: var(--stat-border);
             gap: 8px;
+            /* CSS3: Smooth color transitions */
+            transition: background 0.2s ease-out, border-color 0.2s ease-out;
         }
 
         .stat-card:hover {
-            transform: translateY(-2px);
             background: var(--stat-bg-hover);
+            border-color: var(--stat-value);
         }
 
         .stat-label {
@@ -202,7 +226,8 @@ int main() {
             grid-template-columns: 1fr 1fr 1fr;
             gap: 16px;
             width: 100%;
-            height: 160px;
+            /* CSS3: calc() for action card container height */
+            height: calc(160px + 16px);
         }
 
         .action-card {
@@ -216,10 +241,13 @@ int main() {
             border-style: solid;
             border-color: var(--action-border);
             gap: 12px;
+            /* CSS3: Smooth color transitions */
+            transition: background 0.2s ease-out, border-color 0.2s ease-out;
         }
 
         .action-card:hover {
             background: var(--action-bg-hover);
+            border-color: var(--action-title);
         }
 
         .action-title {
@@ -245,6 +273,8 @@ int main() {
             border-radius: 4px;
             font-size: 14px;
             font-weight: 600;
+            /* CSS3: Smooth color transitions */
+            transition: background 0.15s ease-out, border-color 0.15s ease-out;
         }
 
         .btn-primary {
@@ -281,6 +311,12 @@ int main() {
             border-color: var(--table-border);
             padding: 20px;
             gap: 16px;
+            /* CSS3: Smooth border transition */
+            transition: border-color 0.2s ease-out;
+        }
+
+        .table-container:hover {
+            border-color: var(--table-header-text);
         }
 
         .table-row {
@@ -294,6 +330,12 @@ int main() {
             border-bottom-color: var(--table-row-border);
             align-items: center;
             background: var(--table-row-bg);
+            /* CSS3: Smooth background transition */
+            transition: background 0.15s ease-out;
+        }
+
+        .table-row:hover {
+            background: var(--table-header-bg);
         }
 
         .table-cell {
@@ -338,12 +380,31 @@ int main() {
             border-radius: 4px;
             font-size: 14px;
             color: var(--form-label);
+            /* CSS3: Smooth border/background transitions */
+            transition: border-color 0.2s ease-out, background 0.2s ease-out;
         }
 
         .form-input:focus {
             border-color: var(--form-input-focus-border);
             border-width: 3px;
             background: var(--form-input-focus-bg);
+        }
+
+        .form-input:hover {
+            border-color: var(--form-input-focus-border);
+        }
+
+        /* CSS3: Loading skeleton animation - use .skeleton class when loading */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        /* CSS3: Pulse animation for loading indicators - use .loading class */
+        .loading {
+            animation: pulse 1.2s ease-in-out infinite;
         }
 
         #page-overview, #page-analytics, #page-settings {

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>China Map - Interactive Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        #container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+        
+        #info {
+            text-align: center;
+            color: #666;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>43. China Map</h1>
+        <canvas id="mapCanvas" width="1200" height="720"></canvas>
+        <div id="info">Hover over provinces to see data</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const MIN_LON = 73.0;
+        const MAX_LON = 136.0;
+        const MIN_LAT = 18.0;
+        const MAX_LAT = 54.0;
+        
+        const mapData = {
+            "北京": 95, "上海": 90, "广东": 85, "江苏": 80, "浙江": 78,
+            "山东": 72, "河南": 68, "四川": 65, "湖北": 62, "湖南": 58,
+            "河北": 55, "福建": 52, "安徽": 48, "辽宁": 45, "陕西": 42,
+            "江西": 38, "重庆": 35, "广西": 32, "云南": 30, "山西": 28,
+            "内蒙古": 25, "贵州": 22, "新疆": 20, "天津": 18, "黑龙江": 15,
+            "吉林": 12, "甘肃": 10, "海南": 8, "宁夏": 6, "青海": 5,
+            "西藏": 3, "香港": 88, "澳门": 82, "台湾": 75
+        };
+        
+        const lowColor = { r: 173, g: 216, b: 230, a: 255 };
+        const highColor = { r: 25, g: 118, b: 210, a: 255 };
+        
+        let geoData = null;
+        let hoveredProvinceIndex = -1;
+        let mouseX = 0, mouseY = 0;
+        
+        function interpolateColor(low, high, t) {
+            t = Math.max(0, Math.min(1, t));
+            return {
+                r: Math.round(low.r + (high.r - low.r) * t),
+                g: Math.round(low.g + (high.g - low.g) * t),
+                b: Math.round(low.b + (high.b - low.b) * t),
+                a: Math.round(low.a + (high.a - low.a) * t)
+            };
+        }
+        
+        function colorToRGBA(color) {
+            return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
+        }
+        
+        function pointInPolygon(x, y, polygon) {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                const xi = polygon[i][0], yi = polygon[i][1];
+                const xj = polygon[j][0], yj = polygon[j][1];
+                
+                if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+        
+        function findHoveredProvince(mx, my) {
+            if (!geoData) return -1;
+            
+            const relX = mx / canvas.width;
+            const relY = my / canvas.height;
+            
+            if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return -1;
+            
+            const lon = MIN_LON + relX * (MAX_LON - MIN_LON);
+            const lat = MAX_LAT - relY * (MAX_LAT - MIN_LAT);
+            
+            for (let i = 0; i < geoData.features.length; i++) {
+                const feature = geoData.features[i];
+                const geom = feature.geometry;
+                
+                if (geom.type === 'Polygon') {
+                    for (const ring of geom.coordinates) {
+                        if (pointInPolygon(lon, lat, ring)) {
+                            return i;
+                        }
+                    }
+                } else if (geom.type === 'MultiPolygon') {
+                    for (const polygon of geom.coordinates) {
+                        for (const ring of polygon) {
+                            if (pointInPolygon(lon, lat, ring)) {
+                                return i;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return -1;
+        }
+        
+        function lonLatToPixel(lon, lat) {
+            const x = ((lon - MIN_LON) / (MAX_LON - MIN_LON)) * canvas.width;
+            const y = canvas.height - ((lat - MIN_LAT) / (MAX_LAT - MIN_LAT)) * canvas.height;
+            return { x, y };
+        }
+        
+        function drawProvince(feature, isHovered) {
+            const props = feature.properties;
+            const geom = feature.geometry;
+            const name = props.name || '';
+            
+            const value = mapData[name];
+            if (value === undefined) return;
+            
+            const minValue = Math.min(...Object.values(mapData));
+            const maxValue = Math.max(...Object.values(mapData));
+            const t = (value - minValue) / (maxValue - minValue);
+            
+            let fillColor = interpolateColor(lowColor, highColor, t);
+            
+            if (isHovered) {
+                fillColor = {
+                    r: Math.min(255, fillColor.r + 40),
+                    g: Math.min(255, fillColor.g + 40),
+                    b: Math.min(255, fillColor.b + 40),
+                    a: fillColor.a
+                };
+            }
+            
+            const drawPolygon = (ring) => {
+                ctx.beginPath();
+                for (let i = 0; i < ring.length; i++) {
+                    const { x, y } = lonLatToPixel(ring[i][0], ring[i][1]);
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                ctx.closePath();
+            };
+            
+            if (geom.type === 'Polygon') {
+                for (const ring of geom.coordinates) {
+                    drawPolygon(ring);
+                    ctx.fillStyle = colorToRGBA(fillColor);
+                    ctx.fill();
+                }
+            } else if (geom.type === 'MultiPolygon') {
+                for (const polygon of geom.coordinates) {
+                    for (const ring of polygon) {
+                        drawPolygon(ring);
+                        ctx.fillStyle = colorToRGBA(fillColor);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            if (geom.type === 'Polygon') {
+                for (const ring of geom.coordinates) {
+                    drawPolygon(ring);
+                    ctx.strokeStyle = isHovered ? 'rgba(255, 200, 0, 1)' : 'rgba(255, 255, 255, 0.7)';
+                    ctx.lineWidth = isHovered ? 2.5 : 1;
+                    ctx.stroke();
+                }
+            } else if (geom.type === 'MultiPolygon') {
+                for (const polygon of geom.coordinates) {
+                    for (const ring of polygon) {
+                        drawPolygon(ring);
+                        ctx.strokeStyle = isHovered ? 'rgba(255, 200, 0, 1)' : 'rgba(255, 255, 255, 0.7)';
+                        ctx.lineWidth = isHovered ? 2.5 : 1;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        
+        function drawTooltip(feature) {
+            const props = feature.properties;
+            const name = props.name || '';
+            const value = mapData[name];
+            
+            if (value === undefined || !props.cp) return;
+            
+            const { x: cx, y: cy } = lonLatToPixel(props.cp[0], props.cp[1]);
+            const text = `${name}: ${value.toFixed(1)}`;
+            
+            ctx.font = '18px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            const metrics = ctx.measureText(text);
+            const textWidth = metrics.width;
+            const textHeight = 18;
+            
+            const padding = 8;
+            const boxX = cx - textWidth / 2 - padding;
+            const boxY = cy - textHeight / 2 - padding;
+            const boxWidth = textWidth + padding * 2;
+            const boxHeight = textHeight + padding * 2;
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+            ctx.strokeStyle = 'rgba(200, 200, 200, 1)';
+            ctx.lineWidth = 1;
+            
+            ctx.beginPath();
+            ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 4);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.fillStyle = 'rgba(40, 40, 40, 1)';
+            ctx.fillText(text, cx, cy);
+        }
+        
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (!geoData) {
+                ctx.fillStyle = '#666';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Loading map data...', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+            
+            let hoveredFeature = null;
+            
+            for (let i = 0; i < geoData.features.length; i++) {
+                const feature = geoData.features[i];
+                const isHovered = (i === hoveredProvinceIndex);
+                
+                if (isHovered) {
+                    hoveredFeature = feature;
+                }
+                
+                drawProvince(feature, isHovered);
+            }
+            
+            if (hoveredFeature) {
+                drawTooltip(hoveredFeature);
+            }
+        }
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+            
+            const oldHovered = hoveredProvinceIndex;
+            hoveredProvinceIndex = findHoveredProvince(mouseX, mouseY);
+            
+            if (oldHovered !== hoveredProvinceIndex) {
+                render();
+                
+                if (hoveredProvinceIndex >= 0) {
+                    const name = geoData.features[hoveredProvinceIndex].properties.name;
+                    document.getElementById('info').textContent = `Hovering: ${name} (${mapData[name]})`;
+                } else {
+                    document.getElementById('info').textContent = 'Hover over provinces to see data';
+                }
+            }
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            hoveredProvinceIndex = -1;
+            document.getElementById('info').textContent = 'Hover over provinces to see data';
+            render();
+        });
+        
+        // Load GeoJSON data
+        // Option 1: Load from external file (recommended for production)
+        // fetch('china.json')
+        //     .then(response => response.json())
+        //     .then(data => {
+        //         geoData = data;
+        //         render();
+        //     })
+        //     .catch(error => {
+        //         console.error('Error loading map data:', error);
+        //         ctx.fillStyle = '#f00';
+        //         ctx.font = '16px sans-serif';
+        //         ctx.textAlign = 'center';
+        //         ctx.fillText('Error loading map data. Please ensure china.json is available.', canvas.width / 2, canvas.height / 2);
+        //     });
+        
+        // Option 2: Use embedded simplified data for demo (current implementation)
+        // For full map, download china.json from:
+        // https://github.com/apache/echarts/blob/master/test/data/map/json/china.json
+        
+        fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json')
+            .then(response => response.json())
+            .then(data => {
+                geoData = data;
+                render();
+            })
+            .catch(error => {
+                console.error('Error loading map data:', error);
+                ctx.fillStyle = '#f00';
+                ctx.font = '16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Error loading map data from CDN.', canvas.width / 2, canvas.height / 2);
+                ctx.fillText('Please download china.json and uncomment Option 1 in the code.', canvas.width / 2, canvas.height / 2 + 30);
+            });
+    </script>
+</body>
+</html>

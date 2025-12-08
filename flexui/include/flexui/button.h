@@ -23,7 +23,7 @@ public:
 
     void draw(NVGcontext* vg) override;
 
-    void setButtonText(const std::string& text) { text_ = text; }
+    void setButtonText(const std::string& text);
     std::string getButtonText() const { return text_; }
 
     void setButtonStyle(const ButtonStyle& style) { style_ = style; }

@@ -25,8 +25,8 @@ public:
     bool handleMouseMove(float mx, float my) override;
     bool handleMouseUp(float mx, float my) override;
 
-    NVGcolor getColor() const { return nvgHSLA(hue_, saturation_, lightness_, 1.0f); }
-    void setColor(float h, float s, float l) { hue_ = h; saturation_ = s; lightness_ = l; }
+    NVGcolor getColor() const;  // Returns RGB color from HSV values
+    void setColor(float h, float s, float v) { hue_ = h; saturation_ = s; lightness_ = v; }
     void setChangeCallback(ChangeCallback callback) { change_callback_ = callback; }
 
 private:

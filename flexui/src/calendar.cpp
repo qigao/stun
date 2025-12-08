@@ -28,10 +28,10 @@ int Calendar::getFirstDayOfWeek() const {
 
 void Calendar::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -92,9 +92,8 @@ void Calendar::draw(NVGcontext* vg) {
 }
 
 bool Calendar::handleMouseDown(float mx, float my) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
+    float x, y;
+    getVisualPosition(x, y);
 
     int daysInMonth = getDaysInMonth();
     int firstDay = getFirstDayOfWeek();

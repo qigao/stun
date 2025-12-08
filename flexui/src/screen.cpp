@@ -3,6 +3,7 @@
 #include <flexui/textbox.h>
 #include <flexui/radiobutton.h>
 #include <flexui/scrollview.h>
+#include <flexui/dropdown.h>
 #include <flexui/jsengine.h>
 #include <flexui/font_manager.h>
 #include <glad/glad.h>
@@ -242,21 +243,40 @@ static void getAccumulatedScrollOffset(cssboxRenderer* renderer, cssboxElement* 
 
 bool Screen::pollEvents() {
     SDL_Event event;
-    
+
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_QUIT) {
             return false;
         }
 
+        // Handle window events (expose, restore, show) - mark for redraw
+        if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
+            event.type == SDL_EVENT_WINDOW_RESTORED ||
+            event.type == SDL_EVENT_WINDOW_SHOWN) {
+            needs_redraw_ = true;  // Window visibility changed, force redraw
+        }
+
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             float mx = (float)event.motion.x;
             float my = (float)event.motion.y;
+
+            // First, check open dropdowns for hover on popup items
+            for (auto& widget : widgets_) {
+                if (auto* dropdown = dynamic_cast<Dropdown*>(widget.get())) {
+                    if (dropdown->isOpen()) {
+                        dropdown->handleMouseMove(mx, my);
+                    }
+                }
+            }
+
             auto candidates = spatial_index_->query(mx, my);
             for (auto* widget : candidates) {
                 widget->handleHover(mx, my);
-                widget->handleMouseMove(mx, my);
+                if (widget->handleMouseMove(mx, my)) {
+                    spatial_index_dirty_ = true;
+                    needs_redraw_ = true;
+                }
             }
-            needs_redraw_ = true;  // Mouse motion may change hover states
         }
 
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
@@ -269,22 +289,37 @@ bool Screen::pollEvents() {
                 // Calculate visual position with scroll offset
                 float scroll_x, scroll_y;
                 getAccumulatedScrollOffset(renderer_, el, scroll_x, scroll_y);
-                float visual_x = el->computed.x - scroll_x;
-                float visual_y = el->computed.y - scroll_y;
+                float visual_x = el->layout.x - scroll_x;
+                float visual_y = el->layout.y - scroll_y;
 
                 bool inside = mx >= visual_x &&
-                              mx <= visual_x + el->computed.width &&
+                              mx <= visual_x + el->layout.width &&
                               my >= visual_y &&
-                              my <= visual_y + el->computed.height;
+                              my <= visual_y + el->layout.height;
                 if (!inside) {
                     focused_textbox_->blur();
                 }
             }
 
-            auto candidates = spatial_index_->query(mx, my);
-            for (auto* widget : candidates) {
-                widget->handleClick(mx, my);
-                widget->handleMouseDown(mx, my);
+            // First, check all dropdown widgets for popup clicks (dropdowns need
+            // to receive clicks outside their main bounds when open)
+            bool handled_by_dropdown = false;
+            for (auto& widget : widgets_) {
+                if (auto* dropdown = dynamic_cast<Dropdown*>(widget.get())) {
+                    if (dropdown->isOpen() && dropdown->handleMouseDown(mx, my)) {
+                        handled_by_dropdown = true;
+                        break;
+                    }
+                }
+            }
+
+            // Then check spatial index candidates for regular clicks
+            if (!handled_by_dropdown) {
+                auto candidates = spatial_index_->query(mx, my);
+                for (auto* widget : candidates) {
+                    widget->handleClick(mx, my);
+                    widget->handleMouseDown(mx, my);
+                }
             }
             needs_redraw_ = true;  // Mouse click may change UI state
         }
@@ -294,7 +329,7 @@ bool Screen::pollEvents() {
             float my = (float)event.button.y;
             auto candidates = spatial_index_->query(mx, my);
             for (auto* widget : candidates) {
-                cssboxSetPseudoState(widget->element(), "active", 0);
+                cssboxSetPseudoStateEx(renderer_, widget->element(), "active", 0);
                 widget->handleMouseUp(mx, my);
             }
             needs_redraw_ = true;  // Mouse release may change UI state
@@ -345,17 +380,21 @@ void Screen::draw() {
     if (win_w != width_ || win_h != height_) {
         width_ = win_w;
         height_ = win_h;
+        spatial_index_->resize((float)win_w, (float)win_h);  // Resize grid for new dimensions
         spatial_index_dirty_ = true;
         needs_redraw_ = true;  // Window resize requires redraw
     }
+
+    // Update viewport (marks dirty if size changed)
+    cssboxSetViewport(renderer_, (float)win_w, (float)win_h);
 
     // Check if UI state changed (widgets modified styles/layout)
     if (renderer_->layout_dirty || renderer_->style_dirty) {
         needs_redraw_ = true;
     }
 
-    // Retained Mode: Skip redraw if nothing changed
-    if (!needs_redraw_) {
+    // Retained Mode: Skip redraw if nothing changed (use cssbox API)
+    if (!cssboxNeedsPaint(renderer_)) {
         return;
     }
 
@@ -363,15 +402,23 @@ void Screen::draw() {
     glClearColor(0.98f, 0.98f, 0.98f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
+    // Pre-render patterns before main NVG frame (required for FBO-based patterns)
+    cssboxPreparePatterns(renderer_);
+
     nvgBeginFrame(vg_, win_w, win_h, pixel_ratio);
 
-    // Check if layout will be recomputed
+    // Update animations/transitions and layout (replaces manual cssboxComputeLayout)
+    static Uint64 last_time = SDL_GetTicks();
+    Uint64 current_time = SDL_GetTicks();
+    float delta_time = (current_time - last_time) / 1000.0f;
+    last_time = current_time;
+
+    // Mark spatial index dirty if layout changed (BEFORE cssboxUpdate clears flags)
     if (renderer_->layout_dirty || renderer_->style_dirty) {
         spatial_index_dirty_ = true;
     }
 
-    cssboxSetViewport(renderer_, (float)win_w, (float)win_h);
-    cssboxComputeLayout(renderer_);
+    cssboxUpdate(renderer_, delta_time);
     cssboxRender(renderer_);
 
     // Rebuild spatial index only when dirty
@@ -379,18 +426,41 @@ void Screen::draw() {
         spatial_index_->clear();
         for (auto& widget : widgets_) {
             auto* elem = widget->element();
+            float w = elem->layout.width;
+            float h = elem->layout.height;
+            float x = elem->layout.x;
+            float y = elem->layout.y;
+            
+            // For widgets with zero dimensions, try to use parent's dimensions
+            // This handles chart widgets that fill their container
+            if ((w <= 0 || h <= 0) && elem->parent_internal_id >= 0) {
+                auto* parent = cssboxGetParent(renderer_, elem);
+                if (parent && parent->layout.width > 0 && parent->layout.height > 0) {
+                    x = parent->layout.x;
+                    y = parent->layout.y;
+                    w = parent->layout.width;
+                    h = parent->layout.height;
+                }
+            }
+            
             // Skip widgets with zero dimensions
-            if (elem->computed.width > 0 && elem->computed.height > 0) {
+            if (w > 0 && h > 0) {
                 // Calculate visual position by subtracting accumulated scroll offset
                 float scroll_x, scroll_y;
                 getAccumulatedScrollOffset(renderer_, elem, scroll_x, scroll_y);
 
-                float visual_x = elem->computed.x - scroll_x;
-                float visual_y = elem->computed.y - scroll_y;
+                float visual_x = x - scroll_x;
+                float visual_y = y - scroll_y;
+                
+                // Skip widgets completely outside viewport
+                if (visual_x + w < 0 || visual_x > width_ ||
+                    visual_y + h < 0 || visual_y > height_) {
+                    continue;
+                }
 
                 spatial_index_->insert(widget.get(),
                     visual_x, visual_y,
-                    elem->computed.width, elem->computed.height);
+                    w, h);
             }
         }
         spatial_index_dirty_ = false;
@@ -415,7 +485,44 @@ void Screen::draw() {
         if (is_hidden) {
             continue;
         }
-        widget->draw(vg_);
+
+        // Track layout before draw to detect changes (e.g., charts using parent dimensions)
+        elem = widget->element();
+        float old_w = elem->layout.width;
+        float old_h = elem->layout.height;
+
+        // Apply scroll offset transform for widgets inside scroll containers
+        float scroll_x, scroll_y;
+        getAccumulatedScrollOffset(renderer_, widget->element(), scroll_x, scroll_y);
+
+        if (scroll_x != 0.0f || scroll_y != 0.0f) {
+            nvgSave(vg_);
+
+            // First apply scissor in screen coordinates (before translate)
+            cssboxElement* scroll_parent = widget->element();
+            while (scroll_parent) {
+                cssboxElement* parent = cssboxGetParent(renderer_, scroll_parent);
+                if (parent && (parent->scroll_x != 0.0f || parent->scroll_y != 0.0f)) {
+                    nvgScissor(vg_, parent->layout.x, parent->layout.y,
+                              parent->layout.width, parent->layout.height);
+                    break;
+                }
+                scroll_parent = parent;
+            }
+
+            // Then apply scroll translate
+            nvgTranslate(vg_, -scroll_x, -scroll_y);
+
+            widget->draw(vg_);
+            nvgRestore(vg_);
+        } else {
+            widget->draw(vg_);
+        }
+
+        // If widget updated its layout during draw, mark spatial index dirty
+        if (elem->layout.width != old_w || elem->layout.height != old_h) {
+            spatial_index_dirty_ = true;
+        }
     }
 
     // Call custom draw callback before ending frame

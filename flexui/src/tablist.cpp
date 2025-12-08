@@ -10,10 +10,10 @@ TabList::TabList(cssboxRenderer* renderer, const std::string& id,
 
 void TabList::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -58,8 +58,8 @@ void TabList::draw(NVGcontext* vg) {
 
 bool TabList::handleMouseMove(float mx, float my) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
+    float x = el->layout.x;
+    float y = el->layout.y;
 
     hover_tab_ = -1;
     float yPos = y;
@@ -76,8 +76,8 @@ bool TabList::handleMouseMove(float mx, float my) {
 
 bool TabList::handleMouseDown(float mx, float my) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
+    float x = el->layout.x;
+    float y = el->layout.y;
 
     float yPos = y;
     for (size_t i = 0; i < tabs_.size(); ++i) {

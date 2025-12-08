@@ -10,10 +10,10 @@ IconButton::IconButton(cssboxRenderer* renderer, const std::string& id,
 
 void IconButton::draw(NVGcontext* vg) {
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -41,11 +41,10 @@ void IconButton::draw(NVGcontext* vg) {
 }
 
 bool IconButton::handleMouseMove(float mx, float my) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x, y;
+    getVisualPosition(x, y);
+    float w = element()->layout.width;
+    float h = element()->layout.height;
 
     float cx = x + w / 2;
     float cy = y + h / 2;
@@ -59,11 +58,10 @@ bool IconButton::handleMouseMove(float mx, float my) {
 }
 
 bool IconButton::handleMouseDown(float mx, float my) {
-    auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x, y;
+    getVisualPosition(x, y);
+    float w = element()->layout.width;
+    float h = element()->layout.height;
 
     float cx = x + w / 2;
     float cy = y + h / 2;

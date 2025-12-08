@@ -13,10 +13,10 @@ void Modal::draw(NVGcontext* vg) {
     if (!visible_) return;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     if (w == 0 || h == 0) return;
 
@@ -63,10 +63,10 @@ bool Modal::handleMouseDown(float mx, float my) {
     if (!visible_) return false;
 
     auto* el = element();
-    float x = el->computed.x;
-    float y = el->computed.y;
-    float w = el->computed.width;
-    float h = el->computed.height;
+    float x = el->layout.x;
+    float y = el->layout.y;
+    float w = el->layout.width;
+    float h = el->layout.height;
 
     // Check close button click
     float closeX = x + w - 30;
