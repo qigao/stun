@@ -1,8 +1,8 @@
-# FlexChart JavaScript Bindings Demo
+# FlexChart JavaScript Runtime
 
 ## 概述
 
-`bindingsflexchart_demo.cpp` 展示了如何使用 FlexChart 的 JavaScript 绑定来通过 JavaScript 代码创建和配置图表。
+FlexChart Runtime 提供了 JavaScript 脚本支持，让你可以通过 JavaScript 代码创建和配置图表。
 
 ## 功能特性
 
@@ -69,7 +69,7 @@ Assertion failed: list_empty(&rt->gc_obj_list), file quickjs.c, line 2145
 ```
 
 **原因**：
-在 `bindingsbindings.cpp` 的 `js_chart_on` 函数中，JavaScript 回调函数通过 `JS_DupValue` 复制后存储在 C++ lambda 中，但在 chart 销毁时没有被正确释放。
+在 `runtime.cpp` 的 `js_chart_on` 函数中，JavaScript 回调函数通过 `JS_DupValue` 复制后存储在 C++ lambda 中，但在 chart 销毁时没有被正确释放。
 
 ```cpp
 // 问题代码片段
@@ -83,7 +83,7 @@ w->chart->on(event, [ctx, callback](const ChartEvent& e) {
 **临时解决方案**：
 当前 demo 中事件监听器已被注释掉。如果需要使用事件，请注意在程序退出前可能会遇到断言错误。
 
-**完整解决方案**（需要修改 `bindingsbindings.cpp`）：
+**完整解决方案**（需要修改 `runtime.cpp`）：
 
 1. 在 `ChartWrapper` 中存储回调引用：
 ```cpp
@@ -155,7 +155,7 @@ Demo completed!
 
 ### C++ 层
 1. 初始化 QuickJS runtime 和 context
-2. 设置 FlexChart 的 JavaScript 绑定（`setupChartBindings`）
+2. 设置 FlexChart 的 JavaScript 运行时（`setupChartRuntime`）
 3. 设置 `console.log` 支持
 4. 执行 JavaScript 代码创建图表
 5. 渲染循环：处理事件 + 绘制所有图表

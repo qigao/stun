@@ -40,18 +40,15 @@ void Widget::removeClass(const std::string& className) {
 void Widget::setPosition(float x, float y) {
     x_ = x;
     y_ = y;
-    // Set inline style for positioning
-    char style[128];
-    snprintf(style, sizeof(style), "left: %.0fpx; top: %.0fpx;", x, y);
-    element_->inline_style["left"] = std::to_string((int)x) + "px";
-    element_->inline_style["top"] = std::to_string((int)y) + "px";
+    cssboxSetInlineStyle(renderer_, element_, "left", (std::to_string((int)x) + "px").c_str());
+    cssboxSetInlineStyle(renderer_, element_, "top", (std::to_string((int)y) + "px").c_str());
 }
 
 void Widget::setSize(float w, float h) {
     w_ = w;
     h_ = h;
-    element_->inline_style["width"] = std::to_string((int)w) + "px";
-    element_->inline_style["height"] = std::to_string((int)h) + "px";
+    cssboxSetInlineStyle(renderer_, element_, "width", (std::to_string((int)w) + "px").c_str());
+    cssboxSetInlineStyle(renderer_, element_, "height", (std::to_string((int)h) + "px").c_str());
 }
 
 void Widget::setText(const std::string& text) {
@@ -63,9 +60,7 @@ void Widget::addChild(Widget* child) {
 }
 
 void Widget::setInlineStyle(const std::string& property, const std::string& value) {
-    element_->inline_style[property] = value;
-    renderer_->style_dirty = true;
-    renderer_->layout_dirty = true;
+    cssboxSetInlineStyle(renderer_, element_, property.c_str(), value.c_str());
 }
 
 bool Widget::handleClick(float x, float y) {
@@ -135,18 +130,10 @@ void Widget::clearPath() {
 }
 
 bool Widget::isVisible() const {
-    // Check inline style first (for dynamic visibility control)
-    auto it = element_->inline_style.find("display");
-    if (it != element_->inline_style.end() && it->second == "none") {
-        return false;
-    }
-
-    // Check computed style
+    // Single source of truth: computed style (inline_style is merged during style computation)
     if (element_->style.display == cssbox::Display::NONE) {
         return false;
     }
-
-    // Check visible flag
     return element_->visible;
 }
 

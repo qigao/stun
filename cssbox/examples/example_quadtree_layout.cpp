@@ -1,4 +1,4 @@
-﻿/*
+/*
  * NanoVG CSS - Quadtree Layout Example
  *
  * Demonstrates the quadtree layout engine with:
@@ -7,10 +7,9 @@
  * - Grid spanning
  */
 
-#include <SDL3/SDL.h>
-
 #define GLAD_GL_IMPLEMENTATION
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg.h>
@@ -157,18 +156,17 @@ cssboxElement* create_flex_layout(cssboxRenderer* renderer) {
 }
 
 int main() {
-    // Initialize SDL
-    SDL_Init(SDL_INIT_VIDEO);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    // Initialize GLFW
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
-    SDL_Window* window = SDL_CreateWindow("Quadtree Layout Demo", 1400, 900,
-                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    SDL_GL_MakeCurrent(window, gl_context);
-    SDL_GL_SetSwapInterval(1);
+    GLFWwindow* window = glfwCreateWindow(1400, 900, "Demo", nullptr, nullptr);
+    glfwMakeContextCurrent(window);
+    
+    glfwSwapInterval(1);
 
     gladLoadGL();
 
@@ -201,39 +199,33 @@ int main() {
     std::cout << "Grid: Explicit placement + spanning" << std::endl;
     std::cout << "Flex: Nested containers with flex-grow" << std::endl;
 
-    bool running = true;
-    SDL_Event event;
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
 
-    while (running) {
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
-            } else if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-                       event.type == SDL_EVENT_WINDOW_RESTORED ||
-                       event.type == SDL_EVENT_WINDOW_SHOWN) {
-                cssboxInvalidatePaint(renderer);
-            } else if (event.type == SDL_EVENT_KEY_DOWN) {
-                if (event.key.key == SDLK_SPACE) {
-                    showGrid = !showGrid;
-                    if (showGrid) {
-                        if (!gridLayout) {
-                            gridLayout = create_grid_dashboard(renderer);
-                        }
-                        currentLayout = gridLayout;
-                    } else {
-                        if (!flexLayout) {
-                            flexLayout = create_flex_layout(renderer);
-                        }
-                        currentLayout = flexLayout;
+        // Handle keyboard input for layout toggle
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+            static bool space_was_pressed = false;
+            if (!space_was_pressed) {
+                space_was_pressed = true;
+                showGrid = !showGrid;
+                if (showGrid) {
+                    currentLayout = gridLayout;
+                } else {
+                    if (!flexLayout) {
+                        flexLayout = create_flex_layout(renderer);
                     }
-                    std::cout << "Switched to " << (showGrid ? "Grid" : "Flex") << " layout" << std::endl;
+                    currentLayout = flexLayout;
                 }
+                std::cout << "Switched to " << (showGrid ? "Grid" : "Flex") << " layout" << std::endl;
             }
+        } else {
+            static bool space_was_pressed = false;
+            space_was_pressed = false;
         }
 
         int win_w, win_h, fb_w, fb_h;
-        SDL_GetWindowSize(window, &win_w, &win_h);
-        SDL_GetWindowSizeInPixels(window, &fb_w, &fb_h);
+        glfwGetWindowSize(window, &win_w, &win_h);
+        glfwGetFramebufferSize(window, &fb_w, &fb_h);
         float pixel_ratio = (float)fb_w / (float)win_w;
 
         cssboxSetViewport(renderer, (float)win_w, (float)win_h);
@@ -242,7 +234,7 @@ int main() {
         cssboxUpdate(renderer, 0.016f);
 
         if (!cssboxNeedsPaint(renderer)) {
-            SDL_Delay(1);
+            glfwWaitEventsTimeout(0.001);
             continue;
         }
 
@@ -256,15 +248,15 @@ int main() {
         cssboxRender(renderer);
 
         nvgEndFrame(vg);
-        SDL_GL_SwapWindow(window);
+        glfwSwapBuffers(window);
     }
 
     delete qtEngine;
     cssboxDeleteRenderer(renderer);
     nvgDeleteGL3(vg);
-    SDL_GL_DestroyContext(gl_context);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     return 0;
 }

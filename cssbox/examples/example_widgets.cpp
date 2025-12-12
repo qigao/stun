@@ -1,4 +1,4 @@
-﻿/*
+/*
  * NanoVG CSS Example - Widgets
  *
  * Demonstrates common UI widgets using CSS:
@@ -11,7 +11,9 @@
  * Validates pseudo-states and visual styling in the typed CSS system.
  */
 
-#include <SDL3/SDL.h>
+#define GLAD_GL_IMPLEMENTATION
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 // Include GLAD for OpenGL function loading
 #define GLAD_GL_IMPLEMENTATION
@@ -30,7 +32,7 @@
 class WidgetsDemo {
 public:
     WidgetsDemo() {
-        init_sdl();
+        init_glfw();
         init_nanovg();
         setup_scene();
     }
@@ -38,35 +40,40 @@ public:
     ~WidgetsDemo() {
         if (renderer) cssboxDeleteRenderer(renderer);
         if (vg) nvgDeleteGL3(vg);
-        if (gl_context) SDL_GL_DestroyContext(gl_context);
-        if (window) SDL_DestroyWindow(window);
-        SDL_Quit();
+        
+        if (window) glfwDestroyWindow(window);
+        glfwTerminate();
     }
 
     void run() {
-        bool running = true;
-        SDL_Event event;
 
-        while (running) {
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_EVENT_QUIT) {
-                    running = false;
-                }
-                handle_event(event);
-            }
+        while (!glfwWindowShouldClose(window)) {
+            glfwPollEvents();
 
             if (render()) {
-                SDL_GL_SwapWindow(window);
+                glfwSwapBuffers(window);
             } else {
                 // Nothing to paint - sleep to reduce CPU/GPU usage
-                SDL_Delay(1);
+                glfwWaitEventsTimeout(0.001);
             }
         }
     }
 
+    static void cursor_pos_callback(GLFWwindow* win, double xpos, double ypos) {
+        // Mouse position callback
+    }
+
+    static void window_refresh_callback(GLFWwindow* win) {
+        auto* app = static_cast<WidgetsDemo*>(glfwGetWindowUserPointer(win));
+        if (app) {
+            app->render();
+            glfwSwapBuffers(win);
+        }
+    }
+
 private:
-    SDL_Window* window = nullptr;
-    SDL_GLContext gl_context = nullptr;
+    GLFWwindow* window = nullptr;
+    
     NVGcontext* vg = nullptr;
     cssboxRenderer* renderer = nullptr;
 
@@ -80,18 +87,21 @@ private:
     std::set<cssboxElement*> active_elements;
     std::set<cssboxElement*> focused_elements;
 
-    void init_sdl() {
-        SDL_Init(SDL_INIT_VIDEO);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    void init_glfw() {
+        glfwInit();
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_STENCIL_BITS, 8);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-        window = SDL_CreateWindow("NanoVG CSS Widgets", 1000, 700,
-                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-        gl_context = SDL_GL_CreateContext(window);
-        SDL_GL_MakeCurrent(window, gl_context);
-        SDL_GL_SetSwapInterval(1);
+        window = glfwCreateWindow(1200, 800, "NanoVG CSS Demo", nullptr, nullptr);
+        glfwMakeContextCurrent(window);
+        glfwSwapInterval(1);
+
+        glfwSetWindowUserPointer(window, this);
+        glfwSetCursorPosCallback(window, cursor_pos_callback);
+        glfwSetWindowRefreshCallback(window, window_refresh_callback);
     }
 
     void init_nanovg() {
@@ -387,47 +397,7 @@ private:
         cssboxSetText(label, text);
     }
 
-    void handle_event(const SDL_Event& event) {
-        // Window expose: repaint needed when window becomes visible
-        if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-            event.type == SDL_EVENT_WINDOW_RESTORED ||
-            event.type == SDL_EVENT_WINDOW_SHOWN) {
-            cssboxInvalidatePaint(renderer);
-        }
-
-        // Keyboard: Press 'M' to print memory profile
-        if (event.type == SDL_EVENT_KEY_DOWN) {
-            if (event.key.key == SDLK_M) {
-                cssboxPrintMemoryProfile(renderer);
-            }
-        }
-
-        // Simple hover/active tracking for demonstration
-        // In real app, would use proper hit testing
-
-        if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            // Update hover states
-            float mx = event.motion.x;
-            float my = event.motion.y;
-
-            // Simple bounds check for buttons (hardcoded for demo)
-            update_hover_state(btn_primary, mx, my, 50, 50, 140, 50);
-            update_hover_state(btn_danger, mx, my, 220, 50, 140, 50);
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-            // Set active state (use Ex version to trigger repaint)
-            if (is_hovered(btn_primary)) {
-                cssboxSetPseudoStateEx(renderer, btn_primary, "active", 1);
-            }
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-            // Clear active state
-            cssboxSetPseudoStateEx(renderer, btn_primary, "active", 0);
-            cssboxSetPseudoStateEx(renderer, btn_danger, "active", 0);
-        }
-    }
+  
 
     void update_hover_state(cssboxElement* elem, float mx, float my,
                            float x, float y, float w, float h) {
@@ -451,8 +421,8 @@ private:
 
     bool render() {
         int win_w, win_h, fb_w, fb_h;
-        SDL_GetWindowSize(window, &win_w, &win_h);
-        SDL_GetWindowSizeInPixels(window, &fb_w, &fb_h);
+        glfwGetWindowSize(window, &win_w, &win_h);
+        glfwGetFramebufferSize(window, &fb_w, &fb_h);
         float pixel_ratio = (float)fb_w / (float)win_w;
 
         // Update viewport (only marks dirty if size changed)

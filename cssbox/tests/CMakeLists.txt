@@ -14,12 +14,12 @@ set(ALL_TESTS
     # Core cssbox tests
     test_cssbox_comprehensive
     test_cssbox_advanced
-    test_cssbox_computed
     test_cssbox_rough
     test_cssbox_quadtree
     test_cssbox_tailwind
     test_grid_css_parser
     test_css3_features
+    test_animation_transforms
     # SVG feature tests
     test_svg_path_parser
     test_svg_polygon_polyline

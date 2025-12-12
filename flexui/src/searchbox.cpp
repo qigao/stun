@@ -1,5 +1,6 @@
 ﻿#include <flexui/searchbox.h>
-#include <SDL3/SDL.h>
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <cmath>
 #include <cssbox_internal.h>
 namespace flexui {
@@ -12,7 +13,7 @@ SearchBox::SearchBox(cssboxRenderer* renderer, const std::string& id,
 void SearchBox::handleKeyPress(int key, bool shift, bool ctrl) {
     TextBox::handleKeyPress(key, shift, ctrl);
 
-    if (key == SDLK_RETURN && search_callback_) {
+    if (key == GLFW_KEY_ENTER && search_callback_) {
         search_callback_(getInputText());
     }
 }

@@ -254,6 +254,9 @@
 #define CSS_TRANSFORM_TRANSLATEX 2
 #define CSS_TRANSFORM_TRANSLATEY 3
 #define CSS_TRANSFORM_ROTATE 4
+#define CSS_TRANSFORM_ROTATEX 12
+#define CSS_TRANSFORM_ROTATEY 13
+#define CSS_TRANSFORM_ROTATEZ 14
 #define CSS_TRANSFORM_SCALE 5
 #define CSS_TRANSFORM_SCALEX 6
 #define CSS_TRANSFORM_SCALEY 7
@@ -1018,6 +1021,9 @@ int css_parse_transform_function(const char* str, size_t len) {
         "translatex" { return CSS_TRANSFORM_TRANSLATEX; }
         "translatey" { return CSS_TRANSFORM_TRANSLATEY; }
         "translate"  { return CSS_TRANSFORM_TRANSLATE; }
+        "rotatex"    { return CSS_TRANSFORM_ROTATEX; }
+        "rotatey"    { return CSS_TRANSFORM_ROTATEY; }
+        "rotatez"    { return CSS_TRANSFORM_ROTATEZ; }
         "rotate"     { return CSS_TRANSFORM_ROTATE; }
         "scalex"     { return CSS_TRANSFORM_SCALEX; }
         "scaley"     { return CSS_TRANSFORM_SCALEY; }

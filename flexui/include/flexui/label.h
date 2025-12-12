@@ -19,7 +19,7 @@ public:
 
     void draw(NVGcontext* vg) override;
 
-    void setLabelText(const std::string& text) { text_ = text; }
+    void setLabelText(const std::string& text);
     std::string getLabelText() const { return text_; }
 
     void setLabelStyle(const LabelStyle& style) { style_ = style; }

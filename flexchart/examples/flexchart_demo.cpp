@@ -1,9 +1,10 @@
 #include <flexchart/flexchart.h>
-#include <flexchart/bindingsbindings.h>
+#include <flexchart/runtime.h>
 #include <cssbox.h>
 #include <nanovg.h>
-#include <SDL3/SDL.h>
+#define GLAD_GL_IMPLEMENTATION
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -11,24 +12,58 @@
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg_gl.h>
 
+// Global state for GLFW callbacks
+static float g_scrollY = 0;
+static float g_contentHeight = 0;
+static int g_winW = 1400, g_winH = 800;
+static bool g_needsRelayout = true;
+static std::vector<std::unique_ptr<flexchart::FlexChart>>* g_charts = nullptr;
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    g_scrollY -= (float)yoffset * 50;
+    g_scrollY = std::max(0.0f, std::min(g_scrollY, std::max(0.0f, g_contentHeight - g_winH)));
+    g_needsRelayout = true;
+}
+
+void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (g_charts) {
+        for (auto& c : *g_charts) c->handleMouseMove((float)xpos, (float)ypos);
+    }
+}
+
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && g_charts) {
+        double xpos, ypos;
+        glfwGetCursorPos(window, &xpos, &ypos);
+        for (auto& c : *g_charts) c->handleMouseDown((float)xpos, (float)ypos);
+    }
+}
+
 int main(int argc, char** argv) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
+    if (!glfwInit()) {
+        std::cerr << "GLFW init failed" << std::endl;
         return 1;
     }
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
-    SDL_Window* window = SDL_CreateWindow("FlexChart - 43 Chart Types (Scroll to see all)",
-        1400, 800, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    
-    SDL_GLContext glCtx = SDL_GL_CreateContext(window);
-    SDL_GL_MakeCurrent(window, glCtx);
-    SDL_GL_SetSwapInterval(1);
-    gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
+    GLFWwindow* window = glfwCreateWindow(1400, 800, "FlexChart - 43 Chart Types (Scroll to see all)", nullptr, nullptr);
+    if (!window) {
+        std::cerr << "Window creation failed" << std::endl;
+        glfwTerminate();
+        return 1;
+    }
+
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
+    gladLoadGL();
+
+    glfwSetScrollCallback(window, scroll_callback);
+    glfwSetCursorPosCallback(window, cursor_pos_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
 
     NVGcontext* vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
     nvgCreateFont(vg, "sans-serif", "C:/Windows/Fonts/segoeui.ttf");
@@ -49,8 +84,8 @@ int main(int argc, char** argv) {
 
     float cw = 480, ch = 360, gap = 10;
     int col = 0, row = 0;
-    float scrollY = 0;
-    float contentHeight = 0;
+    
+    
     int cols = 4;  // Will be recalculated based on window width
     
     auto layoutCharts = [&](int windowW, int windowH) {
@@ -58,13 +93,13 @@ int main(int argc, char** argv) {
         col = 0; row = 0;
         for (auto& c : charts) {
             float x = gap + col * (cw + gap);
-            float y = gap + row * (ch + gap) - scrollY;
+            float y = gap + row * (ch + gap) - g_scrollY;
             c->setPosition(x, y);
             c->resize(cw, ch);
             col++;
             if (col >= cols) { col = 0; row++; }
         }
-        contentHeight = (row + (col > 0 ? 1 : 0)) * (ch + gap) + gap;
+        g_contentHeight = (row + (col > 0 ? 1 : 0)) * (ch + gap) + gap;
     };
     
     auto pos = [&]() -> std::pair<float, float> {
@@ -390,76 +425,63 @@ int main(int argc, char** argv) {
       s.mapShowLabel = false;
       o.series = {s}; c->setOption(o); }
 
-    bool running = true;
     int lastW = 0, lastH = 0;
-    
+
     // Initial layout
-    {
-        int w, h;
-        SDL_GetWindowSize(window, &w, &h);
-        layoutCharts(w, h);
-        lastW = w; lastH = h;
-    }
-    
-    while (running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_EVENT_QUIT) running = false;
-            else if (e.type == SDL_EVENT_MOUSE_MOTION)
-                for (auto& c : charts) c->handleMouseMove(e.motion.x, e.motion.y);
-            else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
-                for (auto& c : charts) c->handleMouseDown(e.button.x, e.button.y);
-            else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-                int winW, winH;
-                SDL_GetWindowSize(window, &winW, &winH);
-                scrollY -= e.wheel.y * 50;  // Scroll speed
-                scrollY = std::max(0.0f, std::min(scrollY, std::max(0.0f, contentHeight - winH)));
-                layoutCharts(winW, winH);
-            }
+    glfwGetWindowSize(window, &g_winW, &g_winH);
+    layoutCharts(g_winW, g_winH);
+    lastW = g_winW; lastH = g_winH;
+    g_charts = &charts;
+
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+
+        glfwGetWindowSize(window, &g_winW, &g_winH);
+
+        // Relayout on window resize or scroll
+        if (g_winW != lastW || g_winH != lastH || g_needsRelayout) {
+            lastW = g_winW; lastH = g_winH;
+            g_scrollY = std::max(0.0f, std::min(g_scrollY, std::max(0.0f, g_contentHeight - g_winH)));
+            layoutCharts(g_winW, g_winH);
+            g_needsRelayout = false;
         }
 
-        int w, h;
-        SDL_GetWindowSize(window, &w, &h);
-        
-        // Relayout on window resize
-        if (w != lastW || h != lastH) {
-            lastW = w; lastH = h;
-            scrollY = std::max(0.0f, std::min(scrollY, std::max(0.0f, contentHeight - h)));
-            layoutCharts(w, h);
-        }
-        
-        glViewport(0, 0, w, h);
+        int fbW, fbH;
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+
+        glViewport(0, 0, fbW, fbH);
         glClearColor(0.94f, 0.94f, 0.96f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-        nvgBeginFrame(vg, (float)w, (float)h, 1.0f);
-        
+        float pixelRatio = (float)fbW / (float)g_winW;
+        nvgBeginFrame(vg, (float)g_winW, (float)g_winH, pixelRatio);
+
         // Only draw visible charts
         for (auto& c : charts) {
             float cy = c->y();
-            if (cy + ch > 0 && cy < h) {
+            if (cy + ch > 0 && cy < g_winH) {
                 c->draw(vg);
             }
         }
-        
+
         // Draw scrollbar if needed
-        if (contentHeight > h) {
-            float scrollbarH = h * h / contentHeight;
-            float scrollbarY = scrollY * (h - scrollbarH) / (contentHeight - h);
+        if (g_contentHeight > g_winH) {
+            float scrollbarH = g_winH * g_winH / g_contentHeight;
+            float scrollbarY = g_scrollY * (g_winH - scrollbarH) / (g_contentHeight - g_winH);
             nvgBeginPath(vg);
-            nvgRoundedRect(vg, w - 10, scrollbarY, 6, scrollbarH, 3);
+            nvgRoundedRect(vg, g_winW - 10, scrollbarY, 6, scrollbarH, 3);
             nvgFillColor(vg, nvgRGBA(150, 150, 150, 150));
             nvgFill(vg);
         }
-        
+
         nvgEndFrame(vg);
-        SDL_GL_SwapWindow(window);
+        glfwSwapBuffers(window);
     }
 
+    g_charts = nullptr;
     charts.clear();
     nvgDeleteGL3(vg);
-    SDL_GL_DestroyContext(glCtx);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    glfwDestroyWindow(window);
+    glfwTerminate();
     return 0;
 }

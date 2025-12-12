@@ -34,7 +34,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<FlexChart>> charts_;
 };
 
-void setupChartBindings(JSContext* ctx, cssboxRenderer* renderer);
+void setupChartRuntime(JSContext* ctx, cssboxRenderer* renderer);
 
 ChartOption parseOptionFromJSON(JSContext* ctx, JSValue obj);
 ChartOption parseOptionFromString(const std::string& json);

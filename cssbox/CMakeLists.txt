@@ -32,6 +32,10 @@ message(STATUS "NanoVG CSS: Found Lexbor include: ${LEXBOR_INCLUDE_DIR}")
 find_package(pugixml CONFIG REQUIRED)
 message(STATUS "NanoVG CSS: Found pugixml for SVG XML parsing")
 
+# Find nlohmann_json for state machine JSON parsing
+find_package(nlohmann_json CONFIG REQUIRED)
+message(STATUS "NanoVG CSS: Found nlohmann_json for state machine")
+
 # ============================================================================
 # Generate SVG Path Lexer with re2c
 # ============================================================================
@@ -175,6 +179,7 @@ target_link_libraries(
   glad::glad TurboMemory
   PRIVATE ${LEXBOR_LIBRARY}
   pugixml::pugixml
+  nlohmann_json::nlohmann_json
   fmtlog)
 
 # Platform-specific memory profiling libraries

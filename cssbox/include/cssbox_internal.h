@@ -29,6 +29,11 @@
 #include "cssbox_background.h"
 #include "lexbor_css_parser.h"
 
+// Forward declaration for SVG path commands (defined in cssbox_svg_path.h)
+namespace cssbox {
+struct PathCommand;
+}
+
 
 // Windows macro cleanup (wingdi.h defines RELATIVE/ABSOLUTE)
 #ifdef RELATIVE
@@ -43,6 +48,8 @@
 
 class cssboxPainter;
 struct GradientData;  // Forward declaration for gradient cache
+struct TransitionState;  // Forward declaration for element state
+struct AnimationState;   // Forward declaration for element state
 
 // ============================================================================
 // Element Structure Types
@@ -148,7 +155,7 @@ struct cssboxPattern {
  * REFACTORED for 60fps:
  * - Typed properties instead of string maps
  * - Dirty flags for incremental updates
- * - No more void* pointers
+ * - Type-safe state pointers (no void*)
  */
 struct cssboxElement {
     // === Identity ===
@@ -180,12 +187,15 @@ struct cssboxElement {
     std::map<std::string, std::string> attributes;
     std::set<std::string> pseudo_states;
 
-    // === NEW: Typed CSS properties (replaces string maps) ===
+    // === Typed CSS properties (primary style system) ===
     cssbox::ComputedStyle style;         // Parsed CSS properties
     cssbox::ResolvedLayout layout;       // Resolved layout (in pixels)
 
-    // === DEPRECATED: Old string-based system (will be removed) ===
-    std::map<std::string, std::string> inline_style;  // DEPRECATED - still used by SVG XML parser
+    // === Legacy string-based inline styles ===
+    // NOTE: Use cssboxSetInlineStyle() API instead of direct access.
+    // This map is used internally during CSS cascade and by SVG XML parser.
+    // Values here are merged into ComputedStyle during style computation.
+    std::map<std::string, std::string> inline_style;
 
     // === NEW: Dirty flags for 60fps optimization ===
     cssbox::DirtyFlags dirty_flags = cssbox::DIRTY_ALL;
@@ -225,13 +235,9 @@ struct cssboxElement {
     // === Content ===
     std::string text_content;
 
-    // === State pointers (Phase 2: will replace with std::unique_ptr<TransitionState>) ===
-    void* transition_state;
-    void* animation_state;
-
-    // === DEPRECATED: Old shadow storage (kept for backward compat during refactor) ===
-    std::vector<BoxShadow> box_shadows;      // DEPRECATED: will move to style.box_shadows
-    std::vector<TextShadow> text_shadows;    // DEPRECATED: will move to typed system
+    // === State pointers (type-safe, pool-allocated) ===
+    TransitionState* transition_state = nullptr;
+    AnimationState* animation_state = nullptr;
 
     // === Geometry (for custom shapes) ===
     cssboxLineGeometry line_geometry;
@@ -252,7 +258,7 @@ struct cssboxElement {
     
     // === SVG Path Cache (Avoid re-parsing every frame) ===
     mutable std::string cached_path_d;           // Last parsed 'd' attribute value
-    mutable void* cached_path_commands = nullptr; // std::vector<PathCommand>* - opaque to avoid header dep
+    mutable std::vector<cssbox::PathCommand>* cached_path_commands = nullptr;  // Parsed path commands
     mutable std::string cached_points_str;       // Last parsed 'points' attribute
     mutable std::vector<std::pair<float,float>> cached_points;  // Parsed polygon points
     
@@ -633,6 +639,11 @@ struct cssboxRenderer {
     // === Retain Mode: Animated Elements Tracking ===
     std::unordered_set<int> animated_elements_;  // internal_ids of elements with active animations
 
+    // === Retain Mode: Transition Elements Tracking ===
+    // Elements with CSS transitions that need baseline values captured
+    // Once baseline is captured, element is removed from this set
+    std::unordered_set<int> transition_elements_;
+
     // Image cache (Sprint 31)
     std::unordered_map<std::string, int> image_cache;  // path -> NanoVG image handle
 
@@ -654,6 +665,17 @@ struct cssboxRenderer {
 
     // CSS file tracking (v2 API: for hot-reload)
     std::vector<std::string> css_files;  // Loaded CSS file paths
+
+    // === Error Handling ===
+    cssboxErrorCallback error_callback = nullptr;
+    void* error_callback_user_data = nullptr;
+
+    // Report an error (calls callback if set)
+    void report_error(cssboxErrorLevel level, const char* message) {
+        if (error_callback) {
+            error_callback(level, message, error_callback_user_data);
+        }
+    }
 
     cssboxRenderer(NVGcontext* vg);
     ~cssboxRenderer();

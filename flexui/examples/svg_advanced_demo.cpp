@@ -72,12 +72,12 @@ int main() {
     auto* renderer = screen.renderer();
     auto* dotsPattern = cssboxCreatePattern(renderer, "dots", 0, 0, 20, 20);
     auto* dot = cssboxCreateElement(renderer, "pattern_dot", "circle");
-    dot->inline_style["cx"] = "10px";
-    dot->inline_style["cy"] = "10px";
-    dot->inline_style["r"] = "4px";
-    dot->inline_style["fill"] = "#4a90e2";
-    dot->inline_style["width"] = "20px";
-    dot->inline_style["height"] = "20px";
+    cssboxSetInlineStyle(renderer, dot, "cx", "10px");
+    cssboxSetInlineStyle(renderer, dot, "cy", "10px");
+    cssboxSetInlineStyle(renderer, dot, "r", "4px");
+    cssboxSetInlineStyle(renderer, dot, "fill", "#4a90e2");
+    cssboxSetInlineStyle(renderer, dot, "width", "20px");
+    cssboxSetInlineStyle(renderer, dot, "height", "20px");
     cssboxAppendChild(renderer, dotsPattern, dot);
 
     // Rectangle filled with pattern
@@ -122,19 +122,19 @@ int main() {
     // Create arrow marker
     auto* arrowMarker = cssboxCreateMarker(renderer, "arrow", 10, 10, 5, 5, "auto");
     auto* arrowPath = cssboxCreateElement(renderer, "arrow_shape", "path");
-    arrowPath->inline_style["d"] = "M 0 0 L 10 5 L 0 10 Z";
-    arrowPath->inline_style["fill"] = "#27ae60";
+    cssboxSetInlineStyle(renderer, arrowPath, "d", "M 0 0 L 10 5 L 0 10 Z");
+    cssboxSetInlineStyle(renderer, arrowPath, "fill", "#27ae60");
     cssboxAppendChild(renderer, arrowMarker, arrowPath);
 
     // Create dot marker
     auto* dotMarker = cssboxCreateMarker(renderer, "dot_marker", 8, 8, 4, 4, "0");
     auto* markerCircle = cssboxCreateElement(renderer, "marker_dot_shape", "circle");
-    markerCircle->inline_style["cx"] = "4px";
-    markerCircle->inline_style["cy"] = "4px";
-    markerCircle->inline_style["r"] = "3px";
-    markerCircle->inline_style["fill"] = "#e74c3c";
-    markerCircle->inline_style["width"] = "8px";
-    markerCircle->inline_style["height"] = "8px";
+    cssboxSetInlineStyle(renderer, markerCircle, "cx", "4px");
+    cssboxSetInlineStyle(renderer, markerCircle, "cy", "4px");
+    cssboxSetInlineStyle(renderer, markerCircle, "r", "3px");
+    cssboxSetInlineStyle(renderer, markerCircle, "fill", "#e74c3c");
+    cssboxSetInlineStyle(renderer, markerCircle, "width", "8px");
+    cssboxSetInlineStyle(renderer, markerCircle, "height", "8px");
     cssboxAppendChild(renderer, dotMarker, markerCircle);
 
     // Path with markers
@@ -159,7 +159,7 @@ int main() {
     // Create clip path (star shape)
     auto* clipPath = cssboxCreateClipPath(renderer, "star_clip");
     auto* clipShape = cssboxCreateElement(renderer, "clip_star_shape", "path");
-    clipShape->inline_style["d"] = "M 750,620 L 765,665 L 812,665 L 775,692 L 790,738 L 750,710 L 710,738 L 725,692 L 688,665 L 735,665 Z";
+    cssboxSetInlineStyle(renderer, clipShape, "d", "M 750,620 L 765,665 L 812,665 L 775,692 L 790,738 L 750,710 L 710,738 L 725,692 L 688,665 L 735,665 Z");
     cssboxAppendChild(renderer, clipPath, clipShape);
 
     // Circle clipped by star

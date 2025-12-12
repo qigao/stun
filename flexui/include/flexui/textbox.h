@@ -2,7 +2,7 @@
 
 #include <flexui/widget.h>
 #include <nanovg.h>
-#include <SDL3/SDL.h>
+
 #include <functional>
 #include <string>
 

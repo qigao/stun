@@ -1,4 +1,6 @@
 ﻿#include <flexui/textbox.h>
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <flexui/screen.h>
 #include <flexui/utf8.h>
 #include <cssbox_internal.h>
@@ -23,20 +25,8 @@ void TextBox::setFocused(bool focused) {
             if (focused) {
                 screen_->setFocusedTextBox(this);
                 
-                // Set text input area for IME
-                auto* el = element();
-                SDL_Rect rect;
-                rect.x = static_cast<int>(el->layout.x);
-                rect.y = static_cast<int>(el->layout.y);
-                rect.w = static_cast<int>(el->layout.width);
-                rect.h = static_cast<int>(el->layout.height);
-                SDL_SetTextInputArea(screen_->window(), &rect, 0);
-                
-                // Start text input
-                SDL_StartTextInput(screen_->window());
             } else {
                 screen_->setFocusedTextBox(nullptr);
-                SDL_StopTextInput(screen_->window());
             }
         }
     }
@@ -178,7 +168,7 @@ bool TextBox::handleMouseDown(float mx, float my) {
     if (!focused_) return false;
     
     // Check for double-click (select all)
-    double currentTime = SDL_GetTicks() / 1000.0;
+    double currentTime = glfwGetTime();
     if (currentTime - last_click_time_ < 0.3) {
         // Double click - select all
         selection_start_ = 0;
@@ -328,15 +318,15 @@ void TextBox::handleKeyPress(int key, bool shift, bool ctrl) {
     if (!focused_) return;
 
     switch (key) {
-        case SDLK_LEFT:
+        case GLFW_KEY_LEFT:
             moveCursor(-1, shift);
             break;
             
-        case SDLK_RIGHT:
+        case GLFW_KEY_RIGHT:
             moveCursor(1, shift);
             break;
             
-        case SDLK_HOME:
+        case GLFW_KEY_HOME:
             if (!shift) clearSelection();
             else if (!has_selection_) {
                 selection_start_ = cursor_pos_;
@@ -346,7 +336,7 @@ void TextBox::handleKeyPress(int key, bool shift, bool ctrl) {
             if (shift && cursor_pos_ == selection_start_) clearSelection();
             break;
             
-        case SDLK_END:
+        case GLFW_KEY_END:
             if (!shift) clearSelection();
             else if (!has_selection_) {
                 selection_start_ = cursor_pos_;
@@ -356,7 +346,7 @@ void TextBox::handleKeyPress(int key, bool shift, bool ctrl) {
             if (shift && cursor_pos_ == selection_start_) clearSelection();
             break;
             
-        case SDLK_BACKSPACE:
+        case GLFW_KEY_BACKSPACE:
             if (has_selection_) {
                 deleteSelection();
             } else if (cursor_pos_ > 0) {
@@ -368,7 +358,7 @@ void TextBox::handleKeyPress(int key, bool shift, bool ctrl) {
             if (change_callback_) change_callback_(text_);
             break;
             
-        case SDLK_DELETE:
+        case GLFW_KEY_DELETE:
             if (has_selection_) {
                 deleteSelection();
             } else if (cursor_pos_ < charCount()) {
@@ -379,7 +369,7 @@ void TextBox::handleKeyPress(int key, bool shift, bool ctrl) {
             if (change_callback_) change_callback_(text_);
             break;
             
-        case SDLK_A:
+        case GLFW_KEY_A:
             if (ctrl) {
                 selection_start_ = 0;
                 cursor_pos_ = charCount();
@@ -387,28 +377,27 @@ void TextBox::handleKeyPress(int key, bool shift, bool ctrl) {
             }
             break;
             
-        case SDLK_C:
+        case GLFW_KEY_C:
             if (ctrl && has_selection_) {
                 std::string selected = getSelectedText();
-                SDL_SetClipboardText(selected.c_str());
+                glfwSetClipboardString(screen_->window(), selected.c_str());
             }
             break;
             
-        case SDLK_X:
+        case GLFW_KEY_X:
             if (ctrl && has_selection_) {
                 std::string selected = getSelectedText();
-                SDL_SetClipboardText(selected.c_str());
+                glfwSetClipboardString(screen_->window(), selected.c_str());
                 deleteSelection();
                 if (change_callback_) change_callback_(text_);
             }
             break;
             
-        case SDLK_V:
+        case GLFW_KEY_V:
             if (ctrl) {
-                char* clipboard = SDL_GetClipboardText();
+                const char* clipboard = glfwGetClipboardString(screen_->window());
                 if (clipboard) {
                     insertTextAtCursor(clipboard);
-                    SDL_free(clipboard);
                     if (change_callback_) change_callback_(text_);
                 }
             }

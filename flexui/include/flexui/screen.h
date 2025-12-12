@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include <SDL3/SDL.h>
+struct GLFWwindow;
 #include <nanovg.h>
 #include <cssbox.h>
 #include <string>
@@ -8,6 +8,11 @@
 #include <memory>
 #include <functional>
 #include <unordered_map>
+
+// Forward declaration for pugixml (avoids header dependency)
+namespace pugi {
+class xml_node;
+}
 
 namespace flexui {
 
@@ -82,12 +87,19 @@ public:
     
     NVGcontext* vg() { return vg_; }
     cssboxRenderer* renderer() { return renderer_; }
-    SDL_Window* window() { return window_; }
+    GLFWwindow* window() { return window_; }
     FontManager* fontManager() { return font_manager_.get(); }
 
+    // GLFW callback handlers (called from static callbacks)
+    void handleCursorPos(double xpos, double ypos);
+    void handleMouseButton(int button, int action, int mods);
+    void handleKey(int key, int scancode, int action, int mods);
+    void handleChar(unsigned int codepoint);
+    void handleScroll(double xoffset, double yoffset);
+    void handleWindowRefresh();
+
 private:
-    SDL_Window* window_ = nullptr;
-    SDL_GLContext gl_context_ = nullptr;
+    GLFWwindow* window_ = nullptr;
     NVGcontext* vg_ = nullptr;
     cssboxRenderer* renderer_ = nullptr;
 
@@ -104,10 +116,11 @@ private:
     bool spatial_index_dirty_ = true;  // Rebuild spatial index when true
     bool needs_redraw_ = true;  // Redraw screen when true (Retained Mode)
     int widget_counter_ = 0;
+    double last_mouse_x_ = 0, last_mouse_y_ = 0;  // Track mouse position for scroll events
 
-    // XML parsing helpers
-    Widget* parseXMLNode(void* node, Widget* parent);  // void* to avoid pugixml dependency in header
-    void applyXMLAttributes(Widget* widget, void* node);
+    // XML parsing helpers (pugi::xml_node forward declared above)
+    Widget* parseXMLNode(pugi::xml_node& node, Widget* parent);
+    void applyXMLAttributes(Widget* widget, pugi::xml_node& node);
 };
 
 } // namespace flexui

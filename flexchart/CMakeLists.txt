@@ -8,7 +8,7 @@ option(FLEXCHART_BUILD_EXAMPLES "Build FlexChart examples" ON)
 
 set(FLEXCHART_SOURCES
     src/flexchart.cpp
-    src/bindingsbindings.cpp
+    src/runtime.cpp
     src/render_line.cpp
     src/render_bar.cpp
     src/render_pie.cpp

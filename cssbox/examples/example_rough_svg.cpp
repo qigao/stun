@@ -1,13 +1,13 @@
-﻿/*
+/*
  * NanoVG CSS - Rough SVG Demo
  * 
  * Demonstrates hand-drawn style rendering via CSS/SVG API
  * Uses stroke-rendering: rough property
  */
 
-#include <SDL3/SDL.h>
 #define GLAD_GL_IMPLEMENTATION
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg.h>
 #include <nanovg_gl.h>
@@ -16,44 +16,36 @@
 #include <stdio.h>
 
 int main() {
-    // Initialize SDL
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        printf("SDL init failed: %s\n", SDL_GetError());
+    // Initialize GLFW
+    if (!glfwInit()) {
+        printf("GLFW init failed");
         return -1;
     }
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    // MSAA handled by GLFW_SAMPLES;
 
-    SDL_Window* window = SDL_CreateWindow("NanoVG CSS - Rough SVG Demo",
-        800, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Demo", nullptr, nullptr);
     if (!window) {
-        printf("Window creation failed: %s\n", SDL_GetError());
-        SDL_Quit();
+        printf("Window creation failed");
+        glfwTerminate();
         return -1;
     }
 
-    SDL_GLContext glContext = SDL_GL_CreateContext(window);
-    if (!glContext) {
-        printf("GL context creation failed: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return -1;
-    }
-
-    gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
-    SDL_GL_SetSwapInterval(1);
+    glfwMakeContextCurrent(window);
+    gladLoadGL();
+    glfwSwapInterval(1);
 
     // Create NanoVG context
     NVGcontext* vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
     if (!vg) {
         printf("Failed to create NanoVG context\n");
-        SDL_GL_DestroyContext(glContext);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+        
+        glfwDestroyWindow(window);
+        glfwTerminate();
         return -1;
     }
 
@@ -62,9 +54,9 @@ int main() {
     if (!renderer) {
         printf("Failed to create renderer\n");
         nvgDeleteGL3(vg);
-        SDL_GL_DestroyContext(glContext);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+        
+        glfwDestroyWindow(window);
+        glfwTerminate();
         return -1;
     }
 
@@ -121,28 +113,19 @@ int main() {
     printf("Circle 3: roughness=3.0, bowing=3.5, stroke-count=1\n");
 
     // Main loop
-    bool running = true;
-    while (running) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
-            } else if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-                       event.type == SDL_EVENT_WINDOW_RESTORED ||
-                       event.type == SDL_EVENT_WINDOW_SHOWN) {
-                cssboxInvalidatePaint(renderer);
-            }
-        }
+    
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
 
         int winWidth, winHeight;
-        SDL_GetWindowSize(window, &winWidth, &winHeight);
+        glfwGetWindowSize(window, &winWidth, &winHeight);
         int fbWidth, fbHeight;
-        SDL_GetWindowSizeInPixels(window, &fbWidth, &fbHeight);
+        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
 
         cssboxSetViewport(renderer, (float)winWidth, (float)winHeight);
 
         if (!cssboxNeedsPaint(renderer)) {
-            SDL_Delay(1);
+            glfwWaitEventsTimeout(0.001);
             continue;
         }
 
@@ -157,15 +140,15 @@ int main() {
         cssboxRender(renderer);
 
         nvgEndFrame(vg);
-        SDL_GL_SwapWindow(window);
+        glfwSwapBuffers(window);
     }
 
     // Cleanup
     cssboxDeleteRenderer(renderer);
     nvgDeleteGL3(vg);
-    SDL_GL_DestroyContext(glContext);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    
+    glfwDestroyWindow(window);
+    glfwTerminate();
     
     return 0;
 }

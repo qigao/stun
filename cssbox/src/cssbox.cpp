@@ -1,4 +1,4 @@
-﻿/*
+/*
  * NanoVG CSS - Main implementation
  */
 
@@ -6,6 +6,7 @@
 #define CSSBOX_MEMORY_PROFILE 1
 
 #include "cssbox_internal.h"
+#include "cssbox_conversion.h"
 #include "lexbor_css_parser.h"
 #include "cssbox_quadtree.h"
 #include "cssbox_svg_path.h"
@@ -61,16 +62,51 @@ static bool apply_transition_to_typed_style(
         return true;
     }
     if (property == "transform") {
-        // DISABLED: Causing SVG positioning issues - need to investigate
-        // For now, let Phase 3 handle animated transforms only
-        return false;
+        cssbox::Transform t = cssbox::convert::parse_transform(value);
+        logi("[TRANSFORM] Parsed '{}': functions.size()={}", value, t.functions.size());
+        if (!t.functions.empty()) {
+            for (size_t i = 0; i < t.functions.size(); ++i) {
+                const auto& fn = t.functions[i];
+                logi("[TRANSFORM]   fn[{}]: type={} values=[{}, {}]", i, static_cast<int>(fn.type), fn.values[0], fn.values[1]);
+            }
+        }
+        // Reset to identity first, then apply new transform
+        element->transform[0] = 1.0f; element->transform[1] = 0.0f;
+        element->transform[2] = 0.0f; element->transform[3] = 1.0f;
+        element->transform[4] = 0.0f; element->transform[5] = 0.0f;
+        logi("[TRANSFORM] After reset: [{}, {}, {}, {}, {}, {}]",
+             element->transform[0], element->transform[1],
+             element->transform[2], element->transform[3],
+             element->transform[4], element->transform[5]);
+        if (!t.empty()) {
+            t.compose_matrix(element->transform);
+            logi("[TRANSFORM] After compose_matrix: [{}, {}, {}, {}, {}, {}]",
+                 element->transform[0], element->transform[1],
+                 element->transform[2], element->transform[3],
+                 element->transform[4], element->transform[5]);
+        } else {
+            logi("[TRANSFORM] Empty transform for '{}' from value '{}'", element->id, value);
+        }
+        element->abs_transform_valid_ = false;
+        return true;
     }
     if (property == "box-shadow") {
-        // Parse and apply directly to element->box_shadows
+        // Parse and apply directly to typed style
         if (value.empty() || value == "none") {
-            element->box_shadows.clear();
+            element->style.box_shadows.clear();
         } else {
-            element->box_shadows = cssbox_utils::parse_box_shadow(value);
+            auto legacy_shadows = cssbox_utils::parse_box_shadow(value);
+            element->style.box_shadows.clear();
+            for (const auto& ls : legacy_shadows) {
+                cssbox::BoxShadow bs;
+                bs.offset_x = ls.offset_x;
+                bs.offset_y = ls.offset_y;
+                bs.blur_radius = ls.blur_radius;
+                bs.spread_radius = ls.spread_radius;
+                bs.color = ls.color;
+                bs.inset = ls.inset != 0;
+                element->style.box_shadows.push_back(bs);
+            }
         }
         return true;
     }
@@ -427,6 +463,7 @@ cssboxElement* cssboxCreateElement(cssboxRenderer* renderer,
 
     renderer->root_elements.push_back(ptr);
     renderer->layout_dirty = true;
+    renderer->style_dirty = true;  // New element needs style computation
     renderer->render_list_dirty_ = true;  // Retain mode: tree changed
 
     return ptr;
@@ -960,8 +997,13 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
 
     // === Retain Mode: Early exit if nothing to update ===
     // Skip entire traversal if no animations running and no style changes pending
-    if (renderer->animated_elements_.empty() && !renderer->style_dirty) {
-        return;
+    // NOTE: We also need to check transition_elements_ - elements with CSS transitions
+    // need to be processed at least once to capture baseline values before state changes
+    // logi("[UPDATE] cssboxUpdate called: animated_elements={} transition_elements={} style_dirty={}",
+    //      renderer->animated_elements_.size(), renderer->transition_elements_.size(), renderer->style_dirty);
+    if (renderer->animated_elements_.empty() && renderer->transition_elements_.empty() &&
+        !renderer->style_dirty && !renderer->layout_dirty) {
+         return;
     }
 
     // Helper function to get or create transition state
@@ -981,9 +1023,11 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         // 1. Has DIRTY_STYLE flag (style inputs changed)
         // 2. Has active transition (needs change detection)
         // 3. Has active animation (needs interpolation)
+        // 4. Has CSS animations that need to be started
         bool needs_style_update = (element->dirty_flags & cssbox::DIRTY_STYLE) != 0;
         bool has_active_transition = false;
         bool has_active_animation = false;
+        bool has_css_animations = !element->style.animations.empty();
 
         if (element->transition_state) {
             TransitionState* ts = static_cast<TransitionState*>(element->transition_state);
@@ -1005,7 +1049,13 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         }
 
         // Skip style computation for static elements
-        if (!needs_style_update && !has_active_transition && !has_active_animation) {
+        // CRITICAL: When renderer->style_dirty or layout_dirty is true, we MUST process all elements
+        // because element->style.animations hasnt been computed yet (happens in compute_style_typed)
+        // Also check transition_elements_ - elements with CSS transitions need baseline values captured
+        bool global_dirty = renderer->style_dirty || renderer->layout_dirty;
+        bool needs_baseline = renderer->transition_elements_.count(element->internal_id) > 0;
+        if (!global_dirty && !needs_style_update && !has_active_transition && !has_active_animation &&
+            !has_css_animations && !needs_baseline) {
             // Still recurse to children (they might need updates)
             for (int child_id : element->children_internal_ids) {
                 auto child_it = renderer->elements.find(child_id);
@@ -1053,10 +1103,18 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         // OPTIMIZATION: Only compute string-based style if element has transitions OR animations
         // This avoids double computation for static elements (majority of UI)
         bool has_css_transitions = !element->style.transitions.empty();
-        bool has_css_animations = !element->style.animations.empty();
+         has_css_animations = !element->style.animations.empty();
         bool has_transition_state = element->transition_state != nullptr;
         bool has_animation_state = element->animation_state != nullptr;
-        
+
+        // DEBUG: Log animation detection
+        // if (!element->style.animations.empty()) {
+        //     logi("[ANIM-DEBUG] Element '{}' has {} typed animations", element->id, element->style.animations.size());
+        //     for (const auto& anim : element->style.animations) {
+        //         logi("[ANIM-DEBUG]   - name='{}' duration={}s iterations={}", anim.name, anim.duration, anim.iteration_count);
+        //     }
+        // }
+
         // Skip only if element has no transitions AND no animations in CSS or runtime
         if (!has_css_transitions && !has_css_animations && !has_transition_state && !has_animation_state) {
             // Static element - skip expensive string-based style computation
@@ -1083,6 +1141,8 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         // Check for transition specification
         auto transition_it = computed_style.find("transition");
         if (transition_it != computed_style.end()) {
+            logi("[TRANS] Element '{}' has transition: '{}'", element->id, transition_it->second);
+            bool is_new_transition_state = (trans_state == nullptr);
             if (!trans_state) trans_state = get_transition_state(element);
 
             // Parse transition specification
@@ -1093,6 +1153,20 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                 trans_state->transition_property = prop;
                 trans_state->transition_duration = duration;
                 trans_state->transition_easing = easing;
+                logi("[TRANS]   Parsed: prop='{}' duration={}s", prop, duration);
+            }
+
+            // Initialize previous_values on first encounter (capture baseline)
+            // This ensures we have a baseline to compare against when state changes
+            if (is_new_transition_state && trans_state->previous_values.empty()) {
+                logi("[TRANS]   Initializing baseline values for element '{}'", element->id);
+                for (const auto& [property, value] : computed_style) {
+                    if (property == "transition") continue;
+                    trans_state->previous_values[property] = value;
+                    logi("[TRANS]   Baseline '{}' = '{}'", property, value);
+                }
+                // Baseline captured - remove from transition_elements_ tracking
+                renderer->transition_elements_.erase(element->internal_id);
             }
 
             // Check for property changes and start transitions
@@ -1122,8 +1196,14 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                         // Check if value changed
                         auto prev_it = trans_state->previous_values.find(property);
 
+                        logi("[TRANS]   Checking '{}': prev_exists={} current='{}' prev='{}'",
+                             property, prev_it != trans_state->previous_values.end(),
+                             value, prev_it != trans_state->previous_values.end() ? prev_it->second : "(none)");
+
                         if (prev_it != trans_state->previous_values.end() && prev_it->second != value) {
                             // Value changed - start transition
+                            logi("[TRANS]   *** VALUE CHANGED *** Starting transition '{}' -> '{}'",
+                                 prev_it->second, value);
                             Transition trans;
                             trans.property = property;
                             trans.start_time = renderer->current_time;
@@ -1161,9 +1241,17 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                 // Calculate progress
                 float elapsed = renderer->current_time - trans.start_time;
                 float t = elapsed / trans.duration;
+                logi("[TRANS]   Updating '{}': elapsed={} t={}", trans.property, elapsed, t);
 
                 if (t >= 1.0f) {
-                    // Transition complete
+                    // Transition complete - apply final value
+                    logi("[TRANS]   Transition complete for '{}' -> '{}'", trans.property, trans.end_value);
+
+                    // Apply the final value to typed style
+                    if (!apply_transition_to_typed_style(element, trans.property, trans.end_value)) {
+                        element->inline_style[trans.property] = trans.end_value;
+                    }
+
                     trans.active = false;
                     // Update previous_values to final value
                     trans_state->previous_values[trans.property] = trans.end_value;
@@ -1181,10 +1269,19 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                         trans.end_value,
                         eased_t
                     );
+                    logi("[TRANS]   Interpolated '{}' t={} -> '{}'", trans.property, eased_t, interpolated);
 
                     // Apply to typed style if supported, otherwise fallback to inline_style
                     if (!apply_transition_to_typed_style(element, trans.property, interpolated)) {
                         element->inline_style[trans.property] = interpolated;
+                    }
+                    // Debug: verify transform was actually applied
+                    if (trans.property == "transform") {
+                        logi("[TRANS]   Element '{}' transform after apply: [{}, {}, {}, {}, {}, {}]",
+                             element->id,
+                             element->transform[0], element->transform[1],
+                             element->transform[2], element->transform[3],
+                             element->transform[4], element->transform[5]);
                     }
                     ++it;
                 }
@@ -1205,21 +1302,33 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
 
         // Check for animation-name property
         auto anim_name_it = computed_style.find("animation-name");
+        logi("[ANIMATION] Element '{}' computed_style has animation-name='{}' (iterator valid={}, empty={})",
+             element->id,
+             anim_name_it != computed_style.end() ? anim_name_it->second : "(not found)",
+             anim_name_it != computed_style.end(),
+             anim_name_it != computed_style.end() ? anim_name_it->second.empty() : true);
         if (anim_name_it != computed_style.end() && !anim_name_it->second.empty()) {
+            logi("[ANIMATION] ENTERING animation block for element '{}'", element->id);
             AnimationState* anim_state = get_animation_state(element);
 
             // Check if we need to start a new animation
             bool animation_exists = false;
+            logi("[ANIMATION] Element '{}' checking running_animations (count={})", element->id, anim_state->running_animations.size());
             for (const auto& anim : anim_state->running_animations) {
+                logi("[ANIMATION]   - running anim: name='{}' active={} start_time={} duration={}",
+                     anim.animation_name, anim.active, anim.start_time, anim.duration);
                 if (anim.animation_name == anim_name_it->second) {
                     animation_exists = true;
+                    logi("[ANIMATION] Element '{}' already has animation '{}' (active={})", element->id, anim.animation_name, anim.active);
                     break;
                 }
             }
 
             // Start animation if it doesn't exist
             if (!animation_exists) {
+                logi("[ANIMATION] Element '{}' attempting to start animation '{}'", element->id, anim_name_it->second);
                 RunningAnimation new_anim = parse_animation_from_style(computed_style, renderer->current_time);
+                logi("[ANIMATION] parse_animation_from_style returned: active={} name='{}'", new_anim.active, new_anim.animation_name);
                 if (new_anim.active) {
                     logi("[ANIMATION] Starting animation '{}' on element id='{}' duration={}s iterations={}",
                          new_anim.animation_name, element->id, new_anim.duration, new_anim.iteration_count);
@@ -1235,7 +1344,9 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         if (element->animation_state) {
             AnimationState* anim_state = static_cast<AnimationState*>(element->animation_state);
 
+            // logi("[ANIM-UPDATE] Element '{}' updating {} running animations", element->id, anim_state->running_animations.size());
             for (auto& anim : anim_state->running_animations) {
+                // logi("[ANIM-UPDATE]   Processing anim '{}': active={}", anim.animation_name, anim.active);
                 if (!anim.active) {
                     // For fill-mode forwards/both, we still apply final properties
                     if (anim.fill_mode == "forwards" || anim.fill_mode == "both") {
@@ -1256,6 +1367,8 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
 
                 // Calculate elapsed time
                 float elapsed = renderer->current_time - anim.start_time - anim.delay;
+                logi("[ANIM-UPDATE]   elapsed={} (current_time={}, start_time={}, delay={})",
+                     elapsed, renderer->current_time, anim.start_time, anim.delay);
                 if (elapsed < 0) continue;  // Still in delay period
 
                 // Calculate position in animation [0, 1]
@@ -1264,6 +1377,7 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                 // Handle iteration
                 int iteration = (int)t;
                 float position = t - iteration;  // Fractional part
+                logi("[ANIM-UPDATE]   t={} iteration={} position={}", t, iteration, position);
 
                 // Check if animation finished
                 if (iteration >= anim.iteration_count && anim.iteration_count != -1) {
@@ -1292,11 +1406,14 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
                 // Get interpolated properties from keyframe animation
                 const KeyframeAnimation* kf_anim =
                     renderer->stylesheet->get_keyframe_animation(anim.animation_name);
+                logi("[ANIM-UPDATE]   Looking up keyframes for '{}': found={}", anim.animation_name, kf_anim != nullptr);
                 if (kf_anim) {
                     auto props = kf_anim->get_properties_at(eased_position);
+                    logi("[ANIM-UPDATE]   Got {} properties at position {}", props.size(), eased_position);
 
                     // Apply to typed style if supported, fallback to inline_style
                     for (const auto& [prop, value] : props) {
+                        logi("[ANIM-UPDATE]     Applying {}={}", prop, value);
                         if (!apply_transition_to_typed_style(element, prop, value)) {
                             element->inline_style[prop] = value;
                         }
@@ -1333,6 +1450,19 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
         }
 
 
+        // Debug: log final transform for element before processing children
+        if (element->transition_state) {
+            TransitionState* ts = static_cast<TransitionState*>(element->transition_state);
+            auto it = ts->active_transitions.find("transform");
+            if (it != ts->active_transitions.end() && it->second.active) {
+                logi("[TRANS]   Element '{}' FINAL transform before children: [{}, {}, {}, {}, {}, {}]",
+                     element->id,
+                     element->transform[0], element->transform[1],
+                     element->transform[2], element->transform[3],
+                     element->transform[4], element->transform[5]);
+            }
+        }
+
         // Recursively update children (avoid cssboxGetChildren to skip vector copy)
         for (int child_id : element->children_internal_ids) {
             auto child_it = renderer->elements.find(child_id);
@@ -1353,6 +1483,10 @@ void cssboxUpdate(cssboxRenderer* renderer, float delta_time) {
 
 // Helper: Check if element has active animations or transitions
 static bool element_has_active_animations(cssboxElement* element) {
+    // Check for CSS animations that need to be started
+    if (!element->style.animations.empty()) {
+        return true;
+    }
     if (element->transition_state) {
         TransitionState* ts = static_cast<TransitionState*>(element->transition_state);
         for (const auto& [prop, trans] : ts->active_transitions) {
@@ -1480,9 +1614,6 @@ void cssboxRender(cssboxRenderer* renderer) {
     NVGcontext* vg = renderer->painter->get_context();
 
     for (cssboxElement* element : renderer->render_list_) {
-        // Lazy compute absolute transform
-        ensure_abs_transform(renderer, element);
-
         // Check if element is inside a scroll container and apply scissor
         bool has_scissor = false;
         cssboxElement* parent = cssboxGetParent(renderer, element);
@@ -1499,14 +1630,23 @@ void cssboxRender(cssboxRenderer* renderer) {
             parent = cssboxGetParent(renderer, parent);
         }
 
-        // Use cached transform directly
+        // For animated elements, use local transform directly (painter handles transform-origin)
+        // For static elements, use cached absolute transform for performance
+        bool is_animated = renderer->animated_elements_.count(element->internal_id) > 0;
         float original_transform[6];
-        memcpy(original_transform, element->transform, sizeof(float) * 6);
-        memcpy(element->transform, element->cached_abs_transform_, sizeof(float) * 6);
+
+        if (!is_animated) {
+            // Lazy compute absolute transform for static elements
+            ensure_abs_transform(renderer, element);
+            memcpy(original_transform, element->transform, sizeof(float) * 6);
+            memcpy(element->transform, element->cached_abs_transform_, sizeof(float) * 6);
+        }
 
         renderer->painter->paint_element(element);
 
-        memcpy(element->transform, original_transform, sizeof(float) * 6);
+        if (!is_animated) {
+            memcpy(element->transform, original_transform, sizeof(float) * 6);
+        }
 
         if (has_scissor) {
             nvgRestore(vg);
@@ -1601,15 +1741,22 @@ void cssboxComputeLayout(cssboxRenderer* renderer) {
     // If viewport changed, styles must be recomputed (media queries may now match differently)
     if (viewport_changed) {
         renderer->style_dirty = true;
+        // Mark ALL elements dirty - media queries affect every element's style
+        for (auto& [id, element] : renderer->elements) {
+            element->dirty_flags |= cssbox::DIRTY_STYLE;
+        }
     }
 
     // Ensure styles are up-to-date before layout
+    logi("[LAYOUT] style_dirty={}, will update styles", renderer->style_dirty);
     if (renderer->style_dirty) {
         std::function<void(cssboxElement*)> update_style = [&](cssboxElement* element) {
             if (!element->visible) return;
 
             // OPTIMIZATION: Only recompute style for elements with DIRTY_STYLE flag
             bool needs_style_update = (element->dirty_flags & cssbox::DIRTY_STYLE) != 0;
+            logi("[LAYOUT] Element '{}' needs_style_update={} dirty_flags={}",
+                 element->id, needs_style_update, static_cast<int>(element->dirty_flags));
             if (!needs_style_update) {
                 // Still need to traverse children
                 for (int child_id : element->children_internal_ids) {
@@ -1634,21 +1781,24 @@ void cssboxComputeLayout(cssboxRenderer* renderer) {
                 element->total_siblings
             );
 
-            // Copy box-shadows from typed style to element (convert cssbox::BoxShadow to BoxShadow)
-            element->box_shadows.clear();
-            for (const auto& shadow : element->style.box_shadows) {
-                BoxShadow bs;
-                bs.offset_x = shadow.offset_x;
-                bs.offset_y = shadow.offset_y;
-                bs.blur_radius = shadow.blur_radius;
-                bs.spread_radius = shadow.spread_radius;
-                bs.color = {shadow.color.r, shadow.color.g, shadow.color.b, shadow.color.a};
-                bs.inset = shadow.inset;
-                element->box_shadows.push_back(bs);
-            }
-
             // Clear DIRTY_STYLE flag after computing
             element->dirty_flags &= ~cssbox::DIRTY_STYLE;
+
+            // Track elements with CSS animations for cssboxUpdate
+            logi("[LAYOUT] Element '{}' style computed, animations.size()={} transitions.size()={}",
+                 element->id, element->style.animations.size(), element->style.transitions.size());
+            if (!element->style.animations.empty()) {
+                renderer->animated_elements_.insert(element->internal_id);
+                logi("[LAYOUT] Element '{}' added to animated_elements_ (now size={})",
+                     element->id, renderer->animated_elements_.size());
+            }
+
+            // Track elements with CSS transitions - need baseline values captured
+            if (!element->style.transitions.empty() && !element->transition_state) {
+                renderer->transition_elements_.insert(element->internal_id);
+                logi("[LAYOUT] Element '{}' added to transition_elements_ (now size={})",
+                     element->id, renderer->transition_elements_.size());
+            }
 
             // Recursively update children (avoid cssboxGetChildren to skip vector copy)
             for (int child_id : element->children_internal_ids) {

@@ -798,6 +798,9 @@ inline std::optional<TransformFunction> parse_transform_function(std::string_vie
 
     // Check if this is an angle-based function
     bool is_angle_func = (func_type == CSS_TRANSFORM_ROTATE ||
+                          func_type == CSS_TRANSFORM_ROTATEX ||
+                          func_type == CSS_TRANSFORM_ROTATEY ||
+                          func_type == CSS_TRANSFORM_ROTATEZ ||
                           func_type == CSS_TRANSFORM_SKEW ||
                           func_type == CSS_TRANSFORM_SKEWX ||
                           func_type == CSS_TRANSFORM_SKEWY);
@@ -847,6 +850,9 @@ inline std::optional<TransformFunction> parse_transform_function(std::string_vie
         case CSS_TRANSFORM_TRANSLATEY:
             return TransformFunction::translateY(values.size() > 0 ? values[0] : 0.0f);
         case CSS_TRANSFORM_ROTATE:
+        case CSS_TRANSFORM_ROTATEX:
+        case CSS_TRANSFORM_ROTATEY:
+        case CSS_TRANSFORM_ROTATEZ:
             return TransformFunction::rotate(values.size() > 0 ? values[0] : 0.0f);
         case CSS_TRANSFORM_SCALE: {
             float sx = values.size() > 0 ? values[0] : 1.0f;

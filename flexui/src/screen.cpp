@@ -1,4 +1,4 @@
-﻿#include <flexui/screen.h>
+#include <flexui/screen.h>
 #include <flexui/widget.h>
 #include <flexui/textbox.h>
 #include <flexui/radiobutton.h>
@@ -7,6 +7,7 @@
 #include <flexui/jsengine.h>
 #include <flexui/font_manager.h>
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg_gl.h>
@@ -18,29 +19,75 @@
 #include "widget_factory.h"
 #include "xml_utils.h"
 #include "spatial_index.h"
-#include <SDL3/SDL.h>
 #include <fstream>
 #include <sstream>
 namespace flexui {
+
+// Static GLFW callback functions that forward to Screen instance
+static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
+    auto* screen = static_cast<Screen*>(glfwGetWindowUserPointer(window));
+    if (screen) screen->handleCursorPos(xpos, ypos);
+}
+
+static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+    auto* screen = static_cast<Screen*>(glfwGetWindowUserPointer(window));
+    if (screen) screen->handleMouseButton(button, action, mods);
+}
+
+static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    auto* screen = static_cast<Screen*>(glfwGetWindowUserPointer(window));
+    if (screen) screen->handleKey(key, scancode, action, mods);
+}
+
+static void charCallback(GLFWwindow* window, unsigned int codepoint) {
+    auto* screen = static_cast<Screen*>(glfwGetWindowUserPointer(window));
+    if (screen) screen->handleChar(codepoint);
+}
+
+static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+    auto* screen = static_cast<Screen*>(glfwGetWindowUserPointer(window));
+    if (screen) screen->handleScroll(xoffset, yoffset);
+}
+
+static void windowRefreshCallback(GLFWwindow* window) {
+    auto* screen = static_cast<Screen*>(glfwGetWindowUserPointer(window));
+    if (screen) screen->handleWindowRefresh();
+}
+
 
 Screen::Screen(int width, int height, const std::string& title)
     : width_(width), height_(height),
       spatial_index_(std::make_unique<SpatialIndex>((float)width, (float)height)) {
     
-    SDL_Init(SDL_INIT_VIDEO);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    if (!glfwInit()) {
+        loge("Failed to initialize GLFW");
+        return;
+    }
 
-    window_ = SDL_CreateWindow(title.c_str(), width, height,
-                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    gl_context_ = SDL_GL_CreateContext(window_);
-    SDL_GL_MakeCurrent(window_, gl_context_);
-    SDL_GL_SetSwapInterval(1);
-    
-    // Start text input globally for IME support
-    SDL_StartTextInput(window_);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+    window_ = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    if (!window_) {
+        loge("Failed to create GLFW window");
+        glfwTerminate();
+        return;
+    }
+
+    glfwMakeContextCurrent(window_);
+    glfwSwapInterval(1);
+
+    // Set up callbacks
+    glfwSetWindowUserPointer(window_, this);
+    glfwSetCursorPosCallback(window_, cursorPosCallback);
+    glfwSetMouseButtonCallback(window_, mouseButtonCallback);
+    glfwSetKeyCallback(window_, keyCallback);
+    glfwSetCharCallback(window_, charCallback);
+    glfwSetScrollCallback(window_, scrollCallback);
+    glfwSetWindowRefreshCallback(window_, windowRefreshCallback);
 
     gladLoadGL();
     vg_ = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
@@ -61,9 +108,8 @@ Screen::~Screen() {
     widgets_.clear();
     if (renderer_) cssboxDeleteRenderer(renderer_);
     if (vg_) nvgDeleteGL3(vg_);
-    if (gl_context_) SDL_GL_DestroyContext(gl_context_);
-    if (window_) SDL_DestroyWindow(window_);
-    SDL_Quit();
+    if (window_) glfwDestroyWindow(window_);
+    glfwTerminate();
 }
 
 bool Screen::loadCSS(const std::string& css) {
@@ -241,139 +287,163 @@ static void getAccumulatedScrollOffset(cssboxRenderer* renderer, cssboxElement* 
     }
 }
 
-bool Screen::pollEvents() {
-    SDL_Event event;
+// GLFW callback handler implementations
+void Screen::handleCursorPos(double xpos, double ypos) {
+    float mx = (float)xpos;
+    float my = (float)ypos;
+    last_mouse_x_ = xpos;
+    last_mouse_y_ = ypos;
 
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_EVENT_QUIT) {
-            return false;
-        }
-
-        // Handle window events (expose, restore, show) - mark for redraw
-        if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-            event.type == SDL_EVENT_WINDOW_RESTORED ||
-            event.type == SDL_EVENT_WINDOW_SHOWN) {
-            needs_redraw_ = true;  // Window visibility changed, force redraw
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            float mx = (float)event.motion.x;
-            float my = (float)event.motion.y;
-
-            // First, check open dropdowns for hover on popup items
-            for (auto& widget : widgets_) {
-                if (auto* dropdown = dynamic_cast<Dropdown*>(widget.get())) {
-                    if (dropdown->isOpen()) {
-                        dropdown->handleMouseMove(mx, my);
-                    }
-                }
-            }
-
-            auto candidates = spatial_index_->query(mx, my);
-            for (auto* widget : candidates) {
-                widget->handleHover(mx, my);
-                if (widget->handleMouseMove(mx, my)) {
-                    spatial_index_dirty_ = true;
-                    needs_redraw_ = true;
-                }
-            }
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-            float mx = (float)event.button.x;
-            float my = (float)event.button.y;
-
-            // Blur focused textbox if clicking outside of it
-            if (focused_textbox_) {
-                auto* el = focused_textbox_->element();
-                // Calculate visual position with scroll offset
-                float scroll_x, scroll_y;
-                getAccumulatedScrollOffset(renderer_, el, scroll_x, scroll_y);
-                float visual_x = el->layout.x - scroll_x;
-                float visual_y = el->layout.y - scroll_y;
-
-                bool inside = mx >= visual_x &&
-                              mx <= visual_x + el->layout.width &&
-                              my >= visual_y &&
-                              my <= visual_y + el->layout.height;
-                if (!inside) {
-                    focused_textbox_->blur();
-                }
-            }
-
-            // First, check all dropdown widgets for popup clicks (dropdowns need
-            // to receive clicks outside their main bounds when open)
-            bool handled_by_dropdown = false;
-            for (auto& widget : widgets_) {
-                if (auto* dropdown = dynamic_cast<Dropdown*>(widget.get())) {
-                    if (dropdown->isOpen() && dropdown->handleMouseDown(mx, my)) {
-                        handled_by_dropdown = true;
-                        break;
-                    }
-                }
-            }
-
-            // Then check spatial index candidates for regular clicks
-            if (!handled_by_dropdown) {
-                auto candidates = spatial_index_->query(mx, my);
-                for (auto* widget : candidates) {
-                    widget->handleClick(mx, my);
-                    widget->handleMouseDown(mx, my);
-                }
-            }
-            needs_redraw_ = true;  // Mouse click may change UI state
-        }
-
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-            float mx = (float)event.button.x;
-            float my = (float)event.button.y;
-            auto candidates = spatial_index_->query(mx, my);
-            for (auto* widget : candidates) {
-                cssboxSetPseudoStateEx(renderer_, widget->element(), "active", 0);
-                widget->handleMouseUp(mx, my);
-            }
-            needs_redraw_ = true;  // Mouse release may change UI state
-        }
-
-        // Handle text input for focused textbox (support both old and new SDL3 event values)
-        if (event.type == SDL_EVENT_TEXT_INPUT || event.type == 0x203) {
-            if (focused_textbox_) {
-                focused_textbox_->handleTextInput(event.text.text);
-                needs_redraw_ = true;  // Text input changes UI
-            }
-        }
-
-        // Handle key presses for focused textbox (support both old and new SDL3 event values)
-        if ((event.type == SDL_EVENT_KEY_DOWN || event.type == 0x20d) && focused_textbox_) {
-            bool shift = (event.key.mod & SDL_KMOD_SHIFT) != 0;
-            bool ctrl = (event.key.mod & SDL_KMOD_CTRL) != 0;
-            focused_textbox_->handleKeyPress(event.key.key, shift, ctrl);
-            needs_redraw_ = true;  // Key press changes UI
-        }
-
-        // Handle mouse wheel scrolling
-        if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-            float mx, my;
-            SDL_GetMouseState(&mx, &my);
-            float deltaX = event.wheel.x * 30.0f;  // Scale for smoother scrolling
-            float deltaY = event.wheel.y * 30.0f;
-            auto candidates = spatial_index_->query(mx, my);
-            for (auto* widget : candidates) {
-                if (widget->handleScroll(mx, my, deltaX, deltaY)) {
-                    spatial_index_dirty_ = true;  // Scroll changed, rebuild index
-                    needs_redraw_ = true;  // Scroll changes UI
-                    break;  // Stop if a widget consumed the scroll
-                }
+    for (auto& widget : widgets_) {
+        if (auto* dropdown = dynamic_cast<Dropdown*>(widget.get())) {
+            if (dropdown->isOpen()) {
+                dropdown->handleMouseMove(mx, my);
             }
         }
     }
+
+    auto candidates = spatial_index_->query(mx, my);
+    for (auto* widget : candidates) {
+        widget->handleHover(mx, my);
+        if (widget->handleMouseMove(mx, my)) {
+            spatial_index_dirty_ = true;
+            needs_redraw_ = true;
+        }
+    }
+}
+
+void Screen::handleMouseButton(int button, int action, int mods) {
+    float mx = (float)last_mouse_x_;
+    float my = (float)last_mouse_y_;
+
+    if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (focused_textbox_) {
+            auto* el = focused_textbox_->element();
+            float scroll_x, scroll_y;
+            getAccumulatedScrollOffset(renderer_, el, scroll_x, scroll_y);
+            float visual_x = el->layout.x - scroll_x;
+            float visual_y = el->layout.y - scroll_y;
+
+            bool inside = mx >= visual_x &&
+                          mx <= visual_x + el->layout.width &&
+                          my >= visual_y &&
+                          my <= visual_y + el->layout.height;
+            if (!inside) {
+                focused_textbox_->blur();
+            }
+        }
+
+        bool handled_by_dropdown = false;
+        for (auto& widget : widgets_) {
+            if (auto* dropdown = dynamic_cast<Dropdown*>(widget.get())) {
+                if (dropdown->isOpen() && dropdown->handleMouseDown(mx, my)) {
+                    handled_by_dropdown = true;
+                    break;
+                }
+            }
+        }
+
+        if (!handled_by_dropdown) {
+            auto candidates = spatial_index_->query(mx, my);
+            // Reverse order: children (more specific) should be processed before parents
+            std::reverse(candidates.begin(), candidates.end());
+            for (auto* widget : candidates) {
+                auto* el = widget->element();
+                // Verify click is actually within widget bounds
+                float wx = el->layout.x;
+                float wy = el->layout.y;
+                float ww = el->layout.width;
+                float wh = el->layout.height;
+                if (mx < wx || mx > wx + ww || my < wy || my > wy + wh) {
+                    continue;
+                }
+                if (widget->handleClick(mx, my)) {
+                    // Click was handled, stop propagation
+                    widget->handleMouseDown(mx, my);
+                    break;
+                }
+                widget->handleMouseDown(mx, my);
+            }
+        }
+        needs_redraw_ = true;
+    }
+
+    if (action == GLFW_RELEASE && button == GLFW_MOUSE_BUTTON_LEFT) {
+        auto candidates = spatial_index_->query(mx, my);
+        for (auto* widget : candidates) {
+            cssboxSetPseudoStateEx(renderer_, widget->element(), "active", 0);
+            widget->handleMouseUp(mx, my);
+        }
+        needs_redraw_ = true;
+    }
+}
+
+void Screen::handleKey(int key, int scancode, int action, int mods) {
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        if (focused_textbox_) {
+            bool shift = (mods & GLFW_MOD_SHIFT) != 0;
+            bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;
+            focused_textbox_->handleKeyPress(key, shift, ctrl);
+            needs_redraw_ = true;
+        }
+    }
+}
+
+void Screen::handleChar(unsigned int codepoint) {
+    if (focused_textbox_) {
+        char utf8[5] = {0};
+        if (codepoint < 0x80) {
+            utf8[0] = (char)codepoint;
+        } else if (codepoint < 0x800) {
+            utf8[0] = (char)(0xC0 | (codepoint >> 6));
+            utf8[1] = (char)(0x80 | (codepoint & 0x3F));
+        } else if (codepoint < 0x10000) {
+            utf8[0] = (char)(0xE0 | (codepoint >> 12));
+            utf8[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+            utf8[2] = (char)(0x80 | (codepoint & 0x3F));
+        } else {
+            utf8[0] = (char)(0xF0 | (codepoint >> 18));
+            utf8[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+            utf8[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+            utf8[3] = (char)(0x80 | (codepoint & 0x3F));
+        }
+        focused_textbox_->handleTextInput(utf8);
+        needs_redraw_ = true;
+    }
+}
+
+void Screen::handleScroll(double xoffset, double yoffset) {
+    float mx = (float)last_mouse_x_;
+    float my = (float)last_mouse_y_;
+    float deltaX = (float)xoffset * 30.0f;
+    float deltaY = (float)yoffset * 30.0f;
+
+    auto candidates = spatial_index_->query(mx, my);
+    for (auto* widget : candidates) {
+        if (widget->handleScroll(mx, my, deltaX, deltaY)) {
+            spatial_index_dirty_ = true;
+            needs_redraw_ = true;
+            break;
+        }
+    }
+}
+
+void Screen::handleWindowRefresh() {
+    needs_redraw_ = true;
+}
+
+bool Screen::pollEvents() {
+    if (glfwWindowShouldClose(window_)) {
+        return false;
+    }
+    glfwPollEvents();
     return true;
 }
 
 void Screen::draw() {
     int win_w, win_h, fb_w, fb_h;
-    SDL_GetWindowSize(window_, &win_w, &win_h);
-    SDL_GetWindowSizeInPixels(window_, &fb_w, &fb_h);
+    glfwGetWindowSize(window_, &win_w, &win_h);
+    glfwGetFramebufferSize(window_, &fb_w, &fb_h);
     float pixel_ratio = (float)fb_w / (float)win_w;
 
     // Check if window size changed
@@ -388,12 +458,21 @@ void Screen::draw() {
     // Update viewport (marks dirty if size changed)
     cssboxSetViewport(renderer_, (float)win_w, (float)win_h);
 
-    // Check if UI state changed (widgets modified styles/layout)
+    // Update animations FIRST (before needs_paint check)
+    // This fills animated_elements_ so cssboxNeedsPaint() can detect active animations
+    static double last_time = glfwGetTime();
+    double current_time = glfwGetTime();
+    float delta_time = (float)(current_time - last_time);
+    last_time = current_time;
+
+    // Mark spatial index dirty if layout changed (BEFORE cssboxUpdate clears flags)
     if (renderer_->layout_dirty || renderer_->style_dirty) {
-        needs_redraw_ = true;
+        spatial_index_dirty_ = true;
     }
 
-    // Retained Mode: Skip redraw if nothing changed (use cssbox API)
+    cssboxUpdate(renderer_, delta_time);
+
+    // NOW check if paint needed (after cssboxUpdate filled animated_elements_)
     if (!cssboxNeedsPaint(renderer_)) {
         return;
     }
@@ -407,18 +486,6 @@ void Screen::draw() {
 
     nvgBeginFrame(vg_, win_w, win_h, pixel_ratio);
 
-    // Update animations/transitions and layout (replaces manual cssboxComputeLayout)
-    static Uint64 last_time = SDL_GetTicks();
-    Uint64 current_time = SDL_GetTicks();
-    float delta_time = (current_time - last_time) / 1000.0f;
-    last_time = current_time;
-
-    // Mark spatial index dirty if layout changed (BEFORE cssboxUpdate clears flags)
-    if (renderer_->layout_dirty || renderer_->style_dirty) {
-        spatial_index_dirty_ = true;
-    }
-
-    cssboxUpdate(renderer_, delta_time);
     cssboxRender(renderer_);
 
     // Rebuild spatial index only when dirty
@@ -537,7 +604,7 @@ void Screen::draw() {
         js_engine_->processPendingTimers();
     }
 
-    SDL_GL_SwapWindow(window_);
+    glfwSwapBuffers(window_);
     
     // Reset dirty flag after successful redraw
     needs_redraw_ = false;
@@ -554,7 +621,7 @@ bool Screen::loadXML(const std::string& xml) {
 
     // Parse all root nodes
     for (pugi::xml_node node : doc.children()) {
-        parseXMLNode(&node, nullptr);
+        parseXMLNode(node, nullptr);
     }
 
     // Resolve gradient references after all elements are created
@@ -568,9 +635,7 @@ bool Screen::loadXML(const std::string& xml) {
     return true;
 }
 
-Widget* Screen::parseXMLNode(void* node_ptr, Widget* parent) {
-    pugi::xml_node& node = *static_cast<pugi::xml_node*>(node_ptr);
-
+Widget* Screen::parseXMLNode(pugi::xml_node& node, Widget* parent) {
     std::string tag = node.name();
     std::string id = node.attribute("id").as_string();
 
@@ -592,7 +657,7 @@ Widget* Screen::parseXMLNode(void* node_ptr, Widget* parent) {
         widget_map_[id] = widget;
     }
 
-    applyXMLAttributes(widget, &node);
+    applyXMLAttributes(widget, node);
 
     if (parent) {
         parent->addChild(widget);
@@ -600,15 +665,14 @@ Widget* Screen::parseXMLNode(void* node_ptr, Widget* parent) {
 
     for (pugi::xml_node child : node.children()) {
         if (child.type() == pugi::node_element) {
-            parseXMLNode(&child, widget);
+            parseXMLNode(child, widget);
         }
     }
 
     return widget;
 }
 
-void Screen::applyXMLAttributes(Widget* widget, void* node_ptr) {
-    pugi::xml_node& node = *static_cast<pugi::xml_node*>(node_ptr);
+void Screen::applyXMLAttributes(Widget* widget, pugi::xml_node& node) {
 
     // Apply class attribute
     if (auto attr = node.attribute("class")) {

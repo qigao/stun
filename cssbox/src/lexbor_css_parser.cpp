@@ -1109,14 +1109,14 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
     clear_cache();
 
     // DEBUG: Log CSS content to verify @keyframes are present
-    logi("[CSS PARSE] Starting parse_css, CSS length: {}", css.length());
+    // logi("[CSS PARSE] Starting parse_css, CSS length: {}", css.length());
     if (css.find("@keyframes") != std::string::npos) {
-        logi("[CSS PARSE] ✓ CSS contains '@keyframes' keyword");
+        // logi("[CSS PARSE] ✓ CSS contains '@keyframes' keyword");
         size_t kf_pos = css.find("@keyframes");
-        logi("[CSS PARSE]   First @keyframes at position {}", kf_pos);
-        logi("[CSS PARSE]   Context: '{}'", css.substr(kf_pos, std::min(size_t(80), css.length() - kf_pos)));
+        // logi("[CSS PARSE]   First @keyframes at position {}", kf_pos);
+        // logi("[CSS PARSE]   Context: '{}'", css.substr(kf_pos, std::min(size_t(80), css.length() - kf_pos)));
     } else {
-        logw("[CSS PARSE] ✗ CSS does NOT contain '@keyframes' keyword");
+        // logw("[CSS PARSE] ✗ CSS does NOT contain '@keyframes' keyword");
     }
 
     // Parse with Lexbor (for validation and internal structures)
@@ -1141,7 +1141,7 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
             std::string preview = css.substr(pos, std::min(size_t(40), css.size() - pos));
             // Replace newlines with spaces for cleaner log
             std::replace(preview.begin(), preview.end(), '\n', ' ');
-            logi("[CSS PARSE] Loop #{}, pos={}, next: '{}'", loop_iteration, pos, preview);
+            // logi("[CSS PARSE] Loop #{}, pos={}, next: '{}'", loop_iteration, pos, preview);
         }
 
         // Skip comments /* ... */
@@ -1349,16 +1349,16 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
             if (next_10[0] == '@') {
                 logi("[CSS PARSE] Found @ at pos={}, next 15 chars: '{}'", pos, css.substr(pos, 15));
                 if (next_10 == "@keyframes") {
-                    logi("[CSS PARSE] ✓ Matched @keyframes!");
+                    // logi("[CSS PARSE] ✓ Matched @keyframes!");
                 } else {
-                    logi("[CSS PARSE] ✗ @ found but not @keyframes, got: '{}'", next_10);
+                    // logi("[CSS PARSE] ✗ @ found but not @keyframes, got: '{}'", next_10);
                 }
             }
         }
 
         // Check for @keyframes rules
         if (css.substr(pos, 10) == "@keyframes") {
-            logi("[CSS PARSE] >>> Entering @keyframes parsing block");
+            // logi("[CSS PARSE] >>> Entering @keyframes parsing block");
             pos += 10;  // Skip "@keyframes"
 
             // Skip whitespace
@@ -1398,10 +1398,10 @@ bool EnhancedStyleSheet::parse_css(const std::string& css) {
 
             // Parse and add keyframe animation
             if (!anim_name.empty()) {
-                logi("[CSS PARSE] Found @keyframes rule: name='{}' block_size={}", anim_name, keyframes_block.size());
+                // logi("[CSS PARSE] Found @keyframes rule: name='{}' block_size={}", anim_name, keyframes_block.size());
                 ::KeyframeAnimation kf_anim = ::parse_keyframes_rule(keyframes_block, anim_name);
                 add_keyframe_animation(kf_anim);
-                logi("[CSS PARSE] Added keyframe animation '{}' with {} keyframes", anim_name, kf_anim.keyframes.size());
+                // logi("[CSS PARSE] Added keyframe animation '{}' with {} keyframes", anim_name, kf_anim.keyframes.size());
             }
 
             continue;  // Continue to next rule
@@ -2795,6 +2795,20 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         }
     }
 
+    // === Text Shadow ===
+    std::string text_shadow_str = get("text-shadow");
+    if (!text_shadow_str.empty() && text_shadow_str != "none") {
+        auto parsed = cssbox_utils::parse_text_shadow(text_shadow_str);
+        for (const auto& s : parsed) {
+            cssbox::TextShadow ts;
+            ts.offset_x = s.offset_x;
+            ts.offset_y = s.offset_y;
+            ts.blur_radius = s.blur_radius;
+            ts.color = {s.color.r, s.color.g, s.color.b, s.color.a};
+            result.text_shadows.push_back(ts);
+        }
+    }
+
     // === SVG Stroke Properties (Rough Rendering) ===
     std::string stroke_rendering_str = get("stroke-rendering");
     if (!stroke_rendering_str.empty()) {
@@ -2880,8 +2894,11 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
 
     // === Animation Properties ===
     std::string animation_str = get("animation");
+    logi("[ANIM-PARSE] Element id='{}' checking animation: get('animation')='{}', get('animation-name')='{}'",
+         shape_id, animation_str, get("animation-name"));
     if (!animation_str.empty() && animation_str != "none") {
         result.animations = cssbox::convert::parse_animations(animation_str);
+        logi("[ANIM-PARSE] Parsed {} animations from shorthand", result.animations.size());
     } else {
         // Try individual properties
         std::string animation_name_str = get("animation-name");
@@ -2894,6 +2911,8 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
         std::string animation_play_str = get("animation-play-state");
 
         if (!animation_name_str.empty() && animation_name_str != "none") {
+            logi("[ANIM-PARSE] Creating Animation object: name='{}' duration='{}' iterations='{}'",
+                 animation_name_str, animation_duration_str, animation_iteration_str);
             cssbox::Animation anim;
             anim.name = animation_name_str;
 
@@ -2920,6 +2939,7 @@ cssbox::ComputedStyle EnhancedStyleSheet::compute_style_typed(
             }
 
             result.animations.push_back(anim);
+            logi("[ANIM-PARSE] Animation added, result.animations.size()={}", result.animations.size());
         }
     }
 

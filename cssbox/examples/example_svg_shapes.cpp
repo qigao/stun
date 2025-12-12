@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Example: SVG Shapes with Stroke Styles
  * 
  * Demonstrates:
@@ -8,9 +8,9 @@
  * - Filled and stroked shapes
  */
 
-#include <SDL3/SDL.h>
 #define GLAD_GL_IMPLEMENTATION
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg.h>
 #include <nanovg_gl.h>
@@ -18,22 +18,22 @@
 #include <iostream>
 #include <cssbox_internal.h>
 int main() {
-    SDL_Init(SDL_INIT_VIDEO);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
-    SDL_Window* window = SDL_CreateWindow("SVG Shapes Example", 800, 600, SDL_WINDOW_OPENGL);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Demo", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create window\n";
-        SDL_Quit();
+        glfwTerminate();
         return -1;
     }
 
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    SDL_GL_MakeCurrent(window, gl_context);
-    SDL_GL_SetSwapInterval(1);
+    glfwMakeContextCurrent(window);
+    
+    glfwSwapInterval(1);
 
     gladLoadGL();
     NVGcontext* vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
@@ -108,30 +108,18 @@ int main() {
     std::cout << "- Brown: Dotted rectangle\n";
     std::cout << "Press ESC or close window to exit\n";
 
-    bool running = true;
-    SDL_Event event;
-
-    while (running) {
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT ||
-                (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)) {
-                running = false;
-            } else if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-                       event.type == SDL_EVENT_WINDOW_RESTORED ||
-                       event.type == SDL_EVENT_WINDOW_SHOWN) {
-                cssboxInvalidatePaint(renderer);
-            }
-        }
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
 
         int win_w, win_h, fb_w, fb_h;
-        SDL_GetWindowSize(window, &win_w, &win_h);
-        SDL_GetWindowSizeInPixels(window, &fb_w, &fb_h);
+        glfwGetWindowSize(window, &win_w, &win_h);
+        glfwGetFramebufferSize(window, &fb_w, &fb_h);
         float pixel_ratio = (float)fb_w / (float)win_w;
 
         cssboxSetViewport(renderer, (float)win_w, (float)win_h);
 
         if (!cssboxNeedsPaint(renderer)) {
-            SDL_Delay(1);
+            glfwWaitEventsTimeout(0.001);
             continue;
         }
 
@@ -143,13 +131,13 @@ int main() {
         cssboxRender(renderer);
         nvgEndFrame(vg);
 
-        SDL_GL_SwapWindow(window);
+        glfwSwapBuffers(window);
     }
 
     cssboxDeleteRenderer(renderer);
     nvgDeleteGL3(vg);
-    SDL_GL_DestroyContext(gl_context);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    
+    glfwDestroyWindow(window);
+    glfwTerminate();
     return 0;
 }

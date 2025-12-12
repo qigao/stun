@@ -200,6 +200,19 @@ struct BoxShadow {
 };
 
 // ============================================================================
+// CSS Text Shadow
+// ============================================================================
+
+struct TextShadow {
+    float offset_x;
+    float offset_y;
+    float blur_radius;
+    Color color;
+
+    TextShadow() : offset_x(0), offset_y(0), blur_radius(0), color{0,0,0,0} {}
+};
+
+// ============================================================================
 // CSS Border
 // ============================================================================
 
@@ -877,6 +890,7 @@ struct ComputedStyle {
     TextTransform text_transform = TextTransform::NONE;
     float letter_spacing = 0.0f;  // Extra space between characters (px)
     float word_spacing = 0.0f;    // Extra space between words (px)
+    std::vector<TextShadow> text_shadows;  // CSS text-shadow
 
     // === Pseudo-element content (::before/::after) ===
     std::string content;          // CSS content property value

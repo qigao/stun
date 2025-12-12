@@ -1,4 +1,4 @@
-#include <flexchart/bindingsbindings.h>
+#include <flexchart/runtime.h>
 #include <nlohmann/json.hpp>
 #include <fmtlog.h>
 #include <iostream>
@@ -774,7 +774,7 @@ static JSValue js_chart_dispose(JSContext* ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-void setupChartBindings(JSContext* ctx, cssboxRenderer* renderer) {
+void setupChartRuntime(JSContext* ctx, cssboxRenderer* renderer) {
     ChartManager::instance().init(ctx, renderer);
     
     JSRuntime* rt = JS_GetRuntime(ctx);

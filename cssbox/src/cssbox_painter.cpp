@@ -794,14 +794,14 @@ static void render_styled_borders(NVGcontext* vg, const cssboxElement* element,
     }
 }
 
-// Helper function to render text shadows - extracted from duplicated code
+// Helper function to render text shadows - using typed style system
 static void render_text_shadows(NVGcontext* vg, const cssboxElement* element,
                                 float text_x, float text_y, const std::string& text_content) {
-    if (element->text_shadows.empty()) return;
+    if (element->style.text_shadows.empty()) return;
 
     // Render each shadow in reverse order (last shadow first, so first shadow is on top)
-    for (auto it = element->text_shadows.rbegin(); it != element->text_shadows.rend(); ++it) {
-        const TextShadow& shadow = *it;
+    for (auto it = element->style.text_shadows.rbegin(); it != element->style.text_shadows.rend(); ++it) {
+        const cssbox::TextShadow& shadow = *it;
 
         float shadow_x = text_x + shadow.offset_x;
         float shadow_y = text_y + shadow.offset_y;
@@ -942,14 +942,29 @@ void cssboxPainter::paint_element(const cssboxElement* element) {
         }
     }
 
-    // Apply transform
-    nvgTransform(vg_,
-                 element->transform[0], element->transform[1],
-                 element->transform[2], element->transform[3],
-                 element->transform[4], element->transform[5]);
+    // Apply transform with transform-origin (default: center of element)
+    // CSS transform-origin default is 50% 50% (center)
+    bool has_non_identity_transform =
+        element->transform[0] != 1.0f || element->transform[1] != 0.0f ||
+        element->transform[2] != 0.0f || element->transform[3] != 1.0f ||
+        element->transform[4] != 0.0f || element->transform[5] != 0.0f;
+
+    if (has_non_identity_transform) {
+        // Calculate transform origin (center of element)
+        float origin_x = element->layout.x + element->layout.width * 0.5f;
+        float origin_y = element->layout.y + element->layout.height * 0.5f;
+
+        // Apply: translate to origin -> transform -> translate back
+        nvgTranslate(vg_, origin_x, origin_y);
+        nvgTransform(vg_,
+                     element->transform[0], element->transform[1],
+                     element->transform[2], element->transform[3],
+                     element->transform[4], element->transform[5]);
+        nvgTranslate(vg_, -origin_x, -origin_y);
+    }
 
     // Note: SVG viewBox transform is now handled in compute_absolute_transform
-    // (cssbox.cpp), so we don't need to apply it again here
+    // (cssbox.cpp), so we dont need to apply it again here
 
     // Apply opacity from typed property
     float combined_opacity = element->style.opacity;
@@ -1166,19 +1181,19 @@ void cssboxPainter::apply_background(const cssboxElement* element,
     // If type == NONE, skip (transparent background)
 }
 
-// Sprint 27: Render box-shadows using parsed BoxShadow data structure
+// Sprint 27: Render box-shadows using typed style system
 // Sprint 39: Added inset shadow support
 void cssboxPainter::paint_box_shadows(const cssboxElement* element,
                                        const cssboxBox& box) {
-    if (element->box_shadows.empty()) return;
+    if (element->style.box_shadows.empty()) return;
 
     // Get border radius for rounded shadows
     float border_radius = (box.border_radius[0] + box.border_radius[1] +
                            box.border_radius[2] + box.border_radius[3]) / 4.0f;
 
     // Render each shadow in reverse order (last shadow first, so first shadow is on top)
-    for (auto it = element->box_shadows.rbegin(); it != element->box_shadows.rend(); ++it) {
-        const BoxShadow& shadow = *it;
+    for (auto it = element->style.box_shadows.rbegin(); it != element->style.box_shadows.rend(); ++it) {
+        const cssbox::BoxShadow& shadow = *it;
 
         // Sprint 39: Handle inset shadows
         if (shadow.inset) {
@@ -2405,19 +2420,19 @@ void cssboxPainter::paint_svg_path(const cssboxElement* element, const cssboxBox
     // Use cached path commands if 'd' attribute hasn't changed
     const std::vector<cssbox::PathCommand>* commands_ptr = nullptr;
     if (element->cached_path_d == d_it->second && element->cached_path_commands) {
-        commands_ptr = static_cast<std::vector<cssbox::PathCommand>*>(element->cached_path_commands);
+        commands_ptr = element->cached_path_commands;
     } else {
         // Parse and cache
         auto parsed = cssbox::SVGPathParser::parse(d_it->second);
         if (parsed.empty()) return;
-        
+
         // Update cache (mutable fields)
         element->cached_path_d = d_it->second;
         if (element->cached_path_commands) {
-            delete static_cast<std::vector<cssbox::PathCommand>*>(element->cached_path_commands);
+            delete element->cached_path_commands;
         }
         element->cached_path_commands = new std::vector<cssbox::PathCommand>(std::move(parsed));
-        commands_ptr = static_cast<std::vector<cssbox::PathCommand>*>(element->cached_path_commands);
+        commands_ptr = element->cached_path_commands;
     }
     
     const auto& commands = *commands_ptr;

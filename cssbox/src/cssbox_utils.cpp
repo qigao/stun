@@ -576,6 +576,50 @@ static std::string interpolate_transform(const std::string& start_value,
         snprintf(buf, sizeof(buf), "translate(%.2fpx, %.2fpx)", result_x, result_y);
         return buf;
         }
+        else if (start_func == "translateX" || start_func == "translateY") {
+            // translateX(Xpx) or translateY(Ypx) - single axis translation
+            auto parse_len = [](const std::string& args) -> float {
+                std::string val = args;
+                if (ends_with(val, "px")) val = val.substr(0, val.length() - 2);
+                val = trim(val);
+                if (val.empty()) return 0.0f;
+                return std::stof(val);
+            };
+
+            float start_val = parse_len(start_args);
+            float end_val = parse_len(end_args);
+            float result = interpolate_float(start_val, end_val, t);
+
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s(%.2fpx)", start_func.c_str(), result);
+            return buf;
+        }
+        else if (start_func == "rotateX" || start_func == "rotateY" || start_func == "rotateZ") {
+            // rotateX/Y/Z(Xdeg) - 3D rotation (2D projection)
+            std::string start_clean = start_args;
+            std::string end_clean = end_args;
+
+            if (ends_with(start_clean, "deg")) {
+                start_clean = start_clean.substr(0, start_clean.length() - 3);
+            }
+            if (ends_with(end_clean, "deg")) {
+                end_clean = end_clean.substr(0, end_clean.length() - 3);
+            }
+
+            start_clean = trim(start_clean);
+            end_clean = trim(end_clean);
+            if (start_clean.empty() || end_clean.empty()) {
+                return (t >= 0.5f) ? end_value : start_value;
+            }
+
+            float start_angle = std::stof(start_clean);
+            float end_angle = std::stof(end_clean);
+            float result = interpolate_float(start_angle, end_angle, t);
+
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s(%.2fdeg)", start_func.c_str(), result);
+            return buf;
+        }
 
         // Unknown transform function - snap at t=0.5
         return (t >= 0.5f) ? end_value : start_value;
@@ -615,12 +659,17 @@ std::string interpolate_value(const std::string& start_value,
         }
 
         // Check if both values are transform functions
-        if ((start_trimmed.find("scale(") != std::string::npos ||
-             start_trimmed.find("rotate(") != std::string::npos ||
-             start_trimmed.find("translate(") != std::string::npos) &&
-            (end_trimmed.find("scale(") != std::string::npos ||
-             end_trimmed.find("rotate(") != std::string::npos ||
-             end_trimmed.find("translate(") != std::string::npos)) {
+        auto is_transform = [](const std::string& s) {
+            return s.find("scale(") != std::string::npos ||
+                   s.find("rotate(") != std::string::npos ||
+                   s.find("rotateX(") != std::string::npos ||
+                   s.find("rotateY(") != std::string::npos ||
+                   s.find("rotateZ(") != std::string::npos ||
+                   s.find("translate(") != std::string::npos ||
+                   s.find("translateX(") != std::string::npos ||
+                   s.find("translateY(") != std::string::npos;
+        };
+        if (is_transform(start_trimmed) && is_transform(end_trimmed)) {
             // Transform interpolation
             return interpolate_transform(start_trimmed, end_trimmed, t);
         }

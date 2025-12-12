@@ -32,6 +32,47 @@ typedef struct cssboxRenderer cssboxRenderer;
 typedef struct cssboxElement cssboxElement;
 
 // ============================================================================
+// Error Handling
+// ============================================================================
+
+/**
+ * @brief Error severity levels
+ */
+typedef enum cssboxErrorLevel {
+    CSSBOX_ERROR_WARNING = 0,  /**< Non-fatal warning (e.g., unknown CSS property) */
+    CSSBOX_ERROR_ERROR = 1,    /**< Error that may affect rendering (e.g., parse error) */
+    CSSBOX_ERROR_FATAL = 2     /**< Fatal error (e.g., out of memory) */
+} cssboxErrorLevel;
+
+/**
+ * @brief Error callback function type
+ *
+ * @param level Error severity level
+ * @param message Error message (valid only during callback)
+ * @param user_data User-provided context pointer
+ */
+typedef void (*cssboxErrorCallback)(cssboxErrorLevel level, const char* message, void* user_data);
+
+/**
+ * @brief Set error callback for a renderer
+ *
+ * The callback will be invoked when errors occur during CSS parsing,
+ * layout computation, or rendering. If no callback is set, errors
+ * are silently ignored (current default behavior).
+ *
+ * @param renderer CSS renderer
+ * @param callback Error callback function (NULL to disable)
+ * @param user_data User-provided context passed to callback
+ *
+ * @example
+ *   void my_error_handler(cssboxErrorLevel level, const char* msg, void* data) {
+ *       printf("[cssbox %s] %s\n", level == CSSBOX_ERROR_WARNING ? "WARN" : "ERROR", msg);
+ *   }
+ *   cssboxSetErrorCallback(renderer, my_error_handler, NULL);
+ */
+void cssboxSetErrorCallback(cssboxRenderer* renderer, cssboxErrorCallback callback, void* user_data);
+
+// ============================================================================
 // Core Types
 // ============================================================================
 
@@ -320,12 +361,12 @@ cssboxElement* cssboxCreateMarker(cssboxRenderer* renderer,
  *   // Create circular clip path
  *   cssboxElement* clip = cssboxCreateClipPath(renderer, "circle-clip");
  *   cssboxElement* circle = cssboxCreateElement(renderer, "c1", "circle");
- *   circle->inline_style["r"] = "50px";
+ *   cssboxSetInlineStyle(renderer, circle, "r", "50px");
  *   cssboxAppendChild(renderer, clip, circle);
  *
  *   // Apply to element
  *   cssboxElement* rect = cssboxCreateElement(renderer, "r1", "rect");
- *   rect->inline_style["clip-path"] = "url(#circle-clip)";
+ *   cssboxSetInlineStyle(renderer, rect, "clip-path", "url(#circle-clip)");
  */
 cssboxElement* cssboxCreateClipPath(cssboxRenderer* renderer, const char* id);
 
@@ -339,7 +380,7 @@ cssboxElement* cssboxCreateClipPath(cssboxRenderer* renderer, const char* id);
  * @param renderer Renderer instance
  * @param id Pattern ID (referenced via fill: url(#id))
  * @param x Pattern x offset
- * @param y Pattern y offset  
+ * @param y Pattern y offset
  * @param width Pattern tile width
  * @param height Pattern tile height
  * @return Pattern element (add shapes as children)
@@ -348,15 +389,15 @@ cssboxElement* cssboxCreateClipPath(cssboxRenderer* renderer, const char* id);
  *   // Create dot pattern
  *   cssboxElement* pattern = cssboxCreatePattern(renderer, "dots", 0, 0, 20, 20);
  *   cssboxElement* circle = cssboxCreateElement(renderer, "dot", "circle");
- *   circle->inline_style["cx"] = "10px";
- *   circle->inline_style["cy"] = "10px";
- *   circle->inline_style["r"] = "5px";
- *   circle->inline_style["fill"] = "blue";
+ *   cssboxSetInlineStyle(renderer, circle, "cx", "10px");
+ *   cssboxSetInlineStyle(renderer, circle, "cy", "10px");
+ *   cssboxSetInlineStyle(renderer, circle, "r", "5px");
+ *   cssboxSetInlineStyle(renderer, circle, "fill", "blue");
  *   cssboxAppendChild(renderer, pattern, circle);
  *
  *   // Apply to element
  *   cssboxElement* rect = cssboxCreateElement(renderer, "r1", "rect");
- *   rect->inline_style["fill"] = "url(#dots)";
+ *   cssboxSetInlineStyle(renderer, rect, "fill", "url(#dots)");
  */
 cssboxElement* cssboxCreatePattern(cssboxRenderer* renderer,
                                    const char* id,

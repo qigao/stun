@@ -1,10 +1,10 @@
-﻿/*
+/*
  * NanoVG CSS Example - Advanced Features Demo
  */
 
-#include <SDL3/SDL.h>
 #define GLAD_GL_IMPLEMENTATION
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg.h>
 #include <nanovg_gl.h>
@@ -15,7 +15,7 @@
 class AdvancedDemo {
 public:
     AdvancedDemo() {
-        init_sdl();
+        init_glfw();
         init_nanovg();
         setup_scene();
     }
@@ -23,63 +23,69 @@ public:
     ~AdvancedDemo() {
         if (renderer) cssboxDeleteRenderer(renderer);
         if (vg) nvgDeleteGL3(vg);
-        if (gl_context) SDL_GL_DestroyContext(gl_context);
-        if (window) SDL_DestroyWindow(window);
-        SDL_Quit();
+        
+        if (window) glfwDestroyWindow(window);
+        glfwTerminate();
     }
 
     void run() {
-        bool running = true;
-        SDL_Event event;
-        Uint64 last_time = SDL_GetTicks();
+        double last_time = glfwGetTime();
 
-        while (running) {
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_EVENT_QUIT) {
-                    running = false;
-                } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
-                    mouse_x = event.motion.x;
-                    mouse_y = event.motion.y;
-                    update_hover();
-                } else if (event.type == SDL_EVENT_WINDOW_EXPOSED ||
-                           event.type == SDL_EVENT_WINDOW_RESTORED ||
-                           event.type == SDL_EVENT_WINDOW_SHOWN) {
-                    cssboxInvalidatePaint(renderer);
-                }
-            }
+        while (!glfwWindowShouldClose(window)) {
+            glfwPollEvents();
 
-            Uint64 current_time = SDL_GetTicks();
-            double delta_time = (current_time - last_time) / 1000.0;
+            double current_time = glfwGetTime();
+            double delta_time = current_time - last_time;
             last_time = current_time;
 
             update(delta_time);
             if (render()) {
-                SDL_GL_SwapWindow(window);
+                glfwSwapBuffers(window);
             } else {
-                SDL_Delay(1);
+                glfwWaitEventsTimeout(0.001);
             }
         }
     }
 
+    static void cursor_pos_callback(GLFWwindow* win, double xpos, double ypos) {
+        auto* demo = static_cast<AdvancedDemo*>(glfwGetWindowUserPointer(win));
+        if (demo) {
+            demo->mouse_x = (float)xpos;
+            demo->mouse_y = (float)ypos;
+            demo->update_hover();
+        }
+    }
+
+    static void window_refresh_callback(GLFWwindow* win) {
+        auto* demo = static_cast<AdvancedDemo*>(glfwGetWindowUserPointer(win));
+        if (demo) {
+            demo->render();
+            glfwSwapBuffers(win);
+        }
+    }
+
 private:
-    SDL_Window* window = nullptr;
-    SDL_GLContext gl_context = nullptr;
+    GLFWwindow* window = nullptr;
+    
     NVGcontext* vg = nullptr;
     cssboxRenderer* renderer = nullptr;
     float mouse_x = 0, mouse_y = 0;
 
-    void init_sdl() {
-        SDL_Init(SDL_INIT_VIDEO);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    void init_glfw() {
+        glfwInit();
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_STENCIL_BITS, 8);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-        window = SDL_CreateWindow("NanoVG CSS - Advanced Features", 1200, 800,
-                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-        gl_context = SDL_GL_CreateContext(window);
-        SDL_GL_MakeCurrent(window, gl_context);
-        SDL_GL_SetSwapInterval(1);
+        window = glfwCreateWindow(1200, 800, "NanoVG CSS Demo", nullptr, nullptr);
+        glfwMakeContextCurrent(window);
+        glfwSwapInterval(1);
+
+        glfwSetWindowUserPointer(window, this);
+        glfwSetCursorPosCallback(window, cursor_pos_callback);
+        glfwSetWindowRefreshCallback(window, window_refresh_callback);
     }
 
     void init_nanovg() {
@@ -298,8 +304,8 @@ private:
 
     bool render() {
         int win_w, win_h, fb_w, fb_h;
-        SDL_GetWindowSize(window, &win_w, &win_h);
-        SDL_GetWindowSizeInPixels(window, &fb_w, &fb_h);
+        glfwGetWindowSize(window, &win_w, &win_h);
+        glfwGetFramebufferSize(window, &fb_w, &fb_h);
         float pixel_ratio = (float)fb_w / (float)win_w;
 
         cssboxSetViewport(renderer, (float)win_w, (float)win_h);

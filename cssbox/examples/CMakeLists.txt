@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.15)
 
-# Find SDL3
-find_package(SDL3 REQUIRED)
+# Find GLFW
+find_package(glfw3 CONFIG REQUIRED)
 
 # Find OpenGL
 find_package(OpenGL REQUIRED)
@@ -31,8 +31,8 @@ foreach(EXAMPLE_SOURCE ${EXAMPLE_SOURCES})
 
   # Create executable
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
-  # GUI example with SDL3
-  target_link_libraries(${EXAMPLE_TARGET} PRIVATE SDL3::SDL3 cssbox OpenGL::GL
+  # GUI example with GLFW
+  target_link_libraries(${EXAMPLE_TARGET} PRIVATE glfw cssbox OpenGL::GL
                                                   glad::glad fmtlog)
 
   # Include directories

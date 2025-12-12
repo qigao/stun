@@ -4,10 +4,9 @@
  * Demonstrates various hand-drawn circle styles similar to Excalidraw
  */
 
-#include <SDL3/SDL.h>
-
 #define GLAD_GL_IMPLEMENTATION
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #define NANOVG_GL3_IMPLEMENTATION
 #include <nanovg.h>
@@ -17,18 +16,17 @@
 #include <iostream>
 
 int main() {
-    // Initialize SDL
-    SDL_Init(SDL_INIT_VIDEO);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    // Initialize GLFW
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_STENCIL_BITS, 8);
 
-    SDL_Window* window = SDL_CreateWindow("Rough Circles Demo - Excalidraw Style", 1200, 800,
-                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    SDL_GL_MakeCurrent(window, gl_context);
-    SDL_GL_SetSwapInterval(1);
+    GLFWwindow* window = glfwCreateWindow(1200, 800, "Demo", nullptr, nullptr);
+    glfwMakeContextCurrent(window);
+    
+    glfwSwapInterval(1);
 
     gladLoadGL();
 
@@ -45,23 +43,12 @@ int main() {
     std::cout << "Showing various hand-drawn circle styles" << std::endl;
     std::cout << "Press ESC to exit" << std::endl;
 
-    bool running = true;
-    SDL_Event event;
-
-    while (running) {
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
-                running = false;
-            } else if (event.type == SDL_EVENT_KEY_DOWN) {
-                if (event.key.key == SDLK_ESCAPE) {
-                    running = false;
-                }
-            }
-        }
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
 
         int win_w, win_h, fb_w, fb_h;
-        SDL_GetWindowSize(window, &win_w, &win_h);
-        SDL_GetWindowSizeInPixels(window, &fb_w, &fb_h);
+        glfwGetWindowSize(window, &win_w, &win_h);
+        glfwGetFramebufferSize(window, &fb_w, &fb_h);
         float pixel_ratio = (float)fb_w / (float)win_w;
 
         glViewport(0, 0, fb_w, fb_h);
@@ -362,13 +349,13 @@ int main() {
         }
 
         nvgEndFrame(vg);
-        SDL_GL_SwapWindow(window);
+        glfwSwapBuffers(window);
     }
 
     nvgDeleteGL3(vg);
-    SDL_GL_DestroyContext(gl_context);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     return 0;
 }

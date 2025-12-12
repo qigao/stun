@@ -1,10 +1,10 @@
-﻿cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.15)
 project(
   FlexUI
   VERSION 2.0.0
   LANGUAGES C CXX)
 
-# Define NANOGUI_USE_SDL3 for SDL3 backend
+# Define NANOGUI_USE_GLFW for GLFW backend
 add_definitions(-DNANOGUI_USE_OPENGL)
 
 # C++17 required
@@ -115,9 +115,10 @@ target_include_directories(
 find_package(OpenGL REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 find_package(qjs CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
 target_link_libraries(
   flexui_core
-  PUBLIC cssbox SDL3::SDL3 glad::glad OpenGL::GL
+  PUBLIC cssbox glfw glad::glad OpenGL::GL
   PRIVATE fmtlog::fmtlog pugixml::pugixml  qjs)
 
 # Core-only alias
@@ -128,7 +129,7 @@ set_target_properties(flexui_core PROPERTIES FOLDER flexui/)
 # ============================================================================
 # Examples
 # ============================================================================
- 
+
   add_subdirectory(examples)
 
 
