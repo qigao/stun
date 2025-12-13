@@ -1,0 +1,46 @@
+#ifndef THORVG_CONFIG_H
+#define THORVG_CONFIG_H
+
+/* Version */
+#define THORVG_VERSION_STRING "@THORVG_VERSION_STRING@"
+
+/* Multi-Threading */
+#cmakedefine THORVG_THREAD_SUPPORT
+
+/* Engines */
+#cmakedefine THORVG_SW_RASTER_SUPPORT
+#cmakedefine THORVG_GL_RASTER_SUPPORT
+#cmakedefine THORVG_WG_RASTER_SUPPORT
+
+/* GL Variant */
+#cmakedefine THORVG_GL_TARGET_GL
+#cmakedefine THORVG_GL_TARGET_GLES
+
+/* Partial Rendering */
+#cmakedefine THORVG_PARTIAL_RENDER_SUPPORT
+
+/* Loaders */
+#cmakedefine THORVG_SVG_LOADER_SUPPORT
+#cmakedefine THORVG_PNG_LOADER_SUPPORT
+#cmakedefine THORVG_JPG_LOADER_SUPPORT
+#cmakedefine THORVG_LOTTIE_LOADER_SUPPORT
+#cmakedefine THORVG_TTF_LOADER_SUPPORT
+#cmakedefine THORVG_WEBP_LOADER_SUPPORT
+
+/* Savers */
+#cmakedefine THORVG_GIF_SAVER_SUPPORT
+
+/* Vectorization */
+#cmakedefine THORVG_AVX_VECTOR_SUPPORT
+#cmakedefine THORVG_NEON_VECTOR_SUPPORT
+
+/* Log */
+#cmakedefine THORVG_LOG_ENABLED
+
+/* File IO */
+#cmakedefine THORVG_FILE_IO_SUPPORT
+
+/* Miscellaneous */
+#cmakedefine WIN32_LEAN_AND_MEAN
+
+#endif /* THORVG_CONFIG_H */
