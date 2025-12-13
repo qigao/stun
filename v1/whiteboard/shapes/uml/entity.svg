@@ -1,8 +1,0 @@
-<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
-  <!-- Entity circle -->
-  <circle cx="50" cy="40" r="15" fill="none" stroke="#8BC34A" stroke-width="2"/>
-  <!-- Entity underline -->
-  <line x1="35" y1="55" x2="65" y2="55" stroke="#8BC34A" stroke-width="2"/>
-  <!-- Entity name -->
-  <text x="50" y="75" font-family="Arial" font-size="10" fill="#689F38" text-anchor="middle">Entity</text>
-</svg>

@@ -175,7 +175,7 @@ target_include_directories(
 target_link_libraries(
   cssbox
   PUBLIC nanovg   # Use internal NanoVG build
-  OpenGL::GL
+  OpenGL::GL  thorvg
   glad::glad TurboMemory
   PRIVATE ${LEXBOR_LIBRARY}
   pugixml::pugixml

@@ -1,4 +1,0 @@
-<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
-  <!-- Octagon (stop sign shape) -->
-  <path d="M 30,15 L 70,15 L 85,30 L 85,70 L 70,85 L 30,85 L 15,70 L 15,30 Z" fill="#FFEBEE" stroke="#F44336" stroke-width="2"/>
-</svg>
