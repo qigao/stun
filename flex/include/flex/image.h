@@ -1,0 +1,63 @@
+/*
+ * Flex Engine - Image Node
+ *
+ * Raster image node for rendering bitmaps.
+ */
+
+#pragma once
+
+#include "flex/node.h"
+#include "flex/types.h"
+#include <string>
+
+namespace flex {
+
+enum class ImageFit {
+    Fill,      // Stretch to fill (may distort)
+    Contain,   // Fit inside, preserve aspect ratio
+    Cover,     // Fill and crop, preserve aspect ratio
+};
+
+class Image : public Node {
+public:
+    using Ptr = std::shared_ptr<Image>;
+
+    Image() = default;
+    ~Image() override = default;
+
+    static Ptr create() { return std::make_shared<Image>(); }
+
+    NodeType type() const override { return NodeType::Image; }
+    const char* type_name() const override { return "Image"; }
+
+    // Source
+    const std::string& src() const { return src_; }
+    void set_src(const std::string& src) { src_ = src; mark_dirty(DirtyFlags::Content | DirtyFlags::Visual); }
+
+    // Dimensions
+    float width() const { return width_; }
+    void set_width(float w) { width_ = w; mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds); }
+
+    float height() const { return height_; }
+    void set_height(float h) { height_ = h; mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds); }
+
+    // Fit mode
+    ImageFit fit() const { return fit_; }
+    void set_fit(ImageFit fit) { fit_ = fit; mark_dirty(DirtyFlags::Visual); }
+
+    // Rendering
+    void render(Renderer& renderer) override;
+
+    // Bounds
+    Bounds bounds() const override {
+        return Bounds{x_, y_, width_ * scale_x_, height_ * scale_y_};
+    }
+
+private:
+    std::string src_;
+    float width_ = 0;   // 0 = use natural size
+    float height_ = 0;
+    ImageFit fit_ = ImageFit::Fill;
+};
+
+} // namespace flex

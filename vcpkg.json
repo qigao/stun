@@ -80,18 +80,6 @@
       "version>=": "1.4.0"
     },
     {
-      "name": "sdl3",
-      "version>=": "3.2.20"
-    },
-    {
-      "name": "sdl3-image",
-      "version>=": "3.2.4"
-    },
-    {
-      "name": "sdl3-ttf",
-      "version>=": "3.2.2"
-    },
-    {
       "name": "lunasvg",
       "version>=": "3.4.0"
     },
@@ -102,6 +90,9 @@
       "name": "curl"
     },
     {
+      "name": "sdl2"
+    },
+    {
       "name": "zstd"
     },
     {
@@ -110,6 +101,12 @@
     {
       "name": "rlottie"
     },
+    {
+      "name": "libpng"
+    }, 
+    {
+      "name": "box2d"
+    }, 
     {
       "name": "libass",
       "version>=": "0.17.4"
@@ -132,6 +129,12 @@
     },
     {
       "name": "md4c"
+    },
+    {
+      "name": "stb"
+    },
+    {
+      "name": "clipper2"
     }
   ],
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
