@@ -1,5 +1,10 @@
 # Flex Engine - Simplified 3-Layer Architecture
 
+> **Note:** This document describes the design principles and architecture of Flex Engine.
+> Performance metrics (66% less memory, 2.5x faster) are theoretical estimates based on
+> architectural changes. The core principle—eliminating intermediate AST layer—is implemented
+> and working in production.
+
 ## Design Philosophy
 
 **Linus Torvalds' "Good Taste" approach:**
@@ -23,12 +28,12 @@
 .flex → Parser → Runtime → Renderer
 ```
 
-### Layer 1: Parser (Lexer + Grammar)
-**Location:** `src/flex_lexer.re`, `src/flex_parser.y`
+### Layer 1: Parser (Hand-written Recursive Descent)
+**Location:** `src/flex.cpp` (namespace `parser`, ~1400 lines)
 
 **Purpose:** Parse `.flex` files and **directly construct Runtime objects**
 
-**Why?** No need for intermediate AST representation. Parser builds Runtime objects directly, saving memory and code.
+**Why?** No need for intermediate AST representation. Parser builds Runtime objects directly, saving memory and code. Hand-written parser is simple, maintainable, and integrates component instantiation seamlessly.
 
 ### Layer 2: Runtime (Scene Graph + Animation)
 **Location:** `include/flex/*.h`, `src/*.cpp`
@@ -72,20 +77,34 @@ Parser → flex::Timeline
 
 **Savings:** 924 lines of code deleted!
 
-### ❌ Component System (component.h/cpp - 172 lines)
-**Problem:** Incomplete design, not integrated with DSL
+### ✅ Component System - Simplified and Integrated
+**Design:** Registry-based component system with DSL support
 
-**Solution:** Users create complex objects in C++ directly
+**Why keep it?**
+- Simple implementation using `std::variant<float, string, bool, uint32_t>` for props
+- Seamlessly integrated with Parser (flex.cpp:799)
+- Enables declarative component usage in .flex files
+
+**Usage:**
 ```cpp
-// Complex objects in C++
-auto player = create_player_with_physics();
-artboard->add_child(player);
+// Register component in C++
+auto slider = Component::create("Slider");
+slider->add_prop("value", 0.0f);
+slider->add_prop("width", 300.0f);
+slider->set_builder([](const Props& props) { /* build node tree */ });
+ComponentRegistry::instance().register_component(slider);
 
-// Simple scenes in DSL
-scene game {
-    rect ground { x: 0, y: 500, width: 800, height: 100 }
+// Use in DSL
+scene demo {
+    Slider volumeControl {
+        x: 50, y: 100
+        value: 0.7
+        width: 350
+    }
 }
 ```
+
+**Example:** See `component_dsl_demo.flex` and `component_dsl_demo.cpp`
 
 ---
 
@@ -275,35 +294,39 @@ anim "PlayerMove" {
 
 ### Code Size
 ```
-Old:
-- ast.h: 236 lines
-- builder.h: 108 lines
-- builder.cpp: 688 lines
-- component.h: 172 lines
-- component.cpp: 166 lines
-Total: 1,370 lines
+Removed (dead code):
+- ast.h: 236 lines (duplicate type definitions)
+- builder.h: 108 lines (AST → Runtime conversion)
+- builder.cpp: 688 lines (AST → Runtime conversion)
+- dsl_loader.h: 80 lines (unused wrapper)
+- dsl_loader.cpp: 122 lines (unused wrapper)
+Total removed: 1,234 lines
 
-New:
-- Direct parser callbacks: ~200 lines
-Total: 200 lines
+Current implementation:
+- parser namespace in flex.cpp: ~1400 lines (hand-written recursive descent)
+- component.h/cpp: ~230 lines (kept - simple and useful)
 
-Reduction: 85% less code!
+Net result: Direct parser replaces complex multi-layer system
 ```
 
-### Memory Usage
+### Memory Usage (Theoretical)
 ```
-Old: Parse → AST (100KB) → Builder → Runtime (50KB) = 150KB peak
-New: Parse → Runtime (50KB) = 50KB peak
+Estimated improvement by eliminating intermediate AST:
+- No temporary AST allocations during parsing
+- Direct construction of Runtime objects
+- Single-pass parsing reduces memory pressure
 
-Savings: 66% less memory!
+Note: Actual measurements pending benchmark implementation
 ```
 
-### Parsing Speed
+### Parsing Speed (Theoretical)
 ```
-Old: 5 passes (Lex → Parse → Build → Validate → Link)
-New: 2 passes (Lex → Parse+Build)
+Architectural improvement:
+- Single pass: Parse and build simultaneously
+- No AST → Runtime conversion step
+- Hand-written parser avoids parser generator overhead
 
-Speed: 2.5x faster!
+Note: Actual measurements pending benchmark implementation
 ```
 
 ---
@@ -328,15 +351,15 @@ auto* artboard = instance->artboard();
 
 ---
 
-## Next Steps
+## Implementation Status
 
-1. ✅ Remove AST layer
-2. ✅ Remove Builder layer
-3. ✅ Remove Component system
-4. ⏳ Update parser to build Runtime directly
-5. ⏳ Write tests
-6. ⏳ Update documentation
-7. ⏳ Performance benchmarking
+1. ✅ Remove AST layer - Completed
+2. ✅ Remove Builder layer - Completed
+3. ✅ Hand-written recursive descent parser - Completed (flex.cpp)
+4. ✅ Component system - Simplified and integrated with DSL
+5. ✅ Working examples - 17 .flex files demonstrate all features
+6. ⏳ Write comprehensive tests
+7. ⏳ Performance benchmarking (metrics above are theoretical estimates)
 
 ---
 

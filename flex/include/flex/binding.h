@@ -109,6 +109,19 @@ public:
     void evaluate(Node* target);
 
     // -------------------------------------------
+    // Dirty Tracking (for optimization)
+    // -------------------------------------------
+
+    // Mark bindings as dirty (needs evaluation)
+    void mark_dirty() { dirty_ = true; }
+
+    // Check if bindings need evaluation
+    bool is_dirty() const { return dirty_; }
+
+    // Clear dirty flag
+    void clear_dirty() { dirty_ = false; }
+
+    // -------------------------------------------
     // Script Context
     // -------------------------------------------
 
@@ -124,6 +137,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
     float time_ = 0.0f;
+    bool dirty_ = true;  // Start dirty to evaluate on first frame
 };
 
 // ============================================================================

@@ -109,6 +109,7 @@ public:
             handle_events();
             update(dt);
             render();
+            SDL_Delay(16);  // Limit to ~60 FPS
         }
     }
 

@@ -13,12 +13,14 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <optional>
 
 namespace flex {
 
 // Forward declarations
 class Group;
 class Renderer;
+class Machine;
 
 // ============================================================================
 // Node Types
@@ -42,8 +44,8 @@ class Node : public std::enable_shared_from_this<Node> {
 public:
     using Ptr = std::shared_ptr<Node>;
 
-    Node() = default;
-    virtual ~Node() = default;
+    Node();  // Implemented in node.cpp (required for unique_ptr of incomplete type)
+    virtual ~Node();  // Need to delete EventDispatcher* and FSM
 
     // Non-copyable, non-movable (use shared_ptr for ownership)
     Node(const Node&) = delete;
@@ -62,9 +64,15 @@ public:
     const std::string& id() const { return id_; }
     void set_id(const std::string& id) { id_ = id; }
 
-    const std::vector<std::string>& tags() const { return tags_; }
-    void add_tag(const std::string& tag) { tags_.push_back(tag); }
-    bool has_tag(const std::string& tag) const;
+    const std::vector<std::string>& tags() const {
+        static const std::vector<std::string> empty;
+        return tags_ ? *tags_ : empty;
+    }
+    void add_tag(const std::string& tag) {
+        if (!tags_) tags_ = std::vector<std::string>();
+        tags_->push_back(tag);
+    }
+    bool has_tag(const std::string& tag) const { return tags_ && std::find(tags_->begin(), tags_->end(), tag) != tags_->end(); }
 
     // -------------------------------------------
     // Transform Properties
@@ -98,18 +106,33 @@ public:
     // Effects (Shadow and Blur)
     // -------------------------------------------
 
-    const Shadow& shadow() const { return shadow_; }
-    void set_shadow(const Shadow& s) { shadow_ = s; mark_dirty(DirtyFlags::Visual); }
+    const Shadow& shadow() const {
+        static Shadow none;
+        return shadow_ ? *shadow_ : none;
+    }
+    void set_shadow(const Shadow& s) {
+        shadow_ = s;
+        mark_dirty(DirtyFlags::Visual);
+    }
     void set_shadow(float ox, float oy, float blur, const Color& color) {
         shadow_ = Shadow(ox, oy, blur, color);
         mark_dirty(DirtyFlags::Visual);
     }
-    bool has_shadow() const { return !shadow_.is_none(); }
+    bool has_shadow() const { return shadow_ && !shadow_->is_none(); }
 
-    const BlurFilter& blur() const { return blur_; }
-    void set_blur(const BlurFilter& b) { blur_ = b; mark_dirty(DirtyFlags::Visual); }
-    void set_blur(float radius) { blur_ = BlurFilter(radius); mark_dirty(DirtyFlags::Visual); }
-    bool has_blur() const { return !blur_.is_none(); }
+    const BlurFilter& blur() const {
+        static BlurFilter none;
+        return blur_ ? *blur_ : none;
+    }
+    void set_blur(const BlurFilter& b) {
+        blur_ = b;
+        mark_dirty(DirtyFlags::Visual);
+    }
+    void set_blur(float radius) {
+        blur_ = BlurFilter(radius);
+        mark_dirty(DirtyFlags::Visual);
+    }
+    bool has_blur() const { return blur_ && !blur_->is_none(); }
 
     // -------------------------------------------
     // Layout Properties (for flex children)
@@ -188,17 +211,44 @@ public:
     virtual bool hit_test(float px, float py) const;
 
     // Event callbacks - Pointer
-    void on_pointer_down(PointerEventCallback callback) { on_pointer_down_ = std::move(callback); }
-    void on_pointer_up(PointerEventCallback callback) { on_pointer_up_ = std::move(callback); }
-    void on_pointer_move(PointerEventCallback callback) { on_pointer_move_ = std::move(callback); }
-    void on_hover_enter(PointerEventCallback callback) { on_hover_enter_ = std::move(callback); }
-    void on_hover_leave(PointerEventCallback callback) { on_hover_leave_ = std::move(callback); }
-    void on_click(ClickCallback callback) { on_click_ = std::move(callback); }
+    void on_pointer_down(PointerEventCallback callback) {
+        ensure_events();
+        events_->on_pointer_down = std::move(callback);
+    }
+    void on_pointer_up(PointerEventCallback callback) {
+        ensure_events();
+        events_->on_pointer_up = std::move(callback);
+    }
+    void on_pointer_move(PointerEventCallback callback) {
+        ensure_events();
+        events_->on_pointer_move = std::move(callback);
+    }
+    void on_hover_enter(PointerEventCallback callback) {
+        ensure_events();
+        events_->on_hover_enter = std::move(callback);
+    }
+    void on_hover_leave(PointerEventCallback callback) {
+        ensure_events();
+        events_->on_hover_leave = std::move(callback);
+    }
+    void on_click(ClickCallback callback) {
+        ensure_events();
+        events_->on_click = std::move(callback);
+    }
 
     // Event callbacks - Keyboard
-    void on_key_down(KeyEventCallback callback) { on_key_down_ = std::move(callback); }
-    void on_key_up(KeyEventCallback callback) { on_key_up_ = std::move(callback); }
-    void on_focus(FocusCallback callback) { on_focus_ = std::move(callback); }
+    void on_key_down(KeyEventCallback callback) {
+        ensure_events();
+        events_->on_key_down = std::move(callback);
+    }
+    void on_key_up(KeyEventCallback callback) {
+        ensure_events();
+        events_->on_key_up = std::move(callback);
+    }
+    void on_focus(FocusCallback callback) {
+        ensure_events();
+        events_->on_focus = std::move(callback);
+    }
 
     // Fire events (called by Instance during event propagation)
     void fire_pointer_down(PointerEvent& event);
@@ -225,14 +275,43 @@ public:
     bool focused() const { return focused_; }
     void set_focused(bool f);  // Internal: use Instance::set_focus() instead
 
+    // -------------------------------------------
+    // FSM and Pseudo-Class Styles (New architecture)
+    // -------------------------------------------
+
+    // Pseudo-class styles map (:hover, :pressed, :dragging, etc.)
+    using PseudoClassStyleMap = std::unordered_map<std::string, class PseudoClassStyle>;
+    PseudoClassStyleMap* pseudo_class_styles() const { return pseudo_styles_.get(); }
+
+    // Add a pseudo-class style (called by DSL parser)
+    void add_pseudo_class_style(const std::string& name, const class PseudoClassStyle& style);
+
+    // FSM instance (optional, allocated on demand)
+    void* fsm_instance() const { return fsm_instance_; }
+    void set_fsm_instance(void* fsm) { fsm_instance_ = fsm; }
+
+    // Type-safe FSM access
+    template<typename FsmType>
+    FsmType* get_fsm() const { return static_cast<FsmType*>(fsm_instance_); }
+
+    // Dispatch event to FSM (if attached)
+    template<typename EventType>
+    void dispatch_fsm_event(const EventType& event);
+
+    // Find child by path (for property application: "bg.fill")
+    Node* find_by_path(const std::string& path);
+
 protected:
     friend class Group;
 
     // Propagate dirty to parent (layout changes affect parent)
     void propagate_dirty();
 
+    // Lazy allocation for event handlers (Phase 2.1 optimization)
+    void ensure_events();
+
     std::string id_;
-    std::vector<std::string> tags_;
+    std::optional<std::vector<std::string>> tags_;
 
     // Transform
     float x_ = 0, y_ = 0;
@@ -243,9 +322,9 @@ protected:
     float opacity_ = 1.0f;
     bool visible_ = true;
 
-    // Effects
-    Shadow shadow_;
-    BlurFilter blur_;
+    // Effects (Phase 2.2: Optional allocation)
+    std::optional<Shadow> shadow_;
+    std::optional<BlurFilter> blur_;
 
     // Layout (for flex children)
     float layout_width_ = 0;    // 0 = auto (use bounds)
@@ -261,22 +340,18 @@ protected:
     // Hierarchy (set by parent)
     Node* parent_ = nullptr;
 
-    // Event callbacks - Pointer
-    PointerEventCallback on_pointer_down_;
-    PointerEventCallback on_pointer_up_;
-    PointerEventCallback on_pointer_move_;
-    PointerEventCallback on_hover_enter_;
-    PointerEventCallback on_hover_leave_;
-    ClickCallback on_click_;
-
-    // Event callbacks - Keyboard
-    KeyEventCallback on_key_down_;
-    KeyEventCallback on_key_up_;
-    FocusCallback on_focus_;
+    // Event callbacks - Phase 2.1: On-demand allocation
+    // Only 8B pointer instead of 360B inline storage
+    // Allocated only when node actually uses events (90% of nodes don't)
+    EventDispatcher* events_ = nullptr;
 
     // Focus state
     bool focusable_ = false;
     bool focused_ = false;
+
+    // FSM and Pseudo-Class Styles (new architecture)
+    std::unique_ptr<PseudoClassStyleMap> pseudo_styles_;  // On-demand allocation
+    void* fsm_instance_ = nullptr;  // Type-erased FSM pointer
 };
 
 } // namespace flex

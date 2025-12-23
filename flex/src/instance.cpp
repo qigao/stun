@@ -20,14 +20,14 @@ void InstanceNode::set_source(const std::string& src) {
 void InstanceNode::set_input(const std::string& name, float value) {
     float_inputs_[name] = value;
     if (instance_) {
-        instance_->set_input(name, value);
+        instance_->set_input(name.c_str(), value);
     }
 }
 
 void InstanceNode::set_input(const std::string& name, const std::string& value) {
     string_inputs_[name] = value;
     if (instance_) {
-        instance_->set_input(name, value);
+        instance_->set_input(name.c_str(), value.c_str());
     }
 }
 
@@ -78,10 +78,10 @@ bool InstanceNode::load() {
 
     // Apply stored inputs
     for (const auto& [name, value] : float_inputs_) {
-        instance_->set_input(name, value);
+        instance_->set_input(name.c_str(), value);
     }
     for (const auto& [name, value] : string_inputs_) {
-        instance_->set_input(name, value);
+        instance_->set_input(name.c_str(), value.c_str());
     }
 
     loaded_ = true;

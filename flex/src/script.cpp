@@ -457,7 +457,7 @@ void bind_inputs(ScriptContext* ctx, Instance* /*instance*/) {
         auto* inst = ctx->get_instance();
         if (!inst) return ScriptValue::undefined();
         if (args.size() >= 2 && args[0].is_string() && args[1].is_number()) {
-            inst->set_input(args[0].as_string(), static_cast<float>(args[1].as_number()));
+            inst->set_input(args[0].as_string().c_str(), static_cast<float>(args[1].as_number()));
         }
         return ScriptValue::undefined();
     });
@@ -467,7 +467,7 @@ void bind_inputs(ScriptContext* ctx, Instance* /*instance*/) {
         auto* inst = ctx->get_instance();
         if (!inst) return ScriptValue::from_number(0);
         if (args.size() >= 1 && args[0].is_string()) {
-            return ScriptValue::from_number(inst->get_input(args[0].as_string()));
+            return ScriptValue::from_number(inst->get_input(args[0].as_string().c_str()));
         }
         return ScriptValue::from_number(0);
     });
@@ -495,7 +495,7 @@ void bind_events(ScriptContext* ctx, Instance* /*instance*/) {
         auto* inst = ctx->get_instance();
         if (!inst) return ScriptValue::undefined();
         if (args.size() >= 1 && args[0].is_string()) {
-            inst->send_event(args[0].as_string());
+            inst->send_event(args[0].as_string().c_str());
         }
         return ScriptValue::undefined();
     });
@@ -507,7 +507,7 @@ void bind_animations(ScriptContext* ctx, Instance* /*instance*/) {
         auto* inst = ctx->get_instance();
         if (!inst) return ScriptValue::undefined();
         if (args.size() >= 1 && args[0].is_string()) {
-            inst->play(args[0].as_string());
+            inst->play(args[0].as_string().c_str());
         }
         return ScriptValue::undefined();
     });
@@ -517,7 +517,7 @@ void bind_animations(ScriptContext* ctx, Instance* /*instance*/) {
         auto* inst = ctx->get_instance();
         if (!inst) return ScriptValue::undefined();
         if (args.size() >= 1 && args[0].is_string()) {
-            inst->stop(args[0].as_string());
+            inst->stop(args[0].as_string().c_str());
         }
         return ScriptValue::undefined();
     });
@@ -525,14 +525,16 @@ void bind_animations(ScriptContext* ctx, Instance* /*instance*/) {
 
 void bind_machine(ScriptContext* ctx, Instance* /*instance*/) {
     // flex.currentState(layer) -> string
+    #if 0  // REMOVED: current_state() is part of old Machine system
     ctx->bind_function("flex_currentState", [ctx](const std::vector<ScriptValue>& args) -> ScriptValue {
         auto* inst = ctx->get_instance();
         if (!inst) return ScriptValue::from_string("");
         if (args.size() >= 1 && args[0].is_string()) {
-            return ScriptValue::from_string(inst->current_state(args[0].as_string()));
+            return ScriptValue::from_string(inst->current_state(args[0].as_string().c_str()));
         }
         return ScriptValue::from_string("");
     });
+    #endif
 }
 
 } // namespace script

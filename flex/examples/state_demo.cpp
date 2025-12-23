@@ -1,10 +1,6 @@
 /*
- * Flex State Management Demo
- *
- * Demonstrates reactive UI with Observable State:
- * - State changes automatically update components
- * - Multiple components bound to same state
- * - Batch updates for performance
+ * Flex State Management Demo - MVC Refactor
+ * Demonstrates reactive UI with Observable State using the MVC pattern.
  */
 
 #include "flex/flex.h"
@@ -22,39 +18,35 @@
 #include <iostream>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 // ============================================================================
-// Component Registration (same as component_dsl_demo)
+// Component Registration
 // ============================================================================
 
 flex::Node::Ptr build_slider(const flex::Props& props) {
     auto slider = flex::Group::create();
-
     float value = flex::get_prop<float>(props, "value", 0.5f);
     float width = flex::get_prop<float>(props, "width", 300.0f);
     uint32_t color = flex::get_prop<uint32_t>(props, "color", 0xFF0D6EFD);
 
-    // Extract RGBA from uint32_t
     float a = ((color >> 24) & 0xFF) / 255.0f;
     float r = ((color >> 16) & 0xFF) / 255.0f;
     float g = ((color >> 8) & 0xFF) / 255.0f;
     float b = (color & 0xFF) / 255.0f;
 
-    // Background track
     auto track = flex::Shape::create();
     track->set_rect(width, 8);
     track->set_fill(flex::Color(0.9f, 0.9f, 0.9f, 1.0f));
     track->set_y(6);
     slider->add_child(track);
 
-    // Filled portion
     auto fill = flex::Shape::create();
     fill->set_rect(width * value, 8);
     fill->set_fill(flex::Color(r, g, b, a));
     fill->set_y(6);
     slider->add_child(fill);
 
-    // Thumb (circle)
     auto thumb = flex::Shape::create();
     thumb->set_circle(10);
     thumb->set_fill(flex::Color(r, g, b, a));
@@ -66,7 +58,6 @@ flex::Node::Ptr build_slider(const flex::Props& props) {
 
 flex::Node::Ptr build_progress_bar(const flex::Props& props) {
     auto bar = flex::Group::create();
-
     float progress = flex::get_prop<float>(props, "progress", 0.5f);
     float width = flex::get_prop<float>(props, "width", 300.0f);
     uint32_t color = flex::get_prop<uint32_t>(props, "color", 0xFF198754);
@@ -76,13 +67,11 @@ flex::Node::Ptr build_progress_bar(const flex::Props& props) {
     float g = ((color >> 8) & 0xFF) / 255.0f;
     float b = (color & 0xFF) / 255.0f;
 
-    // Background
     auto bg = flex::Shape::create();
     bg->set_rect(width, 20);
     bg->set_fill(flex::Color(0.9f, 0.9f, 0.9f, 1.0f));
     bar->add_child(bg);
 
-    // Progress fill
     auto fill = flex::Shape::create();
     fill->set_rect(width * progress, 20);
     fill->set_fill(flex::Color(r, g, b, a));
@@ -92,7 +81,6 @@ flex::Node::Ptr build_progress_bar(const flex::Props& props) {
 }
 
 void register_components() {
-    // Slider component
     auto slider_comp = flex::Component::create("Slider");
     slider_comp->add_prop("value", 0.5f);
     slider_comp->add_prop("width", 300.0f);
@@ -100,7 +88,6 @@ void register_components() {
     slider_comp->set_builder(build_slider);
     flex::ComponentRegistry::instance().register_component(slider_comp);
 
-    // ProgressBar component
     auto progress_comp = flex::Component::create("ProgressBar");
     progress_comp->add_prop("progress", 0.5f);
     progress_comp->add_prop("width", 300.0f);
@@ -110,296 +97,238 @@ void register_components() {
 }
 
 // ============================================================================
-// Demo Application
+// Model - System State
 // ============================================================================
 
-int main(int argc, char** argv) {
-    (void)argc; (void)argv;
-
-    // Initialize Flex and SDL
-    flex::init();
-    // Load font
-    if (!flex::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
-        flex::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
-    }
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
-        return 1;
+class MetricsModel {
+public:
+    MetricsModel() {
+        state_ = flex::ObservableState::create();
+        state_->set("cpu_usage", 0.3f);
+        state_->set("memory_usage", 0.65f);
+        state_->set("disk_usage", 0.82f);
+        state_->set("network_speed", 0.45f);
     }
 
-    SDL_Window* window = SDL_CreateWindow(
-        "Flex State Management Demo",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1200, 800,
-        SDL_WINDOW_SHOWN
-    );
-
-    if (!window) {
-        std::cerr << "SDL_CreateWindow Error: " << SDL_GetError() << std::endl;
-        SDL_Quit();
-        return 1;
+    void update(float time) {
+        state_->begin_batch();
+        state_->set("cpu_usage", 0.5f + 0.3f * std::sin(time * 0.8f));
+        state_->set("memory_usage", 0.6f + 0.2f * std::sin(time * 1.2f));
+        state_->set("disk_usage", 0.75f + 0.15f * std::sin(time * 0.5f));
+        state_->set("network_speed", 0.4f + 0.35f * std::sin(time * 1.5f));
+        state_->end_batch();
     }
 
-    // Register components
-    register_components();
+    flex::ObservableState::Ptr state() const { return state_; }
 
-    // ============================================================================
-    // Create Observable State
-    // ============================================================================
+private:
+    flex::ObservableState::Ptr state_;
+};
 
-    auto app_state = flex::ObservableState::create();
+// ============================================================================
+// View - UI Presentation
+// ============================================================================
 
-    // Initialize state values
-    app_state->set("cpu_usage", 0.3f);
-    app_state->set("memory_usage", 0.65f);
-    app_state->set("disk_usage", 0.82f);
-    app_state->set("network_speed", 0.45f);
-
-    // ============================================================================
-    // Build UI with State Bindings
-    // ============================================================================
-
-    auto instance = flex::Instance::create(1200, 800);
-    auto artboard = instance->artboard();
-
-    // Background
-    auto bg = flex::Shape::create();
-    bg->set_rect(1200, 800);
-    bg->set_fill(flex::Color(0.97f, 0.97f, 0.98f, 1.0f));
-    artboard->add_child(bg);
-
-    // Title
-    auto title = flex::Text::create();
-    title->set_content("Reactive State Management Demo");
-    title->set_font_size(32);
-    title->set_position(50, 40);
-    artboard->add_child(title);
-
-    // Subtitle
-    auto subtitle = flex::Text::create();
-    subtitle->set_content("State changes automatically update all bound components");
-    subtitle->set_font_size(16);
-    subtitle->set_color(flex::Color(0.5f, 0.5f, 0.5f, 1.0f));
-    subtitle->set_position(50, 80);
-    artboard->add_child(subtitle);
-
-    // ============================================================================
-    // Reactive Group 1: CPU Usage
-    // ============================================================================
-
-    auto cpu_group = flex::ReactiveGroup::create(app_state);
-    cpu_group->set_position(50, 140);
-
-    auto cpu_label = flex::Text::create();
-    cpu_label->set_content("CPU Usage");
-    cpu_label->set_font_size(18);
-    cpu_group->add_child(cpu_label);
-
-    // Slider bound to cpu_usage state
-    cpu_group->add_bound_component(
-        "Slider",
-        {{"value", 0.3f}, {"width", 400.0f}, {"color", uint32_t(0xFF0D6EFD)}},
-        {{"cpu_usage", "value"}},  // state key -> prop name
-        0, 40
-    );
-
-    // Progress bar also bound to cpu_usage state
-    cpu_group->add_bound_component(
-        "ProgressBar",
-        {{"progress", 0.3f}, {"width", 400.0f}, {"color", uint32_t(0xFF0D6EFD)}},
-        {{"cpu_usage", "progress"}},
-        0, 90
-    );
-
-    artboard->add_child(cpu_group);
-
-    // ============================================================================
-    // Reactive Group 2: Memory Usage
-    // ============================================================================
-
-    auto mem_group = flex::ReactiveGroup::create(app_state);
-    mem_group->set_position(50, 290);
-
-    auto mem_label = flex::Text::create();
-    mem_label->set_content("Memory Usage");
-    mem_label->set_font_size(18);
-    mem_group->add_child(mem_label);
-
-    mem_group->add_bound_component(
-        "Slider",
-        {{"value", 0.65f}, {"width", 400.0f}, {"color", uint32_t(0xFFDC3545)}},
-        {{"memory_usage", "value"}},
-        0, 40
-    );
-
-    mem_group->add_bound_component(
-        "ProgressBar",
-        {{"progress", 0.65f}, {"width", 400.0f}, {"color", uint32_t(0xFFDC3545)}},
-        {{"memory_usage", "progress"}},
-        0, 90
-    );
-
-    artboard->add_child(mem_group);
-
-    // ============================================================================
-    // Reactive Group 3: Disk Usage
-    // ============================================================================
-
-    auto disk_group = flex::ReactiveGroup::create(app_state);
-    disk_group->set_position(50, 440);
-
-    auto disk_label = flex::Text::create();
-    disk_label->set_content("Disk Usage");
-    disk_label->set_font_size(18);
-    disk_group->add_child(disk_label);
-
-    disk_group->add_bound_component(
-        "Slider",
-        {{"value", 0.82f}, {"width", 400.0f}, {"color", uint32_t(0xFFFFC107)}},
-        {{"disk_usage", "value"}},
-        0, 40
-    );
-
-    disk_group->add_bound_component(
-        "ProgressBar",
-        {{"progress", 0.82f}, {"width", 400.0f}, {"color", uint32_t(0xFFFFC107)}},
-        {{"disk_usage", "progress"}},
-        0, 90
-    );
-
-    artboard->add_child(disk_group);
-
-    // ============================================================================
-    // Reactive Group 4: Network Speed
-    // ============================================================================
-
-    auto net_group = flex::ReactiveGroup::create(app_state);
-    net_group->set_position(50, 590);
-
-    auto net_label = flex::Text::create();
-    net_label->set_content("Network Speed");
-    net_label->set_font_size(18);
-    net_group->add_child(net_label);
-
-    net_group->add_bound_component(
-        "Slider",
-        {{"value", 0.45f}, {"width", 400.0f}, {"color", uint32_t(0xFF198754)}},
-        {{"network_speed", "value"}},
-        0, 40
-    );
-
-    net_group->add_bound_component(
-        "ProgressBar",
-        {{"progress", 0.45f}, {"width", 400.0f}, {"color", uint32_t(0xFF198754)}},
-        {{"network_speed", "progress"}},
-        0, 90
-    );
-
-    artboard->add_child(net_group);
-
-    // ============================================================================
-    // Info Panel (right side)
-    // ============================================================================
-
-    auto info = flex::Text::create();
-    info->set_content(
-        "Watch the UI update automatically!\n\n"
-        "State changes every 2 seconds:\n"
-        "- Both slider and progress bar update\n"
-        "- Multiple components bound to same state\n"
-        "- Zero manual UI updates needed\n\n"
-        "This is reactive programming!"
-    );
-    info->set_font_size(14);
-    info->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
-    info->set_position(550, 140);
-    artboard->add_child(info);
-
-    // ============================================================================
-    // Render Setup
-    // ============================================================================
-
-    if (tvg::Initializer::init(0) != tvg::Result::Success) {
-        std::cerr << "ThorVG init failed" << std::endl;
-        return 1;
+class MetricsView {
+public:
+    MetricsView(flex::Instance::Ptr instance, flex::ObservableState::Ptr state) 
+        : instance_(instance), state_(state) 
+    {
+        build_ui();
     }
 
-    SDL_Surface* surface = SDL_GetWindowSurface(window);
-    auto canvas = std::unique_ptr<tvg::SwCanvas>(tvg::SwCanvas::gen());
-    canvas->target(
-        static_cast<uint32_t*>(surface->pixels),
-        surface->pitch / 4,
-        surface->w,
-        surface->h,
-        tvg::ColorSpace::ARGB8888
-    );
+    void build_ui() {
+        auto artboard = instance_->artboard();
 
-    auto renderer = flex::create_thorvg_renderer(canvas.get());
+        // Background
+        auto bg = flex::Shape::create();
+        bg->set_rect(1200, 800);
+        bg->set_fill(flex::Color(0.97f, 0.97f, 0.98f, 1.0f));
+        artboard->add_child(bg);
 
-    // ============================================================================
-    // Animation Loop - Simulate State Changes
-    // ============================================================================
+        // Header
+        auto title = flex::Text::create();
+        title->set_content("Reactive State Management Demo (MVC)");
+        title->set_font_size(32);
+        title->set_position(50, 40);
+        artboard->add_child(title);
 
-    bool running = true;
-    SDL_Event event;
+        auto subtitle = flex::Text::create();
+        subtitle->set_content("State changes automatically update all bound components via MVC pattern");
+        subtitle->set_font_size(16);
+        subtitle->set_color(flex::Color(0.5f, 0.5f, 0.5f, 1.0f));
+        subtitle->set_position(50, 80);
+        artboard->add_child(subtitle);
 
-    float time = 0;
-    Uint32 last_time = SDL_GetTicks();
+        // Metrics Groups
+        add_metric_group("CPU Usage", "cpu_usage", 0xFF0D6EFD, 140);
+        add_metric_group("Memory Usage", "memory_usage", 0xFFDC3545, 290);
+        add_metric_group("Disk Usage", "disk_usage", 0xFFFFC107, 440);
+        add_metric_group("Network Speed", "network_speed", 0xFF198754, 590);
 
-    std::cout << "=================================================\n";
-    std::cout << "Flex State Management Demo\n";
-    std::cout << "=================================================\n";
-    std::cout << "Watch components update automatically as state changes!\n";
-    std::cout << "Press ESC or close window to exit.\n\n";
+        // Info Panel
+        auto info = flex::Text::create();
+        info->set_content(
+            "Watch the UI update automatically!\n\n"
+            "State changes every frame:\n"
+            "- Both slider and progress bar update\n"
+            "- Multiple components bound to same state\n"
+            "- Zero manual UI updates needed\n\n"
+            "This is MVC with Reactive Bindings!"
+        );
+        info->set_font_size(14);
+        info->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
+        info->set_position(550, 140);
+        artboard->add_child(info);
+    }
 
-    while (running) {
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
-                running = false;
-            } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
-                running = false;
-            }
+    void render(flex::Renderer& renderer) {
+        instance_->render(renderer);
+    }
+
+private:
+    void add_metric_group(const std::string& label, const std::string& state_key, uint32_t color, float y) {
+        auto group = flex::ReactiveGroup::create(state_);
+        group->set_position(50, y);
+
+        auto txt = flex::Text::create();
+        txt->set_content(label);
+        txt->set_font_size(18);
+        group->add_child(txt);
+
+        group->add_bound_component(
+            "Slider",
+            {{"value", 0.5f}, {"width", 400.0f}, {"color", color}},
+            {{state_key, "value"}}, 
+            0, 40
+        );
+
+        group->add_bound_component(
+            "ProgressBar",
+            {{"progress", 0.5f}, {"width", 400.0f}, {"color", color}},
+            {{state_key, "progress"}},
+            0, 90
+        );
+
+        instance_->artboard()->add_child(group);
+    }
+
+    flex::Instance::Ptr instance_;
+    flex::ObservableState::Ptr state_;
+};
+
+// ============================================================================
+// Controller - Coordination
+// ============================================================================
+
+class MetricsController {
+public:
+    MetricsController(MetricsModel& model, MetricsView& view, flex::Instance::Ptr instance) 
+        : model_(model), view_(view), instance_(instance) {}
+
+    void update(float dt) {
+        time_ += dt;
+        model_.update(time_);
+        instance_->advance(dt);
+    }
+
+private:
+    MetricsModel& model_;
+    MetricsView& view_;
+    flex::Instance::Ptr instance_;
+    float time_ = 0;
+};
+
+// ============================================================================
+// Application Shell
+// ============================================================================
+
+class StateDemo {
+public:
+    bool init() {
+        flex::init();
+        if (!flex::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
+            flex::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
         }
+        
+        if (SDL_Init(SDL_INIT_VIDEO) != 0) return false;
 
-        Uint32 current_time = SDL_GetTicks();
-        float dt = (current_time - last_time) / 1000.0f;
-        last_time = current_time;
+        window_ = SDL_CreateWindow("Flex State Demo - MVC", 
+            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1200, 800, SDL_WINDOW_SHOWN);
+        if (!window_) return false;
 
-        time += dt;
+        register_components();
 
-        // Update state values with sine waves (simulate changing metrics)
-        // State changes automatically trigger component rebuilds!
-        app_state->begin_batch();  // Batch updates for performance
+        instance_ = flex::Instance::create(1200, 800);
+        model_ = std::make_unique<MetricsModel>();
+        view_ = std::make_unique<MetricsView>(instance_, model_->state());
+        controller_ = std::make_unique<MetricsController>(*model_, *view_, instance_);
 
-        app_state->set("cpu_usage", 0.5f + 0.3f * std::sin(time * 0.8f));
-        app_state->set("memory_usage", 0.6f + 0.2f * std::sin(time * 1.2f));
-        app_state->set("disk_usage", 0.75f + 0.15f * std::sin(time * 0.5f));
-        app_state->set("network_speed", 0.4f + 0.35f * std::sin(time * 1.5f));
+        if (tvg::Initializer::init(0) != tvg::Result::Success) return false;
 
-        app_state->end_batch();  // Trigger all updates at once
+        window_surface_ = SDL_GetWindowSurface(window_);
+        offscreen_surface_ = SDL_CreateRGBSurface(0, 1200, 800, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+        
+        canvas_ = tvg::SwCanvas::gen();
+        canvas_->target(static_cast<uint32_t*>(offscreen_surface_->pixels), 1200, 1200, 800, tvg::ColorSpace::ARGB8888);
+        renderer_ = flex::create_thorvg_renderer(canvas_);
 
-        // Render
-        renderer->begin_frame(1200, 800, 1.0f);
-        instance->render(*renderer);
-        renderer->end_frame();
-
-        canvas->draw();
-        canvas->sync();
-
-        SDL_UpdateWindowSurface(window);
-
-        SDL_Delay(16);  // ~60 FPS
+        return true;
     }
 
-    std::cout << "\nDemo finished. Total runtime: " << time << " seconds\n";
+    void run() {
+        bool running = true;
+        SDL_Event event;
+        Uint32 last_time = SDL_GetTicks();
 
-    renderer.reset();
-    canvas.reset();
-    tvg::Initializer::term();
+        while (running) {
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) {
+                    running = false;
+                }
+            }
 
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    flex::shutdown();
+            Uint32 current_time = SDL_GetTicks();
+            float dt = (current_time - last_time) / 1000.0f;
+            last_time = current_time;
 
+            controller_->update(dt);
+
+            renderer_->begin_frame(1200, 800, 1.0f);
+            view_->render(*renderer_);
+            renderer_->end_frame();
+
+            SDL_BlitSurface(offscreen_surface_, nullptr, window_surface_, nullptr);
+            SDL_UpdateWindowSurface(window_);
+            SDL_Delay(16);
+        }
+    }
+
+    ~StateDemo() {
+        renderer_.reset();
+        if (canvas_) delete canvas_;
+        if (offscreen_surface_) SDL_FreeSurface(offscreen_surface_);
+        tvg::Initializer::term();
+        if (window_) SDL_DestroyWindow(window_);
+        SDL_Quit();
+        flex::shutdown();
+    }
+
+private:
+    SDL_Window* window_ = nullptr;
+    SDL_Surface* window_surface_ = nullptr;
+    SDL_Surface* offscreen_surface_ = nullptr;
+    tvg::SwCanvas* canvas_ = nullptr;
+    std::unique_ptr<flex::Renderer> renderer_;
+    flex::Instance::Ptr instance_;
+    std::unique_ptr<MetricsModel> model_;
+    std::unique_ptr<MetricsView> view_;
+    std::unique_ptr<MetricsController> controller_;
+};
+
+int main(int argc, char** argv) {
+    StateDemo demo;
+    if (!demo.init()) return 1;
+    demo.run();
     return 0;
 }

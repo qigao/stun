@@ -9,6 +9,106 @@
 #include <thorvg.h>
 #include <flex/flex.h>
 
+// ============================================================================
+// CounterController - Handles UI business logic and state
+// ============================================================================
+class CounterController {
+public:
+    CounterController(flex::Instance::Ptr instance) : instance_(instance) {
+        // Find UI elements
+        auto* artboard = instance_->artboard();
+        counter_value_text_ = artboard->find("counterValue");
+        status_text_ = artboard->find("statusText");
+        increment_button_ = artboard->find("incrementButton");
+        decrement_button_ = artboard->find("decrementButton");
+        
+        setup_logic();
+    }
+
+    void increment() {
+        counter_++;
+        update_display();
+        if (increment_button_) {
+            increment_button_->set_scale(1.1f, 1.1f);
+        }
+    }
+
+    void decrement() {
+        counter_--;
+        update_display();
+        if (decrement_button_) {
+            decrement_button_->set_scale(1.1f, 1.1f);
+        }
+    }
+
+    void reset() {
+        counter_ = 0;
+        update_display();
+        std::cout << "Counter reset\n";
+    }
+
+    void update(float dt) {
+        // Simple visual feedback: button scale cooldown
+        if (increment_button_ && increment_button_->scale_x() > 1.0f) {
+            increment_button_->set_scale(1.0f, 1.0f);
+        }
+        if (decrement_button_ && decrement_button_->scale_x() > 1.0f) {
+            decrement_button_->set_scale(1.0f, 1.0f);
+        }
+    }
+
+private:
+    void setup_logic() {
+        // Set initial counter value as input
+        instance_->set_input("counter", static_cast<float>(counter_));
+
+        // Update UI immediately
+        update_display();
+
+        // Connect UI events
+        if (increment_button_) {
+            increment_button_->on_click([this]() {
+                increment();
+            });
+        }
+        if (decrement_button_) {
+            decrement_button_->on_click([this]() {
+                decrement();
+            });
+        }
+    }
+
+    void update_display() {
+        // Update counter value input for data binding and state machine
+        instance_->set_input("counter", static_cast<float>(counter_));
+
+        // Note: counter text display is now controlled by state machine animations
+        // We update the input value, and the state machine transitions will
+        // trigger animations that update both the counter display and status text
+
+        // Update counter value text manually (only the number display)
+        if (counter_value_text_) {
+            if (auto* text = dynamic_cast<flex::Text*>(counter_value_text_)) {
+                text->set_content(std::to_string(counter_));
+            }
+        }
+
+        // Status text is controlled by state machine - do NOT update manually!
+
+        std::cout << "Counter: " << counter_ << "\n";
+    }
+
+    flex::Instance::Ptr instance_;
+    flex::Node* counter_value_text_ = nullptr;
+    flex::Node* status_text_ = nullptr;
+    flex::Node* increment_button_ = nullptr;
+    flex::Node* decrement_button_ = nullptr;
+    int counter_ = 0;
+};
+
+// ============================================================================
+// DataBindingDemo - App Shell (SDL, Rendering, Engine management)
+// ============================================================================
 class DataBindingDemo {
 public:
     bool init() {
@@ -63,15 +163,8 @@ public:
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
-        // Find UI elements
-        auto* artboard = instance_->artboard();
-        counter_value_text_ = artboard->find("counterValue");
-        status_text_ = artboard->find("statusText");
-        increment_button_ = artboard->find("incrementButton");
-        decrement_button_ = artboard->find("decrementButton");
-
-        // Initialize data bindings
-        setup_data_bindings();
+        // Initialize UI Logic Controller
+        controller_ = std::make_unique<CounterController>(instance_);
 
         std::cout << "Data Binding Demo initialized!\n";
         std::cout << "Controls:\n";
@@ -96,10 +189,12 @@ public:
             handle_events();
             update(dt);
             render();
+            SDL_Delay(16);  // Limit to ~60 FPS
         }
     }
 
     ~DataBindingDemo() {
+        controller_.reset();
         flex_renderer_.reset();
         instance_.reset();
         flex::shutdown();
@@ -126,88 +221,9 @@ private:
 
     flex::Instance::Ptr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
-
-    // UI elements
-    flex::Node* counter_value_text_ = nullptr;
-    flex::Node* status_text_ = nullptr;
-    flex::Node* increment_button_ = nullptr;
-    flex::Node* decrement_button_ = nullptr;
+    std::unique_ptr<CounterController> controller_;
 
     bool running_ = false;
-    int counter_ = 0;
-
-    void setup_data_bindings() {
-        // Set initial counter value as input
-        instance_->set_input("counter", static_cast<float>(counter_));
-
-        // Update UI immediately
-        update_counter_display();
-    }
-
-    void update_counter_display() {
-        // Update counter value input
-        instance_->set_input("counter", static_cast<float>(counter_));
-
-        // Update counter text
-        if (counter_value_text_) {
-            if (auto* text = dynamic_cast<flex::Text*>(counter_value_text_)) {
-                text->set_content(std::to_string(counter_));
-            }
-        }
-
-        // Update status text and color based on counter value
-        if (status_text_) {
-            if (auto* text = dynamic_cast<flex::Text*>(status_text_)) {
-                if (counter_ > 10) {
-                    text->set_content("Very High!");
-                    text->set_color(flex::Color(1.0f, 0.0f, 0.0f, 1.0f));  // Red
-                } else if (counter_ > 5) {
-                    text->set_content("High");
-                    text->set_color(flex::Color(1.0f, 0.65f, 0.0f, 1.0f));  // Orange
-                } else if (counter_ > 0) {
-                    text->set_content("Positive");
-                    text->set_color(flex::Color(0.0f, 1.0f, 0.53f, 1.0f));  // Green
-                } else if (counter_ == 0) {
-                    text->set_content("Neutral");
-                    text->set_color(flex::Color(0.53f, 0.53f, 0.53f, 1.0f));  // Gray
-                } else if (counter_ > -5) {
-                    text->set_content("Negative");
-                    text->set_color(flex::Color(1.0f, 0.65f, 0.0f, 1.0f));  // Orange
-                } else {
-                    text->set_content("Very Low!");
-                    text->set_color(flex::Color(1.0f, 0.0f, 0.43f, 1.0f));  // Pink
-                }
-            }
-        }
-
-        std::cout << "Counter: " << counter_ << "\n";
-    }
-
-    void increment_counter() {
-        counter_++;
-        update_counter_display();
-
-        // Button feedback
-        if (increment_button_) {
-            increment_button_->set_scale(1.1f, 1.1f);
-        }
-    }
-
-    void decrement_counter() {
-        counter_--;
-        update_counter_display();
-
-        // Button feedback
-        if (decrement_button_) {
-            decrement_button_->set_scale(1.1f, 1.1f);
-        }
-    }
-
-    void reset_counter() {
-        counter_ = 0;
-        update_counter_display();
-        std::cout << "Counter reset\n";
-    }
 
     void handle_events() {
         SDL_Event event;
@@ -224,46 +240,39 @@ private:
                             break;
 
                         case SDLK_UP:
-                            increment_counter();
+                            if (controller_) controller_->increment();
                             break;
 
                         case SDLK_DOWN:
-                            decrement_counter();
+                            if (controller_) controller_->decrement();
                             break;
 
                         case SDLK_r:
-                            reset_counter();
+                            if (controller_) controller_->reset();
                             break;
                     }
                     break;
 
                 case SDL_MOUSEBUTTONDOWN:
-                    handle_click(event.button.x, event.button.y);
+                    instance_->send_pointer_event(static_cast<float>(event.button.x), 
+                                                static_cast<float>(event.button.y), true);
+                    break;
+                case SDL_MOUSEBUTTONUP:
+                    instance_->send_pointer_event(static_cast<float>(event.button.x), 
+                                                static_cast<float>(event.button.y), false);
+                    break;
+                case SDL_MOUSEMOTION:
+                    instance_->send_pointer_event(static_cast<float>(event.motion.x), 
+                                                static_cast<float>(event.motion.y), 
+                                                (event.motion.state & SDL_BUTTON_LMASK) != 0);
                     break;
             }
         }
     }
 
-    void handle_click(int x, int y) {
-        // Check increment button (centered at 130, 220, size 80x40)
-        if (x >= 90 && x <= 170 && y >= 200 && y <= 240) {
-            increment_counter();
-        }
-        // Check decrement button (centered at 270, 220, size 80x40)
-        else if (x >= 230 && x <= 310 && y >= 200 && y <= 240) {
-            decrement_counter();
-        }
-    }
 
     void update(float dt) {
-        // Reset button scales
-        if (increment_button_ && increment_button_->scale_x() > 1.0f) {
-            increment_button_->set_scale(1.0f, 1.0f);
-        }
-        if (decrement_button_ && decrement_button_->scale_x() > 1.0f) {
-            decrement_button_->set_scale(1.0f, 1.0f);
-        }
-
+        if (controller_) controller_->update(dt);
         instance_->advance(dt);
     }
 

@@ -57,16 +57,18 @@ std::shared_ptr<Node> Component::instantiate(const Props& props) const {
 }
 
 bool Component::validate_props(const Props& props, std::string& error) const {
-    // Check for unknown props
+    // If no property definitions are provided, allow any properties (common for DSL components)
+    if (prop_defs_.empty()) {
+        return true;
+    }
+
+    // Check for unknown props against definitions
     for (const auto& [name, value] : props) {
         if (!has_prop(name)) {
             error = "Unknown prop: " + name;
             return false;
         }
     }
-
-    // TODO: Add type checking
-    // For now, just check for unknown props
 
     return true;
 }

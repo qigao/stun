@@ -16,7 +16,8 @@ namespace flex {
 // ============================================================================
 
 void Shape::update_cached_path() {
-    cached_path_ = geometry_to_path(geometry_);
+    cached_path_ = geometry_to_path(geometry_, rough_);
+    cached_fill_path_ = geometry_to_fill_path(geometry_, rough_);
 }
 
 // ============================================================================
@@ -260,9 +261,41 @@ Stroke Shape::stroke() const {
 // Rendering - Clean and Simple
 // ============================================================================
 
+// Helper to render a rough path with "salted" (randomized) segment thicknesses
+static void split_and_render_rough(flex::Renderer& r, const std::string& path, 
+                                 const flex::Paint& paint, float base_width, 
+                                 float salt, unsigned int seed) {
+    if (path.empty()) return;
+    if (salt <= 0.0f) {
+        r.stroke_path(path, paint, base_width);
+        return;
+    }
+
+    flex::detail::RoughRandom rng(seed + 123);
+    
+    // Find each 'M' (MoveTo) and render segments independently with jittered width
+    size_t start = 0;
+    while (start < path.length()) {
+        size_t next_m = path.find('M', start + 1);
+        std::string segment = path.substr(start, (next_m == std::string::npos) ? std::string::npos : (next_m - start));
+        
+        // Randomize width: base_width * (1.0 +/- salt)
+        float jitter = rng.range(-salt, salt);
+        float w = std::max(0.1f, base_width * (1.0f + jitter));
+        
+        r.stroke_path(segment, paint, w);
+        if (next_m == std::string::npos) break;
+        start = next_m;
+    }
+}
+
 void Shape::render(Renderer& r) {
     if (!visible_) return;
-    if (cached_path_.empty()) return;
+    if (cached_path_.empty()) {
+        // Debug: Why is path empty?
+        fprintf(stderr, "Warning: Shape '%s' has empty cached_path_\n", id_.c_str());
+        return;
+    }
 
     r.save();
 
@@ -271,8 +304,21 @@ void Shape::render(Renderer& r) {
     if (scale_x_ != 1 || scale_y_ != 1) r.scale(scale_x_, scale_y_);
     if (opacity_ < 1.0f) r.set_global_alpha(opacity_);
 
-    if (fill_) r.fill_path(cached_path_, *fill_);
-    if (stroke_) r.stroke_path(cached_path_, *stroke_, stroke_width_);
+    // 1. Draw sketchy fill (if any)
+    if (fill_ && !cached_fill_path_.empty()) {
+        split_and_render_rough(r, cached_fill_path_, *fill_, rough_.fill_weight, 
+                               rough_.stroke_width_randomness * 0.5f, rough_.seed + 777);
+    } 
+    // Otherwise draw solid fill (only if no sketchy fill is generated)
+    else if (fill_) {
+        r.fill_path(cached_path_, *fill_);
+    }
+
+    // 2. Draw outline
+    if (stroke_) {
+        split_and_render_rough(r, cached_path_, *stroke_, stroke_width_, 
+                               rough_.stroke_width_randomness, rough_.seed);
+    }
 
     r.restore();
 }

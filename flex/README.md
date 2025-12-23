@@ -1,5 +1,14 @@
 # Flex Engine - 动画系统
 
+## 📚 文档导航
+
+- **[dsl.md](docs/dsl.md)** - DSL 语法规范（当前实现）
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - 实际架构和实现细节
+- **[VISION.md](docs/VISION.md)** - 理论设计和未来愿景
+- **[REFACTORED_DESIGN.md](REFACTORED_DESIGN.md)** - 简化架构说明
+
+---
+
 ## 🎯 项目简介
 
 Flex Engine 是一个现代化的 2.5D 游戏引擎和 UI 框架，具有强大的动画系统。本项目实现了完整的动画系统，包括类型安全的 C++ API、声明式 DSL 语法，以及 SDL2 + ThorVG 的实时渲染支持。

@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Memory pool for zero-allocation parsing
 typedef struct {
   uint8_t *pool;
@@ -33,5 +37,9 @@ void pool_rewind(MemoryPool *pool, size_t mark);
 
 // Destroy pool
 void pool_destroy(MemoryPool *pool);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // MEMORY_POOL_H

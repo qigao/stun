@@ -1,5 +1,6 @@
 // Shopping Cart Demo
 // E-commerce shopping cart with dynamic price calculation
+// Refactored to use repeat for item generation
 
 scene cart {
     width: 500
@@ -39,229 +40,102 @@ scene cart {
         }
     }
 
-    // Item 1 - Laptop
-    group item1 {
+    // Cart items container - uses flex layout for automatic spacing
+    group cartItems {
         x: 0, y: 100
+        layout: flex
+        flexDirection: column
+        gap: 20
 
-        rect itemBg {
-            x: 20, y: 0
-            width: 460, height: 100
-            fill: #ffffff
-        }
+        // Generate 3 cart item slots using repeat
+        // Note: item IDs are item0, item1, item2 (0-indexed)
+        repeat 3 {
+            group item@index {
+                width: 460, height: 100
 
-        text itemName {
-            x: 40, y: 30
-            content: "Gaming Laptop"
-            fontSize: 18
-            color: #2c2c54
-        }
+                rect itemBg {
+                    x: 20, y: 0
+                    width: 460, height: 100
+                    fill: #ffffff
+                }
 
-        text itemPrice {
-            x: 40, y: 55
-            content: "$999"
-            fontSize: 16
-            color: #666666
-        }
+                text itemName {
+                    x: 40, y: 30
+                    content: "Product Item"
+                    fontSize: 18
+                    color: #2c2c54
+                }
 
-        // Quantity controls
-        group qtyControls {
-            x: 320, y: 40
+                text itemPrice {
+                    x: 40, y: 55
+                    content: "$0"
+                    fontSize: 16
+                    color: #666666
+                }
 
-            rect minusBtn {
-                x: 0, y: 0
-                width: 30, height: 30
-                fill: #ff006e
+                // Quantity controls
+                group qtyControls {
+                    x: 320, y: 40
+
+                    group minusBtn {
+                        x: 0, y: 0
+
+                        rect minusBg {
+                            x: 0, y: 0
+                            width: 30, height: 30
+                            fill: #ff006e
+                        }
+
+                        text minusLabel {
+                            x: 10, y: 0
+                            content: "-"
+                            fontSize: 20
+                            color: #ffffff
+                        }
+                    }
+
+                    group qtyInput {
+                        x: 35, y: 0
+
+                        rect qtyBg {
+                            x: 0, y: 0
+                            width: 50, height: 30
+                            fill: #e0e0e0
+                        }
+
+                        text qty {
+                            x: 10, y: 0
+                            content: "1"
+                            fontSize: 16
+                            color: #2c2c54
+                        }
+                    }
+
+                    group plusBtn {
+                        x: 90, y: 0
+
+                        rect plusBg {
+                            x: 0, y: 0
+                            width: 30, height: 30
+                            fill: #00d9ff
+                        }
+
+                        text plusLabel {
+                            x: 10, y: 0
+                            content: "+"
+                            fontSize: 20
+                            color: #ffffff
+                        }
+                    }
+                }
+
+                text subtotal {
+                    x: 430, y: 55
+                    content: "$0"
+                    fontSize: 18
+                    color: #00d9ff
+                }
             }
-
-            text minusLabel {
-                x: 15, y: 20
-                content: "-"
-                fontSize: 20
-                color: #ffffff
-            }
-
-            rect qtyBg {
-                x: 35, y: 0
-                width: 50, height: 30
-                fill: #e0e0e0
-            }
-
-            text qty {
-                x: 60, y: 20
-                content: "1"
-                fontSize: 16
-                color: #2c2c54
-            }
-
-            rect plusBtn {
-                x: 90, y: 0
-                width: 30, height: 30
-                fill: #00d9ff
-            }
-
-            text plusLabel {
-                x: 105, y: 20
-                content: "+"
-                fontSize: 20
-                color: #ffffff
-            }
-        }
-
-        text subtotal1 {
-            x: 430, y: 55
-            content: "$999"
-            fontSize: 18
-            color: #00d9ff
-        }
-    }
-
-    // Item 2 - Mouse
-    group item2 {
-        x: 0, y: 220
-
-        rect itemBg {
-            x: 20, y: 0
-            width: 460, height: 100
-            fill: #ffffff
-        }
-
-        text itemName {
-            x: 40, y: 30
-            content: "Wireless Mouse"
-            fontSize: 18
-            color: #2c2c54
-        }
-
-        text itemPrice {
-            x: 40, y: 55
-            content: "$49"
-            fontSize: 16
-            color: #666666
-        }
-
-        group qtyControls {
-            x: 320, y: 40
-
-            rect minusBtn {
-                x: 0, y: 0
-                width: 30, height: 30
-                fill: #ff006e
-            }
-
-            text minusLabel {
-                x: 15, y: 20
-                content: "-"
-                fontSize: 20
-                color: #ffffff
-            }
-
-            rect qtyBg {
-                x: 35, y: 0
-                width: 50, height: 30
-                fill: #e0e0e0
-            }
-
-            text qty {
-                x: 60, y: 20
-                content: "2"
-                fontSize: 16
-                color: #2c2c54
-            }
-
-            rect plusBtn {
-                x: 90, y: 0
-                width: 30, height: 30
-                fill: #00d9ff
-            }
-
-            text plusLabel {
-                x: 105, y: 20
-                content: "+"
-                fontSize: 20
-                color: #ffffff
-            }
-        }
-
-        text subtotal2 {
-            x: 430, y: 55
-            content: "$98"
-            fontSize: 18
-            color: #00d9ff
-        }
-    }
-
-    // Item 3 - Keyboard
-    group item3 {
-        x: 0, y: 340
-
-        rect itemBg {
-            x: 20, y: 0
-            width: 460, height: 100
-            fill: #ffffff
-        }
-
-        text itemName {
-            x: 40, y: 30
-            content: "Mechanical Keyboard"
-            fontSize: 18
-            color: #2c2c54
-        }
-
-        text itemPrice {
-            x: 40, y: 55
-            content: "$129"
-            fontSize: 16
-            color: #666666
-        }
-
-        group qtyControls {
-            x: 320, y: 40
-
-            rect minusBtn {
-                x: 0, y: 0
-                width: 30, height: 30
-                fill: #ff006e
-            }
-
-            text minusLabel {
-                x: 15, y: 20
-                content: "-"
-                fontSize: 20
-                color: #ffffff
-            }
-
-            rect qtyBg {
-                x: 35, y: 0
-                width: 50, height: 30
-                fill: #e0e0e0
-            }
-
-            text qty {
-                x: 60, y: 20
-                content: "1"
-                fontSize: 16
-                color: #2c2c54
-            }
-
-            rect plusBtn {
-                x: 90, y: 0
-                width: 30, height: 30
-                fill: #00d9ff
-            }
-
-            text plusLabel {
-                x: 105, y: 20
-                content: "+"
-                fontSize: 20
-                color: #ffffff
-            }
-        }
-
-        text subtotal3 {
-            x: 430, y: 55
-            content: "$129"
-            fontSize: 18
-            color: #00d9ff
         }
     }
 
@@ -291,7 +165,7 @@ scene cart {
 
         text subtotalValue {
             x: 420, y: 30
-            content: "$1226"
+            content: "$0"
             fontSize: 18
             color: #2c2c54
         }
@@ -305,7 +179,7 @@ scene cart {
 
         text taxValue {
             x: 420, y: 60
-            content: "$122.60"
+            content: "$0"
             fontSize: 18
             color: #2c2c54
         }
@@ -319,7 +193,7 @@ scene cart {
 
         text totalValue {
             x: 420, y: 95
-            content: "$1348.60"
+            content: "$0"
             fontSize: 22
             color: #00d9ff
         }
@@ -358,10 +232,10 @@ scene cart {
         }
     }
 
-    // Empty cart message (hidden by default)
+    // Empty cart message (hidden by default, visible: false disables hit-testing)
     group emptyMessage {
-        x: 250, y: 350
-        opacity: 0.0
+        x: 250, y: 500
+        visible: false
 
         text emptyText {
             x: 0, y: 0

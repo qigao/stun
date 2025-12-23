@@ -154,6 +154,17 @@ public:
     void clear_stroke() { stroke_ = std::nullopt; mark_dirty(DirtyFlags::Content | DirtyFlags::Visual); }
 
     // -------------------------------------------
+    // Rough (Hand-drawn) Style
+    // -------------------------------------------
+
+    RoughOptions rough() const { return rough_; }
+    void set_rough(const RoughOptions& opts) {
+        rough_ = opts;
+        mark_dirty(DirtyFlags::Content);
+        update_cached_path();
+    }
+
+    // -------------------------------------------
     // Rendering
     // -------------------------------------------
 
@@ -168,10 +179,12 @@ public:
 private:
     // Core data - clean and minimal
     Geometry geometry_;              // variant: ONE geometry type
-    std::string cached_path_;        // pre-generated SVG path (avoid per-frame allocation)
+    std::string cached_path_;        // pre-generated SVG path for outline
+    std::string cached_fill_path_;   // pre-generated SVG path for sketchy fill
     std::optional<Paint> fill_;      // optional: has fill or not
     std::optional<Paint> stroke_;    // optional: has stroke or not
     float stroke_width_ = 1.0f;
+    RoughOptions rough_ = RoughOptions::disabled();  // Hand-drawn style (disabled by default)
 
     // Regenerate cached path from geometry
     void update_cached_path();

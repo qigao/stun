@@ -75,26 +75,100 @@ struct Easing {
 
     // Evaluate easing at time t [0, 1]
     float evaluate(float t) const {
-        // Simple linear interpolation for now
         switch (type) {
             case EasingType::Linear:
                 return t;
             case EasingType::Ease:
-                return t * t * (3.0f - 2.0f * t);
             case EasingType::EaseIn:
-                return t * t;
             case EasingType::EaseOut:
-                return t * (2.0f - t);
             case EasingType::EaseInOut:
-                return t < 0.5f ? 2.0f * t * t : -1.0f + (4.0f - 2.0f * t) * t;
             case EasingType::CubicBezier:
-                // For simplicity, just return linear for now
-                // TODO: Implement proper cubic bezier
-                return t;
+                return cubic_bezier(t, p1, p2, p3, p4);
             default:
                 return t;
         }
     }
+
+private:
+    // Cubic Bezier implementation (CSS Animations spec compatible)
+    // P0=(0,0), P1=(x1,y1), P2=(x2,y2), P3=(1,1)
+    static float cubic_bezier(float t, float x1, float y1, float x2, float y2) {
+        // Clamp input
+        if (t <= 0.0f) return 0.0f;
+        if (t >= 1.0f) return 1.0f;
+
+        // Newton-Raphson iteration to solve x(t) = input_t
+        float t_guess = t;
+        for (int i = 0; i < 8; ++i) {
+            float x = bezier_x(t_guess, x1, x2);
+            float dx = bezier_x_derivative(t_guess, x1, x2);
+
+            if (dx < 1e-6f) break;
+
+            float x_error = x - t;
+            if (x_error < 1e-6f && x_error > -1e-6f) break;
+
+            t_guess -= x_error / dx;
+        }
+
+        // Calculate y(t) using the solved t
+        return bezier_y(t_guess, y1, y2);
+    }
+
+    // Cubic Bezier x component: x(t) = 3(1-t)²t·x1 + 3(1-t)t²·x2 + t³
+    static float bezier_x(float t, float x1, float x2) {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        float mt = 1.0f - t;
+        float mt2 = mt * mt;
+        return 3.0f * mt2 * t * x1 + 3.0f * mt * t2 * x2 + t3;
+    }
+
+    // Derivative of x(t)
+    static float bezier_x_derivative(float t, float x1, float x2) {
+        float mt = 1.0f - t;
+        return 3.0f * mt * mt * x1 + 6.0f * mt * t * (x2 - x1) + 3.0f * t * t * (1.0f - x2);
+    }
+
+    // Cubic Bezier y component: y(t) = 3(1-t)²t·y1 + 3(1-t)t²·y2 + t³
+    static float bezier_y(float t, float y1, float y2) {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        float mt = 1.0f - t;
+        float mt2 = mt * mt;
+        return 3.0f * mt2 * t * y1 + 3.0f * mt * t2 * y2 + t3;
+    }
+};
+
+// ============================================================================
+// Rough (Hand-drawn) Style Options
+// ============================================================================
+
+enum class RoughFillStyle : uint8_t {
+    Solid,      // Standard solid fill
+    Hachure,    // Sketchy diagonal lines
+    ZigZag,     // Shaky zig-zag fill
+    CrossHatch  // Crossed sketchy lines
+};
+
+struct RoughOptions {
+    float roughness = 0;      // 0-10, amount of randomness (0 = disabled)
+    float bowing = 1.0f;      // 0-10, curvature of lines
+    int stroke_count = 2;     // 1-5, number of strokes per shape
+    unsigned int seed = 0;    // Random seed for reproducibility
+
+    // Fill options
+    RoughFillStyle fill_style = RoughFillStyle::Solid;
+    float fill_weight = 1.0f;      // Width of fill strokes
+    float hachure_angle = -45.0f;  // Angle of fill lines
+    float hachure_gap = 4.0f;      // Gap between fill lines
+    float stroke_width_randomness = 0.0f; // 0-1, adds "salt" to line thicknesses
+
+    // Quick constructors
+    static RoughOptions disabled() { return {0, 0, 1, 0}; }
+    static RoughOptions sketch() { return {1.5f, 1.0f, 2, 0, RoughFillStyle::Hachure, 1.0f, -45.0f, 4.0f, 0.2f}; }
+    static RoughOptions rough() { return {3.0f, 1.5f, 2, 0, RoughFillStyle::Hachure, 1.2f, -45.0f, 5.0f, 0.4f}; }
+    static RoughOptions very_rough() { return {5.0f, 2.0f, 3, 0, RoughFillStyle::CrossHatch, 1.5f, -45.0f, 6.0f, 0.6f}; }
 };
 
 // ============================================================================
@@ -143,11 +217,11 @@ inline Color Color::from_hex(const char* hex) {
 }
 
 inline uint32_t Color::to_rgba32() const {
-    uint32_t r = static_cast<uint32_t>(r * 255);
-    uint32_t g = static_cast<uint32_t>(g * 255);
-    uint32_t b = static_cast<uint32_t>(b * 255);
-    uint32_t a = static_cast<uint32_t>(a * 255);
-    return (r << 24) | (g << 16) | (b << 8) | a;
+    uint32_t ri = static_cast<uint32_t>(r * 255);
+    uint32_t gi = static_cast<uint32_t>(g * 255);
+    uint32_t bi = static_cast<uint32_t>(b * 255);
+    uint32_t ai = static_cast<uint32_t>(a * 255);
+    return (ri << 24) | (gi << 16) | (bi << 8) | ai;
 }
 
 inline Color Color::from_rgba32(uint32_t rgba) {

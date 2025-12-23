@@ -1,10 +1,21 @@
 /*
  * Test Parser - Debug parser output
+ * Tests the re2c lexer + recursive descent parser
  */
 
 #include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
 #include <flex/flex.h>
+#include <flex/component.h>
+#include <flex/group.h>
+#include <flex/flex_token.h>
+#include <flex/flex_ast.h>
 
+using namespace flex;
+
+// Print node information
 void print_node(const flex::Node* node, int depth = 0) {
     std::string indent(depth * 2, ' ');
 
@@ -77,32 +88,120 @@ void print_node(const flex::Node* node, int depth = 0) {
                   << text->color().a << ")\n";
     }
 
-    // If it's a group, print children
+    // If it's a group, print children and pseudo-class styles
     if (node->is_group()) {
         auto* group = static_cast<const flex::Group*>(node);
         const auto& children = group->children();
         std::cout << indent << "  [" << children.size() << " children]\n";
+
+        // Print pseudo-class styles
+        auto* styles = group->pseudo_class_styles();
+        if (styles && styles->size() > 0) {
+            std::cout << indent << "  Pseudo-class styles:\n";
+            for (auto it = styles->begin(); it != styles->end(); ++it) {
+                std::cout << indent << "    " << it->first << "\n";
+            }
+        }
+
         for (const auto& child : children) {
             print_node(child.get(), depth + 1);
         }
     }
 }
 
+// Test lexer
+void test_lexer(const char* source) {
+    std::cout << "\n=== LEXER TEST ===\n";
+    std::cout << "Source: " << source << "\n\n";
+
+    auto lexer = flex::parser::lexer_create(source);
+    int token_count = 0;
+
+    while (true) {
+        flex::parser::Token tok = flex::parser::lex_next_token(lexer);
+        std::cout << "Token " << std::setw(3) << token_count++ << ": "
+                  << "type=" << std::setw(12) << tok.type
+                  << " value=\"" << tok.value << "\""
+                  << " line=" << std::setw(3) << tok.line
+                  << " col=" << std::setw(3) << tok.column << "\n";
+
+        if (tok.type == flex::parser::TOK_EOF || tok.type == flex::parser::TOK_ERROR) {
+            break;
+        }
+    }
+
+    flex::parser::lexer_destroy(lexer);
+    std::cout << "\n";
+}
+
 int main(int argc, char* argv[]) {
     const char* flex_file = "hello.flex";
-    if (argc > 1) {
-        flex_file = argv[1];
+    bool test_lexer_only = false;
+
+    // Parse command line
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--lexer" || arg == "-l") {
+            test_lexer_only = true;
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << "Flex Parser Debug Tool\n";
+            std::cout << "Usage: test_parser [options] [file.flex]\n";
+            std::cout << "Options:\n";
+            std::cout << "  --lexer, -l  Test lexer only\n";
+            std::cout << "  --help, -h   Show this help\n";
+            return 0;
+        } else {
+            flex_file = argv[i];
+        }
     }
 
     std::cout << "=================================================\n";
-    std::cout << "Flex Parser Debug Tool\n";
+    std::cout << "Flex Parser Debug Tool (re2c + Recursive Descent)\n";
     std::cout << "=================================================\n";
-    std::cout << "Loading: " << flex_file << "\n\n";
+    std::cout << "File: " << flex_file << "\n";
+
+    if (test_lexer_only) {
+        std::cout << "Mode: Lexer Test Only\n";
+    } else {
+        std::cout << "Mode: Full Parse + Render\n";
+    }
+
+    std::cout << "\n";
 
     // Initialize Flex
     flex::init();
 
-    // Load .flex file
+    // Register test components for parsing demo
+    using namespace flex;
+    auto dummy_builder = [](const Props& props) -> Node::Ptr {
+        auto g = std::make_shared<Group>();
+        return g;
+    };
+    ComponentRegistry::instance().register_component("Slider", dummy_builder);
+    ComponentRegistry::instance().register_component("ProgressBar", dummy_builder);
+    ComponentRegistry::instance().register_component("LabeledSlider", dummy_builder);
+    ComponentRegistry::instance().register_component("SettingsRow", dummy_builder);
+    ComponentRegistry::instance().register_component("Toggle", dummy_builder);
+
+    // Test lexer only
+    if (test_lexer_only) {
+        std::ifstream file(flex_file);
+        if (!file.is_open()) {
+            std::cerr << "❌ Failed to open file: " << flex_file << "\n";
+            flex::shutdown();
+            return 1;
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string content = buffer.str();
+
+        test_lexer(content.c_str());
+        flex::shutdown();
+        return 0;
+    }
+
+    // Full parse and render
     auto definition = flex::Definition::load_file(flex_file);
 
     if (definition->has_error()) {
@@ -154,6 +253,11 @@ int main(int argc, char* argv[]) {
                   << " tracks=" << tl->tracks().size()
                   << "\n";
     }
+
+    // Note: State machines are parsed to AST but not yet converted to runtime objects
+    // This will be implemented in a future update
+    std::cout << "\nState Machines: (see AST parsing test for details)\n";
+    std::cout << "  Run test_statemachine_parser.cpp for AST-level testing\n";
 
     std::cout << "\n=================================================\n";
     std::cout << "Done!\n";

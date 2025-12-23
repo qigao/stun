@@ -80,7 +80,15 @@ void Text::render(Renderer& renderer) {
         renderer.set_blur(blur());
     }
 
-    renderer.draw_text(content_, 0, 0, font_family_, font_size_,
+    // Calculate alignment offset
+    float ox = 0;
+    if (text_align_ == TextAlign::Center) {
+        ox = -measured_width() / 2.0f;
+    } else if (text_align_ == TextAlign::Right) {
+        ox = -measured_width();
+    }
+
+    renderer.draw_text(content_, ox, 0, font_family_, font_size_,
                        font_weight_ == FontWeight::Bold, color_);
 
     // Clear effects

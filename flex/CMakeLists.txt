@@ -2,87 +2,108 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(flex LANGUAGES C CXX)
+find_package(Stb REQUIRED)
+
+# ============================================================================
+# Parser Generation (re2c + lemon)
+# ============================================================================
+
+# Find re2c
+find_program(RE2C_EXECUTABLE re2c)
+if(NOT RE2C_EXECUTABLE)
+  message(
+    FATAL_ERROR
+      "Flex: re2c not found - required for DSL parser.\n"
+      "Install re2c:\n"
+      "  Ubuntu/Debian: sudo apt install re2c\n"
+      "  macOS: brew install re2c\n"
+      "  Windows (MSYS2): pacman -S re2c\n"
+      "  Or from source: https://re2c.org/")
+endif()
+
+# Find lemon (required for grammar parser)
+find_program(LEMON_EXECUTABLE lemon)
+if(NOT LEMON_EXECUTABLE)
+  message(FATAL_ERROR "Flex: lemon not found - required for DSL parser")
+endif()
+
+message(STATUS "Flex DSL Parser generation enabled")
+message(STATUS "  re2c: ${RE2C_EXECUTABLE}")
+message(STATUS "  lemon: ${LEMON_EXECUTABLE}")
+
+# Get the lempar.c template path
+if(NOT LEMPAR)
+  set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
+endif()
+
+# Generate parser from lemon FIRST (lexer needs the generated token header)
+set(FLEX_PARSER_Y ${CMAKE_CURRENT_SOURCE_DIR}/src/flex_parser.y)
+set(FLEX_PARSER_GEN_C ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.c)
+set(FLEX_PARSER_GEN ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.cpp)
+set(FLEX_PARSER_H ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.h)
+
+add_custom_command(
+  OUTPUT ${FLEX_PARSER_GEN} ${FLEX_PARSER_H}
+  COMMAND ${CMAKE_COMMAND} -E copy ${FLEX_PARSER_Y}
+          ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.y
+  COMMAND ${LEMON_EXECUTABLE} -T${LEMPAR}
+          ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.y
+  COMMAND ${CMAKE_COMMAND} -E rename ${FLEX_PARSER_GEN_C} ${FLEX_PARSER_GEN}
+  DEPENDS ${FLEX_PARSER_Y}
+  COMMENT "Generating Flex DSL parser with lemon (template: ${LEMPAR})"
+  VERBATIM)
+
+# Generate lexer from re2c (depends on parser header for token values)
+set(FLEX_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/flex_lexer.re)
+set(FLEX_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/flex_lexer_gen.cpp)
+
+add_custom_command(
+  OUTPUT ${FLEX_LEXER_GEN}
+  COMMAND ${RE2C_EXECUTABLE} -o ${FLEX_LEXER_GEN} ${FLEX_LEXER_RE}
+  DEPENDS ${FLEX_LEXER_RE} ${FLEX_PARSER_H}
+  COMMENT "Generating Flex DSL lexer with re2c"
+  VERBATIM)
 
 # ============================================================================
 # Library
 # ============================================================================
+file(GLOB_RECURSE FLEX_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*)
+file(GLOB_RECURSE FLEX_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*)
 
-set(FLEX_SOURCES
-    src/flex.cpp
-    src/types.cpp
-    src/node.cpp
-    src/group.cpp
-    src/shape.cpp
-    src/text.cpp
-    src/image.cpp
-    src/svg.cpp
-    src/instance.cpp
-    src/solo.cpp
-    src/artboard.cpp
-    src/renderer_thorvg.cpp
-    src/timeline.cpp
-    src/machine.cpp
-    src/script.cpp
-    src/physics.cpp
-    src/binding.cpp
-    src/path.cpp
-    src/component.cpp)
-    # Note: Removed ${LEXER_GEN} and ${PARSER_GEN_C} - using hand-written parser now
-
-set(FLEX_HEADERS
-    include/flex/flex.h
-    include/flex/types.h
-    include/flex/geometry.h
-    include/flex/node.h
-    include/flex/group.h
-    include/flex/shape.h
-    include/flex/text.h
-    include/flex/image.h
-    include/flex/svg.h
-    include/flex/instance.h
-    include/flex/solo.h
-    include/flex/artboard.h
-    include/flex/renderer.h
-    include/flex/timeline.h
-    include/flex/machine.h
-    include/flex/script.h
-    include/flex/physics.h
-    include/flex/binding.h
-    include/flex/path.h
-    include/flex/component.h
-    include/flex/dsl_loader.h)
-
-add_library(flex STATIC ${FLEX_SOURCES} ${FLEX_HEADERS})
+add_library(flex STATIC ${FLEX_SOURCES} ${FLEX_HEADERS} ${FLEX_LEXER_GEN}
+                        ${FLEX_PARSER_GEN})
 
 target_include_directories(
   flex
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/flex>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<INSTALL_INTERFACE:include>
-  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-          ${CMAKE_CURRENT_SOURCE_DIR}/src)
+         ${Stb_INCLUDE_DIR})
 
 target_compile_features(flex PUBLIC cxx_std_17)
-
-# Link rendering backend (ThorVG)
-target_link_libraries(flex PUBLIC thorvg)
-
-# Link scripting engine (QuickJS)
-target_link_libraries(flex PRIVATE qjs)
-
 # Link physics engine (Box2D)
 find_package(box2d CONFIG REQUIRED)
-target_link_libraries(flex PRIVATE box2d::box2d)
+# Link rendering backend (ThorVG)
+target_link_libraries(
+  flex
+  PUBLIC thorvg TurboMemory fmtlog
+  PRIVATE qjs box2d::box2d)
 
 set_target_properties(flex PROPERTIES FOLDER "flex" POSITION_INDEPENDENT_CODE
                                                     ON)
+
+# ============================================================================
+# Widgets Library
+# ============================================================================
+
+add_subdirectory(widgets)
 
 # ============================================================================
 # Examples & Tests
 # ============================================================================
 
 add_subdirectory(examples)
-
-option(FLEX_BUILD_TESTS "Build Flex tests" ON)
 
 add_subdirectory(tests)
 

@@ -3,12 +3,26 @@
  */
 
 #include "flex/node.h"
+#include "flex/fsm.h"
 #include <algorithm>
 
 namespace flex {
 
-bool Node::has_tag(const std::string& tag) const {
-    return std::find(tags_.begin(), tags_.end(), tag) != tags_.end();
+// ============================================================================
+// Constructor / Destructor
+// ============================================================================
+
+Node::Node() = default;
+
+Node::~Node() {
+    // Clean up event dispatcher if allocated
+    delete events_;
+}
+
+void Node::ensure_events() {
+    if (!events_) {
+        events_ = new EventDispatcher();
+    }
 }
 
 // ============================================================================
@@ -49,32 +63,31 @@ bool Node::hit_test(float px, float py) const {
 }
 
 void Node::fire_pointer_down(PointerEvent& event) {
-    if (on_pointer_down_) on_pointer_down_(event);
+    if (events_ && events_->on_pointer_down) events_->on_pointer_down(event);
 }
 
 void Node::fire_pointer_up(PointerEvent& event) {
-    if (on_pointer_up_) on_pointer_up_(event);
+    if (events_ && events_->on_pointer_up) events_->on_pointer_up(event);
 }
 
 void Node::fire_pointer_move(PointerEvent& event) {
-    if (on_pointer_move_) on_pointer_move_(event);
+    if (events_ && events_->on_pointer_move) events_->on_pointer_move(event);
 }
 
 void Node::fire_hover_enter(PointerEvent& event) {
-    if (on_hover_enter_) on_hover_enter_(event);
+    if (events_ && events_->on_hover_enter) events_->on_hover_enter(event);
 }
 
 void Node::fire_hover_leave(PointerEvent& event) {
-    if (on_hover_leave_) on_hover_leave_(event);
+    if (events_ && events_->on_hover_leave) events_->on_hover_leave(event);
 }
 
 void Node::fire_click() {
-    if (on_click_) on_click_();
+    if (events_ && events_->on_click) events_->on_click();
 }
 
 bool Node::has_pointer_handlers() const {
-    return on_pointer_down_ || on_pointer_up_ || on_pointer_move_ ||
-           on_hover_enter_ || on_hover_leave_ || on_click_;
+    return events_ && events_->has_pointer_handlers();
 }
 
 // ============================================================================
@@ -82,19 +95,19 @@ bool Node::has_pointer_handlers() const {
 // ============================================================================
 
 void Node::fire_key_down(KeyEvent& event) {
-    if (on_key_down_) on_key_down_(event);
+    if (events_ && events_->on_key_down) events_->on_key_down(event);
 }
 
 void Node::fire_key_up(KeyEvent& event) {
-    if (on_key_up_) on_key_up_(event);
+    if (events_ && events_->on_key_up) events_->on_key_up(event);
 }
 
 void Node::fire_focus(bool gained) {
-    if (on_focus_) on_focus_(gained);
+    if (events_ && events_->on_focus) events_->on_focus(gained);
 }
 
 bool Node::has_key_handlers() const {
-    return on_key_down_ || on_key_up_;
+    return events_ && events_->has_key_handlers();
 }
 
 void Node::set_focused(bool f) {
@@ -102,6 +115,38 @@ void Node::set_focused(bool f) {
         focused_ = f;
         fire_focus(f);
     }
+}
+
+// ============================================================================
+// FSM and Pseudo-Class Styles Support
+// ============================================================================
+
+void Node::add_pseudo_class_style(const std::string& name, const PseudoClassStyle& style) {
+    if (!pseudo_styles_) {
+        pseudo_styles_ = std::make_unique<PseudoClassStyleMap>();
+    }
+    (*pseudo_styles_)[name] = style;
+}
+
+Node* Node::find_by_path(const std::string& path) {
+    // Parse path: "child.grandchild.property"
+    size_t dot_pos = path.find('.');
+
+    if (dot_pos == std::string::npos) {
+        // No dot, just find child by ID
+        return find(path);
+    }
+
+    // Split: "child" . "grandchild.property"
+    std::string child_id = path.substr(0, dot_pos);
+    std::string remaining = path.substr(dot_pos + 1);
+
+    // Find child
+    Node* child = find(child_id);
+    if (!child) return nullptr;
+
+    // Recurse
+    return child->find_by_path(remaining);
 }
 
 } // namespace flex

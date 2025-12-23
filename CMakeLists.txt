@@ -29,6 +29,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
-add_subdirectory(flex)
-add_subdirectory(tvgbox)
+add_subdirectory(flex) 
+add_subdirectory(tvgbox2)
 add_subdirectory(editor)

@@ -35,6 +35,12 @@ public:
     virtual void end_frame() = 0;
 
     // -------------------------------------------
+    // Viewport Query (Phase 3.2: For culling optimization)
+    // -------------------------------------------
+
+    virtual Bounds viewport() const = 0;
+
+    // -------------------------------------------
     // Transform Stack
     // -------------------------------------------
 

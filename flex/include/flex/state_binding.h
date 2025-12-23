@@ -61,7 +61,7 @@ public:
 
         observer_ids_.push_back(observer_id);
 
-        // Also initialize prop from current state value
+        // Also initialize prop from current state value (but don't rebuild yet)
         if (state_->has(state_key)) {
             if (auto val = state_->get<float>(state_key, 0.0f); val != 0.0f) {
                 props_[prop_name] = val;
@@ -72,7 +72,7 @@ public:
             } else if (auto c = state_->get<uint32_t>(state_key, 0); c != 0) {
                 props_[prop_name] = c;
             }
-            rebuild();
+            // Don't rebuild here - component was already created with initial_props
         }
     }
 

@@ -141,7 +141,7 @@ scene loading {
         }
 
         // Background track
-        rect track {
+        rect trackBg {
             x: -200, y: -8
             width: 400, height: 16
             fill: #1a1a2e

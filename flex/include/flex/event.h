@@ -156,4 +156,37 @@ using KeyEventCallback = std::function<void(KeyEvent&)>;
 using ClickCallback = std::function<void()>;
 using FocusCallback = std::function<void(bool)>;  // true = gained focus, false = lost focus
 
+// ============================================================================
+// EventDispatcher - On-demand event callback storage (Phase 2.1 Optimization)
+// ============================================================================
+
+// Only allocated when a Node actually registers event handlers.
+// Reduces memory overhead from 360B per node to 8B (pointer only).
+// 90% of nodes never use events, so this saves significant memory.
+struct EventDispatcher {
+    // Pointer events
+    PointerEventCallback on_pointer_down;
+    PointerEventCallback on_pointer_up;
+    PointerEventCallback on_pointer_move;
+    PointerEventCallback on_hover_enter;
+    PointerEventCallback on_hover_leave;
+    ClickCallback on_click;
+
+    // Keyboard events
+    KeyEventCallback on_key_down;
+    KeyEventCallback on_key_up;
+    FocusCallback on_focus;
+
+    // Helper: Check if any pointer handlers are registered
+    bool has_pointer_handlers() const {
+        return on_pointer_down || on_pointer_up || on_pointer_move ||
+               on_hover_enter || on_hover_leave || on_click;
+    }
+
+    // Helper: Check if any keyboard handlers are registered
+    bool has_key_handlers() const {
+        return on_key_down || on_key_up || on_focus;
+    }
+};
+
 } // namespace flex

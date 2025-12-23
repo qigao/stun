@@ -33,6 +33,8 @@
 #include <tvgbox2/widgets/select_widget.h> // Added missing header
 #include <iostream>
 #include <memory>
+#include <fstream>
+#include <vector>
 #include "demo_styles.h"
 
 using namespace tvgbox2;
@@ -72,25 +74,31 @@ public:
 
         // Load fonts
         std::cout << "Loading fonts..." << std::endl;
-        if (tvg::Text::load("resources/font/Arial.ttf") != tvg::Result::Success) {
-            std::cerr << "Failed to load Arial.ttf" << std::endl;
-            return false;
+
+        // Load Arial font with custom name (ThorVG's load(path) uses path as font name)
+        // We need to load from memory to specify "Arial" as the font name
+        {
+            std::ifstream file("C:/Windows/Fonts/arial.ttf", std::ios::binary | std::ios::ate);
+            if (!file.is_open()) {
+                std::cerr << "Failed to open arial.ttf" << std::endl;
+                return false;
+            }
+
+            auto size = file.tellg();
+            file.seekg(0, std::ios::beg);
+
+            std::vector<char> buffer(size);
+            if (!file.read(buffer.data(), size)) {
+                std::cerr << "Failed to read arial.ttf" << std::endl;
+                return false;
+            }
+
+            if (tvg::Text::load("Arial", buffer.data(), static_cast<uint32_t>(size), "ttf", true) != tvg::Result::Success) {
+                std::cerr << "Failed to load Arial font" << std::endl;
+                return false;
+            }
+            std::cout << "  Arial: OK" << std::endl;
         }
-
-        // Load additional fonts for better unicode/emoji coverage
-        tvg::Text::load("resources/font/NOTO-SANS-KR.ttf");  // Korean + better unicode
-
-        // Try to load emoji font for emoji support
-        // Windows: Segoe UI Emoji (color emoji), Segoe UI Symbol (B&W symbols)
-        #ifdef _WIN32
-        auto r1 = tvg::Text::load("C:/Windows/Fonts/seguiemj.ttf");
-        std::cout << "  Segoe UI Emoji: " << (r1 == tvg::Result::Success ? "OK" : "FAILED") << std::endl;
-
-        auto r2 = tvg::Text::load("C:/Windows/Fonts/seguisym.ttf");
-        std::cout << "  Segoe UI Symbol: " << (r2 == tvg::Result::Success ? "OK" : "FAILED") << std::endl;
-        #else
-        tvg::Text::load("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
-        #endif
 
         std::cout << "Fonts loaded" << std::endl;
 

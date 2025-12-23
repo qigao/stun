@@ -6,7 +6,7 @@
 #include "flex/renderer.h"
 #include <algorithm>
 #include <cmath>
-
+#include <iostream>
 namespace flex {
 
 // ============================================================================
@@ -49,6 +49,7 @@ float get_child_cross_size(Node* child, FlexDirection direction) {
 
 void Group::perform_layout() {
     if (layout_ == LayoutMode::None || children_.empty()) {
+        clear_dirty(DirtyFlags::Layout);
         return;
     }
 
@@ -246,27 +247,37 @@ void Group::perform_layout() {
     // Set final positions on nodes
     for (const auto& item : items) {
         if (is_row) {
-            item.node->set_x(item.main_pos);
-            item.node->set_y(item.cross_pos);
+            // Directly modify internal state to avoid triggering dirty propagation
+            item.node->x_ = item.main_pos;
+            item.node->y_ = item.cross_pos;
+
             // Update layout size if stretched
             if (item.node->layout_width() == 0) {
-                item.node->set_layout_width(item.final_main);
+                item.node->layout_width_ = item.final_main;
             }
             if (align_items_ == AlignItems::Stretch && item.node->align_self() == AlignSelf::Auto) {
-                item.node->set_layout_height(item.cross);
+                item.node->layout_height_ = item.cross;
             }
         } else {
-            item.node->set_x(item.cross_pos);
-            item.node->set_y(item.main_pos);
+            // Directly modify internal state to avoid triggering dirty propagation
+            item.node->x_ = item.cross_pos;
+            item.node->y_ = item.main_pos;
+
             // Update layout size if stretched
             if (item.node->layout_height() == 0) {
-                item.node->set_layout_height(item.final_main);
+                item.node->layout_height_ = item.final_main;
             }
             if (align_items_ == AlignItems::Stretch && item.node->align_self() == AlignSelf::Auto) {
-                item.node->set_layout_width(item.cross);
+                item.node->layout_width_ = item.cross;
             }
         }
+
+        // Positions are set, but don't clear child's own Layout dirty flag.
+        // The child needs to perform its own internal layout if it's a Group.
     }
+
+    // Clear layout dirty flag after performing layout
+    clear_dirty(DirtyFlags::Layout);
 }
 
 // ============================================================================
@@ -286,6 +297,7 @@ void Group::add_child(Node::Ptr child) {
 
     child->parent_ = this;
     children_.push_back(child);
+
     mark_dirty(DirtyFlags::Children | DirtyFlags::Layout | DirtyFlags::Bounds);
 }
 
@@ -355,6 +367,22 @@ Node* Group::find_child(const std::string& id) const {
 }
 
 Node* Group::find_child_recursive(const std::string& id) const {
+    // Support nested path syntax: "parent/child/grandchild"
+    auto slash_pos = id.find('/');
+    if (slash_pos != std::string::npos) {
+        // Split path into first component and remaining path
+        std::string first = id.substr(0, slash_pos);
+        std::string rest = id.substr(slash_pos + 1);
+
+        // Find first component in direct children
+        auto* parent = find_child(first);
+        if (!parent) return nullptr;
+
+        // Recursively find remaining path
+        return parent->find(rest);
+    }
+
+    // No '/' -> original recursive search
     for (const auto& child : children_) {
         if (child->id() == id) {
             return child.get();
@@ -391,26 +419,26 @@ Bounds Group::bounds() const {
     Bounds b;
     b.x = x_;
     b.y = y_;
-    
+
     // If clip is enabled, use clip dimensions
     if (clip_ && clip_width_ > 0 && clip_height_ > 0) {
         b.width = clip_width_ * scale_x_;
         b.height = clip_height_ * scale_y_;
         return b;
     }
-    
+
     // Otherwise compute from children bounds
     if (children_.empty()) {
         return b;
     }
-    
+
     float min_x = 0, min_y = 0, max_x = 0, max_y = 0;
     bool first = true;
-    
+
     for (const auto& child : children_) {
         Bounds cb = child->bounds();
         if (!cb.valid()) continue;
-        
+
         if (first) {
             min_x = cb.x;
             min_y = cb.y;
@@ -424,9 +452,13 @@ Bounds Group::bounds() const {
             max_y = std::max(max_y, cb.y + cb.height);
         }
     }
-    
+
+    // Include child offsets in Group's bounds
+    b.x = x_ + min_x;
+    b.y = y_ + min_y;
     b.width = (max_x - min_x) * scale_x_;
     b.height = (max_y - min_y) * scale_y_;
+
     return b;
 }
 
@@ -437,35 +469,33 @@ Bounds Group::bounds() const {
 void Group::render(Renderer& renderer) {
     if (!visible_) return;
 
-    // Perform layout before rendering
-    perform_layout();
-
-    renderer.save();
-
-    // Apply transform
-    renderer.translate(x_, y_);
-    if (rotation_ != 0) {
-        renderer.rotate(rotation_);
-    }
-    if (scale_x_ != 1 || scale_y_ != 1) {
-        renderer.scale(scale_x_, scale_y_);
+    if (is_dirty(DirtyFlags::Layout)) {
+        perform_layout();
     }
 
-    // Apply opacity
-    if (opacity_ < 1.0f) {
-        renderer.set_global_alpha(opacity_);
-    }
-
-    // Apply clipping (if enabled with dimensions)
-    if (clip_ && clip_width_ > 0 && clip_height_ > 0) {
-        renderer.clip_rect(0, 0, clip_width_, clip_height_);
+    bool needs_state = (x_ != 0 || y_ != 0 || rotation_ != 0 ||
+                        scale_x_ != 1 || scale_y_ != 1 || opacity_ < 1.0f || clip_);
+    if (needs_state) {
+        renderer.save();
+        if (x_ != 0 || y_ != 0) renderer.translate(x_, y_);
+        if (rotation_ != 0) renderer.rotate(rotation_);
+        if (scale_x_ != 1 || scale_y_ != 1) renderer.scale(scale_x_, scale_y_);
+        if (opacity_ < 1.0f) renderer.set_global_alpha(opacity_);
+        if (clip_ && clip_width_ > 0 && clip_height_ > 0) {
+            renderer.clip_rect(0, 0, clip_width_, clip_height_);
+        }
     }
 
     // Render children
+    // Note: Viewport culling disabled - bounds are in local space but viewport
+    // is in world space. Proper culling requires transforming bounds to world space
+    // which needs tracking cumulative transforms through the hierarchy.
     for (const auto& child : children_) {
         child->render(renderer);
     }
 
-    renderer.restore();
+    if (needs_state) {
+        renderer.restore();
+    }
 }
 } // namespace flex

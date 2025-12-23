@@ -79,7 +79,9 @@ public:
         auto definition = flex::Definition::load_file("loading_animation.flex");
 
         if (definition->has_error()) {
-            std::cerr << "Parse error: " << definition->error_message() << "\n";
+            std::cerr << "Parse error: " << definition->error_message()
+                      << " at line " << definition->error_line()
+                      << ", column " << definition->error_column() << "\n";
             return false;
         }
 
@@ -140,6 +142,9 @@ public:
             handle_events();
             update(dt);
             render();
+
+            // Limit to ~60 FPS
+            SDL_Delay(16);
         }
     }
 

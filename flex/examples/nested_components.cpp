@@ -1,10 +1,14 @@
 /*
- * Nested Components Demo
+ * Nested Components Demo - MVC Refactor
  * Demonstrates component composition - building complex UIs from simple widgets
+ * Separates data (Model), presentation (View), and logic (Controller).
  */
 
 #include <iostream>
 #include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <memory>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex/flex.h>
@@ -12,6 +16,297 @@
 #include <flex/group.h>
 #include <flex/shape.h>
 #include <flex/text.h>
+
+// ============================================================================
+// Model - Application State
+// ============================================================================
+
+struct NestedModel {
+    // Section 1: Basic
+    float basic_slider = 0.65f;
+    bool basic_toggle = true;
+    float basic_progress = 0.75f;
+    
+    // Section 2: Labeled Sliders
+    float volume = 0.65f;
+    float brightness = 0.80f;
+    float contrast = 0.50f;
+    
+    // Section 3: Settings Rows
+    bool dark_mode = false;
+    bool notifications = true;
+    bool auto_save = true;
+    
+    // Section 4: Volume Control
+    float master_volume = 0.75f;
+    bool master_muted = false;
+    
+    // Section 5: Settings Panel
+    bool hdr_enabled = true;
+    bool vsync_enabled = false;
+    bool show_fps = true;
+    bool full_screen = false;
+};
+
+// ============================================================================
+// View - UI Presentation and Updates
+// ============================================================================
+
+class NestedView {
+public:
+    NestedView(flex::Instance::Ptr instance) : instance_(instance) {
+        auto* artboard = instance_->artboard();
+        
+        // Find nodes by ID
+        basic_slider = artboard->find("basicSlider");
+        basic_toggle = artboard->find("basicToggle");
+        basic_progress = artboard->find("basicProgress");
+        
+        volume = artboard->find("volume");
+        brightness = artboard->find("brightness");
+        contrast = artboard->find("contrast");
+        
+        dark_mode = artboard->find("darkMode");
+        notifications = artboard->find("notifications");
+        auto_save = artboard->find("autoSave");
+        
+        master_ctrl = artboard->find("audioMaster");
+        
+        s1 = artboard->find("s1");
+        s2 = artboard->find("s2");
+        s3 = artboard->find("s3");
+        s4 = artboard->find("s4");
+    }
+
+    void update(const NestedModel& model) {
+        // Section 1
+        update_slider_node(basic_slider, model.basic_slider);
+        update_toggle_node(basic_toggle, model.basic_toggle);
+        update_progress_node(basic_progress, model.basic_progress);
+        
+        // Section 2
+        update_labeled_slider_node(volume, model.volume);
+        update_labeled_slider_node(brightness, model.brightness);
+        update_labeled_slider_node(contrast, model.contrast);
+        
+        // Section 3
+        update_settings_row_node(dark_mode, model.dark_mode);
+        update_settings_row_node(notifications, model.notifications);
+        update_settings_row_node(auto_save, model.auto_save);
+        
+        // Section 4
+        update_volume_ctrl_node(master_ctrl, model.master_volume, model.master_muted);
+        
+        // Section 5
+        update_settings_row_node(s1, model.hdr_enabled);
+        update_settings_row_node(s2, model.vsync_enabled);
+        update_settings_row_node(s3, model.show_fps);
+        update_settings_row_node(s4, model.full_screen);
+    }
+
+    // Accessors for Controller
+    flex::Node* get_basic_slider() { return basic_slider; }
+    flex::Node* get_basic_toggle() { return basic_toggle; }
+    flex::Node* get_volume() { return volume; }
+    flex::Node* get_brightness() { return brightness; }
+    flex::Node* get_contrast() { return contrast; }
+    flex::Node* get_dark_mode() { return dark_mode; }
+    flex::Node* get_notifications() { return notifications; }
+    flex::Node* get_auto_save() { return auto_save; }
+    flex::Node* get_master_ctrl() { return master_ctrl; }
+    flex::Node* get_s1() { return s1; }
+    flex::Node* get_s2() { return s2; }
+    flex::Node* get_s3() { return s3; }
+    flex::Node* get_s4() { return s4; }
+
+private:
+    void update_slider_node(flex::Node* node, float value) {
+        auto* group = dynamic_cast<flex::Group*>(node);
+        if (!group || group->child_count() < 3) return;
+        
+        float width = 400.0f; 
+        float normalized = std::max(0.0f, std::min(1.0f, value));
+        
+        if (auto* fill = dynamic_cast<flex::Shape*>(group->child_at(1))) {
+            fill->set_rect(width * normalized, 8.0f);
+        }
+        if (auto* thumb = dynamic_cast<flex::Shape*>(group->child_at(2))) {
+            thumb->set_position(width * normalized, 10.0f);
+        }
+    }
+
+    void update_progress_node(flex::Node* node, float value) {
+        auto* group = dynamic_cast<flex::Group*>(node);
+        if (!group || group->child_count() < 2) return;
+        
+        float width = 400.0f;
+        float normalized = std::max(0.0f, std::min(1.0f, value));
+        float height = 20.0f;
+        
+        if (auto* fill = dynamic_cast<flex::Shape*>(group->child_at(1))) {
+            fill->set_rect(width * normalized, height);
+        }
+    }
+
+    void update_toggle_node(flex::Node* node, bool on) {
+        auto* group = dynamic_cast<flex::Group*>(node);
+        if (!group || group->child_count() < 2) return;
+        
+        float width = 50.0f;
+        if (auto* track = dynamic_cast<flex::Shape*>(group->child_at(0))) {
+            if (on) track->set_fill(flex::Color(0.1f, 0.53f, 0.33f, 1.0f));
+            else track->set_fill(flex::Color(0.8f, 0.8f, 0.8f, 1.0f));
+        }
+        if (auto* thumb = dynamic_cast<flex::Shape*>(group->child_at(1))) {
+            float thumb_x = on ? (width - 13.0f) : 13.0f;
+            thumb->set_position(thumb_x, 13.0f);
+        }
+    }
+
+    void update_labeled_slider_node(flex::Node* node, float value) {
+        auto* group = dynamic_cast<flex::Group*>(node);
+        if (!group || group->child_count() < 3) return;
+        
+        update_slider_node(group->child_at(1), value);
+        
+        if (auto* val_text = dynamic_cast<flex::Text*>(group->child_at(2))) {
+            std::ostringstream oss;
+            oss << (int)(value * 100) << "%";
+            val_text->set_content(oss.str());
+        }
+    }
+
+    void update_settings_row_node(flex::Node* node, bool on) {
+        auto* group = dynamic_cast<flex::Group*>(node);
+        if (!group || group->child_count() < 2) return;
+        
+        update_toggle_node(group->child_at(1), on);
+    }
+
+    void update_volume_ctrl_node(flex::Node* node, float vol, bool muted) {
+        auto* group = dynamic_cast<flex::Group*>(node);
+        if (!group || group->child_count() < 5) return;
+        
+        // VolumeControl builder: [0] title, [1] Slider, [2] ProgressBar, [3] mute_label, [4] Toggle
+        update_slider_node(group->child_at(1), vol);
+        update_progress_node(group->child_at(2), vol);
+        update_toggle_node(group->child_at(4), muted);
+        
+        if (auto* prog_group = dynamic_cast<flex::Group*>(group->child_at(2))) {
+            if (prog_group->child_count() > 1) {
+                if (auto* prog_fill = dynamic_cast<flex::Shape*>(prog_group->child_at(1))) {
+                    if (muted) prog_fill->set_fill(flex::Color(0.5f, 0.5f, 0.5f, 1.0f));
+                    else prog_fill->set_fill(flex::Color(0.1f, 0.53f, 0.33f, 1.0f));
+                }
+            }
+        }
+    }
+
+    flex::Instance::Ptr instance_;
+    flex::Node *basic_slider, *basic_toggle, *basic_progress;
+    flex::Node *volume, *brightness, *contrast;
+    flex::Node *dark_mode, *notifications, *auto_save;
+    flex::Node *master_ctrl;
+    flex::Node *s1, *s2, *s3, *s4;
+};
+
+// ============================================================================
+// Controller - Interaction Logic
+// ============================================================================
+
+class NestedController {
+public:
+    NestedController(NestedModel& model, NestedView& view) : model_(model), view_(view) {
+        setup_interactions();
+    }
+
+    void update(float dt) {
+        // Auto-update basic progress bar
+        model_.basic_progress = std::fmod(model_.basic_progress + dt * 0.1f, 1.05f);
+        if (model_.basic_progress > 1.0f) model_.basic_progress = 0.0f;
+        
+        view_.update(model_);
+    }
+
+private:
+    void setup_interactions() {
+        // Basic Slider
+        if (auto* n = view_.get_basic_slider()) {
+            n->on_click([this]() { 
+                model_.basic_slider = std::fmod(model_.basic_slider + 0.1f, 1.05f);
+                if (model_.basic_slider > 1.0f) model_.basic_slider = 0.0f;
+                view_.update(model_);
+            });
+        }
+        
+        // Basic Toggle
+        if (auto* n = view_.get_basic_toggle()) {
+            n->on_click([this]() { model_.basic_toggle = !model_.basic_toggle; view_.update(model_); });
+        }
+
+        // Helper for Slider interaction
+        auto setup_slider = [this](flex::Node* node, float& val) {
+            if (!node) return;
+            auto* group = dynamic_cast<flex::Group*>(node);
+            if (group && group->child_count() > 1) {
+                group->child_at(1)->on_click([this, &val]() {
+                    val = std::fmod(val + 0.1f, 1.05f);
+                    if (val > 1.0f) val = 0.0f;
+                    view_.update(model_);
+                });
+            }
+        };
+
+        // Helper for Toggle interaction
+        auto setup_toggle = [this](flex::Node* node, bool& val) {
+            if (!node) return;
+            auto* group = dynamic_cast<flex::Group*>(node);
+            if (group && group->child_count() > 1) {
+                group->child_at(1)->on_click([this, &val]() {
+                    val = !val;
+                    view_.update(model_);
+                });
+            }
+        };
+
+        setup_slider(view_.get_volume(), model_.volume);
+        setup_slider(view_.get_brightness(), model_.brightness);
+        setup_slider(view_.get_contrast(), model_.contrast);
+
+        setup_toggle(view_.get_dark_mode(), model_.dark_mode);
+        setup_toggle(view_.get_notifications(), model_.notifications);
+        setup_toggle(view_.get_auto_save(), model_.auto_save);
+
+        // Volume Control (Complex Nested)
+        if (auto* n = view_.get_master_ctrl()) {
+            auto* group = dynamic_cast<flex::Group*>(n);
+            if (group && group->child_count() > 4) {
+                group->child_at(1)->on_click([this]() {
+                    model_.master_volume = std::fmod(model_.master_volume + 0.1f, 1.05f);
+                    if (model_.master_volume > 1.0f) model_.master_volume = 0.0f;
+                    view_.update(model_);
+                });
+                group->child_at(4)->on_click([this]() {
+                    model_.master_muted = !model_.master_muted;
+                    view_.update(model_);
+                });
+            }
+        }
+
+        // Settings Panel Rows
+        setup_toggle(view_.get_s1(), model_.hdr_enabled);
+        setup_toggle(view_.get_s2(), model_.vsync_enabled);
+        setup_toggle(view_.get_s3(), model_.show_fps);
+        setup_toggle(view_.get_s4(), model_.full_screen);
+    }
+
+    NestedModel& model_;
+    NestedView& view_;
+};
+
+// ============================================================================
+// Application Shell
+// ============================================================================
 
 class NestedComponentsDemo {
 public:
@@ -22,7 +317,7 @@ public:
         }
 
         window_ = SDL_CreateWindow(
-            "Nested Components Demo - Component Composition",
+            "Nested Components - MVC Demo",
             SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED,
             WIDTH, HEIGHT,
@@ -54,11 +349,15 @@ public:
             flex::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
         }
 
-        std::cout << "Loading Nested Components Demo...\n";
+        // Register components for DSL
+        register_base_widgets();
+        register_nested_components();
+
+        std::cout << "Loading Nested Components Demo (MVC Refactored)...\\n";
         auto definition = flex::Definition::load_file("nested_components.flex");
 
         if (definition->has_error()) {
-            std::cerr << "Parse error: " << definition->error_message() << "\n";
+            std::cerr << "Parse error: " << definition->error_message() << "\\n";
             return false;
         }
 
@@ -67,20 +366,15 @@ public:
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
-        // Register base widgets
-        register_base_widgets();
+        // Initialize MVC
+        model_ = std::make_unique<NestedModel>();
+        view_ = std::make_unique<NestedView>(instance_);
+        controller_ = std::make_unique<NestedController>(*model_, *view_);
 
-        // Register nested components
-        register_nested_components();
+        // Initial sync
+        view_->update(*model_);
 
-        // Create component instances
-        create_component_instances();
-
-        std::cout << "Nested Components Demo initialized!\n";
-        std::cout << "Controls:\n";
-        std::cout << "  MOUSE - Click widgets to interact\n";
-        std::cout << "  ESC - Quit\n\n";
-
+        std::cout << "Demo initialized! Click UI elements to interact.\\n";
         return true;
     }
 
@@ -94,12 +388,19 @@ public:
             last_time = current_time;
 
             handle_events();
-            update(dt);
+            
+            controller_->update(dt);
+            instance_->advance(dt);
+            
             render();
+            SDL_Delay(16);
         }
     }
 
     ~NestedComponentsDemo() {
+        controller_.reset();
+        view_.reset();
+        model_.reset();
         flex_renderer_.reset();
         instance_.reset();
         flex::shutdown();
@@ -127,467 +428,230 @@ private:
     flex::Instance::Ptr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
+    std::unique_ptr<NestedModel> model_;
+    std::unique_ptr<NestedView> view_;
+    std::unique_ptr<NestedController> controller_;
+
     bool running_ = false;
 
     void register_base_widgets() {
-        std::cout << "Registering base widgets...\n";
-
-        // ============================================================
-        // Slider Widget
-        // ============================================================
+        // Slider
         auto slider_comp = flex::Component::create("Slider");
-        slider_comp->add_prop("value", 0.5f, "Current value 0-1");
-        slider_comp->add_prop("min", 0.0f, "Minimum value");
-        slider_comp->add_prop("max", 1.0f, "Maximum value");
-        slider_comp->add_prop("width", 300.0f, "Slider width");
-        slider_comp->add_prop("color", uint32_t(0xFF0D6EFD), "Color (ARGB)");
+        slider_comp->add_prop("value", 0.5f);
+        slider_comp->add_prop("width", 300.0f);
+        slider_comp->add_prop("color", uint32_t(0xFF0D6EFD));
         slider_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
             auto slider = flex::Group::create();
+            float val = flex::get_prop_float(props, "value", 0.5f);
+            float w = flex::get_prop_float(props, "width", 300.0f);
+            uint32_t col = flex::get_prop_color(props, "color", 0xFF0D6EFD);
 
-            float value = flex::get_prop_float(props, "value", 0.5f);
-            float min = flex::get_prop_float(props, "min", 0.0f);
-            float max = flex::get_prop_float(props, "max", 1.0f);
-            float width = flex::get_prop_float(props, "width", 300.0f);
-            uint32_t color = flex::get_prop_color(props, "color", 0xFF0D6EFD);
-
-            float normalized = (value - min) / (max - min);
-            normalized = std::max(0.0f, std::min(1.0f, normalized));
-
-            // Track
             auto track = flex::Shape::create();
-            track->set_rect(width, 8.0f);
+            track->set_rect(w, 8.0f);
             track->set_fill(flex::Color(0.87f, 0.89f, 0.91f, 1.0f));
             track->set_position(0.0f, 6.0f);
             slider->add_child(track);
 
-            // Fill
             auto fill = flex::Shape::create();
-            fill->set_rect(width * normalized, 8.0f);
-            uint8_t a = (color >> 24) & 0xFF;
-            uint8_t r = (color >> 16) & 0xFF;
-            uint8_t g = (color >> 8) & 0xFF;
-            uint8_t b = color & 0xFF;
-            fill->set_fill(flex::Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f));
+            fill->set_rect(w * val, 8.0f);
+            uint8_t a = (col >> 24), r = (col >> 16), g = (col >> 8), b = col;
+            fill->set_fill(flex::Color(r/255.f, g/255.f, b/255.f, a/255.f));
             fill->set_position(0.0f, 6.0f);
             slider->add_child(fill);
 
-            // Thumb
             auto thumb = flex::Shape::create();
             thumb->set_circle(10.0f);
-            thumb->set_fill(flex::Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f));
-            thumb->set_position(width * normalized, 10.0f);
+            thumb->set_fill(flex::Color(r/255.f, g/255.f, b/255.f, a/255.f));
+            thumb->set_position(w * val, 10.0f);
             slider->add_child(thumb);
 
             return slider;
         });
         flex::ComponentRegistry::instance().register_component(slider_comp);
 
-        // ============================================================
-        // ProgressBar Widget
-        // ============================================================
+        // ProgressBar
         auto progress_comp = flex::Component::create("ProgressBar");
-        progress_comp->add_prop("progress", 0.5f, "Progress 0-1");
-        progress_comp->add_prop("width", 300.0f, "Bar width");
-        progress_comp->add_prop("height", 20.0f, "Bar height");
-        progress_comp->add_prop("color", uint32_t(0xFF198754), "Color (ARGB)");
+        progress_comp->add_prop("progress", 0.5f);
+        progress_comp->add_prop("width", 300.0f);
+        progress_comp->add_prop("height", 20.0f);
+        progress_comp->add_prop("color", uint32_t(0xFF198754));
         progress_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
             auto progress = flex::Group::create();
+            float val = flex::get_prop_float(props, "progress", 0.5f);
+            float w = flex::get_prop_float(props, "width", 300.0f);
+            float h = flex::get_prop_float(props, "height", 20.0f);
+            uint32_t col = flex::get_prop_color(props, "color", 0xFF198754);
 
-            float value = flex::get_prop_float(props, "progress", 0.5f);
-            float width = flex::get_prop_float(props, "width", 300.0f);
-            float height = flex::get_prop_float(props, "height", 20.0f);
-            uint32_t color = flex::get_prop_color(props, "color", 0xFF198754);
-
-            value = std::max(0.0f, std::min(1.0f, value));
-
-            // Background
             auto bg = flex::Shape::create();
-            bg->set_rect(width, height);
+            bg->set_rect(w, h);
             bg->set_fill(flex::Color(0.87f, 0.89f, 0.91f, 1.0f));
             progress->add_child(bg);
 
-            // Fill
             auto fill = flex::Shape::create();
-            fill->set_rect(width * value, height);
-            uint8_t a = (color >> 24) & 0xFF;
-            uint8_t r = (color >> 16) & 0xFF;
-            uint8_t g = (color >> 8) & 0xFF;
-            uint8_t b = color & 0xFF;
-            fill->set_fill(flex::Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f));
+            fill->set_rect(w * val, h);
+            uint8_t a = (col >> 24), r = (col >> 16), g = (col >> 8), b = col;
+            fill->set_fill(flex::Color(r/255.f, g/255.f, b/255.f, a/255.f));
             progress->add_child(fill);
 
             return progress;
         });
         flex::ComponentRegistry::instance().register_component(progress_comp);
 
-        // ============================================================
-        // Toggle Widget
-        // ============================================================
+        // Toggle
         auto toggle_comp = flex::Component::create("Toggle");
-        toggle_comp->add_prop("on", false, "Toggle state");
-        toggle_comp->add_prop("width", 50.0f, "Toggle width");
-        toggle_comp->add_prop("height", 26.0f, "Toggle height");
-        toggle_comp->add_prop("color", uint32_t(0xFF198754), "Color (ARGB)");
+        toggle_comp->add_prop("on", false);
+        toggle_comp->add_prop("width", 50.0f);
+        toggle_comp->add_prop("color", uint32_t(0xFF198754));
         toggle_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
             auto toggle = flex::Group::create();
+            bool on = flex::get_prop_bool(props, "on");
+            float w = flex::get_prop_float(props, "width", 50.0f);
+            uint32_t col = flex::get_prop_color(props, "color", 0xFF198754);
 
-            bool on = flex::get_prop_bool(props, "on", false);
-            float width = flex::get_prop_float(props, "width", 50.0f);
-            float height = flex::get_prop_float(props, "height", 26.0f);
-            uint32_t color = flex::get_prop_color(props, "color", 0xFF198754);
-
-            // Track
             auto track = flex::Shape::create();
-            track->set_rect(width, height);
+            track->set_rect(w, 26.0f);
 
             if (on) {
-                uint8_t a = (color >> 24) & 0xFF;
-                uint8_t r = (color >> 16) & 0xFF;
-                uint8_t g = (color >> 8) & 0xFF;
-                uint8_t b = color & 0xFF;
-                track->set_fill(flex::Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f));
+                uint8_t a = (col >> 24), r = (col >> 16), g = (col >> 8), b = col;
+                track->set_fill(flex::Color(r/255.f, g/255.f, b/255.f, a/255.f));
             } else {
                 track->set_fill(flex::Color(0.8f, 0.8f, 0.8f, 1.0f));
             }
             toggle->add_child(track);
 
-            // Thumb
             auto thumb = flex::Shape::create();
             thumb->set_circle(11.0f);
-            thumb->set_fill(flex::Color(1.0f, 1.0f, 1.0f, 1.0f));
-
-            float thumb_x = on ? (width - 13.0f) : 13.0f;
-            thumb->set_position(thumb_x, height / 2.0f);
+            thumb->set_fill(flex::Color(1, 1, 1, 1));
+            thumb->set_position(on ? (w - 13.0f) : 13.0f, 13.0f);
             toggle->add_child(thumb);
 
             return toggle;
         });
         flex::ComponentRegistry::instance().register_component(toggle_comp);
-
-        std::cout << "✅ 3 base widgets registered (Slider, ProgressBar, Toggle)\n\n";
     }
 
     void register_nested_components() {
-        std::cout << "Registering nested components...\n";
-
-        // ============================================================
-        // LabeledSlider - Label + Slider + Value Display
-        // ============================================================
+        // LabeledSlider
         auto labeled_slider_comp = flex::Component::create("LabeledSlider");
-        labeled_slider_comp->add_prop("label", std::string(""), "Label text");
-        labeled_slider_comp->add_prop("value", 0.5f, "Current value");
-        labeled_slider_comp->add_prop("width", 300.0f, "Slider width");
-        labeled_slider_comp->add_prop("color", uint32_t(0xFF0D6EFD), "Color");
+        labeled_slider_comp->add_prop("label", std::string(""));
+        labeled_slider_comp->add_prop("value", 0.5f);
+        labeled_slider_comp->add_prop("width", 400.0f);
+        labeled_slider_comp->add_prop("color", uint32_t(0xFF0D6EFD));
         labeled_slider_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
             auto group = flex::Group::create();
-
             std::string label = flex::get_prop_string(props, "label");
-            float value = flex::get_prop_float(props, "value");
-            float width = flex::get_prop_float(props, "width");
-            uint32_t color = flex::get_prop_color(props, "color");
+            float val = flex::get_prop_float(props, "value");
+            float w = flex::get_prop_float(props, "width", 400.0f);
+            uint32_t col = flex::get_prop_color(props, "color", 0xFF0D6EFD);
 
-            // Label
             auto label_text = flex::Text::create();
             label_text->set_content(label);
             label_text->set_font_size(14.0f);
-            label_text->set_color(flex::Color(0.2f, 0.2f, 0.2f, 1.0f));
-            label_text->set_position(0.0f, 0.0f);
             group->add_child(label_text);
 
-            // Slider (nested component!)
-            auto slider = flex::create_component_instance("Slider", {
-                {"value", value},
-                {"width", width},
-                {"color", color}
-            });
-            slider->set_position(0.0f, 25.0f);
+            auto slider = flex::create_component_instance("Slider", {{"value", val}, {"width", w}, {"color", col}});
+            slider->set_position(0, 25);
             group->add_child(slider);
 
-            // Value display
             auto value_text = flex::Text::create();
             std::ostringstream oss;
-            oss << (int)(value * 100) << "%";
+            oss << (int)(val * 100) << "%";
             value_text->set_content(oss.str());
             value_text->set_font_size(14.0f);
-            value_text->set_color(flex::Color(0.05f, 0.43f, 0.99f, 1.0f));
-            value_text->set_position(width + 20.0f, 30.0f);
+            value_text->set_position(w + 20, 30);
             group->add_child(value_text);
 
             return group;
         });
         flex::ComponentRegistry::instance().register_component(labeled_slider_comp);
 
-        // ============================================================
-        // SettingsRow - Label + Toggle
-        // ============================================================
+        // SettingsRow
         auto settings_row_comp = flex::Component::create("SettingsRow");
-        settings_row_comp->add_prop("label", std::string(""), "Setting label");
-        settings_row_comp->add_prop("on", false, "Toggle state");
+        settings_row_comp->add_prop("label", std::string(""));
+        settings_row_comp->add_prop("on", false);
         settings_row_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
             auto group = flex::Group::create();
-
             std::string label = flex::get_prop_string(props, "label");
             bool on = flex::get_prop_bool(props, "on");
 
-            // Label
             auto label_text = flex::Text::create();
             label_text->set_content(label);
             label_text->set_font_size(14.0f);
-            label_text->set_color(flex::Color(0.2f, 0.2f, 0.2f, 1.0f));
-            label_text->set_position(0.0f, 10.0f);
+            label_text->set_position(0, 10);
             group->add_child(label_text);
 
-            // Toggle (nested component!)
-            auto toggle = flex::create_component_instance("Toggle", {
-                {"on", on},
-                {"width", 50.0f},
-                {"height", 26.0f}
-            });
-            toggle->set_position(250.0f, 0.0f);
+            auto toggle = flex::create_component_instance("Toggle", {{"on", on}});
+            toggle->set_position(250, 0);
             group->add_child(toggle);
 
             return group;
         });
         flex::ComponentRegistry::instance().register_component(settings_row_comp);
 
-        // ============================================================
-        // VolumeControl - Slider + ProgressBar + Toggle (3 nested!)
-        // ============================================================
+        // VolumeControl
         auto volume_ctrl_comp = flex::Component::create("VolumeControl");
-        volume_ctrl_comp->add_prop("volume", 0.5f, "Volume level");
-        volume_ctrl_comp->add_prop("muted", false, "Mute state");
+        volume_ctrl_comp->add_prop("volume", 0.5f);
+        volume_ctrl_comp->add_prop("muted", false);
         volume_ctrl_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
             auto group = flex::Group::create();
-
-            float volume = flex::get_prop_float(props, "volume");
+            float vol = flex::get_prop_float(props, "volume");
             bool muted = flex::get_prop_bool(props, "muted");
 
-            // Title
             auto title = flex::Text::create();
             title->set_content("Volume Control");
             title->set_font_size(16.0f);
-            title->set_color(flex::Color(0.2f, 0.2f, 0.2f, 1.0f));
-            title->set_position(0.0f, 0.0f);
             group->add_child(title);
 
-            // Slider (nested!)
-            auto slider = flex::create_component_instance("Slider", {
-                {"value", volume},
-                {"width", 400.0f}
-            });
-            slider->set_position(0.0f, 30.0f);
+            auto slider = flex::create_component_instance("Slider", {{"value", vol}, {"width", 400.0f}});
+            slider->set_position(0, 30);
             group->add_child(slider);
 
-            // ProgressBar (nested!)
-            auto progress = flex::create_component_instance("ProgressBar", {
-                {"progress", volume},
-                {"width", 400.0f},
-                {"height", 12.0f}
-            });
-            progress->set_position(0.0f, 65.0f);
+            auto progress = flex::create_component_instance("ProgressBar", {{"progress", vol}, {"width", 400.0f}, {"height", 12.0f}});
+            progress->set_position(0, 65);
             group->add_child(progress);
 
-            // Mute toggle (nested!)
             auto mute_label = flex::Text::create();
             mute_label->set_content("Mute:");
             mute_label->set_font_size(14.0f);
-            mute_label->set_color(flex::Color(0.2f, 0.2f, 0.2f, 1.0f));
-            mute_label->set_position(0.0f, 100.0f);
+            mute_label->set_position(0, 100);
             group->add_child(mute_label);
 
-            auto toggle = flex::create_component_instance("Toggle", {
-                {"on", muted},
-                {"width", 50.0f},
-                {"height", 26.0f},
-                {"color", uint32_t(0xFFDC3545)}
-            });
-            toggle->set_position(60.0f, 95.0f);
+            auto toggle = flex::create_component_instance("Toggle", {{"on", muted}, {"color", uint32_t(0xFFDC3545)}});
+            toggle->set_position(60, 95);
             group->add_child(toggle);
 
             return group;
         });
         flex::ComponentRegistry::instance().register_component(volume_ctrl_comp);
-
-        // ============================================================
-        // SettingsPanel - Multiple SettingsRow (deeply nested!)
-        // ============================================================
-        auto settings_panel_comp = flex::Component::create("SettingsPanel");
-        settings_panel_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
-            auto group = flex::Group::create();
-
-            // Title
-            auto title = flex::Text::create();
-            title->set_content("Settings Panel");
-            title->set_font_size(16.0f);
-            title->set_color(flex::Color(0.2f, 0.2f, 0.2f, 1.0f));
-            title->set_position(0.0f, 0.0f);
-            group->add_child(title);
-
-            // Row 1 (nested SettingsRow!)
-            auto row1 = flex::create_component_instance("SettingsRow", {
-                {"label", std::string("Notifications")},
-                {"on", true}
-            });
-            row1->set_position(0.0f, 30.0f);
-            group->add_child(row1);
-
-            // Row 2
-            auto row2 = flex::create_component_instance("SettingsRow", {
-                {"label", std::string("Auto-save")},
-                {"on", true}
-            });
-            row2->set_position(0.0f, 70.0f);
-            group->add_child(row2);
-
-            // Row 3
-            auto row3 = flex::create_component_instance("SettingsRow", {
-                {"label", std::string("Dark Mode")},
-                {"on", false}
-            });
-            row3->set_position(0.0f, 110.0f);
-            group->add_child(row3);
-
-            return group;
-        });
-        flex::ComponentRegistry::instance().register_component(settings_panel_comp);
-
-        std::cout << "✅ 4 nested components registered\n";
-        std::cout << "   - LabeledSlider (Label + Slider + Value)\n";
-        std::cout << "   - SettingsRow (Label + Toggle)\n";
-        std::cout << "   - VolumeControl (Slider + ProgressBar + Toggle)\n";
-        std::cout << "   - SettingsPanel (3x SettingsRow)\n\n";
-    }
-
-    void create_component_instances() {
-        auto* artboard = instance_->artboard();
-
-        // Section 1: LabeledSlider
-        if (auto* section = dynamic_cast<flex::Group*>(artboard->find("section1"))) {
-            auto slider1 = flex::create_component_instance("LabeledSlider", {
-                {"label", std::string("Brightness")},
-                {"value", 0.7f},
-                {"width", 350.0f},
-                {"color", uint32_t(0xFF0D6EFD)}
-            });
-            slider1->set_position(0.0f, 40.0f);
-            section->add_child(slider1);
-
-            auto slider2 = flex::create_component_instance("LabeledSlider", {
-                {"label", std::string("Contrast")},
-                {"value", 0.5f},
-                {"width", 350.0f},
-                {"color", uint32_t(0xFF198754)}
-            });
-            slider2->set_position(0.0f, 120.0f);
-            section->add_child(slider2);
-
-            auto slider3 = flex::create_component_instance("LabeledSlider", {
-                {"label", std::string("Saturation")},
-                {"value", 0.9f},
-                {"width", 350.0f},
-                {"color", uint32_t(0xFFFFC107)}
-            });
-            slider3->set_position(0.0f, 200.0f);
-            section->add_child(slider3);
-        }
-
-        // Section 2: SettingsRow
-        if (auto* section = dynamic_cast<flex::Group*>(artboard->find("section2"))) {
-            auto row1 = flex::create_component_instance("SettingsRow", {
-                {"label", std::string("Enable Notifications")},
-                {"on", true}
-            });
-            row1->set_position(0.0f, 40.0f);
-            section->add_child(row1);
-
-            auto row2 = flex::create_component_instance("SettingsRow", {
-                {"label", std::string("Auto-update")},
-                {"on", false}
-            });
-            row2->set_position(0.0f, 100.0f);
-            section->add_child(row2);
-
-            auto row3 = flex::create_component_instance("SettingsRow", {
-                {"label", std::string("Save on Exit")},
-                {"on", true}
-            });
-            row3->set_position(0.0f, 160.0f);
-            section->add_child(row3);
-        }
-
-        // Section 3: VolumeControl
-        if (auto* section = dynamic_cast<flex::Group*>(artboard->find("section3"))) {
-            auto volume = flex::create_component_instance("VolumeControl", {
-                {"volume", 0.65f},
-                {"muted", false}
-            });
-            volume->set_position(0.0f, 40.0f);
-            section->add_child(volume);
-        }
-
-        // Section 4: SettingsPanel
-        if (auto* section = dynamic_cast<flex::Group*>(artboard->find("section4"))) {
-            auto panel = flex::create_component_instance("SettingsPanel", {});
-            panel->set_position(0.0f, 40.0f);
-            section->add_child(panel);
-        }
-
-        std::cout << "✅ Created all component instances\n\n";
     }
 
     void handle_events() {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
-                case SDL_QUIT:
-                    running_ = false;
-                    break;
-
+                case SDL_QUIT: running_ = false; break;
                 case SDL_KEYDOWN:
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
-                        running_ = false;
-                    }
+                    if (event.key.keysym.sym == SDLK_ESCAPE) running_ = false;
                     break;
-
                 case SDL_MOUSEBUTTONDOWN:
-                    instance_->send_pointer_event(
-                        static_cast<float>(event.button.x),
-                        static_cast<float>(event.button.y),
-                        true
-                    );
+                    instance_->send_pointer_event((float)event.button.x, (float)event.button.y, true);
                     break;
-
                 case SDL_MOUSEBUTTONUP:
-                    instance_->send_pointer_event(
-                        static_cast<float>(event.button.x),
-                        static_cast<float>(event.button.y),
-                        false
-                    );
+                    instance_->send_pointer_event((float)event.button.x, (float)event.button.y, false);
                     break;
-
                 case SDL_MOUSEMOTION:
-                    instance_->send_pointer_event(
-                        static_cast<float>(event.motion.x),
-                        static_cast<float>(event.motion.y),
-                        false
-                    );
+                    instance_->send_pointer_event((float)event.motion.x, (float)event.motion.y, (event.motion.state & SDL_BUTTON_LMASK) != 0);
                     break;
             }
         }
     }
 
-    void update(float dt) {
-        instance_->advance(dt);
-    }
-
     void render() {
         canvas_->remove();
-
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
         flex_renderer_->clear(instance_->artboard()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
-
         canvas_->draw();
         canvas_->sync();
 
@@ -599,15 +663,8 @@ private:
 };
 
 int main(int argc, char* argv[]) {
-    std::cout << "===========================================\n";
-    std::cout << "Nested Components Demo\n";
-    std::cout << "===========================================\n\n";
-
     NestedComponentsDemo demo;
-    if (!demo.init()) {
-        return 1;
-    }
-
+    if (!demo.init()) return 1;
     demo.run();
     return 0;
 }
