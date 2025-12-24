@@ -5,12 +5,9 @@
  *
  */
 
-#include "flex/flex.h"
+#include "flex.h"
 #include "ast_to_runtime.cpp" // Inline converter
-#include "flex/component.h"
-#include "flex/group.h"
-#include "flex/script.h"
-#include "flex_parser.h"
+#include "parser/flex_parser.h"
 #include <algorithm>
 #include <cstring>
 #include <fmtlog.h>

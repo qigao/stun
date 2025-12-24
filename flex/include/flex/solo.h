@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "flex/group.h"
+#include "dsl/group.h"
 #include <string>
 
 namespace flex {

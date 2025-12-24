@@ -6,9 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
-#include "flex/flex_ast.h"
-#include "flex/flex_parser.h"
-#include "flex/flex_token.h"
+#include "flex.h"
 
 using namespace flex;
 using namespace flex::parser;
@@ -833,7 +831,7 @@ TEST_CASE("Parser: Inline child node with properties", "[parser][edge]") {
   REQUIRE(program->scene != nullptr);
   REQUIRE(program->scene->children.size() == 1);
 
-  auto& group = program->scene->children[0];
+  auto &group = program->scene->children[0];
   REQUIRE(group->type == "group");
   REQUIRE(group->id == "m12");
   REQUIRE(std::get<float>(group->properties["rotation"]) == 0.0f);
@@ -841,7 +839,7 @@ TEST_CASE("Parser: Inline child node with properties", "[parser][edge]") {
   // Verify the child circle was created
   REQUIRE(group->children.size() == 1);
 
-  auto& circle = group->children[0];
+  auto &circle = group->children[0];
   REQUIRE(circle->type == "circle");
   REQUIRE(circle->id == "c");
   REQUIRE(std::get<float>(circle->properties["x"]) == 0.0f);
@@ -869,27 +867,27 @@ TEST_CASE("Parser: Multiple inline children (clock markers pattern)", "[parser][
   REQUIRE(program->scene != nullptr);
   REQUIRE(program->scene->children.size() == 1);
 
-  auto& markers = program->scene->children[0];
+  auto &markers = program->scene->children[0];
   REQUIRE(markers->type == "group");
   REQUIRE(markers->id == "markers");
   REQUIRE(markers->children.size() == 4);
 
   // Check each marker group has a circle child
-  auto& m12 = markers->children[0];
+  auto &m12 = markers->children[0];
   REQUIRE(m12->id == "m12");
   REQUIRE(std::get<float>(m12->properties["rotation"]) == 0.0f);
   REQUIRE(m12->children.size() == 1);
   REQUIRE(m12->children[0]->type == "circle");
   REQUIRE(std::get<float>(m12->children[0]->properties["radius"]) == 7.0f);
 
-  auto& m1 = markers->children[1];
+  auto &m1 = markers->children[1];
   REQUIRE(m1->id == "m1");
   REQUIRE(std::get<float>(m1->properties["rotation"]) == 30.0f);
   REQUIRE(m1->children.size() == 1);
   REQUIRE(m1->children[0]->type == "circle");
   REQUIRE(std::get<float>(m1->children[0]->properties["radius"]) == 3.0f);
 
-  auto& m3 = markers->children[3];
+  auto &m3 = markers->children[3];
   REQUIRE(m3->id == "m3");
   REQUIRE(std::get<float>(m3->properties["rotation"]) == 90.0f);
   REQUIRE(m3->children.size() == 1);
@@ -922,19 +920,19 @@ TEST_CASE("Parser: Repeat block", "[parser][repeat]") {
   REQUIRE(program->scene->children.size() == 3);
 
   // Check first item: item0 with y=0
-  auto& item0 = program->scene->children[0];
+  auto &item0 = program->scene->children[0];
   REQUIRE(item0->type == "rect");
   REQUIRE(item0->id == "item0");
   REQUIRE(std::get<float>(item0->properties["y"]) == 0.0f);
 
   // Check second item: item1 with y=1
-  auto& item1 = program->scene->children[1];
+  auto &item1 = program->scene->children[1];
   REQUIRE(item1->type == "rect");
   REQUIRE(item1->id == "item1");
   REQUIRE(std::get<float>(item1->properties["y"]) == 1.0f);
 
   // Check third item: item2 with y=2
-  auto& item2 = program->scene->children[2];
+  auto &item2 = program->scene->children[2];
   REQUIRE(item2->type == "rect");
   REQUIRE(item2->id == "item2");
   REQUIRE(std::get<float>(item2->properties["y"]) == 2.0f);
@@ -963,20 +961,20 @@ TEST_CASE("Parser: Repeat with nested groups", "[parser][repeat]") {
 
   // Container group
   REQUIRE(program->scene->children.size() == 1);
-  auto& container = program->scene->children[0];
+  auto &container = program->scene->children[0];
   REQUIRE(container->type == "group");
 
   // Should have 2 item groups
   REQUIRE(container->children.size() == 2);
 
   // Check item0
-  auto& item0 = container->children[0];
+  auto &item0 = container->children[0];
   REQUIRE(item0->id == "item0");
   REQUIRE(item0->children.size() == 1);
   REQUIRE(item0->children[0]->id == "label0");
 
   // Check item1
-  auto& item1 = container->children[1];
+  auto &item1 = container->children[1];
   REQUIRE(item1->id == "item1");
   REQUIRE(item1->children.size() == 1);
   REQUIRE(item1->children[0]->id == "label1");
@@ -1353,12 +1351,12 @@ TEST_CASE("Lexer: For loop tokens", "[lexer][for]") {
 TEST_CASE("Lexer: Dot token", "[lexer][for]") {
   auto lexer = lexer_create("item.name item.price");
 
-  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);  // item
-  REQUIRE(lex_next_token(lexer).type == TOK_DOT);         // .
-  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);  // name
-  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);  // item
-  REQUIRE(lex_next_token(lexer).type == TOK_DOT);         // .
-  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);  // price
+  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER); // item
+  REQUIRE(lex_next_token(lexer).type == TOK_DOT);        // .
+  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER); // name
+  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER); // item
+  REQUIRE(lex_next_token(lexer).type == TOK_DOT);        // .
+  REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER); // price
   REQUIRE(lex_next_token(lexer).type == TOK_EOF);
 
   lexer_destroy(lexer);
@@ -1375,18 +1373,18 @@ TEST_CASE("Parser: Data block", "[parser][for]") {
   REQUIRE(program != nullptr);
   REQUIRE(program->data_blocks.size() == 1);
 
-  auto& data = program->data_blocks[0];
+  auto &data = program->data_blocks[0];
   REQUIRE(data->name == "products");
   REQUIRE(data->items.size() == 2);
 
   // Check first item
-  auto& laptop = data->items[0];
+  auto &laptop = data->items[0];
   REQUIRE(laptop.key == "laptop");
   REQUIRE(std::get<std::string>(laptop.properties["name"]) == "Gaming Laptop");
   REQUIRE(std::get<float>(laptop.properties["price"]) == 999.0f);
 
   // Check second item
-  auto& mouse = data->items[1];
+  auto &mouse = data->items[1];
   REQUIRE(mouse.key == "mouse");
   REQUIRE(std::get<std::string>(mouse.properties["name"]) == "Wireless Mouse");
   REQUIRE(std::get<float>(mouse.properties["price"]) == 49.0f);
@@ -1420,16 +1418,16 @@ TEST_CASE("Parser: For loop basic", "[parser][for]") {
   REQUIRE(program->scene->children.size() == 3);
 
   // Check expanded nodes
-  auto& rect0 = program->scene->children[0];
+  auto &rect0 = program->scene->children[0];
   REQUIRE(rect0->type == "rect");
   REQUIRE(rect0->id == "color0");
   REQUIRE(std::get<std::string>(rect0->properties["fill"]) == "#ff0000");
 
-  auto& rect1 = program->scene->children[1];
+  auto &rect1 = program->scene->children[1];
   REQUIRE(rect1->id == "color1");
   REQUIRE(std::get<std::string>(rect1->properties["fill"]) == "#00ff00");
 
-  auto& rect2 = program->scene->children[2];
+  auto &rect2 = program->scene->children[2];
   REQUIRE(rect2->id == "color2");
   REQUIRE(std::get<std::string>(rect2->properties["fill"]) == "#0000ff");
 }
@@ -1458,7 +1456,7 @@ TEST_CASE("Parser: For loop with index", "[parser][for]") {
   REQUIRE(program->scene->children.size() == 2);
 
   // Check first group
-  auto& group0 = program->scene->children[0];
+  auto &group0 = program->scene->children[0];
   REQUIRE(group0->type == "group");
   REQUIRE(group0->id == "item0");
   REQUIRE(std::get<float>(group0->properties["y"]) == 0.0f);
@@ -1466,7 +1464,7 @@ TEST_CASE("Parser: For loop with index", "[parser][for]") {
   REQUIRE(std::get<std::string>(group0->children[0]->properties["content"]) == "Item A");
 
   // Check second group
-  auto& group1 = program->scene->children[1];
+  auto &group1 = program->scene->children[1];
   REQUIRE(group1->id == "item1");
   REQUIRE(std::get<float>(group1->properties["y"]) == 1.0f);
   REQUIRE(std::get<std::string>(group1->children[0]->properties["content"]) == "Item B");
@@ -1493,11 +1491,11 @@ TEST_CASE("Parser: For loop with numeric properties", "[parser][for]") {
   REQUIRE(program != nullptr);
   REQUIRE(program->scene->children.size() == 2);
 
-  auto& circle0 = program->scene->children[0];
+  auto &circle0 = program->scene->children[0];
   REQUIRE(std::get<float>(circle0->properties["x"]) == 100.0f);
   REQUIRE(std::get<float>(circle0->properties["y"]) == 50.0f);
 
-  auto& circle1 = program->scene->children[1];
+  auto &circle1 = program->scene->children[1];
   REQUIRE(std::get<float>(circle1->properties["x"]) == 200.0f);
   REQUIRE(std::get<float>(circle1->properties["y"]) == 100.0f);
 }

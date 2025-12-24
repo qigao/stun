@@ -7,11 +7,7 @@
 #include <sstream>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
-#include <flex/component.h>
-#include <flex/group.h>
-#include <flex/shape.h>
-#include <flex/text.h>
+#include <flex.h> 
 
 // ============================================================================
 // Model - Application State

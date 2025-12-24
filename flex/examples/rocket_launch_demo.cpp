@@ -8,8 +8,7 @@
 #include <sstream>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
-#include <flex/path.h>
+#include <flex.h> 
 
 class RocketLaunchDemo {
 public:

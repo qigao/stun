@@ -123,7 +123,7 @@ cmake --build . --config Release
 ### 3. 创建你的第一个动画
 
 ```cpp
-#include <flex/flex.h>
+#include <flex.h>
 
 int main() {
     flex::init();

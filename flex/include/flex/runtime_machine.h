@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "flex/flex_ast.h"
-#include "flex/fsm.h"
+#include "parser/flex_ast.h"
+#include "flex/dsl/fsm.h"
 #include <functional>
 #include <iostream>
 #include <memory>

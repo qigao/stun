@@ -8,9 +8,7 @@
 #include <cmath>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
-#include <flex/shape.h>
-#include <flex/text.h>
+#include <flex.h> 
 
 class UIComponentsDemo {
 public:

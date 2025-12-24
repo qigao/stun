@@ -9,8 +9,7 @@
 #include <cmath>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
-#include <flex/path.h>
+#include <flex.h> 
 
 class PathShowcaseDemo {
 public:

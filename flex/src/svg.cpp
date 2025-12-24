@@ -2,7 +2,7 @@
  * Flex Engine - SVG Node Implementation
  */
 
-#include "flex/svg.h"
+#include "flex/dsl/svg.h"
 #include "flex/renderer.h"
 
 namespace flex {

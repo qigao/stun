@@ -7,11 +7,7 @@
 #include <iomanip>
 #include <fstream>
 #include <sstream>
-#include <flex/flex.h>
-#include <flex/component.h>
-#include <flex/group.h>
-#include <flex/flex_token.h>
-#include <flex/flex_ast.h>
+#include <flex.h> 
 
 using namespace flex;
 

@@ -7,7 +7,7 @@
 #include <sstream>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
+#include <flex.h>
 
 // ============================================================================
 // CounterController - Handles UI business logic and state

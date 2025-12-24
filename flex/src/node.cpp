@@ -3,7 +3,7 @@
  */
 
 #include "flex/node.h"
-#include "flex/fsm.h"
+#include "flex/dsl/fsm.h"
 #include <algorithm>
 
 namespace flex {

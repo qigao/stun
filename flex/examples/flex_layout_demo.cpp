@@ -4,7 +4,7 @@
  */
 
 #include <SDL2/SDL.h>
-#include <flex/flex.h>
+#include <flex.h>
 #include <iostream>
 #include <thorvg.h>
 

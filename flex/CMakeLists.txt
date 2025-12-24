@@ -37,7 +37,7 @@ if(NOT LEMPAR)
 endif()
 
 # Generate parser from lemon FIRST (lexer needs the generated token header)
-set(FLEX_PARSER_Y ${CMAKE_CURRENT_SOURCE_DIR}/src/flex_parser.y)
+set(FLEX_PARSER_Y ${CMAKE_CURRENT_SOURCE_DIR}/src/parser/flex_parser.y)
 set(FLEX_PARSER_GEN_C ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.c)
 set(FLEX_PARSER_GEN ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.cpp)
 set(FLEX_PARSER_H ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.h)
@@ -54,7 +54,7 @@ add_custom_command(
   VERBATIM)
 
 # Generate lexer from re2c (depends on parser header for token values)
-set(FLEX_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/flex_lexer.re)
+set(FLEX_LEXER_RE ${CMAKE_CURRENT_SOURCE_DIR}/src/parser/flex_lexer.re)
 set(FLEX_LEXER_GEN ${CMAKE_CURRENT_BINARY_DIR}/flex_lexer_gen.cpp)
 
 add_custom_command(
@@ -71,17 +71,15 @@ file(GLOB_RECURSE FLEX_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c*)
 file(GLOB_RECURSE FLEX_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include/*.h*)
 
 add_library(flex STATIC ${FLEX_SOURCES} ${FLEX_HEADERS} ${FLEX_LEXER_GEN}
-                        ${FLEX_PARSER_GEN})
+                        ${FLEX_PARSER_GEN} ${FLEX_PARSER_Y} ${FLEX_LEXER_RE})
 
 target_include_directories(
   flex
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/flex>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-         $<INSTALL_INTERFACE:include>
-         ${Stb_INCLUDE_DIR})
+         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         $<INSTALL_INTERFACE:include> ${Stb_INCLUDE_DIR})
 
-target_compile_features(flex PUBLIC cxx_std_17)
 # Link physics engine (Box2D)
 find_package(box2d CONFIG REQUIRED)
 # Link rendering backend (ThorVG)
@@ -104,7 +102,6 @@ add_subdirectory(widgets)
 # ============================================================================
 
 add_subdirectory(examples)
-
 add_subdirectory(tests)
 
 # ============================================================================

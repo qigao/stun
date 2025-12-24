@@ -8,7 +8,7 @@
 #pragma once
 
 #include "flex/types.h"
-#include "flex/event.h"
+#include "flex/dsl/event.h"
 #include <string>
 #include <vector>
 #include <memory>

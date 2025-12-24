@@ -8,7 +8,7 @@
 #include <iomanip>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
+#include <flex.h>
 
 class LoadingAnimationDemo {
 public:

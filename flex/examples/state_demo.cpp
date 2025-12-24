@@ -3,15 +3,7 @@
  * Demonstrates reactive UI with Observable State using the MVC pattern.
  */
 
-#include "flex/flex.h"
-#include "flex/state.h"
-#include "flex/state_binding.h"
-#include "flex/component.h"
-#include "flex/shape.h"
-#include "flex/text.h"
-#include "flex/group.h"
-#include "flex/artboard.h"
-#include "flex/renderer.h"
+#include "flex.h"
 
 #include <SDL.h>
 #include <thorvg.h>

@@ -11,8 +11,7 @@
 #include <memory>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
-#include <flex/component.h>
+#include <flex.h> 
 
 // ============================================================================
 // Model - Data and Business Logic

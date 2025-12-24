@@ -10,13 +10,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 
-#include <flex/flex.h>
-#include <flex/state.h>
-#include <flex/component.h>
-#include <flex/state_binding.h>
-#include <flex/group.h>
-#include <flex/shape.h>
-#include <flex/text.h>
+#include <flex.h> 
 
 // ============================================================================
 // Constants and Utilities

@@ -3,12 +3,8 @@
  * Demonstrates the complete runtime system
  */
 
-#include <flex/animation.h>
-#include <flex/flex.h>
-#include <flex/layout.h>
-#include <flex/runtime_machine.h>
+#include <flex.h>
 #include <iostream>
-
 
 using namespace flex;
 using namespace flex::parser;

@@ -8,7 +8,7 @@
 #include <iostream>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
+#include <flex.h>
 #include <algorithm>
 class RoughDemo {
 public:

@@ -251,7 +251,7 @@ app_state->end_batch();  // Trigger all updates at once
 ## 🎨 Complete Example
 
 ```cpp
-#include "flex/flex.h"
+#include "flex.h"
 #include "flex/state.h"
 #include "flex/state_binding.h"
 

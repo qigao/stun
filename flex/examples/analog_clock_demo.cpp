@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
-#include <flex/flex.h>
+#include <flex.h>
 
 // ============================================================================
 // Model - Clock State

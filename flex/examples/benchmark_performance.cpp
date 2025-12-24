@@ -17,7 +17,7 @@
 #include <algorithm>
 #include <iomanip>
 
-#include "flex/flex.h"
+#include "flex.h"
 
 using namespace flex;
 using namespace std::chrono;

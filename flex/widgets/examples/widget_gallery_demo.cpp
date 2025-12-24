@@ -3,7 +3,7 @@
  * Showcases all standard UI controls with Fluent Design theme
  */
 
-#include "flex/flex.h"
+#include "flex.h"
 #include "widgets/widgets.h"
 #include "flex/group.h"
 #include "flex/instance.h"
