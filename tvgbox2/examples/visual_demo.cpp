@@ -2,10 +2,14 @@
  * tvgbox2 - Visual Demo with ThorVG Software Rendering
  *
  * A real window demo showcasing widgets with ThorVG + SDL2
+ *
+ * This demo uses flex::Renderer abstraction layer.
+ * The backend (ThorVG) is initialized here and wrapped via flex::create_thorvg_renderer().
  */
 
 #include <SDL2/SDL.h>
 #include <thorvg.h>
+#include <flex/bridge/renderer.h>
 #include <tvgbox2/box.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/widgets/button_widget.h>
@@ -30,7 +34,7 @@
 #include <tvgbox2/widgets/colorpicker_widget.h>
 #include <tvgbox2/widgets/tooltip_widget.h>
 #include <tvgbox2/widgets/image_widget.h>
-#include <tvgbox2/widgets/select_widget.h> // Added missing header
+#include <tvgbox2/widgets/select_widget.h>
 #include <iostream>
 #include <memory>
 #include <fstream>
@@ -46,7 +50,7 @@ class VisualDemo {
 public:
     bool init() {
         std::cout << "=== tvgbox2 Visual Demo ===" << std::endl;
-        std::cout << "Initializing SDL2 + ThorVG Software Renderer..." << std::endl;
+        std::cout << "Initializing SDL2 + ThorVG (via flex::Renderer)..." << std::endl;
 
         if (SDL_Init(SDL_INIT_VIDEO) < 0) {
             std::cerr << "SDL init failed: " << SDL_GetError() << std::endl;
@@ -67,6 +71,7 @@ public:
 
         surface_ = SDL_GetWindowSurface(window_);
 
+        // Initialize ThorVG
         if (tvg::Initializer::init(0) != tvg::Result::Success) {
             std::cerr << "ThorVG init failed" << std::endl;
             return false;
@@ -74,34 +79,12 @@ public:
 
         // Load fonts
         std::cout << "Loading fonts..." << std::endl;
-
-        // Load Arial font with custom name (ThorVG's load(path) uses path as font name)
-        // We need to load from memory to specify "Arial" as the font name
-        {
-            std::ifstream file("C:/Windows/Fonts/arial.ttf", std::ios::binary | std::ios::ate);
-            if (!file.is_open()) {
-                std::cerr << "Failed to open arial.ttf" << std::endl;
-                return false;
-            }
-
-            auto size = file.tellg();
-            file.seekg(0, std::ios::beg);
-
-            std::vector<char> buffer(size);
-            if (!file.read(buffer.data(), size)) {
-                std::cerr << "Failed to read arial.ttf" << std::endl;
-                return false;
-            }
-
-            if (tvg::Text::load("Arial", buffer.data(), static_cast<uint32_t>(size), "ttf", true) != tvg::Result::Success) {
-                std::cerr << "Failed to load Arial font" << std::endl;
-                return false;
-            }
-            std::cout << "  Arial: OK" << std::endl;
+        if (!load_font("Arial", "C:/Windows/Fonts/arial.ttf")) {
+            return false;
         }
-
         std::cout << "Fonts loaded" << std::endl;
 
+        // Create ThorVG canvas
         canvas_.reset(tvg::SwCanvas::gen());
         canvas_->target(
             static_cast<uint32_t*>(surface_->pixels),
@@ -111,15 +94,24 @@ public:
             tvg::ColorSpace::ARGB8888
         );
 
-        std::cout << "✓ SDL2 window created (" << WINDOW_WIDTH << "x" << WINDOW_HEIGHT << ")" << std::endl;
-        std::cout << "✓ ThorVG SwCanvas initialized" << std::endl;
+        std::cout << "ThorVG SwCanvas created (" << WINDOW_WIDTH << "x" << WINDOW_HEIGHT << ")" << std::endl;
 
-        box_ = std::make_unique<Box>(canvas_.get());
+        // Create flex::Renderer from ThorVG canvas
+        flex_renderer_ = flex::create_thorvg_renderer(canvas_.get());
+        if (!flex_renderer_) {
+            std::cerr << "Failed to create flex::Renderer" << std::endl;
+            return false;
+        }
+
+        std::cout << "flex::Renderer created (ThorVG backend)" << std::endl;
+
+        // Create tvgbox2::Box with flex::Renderer
+        box_ = std::make_unique<Box>(flex_renderer_.get());
         box_->set_viewport(WINDOW_WIDTH, WINDOW_HEIGHT);
 
         build_ui();
 
-        // 第一次渲染
+        // Initial render
         std::cout << "\n>>> Performing initial render..." << std::endl;
         box_->update();
         SDL_UpdateWindowSurface(window_);
@@ -157,18 +149,20 @@ public:
     ~VisualDemo() {
         SDL_StopTextInput();
         box_.reset();
+        flex_renderer_.reset();
         canvas_.reset();
         tvg::Initializer::term();
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
 
-        std::cout << "\n✓ Demo closed successfully" << std::endl;
+        std::cout << "\nDemo closed successfully" << std::endl;
     }
 
 private:
     SDL_Window* window_ = nullptr;
     SDL_Surface* surface_ = nullptr;
     std::unique_ptr<tvg::SwCanvas> canvas_;
+    std::unique_ptr<flex::Renderer> flex_renderer_;
     std::unique_ptr<Box> box_;
     bool running_ = false;
 
@@ -182,13 +176,13 @@ private:
     Element* calendar_view_ = nullptr;
     Element* data_view_ = nullptr;
     Element* title_label_ = nullptr;
-    
+
     // Navigation buttons for click handling
     Element* nav_components_ = nullptr;
     Element* nav_calendar_ = nullptr;
     Element* nav_data_ = nullptr;
     Element* nav_tabs_ = nullptr;
-    
+
     int current_view_ = 0;  // 0=Components, 1=Calendar, 2=Data, 3=Tabs
 
     // Tabs content pages
@@ -199,21 +193,46 @@ private:
     Element* nest_page_a_ = nullptr;
     Element* nest_page_b_ = nullptr;
 
+    bool load_font(const char* name, const char* path) {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open " << path << std::endl;
+            return false;
+        }
+
+        auto size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        std::vector<char> buffer(size);
+        if (!file.read(buffer.data(), size)) {
+            std::cerr << "Failed to read " << path << std::endl;
+            return false;
+        }
+
+        if (tvg::Text::load(name, buffer.data(), static_cast<uint32_t>(size), "ttf", true) != tvg::Result::Success) {
+            std::cerr << "Failed to load " << name << " font" << std::endl;
+            return false;
+        }
+
+        std::cout << "  " << name << ": OK" << std::endl;
+        return true;
+    }
+
     void switch_view(int view_index) {
         current_view_ = view_index;
-        
+
         // Hide all views using CSS class
         if (components_view_) components_view_->add_class("hidden");
         if (calendar_view_) calendar_view_->add_class("hidden");
         if (data_view_) data_view_->add_class("hidden");
         if (tabs_view_) tabs_view_->add_class("hidden");
-        
+
         // Update nav button styles
         if (nav_components_) { nav_components_->remove_class("active"); }
         if (nav_calendar_) { nav_calendar_->remove_class("active"); }
         if (nav_data_) { nav_data_->remove_class("active"); }
         if (nav_tabs_) { nav_tabs_->remove_class("active"); }
-        
+
         // Show selected view
         switch (view_index) {
             case 0:
@@ -237,7 +256,7 @@ private:
                 if (title_label_) static_cast<LabelWidget*>(title_label_->widget)->set_text("Tab Navigation");
                 break;
         }
-        
+
         box_->invalidate();
     }
 
@@ -276,11 +295,11 @@ private:
         nav_components_->add_class("nav-item");
         nav_components_->add_class("active");
         sidebar->append(nav_components_);
-        
+
         nav_calendar_ = box_->create_widget<ButtonWidget>("button", "", "Calendar");
         nav_calendar_->add_class("nav-item");
         sidebar->append(nav_calendar_);
-        
+
         nav_data_ = box_->create_widget<ButtonWidget>("button", "", "Data Table");
         nav_data_->add_class("nav-item");
         sidebar->append(nav_data_);
@@ -336,7 +355,7 @@ private:
             card->append(row);
 
             row->append(box_->create_widget<ButtonWidget>("button", "", "Primary"));
-            
+
             auto* b2 = box_->create_widget<ButtonWidget>("button", "", "Success");
             b2->add_class("success");
             row->append(b2);
@@ -369,19 +388,19 @@ private:
             r2->append(box_->create_widget<CheckboxWidget>("checkbox", "", "Remember me", true));
             r2->append(box_->create_widget<SwitchWidget>("switch", "", "Wifi", true));
         }
-        
+
         // CARD: Progress & Sliders
         {
             auto* card = box_->create("div", "");
             card->add_class("card");
             col1->append(card);
-            
+
             auto* head = box_->create_widget<LabelWidget>("label", "", "Progress & Valuators");
             head->add_class("card-title");
             card->append(head);
-            
+
             card->append(box_->create_widget<SliderWidget>("slider", "", 0.0f, 100.0f, 60.0f));
-            
+
             progress_elem_ = box_->create_widget<ProgressBarWidget>("progressbar", "prog1", 0.0f, false);
             card->append(progress_elem_);
 
@@ -389,10 +408,10 @@ private:
             auto* r3 = box_->create("div", "");
             r3->add_class("card-row");
             card->append(r3);
-            
+
             auto* spin = box_->create_widget<SpinnerWidget>("spinner", "", SpinnerWidget::Variant::Ring);
             r3->append(spin);
-            
+
             auto* badge = box_->create_widget<BadgeWidget>("badge", "", "");
             static_cast<BadgeWidget*>(badge->widget)->set_count(99);
             r3->append(badge);
@@ -412,7 +431,7 @@ private:
             auto* head = box_->create_widget<LabelWidget>("label", "", "Data & Trees");
             head->add_class("card-title");
             card->append(head);
-            
+
             auto* tree = box_->create_widget<TreeWidget>("tree", "");
             auto* tw = static_cast<TreeWidget*>(tree->widget);
             auto r = tw->add_node("r", "Project Root");
@@ -420,7 +439,7 @@ private:
             tw->add_node("inc", "Include", r.get());
             tw->expand("r");
             card->append(tree);
-            
+
             // Dropdown
              auto* dropdown = box_->create_widget<DropdownWidget>("dropdown", "", "Select Branch...");
              auto* dw = static_cast<DropdownWidget*>(dropdown->widget);
@@ -430,7 +449,6 @@ private:
              dw->add_option("bugfix/styling", "bugfix/styling");
              card->append(dropdown);
         }
-        
 
 
         // ==========================================
@@ -440,17 +458,17 @@ private:
         calendar_view_->add_class("gallery-grid");
         calendar_view_->add_class("hidden");  // Hidden initially
         main->append(calendar_view_);
-        
+
         {
             // Calendar Card
             auto* card = box_->create("div", "");
             card->add_class("card");
             calendar_view_->append(card);
-            
+
             auto* head = box_->create_widget<LabelWidget>("label", "", "Date Picker");
             head->add_class("card-title");
             card->append(head);
-            
+
             auto* cal = box_->create_widget<CalendarWidget>("calendar", "cal1");
             card->append(cal);
         }
@@ -462,34 +480,34 @@ private:
         data_view_->add_class("gallery-grid");
         data_view_->add_class("hidden");  // Hidden initially
         main->append(data_view_);
-        
+
         {
             // Table Card
             auto* card = box_->create("div", "");
             card->add_class("card");
             card->computed_style->width = 800.0f;  // Wider for table
             data_view_->append(card);
-            
+
             auto* head = box_->create_widget<LabelWidget>("label", "", "Employee Data");
             head->add_class("card-title");
             card->append(head);
-            
+
             auto* table = box_->create_widget<TableWidget>("table", "table1");
             auto* tw = static_cast<TableWidget*>(table->widget);
-            
+
             // Add columns
             tw->add_column("ID", 60);
             tw->add_column("Name", 150);
             tw->add_column("Role", 150);
             tw->add_column("Status", 100);
-            
+
             // Add sample data
             tw->add_row({"1", "Alice Chen", "Engineer", "Active"});
             tw->add_row({"2", "Bob Smith", "Designer", "Active"});
             tw->add_row({"3", "Carol White", "Manager", "Away"});
             tw->add_row({"4", "David Lee", "Developer", "Active"});
             tw->add_row({"5", "Eve Johnson", "Analyst", "Offline"});
-            
+
             card->append(table);
         }
 
@@ -497,10 +515,8 @@ private:
         // VIEW 4: Tabs (initially hidden)
         // ==========================================
         tabs_view_ = box_->create("div", "tabs-view");
-        tabs_view_->add_class("hidden"); 
+        tabs_view_->add_class("hidden");
         tabs_view_->add_class("tabs-view");
-        // tabs_view_ needs to be column layout for this
-        // styles handled by .tabs-view class now
         main->append(tabs_view_);
 
         // Tabs Widget
@@ -509,42 +525,42 @@ private:
         tw->add_tab("Profile", "profile");
         tw->add_tab("Settings", "settings");
         tw->add_tab("Color & Controls", "demos");
-        
+
         // Add callback to switch content pages
         tw->set_change_callback([this](int index, const std::string& id) {
             if (tab_page1_) tab_page1_->add_class("hidden");
             if (tab_page2_) tab_page2_->add_class("hidden");
             if (tab_page3_) tab_page3_->add_class("hidden");
-            
+
             if (index == 0 && tab_page1_) tab_page1_->remove_class("hidden");
             if (index == 1 && tab_page2_) tab_page2_->remove_class("hidden");
             if (index == 2 && tab_page3_) tab_page3_->remove_class("hidden");
-            
+
             box_->invalidate();
         });
-        
+
         tabs_view_->append(tabs_widget);
 
         // --- PAGE 1: Profile ---
         tab_page1_ = box_->create("div", "page-profile");
         tab_page1_->add_class("card");
         tabs_view_->append(tab_page1_);
-        
+
         {
             auto* h = box_->create_widget<LabelWidget>("label", "", "User Profile");
             h->add_class("card-title");
             tab_page1_->append(h);
-            
+
             auto* row1 = box_->create("div", ""); row1->add_class("card-row");
             row1->append(box_->create_widget<LabelWidget>("label", "", "Username:"));
             row1->append(box_->create_widget<InputWidget>("input", "u1", "admin"));
             tab_page1_->append(row1);
-            
+
             auto* row2 = box_->create("div", ""); row2->add_class("card-row");
             row2->append(box_->create_widget<LabelWidget>("label", "", "Email:"));
             row2->append(box_->create_widget<InputWidget>("input", "e1", "admin@example.com"));
             tab_page1_->append(row2);
-            
+
             auto* btn = box_->create_widget<ButtonWidget>("button", "save", "Save Changes");
             tab_page1_->append(btn);
         }
@@ -554,22 +570,22 @@ private:
         tab_page2_->add_class("card");
         tab_page2_->add_class("hidden"); // hidden by default
         tabs_view_->append(tab_page2_);
-        
+
         {
             auto* h = box_->create_widget<LabelWidget>("label", "", " Application Settings");
             h->add_class("card-title");
             tab_page2_->append(h);
-            
+
             auto* row1 = box_->create("div", ""); row1->add_class("card-row");
             row1->append(box_->create_widget<LabelWidget>("label", "", "Notifications"));
             row1->append(box_->create_widget<SwitchWidget>("switch", "s1", "", true));
             tab_page2_->append(row1);
-            
+
             auto* row2 = box_->create("div", ""); row2->add_class("card-row");
             row2->append(box_->create_widget<LabelWidget>("label", "", "Dark Mode"));
             row2->append(box_->create_widget<SwitchWidget>("switch", "s2", "", true));
             tab_page2_->append(row2);
-            
+
             auto* row3 = box_->create("div", ""); row3->add_class("card-row");
             row3->append(box_->create_widget<LabelWidget>("label", "", "Volume"));
             auto* slid = box_->create_widget<SliderWidget>("slider", "vol", 0.7f);
@@ -582,19 +598,19 @@ private:
         tab_page3_->add_class("card");
         tab_page3_->add_class("hidden"); // hidden by default
         tabs_view_->append(tab_page3_);
-        
+
         {
              auto* h = box_->create_widget<LabelWidget>("label", "", "Interactive Pages Control");
              h->add_class("card-title");
              tab_page3_->append(h);
-             
+
              // Nested Tabs
              auto* tabs = box_->create_widget<TabsWidget>("tabs", "nested-tabs");
              auto* t_w = static_cast<TabsWidget*>(tabs->widget);
              t_w->add_tab("Page A", "sa");
              t_w->add_tab("Page B", "sb");
              tab_page3_->append(tabs);
-             
+
              nest_page_a_ = box_->create("div", "");
              nest_page_a_->add_class("card-row");
              nest_page_a_->append(box_->create_widget<LabelWidget>("label", "", "This is content for Page A."));
@@ -611,12 +627,12 @@ private:
              t_w->set_change_callback([this](int idx, const std::string& id){
                 if (nest_page_a_) nest_page_a_->add_class("hidden");
                 if (nest_page_b_) nest_page_b_->add_class("hidden");
-                
+
                 if (idx == 0 && nest_page_a_) nest_page_a_->remove_class("hidden");
                 if (idx == 1 && nest_page_b_) nest_page_b_->remove_class("hidden");
                 box_->invalidate();
              });
-             
+
              // Color Palette
              auto* h2 = box_->create_widget<LabelWidget>("label", "", "Color Palette");
              h2->add_class("card-title");
@@ -627,12 +643,12 @@ private:
         }
         toast_elem_ = box_->create_widget<ToastWidget>("toast", "toast1", "Welcome to tvgbox2!", ToastWidget::Type::Success);
         root->append(toast_elem_);
-        
+
         modal_elem_ = box_->create_widget<ModalWidget>("modal", "modal1", "System Status");
         root->append(modal_elem_);
 
         std::cout << "UI built with new Gallery Layout" << std::endl;
-        
+
         // Set up event callback for nav button clicks
         box_->set_event_callback([this](Element& elem, const Event& event) {
             if (event.type == EventType::MouseUp) {
@@ -648,7 +664,7 @@ private:
                 }
             }
         });
-        
+
         // Initial update
         box_->update();
     }
@@ -787,8 +803,8 @@ private:
 
         if (progress_elem_) {
             auto* progress = static_cast<ProgressBarWidget*>(progress_elem_->widget);
-            progress->set_value(progress_value_ * 100.0f);  // 0-100 范围
-            progress_elem_->mark_paint_dirty();  // 通知 Box 需要重新渲染
+            progress->set_value(progress_value_ * 100.0f);  // 0-100 range
+            progress_elem_->mark_paint_dirty();
         }
     }
 

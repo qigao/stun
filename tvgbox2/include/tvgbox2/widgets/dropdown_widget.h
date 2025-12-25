@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - DropdownWidget
  *
- * Select from a list of options
+ * Select from a list of options - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_DROPDOWN_WIDGET_H
 #define TVGBOX2_DROPDOWN_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -23,12 +25,6 @@ namespace tvgbox2 {
  *   --dropdown-border: "r,g,b,a"       // Border color
  *   --dropdown-item-hover: "r,g,b,a"   // Item hover background
  *   --dropdown-max-height: "200"       // Max dropdown height
- *
- * Example:
- *   auto* dropdown = box->create_widget<DropdownWidget>("dropdown", "d1");
- *   dropdown->add_option("Option 1", "1");
- *   dropdown->add_option("Option 2", "2");
- *   dropdown->set_change_callback([](const std::string& value) { ... });
  */
 class DropdownWidget : public Widget {
 public:
@@ -40,7 +36,7 @@ public:
 
   explicit DropdownWidget(const std::string& placeholder = "Select...");
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "DropdownWidget"; }
@@ -72,9 +68,9 @@ public:
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_button(tvg::Scene* scene, const Element& elem);
-  void render_dropdown(tvg::Scene* scene, const Element& elem);
-  void render_arrow(tvg::Scene* scene, const Element& elem);
+  void render_button(flex::Renderer& r, const Element& elem);
+  void render_arrow(flex::Renderer& r, const Element& elem);
+  void render_dropdown(flex::Renderer& r, const Element& elem);
 
   std::string placeholder_;
   std::vector<Option> options_;

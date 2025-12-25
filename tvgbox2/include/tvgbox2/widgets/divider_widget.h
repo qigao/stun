@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - DividerWidget
  *
- * Horizontal or vertical separator line
+ * Horizontal or vertical separator line using Group/Shape composition.
  */
 
 #ifndef TVGBOX2_DIVIDER_WIDGET_H
 #define TVGBOX2_DIVIDER_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 
 namespace tvgbox2 {
@@ -20,9 +22,6 @@ namespace tvgbox2 {
  *   --divider-thickness: "1"       // Line thickness
  *   --divider-style: "solid" | "dashed" | "dotted"
  *   --divider-orientation: "horizontal" | "vertical"
- *
- * Example:
- *   auto* divider = box->create_widget<DividerWidget>("divider", "div1");
  */
 class DividerWidget : public Widget {
 public:
@@ -31,7 +30,7 @@ public:
 
   explicit DividerWidget(Orientation orientation = Orientation::Horizontal);
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "DividerWidget"; }

@@ -35,9 +35,9 @@ struct ComputedStyle {
   float border_radius[4] = {0};
 
   // ========== 颜色 ==========
-  Color background_color = {255, 255, 255, 0};  // transparent
-  Color text_color = {0, 0, 0, 255};
-  Color border_color = {0, 0, 0, 255};
+  Color background_color{1.0f, 1.0f, 1.0f, 0.0f};  // transparent white
+  Color text_color{0.0f, 0.0f, 0.0f, 1.0f};        // black
+  Color border_color{0.0f, 0.0f, 0.0f, 1.0f};      // black
 
   // 渐变（如果 background 是渐变）
   bool has_gradient = false;

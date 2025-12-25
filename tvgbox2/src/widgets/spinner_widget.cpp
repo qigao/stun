@@ -6,8 +6,9 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -15,21 +16,22 @@ constexpr float PI = 3.14159265358979f;
 
 SpinnerWidget::SpinnerWidget(Variant variant) : variant_(variant) {}
 
-void SpinnerWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void SpinnerWidget::render(const Element& elem, Renderer& renderer) {
   if (!spinning_) return;
 
+  auto& r = renderer.flex();
   switch (variant_) {
-    case Variant::Ring: render_ring(scene, elem); break;
-    case Variant::Dots: render_dots(scene, elem); break;
-    case Variant::Bars: render_bars(scene, elem); break;
+    case Variant::Ring: render_ring(r, elem); break;
+    case Variant::Dots: render_dots(r, elem); break;
+    case Variant::Bars: render_bars(r, elem); break;
   }
 }
 
-void SpinnerWidget::render_ring(tvg::Scene* scene, const Element& elem) {
+void SpinnerWidget::render_ring(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color color = {59, 130, 246, 255};  // Default: blue
-  Color track = {229, 231, 235, 255}; // Default: light gray
+  Color color = {0.23f, 0.51f, 0.96f, 1.0f};  // Default: blue
+  Color track = {0.90f, 0.91f, 0.92f, 1.0f};  // Default: light gray
   float stroke_width = 3.0f;
 
   if (style) {
@@ -43,46 +45,37 @@ void SpinnerWidget::render_ring(tvg::Scene* scene, const Element& elem) {
   float radius = std::min(cx, cy) - stroke_width;
 
   // Draw track (full circle)
-  auto track_shape = tvg::Shape::gen();
-  track_shape->appendCircle(cx, cy, radius, radius);
-  track_shape->strokeFill(track.r, track.g, track.b, track.a);
-  track_shape->strokeWidth(stroke_width);
-  scene->push(std::move(track_shape));
+  r.draw_circle(cx, cy, radius, Paint::none(), Paint::solid(track), stroke_width);
 
-  // Draw arc (270 degrees)
-  auto arc = tvg::Shape::gen();
-
-  // Create arc using bezier approximation
+  // Draw arc (270 degrees) as path
   float start_angle = rotation_ * PI / 180.0f;
   float arc_length = 270.0f * PI / 180.0f;
 
-  // Draw arc as series of small segments
+  // Build arc path as series of small line segments
+  char path[2048];
+  int offset = 0;
   const int segments = 32;
   float step = arc_length / segments;
-  for (int i = 0; i < segments; i++) {
-    float a1 = start_angle + i * step;
-    float a2 = start_angle + (i + 1) * step;
-    float x1 = cx + radius * std::cos(a1);
-    float y1 = cy + radius * std::sin(a1);
-    float x2 = cx + radius * std::cos(a2);
-    float y2 = cy + radius * std::sin(a2);
+
+  for (int i = 0; i <= segments; i++) {
+    float a = start_angle + i * step;
+    float x = cx + radius * std::cos(a);
+    float y = cy + radius * std::sin(a);
 
     if (i == 0) {
-      arc->moveTo(x1, y1);
+      offset += snprintf(path + offset, sizeof(path) - offset, "M %.4g %.4g", x, y);
+    } else {
+      offset += snprintf(path + offset, sizeof(path) - offset, " L %.4g %.4g", x, y);
     }
-    arc->lineTo(x2, y2);
   }
 
-  arc->strokeFill(color.r, color.g, color.b, color.a);
-  arc->strokeWidth(stroke_width);
-  arc->strokeCap(tvg::StrokeCap::Round);
-  scene->push(std::move(arc));
+  r.stroke_path(path, Paint::solid(color), stroke_width);
 }
 
-void SpinnerWidget::render_dots(tvg::Scene* scene, const Element& elem) {
+void SpinnerWidget::render_dots(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color color = {59, 130, 246, 255};
+  Color color = {0.23f, 0.51f, 0.96f, 1.0f};
   if (style) {
     color = style->get_variable_color("--spinner-color", color);
   }
@@ -100,19 +93,17 @@ void SpinnerWidget::render_dots(tvg::Scene* scene, const Element& elem) {
 
     // Alpha based on position in animation
     float alpha_factor = (float(i) / dot_count);
-    uint8_t alpha = static_cast<uint8_t>(alpha_factor * color.a);
+    Color dot_color = color;
+    dot_color.a = alpha_factor * color.a;
 
-    auto dot = tvg::Shape::gen();
-    dot->appendCircle(x, y, dot_radius, dot_radius);
-    dot->fill(color.r, color.g, color.b, alpha);
-    scene->push(std::move(dot));
+    r.draw_circle(x, y, dot_radius, Paint::solid(dot_color), Paint::none(), 0);
   }
 }
 
-void SpinnerWidget::render_bars(tvg::Scene* scene, const Element& elem) {
+void SpinnerWidget::render_bars(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color color = {59, 130, 246, 255};
+  Color color = {0.23f, 0.51f, 0.96f, 1.0f};
   if (style) {
     color = style->get_variable_color("--spinner-color", color);
   }
@@ -134,10 +125,7 @@ void SpinnerWidget::render_bars(tvg::Scene* scene, const Element& elem) {
     float h = bar_height * (0.3f + 0.7f * scale);
     float y = (elem.height() - h) / 2;
 
-    auto bar = tvg::Shape::gen();
-    bar->appendRect(x, y, bar_width, h, bar_width / 2, bar_width / 2);
-    bar->fill(color.r, color.g, color.b, color.a);
-    scene->push(std::move(bar));
+    r.draw_rect(x, y, bar_width, h, bar_width / 2, Paint::solid(color), Paint::none(), 0);
   }
 }
 

@@ -7,228 +7,212 @@
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
 #include <tvgbox2/renderer.h>
-#include <thorvg.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
-// ============================================================================
-// 构造函数
-// ============================================================================
-
 CheckboxWidget::CheckboxWidget(const std::string& label, bool checked)
     : label_(label), checked_(checked) {
-  target_checkmark_scale_ = checked ? 1.0f : 0.0f;
-  checkmark_scale_ = target_checkmark_scale_;
+    target_checkmark_scale_ = checked ? 1.0f : 0.0f;
+    checkmark_scale_ = target_checkmark_scale_;
 }
-
-// ============================================================================
-// 状态访问
-// ============================================================================
 
 void CheckboxWidget::set_checked(bool checked) {
-  if (checked_ != checked) {
-    checked_ = checked;
-    target_checkmark_scale_ = checked ? 1.0f : 0.0f;
-    dirty_ = true;
+    if (checked_ != checked) {
+        checked_ = checked;
+        target_checkmark_scale_ = checked ? 1.0f : 0.0f;
+        dirty_ = true;
 
-    if (change_callback_) {
-      change_callback_(checked_);
+        if (change_callback_) {
+            change_callback_(checked_);
+        }
     }
-  }
 }
 
-// ============================================================================
-// Widget 接口实现
-// ============================================================================
+void CheckboxWidget::set_label(const std::string& label) {
+    label_ = label;
+    if (text_) {
+        text_->set_text(label);
+    }
+    dirty_ = true;
+}
 
-void CheckboxWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
-  // 1. 渲染复选框主体
-  render_checkbox_box(scene, elem);
+void CheckboxWidget::rebuild_shapes(float checkbox_size, float label_spacing,
+                                     const std::string& font_family, float font_size) {
+    if (checkbox_size == cached_checkbox_size_ &&
+        label_spacing == cached_label_spacing_ && box_ != nullptr) {
+        return;
+    }
 
-  // 2. 渲染勾选标记（如果选中）
-  if (checkmark_scale_ > 0.01f) {
-    render_checkmark(scene, elem);
-  }
+    root_.clear();
+    cached_checkbox_size_ = checkbox_size;
+    cached_label_spacing_ = label_spacing;
 
-  // 3. 渲染文字标签
-  if (!label_.empty()) {
-    render_label(scene, elem);
-  }
+    float radius = checkbox_size * 0.15f;
+
+    // Box background with border
+    box_ = root_.add<RectShape>(0, 0, checkbox_size, checkbox_size, radius);
+
+    // Checkmark path (will be updated with scale)
+    checkmark_ = root_.add<PathShape>();
+    update_checkmark_path(checkbox_size);
+
+    // Label text
+    if (!label_.empty()) {
+        float text_x = checkbox_size + label_spacing;
+        float text_y = checkbox_size / 2 + font_size / 3;
+        text_ = root_.add<TextShape>(text_x, text_y, label_);
+        text_->set_font_family(font_family);
+        text_->set_font_size(font_size);
+    }
+}
+
+void CheckboxWidget::update_colors(const Element& elem) {
+    if (!box_ || !checkmark_) return;
+
+    auto* style = elem.computed_style;
+    if (!style) return;
+
+    // Background color based on checked state
+    Color bg_color;
+    if (checked_ || elem.has_state("checked")) {
+        bg_color = style->get_variable_color("--checkbox-bg-checked", color_from_u8(59, 130, 246, 255));
+    } else {
+        bg_color = style->get_variable_color("--checkbox-bg", color_from_u8(255, 255, 255, 255));
+    }
+
+    // Border color
+    Color border_color = style->get_variable_color("--checkbox-border", color_from_u8(200, 200, 200, 255));
+
+    // Checkmark color
+    Color checkmark_color = style->get_variable_color("--checkbox-checkmark", color_from_u8(255, 255, 255, 255));
+
+    box_->set_fill(bg_color);
+    box_->set_stroke(border_color, 2.0f);
+
+    checkmark_->set_stroke(checkmark_color, 2.0f);
+    checkmark_->set_visible(checkmark_scale_ > 0.01f);
+
+    // Label text color
+    if (text_) {
+        text_->set_color(style->text_color);
+    }
+}
+
+void CheckboxWidget::update_checkmark_path(float checkbox_size) {
+    if (!checkmark_) return;
+
+    float center_x = checkbox_size / 2;
+    float center_y = checkbox_size / 2;
+    float size = checkbox_size * 0.4f * checkmark_scale_;
+
+    if (size < 0.1f) {
+        checkmark_->set_path_data("");
+        return;
+    }
+
+    // L-shaped checkmark path
+    char path[128];
+    snprintf(path, sizeof(path),
+             "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
+             center_x - size * 0.5f, center_y,
+             center_x - size * 0.2f, center_y + size * 0.4f,
+             center_x + size * 0.5f, center_y - size * 0.4f);
+
+    checkmark_->set_path_data(path);
+}
+
+void CheckboxWidget::render(const Element& elem, Renderer& renderer) {
+    auto* style = elem.computed_style;
+    if (!style) return;
+
+    float checkbox_size = style->get_variable_float("--checkbox-size", 20.0f);
+    float label_spacing = style->get_variable_float("--label-spacing", 8.0f);
+
+    // Rebuild shapes if dimensions changed
+    rebuild_shapes(checkbox_size, label_spacing, style->font_family, style->font_size);
+
+    // Update colors based on state
+    update_colors(elem);
+
+    // Update checkmark path for animation
+    update_checkmark_path(checkbox_size);
+
+    // Draw using flex::Renderer
+    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+
+    float opacity = style->opacity;
+    root_.draw(renderer.flex(), world_transform, opacity);
+
+    dirty_ = false;
 }
 
 bool CheckboxWidget::handle_event(const Event& event, Element& elem) {
-  if (disabled_ || elem.has_state("disabled")) {
+    if (disabled_ || elem.has_state("disabled")) {
+        return false;
+    }
+
+    switch (event.type) {
+        case EventType::MouseDown:
+            if (event.button == MouseButton::Left) {
+                set_checked(!checked_);
+
+                if (checked_) {
+                    elem.add_state("checked");
+                } else {
+                    elem.remove_state("checked");
+                }
+
+                elem.mark_paint_dirty();
+                return true;
+            }
+            break;
+
+        case EventType::KeyDown:
+            if (event.key == KeyCode::Enter || event.key == KeyCode::Num0) {
+                set_checked(!checked_);
+
+                if (checked_) {
+                    elem.add_state("checked");
+                } else {
+                    elem.remove_state("checked");
+                }
+
+                elem.mark_paint_dirty();
+                return true;
+            }
+            break;
+
+        default:
+            break;
+    }
+
     return false;
-  }
-
-  switch (event.type) {
-    case EventType::MouseDown:
-      return handle_mouse_down(event, elem);
-
-    case EventType::KeyDown:
-      return handle_key_down(event, elem);
-
-    default:
-      return false;
-  }
 }
 
 void CheckboxWidget::update(float delta_ms, Element& elem) {
-  update_transitions(delta_ms, elem);
-}
+    auto* style = elem.computed_style;
+    if (!style) return;
 
-// ============================================================================
-// 渲染辅助
-// ============================================================================
-
-void CheckboxWidget::render_checkbox_box(tvg::Scene* scene, const Element& elem) {
-  auto* style = elem.computed_style;
-  if (!style) return;
-
-  // 读取复选框大小
-  float checkbox_size = style->get_variable_float("--checkbox-size", 20.0f);
-
-  // 读取背景色
-  Color bg_color;
-  if (checked_ || elem.has_state("checked")) {
-    bg_color = style->get_variable_color("--checkbox-bg-checked", {59, 130, 246, 255});
-  } else {
-    bg_color = style->get_variable_color("--checkbox-bg", {255, 255, 255, 255});
-  }
-
-  // 读取边框色
-  Color border_color = style->get_variable_color("--checkbox-border", {200, 200, 200, 255});
-
-  // 绘制背景
-  auto box = tvg::Shape::gen();
-  float radius = checkbox_size * 0.15f;  // 圆角：15% of size
-  box->appendRect(0, 0, checkbox_size, checkbox_size, radius, radius);
-  box->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-
-  scene->push(std::move(box));
-
-  // 绘制边框
-  auto border = tvg::Shape::gen();
-  border->appendRect(0, 0, checkbox_size, checkbox_size, radius, radius);
-  border->strokeFill(border_color.r, border_color.g, border_color.b, border_color.a);
-  border->strokeWidth(2);
-
-  scene->push(std::move(border));
-}
-
-void CheckboxWidget::render_checkmark(tvg::Scene* scene, const Element& elem) {
-  auto* style = elem.computed_style;
-  if (!style) return;
-
-  float checkbox_size = style->get_variable_float("--checkbox-size", 20.0f);
-  Color checkmark_color = style->get_variable_color("--checkbox-checkmark", {255, 255, 255, 255});
-
-  // 绘制勾选标记（简化版：用 L 形线条）
-  auto checkmark = tvg::Shape::gen();
-
-  float center_x = checkbox_size / 2;
-  float center_y = checkbox_size / 2;
-  float size = checkbox_size * 0.4f * checkmark_scale_;  // 应用动画缩放
-
-  // L 形路径（勾选标记）
-  checkmark->moveTo(center_x - size * 0.5f, center_y);
-  checkmark->lineTo(center_x - size * 0.2f, center_y + size * 0.4f);
-  checkmark->lineTo(center_x + size * 0.5f, center_y - size * 0.4f);
-
-  checkmark->strokeFill(checkmark_color.r, checkmark_color.g, checkmark_color.b, checkmark_color.a);
-  checkmark->strokeWidth(2);
-
-  scene->push(std::move(checkmark));
-}
-
-void CheckboxWidget::render_label(tvg::Scene* scene, const Element& elem) {
-  auto* style = elem.computed_style;
-  if (!style) return;
-
-  float checkbox_size = style->get_variable_float("--checkbox-size", 20.0f);
-  float label_spacing = style->get_variable_float("--label-spacing", 8.0f);
-
-  auto text_shape = tvg::Text::gen();
-  text_shape->font(style->font_family.c_str());
-  text_shape->size(style->font_size);
-  text_shape->text(label_.c_str());
-  text_shape->fill(style->text_color.r, style->text_color.g, style->text_color.b);
-  text_shape->opacity(style->text_color.a);
-
-  // 文字位置：复选框右侧
-  float text_x = checkbox_size + label_spacing;
-  float text_y = checkbox_size / 2 + style->font_size / 3;  // 垂直居中对齐
-  text_shape->translate(text_x, text_y);
-
-  scene->push(std::move(text_shape));
-}
-
-// ============================================================================
-// 事件处理
-// ============================================================================
-
-bool CheckboxWidget::handle_mouse_down(const Event& event, Element& elem) {
-  // 切换选中状态
-  set_checked(!checked_);
-
-  // 更新伪状态
-  if (checked_) {
-    elem.add_state("checked");
-  } else {
-    elem.remove_state("checked");
-  }
-
-  elem.mark_paint_dirty();  // 通知 Box 需要重新渲染
-  return true;  // 消费事件
-}
-
-bool CheckboxWidget::handle_key_down(const Event& event, Element& elem) {
-  // 空格键切换
-  if (event.key == KeyCode::Enter || event.key == KeyCode::Num0) {  // 简化：用数字0代替Space
-    set_checked(!checked_);
-
-    if (checked_) {
-      elem.add_state("checked");
-    } else {
-      elem.remove_state("checked");
+    float duration = style->get_variable_float("--transition-duration", 200.0f);
+    if (duration <= 0) {
+        checkmark_scale_ = target_checkmark_scale_;
+        return;
     }
 
-    elem.mark_paint_dirty();  // 通知 Box 需要重新渲染
-    return true;
-  }
+    float speed = 1000.0f / duration;
+    float delta = speed * (delta_ms / 1000.0f);
 
-  return false;
-}
-
-// ============================================================================
-// 动画更新
-// ============================================================================
-
-void CheckboxWidget::update_transitions(float delta_ms, Element& elem) {
-  auto* style = elem.computed_style;
-  if (!style) return;
-
-  // 读取过渡时长
-  float duration = style->get_variable_float("--transition-duration", 200.0f);
-  if (duration <= 0) {
-    checkmark_scale_ = target_checkmark_scale_;
-    return;
-  }
-
-  // 平滑过渡
-  float speed = 1000.0f / duration;
-  float delta = speed * (delta_ms / 1000.0f);
-
-  if (std::abs(checkmark_scale_ - target_checkmark_scale_) > 0.01f) {
-    if (checkmark_scale_ < target_checkmark_scale_) {
-      checkmark_scale_ = std::min(checkmark_scale_ + delta, target_checkmark_scale_);
-    } else {
-      checkmark_scale_ = std::max(checkmark_scale_ - delta, target_checkmark_scale_);
+    if (std::abs(checkmark_scale_ - target_checkmark_scale_) > 0.01f) {
+        if (checkmark_scale_ < target_checkmark_scale_) {
+            checkmark_scale_ = std::min(checkmark_scale_ + delta, target_checkmark_scale_);
+        } else {
+            checkmark_scale_ = std::max(checkmark_scale_ - delta, target_checkmark_scale_);
+        }
+        elem.mark_paint_dirty();
     }
-    elem.mark_paint_dirty();  // 通知 Box 需要重新渲染
-  }
 }
 
 } // namespace tvgbox2

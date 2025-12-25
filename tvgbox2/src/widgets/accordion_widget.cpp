@@ -6,9 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -79,13 +80,13 @@ bool AccordionWidget::is_expanded(const std::string& id) const {
   return false;
 }
 
-void AccordionWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
-  auto* style = elem.computed_style;
+void AccordionWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
   float header_height = 44.0f;
   float y = 0;
 
   for (size_t i = 0; i < sections_.size(); i++) {
-    render_section(scene, elem, sections_[i], y);
+    render_section(r, elem, sections_[i], y, i);
     y += header_height;
     if (animation_progress_[i] > 0) {
       y += sections_[i].content_height * animation_progress_[i];
@@ -93,12 +94,12 @@ void AccordionWidget::render(tvg::Scene* scene, const Element& elem, Renderer& r
   }
 }
 
-void AccordionWidget::render_section(tvg::Scene* scene, const Element& elem, Section& section, float y) {
+void AccordionWidget::render_section(flex::Renderer& r, const Element& elem, Section& section, float y, size_t idx) {
   auto* style = elem.computed_style;
 
-  Color bg_color = {255, 255, 255, 255};
-  Color border_color = {229, 231, 235, 255};
-  Color text_color = {0, 0, 0, 255};
+  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
+  Color border_color = {0.90f, 0.91f, 0.92f, 1.0f};
+  Color text_color = {0.0f, 0.0f, 0.0f, 1.0f};
   float font_size = 14.0f;
   float header_height = 44.0f;
   std::string font_family = "Arial";
@@ -111,61 +112,41 @@ void AccordionWidget::render_section(tvg::Scene* scene, const Element& elem, Sec
     if (!style->font_family.empty()) font_family = style->font_family;
   }
 
-  size_t idx = &section - &sections_[0];
   float progress = animation_progress_[idx];
 
-  auto header_bg = tvg::Shape::gen();
-  header_bg->appendRect(0, y, elem.width(), header_height);
-  header_bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(header_bg));
+  r.draw_rect(0, y, elem.width(), header_height, 0, Paint::solid(bg_color), Paint::none(), 0);
 
-  auto border = tvg::Shape::gen();
-  border->moveTo(0, y + header_height);
-  border->lineTo(elem.width(), y + header_height);
-  border->strokeFill(border_color.r, border_color.g, border_color.b, border_color.a);
-  border->strokeWidth(1);
-  scene->push(std::move(border));
+  // Border line
+  char path[128];
+  snprintf(path, sizeof(path), "M 0 %.4g L %.4g %.4g", y + header_height, elem.width(), y + header_height);
+  r.stroke_path(path, Paint::solid(border_color), 1);
 
-  render_arrow(scene, 16, y + header_height / 2, section.expanded);
+  render_arrow(r, 16, y + header_height / 2, section.expanded);
 
-  auto title = tvg::Text::gen();
-  title->font(font_family.c_str());
-  title->size(font_size);
-  title->text(section.title.c_str());
-  title->fill(text_color.r, text_color.g, text_color.b);
-  title->translate(40, y + header_height / 2 + font_size / 3);
-  scene->push(std::move(title));
+  r.draw_text(section.title, 40, y + header_height / 2 + font_size / 3,
+              font_family, font_size, false, text_color);
 
   if (progress > 0) {
     float content_y = y + header_height;
     float visible_height = section.content_height * progress;
-    
-    auto content_bg = tvg::Shape::gen();
-    content_bg->appendRect(0, content_y, elem.width(), visible_height);
-    content_bg->fill(250, 250, 250, 255);
-    scene->push(std::move(content_bg));
+
+    r.draw_rect(0, content_y, elem.width(), visible_height, 0,
+                Paint::solid(Color{0.98f, 0.98f, 0.98f, 1.0f}), Paint::none(), 0);
   }
 }
 
-void AccordionWidget::render_arrow(tvg::Scene* scene, float x, float y, bool expanded) {
-  auto arrow = tvg::Shape::gen();
-  
+void AccordionWidget::render_arrow(flex::Renderer& r, float x, float y, bool expanded) {
+  char path[128];
+
   if (expanded) {
-    arrow->moveTo(x - 4, y - 2);
-    arrow->lineTo(x, y + 3);
-    arrow->lineTo(x + 4, y - 2);
+    snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
+             x - 4, y - 2, x, y + 3, x + 4, y - 2);
   } else {
-    arrow->moveTo(x - 2, y - 4);
-    arrow->lineTo(x + 3, y);
-    arrow->lineTo(x - 2, y + 4);
+    snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
+             x - 2, y - 4, x + 3, y, x - 2, y + 4);
   }
 
-  arrow->strokeFill(100, 100, 100, 255);
-  arrow->strokeWidth(2);
-  arrow->strokeCap(tvg::StrokeCap::Round);
-  arrow->strokeJoin(tvg::StrokeJoin::Round);
-
-  scene->push(std::move(arrow));
+  r.stroke_path(path, Paint::solid(Color{0.39f, 0.39f, 0.39f, 1.0f}), 2);
 }
 
 bool AccordionWidget::handle_event(const Event& event, Element& elem) {

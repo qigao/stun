@@ -6,9 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -26,26 +27,25 @@ void ModalWidget::close() {
   dirty_ = true;
 }
 
-void ModalWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void ModalWidget::render(const Element& elem, Renderer& renderer) {
   if (!open_ && opacity_ <= 0) return;
 
-  render_overlay(scene, elem);
-  render_dialog(scene, elem);
+  auto& r = renderer.flex();
+  render_overlay(r, elem);
+  render_dialog(r, elem);
 }
 
-void ModalWidget::render_overlay(tvg::Scene* scene, const Element& elem) {
-  uint8_t alpha = static_cast<uint8_t>(128 * opacity_);
-  
-  auto overlay = tvg::Shape::gen();
-  overlay->appendRect(0, 0, elem.width(), elem.height());
-  overlay->fill(0, 0, 0, alpha);
-  scene->push(std::move(overlay));
+void ModalWidget::render_overlay(flex::Renderer& r, const Element& elem) {
+  float alpha = 0.5f * opacity_;
+
+  r.draw_rect(0, 0, elem.width(), elem.height(), 0,
+              Paint::solid(Color{0.0f, 0.0f, 0.0f, alpha}), Paint::none(), 0);
 }
 
-void ModalWidget::render_dialog(tvg::Scene* scene, const Element& elem) {
+void ModalWidget::render_dialog(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color bg_color = {255, 255, 255, 255};
+  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
   float dialog_w = std::min(500.0f, elem.width() - 40);
   float dialog_h = std::min(400.0f, elem.height() - 40);
   float dialog_x = (elem.width() - dialog_w) / 2;
@@ -65,27 +65,28 @@ void ModalWidget::render_dialog(tvg::Scene* scene, const Element& elem) {
   float offset_x = dialog_w * (1 - scale) / 2;
   float offset_y = dialog_h * (1 - scale) / 2;
 
-  auto shadow = tvg::Shape::gen();
-  shadow->appendRect(dialog_x + 4, dialog_y + 4, dialog_w, dialog_h, radius, radius);
-  shadow->fill(0, 0, 0, static_cast<uint8_t>(40 * opacity_));
-  scene->push(std::move(shadow));
+  // Shadow
+  r.draw_rect(dialog_x + 4, dialog_y + 4, dialog_w, dialog_h, radius,
+              Paint::solid(Color{0.0f, 0.0f, 0.0f, 0.16f * opacity_}), Paint::none(), 0);
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(dialog_x + offset_x, dialog_y + offset_y, 
-                 dialog_w * scale, dialog_h * scale, radius, radius);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, static_cast<uint8_t>(bg_color.a * opacity_));
-  scene->push(std::move(bg));
+  // Background
+  Color bg_with_alpha = bg_color;
+  bg_with_alpha.a *= opacity_;
+
+  r.draw_rect(dialog_x + offset_x, dialog_y + offset_y,
+              dialog_w * scale, dialog_h * scale, radius,
+              Paint::solid(bg_with_alpha), Paint::none(), 0);
 
   if (opacity_ > 0.5f) {
-    render_header(scene, elem, dialog_x + offset_x, dialog_y + offset_y, dialog_w * scale);
+    render_header(r, elem, dialog_x + offset_x, dialog_y + offset_y, dialog_w * scale);
   }
 }
 
-void ModalWidget::render_header(tvg::Scene* scene, const Element& elem, 
+void ModalWidget::render_header(flex::Renderer& r, const Element& elem,
                                 float dialog_x, float dialog_y, float dialog_w) {
   auto* style = elem.computed_style;
-  
-  Color text_color = {0, 0, 0, 255};
+
+  Color text_color = {0.0f, 0.0f, 0.0f, 1.0f};
   float font_size = 18.0f;
   std::string font_family = "Arial";
   float header_height = 56.0f;
@@ -97,40 +98,33 @@ void ModalWidget::render_header(tvg::Scene* scene, const Element& elem,
   }
 
   if (!title_.empty()) {
-    auto title = tvg::Text::gen();
-    title->font(font_family.c_str());
-    title->size(font_size);
-    title->text(title_.c_str());
-    title->fill(text_color.r, text_color.g, text_color.b);
-    title->opacity(static_cast<uint8_t>(255 * opacity_));
-    title->translate(dialog_x + 20, dialog_y + header_height / 2 + font_size / 3);
-    scene->push(std::move(title));
+    Color title_color = text_color;
+    title_color.a *= opacity_;
+
+    r.draw_text(title_, dialog_x + 20, dialog_y + header_height / 2 + font_size / 3,
+                font_family, font_size, false, title_color);
   }
 
   if (show_close_) {
-    render_close_button(scene, dialog_x + dialog_w - 36, dialog_y + header_height / 2);
+    render_close_button(r, dialog_x + dialog_w - 36, dialog_y + header_height / 2);
   }
 
-  auto divider = tvg::Shape::gen();
-  divider->moveTo(dialog_x, dialog_y + header_height);
-  divider->lineTo(dialog_x + dialog_w, dialog_y + header_height);
-  divider->strokeFill(229, 231, 235, static_cast<uint8_t>(255 * opacity_));
-  divider->strokeWidth(1);
-  scene->push(std::move(divider));
+  // Divider
+  char path[128];
+  snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g",
+           dialog_x, dialog_y + header_height,
+           dialog_x + dialog_w, dialog_y + header_height);
+  r.stroke_path(path, Paint::solid(Color{0.90f, 0.91f, 0.92f, opacity_}), 1);
 }
 
-void ModalWidget::render_close_button(tvg::Scene* scene, float x, float y) {
-  uint8_t alpha = static_cast<uint8_t>(255 * opacity_);
+void ModalWidget::render_close_button(flex::Renderer& r, float x, float y) {
+  Color close_color = {0.39f, 0.39f, 0.39f, opacity_};
 
-  auto close = tvg::Shape::gen();
-  close->moveTo(x - 6, y - 6);
-  close->lineTo(x + 6, y + 6);
-  close->moveTo(x + 6, y - 6);
-  close->lineTo(x - 6, y + 6);
-  close->strokeFill(100, 100, 100, alpha);
-  close->strokeWidth(2);
-  close->strokeCap(tvg::StrokeCap::Round);
-  scene->push(std::move(close));
+  char path[128];
+  snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g M %.4g %.4g L %.4g %.4g",
+           x - 6, y - 6, x + 6, y + 6,
+           x + 6, y - 6, x - 6, y + 6);
+  r.stroke_path(path, Paint::solid(close_color), 2);
 }
 
 bool ModalWidget::handle_event(const Event& event, Element& elem) {

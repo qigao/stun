@@ -7,7 +7,6 @@
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
 #include <tvgbox2/renderer.h>
-#include <thorvg.h>
 #include <algorithm>
 #include <sstream>
 
@@ -48,20 +47,22 @@ void TextAreaWidget::set_cursor_position(int pos) {
 // Widget 接口实现
 // ============================================================================
 
-void TextAreaWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
-  render_background(scene, elem);
+void TextAreaWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
+
+  render_background(r, elem);
 
   if (text_.empty() && !placeholder_.empty() && !elem.has_state("focus")) {
-    render_placeholder(scene, elem);
+    render_placeholder(r, elem);
   } else {
-    render_text_lines(scene, elem);
+    render_text_lines(r, elem);
 
     if (selection_start_ != -1 && selection_end_ != -1) {
-      render_selection(scene, elem);
+      render_selection(r, elem);
     }
 
     if (elem.has_state("focus") && cursor_visible_) {
-      render_cursor(scene, elem);
+      render_cursor(r, elem);
     }
   }
 }
@@ -171,32 +172,26 @@ void TextAreaWidget::move_cursor_to_line_column(int line, int col) {
 // 渲染辅助
 // ============================================================================
 
-void TextAreaWidget::render_background(tvg::Scene* scene, const Element& elem) {
+void TextAreaWidget::render_background(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color bg_color = style->get_variable_color("--textarea-bg", {255, 255, 255, 255});
-  Color border_color = style->get_variable_color("--textarea-border", {200, 200, 200, 255});
+  Color bg_color = style->get_variable_color("--textarea-bg", {1.0f, 1.0f, 1.0f, 1.0f});
+  Color border_color = style->get_variable_color("--textarea-border", {0.78f, 0.78f, 0.78f, 1.0f});
 
   // 背景
-  auto rect = tvg::Shape::gen();
-  rect->appendRect(0, 0, elem.width(), elem.height(), 4, 4);
-  rect->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(rect));
+  r.draw_rect(0, 0, elem.width(), elem.height(), 4, Paint::solid(bg_color), Paint::none(), 0);
 
   // 边框
-  auto border = tvg::Shape::gen();
-  border->appendRect(0, 0, elem.width(), elem.height(), 4, 4);
-  border->strokeFill(border_color.r, border_color.g, border_color.b, border_color.a);
-  border->strokeWidth(elem.has_state("focus") ? 2.0f : 1.0f);
-  scene->push(std::move(border));
+  float stroke_width = elem.has_state("focus") ? 2.0f : 1.0f;
+  r.draw_rect(0, 0, elem.width(), elem.height(), 4, Paint::none(), Paint::solid(border_color), stroke_width);
 }
 
-void TextAreaWidget::render_text_lines(tvg::Scene* scene, const Element& elem) {
+void TextAreaWidget::render_text_lines(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color text_color = style->get_variable_color("--textarea-text", {0, 0, 0, 255});
+  Color text_color = style->get_variable_color("--textarea-text", {0.0f, 0.0f, 0.0f, 1.0f});
   float line_height_multiplier = style->get_variable_float("--line-height", 1.5f);
   float line_height = style->font_size * line_height_multiplier;
 
@@ -212,46 +207,31 @@ void TextAreaWidget::render_text_lines(tvg::Scene* scene, const Element& elem) {
     }
 
     if (!line.empty()) {
-      auto text_shape = tvg::Text::gen();
-      text_shape->font(style->font_family.c_str());
-      text_shape->size(style->font_size);
-      text_shape->text(line.c_str());
-      text_shape->fill(text_color.r, text_color.g, text_color.b);
-      text_shape->opacity(text_color.a);
-      text_shape->translate(padding_left, y - scroll_offset_);
-
-      scene->push(std::move(text_shape));
+      r.draw_text(line, padding_left, y - scroll_offset_,
+                  style->font_family, style->font_size, false, text_color);
     }
 
     y += line_height;
   }
 }
 
-void TextAreaWidget::render_placeholder(tvg::Scene* scene, const Element& elem) {
+void TextAreaWidget::render_placeholder(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color placeholder_color = style->get_variable_color("--textarea-placeholder", {160, 160, 160, 255});
-
-  auto text_shape = tvg::Text::gen();
-  text_shape->font(style->font_family.c_str());
-  text_shape->size(style->font_size);
-  text_shape->text(placeholder_.c_str());
-  text_shape->fill(placeholder_color.r, placeholder_color.g, placeholder_color.b);
-  text_shape->opacity(placeholder_color.a);
+  Color placeholder_color = style->get_variable_color("--textarea-placeholder", {0.63f, 0.63f, 0.63f, 1.0f});
 
   float x = style->padding[3];
   float y = style->padding[0] + style->font_size;
-  text_shape->translate(x, y);
 
-  scene->push(std::move(text_shape));
+  r.draw_text(placeholder_, x, y, style->font_family, style->font_size, false, placeholder_color);
 }
 
-void TextAreaWidget::render_selection(tvg::Scene* scene, const Element& elem) {
+void TextAreaWidget::render_selection(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color sel_color = style->get_variable_color("--textarea-selection-bg", {100, 149, 237, 128});
+  Color sel_color = style->get_variable_color("--textarea-selection-bg", {0.39f, 0.58f, 0.93f, 0.5f});
   float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
   float padding_left = style->padding[3];
   float padding_top = style->padding[0];
@@ -266,17 +246,14 @@ void TextAreaWidget::render_selection(tvg::Scene* scene, const Element& elem) {
   float width = (sel_end - sel_start) * char_width;
   float height = line_height;
 
-  auto sel_rect = tvg::Shape::gen();
-  sel_rect->appendRect(x, y - scroll_offset_, width, height);
-  sel_rect->fill(sel_color.r, sel_color.g, sel_color.b, sel_color.a);
-  scene->push(std::move(sel_rect));
+  r.draw_rect(x, y - scroll_offset_, width, height, 0, Paint::solid(sel_color), Paint::none(), 0);
 }
 
-void TextAreaWidget::render_cursor(tvg::Scene* scene, const Element& elem) {
+void TextAreaWidget::render_cursor(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color cursor_color = style->get_variable_color("--textarea-cursor", {0, 0, 0, 255});
+  Color cursor_color = style->get_variable_color("--textarea-cursor", {0.0f, 0.0f, 0.0f, 1.0f});
   float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
 
   int line = get_line_from_cursor();
@@ -289,10 +266,7 @@ void TextAreaWidget::render_cursor(tvg::Scene* scene, const Element& elem) {
   float x = padding_left + col * char_width;
   float y = padding_top + line * line_height;
 
-  auto cursor_line = tvg::Shape::gen();
-  cursor_line->appendRect(x, y - scroll_offset_, 2, line_height);
-  cursor_line->fill(cursor_color.r, cursor_color.g, cursor_color.b, cursor_color.a);
-  scene->push(std::move(cursor_line));
+  r.draw_rect(x, y - scroll_offset_, 2, line_height, 0, Paint::solid(cursor_color), Paint::none(), 0);
 }
 
 // ============================================================================

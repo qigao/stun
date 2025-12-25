@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - TooltipWidget
  *
- * Hover information popup
+ * Hover information popup - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_TOOLTIP_WIDGET_H
 #define TVGBOX2_TOOLTIP_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 
 namespace tvgbox2 {
@@ -34,7 +36,7 @@ public:
 
   explicit TooltipWidget(const std::string& text = "");
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "TooltipWidget"; }
@@ -53,9 +55,9 @@ public:
   void set_position(Position pos) { position_ = pos; dirty_ = true; }
 
 private:
-  void render_background(tvg::Scene* scene, const Element& elem);
-  void render_text(tvg::Scene* scene, const Element& elem);
-  void render_arrow(tvg::Scene* scene, const Element& elem);
+  void render_background(flex::Renderer& r, const Element& elem);
+  void render_text(flex::Renderer& r, const Element& elem);
+  void render_arrow(flex::Renderer& r, const Element& elem);
 
   std::string text_;
   Position position_ = Position::Top;

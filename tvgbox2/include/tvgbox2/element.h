@@ -14,10 +14,6 @@
 #include <set>
 #include <algorithm>
 
-namespace tvg {
-  class Scene;
-}
-
 namespace tvgbox2 {
 
 // Forward declaration
@@ -56,7 +52,6 @@ struct Element {
   // ========== 样式和渲染 ==========
   ComputedStyle* computed_style = nullptr;  // 计算后的样式
   Widget* widget = nullptr;                 // Widget（如果需要）
-  tvg::Scene* scene = nullptr;              // ThorVG Scene（owned by parent or canvas after push）
 
   // ========== 脏标记 ==========
   bool dirty_style_ = true;   // 需要重新计算样式

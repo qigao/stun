@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - BadgeWidget
  *
- * Small label/count indicator for notifications, status, etc.
+ * Small label/count indicator - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_BADGE_WIDGET_H
 #define TVGBOX2_BADGE_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 
 namespace tvgbox2 {
@@ -20,15 +22,12 @@ namespace tvgbox2 {
  *   --badge-text: "r,g,b,a"      // Text color
  *   --badge-size: "20"           // Min size (for dot badge)
  *   --badge-dot: "true" | "false" // Show as dot (no text)
- *
- * Example:
- *   auto* badge = box->create_widget<BadgeWidget>("badge", "notif", "3");
  */
 class BadgeWidget : public Widget {
 public:
   explicit BadgeWidget(const std::string& text = "");
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "BadgeWidget"; }
@@ -51,8 +50,8 @@ public:
   bool is_visible() const { return visible_; }
 
 private:
-  void render_background(tvg::Scene* scene, const Element& elem);
-  void render_text(tvg::Scene* scene, const Element& elem);
+  void render_background(flex::Renderer& r, const Element& elem);
+  void render_text(flex::Renderer& r, const Element& elem);
 
   std::string text_;
   int count_ = 0;

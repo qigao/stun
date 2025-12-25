@@ -1,37 +1,40 @@
 /*
- * tvgbox2 - Renderer (Placeholder)
+ * tvgbox2 - Renderer
  *
- * ThorVG 渲染辅助类（未来实现）
+ * Wraps flex::Renderer for backend-agnostic rendering.
+ * The actual backend (ThorVG, NanoVG, etc.) is determined by the
+ * flex::Renderer implementation passed to Box.
  */
 
 #ifndef TVGBOX2_RENDERER_H
 #define TVGBOX2_RENDERER_H
 
-namespace tvg {
-  class Canvas;
-  class Shape;
-  class Text;
-}
+#include "flex/runtime/renderer.h"
 
 namespace tvgbox2 {
 
+// Re-export flex types for convenience
+using flex::Paint;
+using flex::Transform;
+using flex::Bounds;
+
 /**
- * Renderer - ThorVG 渲染辅助类
+ * Renderer - Wrapper around flex::Renderer
  *
- * 提供便捷的 ThorVG Paint 创建方法
+ * Provides access to flex::Renderer for backend-agnostic rendering.
+ * The backend is determined by the flex::Renderer implementation.
  */
 class Renderer {
 public:
-  explicit Renderer(tvg::Canvas* canvas) : canvas_(canvas) {}
+  explicit Renderer(flex::Renderer* renderer)
+    : flex_renderer_(renderer) {}
 
-  tvg::Canvas* canvas() { return canvas_; }
-
-  // TODO: 添加便捷的 Paint 创建方法
-  // tvg::Shape* create_rect(float x, float y, float w, float h);
-  // tvg::Text* create_text(const std::string& text, float x, float y);
+  // Access flex::Renderer
+  flex::Renderer& flex() { return *flex_renderer_; }
+  const flex::Renderer& flex() const { return *flex_renderer_; }
 
 private:
-  tvg::Canvas* canvas_;
+  flex::Renderer* flex_renderer_;
 };
 
 } // namespace tvgbox2

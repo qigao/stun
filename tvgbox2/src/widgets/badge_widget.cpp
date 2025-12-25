@@ -6,7 +6,7 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 
 namespace tvgbox2 {
@@ -25,20 +25,21 @@ void BadgeWidget::set_count(int count) {
   dirty_ = true;
 }
 
-void BadgeWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void BadgeWidget::render(const Element& elem, Renderer& renderer) {
   if (!visible_) return;
 
-  render_background(scene, elem);
+  auto& r = renderer.flex();
+  render_background(r, elem);
   if (!dot_) {
-    render_text(scene, elem);
+    render_text(r, elem);
   }
 }
 
-void BadgeWidget::render_background(tvg::Scene* scene, const Element& elem) {
+void BadgeWidget::render_background(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  // Badge background color
-  Color bg_color = {239, 68, 68, 255};  // Default: red
+  // Badge background color (normalized 0-1)
+  Color bg_color = {0.94f, 0.27f, 0.27f, 1.0f};  // Default: red (239/255, 68/255, 68/255)
   if (style) {
     bg_color = style->get_variable_color("--badge-bg", bg_color);
   }
@@ -49,19 +50,15 @@ void BadgeWidget::render_background(tvg::Scene* scene, const Element& elem) {
   // Badge is always pill-shaped (full radius)
   float radius = std::min(w, h) / 2;
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, w, h, radius, radius);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, w, h, radius, Paint::solid(bg_color), Paint::none(), 0);
 }
 
-void BadgeWidget::render_text(tvg::Scene* scene, const Element& elem) {
+void BadgeWidget::render_text(flex::Renderer& r, const Element& elem) {
   if (text_.empty()) return;
 
   auto* style = elem.computed_style;
 
-  Color text_color = {255, 255, 255, 255};  // Default: white
+  Color text_color = {1.0f, 1.0f, 1.0f, 1.0f};  // Default: white
   float font_size = 12.0f;
   std::string font_family = "Arial";
 
@@ -76,15 +73,7 @@ void BadgeWidget::render_text(tvg::Scene* scene, const Element& elem) {
   float text_x = (elem.width() - text_width) / 2;
   float text_y = elem.height() / 2 + font_size / 3;
 
-  auto text_shape = tvg::Text::gen();
-  text_shape->font(font_family.c_str());
-  text_shape->size(font_size);
-  text_shape->text(text_.c_str());
-  text_shape->fill(text_color.r, text_color.g, text_color.b);
-  text_shape->opacity(text_color.a);
-  text_shape->translate(text_x, text_y);
-
-  scene->push(std::move(text_shape));
+  r.draw_text(text_, text_x, text_y, font_family, font_size, false, text_color);
 }
 
 bool BadgeWidget::handle_event(const Event& event, Element& elem) {

@@ -6,9 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -30,147 +31,132 @@ void ColorPickerWidget::set_hsv(float h, float s, float v) {
   dirty_ = true;
 }
 
-void ColorPickerWidget::hsv_to_rgb(float h, float s, float v, uint8_t& r, uint8_t& g, uint8_t& b) {
+void ColorPickerWidget::hsv_to_rgb(float h, float s, float v, float& r, float& g, float& b) {
   float c = v * s;
   float x = c * (1 - std::abs(std::fmod(h / 60.0f, 2.0f) - 1));
   float m = v - c;
-  float rf, gf, bf;
 
-  if (h < 60)       { rf = c; gf = x; bf = 0; }
-  else if (h < 120) { rf = x; gf = c; bf = 0; }
-  else if (h < 180) { rf = 0; gf = c; bf = x; }
-  else if (h < 240) { rf = 0; gf = x; bf = c; }
-  else if (h < 300) { rf = x; gf = 0; bf = c; }
-  else              { rf = c; gf = 0; bf = x; }
-
-  r = static_cast<uint8_t>((rf + m) * 255);
-  g = static_cast<uint8_t>((gf + m) * 255);
-  b = static_cast<uint8_t>((bf + m) * 255);
+  if (h < 60)       { r = c + m; g = x + m; b = m; }
+  else if (h < 120) { r = x + m; g = c + m; b = m; }
+  else if (h < 180) { r = m;     g = c + m; b = x + m; }
+  else if (h < 240) { r = m;     g = x + m; b = c + m; }
+  else if (h < 300) { r = x + m; g = m;     b = c + m; }
+  else              { r = c + m; g = m;     b = x + m; }
 }
 
-void ColorPickerWidget::rgb_to_hsv(uint8_t r, uint8_t g, uint8_t b, float& h, float& s, float& v) {
-  float rf = r / 255.0f, gf = g / 255.0f, bf = b / 255.0f;
-  float cmax = std::max({rf, gf, bf});
-  float cmin = std::min({rf, gf, bf});
+void ColorPickerWidget::rgb_to_hsv(float r, float g, float b, float& h, float& s, float& v) {
+  float cmax = std::max({r, g, b});
+  float cmin = std::min({r, g, b});
   float delta = cmax - cmin;
 
   if (delta == 0) h = 0;
-  else if (cmax == rf) h = 60 * std::fmod((gf - bf) / delta + 6, 6.0f);
-  else if (cmax == gf) h = 60 * ((bf - rf) / delta + 2);
-  else h = 60 * ((rf - gf) / delta + 4);
+  else if (cmax == r) h = 60 * std::fmod((g - b) / delta + 6, 6.0f);
+  else if (cmax == g) h = 60 * ((b - r) / delta + 2);
+  else h = 60 * ((r - g) / delta + 4);
 
   s = (cmax == 0) ? 0 : delta / cmax;
   v = cmax;
 }
 
-void ColorPickerWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void ColorPickerWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
   auto* style = elem.computed_style;
-  Color bg_color = {255, 255, 255, 255};
+  Color bg_color{1.0f, 1.0f, 1.0f, 1.0f};
   if (style) bg_color = style->get_variable_color("--picker-bg", bg_color);
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), 8, 8);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), 8, Paint::solid(bg_color), Paint::none(), 0);
 
-  render_gradient(scene, elem);
-  render_hue_bar(scene, elem);
-  render_preview(scene, elem);
-  render_cursor(scene, elem);
+  render_gradient(r, elem);
+  render_hue_bar(r, elem);
+  render_preview(r, elem);
+  render_cursor(r, elem);
 }
 
-void ColorPickerWidget::render_gradient(tvg::Scene* scene, const Element& elem) {
+void ColorPickerWidget::render_gradient(flex::Renderer& r, const Element& elem) {
   float padding = 12.0f;
   float hue_bar_w = 24.0f;
   float preview_h = 40.0f;
   float grad_w = elem.width() - padding * 3 - hue_bar_w;
   float grad_h = elem.height() - padding * 2 - preview_h - 8;
 
-  uint8_t hr, hg, hb;
+  float hr, hg, hb;
   hsv_to_rgb(hue_, 1.0f, 1.0f, hr, hg, hb);
 
-  auto base = tvg::Shape::gen();
-  base->appendRect(padding, padding, grad_w, grad_h, 4, 4);
-  base->fill(hr, hg, hb, 255);
-  scene->push(std::move(base));
+  // Simulate gradient with grid of colored rectangles
+  // HSV gradient: x = saturation (0 to 1), y = value (1 to 0)
+  const int cols = 16;
+  const int rows = 16;
+  float cell_w = grad_w / cols;
+  float cell_h = grad_h / rows;
 
-  auto white_grad = tvg::Shape::gen();
-  white_grad->appendRect(padding, padding, grad_w, grad_h, 4, 4);
-  auto fill_w = tvg::LinearGradient::gen();
-  fill_w->linear(padding, padding, padding + grad_w, padding);
-  tvg::Fill::ColorStop stops_w[2] = {{0, 255, 255, 255, 255}, {1, 255, 255, 255, 0}};
-  fill_w->colorStops(stops_w, 2);
-  white_grad->fill(std::move(fill_w));
-  scene->push(std::move(white_grad));
+  for (int row = 0; row < rows; row++) {
+    for (int col = 0; col < cols; col++) {
+      float s = (col + 0.5f) / cols;  // saturation
+      float v = 1.0f - (row + 0.5f) / rows;  // value (top = 1, bottom = 0)
 
-  auto black_grad = tvg::Shape::gen();
-  black_grad->appendRect(padding, padding, grad_w, grad_h, 4, 4);
-  auto fill_b = tvg::LinearGradient::gen();
-  fill_b->linear(padding, padding, padding, padding + grad_h);
-  tvg::Fill::ColorStop stops_b[2] = {{0, 0, 0, 0, 0}, {1, 0, 0, 0, 255}};
-  fill_b->colorStops(stops_b, 2);
-  black_grad->fill(std::move(fill_b));
-  scene->push(std::move(black_grad));
+      float cr, cg, cb;
+      hsv_to_rgb(hue_, s, v, cr, cg, cb);
 
-  auto border = tvg::Shape::gen();
-  border->appendRect(padding, padding, grad_w, grad_h, 4, 4);
-  border->strokeFill(200, 200, 200, 255);
-  border->strokeWidth(1);
-  scene->push(std::move(border));
+      float x = padding + col * cell_w;
+      float y = padding + row * cell_h;
+
+      r.draw_rect(x, y, cell_w + 0.5f, cell_h + 0.5f, 0,
+                  Paint::solid(Color{cr, cg, cb, 1.0f}), Paint::none(), 0);
+    }
+  }
+
+  // Border around gradient area
+  r.draw_rect(padding, padding, grad_w, grad_h, 4,
+              Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
 }
 
-void ColorPickerWidget::render_hue_bar(tvg::Scene* scene, const Element& elem) {
+void ColorPickerWidget::render_hue_bar(flex::Renderer& r, const Element& elem) {
   float padding = 12.0f;
   float hue_bar_w = 24.0f;
   float preview_h = 40.0f;
   float bar_h = elem.height() - padding * 2 - preview_h - 8;
   float bar_x = elem.width() - padding - hue_bar_w;
 
-  for (int i = 0; i < 6; i++) {
-    float y1 = padding + i * bar_h / 6;
-    float y2 = padding + (i + 1) * bar_h / 6;
+  // Simulate hue gradient with segments
+  const int segments = 36;  // 10 degrees each
+  float seg_h = bar_h / segments;
 
-    uint8_t r1, g1, b1, r2, g2, b2;
-    hsv_to_rgb(i * 60.0f, 1.0f, 1.0f, r1, g1, b1);
-    hsv_to_rgb((i + 1) * 60.0f, 1.0f, 1.0f, r2, g2, b2);
+  for (int i = 0; i < segments; i++) {
+    float hue = i * (360.0f / segments);
+    float cr, cg, cb;
+    hsv_to_rgb(hue, 1.0f, 1.0f, cr, cg, cb);
 
-    auto seg = tvg::Shape::gen();
-    seg->appendRect(bar_x, y1, hue_bar_w, y2 - y1);
-    auto fill = tvg::LinearGradient::gen();
-    fill->linear(bar_x, y1, bar_x, y2);
-    tvg::Fill::ColorStop stops[2] = {{0, r1, g1, b1, 255}, {1, r2, g2, b2, 255}};
-    fill->colorStops(stops, 2);
-    seg->fill(std::move(fill));
-    scene->push(std::move(seg));
+    float y = padding + i * seg_h;
+    r.draw_rect(bar_x, y, hue_bar_w, seg_h + 0.5f, 0,
+                Paint::solid(Color{cr, cg, cb, 1.0f}), Paint::none(), 0);
   }
 
+  // Border around hue bar
+  r.draw_rect(bar_x, padding, hue_bar_w, bar_h, 2,
+              Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
+
+  // Hue indicator
   float indicator_y = padding + (hue_ / 360.0f) * bar_h;
-  auto indicator = tvg::Shape::gen();
-  indicator->appendRect(bar_x - 2, indicator_y - 3, hue_bar_w + 4, 6, 2, 2);
-  indicator->strokeFill(255, 255, 255, 255);
-  indicator->strokeWidth(2);
-  scene->push(std::move(indicator));
+  r.draw_rect(bar_x - 2, indicator_y - 3, hue_bar_w + 4, 6, 2,
+              Paint::none(), Paint::solid(Color{1.0f, 1.0f, 1.0f, 1.0f}), 2);
 }
 
-void ColorPickerWidget::render_preview(tvg::Scene* scene, const Element& elem) {
+void ColorPickerWidget::render_preview(flex::Renderer& r, const Element& elem) {
   float padding = 12.0f;
   float preview_h = 40.0f;
   float preview_y = elem.height() - padding - preview_h;
   float preview_w = elem.width() - padding * 2;
 
-  auto preview = tvg::Shape::gen();
-  preview->appendRect(padding, preview_y, preview_w, preview_h, 4, 4);
-  preview->fill(color_.r, color_.g, color_.b, color_.a);
-  scene->push(std::move(preview));
+  // Preview rectangle with current color
+  r.draw_rect(padding, preview_y, preview_w, preview_h, 4,
+              Paint::solid(color_), Paint::none(), 0);
 
-  auto border = tvg::Shape::gen();
-  border->appendRect(padding, preview_y, preview_w, preview_h, 4, 4);
-  border->strokeFill(200, 200, 200, 255);
-  border->strokeWidth(1);
-  scene->push(std::move(border));
+  // Border
+  r.draw_rect(padding, preview_y, preview_w, preview_h, 4,
+              Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
 }
 
-void ColorPickerWidget::render_cursor(tvg::Scene* scene, const Element& elem) {
+void ColorPickerWidget::render_cursor(flex::Renderer& r, const Element& elem) {
   float padding = 12.0f;
   float hue_bar_w = 24.0f;
   float preview_h = 40.0f;
@@ -180,17 +166,11 @@ void ColorPickerWidget::render_cursor(tvg::Scene* scene, const Element& elem) {
   float cx = padding + sat_ * grad_w;
   float cy = padding + (1 - val_) * grad_h;
 
-  auto outer = tvg::Shape::gen();
-  outer->appendCircle(cx, cy, 8, 8);
-  outer->strokeFill(255, 255, 255, 255);
-  outer->strokeWidth(2);
-  scene->push(std::move(outer));
+  // Outer circle (white)
+  r.draw_circle(cx, cy, 8, Paint::none(), Paint::solid(Color{1.0f, 1.0f, 1.0f, 1.0f}), 2);
 
-  auto inner = tvg::Shape::gen();
-  inner->appendCircle(cx, cy, 6, 6);
-  inner->strokeFill(0, 0, 0, 255);
-  inner->strokeWidth(1);
-  scene->push(std::move(inner));
+  // Inner circle (black)
+  r.draw_circle(cx, cy, 6, Paint::none(), Paint::solid(Color{0.0f, 0.0f, 0.0f, 1.0f}), 1);
 }
 
 bool ColorPickerWidget::handle_event(const Event& event, Element& elem) {

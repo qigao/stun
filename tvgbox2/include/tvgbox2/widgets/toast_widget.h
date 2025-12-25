@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - ToastWidget
  *
- * Auto-dismissing notification messages
+ * Auto-dismissing notification - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_TOAST_WIDGET_H
 #define TVGBOX2_TOAST_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include "../types.h"
 #include <string>
 #include <functional>
@@ -20,18 +22,7 @@ namespace tvgbox2 {
  * CSS variables:
  *   --toast-bg: "r,g,b,a"           // Background color
  *   --toast-text: "r,g,b,a"         // Text color
- *   --toast-duration: "3000"        // Auto-dismiss time (ms), 0 = manual
- *   --toast-position: "top-right" | "top-left" | "bottom-right" | "bottom-left"
- *
- * Variants (via classes):
- *   .toast-success  - Green success toast
- *   .toast-error    - Red error toast
- *   .toast-warning  - Yellow warning toast
- *   .toast-info     - Blue info toast
- *
- * Example:
- *   auto* toast = box->create_widget<ToastWidget>("toast", "t1", "Saved!", ToastWidget::Type::Success);
- *   toast->show();
+ *   --toast-duration: "3000"        // Auto-dismiss time (ms)
  */
 class ToastWidget : public Widget {
 public:
@@ -39,7 +30,7 @@ public:
 
   explicit ToastWidget(const std::string& message = "", Type type = Type::Default);
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ToastWidget"; }
@@ -66,10 +57,10 @@ public:
   void set_dismiss_callback(DismissCallback cb) { on_dismiss_ = std::move(cb); }
 
 private:
-  void render_background(tvg::Scene* scene, const Element& elem);
-  void render_icon(tvg::Scene* scene, const Element& elem);
-  void render_text(tvg::Scene* scene, const Element& elem);
-  void render_close_button(tvg::Scene* scene, const Element& elem);
+  void render_background(flex::Renderer& r, const Element& elem);
+  void render_icon(flex::Renderer& r, const Element& elem);
+  void render_text(flex::Renderer& r, const Element& elem);
+  void render_close_button(flex::Renderer& r, const Element& elem);
   Color get_type_color() const;
 
   std::string message_;

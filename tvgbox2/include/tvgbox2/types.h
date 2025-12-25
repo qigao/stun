@@ -2,46 +2,47 @@
  * tvgbox2 - Core Types
  *
  * 基础类型定义（颜色、枚举等）
+ * Uses flex::Color for unified type system across flex and tvgbox2.
  */
 
 #ifndef TVGBOX2_TYPES_H
 #define TVGBOX2_TYPES_H
 
 #include <cstdint>
+#include "flex/runtime/types.h"
 
 namespace tvgbox2 {
 
 // ============================================================================
-// 颜色
+// 颜色 - Use flex::Color directly
 // ============================================================================
+// flex::Color uses float (0.0-1.0) for r,g,b,a
+// This replaces the old uint8_t based Color
 
-struct Color {
-  uint8_t r = 0;
-  uint8_t g = 0;
-  uint8_t b = 0;
-  uint8_t a = 255;
+using Color = flex::Color;
 
-  Color() = default;
-  Color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255)
-    : r(r), g(g), b(b), a(a) {}
+// Helper to create Color from uint8_t values (0-255)
+inline Color color_from_u8(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+    return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+}
 
-  bool operator==(const Color& other) const {
-    return r == other.r && g == other.g && b == other.b && a == other.a;
-  }
+// Helper to convert Color to uint8_t values
+inline void color_to_u8(const Color& c, uint8_t& r, uint8_t& g, uint8_t& b, uint8_t& a) {
+    r = static_cast<uint8_t>(c.r * 255.0f);
+    g = static_cast<uint8_t>(c.g * 255.0f);
+    b = static_cast<uint8_t>(c.b * 255.0f);
+    a = static_cast<uint8_t>(c.a * 255.0f);
+}
 
-  bool operator!=(const Color& other) const {
-    return !(*this == other);
-  }
-
-  static Color lerp(const Color& a, const Color& b, float t) {
+// Lerp helper (flex::Color doesn't have this)
+inline Color color_lerp(const Color& a, const Color& b, float t) {
     return Color(
-      static_cast<uint8_t>(a.r + (b.r - a.r) * t),
-      static_cast<uint8_t>(a.g + (b.g - a.g) * t),
-      static_cast<uint8_t>(a.b + (b.b - a.b) * t),
-      static_cast<uint8_t>(a.a + (b.a - a.a) * t)
+        a.r + (b.r - a.r) * t,
+        a.g + (b.g - a.g) * t,
+        a.b + (b.b - a.b) * t,
+        a.a + (b.a - a.a) * t
     );
-  }
-};
+}
 
 // ============================================================================
 // CSS 枚举类型
@@ -172,7 +173,7 @@ struct BoxShadow {
   float offset_y = 0;
   float blur_radius = 0;
   float spread_radius = 0;
-  Color color = {0, 0, 0, 128};
+  Color color{0.0f, 0.0f, 0.0f, 0.5f};  // black with 50% opacity
   bool inset = false;
 };
 

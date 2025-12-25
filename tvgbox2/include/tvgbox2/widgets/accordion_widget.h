@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - AccordionWidget
  *
- * Collapsible sections
+ * Collapsible sections - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_ACCORDION_WIDGET_H
 #define TVGBOX2_ACCORDION_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -25,7 +27,7 @@ public:
 
   AccordionWidget();
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "AccordionWidget"; }
@@ -46,8 +48,8 @@ public:
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_section(tvg::Scene* scene, const Element& elem, Section& section, float y);
-  void render_arrow(tvg::Scene* scene, float x, float y, bool expanded);
+  void render_section(flex::Renderer& r, const Element& elem, Section& section, float y, size_t idx);
+  void render_arrow(flex::Renderer& r, float x, float y, bool expanded);
 
   std::vector<Section> sections_;
   bool allow_multiple_ = false;
@@ -58,4 +60,4 @@ private:
 
 } // namespace tvgbox2
 
-#endif
+#endif // TVGBOX2_ACCORDION_WIDGET_H

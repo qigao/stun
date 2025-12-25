@@ -6,9 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -31,24 +32,25 @@ void ToastWidget::hide() {
 
 Color ToastWidget::get_type_color() const {
   switch (type_) {
-    case Type::Success: return {34, 197, 94, 255};    // Green
-    case Type::Error:   return {239, 68, 68, 255};    // Red
-    case Type::Warning: return {234, 179, 8, 255};    // Yellow
-    case Type::Info:    return {59, 130, 246, 255};   // Blue
-    default:            return {50, 50, 50, 240};     // Dark gray
+    case Type::Success: return {0.13f, 0.77f, 0.37f, 1.0f};    // Green
+    case Type::Error:   return {0.94f, 0.27f, 0.27f, 1.0f};    // Red
+    case Type::Warning: return {0.92f, 0.70f, 0.03f, 1.0f};    // Yellow
+    case Type::Info:    return {0.23f, 0.51f, 0.96f, 1.0f};    // Blue
+    default:            return {0.20f, 0.20f, 0.20f, 0.94f};   // Dark gray
   }
 }
 
-void ToastWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void ToastWidget::render(const Element& elem, Renderer& renderer) {
   if (!visible_ || opacity_ <= 0) return;
 
-  render_background(scene, elem);
-  render_icon(scene, elem);
-  render_text(scene, elem);
-  render_close_button(scene, elem);
+  auto& r = renderer.flex();
+  render_background(r, elem);
+  render_icon(r, elem);
+  render_text(r, elem);
+  render_close_button(r, elem);
 }
 
-void ToastWidget::render_background(tvg::Scene* scene, const Element& elem) {
+void ToastWidget::render_background(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color bg_color = get_type_color();
@@ -59,83 +61,65 @@ void ToastWidget::render_background(tvg::Scene* scene, const Element& elem) {
     radius = style->border_radius[0];
   }
 
-  uint8_t alpha = static_cast<uint8_t>(bg_color.a * opacity_);
-
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), radius, radius);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, alpha);
+  Color bg_with_alpha = bg_color;
+  bg_with_alpha.a *= opacity_;
 
   // Shadow
-  auto shadow = tvg::Shape::gen();
-  shadow->appendRect(2, 2, elem.width(), elem.height(), radius, radius);
-  shadow->fill(0, 0, 0, static_cast<uint8_t>(30 * opacity_));
-  scene->push(std::move(shadow));
+  r.draw_rect(2, 2, elem.width(), elem.height(), radius,
+              Paint::solid(Color{0.0f, 0.0f, 0.0f, 0.12f * opacity_}), Paint::none(), 0);
 
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), radius,
+              Paint::solid(bg_with_alpha), Paint::none(), 0);
 }
 
-void ToastWidget::render_icon(tvg::Scene* scene, const Element& elem) {
+void ToastWidget::render_icon(flex::Renderer& r, const Element& elem) {
   float icon_size = 20.0f;
   float padding = 12.0f;
   float cx = padding + icon_size / 2;
   float cy = elem.height() / 2;
 
-  uint8_t alpha = static_cast<uint8_t>(255 * opacity_);
-
-  auto icon = tvg::Shape::gen();
+  Color icon_color = {1.0f, 1.0f, 1.0f, opacity_};
+  char path[256];
 
   switch (type_) {
     case Type::Success:
       // Checkmark
-      icon->moveTo(cx - 6, cy);
-      icon->lineTo(cx - 2, cy + 4);
-      icon->lineTo(cx + 6, cy - 4);
-      icon->strokeFill(255, 255, 255, alpha);
-      icon->strokeWidth(2);
-      icon->strokeCap(tvg::StrokeCap::Round);
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
+               cx - 6, cy, cx - 2, cy + 4, cx + 6, cy - 4);
+      r.stroke_path(path, Paint::solid(icon_color), 2);
       break;
 
     case Type::Error:
       // X mark
-      icon->moveTo(cx - 5, cy - 5);
-      icon->lineTo(cx + 5, cy + 5);
-      icon->moveTo(cx + 5, cy - 5);
-      icon->lineTo(cx - 5, cy + 5);
-      icon->strokeFill(255, 255, 255, alpha);
-      icon->strokeWidth(2);
-      icon->strokeCap(tvg::StrokeCap::Round);
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g M %.4g %.4g L %.4g %.4g",
+               cx - 5, cy - 5, cx + 5, cy + 5,
+               cx + 5, cy - 5, cx - 5, cy + 5);
+      r.stroke_path(path, Paint::solid(icon_color), 2);
       break;
 
     case Type::Warning:
-      // Triangle with !
-      icon->moveTo(cx, cy - 7);
-      icon->lineTo(cx + 8, cy + 6);
-      icon->lineTo(cx - 8, cy + 6);
-      icon->close();
-      icon->strokeFill(255, 255, 255, alpha);
-      icon->strokeWidth(1.5f);
+      // Triangle
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+               cx, cy - 7, cx + 8, cy + 6, cx - 8, cy + 6);
+      r.stroke_path(path, Paint::solid(icon_color), 1.5f);
       break;
 
     case Type::Info:
-      // i in circle
-      icon->appendCircle(cx, cy, 8, 8);
-      icon->strokeFill(255, 255, 255, alpha);
-      icon->strokeWidth(1.5f);
+      // Circle
+      r.draw_circle(cx, cy, 8, Paint::none(), Paint::solid(icon_color), 1.5f);
       break;
 
     default:
-      return;
+      break;
   }
-
-  scene->push(std::move(icon));
 }
 
-void ToastWidget::render_text(tvg::Scene* scene, const Element& elem) {
+void ToastWidget::render_text(flex::Renderer& r, const Element& elem) {
   if (message_.empty()) return;
 
   auto* style = elem.computed_style;
 
-  Color text_color = {255, 255, 255, 255};
+  Color text_color = {1.0f, 1.0f, 1.0f, 1.0f};
   float font_size = 14.0f;
   std::string font_family = "Arial";
 
@@ -145,41 +129,29 @@ void ToastWidget::render_text(tvg::Scene* scene, const Element& elem) {
     if (!style->font_family.empty()) font_family = style->font_family;
   }
 
-  uint8_t alpha = static_cast<uint8_t>(text_color.a * opacity_);
+  Color text_with_alpha = text_color;
+  text_with_alpha.a *= opacity_;
 
   float icon_space = 44.0f;  // Space for icon
   float text_x = icon_space;
   float text_y = elem.height() / 2 + font_size / 3;
 
-  auto text_shape = tvg::Text::gen();
-  text_shape->font(font_family.c_str());
-  text_shape->size(font_size);
-  text_shape->text(message_.c_str());
-  text_shape->fill(text_color.r, text_color.g, text_color.b);
-  text_shape->opacity(alpha);
-  text_shape->translate(text_x, text_y);
-
-  scene->push(std::move(text_shape));
+  r.draw_text(message_, text_x, text_y, font_family, font_size, false, text_with_alpha);
 }
 
-void ToastWidget::render_close_button(tvg::Scene* scene, const Element& elem) {
+void ToastWidget::render_close_button(flex::Renderer& r, const Element& elem) {
   float btn_size = 20.0f;
   float padding = 8.0f;
   float cx = elem.width() - padding - btn_size / 2;
   float cy = elem.height() / 2;
 
-  uint8_t alpha = static_cast<uint8_t>(200 * opacity_);
+  Color close_color = {1.0f, 1.0f, 1.0f, 0.78f * opacity_};
 
-  auto close = tvg::Shape::gen();
-  close->moveTo(cx - 4, cy - 4);
-  close->lineTo(cx + 4, cy + 4);
-  close->moveTo(cx + 4, cy - 4);
-  close->lineTo(cx - 4, cy + 4);
-  close->strokeFill(255, 255, 255, alpha);
-  close->strokeWidth(1.5f);
-  close->strokeCap(tvg::StrokeCap::Round);
-
-  scene->push(std::move(close));
+  char path[128];
+  snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g M %.4g %.4g L %.4g %.4g",
+           cx - 4, cy - 4, cx + 4, cy + 4,
+           cx + 4, cy - 4, cx - 4, cy + 4);
+  r.stroke_path(path, Paint::solid(close_color), 1.5f);
 }
 
 bool ToastWidget::handle_event(const Event& event, Element& elem) {

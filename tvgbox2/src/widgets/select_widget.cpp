@@ -7,7 +7,6 @@
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
 #include <tvgbox2/renderer.h>
-#include <thorvg.h>
 #include <algorithm>
 #include <cmath>
 
@@ -73,19 +72,21 @@ void SelectWidget::set_expanded(bool expanded) {
 // Widget 接口实现
 // ============================================================================
 
-void SelectWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void SelectWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
+
   // 1. 渲染选择框
-  render_select_box(scene, elem);
+  render_select_box(r, elem);
 
   // 2. 渲染当前选中文本
-  render_selected_text(scene, elem);
+  render_selected_text(r, elem);
 
   // 3. 渲染下拉箭头
-  render_arrow(scene, elem);
+  render_arrow(r, elem);
 
   // 4. 渲染下拉列表（如果展开）
   if (dropdown_height_ > 0.1f) {
-    render_dropdown(scene, elem);
+    render_dropdown(r, elem);
   }
 }
 
@@ -120,31 +121,25 @@ void SelectWidget::update(float delta_ms, Element& elem) {
 // 渲染辅助
 // ============================================================================
 
-void SelectWidget::render_select_box(tvg::Scene* scene, const Element& elem) {
+void SelectWidget::render_select_box(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color bg_color = style->get_variable_color("--select-bg", {255, 255, 255, 255});
-  Color border_color = style->get_variable_color("--select-border", {200, 200, 200, 255});
+  Color bg_color = style->get_variable_color("--select-bg", {1.0f, 1.0f, 1.0f, 1.0f});
+  Color border_color = style->get_variable_color("--select-border", {0.78f, 0.78f, 0.78f, 1.0f});
 
   float width = elem.width();
   float height = style->get_variable_float("--item-height", 32.0f);
 
   // 背景
-  auto rect = tvg::Shape::gen();
-  rect->appendRect(0, 0, width, height, 4, 4);
-  rect->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(rect));
+  r.draw_rect(0, 0, width, height, 4, Paint::solid(bg_color), Paint::none(), 0);
 
   // 边框
-  auto border = tvg::Shape::gen();
-  border->appendRect(0, 0, width, height, 4, 4);
-  border->strokeFill(border_color.r, border_color.g, border_color.b, border_color.a);
-  border->strokeWidth(elem.has_state("focus") || expanded_ ? 2.0f : 1.0f);
-  scene->push(std::move(border));
+  float stroke_width = (elem.has_state("focus") || expanded_) ? 2.0f : 1.0f;
+  r.draw_rect(0, 0, width, height, 4, Paint::none(), Paint::solid(border_color), stroke_width);
 }
 
-void SelectWidget::render_selected_text(tvg::Scene* scene, const Element& elem) {
+void SelectWidget::render_selected_text(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -152,28 +147,20 @@ void SelectWidget::render_selected_text(tvg::Scene* scene, const Element& elem) 
     return;
   }
 
-  Color text_color = style->get_variable_color("--select-text", {0, 0, 0, 255});
+  Color text_color = style->get_variable_color("--select-text", {0.0f, 0.0f, 0.0f, 1.0f});
   float item_height = style->get_variable_float("--item-height", 32.0f);
-
-  auto text_shape = tvg::Text::gen();
-  text_shape->font(style->font_family.c_str());
-  text_shape->size(style->font_size);
-  text_shape->text(options_[selected_index_].c_str());
-  text_shape->fill(text_color.r, text_color.g, text_color.b);
-  text_shape->opacity(text_color.a);
 
   float text_x = 12;
   float text_y = item_height / 2 + style->font_size / 3;
-  text_shape->translate(text_x, text_y);
 
-  scene->push(std::move(text_shape));
+  r.draw_text(options_[selected_index_], text_x, text_y, style->font_family, style->font_size, false, text_color);
 }
 
-void SelectWidget::render_arrow(tvg::Scene* scene, const Element& elem) {
+void SelectWidget::render_arrow(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color arrow_color = style->get_variable_color("--select-arrow", {100, 100, 100, 255});
+  Color arrow_color = style->get_variable_color("--select-arrow", {0.39f, 0.39f, 0.39f, 1.0f});
   float item_height = style->get_variable_float("--item-height", 32.0f);
   float width = elem.width();
 
@@ -182,51 +169,43 @@ void SelectWidget::render_arrow(tvg::Scene* scene, const Element& elem) {
   float arrow_x = width - 20;
   float arrow_y = item_height / 2;
 
-  auto arrow = tvg::Shape::gen();
-
+  char path[128];
   if (expanded_) {
     // 向上箭头
-    arrow->moveTo(arrow_x - arrow_size, arrow_y + arrow_size / 2);
-    arrow->lineTo(arrow_x, arrow_y - arrow_size / 2);
-    arrow->lineTo(arrow_x + arrow_size, arrow_y + arrow_size / 2);
+    snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+             arrow_x - arrow_size, arrow_y + arrow_size / 2,
+             arrow_x, arrow_y - arrow_size / 2,
+             arrow_x + arrow_size, arrow_y + arrow_size / 2);
   } else {
     // 向下箭头
-    arrow->moveTo(arrow_x - arrow_size, arrow_y - arrow_size / 2);
-    arrow->lineTo(arrow_x, arrow_y + arrow_size / 2);
-    arrow->lineTo(arrow_x + arrow_size, arrow_y - arrow_size / 2);
+    snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+             arrow_x - arrow_size, arrow_y - arrow_size / 2,
+             arrow_x, arrow_y + arrow_size / 2,
+             arrow_x + arrow_size, arrow_y - arrow_size / 2);
   }
 
-  arrow->close();
-  arrow->fill(arrow_color.r, arrow_color.g, arrow_color.b, arrow_color.a);
-  scene->push(std::move(arrow));
+  r.fill_path(path, Paint::solid(arrow_color));
 }
 
-void SelectWidget::render_dropdown(tvg::Scene* scene, const Element& elem) {
+void SelectWidget::render_dropdown(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color dropdown_bg = style->get_variable_color("--dropdown-bg", {255, 255, 255, 255});
-  Color border_color = style->get_variable_color("--select-border", {200, 200, 200, 255});
-  Color text_color = style->get_variable_color("--select-text", {0, 0, 0, 255});
-  Color hover_bg = style->get_variable_color("--dropdown-item-hover", {240, 240, 240, 255});
-  Color selected_bg = style->get_variable_color("--dropdown-item-selected", {230, 240, 255, 255});
+  Color dropdown_bg = style->get_variable_color("--dropdown-bg", {1.0f, 1.0f, 1.0f, 1.0f});
+  Color border_color = style->get_variable_color("--select-border", {0.78f, 0.78f, 0.78f, 1.0f});
+  Color text_color = style->get_variable_color("--select-text", {0.0f, 0.0f, 0.0f, 1.0f});
+  Color hover_bg = style->get_variable_color("--dropdown-item-hover", {0.94f, 0.94f, 0.94f, 1.0f});
+  Color selected_bg = style->get_variable_color("--dropdown-item-selected", {0.90f, 0.94f, 1.0f, 1.0f});
 
   float item_height = style->get_variable_float("--item-height", 32.0f);
   float width = elem.width();
   float y_offset = item_height;
 
   // 下拉列表背景
-  auto dropdown_rect = tvg::Shape::gen();
-  dropdown_rect->appendRect(0, y_offset, width, dropdown_height_, 4, 4);
-  dropdown_rect->fill(dropdown_bg.r, dropdown_bg.g, dropdown_bg.b, dropdown_bg.a);
-  scene->push(std::move(dropdown_rect));
+  r.draw_rect(0, y_offset, width, dropdown_height_, 4, Paint::solid(dropdown_bg), Paint::none(), 0);
 
   // 边框
-  auto dropdown_border = tvg::Shape::gen();
-  dropdown_border->appendRect(0, y_offset, width, dropdown_height_, 4, 4);
-  dropdown_border->strokeFill(border_color.r, border_color.g, border_color.b, border_color.a);
-  dropdown_border->strokeWidth(1);
-  scene->push(std::move(dropdown_border));
+  r.draw_rect(0, y_offset, width, dropdown_height_, 4, Paint::none(), Paint::solid(border_color), 1);
 
   // 渲染每个选项
   int visible_items = static_cast<int>(dropdown_height_ / item_height);
@@ -236,27 +215,14 @@ void SelectWidget::render_dropdown(tvg::Scene* scene, const Element& elem) {
 
     // 选项背景（悬停或选中）
     if (i == hovered_index_ || i == selected_index_) {
-      auto item_bg = tvg::Shape::gen();
-      item_bg->appendRect(0, item_y, width, item_height);
-
       Color bg = (i == hovered_index_) ? hover_bg : selected_bg;
-      item_bg->fill(bg.r, bg.g, bg.b, bg.a);
-      scene->push(std::move(item_bg));
+      r.draw_rect(0, item_y, width, item_height, 0, Paint::solid(bg), Paint::none(), 0);
     }
 
     // 选项文字
-    auto item_text = tvg::Text::gen();
-    item_text->font(style->font_family.c_str());
-    item_text->size(style->font_size);
-    item_text->text(options_[i].c_str());
-    item_text->fill(text_color.r, text_color.g, text_color.b);
-    item_text->opacity(text_color.a);
-
     float text_x = 12;
     float text_y = item_y + item_height / 2 + style->font_size / 3;
-    item_text->translate(text_x, text_y);
-
-    scene->push(std::move(item_text));
+    r.draw_text(options_[i], text_x, text_y, style->font_family, style->font_size, false, text_color);
   }
 }
 

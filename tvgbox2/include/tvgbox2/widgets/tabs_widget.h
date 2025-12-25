@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - TabsWidget
  *
- * Tab navigation component
+ * Tab navigation - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_TABS_WIDGET_H
 #define TVGBOX2_TABS_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -24,7 +26,7 @@ public:
 
   TabsWidget();
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "TabsWidget"; }
@@ -43,8 +45,8 @@ public:
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_tabs(tvg::Scene* scene, const Element& elem);
-  void render_indicator(tvg::Scene* scene, const Element& elem);
+  void render_tabs(flex::Renderer& r, const Element& elem);
+  void render_indicator(flex::Renderer& r, const Element& elem);
   float get_tab_width(const Tab& tab, float font_size) const;
 
   std::vector<Tab> tabs_;

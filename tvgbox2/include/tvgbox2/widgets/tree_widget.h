@@ -1,7 +1,15 @@
+/*
+ * tvgbox2 - TreeWidget
+ *
+ * Tree view - 使用 flex::Renderer 渲染
+ */
+
 #ifndef TVGBOX2_TREE_WIDGET_H
 #define TVGBOX2_TREE_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -21,7 +29,7 @@ class TreeWidget : public Widget {
 public:
   TreeWidget();
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "TreeWidget"; }
@@ -40,7 +48,7 @@ public:
   void set_select_callback(SelectCallback cb) { on_select_ = std::move(cb); }
 
 private:
-  void render_node(tvg::Scene* scene, const Element& elem, TreeNode* node, float& y, int depth);
+  void render_node(flex::Renderer& r, const Element& elem, TreeNode* node, float& y, int depth);
   TreeNode* find_node(const std::string& id, TreeNode* root = nullptr);
   TreeNode* hit_test(float y, TreeNode* root, float& current_y, int depth);
 
@@ -54,4 +62,5 @@ private:
 };
 
 } // namespace tvgbox2
-#endif
+
+#endif // TVGBOX2_TREE_WIDGET_H

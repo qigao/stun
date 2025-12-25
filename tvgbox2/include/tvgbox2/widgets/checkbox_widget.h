@@ -1,116 +1,88 @@
 /*
  * tvgbox2 - CheckboxWidget
  *
- * 复选框控件 - 所有行为由 CSS 定义
+ * Checkbox control using Group/Shape composition system.
  */
 
 #ifndef TVGBOX2_CHECKBOX_WIDGET_H
 #define TVGBOX2_CHECKBOX_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <functional>
 
 namespace tvgbox2 {
 
 /**
- * CheckboxWidget - 复选框
+ * CheckboxWidget - Checkbox using Group/Shape composition
  *
- * 设计理念：布尔值输入，支持动画和自定义样式
+ * Structure:
+ *   Group (root)
+ *   ├── RectShape (box background + border)
+ *   ├── PathShape (checkmark)
+ *   └── TextShape (label)
  *
- * CSS 变量支持：
- *   --checkbox-size: "20"                    // 复选框大小（px）
- *   --checkbox-bg: "r,g,b,a"                 // 未选中背景色
- *   --checkbox-bg-checked: "r,g,b,a"         // 选中背景色
- *   --checkbox-border: "r,g,b,a"             // 边框颜色
- *   --checkbox-checkmark: "r,g,b,a"          // 勾选标记颜色
- *   --transition-duration: "200"             // 过渡动画时长（ms）
- *   --label-spacing: "8"                     // 文字与复选框间距
- *
- * 伪状态支持：
- *   :checked   - 选中状态
- *   :hover     - 鼠标悬停
- *   :disabled  - 禁用状态
- *   :focus     - 键盘焦点
- *
- * 示例用法（CSS）：
- *   checkbox {
- *     --checkbox-size: 20;
- *     --checkbox-bg: 255,255,255,255;
- *     --checkbox-bg-checked: 59,130,246,255;
- *     --transition-duration: 200;
- *   }
- *   checkbox:checked {
- *     --checkbox-checkmark: 255,255,255,255;
- *   }
+ * CSS variables:
+ *   --checkbox-size: "20"
+ *   --checkbox-bg: "r,g,b,a"
+ *   --checkbox-bg-checked: "r,g,b,a"
+ *   --checkbox-border: "r,g,b,a"
+ *   --checkbox-checkmark: "r,g,b,a"
+ *   --transition-duration: "200"
+ *   --label-spacing: "8"
  */
 class CheckboxWidget : public Widget {
 public:
-  /**
-   * 构造函数
-   *
-   * @param label 文字标签（可选）
-   * @param checked 初始选中状态
-   */
-  explicit CheckboxWidget(const std::string& label = "", bool checked = false);
+    explicit CheckboxWidget(const std::string& label = "", bool checked = false);
 
-  // ========================================================================
-  // Widget 接口实现
-  // ========================================================================
+    // Widget interface
+    void render(const Element& elem, Renderer& renderer) override;
+    bool handle_event(const Event& event, Element& elem) override;
+    void update(float delta_ms, Element& elem) override;
+    const char* type_name() const override { return "CheckboxWidget"; }
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
-  bool handle_event(const Event& event, Element& elem) override;
-  void update(float delta_ms, Element& elem) override;
-  const char* type_name() const override { return "CheckboxWidget"; }
+    // State
+    bool is_checked() const { return checked_; }
+    void set_checked(bool checked);
 
-  // ========================================================================
-  // 状态访问
-  // ========================================================================
+    const std::string& label() const { return label_; }
+    void set_label(const std::string& label);
 
-  bool is_checked() const { return checked_; }
-  void set_checked(bool checked);
+    bool is_disabled() const { return disabled_; }
+    void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
 
-  const std::string& label() const { return label_; }
-  void set_label(const std::string& label) { label_ = label; dirty_ = true; }
-
-  bool is_disabled() const { return disabled_; }
-  void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
-
-  // ========================================================================
-  // 回调
-  // ========================================================================
-
-  using ChangeCallback = std::function<void(bool checked)>;
-  void set_change_callback(ChangeCallback callback) { change_callback_ = callback; }
+    // Callback
+    using ChangeCallback = std::function<void(bool checked)>;
+    void set_change_callback(ChangeCallback callback) { change_callback_ = std::move(callback); }
 
 private:
-  // ========== 渲染辅助 ==========
+    void rebuild_shapes(float checkbox_size, float label_spacing, const std::string& font_family, float font_size);
+    void update_colors(const Element& elem);
+    void update_checkmark_path(float checkbox_size);
 
-  void render_checkbox_box(tvg::Scene* scene, const Element& elem);
-  void render_checkmark(tvg::Scene* scene, const Element& elem);
-  void render_label(tvg::Scene* scene, const Element& elem);
+    // Visual composition
+    Group root_;
+    RectShape* box_ = nullptr;
+    PathShape* checkmark_ = nullptr;
+    TextShape* text_ = nullptr;
 
-  // ========== 事件处理 ==========
+    // State
+    bool checked_ = false;
+    std::string label_;
+    bool disabled_ = false;
 
-  bool handle_mouse_down(const Event& event, Element& elem);
-  bool handle_key_down(const Event& event, Element& elem);
+    // Animation
+    float checkmark_scale_ = 0.0f;
+    float target_checkmark_scale_ = 0.0f;
 
-  // ========== 动画更新 ==========
+    // Cached dimensions
+    float cached_checkbox_size_ = 0;
+    float cached_label_spacing_ = 0;
 
-  void update_transitions(float delta_ms, Element& elem);
-
-  // ========== 状态 ==========
-
-  bool checked_ = false;
-  std::string label_;
-  bool disabled_ = false;
-
-  // 动画状态
-  float checkmark_scale_ = 0.0f;    // 勾选标记缩放（0-1）
-  float target_checkmark_scale_ = 0.0f;
-
-  // 回调
-  ChangeCallback change_callback_;
+    // Callback
+    ChangeCallback change_callback_;
 };
 
 } // namespace tvgbox2

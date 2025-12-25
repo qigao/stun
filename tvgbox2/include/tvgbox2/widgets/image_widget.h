@@ -1,41 +1,34 @@
 /*
  * tvgbox2 - ImageWidget
  *
- * Display images (PNG, JPG, SVG) using ThorVG
+ * Display images - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_IMAGE_WIDGET_H
 #define TVGBOX2_IMAGE_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
-#include <memory>
 #include <functional>
-
-namespace tvg {
-class Picture;
-}
 
 namespace tvgbox2 {
 
 /**
  * ImageWidget - Image display widget
  *
- * Supports PNG, JPG, SVG via ThorVG's native loaders.
+ * Uses flex::Renderer's draw_image() for loading and rendering.
  *
  * CSS variables:
  *   --object-fit: "contain" | "cover" | "fill" | "none"
  *   --object-position: "center" | "top" | "bottom" | "left" | "right"
- *
- * Example:
- *   auto* img = box->create_widget<ImageWidget>("image", "logo", "assets/logo.svg");
  */
 class ImageWidget : public Widget {
 public:
   explicit ImageWidget(const std::string& src = "");
-  ~ImageWidget() override;
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ImageWidget"; }
@@ -57,12 +50,7 @@ public:
   void set_load_callback(LoadCallback cb) { on_load_ = std::move(cb); }
 
 private:
-  void load_image();
-  void render_image(tvg::Scene* scene, const Element& elem);
-  void release_picture();
-
   std::string src_;
-  tvg::Picture* picture_ = nullptr;  // Owned, release with Paint::rel()
   float natural_width_ = 0;
   float natural_height_ = 0;
   bool loaded_ = false;

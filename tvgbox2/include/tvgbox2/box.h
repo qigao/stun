@@ -15,8 +15,8 @@
 #include <functional>
 #include <memory>
 
-namespace tvg {
-  class Canvas;
+namespace flex {
+  class Renderer;
 }
 
 namespace tvgbox2 {
@@ -38,9 +38,9 @@ public:
   /**
    * 构造函数
    *
-   * @param canvas ThorVG Canvas
+   * @param renderer flex::Renderer 指针（由调用方管理生命周期）
    */
-  explicit Box(tvg::Canvas* canvas);
+  explicit Box(flex::Renderer* renderer);
   ~Box();
 
   // 不可复制
@@ -136,7 +136,6 @@ public:
    * 1. 样式计算（如果需要）
    * 2. 布局计算（如果需要）
    * 3. 渲染（如果需要）
-   * 4. ThorVG sync
    */
   void update();
 
@@ -198,8 +197,7 @@ private:
   bool has_dirty_layout(Element* elem);
 
   // 渲染
-  void force_rebuild_element(Element* elem);  // 强制重建元素及子元素
-  bool render_element(Element* elem);  // 返回 true 表示重建
+  void render_element(Element* elem);
   void render_tree(Element* elem);
   bool has_dirty_paint(Element* elem);
 
@@ -217,7 +215,7 @@ private:
 
   // ========== 状态 ==========
 
-  tvg::Canvas* canvas_;
+  flex::Renderer* flex_renderer_;  // 外部渲染器
   Element* root_ = nullptr;
 
   float viewport_width_ = 800;
@@ -244,15 +242,8 @@ private:
   LayoutEngine layout_engine_;
   TransitionManager transitions_;
 
-  // ThorVG retained mode: 根 scene 只 push 一次
-  bool root_scene_pushed_ = false;
-
-  // Overlay scene for popups (dropdowns, tooltips, etc.)
-  tvg::Scene* overlay_scene_ = nullptr;
-
 public:
-  // Overlay API for widgets
-  tvg::Scene* get_overlay_scene() { return overlay_scene_; }
+  // Viewport API for widgets
   float get_viewport_width() const { return viewport_width_; }
   float get_viewport_height() const { return viewport_height_; }
 };

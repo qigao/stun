@@ -6,7 +6,7 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 #include <cmath>
 
@@ -70,17 +70,18 @@ float TabsWidget::get_tab_width(const Tab& tab, float font_size) const {
   return tab.label.size() * font_size * 0.6f + 32.0f;
 }
 
-void TabsWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
-  render_tabs(scene, elem);
-  render_indicator(scene, elem);
+void TabsWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
+  render_tabs(r, elem);
+  render_indicator(r, elem);
 }
 
-void TabsWidget::render_tabs(tvg::Scene* scene, const Element& elem) {
+void TabsWidget::render_tabs(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color bg_color = {245, 245, 245, 255};
-  Color text_color = {100, 100, 100, 255};
-  Color active_text = {0, 0, 0, 255};
+  Color bg_color = {0.96f, 0.96f, 0.96f, 1.0f};
+  Color text_color = {0.39f, 0.39f, 0.39f, 1.0f};
+  Color active_text = {0.0f, 0.0f, 0.0f, 1.0f};
   float font_size = 14.0f;
   std::string font_family = "Arial";
 
@@ -92,10 +93,7 @@ void TabsWidget::render_tabs(tvg::Scene* scene, const Element& elem) {
     if (!style->font_family.empty()) font_family = style->font_family;
   }
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height());
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), 0, Paint::solid(bg_color), Paint::none(), 0);
 
   float x = 0;
   for (size_t i = 0; i < tabs_.size(); i++) {
@@ -103,29 +101,22 @@ void TabsWidget::render_tabs(tvg::Scene* scene, const Element& elem) {
     float tab_width = get_tab_width(tab, font_size);
 
     if (static_cast<int>(i) == hover_index_ && static_cast<int>(i) != active_index_) {
-      auto hover_bg = tvg::Shape::gen();
-      hover_bg->appendRect(x, 0, tab_width, elem.height());
-      hover_bg->fill(230, 230, 230, 255);
-      scene->push(std::move(hover_bg));
+      r.draw_rect(x, 0, tab_width, elem.height(), 0,
+                  Paint::solid(Color{0.90f, 0.90f, 0.90f, 1.0f}), Paint::none(), 0);
     }
 
-    auto text_shape = tvg::Text::gen();
-    text_shape->font(font_family.c_str());
-    text_shape->size(font_size);
-    text_shape->text(tab.label.c_str());
-
+    Color tab_text_color;
     if (tab.disabled) {
-      text_shape->fill(180, 180, 180);
+      tab_text_color = {0.71f, 0.71f, 0.71f, 1.0f};
     } else if (static_cast<int>(i) == active_index_) {
-      text_shape->fill(active_text.r, active_text.g, active_text.b);
+      tab_text_color = active_text;
     } else {
-      text_shape->fill(text_color.r, text_color.g, text_color.b);
+      tab_text_color = text_color;
     }
 
     float text_x = x + (tab_width - tab.label.size() * font_size * 0.6f) / 2;
     float text_y = elem.height() / 2 + font_size / 3;
-    text_shape->translate(text_x, text_y);
-    scene->push(std::move(text_shape));
+    r.draw_text(tab.label, text_x, text_y, font_family, font_size, false, tab_text_color);
 
     if (static_cast<int>(i) == active_index_) {
       target_indicator_x_ = x;
@@ -136,19 +127,17 @@ void TabsWidget::render_tabs(tvg::Scene* scene, const Element& elem) {
   }
 }
 
-void TabsWidget::render_indicator(tvg::Scene* scene, const Element& elem) {
+void TabsWidget::render_indicator(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color indicator_color = {59, 130, 246, 255};
+  Color indicator_color = {0.23f, 0.51f, 0.96f, 1.0f};
   if (style) {
     indicator_color = style->get_variable_color("--tabs-indicator", indicator_color);
   }
 
   if (indicator_width_ > 0) {
-    auto indicator = tvg::Shape::gen();
-    indicator->appendRect(indicator_x_, elem.height() - 3, indicator_width_, 3, 1.5f, 1.5f);
-    indicator->fill(indicator_color.r, indicator_color.g, indicator_color.b, indicator_color.a);
-    scene->push(std::move(indicator));
+    r.draw_rect(indicator_x_, elem.height() - 3, indicator_width_, 3, 1.5f,
+                Paint::solid(indicator_color), Paint::none(), 0);
   }
 }
 
@@ -203,7 +192,7 @@ bool TabsWidget::handle_event(const Event& event, Element& elem) {
 
 void TabsWidget::update(float delta_ms, Element& elem) {
   float speed = 8.0f * delta_ms / 1000.0f;
-  
+
   bool changed = false;
   if (std::abs(indicator_x_ - target_indicator_x_) > 0.5f) {
     indicator_x_ += (target_indicator_x_ - indicator_x_) * speed;

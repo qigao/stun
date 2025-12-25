@@ -1,137 +1,108 @@
 /*
  * tvgbox2 - SliderWidget
  *
- * 滑块控件 - 所有行为由 CSS 定义
+ * Slider control using Group/Shape composition system.
  */
 
 #ifndef TVGBOX2_SLIDER_WIDGET_H
 #define TVGBOX2_SLIDER_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <functional>
 
 namespace tvgbox2 {
 
 /**
- * SliderWidget - 数值滑块
+ * SliderWidget - Slider using Group/Shape composition
  *
- * 设计理念：连续值输入，支持拖拽和动画
+ * Structure:
+ *   Group (root)
+ *   ├── RectShape (track background)
+ *   ├── RectShape (track fill)
+ *   ├── CircleShape (thumb)
+ *   └── TextShape (value label, optional)
  *
- * CSS 变量支持：
- *   --track-height: "4"                    // 轨道高度（px）
- *   --track-bg: "r,g,b,a"                  // 轨道背景色
- *   --track-fill: "r,g,b,a"                // 轨道填充色（已滑过的部分）
- *   --thumb-size: "20"                     // 滑块大小（px）
- *   --thumb-bg: "r,g,b,a"                  // 滑块背景色
- *   --thumb-border: "r,g,b,a"              // 滑块边框色
- *   --transition-duration: "100"           // 过渡动画时长（ms）
- *   --show-value: "true" | "false"         // 是否显示数值
- *
- * 伪状态支持：
- *   :hover     - 鼠标悬停
- *   :active    - 正在拖拽
- *   :disabled  - 禁用状态
- *   :focus     - 键盘焦点
- *
- * 示例用法（CSS）：
- *   slider {
- *     --track-height: 4;
- *     --track-bg: 229,231,235,255;
- *     --track-fill: 59,130,246,255;
- *     --thumb-size: 20;
- *     --thumb-bg: 255,255,255,255;
- *   }
+ * CSS variables:
+ *   --track-height: "4"
+ *   --track-bg: "r,g,b,a"
+ *   --track-fill: "r,g,b,a"
+ *   --thumb-size: "20"
+ *   --thumb-bg: "r,g,b,a"
+ *   --thumb-border: "r,g,b,a"
+ *   --transition-duration: "100"
+ *   --show-value: "true" | "false"
  */
 class SliderWidget : public Widget {
 public:
-  /**
-   * 构造函数
-   *
-   * @param min 最小值
-   * @param max 最大值
-   * @param value 初始值
-   * @param step 步长（0 = 连续）
-   */
-  explicit SliderWidget(float min = 0.0f, float max = 100.0f,
-                       float value = 50.0f, float step = 0.0f);
+    explicit SliderWidget(float min = 0.0f, float max = 100.0f,
+                          float value = 50.0f, float step = 0.0f);
 
-  // ========================================================================
-  // Widget 接口实现
-  // ========================================================================
+    // Widget interface
+    void render(const Element& elem, Renderer& renderer) override;
+    bool handle_event(const Event& event, Element& elem) override;
+    void update(float delta_ms, Element& elem) override;
+    const char* type_name() const override { return "SliderWidget"; }
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
-  bool handle_event(const Event& event, Element& elem) override;
-  void update(float delta_ms, Element& elem) override;
-  const char* type_name() const override { return "SliderWidget"; }
+    // Value access
+    float value() const { return value_; }
+    void set_value(float value);
 
-  // ========================================================================
-  // 值访问
-  // ========================================================================
+    float min() const { return min_; }
+    void set_min(float min) { min_ = min; update_value_position(); dirty_ = true; }
 
-  float value() const { return value_; }
-  void set_value(float value);
+    float max() const { return max_; }
+    void set_max(float max) { max_ = max; update_value_position(); dirty_ = true; }
 
-  float min() const { return min_; }
-  void set_min(float min) { min_ = min; update_value_position(); dirty_ = true; }
+    float step() const { return step_; }
+    void set_step(float step) { step_ = step; }
 
-  float max() const { return max_; }
-  void set_max(float max) { max_ = max; update_value_position(); dirty_ = true; }
+    bool is_disabled() const { return disabled_; }
+    void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
 
-  float step() const { return step_; }
-  void set_step(float step) { step_ = step; }
-
-  bool is_disabled() const { return disabled_; }
-  void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
-
-  // ========================================================================
-  // 回调
-  // ========================================================================
-
-  using ChangeCallback = std::function<void(float value)>;
-  void set_change_callback(ChangeCallback callback) { change_callback_ = callback; }
+    // Callback
+    using ChangeCallback = std::function<void(float value)>;
+    void set_change_callback(ChangeCallback callback) { change_callback_ = std::move(callback); }
 
 private:
-  // ========== 渲染辅助 ==========
+    void rebuild_shapes(const Element& elem);
+    void update_shapes(const Element& elem);
 
-  void render_track(tvg::Scene* scene, const Element& elem);
-  void render_fill(tvg::Scene* scene, const Element& elem);
-  void render_thumb(tvg::Scene* scene, const Element& elem);
-  void render_value_label(tvg::Scene* scene, const Element& elem);
+    void update_value_from_x(float x, const Element& elem);
+    void update_value_position();
+    float snap_to_step(float value);
 
-  // ========== 事件处理 ==========
+    // Visual composition
+    Group root_;
+    RectShape* track_ = nullptr;
+    RectShape* fill_ = nullptr;
+    CircleShape* thumb_ = nullptr;
+    TextShape* value_label_ = nullptr;
 
-  bool handle_mouse_down(const Event& event, Element& elem);
-  bool handle_mouse_move(const Event& event, Element& elem);
-  bool handle_mouse_up(const Event& event, Element& elem);
-  bool handle_key_down(const Event& event, Element& elem);
+    // State
+    float min_ = 0.0f;
+    float max_ = 100.0f;
+    float value_ = 50.0f;
+    float step_ = 0.0f;
 
-  // ========== 值计算 ==========
+    bool disabled_ = false;
+    bool is_dragging_ = false;
 
-  void update_value_from_x(float x, const Element& elem);
-  void update_value_position();
-  float snap_to_step(float value);
+    // Animation
+    float value_position_ = 0.5f;
+    float current_thumb_scale_ = 1.0f;
+    float target_thumb_scale_ = 1.0f;
 
-  // ========== 动画更新 ==========
+    // Cached dimensions
+    float cached_width_ = 0;
+    float cached_height_ = 0;
+    float cached_track_height_ = 0;
+    float cached_thumb_size_ = 0;
+    bool cached_show_value_ = false;
 
-  void update_transitions(float delta_ms, Element& elem);
-
-  // ========== 状态 ==========
-
-  float min_ = 0.0f;
-  float max_ = 100.0f;
-  float value_ = 50.0f;
-  float step_ = 0.0f;
-
-  bool disabled_ = false;
-  bool is_dragging_ = false;
-
-  // 动画状态
-  float value_position_ = 0.5f;  // 归一化位置（0-1）
-  float current_thumb_scale_ = 1.0f;
-  float target_thumb_scale_ = 1.0f;
-
-  // 回调
-  ChangeCallback change_callback_;
+    // Callback
+    ChangeCallback change_callback_;
 };
 
 } // namespace tvgbox2

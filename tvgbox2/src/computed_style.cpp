@@ -129,19 +129,20 @@ Color ComputedStyle::get_variable_color(const std::string& name,
   std::string token;
   int index = 0;
 
-  // Check if it looks like r,g,b,a 
-  // If it's pure hex or something else, we might need more robust parsing here,
-  // but for this project variables are stored as "r, g, b, a" strings.
-  
+  // Check if it looks like r,g,b,a
+  // Variables are stored as "r, g, b, a" strings (0-255 range)
+  // Convert to float (0.0-1.0) for flex::Color
+
   while (std::getline(ss, token, ',') && index < 4) {
     int component = std::atoi(token.c_str());
     component = std::max(0, std::min(255, component)); // clamp to [0, 255]
+    float normalized = component / 255.0f;
 
     switch (index) {
-      case 0: result.r = static_cast<uint8_t>(component); break;
-      case 1: result.g = static_cast<uint8_t>(component); break;
-      case 2: result.b = static_cast<uint8_t>(component); break;
-      case 3: result.a = static_cast<uint8_t>(component); break;
+      case 0: result.r = normalized; break;
+      case 1: result.g = normalized; break;
+      case 2: result.b = normalized; break;
+      case 3: result.a = normalized; break;
     }
     index++;
   }

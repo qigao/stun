@@ -7,10 +7,6 @@
 #ifndef TVGBOX2_WIDGET_H
 #define TVGBOX2_WIDGET_H
 
-namespace tvg {
-  class Scene;
-}
-
 namespace tvgbox2 {
 
 // 前向声明
@@ -32,13 +28,12 @@ public:
   virtual ~Widget() = default;
 
   /**
-   * 渲染 Widget 到 ThorVG Scene
+   * 渲染 Widget
    *
-   * @param scene 父 Scene（通常是 element->scene）
    * @param elem 关联的 Element（用于获取样式、布局）
-   * @param renderer 渲染器（用于创建 Paint 对象）
+   * @param renderer 渲染器（后端无关）
    */
-  virtual void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) = 0;
+  virtual void render(const Element& elem, Renderer& renderer) = 0;
 
   /**
    * 处理事件

@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - SpinnerWidget
  *
- * Animated loading indicator
+ * Animated loading indicator using Group/Shape composition.
  */
 
 #ifndef TVGBOX2_SPINNER_WIDGET_H
 #define TVGBOX2_SPINNER_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 
 namespace tvgbox2 {
 
@@ -32,7 +34,7 @@ public:
 
   explicit SpinnerWidget(Variant variant = Variant::Ring);
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "SpinnerWidget"; }
@@ -47,9 +49,9 @@ public:
   void set_variant(Variant v) { variant_ = v; dirty_ = true; }
 
 private:
-  void render_ring(tvg::Scene* scene, const Element& elem);
-  void render_dots(tvg::Scene* scene, const Element& elem);
-  void render_bars(tvg::Scene* scene, const Element& elem);
+  void render_ring(flex::Renderer& r, const Element& elem);
+  void render_dots(flex::Renderer& r, const Element& elem);
+  void render_bars(flex::Renderer& r, const Element& elem);
 
   Variant variant_ = Variant::Ring;
   bool spinning_ = true;

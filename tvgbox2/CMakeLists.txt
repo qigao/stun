@@ -63,6 +63,7 @@ set(TVGBOX2_SOURCES
   src/widgets/table_widget.cpp
   src/widgets/tree_widget.cpp
   src/widgets/colorpicker_widget.cpp
+  src/widgets/group_button_widget.cpp
 )
 
 # 头文件
@@ -78,6 +79,9 @@ set(TVGBOX2_HEADERS
   include/tvgbox2/textedit.h
   include/tvgbox2/transition.h
   include/tvgbox2/text_util.h
+  include/tvgbox2/renderer.h
+  include/tvgbox2/group.h
+  include/tvgbox2/shapes.h
   include/tvgbox2/widgets/input_widget.h
   include/tvgbox2/widgets/label_widget.h
   include/tvgbox2/widgets/checkbox_widget.h
@@ -102,13 +106,14 @@ set(TVGBOX2_HEADERS
   include/tvgbox2/widgets/table_widget.h
   include/tvgbox2/widgets/tree_widget.h
   include/tvgbox2/widgets/colorpicker_widget.h
+  include/tvgbox2/widgets/group_button_widget.h
 )
 
 # 创建库
 add_library(tvgbox2 STATIC ${TVGBOX2_SOURCES} ${TVGBOX2_HEADERS})
 
-# 链接 ThorVG（假设已经在父项目中找到）
-target_link_libraries(tvgbox2 PUBLIC thorvg ${LEXBOR_LIBRARY})
+# 链接依赖（flex 提供后端无关的渲染抽象，thorvg 由 flex 传递依赖）
+target_link_libraries(tvgbox2 PUBLIC ${LEXBOR_LIBRARY} flex)
 set_target_properties(tvgbox2 PROPERTIES FOLDER tvgbox2/)
 
 # 安装头文件

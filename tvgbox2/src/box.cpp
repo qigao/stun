@@ -4,7 +4,8 @@
 
 #include <tvgbox2/box.h>
 #include <tvgbox2/renderer.h>
-#include <thorvg.h>
+#include <tvgbox2/types.h>
+#include <flex/bridge/renderer.h>
 #include <algorithm>
 
 namespace tvgbox2 {
@@ -13,9 +14,9 @@ namespace tvgbox2 {
 // 构造/析构
 // ============================================================================
 
-Box::Box(tvg::Canvas* canvas) : canvas_(canvas) {
-  // 初始化 Renderer
-  renderer_ = std::make_unique<Renderer>(canvas);
+Box::Box(flex::Renderer* renderer) : flex_renderer_(renderer) {
+  // 初始化 Renderer wrapper
+  renderer_ = std::make_unique<Renderer>(renderer);
 }
 
 Box::~Box() {
@@ -31,7 +32,6 @@ Box::~Box() {
       delete elem->computed_style;
       elem->computed_style = nullptr;
     }
-    // Scene 由 ThorVG 管理，不手动 delete
   }
 }
 
@@ -121,30 +121,33 @@ void Box::set_viewport(float width, float height) {
 // ============================================================================
 
 void Box::update() {
-  if (!root_) {
+  if (!root_ || !flex_renderer_) {
     return;
   }
 
- 
   // 第1步：计算样式（如果需要）
   if (has_dirty_style(root_)) {
     compute_styles(root_);
-  }  
+  }
 
   // 第2步：计算布局（如果需要）
   if (has_dirty_layout(root_)) {
     layout_engine_.layout(root_, viewport_width_, viewport_height_);
-  } 
+  }
 
   // 第3步：渲染（如果需要）
   if (has_dirty_paint(root_)) {
-    render_tree(root_);
-  } 
+    // Begin frame
+    flex_renderer_->begin_frame(viewport_width_, viewport_height_, 1.0f);
 
-  // 第4步：同步到 ThorVG
-  if (canvas_) {
-    canvas_->draw();
-    canvas_->sync();
+    // Clear with background color (dark gray)
+    flex_renderer_->clear(Color{0.12f, 0.12f, 0.12f, 1.0f});
+
+    // Render tree
+    render_tree(root_);
+
+    // End frame
+    flex_renderer_->end_frame();
   }
 }
 
@@ -240,11 +243,10 @@ void Box::compute_styles(Element* elem) {
 }
 
 // ============================================================================
-// 渲染（简化版）
+// 渲染
 // ============================================================================
 
-// 强制重建元素及其所有子元素的 scene（使用 ThorVG 原生 API - 返回 raw pointer）
-void Box::force_rebuild_element(Element* elem) {
+void Box::render_element(Element* elem) {
   auto* style = elem->computed_style;
   if (!style) return;
 
@@ -253,135 +255,92 @@ void Box::force_rebuild_element(Element* elem) {
     return;
   }
 
-  // 创建新 scene（ThorVG gen() 返回 raw pointer）
-  elem->scene = tvg::Scene::gen();
+  auto& r = renderer_->flex();
 
-  // 设置变换
-  elem->scene->translate(elem->x_ + style->transform_x,
-                         elem->y_ + style->transform_y);
-  elem->scene->scale(style->transform_scale);
-  elem->scene->rotate(style->transform_rotate);
-  elem->scene->opacity(static_cast<uint8_t>(style->opacity * 255));
+  // 保存变换状态
+  r.save();
+
+  // 累加变换（相对于父元素）
+  r.translate(elem->x_ + style->transform_x, elem->y_ + style->transform_y);
+
+  if (style->transform_scale != 1.0f) {
+    float cx = elem->width_ / 2;
+    float cy = elem->height_ / 2;
+    r.translate(cx, cy);
+    r.scale(style->transform_scale, style->transform_scale);
+    r.translate(-cx, -cy);
+  }
+
+  if (style->transform_rotate != 0.0f) {
+    float cx = elem->width_ / 2;
+    float cy = elem->height_ / 2;
+    r.translate(cx, cy);
+    r.rotate(style->transform_rotate * 180.0f / 3.14159265f);  // Convert radians to degrees
+    r.translate(-cx, -cy);
+  }
+
+  r.set_global_alpha(style->opacity);
 
   // 渲染元素自身内容
   if (elem->widget && renderer_) {
-    elem->widget->render(elem->scene, *elem, *renderer_);
+    elem->widget->render(*elem, *renderer_);
   } else {
     // 基础元素渲染
-    float r = style->border_radius[0];  // 使用第一个值（简化：四角相同）
+    float radius = style->border_radius[0];  // 使用第一个值（简化：四角相同）
 
     // 1. 阴影（渲染在背景之前）
     if (style->has_shadow && !style->shadow.inset) {
       auto& shadow = style->shadow;
-      auto* shadow_shape = tvg::Shape::gen();
       float sx = shadow.offset_x - shadow.spread_radius;
       float sy = shadow.offset_y - shadow.spread_radius;
       float sw = elem->width_ + shadow.spread_radius * 2;
       float sh = elem->height_ + shadow.spread_radius * 2;
-      shadow_shape->appendRect(sx, sy, sw, sh, r, r);
-      shadow_shape->fill(shadow.color.r, shadow.color.g, shadow.color.b, shadow.color.a);
-      elem->scene->push(shadow_shape);
+
+      r.draw_rect(sx, sy, sw, sh, radius,
+                  Paint::solid(shadow.color), Paint::none(), 0);
     }
 
     // 2. 背景
     Color bg_color = style->get_variable_color("--bg", style->background_color);
     if (bg_color.a > 0) {
-      auto* bg = tvg::Shape::gen();
-      bg->appendRect(0, 0, elem->width_, elem->height_, r, r);
-      bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-      elem->scene->push(bg);
+      r.draw_rect(0, 0, elem->width_, elem->height_, radius,
+                  Paint::solid(bg_color), Paint::none(), 0);
     }
 
-    // 文本
+    // 3. 文本
     if (!elem->text_content.empty()) {
       Color text_col = style->get_variable_color("--text-color", style->text_color);
-      auto* text_shape = tvg::Text::gen();
-      text_shape->font(style->font_family.c_str());
-      text_shape->size(style->font_size);
-      text_shape->text(elem->text_content.c_str());
-      text_shape->fill(text_col.r, text_col.g, text_col.b);
-      text_shape->opacity(text_col.a);
 
       float text_x = style->padding[3];
       float text_y = (elem->height_ + style->font_size) / 2;
-      text_shape->translate(text_x, text_y);
 
-      elem->scene->push(text_shape);
+      r.draw_text(elem->text_content, text_x, text_y,
+                  style->font_family, style->font_size, false, text_col);
     }
   }
 
-  // 递归重建所有子元素，并将其 scene push 到当前 scene
+  // 递归渲染所有子元素
   for (auto* child : elem->children) {
-    force_rebuild_element(child);
-    if (child->scene) {
-      elem->scene->push(child->scene);
-      child->scene = nullptr;  // 子 scene 已被 parent 接管
-    }
+    render_element(child);
   }
+
+  // 恢复变换状态
+  r.restore();
 
   elem->dirty_paint_ = false;
 }
 
-// 返回 true 表示此元素或其子元素被重建
-bool Box::render_element(Element* elem) {
-  auto* style = elem->computed_style;
-  if (!style) return false;
-
-  // 不可见元素跳过
-  if (!elem->is_visible()) {
-    return false;
-  }
-
-  // 检查当前元素或任何子元素是否需要重建
-  bool needs_rebuild = elem->dirty_paint_;
-  if (!needs_rebuild) {
-    for (auto* child : elem->children) {
-      if (has_dirty_paint(child)) {
-        needs_rebuild = true;
-        break;
-      }
-    }
-  }
-
-  if (needs_rebuild) {
-    // 如果需要重建，强制重建整个子树
-    force_rebuild_element(elem);
-    return true;
-  }
-
-  return false;
-}
-
 void Box::render_tree(Element* elem) {
-  // Check if we need to rebuild
-  bool needs_rebuild = (elem == root_ && canvas_) && 
-                       (has_dirty_paint(elem) || !root_scene_pushed_);
-  
-  if (needs_rebuild) {
-    // Clear canvas first (this deletes old scenes including overlay_scene_)
-    canvas_->remove();
-    
-    // Create fresh overlay scene BEFORE rendering (widgets render to it)
-    overlay_scene_ = tvg::Scene::gen();
-  }
+  if (!flex_renderer_ || !elem) return;
 
-  bool rebuilt = render_element(elem);
-
-  // 根元素推送到 Canvas
-  if (elem == root_ && canvas_ && elem->scene && rebuilt) {
-    // Push main scene first, then overlay
-    canvas_->push(elem->scene);
-    if (overlay_scene_) {
-      canvas_->push(overlay_scene_);
-    }
-
-    elem->scene = nullptr;  // scene now owned by canvas
-    // Note: overlay_scene_ pointer is still valid until next canvas_->remove()
-    root_scene_pushed_ = true;
-  }
+  // 渲染整个树
+  render_element(elem);
 }
 
-
+void Box::render_overlays() {
+  // Overlay rendering is now handled by widgets directly
+  // using flex::Renderer's immediate mode API
+}
 
 
 // ============================================================================
@@ -410,7 +369,7 @@ void Box::dispatch_event(Event& event) {
         return;
       }
     }
-    
+
     // 鼠标事件 - 通过坐标查找
     target = hit_test(root_, event.x, event.y);
   } else if (event.type == EventType::KeyDown ||
@@ -560,18 +519,18 @@ Element* Box::hit_test(Element* elem, float x, float y) {
 
 Element* Box::find_capturing_element(Element* elem) {
   if (!elem) return nullptr;
-  
+
   // Check if this element's widget wants mouse capture
   if (elem->widget && elem->widget->wants_mouse_capture()) {
     return elem;
   }
-  
+
   // Check children
   for (auto* child : elem->children) {
     Element* capturing = find_capturing_element(child);
     if (capturing) return capturing;
   }
-  
+
   return nullptr;
 }
 

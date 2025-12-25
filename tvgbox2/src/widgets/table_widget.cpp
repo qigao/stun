@@ -6,8 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -46,77 +48,59 @@ void TableWidget::set_selected_row(int row) {
   }
 }
 
-void TableWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void TableWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
   auto* style = elem.computed_style;
-  Color bg_color = {255, 255, 255, 255};
+  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
   if (style) bg_color = style->get_variable_color("--table-bg", bg_color);
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), 4, 4);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), 4, Paint::solid(bg_color), Paint::none(), 0);
+  r.draw_rect(0, 0, elem.width(), elem.height(), 4,
+              Paint::none(), Paint::solid(Color{0.90f, 0.91f, 0.92f, 1.0f}), 1);
 
-  auto border = tvg::Shape::gen();
-  border->appendRect(0, 0, elem.width(), elem.height(), 4, 4);
-  border->strokeFill(229, 231, 235, 255);
-  border->strokeWidth(1);
-  scene->push(std::move(border));
-
-  render_header(scene, elem);
-  render_rows(scene, elem);
+  render_header(r, elem);
+  render_rows(r, elem);
 }
 
-void TableWidget::render_header(tvg::Scene* scene, const Element& elem) {
+void TableWidget::render_header(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   float font_size = style && style->font_size > 0 ? style->font_size : 14.0f;
   std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
-  Color header_bg = {249, 250, 251, 255};
-  Color header_text = {55, 65, 81, 255};
+  Color header_bg = {0.98f, 0.98f, 0.98f, 1.0f};
+  Color header_text = {0.22f, 0.25f, 0.32f, 1.0f};
   if (style) {
     header_bg = style->get_variable_color("--table-header-bg", header_bg);
     header_text = style->get_variable_color("--table-header-text", header_text);
   }
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), header_height_, 4, 4);
-  bg->fill(header_bg.r, header_bg.g, header_bg.b, header_bg.a);
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), header_height_, 4, Paint::solid(header_bg), Paint::none(), 0);
 
   float x = 0;
   for (const auto& col : columns_) {
-    auto text = tvg::Text::gen();
-    text->font(font_family.c_str());
-    text->size(font_size);
-    text->text(col.header.c_str());
-    text->fill(header_text.r, header_text.g, header_text.b);
-    text->translate(x + 12, header_height_ / 2 + font_size / 3);
-    scene->push(std::move(text));
+    r.draw_text(col.header, x + 12, header_height_ / 2 + font_size / 3,
+                font_family, font_size, false, header_text);
 
-    auto divider = tvg::Shape::gen();
-    divider->moveTo(x + col.width, 8);
-    divider->lineTo(x + col.width, header_height_ - 8);
-    divider->strokeFill(229, 231, 235, 255);
-    divider->strokeWidth(1);
-    scene->push(std::move(divider));
+    // Column divider
+    char path[64];
+    snprintf(path, sizeof(path), "M %.4g 8 L %.4g %.4g", x + col.width, x + col.width, header_height_ - 8);
+    r.stroke_path(path, Paint::solid(Color{0.90f, 0.91f, 0.92f, 1.0f}), 1);
 
     x += col.width;
   }
 
-  auto bottom = tvg::Shape::gen();
-  bottom->moveTo(0, header_height_);
-  bottom->lineTo(elem.width(), header_height_);
-  bottom->strokeFill(229, 231, 235, 255);
-  bottom->strokeWidth(1);
-  scene->push(std::move(bottom));
+  // Header bottom line
+  char bottom_path[64];
+  snprintf(bottom_path, sizeof(bottom_path), "M 0 %.4g L %.4g %.4g", header_height_, elem.width(), header_height_);
+  r.stroke_path(bottom_path, Paint::solid(Color{0.90f, 0.91f, 0.92f, 1.0f}), 1);
 }
 
-void TableWidget::render_rows(tvg::Scene* scene, const Element& elem) {
+void TableWidget::render_rows(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   float font_size = style && style->font_size > 0 ? style->font_size : 14.0f;
   std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
-  Color text_color = {0, 0, 0, 255};
-  Color selected_bg = {239, 246, 255, 255};
-  Color hover_bg = {249, 250, 251, 255};
+  Color text_color = {0.0f, 0.0f, 0.0f, 1.0f};
+  Color selected_bg = {0.94f, 0.96f, 1.0f, 1.0f};
+  Color hover_bg = {0.98f, 0.98f, 0.98f, 1.0f};
   if (style) {
     text_color = style->get_variable_color("--table-text", text_color);
     selected_bg = style->get_variable_color("--table-selected", selected_bg);
@@ -131,35 +115,22 @@ void TableWidget::render_rows(tvg::Scene* scene, const Element& elem) {
     float y = header_height_ + (i - start_row) * row_height_ - std::fmod(scroll_y_, row_height_);
 
     if (i == selected_row_) {
-      auto bg = tvg::Shape::gen();
-      bg->appendRect(0, y, elem.width(), row_height_);
-      bg->fill(selected_bg.r, selected_bg.g, selected_bg.b, selected_bg.a);
-      scene->push(std::move(bg));
+      r.draw_rect(0, y, elem.width(), row_height_, 0, Paint::solid(selected_bg), Paint::none(), 0);
     } else if (i == hover_row_) {
-      auto bg = tvg::Shape::gen();
-      bg->appendRect(0, y, elem.width(), row_height_);
-      bg->fill(hover_bg.r, hover_bg.g, hover_bg.b, hover_bg.a);
-      scene->push(std::move(bg));
+      r.draw_rect(0, y, elem.width(), row_height_, 0, Paint::solid(hover_bg), Paint::none(), 0);
     }
 
     float x = 0;
     for (size_t c = 0; c < columns_.size() && c < rows_[i].size(); c++) {
-      auto text = tvg::Text::gen();
-      text->font(font_family.c_str());
-      text->size(font_size);
-      text->text(rows_[i][c].text.c_str());
-      text->fill(text_color.r, text_color.g, text_color.b);
-      text->translate(x + 12, y + row_height_ / 2 + font_size / 3);
-      scene->push(std::move(text));
+      r.draw_text(rows_[i][c].text, x + 12, y + row_height_ / 2 + font_size / 3,
+                  font_family, font_size, false, text_color);
       x += columns_[c].width;
     }
 
-    auto divider = tvg::Shape::gen();
-    divider->moveTo(0, y + row_height_);
-    divider->lineTo(elem.width(), y + row_height_);
-    divider->strokeFill(243, 244, 246, 255);
-    divider->strokeWidth(1);
-    scene->push(std::move(divider));
+    // Row divider
+    char path[64];
+    snprintf(path, sizeof(path), "M 0 %.4g L %.4g %.4g", y + row_height_, elem.width(), y + row_height_);
+    r.stroke_path(path, Paint::solid(Color{0.95f, 0.96f, 0.96f, 1.0f}), 1);
   }
 }
 

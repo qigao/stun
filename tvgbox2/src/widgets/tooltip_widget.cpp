@@ -6,24 +6,26 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
+#include <cstdio>
 
 namespace tvgbox2 {
 
 TooltipWidget::TooltipWidget(const std::string& text) : text_(text) {}
 
-void TooltipWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void TooltipWidget::render(const Element& elem, Renderer& renderer) {
   if (!visible_ || opacity_ <= 0) return;
 
-  render_background(scene, elem);
-  render_text(scene, elem);
+  auto& r = renderer.flex();
+  render_background(r, elem);
+  render_text(r, elem);
 }
 
-void TooltipWidget::render_background(tvg::Scene* scene, const Element& elem) {
+void TooltipWidget::render_background(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color bg_color = {30, 30, 30, 230};  // Dark background
+  Color bg_color = {0.12f, 0.12f, 0.12f, 0.9f};  // Dark background
   float radius = 4.0f;
 
   if (style) {
@@ -32,77 +34,73 @@ void TooltipWidget::render_background(tvg::Scene* scene, const Element& elem) {
   }
 
   // Apply opacity
-  uint8_t alpha = static_cast<uint8_t>(bg_color.a * opacity_);
+  Color final_color = {bg_color.r, bg_color.g, bg_color.b, bg_color.a * opacity_};
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), radius, radius);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, alpha);
-
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), radius,
+              Paint::solid(final_color), Paint::none(), 0);
 
   // Arrow
   if (style && style->get_variable("--tooltip-arrow", "true") == "true") {
-    render_arrow(scene, elem);
+    render_arrow(r, elem);
   }
 }
 
-void TooltipWidget::render_arrow(tvg::Scene* scene, const Element& elem) {
+void TooltipWidget::render_arrow(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
 
-  Color bg_color = {30, 30, 30, 230};
+  Color bg_color = {0.12f, 0.12f, 0.12f, 0.9f};
   if (style) {
     bg_color = style->get_variable_color("--tooltip-bg", bg_color);
   }
 
-  uint8_t alpha = static_cast<uint8_t>(bg_color.a * opacity_);
+  Color final_color = {bg_color.r, bg_color.g, bg_color.b, bg_color.a * opacity_};
   float arrow_size = 6.0f;
-
-  auto arrow = tvg::Shape::gen();
 
   float cx = elem.width() / 2;
   float cy = elem.height() / 2;
 
+  char path[256];
+
   switch (position_) {
     case Position::Top:
       // Arrow pointing down at bottom
-      arrow->moveTo(cx - arrow_size, elem.height());
-      arrow->lineTo(cx, elem.height() + arrow_size);
-      arrow->lineTo(cx + arrow_size, elem.height());
-      arrow->close();
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+               cx - arrow_size, elem.height(),
+               cx, elem.height() + arrow_size,
+               cx + arrow_size, elem.height());
       break;
     case Position::Bottom:
       // Arrow pointing up at top
-      arrow->moveTo(cx - arrow_size, 0);
-      arrow->lineTo(cx, -arrow_size);
-      arrow->lineTo(cx + arrow_size, 0);
-      arrow->close();
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+               cx - arrow_size, 0.0f,
+               cx, -arrow_size,
+               cx + arrow_size, 0.0f);
       break;
     case Position::Left:
       // Arrow pointing right at right side
-      arrow->moveTo(elem.width(), cy - arrow_size);
-      arrow->lineTo(elem.width() + arrow_size, cy);
-      arrow->lineTo(elem.width(), cy + arrow_size);
-      arrow->close();
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+               elem.width(), cy - arrow_size,
+               elem.width() + arrow_size, cy,
+               elem.width(), cy + arrow_size);
       break;
     case Position::Right:
       // Arrow pointing left at left side
-      arrow->moveTo(0, cy - arrow_size);
-      arrow->lineTo(-arrow_size, cy);
-      arrow->lineTo(0, cy + arrow_size);
-      arrow->close();
+      snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+               0.0f, cy - arrow_size,
+               -arrow_size, cy,
+               0.0f, cy + arrow_size);
       break;
   }
 
-  arrow->fill(bg_color.r, bg_color.g, bg_color.b, alpha);
-  scene->push(std::move(arrow));
+  r.fill_path(path, Paint::solid(final_color));
 }
 
-void TooltipWidget::render_text(tvg::Scene* scene, const Element& elem) {
+void TooltipWidget::render_text(flex::Renderer& r, const Element& elem) {
   if (text_.empty()) return;
 
   auto* style = elem.computed_style;
 
-  Color text_color = {255, 255, 255, 255};
+  Color text_color = {1.0f, 1.0f, 1.0f, 1.0f};
   float font_size = 12.0f;
   std::string font_family = "Arial";
 
@@ -112,20 +110,12 @@ void TooltipWidget::render_text(tvg::Scene* scene, const Element& elem) {
     if (!style->font_family.empty()) font_family = style->font_family;
   }
 
-  uint8_t alpha = static_cast<uint8_t>(text_color.a * opacity_);
+  Color final_color = {text_color.r, text_color.g, text_color.b, text_color.a * opacity_};
 
   float padding = 8.0f;
   float text_y = elem.height() / 2 + font_size / 3;
 
-  auto text_shape = tvg::Text::gen();
-  text_shape->font(font_family.c_str());
-  text_shape->size(font_size);
-  text_shape->text(text_.c_str());
-  text_shape->fill(text_color.r, text_color.g, text_color.b);
-  text_shape->opacity(alpha);
-  text_shape->translate(padding, text_y);
-
-  scene->push(std::move(text_shape));
+  r.draw_text(text_, padding, text_y, font_family, font_size, false, final_color);
 }
 
 bool TooltipWidget::handle_event(const Event& event, Element& elem) {

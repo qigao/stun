@@ -6,8 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
+#include <cstdio>
+#include <functional>
 
 namespace tvgbox2 {
 
@@ -95,23 +97,21 @@ void TreeWidget::toggle(const std::string& id) {
   if (auto node = find_node(id)) { node->expanded = !node->expanded; dirty_ = true; }
 }
 
-void TreeWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void TreeWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
   auto* style = elem.computed_style;
-  Color bg_color = {255, 255, 255, 255};
+  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
   if (style) bg_color = style->get_variable_color("--tree-bg", bg_color);
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), 4, 4);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), 4, Paint::solid(bg_color), Paint::none(), 0);
 
   float y = -scroll_y_;
   for (auto& root : roots_) {
-    render_node(scene, elem, root.get(), y, 0);
+    render_node(r, elem, root.get(), y, 0);
   }
 }
 
-void TreeWidget::render_node(tvg::Scene* scene, const Element& elem, TreeNode* node, float& y, int depth) {
+void TreeWidget::render_node(flex::Renderer& r, const Element& elem, TreeNode* node, float& y, int depth) {
   if (y + item_height_ < 0) { y += item_height_; goto recurse; }
   if (y > elem.height()) return;
 
@@ -119,9 +119,9 @@ void TreeWidget::render_node(tvg::Scene* scene, const Element& elem, TreeNode* n
     auto* style = elem.computed_style;
     float font_size = style && style->font_size > 0 ? style->font_size : 14.0f;
     std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
-    Color text_color = {0, 0, 0, 255};
-    Color selected_bg = {239, 246, 255, 255};
-    Color hover_bg = {249, 250, 251, 255};
+    Color text_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    Color selected_bg = {0.94f, 0.96f, 1.0f, 1.0f};
+    Color hover_bg = {0.98f, 0.98f, 0.98f, 1.0f};
     if (style) {
       text_color = style->get_variable_color("--tree-text", text_color);
       selected_bg = style->get_variable_color("--tree-selected", selected_bg);
@@ -131,55 +131,26 @@ void TreeWidget::render_node(tvg::Scene* scene, const Element& elem, TreeNode* n
     float x = depth * indent_ + 8;
 
     if (node == selected_) {
-      auto bg = tvg::Shape::gen();
-      bg->appendRect(0, y, elem.width(), item_height_);
-      bg->fill(selected_bg.r, selected_bg.g, selected_bg.b, selected_bg.a);
-      scene->push(std::move(bg));
+      r.draw_rect(0, y, elem.width(), item_height_, 0, Paint::solid(selected_bg), Paint::none(), 0);
     } else if (node == hover_) {
-      auto bg = tvg::Shape::gen();
-      bg->appendRect(0, y, elem.width(), item_height_);
-      bg->fill(hover_bg.r, hover_bg.g, hover_bg.b, hover_bg.a);
-      scene->push(std::move(bg));
+      r.draw_rect(0, y, elem.width(), item_height_, 0, Paint::solid(hover_bg), Paint::none(), 0);
     }
 
     if (!node->children.empty()) {
-      auto arrow = tvg::Shape::gen();
       float ax = x + 4, ay = y + item_height_ / 2;
+      char path[128];
       if (node->expanded) {
-        arrow->moveTo(ax - 4, ay - 2);
-        arrow->lineTo(ax, ay + 3);
-        arrow->lineTo(ax + 4, ay - 2);
+        snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
+                 ax - 4, ay - 2, ax, ay + 3, ax + 4, ay - 2);
       } else {
-        arrow->moveTo(ax - 2, ay - 4);
-        arrow->lineTo(ax + 3, ay);
-        arrow->lineTo(ax - 2, ay + 4);
+        snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
+                 ax - 2, ay - 4, ax + 3, ay, ax - 2, ay + 4);
       }
-      arrow->strokeFill(100, 100, 100, 255);
-      arrow->strokeWidth(1.5f);
-      arrow->strokeCap(tvg::StrokeCap::Round);
-      arrow->strokeJoin(tvg::StrokeJoin::Round);
-      scene->push(std::move(arrow));
+      r.stroke_path(path, Paint::solid(Color{0.39f, 0.39f, 0.39f, 1.0f}), 1.5f);
     }
 
-    auto text = tvg::Text::gen();
-    text->font(font_family.c_str());
-    text->size(font_size);
-    text->text(node->label.c_str());
-    text->fill(text_color.r, text_color.g, text_color.b);
-    
-    float tx, ty, tw, th;
-    text->bounds(&tx, &ty, &tw, &th);
-    
-    // Vertical centering using bounds
-    // ty is usually negative (top relative to baseline). th is height.
-    // We want to align the center of the bounding box with the center of the row.
-    float text_center_y = ty + th / 2.0f; 
-    float row_center_y = y + item_height_ / 2.0f;
-    float baseline_y = row_center_y - text_center_y;
-
-    // Reduced gap from x+16 to x+12 for better visual spacing
-    text->translate(x + 12, baseline_y);
-    scene->push(text);
+    float text_y = y + item_height_ / 2 + font_size / 3;
+    r.draw_text(node->label, x + 12, text_y, font_family, font_size, false, text_color);
   }
 
   y += item_height_;
@@ -187,7 +158,7 @@ void TreeWidget::render_node(tvg::Scene* scene, const Element& elem, TreeNode* n
 recurse:
   if (node->expanded) {
     for (auto& child : node->children) {
-      render_node(scene, elem, child.get(), y, depth + 1);
+      render_node(r, elem, child.get(), y, depth + 1);
     }
   }
 }

@@ -1,7 +1,15 @@
+/*
+ * tvgbox2 - TableWidget
+ *
+ * Data table - 使用 flex::Renderer 渲染
+ */
+
 #ifndef TVGBOX2_TABLE_WIDGET_H
 #define TVGBOX2_TABLE_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -15,7 +23,7 @@ public:
 
   TableWidget();
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "TableWidget"; }
@@ -32,8 +40,8 @@ public:
   void set_select_callback(SelectCallback cb) { on_select_ = std::move(cb); }
 
 private:
-  void render_header(tvg::Scene* scene, const Element& elem);
-  void render_rows(tvg::Scene* scene, const Element& elem);
+  void render_header(flex::Renderer& r, const Element& elem);
+  void render_rows(flex::Renderer& r, const Element& elem);
 
   std::vector<Column> columns_;
   std::vector<std::vector<Cell>> rows_;
@@ -46,4 +54,5 @@ private:
 };
 
 } // namespace tvgbox2
-#endif
+
+#endif // TVGBOX2_TABLE_WIDGET_H

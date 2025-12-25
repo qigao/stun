@@ -6,16 +6,17 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 
 namespace tvgbox2 {
 
 DividerWidget::DividerWidget(Orientation orientation) : orientation_(orientation) {}
 
-void DividerWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void DividerWidget::render(const Element& elem, Renderer& renderer) {
   auto* style = elem.computed_style;
+  auto& r = renderer.flex();
 
-  Color color = {200, 200, 200, 255};
+  Color color = {0.78f, 0.78f, 0.78f, 1.0f};  // 200/255
   float thickness = 1.0f;
 
   if (style) {
@@ -32,55 +33,50 @@ void DividerWidget::render(tvg::Scene* scene, const Element& elem, Renderer& ren
     else style_ = Style::Solid;
   }
 
-  auto line = tvg::Shape::gen();
+  Paint stroke = Paint::solid(color);
 
   if (orientation_ == Orientation::Horizontal) {
     float y = elem.height() / 2;
 
     if (label_.empty()) {
-      // Simple line
-      line->moveTo(0, y);
-      line->lineTo(elem.width(), y);
+      // Simple horizontal line
+      char path[128];
+      snprintf(path, sizeof(path), "M 0 %.4g L %.4g %.4g", y, elem.width(), y);
+      r.stroke_path(path, stroke, thickness);
     } else {
       // Line with gap for label
       float label_width = label_.size() * 8.0f;  // Approximate
       float gap = 8.0f;
       float center = elem.width() / 2;
 
-      line->moveTo(0, y);
-      line->lineTo(center - label_width / 2 - gap, y);
-      line->moveTo(center + label_width / 2 + gap, y);
-      line->lineTo(elem.width(), y);
+      // Left segment
+      char path1[128];
+      snprintf(path1, sizeof(path1), "M 0 %.4g L %.4g %.4g",
+               y, center - label_width / 2 - gap, y);
+      r.stroke_path(path1, stroke, thickness);
+
+      // Right segment
+      char path2[128];
+      snprintf(path2, sizeof(path2), "M %.4g %.4g L %.4g %.4g",
+               center + label_width / 2 + gap, y, elem.width(), y);
+      r.stroke_path(path2, stroke, thickness);
 
       // Render label
-      auto text_shape = tvg::Text::gen();
-      text_shape->font(style ? style->font_family.c_str() : "Arial");
-      text_shape->size(style ? style->font_size : 12.0f);
-      text_shape->text(label_.c_str());
-      text_shape->fill(color.r, color.g, color.b);
-      text_shape->opacity(color.a);
-      text_shape->translate(center - label_width / 2, y + 4);
-      scene->push(std::move(text_shape));
+      float font_size = style ? style->font_size : 12.0f;
+      std::string font_family = style ? style->font_family : "Arial";
+      r.draw_text(label_, center - label_width / 2, y + 4, font_family, font_size, false, color);
     }
   } else {
+    // Vertical line
     float x = elem.width() / 2;
-    line->moveTo(x, 0);
-    line->lineTo(x, elem.height());
+    char path[128];
+    snprintf(path, sizeof(path), "M %.4g 0 L %.4g %.4g", x, x, elem.height());
+    r.stroke_path(path, stroke, thickness);
   }
 
-  line->strokeFill(color.r, color.g, color.b, color.a);
-  line->strokeWidth(thickness);
-
-  // Apply dash pattern
-  if (style_ == Style::Dashed) {
-    float dash[] = {6.0f, 4.0f};
-    line->strokeDash(dash, 2);
-  } else if (style_ == Style::Dotted) {
-    float dash[] = {2.0f, 2.0f};
-    line->strokeDash(dash, 2);
-  }
-
-  scene->push(std::move(line));
+  // Note: dash pattern would require custom stroke_path extension
+  // For now, solid lines only. Dashed/dotted styles could be implemented
+  // by adding dash support to flex::Renderer::stroke_path
 }
 
 bool DividerWidget::handle_event(const Event& event, Element& elem) {

@@ -1,13 +1,15 @@
 /*
  * tvgbox2 - ModalWidget
  *
- * Dialog overlay
+ * Dialog overlay - 使用 flex::Renderer 渲染
  */
 
 #ifndef TVGBOX2_MODAL_WIDGET_H
 #define TVGBOX2_MODAL_WIDGET_H
 
 #include "../widget.h"
+#include "../group.h"
+#include "../shapes.h"
 #include <string>
 #include <functional>
 
@@ -17,7 +19,7 @@ class ModalWidget : public Widget {
 public:
   ModalWidget(const std::string& title = "");
 
-  void render(tvg::Scene* scene, const Element& elem, Renderer& renderer) override;
+  void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ModalWidget"; }
@@ -39,10 +41,11 @@ public:
   void set_close_callback(CloseCallback cb) { on_close_ = std::move(cb); }
 
 private:
-  void render_overlay(tvg::Scene* scene, const Element& elem);
-  void render_dialog(tvg::Scene* scene, const Element& elem);
-  void render_header(tvg::Scene* scene, const Element& elem, float dialog_x, float dialog_y, float dialog_w);
-  void render_close_button(tvg::Scene* scene, float x, float y);
+  void render_overlay(flex::Renderer& r, const Element& elem);
+  void render_dialog(flex::Renderer& r, const Element& elem);
+  void render_header(flex::Renderer& r, const Element& elem,
+                     float dialog_x, float dialog_y, float dialog_w);
+  void render_close_button(flex::Renderer& r, float x, float y);
 
   std::string title_;
   bool open_ = false;
@@ -54,4 +57,4 @@ private:
 
 } // namespace tvgbox2
 
-#endif
+#endif // TVGBOX2_MODAL_WIDGET_H

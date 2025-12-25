@@ -486,7 +486,7 @@ private:
     }
 
     Color parse_color(const std::string& value) {
-        if (value.empty()) return Color(0, 0, 0, 0);
+        if (value.empty()) return Color(0.0f, 0.0f, 0.0f, 0.0f);
 
         // Hex color
         if (value[0] == '#') {
@@ -498,12 +498,12 @@ private:
             if (hex.size() == 6) {
                 unsigned int r, g, b;
                 sscanf(hex.c_str(), "%2x%2x%2x", &r, &g, &b);
-                return Color(r, g, b, 255);
+                return Color(r / 255.0f, g / 255.0f, b / 255.0f, 1.0f);
             }
             if (hex.size() == 8) {
                 unsigned int r, g, b, a;
                 sscanf(hex.c_str(), "%2x%2x%2x%2x", &r, &g, &b, &a);
-                return Color(r, g, b, a);
+                return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
             }
         }
 
@@ -518,7 +518,7 @@ private:
             int r, g, b;
             float a;
             ss >> r >> g >> b >> a;
-            return Color(r, g, b, static_cast<uint8_t>(a * 255));
+            return Color(r / 255.0f, g / 255.0f, b / 255.0f, a);
         }
 
         // rgb(r, g, b)
@@ -530,20 +530,20 @@ private:
             std::istringstream ss(inner);
             int r, g, b;
             ss >> r >> g >> b;
-            return Color(r, g, b, 255);
+            return Color(r / 255.0f, g / 255.0f, b / 255.0f, 1.0f);
         }
 
-        // Named colors (common ones)
-        if (value == "transparent") return Color(0, 0, 0, 0);
-        if (value == "black") return Color(0, 0, 0, 255);
-        if (value == "white") return Color(255, 255, 255, 255);
-        if (value == "red") return Color(255, 0, 0, 255);
-        if (value == "green") return Color(0, 128, 0, 255);
-        if (value == "blue") return Color(0, 0, 255, 255);
-        if (value == "yellow") return Color(255, 255, 0, 255);
-        if (value == "gray" || value == "grey") return Color(128, 128, 128, 255);
+        // Named colors (common ones) - now using float [0.0-1.0]
+        if (value == "transparent") return Color(0.0f, 0.0f, 0.0f, 0.0f);
+        if (value == "black") return Color(0.0f, 0.0f, 0.0f, 1.0f);
+        if (value == "white") return Color(1.0f, 1.0f, 1.0f, 1.0f);
+        if (value == "red") return Color(1.0f, 0.0f, 0.0f, 1.0f);
+        if (value == "green") return Color(0.0f, 0.5f, 0.0f, 1.0f);  // CSS green is #008000
+        if (value == "blue") return Color(0.0f, 0.0f, 1.0f, 1.0f);
+        if (value == "yellow") return Color(1.0f, 1.0f, 0.0f, 1.0f);
+        if (value == "gray" || value == "grey") return Color(0.5f, 0.5f, 0.5f, 1.0f);
 
-        return Color(0, 0, 0, 255);  // Default: black
+        return Color(0.0f, 0.0f, 0.0f, 1.0f);  // Default: black
     }
 
     void parse_box_shadow(const std::string& value, ComputedStyle* style) {
@@ -598,7 +598,7 @@ private:
                     float a;
                     char comma;
                     ss >> r >> comma >> g >> comma >> b >> comma >> a;
-                    shadow.color = Color(r, g, b, static_cast<uint8_t>(a * 255));
+                    shadow.color = Color(r / 255.0f, g / 255.0f, b / 255.0f, a);
                 }
                 continue;
             }

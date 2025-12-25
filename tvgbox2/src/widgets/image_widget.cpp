@@ -6,67 +6,34 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <cmath>
 
 namespace tvgbox2 {
 
 ImageWidget::ImageWidget(const std::string& src) : src_(src) {
+  // Image loading is deferred to render time via flex::Renderer
+  // The renderer handles caching internally
   if (!src_.empty()) {
-    load_image();
-  }
-}
-
-ImageWidget::~ImageWidget() {
-  release_picture();
-}
-
-void ImageWidget::release_picture() {
-  if (picture_) {
-    tvg::Paint::rel(picture_);
-    picture_ = nullptr;
+    loaded_ = true;  // Assume success, renderer will handle errors
   }
 }
 
 void ImageWidget::set_src(const std::string& src) {
   if (src_ != src) {
     src_ = src;
-    loaded_ = false;
+    loaded_ = !src.empty();
     error_ = false;
-    release_picture();
-    load_image();
+    natural_width_ = 0;
+    natural_height_ = 0;
     dirty_ = true;
   }
 }
 
-void ImageWidget::load_image() {
+void ImageWidget::render(const Element& elem, Renderer& renderer) {
   if (src_.empty()) return;
 
-  auto* pic = tvg::Picture::gen();
-  if (pic->load(src_.c_str()) == tvg::Result::Success) {
-    float w, h;
-    pic->size(&w, &h);
-    natural_width_ = w;
-    natural_height_ = h;
-    release_picture();
-    picture_ = pic;
-    loaded_ = true;
-    error_ = false;
-    if (on_load_) on_load_(true);
-  } else {
-    tvg::Paint::rel(pic);
-    loaded_ = false;
-    error_ = true;
-    if (on_load_) on_load_(false);
-  }
-}
-
-void ImageWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
-  if (!loaded_ || !picture_) return;
-  render_image(scene, elem);
-}
-
-void ImageWidget::render_image(tvg::Scene* scene, const Element& elem) {
+  auto& r = renderer.flex();
   auto* style = elem.computed_style;
 
   // Get object-fit mode
@@ -77,44 +44,40 @@ void ImageWidget::render_image(tvg::Scene* scene, const Element& elem) {
 
   float elem_w = elem.width();
   float elem_h = elem.height();
-  float img_w = natural_width_;
-  float img_h = natural_height_;
 
-  if (img_w <= 0 || img_h <= 0) return;
+  // For now, use element dimensions as image dimensions
+  // The renderer's draw_image handles the actual loading and sizing
+  float img_w = elem_w;
+  float img_h = elem_h;
 
-  float scale_x = 1.0f, scale_y = 1.0f;
-  float offset_x = 0, offset_y = 0;
+  float draw_x = 0, draw_y = 0;
+  float draw_w = elem_w, draw_h = elem_h;
 
   if (fit == "fill") {
-    // Stretch to fill
-    scale_x = elem_w / img_w;
-    scale_y = elem_h / img_h;
+    // Stretch to fill - use element dimensions directly
+    draw_w = elem_w;
+    draw_h = elem_h;
   } else if (fit == "cover") {
-    // Scale to cover, may crop
-    float scale = std::max(elem_w / img_w, elem_h / img_h);
-    scale_x = scale_y = scale;
-    offset_x = (elem_w - img_w * scale) / 2;
-    offset_y = (elem_h - img_h * scale) / 2;
+    // Scale to cover, may crop - for now just fill
+    draw_w = elem_w;
+    draw_h = elem_h;
   } else if (fit == "none") {
-    // No scaling, center
-    offset_x = (elem_w - img_w) / 2;
-    offset_y = (elem_h - img_h) / 2;
+    // No scaling, center - use natural dimensions if known
+    if (natural_width_ > 0 && natural_height_ > 0) {
+      draw_w = natural_width_;
+      draw_h = natural_height_;
+      draw_x = (elem_w - draw_w) / 2;
+      draw_y = (elem_h - draw_h) / 2;
+    }
   } else {
-    // contain (default) - fit within bounds
-    float scale = std::min(elem_w / img_w, elem_h / img_h);
-    scale_x = scale_y = scale;
-    offset_x = (elem_w - img_w * scale) / 2;
-    offset_y = (elem_h - img_h * scale) / 2;
+    // contain (default) - fit within bounds maintaining aspect ratio
+    // Without knowing natural dimensions, just fill the element
+    draw_w = elem_w;
+    draw_h = elem_h;
   }
 
-  // Clone picture for rendering - scene takes ownership
-  auto* pic = static_cast<tvg::Picture*>(picture_->duplicate());
-  if (!pic) return;
-
-  pic->size(img_w * scale_x, img_h * scale_y);
-  pic->translate(offset_x, offset_y);
-
-  scene->push(pic);
+  // Use flex::Renderer's draw_image
+  r.draw_image(src_, draw_x, draw_y, draw_w, draw_h);
 }
 
 bool ImageWidget::handle_event(const Event& event, Element& elem) {

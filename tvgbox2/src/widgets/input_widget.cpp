@@ -10,7 +10,6 @@
 #include <tvgbox2/event.h>
 #include <tvgbox2/renderer.h>
 #include <tvgbox2/text_util.h>
-#include <thorvg.h>
 #include <algorithm>
 #include <cmath>
 
@@ -86,21 +85,23 @@ void InputWidget::clear_selection() {
 // Widget 接口实现
 // ============================================================================
 
-void InputWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void InputWidget::render(const Element& elem, Renderer& renderer) {
   // Ensure textedit is initialized for cursor/selection queries
   const_cast<InputWidget*>(this)->ensure_textedit_init(elem);
 
-  render_background(scene, elem);
+  auto& r = renderer.flex();
+
+  render_background(r, elem);
 
   if (has_selection()) {
-    render_selection(scene, elem);
+    render_selection(r, elem);
   }
 
-  render_text(scene, elem);
+  render_text(r, elem);
 
   // 只有聚焦时才显示光标
   if (elem.has_state("focus") && cursor_visible_) {
-    render_cursor(scene, elem);
+    render_cursor(r, elem);
   }
 }
 
@@ -146,31 +147,26 @@ void InputWidget::update(float delta_ms, Element& elem) {
 // 渲染辅助
 // ============================================================================
 
-void InputWidget::render_background(tvg::Scene* scene, const Element& elem) {
+void InputWidget::render_background(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
   float radius = style->border_radius[0];  // 使用第一个值（四角相同）
 
   // 背景色：CSS 变量 --input-bg 或默认
-  Color bg_color = style->get_variable_color("--input-bg", {240, 240, 240, 255});
+  Color bg_color = style->get_variable_color("--input-bg", {0.94f, 0.94f, 0.94f, 1.0f});
 
-  auto* bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), radius, radius);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(bg);
+  r.draw_rect(0, 0, elem.width(), elem.height(), radius,
+              Paint::solid(bg_color), Paint::none(), 0);
 
   // 边框：CSS 变量 --input-border 或默认
-  Color border_color = style->get_variable_color("--input-border", {200, 200, 200, 255});
+  Color border_color = style->get_variable_color("--input-border", {0.78f, 0.78f, 0.78f, 1.0f});
 
-  auto* border = tvg::Shape::gen();
-  border->appendRect(0, 0, elem.width(), elem.height(), radius, radius);
-  border->strokeFill(border_color.r, border_color.g, border_color.b, border_color.a);
-  border->strokeWidth(1);
-  scene->push(border);
+  r.draw_rect(0, 0, elem.width(), elem.height(), radius,
+              Paint::none(), Paint::solid(border_color), 1);
 }
 
-void InputWidget::render_text(tvg::Scene* scene, const Element& elem) {
+void InputWidget::render_text(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -182,27 +178,21 @@ void InputWidget::render_text(tvg::Scene* scene, const Element& elem) {
 
   // 如果为空，显示 placeholder
   if (display.empty() && !placeholder_.empty()) {
-    Color placeholder_color = style->get_variable_color("--input-placeholder", {160, 160, 160, 255});
+    Color placeholder_color = style->get_variable_color("--input-placeholder", {0.63f, 0.63f, 0.63f, 1.0f});
 
     // Placeholder 也支持 emoji
     auto segments = segment_text(placeholder_);
     float current_x = text_x;
 
     for (const auto& seg : segments) {
-      auto* text_shape = tvg::Text::gen();
-
+      std::string font_name;
       if (seg.type == TextSegmentType::Emoji) {
-        text_shape->font(get_emoji_font_name());
+        font_name = get_emoji_font_name();
       } else {
-        text_shape->font(style->font_family.c_str());
+        font_name = style->font_family;
       }
 
-      text_shape->size(style->font_size);
-      text_shape->text(seg.text.c_str());
-      text_shape->fill(placeholder_color.r, placeholder_color.g, placeholder_color.b);
-      text_shape->opacity(placeholder_color.a);
-      text_shape->translate(current_x, text_y);
-      scene->push(text_shape);
+      r.draw_text(seg.text, current_x, text_y, font_name, style->font_size, false, placeholder_color);
 
       // 更新位置
       if (seg.type == TextSegmentType::Emoji) {
@@ -222,26 +212,20 @@ void InputWidget::render_text(tvg::Scene* scene, const Element& elem) {
 
   // 正常文本 - 支持 emoji
   if (!display.empty()) {
-    Color text_color = style->get_variable_color("--input-text", {0, 0, 0, 255});
+    Color text_color = style->get_variable_color("--input-text", {0.0f, 0.0f, 0.0f, 1.0f});
 
     auto segments = segment_text(display);
     float current_x = text_x;
 
     for (const auto& seg : segments) {
-      auto* text_shape = tvg::Text::gen();
-
+      std::string font_name;
       if (seg.type == TextSegmentType::Emoji) {
-        text_shape->font(get_emoji_font_name());
+        font_name = get_emoji_font_name();
       } else {
-        text_shape->font(style->font_family.c_str());
+        font_name = style->font_family;
       }
 
-      text_shape->size(style->font_size);
-      text_shape->text(seg.text.c_str());
-      text_shape->fill(text_color.r, text_color.g, text_color.b);
-      text_shape->opacity(text_color.a);
-      text_shape->translate(current_x, text_y);
-      scene->push(text_shape);
+      r.draw_text(seg.text, current_x, text_y, font_name, style->font_size, false, text_color);
 
       // 更新位置
       if (seg.type == TextSegmentType::Emoji) {
@@ -259,7 +243,7 @@ void InputWidget::render_text(tvg::Scene* scene, const Element& elem) {
   }
 }
 
-void InputWidget::render_cursor(tvg::Scene* scene, const Element& elem) {
+void InputWidget::render_cursor(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -268,15 +252,12 @@ void InputWidget::render_cursor(tvg::Scene* scene, const Element& elem) {
   float cursor_h = style->font_size;
   float cursor_y = (elem.height() - cursor_h) / 2;
 
-  Color cursor_color = style->get_variable_color("--input-cursor", {0, 0, 0, 255});
+  Color cursor_color = style->get_variable_color("--input-cursor", {0.0f, 0.0f, 0.0f, 1.0f});
 
-  auto* cursor = tvg::Shape::gen();
-  cursor->appendRect(cursor_x, cursor_y, 1, cursor_h);  // 1px 宽的竖线
-  cursor->fill(cursor_color.r, cursor_color.g, cursor_color.b, cursor_color.a);
-  scene->push(cursor);
+  r.draw_rect(cursor_x, cursor_y, 1, cursor_h, 0, Paint::solid(cursor_color), Paint::none(), 0);
 }
 
-void InputWidget::render_selection(tvg::Scene* scene, const Element& elem) {
+void InputWidget::render_selection(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style || !textedit_) return;
 
@@ -286,12 +267,9 @@ void InputWidget::render_selection(tvg::Scene* scene, const Element& elem) {
   float start_x = index_to_x(start, elem);
   float end_x = index_to_x(end, elem);
 
-  Color selection_bg = style->get_variable_color("--input-selection-bg", {100, 150, 255, 128});
+  Color selection_bg = style->get_variable_color("--input-selection-bg", {0.39f, 0.59f, 1.0f, 0.5f});
 
-  auto* selection = tvg::Shape::gen();
-  selection->appendRect(start_x, 0, end_x - start_x, elem.height());
-  selection->fill(selection_bg.r, selection_bg.g, selection_bg.b, selection_bg.a);
-  scene->push(selection);
+  r.draw_rect(start_x, 0, end_x - start_x, elem.height(), 0, Paint::solid(selection_bg), Paint::none(), 0);
 }
 
 // ============================================================================
@@ -310,7 +288,7 @@ bool InputWidget::handle_key_down(const Event& event, Element& elem) {
     // 重置光标闪烁
     cursor_blink_time_ = 0;
     cursor_visible_ = true;
-    
+
     // Notify change
     if (change_callback_) change_callback_(text_);
 
@@ -366,7 +344,7 @@ bool InputWidget::handle_text_input(const Event& event, Element& elem) {
     // 重置光标闪烁
     cursor_blink_time_ = 0;
     cursor_visible_ = true;
-    
+
     if (change_callback_) change_callback_(text_);
 
     elem.mark_paint_dirty();

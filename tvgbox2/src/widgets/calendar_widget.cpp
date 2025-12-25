@@ -6,9 +6,10 @@
 #include <tvgbox2/computed_style.h>
 #include <tvgbox2/element.h>
 #include <tvgbox2/event.h>
-#include <thorvg.h>
+#include <tvgbox2/renderer.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace tvgbox2 {
 
@@ -56,76 +57,66 @@ int CalendarWidget::day_of_week(int year, int month, int day) const {
   return ((h + 6) % 7);
 }
 
-void CalendarWidget::render(tvg::Scene* scene, const Element& elem, Renderer& renderer) {
+void CalendarWidget::render(const Element& elem, Renderer& renderer) {
+  auto& r = renderer.flex();
   auto* style = elem.computed_style;
-  Color bg_color = {255, 255, 255, 255};
+  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
   if (style) bg_color = style->get_variable_color("--calendar-bg", bg_color);
 
-  auto bg = tvg::Shape::gen();
-  bg->appendRect(0, 0, elem.width(), elem.height(), 8, 8);
-  bg->fill(bg_color.r, bg_color.g, bg_color.b, bg_color.a);
-  scene->push(std::move(bg));
+  r.draw_rect(0, 0, elem.width(), elem.height(), 8, Paint::solid(bg_color), Paint::none(), 0);
 
-  render_header(scene, elem);
-  render_weekdays(scene, elem);
-  render_days(scene, elem);
+  render_header(r, elem);
+  render_weekdays(r, elem);
+  render_days(r, elem);
 }
 
-void CalendarWidget::render_header(tvg::Scene* scene, const Element& elem) {
+void CalendarWidget::render_header(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   float font_size = style && style->font_size > 0 ? style->font_size : 16.0f;
   std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
   float header_h = 48.0f, padding = 12.0f;
 
-  auto prev = tvg::Shape::gen();
-  prev->moveTo(padding + 8, header_h / 2);
-  prev->lineTo(padding + 14, header_h / 2 - 6);
-  prev->lineTo(padding + 14, header_h / 2 + 6);
-  prev->close();
-  prev->fill(100, 100, 100, 255);
-  scene->push(std::move(prev));
+  // Prev arrow (filled triangle)
+  char prev_path[128];
+  snprintf(prev_path, sizeof(prev_path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+           padding + 14, header_h / 2 - 6,
+           padding + 14, header_h / 2 + 6,
+           padding + 8, header_h / 2);
+  r.fill_path(prev_path, Paint::solid(Color{0.39f, 0.39f, 0.39f, 1.0f}));
 
-  auto next = tvg::Shape::gen();
+  // Next arrow (filled triangle)
   float nx = elem.width() - padding - 8;
-  next->moveTo(nx, header_h / 2);
-  next->lineTo(nx - 6, header_h / 2 - 6);
-  next->lineTo(nx - 6, header_h / 2 + 6);
-  next->close();
-  next->fill(100, 100, 100, 255);
-  scene->push(std::move(next));
+  char next_path[128];
+  snprintf(next_path, sizeof(next_path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g Z",
+           nx - 6, header_h / 2 - 6,
+           nx - 6, header_h / 2 + 6,
+           nx, header_h / 2);
+  r.fill_path(next_path, Paint::solid(Color{0.39f, 0.39f, 0.39f, 1.0f}));
 
   std::string month_year = std::string(MONTH_NAMES[view_.month - 1]) + " " + std::to_string(view_.year);
-  auto title = tvg::Text::gen();
-  title->font(font_family.c_str());
-  title->size(font_size);
-  title->text(month_year.c_str());
-  title->fill(0, 0, 0);
-  title->translate((elem.width() - month_year.size() * font_size * 0.5f) / 2, header_h / 2 + font_size / 3);
-  scene->push(std::move(title));
+  float text_x = (elem.width() - month_year.size() * font_size * 0.5f) / 2;
+  float text_y = header_h / 2 + font_size / 3;
+  r.draw_text(month_year, text_x, text_y, font_family, font_size, false, Color{0.0f, 0.0f, 0.0f, 1.0f});
 }
 
-void CalendarWidget::render_weekdays(tvg::Scene* scene, const Element& elem) {
+void CalendarWidget::render_weekdays(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   float font_size = style && style->font_size > 0 ? style->font_size * 0.8f : 12.0f;
   std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
   float header_h = 48.0f, weekday_h = 32.0f, cell_w = elem.width() / 7;
 
   for (int i = 0; i < 7; i++) {
-    auto text = tvg::Text::gen();
-    text->font(font_family.c_str());
-    text->size(font_size);
-    text->text(WEEKDAY_NAMES[i]);
-    text->fill(100, 100, 100);
-    text->translate(i * cell_w + (cell_w - font_size * 1.2f) / 2, header_h + weekday_h / 2 + font_size / 3);
-    scene->push(std::move(text));
+    float x = i * cell_w + (cell_w - font_size * 1.2f) / 2;
+    float y = header_h + weekday_h / 2 + font_size / 3;
+    r.draw_text(WEEKDAY_NAMES[i], x, y, font_family, font_size, false, Color{0.39f, 0.39f, 0.39f, 1.0f});
   }
 }
 
-void CalendarWidget::render_days(tvg::Scene* scene, const Element& elem) {
+void CalendarWidget::render_days(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   float font_size = style && style->font_size > 0 ? style->font_size : 14.0f;
   std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
-  Color selected_bg = {59, 130, 246, 255};
+  Color selected_bg = {0.23f, 0.51f, 0.96f, 1.0f};
   if (style) selected_bg = style->get_variable_color("--calendar-selected", selected_bg);
 
   float header_h = 48.0f, weekday_h = 32.0f, start_y = header_h + weekday_h;
@@ -141,26 +132,16 @@ void CalendarWidget::render_days(tvg::Scene* scene, const Element& elem) {
     bool is_hover = (d == hover_day_);
 
     if (is_selected) {
-      auto bg = tvg::Shape::gen();
-      bg->appendCircle(cx, cy, radius, radius);
-      bg->fill(selected_bg.r, selected_bg.g, selected_bg.b, selected_bg.a);
-      scene->push(std::move(bg));
+      r.draw_circle(cx, cy, radius, Paint::solid(selected_bg), Paint::none(), 0);
     } else if (is_hover) {
-      auto bg = tvg::Shape::gen();
-      bg->appendCircle(cx, cy, radius, radius);
-      bg->fill(240, 240, 240, 255);
-      scene->push(std::move(bg));
+      r.draw_circle(cx, cy, radius, Paint::solid(Color{0.94f, 0.94f, 0.94f, 1.0f}), Paint::none(), 0);
     }
 
-    auto text = tvg::Text::gen();
-    text->font(font_family.c_str());
-    text->size(font_size);
-    text->text(std::to_string(d).c_str());
-    if (is_selected) text->fill(255, 255, 255);
-    else text->fill(0, 0, 0);
+    Color text_color = is_selected ? Color{1.0f, 1.0f, 1.0f, 1.0f} : Color{0.0f, 0.0f, 0.0f, 1.0f};
     float text_w = (d >= 10 ? 2 : 1) * font_size * 0.5f;
-    text->translate(cx - text_w / 2, cy + font_size / 3);
-    scene->push(std::move(text));
+    float text_x = cx - text_w / 2;
+    float text_y = cy + font_size / 3;
+    r.draw_text(std::to_string(d), text_x, text_y, font_family, font_size, false, text_color);
   }
 }
 
