@@ -6,6 +6,7 @@
 
 #include <SDL2/SDL.h>
 #include <flex.h>
+#include "flex/backends/thorvg/init.h"
 #include <iomanip>
 #include <iostream>
 #include <memory>

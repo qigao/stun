@@ -11,6 +11,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
+#include "flex/backends/thorvg/init.h"
 
 class SpaceShooterGame {
 public:

@@ -59,40 +59,44 @@ void demo_state_machine() {
 void demo_animation() {
   std::cout << "\n=== Animation Runtime Demo ===\n\n";
 
-  // Create animation manager
-  AnimationManager manager;
+  // Create arena allocator for Timeline system
+  ArenaAllocator alloc{16 * 1024};
 
-  // Create an animation from AST-like data
-  parser::AstAnim ast_anim("fadeIn");
-  ast_anim.duration = 1.0f;
-  ast_anim.loop_mode = "once";
+  // Create animation using Timeline API
+  auto timeline = Timeline::create("fadeIn", alloc);
+  timeline->set_duration(1.0f);
+  timeline->set_loop_mode(LoopMode::Once);
 
-  // Add track
-  parser::AstTrack track("opacity");
-  track.keyframes.push_back({0.0f, parser::AstValue(0.0f)});
-  track.keyframes.push_back({0.5f, parser::AstValue(0.5f)});
-  track.keyframes.push_back({1.0f, parser::AstValue(1.0f)});
-  ast_anim.tracks.push_back(track);
+  // Add track with keyframes
+  auto track = timeline->add_track("opacity");
+  track->add_keyframe(0.0f, 0.0f);
+  track->add_keyframe(0.5f, 0.5f);
+  track->add_keyframe(1.0f, 1.0f);
 
-  // Convert to runtime animation
-  auto runtime_anim = manager.create_animation(ast_anim);
+  std::cout << "Created animation: " << timeline->name() << "\n";
+  std::cout << "Duration: " << timeline->duration() << "s\n";
+  std::cout << "Loop: " << (timeline->loop_mode() == LoopMode::Once ? "once" :
+                            timeline->loop_mode() == LoopMode::Loop ? "loop" : "pingpong") << "\n";
+  std::cout << "Tracks: " << timeline->track_count() << "\n";
+  std::cout << "Keyframes: " << track->keyframe_count() << "\n\n";
 
-  std::cout << "Created animation: " << runtime_anim->name() << "\n";
-  std::cout << "Duration: " << runtime_anim->duration() << "s\n";
-  std::cout << "Loop: " << runtime_anim->loop_mode() << "\n";
-  std::cout << "Tracks: " << runtime_anim->get_track("opacity")->keyframes().size() << "\n\n";
+  // Create animation controller and player
+  AnimationController controller(alloc);
+  auto* player = controller.play(timeline.get(), nullptr);
 
-  // Simulate animation playback
   std::cout << "Playing animation...\n";
-  runtime_anim->start();
 
-  for (int i = 0; i < 60; i++) { // 1 second at 60fps
-    runtime_anim->update(1.0f / 60.0f);
+  for (int i = 0; i <= 60; i++) { // 1 second at 60fps
+    controller.advance(1.0f / 60.0f);
 
     if (i % 10 == 0) {
-      std::cout << "  Time: " << (i / 60.0f) << "s"
-                << ", Running: " << (runtime_anim->is_running() ? "yes" : "no")
-                << ", Finished: " << (runtime_anim->is_finished() ? "yes" : "no") << "\n";
+      float sample_time = i / 60.0f;
+      AnimValue value = track->sample(sample_time);
+      float opacity = std::holds_alternative<float>(value) ? std::get<float>(value) : 0.0f;
+
+      std::cout << "  Time: " << sample_time << "s"
+                << ", Opacity: " << opacity
+                << ", Playing: " << (player->is_playing() ? "yes" : "no") << "\n";
     }
   }
 

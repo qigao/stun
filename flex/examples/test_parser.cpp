@@ -7,7 +7,8 @@
 #include <iomanip>
 #include <fstream>
 #include <sstream>
-#include <flex.h> 
+#include <flex.h>
+#include "flex/backends/thorvg/init.h" 
 
 using namespace flex;
 

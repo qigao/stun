@@ -19,6 +19,7 @@
 #include <memory>
 
 #include "flex.h"
+#include "flex/backends/thorvg/init.h"
 #include <thorvg.h>
 
 #ifdef _WIN32
@@ -415,7 +416,7 @@ void test_rendering_performance() {
     // RETAINED MODE TEST - Use fresh canvas to avoid contamination
     // ===========================================
     std::cout << "\n=== Test 6b: Retained Mode Performance ===\n";
-    std::cout << "Using begin_retained_frame() to reuse ThorVG objects\n";
+    std::cout << "Using set_retained_mode(true) to reuse ThorVG objects\n";
 
     for (int node_count : node_counts) {
         std::cout << "\n--- Retained Mode with " << node_count << " shapes ---\n";
@@ -424,6 +425,9 @@ void test_rendering_performance() {
         auto retained_canvas = tvg::SwCanvas::gen();
         retained_canvas->target(buffer.data(), WIDTH, WIDTH, HEIGHT, tvg::ColorSpace::ARGB8888);
         auto retained_renderer = create_thorvg_renderer(retained_canvas);
+
+        // Enable retained mode
+        retained_renderer->set_retained_mode(true);
 
         // Create fresh instance
         auto retained_instance = Instance::create(WIDTH, HEIGHT);
@@ -443,7 +447,7 @@ void test_rendering_performance() {
         }
 
         // First frame: build all objects with retained mode
-        retained_renderer->begin_retained_frame(WIDTH, HEIGHT, 1.0f);
+        retained_renderer->begin_frame(WIDTH, HEIGHT, 1.0f);
         retained_instance->render(*retained_renderer);
         retained_renderer->end_frame();
 
@@ -452,7 +456,7 @@ void test_rendering_performance() {
         auto start = high_resolution_clock::now();
 
         for (size_t frame = 0; frame < frames; frame++) {
-            retained_renderer->begin_retained_frame(WIDTH, HEIGHT, 1.0f);
+            retained_renderer->begin_frame(WIDTH, HEIGHT, 1.0f);
             retained_instance->render(*retained_renderer);
             retained_renderer->end_frame();
         }
@@ -498,6 +502,9 @@ void test_retained_mode_animated() {
         canvas->target(buffer.data(), WIDTH, WIDTH, HEIGHT, tvg::ColorSpace::ARGB8888);
         auto renderer = create_thorvg_renderer(canvas);
 
+        // Enable retained mode
+        renderer->set_retained_mode(true);
+
         auto instance = Instance::create(WIDTH, HEIGHT);
         auto* artboard = instance->artboard();
 
@@ -518,7 +525,7 @@ void test_retained_mode_animated() {
         }
 
         // First frame: build all cached objects
-        renderer->begin_retained_frame(WIDTH, HEIGHT, 1.0f);
+        renderer->begin_frame(WIDTH, HEIGHT, 1.0f);
         instance->render(*renderer);
         renderer->end_frame();
 
@@ -532,7 +539,7 @@ void test_retained_mode_animated() {
                 shape->set_rotation(shape->rotation() + 1.0f);
             }
 
-            renderer->begin_retained_frame(WIDTH, HEIGHT, 1.0f);
+            renderer->begin_frame(WIDTH, HEIGHT, 1.0f);
             instance->render(*renderer);
             renderer->end_frame();
         }

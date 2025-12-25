@@ -23,6 +23,7 @@
 #include <thorvg.h>
 
 #include <flex.h>
+#include "flex/backends/thorvg/init.h"
 #include <flex/dsl/group.h>
 #include <flex/dsl/shape.h>
 #include <flex/dsl/text.h>

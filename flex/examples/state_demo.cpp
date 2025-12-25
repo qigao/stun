@@ -4,6 +4,7 @@
  */
 
 #include "flex.h"
+#include "flex/backends/thorvg/init.h"
 
 #include <SDL.h>
 #include <thorvg.h>

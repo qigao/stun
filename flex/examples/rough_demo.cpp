@@ -9,6 +9,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
+#include "flex/backends/thorvg/init.h"
 #include <algorithm>
 class RoughDemo {
 public:

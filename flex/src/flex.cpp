@@ -6,9 +6,9 @@
  */
 
 #include "flex.h"
-#include "flex/debug.h"
-#include "ast_to_runtime.cpp" // Inline converter
-#include "parser/flex_parser.h"
+#include "flex/runtime/debug.h"
+#include "flex/bridge/ast_to_runtime.h"
+#include "flex/compiler/flex_parser.h"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -171,20 +171,21 @@ Definition::Ptr Definition::load(const char *source) {
   // Note: load() doesn't handle imports (no base directory)
   // Use load_file() for import support
 
-  // Convert AST scene to Artboard
-  if (program->scene) {
-    def->impl_->artboard = parser::convert_ast_scene(program->scene);
-  }
+  // Convert AST to Runtime objects using AstToRuntimeConverter
+  AstToRuntimeConverter converter(def->impl_.get());
+  converter.convert(*program);
 
+  // Default artboard if none was created
   if (!def->impl_->artboard) {
     def->impl_->artboard = Artboard::create(800, 600);
   }
 
   def->impl_->has_error = false;
 
-  // Convert animations and state machines using AstToRuntimeConverter
-  AstToRuntimeConverter converter(def->impl_.get());
-  converter.convert(*program);
+  // AST PRUNING: The AST is no longer needed after conversion.
+  // Since 'program' is a shared_ptr to AstProgram, it will be deleted when it goes out of scope here.
+  // To be explicit and support future optimizations where we might want to discard the compiler module,
+  // we ensure no references remain.
 
   return def;
 }
@@ -233,21 +234,19 @@ Definition::Ptr Definition::load_file(const char *path) {
 
   FLEX_LOGD("Loaded {} files total", loaded_files.size());
 
-  // Convert AST scene to Artboard
-  if (program->scene) {
-    def->impl_->artboard = parser::convert_ast_scene(program->scene);
-  }
+  // Convert AST to Runtime objects using AstToRuntimeConverter
+  AstToRuntimeConverter converter(def->impl_.get());
+  converter.convert(*program);
 
+  // Default artboard if none was created
   if (!def->impl_->artboard) {
     def->impl_->artboard = Artboard::create(800, 600);
   }
 
   def->impl_->has_error = false;
 
-  // Convert animations and state machines using AstToRuntimeConverter
-  AstToRuntimeConverter converter(def->impl_.get());
-  converter.convert(*program);
-
+  // AST PRUNING: The AST is discarded as it's no longer needed.
+  
   return def;
 }
 

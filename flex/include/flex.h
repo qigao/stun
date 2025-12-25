@@ -1,7 +1,7 @@
 /*
  * Flex Engine - Main Header
  *
- * Include this to use the Flex Engine.
+ * Complete Flex Engine: Compiler + Runtime + Bridge
  *
  * Features:
  * - Declarative scene graph (Group, Shape, Text, Image)
@@ -9,39 +9,23 @@
  * - State machine for logic control
  * - DSL parser for .flex files
  * - Arena allocator for zero-allocation performance
+ *
+ * For modular usage:
+ *   #include "flex/compiler.h"  // Only lexer/parser/AST
+ *   #include "flex/runtime.h"   // Only scene graph/animation/rendering
  */
 
 #pragma once
 
-#include "flex/allocator.h"
-#include "flex/binding.h"
-#include "flex/dsl/artboard.h"
-#include "flex/dsl/asset.h"
-#include "flex/dsl/component.h"
-#include "flex/dsl/event.h"
-#include "flex/dsl/fsm.h"
-#include "flex/dsl/geometry.h"
-#include "flex/dsl/group.h"
-#include "flex/dsl/image.h"
-#include "flex/dsl/instance.h"
-#include "flex/dsl/layout.h"
-#include "flex/dsl/path.h"
-#include "flex/dsl/physics.h"
-#include "flex/dsl/script.h"
-#include "flex/dsl/shape.h"
-#include "flex/dsl/state_binding.h"
-#include "flex/dsl/svg.h"
-#include "flex/dsl/text.h"
-#include "flex/dsl/timeline.h"
-#include "flex/node.h"
-#include "flex/renderer.h"
-#include "flex/runtime_machine.h"
-#include "flex/solo.h"
-#include "flex/types.h"
-#include "parser/flex_ast.h"
-#include "parser/flex_parser.h"
-#include "parser/flex_token.h"
+// Modular headers
+#include "flex/compiler.h"
+#include "flex/runtime.h"
 
+// Bridge: AST to Runtime converter and renderer factory
+#include "flex/bridge/ast_to_runtime.h"
+#include "flex/bridge/renderer.h"
+
+// Standard library
 #include <fmtlog.h>
 #include <fstream>
 #include <functional>
@@ -50,8 +34,7 @@
 #include <set>
 #include <string>
 #include <vector>
-// ThorVG for rendering
-#include <thorvg.h>
+#include <thread>
 
 namespace flex {
 
@@ -59,10 +42,8 @@ namespace flex {
 // Forward Declarations
 // ============================================================================
 
-// Forward declarations for friend classes
-namespace parser {
+// Forward declaration for bridge converter
 class AstToRuntimeConverter;
-}
 
 // ============================================================================
 // Definition - Immutable blueprint loaded from .flex file
@@ -80,6 +61,15 @@ public:
   // Load from .flex source
   static Ptr load(const char *source);
   static Ptr load_file(const char *path);
+
+  // Load from .flexb binary (fast loading, no parsing)
+  // Note: Use BinaryReader directly for more control (see flex/binary/reader.h)
+  static Ptr load_binary(const char *path);
+  static Ptr load_binary_data(const void *data, size_t size);
+
+  // Load encrypted binary - NOT YET IMPLEMENTED
+  // This method exists for future compatibility but currently not supported
+  static Ptr load_binary_encrypted(const char *path, const char *password);
 
   // Check for parse errors
   bool has_error() const { return impl_->has_error; }
@@ -131,7 +121,7 @@ private:
 // Instance - Mutable runtime state
 // ============================================================================
 
-class Instance {
+class Instance : public IInstanceContext {
 public:
   using Ptr = std::shared_ptr<Instance>;
 
@@ -151,17 +141,18 @@ public:
   Instance *get_ptr() { return this; }
 
   // -------------------------------------------
-  // Scene Access
+  // Scene Access (IInstanceContext interface)
   // -------------------------------------------
 
-  Artboard *artboard() const { return impl_->artboard.get(); }
+  Artboard *artboard() const override { return impl_->artboard.get(); }
 
   // -------------------------------------------
-  // Input Control
+  // Input Control (IInstanceContext interface)
   // -------------------------------------------
 
-  void set_input(const char *name, float value);
-  void set_input(const char *name, const char *value);
+  void set_input(const char *name, float value) override;
+  void set_input(const char *name, const char *value) override;
+  float get_input(const char *name) const override;
 
   // -------------------------------------------
   // Frame Update
@@ -177,39 +168,36 @@ public:
   void render(Renderer &renderer);
 
   // -------------------------------------------
-  // Event Handling
+  // Event Handling (IInstanceContext interface)
   // -------------------------------------------
 
   void send_pointer_event(float x, float y, bool is_down);
-  void send_event(const char *name);
+  void send_event(const char *name) override;
 
   // -------------------------------------------
-  // Animation Control (Phase 2)
+  // Animation Control (IInstanceContext interface)
   // -------------------------------------------
 
   // Get animation controller
-  AnimationController *animation_controller() const;
+  AnimationController *animation_controller() const override;
 
   // Add a timeline
   void add_timeline(Timeline::Ptr timeline);
 
   // Play a timeline on a node
-  TimelinePlayer *play(const char *timeline_name, Node *target);
-  TimelinePlayer *play(const char *timeline_name); // Play on artboard root
+  TimelinePlayer *play(const char *timeline_name, Node *target) override;
+  TimelinePlayer *play(const char *timeline_name) override; // Play on artboard root
 
   // Stop animations
-  void stop(const char *timeline_name);
-  void stop_all();
-
-  // Get input value (for state machine conditions)
-  float get_input(const char *name) const;
+  void stop(const char *timeline_name) override;
+  void stop_all() override;
 
   // -------------------------------------------
-  // Runtime Systems Access
+  // Runtime Systems Access (IInstanceContext interface)
   // -------------------------------------------
 
   // Get state machine by name
-  class RuntimeStateMachine *get_machine(const std::string &name);
+  RuntimeStateMachine *get_machine(const std::string &name) override;
 
   // Play animation by name (using Timeline system)
   TimelinePlayer* play_animation(const std::string &name);
@@ -220,15 +208,15 @@ public:
   // Stop animation by name
   void stop_animation(const std::string &name);
 
-  // Asset resolution (legacy)
+  // Asset resolution (IInstanceContext interface)
   void register_asset(const char *name, const char *path);
-  const char *resolve_asset(const char *name) const;
+  const char *resolve_asset(const char *name) const override;
 
   // -------------------------------------------
-  // Asset Management (New)
+  // Asset Management (IInstanceContext interface)
   // -------------------------------------------
 
-  class AssetManager* asset_manager() const;
+  AssetManager* asset_manager() const override;
 
   // Register assets
   void register_audio(const char* id, const char* path, bool loop = false, float volume = 1.0f);
@@ -322,82 +310,11 @@ int get_error_column();
 } // namespace parser
 
 // ============================================================================
-// Engine Initialization
+// Backend Initialization
 // ============================================================================
 
-#include <thread>
-
-// ...
-
-// Initialize the Flex engine (call once at startup)
-inline void init() {
-  // Initialize ThorVG with auto-detected threads
-  tvg::Initializer::init(std::thread::hardware_concurrency());
-
-  // Initialize fmtlog
-  fmtlog::setLogLevel(fmtlog::DBG); // Enable all log levels (DBG, INF, WRN, ERR)
-  fmtlog::setThreadName("main");
-
-  // Optional: Output to file for debugging
-  // fmtlog::setLogFile("flex_engine.log", true);
-}
-
-// Shutdown the Flex engine (call at exit)
-inline void shutdown() {
-  // Flush and shutdown fmtlog
-  fmtlog::shutdown();
-
-  // Terminate ThorVG
-  tvg::Initializer::term();
-}
-
-// ============================================================================
-// Font Management
-// ============================================================================
-
-// Load a font from file (TTF, OTF)
-// Returns true on success
-inline bool load_font(const char *path) {
-  if (!path)
-    return false;
-  return tvg::Text::load(path) == tvg::Result::Success;
-}
-
-// Load a font from file with a custom name
-inline bool load_font(const char *name, const char *path) {
-  // ThorVG's Text::load(filename) uses filename as the font name
-  // For custom name, we need to load from memory
-  if (!name || !path)
-    return false;
-
-  // Read file into memory
-  std::ifstream file(path, std::ios::binary | std::ios::ate);
-  if (!file.is_open())
-    return false;
-
-  auto size = file.tellg();
-  file.seekg(0, std::ios::beg);
-
-  std::vector<char> buffer(size);
-  if (!file.read(buffer.data(), size))
-    return false;
-
-  return tvg::Text::load(name, buffer.data(), static_cast<uint32_t>(size), "ttf", true) ==
-         tvg::Result::Success;
-}
-
-// Load a font from memory
-inline bool load_font_data(const char *name, const char *data, uint32_t size) {
-  if (!name || !data || size == 0)
-    return false;
-  return tvg::Text::load(name, data, size, "ttf", true) == tvg::Result::Success;
-}
-
-// Unload a previously loaded font
-inline void unload_font(const char *name) {
-  if (name) {
-    tvg::Text::unload(name);
-  }
-}
+// For backend-specific initialization, include the corresponding header:
+// ThorVG:  #include "flex/backends/thorvg/init.h"
+// NanoVG:  #include "flex/backends/nanovg/init.h" (planned)
 
 } // namespace flex

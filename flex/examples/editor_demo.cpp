@@ -13,6 +13,7 @@
 #include <SDL2/SDL.h>
 #include <cmath>
 #include <flex.h>
+#include "flex/backends/thorvg/init.h"
 #include <fstream>
 #include <functional>
 #include <iostream>

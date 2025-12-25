@@ -10,6 +10,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
+#include "flex/backends/thorvg/init.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>

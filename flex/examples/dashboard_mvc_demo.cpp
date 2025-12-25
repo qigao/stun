@@ -16,9 +16,8 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include <flex/dsl/group.h>
-#include <flex/dsl/shape.h>
-#include <flex/dsl/text.h>
+#include "flex/backends/thorvg/init.h"
+ 
 
 // ============================================================================
 // Model - Dashboard State
