@@ -6,23 +6,152 @@
  */
 
 #include "flex.h"
+#include "flex/debug.h"
 #include "ast_to_runtime.cpp" // Inline converter
 #include "parser/flex_parser.h"
 #include <algorithm>
 #include <cstring>
-#include <fmtlog.h>
 #include <fstream>
-#include <iostream>
 #include <set>
 #include <sstream>
 #include <thorvg.h>
 #include <vector>
 
+// Filesystem for path manipulation
+#ifdef _WIN32
+#include <direct.h>
+#define PATH_SEP '\\'
+#else
+#include <unistd.h>
+#define PATH_SEP '/'
+#endif
+
 namespace flex {
+
+// ============================================================================
+// Helper: Path utilities for import resolution
+// ============================================================================
+
+static std::string get_directory(const std::string &path) {
+  size_t pos = path.find_last_of("/\\");
+  if (pos == std::string::npos) {
+    return ".";
+  }
+  return path.substr(0, pos);
+}
+
+static std::string join_path(const std::string &dir, const std::string &file) {
+  if (dir.empty() || dir == ".") {
+    return file;
+  }
+  char last = dir.back();
+  if (last == '/' || last == '\\') {
+    return dir + file;
+  }
+  return dir + PATH_SEP + file;
+}
+
+static std::string normalize_path(const std::string &path) {
+  // Simple normalization: replace backslashes with forward slashes
+  std::string result = path;
+  for (char &c : result) {
+    if (c == '\\') c = '/';
+  }
+  return result;
+}
 
 // ============================================================================
 // Definition Implementation (stores Runtime objects)
 // ============================================================================
+
+// Internal: Parse and merge imports recursively
+static bool load_imports_recursive(
+    const std::string &base_dir,
+    parser::AstProgram &program,
+    std::set<std::string> &loaded_files,
+    std::string &error_message,
+    int &error_line,
+    int &error_column) {
+
+  for (const auto &import : program.imports) {
+    std::string import_path = join_path(base_dir, import.path);
+    std::string normalized = normalize_path(import_path);
+
+    // Check for circular import
+    if (loaded_files.count(normalized)) {
+      FLEX_LOGD("Skipping already imported file: {}", normalized);
+      continue;  // Already loaded, skip (not an error)
+    }
+
+    // Mark as loaded to prevent cycles
+    loaded_files.insert(normalized);
+
+    // Read imported file
+    std::ifstream file(import_path);
+    if (!file.is_open()) {
+      error_message = "Could not open imported file: " + import.path;
+      error_line = import.line;
+      error_column = import.column;
+      return false;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+
+    // Parse imported file
+    auto imported_program = parser::parse(buffer.str().c_str());
+    if (!imported_program) {
+      error_message = "Error in imported file '" + import.path + "': " + parser::get_error();
+      error_line = import.line;
+      error_column = import.column;
+      return false;
+    }
+
+    FLEX_LOGD("Imported: {} ({} animations, {} machines)",
+              import.path,
+              imported_program->animations.size(),
+              imported_program->machines.size());
+
+    // Recursively process imports in the imported file
+    std::string import_dir = get_directory(import_path);
+    if (!load_imports_recursive(import_dir, *imported_program, loaded_files,
+                                error_message, error_line, error_column)) {
+      return false;
+    }
+
+    // Merge imported content into main program
+    // Note: Scene is NOT merged (each file should have at most one scene)
+    // Components, animations, machines, data, assets are merged
+
+    for (auto &comp : imported_program->components) {
+      program.components.push_back(std::move(comp));
+    }
+
+    for (auto &anim : imported_program->animations) {
+      program.animations.push_back(std::move(anim));
+    }
+
+    for (auto &machine : imported_program->machines) {
+      program.machines.push_back(std::move(machine));
+    }
+
+    for (auto &data : imported_program->data_blocks) {
+      program.data_blocks.push_back(std::move(data));
+    }
+
+    // Merge assets
+    if (imported_program->assets) {
+      if (!program.assets) {
+        program.assets = std::make_shared<parser::AstAssets>();
+      }
+      for (auto &asset : imported_program->assets->assets) {
+        program.assets->assets.push_back(std::move(asset));
+      }
+    }
+  }
+
+  return true;
+}
 
 Definition::Ptr Definition::load(const char *source) {
   auto def = std::shared_ptr<Definition>(new Definition());
@@ -38,6 +167,9 @@ Definition::Ptr Definition::load(const char *source) {
     def->impl_->error_column = parser::get_error_column();
     return def;
   }
+
+  // Note: load() doesn't handle imports (no base directory)
+  // Use load_file() for import support
 
   // Convert AST scene to Artboard
   if (program->scene) {
@@ -58,10 +190,11 @@ Definition::Ptr Definition::load(const char *source) {
 }
 
 Definition::Ptr Definition::load_file(const char *path) {
+  auto def = std::shared_ptr<Definition>(new Definition());
+  def->impl_ = std::make_unique<Impl>();
+
   std::ifstream file(path);
   if (!file.is_open()) {
-    auto def = std::shared_ptr<Definition>(new Definition());
-    def->impl_ = std::make_unique<Impl>();
     def->impl_->has_error = true;
     def->impl_->error_message = "Could not open file: " + std::string(path);
     return def;
@@ -69,7 +202,53 @@ Definition::Ptr Definition::load_file(const char *path) {
 
   std::stringstream buffer;
   buffer << file.rdbuf();
-  return load(buffer.str().c_str());
+
+  // Parse main file
+  auto program = parser::parse(buffer.str().c_str());
+  if (!program) {
+    def->impl_->has_error = true;
+    def->impl_->error_message = parser::get_error();
+    def->impl_->error_line = parser::get_error_line();
+    def->impl_->error_column = parser::get_error_column();
+    return def;
+  }
+
+  // Process imports recursively
+  std::string base_dir = get_directory(path);
+  std::set<std::string> loaded_files;
+  loaded_files.insert(normalize_path(path));  // Mark main file as loaded
+
+  std::string import_error;
+  int import_error_line = 0;
+  int import_error_column = 0;
+
+  if (!load_imports_recursive(base_dir, *program, loaded_files,
+                              import_error, import_error_line, import_error_column)) {
+    def->impl_->has_error = true;
+    def->impl_->error_message = import_error;
+    def->impl_->error_line = import_error_line;
+    def->impl_->error_column = import_error_column;
+    return def;
+  }
+
+  FLEX_LOGD("Loaded {} files total", loaded_files.size());
+
+  // Convert AST scene to Artboard
+  if (program->scene) {
+    def->impl_->artboard = parser::convert_ast_scene(program->scene);
+  }
+
+  if (!def->impl_->artboard) {
+    def->impl_->artboard = Artboard::create(800, 600);
+  }
+
+  def->impl_->has_error = false;
+
+  // Convert animations and state machines using AstToRuntimeConverter
+  AstToRuntimeConverter converter(def->impl_.get());
+  converter.convert(*program);
+
+  return def;
 }
 
 // ============================================================================
@@ -104,23 +283,11 @@ Instance::~Instance() {
     float frame_usage = frame_total > 0 ? (float)frame_used / frame_total * 100.0f : 0;
     float frame_peak_pct = frame_total > 0 ? (float)frame_peak / frame_total * 100.0f : 0;
 
-    logi("  Frame:  {:.2f} MB allocated, {:.2f} MB used ({:.1f}%), peak {:.2f} MB ({:.1f}%), {} "
-         "allocations",
-         frame_total / (1024.0f * 1024.0f), frame_used / (1024.0f * 1024.0f), frame_usage,
-         frame_peak / (1024.0f * 1024.0f), frame_peak_pct, impl_->frame_alloc.alloc_count());
-
     size_t obj_total = impl_->object_alloc.size();
     size_t obj_used = impl_->object_alloc.used();
     size_t obj_peak = impl_->object_alloc.peak_used();
     float obj_usage = obj_total > 0 ? (float)obj_used / obj_total * 100.0f : 0;
     float obj_peak_pct = obj_total > 0 ? (float)obj_peak / obj_total * 100.0f : 0;
-
-    logi("  Object: {:.2f} MB allocated, {:.2f} MB used ({:.1f}%), peak {:.2f} MB ({:.1f}%), {} "
-         "allocations",
-         obj_total / (1024.0f * 1024.0f), obj_used / (1024.0f * 1024.0f), obj_usage,
-         obj_peak / (1024.0f * 1024.0f), obj_peak_pct, impl_->object_alloc.alloc_count());
-
-    logi("  Nodes:  {} total in scene graph", node_count);
   }
 }
 
@@ -144,16 +311,28 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
     for (const auto &machine : definition->machines()) {
       instance->impl_->machines.push_back(machine);
 
-      // Set up callback to trigger animations on state changes
+      // Set up callback to trigger animations and audio on state changes
       auto inst_ptr = instance.get();
       machine->set_state_change_callback(
           [inst_ptr](const std::string &layer, const std::string &from_state,
-                     const std::string &to_state, const std::string &animation) {
+                     const std::string &to_state, const std::string &animation,
+                     const std::string &play_audio, const std::string &stop_audio) {
             if (!animation.empty()) {
-              std::cout << "[Instance] State change triggers animation: " << animation << "\n";
+              FLEX_LOGD("State change triggers animation: {}", animation);
               inst_ptr->start_animation(animation);
             }
+            if (!stop_audio.empty()) {
+              FLEX_LOGD("State change stops audio: {}", stop_audio);
+              inst_ptr->stop_audio(stop_audio.c_str());
+            }
+            if (!play_audio.empty()) {
+              FLEX_LOGD("State change plays audio: {}", play_audio);
+              inst_ptr->play_audio(play_audio.c_str());
+            }
           });
+
+      // Trigger initial state animations now that callback is set
+      machine->trigger_initial_animations();
     }
 
     // NOTE: ScriptContext is NOT created by default (saves ~15MB per Instance)
@@ -162,6 +341,22 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
 
     // Auto-play timelines set to Loop
     // (Optional: logic to auto-play)
+
+    // Initialize assets from definition
+    if (!definition->impl_->parsed_assets.empty()) {
+      for (const auto &asset : definition->impl_->parsed_assets) {
+        if (asset.type == "audio") {
+          instance->register_audio(asset.id.c_str(), asset.path.c_str(), asset.loop, asset.volume);
+        } else if (asset.type == "image") {
+          instance->register_image(asset.id.c_str(), asset.path.c_str());
+        } else if (asset.type == "font") {
+          instance->register_font(asset.id.c_str(), asset.path.c_str());
+        }
+        // Note: svg assets are handled as images
+      }
+      // Preload assets if requested
+      instance->preload_assets();
+    }
   }
 
   return instance;
@@ -213,17 +408,8 @@ void Instance::advance(float dt) {
     machine->update(dt);
   }
 
-  // Update old timeline animations
+  // Update timeline animations
   impl_->animation_controller.advance(dt);
-
-  // Update runtime animations (new system)
-  if (impl_->definition) {
-    for (auto &[name, anim] : impl_->definition->impl_->animations) {
-      if (anim->is_running()) {
-        anim->update(dt);
-      }
-    }
-  }
 
   // Clear fired events
   impl_->fired_events.clear();
@@ -241,31 +427,29 @@ static Node *hit_test_recursive(Node *node, float x, float y) {
   if (!node || !node->visible())
     return nullptr;
 
-  // First check if point is within this node's bounds (in parent's coordinate space)
-  Bounds b = node->bounds();
-  bool inside = b.contains(x, y);
+  // Convert global point to node's local space using Eigen matrices
+  Vec2 global_pos(x, y);
+  Vec2 local_pos = node->to_local(global_pos);
 
-  // For groups, check children first (they may be on top of this node's bounds)
+  // Check if point is within this node's bounds in its own local coordinate space
+  // Note: Node::bounds() now returns bounds in local space
+  if (!node->bounds().contains(local_pos.x(), local_pos.y())) {
+    return nullptr;
+  }
+
+  // For groups, check children first (they may be on top)
   if (node->is_group()) {
     auto *group = static_cast<Group *>(node);
-    // Transform to this node's local coordinate space for children
-    float local_x = x - node->x();
-    float local_y = y - node->y();
-
     const auto &children = group->children();
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
-      Node *hit = hit_test_recursive(it->get(), local_x, local_y);
+      // Pass the SAME global coordinates to children, they will do their own to_local
+      Node *hit = hit_test_recursive(it->get(), x, y);
       if (hit)
         return hit;
     }
   }
 
-  // If point is inside this node, return it
-  if (inside) {
-    return node;
-  }
-
-  return nullptr;
+  return node;
 }
 
 // Helper: build path from root to target node
@@ -457,6 +641,83 @@ const char *Instance::resolve_asset(const char *name) const {
 }
 
 // ============================================================================
+// Asset Management (New System)
+// ============================================================================
+
+AssetManager* Instance::asset_manager() const {
+  return impl_->asset_manager.get();
+}
+
+void Instance::register_audio(const char* id, const char* path, bool loop, float volume) {
+  if (!impl_->asset_manager) {
+    impl_->asset_manager = std::make_unique<AssetManager>();
+  }
+  AudioOptions opts;
+  opts.loop = loop;
+  opts.volume = volume;
+  impl_->asset_manager->register_audio(id, path, opts);
+}
+
+void Instance::register_image(const char* id, const char* path) {
+  if (!impl_->asset_manager) {
+    impl_->asset_manager = std::make_unique<AssetManager>();
+  }
+  impl_->asset_manager->register_image(id, path);
+}
+
+void Instance::register_font(const char* id, const char* path) {
+  if (!impl_->asset_manager) {
+    impl_->asset_manager = std::make_unique<AssetManager>();
+  }
+  impl_->asset_manager->register_font(id, path);
+}
+
+int Instance::play_audio(const char* id) {
+  if (!impl_->asset_manager) {
+    return -1;
+  }
+  return impl_->asset_manager->play_audio(id);
+}
+
+int Instance::play_audio(const char* id, bool loop, float volume) {
+  if (!impl_->asset_manager) {
+    return -1;
+  }
+  return impl_->asset_manager->play_audio(id, loop, volume);
+}
+
+void Instance::stop_audio(const char* id) {
+  if (impl_->asset_manager) {
+    impl_->asset_manager->stop_audio(id);
+  }
+}
+
+void Instance::stop_audio_channel(int channel) {
+  if (impl_->asset_manager) {
+    impl_->asset_manager->stop_audio_channel(channel);
+  }
+}
+
+void Instance::set_audio_volume(int channel, float volume) {
+  if (impl_->asset_manager) {
+    impl_->asset_manager->set_audio_volume(channel, volume);
+  }
+}
+
+bool Instance::is_audio_playing(int channel) {
+  if (!impl_->asset_manager) {
+    return false;
+  }
+  return impl_->asset_manager->is_audio_playing(channel);
+}
+
+void Instance::preload_assets() {
+  if (impl_->asset_manager) {
+    impl_->asset_manager->preload_all();
+  }
+}
+
+// ============================================================================
 // Runtime Systems Access
 // ============================================================================
 
@@ -469,28 +730,19 @@ RuntimeStateMachine *Instance::get_machine(const std::string &name) {
   return nullptr;
 }
 
-RuntimeAnimation *Instance::get_animation(const std::string &name) {
-  if (impl_->definition && impl_->definition->impl_->animations.count(name)) {
-    return impl_->definition->impl_->animations.at(name).get();
+TimelinePlayer* Instance::play_animation(const std::string &name) {
+  if (!impl_->artboard) {
+    return nullptr;
   }
-  return nullptr;
+  return impl_->animation_controller.play(name.c_str(), impl_->artboard->root());
 }
 
 void Instance::start_animation(const std::string &name) {
-  auto *anim = get_animation(name);
-  if (anim && impl_->artboard) {
-    // Set target root so animation can find nodes by ID (e.g., #statusText)
-    // Note: Artboard is not a Node, use its root Group for node lookup
-    anim->set_target_root(impl_->artboard->root());
-    anim->start();
-  }
+  play_animation(name);
 }
 
 void Instance::stop_animation(const std::string &name) {
-  auto *anim = get_animation(name);
-  if (anim) {
-    anim->stop();
-  }
+  impl_->animation_controller.stop(name.c_str());
 }
 
 // ============================================================================

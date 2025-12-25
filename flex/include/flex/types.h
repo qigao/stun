@@ -2,7 +2,7 @@
  * Flex Engine - Core Type Definitions
  *
  * Simplified version - No variant, no complexity
- * Direct use of native types
+ * Direct use of native types, no Eigen dependency
  */
 
 #pragma once
@@ -14,41 +14,9 @@
 #include <vector>
 #include <array>
 
+#include "flex/matrix.h"  // Vec2, Vec3, Vec4, Transform, create_transform
+
 namespace flex {
-
-// ============================================================================
-// Simple Value Types - Direct use of native types
-// ============================================================================
-
-// No enum class ValueType needed!
-// No complex Value union needed!
-// Just use native C++ types directly!
-
-struct Vec2 {
-    float x = 0, y = 0;
-    Vec2() = default;
-    Vec2(float x, float y) : x(x), y(y) {}
-};
-
-struct Vec3 {
-    float x = 0, y = 0, z = 0;
-    Vec3() = default;
-    Vec3(float x, float y, float z) : x(x), y(y), z(z) {}
-};
-
-struct Vec4 {
-    float x = 0, y = 0, z = 0, w = 0;
-    Vec4() = default;
-    Vec4(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
-};
-
-// Transform matrix [a, b, c, d, e, f]
-struct Transform {
-    float a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
-    Transform() = default;
-    Transform(float a, float b, float c, float d, float e, float f)
-        : a(a), b(b), c(c), d(d), e(e), f(f) {}
-};
 
 // ============================================================================
 // Easing Functions - Simplified
@@ -293,9 +261,9 @@ struct RadialGradient {
 // ============================================================================
 
 struct Paint {
-    enum class Type : uint8_t { Solid, Linear, Radial };
+    enum class Type : uint8_t { None, Solid, Linear, Radial };
 
-    Type type = Type::Solid;
+    Type type = Type::None;
     Color color;
     LinearGradient linear;
     RadialGradient radial;
@@ -305,6 +273,7 @@ struct Paint {
     explicit Paint(const LinearGradient& g) : type(Type::Linear), linear(g) {}
     explicit Paint(const RadialGradient& g) : type(Type::Radial), radial(g) {}
 
+    static Paint none() { return Paint(); }
     static Paint solid(const Color& c) { return Paint(c); }
     static Paint solid(uint32_t rgba) { return Paint(Color::from_rgba32(rgba)); }
 };
@@ -393,6 +362,19 @@ enum class FlexWrap : uint8_t {
     Wrap,       // Multiple lines
 };
 
+// Anchor point for positioning - determines which point of the element x,y refers to
+enum class Anchor : uint8_t {
+    TopLeft,     // Default: x,y is top-left corner
+    Top,         // x is center-x, y is top
+    TopRight,    // x,y is top-right corner
+    Left,        // x is left, y is center-y
+    Center,      // x,y is center point
+    Right,       // x is right, y is center-y
+    BottomLeft,  // x,y is bottom-left corner
+    Bottom,      // x is center-x, y is bottom
+    BottomRight, // x,y is bottom-right corner
+};
+
 // ============================================================================
 // Dirty Flags - Track what needs to be updated
 // ============================================================================
@@ -405,7 +387,8 @@ enum class DirtyFlags : uint32_t {
     Bounds      = 1 << 3,   // Bounds need recalculation
     Layout      = 1 << 4,   // Layout properties changed
     Children    = 1 << 5,   // Child list changed (Group only)
-    All         = 0x3F,     // All flags set
+    WorldBounds = 1 << 6,   // World-space bounds need recalculation
+    All         = 0x7F,     // All flags set
 };
 
 // Bitwise operators for DirtyFlags
@@ -456,6 +439,7 @@ enum class GeometryType {
     Star,
     Line,
     Ring,
+    Triangle,
 };
 
 // ============================================================================
@@ -481,6 +465,39 @@ struct Bounds {
 
     bool valid() const {
         return width > 0 && height > 0;
+    }
+
+    // Transform AABB by a 2D affine transform (results in a new AABB)
+    Bounds transformed(const Transform& t) const {
+        if (!valid()) return *this;
+
+        // Transform 4 corners using direct array access
+        float x0 = x, x1 = x + width;
+        float y0 = y, y1 = y + height;
+
+        // c0 = transform(x0, y0)
+        float c0x = t.m[0] * x0 + t.m[1] * y0 + t.m[2];
+        float c0y = t.m[3] * x0 + t.m[4] * y0 + t.m[5];
+
+        // c1 = transform(x1, y0)
+        float c1x = t.m[0] * x1 + t.m[1] * y0 + t.m[2];
+        float c1y = t.m[3] * x1 + t.m[4] * y0 + t.m[5];
+
+        // c2 = transform(x0, y1)
+        float c2x = t.m[0] * x0 + t.m[1] * y1 + t.m[2];
+        float c2y = t.m[3] * x0 + t.m[4] * y1 + t.m[5];
+
+        // c3 = transform(x1, y1)
+        float c3x = t.m[0] * x1 + t.m[1] * y1 + t.m[2];
+        float c3y = t.m[3] * x1 + t.m[4] * y1 + t.m[5];
+
+        // Find min/max
+        float min_x = std::min({c0x, c1x, c2x, c3x});
+        float max_x = std::max({c0x, c1x, c2x, c3x});
+        float min_y = std::min({c0y, c1y, c2y, c3y});
+        float max_y = std::max({c0y, c1y, c2y, c3y});
+
+        return Bounds(min_x, min_y, max_x - min_x, max_y - min_y);
     }
 };
 

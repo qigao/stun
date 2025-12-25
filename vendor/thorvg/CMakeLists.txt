@@ -28,7 +28,7 @@ option(THORVG_LOADER_LOTTIE "Enable Lottie loader" OFF)
 option(THORVG_LOADER_TTF "Enable TTF loader" ON)
 option(THORVG_SAVER_GIF "Enable GIF saver" OFF)
 option(THORVG_THREADS "Enable multi-threading" ON)
-option(THORVG_SIMD "Enable SIMD (AVX/NEON)" OFF)
+option(THORVG_SIMD "Enable SIMD (AVX/NEON)" ON)
 option(THORVG_LOG "Enable log messages" OFF)
 option(THORVG_FILE_IO "Enable file I/O" ON)
 # ============================================================

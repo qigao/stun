@@ -10,8 +10,39 @@
 #include "flex/dsl/text.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace flex {
+
+// ============================================================================
+// Helper: Parse color from hex string (e.g., "#FF0000", "#FF0000FF", "#F00")
+// ============================================================================
+
+static Color parse_color_hex(const std::string& color_str) {
+    if (color_str.empty() || color_str[0] != '#') {
+        return Color(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    const char* hex = color_str.c_str() + 1;
+    size_t len = color_str.length() - 1;
+
+    unsigned int r = 0, g = 0, b = 0, a = 255;
+
+    if (len == 6) {
+        sscanf(hex, "%02x%02x%02x", &r, &g, &b);
+    } else if (len == 8) {
+        sscanf(hex, "%02x%02x%02x%02x", &r, &g, &b, &a);
+    } else if (len == 3) {
+        unsigned int r4, g4, b4;
+        sscanf(hex, "%1x%1x%1x", &r4, &g4, &b4);
+        r = r4 * 17;
+        g = g4 * 17;
+        b = b4 * 17;
+    }
+
+    // Convert from 0-255 to 0-1 range for flex::Color (which uses floats)
+    return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+}
 
 // ============================================================================
 // Track Implementation
@@ -71,8 +102,8 @@ AnimValue Track::sample(float time) const {
 }
 
 float Track::duration() const {
-    if (keyframes_.size() == 0) return 0;
-    return keyframes_.back().time;
+    if (keyframes_.size() == 0) return 0.0f;
+    return keyframes_[keyframes_.size() - 1].time;
 }
 
 void Track::find_keyframes(float time, const Keyframe** prev, const Keyframe** next) const {
@@ -176,6 +207,7 @@ void Timeline::apply(Node* target, float time) const {
                 std::string id = prop_str.substr(1, slash - 1);
                 actual_target = target->find(id);
                 actual_prop = prop + slash + 1;
+
             }
         }
 
@@ -225,6 +257,38 @@ void Timeline::apply(Node* target, float time) const {
                 }
             }
         }
+        // Size properties for Shape nodes
+        else if (strcmp(actual_prop, "width") == 0) {
+            if (std::holds_alternative<float>(value)) {
+                float new_val = std::get<float>(value);
+                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
+                    auto r = shape->rect();
+                    if (r.width != new_val) {
+                        shape->set_rect(new_val, r.height, r.corner_radius);
+                    }
+                }
+            }
+        } else if (strcmp(actual_prop, "height") == 0) {
+            if (std::holds_alternative<float>(value)) {
+                float new_val = std::get<float>(value);
+                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
+                    auto r = shape->rect();
+                    if (r.height != new_val) {
+                        shape->set_rect(r.width, new_val, r.corner_radius);
+                    }
+                }
+            }
+        } else if (strcmp(actual_prop, "radius") == 0) {
+            if (std::holds_alternative<float>(value)) {
+                float new_val = std::get<float>(value);
+                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
+                    auto c = shape->circle();
+                    if (c.radius != new_val) {
+                        shape->set_circle(new_val);
+                    }
+                }
+            }
+        }
         // Visual properties (Phase 3.1: Change detection)
         else if (strcmp(actual_prop, "opacity") == 0) {
             if (std::holds_alternative<float>(value)) {
@@ -244,15 +308,21 @@ void Timeline::apply(Node* target, float time) const {
         // Shape-specific properties (Phase 3.1: Change detection)
         else if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
             if (strcmp(actual_prop, "fill") == 0 || strcmp(actual_prop, "color") == 0) {
+                Color new_color;
                 if (std::holds_alternative<Color>(value)) {
-                    Color new_color = std::get<Color>(value);
-                    auto current_fill = shape->fill();
-                    if (current_fill.color.r != new_color.r ||
-                        current_fill.color.g != new_color.g ||
-                        current_fill.color.b != new_color.b ||
-                        current_fill.color.a != new_color.a) {
-                        shape->set_fill(new_color);
-                    }
+                    new_color = std::get<Color>(value);
+                } else if (std::holds_alternative<std::string>(value)) {
+                    // Parse color from hex string (e.g., "#FF0000")
+                    new_color = parse_color_hex(std::get<std::string>(value));
+                } else {
+                    continue;
+                }
+                auto current_fill = shape->fill();
+                if (current_fill.color.r != new_color.r ||
+                    current_fill.color.g != new_color.g ||
+                    current_fill.color.b != new_color.b ||
+                    current_fill.color.a != new_color.a) {
+                    shape->set_fill(new_color);
                 }
             } else if (strcmp(actual_prop, "fill.opacity") == 0) {
                 if (std::holds_alternative<float>(value)) {
@@ -265,15 +335,20 @@ void Timeline::apply(Node* target, float time) const {
                     }
                 }
             } else if (strcmp(actual_prop, "stroke") == 0) {
+                Color new_color;
                 if (std::holds_alternative<Color>(value)) {
-                    Color new_color = std::get<Color>(value);
-                    auto stroke = shape->stroke();
-                    if (stroke.color.r != new_color.r ||
-                        stroke.color.g != new_color.g ||
-                        stroke.color.b != new_color.b ||
-                        stroke.color.a != new_color.a) {
-                        shape->set_stroke(new_color, stroke.width);
-                    }
+                    new_color = std::get<Color>(value);
+                } else if (std::holds_alternative<std::string>(value)) {
+                    new_color = parse_color_hex(std::get<std::string>(value));
+                } else {
+                    continue;
+                }
+                auto stroke = shape->stroke();
+                if (stroke.color.r != new_color.r ||
+                    stroke.color.g != new_color.g ||
+                    stroke.color.b != new_color.b ||
+                    stroke.color.a != new_color.a) {
+                    shape->set_stroke(new_color, stroke.width);
                 }
             } else if (strcmp(actual_prop, "stroke.width") == 0) {
                 if (std::holds_alternative<float>(value)) {
@@ -301,16 +376,21 @@ void Timeline::apply(Node* target, float time) const {
                         text->set_font_size(new_size);
                     }
                 }
-            } else if (strcmp(actual_prop, "text.color") == 0) {
+            } else if (strcmp(actual_prop, "text.color") == 0 || strcmp(actual_prop, "color") == 0) {
+                Color new_color;
                 if (std::holds_alternative<Color>(value)) {
-                    Color new_color = std::get<Color>(value);
-                    Color current_color = text->color();
-                    if (current_color.r != new_color.r ||
-                        current_color.g != new_color.g ||
-                        current_color.b != new_color.b ||
-                        current_color.a != new_color.a) {
-                        text->set_color(new_color);
-                    }
+                    new_color = std::get<Color>(value);
+                } else if (std::holds_alternative<std::string>(value)) {
+                    new_color = parse_color_hex(std::get<std::string>(value));
+                } else {
+                    continue;
+                }
+                Color current_color = text->color();
+                if (current_color.r != new_color.r ||
+                    current_color.g != new_color.g ||
+                    current_color.b != new_color.b ||
+                    current_color.a != new_color.a) {
+                    text->set_color(new_color);
                 }
             }
         }
@@ -335,6 +415,9 @@ void TimelinePlayer::play() {
     playing_ = true;
     finished_ = false;
 
+    // Set prev_time_ to -1 so the first apply() doesn't skip
+    prev_time_ = -1.0f;
+
     // Apply initial frame immediately to avoid jumping
     apply();
 }
@@ -358,22 +441,39 @@ bool TimelinePlayer::advance(float dt) {
     if (!playing_ || finished_) return false;
 
     prev_time_ = time_;
-    time_ += dt * timeline_->speed();
 
     float duration = timeline_->duration();
     LoopMode loop_mode = timeline_->loop_mode();
 
+    // Advance time (direction depends on reverse_ for PingPong)
+    if (reverse_) {
+        time_ -= dt * timeline_->speed();
+    } else {
+        time_ += dt * timeline_->speed();
+    }
+
     // Handle loop modes
-    if (time_ >= duration) {
-        if (loop_mode == LoopMode::Once) {
+    if (loop_mode == LoopMode::Once) {
+        if (time_ >= duration) {
             time_ = duration;
             finished_ = true;
             playing_ = false;
-        } else if (loop_mode == LoopMode::Loop) {
+        }
+    } else if (loop_mode == LoopMode::Loop) {
+        if (time_ >= duration) {
             time_ = std::fmod(time_, duration);
-        } else if (loop_mode == LoopMode::PingPong) {
-            reverse_ = !reverse_;
+        }
+    } else if (loop_mode == LoopMode::PingPong) {
+        if (!reverse_ && time_ >= duration) {
+            // Hit end, start going backwards
+            reverse_ = true;
             time_ = duration - (time_ - duration);
+            if (time_ < 0) time_ = 0;
+        } else if (reverse_ && time_ <= 0) {
+            // Hit start, start going forwards
+            reverse_ = false;
+            time_ = -time_;
+            if (time_ > duration) time_ = duration;
         }
     }
 
@@ -456,7 +556,7 @@ TimelinePlayer* AnimationController::play(const char* timeline_name, Node* targe
 
 void AnimationController::stop(const char* timeline_name) {
     for (auto& player : players_) {
-        if (player->timeline()->name() == timeline_name) {
+        if (std::strcmp(player->timeline()->name(), timeline_name) == 0) {
             player->stop();
         }
     }
@@ -478,7 +578,7 @@ void AnimationController::stop_on_target(Node* target) {
 
 bool AnimationController::is_playing(const char* timeline_name) const {
     for (auto& player : players_) {
-        if (player->timeline()->name() == timeline_name && player->is_playing()) {
+        if (std::strcmp(player->timeline()->name(), timeline_name) == 0 && player->is_playing()) {
             return true;
         }
     }

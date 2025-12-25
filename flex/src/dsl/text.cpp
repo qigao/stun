@@ -42,9 +42,9 @@ void Text::update_measurement() const {
     measurement_valid_ = true;
 }
 
-Bounds Text::bounds() const {
+Bounds Text::compute_bounds() const {
     update_measurement();
-    return Bounds{x_, y_, measured_width_ * scale_x_, measured_height_ * scale_y_};
+    return Bounds{0, 0, measured_width_, measured_height_};
 }
 
 float Text::measured_width() const {
@@ -65,9 +65,12 @@ void Text::render(Renderer& renderer) {
     if (!visible() || content_.empty()) return;
 
     renderer.save();
-    renderer.translate(x(), y());
-    renderer.rotate(rotation());
-    renderer.scale(scale_x(), scale_y());
+    
+    // Use Eigen world transform for absolute positioning
+    renderer.set_transform(world_transform());
+    
+    // Opacity needs to be handled via global alpha stack or world opacity
+    // For now keep it simple since ThorVG renderer handles it in draw_text
     renderer.set_global_alpha(opacity());
 
     // Apply shadow if set

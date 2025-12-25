@@ -7,6 +7,7 @@
 #include "flex/dsl/shape.h"
 #include "flex/renderer.h"
 #include <algorithm>
+#include <thorvg.h>
 
 namespace flex {
 
@@ -45,6 +46,8 @@ GeometryType Shape::geometry_type() const {
           return GeometryType::Line;
         else if constexpr (std::is_same_v<T, RingData>)
           return GeometryType::Ring;
+        else if constexpr (std::is_same_v<T, TriangleData>)
+          return GeometryType::Triangle;
         else
           return GeometryType::None;
       },
@@ -110,6 +113,12 @@ void Shape::set_ring(float outer_radius, float inner_radius) {
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
+void Shape::set_triangle(float width, float height, Direction direction) {
+  geometry_ = TriangleData{std::max(0.f, width), std::max(0.f, height), direction};
+  update_cached_path();
+  mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
+}
+
 // ============================================================================
 // Geometry Getters (compute from variant)
 // ============================================================================
@@ -166,6 +175,13 @@ LineGeometry Shape::line() const {
 RingGeometry Shape::ring() const {
   if (auto *r = std::get_if<RingData>(&geometry_)) {
     return {r->outer_radius, r->inner_radius};
+  }
+  return {};
+}
+
+TriangleGeometry Shape::triangle() const {
+  if (auto *t = std::get_if<TriangleData>(&geometry_)) {
+    return {t->width, t->height, t->direction};
   }
   return {};
 }
@@ -305,6 +321,103 @@ static void split_and_render_rough(flex::Renderer &r, const std::string &path,
 void Shape::render(Renderer &r) {
   if (!visible_)
     return;
+
+  bool is_rough = (rough_.roughness > 0);
+
+  // -------------------------------------------
+  // RETAINED MODE: Use cached ThorVG objects
+  // -------------------------------------------
+  if (!is_rough && r.supports_retained_mode()) {
+    // Already cached and no changes? Skip entirely!
+    if (tvg_cached_paint_ && !is_dirty(DirtyFlags::Content)) {
+      if (is_dirty(DirtyFlags::Transform)) {
+        r.update_transform(tvg_cached_paint_, world_transform());
+        clear_dirty(DirtyFlags::Transform);
+      }
+      return;  // Cached object still valid
+    }
+
+    // Need to rebuild
+    Paint f = fill_ ? *fill_ : Paint();
+    Paint s = stroke_ ? *stroke_ : Paint();
+    float sw = stroke_width_;
+    float alpha = opacity_;
+
+    // Remove old cached object if exists
+    if (tvg_cached_paint_) {
+      r.remove_cached(tvg_cached_paint_);
+      tvg_cached_paint_ = nullptr;
+    }
+
+    // Create new cached object
+    tvg::Shape* new_shape = std::visit([&](auto&& g) -> tvg::Shape* {
+      using T = std::decay_t<decltype(g)>;
+
+      if constexpr (std::is_same_v<T, RectData>) {
+        return r.push_rect(0, 0, g.width, g.height, g.corner_radius, f, s, sw, world_transform(), alpha);
+      } else if constexpr (std::is_same_v<T, CircleData>) {
+        return r.push_circle(0, 0, g.radius, f, s, sw, world_transform(), alpha);
+      } else if constexpr (std::is_same_v<T, EllipseData>) {
+        return r.push_ellipse(0, 0, g.rx, g.ry, f, s, sw, world_transform(), alpha);
+      } else if constexpr (std::is_same_v<T, PolygonData>) {
+        return r.push_polygon(g.sides, g.radius, f, s, sw, world_transform(), alpha);
+      } else if constexpr (std::is_same_v<T, StarData>) {
+        return r.push_star(g.points, g.outer_radius, g.inner_radius, f, s, sw, world_transform(), alpha);
+      } else if constexpr (std::is_same_v<T, PathData>) {
+        return r.push_path(g.d, f, s, sw, world_transform(), alpha);
+      } else if constexpr (std::is_same_v<T, LineData>) {
+        // Line not yet supported in retained mode
+        return nullptr;
+      } else if constexpr (std::is_same_v<T, RingData>) {
+        // Ring not yet supported in retained mode
+        return nullptr;
+      }
+      return nullptr;
+    }, geometry_);
+
+    if (new_shape) {
+      tvg_cached_paint_ = new_shape;
+      clear_dirty(DirtyFlags::Content | DirtyFlags::Transform);
+      return;
+    }
+    // Fall through to immediate mode for unsupported geometry
+  }
+
+  // -------------------------------------------
+  // IMMEDIATE MODE: Fallback for rough/complex shapes
+  // -------------------------------------------
+
+  // OPTIMIZATION: Use direct primitive rendering if not rough
+  if (!is_rough) {
+      r.save();
+      r.set_transform(world_transform());
+      if (opacity_ < 1.0f) r.set_global_alpha(opacity_);
+
+      bool handled = std::visit([&](auto&& g) -> bool {
+          using T = std::decay_t<decltype(g)>;
+
+          Paint f = fill_ ? *fill_ : Paint();
+          Paint s = stroke_ ? *stroke_ : Paint();
+          float sw = stroke_width_;
+
+          if constexpr (std::is_same_v<T, RectData>) {
+              r.draw_rect(0, 0, g.width, g.height, g.corner_radius, f, s, sw);
+              return true;
+          } else if constexpr (std::is_same_v<T, CircleData>) {
+              r.draw_circle(0, 0, g.radius, f, s, sw);
+              return true;
+          } else if constexpr (std::is_same_v<T, EllipseData>) {
+              r.draw_ellipse(0, 0, g.rx, g.ry, f, s, sw);
+              return true;
+          }
+          return false;
+      }, geometry_);
+
+      r.restore();
+      if (handled) return;
+  }
+
+  // Fallback to path rendering for rough shapes or complex geometry
   if (cached_path_.empty()) {
     // Debug: Why is path empty?
     fprintf(stderr, "Warning: Shape '%s' has empty cached_path_\n", id_.c_str());
@@ -313,11 +426,9 @@ void Shape::render(Renderer &r) {
 
   r.save();
 
-  r.translate(x_, y_);
-  if (rotation_ != 0)
-    r.rotate(rotation_);
-  if (scale_x_ != 1 || scale_y_ != 1)
-    r.scale(scale_x_, scale_y_);
+  // Use Eigen world transform
+  r.set_transform(world_transform());
+
   if (opacity_ < 1.0f)
     r.set_global_alpha(opacity_);
 
@@ -348,10 +459,10 @@ void Shape::render(Renderer &r) {
 // Bounds - Using variant visitor
 // ============================================================================
 
-Bounds Shape::bounds() const {
+Bounds Shape::compute_bounds() const {
   Bounds b;
-  b.x = x_;
-  b.y = y_;
+  b.x = 0;
+  b.y = 0;
 
   std::visit(
       [&](auto &&g) {
@@ -361,44 +472,48 @@ Bounds Shape::bounds() const {
           b.width = 0;
           b.height = 0;
         } else if constexpr (std::is_same_v<T, RectData>) {
-          b.width = g.width * scale_x_;
-          b.height = g.height * scale_y_;
+          b.width = g.width;
+          b.height = g.height;
         } else if constexpr (std::is_same_v<T, CircleData>) {
-          b.width = g.radius * 2 * scale_x_;
-          b.height = g.radius * 2 * scale_y_;
-          b.x -= g.radius * scale_x_;
-          b.y -= g.radius * scale_y_;
+          b.width = g.radius * 2;
+          b.height = g.radius * 2;
+          b.x -= g.radius;
+          b.y -= g.radius;
         } else if constexpr (std::is_same_v<T, EllipseData>) {
-          b.width = g.rx * 2 * scale_x_;
-          b.height = g.ry * 2 * scale_y_;
-          b.x -= g.rx * scale_x_;
-          b.y -= g.ry * scale_y_;
+          b.width = g.rx * 2;
+          b.height = g.ry * 2;
+          b.x -= g.rx;
+          b.y -= g.ry;
         } else if constexpr (std::is_same_v<T, PolygonData>) {
-          b.width = g.radius * 2 * scale_x_;
-          b.height = g.radius * 2 * scale_y_;
-          b.x -= g.radius * scale_x_;
-          b.y -= g.radius * scale_y_;
+          // Polygon is centered by default in our generator
+          b.width = g.radius * 2;
+          b.height = g.radius * 2;
+          b.x -= g.radius;
+          b.y -= g.radius;
         } else if constexpr (std::is_same_v<T, PathData>) {
-          // Use stored bounds if available, otherwise minimal default
-          b.width = (g.width > 0 ? g.width : 10) * scale_x_;
-          b.height = (g.height > 0 ? g.height : 10) * scale_y_;
+          b.width = (g.width > 0 ? g.width : 10);
+          b.height = (g.height > 0 ? g.height : 10);
         } else if constexpr (std::is_same_v<T, StarData>) {
-          b.width = g.outer_radius * 2 * scale_x_;
-          b.height = g.outer_radius * 2 * scale_y_;
-          b.x -= g.outer_radius * scale_x_;
-          b.y -= g.outer_radius * scale_y_;
+          b.width = g.outer_radius * 2;
+          b.height = g.outer_radius * 2;
+          b.x -= g.outer_radius;
+          b.y -= g.outer_radius;
         } else if constexpr (std::is_same_v<T, LineData>) {
-          b.width = std::abs(g.x2) * scale_x_;
-          b.height = std::abs(g.y2) * scale_y_;
-          if (g.x2 < 0)
-            b.x += g.x2 * scale_x_;
-          if (g.y2 < 0)
-            b.y += g.y2 * scale_y_;
+          b.width = std::abs(g.x2);
+          b.height = std::abs(g.y2);
+          if (g.x2 < 0) b.x += g.x2;
+          if (g.y2 < 0) b.y += g.y2;
         } else if constexpr (std::is_same_v<T, RingData>) {
-          b.width = g.outer_radius * 2 * scale_x_;
-          b.height = g.outer_radius * 2 * scale_y_;
-          b.x -= g.outer_radius * scale_x_;
-          b.y -= g.outer_radius * scale_y_;
+          b.width = g.outer_radius * 2;
+          b.height = g.outer_radius * 2;
+          b.x -= g.outer_radius;
+          b.y -= g.outer_radius;
+        } else if constexpr (std::is_same_v<T, TriangleData>) {
+          // Triangle is centered at origin
+          b.width = g.width;
+          b.height = g.height;
+          b.x -= g.width / 2;
+          b.y -= g.height / 2;
         }
       },
       geometry_);

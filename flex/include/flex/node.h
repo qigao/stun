@@ -7,13 +7,18 @@
 
 #pragma once
 
-#include "flex/types.h"
+#include "types.h"
 #include "flex/dsl/event.h"
 #include <string>
 #include <vector>
 #include <memory>
 #include <functional>
 #include <optional>
+
+// Forward declare ThorVG types for retained mode
+namespace tvg {
+    class Paint;
+}
 
 namespace flex {
 
@@ -80,27 +85,41 @@ public:
 
     float x() const { return x_; }
     float y() const { return y_; }
-    void set_x(float x) { x_ = x; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
-    void set_y(float y) { y_ = y; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
-    void set_position(float x, float y) { x_ = x; y_ = y; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    
+    // Optimized: inline dirty marking (no propagation needed for transform)
+    void set_x(float x) {
+        x_ = x;
+        mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
+    }
+    
+    void set_y(float y) {
+        y_ = y;
+        mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
+    }
+    
+    void set_position(float x, float y) {
+        x_ = x;
+        y_ = y;
+        mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
+    }
 
     float scale_x() const { return scale_x_; }
     float scale_y() const { return scale_y_; }
-    void set_scale(float sx, float sy) { scale_x_ = sx; scale_y_ = sy; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
-    void set_scale(float s) { scale_x_ = scale_y_ = s; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_scale(float sx, float sy) { scale_x_ = sx; scale_y_ = sy; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_scale(float s) { scale_x_ = scale_y_ = s; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
 
     float rotation() const { return rotation_; }
-    void set_rotation(float degrees) { rotation_ = degrees; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_rotation(float degrees) { rotation_ = degrees; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
 
     // -------------------------------------------
     // Visual Properties
     // -------------------------------------------
 
     float opacity() const { return opacity_; }
-    void set_opacity(float o) { opacity_ = o; mark_dirty(DirtyFlags::Visual); }
+    void set_opacity(float o) { opacity_ = o; mark_dirty_internal(DirtyFlags::Visual); }
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; mark_dirty(DirtyFlags::Visual); }
+    void set_visible(bool v) { visible_ = v; mark_dirty_internal(DirtyFlags::Visual); }
 
     // -------------------------------------------
     // Effects (Shadow and Blur)
@@ -160,6 +179,46 @@ public:
     AlignSelf align_self() const { return align_self_; }
     void set_align_self(AlignSelf a) { align_self_ = a; mark_dirty(DirtyFlags::Layout); }
 
+    // Position mode: absolute elements are excluded from flex layout
+    bool position_absolute() const { return position_absolute_; }
+    void set_position_absolute(bool a) { position_absolute_ = a; mark_dirty(DirtyFlags::Layout); }
+
+    // Anchor point: determines which point of the element x,y refers to
+    Anchor anchor() const { return anchor_; }
+    void set_anchor(Anchor a) { anchor_ = a; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+
+    // -------------------------------------------
+    // Dirty Flags (for optimization)
+    // -------------------------------------------
+
+    // -------------------------------------------
+    // Matrix Transforms (Eigen Optimized)
+    // -------------------------------------------
+
+    const Transform& local_transform() const {
+        if (is_dirty(DirtyFlags::Transform)) {
+            const_cast<Node*>(this)->update_local_transform();
+        }
+        return local_transform_;
+    }
+
+    const Transform& world_transform() const {
+        if (is_dirty(DirtyFlags::Transform)) {
+            const_cast<Node*>(this)->update_world_transform();
+        }
+        return world_transform_;
+    }
+
+    // Convert point from world space to local space
+    Vec2 to_local(const Vec2& world_pos) const {
+        return world_transform().inverse() * world_pos;
+    }
+
+    // Convert point from local space to world space
+    Vec2 to_world(const Vec2& local_pos) const {
+        return world_transform() * local_pos;
+    }
+
     // -------------------------------------------
     // Dirty Flags (for optimization)
     // -------------------------------------------
@@ -167,19 +226,45 @@ public:
     DirtyFlags dirty_flags() const { return dirty_flags_; }
     bool is_dirty() const { return dirty_flags_ != DirtyFlags::None; }
     bool is_dirty(DirtyFlags flag) const { return has_flag(dirty_flags_, flag); }
-    void mark_dirty(DirtyFlags flags) { dirty_flags_ |= flags; propagate_dirty(); }
+    
+    // mark_dirty remains public, but we'll override it in Group to handle children
+    virtual void mark_dirty(DirtyFlags flags);
+    
     void clear_dirty() { dirty_flags_ = DirtyFlags::None; }
     void clear_dirty(DirtyFlags flags) { dirty_flags_ &= ~flags; }
+
+    // -------------------------------------------
+    // Batch Updates (Performance Optimization)
+    // -------------------------------------------
+
+    // Begin batch update mode - accumulates dirty flags without propagation
+    void begin_batch() { batch_mode_ = true; }
+
+    // End batch update mode - propagates accumulated dirty flags once
+    void end_batch() {
+        batch_mode_ = false;
+        if (pending_dirty_flags_ != DirtyFlags::None) {
+            mark_dirty(pending_dirty_flags_);
+            pending_dirty_flags_ = DirtyFlags::None;
+        }
+    }
+
+    // Check if in batch mode
+    bool is_batching() const { return batch_mode_; }
 
     // -------------------------------------------
     // Culling (for rendering optimization)
     // -------------------------------------------
 
-    // Quick check if node should be rendered at all
-    bool should_render() const { return visible_ && opacity_ > 0.0f; }
-
-    // Check culling against viewport bounds
-    CullResult cull(const Bounds& viewport) const;
+    // Check culling against viewport bounds (cached)
+    CullResult cull(const Bounds& viewport) const {
+        if (!visible_) return CullResult::Hidden;
+        if (opacity_ <= 0.0f) return CullResult::Transparent;
+        
+        // Viewport-based culling check
+        if (!intersects_viewport(viewport)) return CullResult::OutOfView;
+        return CullResult::Visible;
+    }
 
     // Check if node's bounds intersect with viewport
     bool intersects_viewport(const Bounds& viewport) const;
@@ -204,8 +289,25 @@ public:
     // Hit Testing and Events
     // -------------------------------------------
 
-    // Get node bounds (override in subclasses)
-    virtual Bounds bounds() const { return Bounds{x_, y_, 0, 0}; }
+    Bounds bounds() const {
+        if (is_dirty(DirtyFlags::Bounds)) {
+            cached_bounds_ = compute_bounds();
+            const_cast<Node*>(this)->clear_dirty(DirtyFlags::Bounds);
+        }
+        return cached_bounds_;
+    }
+
+    // Get node bounds in world space (cached)
+    Bounds world_bounds() const {
+        if (is_dirty(DirtyFlags::WorldBounds | DirtyFlags::Transform | DirtyFlags::Bounds)) {
+            cached_world_bounds_ = bounds().transformed(world_transform());
+            const_cast<Node*>(this)->clear_dirty(DirtyFlags::WorldBounds);
+        }
+        return cached_world_bounds_;
+    }
+
+    // Compute bounds (override in subclasses)
+    virtual Bounds compute_bounds() const { return Bounds{0, 0, 0, 0}; }
 
     // Test if point is inside node
     virtual bool hit_test(float px, float py) const;
@@ -333,9 +435,36 @@ protected:
     float flex_shrink_ = 1;     // Shrink factor
     float flex_basis_ = 0;      // Initial main size (0 = auto)
     AlignSelf align_self_ = AlignSelf::Auto;
+    bool position_absolute_ = false;  // If true, excluded from flex layout
+    Anchor anchor_ = Anchor::TopLeft; // Anchor point for positioning
 
     // Dirty flags (for optimization)
     DirtyFlags dirty_flags_ = DirtyFlags::All;  // Start dirty
+
+    // Batch update mode (for performance)
+    bool batch_mode_ = false;
+    DirtyFlags pending_dirty_flags_ = DirtyFlags::None;
+
+    // Cached bounds (recomputed when Bounds flag is dirty)
+    mutable Bounds cached_bounds_;
+    mutable Bounds cached_world_bounds_;
+
+    // Internal dirty marking (respects batch mode)
+    void mark_dirty_internal(DirtyFlags flags) {
+        if (batch_mode_) {
+            pending_dirty_flags_ |= flags;
+        } else {
+            mark_dirty(flags);
+        }
+    }
+
+    // Cached transforms (Eigen Matrix3f)
+    Transform local_transform_ = Transform::Identity();
+    Transform world_transform_ = Transform::Identity();
+
+    // Internal update logic
+    void update_local_transform();
+    void update_world_transform();
 
     // Hierarchy (set by parent)
     Node* parent_ = nullptr;
@@ -352,6 +481,24 @@ protected:
     // FSM and Pseudo-Class Styles (new architecture)
     std::unique_ptr<PseudoClassStyleMap> pseudo_styles_;  // On-demand allocation
     void* fsm_instance_ = nullptr;  // Type-erased FSM pointer
+
+    // -------------------------------------------
+    // ThorVG Retained Mode Cache
+    // -------------------------------------------
+    // Cached ThorVG paint object for retained mode rendering.
+    // Owned by ThorVG canvas after push(), we just keep a reference.
+    tvg::Paint* tvg_cached_paint_ = nullptr;
+
+public:
+    // Retained mode API
+    tvg::Paint* tvg_cached_paint() const { return tvg_cached_paint_; }
+    void set_tvg_cached_paint(tvg::Paint* paint) { tvg_cached_paint_ = paint; }
+    void invalidate_tvg_cache() { tvg_cached_paint_ = nullptr; }
+
+    // Check if node needs ThorVG object rebuild (content changed)
+    bool needs_tvg_rebuild() const {
+        return tvg_cached_paint_ == nullptr || is_dirty(DirtyFlags::Content);
+    }
 };
 
 } // namespace flex

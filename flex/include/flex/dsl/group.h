@@ -108,7 +108,10 @@ public:
     // Bounds
     // -------------------------------------------
 
-    Bounds bounds() const override;
+    Bounds compute_bounds() const override;
+
+    // Override to propagate transform dirty to children
+    void mark_dirty(DirtyFlags flags) override;
 
     // -------------------------------------------
     // Rendering

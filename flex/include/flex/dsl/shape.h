@@ -51,6 +51,12 @@ struct RingGeometry {
     float inner_radius = 0;
 };
 
+struct TriangleGeometry {
+    float width = 0;
+    float height = 0;
+    Direction direction = Direction::Right;
+};
+
 struct PathGeometry {
     std::string d;
 };
@@ -133,6 +139,9 @@ public:
     void set_ring(float outer_radius, float inner_radius);
     RingGeometry ring() const;
 
+    void set_triangle(float width, float height, Direction direction = Direction::Right);
+    TriangleGeometry triangle() const;
+
     // -------------------------------------------
     // Paint
     // -------------------------------------------
@@ -174,7 +183,7 @@ public:
     // Hit Testing
     // -------------------------------------------
 
-    Bounds bounds() const override;
+    Bounds compute_bounds() const override;
 
 private:
     // Core data - clean and minimal

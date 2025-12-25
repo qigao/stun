@@ -24,6 +24,24 @@ Flex Engine 是一个现代化的 2.5D 游戏引擎和 UI 框架，具有强大�
 - ✅ **动画混合**: Override、Additive、Multiply 模式
 - ✅ **实时渲染**: SDL2 + ThorVG 高质量向量渲染
 
+### 模块导入
+```flex
+// main.flex - 导入其他模块
+import "animations/fade.flex"
+import "components/button.flex"
+import "machines/player_state.flex"
+
+scene main {
+  // 使用导入的动画和组件
+}
+```
+
+导入特性：
+- 支持相对路径导入
+- 自动检测循环导入（跳过已加载文件）
+- 合并 animations、machines、components、assets
+- 递归处理嵌套导入
+
 ### DSL 动画定义
 ```flex
 anim "PlayerMove" {
@@ -211,12 +229,96 @@ int main() {
 - **re2c** - 词法分析器生成器
 - **Lemon** - 解析器生成器
 
-## 📊 性能指标
+## 🐛 调试与性能分析
 
-- **帧率**: 稳定 60 FPS
-- **动画延迟**: < 1ms
-- **内存使用**: 单个动画 < 1KB
-- **同时动画**: 支持 1000+ 动画同时播放
+Flex Engine 支持通过环境变量启用调试日志和性能分析，无需重新编译：
+
+### 环境变量
+
+| 变量 | 值 | 描述 |
+|------|-----|------|
+| `FLEX_DEBUG` | `1` 或 `true` | 启用调试日志输出 |
+| `FLEX_PROFILE` | `1` 或 `true` | 启用性能分析（后台线程收集） |
+| `FLEX_LOG_LEVEL` | `DBG`/`INF`/`WRN`/`ERR` | 设置日志级别 |
+
+### 使用示例
+
+```bash
+# 启用调试日志
+FLEX_DEBUG=1 ./your_app
+
+# 启用性能分析
+FLEX_PROFILE=1 ./your_app
+
+# 同时启用调试和性能分析
+FLEX_DEBUG=1 FLEX_PROFILE=1 ./your_app
+
+# 只显示警告和错误
+FLEX_LOG_LEVEL=WRN FLEX_DEBUG=1 ./your_app
+```
+
+### Windows (PowerShell)
+
+```powershell
+$env:FLEX_DEBUG=1; ./your_app.exe
+$env:FLEX_PROFILE=1; ./your_app.exe
+```
+
+### Windows (CMD)
+
+```cmd
+set FLEX_DEBUG=1 && your_app.exe
+set FLEX_PROFILE=1 && your_app.exe
+```
+
+### 在代码中初始化
+
+```cpp
+#include <flex.h>
+
+int main() {
+    // 初始化调试/性能系统（读取环境变量）
+    flex::debug::init();
+
+    // ... 你的代码 ...
+
+    // 关闭时刷新日志和性能数据
+    flex::debug::shutdown();
+    return 0;
+}
+```
+
+### 获取性能统计
+
+```cpp
+// 获取作用域统计
+auto scope_stats = flex::debug::get_scope_stats();
+for (const auto& [name, stats] : scope_stats) {
+    printf("%s: count=%lld, avg=%.2fus\n",
+           name.c_str(), stats.count, stats.avg_ns() / 1000.0f);
+}
+
+// 获取帧统计
+auto frame_stats = flex::debug::get_frame_stats();
+printf("FPS: %.1f\n", frame_stats.avg_fps());
+```
+
+## 📊 性能指标 (实测数据)
+
+**✅ 经过验证的高性能** - 详见 [FINAL_PERFORMANCE_REPORT.md](docs/FINAL_PERFORMANCE_REPORT.md)
+
+- **复杂场景**: **120 FPS** (500 nodes + 100 animations) - 2x 超越 60 FPS 目标
+- **渲染性能**: **96 FPS** @ 1000 shapes
+- **节点更新**: **66 ns/node** - 业界领先
+- **动画采样**: **241 ns/sample** - 可支持数千条并发动画
+- **内存分配**: **5.7x 快于 malloc/free** - Arena allocator
+- **内存占用**: **0.06 MB** for 500 nodes (极低)
+
+**性能优化**: 通过 bounds 缓存和内联优化,性能提升 **43%**
+
+详细 benchmark 结果请查看:
+- [PERFORMANCE.md](PERFORMANCE.md) - 完整性能报告
+- [docs/FINAL_PERFORMANCE_REPORT.md](docs/FINAL_PERFORMANCE_REPORT.md) - 最终报告
 
 ## 🎯 支持的动画类型
 

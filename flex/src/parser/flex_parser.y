@@ -92,11 +92,28 @@ program ::= top_level_list.
 top_level_list ::= top_level_list top_level_block.
 top_level_list ::= .
 
+top_level_block ::= import_stmt.
+top_level_block ::= const_decl.
+top_level_block ::= var_decl.
 top_level_block ::= scene_block.
 top_level_block ::= component_block.
 top_level_block ::= anim_block.
 top_level_block ::= machine_block.
 top_level_block ::= data_block.
+top_level_block ::= assets_block.
+
+// ============================================================================
+// Import Statement - import "path/to/file.flex"
+// ============================================================================
+
+import_stmt ::= IMPORT STRING.
+
+// ============================================================================
+// Const/Var Declarations - const name = expr, var name = expr
+// ============================================================================
+
+const_decl ::= CONST IDENTIFIER ASSIGN value_expr.
+var_decl ::= VAR IDENTIFIER ASSIGN value_expr.
 
 // ============================================================================
 // Scene Block
@@ -120,7 +137,7 @@ scene_item ::= node_def.
 scene_item ::= repeat_block.
 scene_item ::= for_block.
 
-scene_property ::= IDENTIFIER COLON NUMBER opt_comma.
+scene_property ::= IDENTIFIER COLON value_expr opt_comma.
 
 // ============================================================================
 // Node Definition
@@ -156,19 +173,29 @@ node_item ::= for_block.
 node_property ::= IDENTIFIER COLON value_expr opt_comma.
 
 // ============================================================================
-// Value Expressions (simplified - actual parsing done in driver)
+// Value Expressions
 // ============================================================================
 
-value_expr ::= NUMBER.
-value_expr ::= STRING.
-value_expr ::= COLOR.
-value_expr ::= BOOL.
-value_expr ::= IDENTIFIER.
-value_expr ::= DOLLAR IDENTIFIER.
-value_expr ::= HASH IDENTIFIER.
-value_expr ::= AT IDENTIFIER.
-value_expr ::= IDENTIFIER DOT IDENTIFIER.
-value_expr ::= BINDING.
+%left PLUS MINUS.
+%left STAR SLASH.
+
+value_expr ::= term.
+value_expr ::= value_expr STAR value_expr.
+value_expr ::= value_expr SLASH value_expr.
+value_expr ::= value_expr PLUS value_expr.
+value_expr ::= value_expr MINUS value_expr.
+value_expr ::= LPAREN value_expr RPAREN.
+
+term ::= NUMBER.
+term ::= STRING.
+term ::= COLOR.
+term ::= BOOL.
+term ::= IDENTIFIER.
+term ::= DOLLAR IDENTIFIER.
+term ::= HASH IDENTIFIER.
+term ::= AT IDENTIFIER.
+term ::= IDENTIFIER DOT IDENTIFIER.
+term ::= BINDING.
 
 opt_comma ::= COMMA.
 opt_comma ::= .
@@ -337,3 +364,27 @@ for_block ::= FOR IDENTIFIER IN IDENTIFIER LBRACE for_body RBRACE.
 
 for_body ::= for_body node_def.
 for_body ::= .
+
+// ============================================================================
+// Assets Block - assets { audio click: "sounds/click.wav", ... }
+// ============================================================================
+
+assets_block ::= ASSETS LBRACE asset_items RBRACE.
+
+asset_items ::= asset_items asset_item.
+asset_items ::= .
+
+// Simple asset: audio click: "sounds/click.wav"
+asset_item ::= AUDIO IDENTIFIER COLON STRING.
+asset_item ::= NODE_TYPE IDENTIFIER COLON STRING.
+asset_item ::= FONT IDENTIFIER COLON STRING.
+
+// Asset with options block: audio bgm: "bgm.mp3" { loop: true, volume: 0.5 }
+asset_item ::= AUDIO IDENTIFIER COLON STRING LBRACE asset_opts RBRACE.
+asset_item ::= NODE_TYPE IDENTIFIER COLON STRING LBRACE asset_opts RBRACE.
+asset_item ::= FONT IDENTIFIER COLON STRING LBRACE asset_opts RBRACE.
+
+asset_opts ::= asset_opts asset_opt.
+asset_opts ::= .
+
+asset_opt ::= IDENTIFIER COLON value_expr opt_comma.

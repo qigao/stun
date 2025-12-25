@@ -11,16 +11,17 @@ endforeach()
 
 # SDL2 Examples (require SDL2)
 find_package(SDL2 CONFIG QUIET)
- 
+find_package(OpenGL REQUIRED)
+
 # Find remaining cpp files (those without _demo or _app suffix)
-file(GLOB CPP_FILES *.cpp) 
+file(GLOB CPP_FILES *.cpp)
 list(LENGTH CPP_FILES CPP_COUNT)
 math(EXPR TOTAL_COUNT "${DEMO_COUNT} + ${CPP_COUNT}")
 
 foreach(CPP_FILE ${CPP_FILES})
   get_filename_component(CPP_NAME ${CPP_FILE} NAME_WE)
   add_executable(${CPP_NAME} ${CPP_FILE})
-  target_link_libraries(${CPP_NAME} PRIVATE flex SDL2::SDL2 SDL2::SDL2main)
+  target_link_libraries(${CPP_NAME} PRIVATE flex SDL2::SDL2 SDL2::SDL2main OpenGL::GL)
   set_target_properties(${CPP_NAME} PROPERTIES FOLDER "flex/examples")
 endforeach()
 

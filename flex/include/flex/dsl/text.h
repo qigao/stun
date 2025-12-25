@@ -102,7 +102,7 @@ public:
 
     // Get measured text bounds (width x height)
     // Returns cached measurement, recalculates if invalidated
-    Bounds bounds() const override;
+    Bounds compute_bounds() const override;
 
     // Get measured text width (approximate, based on font metrics)
     float measured_width() const;

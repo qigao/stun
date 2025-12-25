@@ -29,6 +29,19 @@ void Node::ensure_events() {
 // Dirty Flags and Culling
 // ============================================================================
 
+void Node::mark_dirty(DirtyFlags flags) {
+    // If transform or local bounds change, world bounds also need recalculation
+    if (has_flag(flags, DirtyFlags::Transform | DirtyFlags::Bounds)) {
+        flags |= DirtyFlags::WorldBounds;
+    }
+
+    dirty_flags_ |= flags;
+    
+    // If transform changed, we must also invalidate world transforms of all children
+    // This is handled by recursion in Group::mark_dirty
+    propagate_dirty();
+}
+
 void Node::propagate_dirty() {
     // Propagate layout dirty to parent
     if (parent_ && has_flag(dirty_flags_, DirtyFlags::Layout)) {
@@ -36,15 +49,70 @@ void Node::propagate_dirty() {
     }
 }
 
-CullResult Node::cull(const Bounds& viewport) const {
-    if (!visible_) return CullResult::Hidden;
-    if (opacity_ <= 0.0f) return CullResult::Transparent;
-    if (!intersects_viewport(viewport)) return CullResult::OutOfView;
-    return CullResult::Visible;
+void Node::update_local_transform() {
+    float tx = x_;
+    float ty = y_;
+
+    // Apply anchor offset if not TopLeft (default)
+    if (anchor_ != Anchor::TopLeft) {
+        Bounds b = compute_bounds();
+        float w = b.width;
+        float h = b.height;
+
+        switch (anchor_) {
+            case Anchor::TopLeft:
+                break;
+            case Anchor::Top:
+                tx -= w / 2;
+                break;
+            case Anchor::TopRight:
+                tx -= w;
+                break;
+            case Anchor::Left:
+                ty -= h / 2;
+                break;
+            case Anchor::Center:
+                tx -= w / 2;
+                ty -= h / 2;
+                break;
+            case Anchor::Right:
+                tx -= w;
+                ty -= h / 2;
+                break;
+            case Anchor::BottomLeft:
+                ty -= h;
+                break;
+            case Anchor::Bottom:
+                tx -= w / 2;
+                ty -= h;
+                break;
+            case Anchor::BottomRight:
+                tx -= w;
+                ty -= h;
+                break;
+        }
+    }
+
+    local_transform_ = create_transform(tx, ty, rotation_, scale_x_, scale_y_);
+    // No need to clear flag here, it's cleared by callers (world_transform() or similar)
 }
 
+void Node::update_world_transform() {
+    if (is_dirty(DirtyFlags::Transform)) {
+        update_local_transform();
+        if (parent_) {
+            world_transform_ = parent_->world_transform() * local_transform_;
+        } else {
+            world_transform_ = local_transform_;
+        }
+        clear_dirty(DirtyFlags::Transform);
+    }
+}
+
+
+
 bool Node::intersects_viewport(const Bounds& viewport) const {
-    Bounds b = bounds();
+    Bounds b = world_bounds();
     // AABB intersection test
     return !(b.x + b.width < viewport.x ||
              b.x > viewport.x + viewport.width ||

@@ -21,12 +21,26 @@ struct AstScene;
 struct AstComponent;
 struct AstAnim;
 struct AstMachine;
+struct AstImport;
 
 // Property value types
 using AstValue = std::variant<float, std::string, bool>;
 
 // Property map
 using AstProps = std::unordered_map<std::string, AstValue>;
+
+// ============================================================================
+// Import Statement
+// ============================================================================
+
+struct AstImport {
+  std::string path;  // Relative path to imported file
+  int line = 0;      // Source line for error reporting
+  int column = 0;
+
+  AstImport() = default;
+  AstImport(const std::string &p, int l = 0, int c = 0) : path(p), line(l), column(c) {}
+};
 
 // ============================================================================
 // AST Node Types
@@ -115,6 +129,43 @@ struct AstTransition {
 };
 
 // ============================================================================
+// Assets Block
+// ============================================================================
+
+struct AstAsset {
+  std::string type;    // "audio", "image", "font", "svg"
+  std::string id;      // Asset ID
+  std::string path;    // File path
+  AstProps options;    // loop, volume, preload, etc.
+
+  AstAsset() = default;
+  AstAsset(const std::string &t, const std::string &i, const std::string &p)
+      : type(t), id(i), path(p) {}
+};
+
+struct AstAssets {
+  std::vector<AstAsset> assets;
+
+  AstAssets() = default;
+};
+
+// ============================================================================
+// Constants and Variables
+// ============================================================================
+
+// const faceRadius = 200
+// var counter = 0
+struct AstConst {
+  std::string name;
+  AstValue value;        // Evaluated at parse time
+  bool is_variable;      // false = const (immutable), true = var (mutable at runtime)
+
+  AstConst() : is_variable(false) {}
+  AstConst(const std::string &n, const AstValue &v, bool is_var = false)
+      : name(n), value(v), is_variable(is_var) {}
+};
+
+// ============================================================================
 // Data and For Loop
 // ============================================================================
 
@@ -149,6 +200,8 @@ struct AstState {
   std::string name;
   bool initial = false;
   std::string animation;
+  std::string play_audio;  // Audio asset ID to play on state entry
+  std::string stop_audio;  // Audio asset ID to stop on state entry
 
   AstState() = default;
   AstState(const std::string &n) : name(n) {}
@@ -176,11 +229,14 @@ struct AstMachine {
 // ============================================================================
 
 struct AstProgram {
+  std::vector<AstImport> imports;  // import statements (processed first)
+  std::vector<AstConst> constants; // const/var declarations (processed before scene)
   std::shared_ptr<AstScene> scene;
   std::vector<std::shared_ptr<AstComponent>> components;
   std::vector<std::shared_ptr<AstAnim>> animations;
   std::vector<std::shared_ptr<AstMachine>> machines;
   std::vector<std::shared_ptr<AstData>> data_blocks; // data { ... }
+  std::shared_ptr<AstAssets> assets; // assets { ... }
 
   AstProgram() = default;
 };

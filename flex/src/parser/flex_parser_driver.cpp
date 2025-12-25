@@ -22,9 +22,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <set>
 #include <sstream>
 #include <stack>
+#include <unordered_map>
 #include <vector>
 
 namespace flex {
@@ -118,7 +120,23 @@ class AstBuilder {
 public:
   AstBuilder(AstProgram *program) : program_(program) {}
 
+  // Symbol table for constants and variables (name -> value)
+  std::unordered_map<std::string, AstValue> symbols_;
+
   void on_token(const Token &tok, const Token *prev_tok) {
+    // Flush pending const/var value when encountering a new top-level block or EOF
+    if (expecting_const_value_ && !pending_value_tokens_.empty()) {
+      bool should_flush = (tok.type == TOK_SCENE || tok.type == TOK_ARTBOARD ||
+                           tok.type == TOK_CONST || tok.type == TOK_VAR ||
+                           tok.type == TOK_DATA || tok.type == TOK_ANIM ||
+                           tok.type == TOK_MACHINE || tok.type == TOK_COMPONENT ||
+                           tok.type == TOK_ASSETS || tok.type == TOK_IMPORT ||
+                           tok.type == TOK_EOF);
+      if (should_flush) {
+        flush_const_value();
+      }
+    }
+
     // Build AST based on token sequence
     switch (tok.type) {
     case TOK_SCENE:
@@ -132,9 +150,22 @@ public:
       break;
 
     case TOK_NODE_TYPE:
-      // Next IDENTIFIER will be node ID
-      pending_node_type_ = tok.value;
-      expecting_node_id_ = true;
+      // In assets block, image/svg are asset types
+      if (in_assets_block_ && (tok.value == "image" || tok.value == "svg")) {
+        pending_asset_type_ = tok.value;
+        expecting_asset_id_ = true;
+      } else {
+        // Next IDENTIFIER will be node ID
+        pending_node_type_ = tok.value;
+        expecting_node_id_ = true;
+      }
+      break;
+
+    case TOK_COMMA:
+      // Flush pending value before processing next property
+      if (expecting_value_ && !pending_value_tokens_.empty()) {
+        flush_pending_value();
+      }
       break;
 
     case TOK_LBRACE:
@@ -148,6 +179,18 @@ public:
     case TOK_COLON:
       // Previous IDENTIFIER is a property key
       if (prev_tok && prev_tok->type == TOK_IDENTIFIER) {
+        // If we were building a value for a previous property, finish it now
+        if (expecting_value_ && !pending_value_tokens_.empty()) {
+            // The previous token (which is the new key) was buffered because it was an IDENTIFIER.
+            // We must remove it from the value buffer of the *previous* property.
+            if (pending_value_tokens_.back().type == TOK_IDENTIFIER && 
+                pending_value_tokens_.back().value == prev_tok->value) {
+                pending_value_tokens_.pop_back();
+            }
+        
+            flush_pending_value();
+        }
+        
         pending_prop_key_ = prev_tok->value;
         expecting_value_ = true;
       }
@@ -161,37 +204,85 @@ public:
     case TOK_COLOR:
     case TOK_BOOL:
     case TOK_BINDING:
-      // Handle repeat count (repeat N { ... })
-      if (expecting_repeat_count_ && tok.type == TOK_NUMBER) {
+    case TOK_STAR:
+    case TOK_PLUS:
+    case TOK_MINUS:
+    case TOK_SLASH:
+    case TOK_LPAREN:
+    case TOK_RPAREN:
+      // Handle import path (STRING token like "components/button.flex")
+      if (expecting_import_path_ && tok.type == TOK_STRING) {
+        program_->imports.emplace_back(tok.value, tok.line, tok.column);
+        expecting_import_path_ = false;
+      }
+      // Handle asset path (STRING token like "sounds/click.wav")
+      else if (expecting_asset_path_ && tok.type == TOK_STRING) {
+        pending_asset_path_ = tok.value;
+        expecting_asset_path_ = false;
+        // Create and finalize the asset entry
+        AstAsset asset(pending_asset_type_, pending_asset_id_, pending_asset_path_);
+        if (!current_assets_) {
+          current_assets_ = std::make_shared<AstAssets>();
+        }
+        current_assets_->assets.push_back(asset);
+        pending_asset_type_.clear();
+        pending_asset_id_.clear();
+        pending_asset_path_.clear();
+        // Note: If there's an options block after this, it will be handled in handle_lbrace
+      }
+      // Handle asset option value
+      else if (expecting_asset_opt_value_) {
+        // Option values don't support math yet
+        if (!current_assets_ || current_assets_->assets.empty())
+          break;
+        auto &asset = current_assets_->assets.back();
+        AstValue value;
+        if (tok.type == TOK_NUMBER) {
+          value = std::stof(tok.value);
+        } else if (tok.type == TOK_BOOL) {
+          value = (tok.value == "true");
+        } else {
+          value = tok.value;
+        }
+        asset.options[pending_asset_opt_key_] = value;
+        pending_asset_opt_key_.clear();
+        expecting_asset_opt_value_ = false;
+        expecting_asset_opt_key_ = true; // Ready for next option
+      }
+      // Handle repeat count 
+       else if (expecting_repeat_count_ && tok.type == TOK_NUMBER) {
         pending_repeat_count_ = static_cast<int>(std::stof(tok.value));
         expecting_repeat_count_ = false;
       }
-      // Handle animation name (STRING token like "toVeryHigh")
+      // Handle animation name
       else if (expecting_anim_name_ && tok.type == TOK_STRING) {
         current_anim_ = std::make_shared<parser::AstAnim>();
         current_anim_->name = tok.value;
         expecting_anim_name_ = false;
       }
-      // Handle track property path (STRING token like "#statusText/content")
+      // Handle track property path
       else if (expecting_track_name_ && tok.type == TOK_STRING) {
         current_track_ = parser::AstTrack(tok.value);
         in_track_ = true;
         expecting_track_name_ = false;
       }
+      // Handle const/var value expression
+      else if (expecting_const_value_) {
+        pending_value_tokens_.push_back(tok);
+      }
       // Handle keyframe value
       else if (expecting_keyframe_value_) {
-        parser::AstValue value;
-        if (tok.type == TOK_NUMBER) {
-          value = std::stof(tok.value);
-        } else {
-          value = tok.value;
-        }
-        current_track_.keyframes.emplace_back(pending_keyframe_time_, value);
-        expecting_keyframe_value_ = false;
+        // Keyframes now support buffering too
+        pending_value_tokens_.push_back(tok);
       }
       // Handle property value or condition value
       else if (expecting_value_ || expecting_condition_val_) {
-        handle_value(tok);
+        // BUFFER the token
+        pending_value_tokens_.push_back(tok);
+      }
+      // Handle transition condition op
+      else if (tok.type == TOK_GT || tok.type == TOK_LT || tok.type == TOK_EQ || tok.type == TOK_NEQ) {
+         // handled elsewhere
       }
       break;
 
@@ -204,6 +295,10 @@ public:
       break;
 
     case TOK_KEYFRAME:
+      // Flush any pending keyframe value from previous keyframe
+      if (expecting_keyframe_value_ && !pending_value_tokens_.empty()) {
+        flush_pending_value();
+      }
       expecting_keyframe_time_ = true;
       break;
 
@@ -228,6 +323,10 @@ public:
       break;
 
     case TOK_TRANSITION:
+      // Flush any pending condition value from previous transition
+      if (expecting_condition_val_ && !pending_value_tokens_.empty()) {
+        flush_pending_value();
+      }
       // Push any pending transition before starting a new one
       if (has_pending_transition_ && in_layer_) {
         current_layer_.transitions.push_back(current_transition_);
@@ -269,8 +368,47 @@ public:
       expecting_data_name_ = true;
       break;
 
+    case TOK_ASSETS:
+      expecting_assets_block_ = true;
+      break;
+
+    case TOK_AUDIO:
+      if (in_assets_block_) {
+        pending_asset_type_ = "audio";
+        expecting_asset_id_ = true;
+      }
+      break;
+
+    case TOK_FONT:
+      if (in_assets_block_) {
+        pending_asset_type_ = "font";
+        expecting_asset_id_ = true;
+      }
+      break;
+
     case TOK_FOR:
       expecting_for_iterator_ = true;
+      break;
+
+    case TOK_CONST:
+      expecting_const_name_ = true;
+      pending_is_var_ = false;
+      break;
+
+    case TOK_VAR:
+      expecting_const_name_ = true;
+      pending_is_var_ = true;
+      break;
+
+    case TOK_ASSIGN:
+      // After const/var name, expect expression
+      if (!pending_const_name_.empty()) {
+        expecting_const_value_ = true;
+      }
+      break;
+
+    case TOK_IMPORT:
+      expecting_import_path_ = true;
       break;
 
     case TOK_IN:
@@ -306,7 +444,26 @@ public:
 
 private:
   void handle_identifier(const Token &tok, const Token *prev_tok) {
-    if (expecting_scene_name_) {
+    // Handle const/var name
+    if (expecting_const_name_) {
+      pending_const_name_ = tok.value;
+      expecting_const_name_ = false;
+      return;
+    }
+    // Handle const/var value expression
+    if (expecting_const_value_) {
+      pending_value_tokens_.push_back(tok);
+      return;
+    }
+    if (expecting_asset_id_) {
+      pending_asset_id_ = tok.value;
+      expecting_asset_id_ = false;
+      expecting_asset_path_ = true;
+    } else if (expecting_asset_opt_key_) {
+      pending_asset_opt_key_ = tok.value;
+      expecting_asset_opt_key_ = false;
+      expecting_asset_opt_value_ = true;
+    } else if (expecting_scene_name_) {
       current_scene_ = std::make_shared<AstScene>(tok.value);
       expecting_scene_name_ = false;
     } else if (expecting_template_suffix_) {
@@ -373,18 +530,263 @@ private:
       expecting_dot_property_ = false;
       pending_dot_object_.clear();
     } else if (expecting_value_) {
-      // Identifier as value (enum-like)
-      set_property(AstValue(tok.value));
-    } else if (prev_tok && prev_tok->type == TOK_IDENTIFIER) {
-      // Two identifiers in a row could be custom component instantiation
-      // Store type and ID, wait for LBRACE to confirm (COLON means it's a property)
-      pending_node_type_ = prev_tok->value;
-      pending_node_id_ = tok.value;
+        // Identifier can be part of an expression or an Enum value
+        // Buffer it
+        pending_value_tokens_.push_back(tok);
+      } else if (prev_tok && prev_tok->type == TOK_IDENTIFIER) {
+        // Two identifiers in a row...
+        pending_node_type_ = prev_tok->value;
+        pending_node_id_ = tok.value;
+      }
+  }
+
+  // Evaluate a math expression from tokens, substituting variables from symbol table
+  // Returns true if successfully evaluated as a number, false if should keep as string
+  bool try_evaluate_expression(const std::vector<Token>& tokens, float& result) {
+    // Check if this is a pure math expression (numbers, operators, parens, and known symbols)
+    bool has_binding = false;
+    bool has_unknown_identifier = false;
+
+    for (const auto& tok : tokens) {
+      if (tok.type == TOK_BINDING) {
+        has_binding = true;
+        break;
+      }
+      if (tok.type == TOK_IDENTIFIER) {
+        // Check if it's a known constant
+        if (symbols_.find(tok.value) == symbols_.end()) {
+          has_unknown_identifier = true;
+        }
+      }
+    }
+
+    // If has binding like ${m.rot}, can't evaluate at parse time
+    if (has_binding || has_unknown_identifier) {
+      return false;
+    }
+
+    // Build expression string, substituting constants
+    std::string expr;
+    for (const auto& tok : tokens) {
+      if (tok.type == TOK_IDENTIFIER) {
+        auto it = symbols_.find(tok.value);
+        if (it != symbols_.end()) {
+          if (auto* fval = std::get_if<float>(&it->second)) {
+            expr += std::to_string(*fval);
+          } else {
+            return false; // Non-numeric constant
+          }
+        }
+      } else if (tok.type == TOK_NUMBER || tok.type == TOK_PLUS ||
+                 tok.type == TOK_MINUS || tok.type == TOK_STAR ||
+                 tok.type == TOK_SLASH || tok.type == TOK_LPAREN ||
+                 tok.type == TOK_RPAREN) {
+        expr += tok.value;
+      } else {
+        return false; // Unknown token type for math
+      }
+      expr += " ";
+    }
+
+    // Check if it's a valid math expression
+    bool is_math = true;
+    for (char c : expr) {
+      if (!isdigit(c) && c != '.' && c != ' ' && c != '*' && c != '/' &&
+          c != '+' && c != '-' && c != '(' && c != ')') {
+        is_math = false;
+        break;
+      }
+    }
+
+    if (!is_math) return false;
+
+    // Recursive descent parser for math with parentheses
+    std::function<float(const char*&)> parse_expr;
+    std::function<float(const char*&)> parse_term;
+    std::function<float(const char*&)> parse_factor;
+
+    parse_factor = [&](const char*& p) -> float {
+      while (*p == ' ') p++;
+      if (*p == '(') {
+        p++;
+        float val = parse_expr(p);
+        while (*p == ' ') p++;
+        if (*p == ')') p++;
+        return val;
+      }
+      char* end;
+      float val = strtof(p, &end);
+      p = end;
+      return val;
+    };
+
+    parse_term = [&](const char*& p) -> float {
+      float left = parse_factor(p);
+      while (true) {
+        while (*p == ' ') p++;
+        if (*p == '*') { p++; left *= parse_factor(p); }
+        else if (*p == '/') { p++; left /= parse_factor(p); }
+        else break;
+      }
+      return left;
+    };
+
+    parse_expr = [&](const char*& p) -> float {
+      float left = parse_term(p);
+      while (true) {
+        while (*p == ' ') p++;
+        if (*p == '+') { p++; left += parse_term(p); }
+        else if (*p == '-') { p++; left -= parse_term(p); }
+        else break;
+      }
+      return left;
+    };
+
+    try {
+      const char* p = expr.c_str();
+      result = parse_expr(p);
+      while (*p == ' ') p++;
+      return (*p == '\0'); // Success only if consumed entire string
+    } catch (...) {
+      return false;
     }
   }
 
+  // Flush a const/var declaration
+  void flush_const_value() {
+    if (pending_const_name_.empty() || pending_value_tokens_.empty()) {
+      pending_const_name_.clear();
+      pending_value_tokens_.clear();
+      expecting_const_value_ = false;
+      return;
+    }
+
+    // Try to evaluate as numeric expression
+    float numeric_result;
+    AstValue value;
+
+    if (pending_value_tokens_.size() == 1) {
+      const auto& tok = pending_value_tokens_[0];
+      if (tok.type == TOK_NUMBER) {
+        value = std::stof(tok.value);
+      } else if (tok.type == TOK_BOOL) {
+        value = (tok.value == "true");
+      } else if (tok.type == TOK_STRING) {
+        value = tok.value;
+      } else if (tok.type == TOK_IDENTIFIER) {
+        // Reference to another constant
+        auto it = symbols_.find(tok.value);
+        if (it != symbols_.end()) {
+          value = it->second;
+        } else {
+          value = tok.value;
+        }
+      } else {
+        value = tok.value;
+      }
+    } else if (try_evaluate_expression(pending_value_tokens_, numeric_result)) {
+      value = numeric_result;
+    } else {
+      // Keep as string expression
+      std::string expr;
+      for (size_t i = 0; i < pending_value_tokens_.size(); i++) {
+        if (i > 0) expr += " ";
+        expr += pending_value_tokens_[i].value;
+      }
+      value = expr;
+    }
+
+    // Store in symbol table
+    symbols_[pending_const_name_] = value;
+
+    // Store in AST
+    program_->constants.emplace_back(pending_const_name_, value, pending_is_var_);
+
+    pending_const_name_.clear();
+    pending_value_tokens_.clear();
+    expecting_const_value_ = false;
+  }
+
+  void flush_pending_value() {
+     if (pending_value_tokens_.empty()) return;
+
+     AstValue value;
+
+     // Try to evaluate as numeric expression first
+     float numeric_result;
+     if (pending_value_tokens_.size() == 1 && pending_value_tokens_[0].type != TOK_BINDING) {
+         // Simple single token
+         const auto& tok = pending_value_tokens_[0];
+         switch (tok.type) {
+            case TOK_NUMBER: value = std::stof(tok.value); break;
+            case TOK_BOOL: value = (tok.value == "true"); break;
+            case TOK_IDENTIFIER: {
+              // Check if it's a constant reference
+              auto it = symbols_.find(tok.value);
+              if (it != symbols_.end()) {
+                value = it->second;
+              } else {
+                value = tok.value;
+              }
+              break;
+            }
+            default: value = tok.value; break;
+         }
+     } else if (try_evaluate_expression(pending_value_tokens_, numeric_result)) {
+         // Successfully evaluated math expression
+         value = numeric_result;
+     } else {
+         // Expression or Binding -> Stringify
+         std::string expr;
+         for (size_t i = 0; i < pending_value_tokens_.size(); i++) {
+             if (i > 0) expr += " ";
+             expr += pending_value_tokens_[i].value;
+         }
+         value = expr;
+     }
+
+     if (expecting_keyframe_value_) {
+         current_track_.keyframes.emplace_back(pending_keyframe_time_, value);
+         expecting_keyframe_value_ = false;
+     } else if (expecting_condition_val_) {
+         if (auto* fval = std::get_if<float>(&value)) {
+             current_transition_.condition_val = *fval;
+         }
+         expecting_condition_val_ = false;
+     } else {
+         set_property(value);
+     }
+
+     pending_value_tokens_.clear();
+     expecting_value_ = false;
+  }
+
   void handle_lbrace(const Token &tok) {
+    // Flush any pending value before entering block
+    if (expecting_value_ && !pending_value_tokens_.empty()) {
+        flush_pending_value();
+    }
+
     brace_depth_++;
+
+    // Track entering assets block
+    if (expecting_assets_block_) {
+      in_assets_block_ = true;
+      assets_brace_depth_ = brace_depth_;
+      expecting_assets_block_ = false;
+      if (!current_assets_) {
+        current_assets_ = std::make_shared<AstAssets>();
+      }
+      return;
+    }
+
+    // Track entering asset options block (nested brace inside assets block)
+    if (in_assets_block_ && !in_asset_opts_ && current_assets_ && !current_assets_->assets.empty()) {
+      in_asset_opts_ = true;
+      asset_opts_brace_depth_ = brace_depth_;
+      expecting_asset_opt_key_ = true;
+      return;
+    }
 
     // Track entering repeat block
     if (pending_repeat_count_ > 0 && repeat_brace_depth_ == 0) {
@@ -505,13 +907,13 @@ private:
     // Substitute in string properties
     for (auto &[key, value] : node->properties) {
       if (auto *sval = std::get_if<std::string>(&value)) {
-        // Look for $(iterator.property) patterns
+        // Look for ${iterator.property} patterns
         std::string result = *sval;
-        std::string prefix = "$(" + iterator + ".";
+        std::string prefix = "${" + iterator + ".";
 
         size_t start = 0;
         while ((pos = result.find(prefix, start)) != std::string::npos) {
-          size_t end = result.find(")", pos);
+          size_t end = result.find("}", pos);
           if (end == std::string::npos)
             break;
 
@@ -539,9 +941,75 @@ private:
           start = pos + replacement.length();
         }
 
-        // Also handle $(index) substitution
-        while ((pos = result.find("$(index)")) != std::string::npos) {
+        // Also handle ${index} substitution
+        while ((pos = result.find("${index}")) != std::string::npos) {
           result.replace(pos, 8, std::to_string(index));
+        }
+
+        // --- MATH EVALUATION ---
+        if (result.find('*') != std::string::npos || result.find('/') != std::string::npos ||
+            result.find('+') != std::string::npos || result.find('-') != std::string::npos) {
+             try {
+                 bool is_math = true;
+                 for (char c : result) {
+                     if (!isdigit(c) && c != '.' && c != ' ' && c != '*' && c != '/' && c != '+' && c != '-' && c != '(' && c != ')') {
+                         is_math = false; break;
+                     }
+                 }
+
+                 if (is_math) {
+                     // Recursive descent parser for math with parentheses
+                     std::function<float(const char*&)> parse_expr;
+                     std::function<float(const char*&)> parse_term;
+                     std::function<float(const char*&)> parse_factor;
+
+                     parse_factor = [&](const char*& p) -> float {
+                         while (*p == ' ') p++;
+                         if (*p == '(') {
+                             p++;
+                             float val = parse_expr(p);
+                             while (*p == ' ') p++;
+                             if (*p == ')') p++;
+                             return val;
+                         }
+                         char* end;
+                         float val = strtof(p, &end);
+                         p = end;
+                         return val;
+                     };
+
+                     parse_term = [&](const char*& p) -> float {
+                         float left = parse_factor(p);
+                         while (true) {
+                             while (*p == ' ') p++;
+                             if (*p == '*') { p++; left *= parse_factor(p); }
+                             else if (*p == '/') { p++; left /= parse_factor(p); }
+                             else break;
+                         }
+                         return left;
+                     };
+
+                     parse_expr = [&](const char*& p) -> float {
+                         float left = parse_term(p);
+                         while (true) {
+                             while (*p == ' ') p++;
+                             if (*p == '+') { p++; left += parse_term(p); }
+                             else if (*p == '-') { p++; left -= parse_term(p); }
+                             else break;
+                         }
+                         return left;
+                     };
+
+                     const char* p = result.c_str();
+                     float computed = parse_expr(p);
+                     while (*p == ' ') p++;
+                     if (*p == '\0') {
+                         std::ostringstream oss;
+                         oss << computed;
+                         result = oss.str();
+                     }
+                 }
+             } catch (...) {}
         }
 
         // If result is a pure number, convert to float
@@ -567,7 +1035,28 @@ private:
   }
 
   void handle_rbrace(const Token &tok) {
+    // Flush any pending value before processing closing brace
+    if (expecting_value_ && !pending_value_tokens_.empty()) {
+      flush_pending_value();
+    }
+
     brace_depth_--;
+
+    // Check for asset options block completion
+    if (in_asset_opts_ && brace_depth_ == asset_opts_brace_depth_ - 1) {
+      in_asset_opts_ = false;
+      expecting_asset_opt_key_ = false;
+      return;
+    }
+
+    // Check for assets block completion
+    if (in_assets_block_ && brace_depth_ == assets_brace_depth_ - 1) {
+      program_->assets = current_assets_;
+      current_assets_ = nullptr;
+      in_assets_block_ = false;
+      assets_brace_depth_ = 0;
+      return;
+    }
 
     // Check for repeat block completion - expand template N times
     if (repeat_brace_depth_ > 0 && brace_depth_ == repeat_brace_depth_ - 1) {
@@ -675,6 +1164,10 @@ private:
     // Check for animation completion
     // Track closes when we drop back to anim level (from depth N to N-1, where N was track depth)
     if (current_anim_ && in_track_ && brace_depth_ == anim_brace_depth_) {
+      // Flush any pending keyframe value before closing track
+      if (expecting_keyframe_value_ && !pending_value_tokens_.empty()) {
+        flush_pending_value();
+      }
       current_anim_->tracks.push_back(current_track_);
       current_track_ = AstTrack("");
       in_track_ = false;
@@ -691,6 +1184,10 @@ private:
       current_state_ = AstState();
       in_state_ = false;
     } else if (in_layer_ && brace_depth_ == layer_brace_depth_ - 1) {
+      // Flush any pending condition value before closing
+      if (expecting_condition_val_ && !pending_value_tokens_.empty()) {
+        flush_pending_value();
+      }
       // Push any pending transition before closing the layer
       if (has_pending_transition_) {
         current_layer_.transitions.push_back(current_transition_);
@@ -716,13 +1213,21 @@ private:
     }
   }
 
-  void handle_value(const Token &tok) {
+    void handle_value(const Token &tok) {
+        // Legacy: Just push to buffer now.
+        // This function is only kept if other parts call it directly (none found), 
+        // or for simple cases. 
+        // We moved logic to flush_pending_value().
+    }
+
+    /*
     AstValue value;
 
     switch (tok.type) {
     case TOK_NUMBER:
       value = std::stof(tok.value);
       break;
+    ...
     case TOK_STRING:
       value = tok.value;
       break;
@@ -755,6 +1260,7 @@ private:
 
     expecting_value_ = false;
   }
+  */
 
   void set_property(const AstValue &value) {
     if (pending_prop_key_.empty())
@@ -794,6 +1300,16 @@ private:
       } else if (pending_prop_key_ == "animation") {
         if (auto *sval = std::get_if<std::string>(&value)) {
           current_state_.animation = *sval;
+        }
+      } else if (pending_prop_key_ == "play") {
+        // play: can be string or identifier (asset ID)
+        if (auto *sval = std::get_if<std::string>(&value)) {
+          current_state_.play_audio = *sval;
+        }
+      } else if (pending_prop_key_ == "stop") {
+        // stop: can be string or identifier (asset ID)
+        if (auto *sval = std::get_if<std::string>(&value)) {
+          current_state_.stop_audio = *sval;
         }
       }
     }
@@ -858,6 +1374,7 @@ private:
   bool expecting_node_id_ = false;
   bool expecting_template_suffix_ = false;
   bool expecting_value_ = false;
+  std::vector<Token> pending_value_tokens_; // Added for buffering
   bool expecting_anim_name_ = false;
   bool expecting_track_name_ = false;
   bool expecting_keyframe_time_ = false;
@@ -874,12 +1391,37 @@ private:
   bool expecting_repeat_count_ = false;
   bool expecting_at_var_ = false;
 
+  // Import flag
+  bool expecting_import_path_ = false;
+
   // Data and for loop flags
   bool expecting_data_name_ = false;
   bool expecting_data_item_key_ = false;
   bool expecting_for_iterator_ = false;
   bool expecting_for_source_ = false;
   bool expecting_dot_property_ = false;
+
+  // Assets block building
+  std::shared_ptr<AstAssets> current_assets_;
+  int assets_brace_depth_ = 0;
+  int asset_opts_brace_depth_ = 0;
+  bool in_assets_block_ = false;
+  bool in_asset_opts_ = false;
+  bool expecting_assets_block_ = false;
+  bool expecting_asset_id_ = false;
+  bool expecting_asset_path_ = false;
+  bool expecting_asset_opt_key_ = false;
+  bool expecting_asset_opt_value_ = false;
+  std::string pending_asset_type_;
+  std::string pending_asset_id_;
+  std::string pending_asset_path_;
+  std::string pending_asset_opt_key_;
+
+  // Const/var building
+  bool expecting_const_name_ = false;
+  bool expecting_const_value_ = false;
+  bool pending_is_var_ = false;
+  std::string pending_const_name_;
 };
 
 // ============================================================================
@@ -1037,6 +1579,10 @@ static std::shared_ptr<Node> convert_ast_node(const std::shared_ptr<AstNode> &as
     auto shape = Shape::create();
     shape->set_ring(50, 25);
     node = shape;
+  } else if (ast_node->type == "triangle") {
+    auto shape = Shape::create();
+    shape->set_triangle(20, 20, Direction::Right);
+    node = shape;
   } else {
     auto component = ComponentRegistry::instance().get(ast_node->type);
     if (component) {
@@ -1111,6 +1657,44 @@ static std::shared_ptr<Node> convert_ast_node(const std::shared_ptr<AstNode> &as
           node->set_align_self(AlignSelf::Center);
         else if (*sval == "stretch")
           node->set_align_self(AlignSelf::Stretch);
+      }
+    } else if (key == "position") {
+      if (auto sval = std::get_if<std::string>(&value)) {
+        if (*sval == "absolute")
+          node->set_position_absolute(true);
+      }
+    } else if (key == "flexGrow") {
+      if (auto fval = std::get_if<float>(&value)) {
+        node->set_flex_grow(*fval);
+      }
+    } else if (key == "flexShrink") {
+      if (auto fval = std::get_if<float>(&value)) {
+        node->set_flex_shrink(*fval);
+      }
+    } else if (key == "flexBasis") {
+      if (auto fval = std::get_if<float>(&value)) {
+        node->set_flex_basis(*fval);
+      }
+    } else if (key == "anchor") {
+      if (auto sval = std::get_if<std::string>(&value)) {
+        if (*sval == "topLeft")
+          node->set_anchor(Anchor::TopLeft);
+        else if (*sval == "top")
+          node->set_anchor(Anchor::Top);
+        else if (*sval == "topRight")
+          node->set_anchor(Anchor::TopRight);
+        else if (*sval == "left")
+          node->set_anchor(Anchor::Left);
+        else if (*sval == "center")
+          node->set_anchor(Anchor::Center);
+        else if (*sval == "right")
+          node->set_anchor(Anchor::Right);
+        else if (*sval == "bottomLeft")
+          node->set_anchor(Anchor::BottomLeft);
+        else if (*sval == "bottom")
+          node->set_anchor(Anchor::Bottom);
+        else if (*sval == "bottomRight")
+          node->set_anchor(Anchor::BottomRight);
       }
     }
 
@@ -1229,6 +1813,86 @@ static std::shared_ptr<Node> convert_ast_node(const std::shared_ptr<AstNode> &as
             auto star_geom = shape->star();
             shape->set_star(star_geom.points, star_geom.outer_radius, *fval);
           }
+        }
+      } else if (key == "direction") {
+        if (auto sval = std::get_if<std::string>(&value)) {
+          if (ast_node->type == "triangle") {
+            auto tri_geom = shape->triangle();
+            Direction dir = Direction::Right;
+            if (*sval == "right") dir = Direction::Right;
+            else if (*sval == "left") dir = Direction::Left;
+            else if (*sval == "up") dir = Direction::Up;
+            else if (*sval == "down") dir = Direction::Down;
+            shape->set_triangle(tri_geom.width, tri_geom.height, dir);
+          }
+        }
+      }
+    }
+
+    // Triangle width/height handling (after general width/height)
+    if (auto shape = std::dynamic_pointer_cast<Shape>(node)) {
+      if (ast_node->type == "triangle") {
+        auto tri_geom = shape->triangle();
+        float w = tri_geom.width;
+        float h = tri_geom.height;
+        bool updated = false;
+
+        if (key == "width") {
+          if (auto fval = std::get_if<float>(&value)) {
+            w = *fval;
+            updated = true;
+          }
+        } else if (key == "height") {
+          if (auto fval = std::get_if<float>(&value)) {
+            h = *fval;
+            updated = true;
+          }
+        }
+
+        if (updated) {
+          shape->set_triangle(w, h, tri_geom.direction);
+        }
+      }
+
+      // Rough/hand-drawn style properties
+      if (key == "roughness") {
+        if (auto fval = std::get_if<float>(&value)) {
+          auto opts = shape->rough();
+          opts.roughness = *fval;
+          shape->set_rough(opts);
+        }
+      } else if (key == "bowing") {
+        if (auto fval = std::get_if<float>(&value)) {
+          auto opts = shape->rough();
+          opts.bowing = *fval;
+          shape->set_rough(opts);
+        }
+      } else if (key == "roughSeed") {
+        if (auto fval = std::get_if<float>(&value)) {
+          auto opts = shape->rough();
+          opts.seed = static_cast<unsigned int>(*fval);
+          shape->set_rough(opts);
+        }
+      } else if (key == "fillStyle") {
+        if (auto sval = std::get_if<std::string>(&value)) {
+          auto opts = shape->rough();
+          if (*sval == "solid") opts.fill_style = RoughFillStyle::Solid;
+          else if (*sval == "hachure") opts.fill_style = RoughFillStyle::Hachure;
+          else if (*sval == "zigzag") opts.fill_style = RoughFillStyle::ZigZag;
+          else if (*sval == "crosshatch") opts.fill_style = RoughFillStyle::CrossHatch;
+          shape->set_rough(opts);
+        }
+      } else if (key == "hachureGap") {
+        if (auto fval = std::get_if<float>(&value)) {
+          auto opts = shape->rough();
+          opts.hachure_gap = *fval;
+          shape->set_rough(opts);
+        }
+      } else if (key == "hachureAngle") {
+        if (auto fval = std::get_if<float>(&value)) {
+          auto opts = shape->rough();
+          opts.hachure_angle = *fval;
+          shape->set_rough(opts);
         }
       }
     }

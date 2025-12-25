@@ -46,13 +46,14 @@ scene {
 
 ## 核心概念
 
-5个核心概念：
+6个核心概念：
 
 1. **Scene** - 场景图（支持group嵌套）
 2. **Component** - 可复用组件（支持组件嵌套）
-3. **Anim** - 动画
-4. **Machine** - 状态机
-5. **Input** - 输入绑定
+3. **Assets** - 资源预加载（图片、音频、字体）
+4. **Anim** - 动画
+5. **Machine** - 状态机
+6. **Input** - 输入绑定
 
 ---
 
@@ -324,9 +325,146 @@ scene dots {
 
 ---
 
-## 2. COMPONENT
+## 2. ASSETS
 
-Component系统让你在DSL中直接使用C++注册的组件。
+资源预加载系统，在应用启动时加载所有资源，避免运行时延迟。
+
+### 基础语法
+
+```flex
+assets {
+    // 类型 ID: "路径"
+    audio click: "sounds/click.wav"
+    audio success: "sounds/success.mp3"
+
+    image logo: "images/logo.png"
+    image avatar: "images/avatar.jpg"
+
+    font roboto: "fonts/Roboto.ttf"
+}
+```
+
+### 带选项的资源
+
+```flex
+assets {
+    // 音频选项
+    audio bgm: "sounds/background.mp3" {
+        loop: true          // 循环播放
+        volume: 0.5         // 音量 0.0-1.0
+        preload: true       // 预加载（默认true）
+    }
+
+    audio ambient: "sounds/ambient.wav" {
+        loop: true
+        volume: 0.3
+    }
+
+    // 图片选项
+    image sprite: "images/sprite.png" {
+        preload: true       // 预加载到内存
+    }
+}
+```
+
+### 支持的资源类型
+
+| 类型 | 用途 | 支持格式 |
+|------|------|----------|
+| `audio` | 音效、背景音乐 | .wav, .mp3, .ogg |
+| `image` | 图片资源 | .png, .jpg, .webp |
+| `font` | 自定义字体 | .ttf, .otf |
+| `svg` | 矢量图形 | .svg |
+
+### 在状态机中使用资源
+
+```flex
+assets {
+    audio click: "sounds/click.wav"
+    audio hover: "sounds/hover.wav"
+    audio success: "sounds/success.mp3"
+    audio bgm: "sounds/bgm.mp3" { loop: true }
+}
+
+machine buttonState {
+    layer main {
+        state idle {
+            initial: true
+        }
+
+        state hover {
+            play: hover          // 进入状态时播放 hover 音效
+        }
+
+        state pressed {
+            play: click          // 播放点击音效
+            animation: "pressDown"
+        }
+
+        state success {
+            play: success
+            stop: bgm            // 停止背景音乐
+        }
+
+        transition idle -> hover when mouseEnter
+        transition hover -> idle when mouseLeave
+        transition hover -> pressed when mouseDown
+        transition pressed -> success when mouseUp
+    }
+}
+```
+
+### 在动画中切换图片
+
+```flex
+assets {
+    image avatar_normal: "images/avatar_normal.png"
+    image avatar_happy: "images/avatar_happy.png"
+    image avatar_sad: "images/avatar_sad.png"
+}
+
+scene demo {
+    image avatar {
+        x: 100, y: 100
+        src: avatar_normal      // 引用 assets 中的 ID
+        width: 64, height: 64
+    }
+}
+
+anim "moodChange" {
+    duration: 1.0s
+
+    // 切换图片资源
+    track "#avatar/src" {
+        keyframe 0s -> avatar_normal
+        keyframe 0.5s -> avatar_happy
+        keyframe 1s -> avatar_sad
+    }
+}
+```
+
+### C++ API
+
+```cpp
+// 手动播放/停止音频
+instance->play_audio("click");
+instance->play_audio("bgm");       // 循环播放（如果设置了loop）
+instance->stop_audio("bgm");
+instance->set_audio_volume("bgm", 0.5f);
+
+// 获取资源引用
+auto* image = instance->get_asset<Image>("logo");
+auto* font = instance->get_asset<Font>("roboto");
+
+// 检查资源是否已加载
+bool loaded = instance->is_asset_loaded("bgm");
+```
+
+---
+
+## 3. COMPONENT
+
+Component 系统让你在 DSL 中直接使用 C++ 注册的组件。
 
 ### 基础用法
 
@@ -427,7 +565,7 @@ ComponentRegistry::instance().register_component(labeled);
 
 ---
 
-## 3. ANIM
+## 4. ANIM
 
 ```flex
 anim "moveAndFade" {
@@ -464,7 +602,7 @@ anim "moveAndFade" {
 
 ---
 
-## 4. MACHINE
+## 5. MACHINE
 
 ```flex
 machine statusTracker {
@@ -504,7 +642,7 @@ machine statusTracker {
 
 ---
 
-## 5. INPUT
+## 6. INPUT
 
 ```flex
 // 不需要显式声明input，直接在C++中设置
@@ -647,7 +785,7 @@ machine statusTracker {
 
 ---
 
-## 6. 高级图形与可视控件 (Design Complex Shapes)
+## 7. 高级图形与可视控件 (Design Complex Shapes)
 
 通过组合 `path` 和 `Component`，可以轻松设计复杂的视觉控件和图标（如 AWS 图标、架构图组件）。
 
@@ -763,8 +901,9 @@ component IconButton {
 
 ## 总结
 
-**8个关键字：**
+**9个关键字：**
 - `scene` - 场景图（支持group嵌套）
+- `assets` - 资源预加载（音频、图片、字体）
 - `repeat` - 重复生成UI结构（静态次数）
 - `data` - 定义数据集合
 - `for...in` - 遍历数据生成UI
@@ -772,6 +911,10 @@ component IconButton {
 - `anim` - 动画
 - `machine` - 状态机
 - *(input通过C++设置，无需关键字)*
+
+**资源动作（状态机中）：**
+- `play: assetId` - 进入状态时播放音频
+- `stop: assetId` - 进入状态时停止音频
 
 **绑定语法：**
 - `@index` - repeat块中的索引替换
@@ -786,5 +929,6 @@ component IconButton {
 - ✅ 统一的相对定位规则
 - ✅ 简洁的状态机语法
 - ✅ 强大的动画系统
+- ✅ 资源预加载和状态机音频控制
 
 **这就是全部！**

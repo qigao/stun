@@ -7,6 +7,8 @@
 
 #pragma once
 
+#define FLEX_PI 3.14159265358979f
+
 #include "flex/types.h"  // For RoughOptions
 #include <string>
 #include <variant>
@@ -64,6 +66,20 @@ struct RingData {
     float inner_radius = 0;
 };
 
+// Direction for triangle/arrow shapes
+enum class Direction : uint8_t {
+    Right = 0,  // Pointing right (play icon)
+    Left,       // Pointing left
+    Up,         // Pointing up
+    Down,       // Pointing down
+};
+
+struct TriangleData {
+    float width = 0;
+    float height = 0;
+    Direction direction = Direction::Right;
+};
+
 // ============================================================================
 // Geometry Variant - Only stores ONE geometry type at a time
 // ============================================================================
@@ -77,7 +93,8 @@ using Geometry = std::variant<
     PathData,
     StarData,
     LineData,
-    RingData
+    RingData,
+    TriangleData
 >;
 
 // ============================================================================
@@ -228,7 +245,7 @@ inline std::string polygon_to_path(int sides, float r) {
     std::string path;
     path.reserve(sides * 24);
 
-    const float pi = 3.14159265358979f;
+    const float pi = FLEX_PI;
     const float angle_step = 2.0f * pi / sides;
     // Use flat-top orientation for all polygons (top edge is horizontal)
     // This is more intuitive than pointy-top
@@ -258,7 +275,7 @@ inline std::string star_to_path(int points, float outer_r, float inner_r) {
     std::string path;
     path.reserve(points * 48);
 
-    const float pi = 3.14159265358979f;
+    const float pi = FLEX_PI;
     const float angle_step = pi / points;  // Half step between outer and inner
     const float start_angle = -pi / 2.0f;  // Start at top
 
@@ -317,6 +334,41 @@ inline std::string ring_to_path(float outer_r, float inner_r) {
     return buf;
 }
 
+inline std::string triangle_to_path(float w, float h, Direction dir) {
+    if (w <= 0 || h <= 0) return "";
+    char buf[256];
+
+    // Triangle centered at origin with specified width/height
+    // Direction determines which way the triangle points
+    switch (dir) {
+        case Direction::Right:
+            // Pointing right: tip at (w/2, 0), base at left
+            stbsp_snprintf(buf, sizeof(buf),
+                "M %.4g 0 L %.4g %.4g L %.4g %.4g Z",
+                w / 2, -w / 2, -h / 2, -w / 2, h / 2);
+            break;
+        case Direction::Left:
+            // Pointing left: tip at (-w/2, 0), base at right
+            stbsp_snprintf(buf, sizeof(buf),
+                "M %.4g 0 L %.4g %.4g L %.4g %.4g Z",
+                -w / 2, w / 2, -h / 2, w / 2, h / 2);
+            break;
+        case Direction::Up:
+            // Pointing up: tip at (0, -h/2), base at bottom
+            stbsp_snprintf(buf, sizeof(buf),
+                "M 0 %.4g L %.4g %.4g L %.4g %.4g Z",
+                -h / 2, -w / 2, h / 2, w / 2, h / 2);
+            break;
+        case Direction::Down:
+            // Pointing down: tip at (0, h/2), base at top
+            stbsp_snprintf(buf, sizeof(buf),
+                "M 0 %.4g L %.4g %.4g L %.4g %.4g Z",
+                h / 2, -w / 2, -h / 2, w / 2, -h / 2);
+            break;
+    }
+    return buf;
+}
+
 } // namespace detail
 
 // ============================================================================
@@ -366,7 +418,7 @@ inline std::string circle_to_path_rough(float r, const RoughOptions& opts) {
 
     int strokes = std::max(2, opts.stroke_count);
     const float kappa = 0.55228f;
-    const float pi = 3.14159265358979f;
+    const float pi = FLEX_PI;
 
     for (int s = 0; s < strokes; ++s) {
         // Randomize circle parameters for each stroke
@@ -430,7 +482,7 @@ inline std::string ellipse_to_path_rough(float rx, float ry, const RoughOptions&
 
     int strokes = std::max(2, opts.stroke_count);
     const float kappa = 0.55228f;
-    const float pi = 3.14159265358979f;
+    const float pi = FLEX_PI;
 
     for (int s = 0; s < strokes; ++s) {
         float r_off = opts.roughness * 0.5f;
@@ -491,7 +543,7 @@ inline std::string polygon_to_path_rough(int sides, float r, const RoughOptions&
     std::string path;
     path.reserve(sides * 256);
 
-    const float pi = 3.14159265358979f;
+    const float pi = FLEX_PI;
     const float angle_step = 2.0f * pi / sides;
     const float start_angle = -pi / 2.0f + angle_step / 2.0f;
 
@@ -520,7 +572,7 @@ inline std::string star_to_path_rough(int points, float outer_r, float inner_r, 
     std::string path;
     path.reserve(points * 512);
 
-    const float pi = 3.14159265358979f;
+    const float pi = FLEX_PI;
     const float angle_step = pi / points;
     const float start_angle = -pi / 2.0f;
 
@@ -591,13 +643,13 @@ inline void hachure_fill(std::string& path, const std::vector<Vec2>& points, con
     float cos_a = std::cos(-angle_rad);
     float sin_a = std::sin(-angle_rad);
 
-    // 1. Rotate points
-    std::vector<Vec2> rotated;
+    // 1. Rotate points (store as simple floats to avoid Eigen overhead)
+    std::vector<std::pair<float, float>> rotated;
     rotated.reserve(points.size());
     float min_y = 1e10f, max_y = -1e10f;
     for (const auto& p : points) {
-        float rx = p.x * cos_a - p.y * sin_a;
-        float ry = p.x * sin_a + p.y * cos_a;
+        float rx = p.x() * cos_a - p.y() * sin_a;
+        float ry = p.x() * sin_a + p.y() * cos_a;
         rotated.push_back({rx, ry});
         min_y = std::min(min_y, ry);
         max_y = std::max(max_y, ry);
@@ -610,7 +662,7 @@ inline void hachure_fill(std::string& path, const std::vector<Vec2>& points, con
         for (size_t i = 0; i < rotated.size(); ++i) {
             size_t j = (i + 1) % rotated.size();
             float ix;
-            if (intersect_line_y(y, rotated[i].x, rotated[i].y, rotated[j].x, rotated[j].y, ix)) {
+            if (intersect_line_y(y, rotated[i].first, rotated[i].second, rotated[j].first, rotated[j].second, ix)) {
                 intersections.push_back(ix);
             }
         }
@@ -620,16 +672,16 @@ inline void hachure_fill(std::string& path, const std::vector<Vec2>& points, con
         for (size_t i = 0; i + 1 < intersections.size(); i += 2) {
             float x1 = intersections[i];
             float x2 = intersections[i+1];
-            
+
             // Rotate back and draw
             float cos_inv = std::cos(angle_rad);
             float sin_inv = std::sin(angle_rad);
-            
+
             float sx = x1 * cos_inv - y * sin_inv;
             float sy = x1 * sin_inv + y * cos_inv;
             float ex = x2 * cos_inv - y * sin_inv;
             float ey = x2 * sin_inv + y * cos_inv;
-            
+
             rough_line(path, sx, sy, ex, ey, opts, rng);
         }
     }
@@ -669,6 +721,9 @@ inline std::string geometry_to_path(const Geometry& geom) {
         else if constexpr (std::is_same_v<T, RingData>) {
             return detail::ring_to_path(g.outer_radius, g.inner_radius);
         }
+        else if constexpr (std::is_same_v<T, TriangleData>) {
+            return detail::triangle_to_path(g.width, g.height, g.direction);
+        }
         else {
             return "";
         }
@@ -689,6 +744,7 @@ inline std::string geometry_to_path(const Geometry& geom, const RoughOptions& ro
         else if constexpr (std::is_same_v<T, StarData>) return star_to_path_rough(g.points, g.outer_radius, g.inner_radius, rough);
         else if constexpr (std::is_same_v<T, LineData>) return line_to_path_rough(g.x2, g.y2, rough);
         else if constexpr (std::is_same_v<T, RingData>) return ring_to_path_rough(g.outer_radius, g.inner_radius, rough);
+        else if constexpr (std::is_same_v<T, TriangleData>) return detail::triangle_to_path(g.width, g.height, g.direction);
         return "";
     }, geom);
 }
@@ -704,29 +760,31 @@ inline std::string geometry_to_fill_path(const Geometry& geom, const RoughOption
         std::vector<Vec2> points;
 
         if constexpr (std::is_same_v<T, RectData>) {
-            points = {{0,0}, {g.width,0}, {g.width, g.height}, {0, g.height}};
+            points = {Vec2(0,0), Vec2(g.width,0), Vec2(g.width, g.height), Vec2(0, g.height)};
         } else if constexpr (std::is_same_v<T, PolygonData>) {
             float angle_step = 2.0f * 3.14159f / g.sides;
             float start_angle = -3.14159f / 2.0f + angle_step / 2.0f;
             for (int i = 0; i < g.sides; ++i) {
-                points.push_back({g.radius * std::cos(start_angle + i * angle_step), g.radius * std::sin(start_angle + i * angle_step)});
+                float a = start_angle + i * angle_step;
+                points.push_back(Vec2(g.radius * std::cos(a), g.radius * std::sin(a)));
             }
         } else if constexpr (std::is_same_v<T, StarData>) {
             float angle_step = 3.14159f / g.points;
             for (int i = 0; i < g.points * 2; ++i) {
                 float r = (i % 2 == 0) ? g.outer_radius : g.inner_radius;
-                points.push_back({r * std::cos(-3.14159f/2.0f + i * angle_step), r * std::sin(-3.14159f/2.0f + i * angle_step)});
+                float a = -3.14159f/2.0f + i * angle_step;
+                points.push_back(Vec2(r * std::cos(a), r * std::sin(a)));
             }
         } else if constexpr (std::is_same_v<T, CircleData>) {
             // Approximate circle with 16-sided polygon for hachure
             for (int i = 0; i < 16; ++i) {
                 float a = i * (2.0f * 3.14159f / 16.0f);
-                points.push_back({g.radius * std::cos(a), g.radius * std::sin(a)});
+                points.push_back(Vec2(g.radius * std::cos(a), g.radius * std::sin(a)));
             }
         } else if constexpr (std::is_same_v<T, EllipseData>) {
             for (int i = 0; i < 16; ++i) {
                 float a = i * (2.0f * 3.14159f / 16.0f);
-                points.push_back({g.rx * std::cos(a), g.ry * std::sin(a)});
+                points.push_back(Vec2(g.rx * std::cos(a), g.ry * std::sin(a)));
             }
         }
 

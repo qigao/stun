@@ -5,10 +5,10 @@
 
 #pragma once
 
+#include "flex/debug.h"
 #include "parser/flex_ast.h"
 #include "flex/dsl/fsm.h"
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -24,7 +24,8 @@ public:
   using Ptr = std::shared_ptr<RuntimeStateMachine>;
   using StateChangeCallback =
       std::function<void(const std::string &layer, const std::string &from_state,
-                         const std::string &to_state, const std::string &animation)>;
+                         const std::string &to_state, const std::string &animation,
+                         const std::string &play_audio, const std::string &stop_audio)>;
 
   RuntimeStateMachine(const std::string &name);
   ~RuntimeStateMachine() = default;
@@ -38,6 +39,9 @@ public:
   // Update all layers
   void update(float dt);
 
+  // Trigger initial state animations (call after callback is set)
+  void trigger_initial_animations();
+
   // Set input value (triggers InputChange event)
   void set_input(const std::string &input_name, float value);
 
@@ -48,7 +52,8 @@ public:
 
   // Fire state change (called by RuntimeLayer)
   void fire_state_change(const std::string &layer, const std::string &from_state,
-                         const std::string &to_state, const std::string &animation);
+                         const std::string &to_state, const std::string &animation,
+                         const std::string &play_audio, const std::string &stop_audio);
 
   const std::string &name() const { return name_; }
 
@@ -68,7 +73,8 @@ public:
   ~RuntimeLayer() = default;
 
   // Add a state
-  void add_state(const std::string &name, bool initial, const std::string &animation);
+  void add_state(const std::string &name, bool initial, const std::string &animation,
+                 const std::string &play_audio = "", const std::string &stop_audio = "");
 
   // Add a transition
   void add_transition(const std::string &from, const std::string &to,
@@ -77,6 +83,9 @@ public:
 
   // Update layer
   void update(float dt);
+
+  // Trigger initial state animation
+  void trigger_initial_animation();
 
   // Get current state
   const std::string &current_state() const { return current_state_; }
@@ -108,17 +117,22 @@ private:
 
 class RuntimeState {
 public:
-  RuntimeState(const std::string &name, bool initial, const std::string &animation);
+  RuntimeState(const std::string &name, bool initial, const std::string &animation,
+               const std::string &play_audio = "", const std::string &stop_audio = "");
   ~RuntimeState() = default;
 
   const std::string &name() const { return name_; }
   bool initial() const { return initial_; }
   const std::string &animation() const { return animation_; }
+  const std::string &play_audio() const { return play_audio_; }
+  const std::string &stop_audio() const { return stop_audio_; }
 
 private:
   std::string name_;
   bool initial_;
   std::string animation_;
+  std::string play_audio_;
+  std::string stop_audio_;
 };
 
 // ============================================================================
@@ -169,6 +183,12 @@ inline void RuntimeStateMachine::update(float dt) {
   }
 }
 
+inline void RuntimeStateMachine::trigger_initial_animations() {
+  for (auto &[name, layer] : layers_) {
+    layer->trigger_initial_animation();
+  }
+}
+
 inline void RuntimeStateMachine::set_input(const std::string &input_name, float value) {
   // Broadcast to all layers
   for (auto &[name, layer] : layers_) {
@@ -179,9 +199,11 @@ inline void RuntimeStateMachine::set_input(const std::string &input_name, float 
 inline void RuntimeStateMachine::fire_state_change(const std::string &layer,
                                                    const std::string &from_state,
                                                    const std::string &to_state,
-                                                   const std::string &animation) {
+                                                   const std::string &animation,
+                                                   const std::string &play_audio,
+                                                   const std::string &stop_audio) {
   if (state_change_callback_) {
-    state_change_callback_(layer, from_state, to_state, animation);
+    state_change_callback_(layer, from_state, to_state, animation, play_audio, stop_audio);
   }
 }
 
@@ -191,8 +213,10 @@ inline RuntimeLayer::RuntimeLayer(const std::string &name, RuntimeStateMachine *
     : name_(name), machine_(machine), current_state_("") {}
 
 inline void RuntimeLayer::add_state(const std::string &name, bool initial,
-                                    const std::string &animation) {
-  states_[name] = std::make_unique<RuntimeState>(name, initial, animation);
+                                    const std::string &animation,
+                                    const std::string &play_audio,
+                                    const std::string &stop_audio) {
+  states_[name] = std::make_unique<RuntimeState>(name, initial, animation, play_audio, stop_audio);
 
   // Set as current state if initial
   if (initial || current_state_.empty()) {
@@ -229,6 +253,19 @@ inline void RuntimeLayer::set_input(const std::string &input_name, float value) 
   inputs_[input_name] = value;
 }
 
+inline void RuntimeLayer::trigger_initial_animation() {
+  if (current_state_.empty()) return;
+
+  auto it = states_.find(current_state_);
+  if (it != states_.end() && machine_) {
+    const auto& state = it->second;
+    if (!state->animation().empty()) {
+      machine_->fire_state_change(name_, "", current_state_,
+                                  state->animation(), state->play_audio(), state->stop_audio());
+    }
+  }
+}
+
 inline bool RuntimeLayer::check_condition(const RuntimeTransition &trans) const {
   auto it = inputs_.find(trans.condition_var());
   if (it == inputs_.end())
@@ -253,13 +290,14 @@ inline void RuntimeLayer::transition_to(const std::string &state_name) {
   if (it != states_.end()) {
     std::string from_state = current_state_;
     current_state_ = state_name;
-    std::cout << "[FSM] Layer '" << name_ << "' transitioned: " << from_state << " -> "
-              << state_name << "\n";
+    FLEX_LOGD("FSM Layer '{}' transitioned: {} -> {}", name_, from_state, state_name);
 
-    // Fire callback to trigger animation
+    // Fire callback to trigger animation and audio
     const auto &anim_name = it->second->animation();
+    const auto &play_audio = it->second->play_audio();
+    const auto &stop_audio = it->second->stop_audio();
     if (machine_) {
-      machine_->fire_state_change(name_, from_state, state_name, anim_name);
+      machine_->fire_state_change(name_, from_state, state_name, anim_name, play_audio, stop_audio);
     }
   }
 }
@@ -267,8 +305,11 @@ inline void RuntimeLayer::transition_to(const std::string &state_name) {
 // ---------------------------------------------------------------------------
 
 inline RuntimeState::RuntimeState(const std::string &name, bool initial,
-                                  const std::string &animation)
-    : name_(name), initial_(initial), animation_(animation) {}
+                                  const std::string &animation,
+                                  const std::string &play_audio,
+                                  const std::string &stop_audio)
+    : name_(name), initial_(initial), animation_(animation),
+      play_audio_(play_audio), stop_audio_(stop_audio) {}
 
 // ---------------------------------------------------------------------------
 

@@ -94,37 +94,42 @@ public:
         // Create ThorVG renderer
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
-        // Find nodes we need to animate
+        // Get artboard for manual nodes
         auto* artboard = instance_->artboard();
 
-        // Spinner nodes
-        spinner1_rotator_ = artboard->find("rotator");
-        spinner2_pulse1_ = artboard->find("pulse1");
-        spinner2_pulse2_ = artboard->find("pulse2");
-        spinner2_pulse3_ = artboard->find("pulse3");
-
-        // Wave dots
-        wave_dot1_ = artboard->find("dot1");
-        wave_dot2_ = artboard->find("dot2");
-        wave_dot3_ = artboard->find("dot3");
-        wave_dot4_ = artboard->find("dot4");
-
-        // Progress bar
+        // Progress bar nodes (we need to update text manually)
         progress_fill_ = artboard->find("progress");
         progress_text_ = artboard->find("percentage");
 
-        // Orbit dots
-        orbit1_ = artboard->find("orbit1");
-        orbit2_ = artboard->find("orbit2");
-        orbit3_ = artboard->find("orbit3");
+        // Start all declarative animations from .flex file
+        auto check_anim = [&](const char* name) {
+            auto* player = instance_->play_animation(name);
+            if (player) {
+                auto* tl = player->timeline();
+                const char* loop_str = "once";
+                if (tl->loop_mode() == flex::LoopMode::Loop) loop_str = "loop";
+                else if (tl->loop_mode() == flex::LoopMode::PingPong) loop_str = "pingpong";
+                std::cout << "  [OK] '" << name << "' (loop=" << loop_str << ", dur=" << tl->duration() << "s)\n";
+            } else {
+                std::cout << "  [FAIL] Animation '" << name << "' NOT FOUND\n";
+            }
+        };
 
-        // Square spinner
-        square_ = artboard->find("square");
+        std::cout << "\nStarting animations:\n";
+        check_anim("spin");         // Spinner 1: rotation
+        check_anim("pulse");        // Spinner 2: pulsing opacity
+        check_anim("bounce1");      // Spinner 3: bouncing dots
+        check_anim("bounce2");
+        check_anim("bounce3");
+        check_anim("bounce4");
+        check_anim("progressFill"); // Progress bar width
+        check_anim("squareSpin");   // Spinner 4: square rotation
+        check_anim("fadeWave1");    // Spinner 5: fading circles
+        check_anim("fadeWave2");
+        check_anim("fadeWave3");
+        check_anim("scalePulse");   // Spinner 6: scale animation
 
-        // Bouncing bar
-        bounce_bar_ = artboard->find("bar");
-
-        std::cout << "Loading Animations initialized!\n";
+        std::cout << "\nLoading Animations initialized!\n";
         std::cout << "Press ESC to quit\n\n";
 
         return true;
@@ -179,22 +184,9 @@ private:
     flex::Instance::Ptr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
-    // Animation nodes
-    flex::Node* spinner1_rotator_ = nullptr;
-    flex::Node* spinner2_pulse1_ = nullptr;
-    flex::Node* spinner2_pulse2_ = nullptr;
-    flex::Node* spinner2_pulse3_ = nullptr;
-    flex::Node* wave_dot1_ = nullptr;
-    flex::Node* wave_dot2_ = nullptr;
-    flex::Node* wave_dot3_ = nullptr;
-    flex::Node* wave_dot4_ = nullptr;
+    // Progress bar nodes (for manual text update)
     flex::Node* progress_fill_ = nullptr;
     flex::Node* progress_text_ = nullptr;
-    flex::Node* orbit1_ = nullptr;
-    flex::Node* orbit2_ = nullptr;
-    flex::Node* orbit3_ = nullptr;
-    flex::Node* square_ = nullptr;
-    flex::Node* bounce_bar_ = nullptr;
 
     bool running_ = false;
     float time_ = 0.0f;
@@ -219,69 +211,17 @@ private:
     void update(float dt) {
         time_ += dt;
 
-        // Spinner 1: Continuous rotation
-        if (spinner1_rotator_) {
-            float rotation = fmod(time_ * 180.0f, 360.0f);  // 2 seconds per rotation
-            spinner1_rotator_->set_rotation(rotation);
-        }
-
-        // Spinner 2: Pulsing circles
-        float pulse_cycle = fmod(time_, 3.0f) / 3.0f;  // 3 second cycle
-        float pulse_t = pulse_cycle < 0.5f ? pulse_cycle * 2.0f : (1.0f - pulse_cycle) * 2.0f;
-
-        if (spinner2_pulse1_) spinner2_pulse1_->set_opacity(1.0f);
-        if (spinner2_pulse2_) spinner2_pulse2_->set_opacity(0.5f + pulse_t * 0.5f);
-        if (spinner2_pulse3_) spinner2_pulse3_->set_opacity(0.2f + pulse_t * 0.3f);
-
-        // Spinner 3: Wave animation
-        float wave_offset = time_ * 3.0f;  // Wave speed
-        if (wave_dot1_) wave_dot1_->set_y(std::sin(wave_offset) * 20.0f);
-        if (wave_dot2_) wave_dot2_->set_y(std::sin(wave_offset + 1.57f) * 20.0f);
-        if (wave_dot3_) wave_dot3_->set_y(std::sin(wave_offset + 3.14f) * 20.0f);
-        if (wave_dot4_) wave_dot4_->set_y(std::sin(wave_offset + 4.71f) * 20.0f);
-
-        // Progress bar
-        float progress_cycle = fmod(time_, 5.0f) / 5.0f;  // 5 second cycle
-        float progress_width = progress_cycle * 400.0f;
-
-        if (progress_fill_) {
-            if (auto* shape = dynamic_cast<flex::Shape*>(progress_fill_)) {
-                shape->set_rect(progress_width, 16);
-            }
-        }
-
+        // Update percentage text based on progress bar cycle (5 seconds)
         if (progress_text_) {
             if (auto* text = dynamic_cast<flex::Text*>(progress_text_)) {
+                float progress_cycle = fmod(time_, 5.0f) / 5.0f;
                 std::ostringstream oss;
                 oss << std::fixed << std::setprecision(0) << (progress_cycle * 100.0f) << "%";
                 text->set_content(oss.str());
             }
         }
 
-        // Spinner 4: Orbiting dots (rotate the parent group)
-        float orbit_rotation = fmod(time_ * 240.0f, 360.0f);  // 1.5 seconds per rotation
-        if (orbit1_) {
-            // Rotate each orbit individually for staggered effect
-            if (auto* parent = orbit1_->parent()) {
-                parent->set_rotation(orbit_rotation);
-            }
-        }
-
-        // Spinner 5: Square rotation (slower)
-        if (square_) {
-            float square_rotation = fmod(time_ * 120.0f, 360.0f);  // 3 seconds per rotation
-            square_->set_rotation(square_rotation);
-        }
-
-        // Spinner 6: Bouncing bar
-        if (bounce_bar_) {
-            float bounce_cycle = fmod(time_, 1.2f) / 1.2f;  // 1.2 second cycle
-            float bounce_t = bounce_cycle < 0.5f ? bounce_cycle * 2.0f : (1.0f - bounce_cycle) * 2.0f;
-            float bounce_y = -40.0f + bounce_t * 60.0f;
-            bounce_bar_->set_y(bounce_y);
-        }
-
-        // Advance animations
+        // Advance all declarative animations
         instance_->advance(dt);
     }
 

@@ -786,3 +786,340 @@ TEST_CASE("Layout: No layout mode (manual positioning)", "[layout][edge]") {
   REQUIRE(child2->x() == 100.0f);
   REQUIRE(child2->y() == 50.0f);
 }
+
+// ============================================================================
+// POSITION ABSOLUTE TESTS
+// ============================================================================
+
+TEST_CASE("Parser: Position absolute property", "[layout][parser]") {
+  auto program = parse(R"(
+        scene Test {
+            group container {
+                layout: flex
+                flexDirection: row
+                width: 400, height: 100
+
+                rect background {
+                    width: 400, height: 100
+                    fill: #ffffff
+                    position: absolute
+                }
+                rect item1 { width: 50, height: 30, fill: #ff0000 }
+                rect item2 { width: 50, height: 30, fill: #00ff00 }
+            }
+        }
+    )");
+
+  REQUIRE(program != nullptr);
+  auto &container = program->scene->children[0];
+  REQUIRE(container->children.size() == 3);
+
+  // Background should have position: absolute
+  auto &background = container->children[0];
+  REQUIRE(std::get<std::string>(background->properties["position"]) == "absolute");
+}
+
+TEST_CASE("Node: Position absolute setting", "[layout][runtime]") {
+  auto shape = Shape::create();
+
+  REQUIRE(shape->position_absolute() == false);
+
+  shape->set_position_absolute(true);
+  REQUIRE(shape->position_absolute() == true);
+
+  shape->set_position_absolute(false);
+  REQUIRE(shape->position_absolute() == false);
+}
+
+TEST_CASE("Layout: Position absolute excludes from flex layout", "[layout][algorithm]") {
+  auto container = Group::create();
+  container->set_layout(LayoutMode::Flex);
+  container->set_flex_direction(FlexDirection::Row);
+  container->set_layout_size(300, 100);
+
+  // Background rect with position: absolute
+  auto background = make_rect(300, 100);
+  background->set_position_absolute(true);
+
+  // Regular flex items
+  auto child1 = make_rect(50, 30);
+  auto child2 = make_rect(50, 30);
+
+  container->add_child(background);
+  container->add_child(child1);
+  container->add_child(child2);
+
+  container->perform_layout();
+
+  // Background should remain at (0,0) - not participating in flex layout
+  REQUIRE(background->x() == 0.0f);
+  REQUIRE(background->y() == 0.0f);
+
+  // Flex items should be positioned as if background doesn't exist
+  // child1 at x=0, child2 at x=50
+  REQUIRE(child1->x() == 0.0f);
+  REQUIRE(child2->x() == 50.0f);
+}
+
+TEST_CASE("Layout: Multiple absolute positioned children", "[layout][algorithm]") {
+  auto container = Group::create();
+  container->set_layout(LayoutMode::Flex);
+  container->set_flex_direction(FlexDirection::Row);
+  container->set_gap(10.0f);
+  container->set_layout_size(300, 100);
+
+  // Two absolute positioned backgrounds
+  auto bg1 = make_rect(300, 100);
+  bg1->set_position_absolute(true);
+  bg1->set_x(0);
+  bg1->set_y(0);
+
+  auto bg2 = make_rect(280, 80);
+  bg2->set_position_absolute(true);
+  bg2->set_x(10);
+  bg2->set_y(10);
+
+  // Regular flex items
+  auto child1 = make_rect(50, 30);
+  auto child2 = make_rect(50, 30);
+  auto child3 = make_rect(50, 30);
+
+  container->add_child(bg1);
+  container->add_child(child1);
+  container->add_child(bg2);
+  container->add_child(child2);
+  container->add_child(child3);
+
+  container->perform_layout();
+
+  // Absolute positioned elements keep their manual positions
+  REQUIRE(bg1->x() == 0.0f);
+  REQUIRE(bg1->y() == 0.0f);
+  REQUIRE(bg2->x() == 10.0f);
+  REQUIRE(bg2->y() == 10.0f);
+
+  // Flex items should be positioned with gap, ignoring absolute elements
+  // child1 at x=0, child2 at x=60 (50+10), child3 at x=120 (60+50+10)
+  REQUIRE(child1->x() == 0.0f);
+  REQUIRE(child2->x() == 60.0f);
+  REQUIRE(child3->x() == 120.0f);
+}
+
+// ============================================================================
+// FLEX GROW/SHRINK/BASIS TESTS
+// ============================================================================
+
+TEST_CASE("Parser: Flex grow/shrink/basis properties", "[layout][parser]") {
+  auto program = parse(R"(
+        scene Test {
+            group container {
+                layout: flex
+                flexDirection: row
+                width: 400, height: 100
+
+                rect item1 { width: 50, flexGrow: 1 }
+                rect item2 { width: 50, flexGrow: 2, flexShrink: 0 }
+                rect item3 { flexBasis: 100, flexGrow: 1 }
+            }
+        }
+    )");
+
+  REQUIRE(program != nullptr);
+  auto &container = program->scene->children[0];
+  REQUIRE(container->children.size() == 3);
+
+  auto &item1 = container->children[0];
+  REQUIRE(std::get<float>(item1->properties["flexGrow"]) == 1.0f);
+
+  auto &item2 = container->children[1];
+  REQUIRE(std::get<float>(item2->properties["flexGrow"]) == 2.0f);
+  REQUIRE(std::get<float>(item2->properties["flexShrink"]) == 0.0f);
+
+  auto &item3 = container->children[2];
+  REQUIRE(std::get<float>(item3->properties["flexBasis"]) == 100.0f);
+  REQUIRE(std::get<float>(item3->properties["flexGrow"]) == 1.0f);
+}
+
+TEST_CASE("Node: Flex grow/shrink/basis setting", "[layout][runtime]") {
+  auto shape = Shape::create();
+
+  // Default values
+  REQUIRE(shape->flex_grow() == 0.0f);
+  REQUIRE(shape->flex_shrink() == 1.0f);
+  REQUIRE(shape->flex_basis() == 0.0f);
+
+  shape->set_flex_grow(2.0f);
+  REQUIRE(shape->flex_grow() == 2.0f);
+
+  shape->set_flex_shrink(0.5f);
+  REQUIRE(shape->flex_shrink() == 0.5f);
+
+  shape->set_flex_basis(100.0f);
+  REQUIRE(shape->flex_basis() == 100.0f);
+
+  // set_flex convenience method
+  shape->set_flex(3.0f, 2.0f, 50.0f);
+  REQUIRE(shape->flex_grow() == 3.0f);
+  REQUIRE(shape->flex_shrink() == 2.0f);
+  REQUIRE(shape->flex_basis() == 50.0f);
+}
+
+TEST_CASE("Layout: Flex grow distributes extra space", "[layout][algorithm]") {
+  auto container = Group::create();
+  container->set_layout(LayoutMode::Flex);
+  container->set_flex_direction(FlexDirection::Row);
+  container->set_layout_size(300, 100);
+
+  // child1: 50px base, flexGrow=1
+  auto child1 = make_rect(50, 30);
+  child1->set_flex_grow(1.0f);
+
+  // child2: 50px base, flexGrow=2
+  auto child2 = make_rect(50, 30);
+  child2->set_flex_grow(2.0f);
+
+  container->add_child(child1);
+  container->add_child(child2);
+
+  container->perform_layout();
+
+  // Total base = 100, container = 300, free space = 200
+  // child1 gets 200 * 1/3 = ~66.67 extra -> total ~116.67
+  // child2 gets 200 * 2/3 = ~133.33 extra -> total ~183.33
+  // child1 at x=0, child2 at x=~116.67
+  REQUIRE(child1->x() == 0.0f);
+  REQUIRE_THAT(child2->x(), WithinAbs(116.67f, 1.0f));
+}
+
+TEST_CASE("Layout: Flex shrink when content exceeds container", "[layout][algorithm]") {
+  auto container = Group::create();
+  container->set_layout(LayoutMode::Flex);
+  container->set_flex_direction(FlexDirection::Row);
+  container->set_layout_size(100, 50); // Small container
+
+  // Total content = 150px, exceeds container by 50px
+  auto child1 = make_rect(50, 30);
+  child1->set_flex_shrink(1.0f);
+
+  auto child2 = make_rect(50, 30);
+  child2->set_flex_shrink(1.0f);
+
+  auto child3 = make_rect(50, 30);
+  child3->set_flex_shrink(1.0f);
+
+  container->add_child(child1);
+  container->add_child(child2);
+  container->add_child(child3);
+
+  container->perform_layout();
+
+  // Each should shrink equally: 50 - 50/3 = ~33.33
+  // child1 at x=0, child2 at x=~33.33, child3 at x=~66.67
+  REQUIRE(child1->x() == 0.0f);
+  REQUIRE_THAT(child2->x(), WithinAbs(33.33f, 1.0f));
+  REQUIRE_THAT(child3->x(), WithinAbs(66.67f, 1.0f));
+}
+
+TEST_CASE("Layout: Flex basis overrides content size", "[layout][algorithm]") {
+  auto container = Group::create();
+  container->set_layout(LayoutMode::Flex);
+  container->set_flex_direction(FlexDirection::Row);
+  container->set_layout_size(300, 100);
+
+  // child1: rect is 50px, but flex-basis is 100px
+  auto child1 = make_rect(50, 30);
+  child1->set_flex_basis(100.0f);
+
+  // child2: rect is 50px, no flex-basis (uses content size)
+  auto child2 = make_rect(50, 30);
+
+  container->add_child(child1);
+  container->add_child(child2);
+
+  container->perform_layout();
+
+  // child1 uses 100px (flex-basis), child2 uses 50px (content)
+  // child1 at x=0, child2 at x=100
+  REQUIRE(child1->x() == 0.0f);
+  REQUIRE(child2->x() == 100.0f);
+}
+
+// ============================================================================
+// ANCHOR PROPERTY TESTS
+// ============================================================================
+
+TEST_CASE("Parser: Anchor property", "[layout][parser]") {
+  auto program = parse(R"(
+        scene Test {
+            rect centered { x: 50, y: 50, width: 100, height: 100, anchor: center }
+            rect topRight { x: 100, y: 0, width: 50, height: 50, anchor: topRight }
+            rect bottom { x: 50, y: 100, width: 50, height: 50, anchor: bottom }
+        }
+    )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene->children.size() == 3);
+
+  auto &centered = program->scene->children[0];
+  REQUIRE(std::get<std::string>(centered->properties["anchor"]) == "center");
+
+  auto &topRight = program->scene->children[1];
+  REQUIRE(std::get<std::string>(topRight->properties["anchor"]) == "topRight");
+
+  auto &bottom = program->scene->children[2];
+  REQUIRE(std::get<std::string>(bottom->properties["anchor"]) == "bottom");
+}
+
+TEST_CASE("Node: Anchor property setting", "[layout][runtime]") {
+  auto shape = Shape::create();
+
+  REQUIRE(shape->anchor() == Anchor::TopLeft);
+
+  shape->set_anchor(Anchor::Center);
+  REQUIRE(shape->anchor() == Anchor::Center);
+
+  shape->set_anchor(Anchor::BottomRight);
+  REQUIRE(shape->anchor() == Anchor::BottomRight);
+}
+
+TEST_CASE("Layout: Anchor center positions element by center point", "[layout][algorithm]") {
+  auto shape = Shape::create();
+  shape->set_rect(100, 60);  // 100x60 rect
+  shape->set_anchor(Anchor::Center);
+  shape->set_position(50, 30);  // x,y now refers to center
+
+  // Force transform update
+  auto transform = shape->world_transform();
+
+  // With anchor: center, x=50, y=30, width=100, height=60
+  // The top-left corner should be at (50 - 50, 30 - 30) = (0, 0)
+  // world_transform translates by (tx, ty) where tx = x - width/2, ty = y - height/2
+  REQUIRE_THAT(transform(0, 2), WithinAbs(0.0f, 0.1f));  // tx = 0
+  REQUIRE_THAT(transform(1, 2), WithinAbs(0.0f, 0.1f));  // ty = 0
+}
+
+TEST_CASE("Layout: Anchor topRight positions element by top-right corner", "[layout][algorithm]") {
+  auto shape = Shape::create();
+  shape->set_rect(100, 60);
+  shape->set_anchor(Anchor::TopRight);
+  shape->set_position(100, 0);  // x,y refers to top-right corner
+
+  auto transform = shape->world_transform();
+
+  // Top-left should be at (100 - 100, 0) = (0, 0)
+  REQUIRE_THAT(transform(0, 2), WithinAbs(0.0f, 0.1f));
+  REQUIRE_THAT(transform(1, 2), WithinAbs(0.0f, 0.1f));
+}
+
+TEST_CASE("Layout: Anchor bottom positions element by bottom-center", "[layout][algorithm]") {
+  auto shape = Shape::create();
+  shape->set_rect(100, 60);
+  shape->set_anchor(Anchor::Bottom);
+  shape->set_position(50, 60);  // x,y refers to bottom-center
+
+  auto transform = shape->world_transform();
+
+  // Top-left should be at (50 - 50, 60 - 60) = (0, 0)
+  REQUIRE_THAT(transform(0, 2), WithinAbs(0.0f, 0.1f));
+  REQUIRE_THAT(transform(1, 2), WithinAbs(0.0f, 0.1f));
+}

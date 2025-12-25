@@ -4,11 +4,42 @@
  */
 
 #include "flex.h"
+#include "flex/debug.h"
+#include "flex/dsl/timeline.h"
 #include "parser/flex_ast.h"
 #include "parser/flex_parser.h"
-#include <iostream>
 
 namespace flex {
+
+// ============================================================================
+// Helper: Parse color from hex string
+// ============================================================================
+
+static Color parse_color_from_string(const std::string& color_str) {
+  if (color_str.empty() || color_str[0] != '#') {
+    return Color(0.0f, 0.0f, 0.0f, 1.0f);
+  }
+
+  const char* hex = color_str.c_str() + 1;
+  size_t len = color_str.length() - 1;
+
+  unsigned int r = 0, g = 0, b = 0, a = 255;
+
+  if (len == 6) {
+    sscanf(hex, "%02x%02x%02x", &r, &g, &b);
+  } else if (len == 8) {
+    sscanf(hex, "%02x%02x%02x%02x", &r, &g, &b, &a);
+  } else if (len == 3) {
+    unsigned int r4, g4, b4;
+    sscanf(hex, "%1x%1x%1x", &r4, &g4, &b4);
+    r = r4 * 17;
+    g = g4 * 17;
+    b = b4 * 17;
+  }
+
+  // Convert from 0-255 to 0-1 range for flex::Color (which uses floats)
+  return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+}
 
 // ============================================================================
 // AST to Runtime Converter
@@ -28,46 +59,52 @@ private:
   // Helper methods
   void convert_machines(const std::vector<std::shared_ptr<parser::AstMachine>> &machines);
   void convert_animations(const std::vector<std::shared_ptr<parser::AstAnim>> &animations);
+  void convert_assets(const parser::AstAssets &assets);
 
   // Machine conversion
   RuntimeStateMachine::Ptr convert_machine(const parser::AstMachine &machine);
   void convert_layer(RuntimeStateMachine *machine, const parser::AstLayer &layer);
 
-  // Animation conversion
-  RuntimeAnimation::Ptr convert_animation(const parser::AstAnim &anim);
+  // Animation conversion - now creates Timeline instead of RuntimeAnimation
+  Timeline::Ptr convert_animation(const parser::AstAnim &anim);
 
   // Utility
-  float parse_duration(const std::string &time_str);
+  LoopMode parse_loop_mode(const std::string &mode_str);
 };
 
 inline AstToRuntimeConverter::AstToRuntimeConverter(Definition::Impl *definition_impl)
     : impl_(definition_impl) {}
 
 inline void AstToRuntimeConverter::convert(const parser::AstProgram &program) {
-  std::cout << "[Converter] Converting AST to runtime objects...\n";
+  FLEX_LOGD("Converting AST to runtime objects...");
 
   // Convert machines
   if (!program.machines.empty()) {
     convert_machines(program.machines);
   }
 
-  // Convert animations
+  // Convert animations to Timelines
   if (!program.animations.empty()) {
     convert_animations(program.animations);
   }
 
-  std::cout << "[Converter] Conversion complete!\n";
+  // Convert assets
+  if (program.assets) {
+    convert_assets(*program.assets);
+  }
+
+  FLEX_LOGD("Conversion complete!");
 }
 
 inline void AstToRuntimeConverter::convert_machines(
     const std::vector<std::shared_ptr<parser::AstMachine>> &machines) {
-  std::cout << "[Converter] Converting " << machines.size() << " state machine(s)...\n";
+  FLEX_LOGD("Converting {} state machine(s)...", machines.size());
 
   for (const auto &ast_machine : machines) {
     auto runtime_machine = convert_machine(*ast_machine);
     impl_->machines.push_back(runtime_machine);
 
-    std::cout << "[Converter] Converted machine: " << runtime_machine->name() << "\n";
+    FLEX_LOGD("Converted machine: {}", runtime_machine->name());
 
     // Convert layers
     for (const auto &ast_layer : ast_machine->layers) {
@@ -78,15 +115,15 @@ inline void AstToRuntimeConverter::convert_machines(
 
 inline void AstToRuntimeConverter::convert_animations(
     const std::vector<std::shared_ptr<parser::AstAnim>> &animations) {
-  std::cout << "[Converter] Converting " << animations.size() << " animation(s)...\n";
+  FLEX_LOGD("Converting {} animation(s) to Timeline...", animations.size());
 
-  impl_->animations.clear();
+  impl_->timelines.clear();
 
   for (const auto &ast_anim : animations) {
-    auto runtime_anim = convert_animation(*ast_anim);
-    impl_->animations[runtime_anim->name()] = runtime_anim;
+    auto timeline = convert_animation(*ast_anim);
+    impl_->timelines.push_back(timeline);
 
-    std::cout << "[Converter] Converted animation: " << runtime_anim->name() << "\n";
+    FLEX_LOGD("Converted animation to Timeline: {}", timeline->name());
   }
 }
 
@@ -101,20 +138,20 @@ AstToRuntimeConverter::convert_machine(const parser::AstMachine &machine) {
 
 inline void AstToRuntimeConverter::convert_layer(RuntimeStateMachine *machine,
                                                  const parser::AstLayer &layer) {
-  std::cout << "[Converter]   Converting layer: " << layer.name << "\n";
+  FLEX_LOGD("  Converting layer: {}", layer.name);
 
   machine->add_layer(layer.name);
   auto runtime_layer = machine->get_layer(layer.name);
 
   // Convert states
   for (const auto &ast_state : layer.states) {
-    runtime_layer->add_state(ast_state.name, ast_state.initial, ast_state.animation);
-    std::cout << "[Converter]     Added state: " << ast_state.name;
-    if (ast_state.initial)
-      std::cout << " (initial)";
-    if (!ast_state.animation.empty())
-      std::cout << " animation=\"" << ast_state.animation << "\"";
-    std::cout << "\n";
+    runtime_layer->add_state(ast_state.name, ast_state.initial, ast_state.animation,
+                             ast_state.play_audio, ast_state.stop_audio);
+    FLEX_LOGD("    Added state: {}{}{}{}{}", ast_state.name,
+              ast_state.initial ? " (initial)" : "",
+              ast_state.animation.empty() ? "" : " animation=\"" + ast_state.animation + "\"",
+              ast_state.play_audio.empty() ? "" : " play=\"" + ast_state.play_audio + "\"",
+              ast_state.stop_audio.empty() ? "" : " stop=\"" + ast_state.stop_audio + "\"");
   }
 
   // Convert transitions
@@ -122,67 +159,95 @@ inline void AstToRuntimeConverter::convert_layer(RuntimeStateMachine *machine,
     runtime_layer->add_transition(ast_trans.from_state, ast_trans.to_state, ast_trans.condition_var,
                                   ast_trans.condition_op, ast_trans.condition_val);
 
-    std::cout << "[Converter]     Added transition: " << ast_trans.from_state << " -> "
-              << ast_trans.to_state;
-
     if (!ast_trans.condition_var.empty()) {
-      std::cout << " when " << ast_trans.condition_var << " " << ast_trans.condition_op << " "
-                << ast_trans.condition_val;
+      FLEX_LOGD("    Added transition: {} -> {} when {} {} {}",
+                ast_trans.from_state, ast_trans.to_state,
+                ast_trans.condition_var, ast_trans.condition_op, ast_trans.condition_val);
+    } else {
+      FLEX_LOGD("    Added transition: {} -> {}", ast_trans.from_state, ast_trans.to_state);
     }
-    std::cout << "\n";
   }
 }
 
-inline RuntimeAnimation::Ptr AstToRuntimeConverter::convert_animation(const parser::AstAnim &anim) {
-  auto runtime_anim = std::make_shared<RuntimeAnimation>(anim.name);
+inline Timeline::Ptr AstToRuntimeConverter::convert_animation(const parser::AstAnim &anim) {
+  // Create Timeline using Definition's arena allocator
+  auto timeline = Timeline::create(anim.name.c_str(), impl_->object_alloc);
 
   // Set properties
-  runtime_anim->set_duration(anim.duration);
-  runtime_anim->set_loop_mode(anim.loop_mode);
+  timeline->set_duration(anim.duration);
+  timeline->set_loop_mode(parse_loop_mode(anim.loop_mode));
 
   // Convert tracks
   for (const auto &ast_track : anim.tracks) {
-    auto runtime_track = std::make_unique<RuntimeTrack>(ast_track.property);
+    auto track = timeline->add_track(ast_track.property.c_str());
 
     // Add keyframes
     for (const auto &ast_kf : ast_track.keyframes) {
-      runtime_track->add_keyframe(ast_kf.time, ast_kf.value);
-    }
-
-    runtime_anim->add_track(ast_track.property);
-
-    // Copy keyframes
-    auto *target_track = runtime_anim->get_track(ast_track.property);
-    if (target_track) {
-      target_track->keyframes() = std::move(runtime_track->keyframes());
+      if (auto *fval = std::get_if<float>(&ast_kf.value)) {
+        track->add_keyframe(ast_kf.time, *fval);
+      } else if (auto *sval = std::get_if<std::string>(&ast_kf.value)) {
+        // Check if it's a color string
+        if (!sval->empty() && (*sval)[0] == '#') {
+          Color color = parse_color_from_string(*sval);
+          track->add_keyframe(ast_kf.time, color);
+        } else {
+          track->add_keyframe(ast_kf.time, sval->c_str());
+        }
+      } else if (auto *bval = std::get_if<bool>(&ast_kf.value)) {
+        track->add_keyframe(ast_kf.time, *bval ? 1.0f : 0.0f);
+      }
     }
   }
 
-  return runtime_anim;
+  return timeline;
 }
 
-inline float AstToRuntimeConverter::parse_duration(const std::string &time_str) {
-  // Parse duration string like "0.5s", "100ms"
-  float duration = 0.0f;
-  size_t i = 0;
-
-  // Parse number
-  while (i < time_str.length() &&
-         (time_str[i] == '.' || (time_str[i] >= '0' && time_str[i] <= '9'))) {
-    i++;
+inline LoopMode AstToRuntimeConverter::parse_loop_mode(const std::string &mode_str) {
+  if (mode_str == "loop") {
+    return LoopMode::Loop;
+  } else if (mode_str == "pingpong") {
+    return LoopMode::PingPong;
   }
+  return LoopMode::Once;
+}
 
-  duration = std::stof(time_str.substr(0, i));
+inline void AstToRuntimeConverter::convert_assets(const parser::AstAssets &assets) {
+  FLEX_LOGD("Converting {} asset(s)...", assets.assets.size());
 
-  // Parse unit
-  if (i < time_str.length()) {
-    std::string unit = time_str.substr(i);
-    if (unit == "ms") {
-      duration /= 1000.0f; // Convert to seconds
+  impl_->parsed_assets.clear();
+
+  for (const auto &ast_asset : assets.assets) {
+    Definition::Impl::ParsedAsset parsed;
+    parsed.type = ast_asset.type;
+    parsed.id = ast_asset.id;
+    parsed.path = ast_asset.path;
+
+    // Extract options
+    for (const auto &[key, value] : ast_asset.options) {
+      if (key == "loop") {
+        if (auto *bval = std::get_if<bool>(&value)) {
+          parsed.loop = *bval;
+        }
+      } else if (key == "volume") {
+        if (auto *fval = std::get_if<float>(&value)) {
+          parsed.volume = *fval;
+        }
+      } else if (key == "preload") {
+        if (auto *bval = std::get_if<bool>(&value)) {
+          parsed.preload = *bval;
+        }
+      }
+    }
+
+    impl_->parsed_assets.push_back(parsed);
+    if (parsed.type == "audio") {
+      FLEX_LOGD("  Asset: {} {} = \"{}\" (loop={}, volume={})",
+                parsed.type, parsed.id, parsed.path,
+                parsed.loop ? "true" : "false", parsed.volume);
+    } else {
+      FLEX_LOGD("  Asset: {} {} = \"{}\"", parsed.type, parsed.id, parsed.path);
     }
   }
-
-  return duration;
 }
 
 } // namespace flex

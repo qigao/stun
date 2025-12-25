@@ -15,8 +15,8 @@
 
 #include "flex/allocator.h"
 #include "flex/binding.h"
-#include "flex/dsl/animation.h"
 #include "flex/dsl/artboard.h"
+#include "flex/dsl/asset.h"
 #include "flex/dsl/component.h"
 #include "flex/dsl/event.h"
 #include "flex/dsl/fsm.h"
@@ -95,10 +95,6 @@ public:
   const std::vector<std::shared_ptr<class RuntimeStateMachine>> &machines() const {
     return impl_->machines;
   }
-  const std::unordered_map<std::string, std::shared_ptr<class RuntimeAnimation>> &
-  animations() const {
-    return impl_->animations;
-  }
 
 private:
   Definition() = default;
@@ -111,7 +107,17 @@ private:
 
     // Runtime objects
     std::vector<std::shared_ptr<class RuntimeStateMachine>> machines;
-    std::unordered_map<std::string, std::shared_ptr<class RuntimeAnimation>> animations;
+
+    // Parsed assets from DSL
+    struct ParsedAsset {
+      std::string type;    // "audio", "image", "font", "svg"
+      std::string id;
+      std::string path;
+      bool loop = false;
+      float volume = 1.0f;
+      bool preload = true;
+    };
+    std::vector<ParsedAsset> parsed_assets;
 
     std::string error_message;
     int error_line = 0;
@@ -205,18 +211,40 @@ public:
   // Get state machine by name
   class RuntimeStateMachine *get_machine(const std::string &name);
 
-  // Get animation by name
-  class RuntimeAnimation *get_animation(const std::string &name);
+  // Play animation by name (using Timeline system)
+  TimelinePlayer* play_animation(const std::string &name);
 
-  // Start animation
+  // Start animation - alias for play_animation
   void start_animation(const std::string &name);
 
-  // Stop animation
+  // Stop animation by name
   void stop_animation(const std::string &name);
 
-  // Asset resolution
+  // Asset resolution (legacy)
   void register_asset(const char *name, const char *path);
   const char *resolve_asset(const char *name) const;
+
+  // -------------------------------------------
+  // Asset Management (New)
+  // -------------------------------------------
+
+  class AssetManager* asset_manager() const;
+
+  // Register assets
+  void register_audio(const char* id, const char* path, bool loop = false, float volume = 1.0f);
+  void register_image(const char* id, const char* path);
+  void register_font(const char* id, const char* path);
+
+  // Audio control
+  int play_audio(const char* id);
+  int play_audio(const char* id, bool loop, float volume);
+  void stop_audio(const char* id);
+  void stop_audio_channel(int channel);
+  void set_audio_volume(int channel, float volume);
+  bool is_audio_playing(int channel);
+
+  // Preload all registered assets
+  void preload_assets();
 
   // -------------------------------------------
   // Memory Pool Access
@@ -262,7 +290,9 @@ private:
 
     // Runtime systems (Phase 3)
     std::vector<std::shared_ptr<class RuntimeStateMachine>> machines;
-    std::unique_ptr<class AnimationManager> animation_manager;
+
+    // Asset management (Phase 4)
+    std::unique_ptr<class AssetManager> asset_manager;
 
     // Pointer state for event handling
     std::weak_ptr<Node> hover_node;
@@ -295,10 +325,14 @@ int get_error_column();
 // Engine Initialization
 // ============================================================================
 
+#include <thread>
+
+// ...
+
 // Initialize the Flex engine (call once at startup)
 inline void init() {
-  // Initialize ThorVG
-  tvg::Initializer::init(0);
+  // Initialize ThorVG with auto-detected threads
+  tvg::Initializer::init(std::thread::hardware_concurrency());
 
   // Initialize fmtlog
   fmtlog::setLogLevel(fmtlog::DBG); // Enable all log levels (DBG, INF, WRN, ERR)

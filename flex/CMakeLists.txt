@@ -81,11 +81,11 @@ target_include_directories(
          $<INSTALL_INTERFACE:include> ${Stb_INCLUDE_DIR})
 
 # Link physics engine (Box2D)
-find_package(box2d CONFIG REQUIRED)
+find_package(box2d CONFIG REQUIRED) 
 # Link rendering backend (ThorVG)
 target_link_libraries(
   flex
-  PUBLIC thorvg TurboMemory fmtlog
+  PUBLIC thorvg TurboMemory fmtlog  
   PRIVATE qjs box2d::box2d)
 
 set_target_properties(flex PROPERTIES FOLDER "flex" POSITION_INDEPENDENT_CODE

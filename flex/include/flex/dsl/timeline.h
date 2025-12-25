@@ -94,7 +94,7 @@ public:
     }
 
     // Property path (e.g., "opacity", "x", "fill.color")
-    const char* property() const { return property_; }
+    const char* property() const { return property_.c_str(); }
 
     // Keyframe management
     void add_keyframe(float time, float value, Easing easing = Easing::linear());
@@ -110,7 +110,7 @@ public:
     float duration() const;
 
 private:
-    const char* property_;
+    std::string property_;  // Own the string to avoid dangling pointer
     PoolVector<Keyframe> keyframes_;  // Uses arena allocator
 
     // Find surrounding keyframes for interpolation (optimized with binary search)
@@ -134,7 +134,7 @@ public:
     }
 
     // Identity
-    const char* name() const { return name_; }
+    const char* name() const { return name_.c_str(); }
 
     // Get raw pointer (for TimelinePlayer constructor)
     Timeline* get_ptr() { return this; }
@@ -166,7 +166,7 @@ public:
     void apply(Node* target, float time) const;
 
 private:
-    const char* name_;
+    std::string name_;  // Own the string to avoid dangling pointer
     PoolVector<Track::Ptr> tracks_;  // Uses arena allocator
     mutable PoolVector<Trigger> triggers_;   // Uses arena allocator (mutable for lazy sorting)
     mutable bool triggers_sorted_ = true;    // Track if triggers are sorted

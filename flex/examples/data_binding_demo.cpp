@@ -166,6 +166,18 @@ public:
         // Initialize UI Logic Controller
         controller_ = std::make_unique<CounterController>(instance_);
 
+        // Debug: Check state machines
+        auto* machine = instance_->get_machine("statusTracker");
+        if (machine) {
+            std::cout << "State machine 'statusTracker' found\n";
+            auto* layer = machine->get_layer("status");
+            if (layer) {
+                std::cout << "  Layer 'status' current state: " << layer->current_state() << "\n";
+            }
+        } else {
+            std::cout << "WARNING: State machine 'statusTracker' NOT FOUND\n";
+        }
+
         std::cout << "Data Binding Demo initialized!\n";
         std::cout << "Controls:\n";
         std::cout << "  Click + button to increment\n";

@@ -4,9 +4,7 @@
  */
 
 #include "flex.h"
-#include "widgets/widgets.h"
-#include "flex/group.h"
-#include "flex/instance.h"
+#include "widgets/widgets.h" 
 #include <SDL.h>
 #include <thorvg.h>
 #include <iostream>

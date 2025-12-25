@@ -1362,6 +1362,22 @@ TEST_CASE("Lexer: Dot token", "[lexer][for]") {
   lexer_destroy(lexer);
 }
 
+TEST_CASE("Lexer: Binding syntax ${}", "[lexer][binding]") {
+  auto lexer = lexer_create("${item.name} ${index}");
+
+  auto tok1 = lex_next_token(lexer);
+  REQUIRE(tok1.type == TOK_BINDING);
+  REQUIRE(tok1.value == "${item.name}");
+
+  auto tok2 = lex_next_token(lexer);
+  REQUIRE(tok2.type == TOK_BINDING);
+  REQUIRE(tok2.value == "${index}");
+
+  REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+  lexer_destroy(lexer);
+}
+
 TEST_CASE("Parser: Data block", "[parser][for]") {
   auto program = parse(R"(
     data products {
@@ -1401,7 +1417,7 @@ TEST_CASE("Parser: For loop basic", "[parser][for]") {
     scene ForTest {
       for color in colors {
         rect color {
-          fill: $(color.value)
+          fill: ${color.value}
         }
       }
     }
@@ -1442,9 +1458,9 @@ TEST_CASE("Parser: For loop with index", "[parser][for]") {
     scene IndexTest {
       for item in items {
         group item {
-          y: $(index)
+          y: ${index}
           text label {
-            content: $(item.label)
+            content: ${item.label}
           }
         }
       }
@@ -1480,8 +1496,8 @@ TEST_CASE("Parser: For loop with numeric properties", "[parser][for]") {
     scene NumericTest {
       for pos in positions {
         circle pos {
-          x: $(pos.x)
-          y: $(pos.y)
+          x: ${pos.x}
+          y: ${pos.y}
           radius: 25
         }
       }
@@ -1498,4 +1514,449 @@ TEST_CASE("Parser: For loop with numeric properties", "[parser][for]") {
   auto &circle1 = program->scene->children[1];
   REQUIRE(std::get<float>(circle1->properties["x"]) == 200.0f);
   REQUIRE(std::get<float>(circle1->properties["y"]) == 100.0f);
+}
+
+TEST_CASE("Parser: For loop with ${} binding syntax", "[parser][for][binding]") {
+  auto program = parse(R"(
+    data colors {
+      red: { value: "#ff0000" }
+      green: { value: "#00ff00" }
+    }
+
+    scene BindingTest {
+      for color in colors {
+        rect color {
+          fill: ${color.value}
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->children.size() == 2);
+
+  // ${} syntax should work the same as $()
+  auto &rect0 = program->scene->children[0];
+  REQUIRE(rect0->id == "color0");
+  REQUIRE(std::get<std::string>(rect0->properties["fill"]) == "#ff0000");
+
+  auto &rect1 = program->scene->children[1];
+  REQUIRE(rect1->id == "color1");
+  REQUIRE(std::get<std::string>(rect1->properties["fill"]) == "#00ff00");
+}
+
+// ============================================================================
+// PARSER TESTS: ASSETS
+// ============================================================================
+
+TEST_CASE("Lexer: Assets tokens", "[lexer][assets]") {
+  auto lexer = lexer_create("assets audio font");
+
+  REQUIRE(lex_next_token(lexer).type == TOK_ASSETS);
+  REQUIRE(lex_next_token(lexer).type == TOK_AUDIO);
+  REQUIRE(lex_next_token(lexer).type == TOK_FONT);
+  REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+  lexer_destroy(lexer);
+}
+
+TEST_CASE("Parser: Assets block basic", "[parser][assets]") {
+  auto program = parse(R"(
+    assets {
+      audio click: "sounds/click.wav"
+      audio hover: "sounds/hover.mp3"
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->assets != nullptr);
+  REQUIRE(program->assets->assets.size() == 2);
+
+  // Check first asset
+  auto &click = program->assets->assets[0];
+  REQUIRE(click.type == "audio");
+  REQUIRE(click.id == "click");
+  REQUIRE(click.path == "sounds/click.wav");
+
+  // Check second asset
+  auto &hover = program->assets->assets[1];
+  REQUIRE(hover.type == "audio");
+  REQUIRE(hover.id == "hover");
+  REQUIRE(hover.path == "sounds/hover.mp3");
+}
+
+TEST_CASE("Parser: Assets with options", "[parser][assets]") {
+  auto program = parse(R"(
+    assets {
+      audio bgm: "sounds/background.mp3" {
+        loop: true
+        volume: 0.5
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->assets != nullptr);
+  REQUIRE(program->assets->assets.size() == 1);
+
+  auto &bgm = program->assets->assets[0];
+  REQUIRE(bgm.type == "audio");
+  REQUIRE(bgm.id == "bgm");
+  REQUIRE(bgm.path == "sounds/background.mp3");
+
+  // Check options
+  REQUIRE(bgm.options.count("loop") == 1);
+  REQUIRE(std::get<bool>(bgm.options["loop"]) == true);
+
+  REQUIRE(bgm.options.count("volume") == 1);
+  REQUIRE(std::get<float>(bgm.options["volume"]) == 0.5f);
+}
+
+TEST_CASE("Parser: Multiple asset types", "[parser][assets]") {
+  auto program = parse(R"(
+    assets {
+      audio click: "sounds/click.wav"
+      image logo: "images/logo.png"
+      font main: "fonts/roboto.ttf"
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->assets != nullptr);
+  REQUIRE(program->assets->assets.size() == 3);
+
+  REQUIRE(program->assets->assets[0].type == "audio");
+  REQUIRE(program->assets->assets[0].id == "click");
+
+  REQUIRE(program->assets->assets[1].type == "image");
+  REQUIRE(program->assets->assets[1].id == "logo");
+
+  REQUIRE(program->assets->assets[2].type == "font");
+  REQUIRE(program->assets->assets[2].id == "main");
+}
+
+TEST_CASE("Parser: Assets with scene", "[parser][assets]") {
+  auto program = parse(R"(
+    assets {
+      audio click: "sounds/click.wav"
+    }
+
+    scene TestScene {
+      width: 800
+      height: 600
+      rect bg { fill: #000000 }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+
+  // Assets should be parsed
+  REQUIRE(program->assets != nullptr);
+  REQUIRE(program->assets->assets.size() == 1);
+
+  // Scene should also be parsed
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->name == "TestScene");
+  REQUIRE(program->scene->width == 800.0f);
+}
+
+// ============================================================================
+// PARSER TESTS: STATE MACHINE WITH PLAY/STOP AUDIO
+// ============================================================================
+
+TEST_CASE("Parser: State with play audio", "[parser][machine][audio]") {
+  auto program = parse(R"(
+    machine audioMachine {
+      layer main {
+        state idle {
+          initial: true
+        }
+
+        state playing {
+          play: bgm
+          animation: "toPlaying"
+        }
+
+        transition idle -> playing when start > 0
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->machines.size() == 1);
+
+  auto &machine = program->machines[0];
+  auto &layer = machine->layers[0];
+  REQUIRE(layer.states.size() == 2);
+
+  // Check idle state (no audio)
+  auto &idle = layer.states[0];
+  REQUIRE(idle.name == "idle");
+  REQUIRE(idle.play_audio.empty());
+  REQUIRE(idle.stop_audio.empty());
+
+  // Check playing state (has play audio)
+  auto &playing = layer.states[1];
+  REQUIRE(playing.name == "playing");
+  REQUIRE(playing.play_audio == "bgm");
+  REQUIRE(playing.animation == "toPlaying");
+  REQUIRE(playing.stop_audio.empty());
+}
+
+TEST_CASE("Parser: State with stop audio", "[parser][machine][audio]") {
+  auto program = parse(R"(
+    machine audioMachine {
+      layer main {
+        state playing {
+          initial: true
+          play: bgm
+        }
+
+        state stopped {
+          stop: bgm
+        }
+
+        transition playing -> stopped when stop > 0
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  auto &layer = program->machines[0]->layers[0];
+
+  // Check playing state
+  auto &playing = layer.states[0];
+  REQUIRE(playing.play_audio == "bgm");
+  REQUIRE(playing.stop_audio.empty());
+
+  // Check stopped state
+  auto &stopped = layer.states[1];
+  REQUIRE(stopped.play_audio.empty());
+  REQUIRE(stopped.stop_audio == "bgm");
+}
+
+TEST_CASE("Parser: State with both play and stop audio", "[parser][machine][audio]") {
+  auto program = parse(R"(
+    machine audioMachine {
+      layer main {
+        state switchTrack {
+          stop: track1
+          play: track2
+          animation: "switchAnim"
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  auto &state = program->machines[0]->layers[0].states[0];
+
+  REQUIRE(state.name == "switchTrack");
+  REQUIRE(state.stop_audio == "track1");
+  REQUIRE(state.play_audio == "track2");
+  REQUIRE(state.animation == "switchAnim");
+}
+
+TEST_CASE("Parser: Full audio demo", "[parser][assets][machine][audio]") {
+  auto program = parse(R"(
+    assets {
+      audio click: "sounds/click.wav"
+      audio hover: "sounds/hover.wav"
+      audio bgm: "sounds/background.mp3" {
+        loop: true
+        volume: 0.5
+      }
+    }
+
+    scene audioDemo {
+      width: 600
+      height: 400
+      rect bg { fill: #1a1a2e }
+    }
+
+    machine audioController {
+      layer main {
+        state idle {
+          initial: true
+        }
+
+        state playing {
+          play: bgm
+          animation: "toPlaying"
+        }
+
+        state stopped {
+          stop: bgm
+          animation: "toStopped"
+        }
+
+        transition idle -> playing when playClicked > 0
+        transition playing -> stopped when stopClicked > 0
+        transition stopped -> playing when playClicked > 0
+      }
+    }
+
+    anim "toPlaying" {
+      duration: 0.2
+      track "#statusText/content" {
+        keyframe 0 -> "Playing..."
+      }
+    }
+
+    anim "toStopped" {
+      duration: 0.2
+      track "#statusText/content" {
+        keyframe 0 -> "Stopped"
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+
+  // Verify assets
+  REQUIRE(program->assets != nullptr);
+  REQUIRE(program->assets->assets.size() == 3);
+
+  auto &bgm = program->assets->assets[2];
+  REQUIRE(bgm.id == "bgm");
+  REQUIRE(bgm.options.count("loop") == 1);
+
+  // Verify scene
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->name == "audioDemo");
+
+  // Verify state machine
+  REQUIRE(program->machines.size() == 1);
+  auto &machine = program->machines[0];
+  REQUIRE(machine->name == "audioController");
+
+  auto &layer = machine->layers[0];
+  REQUIRE(layer.states.size() == 3);
+  REQUIRE(layer.transitions.size() == 3);
+
+  // Check states
+  REQUIRE(layer.states[0].name == "idle");
+  REQUIRE(layer.states[0].initial == true);
+
+  REQUIRE(layer.states[1].name == "playing");
+  REQUIRE(layer.states[1].play_audio == "bgm");
+  REQUIRE(layer.states[1].animation == "toPlaying");
+
+  REQUIRE(layer.states[2].name == "stopped");
+  REQUIRE(layer.states[2].stop_audio == "bgm");
+  REQUIRE(layer.states[2].animation == "toStopped");
+
+  // Verify animations
+  REQUIRE(program->animations.size() == 2);
+  REQUIRE(program->animations[0]->name == "toPlaying");
+  REQUIRE(program->animations[1]->name == "toStopped");
+}
+
+// ============================================================================
+// PARSER TESTS: IMPORT
+// ============================================================================
+
+TEST_CASE("Lexer: Import token", "[lexer][import]") {
+  auto lexer = lexer_create("import");
+
+  auto tok = lex_next_token(lexer);
+  REQUIRE(tok.type == TOK_IMPORT);
+  REQUIRE(tok.value == "import");
+  REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+  lexer_destroy(lexer);
+}
+
+TEST_CASE("Lexer: Import statement tokens", "[lexer][import]") {
+  auto lexer = lexer_create("import \"animations/fade.flex\"");
+
+  REQUIRE(lex_next_token(lexer).type == TOK_IMPORT);
+
+  auto tok = lex_next_token(lexer);
+  REQUIRE(tok.type == TOK_STRING);
+  REQUIRE(tok.value == "animations/fade.flex");
+
+  REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+  lexer_destroy(lexer);
+}
+
+TEST_CASE("Parser: Single import statement", "[parser][import]") {
+  auto program = parse(R"(
+    import "components/button.flex"
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->imports.size() == 1);
+  REQUIRE(program->imports[0].path == "components/button.flex");
+}
+
+TEST_CASE("Parser: Multiple import statements", "[parser][import]") {
+  auto program = parse(R"(
+    import "animations/fade.flex"
+    import "components/button.flex"
+    import "machines/player.flex"
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->imports.size() == 3);
+  REQUIRE(program->imports[0].path == "animations/fade.flex");
+  REQUIRE(program->imports[1].path == "components/button.flex");
+  REQUIRE(program->imports[2].path == "machines/player.flex");
+}
+
+TEST_CASE("Parser: Import with scene", "[parser][import]") {
+  auto program = parse(R"(
+    import "shared/colors.flex"
+
+    scene Main {
+      width: 800
+      height: 600
+      rect bg { fill: #000000 }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->imports.size() == 1);
+  REQUIRE(program->imports[0].path == "shared/colors.flex");
+
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->name == "Main");
+  REQUIRE(program->scene->width == 800.0f);
+}
+
+TEST_CASE("Parser: Import with animations and machines", "[parser][import]") {
+  auto program = parse(R"(
+    import "animations/base.flex"
+
+    anim "localFade" {
+      duration: 0.5
+      track "opacity" {
+        keyframe 0 -> 0
+        keyframe 0.5 -> 1
+      }
+    }
+
+    machine localMachine {
+      layer main {
+        state idle { initial: true }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->imports.size() == 1);
+  REQUIRE(program->animations.size() == 1);
+  REQUIRE(program->animations[0]->name == "localFade");
+  REQUIRE(program->machines.size() == 1);
+  REQUIRE(program->machines[0]->name == "localMachine");
+}
+
+TEST_CASE("Parser: Import preserves line info", "[parser][import]") {
+  auto program = parse("import \"test.flex\"");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->imports.size() == 1);
+  REQUIRE(program->imports[0].line == 1);
 }

@@ -61,7 +61,7 @@ public:
   void render(Renderer &renderer) override;
 
   // Bounds
-  Bounds bounds() const override { return Bounds{x_, y_, width_ * scale_x_, height_ * scale_y_}; }
+  Bounds compute_bounds() const override;
 
 private:
   std::string src_;

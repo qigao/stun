@@ -54,6 +54,11 @@ yyloop:
       comment { update_position(state, tok_start); goto yyloop; }
 
       // Keywords - Top-level blocks
+      "import" {
+          update_position(state, tok_start);
+          return Token{TOK_IMPORT, "import", state->line, state->column};
+      }
+
       "scene" {
           update_position(state, tok_start);
           return Token{TOK_SCENE, "scene", state->line, state->column};
@@ -110,6 +115,21 @@ yyloop:
           return Token{TOK_DATA, "data", state->line, state->column};
       }
 
+      "assets" {
+          update_position(state, tok_start);
+          return Token{TOK_ASSETS, "assets", state->line, state->column};
+      }
+
+      "audio" {
+          update_position(state, tok_start);
+          return Token{TOK_AUDIO, "audio", state->line, state->column};
+      }
+
+      "font" {
+          update_position(state, tok_start);
+          return Token{TOK_FONT, "font", state->line, state->column};
+      }
+
       "for" {
           update_position(state, tok_start);
           return Token{TOK_FOR, "for", state->line, state->column};
@@ -118,6 +138,16 @@ yyloop:
       "in" {
           update_position(state, tok_start);
           return Token{TOK_IN, "in", state->line, state->column};
+      }
+
+      "const" {
+          update_position(state, tok_start);
+          return Token{TOK_CONST, "const", state->line, state->column};
+      }
+
+      "var" {
+          update_position(state, tok_start);
+          return Token{TOK_VAR, "var", state->line, state->column};
       }
 
       // Animation keywords
@@ -197,6 +227,11 @@ yyloop:
           return Token{TOK_NODE_TYPE, "ring", state->line, state->column};
       }
 
+      "triangle" {
+          update_position(state, tok_start);
+          return Token{TOK_NODE_TYPE, "triangle", state->line, state->column};
+      }
+
       // Boolean literals
       "true" {
           update_position(state, tok_start);
@@ -213,6 +248,37 @@ yyloop:
           update_position(state, tok_start);
           return Token{TOK_ARROW, "->", state->line, state->column};
       }
+
+      "*" {
+          update_position(state, tok_start);
+          return Token{TOK_STAR, "*", state->line, state->column};
+      }
+
+      "+" {
+          update_position(state, tok_start);
+          return Token{TOK_PLUS, "+", state->line, state->column};
+      }
+
+      "-" {
+          update_position(state, tok_start);
+          return Token{TOK_MINUS, "-", state->line, state->column};
+      }
+
+      "/" {
+          update_position(state, tok_start);
+          return Token{TOK_SLASH, "/", state->line, state->column};
+      }
+
+      "(" {
+          update_position(state, tok_start);
+          return Token{TOK_LPAREN, "(", state->line, state->column};
+      }
+
+      ")" {
+          update_position(state, tok_start);
+          return Token{TOK_RPAREN, ")", state->line, state->column};
+      }
+
 
       ">" {
           update_position(state, tok_start);
@@ -232,6 +298,11 @@ yyloop:
       "!=" {
           update_position(state, tok_start);
           return Token{TOK_NEQ, "!=", state->line, state->column};
+      }
+
+      "=" {
+          update_position(state, tok_start);
+          return Token{TOK_ASSIGN, "=", state->line, state->column};
       }
 
       "{" {
@@ -254,12 +325,12 @@ yyloop:
           return Token{TOK_COMMA, ",", state->line, state->column};
       }
 
-      // Binding expression: $(pos.x) - uses parentheses to avoid brace conflicts
-      "$(" [^)\n]+ ")" {
+      // Binding expression: ${pos.x}
+      "${" [^}\n]+ "}" {
           update_position(state, tok_start);
-          // Keep the full $(...) as value for substitution
-          std::string value(tok_start, state->cursor - tok_start);
-          return Token{TOK_BINDING, value, state->line, state->column};
+          std::string raw(tok_start, state->cursor - tok_start);
+          // Store as ${...} format
+          return Token{TOK_BINDING, raw, state->line, state->column};
       }
 
       "$" {

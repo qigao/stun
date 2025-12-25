@@ -116,6 +116,7 @@ void Group::perform_layout() {
 
     for (const auto& child : children_) {
         if (!child->visible()) continue;
+        if (child->position_absolute()) continue;  // Skip absolute positioned elements
 
         ChildLayout item;
         item.node = child.get();
@@ -411,53 +412,89 @@ std::vector<Node*> Group::find_by_tag(const std::string& tag) const {
     return result;
 }
 
+void Group::mark_dirty(DirtyFlags flags) {
+    // Basic marking for this node
+    Node::mark_dirty(flags);
+
+    // If transform changed, all children's world transforms are now invalid
+    if (has_flag(flags, DirtyFlags::Transform)) {
+        for (auto& child : children_) {
+            child->mark_dirty(DirtyFlags::Transform);
+        }
+    }
+}
+
 // ============================================================================
 // Bounds
 // ============================================================================
 
-Bounds Group::bounds() const {
+Bounds Group::compute_bounds() const {
     Bounds b;
-    b.x = x_;
-    b.y = y_;
+    b.x = 0;
+    b.y = 0;
 
     // If clip is enabled, use clip dimensions
-    if (clip_ && clip_width_ > 0 && clip_height_ > 0) {
-        b.width = clip_width_ * scale_x_;
-        b.height = clip_height_ * scale_y_;
+    if (clip_) {
+        b.width = layout_width_;
+        b.height = layout_height_;
         return b;
     }
 
-    // Otherwise compute from children bounds
+    // Otherwise, union of all children's bounds (which are in their parent's space, i.e., our local space)
     if (children_.empty()) {
+        b.width = layout_width_;
+        b.height = layout_height_;
         return b;
     }
 
-    float min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+    float min_x = 0, min_y = 0;
+    float max_x = 0, max_y = 0;
     bool first = true;
 
     for (const auto& child : children_) {
+        if (!child->visible()) continue;
+        
+        // child->bounds() is now in child's local space.
+        // We need the child's bounds in OUR local space.
+        // For a simple group without rotation/scale, this is:
+        // child_local_bounds + child_position.
+        // But with Eigen, we could do full matrix transform of the bounds.
+        // For now, let's use the child's local_transform to transform its local bounds 4 corners.
+        
         Bounds cb = child->bounds();
-        if (!cb.valid()) continue;
+        Transform ct = child->local_transform();
+        
+        // Transform the 4 corners of child's local bounds to our space
+        Vec2 p1 = ct * Vec2(cb.x, cb.y);
+        Vec2 p2 = ct * Vec2(cb.x + cb.width, cb.y);
+        Vec2 p3 = ct * Vec2(cb.x, cb.y + cb.height);
+        Vec2 p4 = ct * Vec2(cb.x + cb.width, cb.y + cb.height);
+        
+        float c_min_x = std::min({p1.x(), p2.x(), p3.x(), p4.x()});
+        float c_min_y = std::min({p1.y(), p2.y(), p3.y(), p4.y()});
+        float c_max_x = std::max({p1.x(), p2.x(), p3.x(), p4.x()});
+        float c_max_y = std::max({p1.y(), p2.y(), p3.y(), p4.y()});
 
         if (first) {
-            min_x = cb.x;
-            min_y = cb.y;
-            max_x = cb.x + cb.width;
-            max_y = cb.y + cb.height;
+            min_x = c_min_x; min_y = c_min_y;
+            max_x = c_max_x; max_y = c_max_y;
             first = false;
         } else {
-            min_x = std::min(min_x, cb.x);
-            min_y = std::min(min_y, cb.y);
-            max_x = std::max(max_x, cb.x + cb.width);
-            max_y = std::max(max_y, cb.y + cb.height);
+            min_x = std::min(min_x, c_min_x);
+            min_y = std::min(min_y, c_min_y);
+            max_x = std::max(max_x, c_max_x);
+            max_y = std::max(max_y, c_max_y);
         }
     }
 
-    // Include child offsets in Group's bounds
-    b.x = x_ + min_x;
-    b.y = y_ + min_y;
-    b.width = (max_x - min_x) * scale_x_;
-    b.height = (max_y - min_y) * scale_y_;
+    b.x = min_x;
+    b.y = min_y;
+    b.width = max_x - min_x;
+    b.height = max_y - min_y;
+
+    // Ensure at least layout size
+    b.width = std::max(b.width, layout_width_);
+    b.height = std::max(b.height, layout_height_);
 
     return b;
 }
@@ -473,25 +510,29 @@ void Group::render(Renderer& renderer) {
         perform_layout();
     }
 
-    bool needs_state = (x_ != 0 || y_ != 0 || rotation_ != 0 ||
-                        scale_x_ != 1 || scale_y_ != 1 || opacity_ < 1.0f || clip_);
+    bool needs_state = (opacity_ < 1.0f || clip_ || has_shadow() || has_blur());
     if (needs_state) {
         renderer.save();
-        if (x_ != 0 || y_ != 0) renderer.translate(x_, y_);
-        if (rotation_ != 0) renderer.rotate(rotation_);
-        if (scale_x_ != 1 || scale_y_ != 1) renderer.scale(scale_x_, scale_y_);
+        renderer.set_transform(world_transform());
         if (opacity_ < 1.0f) renderer.set_global_alpha(opacity_);
-        if (clip_ && clip_width_ > 0 && clip_height_ > 0) {
-            renderer.clip_rect(0, 0, clip_width_, clip_height_);
+        if (clip_ && layout_width_ > 0 && layout_height_ > 0) {
+            renderer.clip_rect(0, 0, layout_width_, layout_height_);
         }
+    } else {
+        // Even if we don't need a state save, we should check if we need to set the
+        // transform for ourselves (though groups usually don't draw anything directly).
     }
 
-    // Render children
-    // Note: Viewport culling disabled - bounds are in local space but viewport
-    // is in world space. Proper culling requires transforming bounds to world space
-    // which needs tracking cumulative transforms through the hierarchy.
+    // Render children with full frustum culling
+    // Caching of world_bounds makes this check very fast (~10ns)
+    // and saves significant time by skipping ThorVG calls for off-screen items.
+    Bounds vp = renderer.viewport();
     for (const auto& child : children_) {
-        child->render(renderer);
+        // Optimization: Cull all nodes, not just groups
+        // Since we cached world_bounds, this is now cheap.
+        if (child->cull(vp) == CullResult::Visible) {
+            child->render(renderer);
+        }
     }
 
     if (needs_state) {
