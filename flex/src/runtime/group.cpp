@@ -15,40 +15,77 @@ namespace flex {
 
 namespace {
 
-// Get the size of a child along the main axis
-float get_child_main_size(Node* child, FlexDirection direction) {
-    Bounds b = child->bounds();
-    float explicit_w = child->layout_width();
-    float explicit_h = child->layout_height();
+// Resolve a dimension that might be a percentage
+float resolve_dimension(float value, bool is_percent, float container_size) {
+    if (is_percent && value > 0) {
+        return container_size * (value / 100.0f);
+    }
+    return value;
+}
 
+// Get the size of a child along the main axis (including margin)
+float get_child_main_size(Node* child, FlexDirection direction, float container_main, float container_cross) {
     bool is_row = (direction == FlexDirection::Row || direction == FlexDirection::RowReverse);
 
+    // Resolve percentage dimensions
+    float w = resolve_dimension(child->layout_width(), child->width_is_percent(), is_row ? container_main : container_cross);
+    float h = resolve_dimension(child->layout_height(), child->height_is_percent(), is_row ? container_cross : container_main);
+
+    // If still 0, use bounds
+    if (w <= 0) w = child->bounds().width;
+    if (h <= 0) h = child->bounds().height;
+
+    // Add margin
     if (is_row) {
-        return (explicit_w > 0) ? explicit_w : b.width;
+        return w + child->margin_left() + child->margin_right();
     } else {
-        return (explicit_h > 0) ? explicit_h : b.height;
+        return h + child->margin_top() + child->margin_bottom();
     }
 }
 
-// Get the size of a child along the cross axis
-float get_child_cross_size(Node* child, FlexDirection direction) {
-    Bounds b = child->bounds();
-    float explicit_w = child->layout_width();
-    float explicit_h = child->layout_height();
-
+// Get the size of a child along the cross axis (including margin)
+float get_child_cross_size(Node* child, FlexDirection direction, float container_main, float container_cross) {
     bool is_row = (direction == FlexDirection::Row || direction == FlexDirection::RowReverse);
 
+    // Resolve percentage dimensions
+    float w = resolve_dimension(child->layout_width(), child->width_is_percent(), is_row ? container_main : container_cross);
+    float h = resolve_dimension(child->layout_height(), child->height_is_percent(), is_row ? container_cross : container_main);
+
+    // If still 0, use bounds
+    if (w <= 0) w = child->bounds().width;
+    if (h <= 0) h = child->bounds().height;
+
+    // Add margin
     if (is_row) {
-        return (explicit_h > 0) ? explicit_h : b.height;
+        return h + child->margin_top() + child->margin_bottom();
     } else {
-        return (explicit_w > 0) ? explicit_w : b.width;
+        return w + child->margin_left() + child->margin_right();
     }
+}
+
+// Get the content size (excluding margin) for a child
+float get_child_content_main(Node* child, FlexDirection direction, float container_main, float container_cross) {
+    bool is_row = (direction == FlexDirection::Row || direction == FlexDirection::RowReverse);
+    float w = resolve_dimension(child->layout_width(), child->width_is_percent(), is_row ? container_main : container_cross);
+    float h = resolve_dimension(child->layout_height(), child->height_is_percent(), is_row ? container_cross : container_main);
+    if (w <= 0) w = child->bounds().width;
+    if (h <= 0) h = child->bounds().height;
+    return is_row ? w : h;
+}
+
+float get_child_content_cross(Node* child, FlexDirection direction, float container_main, float container_cross) {
+    bool is_row = (direction == FlexDirection::Row || direction == FlexDirection::RowReverse);
+    float w = resolve_dimension(child->layout_width(), child->width_is_percent(), is_row ? container_main : container_cross);
+    float h = resolve_dimension(child->layout_height(), child->height_is_percent(), is_row ? container_cross : container_main);
+    if (w <= 0) w = child->bounds().width;
+    if (h <= 0) h = child->bounds().height;
+    return is_row ? h : w;
 }
 
 } // anonymous namespace
 
 void Group::perform_layout() {
-    if (layout_ == LayoutMode::None || children_.empty()) {
+    if (children_.empty()) {
         clear_dirty(DirtyFlags::Layout);
         return;
     }
@@ -57,40 +94,13 @@ void Group::perform_layout() {
     bool is_row = (flex_direction_ == FlexDirection::Row || flex_direction_ == FlexDirection::RowReverse);
     bool is_reverse = (flex_direction_ == FlexDirection::RowReverse || flex_direction_ == FlexDirection::ColumnReverse);
 
-    // Get container size (use clip size if clipping, otherwise calculate from content)
-    float container_main = 0;
-    float container_cross = 0;
+    // Get container size
+    float container_w = layout_width_;
+    float container_h = layout_height_;
+    float container_main = is_row ? container_w : container_h;
+    float container_cross = is_row ? container_h : container_w;
 
-    if (clip_ && clip_width_ > 0 && clip_height_ > 0) {
-        container_main = is_row ? clip_width_ : clip_height_;
-        container_cross = is_row ? clip_height_ : clip_width_;
-    } else {
-        // Calculate based on layout_width/layout_height or bounds
-        float w = (layout_width_ > 0) ? layout_width_ : 0;
-        float h = (layout_height_ > 0) ? layout_height_ : 0;
-
-        // If no explicit size, we need to measure children first (content-based sizing)
-        if (w == 0 || h == 0) {
-            float total_main = 0;
-            float max_cross = 0;
-            for (const auto& child : children_) {
-                if (!child->visible()) continue;
-                float main_size = get_child_main_size(child.get(), flex_direction_);
-                float cross_size = get_child_cross_size(child.get(), flex_direction_);
-                total_main += main_size;
-                max_cross = std::max(max_cross, cross_size);
-            }
-            total_main += gap_ * std::max(0, static_cast<int>(children_.size()) - 1);
-
-            if (w == 0) w = is_row ? total_main : max_cross;
-            if (h == 0) h = is_row ? max_cross : total_main;
-        }
-
-        container_main = is_row ? w : h;
-        container_cross = is_row ? h : w;
-    }
-
-    // Subtract padding
+    // Subtract padding for content area
     float padding_main_start = is_row ? padding_[3] : padding_[0];  // left : top
     float padding_main_end = is_row ? padding_[1] : padding_[2];    // right : bottom
     float padding_cross_start = is_row ? padding_[0] : padding_[3]; // top : left
@@ -99,11 +109,75 @@ void Group::perform_layout() {
     float available_main = container_main - padding_main_start - padding_main_end;
     float available_cross = container_cross - padding_cross_start - padding_cross_end;
 
-    // Collect visible children and their sizes
+    // ========================================================================
+    // Phase 1: Layout absolute/fixed positioned children
+    // ========================================================================
+    for (auto* child : children_) {
+        if (!child->visible()) continue;
+
+        PositionMode pm = child->position_mode();
+        if (pm != PositionMode::Absolute && pm != PositionMode::Fixed) continue;
+
+        // Resolve child size (percentage based on container)
+        float child_w = resolve_dimension(child->layout_width(), child->width_is_percent(), container_w);
+        float child_h = resolve_dimension(child->layout_height(), child->height_is_percent(), container_h);
+
+        // Containing block (fixed uses root/viewport, but we don't have that info here - treat as container)
+        float cb_w = container_w;
+        float cb_h = container_h;
+
+        float top = child->position_top();
+        float right = child->position_right();
+        float bottom = child->position_bottom();
+        float left = child->position_left();
+
+        // If both left and right specified but no width, stretch
+        if (!std::isnan(left) && !std::isnan(right) && child_w <= 0) {
+            child_w = cb_w - left - right;
+        }
+        // If both top and bottom specified but no height, stretch
+        if (!std::isnan(top) && !std::isnan(bottom) && child_h <= 0) {
+            child_h = cb_h - top - bottom;
+        }
+
+        // Calculate position
+        float x = 0, y = 0;
+        if (!std::isnan(left)) {
+            x = left;
+        } else if (!std::isnan(right)) {
+            x = cb_w - right - child_w;
+        }
+
+        if (!std::isnan(top)) {
+            y = top;
+        } else if (!std::isnan(bottom)) {
+            y = cb_h - bottom - child_h;
+        }
+
+        // Set position and size
+        child->x_ = x;
+        child->y_ = y;
+        if (child_w > 0) child->layout_width_ = child_w;
+        if (child_h > 0) child->layout_height_ = child_h;
+    }
+
+    // ========================================================================
+    // Phase 2: Flex layout for normal flow children
+    // ========================================================================
+    if (layout_ == LayoutMode::None) {
+        clear_dirty(DirtyFlags::Layout);
+        return;
+    }
+
+    // Collect flex items (exclude absolute/fixed)
     struct ChildLayout {
         Node* node;
-        float base_main;    // Base main axis size
-        float cross;        // Cross axis size
+        float base_main;    // Base main axis size (content only)
+        float cross;        // Cross axis size (content only)
+        float margin_main_start;
+        float margin_main_end;
+        float margin_cross_start;
+        float margin_cross_end;
         float final_main;   // After flex grow/shrink
         float main_pos;     // Final position
         float cross_pos;    // Final position
@@ -114,25 +188,38 @@ void Group::perform_layout() {
     float total_flex_grow = 0;
     float total_flex_shrink = 0;
 
-    for (const auto& child : children_) {
+    for (auto* child : children_) {
         if (!child->visible()) continue;
-        if (child->position_absolute()) continue;  // Skip absolute positioned elements
+        if (child->position_absolute()) continue;  // Skip positioned elements
 
         ChildLayout item;
-        item.node = child.get();
+        item.node = child;
+
+        // Get margins
+        if (is_row) {
+            item.margin_main_start = child->margin_left();
+            item.margin_main_end = child->margin_right();
+            item.margin_cross_start = child->margin_top();
+            item.margin_cross_end = child->margin_bottom();
+        } else {
+            item.margin_main_start = child->margin_top();
+            item.margin_main_end = child->margin_bottom();
+            item.margin_cross_start = child->margin_left();
+            item.margin_cross_end = child->margin_right();
+        }
 
         // Get base size (flex_basis or content size)
         float basis = child->flex_basis();
         if (basis > 0) {
             item.base_main = basis;
         } else {
-            item.base_main = get_child_main_size(child.get(), flex_direction_);
+            item.base_main = get_child_content_main(child, flex_direction_, available_main, available_cross);
         }
 
-        item.cross = get_child_cross_size(child.get(), flex_direction_);
+        item.cross = get_child_content_cross(child, flex_direction_, available_main, available_cross);
         item.final_main = item.base_main;
 
-        total_base_main += item.base_main;
+        total_base_main += item.base_main + item.margin_main_start + item.margin_main_end;
         total_flex_grow += child->flex_grow();
         total_flex_shrink += child->flex_shrink();
 
@@ -169,7 +256,7 @@ void Group::perform_layout() {
     // Calculate main axis positions based on justify_content
     float used_main = 0;
     for (const auto& item : items) {
-        used_main += item.final_main;
+        used_main += item.final_main + item.margin_main_start + item.margin_main_end;
     }
     used_main += total_gaps;
 
@@ -179,7 +266,6 @@ void Group::perform_layout() {
 
     switch (justify_content_) {
         case JustifyContent::Start:
-            // Default: start at padding
             break;
         case JustifyContent::End:
             main_start += free_space;
@@ -211,6 +297,8 @@ void Group::perform_layout() {
     // Position items
     float current_main = main_start;
     for (auto& item : items) {
+        // Add margin before
+        current_main += item.margin_main_start;
         item.main_pos = current_main;
 
         // Calculate cross axis position based on align_items / align_self
@@ -219,65 +307,80 @@ void Group::perform_layout() {
             align = static_cast<AlignItems>(static_cast<int>(item.node->align_self()) - 1);
         }
 
+        float item_cross = item.cross;
         switch (align) {
             case AlignItems::Start:
-                item.cross_pos = padding_cross_start;
+                item.cross_pos = padding_cross_start + item.margin_cross_start;
                 break;
             case AlignItems::End:
-                item.cross_pos = padding_cross_start + available_cross - item.cross;
+                item.cross_pos = padding_cross_start + available_cross - item_cross - item.margin_cross_end;
                 break;
             case AlignItems::Center:
-                item.cross_pos = padding_cross_start + (available_cross - item.cross) / 2;
+                item.cross_pos = padding_cross_start + (available_cross - item_cross) / 2;
                 break;
             case AlignItems::Stretch:
-                item.cross_pos = padding_cross_start;
-                item.cross = available_cross;  // Stretch to fill
+                item.cross_pos = padding_cross_start + item.margin_cross_start;
+                item_cross = available_cross - item.margin_cross_start - item.margin_cross_end;
                 break;
         }
 
-        current_main += item.final_main + item_gap;
+        current_main += item.final_main + item.margin_main_end + item_gap;
+
+        // Store computed cross size for stretch
+        item.cross = item_cross;
     }
 
-    // Apply positions (handle reverse)
+    // Handle reverse
     if (is_reverse) {
         for (auto& item : items) {
             item.main_pos = available_main - item.main_pos - item.final_main + padding_main_start;
         }
     }
 
-    // Set final positions on nodes
+    // Apply relative offset and set final positions
     for (const auto& item : items) {
+        float x, y;
         if (is_row) {
-            // Directly modify internal state to avoid triggering dirty propagation
-            item.node->x_ = item.main_pos;
-            item.node->y_ = item.cross_pos;
+            x = item.main_pos;
+            y = item.cross_pos;
+        } else {
+            x = item.cross_pos;
+            y = item.main_pos;
+        }
 
-            // Update layout size if stretched
-            if (item.node->layout_width() == 0) {
-                item.node->layout_width_ = item.final_main;
+        // Apply relative positioning offset
+        if (item.node->position_mode() == PositionMode::Relative) {
+            if (!std::isnan(item.node->position_left())) {
+                x += item.node->position_left();
+            } else if (!std::isnan(item.node->position_right())) {
+                x -= item.node->position_right();
             }
+            if (!std::isnan(item.node->position_top())) {
+                y += item.node->position_top();
+            } else if (!std::isnan(item.node->position_bottom())) {
+                y -= item.node->position_bottom();
+            }
+        }
+
+        // Set position directly (avoid triggering dirty)
+        item.node->x_ = x;
+        item.node->y_ = y;
+
+        // Update layout size
+        if (is_row) {
+            item.node->layout_width_ = item.final_main;
             if (align_items_ == AlignItems::Stretch && item.node->align_self() == AlignSelf::Auto) {
                 item.node->layout_height_ = item.cross;
             }
         } else {
-            // Directly modify internal state to avoid triggering dirty propagation
-            item.node->x_ = item.cross_pos;
-            item.node->y_ = item.main_pos;
-
-            // Update layout size if stretched
-            if (item.node->layout_height() == 0) {
-                item.node->layout_height_ = item.final_main;
-            }
+            item.node->layout_height_ = item.final_main;
             if (align_items_ == AlignItems::Stretch && item.node->align_self() == AlignSelf::Auto) {
                 item.node->layout_width_ = item.cross;
             }
         }
-
-        // Positions are set, but don't clear child's own Layout dirty flag.
-        // The child needs to perform its own internal layout if it's a Group.
     }
 
-    // Clear layout dirty flag after performing layout
+    // Clear layout dirty flag
     clear_dirty(DirtyFlags::Layout);
 }
 
@@ -285,14 +388,14 @@ void Group::perform_layout() {
 // Children Management
 // ============================================================================
 
-void Group::add_child(Node::Ptr child) {
+void Group::add_child(Node* child) {
     if (!child) return;
 
     // Remove from previous parent
     if (child->parent_) {
         auto* prev_parent = dynamic_cast<Group*>(child->parent_);
         if (prev_parent) {
-            prev_parent->remove_child(child.get());
+            prev_parent->remove_child(child);
         }
     }
 
@@ -303,8 +406,7 @@ void Group::add_child(Node::Ptr child) {
 }
 
 void Group::remove_child(Node* child) {
-    auto it = std::find_if(children_.begin(), children_.end(),
-        [child](const Node::Ptr& ptr) { return ptr.get() == child; });
+    auto it = std::find(children_.begin(), children_.end(), child);
 
     if (it != children_.end()) {
         (*it)->parent_ = nullptr;
@@ -321,14 +423,14 @@ void Group::remove_child_at(size_t index) {
     }
 }
 
-void Group::insert_child(Node::Ptr child, size_t index) {
+void Group::insert_child(Node* child, size_t index) {
     if (!child) return;
 
     // Remove from previous parent
     if (child->parent_) {
         auto* prev_parent = dynamic_cast<Group*>(child->parent_);
         if (prev_parent) {
-            prev_parent->remove_child(child.get());
+            prev_parent->remove_child(child);
         }
     }
 
@@ -353,7 +455,7 @@ void Group::clear_children() {
 
 Node* Group::child_at(size_t index) const {
     if (index < children_.size()) {
-        return children_[index].get();
+        return children_[index];
     }
     return nullptr;
 }
@@ -361,7 +463,7 @@ Node* Group::child_at(size_t index) const {
 Node* Group::find_child(const std::string& id) const {
     for (const auto& child : children_) {
         if (child->id() == id) {
-            return child.get();
+            return child;
         }
     }
     return nullptr;
@@ -386,10 +488,10 @@ Node* Group::find_child_recursive(const std::string& id) const {
     // No '/' -> original recursive search
     for (const auto& child : children_) {
         if (child->id() == id) {
-            return child.get();
+            return child;
         }
         if (child->is_group()) {
-            auto* group = static_cast<Group*>(child.get());
+            auto* group = static_cast<Group*>(child);
             auto* found = group->find_child_recursive(id);
             if (found) return found;
         }
@@ -401,10 +503,10 @@ std::vector<Node*> Group::find_by_tag(const std::string& tag) const {
     std::vector<Node*> result;
     for (const auto& child : children_) {
         if (child->has_tag(tag)) {
-            result.push_back(child.get());
+            result.push_back(child);
         }
         if (child->is_group()) {
-            auto* group = static_cast<Group*>(child.get());
+            auto* group = static_cast<Group*>(child);
             auto sub_result = group->find_by_tag(tag);
             result.insert(result.end(), sub_result.begin(), sub_result.end());
         }
@@ -474,6 +576,7 @@ Bounds Group::compute_bounds() const {
         float c_min_y = std::min({p1.y(), p2.y(), p3.y(), p4.y()});
         float c_max_x = std::max({p1.x(), p2.x(), p3.x(), p4.x()});
         float c_max_y = std::max({p1.y(), p2.y(), p3.y(), p4.y()});
+
 
         if (first) {
             min_x = c_min_x; min_y = c_min_y;

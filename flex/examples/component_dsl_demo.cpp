@@ -39,24 +39,24 @@ struct DemoModel {
 class DemoView {
 public:
     DemoView(flex::Instance::Ptr instance) : instance_(instance) {
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
         
         // Find component nodes by ID (from .flex file)
-        slider1 = artboard->find("slider1");
-        slider2 = artboard->find("slider2");
-        slider3 = artboard->find("slider3");
+        slider1 = scene->find("slider1");
+        slider2 = scene->find("slider2");
+        slider3 = scene->find("slider3");
         
-        progress1 = artboard->find("progress1");
-        progress2 = artboard->find("progress2");
-        progress3 = artboard->find("progress3");
+        progress1 = scene->find("progress1");
+        progress2 = scene->find("progress2");
+        progress3 = scene->find("progress3");
         
-        brightness = artboard->find("brightness");
-        contrast = artboard->find("contrast");
-        saturation = artboard->find("saturation");
+        brightness = scene->find("brightness");
+        contrast = scene->find("contrast");
+        saturation = scene->find("saturation");
         
-        notifications = artboard->find("notifications");
-        autosave = artboard->find("autosave");
-        darkmode = artboard->find("darkmode");
+        notifications = scene->find("notifications");
+        autosave = scene->find("autosave");
+        darkmode = scene->find("darkmode");
     }
 
     void update(const DemoModel& model) {
@@ -300,7 +300,7 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
@@ -555,7 +555,7 @@ private:
     void render() {
         canvas_->remove();
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
         canvas_->draw();

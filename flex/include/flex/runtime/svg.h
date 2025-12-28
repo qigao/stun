@@ -8,18 +8,19 @@
 
 #include "flex/runtime/node.h"
 #include "flex/runtime/types.h"
+#include "flex/runtime/allocator.h"
 #include <string>
 
 namespace flex {
 
 class Svg : public Node {
 public:
-    using Ptr = std::shared_ptr<Svg>;
+    using Ptr = Svg*;
 
     Svg() = default;
     ~Svg() override = default;
 
-    static Ptr create() { return std::make_shared<Svg>(); }
+    static Ptr create(ArenaAllocator& arena) { return arena.create<Svg>(); }
 
     NodeType type() const override { return NodeType::Svg; }
     const char* type_name() const override { return "Svg"; }

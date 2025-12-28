@@ -58,7 +58,7 @@ Inputs {
 Script "Bridge" { source: "LogicJS" }
 
 // IV. ARTBOARD (Scene Graph)
-Artboard "MainScene" (1920, 1080) {
+Scene "MainScene" (1920, 1080) {
     
     // Standard Node
     Group "Hero" {

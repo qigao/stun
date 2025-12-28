@@ -131,27 +131,27 @@ public:
     }
 
     void build_ui() {
-        auto artboard = instance_->artboard();
+        auto scene = instance_->scene();
 
         // Background
         auto bg = flex::Shape::create();
         bg->set_rect(1200, 800);
         bg->set_fill(flex::Color(0.97f, 0.97f, 0.98f, 1.0f));
-        artboard->add_child(bg);
+        scene->add_child(bg);
 
         // Header
         auto title = flex::Text::create();
         title->set_content("Reactive State Management Demo (MVC)");
         title->set_font_size(32);
         title->set_position(50, 40);
-        artboard->add_child(title);
+        scene->add_child(title);
 
         auto subtitle = flex::Text::create();
         subtitle->set_content("State changes automatically update all bound components via MVC pattern");
         subtitle->set_font_size(16);
         subtitle->set_color(flex::Color(0.5f, 0.5f, 0.5f, 1.0f));
         subtitle->set_position(50, 80);
-        artboard->add_child(subtitle);
+        scene->add_child(subtitle);
 
         // Metrics Groups
         add_metric_group("CPU Usage", "cpu_usage", 0xFF0D6EFD, 140);
@@ -172,7 +172,7 @@ public:
         info->set_font_size(14);
         info->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         info->set_position(550, 140);
-        artboard->add_child(info);
+        scene->add_child(info);
     }
 
     void render(flex::Renderer& renderer) {
@@ -203,7 +203,7 @@ private:
             0, 90
         );
 
-        instance_->artboard()->add_child(group);
+        instance_->scene()->add_child(group);
     }
 
     flex::Instance::Ptr instance_;

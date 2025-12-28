@@ -17,11 +17,11 @@ class CounterController {
 public:
     CounterController(flex::Instance::Ptr instance) : instance_(instance) {
         // Find UI elements
-        auto* artboard = instance_->artboard();
-        counter_value_text_ = artboard->find("counterValue");
-        status_text_ = artboard->find("statusText");
-        increment_button_ = artboard->find("incrementButton");
-        decrement_button_ = artboard->find("decrementButton");
+        auto* scene = instance_->scene();
+        counter_value_text_ = scene->find("counterValue");
+        status_text_ = scene->find("statusText");
+        increment_button_ = scene->find("incrementButton");
+        decrement_button_ = scene->find("decrementButton");
         
         setup_logic();
     }
@@ -160,7 +160,7 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
@@ -293,7 +293,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

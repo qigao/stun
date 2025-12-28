@@ -85,26 +85,26 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "No artboard in definition\n";
+        if (!instance_->scene()) {
+            std::cerr << "No scene in definition\n";
             return false;
         }
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
         // Find game objects
-        auto* artboard = instance_->artboard();
-        ball_ = artboard->find("ball");
-        paddle_ = artboard->find("paddle");
-        score_text_ = artboard->find("scoreValue");
-        lives_text_ = artboard->find("livesValue");
-        game_over_screen_ = artboard->find("gameOverScreen");
-        win_screen_ = artboard->find("winScreen");
+        auto* scene = instance_->scene();
+        ball_ = scene->find("ball");
+        paddle_ = scene->find("paddle");
+        score_text_ = scene->find("scoreValue");
+        lives_text_ = scene->find("livesValue");
+        game_over_screen_ = scene->find("gameOverScreen");
+        win_screen_ = scene->find("winScreen");
 
         // Find all bricks
         for (int i = 0; i < 50; i++) {
             std::string name = "brick" + std::to_string(i);
-            auto* brick = artboard->find(name);
+            auto* brick = scene->find(name);
             if (brick) {
                 bricks_.push_back(brick);
                 brick_alive_.push_back(true);
@@ -372,7 +372,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

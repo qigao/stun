@@ -17,9 +17,9 @@ namespace flex {
 
 struct BindingContext::Impl {
     // Input storage
-    std::unordered_map<std::string, float> float_inputs;
-    std::unordered_map<std::string, std::string> string_inputs;
-    std::unordered_map<std::string, bool> bool_inputs;
+    std::unordered_map<Symbol, float, SymbolHash> float_inputs;
+    std::unordered_map<Symbol, std::string, SymbolHash> string_inputs;
+    std::unordered_map<Symbol, bool, SymbolHash> bool_inputs;
 
     // All bindings
     std::vector<Binding> bindings;
@@ -39,23 +39,23 @@ BindingContext::~BindingContext() = default;
 // Input Management
 // -------------------------------------------
 
-void BindingContext::set_input(const std::string& name, float value) {
+void BindingContext::set_input(Symbol name, float value) {
     impl_->float_inputs[name] = value;
 }
 
-void BindingContext::set_input(const std::string& name, const std::string& value) {
+void BindingContext::set_input(Symbol name, const std::string& value) {
     impl_->string_inputs[name] = value;
 }
 
-void BindingContext::set_input(const std::string& name, const char* value) {
+void BindingContext::set_input(Symbol name, const char* value) {
     impl_->string_inputs[name] = value ? value : "";
 }
 
-void BindingContext::set_input(const std::string& name, bool value) {
+void BindingContext::set_input(Symbol name, bool value) {
     impl_->bool_inputs[name] = value;
 }
 
-float BindingContext::get_float_input(const std::string& name) const {
+float BindingContext::get_float_input(Symbol name) const {
     auto it = impl_->float_inputs.find(name);
     if (it != impl_->float_inputs.end()) {
         return it->second;
@@ -63,7 +63,7 @@ float BindingContext::get_float_input(const std::string& name) const {
     return 0.0f;
 }
 
-const std::string& BindingContext::get_string_input(const std::string& name) const {
+const std::string& BindingContext::get_string_input(Symbol name) const {
     auto it = impl_->string_inputs.find(name);
     if (it != impl_->string_inputs.end()) {
         return it->second;
@@ -71,7 +71,7 @@ const std::string& BindingContext::get_string_input(const std::string& name) con
     return impl_->empty_string;
 }
 
-bool BindingContext::get_bool_input(const std::string& name) const {
+bool BindingContext::get_bool_input(Symbol name) const {
     auto it = impl_->bool_inputs.find(name);
     if (it != impl_->bool_inputs.end()) {
         return it->second;
@@ -79,7 +79,7 @@ bool BindingContext::get_bool_input(const std::string& name) const {
     return false;
 }
 
-bool BindingContext::has_input(const std::string& name) const {
+bool BindingContext::has_input(Symbol name) const {
     return impl_->float_inputs.count(name) > 0 ||
            impl_->string_inputs.count(name) > 0 ||
            impl_->bool_inputs.count(name) > 0;
@@ -89,7 +89,7 @@ bool BindingContext::has_input(const std::string& name) const {
 // Binding Registration
 // -------------------------------------------
 
-void BindingContext::add_binding(Node* target, const std::string& property, const Binding& binding) {
+void BindingContext::add_binding(Node* target, Symbol property, const Binding& binding) {
     Binding b = binding;
     b.target = target;
     b.property = property;
@@ -104,10 +104,10 @@ void BindingContext::remove_bindings(Node* target) {
     );
 }
 
-void BindingContext::remove_binding(Node* target, const std::string& property) {
+void BindingContext::remove_binding(Node* target, Symbol property) {
     impl_->bindings.erase(
         std::remove_if(impl_->bindings.begin(), impl_->bindings.end(),
-            [target, &property](const Binding& b) {
+            [target, property](const Binding& b) {
                 return b.target == target && b.property == property;
             }),
         impl_->bindings.end()

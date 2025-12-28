@@ -175,9 +175,9 @@ Definition::Ptr Definition::load(const char *source) {
   AstToRuntimeConverter converter(def->impl_.get());
   converter.convert(*program);
 
-  // Default artboard if none was created
-  if (!def->impl_->artboard) {
-    def->impl_->artboard = Artboard::create(800, 600);
+  // Default scene if none was created
+  if (!def->impl_->scene) {
+    def->impl_->scene = Scene::create(800, 600, def->impl_->object_alloc);
   }
 
   def->impl_->has_error = false;
@@ -238,9 +238,9 @@ Definition::Ptr Definition::load_file(const char *path) {
   AstToRuntimeConverter converter(def->impl_.get());
   converter.convert(*program);
 
-  // Default artboard if none was created
-  if (!def->impl_->artboard) {
-    def->impl_->artboard = Artboard::create(800, 600);
+  // Default scene if none was created
+  if (!def->impl_->scene) {
+    def->impl_->scene = Scene::create(800, 600, def->impl_->object_alloc);
   }
 
   def->impl_->has_error = false;
@@ -264,7 +264,7 @@ static size_t count_nodes(Node *node) {
   if (node->is_group()) {
     auto *group = static_cast<Group *>(node);
     for (const auto &child : group->children()) {
-      count += count_nodes(child.get());
+      count += count_nodes(child);  // children() returns vector<Node*>
     }
   }
   return count;
@@ -274,7 +274,7 @@ static size_t count_nodes(Node *node) {
 Instance::~Instance() {
   if (impl_) {
     // Count total nodes in scene
-    size_t node_count = count_nodes(impl_->artboard ? impl_->artboard->root() : nullptr);
+    size_t node_count = count_nodes(impl_->scene ? impl_->scene->root() : nullptr);
 
     size_t frame_total = impl_->frame_alloc.size();
     size_t frame_used = impl_->frame_alloc.used();
@@ -294,9 +294,9 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
   auto instance = std::shared_ptr<Instance>(new Instance());
   instance->impl_->definition = definition;
 
-  if (definition && definition->artboard()) {
+  if (definition && definition->scene()) {
     // No Builder - Definition already has Runtime objects
-    instance->impl_->artboard = definition->artboard();
+    instance->impl_->scene = definition->scene();
 
     // Initialize bindings context
     instance->impl_->bindings = std::make_unique<BindingContext>();
@@ -308,30 +308,35 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
 
     // Initialize State Machines - copy from definition and set up callbacks
     for (const auto &machine : definition->machines()) {
-      instance->impl_->machines.push_back(machine);
+      // Clone the machine to ensure unique state per instance
+      auto cloned_machine = machine->clone();
+      instance->impl_->machines.push_back(cloned_machine);
 
       // Set up callback to trigger animations and audio on state changes
-      auto inst_ptr = instance.get();
-      machine->set_state_change_callback(
-          [inst_ptr](const std::string &layer, const std::string &from_state,
+      std::weak_ptr<Instance> weak_inst = instance;
+      cloned_machine->set_state_change_callback(
+          [weak_inst](const std::string &layer, const std::string &from_state,
                      const std::string &to_state, const std::string &animation,
                      const std::string &play_audio, const std::string &stop_audio) {
+            auto inst = weak_inst.lock();
+            if (!inst) return;
+
             if (!animation.empty()) {
               FLEX_LOGD("State change triggers animation: {}", animation);
-              inst_ptr->start_animation(animation);
+              inst->start_animation(animation);
             }
             if (!stop_audio.empty()) {
               FLEX_LOGD("State change stops audio: {}", stop_audio);
-              inst_ptr->stop_audio(stop_audio.c_str());
+              inst->stop_audio(stop_audio.c_str());
             }
             if (!play_audio.empty()) {
               FLEX_LOGD("State change plays audio: {}", play_audio);
-              inst_ptr->play_audio(play_audio.c_str());
+              inst->play_audio(play_audio.c_str());
             }
           });
 
       // Trigger initial state animations now that callback is set
-      machine->trigger_initial_animations();
+      cloned_machine->trigger_initial_animations();
     }
 
     // NOTE: ScriptContext is NOT created by default (saves ~15MB per Instance)
@@ -363,7 +368,7 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
 
 Instance::Ptr Instance::create(float width, float height) {
   auto instance = std::shared_ptr<Instance>(new Instance());
-  instance->impl_->artboard = Artboard::create(width, height);
+  instance->impl_->scene = Scene::create(width, height, instance->impl_->object_alloc);
 
   // It will be created on-demand if script APIs are used
 
@@ -371,22 +376,24 @@ Instance::Ptr Instance::create(float width, float height) {
 }
 
 void Instance::set_input(const char *name, float value) {
-  impl_->inputs[std::string(name)] = value;
+  Symbol sym(name);
+  impl_->inputs[sym] = value;
   if (impl_->bindings) {
-    impl_->bindings->set_input(std::string(name), value);
-    impl_->bindings->mark_dirty(); // Mark dirty when input changes
+    impl_->bindings->set_input(sym, value); // Using Symbol directly avoiding std::string
+    impl_->bindings->mark_dirty();
   }
   // Forward to state machines
   for (auto &machine : impl_->machines) {
-    machine->set_input(std::string(name), value);
+    machine->set_input(sym, value);
   }
 }
 
 void Instance::set_input(const char *name, const char *value) {
-  impl_->inputs[std::string(name)] = std::string(value);
+  Symbol sym(name);
+  impl_->inputs[sym] = std::string(value);
   if (impl_->bindings) {
-    impl_->bindings->set_input(std::string(name), std::string(value));
-    impl_->bindings->mark_dirty(); // Mark dirty when input changes
+    impl_->bindings->set_input(sym, std::string(value));
+    impl_->bindings->mark_dirty();
   }
 }
 
@@ -415,8 +422,8 @@ void Instance::advance(float dt) {
 }
 
 void Instance::render(Renderer &renderer) {
-  if (impl_->artboard) {
-    impl_->artboard->render(renderer);
+  if (impl_->scene) {
+    impl_->scene->render(renderer);
   }
 }
 
@@ -442,7 +449,7 @@ static Node *hit_test_recursive(Node *node, float x, float y) {
     const auto &children = group->children();
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
       // Pass the SAME global coordinates to children, they will do their own to_local
-      Node *hit = hit_test_recursive(it->get(), x, y);
+      Node *hit = hit_test_recursive(*it, x, y);  // children() returns vector<Node*>
       if (hit)
         return hit;
     }
@@ -452,24 +459,29 @@ static Node *hit_test_recursive(Node *node, float x, float y) {
 }
 
 // Helper: build path from root to target node
-static void build_propagation_path(Node *target, std::vector<Node *> &path) {
-  path.clear();
-  for (Node *n = target; n != nullptr; n = n->parent()) {
-    path.push_back(n);
+static size_t build_propagation_path(Node *target, Node **path_buffer, size_t max_items) {
+  size_t count = 0;
+  for (Node *n = target; n != nullptr && count < max_items; n = n->parent()) {
+    path_buffer[count++] = n;
   }
   // path is now [target, parent, grandparent, ..., root]
   // Reverse to get [root, ..., grandparent, parent, target]
-  std::reverse(path.begin(), path.end());
+  if (count > 0) {
+    for (size_t i = 0; i < count / 2; ++i) {
+      std::swap(path_buffer[i], path_buffer[count - 1 - i]);
+    }
+  }
+  return count;
 }
 
 // Helper: dispatch event through propagation path with bubbling
-static void dispatch_with_bubbling(PointerEvent &event, const std::vector<Node *> &path,
+static void dispatch_with_bubbling(PointerEvent &event, Node **path, size_t count,
                                    void (Node::*fire_method)(PointerEvent &)) {
-  if (path.empty())
+  if (count == 0)
     return;
 
   // Target phase: last node in path
-  Node *target = path.back();
+  Node *target = path[count - 1];
   event.phase = EventPhase::Target;
   event.current_target = target;
   event.local_x = event.x - target->x();
@@ -479,8 +491,9 @@ static void dispatch_with_bubbling(PointerEvent &event, const std::vector<Node *
     return;
 
   // Bubble phase: from parent to root (reverse order, skip target)
+  // Parent is at count-2 (if count >= 2)
   event.phase = EventPhase::Bubble;
-  for (int i = static_cast<int>(path.size()) - 2; i >= 0; --i) {
+  for (int i = static_cast<int>(count) - 2; i >= 0; --i) {
     Node *node = path[i];
     event.current_target = node;
     event.local_x = event.x - node->x();
@@ -492,21 +505,24 @@ static void dispatch_with_bubbling(PointerEvent &event, const std::vector<Node *
 }
 
 void Instance::send_pointer_event(float x, float y, bool is_down) {
-  if (!impl_->artboard)
+  if (!impl_->scene)
     return;
 
   // Find node at pointer position
-  Node *hit_node = hit_test_recursive(impl_->artboard->root(), x, y);
+  Node *hit_node = hit_test_recursive(impl_->scene->root(), x, y);
 
-  // Build propagation path for hit node
-  std::vector<Node *> path;
+  // Stack buffer for path (avoid heap allocation)
+  constexpr size_t kMaxPathDepth = 64;
+  Node *path[kMaxPathDepth];
+  size_t path_count = 0;
+
   if (hit_node) {
-    build_propagation_path(hit_node, path);
+    path_count = build_propagation_path(hit_node, path, kMaxPathDepth);
   }
 
   // Handle hover enter/leave (no bubbling for enter/leave)
-  auto prev_hover = impl_->hover_node.lock();
-  if (hit_node != prev_hover.get()) {
+  Node* prev_hover = impl_->hover_node;
+  if (hit_node != prev_hover) {
     // Leave old node
     if (prev_hover) {
       PointerEvent leave_event;
@@ -514,8 +530,8 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
       leave_event.phase = EventPhase::Target;
       leave_event.x = x;
       leave_event.y = y;
-      leave_event.target = prev_hover.get();
-      leave_event.current_target = prev_hover.get();
+      leave_event.target = prev_hover;
+      leave_event.current_target = prev_hover;
       leave_event.local_x = x - prev_hover->x();
       leave_event.local_y = y - prev_hover->y();
       prev_hover->fire_hover_leave(leave_event);
@@ -534,9 +550,9 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
       enter_event.local_y = y - hit_node->y();
       hit_node->fire_hover_enter(enter_event);
 
-      impl_->hover_node = hit_node->shared_from_this();
+      impl_->hover_node = hit_node;
     } else {
-      impl_->hover_node.reset();
+      impl_->hover_node = nullptr;
     }
   }
 
@@ -544,45 +560,45 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
   if (is_down && !impl_->is_pointer_down) {
     impl_->is_pointer_down = true;
     if (hit_node) {
-      impl_->pointer_down_node = hit_node->shared_from_this();
+      impl_->pointer_down_node = hit_node;
       PointerEvent event;
       event.type = PointerEventType::Down;
       event.x = x;
       event.y = y;
       event.target = hit_node;
-      dispatch_with_bubbling(event, path, &Node::fire_pointer_down);
+      dispatch_with_bubbling(event, path, path_count, &Node::fire_pointer_down);
 
     } else {
-      impl_->pointer_down_node.reset();
+      impl_->pointer_down_node = nullptr;
     }
   }
   // Handle pointer up (with bubbling)
   else if (!is_down && impl_->is_pointer_down) {
     impl_->is_pointer_down = false;
 
-    auto down_node = impl_->pointer_down_node.lock();
+    Node* down_node = impl_->pointer_down_node;
     if (down_node) {
       // Build path for the original down node (not current hit)
-      std::vector<Node *> down_path;
-      build_propagation_path(down_node.get(), down_path);
+      Node *down_path[kMaxPathDepth];
+      size_t down_path_count = build_propagation_path(down_node, down_path, kMaxPathDepth);
 
       PointerEvent up_event;
       up_event.type = PointerEventType::Up;
       up_event.x = x;
       up_event.y = y;
-      up_event.target = down_node.get();
-      dispatch_with_bubbling(up_event, down_path, &Node::fire_pointer_up);
+      up_event.target = down_node;
+      dispatch_with_bubbling(up_event, down_path, down_path_count, &Node::fire_pointer_up);
 
       // Fire click if up on same node as down (with bubbling)
-      if (down_node.get() == hit_node) {
+      if (down_node == hit_node) {
         // Click events bubble from target to root
-        for (auto it = down_path.rbegin(); it != down_path.rend(); ++it) {
-          (*it)->fire_click();
+        for (int i = static_cast<int>(down_path_count) - 1; i >= 0; --i) {
+          down_path[i]->fire_click();
         }
       }
     }
 
-    impl_->pointer_down_node.reset();
+    impl_->pointer_down_node = nullptr;
   }
   // Handle pointer move (with bubbling)
   else if (hit_node) {
@@ -591,7 +607,7 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
     event.x = x;
     event.y = y;
     event.target = hit_node;
-    dispatch_with_bubbling(event, path, &Node::fire_pointer_move);
+    dispatch_with_bubbling(event, path, path_count, &Node::fire_pointer_move);
   }
 }
 
@@ -612,7 +628,7 @@ TimelinePlayer *Instance::play(const char *timeline_name, Node *target) {
 }
 
 TimelinePlayer *Instance::play(const char *timeline_name) {
-  return impl_->animation_controller.play(timeline_name, impl_->artboard->root());
+  return impl_->animation_controller.play(timeline_name, impl_->scene->root());
 }
 
 void Instance::stop(const char *timeline_name) { impl_->animation_controller.stop(timeline_name); }
@@ -620,7 +636,8 @@ void Instance::stop(const char *timeline_name) { impl_->animation_controller.sto
 void Instance::stop_all() { impl_->animation_controller.stop_all(); }
 
 float Instance::get_input(const char *name) const {
-  auto it = impl_->inputs.find(std::string(name));
+  Symbol sym(name);
+  auto it = impl_->inputs.find(sym);
   if (it != impl_->inputs.end() && std::holds_alternative<float>(it->second)) {
     return std::get<float>(it->second);
   }
@@ -628,11 +645,12 @@ float Instance::get_input(const char *name) const {
 }
 
 void Instance::register_asset(const char *name, const char *path) {
-  impl_->assets[std::string(name)] = std::string(path);
+  Symbol sym(name);
+  impl_->assets[sym] = std::string(path);
 }
 
 const char *Instance::resolve_asset(const char *name) const {
-  auto it = impl_->assets.find(std::string(name));
+  auto it = impl_->assets.find(Symbol(name));
   if (it != impl_->assets.end()) {
     return it->second.c_str();
   }
@@ -730,10 +748,10 @@ RuntimeStateMachine *Instance::get_machine(const std::string &name) {
 }
 
 TimelinePlayer* Instance::play_animation(const std::string &name) {
-  if (!impl_->artboard) {
+  if (!impl_->scene) {
     return nullptr;
   }
-  return impl_->animation_controller.play(name.c_str(), impl_->artboard->root());
+  return impl_->animation_controller.play(name.c_str(), impl_->scene->root());
 }
 
 void Instance::start_animation(const std::string &name) {

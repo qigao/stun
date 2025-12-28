@@ -148,14 +148,14 @@ int main() {
 
     // 创建实例
     auto instance = flex::Instance::create(800, 600);
-    auto* artboard = instance->artboard();
+    auto* scene = instance->scene();
 
     // 创建节点
     auto player = flex::Shape::create();
     player->set_rect(80, 80);
     player->set_position(100, 350);
     player->set_fill(flex::Color::Blue);
-    artboard->add_child(player);
+    scene->add_child(player);
 
     // 创建动画
     auto anim = flex::Timeline::create("Move");

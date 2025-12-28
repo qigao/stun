@@ -12,7 +12,7 @@ namespace flex {
 
 // Forward declarations
 class Definition;
-class Artboard;
+class Scene;
 class Node;
 class Timeline;
 class RuntimeStateMachine;
@@ -44,8 +44,8 @@ private:
   void *impl_;
 
   // Scene conversion
-  std::shared_ptr<Artboard> convert_scene(const std::shared_ptr<parser::AstScene> &scene);
-  std::shared_ptr<Node> convert_node(const std::shared_ptr<parser::AstNode> &ast_node);
+  Scene* convert_scene(const std::shared_ptr<parser::AstScene> &scene);
+  Node* convert_node(const std::shared_ptr<parser::AstNode> &ast_node);
 
   // Machine conversion
   void convert_machines(const std::vector<std::shared_ptr<parser::AstMachine>> &machines);

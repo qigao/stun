@@ -10,6 +10,7 @@
 #include "flex/runtime/node.h"
 #include "flex/runtime/types.h"
 #include "flex/runtime/geometry.h"
+#include "flex/runtime/allocator.h"
 #include <string>
 #include <optional>
 
@@ -98,12 +99,12 @@ struct Stroke {
 
 class Shape : public Node {
 public:
-    using Ptr = std::shared_ptr<Shape>;
+    using Ptr = Shape*;
 
     Shape() = default;
     ~Shape() override = default;
 
-    static Ptr create() { return std::make_shared<Shape>(); }
+    static Ptr create(ArenaAllocator& arena) { return arena.create<Shape>(); }
 
     NodeType type() const override { return NodeType::Shape; }
     const char* type_name() const override { return "Shape"; }
@@ -127,7 +128,8 @@ public:
     PolygonGeometry polygon() const;
 
     void set_path(const std::string& d);
-    void set_path(const std::string& d, float width, float height);  // With explicit bounds
+    void set_path(const std::string& d, float width, float height, float x = 0.0f, float y = 0.0f);  // With explicit bounds
+    void set_path_data(const std::string& d) { set_path(d); }
     PathGeometry path() const;
 
     void set_star(int points, float outer_radius, float inner_radius = 0);
@@ -200,3 +202,9 @@ private:
 };
 
 } // namespace flex
+
+namespace flex {
+    using PathShape = Shape;
+    using RectShape = Shape;
+    using CircleShape = Shape;
+}

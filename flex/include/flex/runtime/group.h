@@ -8,6 +8,7 @@
 #pragma once
 
 #include "flex/runtime/node.h"
+#include "flex/runtime/allocator.h"  // For ArenaAllocator
 #include <vector>
 #include <memory>
 
@@ -19,13 +20,17 @@ namespace flex {
 
 class Group : public Node {
 public:
-    using Ptr = std::shared_ptr<Group>;
+    using Ptr = Group*;
 
     Group() = default;
     ~Group() override = default;
 
-    // Factory
-    static Ptr create() { return std::make_shared<Group>(); }
+    // Factory (Arena mode)
+    static Ptr create(ArenaAllocator& arena) {
+        auto g = arena.create<Group>();
+        g->allocator_ = &arena;
+        return g;
+    }
 
     // Type identification
     NodeType type() const override { return NodeType::Group; }
@@ -36,14 +41,40 @@ public:
     // Children Management
     // -------------------------------------------
 
-    const std::vector<Node::Ptr>& children() const { return children_; }
+    const std::vector<Node*>& children() const { return children_; }
     size_t child_count() const { return children_.size(); }
 
-    void add_child(Node::Ptr child);
+    void add_child(Node* child);
+
+    template<typename T, typename... Args>
+    T* add(Args&&... args) {
+        if (!allocator_) return nullptr;
+        T* child = allocator_->create<T>(std::forward<Args>(args)...);
+        if constexpr (std::is_base_of_v<Group, T>) {
+            (static_cast<Group*>(child))->allocator_ = allocator_;
+        }
+        add_child(child);
+        return child;
+    }
+
+    // Convenience overload for shared_ptr (for backward compatibility)
+    template<typename T>
+    void add_child(const std::shared_ptr<T>& child) {
+        add_child(child.get());
+    }
+
     void remove_child(Node* child);
     void remove_child_at(size_t index);
-    void insert_child(Node::Ptr child, size_t index);
+    void insert_child(Node* child, size_t index);
+
+    // Convenience overload for shared_ptr (for backward compatibility)
+    template<typename T>
+    void insert_child(const std::shared_ptr<T>& child, size_t index) {
+        insert_child(child.get(), index);
+    }
+
     void clear_children();
+    void clear() { clear_children(); }
 
     Node* child_at(size_t index) const;
     Node* find_child(const std::string& id) const;
@@ -120,7 +151,8 @@ public:
     void render(Renderer& renderer) override;
 
 private:
-    std::vector<Node::Ptr> children_;
+    std::vector<Node*> children_;  // raw pointers, Arena manages lifetime
+    ArenaAllocator* allocator_ = nullptr;
 
     // Clipping
     bool clip_ = false;

@@ -211,25 +211,25 @@ int main(int argc, char* argv[]) {
 
     std::cout << "✅ Parse succeeded!\n\n";
 
-    // Print artboard info
-    auto artboard = definition->artboard();
-    if (!artboard) {
-        std::cerr << "❌ No artboard created!\n";
+    // Print scene info
+    auto scene = definition->scene();
+    if (!scene) {
+        std::cerr << "❌ No scene created!\n";
         flex::shutdown();
         return 1;
     }
 
-    std::cout << "Artboard:\n";
-    std::cout << "  Size: " << artboard->width() << " x " << artboard->height() << "\n";
+    std::cout << "Scene:\n";
+    std::cout << "  Size: " << scene->width() << " x " << scene->height() << "\n";
     std::cout << "  Background: rgba("
-              << artboard->background().r << ", "
-              << artboard->background().g << ", "
-              << artboard->background().b << ", "
-              << artboard->background().a << ")\n\n";
+              << scene->background().r << ", "
+              << scene->background().g << ", "
+              << scene->background().b << ", "
+              << scene->background().a << ")\n\n";
 
     // Print scene graph
     std::cout << "Scene Graph:\n";
-    auto* root = artboard->root();
+    auto* root = scene->root();
     if (root) {
         const auto& children = root->children();
         std::cout << "Root has " << children.size() << " children:\n";

@@ -17,7 +17,7 @@ namespace flex {
 // Forward declarations
 class Definition;
 class Instance;
-class Artboard;
+class Scene;
 
 class InstanceNode : public Node {
 public:
@@ -46,7 +46,7 @@ public:
     bool get_bool_input(const std::string& name) const;
 
     // Access the instantiated content
-    Artboard* content() const;
+    Scene* content() const;
 
     // Load the component (call after set_source)
     bool load();

@@ -32,10 +32,10 @@ std::vector<uint8_t> BinaryCompiler::compile_source(const char* source) {
         return {};
     }
 
-    // Get artboard from definition
-    artboard_ = definition->artboard();
-    if (!artboard_) {
-        error_message_ = "No artboard in definition";
+    // Get scene from definition
+    scene_ = definition->scene();
+    if (!scene_) {
+        error_message_ = "No scene in definition";
         return {};
     }
 
@@ -98,16 +98,16 @@ bool BinaryCompiler::compile_to_file(const char* input_path, const char* output_
 }
 
 std::vector<uint8_t> BinaryCompiler::write_binary() {
-    if (!artboard_) {
-        error_message_ = "No artboard to serialize";
+    if (!scene_) {
+        error_message_ = "No scene to serialize";
         return {};
     }
 
     BinaryWriter writer;
     writer.set_compress(compress_);
-    std::vector<uint8_t> binary = writer.write(artboard_.get());
+    std::vector<uint8_t> binary = writer.write(scene_ );
     if (binary.empty()) {
-        error_message_ = "Failed to serialize artboard";
+        error_message_ = "Failed to serialize scene";
         return {};
     }
 

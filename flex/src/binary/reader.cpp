@@ -236,32 +236,32 @@ const std::string& BinaryReader::get_string(StringIndex index) const {
     return strings_[index];
 }
 
-Artboard::Ptr BinaryReader::create_artboard() {
+Scene* BinaryReader::create_scene() {
     if (!valid_) return nullptr;
 
-    // Create artboard with dimensions from header
-    auto artboard = Artboard::create(header_.canvas_width, header_.canvas_height);
+    // Create scene with dimensions from header
+    auto* scene = Scene::create(header_.canvas_width, header_.canvas_height, arena_);
 
     // Verify node data exists
     if (header_.node_data_size == 0) {
-        return artboard;
+        return scene;
     }
 
     size_t offset = header_.node_data_offset;
     if (offset + sizeof(NodeHeader) > size_) {
-        return artboard;
+        return scene;
     }
 
-    // Read root node (should be Artboard type)
+    // Read root node (should be Scene type)
     const NodeHeader* node = reinterpret_cast<const NodeHeader*>(ptr_ + offset);
-    if (node->type != NodeType::Artboard) {
-        return artboard;
+    if (node->type != NodeType::Scene) {
+        return scene;
     }
 
-    // Note: Artboard doesn't have set_id() - ID stored in node header but not used
+    // Note: Scene doesn't have set_id() - ID stored in node header but not used
     // Child deserialization not yet implemented
 
-    return artboard;
+    return scene;
 }
 
 std::vector<Timeline::Ptr> BinaryReader::create_timelines() {
@@ -285,27 +285,27 @@ float BinaryReader::canvas_height() const {
     return valid_ ? header_.canvas_height : 0.0f;
 }
 
-Node::Ptr BinaryReader::read_node(const uint8_t* node_data) {
+Node* BinaryReader::read_node(const uint8_t* node_data) {
     // Not yet implemented
     return nullptr;
 }
 
-Shape::Ptr BinaryReader::read_shape(const uint8_t* shape_data) {
+Shape* BinaryReader::read_shape(const uint8_t* shape_data) {
     // Not yet implemented
     return nullptr;
 }
 
-Text::Ptr BinaryReader::read_text(const uint8_t* text_data) {
+Text* BinaryReader::read_text(const uint8_t* text_data) {
     // Not yet implemented
     return nullptr;
 }
 
-Image::Ptr BinaryReader::read_image(const uint8_t* image_data) {
+Image* BinaryReader::read_image(const uint8_t* image_data) {
     // Not yet implemented
     return nullptr;
 }
 
-Group::Ptr BinaryReader::read_group(const uint8_t* group_data) {
+Group* BinaryReader::read_group(const uint8_t* group_data) {
     // Not yet implemented
     return nullptr;
 }

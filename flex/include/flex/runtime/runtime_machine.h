@@ -43,7 +43,7 @@ public:
   void trigger_initial_animations();
 
   // Set input value (triggers InputChange event)
-  void set_input(const std::string &input_name, float value);
+  void set_input(Symbol input_name, float value);
 
   // Set callback for state changes
   void set_state_change_callback(StateChangeCallback callback) {
@@ -56,6 +56,9 @@ public:
                          const std::string &play_audio, const std::string &stop_audio);
 
   const std::string &name() const { return name_; }
+
+  // Clone this machine (deep copy)
+  std::shared_ptr<RuntimeStateMachine> clone() const;
 
 private:
   std::string name_;
@@ -91,9 +94,12 @@ public:
   const std::string &current_state() const { return current_state_; }
 
   // Set input value
-  void set_input(const std::string &input_name, float value);
+  void set_input(Symbol input_name, float value);
 
   const std::string &name() const { return name_; }
+
+  // Clone this layer
+  std::unique_ptr<RuntimeLayer> clone(RuntimeStateMachine *machine) const;
 
 private:
   std::string name_;
@@ -103,8 +109,8 @@ private:
   std::unordered_map<std::string, std::unique_ptr<class RuntimeState>> states_;
   std::vector<std::unique_ptr<class RuntimeTransition>> transitions_;
 
-  // Input values
-  std::unordered_map<std::string, float> inputs_;
+  // Input values (Symbol optimized)
+  std::unordered_map<Symbol, float, SymbolHash> inputs_;
 
   // Helper methods
   bool check_condition(const RuntimeTransition &trans) const;
@@ -127,6 +133,11 @@ public:
   const std::string &play_audio() const { return play_audio_; }
   const std::string &stop_audio() const { return stop_audio_; }
 
+  // Clone
+  std::unique_ptr<RuntimeState> clone() const {
+      return std::make_unique<RuntimeState>(name_, initial_, animation_, play_audio_, stop_audio_);
+  }
+
 private:
   std::string name_;
   bool initial_;
@@ -148,16 +159,24 @@ public:
 
   const std::string &from() const { return from_; }
   const std::string &to() const { return to_; }
-  const std::string &condition_var() const { return condition_var_; }
+  const Symbol &condition_var() const { return condition_var_; }
   const std::string &condition_op() const { return condition_op_; }
   float condition_val() const { return condition_val_; }
 
-  bool check(const std::unordered_map<std::string, float> &inputs) const;
+  bool check(const std::unordered_map<Symbol, float, SymbolHash> &inputs) const;
+
+  // Clone
+  std::unique_ptr<RuntimeTransition> clone() const {
+     return std::unique_ptr<RuntimeTransition>(new RuntimeTransition(*this));
+  }
+  
+  // Copy constructor for clone
+  RuntimeTransition(const RuntimeTransition&) = default;
 
 private:
   std::string from_;
   std::string to_;
-  std::string condition_var_;
+  Symbol condition_var_;
   std::string condition_op_;
   float condition_val_;
 };
@@ -189,7 +208,7 @@ inline void RuntimeStateMachine::trigger_initial_animations() {
   }
 }
 
-inline void RuntimeStateMachine::set_input(const std::string &input_name, float value) {
+inline void RuntimeStateMachine::set_input(Symbol input_name, float value) {
   // Broadcast to all layers
   for (auto &[name, layer] : layers_) {
     layer->set_input(input_name, value);
@@ -205,6 +224,14 @@ inline void RuntimeStateMachine::fire_state_change(const std::string &layer,
   if (state_change_callback_) {
     state_change_callback_(layer, from_state, to_state, animation, play_audio, stop_audio);
   }
+}
+
+inline std::shared_ptr<RuntimeStateMachine> RuntimeStateMachine::clone() const {
+    auto copy = std::make_shared<RuntimeStateMachine>(name_);
+    for (const auto& [name, layer] : layers_) {
+        copy->layers_[name] = layer->clone(copy.get());
+    }
+    return copy;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,19 +264,19 @@ inline void RuntimeLayer::update(float dt) {
     if (trans->from() != current_state_)
       continue;
 
-    if (trans->condition_var().empty()) {
-      // Unconditional transition
-      transition_to(trans->to());
-      break;
+    // Symbol logic optimization:
+    // If condition_op is empty, it's unconditional.
+    if (trans->condition_op().empty()) {
+        transition_to(trans->to());
+        break;
     } else if (check_condition(*trans)) {
-      // Conditional transition
       transition_to(trans->to());
       break;
     }
   }
 }
 
-inline void RuntimeLayer::set_input(const std::string &input_name, float value) {
+inline void RuntimeLayer::set_input(Symbol input_name, float value) {
   inputs_[input_name] = value;
 }
 
@@ -267,22 +294,7 @@ inline void RuntimeLayer::trigger_initial_animation() {
 }
 
 inline bool RuntimeLayer::check_condition(const RuntimeTransition &trans) const {
-  auto it = inputs_.find(trans.condition_var());
-  if (it == inputs_.end())
-    return false;
-
-  float input_value = it->second;
-
-  if (trans.condition_op() == ">")
-    return input_value > trans.condition_val();
-  if (trans.condition_op() == "<")
-    return input_value < trans.condition_val();
-  if (trans.condition_op() == "==")
-    return std::abs(input_value - trans.condition_val()) < 0.001f;
-  if (trans.condition_op() == "!=")
-    return std::abs(input_value - trans.condition_val()) >= 0.001f;
-
-  return false;
+  return trans.check(inputs_);
 }
 
 inline void RuntimeLayer::transition_to(const std::string &state_name) {
@@ -290,9 +302,8 @@ inline void RuntimeLayer::transition_to(const std::string &state_name) {
   if (it != states_.end()) {
     std::string from_state = current_state_;
     current_state_ = state_name;
-    FLEX_LOGD("FSM Layer '{}' transitioned: {} -> {}", name_, from_state, state_name);
+    // FLEX_LOGD("FSM Layer '{}' transitioned: {} -> {}", name_, from_state, state_name);
 
-    // Fire callback to trigger animation and audio
     const auto &anim_name = it->second->animation();
     const auto &play_audio = it->second->play_audio();
     const auto &stop_audio = it->second->stop_audio();
@@ -300,6 +311,22 @@ inline void RuntimeLayer::transition_to(const std::string &state_name) {
       machine_->fire_state_change(name_, from_state, state_name, anim_name, play_audio, stop_audio);
     }
   }
+}
+
+inline std::unique_ptr<RuntimeLayer> RuntimeLayer::clone(RuntimeStateMachine *machine) const {
+    auto copy = std::make_unique<RuntimeLayer>(name_, machine);
+    copy->current_state_ = current_state_;
+    copy->inputs_ = inputs_;
+    
+    for (const auto& [name, state] : states_) {
+        copy->states_[name] = state->clone();
+    }
+    
+    for (const auto& trans : transitions_) {
+        copy->transitions_.push_back(trans->clone());
+    }
+    
+    return copy;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,11 +343,14 @@ inline RuntimeState::RuntimeState(const std::string &name, bool initial,
 inline RuntimeTransition::RuntimeTransition(const std::string &from, const std::string &to,
                                             const std::string &condition_var,
                                             const std::string &condition_op, float condition_val)
-    : from_(from), to_(to), condition_var_(condition_var), condition_op_(condition_op),
-      condition_val_(condition_val) {}
+    : from_(from), to_(to), condition_op_(condition_op), condition_val_(condition_val) {
+    if (!condition_var.empty()) {
+        condition_var_ = Symbol(condition_var);
+    }
+}
 
-inline bool RuntimeTransition::check(const std::unordered_map<std::string, float> &inputs) const {
-  if (condition_var_.empty())
+inline bool RuntimeTransition::check(const std::unordered_map<Symbol, float, SymbolHash> &inputs) const {
+  if (condition_op_.empty())
     return true;
 
   auto it = inputs.find(condition_var_);

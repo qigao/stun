@@ -15,9 +15,9 @@ namespace flex {
 
 // These methods are defined here instead of instance.cpp to access bridge types
 
-Artboard* InstanceNode::content() const {
+Scene* InstanceNode::content() const {
     if (!instance_) return nullptr;
-    return (*INST_PTR)->artboard();
+    return (*INST_PTR)->scene();
 }
 
 bool InstanceNode::load() {

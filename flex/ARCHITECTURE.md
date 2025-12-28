@@ -94,7 +94,7 @@ flex/runtime/shape.h        # Geometry node
 flex/runtime/text.h         # Typography node
 flex/runtime/image.h        # Raster image node
 flex/runtime/svg.h          # Vector graphic node
-flex/runtime/artboard.h     # Root canvas
+flex/runtime/scene.h     # Root canvas
 flex/runtime/instance.h     # Component instance (InstanceNode)
 ```
 
@@ -119,12 +119,12 @@ flex/runtime/instance_context.h   # 实例上下文接口 (抽象)
 ```cpp
 #include "flex/runtime.h"
 
-auto artboard = flex::Artboard::create(800, 600);
+auto scene = flex::Scene::create(800, 600);
 auto shape = flex::Shape::rect(0, 0, 100, 100);
-artboard->add_child(shape);
+scene->add_child(shape);
 
 // 需要 renderer (由 bridge 提供)
-artboard->render(renderer);
+scene->render(renderer);
 ```
 
 ---
@@ -199,7 +199,7 @@ flex::shutdown();
 class IInstanceContext {
 public:
     virtual void set_input(const char* name, float value) = 0;
-    virtual Artboard* artboard() const = 0;
+    virtual Scene* scene() const = 0;
     // ...
 };
 
@@ -373,9 +373,9 @@ ninja flex_runtime  # 应该成功，无编译器依赖
 ```cpp
 #include "flex/runtime.h"  // 不包含 flex.h
 
-auto artboard = flex::Artboard::create(800, 600);
+auto scene = flex::Scene::create(800, 600);
 auto shape = flex::Shape::rect(0, 0, 100, 100);
-artboard->add_child(shape);
+scene->add_child(shape);
 // 可以构建场景图，但不能加载 .flex 文件
 ```
 

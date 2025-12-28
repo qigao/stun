@@ -64,9 +64,9 @@ yyloop:
           return Token{TOK_SCENE, "scene", state->line, state->column};
       }
 
-      "artboard" {
+      "scene" {
           update_position(state, tok_start);
-          return Token{TOK_ARTBOARD, "artboard", state->line, state->column};
+          return Token{TOK_ARTBOARD, "scene", state->line, state->column};
       }
 
       "component" {

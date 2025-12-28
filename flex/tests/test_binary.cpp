@@ -73,11 +73,11 @@ TEST_CASE("CRC32: Checksum verification", "[binary][crc32]") {
 // WRITER TESTS
 // ============================================================================
 
-TEST_CASE("BinaryWriter: Serialize empty artboard", "[binary][writer]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+TEST_CASE("BinaryWriter: Serialize empty scene", "[binary][writer]") {
+    auto scene = Scene::create(800.0f, 600.0f);
 
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     REQUIRE_FALSE(binary.empty());
     REQUIRE(binary.size() >= sizeof(FileHeader));
@@ -88,13 +88,13 @@ TEST_CASE("BinaryWriter: Serialize empty artboard", "[binary][writer]") {
     REQUIRE(header->version == FORMAT_VERSION);
 }
 
-TEST_CASE("BinaryWriter: Artboard dimensions stored correctly", "[binary][writer]") {
+TEST_CASE("BinaryWriter: Scene dimensions stored correctly", "[binary][writer]") {
     float width = 1920.0f;
     float height = 1080.0f;
-    auto artboard = Artboard::create(width, height);
+    auto scene = Scene::create(width, height);
 
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     const FileHeader* header = reinterpret_cast<const FileHeader*>(binary.data());
     REQUIRE_THAT(header->canvas_width, WithinAbs(width, 0.001f));
@@ -102,10 +102,10 @@ TEST_CASE("BinaryWriter: Artboard dimensions stored correctly", "[binary][writer
 }
 
 TEST_CASE("BinaryWriter: Binary size tracking", "[binary][writer]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+    auto scene = Scene::create(800.0f, 600.0f);
 
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     REQUIRE(writer.binary_size() > 0);      // Has data
     REQUIRE(writer.binary_size() == binary.size());  // Size matches
@@ -139,9 +139,9 @@ TEST_CASE("BinaryReader: Reject file too small", "[binary][reader]") {
 
 TEST_CASE("BinaryReader: Reject invalid checksum", "[binary][reader]") {
     // Create valid binary
-    auto artboard = Artboard::create(800.0f, 600.0f);
+    auto scene = Scene::create(800.0f, 600.0f);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     // Corrupt checksum
     FileHeader* header = reinterpret_cast<FileHeader*>(binary.data());
@@ -158,12 +158,12 @@ TEST_CASE("BinaryReader: Reject invalid checksum", "[binary][reader]") {
 // ROUND-TRIP TESTS
 // ============================================================================
 
-TEST_CASE("Round-trip: Empty artboard", "[binary][roundtrip]") {
+TEST_CASE("Round-trip: Empty scene", "[binary][roundtrip]") {
     float width = 1024.0f;
     float height = 768.0f;
 
     // Write
-    auto original = Artboard::create(width, height);
+    auto original = Scene::create(width, height);
     BinaryWriter writer;
     std::vector<uint8_t> binary = writer.write(original.get());
 
@@ -174,7 +174,7 @@ TEST_CASE("Round-trip: Empty artboard", "[binary][roundtrip]") {
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
     REQUIRE(reader.is_valid());
 
-    auto loaded = reader.create_artboard();
+    auto loaded = reader.create_scene();
     REQUIRE(loaded);
 
     // Verify dimensions
@@ -182,7 +182,7 @@ TEST_CASE("Round-trip: Empty artboard", "[binary][roundtrip]") {
     REQUIRE_THAT(loaded->height(), WithinAbs(height, 0.001f));
 }
 
-TEST_CASE("Round-trip: Multiple artboard sizes", "[binary][roundtrip]") {
+TEST_CASE("Round-trip: Multiple scene sizes", "[binary][roundtrip]") {
     std::vector<std::pair<float, float>> sizes = {
         {100.0f, 100.0f},
         {800.0f, 600.0f},
@@ -191,7 +191,7 @@ TEST_CASE("Round-trip: Multiple artboard sizes", "[binary][roundtrip]") {
     };
 
     for (auto [width, height] : sizes) {
-        auto original = Artboard::create(width, height);
+        auto original = Scene::create(width, height);
 
         BinaryWriter writer;
         std::vector<uint8_t> binary = writer.write(original.get());
@@ -199,7 +199,7 @@ TEST_CASE("Round-trip: Multiple artboard sizes", "[binary][roundtrip]") {
         BinaryReader reader;
         REQUIRE(reader.load_memory(binary.data(), binary.size()));
 
-        auto loaded = reader.create_artboard();
+        auto loaded = reader.create_scene();
         REQUIRE(loaded);
         REQUIRE_THAT(loaded->width(), WithinAbs(width, 0.001f));
         REQUIRE_THAT(loaded->height(), WithinAbs(height, 0.001f));
@@ -233,10 +233,10 @@ scene TestScene {
     BinaryReader reader;
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
 
-    auto artboard = reader.create_artboard();
-    REQUIRE(artboard);
-    REQUIRE_THAT(artboard->width(), WithinAbs(800.0f, 0.001f));
-    REQUIRE_THAT(artboard->height(), WithinAbs(600.0f, 0.001f));
+    auto scene = reader.create_scene();
+    REQUIRE(scene);
+    REQUIRE_THAT(scene->width(), WithinAbs(800.0f, 0.001f));
+    REQUIRE_THAT(scene->height(), WithinAbs(600.0f, 0.001f));
 }
 
 TEST_CASE("BinaryCompiler: Handle parse errors", "[binary][compiler]") {
@@ -281,9 +281,9 @@ scene Test {
 
 TEST_CASE("BinaryReader: Reject out-of-bounds string table", "[binary][reader][boundary]") {
     // Create valid binary
-    auto artboard = Artboard::create(800.0f, 600.0f);
+    auto scene = Scene::create(800.0f, 600.0f);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     // Corrupt string table offset (point outside file)
     FileHeader* header = reinterpret_cast<FileHeader*>(binary.data());
@@ -302,9 +302,9 @@ TEST_CASE("BinaryReader: Reject out-of-bounds string table", "[binary][reader][b
 }
 
 TEST_CASE("BinaryReader: Reject out-of-bounds node data", "[binary][reader][boundary]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+    auto scene = Scene::create(800.0f, 600.0f);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     // Corrupt node data offset
     FileHeader* header = reinterpret_cast<FileHeader*>(binary.data());
@@ -325,16 +325,16 @@ TEST_CASE("BinaryReader: Reject out-of-bounds node data", "[binary][reader][boun
 // ============================================================================
 
 TEST_CASE("BinaryWriter: Compression reduces size", "[binary][compression]") {
-    auto artboard = Artboard::create(1920.0f, 1080.0f);
+    auto scene = Scene::create(1920.0f, 1080.0f);
 
     // Write without compression
     BinaryWriter writer_uncompressed;
-    std::vector<uint8_t> binary_uncompressed = writer_uncompressed.write(artboard.get());
+    std::vector<uint8_t> binary_uncompressed = writer_uncompressed.write(scene.get());
 
     // Write with compression
     BinaryWriter writer_compressed;
     writer_compressed.set_compress(true);
-    std::vector<uint8_t> binary_compressed = writer_compressed.write(artboard.get());
+    std::vector<uint8_t> binary_compressed = writer_compressed.write(scene.get());
 
     REQUIRE_FALSE(binary_uncompressed.empty());
     REQUIRE_FALSE(binary_compressed.empty());
@@ -354,12 +354,12 @@ TEST_CASE("BinaryWriter: Compression reduces size", "[binary][compression]") {
 }
 
 TEST_CASE("BinaryReader: Load compressed file", "[binary][compression]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+    auto scene = Scene::create(800.0f, 600.0f);
 
     // Write compressed binary
     BinaryWriter writer;
     writer.set_compress(true);
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     REQUIRE_FALSE(binary.empty());
 
@@ -367,8 +367,8 @@ TEST_CASE("BinaryReader: Load compressed file", "[binary][compression]") {
     BinaryReader reader;
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
 
-    // Verify artboard is created correctly
-    auto loaded = reader.create_artboard();
+    // Verify scene is created correctly
+    auto loaded = reader.create_scene();
     REQUIRE(loaded);
     REQUIRE_THAT(loaded->width(), WithinAbs(800.0f, 0.001f));
     REQUIRE_THAT(loaded->height(), WithinAbs(600.0f, 0.001f));
@@ -406,25 +406,25 @@ scene TestScene {
     BinaryReader reader_compressed;
     REQUIRE(reader_compressed.load_memory(binary_compressed.data(), binary_compressed.size()));
 
-    // Both should produce identical artboards
-    auto artboard_uncompressed = reader_uncompressed.create_artboard();
-    auto artboard_compressed = reader_compressed.create_artboard();
+    // Both should produce identical scenes
+    auto scene_uncompressed = reader_uncompressed.create_scene();
+    auto scene_compressed = reader_compressed.create_scene();
 
-    REQUIRE(artboard_uncompressed);
-    REQUIRE(artboard_compressed);
-    REQUIRE_THAT(artboard_uncompressed->width(), WithinAbs(artboard_compressed->width(), 0.001f));
-    REQUIRE_THAT(artboard_uncompressed->height(), WithinAbs(artboard_compressed->height(), 0.001f));
+    REQUIRE(scene_uncompressed);
+    REQUIRE(scene_compressed);
+    REQUIRE_THAT(scene_uncompressed->width(), WithinAbs(scene_compressed->width(), 0.001f));
+    REQUIRE_THAT(scene_uncompressed->height(), WithinAbs(scene_compressed->height(), 0.001f));
 }
 
 TEST_CASE("BinaryReader: Round-trip compressed data", "[binary][compression][roundtrip]") {
     float width = 1280.0f;
     float height = 720.0f;
-    auto artboard = Artboard::create(width, height);
+    auto scene = Scene::create(width, height);
 
     // Write compressed
     BinaryWriter writer;
     writer.set_compress(true);
-    std::vector<uint8_t> binary = writer.write(artboard.get());
+    std::vector<uint8_t> binary = writer.write(scene.get());
 
     REQUIRE_FALSE(binary.empty());
 
@@ -436,8 +436,8 @@ TEST_CASE("BinaryReader: Round-trip compressed data", "[binary][compression][rou
     REQUIRE_THAT(reader.canvas_width(), WithinAbs(width, 0.001f));
     REQUIRE_THAT(reader.canvas_height(), WithinAbs(height, 0.001f));
 
-    // Create artboard
-    auto loaded = reader.create_artboard();
+    // Create scene
+    auto loaded = reader.create_scene();
     REQUIRE(loaded);
     REQUIRE_THAT(loaded->width(), WithinAbs(width, 0.001f));
     REQUIRE_THAT(loaded->height(), WithinAbs(height, 0.001f));

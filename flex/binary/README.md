@@ -51,7 +51,7 @@ if (!reader.load_file("app.flexb")) {
 }
 
 // Create runtime objects
-auto artboard = reader.create_artboard();
+auto scene = reader.create_scene();
 auto timelines = reader.create_timelines();
 
 // Get metadata
@@ -77,7 +77,7 @@ flex-compiler app.flex -o app.flexb --stats
 ```
 [FileHeader]        Magic, version, checksums, section offsets
 [String Table]      Deduplicated strings
-[Node Data]         Artboard and scene graph
+[Node Data]         Scene and scene graph
 [Asset Table]       (Reserved)
 [Animation Data]    (Reserved)
 [FSM Data]          (Reserved)
@@ -126,7 +126,7 @@ reader.load_file_encrypted("app.flexb", "password");
 
 ### Timeline Serialization (Planned)
 
-Currently only artboard/scene graph is serialized. Timeline animation data will be added in a future version.
+Currently only scene/scene graph is serialized. Timeline animation data will be added in a future version.
 
 ## Testing
 

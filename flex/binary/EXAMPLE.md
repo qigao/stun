@@ -77,14 +77,14 @@ int main() {
     std::cout << "  Nodes: " << reader.node_count() << "\n";
     std::cout << "  Timelines: " << reader.timeline_count() << "\n";
 
-    // Create runtime artboard
-    auto artboard = reader.create_artboard();
-    if (!artboard) {
-        std::cerr << "Failed to create artboard\n";
+    // Create runtime scene
+    auto scene = reader.create_scene();
+    if (!scene) {
+        std::cerr << "Failed to create scene\n";
         return 1;
     }
 
-    std::cout << "Artboard created!\n";
+    std::cout << "Scene created!\n";
     return 0;
 }
 ```
@@ -131,14 +131,14 @@ scene MyApp {
     std::cout << "Loaded: " << reader.node_count() << " nodes\n";
 
     // 4. Create runtime objects
-    auto artboard = reader.create_artboard();
-    if (!artboard) {
-        std::cerr << "Failed to create artboard\n";
+    auto scene = reader.create_scene();
+    if (!scene) {
+        std::cerr << "Failed to create scene\n";
         return 1;
     }
 
-    std::cout << "Artboard: " << artboard->width()
-              << "x" << artboard->height() << "\n";
+    std::cout << "Scene: " << scene->width()
+              << "x" << scene->height() << "\n";
 
     return 0;
 }
@@ -182,7 +182,7 @@ int main() {
     canvas->target(buffer.data(), 800, 800, 600, tvg::ColorSpace::ARGB8888);
 
     auto renderer = flex::create_thorvg_renderer(canvas);
-    renderer->render(instance->artboard().get());
+    renderer->render(instance->scene().get());
 
     canvas->draw();
     canvas->sync();
@@ -250,10 +250,10 @@ bool compile_and_load(const char* flex_file, const char* flexb_file) {
         return false;
     }
 
-    // Verify artboard creation
-    auto artboard = reader.create_artboard();
-    if (!artboard) {
-        std::cerr << "Artboard creation failed\n";
+    // Verify scene creation
+    auto scene = reader.create_scene();
+    if (!scene) {
+        std::cerr << "Scene creation failed\n";
         return false;
     }
 
@@ -314,9 +314,9 @@ scene MyApp {
     // Both load and work identically
     BinaryReader reader;
     reader.load_memory(binary_compressed.data(), binary_compressed.size());
-    auto artboard = reader.create_artboard();
+    auto scene = reader.create_scene();
 
-    std::cout << "Artboard: " << artboard->width() << "x" << artboard->height() << "\n";
+    std::cout << "Scene: " << scene->width() << "x" << scene->height() << "\n";
 
     return 0;
 }
@@ -326,5 +326,5 @@ scene MyApp {
 
 - ✅ **Compression**: zstd compression supported (use `set_compress(true)`)
 - ❌ **No encryption**: Binary files are not encrypted (future feature)
-- ❌ **No timeline serialization**: Only artboard/scene graph is saved
+- ❌ **No timeline serialization**: Only scene/scene graph is saved
 - ❌ **No asset embedding**: External assets are not embedded

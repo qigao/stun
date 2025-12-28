@@ -61,20 +61,20 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
         // Find UI elements
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
 
-        rocket_ = artboard->find("rocket");
-        flame1_ = artboard->find("rocket")->find("flame1");
-        flame2_ = artboard->find("rocket")->find("flame2");
+        rocket_ = scene->find("rocket");
+        flame1_ = scene->find("rocket")->find("flame1");
+        flame2_ = scene->find("rocket")->find("flame2");
 
-        progress_value_ = artboard->find("progress")->find("progressValue");
-        altitude_value_ = artboard->find("altitude")->find("altitudeValue");
-        speed_value_ = artboard->find("speed")->find("speedValue");
+        progress_value_ = scene->find("progress")->find("progressValue");
+        altitude_value_ = scene->find("altitude")->find("altitudeValue");
+        speed_value_ = scene->find("speed")->find("speedValue");
 
         // Create launch path
         // Path: Vertical launch → Curve right → Space
@@ -280,7 +280,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

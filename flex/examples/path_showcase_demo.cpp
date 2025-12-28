@@ -62,27 +62,27 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
         // Find UI elements
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
 
         // Scene 1: Enemy
-        enemy_ = artboard->find("scene1")->find("enemy");
+        enemy_ = scene->find("scene1")->find("enemy");
 
         // Scene 2: Menu
-        menu_ = artboard->find("scene2")->find("menu");
+        menu_ = scene->find("scene2")->find("menu");
 
         // Scene 3: Particles
         for (int i = 0; i < PARTICLE_COUNT; i++) {
             std::string name = "particle" + std::to_string(i);
-            particles_[i] = artboard->find("scene3")->find(name);
+            particles_[i] = scene->find("scene3")->find(name);
         }
 
         // Scene 4: Camera
-        camera_ = artboard->find("scene4")->find("viewport")->find("camera");
+        camera_ = scene->find("scene4")->find("viewport")->find("camera");
 
         setup_paths();
 
@@ -366,7 +366,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

@@ -48,6 +48,8 @@ struct PathData {
     std::string d;
     float width = 0;   // Cached bounds (set by user or parsed)
     float height = 0;
+    float x = 0;       // Bounds origin x
+    float y = 0;       // Bounds origin y
 };
 
 struct StarData {

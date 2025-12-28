@@ -76,7 +76,7 @@ private:
     Stats stats_;
 
     // Internal state
-    Artboard::Ptr artboard_;
+    Scene::Ptr scene_;
     std::vector<Timeline::Ptr> timelines_;
 
     // Write binary data

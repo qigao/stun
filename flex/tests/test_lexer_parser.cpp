@@ -18,7 +18,7 @@ using Catch::Matchers::ContainsSubstring;
 
 TEST_CASE("Lexer: Basic tokens", "[lexer]") {
   SECTION("Keywords") {
-    auto lexer = lexer_create("scene artboard group rect circle text");
+    auto lexer = lexer_create("scene scene group rect circle text");
 
     REQUIRE(lex_next_token(lexer).type == TOK_SCENE);
     REQUIRE(lex_next_token(lexer).type == TOK_ARTBOARD);

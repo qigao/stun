@@ -60,13 +60,13 @@ struct ClockModel {
 class ClockView {
 public:
     ClockView(flex::Instance::Ptr instance) : instance_(instance) {
-        auto* artboard = instance_->artboard();
-        if (!artboard) return;
+        auto* scene = instance_->scene();
+        if (!scene) return;
 
-        hands_group_ = artboard->find("hands");
-        hour_hand_ = artboard->find("hourHand");
-        minute_hand_ = artboard->find("minuteHand");
-        second_hand_ = artboard->find("secondHand");
+        hands_group_ = scene->find("hands");
+        hour_hand_ = scene->find("hourHand");
+        minute_hand_ = scene->find("minuteHand");
+        second_hand_ = scene->find("secondHand");
     }
 
     void update(const ClockModel& model) {
@@ -169,7 +169,7 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
@@ -251,7 +251,7 @@ private:
     void render() {
         canvas_->remove();
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
         canvas_->draw();

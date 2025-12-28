@@ -78,7 +78,7 @@ public:
   int error_column() const { return impl_->error_column; }
 
   // Access parsed objects (no more ast::Document)
-  Artboard::Ptr artboard() const { return impl_->artboard; }
+  Scene::Ptr scene() const { return impl_->scene; }
   const std::vector<Timeline::Ptr> &timelines() const { return impl_->timelines; }
 
   // Access runtime objects
@@ -90,9 +90,9 @@ private:
   Definition() = default;
   struct Impl {
     // Arena allocator for this definition's objects
-    ArenaAllocator object_alloc{64 * 1024}; // 64KB
+    ArenaAllocator object_alloc{1024 * 1024}; // 1MB
 
-    Artboard::Ptr artboard;
+    Scene::Ptr scene;
     std::vector<Timeline::Ptr> timelines;
 
     // Runtime objects
@@ -144,7 +144,7 @@ public:
   // Scene Access (IInstanceContext interface)
   // -------------------------------------------
 
-  Artboard *artboard() const override { return impl_->artboard.get(); }
+  Scene *scene() const override { return impl_->scene ; }
 
   // -------------------------------------------
   // Input Control (IInstanceContext interface)
@@ -186,7 +186,7 @@ public:
 
   // Play a timeline on a node
   TimelinePlayer *play(const char *timeline_name, Node *target) override;
-  TimelinePlayer *play(const char *timeline_name) override; // Play on artboard root
+  TimelinePlayer *play(const char *timeline_name) override; // Play on scene root
 
   // Stop animations
   void stop(const char *timeline_name) override;
@@ -251,17 +251,17 @@ private:
   Instance();
   struct Impl {
     Definition::Ptr definition;
-    Artboard::Ptr artboard;
+    Scene::Ptr scene;
     float time = 0;
 
     // Arena allocators (based on memory_pool) - MUST be declared first!
-    ArenaAllocator frame_alloc{16 * 1024};  // 16KB
-    ArenaAllocator object_alloc{64 * 1024}; // 64KB
+    ArenaAllocator frame_alloc{256 * 1024};  // 256KB
+    ArenaAllocator object_alloc{1024 * 1024}; // 1MB
 
     // Input values (Phase 2.3: Single map with variant)
     using InputValue = std::variant<float, std::string>;
-    std::unordered_map<std::string, InputValue> inputs;
-    std::unordered_map<std::string, std::string> assets;
+    std::unordered_map<Symbol, InputValue, SymbolHash> inputs;
+    std::unordered_map<Symbol, std::string, SymbolHash> assets;
 
     // Data bindings
     std::unique_ptr<BindingContext> bindings;
@@ -283,8 +283,8 @@ private:
     std::unique_ptr<class AssetManager> asset_manager;
 
     // Pointer state for event handling
-    std::weak_ptr<Node> hover_node;
-    std::weak_ptr<Node> pointer_down_node;
+    Node* hover_node = nullptr;
+    Node* pointer_down_node = nullptr;
     bool is_pointer_down = false;
   };
   std::unique_ptr<Impl> impl_;
@@ -298,7 +298,7 @@ namespace parser {
 
 // Parse .flex source and build Runtime objects directly
 // Returns nullptr on error - use get_error() for details
-Artboard::Ptr parse(const char *source, std::vector<Timeline::Ptr> *out_timelines,
+Scene::Ptr parse(const char *source, std::vector<Timeline::Ptr> *out_timelines,
                     void *out_machine, // REMOVED: Machine::Ptr* out_machine (old system)
                     ArenaAllocator &alloc);
 

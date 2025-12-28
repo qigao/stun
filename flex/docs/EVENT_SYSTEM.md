@@ -344,7 +344,7 @@ if (dragging_slider_) {
 **核心理念：** 所有 GUI 都是一棵树。
 
 ```
-Artboard (画布/根节点)
+Scene (画布/根节点)
   └─ Group (容器)
       ├─ Shape (按钮背景)
       │   └─ Text (按钮文字)
@@ -578,7 +578,7 @@ struct PointerEvent {
     PointerEventType type;        // Down, Up, Move, Enter, Leave
     EventPhase phase;             // None, Capture, Target, Bubble
 
-    float x, y;                   // 全局坐标（相对于 Artboard）
+    float x, y;                   // 全局坐标（相对于 Scene）
     float local_x, local_y;       // 局部坐标（相对于 current_target）
 
     Node* target;                 // 原始目标节点（最深的命中节点）
@@ -591,7 +591,7 @@ struct PointerEvent {
 
 **坐标系统：**
 ```
-全局坐标 (x, y)        - 相对于 Artboard (0, 0)
+全局坐标 (x, y)        - 相对于 Scene (0, 0)
 局部坐标 (local_x, local_y) - 相对于当前节点 (node->x(), node->y())
 
 转换公式：

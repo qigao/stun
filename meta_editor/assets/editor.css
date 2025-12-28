@@ -1,0 +1,56 @@
+/* Meta Editor - Excalidraw-style Minimal Stylesheet */
+
+/* Root container */
+#root {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background-color: #1a1a1a;
+    font-family: 'Arial';
+    position: relative;
+}
+
+/* Workspace (canvas area) - full size */
+#workspace_container {
+    width: 100%;
+    height: 100%;
+    background-color: #1a1a1a;
+}
+
+/* Toolbar - floating, draggable */
+#toolbar {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    display: flex;
+    background-color: #2b2b2b;
+    flex-direction: row;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 4px;
+    border-radius: 12px;
+    border: 1px solid #3d3d3d;
+    z-index: 100;
+}
+
+/* Tool buttons - use padding for size, not fixed width */
+.tool_btn {
+    padding: 10px 12px;
+    background-color: #3a3a3a;
+    color: #d0d0d0;
+    border-radius: 8px;
+    font-size: 14px;
+    border: 1px solid #4a4a4a;
+}
+
+.tool_btn:hover {
+    background-color: #4a4a4a;
+    color: #ffffff;
+    border-color: #5a5a5a;
+}
+
+.tool_btn.active {
+    background-color: #6965db;
+    color: #ffffff;
+    border-color: #7c78e0;
+}

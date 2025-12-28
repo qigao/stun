@@ -82,7 +82,7 @@ public:
 
         // Create Flex instance
         instance_ = flex::Instance::create(WIDTH, HEIGHT);
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
         auto* alloc = instance_->object_allocator();
 
         // Create 5 circles with labels
@@ -106,7 +106,7 @@ public:
             circle->set_circle(30);
             circle->set_fill(flex::Color(0.2f + i * 0.15f, 0.5f, 0.8f - i * 0.1f, 1.0f));
             circle->set_position(start_x + i * spacing, start_y);
-            artboard->add_child(circle);
+            scene->add_child(circle);
             circles_[i] = circle.get();
 
             // Create label
@@ -115,7 +115,7 @@ public:
             label->set_font_size(14);
             label->set_color(flex::Color::White);
             label->set_position(start_x + i * spacing - 30, start_y + 60);
-            artboard->add_child(label);
+            scene->add_child(label);
         }
 
         // Create instruction text
@@ -124,7 +124,7 @@ public:
         instructions->set_font_size(20);
         instructions->set_color(flex::Color::White);
         instructions->set_position(200, 50);
-        artboard->add_child(instructions);
+        scene->add_child(instructions);
 
         // Create animation status text
         status_text_ = flex::Text::create();
@@ -132,7 +132,7 @@ public:
         status_text_->set_font_size(18);
         status_text_->set_color(flex::Color(1, 1, 0, 1));
         status_text_->set_position(250, 100);
-        artboard->add_child(status_text_);
+        scene->add_child(status_text_);
 
         // Create bounce animation (y-axis movement)
         // Each circle gets its own timeline with different easing

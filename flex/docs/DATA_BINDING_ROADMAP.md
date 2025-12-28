@@ -9,7 +9,7 @@ Current implementation using C++ BindingContext API:
 instance_->set_input("counter", 10.0f);
 
 // Updates propagate to nodes automatically
-auto* text = artboard->find("counterValue");
+auto* text = scene->find("counterValue");
 text->set_content(std::to_string(counter));
 ```
 

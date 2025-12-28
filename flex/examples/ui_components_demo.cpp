@@ -61,49 +61,46 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "No artboard created!\n";
+        if (!instance_->scene()) {
+            std::cerr << "No scene created!\n";
             return false;
         }
 
         std::cout << "✅ Instance created\n";
-        std::cout << "  Artboard size (from flex): " << instance_->artboard()->width() << "x" << instance_->artboard()->height() << "\n";
+        std::cout << "  Scene size (from flex): " << instance_->scene()->width() << "x" << instance_->scene()->height() << "\n";
 
-        // Force artboard size to match window
-        instance_->artboard()->set_size(WIDTH, HEIGHT);
-        std::cout << "  Artboard size (after set): " << instance_->artboard()->width() << "x" << instance_->artboard()->height() << "\n";
+        // Force scene size to match window
+        instance_->scene()->set_size(WIDTH, HEIGHT);
+        std::cout << "  Scene size (after set): " << instance_->scene()->width() << "x" << instance_->scene()->height() << "\n";
 
-        auto* root = instance_->artboard()->root();
+        auto* root = instance_->scene()->root();
         if (root) {
             std::cout << "  Root node children count: " << root->children().size() << "\n";
 
             // Debug: List all children
-            for (size_t i = 0; i < root->children().size(); i++) {
-                auto* child = root->children()[i].get();
-                std::cout << "    Child " << i << ": type=" << child->type_name()
-                          << " id='" << child->id() << "'"
-                          << " visible=" << (child->visible() ? "yes" : "no") << "\n";
+            // for (size_t i = 0; i < root->children().size(); i++) {
+            //     auto* child = root->children()[i];
 
-                // If it's a Shape, check geometry
-                if (auto* shape = dynamic_cast<flex::Shape*>(child)) {
-                    std::cout << "      Geometry type: " << (int)shape->geometry_type() << "\n";
-                    std::cout << "      Has fill: " << (shape->has_fill() ? "yes" : "no") << "\n";
-                    std::cout << "      Has stroke: " << (shape->has_stroke() ? "yes" : "no") << "\n";
-                    std::cout << "      Position: (" << shape->x() << ", " << shape->y() << ")\n";
+            //     // If it's a Shape, check geometry
+            //     if (auto* shape = dynamic_cast<flex::Shape*>(child)) {
+            //         std::cout << "      Geometry type: " << (int)shape->geometry_type() << "\n";
+            //         std::cout << "      Has fill: " << (shape->has_fill() ? "yes" : "no") << "\n";
+            //         std::cout << "      Has stroke: " << (shape->has_stroke() ? "yes" : "no") << "\n";
+            //         std::cout << "      Position: (" << shape->x() << ", " << shape->y() << ")\n";
 
-                    // For circles, check radius
-                    if (shape->geometry_type() == flex::GeometryType::Circle) {
-                        auto circle_geom = shape->circle();
-                        std::cout << "      Circle radius: " << circle_geom.radius << "\n";
-                    }
+            //         // For circles, check radius
+            //         if (shape->geometry_type() == flex::GeometryType::Circle) {
+            //             auto circle_geom = shape->circle();
+            //             std::cout << "      Circle radius: " << circle_geom.radius << "\n";
+            //         }
 
-                    // For rects, check size
-                    if (shape->geometry_type() == flex::GeometryType::Rect) {
-                        auto rect_geom = shape->rect();
-                        std::cout << "      Rect size: " << rect_geom.width << "x" << rect_geom.height << "\n";
-                    }
-                }
-            }
+            //         // For rects, check size
+            //         if (shape->geometry_type() == flex::GeometryType::Rect) {
+            //             auto rect_geom = shape->rect();
+            //             std::cout << "      Rect size: " << rect_geom.width << "x" << rect_geom.height << "\n";
+            //         }
+            //     }
+            // }
         } else {
             std::cout << "  ERROR: Root node is null!\n";
         }
@@ -179,12 +176,12 @@ private:
     bool auto_save_on_ = false;
 
     void setup_interactive_elements() {
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
 
-        toggle1_ = artboard->find("toggle1");
-        toggle2_ = artboard->find("toggle2");
-        progress1_ = artboard->find("progress1");
-        progress2_ = artboard->find("progress2");
+        toggle1_ = scene->find("toggle1");
+        toggle2_ = scene->find("toggle2");
+        progress1_ = scene->find("progress1");
+        progress2_ = scene->find("progress2");
 
         std::cout << "✅ Interactive elements initialized\n";
         std::cout << "  toggle1: " << (toggle1_ ? "found" : "NOT FOUND") << "\n";
@@ -201,8 +198,8 @@ private:
         }
 
         // Check basic shapes
-        auto* bg = artboard->find("background");
-        auto* primaryBtn = artboard->find("primaryButton");
+        auto* bg = scene->find("background");
+        auto* primaryBtn = scene->find("primaryButton");
         std::cout << "  background rect: " << (bg ? "found" : "NOT FOUND") << "\n";
         std::cout << "  primaryButton: " << (primaryBtn ? "found" : "NOT FOUND") << "\n";
     }
@@ -388,7 +385,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

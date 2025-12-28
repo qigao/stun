@@ -4,7 +4,7 @@
  * Writes compiled Flex data to binary format.
  *
  * Current Features:
- * - ✅ Serialize artboard to .flexb
+ * - ✅ Serialize scene to .flexb
  * - ✅ String table deduplication
  * - ✅ CRC32 integrity checksum
  * - ✅ Node counting and statistics
@@ -37,11 +37,11 @@ public:
     // Configuration
     void set_compress(bool compress) { compress_ = compress; }
 
-    // Write artboard to binary
-    std::vector<uint8_t> write(Artboard* artboard);
+    // Write scene to binary
+    std::vector<uint8_t> write(Scene* scene);
 
     // Write with timelines
-    std::vector<uint8_t> write(Artboard* artboard,
+    std::vector<uint8_t> write(Scene* scene,
                                 const std::vector<Timeline::Ptr>& timelines);
 
     // Get statistics

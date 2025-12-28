@@ -65,22 +65,22 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
         // Find game objects
-        auto* artboard = instance_->artboard();
-        player_ = artboard->find("player");
-        score_text_ = artboard->find("scoreValue");
-        health_fill_ = artboard->find("healthFill");
-        game_over_screen_ = artboard->find("gameOverScreen");
-        final_score_text_ = artboard->find("finalScoreValue");
+        auto* scene = instance_->scene();
+        player_ = scene->find("player");
+        score_text_ = scene->find("scoreValue");
+        health_fill_ = scene->find("healthFill");
+        game_over_screen_ = scene->find("gameOverScreen");
+        final_score_text_ = scene->find("finalScoreValue");
 
         // Bullets
         for (int i = 0; i < 10; i++) {
             std::string name = "bullet" + std::to_string(i);
-            bullets_.push_back(artboard->find(name));
+            bullets_.push_back(scene->find(name));
             bullet_active_.push_back(false);
             bullet_y_.push_back(0.0f);
         }
@@ -88,7 +88,7 @@ public:
         // Enemies
         for (int i = 0; i < 4; i++) {
             std::string name = "enemy" + std::to_string(i);
-            enemies_.push_back(artboard->find(name));
+            enemies_.push_back(scene->find(name));
             enemy_active_.push_back(false);
             enemy_x_.push_back(0.0f);
             enemy_y_.push_back(0.0f);
@@ -97,7 +97,7 @@ public:
         // Explosions
         for (int i = 0; i < 4; i++) {
             std::string name = "explosion" + std::to_string(i);
-            explosions_.push_back(artboard->find(name));
+            explosions_.push_back(scene->find(name));
             explosion_active_.push_back(false);
             explosion_time_.push_back(0.0f);
         }
@@ -443,7 +443,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

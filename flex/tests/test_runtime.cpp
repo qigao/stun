@@ -2,7 +2,7 @@
  * Flex Runtime Tests - Clean Version
  *
  * Tests only implemented runtime functionality:
- * - Artboard creation and properties
+ * - Scene creation and properties
  * - Node hierarchy (Group, Shape, Text, Image)
  * - Timeline animation system
  * - State machine transitions
@@ -20,44 +20,44 @@ using Catch::Matchers::WithinAbs;
 // ARTBOARD TESTS
 // ============================================================================
 
-TEST_CASE("Artboard: Create with dimensions", "[runtime][artboard]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+TEST_CASE("Scene: Create with dimensions", "[runtime][scene]") {
+    auto scene = Scene::create(800.0f, 600.0f);
 
-    REQUIRE(artboard);
-    REQUIRE_THAT(artboard->width(), WithinAbs(800.0f, 0.001f));
-    REQUIRE_THAT(artboard->height(), WithinAbs(600.0f, 0.001f));
+    REQUIRE(scene);
+    REQUIRE_THAT(scene->width(), WithinAbs(800.0f, 0.001f));
+    REQUIRE_THAT(scene->height(), WithinAbs(600.0f, 0.001f));
 }
 
-TEST_CASE("Artboard: Set size", "[runtime][artboard]") {
-    auto artboard = Artboard::create(100.0f, 100.0f);
+TEST_CASE("Scene: Set size", "[runtime][scene]") {
+    auto scene = Scene::create(100.0f, 100.0f);
 
-    artboard->set_size(1920.0f, 1080.0f);
+    scene->set_size(1920.0f, 1080.0f);
 
-    REQUIRE_THAT(artboard->width(), WithinAbs(1920.0f, 0.001f));
-    REQUIRE_THAT(artboard->height(), WithinAbs(1080.0f, 0.001f));
+    REQUIRE_THAT(scene->width(), WithinAbs(1920.0f, 0.001f));
+    REQUIRE_THAT(scene->height(), WithinAbs(1080.0f, 0.001f));
 }
 
-TEST_CASE("Artboard: Background color", "[runtime][artboard]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+TEST_CASE("Scene: Background color", "[runtime][scene]") {
+    auto scene = Scene::create(800.0f, 600.0f);
 
     Color bg = {0.2f, 0.3f, 0.4f, 1.0f};
-    artboard->set_background(bg);
+    scene->set_background(bg);
 
-    const Color& result = artboard->background();
+    const Color& result = scene->background();
     REQUIRE_THAT(result.r, WithinAbs(0.2f, 0.001f));
     REQUIRE_THAT(result.g, WithinAbs(0.3f, 0.001f));
     REQUIRE_THAT(result.b, WithinAbs(0.4f, 0.001f));
     REQUIRE_THAT(result.a, WithinAbs(1.0f, 0.001f));
 }
 
-TEST_CASE("Artboard: Add children to root", "[runtime][artboard]") {
-    auto artboard = Artboard::create(800.0f, 600.0f);
+TEST_CASE("Scene: Add children to root", "[runtime][scene]") {
+    auto scene = Scene::create(800.0f, 600.0f);
 
     auto group = Group::create();
-    artboard->add_child(group);
+    scene->add_child(group);
 
-    REQUIRE(artboard->root() != nullptr);
-    REQUIRE(artboard->root()->child_count() == 1);
+    REQUIRE(scene->root() != nullptr);
+    REQUIRE(scene->root()->child_count() == 1);
 }
 
 // ============================================================================

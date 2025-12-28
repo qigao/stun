@@ -54,7 +54,7 @@ bool InstanceNode::get_bool_input(const std::string& name) const {
 // Real implementations are in src/bridge/instance_node_bridge.cpp
 // to avoid circular dependency on Definition/Instance classes.
 
-Artboard* InstanceNode::content() const {
+Scene* InstanceNode::content() const {
     // Implemented in bridge layer
     return nullptr;
 }

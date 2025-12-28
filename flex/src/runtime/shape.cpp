@@ -88,8 +88,8 @@ void Shape::set_path(const std::string &d) {
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
-void Shape::set_path(const std::string &d, float width, float height) {
-  geometry_ = PathData{d, std::max(0.f, width), std::max(0.f, height)};
+void Shape::set_path(const std::string &d, float width, float height, float x, float y) {
+  geometry_ = PathData{d, std::max(0.f, width), std::max(0.f, height), x, y};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
@@ -493,6 +493,8 @@ Bounds Shape::compute_bounds() const {
         } else if constexpr (std::is_same_v<T, PathData>) {
           b.width = (g.width > 0 ? g.width : 10);
           b.height = (g.height > 0 ? g.height : 10);
+          b.x = g.x;
+          b.y = g.y;
         } else if constexpr (std::is_same_v<T, StarData>) {
           b.width = g.outer_radius * 2;
           b.height = g.outer_radius * 2;

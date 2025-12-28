@@ -24,17 +24,13 @@ void PseudoClassStyle::apply_to(Node *node) const {
     const std::string &path = prop.path;
     const PropertyValue &value = prop.value;
 
-    // Parse property path: "bg.fill" or "scale" or "label.content"
-    size_t dot_pos = path.find('.');
-
+    // Use pre-parsed property path
     Node *target_node = node;
-    std::string prop_name = path;
+    const std::string &prop_name = prop.prop_name;
 
-    // If path has dot, find child node
-    if (dot_pos != std::string::npos) {
-      std::string child_id = path.substr(0, dot_pos);
-      prop_name = path.substr(dot_pos + 1);
-      target_node = node->find(child_id);
+    // If child_id is present, find child node
+    if (!prop.child_id.empty()) {
+      target_node = node->find(prop.child_id);
       if (!target_node) {
         // Silently skip missing nodes (allows partial component definitions)
         continue;

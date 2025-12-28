@@ -12,7 +12,7 @@
 
 // Forward declarations of Runtime types
 namespace flex {
-    class Artboard;
+    class Scene;
     class Node;
     class Timeline;
     class Track;
@@ -43,7 +43,7 @@ struct FlexParserState {
     int current_token_len = 0;
 
     // Context stacks for building Runtime objects
-    flex::Artboard* current_artboard = nullptr;
+    flex::Scene* current_scene = nullptr;
     flex::Node* current_node = nullptr;
     std::vector<flex::Node*> node_stack;
 

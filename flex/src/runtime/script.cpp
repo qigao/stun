@@ -483,7 +483,7 @@ void bind_nodes(ScriptContext *ctx, IInstanceContext * /*instance*/) {
   ctx->bind_function("flex_getProperty",
                      [ctx](const std::vector<ScriptValue> &args) -> ScriptValue {
                        auto *inst = ctx->get_instance();
-                       if (!inst || !inst->artboard())
+                       if (!inst || !inst->scene())
                          return ScriptValue::undefined();
                        return ScriptValue::undefined();
                      });
@@ -492,7 +492,7 @@ void bind_nodes(ScriptContext *ctx, IInstanceContext * /*instance*/) {
   ctx->bind_function("flex_setProperty",
                      [ctx](const std::vector<ScriptValue> &args) -> ScriptValue {
                        auto *inst = ctx->get_instance();
-                       if (!inst || !inst->artboard())
+                       if (!inst || !inst->scene())
                          return ScriptValue::undefined();
                        return ScriptValue::undefined();
                      });

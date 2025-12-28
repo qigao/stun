@@ -6,7 +6,7 @@
  *
  * Usage:
  *   #include "flex/runtime.h"
- *   auto artboard = flex::Artboard::create(800, 600);
+ *   auto scene = flex::Scene::create(800, 600);
  *   auto shape = flex::Shape::create();
  *
  * For backend initialization (ThorVG example):
@@ -26,15 +26,14 @@
 #include "flex/runtime/instance_context.h"
 
 // Scene graph nodes
-#include "flex/runtime/artboard.h"
+#include "flex/runtime/scene.h"
 #include "flex/runtime/group.h"
 #include "flex/runtime/shape.h"
 #include "flex/runtime/text.h"
 #include "flex/runtime/image.h"
 #include "flex/runtime/svg.h"
 #include "flex/runtime/path.h"
-#include "flex/runtime/instance.h"
-#include "flex/runtime/solo.h"
+#include "flex/runtime/instance.h" 
 
 // Animation system
 #include "flex/runtime/timeline.h" 
@@ -65,8 +64,7 @@
 #include "flex/runtime/component.h"
 #include "flex/runtime/instance.h"
 
-// Utilities
-#include "flex/runtime/solo.h"
+// Utilities 
 #include "flex/runtime/debug.h"
 
 // Standard library

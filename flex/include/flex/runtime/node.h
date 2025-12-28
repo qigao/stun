@@ -3,6 +3,10 @@
  *
  * Abstract base class for all scene graph nodes.
  * Implements common properties: position, opacity, visibility, tags.
+ *
+ * Memory Management:
+ * - Default: shared_ptr for automatic memory management
+ * - Arena mode: raw pointers with ArenaAllocator for high-performance scenarios
  */
 
 #pragma once
@@ -21,6 +25,7 @@ namespace flex {
 class Group;
 class Renderer;
 class Machine;
+class ArenaAllocator;
 
 // Opaque handle for backend-specific cached objects (retained mode)
 using PaintHandle = void*;
@@ -43,14 +48,15 @@ enum class NodeType {
 // Node - Base class for all scene graph elements
 // ============================================================================
 
-class Node : public std::enable_shared_from_this<Node> {
+class Node {
 public:
-    using Ptr = std::shared_ptr<Node>;
+    // Pointer type - raw pointer (Arena manages lifetime)
+    using Ptr = Node*;
 
     Node();  // Implemented in node.cpp (required for unique_ptr of incomplete type)
     virtual ~Node();  // Need to delete EventDispatcher* and FSM
 
-    // Non-copyable, non-movable (use shared_ptr for ownership)
+    // Non-copyable, non-movable
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
     Node(Node&&) = delete;
@@ -87,27 +93,37 @@ public:
     // Optimized: inline dirty marking (no propagation needed for transform)
     void set_x(float x) {
         x_ = x;
+        has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
     
     void set_y(float y) {
         y_ = y;
+        has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
     
     void set_position(float x, float y) {
         x_ = x;
         y_ = y;
+        has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
 
     float scale_x() const { return scale_x_; }
     float scale_y() const { return scale_y_; }
-    void set_scale(float sx, float sy) { scale_x_ = sx; scale_y_ = sy; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
-    void set_scale(float s) { scale_x_ = scale_y_ = s; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_scale(float sx, float sy) { scale_x_ = sx; scale_y_ = sy; has_manual_transform_ = false; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_scale(float s) { scale_x_ = scale_y_ = s; has_manual_transform_ = false; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
 
     float rotation() const { return rotation_; }
-    void set_rotation(float degrees) { rotation_ = degrees; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_rotation(float degrees) { rotation_ = degrees; has_manual_transform_ = false; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+
+    const Transform& transform() const { return local_transform(); }
+    void set_transform(const Transform& t) {
+        local_transform_ = t;
+        has_manual_transform_ = true;
+        mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
+    }
 
     // -------------------------------------------
     // Visual Properties
@@ -178,12 +194,68 @@ public:
     void set_align_self(AlignSelf a) { align_self_ = a; mark_dirty(DirtyFlags::Layout); }
 
     // Position mode: absolute elements are excluded from flex layout
-    bool position_absolute() const { return position_absolute_; }
+    bool position_absolute() const { return position_absolute_ || position_mode_ == PositionMode::Absolute || position_mode_ == PositionMode::Fixed; }
     void set_position_absolute(bool a) { position_absolute_ = a; mark_dirty(DirtyFlags::Layout); }
 
     // Anchor point: determines which point of the element x,y refers to
     Anchor anchor() const { return anchor_; }
     void set_anchor(Anchor a) { anchor_ = a; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+
+    // -------------------------------------------
+    // Extended Layout Properties (CSS-like)
+    // -------------------------------------------
+
+    PositionMode position_mode() const { return position_mode_; }
+    void set_position_mode(PositionMode m) {
+        position_mode_ = m;
+        position_absolute_ = (m == PositionMode::Absolute || m == PositionMode::Fixed);
+        mark_dirty(DirtyFlags::Layout);
+    }
+
+    float position_top() const { return position_top_; }
+    float position_right() const { return position_right_; }
+    float position_bottom() const { return position_bottom_; }
+    float position_left() const { return position_left_; }
+    void set_position_top(float v) { position_top_ = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_right(float v) { position_right_ = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_bottom(float v) { position_bottom_ = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_left(float v) { position_left_ = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_offsets(float top, float right, float bottom, float left) {
+        position_top_ = top; position_right_ = right;
+        position_bottom_ = bottom; position_left_ = left;
+        mark_dirty(DirtyFlags::Layout);
+    }
+
+    int z_index() const { return z_index_; }
+    void set_z_index(int z) { z_index_ = z; mark_dirty(DirtyFlags::Visual); }
+
+    BoxSizing box_sizing() const { return box_sizing_; }
+    void set_box_sizing(BoxSizing b) { box_sizing_ = b; mark_dirty(DirtyFlags::Layout); }
+
+    bool width_is_percent() const { return width_is_percent_; }
+    bool height_is_percent() const { return height_is_percent_; }
+    void set_width_percent(float percent) { layout_width_ = percent; width_is_percent_ = true; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+    void set_height_percent(float percent) { layout_height_ = percent; height_is_percent_ = true; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+
+    float margin_top() const { return margin_[0]; }
+    float margin_right() const { return margin_[1]; }
+    float margin_bottom() const { return margin_[2]; }
+    float margin_left() const { return margin_[3]; }
+    void set_margin(float all) { margin_[0] = margin_[1] = margin_[2] = margin_[3] = all; mark_dirty(DirtyFlags::Layout); }
+    void set_margin(float top, float right, float bottom, float left) {
+        margin_[0] = top; margin_[1] = right; margin_[2] = bottom; margin_[3] = left;
+        mark_dirty(DirtyFlags::Layout);
+    }
+
+    float border_width_top() const { return border_width_[0]; }
+    float border_width_right() const { return border_width_[1]; }
+    float border_width_bottom() const { return border_width_[2]; }
+    float border_width_left() const { return border_width_[3]; }
+    void set_border_width(float all) { border_width_[0] = border_width_[1] = border_width_[2] = border_width_[3] = all; mark_dirty(DirtyFlags::Layout); }
+    void set_border_width(float top, float right, float bottom, float left) {
+        border_width_[0] = top; border_width_[1] = right; border_width_[2] = bottom; border_width_[3] = left;
+        mark_dirty(DirtyFlags::Layout);
+    }
 
     // -------------------------------------------
     // Dirty Flags (for optimization)
@@ -433,8 +505,21 @@ protected:
     float flex_shrink_ = 1;     // Shrink factor
     float flex_basis_ = 0;      // Initial main size (0 = auto)
     AlignSelf align_self_ = AlignSelf::Auto;
-    bool position_absolute_ = false;  // If true, excluded from flex layout
+    bool position_absolute_ = false;  // If true, excluded from flex layout (deprecated, use position_mode_)
     Anchor anchor_ = Anchor::TopLeft; // Anchor point for positioning
+
+    // Extended layout properties (CSS-like)
+    PositionMode position_mode_ = PositionMode::Static;  // CSS position
+    float position_top_ = NAN;     // CSS top (NAN = auto)
+    float position_right_ = NAN;   // CSS right
+    float position_bottom_ = NAN;  // CSS bottom
+    float position_left_ = NAN;    // CSS left
+    int z_index_ = 0;              // CSS z-index (only for positioned elements)
+    BoxSizing box_sizing_ = BoxSizing::ContentBox;  // CSS box-sizing
+    bool width_is_percent_ = false;   // If true, layout_width_ is a percentage
+    bool height_is_percent_ = false;  // If true, layout_height_ is a percentage
+    float margin_[4] = {0, 0, 0, 0};  // top, right, bottom, left
+    float border_width_[4] = {0, 0, 0, 0};  // top, right, bottom, left
 
     // Dirty flags (for optimization)
     DirtyFlags dirty_flags_ = DirtyFlags::All;  // Start dirty
@@ -442,6 +527,8 @@ protected:
     // Batch update mode (for performance)
     bool batch_mode_ = false;
     DirtyFlags pending_dirty_flags_ = DirtyFlags::None;
+
+    bool has_manual_transform_ = false;
 
     // Cached bounds (recomputed when Bounds flag is dirty)
     mutable Bounds cached_bounds_;

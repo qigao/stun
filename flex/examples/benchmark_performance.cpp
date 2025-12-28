@@ -210,7 +210,7 @@ void test_scene_graph_performance() {
     std::cout << "\n=== Test 4: Scene Graph Performance ===\n";
 
     auto instance = Instance::create(800, 600);
-    auto* artboard = instance->artboard();
+    auto* scene = instance->scene();
 
     // Create 1000 nodes
     const size_t node_count = 1000;
@@ -221,7 +221,7 @@ void test_scene_graph_performance() {
         node->set_position(i * 10, i * 10);
         node->set_rect(50, 50);
         nodes.push_back(node);
-        artboard->add_child(node);
+        scene->add_child(node);
     }
 
     const size_t iterations = 10000;
@@ -271,7 +271,7 @@ void test_total_frame_time() {
     std::cout << "\n=== Test 5: Total Frame Time (60 FPS simulation) ===\n";
 
     auto instance = Instance::create(800, 600);
-    auto* artboard = instance->artboard();
+    auto* scene = instance->scene();
     auto* obj_alloc = instance->object_allocator();
 
     if (!obj_alloc) {
@@ -293,7 +293,7 @@ void test_total_frame_time() {
     auto player = Shape::create();
     player->set_rect(40, 80);
     player->set_position(100, 450);
-    artboard->add_child(player);
+    scene->add_child(player);
 
     instance->play("move", player.get());
 
@@ -348,7 +348,7 @@ void test_rendering_performance() {
 
     // Create Flex instance and renderer
     auto instance = Instance::create(WIDTH, HEIGHT);
-    auto* artboard = instance->artboard();
+    auto* scene = instance->scene();
     auto renderer = create_thorvg_renderer(canvas );
 
     // Test different scene complexities
@@ -358,10 +358,10 @@ void test_rendering_performance() {
         std::cout << "\n--- Testing with " << node_count << " shapes ---\n";
 
         // Clear scene
-        while (artboard->root()->children().size() > 0) {
+        while (scene->root()->children().size() > 0) {
             // Note: Can't easily remove children, so create new instance
             instance = Instance::create(WIDTH, HEIGHT);
-            artboard = instance->artboard();
+            scene = instance->scene();
             break;
         }
 
@@ -377,7 +377,7 @@ void test_rendering_performance() {
             shape->set_rect(20, 20);
             shape->set_position(pos_x(gen), pos_y(gen));
             shape->set_fill(Color(color(gen), color(gen), color(gen), 1.0f));
-            artboard->add_child(shape);
+            scene->add_child(shape);
         }
 
         // Benchmark rendering
@@ -431,7 +431,7 @@ void test_rendering_performance() {
 
         // Create fresh instance
         auto retained_instance = Instance::create(WIDTH, HEIGHT);
-        auto* retained_artboard = retained_instance->artboard();
+        auto* retained_scene = retained_instance->scene();
 
         // Create shapes
         std::mt19937 gen2(42);
@@ -443,7 +443,7 @@ void test_rendering_performance() {
             shape->set_rect(20, 20);
             shape->set_position(pos_x2(gen2), pos_y2(gen2));
             shape->set_fill(Color(color2(gen2), color2(gen2), color2(gen2), 1.0f));
-            retained_artboard->add_child(shape);
+            retained_scene->add_child(shape);
         }
 
         // First frame: build all objects with retained mode
@@ -506,7 +506,7 @@ void test_retained_mode_animated() {
         renderer->set_retained_mode(true);
 
         auto instance = Instance::create(WIDTH, HEIGHT);
-        auto* artboard = instance->artboard();
+        auto* scene = instance->scene();
 
         // Create shapes
         std::vector<std::shared_ptr<Shape>> shapes;
@@ -520,7 +520,7 @@ void test_retained_mode_animated() {
             shape->set_rect(20, 20);
             shape->set_position(pos_x(gen), pos_y(gen));
             shape->set_fill(Color(color(gen), color(gen), color(gen), 1.0f));
-            artboard->add_child(shape);
+            scene->add_child(shape);
             shapes.push_back(shape);
         }
 
@@ -585,7 +585,7 @@ void test_complex_scene() {
 
     // Create Flex instance
     auto instance = Instance::create(WIDTH, HEIGHT);
-    auto* artboard = instance->artboard();
+    auto* scene = instance->scene();
     auto* alloc = instance->object_allocator();
     auto renderer = create_thorvg_renderer(canvas );
 
@@ -607,7 +607,7 @@ void test_complex_scene() {
         shape->set_circle(10);
         shape->set_position(pos_x(gen), pos_y(gen));
         shape->set_fill(Color(color(gen), color(gen), color(gen), 1.0f));
-        artboard->add_child(shape);
+        scene->add_child(shape);
         animated_nodes.push_back(shape.get());
 
         // Create bounce animation
@@ -632,7 +632,7 @@ void test_complex_scene() {
         shape->set_rect(15, 15);
         shape->set_position(pos_x(gen), pos_y(gen));
         shape->set_fill(Color(color(gen), color(gen), color(gen), 0.5f));
-        artboard->add_child(shape);
+        scene->add_child(shape);
     }
 
     std::cout << "Scene: " << animated_count << " animated + " << static_count 
@@ -744,7 +744,7 @@ void test_gpu_rendering() {
 
     // Create Flex instance and renderer
     auto instance = Instance::create(WIDTH, HEIGHT);
-    auto* artboard = instance->artboard();
+    auto* scene = instance->scene();
     auto renderer = create_thorvg_renderer(canvas );
 
     // Test different scene complexities
@@ -755,7 +755,7 @@ void test_gpu_rendering() {
 
         // Recreate instance for clean scene
         instance = Instance::create(WIDTH, HEIGHT);
-        artboard = instance->artboard();
+        scene = instance->scene();
 
         // Create shapes
         std::mt19937 gen(42);
@@ -768,7 +768,7 @@ void test_gpu_rendering() {
             shape->set_rect(20, 20);
             shape->set_position(pos_x(gen), pos_y(gen));
             shape->set_fill(Color(color(gen), color(gen), color(gen), 1.0f));
-            artboard->add_child(shape);
+            scene->add_child(shape);
         }
 
         // Benchmark rendering

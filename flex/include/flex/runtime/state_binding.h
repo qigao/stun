@@ -2,6 +2,9 @@
  * Flex Engine - State Binding
  *
  * Helpers to bind Observable State to Component props for reactive UI
+ *
+ * NOTE: This module still uses shared_ptr for components because the
+ * Component system (ComponentRegistry) hasn't been migrated to Arena yet.
  */
 
 #pragma once
@@ -16,6 +19,9 @@
 
 
 namespace flex {
+
+// Use shared_ptr for component nodes (Component system not yet Arena-based)
+using ComponentNodePtr = std::shared_ptr<Node>;
 
 // ============================================================================
 // State Component Binding - Automatic Component Recreation on State Change
@@ -38,7 +44,7 @@ public:
   }
 
   // Get current component instance
-  Node::Ptr component() const { return component_; }
+  ComponentNodePtr component() const { return component_; }
 
   // Bind a state key to a component prop
   // When state[state_key] changes, component prop updates and rebuilds
@@ -71,7 +77,7 @@ public:
   }
 
   // Set callback when component rebuilds (useful for updating scene graph)
-  void on_rebuild(std::function<void(Node::Ptr old_node, Node::Ptr new_node)> callback) {
+  void on_rebuild(std::function<void(ComponentNodePtr old_node, ComponentNodePtr new_node)> callback) {
     rebuild_callback_ = callback;
   }
 
@@ -100,9 +106,9 @@ private:
   ObservableState::Ptr state_;
   std::string component_name_;
   Props props_;
-  Node::Ptr component_;
+  ComponentNodePtr component_;
   std::vector<size_t> observer_ids_;
-  std::function<void(Node::Ptr, Node::Ptr)> rebuild_callback_;
+  std::function<void(ComponentNodePtr, ComponentNodePtr)> rebuild_callback_;
 };
 
 // ============================================================================
@@ -148,20 +154,20 @@ public:
 
     auto component = binding->component();
     component->set_position(x, y);
-    add_child(component);
+    add_child(component.get());
 
     // When component rebuilds, replace it in scene graph
-    binding->on_rebuild([this](Node::Ptr old_node, Node::Ptr new_node) {
+    binding->on_rebuild([this](ComponentNodePtr old_node, ComponentNodePtr new_node) {
       if (!old_node || !new_node)
         return;
 
       // Find old node index
       const auto &children = this->children();
       for (size_t i = 0; i < children.size(); ++i) {
-        if (children[i] == old_node) {
+        if (children[i] == old_node.get()) {
           // Replace child
           this->remove_child(old_node.get());
-          this->insert_child(new_node, i);
+          this->insert_child(new_node.get(), i);
           break;
         }
       }

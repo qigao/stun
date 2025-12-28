@@ -66,12 +66,12 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "No artboard created!\n";
+        if (!instance_->scene()) {
+            std::cerr << "No scene created!\n";
             return false;
         }
 
-        instance_->artboard()->set_size(WIDTH, HEIGHT);
+        instance_->scene()->set_size(WIDTH, HEIGHT);
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
@@ -172,7 +172,7 @@ private:
         canvas_->remove();
 
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

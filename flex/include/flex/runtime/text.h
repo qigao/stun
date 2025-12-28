@@ -8,6 +8,7 @@
 
 #include "flex/runtime/node.h"
 #include "flex/runtime/types.h"
+#include "flex/runtime/allocator.h"
 #include <string>
 
 namespace flex {
@@ -43,12 +44,12 @@ enum class TextOverflow {
 
 class Text : public Node {
 public:
-    using Ptr = std::shared_ptr<Text>;
+    using Ptr = Text*;
 
     Text() = default;
     ~Text() override = default;
 
-    static Ptr create() { return std::make_shared<Text>(); }
+    static Ptr create(ArenaAllocator& arena) { return arena.create<Text>(); }
 
     NodeType type() const override { return NodeType::Text; }
     const char* type_name() const override { return "Text"; }

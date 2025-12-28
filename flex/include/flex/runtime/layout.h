@@ -120,7 +120,7 @@ inline void FlexLayoutEngine::collect_items() {
     if (auto* group = dynamic_cast<Group*>(container_)) {
         for (const auto& child : group->children()) {
             FlexItem item;
-            item.node = child.get();
+            item.node = child;  // children() now returns vector<Node*>
 
             // Read flex properties from node
             item.flexGrow = child->flex_grow();

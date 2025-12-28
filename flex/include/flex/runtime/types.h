@@ -13,10 +13,50 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <string_view>
 
 #include "flex/runtime/matrix.h"  // Vec2, Vec3, Vec4, Transform, create_transform
 
 namespace flex {
+
+// ============================================================================
+// Hashing & Symbols
+// ============================================================================
+
+// FNV-1a 32-bit Hash
+inline constexpr uint32_t hash_str(const char* s, size_t count) {
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < count; ++i) {
+        hash ^= static_cast<uint8_t>(s[i]);
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+inline uint32_t hash_str(const char* s) {
+    return hash_str(s, std::strlen(s));
+}
+
+inline uint32_t hash_str(const std::string& s) {
+    return hash_str(s.c_str(), s.size());
+}
+
+struct Symbol {
+    uint32_t id;
+
+    constexpr Symbol() : id(0) {}
+    constexpr Symbol(uint32_t id) : id(id) {}
+    Symbol(const char* s) : id(hash_str(s)) {}
+    Symbol(const std::string& s) : id(hash_str(s)) {}
+    Symbol(std::string_view s) : id(hash_str(s.data(), s.size())) {}
+
+    bool operator==(const Symbol& other) const { return id == other.id; }
+    bool operator!=(const Symbol& other) const { return id != other.id; }
+};
+
+struct SymbolHash {
+    std::size_t operator()(const Symbol& s) const { return s.id; }
+};
 
 // ============================================================================
 // Easing Functions - Simplified
@@ -347,6 +387,20 @@ struct BlurFilter {
 enum class LayoutMode : uint8_t {
     None,   // Manual positioning (default)
     Flex,   // Flexbox layout
+};
+
+// CSS Position property
+enum class PositionMode : uint8_t {
+    Static,     // Normal flow (default)
+    Relative,   // Offset from normal position
+    Absolute,   // Removed from flow, relative to positioned ancestor
+    Fixed,      // Removed from flow, relative to viewport
+};
+
+// CSS box-sizing property
+enum class BoxSizing : uint8_t {
+    ContentBox,  // width/height = content only (default)
+    BorderBox,   // width/height = content + padding + border
 };
 
 enum class FlexDirection : uint8_t {

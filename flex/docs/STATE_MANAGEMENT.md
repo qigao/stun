@@ -188,8 +188,8 @@ reactive_group->add_bound_component(
     0, 40                             // Position (x, y)
 );
 
-// Add to artboard
-artboard->add_child(reactive_group);
+// Add to scene
+scene->add_child(reactive_group);
 
 // State change → Slider auto-updates!
 app_state->set("volume", 0.8f);
@@ -210,15 +210,15 @@ binding->bind("volume", "value");
 binding->bind("theme_color", "color");
 
 // Setup rebuild callback
-binding->on_rebuild([artboard](Node::Ptr old_node, Node::Ptr new_node) {
+binding->on_rebuild([scene](Node::Ptr old_node, Node::Ptr new_node) {
     // Replace in scene graph
-    artboard->remove_child(old_node);
-    artboard->add_child(new_node);
+    scene->remove_child(old_node);
+    scene->add_child(new_node);
 });
 
 // Get component
 auto slider = binding->component();
-artboard->add_child(slider);
+scene->add_child(slider);
 ```
 
 ---
@@ -268,7 +268,7 @@ int main() {
 
     // 3. Build UI with reactive bindings
     auto instance = flex::Instance::create(800, 600);
-    auto artboard = instance->artboard();
+    auto scene = instance->scene();
 
     // Volume section (reactive group)
     auto volume_section = flex::ReactiveGroup::create(app_state);
@@ -290,7 +290,7 @@ int main() {
         0, 50
     );
 
-    artboard->add_child(volume_section);
+    scene->add_child(volume_section);
 
     // Brightness section
     auto brightness_section = flex::ReactiveGroup::create(app_state);
@@ -303,7 +303,7 @@ int main() {
         0, 0
     );
 
-    artboard->add_child(brightness_section);
+    scene->add_child(brightness_section);
 
     // 4. Simulate state changes
     float time = 0;

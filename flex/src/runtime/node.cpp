@@ -50,6 +50,8 @@ void Node::propagate_dirty() {
 }
 
 void Node::update_local_transform() {
+    if (has_manual_transform_) return;
+
     float tx = x_;
     float ty = y_;
 

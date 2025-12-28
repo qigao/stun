@@ -69,7 +69,7 @@ public:
         }
 
         instance_ = flex::Instance::create(WIDTH, HEIGHT);
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
 
         // Initial style
         current_rough_ = flex::RoughOptions::sketch();
@@ -83,7 +83,7 @@ public:
         circle->set_stroke(flex::Color(0.2f, 0.4f, 0.8f, 1.0f), 2.5f);
         circle->set_rough(current_rough_);
         circle->set_position(120, 150);
-        artboard->add_child(circle);
+        scene->add_child(circle);
         shapes_.push_back(circle);
 
         auto label1 = flex::Text::create();
@@ -91,7 +91,7 @@ public:
         label1->set_font_size(14);
         label1->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label1->set_position(95, 210);
-        artboard->add_child(label1);
+        scene->add_child(label1);
 
         // Ellipse
         auto ellipse = flex::Shape::create();
@@ -100,7 +100,7 @@ public:
         ellipse->set_stroke(flex::Color(0.8f, 0.6f, 0.2f, 1.0f), 2.5f);
         ellipse->set_rough(current_rough_);
         ellipse->set_position(280, 150);
-        artboard->add_child(ellipse);
+        scene->add_child(ellipse);
         shapes_.push_back(ellipse);
 
         auto label2 = flex::Text::create();
@@ -108,7 +108,7 @@ public:
         label2->set_font_size(14);
         label2->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label2->set_position(252, 210);
-        artboard->add_child(label2);
+        scene->add_child(label2);
 
         // Rectangle
         auto rect = flex::Shape::create();
@@ -117,7 +117,7 @@ public:
         rect->set_stroke(flex::Color(0.7f, 0.2f, 0.2f, 1.0f), 2.5f);
         rect->set_rough(current_rough_);
         rect->set_position(400, 115);
-        artboard->add_child(rect);
+        scene->add_child(rect);
         shapes_.push_back(rect);
 
         auto label3 = flex::Text::create();
@@ -125,7 +125,7 @@ public:
         label3->set_font_size(14);
         label3->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label3->set_position(410, 210);
-        artboard->add_child(label3);
+        scene->add_child(label3);
 
         // Row 2: Triangle, Pentagon, Hexagon
         // Triangle
@@ -135,7 +135,7 @@ public:
         triangle->set_stroke(flex::Color(0.2f, 0.6f, 0.2f, 1.0f), 2.5f);
         triangle->set_rough(current_rough_);
         triangle->set_position(120, 320);
-        artboard->add_child(triangle);
+        scene->add_child(triangle);
         shapes_.push_back(triangle);
 
         auto label4 = flex::Text::create();
@@ -143,7 +143,7 @@ public:
         label4->set_font_size(14);
         label4->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label4->set_position(85, 380);
-        artboard->add_child(label4);
+        scene->add_child(label4);
 
         // Pentagon
         auto pentagon = flex::Shape::create();
@@ -152,7 +152,7 @@ public:
         pentagon->set_stroke(flex::Color(0.6f, 0.2f, 0.6f, 1.0f), 2.5f);
         pentagon->set_rough(current_rough_);
         pentagon->set_position(280, 320);
-        artboard->add_child(pentagon);
+        scene->add_child(pentagon);
         shapes_.push_back(pentagon);
 
         auto label5 = flex::Text::create();
@@ -160,7 +160,7 @@ public:
         label5->set_font_size(14);
         label5->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label5->set_position(245, 380);
-        artboard->add_child(label5);
+        scene->add_child(label5);
 
         // Hexagon
         auto hexagon = flex::Shape::create();
@@ -169,7 +169,7 @@ public:
         hexagon->set_stroke(flex::Color(0.2f, 0.6f, 0.6f, 1.0f), 2.5f);
         hexagon->set_rough(current_rough_);
         hexagon->set_position(445, 320);
-        artboard->add_child(hexagon);
+        scene->add_child(hexagon);
         shapes_.push_back(hexagon);
 
         auto label6 = flex::Text::create();
@@ -177,7 +177,7 @@ public:
         label6->set_font_size(14);
         label6->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label6->set_position(410, 380);
-        artboard->add_child(label6);
+        scene->add_child(label6);
 
         // Row 3: Star, Ring, Line
         // Star
@@ -187,7 +187,7 @@ public:
         star->set_stroke(flex::Color(0.8f, 0.7f, 0.2f, 1.0f), 2.5f);
         star->set_rough(current_rough_);
         star->set_position(120, 490);
-        artboard->add_child(star);
+        scene->add_child(star);
         shapes_.push_back(star);
 
         auto label7 = flex::Text::create();
@@ -195,7 +195,7 @@ public:
         label7->set_font_size(14);
         label7->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label7->set_position(100, 550);
-        artboard->add_child(label7);
+        scene->add_child(label7);
 
         // Ring
         auto ring = flex::Shape::create();
@@ -204,7 +204,7 @@ public:
         ring->set_stroke(flex::Color(0.3f, 0.3f, 0.6f, 1.0f), 2.5f);
         ring->set_rough(current_rough_);
         ring->set_position(280, 490);
-        artboard->add_child(ring);
+        scene->add_child(ring);
         shapes_.push_back(ring);
 
         auto label8 = flex::Text::create();
@@ -212,7 +212,7 @@ public:
         label8->set_font_size(14);
         label8->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label8->set_position(260, 550);
-        artboard->add_child(label8);
+        scene->add_child(label8);
 
         // Line
         auto line = flex::Shape::create();
@@ -220,7 +220,7 @@ public:
         line->set_stroke(flex::Color(0.4f, 0.4f, 0.4f, 1.0f), 3.0f);
         line->set_rough(current_rough_);
         line->set_position(405, 460);
-        artboard->add_child(line);
+        scene->add_child(line);
         shapes_.push_back(line);
 
         auto label9 = flex::Text::create();
@@ -228,7 +228,7 @@ public:
         label9->set_font_size(14);
         label9->set_color(flex::Color(0.3f, 0.3f, 0.3f, 1.0f));
         label9->set_position(430, 550);
-        artboard->add_child(label9);
+        scene->add_child(label9);
 
         // Title
         auto title = flex::Text::create();
@@ -236,7 +236,7 @@ public:
         title->set_font_size(24);
         title->set_color(flex::Color(0.2f, 0.2f, 0.2f, 1.0f));
         title->set_position(150, 40);
-        artboard->add_child(title);
+        scene->add_child(title);
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_.get());
 

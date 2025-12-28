@@ -35,7 +35,7 @@ void AstToRuntimeConverter::convert(const parser::AstProgram &program) {
 
   // Convert main scene
   if (program.scene) {
-    IMPL->artboard = convert_scene(program.scene);
+    IMPL->scene = convert_scene(program.scene);
   }
 
   // Convert machines
@@ -235,68 +235,69 @@ uint32_t AstToRuntimeConverter::parse_color_rgba(const std::string &color_str) {
   return (r << 24) | (g << 16) | (b << 8) | a;
 }
 
-std::shared_ptr<Artboard>
+Scene*
 AstToRuntimeConverter::convert_scene(const std::shared_ptr<parser::AstScene> &scene) {
-  Artboard::Ptr artboard = Artboard::create(scene->width, scene->height);
+  Scene* scene_obj = Scene::create(scene->width, scene->height, IMPL->object_alloc);
 
   for (const auto &child_ast : scene->children) {
     auto child = convert_node(child_ast);
     if (child) {
-      artboard->add_child(child);
+      scene_obj->add_child(child);
     }
   }
 
-  return artboard;
+  return scene_obj;
 }
 
-std::shared_ptr<Node>
+Node*
 AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_node) {
-  std::shared_ptr<Node> node;
+  Node* node = nullptr;
+  auto& arena = IMPL->object_alloc;
 
   if (ast_node->type == "group") {
-    node = Group::create();
+    node = Group::create(arena);
   } else if (ast_node->type == "rect") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_rect(100, 100);
     node = shape;
   } else if (ast_node->type == "circle") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_circle(50);
     node = shape;
   } else if (ast_node->type == "ellipse") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_ellipse(50, 25);
     node = shape;
   } else if (ast_node->type == "polygon") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_polygon(5, 50);
     node = shape;
   } else if (ast_node->type == "star") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_star(5, 50, 25);
     node = shape;
   } else if (ast_node->type == "text") {
-    auto text = Text::create();
+    auto* text = Text::create(arena);
     text->set_content("Text");
     node = text;
   } else if (ast_node->type == "image" || ast_node->type == "img") {
-    node = Image::create();
+    node = Image::create(arena);
   } else if (ast_node->type == "svg") {
-    node = Svg::create();
+    node = Svg::create(arena);
   } else if (ast_node->type == "path") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_path("");
     node = shape;
   } else if (ast_node->type == "line") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_line(0, 0);
     node = shape;
   } else if (ast_node->type == "ring") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_ring(50, 25);
     node = shape;
   } else if (ast_node->type == "triangle") {
-    auto shape = Shape::create();
+    auto* shape = Shape::create(arena);
     shape->set_triangle(20, 20, Direction::Right);
     node = shape;
   } else {
@@ -324,9 +325,13 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
           props[key] = *bval;
         }
       }
-      node = component->instantiate(props);
-      if (node) {
-        node->set_id(ast_node->id);
+      // TODO: Component instantiation still uses shared_ptr - needs refactoring
+      auto shared_node = component->instantiate(props);
+      if (shared_node) {
+        shared_node->set_id(ast_node->id);
+        // WARNING: This is a temporary workaround - component nodes will leak
+        // Components need to be refactored to use Arena allocation
+        node = shared_node.get();
       }
     }
   }
@@ -414,7 +419,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
       }
     }
 
-    if (auto shape = std::dynamic_pointer_cast<Shape>(node)) {
+    if (auto* shape = dynamic_cast<Shape*>(node)) {
       if (key == "width") {
         if (auto fval = std::get_if<float>(&value)) {
           if (ast_node->type == "rect") {
@@ -550,7 +555,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
     }
 
     // Triangle width/height handling (after general width/height)
-    if (auto shape = std::dynamic_pointer_cast<Shape>(node)) {
+    if (auto* shape = dynamic_cast<Shape*>(node)) {
       if (ast_node->type == "triangle") {
         auto tri_geom = shape->triangle();
         float w = tri_geom.width;
@@ -621,7 +626,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
       }
     }
 
-    if (auto svg = std::dynamic_pointer_cast<Svg>(node)) {
+    if (auto* svg = dynamic_cast<Svg*>(node)) {
       if (key == "src") {
         if (auto sval = std::get_if<std::string>(&value)) {
           svg->set_src(*sval);
@@ -633,7 +638,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
       }
     }
 
-    if (auto img = std::dynamic_pointer_cast<Image>(node)) {
+    if (auto* img = dynamic_cast<Image*>(node)) {
       if (key == "src") {
         if (auto sval = std::get_if<std::string>(&value)) {
           img->set_src(*sval);
@@ -641,7 +646,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
       }
     }
 
-    if (auto text = std::dynamic_pointer_cast<Text>(node)) {
+    if (auto* text = dynamic_cast<Text*>(node)) {
       if (key == "content") {
         if (auto sval = std::get_if<std::string>(&value)) {
           text->set_content(*sval);
@@ -659,7 +664,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
     }
 
     // Group layout properties
-    if (auto group = std::dynamic_pointer_cast<Group>(node)) {
+    if (auto* group = dynamic_cast<Group*>(node)) {
       if (key == "layout") {
         if (auto sval = std::get_if<std::string>(&value)) {
           if (*sval == "flex") {
@@ -745,7 +750,7 @@ AstToRuntimeConverter::convert_node(const std::shared_ptr<parser::AstNode> &ast_
   for (const auto &child_ast : ast_node->children) {
     auto child = convert_node(child_ast);
     if (child) {
-      if (auto group = std::dynamic_pointer_cast<Group>(node)) {
+      if (auto* group = dynamic_cast<Group*>(node)) {
         group->add_child(child);
       }
     }

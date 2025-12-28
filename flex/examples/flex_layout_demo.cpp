@@ -57,7 +57,7 @@ public:
     }
 
     instance_ = flex::Instance::create(definition);
-    if (!instance_->artboard())
+    if (!instance_->scene())
       return false;
 
     flex_renderer_ = flex::create_thorvg_renderer(canvas_);
@@ -123,10 +123,10 @@ private:
   bool running_ = false;
 
   void setup_layouts() {
-    auto *artboard = instance_->artboard();
+    auto *scene = instance_->scene();
 
     // Scene 1: Horizontal Toolbar (Flex Row)
-    if (auto *toolbar = dynamic_cast<flex::Group *>(artboard->find("scene1")->find("toolbar"))) {
+    if (auto *toolbar = dynamic_cast<flex::Group *>(scene->find("scene1")->find("toolbar"))) {
       toolbar->set_layout(flex::LayoutMode::Flex);
       toolbar->set_flex_direction(flex::FlexDirection::Row);
       toolbar->set_gap(10.0f);
@@ -138,7 +138,7 @@ private:
     }
 
     // Scene 2: Vertical Menu (Flex Column)
-    if (auto *menu = dynamic_cast<flex::Group *>(artboard->find("scene2")->find("menu"))) {
+    if (auto *menu = dynamic_cast<flex::Group *>(scene->find("scene2")->find("menu"))) {
       menu->set_layout(flex::LayoutMode::Flex);
       menu->set_flex_direction(flex::FlexDirection::Column);
       menu->set_gap(5.0f);
@@ -151,7 +151,7 @@ private:
 
     // Scene 3: Center Alignment
     if (auto *centerContainer =
-            dynamic_cast<flex::Group *>(artboard->find("scene3")->find("centerContainer"))) {
+            dynamic_cast<flex::Group *>(scene->find("scene3")->find("centerContainer"))) {
       centerContainer->set_layout(flex::LayoutMode::Flex);
       centerContainer->set_flex_direction(flex::FlexDirection::Row);
       centerContainer->set_justify_content(flex::JustifyContent::Center);
@@ -165,7 +165,7 @@ private:
 
     // Scene 4: Space Between
     if (auto *spaceBetween =
-            dynamic_cast<flex::Group *>(artboard->find("scene4")->find("spaceBetweenContainer"))) {
+            dynamic_cast<flex::Group *>(scene->find("scene4")->find("spaceBetweenContainer"))) {
       spaceBetween->set_layout(flex::LayoutMode::Flex);
       spaceBetween->set_flex_direction(flex::FlexDirection::Row);
       spaceBetween->set_justify_content(flex::JustifyContent::SpaceBetween);
@@ -178,7 +178,7 @@ private:
 
     // Scene 5: Nested Layout (Column > Row)
     if (auto *outerColumn =
-            dynamic_cast<flex::Group *>(artboard->find("scene5")->find("outerColumn"))) {
+            dynamic_cast<flex::Group *>(scene->find("scene5")->find("outerColumn"))) {
       // Outer column
       outerColumn->set_layout(flex::LayoutMode::Flex);
       outerColumn->set_flex_direction(flex::FlexDirection::Column);
@@ -208,7 +208,7 @@ private:
 
     // Scene 6: Padding & Gap
     if (auto *paddedContainer =
-            dynamic_cast<flex::Group *>(artboard->find("scene6")->find("paddedContainer"))) {
+            dynamic_cast<flex::Group *>(scene->find("scene6")->find("paddedContainer"))) {
       paddedContainer->set_layout(flex::LayoutMode::Flex);
       paddedContainer->set_flex_direction(flex::FlexDirection::Row);
       paddedContainer->set_gap(15.0f);
@@ -249,7 +249,7 @@ private:
     canvas_->remove();
 
     flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-    flex_renderer_->clear(instance_->artboard()->background());
+    flex_renderer_->clear(instance_->scene()->background());
     instance_->render(*flex_renderer_);
     flex_renderer_->end_frame();
 

@@ -8,6 +8,7 @@
 
 #include "flex/runtime/node.h"
 #include "flex/runtime/types.h"
+#include "flex/runtime/allocator.h"
 #include <string>
 
 namespace flex {
@@ -20,12 +21,12 @@ enum class ImageFit {
 
 class Image : public Node {
 public:
-  using Ptr = std::shared_ptr<Image>;
+  using Ptr = Image*;
 
   Image() = default;
   ~Image() override = default;
 
-  static Ptr create() { return std::make_shared<Image>(); }
+  static Ptr create(ArenaAllocator& arena) { return arena.create<Image>(); }
 
   NodeType type() const override { return NodeType::Image; }
   const char *type_name() const override { return "Image"; }

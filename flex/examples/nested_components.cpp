@@ -52,27 +52,27 @@ struct NestedModel {
 class NestedView {
 public:
     NestedView(flex::Instance::Ptr instance) : instance_(instance) {
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
         
         // Find nodes by ID
-        basic_slider = artboard->find("basicSlider");
-        basic_toggle = artboard->find("basicToggle");
-        basic_progress = artboard->find("basicProgress");
+        basic_slider = scene->find("basicSlider");
+        basic_toggle = scene->find("basicToggle");
+        basic_progress = scene->find("basicProgress");
         
-        volume = artboard->find("volume");
-        brightness = artboard->find("brightness");
-        contrast = artboard->find("contrast");
+        volume = scene->find("volume");
+        brightness = scene->find("brightness");
+        contrast = scene->find("contrast");
         
-        dark_mode = artboard->find("darkMode");
-        notifications = artboard->find("notifications");
-        auto_save = artboard->find("autoSave");
+        dark_mode = scene->find("darkMode");
+        notifications = scene->find("notifications");
+        auto_save = scene->find("autoSave");
         
-        master_ctrl = artboard->find("audioMaster");
+        master_ctrl = scene->find("audioMaster");
         
-        s1 = artboard->find("s1");
-        s2 = artboard->find("s2");
-        s3 = artboard->find("s3");
-        s4 = artboard->find("s4");
+        s1 = scene->find("s1");
+        s2 = scene->find("s2");
+        s3 = scene->find("s3");
+        s4 = scene->find("s4");
     }
 
     void update(const NestedModel& model) {
@@ -359,7 +359,7 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) return false;
+        if (!instance_->scene()) return false;
 
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
@@ -646,7 +646,7 @@ private:
     void render() {
         canvas_->remove();
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
         canvas_->draw();

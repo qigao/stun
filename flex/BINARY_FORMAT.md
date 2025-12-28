@@ -244,7 +244,7 @@ while (auto node = stream.read_node()) {
 auto def = flex::Definition::mmap_binary("app.flexb");
 
 // Nodes accessed directly from file
-auto artboard = def->artboard();  // No parsing, no allocation!
+auto scene = def->scene();  // No parsing, no allocation!
 ```
 
 ### 3. Incremental Updates (Hot Reload)

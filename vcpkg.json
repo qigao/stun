@@ -103,10 +103,10 @@
     },
     {
       "name": "libpng"
-    }, 
+    },
     {
       "name": "box2d"
-    }, 
+    },
     {
       "name": "libass",
       "version>=": "0.17.4"
@@ -135,6 +135,9 @@
     },
     {
       "name": "clipper2"
+    },
+    {
+      "name": "cxxopts"
     }
   ],
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"

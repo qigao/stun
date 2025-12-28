@@ -59,10 +59,21 @@ struct PropertyValue {
  */
 struct PropertySetter {
     std::string path;           // e.g., "thumb.fill"
+    std::string child_id;       // "thumb"
+    std::string prop_name;      // "fill"
     PropertyValue value;
 
     PropertySetter() = default;
-    PropertySetter(const std::string& p, const PropertyValue& v) : path(p), value(v) {}
+    PropertySetter(const std::string& p, const PropertyValue& v) : path(p), value(v) {
+        // Pre-parse the path
+        size_t dot_pos = p.find('.');
+        if (dot_pos != std::string::npos) {
+            child_id = p.substr(0, dot_pos);
+            prop_name = p.substr(dot_pos + 1);
+        } else {
+            prop_name = p;
+        }
+    }
 };
 
 /**

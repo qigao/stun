@@ -7,7 +7,7 @@
  * - ✅ Load .flexb files (load_file, load_memory)
  * - ✅ CRC32 integrity verification
  * - ✅ String table deduplication
- * - ✅ Create runtime objects (artboard, timelines)
+ * - ✅ Create runtime objects (scene, timelines)
  * - ❌ Compression (decompress_data) - NOT YET IMPLEMENTED
  * - ❌ Encryption (decrypt_data) - NOT YET IMPLEMENTED
  */
@@ -16,6 +16,7 @@
 
 #include "flex/binary/format.h"
 #include "flex/runtime.h"
+#include "flex/runtime/allocator.h"
 #include <vector>
 #include <memory>
 
@@ -48,9 +49,12 @@ public:
     // Get error message
     const char* error_message() const { return error_message_.c_str(); }
 
-    // Create runtime objects
-    Artboard::Ptr create_artboard();
+    // Create runtime objects (uses internal arena)
+    Scene* create_scene();
     std::vector<Timeline::Ptr> create_timelines();
+
+    // Access arena
+    ArenaAllocator& arena() { return arena_; }
 
     // Get metadata
     uint32_t node_count() const;
@@ -61,6 +65,9 @@ public:
 private:
     bool valid_ = false;
     std::string error_message_;
+
+    // Arena allocator for created objects
+    ArenaAllocator arena_{64 * 1024};  // 64KB
 
     // Binary data
     std::vector<uint8_t> data_;
@@ -78,11 +85,11 @@ private:
     bool parse_string_table();
     bool verify_integrity();
 
-    Node::Ptr read_node(const uint8_t* node_data);
-    Shape::Ptr read_shape(const uint8_t* shape_data);
-    Text::Ptr read_text(const uint8_t* text_data);
-    Image::Ptr read_image(const uint8_t* image_data);
-    Group::Ptr read_group(const uint8_t* group_data);
+    Node* read_node(const uint8_t* node_data);
+    Shape* read_shape(const uint8_t* shape_data);
+    Text* read_text(const uint8_t* text_data);
+    Image* read_image(const uint8_t* image_data);
+    Group* read_group(const uint8_t* group_data);
 
     Timeline::Ptr read_timeline(const uint8_t* timeline_data);
 

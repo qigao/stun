@@ -87,20 +87,20 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "No artboard in definition\n";
+        if (!instance_->scene()) {
+            std::cerr << "No scene in definition\n";
             return false;
         }
 
         // Create ThorVG renderer
         flex_renderer_ = flex::create_thorvg_renderer(canvas_);
 
-        // Get artboard for manual nodes
-        auto* artboard = instance_->artboard();
+        // Get scene for manual nodes
+        auto* scene = instance_->scene();
 
         // Progress bar nodes (we need to update text manually)
-        progress_fill_ = artboard->find("progress");
-        progress_text_ = artboard->find("percentage");
+        progress_fill_ = scene->find("progress");
+        progress_text_ = scene->find("percentage");
 
         // Start all declarative animations from .flex file
         auto check_anim = [&](const char* name) {
@@ -232,7 +232,7 @@ private:
 
         // Render flex scene to ThorVG
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
 

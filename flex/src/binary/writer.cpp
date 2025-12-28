@@ -29,8 +29,8 @@ StringIndex BinaryWriter::add_string(const std::string& str) {
     return index;
 }
 
-std::vector<uint8_t> BinaryWriter::write(Artboard* artboard) {
-    if (!artboard) return {};
+std::vector<uint8_t> BinaryWriter::write(Scene* scene) {
+    if (!scene) return {};
 
     // Reset state
     string_data_.clear();
@@ -43,13 +43,13 @@ std::vector<uint8_t> BinaryWriter::write(Artboard* artboard) {
     size_t header_offset = buffer.size();
     buffer.resize(buffer.size() + sizeof(FileHeader));
 
-    // Write artboard as root node
+    // Write scene as root node
     size_t node_data_offset = buffer.size();
     {
-        node_count_++;  // Count the artboard node
+        node_count_++;  // Count the scene node
 
         NodeHeader node_header = {};
-        node_header.type = NodeType::Artboard;
+        node_header.type = NodeType::Scene;
         node_header.id = add_string("");
         node_header.flags = 0;
         node_header.opacity = 1.0f;
@@ -111,8 +111,8 @@ std::vector<uint8_t> BinaryWriter::write(Artboard* artboard) {
     header.timeline_count = 0;
     header.fsm_count = 0;
 
-    header.canvas_width = artboard->width();
-    header.canvas_height = artboard->height();
+    header.canvas_width = scene->width();
+    header.canvas_height = scene->height();
 
     // Calculate checksum
     header.checksum = 0;
@@ -125,10 +125,10 @@ std::vector<uint8_t> BinaryWriter::write(Artboard* artboard) {
     return buffer;
 }
 
-std::vector<uint8_t> BinaryWriter::write(Artboard* artboard,
+std::vector<uint8_t> BinaryWriter::write(Scene* scene,
                                           const std::vector<Timeline::Ptr>& timelines) {
     // TODO: Implement timeline serialization
-    return write(artboard);
+    return write(scene);
 }
 
 void BinaryWriter::write_string_table(std::vector<uint8_t>& buffer) {

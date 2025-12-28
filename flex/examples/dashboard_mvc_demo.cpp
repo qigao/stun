@@ -85,42 +85,42 @@ struct DashboardModel {
 class DashboardView {
 public:
     DashboardView(flex::Instance::Ptr instance) : instance_(instance) {
-        auto* artboard = instance_->artboard();
-        if (!artboard) return;
+        auto* scene = instance_->scene();
+        if (!scene) return;
 
         // Find metrics_row and get metric_card children
-        auto* metrics_row = artboard->find("metrics_row");
+        auto* metrics_row = scene->find("metrics_row");
         if (metrics_row && metrics_row->is_group()) {
             auto* group = static_cast<flex::Group*>(metrics_row);
             const auto& children = group->children();
             for (size_t i = 0; i < children.size() && i < 4; ++i) {
-                metric_cards_[i] = children[i].get();
+                metric_cards_[i] = children[i] ;
             }
         }
 
         // Find chart_bars and get bar children
-        auto* chart_bars = artboard->find("chart_bars");
+        auto* chart_bars = scene->find("chart_bars");
         if (chart_bars && chart_bars->is_group()) {
             auto* group = static_cast<flex::Group*>(chart_bars);
             const auto& children = group->children();
             for (size_t i = 0; i < children.size() && i < 7; ++i) {
                 // Each bar_group contains a bar Shape as first child
-                auto* bar_group = children[i].get();
+                auto* bar_group = children[i] ;
                 if (bar_group && bar_group->is_group()) {
                     auto* bg = static_cast<flex::Group*>(bar_group);
                     if (!bg->children().empty()) {
-                        chart_bars_[i] = dynamic_cast<flex::Shape*>(bg->children()[0].get());
+                        chart_bars_[i] = dynamic_cast<flex::Shape*>(bg->children()[0]);
                     }
                 }
             }
         }
 
         // Find status elements
-        status_dot_ = dynamic_cast<flex::Shape*>(artboard->find("status_dot"));
-        status_text_ = dynamic_cast<flex::Text*>(artboard->find("status_text"));
-        last_update_ = dynamic_cast<flex::Text*>(artboard->find("last_update"));
-        refresh_indicator_ = artboard->find("refresh_indicator");
-        toast_ = artboard->find("toast");
+        status_dot_ = dynamic_cast<flex::Shape*>(scene->find("status_dot"));
+        status_text_ = dynamic_cast<flex::Text*>(scene->find("status_text"));
+        last_update_ = dynamic_cast<flex::Text*>(scene->find("last_update"));
+        refresh_indicator_ = scene->find("refresh_indicator");
+        toast_ = scene->find("toast");
     }
 
     void update(const DashboardModel& model) {
@@ -306,8 +306,8 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "Failed to create artboard\n";
+        if (!instance_->scene()) {
+            std::cerr << "Failed to create scene\n";
             return false;
         }
 
@@ -411,7 +411,7 @@ private:
     void render() {
         canvas_->remove();
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
         canvas_->draw();

@@ -52,8 +52,8 @@ canvas->target(buffer, width, width, height, tvg::SwCanvas::ARGB8888);
 auto renderer = flex::create_thorvg_renderer(canvas.get());
 
 // Use with Flex
-auto artboard = flex::Artboard::create(800, 600);
-artboard->render(*renderer);
+auto scene = flex::Scene::create(800, 600);
+scene->render(*renderer);
 
 // Cleanup
 flex::shutdown();
@@ -92,8 +92,8 @@ NVGcontext* vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
 auto renderer = flex::create_nanovg_renderer(vg);
 
 // Use with Flex
-auto artboard = flex::Artboard::create(800, 600);
-artboard->render(*renderer);
+auto scene = flex::Scene::create(800, 600);
+scene->render(*renderer);
 
 // Cleanup
 nvgDeleteGL3(vg);
@@ -134,8 +134,8 @@ SkCanvas* canvas = surface->getCanvas();
 auto renderer = flex::create_skia_renderer(canvas);
 
 // Use with Flex
-auto artboard = flex::Artboard::create(800, 600);
-artboard->render(*renderer);
+auto scene = flex::Scene::create(800, 600);
+scene->render(*renderer);
 
 // Cleanup
 flex::shutdown();
@@ -178,10 +178,10 @@ flex::g_d2d_factory->CreateHwndRenderTarget(
 auto renderer = flex::create_d2d_renderer(renderTarget);
 
 // Use with Flex
-auto artboard = flex::Artboard::create(800, 600);
+auto scene = flex::Scene::create(800, 600);
 
 renderTarget->BeginDraw();
-artboard->render(*renderer);
+scene->render(*renderer);
 renderTarget->EndDraw();
 
 // Cleanup

@@ -45,7 +45,7 @@ Debug {
     traceTransitions: true // Log every State Machine change
 }
 
-Artboard "Main" { ... }
+Scene "Main" { ... }
 ```
 
 ---

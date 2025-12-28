@@ -59,7 +59,7 @@ auto slider = flex::create_component_instance("Slider", {
     {"color", uint32_t(0xFF0D6EFD)}
 });
 slider->set_position(100, 100);
-artboard->add_child(slider);
+scene->add_child(slider);
 ```
 
 **After (DSL)**:
@@ -151,7 +151,7 @@ group panel {
     }
 
     auto child = create_component_instance(component_name, component_props);
-    artboard->add_child(child);
+    scene->add_child(child);
 }
 ```
 
@@ -407,11 +407,11 @@ Slider s { val: 0.7 }  // Prop ignored, uses default
 // 50+ lines of boilerplate
 auto slider1 = create_component_instance("Slider", {...});
 slider1->set_position(100, 100);
-artboard->add_child(slider1);
+scene->add_child(slider1);
 
 auto slider2 = create_component_instance("Slider", {...});
 slider2->set_position(100, 200);
-artboard->add_child(slider2);
+scene->add_child(slider2);
 // ...
 ```
 

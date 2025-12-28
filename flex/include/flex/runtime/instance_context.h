@@ -14,7 +14,7 @@ namespace flex {
 
 // Forward declarations
 class Node;
-class Artboard;
+class Scene;
 class AnimationController;
 class TimelinePlayer;
 class AssetManager;
@@ -34,7 +34,7 @@ public:
     virtual float get_input(const char* name) const = 0;
 
     // Scene access
-    virtual Artboard* artboard() const = 0;
+    virtual Scene* scene() const = 0;
 
     // Animation control
     virtual AnimationController* animation_controller() const = 0;

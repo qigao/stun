@@ -108,11 +108,11 @@ public:
 class MusicPlayerView {
 public:
     MusicPlayerView(flex::Instance::Ptr instance) : instance_(instance) {
-        auto* artboard = instance_->artboard();
-        if (!artboard) return;
+        auto* scene = instance_->scene();
+        if (!scene) return;
 
         // Find visualizer bars
-        auto* visualizer = artboard->find("visualizer_section");
+        auto* visualizer = scene->find("visualizer_section");
         if (visualizer && visualizer->is_group()) {
             auto* group = static_cast<flex::Group*>(visualizer);
             const auto& children = group->children();
@@ -122,25 +122,25 @@ public:
         }
 
         // Find progress elements
-        track_fill_ = dynamic_cast<flex::Shape*>(artboard->find("track_fill"));
-        playhead_ = dynamic_cast<flex::Shape*>(artboard->find("playhead"));
-        time_current_ = dynamic_cast<flex::Text*>(artboard->find("time_current"));
-        time_total_ = dynamic_cast<flex::Text*>(artboard->find("time_total"));
+        track_fill_ = dynamic_cast<flex::Shape*>(scene->find("track_fill"));
+        playhead_ = dynamic_cast<flex::Shape*>(scene->find("playhead"));
+        time_current_ = dynamic_cast<flex::Text*>(scene->find("time_current"));
+        time_total_ = dynamic_cast<flex::Text*>(scene->find("time_total"));
 
         // Find volume elements
-        vol_fill_ = dynamic_cast<flex::Shape*>(artboard->find("vol_fill"));
-        vol_thumb_ = dynamic_cast<flex::Shape*>(artboard->find("vol_thumb"));
-        volume_value_ = dynamic_cast<flex::Text*>(artboard->find("volume_value"));
+        vol_fill_ = dynamic_cast<flex::Shape*>(scene->find("vol_fill"));
+        vol_thumb_ = dynamic_cast<flex::Shape*>(scene->find("vol_thumb"));
+        volume_value_ = dynamic_cast<flex::Text*>(scene->find("volume_value"));
 
         // Find play button elements
-        pause_bar1_ = artboard->find("pause_bar1");
-        pause_bar2_ = artboard->find("pause_bar2");
+        pause_bar1_ = scene->find("pause_bar1");
+        pause_bar2_ = scene->find("pause_bar2");
 
         // Find disc for rotation
-        disc_ = artboard->find("disc");
+        disc_ = scene->find("disc");
 
         // Find glow for pulse
-        album_glow_ = artboard->find("album_glow");
+        album_glow_ = scene->find("album_glow");
     }
 
     void update(const MusicPlayerModel& model, float dt) {
@@ -325,8 +325,8 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "Failed to create artboard\n";
+        if (!instance_->scene()) {
+            std::cerr << "Failed to create scene\n";
             return false;
         }
 
@@ -431,7 +431,7 @@ private:
     void render() {
         canvas_->remove();
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
-        flex_renderer_->clear(instance_->artboard()->background());
+        flex_renderer_->clear(instance_->scene()->background());
         instance_->render(*flex_renderer_);
         flex_renderer_->end_frame();
         canvas_->draw();

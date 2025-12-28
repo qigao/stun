@@ -92,7 +92,7 @@ enum class NodeType : uint8_t {
     Svg = 4,
     Instance = 5,
     Solo = 6,
-    Artboard = 7,
+    Scene = 7,
 };
 
 // ============================================================================

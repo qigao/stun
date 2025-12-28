@@ -37,18 +37,18 @@ enum class BindingType : uint8_t {
 
 struct Binding {
     BindingType type = BindingType::Input;
-    std::string input_name;   // For Input type: the input name
+    Symbol input_name;        // For Input type: the input name
     std::string expression;   // For Expression type: the JS expression
 
     // Target
     Node* target = nullptr;
-    std::string property;     // Property name on target node
+    Symbol property;          // Property name on target node
 
     // Create input binding
     static Binding input(const std::string& input_name) {
         Binding b;
         b.type = BindingType::Input;
-        b.input_name = input_name;
+        b.input_name = Symbol(input_name);
         return b;
     }
 
@@ -74,29 +74,29 @@ public:
     // Input Management
     // -------------------------------------------
 
-    void set_input(const std::string& name, float value);
-    void set_input(const std::string& name, const std::string& value);
-    void set_input(const std::string& name, const char* value);
-    void set_input(const std::string& name, bool value);
+    void set_input(Symbol name, float value);
+    void set_input(Symbol name, const std::string& value);
+    void set_input(Symbol name, const char* value);
+    void set_input(Symbol name, bool value);
 
-    float get_float_input(const std::string& name) const;
-    const std::string& get_string_input(const std::string& name) const;
-    bool get_bool_input(const std::string& name) const;
+    float get_float_input(Symbol name) const;
+    const std::string& get_string_input(Symbol name) const;
+    bool get_bool_input(Symbol name) const;
 
-    bool has_input(const std::string& name) const;
+    bool has_input(Symbol name) const;
 
     // -------------------------------------------
     // Binding Registration
     // -------------------------------------------
 
     // Add a binding for a property
-    void add_binding(Node* target, const std::string& property, const Binding& binding);
+    void add_binding(Node* target, Symbol property, const Binding& binding);
 
     // Remove all bindings for a node
     void remove_bindings(Node* target);
 
     // Remove a specific binding
-    void remove_binding(Node* target, const std::string& property);
+    void remove_binding(Node* target, Symbol property);
 
     // -------------------------------------------
     // Evaluation

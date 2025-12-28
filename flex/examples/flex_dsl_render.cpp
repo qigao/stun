@@ -85,8 +85,8 @@ public:
         }
 
         instance_ = flex::Instance::create(definition);
-        if (!instance_->artboard()) {
-            std::cerr << "No artboard in definition\n";
+        if (!instance_->scene()) {
+            std::cerr << "No scene in definition\n";
             return false;
         }
 
@@ -179,7 +179,7 @@ private:
         instance_->advance(dt);
 
         // Simple animation: move player based on time
-        auto* player = instance_->artboard()->find("player");
+        auto* player = instance_->scene()->find("player");
         if (player) {
             float wave = std::sin(time_ * 2.0f) * 20.0f;
             player->set_y(300 + wave);
@@ -191,11 +191,11 @@ private:
         canvas_->remove();
 
         // Render flex scene to ThorVG
-        auto* artboard = instance_->artboard();
+        auto* scene = instance_->scene();
         flex_renderer_->begin_frame(WIDTH, HEIGHT, 1.0f);
 
         // Clear background
-        flex_renderer_->clear(artboard->background());
+        flex_renderer_->clear(scene->background());
 
         // Render scene
         instance_->render(*flex_renderer_);

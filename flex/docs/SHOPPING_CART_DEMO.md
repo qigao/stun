@@ -207,8 +207,8 @@ struct Product {
 ### 2. **UI节点查找**
 ```cpp
 // 层次化查找
-item1_qty_text_ = artboard->find("item1")->find("qty");
-item1_minus_btn_ = artboard->find("item1")
+item1_qty_text_ = scene->find("item1")->find("qty");
+item1_minus_btn_ = scene->find("item1")
                    ->find("qtyControls")
                    ->find("minusBtn");
 ```
