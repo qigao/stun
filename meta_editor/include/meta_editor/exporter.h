@@ -1,7 +1,7 @@
 /*
  * Meta Editor - Export functionality
  *
- * SVG and clipboard export for sharing designs.
+ * SVG, PNG, and clipboard export for sharing designs.
  */
 
 #pragma once
@@ -9,6 +9,7 @@
 #include <flex.h>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace meta_editor {
 
@@ -26,6 +27,9 @@ public:
 
     // Save SVG to file
     bool save_svg(const std::string& path) const;
+
+    // Save PNG from pixel buffer (ARGB format)
+    bool save_png(const std::string& path, const uint32_t* buffer, int width, int height) const;
 
     // Copy SVG to clipboard (platform-specific)
     bool copy_to_clipboard(const std::string& svg) const;

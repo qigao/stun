@@ -8,6 +8,23 @@
 #include <flex/bridge/renderer.h>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <fmtlog.h>
+
+// Profiling macro - set to 1 to enable
+#define FLEXUI_PROFILE 1
+
+#if FLEXUI_PROFILE
+#define PROFILE_START(name) auto _profile_##name = std::chrono::high_resolution_clock::now()
+#define PROFILE_END(name, threshold_ms) do { \
+    auto _end = std::chrono::high_resolution_clock::now(); \
+    double _ms = std::chrono::duration<double, std::milli>(_end - _profile_##name).count(); \
+    if (_ms > threshold_ms) logi("[PERF] {} took {:.2f}ms", #name, _ms); \
+} while(0)
+#else
+#define PROFILE_START(name)
+#define PROFILE_END(name, threshold_ms)
+#endif
 
 namespace flexUI {
 
@@ -22,16 +39,12 @@ Box::Box(flex::Renderer* renderer) : flex_renderer_(renderer) {
 
 Box::~Box() {
   // 清理所有元素（unique_ptr 自动删除）
-  // 但需要手动删除 Widget 和 ComputedStyle
+  // Widget 需要手动删除，computed_style 已内嵌无需删除
   for (auto& elem_ptr : elements_) {
     auto* elem = elem_ptr.get();
     if (elem->widget) {
       delete elem->widget;
       elem->widget = nullptr;
-    }
-    if (elem->computed_style) {
-      delete elem->computed_style;
-      elem->computed_style = nullptr;
     }
   }
 }
@@ -60,10 +73,9 @@ Element* Box::create(const std::string& tag, const std::string& id) {
   auto elem = std::make_unique<Element>();
   elem->set_tag(tag);
   elem->set_element_id(id);
-  elem->owner_box_ = this;  // Set owner for overlay access
+  elem->owner_box_ = this;
 
-  // 创建默认样式
-  elem->computed_style = new ComputedStyle();
+  // computed_style 已内嵌，无需 new
 
   Element* ptr = elem.get();
   elements_.push_back(std::move(elem));
@@ -81,6 +93,8 @@ Element* Box::create_with_widget(const std::string& tag, Widget* widget,
   Element* elem = create(tag, id);
   elem->widget = widget;
   elem->focusable = true;  // 带 Widget 的元素默认可聚焦
+  // 自动注册需要 update_time 的 Widget
+  active_widgets_.push_back(elem);
   return elem;
 }
 
@@ -389,50 +403,73 @@ void perform_layout_recursive(Element* elem) {
 }
 
 void Box::update() {
+  PROFILE_START(update_total);
+
   if (!root_ || !flex_renderer_) {
     return;
   }
 
-  // 第1步：计算样式（如果需要）
-  if (has_dirty_style(root_)) {
-    // logi("[Box::update] Computing styles...");
+  // 第1步：计算样式（如果需要）- O(1) 检查
+  if (subtree_dirty_style_) {
+    PROFILE_START(compute_styles);
     compute_styles(root_);
+    PROFILE_END(compute_styles, 1.0);
+    subtree_dirty_style_ = false;
   }
 
-  // 第2步：计算布局（如果需要）
-  if (has_dirty_layout(root_)) {
-    // logi("[Box::update] Computing layout... viewport={}x{}", viewport_width_, viewport_height_);
+  // 第2步：计算布局（如果需要）- O(1) 检查
+  if (subtree_dirty_layout_) {
+    PROFILE_START(layout_total);
     // 2.1 设置根元素位置
     root_->set_x(0);
     root_->set_y(0);
 
     // 2.2 同步 CSS 属性到 flex 布局属性
+    PROFILE_START(sync_layout);
     sync_layout_to_flex(root_, viewport_width_, viewport_height_);
+    PROFILE_END(sync_layout, 1.0);
 
     // 2.3 执行 flex 布局 (递归)
-    // flex::Group::perform_layout() 已处理 absolute/fixed 定位
+    PROFILE_START(perform_layout);
     perform_layout_recursive(root_);
-    // logi("[Box::update] Layout done. root size={}x{}", root_->width(), root_->height());
+    PROFILE_END(perform_layout, 1.0);
+
+    PROFILE_END(layout_total, 2.0);
+    subtree_dirty_layout_ = false;
   }
 
-  // 第3步：渲染（如果需要）
-  if (has_dirty_paint(root_)) {
-    // logi("[Box::update] Rendering...");
+  // 第3步：渲染（如果需要）- O(1) 检查
+  if (subtree_dirty_paint_) {
+    PROFILE_START(render_total);
+
     // Begin frame
+    PROFILE_START(begin_frame);
     flex_renderer_->begin_frame(viewport_width_, viewport_height_, 1.0f);
+    PROFILE_END(begin_frame, 1.0);
 
     // Clear with background color (dark gray)
     flex_renderer_->clear(Color{0.12f, 0.12f, 0.12f, 1.0f});
 
     // Render tree (normal elements)
+    PROFILE_START(render_tree);
     render_tree(root_);
+    PROFILE_END(render_tree, 5.0);
 
     // Render overlays (dropdowns, popups, etc.) - always on top
+    PROFILE_START(render_overlays);
     render_overlays(root_);
+    PROFILE_END(render_overlays, 1.0);
 
     // End frame
+    PROFILE_START(end_frame);
     flex_renderer_->end_frame();
+    PROFILE_END(end_frame, 5.0);
+
+    PROFILE_END(render_total, 10.0);
+    subtree_dirty_paint_ = false;
   }
+
+  PROFILE_END(update_total, 16.0);
 }
 
 
@@ -449,24 +486,30 @@ void Box::update_time(float delta_ms) {
   // 更新 transitions
   transitions_.update(time_ms_);
 
-  // 更新所有 Widget 和检查 transitions
-  std::function<void(Element*)> update_widgets = [&](Element* elem) {
-    if (elem->widget) {
+  // 只更新活跃的 Widget - O(k) where k = active widgets count
+  for (auto* elem : active_widgets_) {
+    if (elem && elem->widget) {
       elem->widget->update(delta_ms, *elem);
     }
     // 如果元素有活跃的 transition，需要重绘
     if (transitions_.has_active(reinterpret_cast<intptr_t>(elem), time_ms_)) {
       elem->mark_paint_dirty();
     }
-    for (auto* node : elem->children()) {
-      if (auto* child = static_cast<Element*>(node)) {
-        update_widgets(child);
-      }
-    }
-  };
+  }
+}
 
-  if (root_) {
-    update_widgets(root_);
+void Box::register_active_widget(Element* elem) {
+  // 避免重复添加
+  auto it = std::find(active_widgets_.begin(), active_widgets_.end(), elem);
+  if (it == active_widgets_.end()) {
+    active_widgets_.push_back(elem);
+  }
+}
+
+void Box::unregister_active_widget(Element* elem) {
+  auto it = std::find(active_widgets_.begin(), active_widgets_.end(), elem);
+  if (it != active_widgets_.end()) {
+    active_widgets_.erase(it);
   }
 }
 
@@ -638,6 +681,9 @@ void Box::render_tree(Element* elem) {
 void Box::render_overlays(Element* elem) {
   if (!elem || !renderer_) return;
 
+  // Skip invisible elements
+  if (!elem->is_visible()) return;
+
   // 渲染当前元素的 overlay
   if (elem->widget && elem->widget->has_overlay()) {
     auto& r = renderer_->flex();
@@ -661,6 +707,8 @@ void Box::render_overlays(Element* elem) {
 // ============================================================================
 
 void Box::dispatch_event(Event& event) {
+  PROFILE_START(dispatch_event);
+
   // 第1步：路由事件（找到目标元素）
   Element* target = nullptr;
 
@@ -668,14 +716,13 @@ void Box::dispatch_event(Event& event) {
       event.type == EventType::MouseDown ||
       event.type == EventType::MouseUp ||
       event.type == EventType::MouseWheel) {
-    // Check if any widget wants to capture mouse events (e.g., open dropdown)
-    Element* capturing = find_capturing_element(root_);
-    if (capturing) {
+    // Check cached capturing element - O(1) instead of O(n) tree traversal
+    if (capturing_element_) {
       // Route mouse event to capturing widget first
-      event.target = capturing;
+      event.target = capturing_element_;
       bool consumed = false;
-      if (capturing->widget) {
-        consumed = capturing->widget->handle_event(event, *capturing);
+      if (capturing_element_->widget) {
+        consumed = capturing_element_->widget->handle_event(event, *capturing_element_);
       }
       if (consumed) {
         event.handled = true;
@@ -684,7 +731,9 @@ void Box::dispatch_event(Event& event) {
     }
 
     // 鼠标事件 - 通过坐标查找
+    PROFILE_START(hit_test);
     target = hit_test(root_, event.x, event.y);
+    PROFILE_END(hit_test, 1.0);
   } else if (event.type == EventType::KeyDown ||
              event.type == EventType::KeyUp ||
              event.type == EventType::TextInput) {
@@ -695,12 +744,33 @@ void Box::dispatch_event(Event& event) {
   event.target = target;
 
   // 第2步：特殊处理（状态更新）
+  PROFILE_START(special_events);
   handle_special_events(event, target);
+  PROFILE_END(special_events, 1.0);
 
   // 第3步：事件传播（冒泡）
   if (target) {
+    PROFILE_START(propagate);
     propagate_event(event, target);
+    PROFILE_END(propagate, 1.0);
   }
+
+  // 第4步：更新鼠标捕获缓存
+  // 检查目标元素的 widget 是否改变了捕获状态
+  if (target && target->widget) {
+    if (target->widget->wants_mouse_capture()) {
+      capturing_element_ = target;
+    } else if (capturing_element_ == target) {
+      capturing_element_ = nullptr;
+    }
+  }
+  // 检查之前的捕获元素是否释放了捕获
+  if (capturing_element_ && capturing_element_->widget &&
+      !capturing_element_->widget->wants_mouse_capture()) {
+    capturing_element_ = nullptr;
+  }
+
+  PROFILE_END(dispatch_event, 5.0);
 }
 
 void Box::handle_special_events(Event& event, Element* target) {

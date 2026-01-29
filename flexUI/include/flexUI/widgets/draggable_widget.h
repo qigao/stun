@@ -12,6 +12,7 @@
 #include "../event.h"
 #include "../element.h"
 #include "../computed_style.h"
+#include "../renderer.h"
 #include <cmath>
 
 namespace flexUI {
@@ -19,24 +20,19 @@ namespace flexUI {
 class DraggableWidget : public Widget {
 public:
     void render(const Element& elem, Renderer& renderer) override {
-        // No custom rendering - just makes the element draggable
+        // Ghosting and lift effects are disabled for TUI to reduce lag and artifacts
     }
 
     bool handle_event(const Event& event, Element& elem) override {
         if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
-            // Start tracking potential drag, but don't consume yet
             potential_drag_ = true;
             drag_start_x_ = event.x;
             drag_start_y_ = event.y;
-            // Handle NAN (unset) values - use current element position
-            if (elem.computed_style) {
-                elem_start_x_ = std::isnan(elem.computed_style->left) ? elem.x() : elem.computed_style->left;
-                elem_start_y_ = std::isnan(elem.computed_style->top) ? elem.y() : elem.computed_style->top;
-            } else {
-                elem_start_x_ = elem.x();
-                elem_start_y_ = elem.y();
-            }
-            return false;  // Don't consume - let buttons handle clicks
+
+            offset_x_ = event.x - elem.x();
+            offset_y_ = event.y - elem.y();
+
+            return false;
         }
 
         if (event.type == EventType::MouseMove && potential_drag_) {
@@ -44,26 +40,40 @@ public:
             float dy = event.y - drag_start_y_;
             float dist = std::sqrt(dx * dx + dy * dy);
 
-            // Start actual drag after threshold movement
             if (!dragging_ && dist > drag_threshold_) {
                 dragging_ = true;
+                elem.add_state("dragging");
+                
+                if (elem.computed_style) {
+                    elem.computed_style->position = Position::Absolute;
+                }
             }
 
             if (dragging_ && elem.computed_style) {
-                elem.computed_style->left = elem_start_x_ + dx;
-                elem.computed_style->top = elem_start_y_ + dy;
+                elem.computed_style->left = event.x - offset_x_;
+                elem.computed_style->top = event.y - offset_y_;
                 elem.mark_layout_dirty();
                 return true;
             }
         }
 
         if (event.type == EventType::MouseUp) {
+            if (dragging_) {
+                elem.remove_state("dragging");
+            }
             potential_drag_ = false;
             dragging_ = false;
             return false;
         }
 
         return false;
+    }
+
+    bool has_overlay() const override { return dragging_; }
+
+    void render_overlay(const Element& elem, Renderer& renderer) override {
+        // Overlay check ensures it's on top, 
+        // but render() is already providing the "lifted" look.
     }
 
     bool wants_mouse_capture() const override {
@@ -77,9 +87,9 @@ private:
     bool dragging_ = false;
     float drag_start_x_ = 0;
     float drag_start_y_ = 0;
-    float elem_start_x_ = 0;
-    float elem_start_y_ = 0;
-    float drag_threshold_ = 5.0f;  // Pixels before drag starts
+    float offset_x_ = 0;
+    float offset_y_ = 0;
+    float drag_threshold_ = 3.0f;
 };
 
 } // namespace flexUI

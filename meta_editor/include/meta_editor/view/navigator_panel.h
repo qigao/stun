@@ -21,7 +21,7 @@ public:
     void render(flex::Renderer& renderer) override;
 
     // Handle mouse events
-    bool handle_click(float x, float y);
+    bool handle_click(float x, float y) override;
     bool handle_drag(float x, float y);
     void end_drag();
 

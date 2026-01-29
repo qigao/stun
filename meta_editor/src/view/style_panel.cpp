@@ -13,8 +13,8 @@
 #include <flexUI/widgets/gradient_editor_widget.h>
 #include <flexUI/widgets/slider_widget.h>
 #include <flexUI/widgets/button_widget.h>
+#include <stb_sprintf.h>
 #include <algorithm>
-#include <cstdio>
 
 namespace meta_editor {
 
@@ -122,7 +122,7 @@ void StylePanel::on_stroke_width_changed(float width) {
     stroke_width_ = width;
     if (stroke_width_label_elem_) {
         char buf[16];
-        snprintf(buf, sizeof(buf), "%.1f", width);
+        stbsp_snprintf(buf, sizeof(buf), "%.1f", width);
         stroke_width_label_elem_->set_text(buf);
     }
     if (stroke_enabled_) {

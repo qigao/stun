@@ -9,7 +9,10 @@
 #include "meta_editor/canvas.h"
 #include "meta_editor/selection_manager.h"
 #include "meta_editor/command.h"
+#include <flex/runtime/text.h>
 #include <cmath>
+#include <cstring>
+#include <stb_sprintf.h>
 #include <sstream>
 
 namespace meta_editor {
@@ -22,6 +25,11 @@ void SelectTool::activate() {
     active_handle_ = HandleType::None;
     editing_path_ = nullptr;
     selected_point_ = -1;
+
+    // Create snap helper if needed
+    if (!snap_helper_ && canvas_ && selection_) {
+        snap_helper_ = std::make_unique<SnapHelper>(canvas_, selection_);
+    }
 }
 
 void SelectTool::deactivate() {
@@ -35,6 +43,15 @@ bool SelectTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2&
     bool dbl_click = is_double_click(world_pos);
     last_click_time_ = std::chrono::steady_clock::now();
     last_click_pos_ = world_pos;
+
+    if (mode_ == Mode::TextEdit) {
+        // Click outside text = exit edit mode
+        auto* hit = canvas_->hit_test(world_pos);
+        if (hit != editing_text_) {
+            exit_text_edit_mode();
+        }
+        return true;
+    }
 
     if (mode_ == Mode::PathEdit) {
         // In path edit mode - check for point/handle hits
@@ -71,9 +88,29 @@ bool SelectTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2&
         return true;
     }
 
-    // Normal select mode - check resize handles first
+    // Normal select mode - check resize/rotate handles first
     if (selection_->has_selection()) {
         HandleType handle = selection_->hit_test_handle(screen_pos);
+        if (handle == HandleType::Rotate) {
+            drag_mode_ = DragMode::Rotate;
+            active_handle_ = handle;
+            drag_start_screen_ = screen_pos;
+            drag_start_world_ = world_pos;
+
+            // Store rotation center (selection center in screen space)
+            auto bounds = selection_->selection_bounds();
+            rotation_center_ = canvas_->world_to_screen(
+                bounds.x + bounds.width / 2,
+                bounds.y + bounds.height / 2
+            );
+
+            // Store original rotations for undo
+            original_rotations_.clear();
+            for (auto* node : selection_->selection()) {
+                original_rotations_.push_back(node->rotation());
+            }
+            return true;
+        }
         if (handle != HandleType::None) {
             drag_mode_ = DragMode::Resize;
             active_handle_ = handle;
@@ -93,26 +130,50 @@ bool SelectTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2&
         }
     }
 
-    // Check for object hit
-    auto* hit_node = canvas_->hit_test(screen_pos);
+    // Check for object hit (use world coordinates for hit test)
+    auto* hit_node = canvas_->hit_test(world_pos);
 
     if (hit_node) {
-        // Double-click on path shape = enter edit mode
-        if (dbl_click && hit_node->type() == flex::NodeType::Shape) {
-            auto* shape = static_cast<flex::Shape*>(hit_node);
-            if (shape->geometry_type() == flex::GeometryType::Path) {
+        // Skip locked nodes for editing/moving
+        bool is_locked = selection_->is_locked(hit_node);
+
+        // Double-click handling (allowed on locked for viewing, but not editing)
+        if (dbl_click && !is_locked) {
+            // Double-click on Text = enter text edit mode
+            if (hit_node->type() == flex::NodeType::Text) {
                 selection_->select(hit_node);
-                enter_path_edit_mode(hit_node);
+                enter_text_edit_mode(hit_node);
                 return true;
+            }
+            // Double-click on path shape = enter path edit mode
+            if (hit_node->type() == flex::NodeType::Shape) {
+                auto* shape = static_cast<flex::Shape*>(hit_node);
+                if (shape->geometry_type() == flex::GeometryType::Path) {
+                    selection_->select(hit_node);
+                    enter_path_edit_mode(hit_node);
+                    return true;
+                }
             }
         }
 
-        if (!selection_->is_selected(hit_node)) {
-            selection_->select(hit_node);
+        // Shift+Click = toggle selection (add/remove)
+        if (shift_pressed_) {
+            if (selection_->is_selected(hit_node)) {
+                selection_->remove_from_selection(hit_node);
+            } else {
+                selection_->add_to_selection(hit_node);
+            }
+        } else {
+            // Normal click = select only this node (unless already selected for drag)
+            if (!selection_->is_selected(hit_node)) {
+                selection_->select(hit_node);
+            }
         }
 
-        // Start drag
-        drag_mode_ = DragMode::Move;
+        // Start drag only if not locked
+        if (!is_locked) {
+            drag_mode_ = DragMode::Move;
+        }
         drag_start_world_ = world_pos;
         drag_start_screen_ = screen_pos;
 
@@ -124,8 +185,14 @@ bool SelectTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2&
 
         return true;
     } else {
-        selection_->clear_selection();
-        return false;
+        // Clicked on empty space - start marquee selection
+        if (!shift_pressed_) {
+            selection_->clear_selection();
+        }
+        drag_mode_ = DragMode::Marquee;
+        drag_start_world_ = world_pos;
+        marquee_end_ = world_pos;
+        return true;
     }
 }
 
@@ -167,31 +234,64 @@ bool SelectTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec2&
         return false;
     }
 
+    // Rotate mode
+    if (drag_mode_ == DragMode::Rotate) {
+        apply_rotate(screen_pos);
+        return true;
+    }
+
     // Resize mode
     if (drag_mode_ == DragMode::Resize) {
         apply_resize(screen_pos);
         return true;
     }
 
+    // Marquee selection mode
+    if (drag_mode_ == DragMode::Marquee) {
+        marquee_end_ = world_pos;
+        return true;
+    }
+
     // Normal move mode
     if (drag_mode_ == DragMode::Move) {
         auto delta = world_pos - drag_start_world_;
-
         const auto& selected = selection_->selection();
-        for (size_t i = 0; i < selected.size(); ++i) {
-            auto* node = selected[i];
-            auto original_pos = original_positions_[i];
-            float new_x = original_pos.x() + delta.x();
-            float new_y = original_pos.y() + delta.y();
 
-            // Snap final position, not delta
-            if (canvas_->is_snap_to_grid()) {
-                auto snapped = canvas_->snap_to_grid(flex::Vec2(new_x, new_y));
-                new_x = snapped.x();
-                new_y = snapped.y();
+        // Calculate new bounds for snapping
+        flex::Bounds new_bounds = selection_->selection_bounds();
+        new_bounds.x += delta.x();
+        new_bounds.y += delta.y();
+
+        // Use smart guides for object snapping
+        if (snap_helper_) {
+            std::vector<flex::Node*> excluded(selected.begin(), selected.end());
+            auto snap_result = snap_helper_->snap_bounds(new_bounds, excluded);
+
+            // Apply snapped position
+            float snap_dx = snap_result.snapped_pos.x() - new_bounds.x + delta.x();
+            float snap_dy = snap_result.snapped_pos.y() - new_bounds.y + delta.y();
+
+            for (size_t i = 0; i < selected.size(); ++i) {
+                auto* node = selected[i];
+                auto original_pos = original_positions_[i];
+                node->set_position(original_pos.x() + snap_dx, original_pos.y() + snap_dy);
             }
+        } else {
+            // Fallback to grid snapping only
+            for (size_t i = 0; i < selected.size(); ++i) {
+                auto* node = selected[i];
+                auto original_pos = original_positions_[i];
+                float new_x = original_pos.x() + delta.x();
+                float new_y = original_pos.y() + delta.y();
 
-            node->set_position(new_x, new_y);
+                if (canvas_->is_snap_to_grid()) {
+                    auto snapped = canvas_->snap_to_grid(flex::Vec2(new_x, new_y));
+                    new_x = snapped.x();
+                    new_y = snapped.y();
+                }
+
+                node->set_position(new_x, new_y);
+            }
         }
 
         return true;
@@ -225,6 +325,39 @@ bool SelectTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& w
         return false;
     }
 
+    // Rotate mode
+    if (drag_mode_ == DragMode::Rotate) {
+        const auto& selected = selection_->selection();
+
+        // Check if anything actually rotated
+        bool rotated = false;
+        std::vector<float> new_rotations;
+        for (size_t i = 0; i < selected.size(); ++i) {
+            new_rotations.push_back(selected[i]->rotation());
+            if (std::abs(new_rotations[i] - original_rotations_[i]) > 0.1f) {
+                rotated = true;
+            }
+        }
+
+        // Create RotateCommand if something rotated
+        if (rotated && commands_) {
+            for (size_t i = 0; i < selected.size(); ++i) {
+                selected[i]->set_rotation(original_rotations_[i]);
+            }
+
+            auto cmd = std::make_unique<RotateCommand>(
+                std::vector<flex::Node*>(selected.begin(), selected.end()),
+                original_rotations_,
+                new_rotations
+            );
+            commands_->execute(std::move(cmd));
+        }
+
+        drag_mode_ = DragMode::None;
+        active_handle_ = HandleType::None;
+        return true;
+    }
+
     // Resize mode
     if (drag_mode_ == DragMode::Resize) {
         // TODO: Create ResizeCommand for undo
@@ -233,7 +366,23 @@ bool SelectTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& w
         return true;
     }
 
+    // Marquee selection complete
+    if (drag_mode_ == DragMode::Marquee) {
+        marquee_end_ = world_pos;
+        auto nodes = get_nodes_in_marquee();
+        for (auto* node : nodes) {
+            selection_->add_to_selection(node);
+        }
+        drag_mode_ = DragMode::None;
+        return true;
+    }
+
     if (drag_mode_ == DragMode::Move) {
+        // Clear snap guides
+        if (snap_helper_) {
+            snap_helper_->clear_guides();
+        }
+
         const auto& selected = selection_->selection();
 
         // Check if anything actually moved
@@ -270,10 +419,43 @@ bool SelectTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& w
 }
 
 bool SelectTool::on_key_down(int key, int mods) {
-    // Track Shift for proportional resize
-    if (key == 225 || key == 229) {  // SDLK_LSHIFT or SDLK_RSHIFT
-        shift_pressed_ = true;
-        return false;
+    // Track Shift via mods (more reliable than key code)
+    shift_pressed_ = (mods & 0x0003) != 0;  // KMOD_SHIFT = KMOD_LSHIFT | KMOD_RSHIFT
+
+    if (mode_ == Mode::TextEdit) {
+        if (key == 27) {  // Escape
+            exit_text_edit_mode();
+            return true;
+        }
+        if (key == 13) {  // Enter - commit and exit
+            if (editing_text_) {
+                auto* text = static_cast<flex::Text*>(editing_text_);
+                text->set_content(text_buffer_.c_str());
+            }
+            exit_text_edit_mode();
+            return true;
+        }
+        if (key == 8 && cursor_pos_ > 0) {  // Backspace
+            text_buffer_.erase(cursor_pos_ - 1, 1);
+            cursor_pos_--;
+            if (editing_text_) {
+                auto* text = static_cast<flex::Text*>(editing_text_);
+                text->set_content(text_buffer_.c_str());
+            }
+            return true;
+        }
+        if (key == 127 && cursor_pos_ < text_buffer_.length()) {  // Delete
+            text_buffer_.erase(cursor_pos_, 1);
+            if (editing_text_) {
+                auto* text = static_cast<flex::Text*>(editing_text_);
+                text->set_content(text_buffer_.c_str());
+            }
+            return true;
+        }
+        // Arrow keys for cursor movement
+        if (key == 263 && cursor_pos_ > 0) cursor_pos_--;  // Left
+        if (key == 262 && cursor_pos_ < text_buffer_.length()) cursor_pos_++;  // Right
+        return true;
     }
 
     if (mode_ == Mode::PathEdit) {
@@ -295,19 +477,34 @@ bool SelectTool::on_key_down(int key, int mods) {
 }
 
 bool SelectTool::on_key_up(int key, int mods) {
-    // Track Shift release
-    if (key == 225 || key == 229) {  // SDLK_LSHIFT or SDLK_RSHIFT
-        shift_pressed_ = false;
-        return false;
-    }
+    // Track Shift via mods
+    shift_pressed_ = (mods & 0x0003) != 0;  // KMOD_SHIFT
     return false;
+}
+
+bool SelectTool::on_text_input(const char* text) {
+    if (mode_ != Mode::TextEdit || !editing_text_) return false;
+    
+    text_buffer_.insert(cursor_pos_, text);
+    cursor_pos_ += strlen(text);
+    
+    auto* txt = static_cast<flex::Text*>(editing_text_);
+    txt->set_content(text_buffer_.c_str());
+    return true;
 }
 
 void SelectTool::render_overlay(flex::Renderer& renderer) {
     if (mode_ == Mode::PathEdit) {
         render_path_edit_overlay(renderer);
+    } else if (mode_ == Mode::TextEdit) {
+        // Draw text edit cursor indicator
+        selection_->render_selection_indicators(renderer);
     } else {
         selection_->render_selection_indicators(renderer);
+        render_snap_guides(renderer);
+        if (drag_mode_ == DragMode::Marquee) {
+            render_marquee(renderer);
+        }
     }
 }
 
@@ -327,6 +524,24 @@ void SelectTool::exit_path_edit_mode() {
     mode_ = Mode::Select;
     selected_point_ = -1;
     path_data_.points.clear();
+}
+
+void SelectTool::enter_text_edit_mode(flex::Node* text_node) {
+    if (!text_node || text_node->type() != flex::NodeType::Text) return;
+    
+    editing_text_ = text_node;
+    mode_ = Mode::TextEdit;
+    
+    auto* text = static_cast<flex::Text*>(text_node);
+    text_buffer_ = text->content();
+    cursor_pos_ = text_buffer_.length();
+}
+
+void SelectTool::exit_text_edit_mode() {
+    editing_text_ = nullptr;
+    mode_ = Mode::Select;
+    text_buffer_.clear();
+    cursor_pos_ = 0;
 }
 
 void SelectTool::load_path_from_node() {
@@ -509,6 +724,32 @@ bool SelectTool::is_double_click(const flex::Vec2& pos) {
     return (elapsed < 400 && dist_sq < 100.0f);
 }
 
+void SelectTool::apply_rotate(const flex::Vec2& screen_pos) {
+    // Calculate angle from center to current mouse position
+    float dx = screen_pos.x() - rotation_center_.x();
+    float dy = screen_pos.y() - rotation_center_.y();
+    float current_angle = std::atan2(dy, dx) * 180.0f / 3.14159f;
+
+    // Calculate angle from center to drag start
+    float start_dx = drag_start_screen_.x() - rotation_center_.x();
+    float start_dy = drag_start_screen_.y() - rotation_center_.y();
+    float start_angle = std::atan2(start_dy, start_dx) * 180.0f / 3.14159f;
+
+    float delta_angle = current_angle - start_angle;
+
+    // Snap to 15° increments if Shift is held
+    if (shift_pressed_) {
+        delta_angle = std::round(delta_angle / 15.0f) * 15.0f;
+    }
+
+    // Apply rotation to all selected nodes
+    const auto& selected = selection_->selection();
+    for (size_t i = 0; i < selected.size(); ++i) {
+        float new_rotation = original_rotations_[i] + delta_angle;
+        selected[i]->set_rotation(new_rotation);
+    }
+}
+
 void SelectTool::apply_resize(const flex::Vec2& screen_pos) {
     // Convert screen delta to world delta
     flex::Vec2 world_pos = canvas_->screen_to_world(screen_pos);
@@ -687,6 +928,106 @@ void SelectTool::apply_resize(const flex::Vec2& screen_pos) {
             }
         }
     }
+}
+
+void SelectTool::render_snap_guides(flex::Renderer& renderer) {
+    if (!snap_helper_) return;
+
+    const auto& guides = snap_helper_->guides();
+    if (guides.empty()) return;
+
+    // Cyan dashed lines for snap guides (draw in world coordinates)
+    flex::Paint guide_paint = flex::Paint::solid(flex::Color(0.0f, 0.8f, 1.0f, 0.8f));
+
+    for (const auto& guide : guides) {
+        if (guide.type == SnapGuide::Type::Vertical) {
+            // Vertical line at world x position
+            std::string path = "M " + std::to_string(guide.position) + " -10000" +
+                              " L " + std::to_string(guide.position) + " 10000";
+            renderer.stroke_path(path, guide_paint, 1.0f);
+        } else {
+            // Horizontal line at world y position
+            std::string path = "M -10000 " + std::to_string(guide.position) +
+                              " L 10000 " + std::to_string(guide.position);
+            renderer.stroke_path(path, guide_paint, 1.0f);
+        }
+    }
+}
+
+void SelectTool::render_marquee(flex::Renderer& renderer) {
+    // Draw in world coordinates (camera transform is applied by caller)
+    float x = std::min(drag_start_world_.x(), marquee_end_.x());
+    float y = std::min(drag_start_world_.y(), marquee_end_.y());
+    float w = std::abs(marquee_end_.x() - drag_start_world_.x());
+    float h = std::abs(marquee_end_.y() - drag_start_world_.y());
+
+    // Semi-transparent fill
+    flex::Paint fill = flex::Paint::solid(flex::Color{0.3f, 0.5f, 0.9f, 0.15f});
+    flex::Paint stroke = flex::Paint::solid(flex::Color{0.3f, 0.5f, 0.9f, 0.8f});
+    flex::Paint guide_stroke = flex::Paint::solid(flex::Color(0.3f, 0.5f, 0.9f, 0.6f));
+    flex::Paint point_fill = flex::Paint::solid(flex::Color(0.3f, 0.5f, 0.9f, 1.0f));
+    flex::Paint dim_stroke = flex::Paint::solid(flex::Color(0.5f, 0.5f, 0.5f, 0.6f));
+
+    // Draw marquee rectangle
+    renderer.draw_rect(x, y, w, h, 0, fill, stroke, 1.0f);
+
+    // Draw corner points (start -> end)
+    renderer.draw_circle(drag_start_world_.x(), drag_start_world_.y(), 4.0f, point_fill, stroke, 1.0f);
+    renderer.draw_circle(marquee_end_.x(), marquee_end_.y(), 4.0f, point_fill, stroke, 1.0f);
+
+    // Draw diagonal guide line
+    std::string diag = "M " + std::to_string(drag_start_world_.x()) + " " + std::to_string(drag_start_world_.y()) +
+                      " L " + std::to_string(marquee_end_.x()) + " " + std::to_string(marquee_end_.y());
+    renderer.stroke_path(diag, guide_stroke, 1.0f);
+
+    // Draw dimension lines
+    float dim_offset = 8.0f;
+    // Width dimension (top)
+    std::string w_dim = "M " + std::to_string(x) + " " + std::to_string(y - dim_offset) +
+                       " L " + std::to_string(x + w) + " " + std::to_string(y - dim_offset);
+    renderer.stroke_path(w_dim, dim_stroke, 1.0f);
+    // Height dimension (right)
+    std::string h_dim = "M " + std::to_string(x + w + dim_offset) + " " + std::to_string(y) +
+                       " L " + std::to_string(x + w + dim_offset) + " " + std::to_string(y + h);
+    renderer.stroke_path(h_dim, dim_stroke, 1.0f);
+
+    // Draw dimension text (in world coordinates)
+    char dim_text[32];
+    stbsp_snprintf(dim_text, sizeof(dim_text), "%.0f x %.0f", w, h);
+    renderer.draw_text(dim_text, x + w / 2 - 20, y - dim_offset - 14,
+                      "Arial", 11.0f, false, flex::Color(0.4f, 0.4f, 0.4f, 1.0f));
+}
+
+std::vector<flex::Node*> SelectTool::get_nodes_in_marquee() {
+    std::vector<flex::Node*> result;
+
+    float x1 = std::min(drag_start_world_.x(), marquee_end_.x());
+    float y1 = std::min(drag_start_world_.y(), marquee_end_.y());
+    float x2 = std::max(drag_start_world_.x(), marquee_end_.x());
+    float y2 = std::max(drag_start_world_.y(), marquee_end_.y());
+
+    flex::Bounds marquee{x1, y1, x2 - x1, y2 - y1};
+
+    auto layers = canvas_->get_all_layers();
+    for (auto* layer : layers) {
+        if (!layer->visible()) continue;
+
+        for (auto* child : layer->children()) {
+            if (!child->visible()) continue;
+
+            auto nb = child->world_bounds();
+            bool intersects = !(nb.x + nb.width < marquee.x ||
+                               nb.x > marquee.x + marquee.width ||
+                               nb.y + nb.height < marquee.y ||
+                               nb.y > marquee.y + marquee.height);
+
+            if (intersects) {
+                result.push_back(child);
+            }
+        }
+    }
+
+    return result;
 }
 
 } // namespace meta_editor

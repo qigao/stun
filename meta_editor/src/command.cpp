@@ -131,6 +131,26 @@ void EditPathCommand::undo() {
     shape->set_path(old_path_);
 }
 
+// RotateCommand
+RotateCommand::RotateCommand(std::vector<flex::Node*> nodes,
+                             std::vector<float> old_rotations,
+                             std::vector<float> new_rotations)
+    : nodes_(std::move(nodes))
+    , old_rotations_(std::move(old_rotations))
+    , new_rotations_(std::move(new_rotations)) {}
+
+void RotateCommand::execute() {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        nodes_[i]->set_rotation(new_rotations_[i]);
+    }
+}
+
+void RotateCommand::undo() {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        nodes_[i]->set_rotation(old_rotations_[i]);
+    }
+}
+
 // CommandManager
 CommandManager::CommandManager() {}
 

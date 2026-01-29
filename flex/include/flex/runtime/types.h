@@ -503,6 +503,29 @@ enum class CullResult : uint8_t {
 };
 
 // ============================================================================
+// Animation Property IDs - for fast property dispatch
+// ============================================================================
+
+enum class PropertyID : uint16_t {
+    Unknown = 0,
+    // Transform
+    X, Y, Rotation, Scale, ScaleX, ScaleY,
+    // Size
+    Width, Height, Radius,
+    // Visual
+    Opacity, Visible,
+    // Shape
+    Fill, FillOpacity, Stroke, StrokeWidth,
+    // Text
+    Text, Content, FontSize, TextColor,
+    // Color (generic)
+    Color,
+};
+
+// Forward declaration for AnimValue (full definition after Color)
+// AnimValue = variant<float, std::string, Color>
+
+// ============================================================================
 // Geometry Types
 // ============================================================================
 
@@ -577,5 +600,20 @@ struct Bounds {
         return Bounds(min_x, min_y, max_x - min_x, max_y - min_y);
     }
 };
+
+// ============================================================================
+// Animation Value - variant type for animated properties
+// ============================================================================
+
+} // namespace flex
+
+#include <variant>
+
+namespace flex {
+
+using AnimValue = std::variant<float, std::string, Color>;
+
+// Helper to get PropertyID from string (fast path using first char switch)
+PropertyID get_property_id(const char* prop);
 
 } // namespace flex

@@ -55,6 +55,38 @@ void Element::set_text(const std::string& text) {
   mark_layout_dirty();
 }
 
+// ============================================================================
+// 脏标记（冒泡到 Box）
+// ============================================================================
+
+void Element::mark_style_dirty() {
+  mark_dirty(flex::DirtyFlags::Content | flex::DirtyFlags::Layout | flex::DirtyFlags::Visual);
+  if (owner_box_) {
+    owner_box_->notify_dirty_style();
+    owner_box_->notify_dirty_layout();
+    owner_box_->notify_dirty_paint();
+  }
+  // 直接 static_cast - Element::append() 只接受 Element*，所以子节点一定是 Element
+  for (auto* child : children()) {
+    static_cast<Element*>(child)->mark_style_dirty();
+  }
+}
+
+void Element::mark_layout_dirty() {
+  mark_dirty(flex::DirtyFlags::Layout | flex::DirtyFlags::Bounds);
+  if (owner_box_) {
+    owner_box_->notify_dirty_layout();
+    owner_box_->notify_dirty_paint();  // Layout changes require repaint
+  }
+}
+
+void Element::mark_paint_dirty() {
+  mark_dirty(flex::DirtyFlags::Visual);
+  if (owner_box_) {
+    owner_box_->notify_dirty_paint();
+  }
+}
+
 void Element::render(flex::Renderer& renderer) {
   if (!is_visible()) return;
 

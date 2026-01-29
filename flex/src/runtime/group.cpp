@@ -95,8 +95,8 @@ void Group::perform_layout() {
     bool is_reverse = (flex_direction_ == FlexDirection::RowReverse || flex_direction_ == FlexDirection::ColumnReverse);
 
     // Get container size
-    float container_w = layout_width_;
-    float container_h = layout_height_;
+    float container_w = layout_width();
+    float container_h = layout_height();
     float container_main = is_row ? container_w : container_h;
     float container_cross = is_row ? container_h : container_w;
 
@@ -155,10 +155,9 @@ void Group::perform_layout() {
         }
 
         // Set position and size
-        child->x_ = x;
-        child->y_ = y;
-        if (child_w > 0) child->layout_width_ = child_w;
-        if (child_h > 0) child->layout_height_ = child_h;
+        child->set_position(x, y);
+        if (child_w > 0) child->set_layout_width(child_w);
+        if (child_h > 0) child->set_layout_height(child_h);
     }
 
     // ========================================================================
@@ -362,20 +361,19 @@ void Group::perform_layout() {
             }
         }
 
-        // Set position directly (avoid triggering dirty)
-        item.node->x_ = x;
-        item.node->y_ = y;
+        // Set position and layout size
+        item.node->set_position(x, y);
 
         // Update layout size
         if (is_row) {
-            item.node->layout_width_ = item.final_main;
+            item.node->set_layout_width(item.final_main);
             if (align_items_ == AlignItems::Stretch && item.node->align_self() == AlignSelf::Auto) {
-                item.node->layout_height_ = item.cross;
+                item.node->set_layout_height(item.cross);
             }
         } else {
-            item.node->layout_height_ = item.final_main;
+            item.node->set_layout_height(item.final_main);
             if (align_items_ == AlignItems::Stretch && item.node->align_self() == AlignSelf::Auto) {
-                item.node->layout_width_ = item.cross;
+                item.node->set_layout_width(item.cross);
             }
         }
     }
@@ -537,15 +535,15 @@ Bounds Group::compute_bounds() const {
 
     // If clip is enabled, use clip dimensions
     if (clip_) {
-        b.width = layout_width_;
-        b.height = layout_height_;
+        b.width = layout_width();
+        b.height = layout_height();
         return b;
     }
 
     // Otherwise, union of all children's bounds (which are in their parent's space, i.e., our local space)
     if (children_.empty()) {
-        b.width = layout_width_;
-        b.height = layout_height_;
+        b.width = layout_width();
+        b.height = layout_height();
         return b;
     }
 
@@ -596,8 +594,8 @@ Bounds Group::compute_bounds() const {
     b.height = max_y - min_y;
 
     // Ensure at least layout size
-    b.width = std::max(b.width, layout_width_);
-    b.height = std::max(b.height, layout_height_);
+    b.width = std::max(b.width, layout_width());
+    b.height = std::max(b.height, layout_height());
 
     return b;
 }
@@ -613,33 +611,25 @@ void Group::render(Renderer& renderer) {
         perform_layout();
     }
 
-    bool needs_state = (opacity_ < 1.0f || clip_ || has_shadow() || has_blur());
-    if (needs_state) {
-        renderer.save();
-        renderer.set_transform(world_transform());
-        if (opacity_ < 1.0f) renderer.set_global_alpha(opacity_);
-        if (clip_ && layout_width_ > 0 && layout_height_ > 0) {
-            renderer.clip_rect(0, 0, layout_width_, layout_height_);
-        }
-    } else {
-        // Even if we don't need a state save, we should check if we need to set the
-        // transform for ourselves (though groups usually don't draw anything directly).
+    renderer.save();
+    
+    renderer.translate(x_, y_);
+    if (rotation_ != 0.0f) renderer.rotate(rotation_);
+    if (scale_x_ != 1.0f || scale_y_ != 1.0f) renderer.scale(scale_x_, scale_y_);
+    
+    if (opacity_ < 1.0f) renderer.set_global_alpha(opacity_);
+    if (clip_ && layout_width() > 0 && layout_height() > 0) {
+        renderer.clip_rect(0, 0, layout_width(), layout_height());
     }
 
     // Render children with full frustum culling
-    // Caching of world_bounds makes this check very fast (~10ns)
-    // and saves significant time by skipping ThorVG calls for off-screen items.
     Bounds vp = renderer.viewport();
     for (const auto& child : children_) {
-        // Optimization: Cull all nodes, not just groups
-        // Since we cached world_bounds, this is now cheap.
         if (child->cull(vp) == CullResult::Visible) {
             child->render(renderer);
         }
     }
 
-    if (needs_state) {
-        renderer.restore();
-    }
+    renderer.restore();
 }
 } // namespace flex

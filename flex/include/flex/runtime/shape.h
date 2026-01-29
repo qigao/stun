@@ -176,6 +176,12 @@ public:
     }
 
     // -------------------------------------------
+    // Animation Property Dispatch
+    // -------------------------------------------
+
+    bool set_animated_property(PropertyID pid, const AnimValue& value) override;
+
+    // -------------------------------------------
     // Rendering
     // -------------------------------------------
 

@@ -23,7 +23,7 @@ public:
     explicit ToolPanel(ToolManager* tools);
 
     void render(flex::Renderer& renderer) override;
-    bool handle_click(float screen_x, float screen_y);
+    bool handle_click(float screen_x, float screen_y) override;
 
 protected:
     float content_height() const override;

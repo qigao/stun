@@ -16,6 +16,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
+#include <stb_sprintf.h>
 #include "flex/backends/thorvg/init.h"
  
 
@@ -60,13 +61,13 @@ struct DashboardModel {
 
         // Update display strings
         char buf[32];
-        snprintf(buf, sizeof(buf), "$%.0f", revenue.numeric_value);
+        stbsp_snprintf(buf, sizeof(buf), "$%.0f", revenue.numeric_value);
         revenue.value = buf;
 
-        snprintf(buf, sizeof(buf), "%.0f", users.numeric_value);
+        stbsp_snprintf(buf, sizeof(buf), "%.0f", users.numeric_value);
         users.value = buf;
 
-        snprintf(buf, sizeof(buf), "%.0f", sessions.numeric_value);
+        stbsp_snprintf(buf, sizeof(buf), "%.0f", sessions.numeric_value);
         sessions.value = buf;
 
         // Shift chart data

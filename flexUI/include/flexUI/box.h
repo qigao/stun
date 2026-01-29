@@ -143,6 +143,11 @@ public:
    */
   void invalidate();
 
+  /**
+   * 检查是否有脏标记需要更新
+   */
+  bool is_dirty() const { return subtree_dirty_style_ || subtree_dirty_layout_ || subtree_dirty_paint_; }
+
   // ========================================================================
   // 事件处理
   // ========================================================================
@@ -185,6 +190,31 @@ public:
    */
   TransitionManager& transitions() { return transitions_; }
 
+  // ========================================================================
+  // 脏标记通知（从 Element 调用）
+  // ========================================================================
+
+  void notify_dirty_style() { subtree_dirty_style_ = true; }
+  void notify_dirty_layout() { subtree_dirty_layout_ = true; }
+  void notify_dirty_paint() { subtree_dirty_paint_ = true; }
+
+  // ========================================================================
+  // 鼠标捕获（Widget 注册/注销）
+  // ========================================================================
+
+  void set_mouse_capture(Element* elem) { capturing_element_ = elem; }
+  void release_mouse_capture(Element* elem) {
+    if (capturing_element_ == elem) capturing_element_ = nullptr;
+  }
+  Element* capturing_element() const { return capturing_element_; }
+
+  // ========================================================================
+  // 活跃 Widget 注册（用于 update_time 优化）
+  // ========================================================================
+
+  void register_active_widget(Element* elem);
+  void unregister_active_widget(Element* elem);
+
 private:
   // ========== 内部方法 ==========
 
@@ -226,8 +256,17 @@ private:
   Element* hovered_element_ = nullptr;
   Element* active_element_ = nullptr;
   Element* focused_element_ = nullptr;
+  Element* capturing_element_ = nullptr;  // 缓存的鼠标捕获元素
 
   EventCallback event_callback_;
+
+  // 脏标记缓存（O(1) 检查，由 Element 冒泡）
+  bool subtree_dirty_style_ = true;
+  bool subtree_dirty_layout_ = true;
+  bool subtree_dirty_paint_ = true;
+
+  // 活跃 Widget 集合（需要 update_time 的元素）
+  std::vector<Element*> active_widgets_;
 
   // 元素存储（Box 拥有所有元素）
   std::vector<std::unique_ptr<Element>> elements_;

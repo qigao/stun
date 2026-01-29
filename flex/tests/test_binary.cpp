@@ -50,10 +50,8 @@ TEST_CASE("CRC32: Incremental calculation matches full calculation", "[binary][c
     const char* data = "This is a longer test string to verify incremental CRC32";
     size_t len = strlen(data);
 
-    // Full calculation
     uint32_t full_crc = calculate_crc32(data, len);
 
-    // Split into two parts
     size_t split = len / 2;
     uint32_t part1_crc = calculate_crc32(data, split);
     uint32_t incremental_crc = calculate_crc32_continue(data + split, len - split, part1_crc);
@@ -74,27 +72,28 @@ TEST_CASE("CRC32: Checksum verification", "[binary][crc32]") {
 // ============================================================================
 
 TEST_CASE("BinaryWriter: Serialize empty scene", "[binary][writer]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
 
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
     REQUIRE_FALSE(binary.empty());
     REQUIRE(binary.size() >= sizeof(FileHeader));
 
-    // Check magic number
     const FileHeader* header = reinterpret_cast<const FileHeader*>(binary.data());
     REQUIRE(header->magic == MAGIC_NUMBER);
     REQUIRE(header->version == FORMAT_VERSION);
 }
 
 TEST_CASE("BinaryWriter: Scene dimensions stored correctly", "[binary][writer]") {
+    ArenaAllocator arena(4096);
     float width = 1920.0f;
     float height = 1080.0f;
-    auto scene = Scene::create(width, height);
+    auto scene = Scene::create(width, height, arena);
 
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
     const FileHeader* header = reinterpret_cast<const FileHeader*>(binary.data());
     REQUIRE_THAT(header->canvas_width, WithinAbs(width, 0.001f));
@@ -102,13 +101,14 @@ TEST_CASE("BinaryWriter: Scene dimensions stored correctly", "[binary][writer]")
 }
 
 TEST_CASE("BinaryWriter: Binary size tracking", "[binary][writer]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
 
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
-    REQUIRE(writer.binary_size() > 0);      // Has data
-    REQUIRE(writer.binary_size() == binary.size());  // Size matches
+    REQUIRE(writer.binary_size() > 0);
+    REQUIRE(writer.binary_size() == binary.size());
 }
 
 // ============================================================================
@@ -118,7 +118,7 @@ TEST_CASE("BinaryWriter: Binary size tracking", "[binary][writer]") {
 TEST_CASE("BinaryReader: Reject invalid magic number", "[binary][reader]") {
     std::vector<uint8_t> bad_data(sizeof(FileHeader), 0);
     FileHeader* header = reinterpret_cast<FileHeader*>(bad_data.data());
-    header->magic = 0xDEADBEEF;  // Wrong magic
+    header->magic = 0xDEADBEEF;
 
     BinaryReader reader;
     bool loaded = reader.load_memory(bad_data.data(), bad_data.size());
@@ -128,7 +128,7 @@ TEST_CASE("BinaryReader: Reject invalid magic number", "[binary][reader]") {
 }
 
 TEST_CASE("BinaryReader: Reject file too small", "[binary][reader]") {
-    std::vector<uint8_t> tiny_data(10, 0);  // Too small for header
+    std::vector<uint8_t> tiny_data(10, 0);
 
     BinaryReader reader;
     bool loaded = reader.load_memory(tiny_data.data(), tiny_data.size());
@@ -138,12 +138,11 @@ TEST_CASE("BinaryReader: Reject file too small", "[binary][reader]") {
 }
 
 TEST_CASE("BinaryReader: Reject invalid checksum", "[binary][reader]") {
-    // Create valid binary
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
-    // Corrupt checksum
     FileHeader* header = reinterpret_cast<FileHeader*>(binary.data());
     header->checksum = 0xDEADBEEF;
 
@@ -159,17 +158,16 @@ TEST_CASE("BinaryReader: Reject invalid checksum", "[binary][reader]") {
 // ============================================================================
 
 TEST_CASE("Round-trip: Empty scene", "[binary][roundtrip]") {
+    ArenaAllocator arena(4096);
     float width = 1024.0f;
     float height = 768.0f;
 
-    // Write
-    auto original = Scene::create(width, height);
+    auto original = Scene::create(width, height, arena);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(original.get());
+    std::vector<uint8_t> binary = writer.write(original);
 
     REQUIRE_FALSE(binary.empty());
 
-    // Read
     BinaryReader reader;
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
     REQUIRE(reader.is_valid());
@@ -177,7 +175,6 @@ TEST_CASE("Round-trip: Empty scene", "[binary][roundtrip]") {
     auto loaded = reader.create_scene();
     REQUIRE(loaded);
 
-    // Verify dimensions
     REQUIRE_THAT(loaded->width(), WithinAbs(width, 0.001f));
     REQUIRE_THAT(loaded->height(), WithinAbs(height, 0.001f));
 }
@@ -191,10 +188,11 @@ TEST_CASE("Round-trip: Multiple scene sizes", "[binary][roundtrip]") {
     };
 
     for (auto [width, height] : sizes) {
-        auto original = Scene::create(width, height);
+        ArenaAllocator arena(4096);
+        auto original = Scene::create(width, height, arena);
 
         BinaryWriter writer;
-        std::vector<uint8_t> binary = writer.write(original.get());
+        std::vector<uint8_t> binary = writer.write(original);
 
         BinaryReader reader;
         REQUIRE(reader.load_memory(binary.data(), binary.size()));
@@ -221,7 +219,6 @@ scene TestScene {
     BinaryCompiler compiler;
     std::vector<uint8_t> binary = compiler.compile_source(source);
 
-    // Debug: print error if compilation failed
     if (compiler.has_error()) {
         INFO("Compilation error: " << compiler.error_message());
     }
@@ -229,7 +226,6 @@ scene TestScene {
     REQUIRE_FALSE(compiler.has_error());
     REQUIRE_FALSE(binary.empty());
 
-    // Verify binary is valid
     BinaryReader reader;
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
 
@@ -261,7 +257,6 @@ scene Test {
     BinaryCompiler compiler;
     std::vector<uint8_t> binary = compiler.compile_source(source);
 
-    // Debug: print error if compilation failed
     if (compiler.has_error()) {
         INFO("Compilation error: " << compiler.error_message());
     }
@@ -280,37 +275,32 @@ scene Test {
 // ============================================================================
 
 TEST_CASE("BinaryReader: Reject out-of-bounds string table", "[binary][reader][boundary]") {
-    // Create valid binary
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
-    // Corrupt string table offset (point outside file)
     FileHeader* header = reinterpret_cast<FileHeader*>(binary.data());
-    uint32_t stored_checksum = header->checksum;
     header->string_table_offset = 0xFFFFFFFF;
 
-    // Recalculate checksum
     header->checksum = 0;
     header->checksum = calculate_crc32(binary.data(), binary.size());
 
     BinaryReader reader;
     bool loaded = reader.load_memory(binary.data(), binary.size());
 
-    // Should detect invalid bounds
     REQUIRE_FALSE(loaded);
 }
 
 TEST_CASE("BinaryReader: Reject out-of-bounds node data", "[binary][reader][boundary]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
     BinaryWriter writer;
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
-    // Corrupt node data offset
     FileHeader* header = reinterpret_cast<FileHeader*>(binary.data());
     header->node_data_offset = 0xFFFFFFFF;
 
-    // Recalculate checksum
     header->checksum = 0;
     header->checksum = calculate_crc32(binary.data(), binary.size());
 
@@ -325,49 +315,43 @@ TEST_CASE("BinaryReader: Reject out-of-bounds node data", "[binary][reader][boun
 // ============================================================================
 
 TEST_CASE("BinaryWriter: Compression reduces size", "[binary][compression]") {
-    auto scene = Scene::create(1920.0f, 1080.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(1920.0f, 1080.0f, arena);
 
-    // Write without compression
     BinaryWriter writer_uncompressed;
-    std::vector<uint8_t> binary_uncompressed = writer_uncompressed.write(scene.get());
+    std::vector<uint8_t> binary_uncompressed = writer_uncompressed.write(scene);
 
-    // Write with compression
     BinaryWriter writer_compressed;
     writer_compressed.set_compress(true);
-    std::vector<uint8_t> binary_compressed = writer_compressed.write(scene.get());
+    std::vector<uint8_t> binary_compressed = writer_compressed.write(scene);
 
     REQUIRE_FALSE(binary_uncompressed.empty());
     REQUIRE_FALSE(binary_compressed.empty());
 
-    // Compressed should be smaller (or same size if data is incompressible)
     REQUIRE(binary_compressed.size() <= binary_uncompressed.size());
 
-    // Check compression flag
     const FileHeader* header_uncompressed = reinterpret_cast<const FileHeader*>(binary_uncompressed.data());
     const FileHeader* header_compressed = reinterpret_cast<const FileHeader*>(binary_compressed.data());
 
     REQUIRE((header_uncompressed->flags & FLAG_COMPRESSED) == 0);
-    // Compression flag should be set if size was reduced
     if (binary_compressed.size() < binary_uncompressed.size()) {
         REQUIRE((header_compressed->flags & FLAG_COMPRESSED) != 0);
     }
 }
 
 TEST_CASE("BinaryReader: Load compressed file", "[binary][compression]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
 
-    // Write compressed binary
     BinaryWriter writer;
     writer.set_compress(true);
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
     REQUIRE_FALSE(binary.empty());
 
-    // Load compressed binary
     BinaryReader reader;
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
 
-    // Verify scene is created correctly
     auto loaded = reader.create_scene();
     REQUIRE(loaded);
     REQUIRE_THAT(loaded->width(), WithinAbs(800.0f, 0.001f));
@@ -382,11 +366,9 @@ scene TestScene {
 }
 )";
 
-    // Compile without compression
     BinaryCompiler compiler_uncompressed;
     std::vector<uint8_t> binary_uncompressed = compiler_uncompressed.compile_source(source);
 
-    // Compile with compression
     BinaryCompiler compiler_compressed;
     compiler_compressed.set_compress(true);
     std::vector<uint8_t> binary_compressed = compiler_compressed.compile_source(source);
@@ -396,17 +378,14 @@ scene TestScene {
     REQUIRE_FALSE(binary_uncompressed.empty());
     REQUIRE_FALSE(binary_compressed.empty());
 
-    // Compressed should be smaller or same size
     REQUIRE(binary_compressed.size() <= binary_uncompressed.size());
 
-    // Both should load correctly
     BinaryReader reader_uncompressed;
     REQUIRE(reader_uncompressed.load_memory(binary_uncompressed.data(), binary_uncompressed.size()));
 
     BinaryReader reader_compressed;
     REQUIRE(reader_compressed.load_memory(binary_compressed.data(), binary_compressed.size()));
 
-    // Both should produce identical scenes
     auto scene_uncompressed = reader_uncompressed.create_scene();
     auto scene_compressed = reader_compressed.create_scene();
 
@@ -417,26 +396,23 @@ scene TestScene {
 }
 
 TEST_CASE("BinaryReader: Round-trip compressed data", "[binary][compression][roundtrip]") {
+    ArenaAllocator arena(4096);
     float width = 1280.0f;
     float height = 720.0f;
-    auto scene = Scene::create(width, height);
+    auto scene = Scene::create(width, height, arena);
 
-    // Write compressed
     BinaryWriter writer;
     writer.set_compress(true);
-    std::vector<uint8_t> binary = writer.write(scene.get());
+    std::vector<uint8_t> binary = writer.write(scene);
 
     REQUIRE_FALSE(binary.empty());
 
-    // Load compressed
     BinaryReader reader;
     REQUIRE(reader.load_memory(binary.data(), binary.size()));
 
-    // Verify data
     REQUIRE_THAT(reader.canvas_width(), WithinAbs(width, 0.001f));
     REQUIRE_THAT(reader.canvas_height(), WithinAbs(height, 0.001f));
 
-    // Create scene
     auto loaded = reader.create_scene();
     REQUIRE(loaded);
     REQUIRE_THAT(loaded->width(), WithinAbs(width, 0.001f));

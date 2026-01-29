@@ -56,12 +56,13 @@ void Node::update_local_transform() {
     float ty = y_;
 
     // Apply anchor offset if not TopLeft (default)
-    if (anchor_ != Anchor::TopLeft) {
+    Anchor a = anchor();
+    if (a != Anchor::TopLeft) {
         Bounds b = compute_bounds();
         float w = b.width;
         float h = b.height;
 
-        switch (anchor_) {
+        switch (a) {
             case Anchor::TopLeft:
                 break;
             case Anchor::Top:
@@ -96,7 +97,6 @@ void Node::update_local_transform() {
     }
 
     local_transform_ = create_transform(tx, ty, rotation_, scale_x_, scale_y_);
-    // No need to clear flag here, it's cleared by callers (world_transform() or similar)
 }
 
 void Node::update_world_transform() {
@@ -217,6 +217,54 @@ Node* Node::find_by_path(const std::string& path) {
 
     // Recurse
     return child->find_by_path(remaining);
+}
+
+// ============================================================================
+// Animation Property Dispatch
+// ============================================================================
+
+bool Node::set_animated_property(PropertyID pid, const AnimValue& value) {
+    auto* f = std::get_if<float>(&value);
+    if (!f) return false;
+
+    switch (pid) {
+    case PropertyID::X:
+        if (x_ != *f) set_x(*f);
+        return true;
+
+    case PropertyID::Y:
+        if (y_ != *f) set_y(*f);
+        return true;
+
+    case PropertyID::Rotation:
+        if (rotation_ != *f) set_rotation(*f);
+        return true;
+
+    case PropertyID::Scale:
+        if (scale_x_ != *f || scale_y_ != *f) set_scale(*f);
+        return true;
+
+    case PropertyID::ScaleX:
+        if (scale_x_ != *f) set_scale(*f, scale_y_);
+        return true;
+
+    case PropertyID::ScaleY:
+        if (scale_y_ != *f) set_scale(scale_x_, *f);
+        return true;
+
+    case PropertyID::Opacity:
+        if (opacity_ != *f) set_opacity(*f);
+        return true;
+
+    case PropertyID::Visible: {
+        bool new_val = *f > 0.5f;
+        if (visible_ != new_val) set_visible(new_val);
+        return true;
+    }
+
+    default:
+        return false;
+    }
 }
 
 } // namespace flex

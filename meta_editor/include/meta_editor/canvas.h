@@ -76,13 +76,13 @@ public:
     float camera_pan_x() const { return camera_pan_x_; }
     float camera_pan_y() const { return camera_pan_y_; }
     float camera_zoom() const { return camera_zoom_; }
+    flex::Transform camera_transform() const;
     
     // Callbacks
     using LayerChangeCallback = std::function<void()>;
     void set_layer_change_callback(LayerChangeCallback cb) { layer_change_callback_ = std::move(cb); }
 
 private:
-    flex::Transform camera_transform() const;
     flex::Transform inverse_camera_transform() const;
     void rebuild_grid();
     void notify_layer_change();

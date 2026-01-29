@@ -48,15 +48,6 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     PUBLIC_HEADER "${MEMORY_PUBLIC_HEADERS}"
 )
 
-# Install library
-install(
-    TARGETS ${TARGET_NAME}
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-    PUBLIC_HEADER DESTINATION include/turbonet/memory
-)
-
 # Tests
 if(BUILD_TESTS)
     add_subdirectory(tests)

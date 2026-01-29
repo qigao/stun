@@ -1,127 +1,138 @@
-# Meta Editor
+# Meta Editor SDK
 
-A professional vector graphics editor built on Flex and FlexUI.
-
-## Features
-
-- **Layer-based canvas** with hierarchical organization
-- **Camera system** with zoom and pan
-- **Tool system** with pluggable tools:
-  - Select Tool (V) - Selection and movement
-  - Pen Tool (P) - Path drawing
-  - Rectangle Tool (R) - Rectangle creation
-  - Circle Tool (C) - Circle creation
-- **Undo/Redo** command system
-- **Snap to grid** support
-- **Transform system** using Flex's matrix operations
-
-## Building
-
-### Prerequisites
-
-- CMake 3.15+
-- C++17 compiler
-- SDL2
-- ThorVG
-- Flex (parent project)
-- FlexUI (parent project)
-
-### Build Steps
-
-```bash
-cd meta_editor
-mkdir build
-cd build
-cmake ..
-cmake --build .
-```
-
-## Running the Demo
-
-```bash
-./meta_editor_demo
-```
-
-### Controls
-
-- **V** - Select tool
-- **P** - Pen tool  
-- **R** - Rectangle tool
-- **C** - Circle tool
-- **Middle Mouse + Drag** - Pan camera
-- **Mouse Wheel** - Zoom at cursor
-- **0** - Reset camera
-- **Ctrl+Z** - Undo
-- **Ctrl+Y** - Redo
-- **ESC** - Quit
+A component-based vector graphics editor SDK built on Flex and FlexUI.
 
 ## Architecture
-
-### Core Components
-
-- **Canvas** - Main editing surface with layer management and camera
-- **Layer** - Wrapper around `flex::Group` with metadata
-- **SelectionManager** - Tracks selected nodes and renders indicators
-- **ToolManager** - Manages active tool and routes events
-- **CommandManager** - Undo/redo stack
-- **MetaEditor** - Main application class
-
-### Tools
-
-- **Tool** - Base class for editing tools
-- **SelectTool** - Selection, movement, and transformation
-- **PenTool** - Path drawing with click-to-add-points
-- **ShapeTool** - Basic shape creation (rect, circle, etc.)
-
-### Design Principles
-
-1. **Leverage Flex Scene Graph** - Use `flex::Group` as layers (no separate tree)
-2. **Camera Transform** - Applied to content root, UI overlay in screen space
-3. **Coordinate Conversion** - Screen ↔ World transforms for proper event handling
-4. **Command Pattern** - All edits are commands for undo/redo
-5. **Tool System** - Pluggable tools with consistent interface
-
-## Project Structure
 
 ```
 meta_editor/
 ├── include/meta_editor/
-│   ├── canvas.h
-│   ├── layer.h
-│   ├── selection_manager.h
-│   ├── tool_manager.h
-│   ├── tool.h
-│   ├── command.h
-│   ├── meta_editor.h
+│   ├── core/
+│   │   ├── editor.h          ← SDK entry point
+│   │   ├── editor_event.h    ← Platform-agnostic events
+│   │   └── sdl_adapter.h     ← SDL → EditorEvent conversion
+│   ├── canvas.h              ← Layers, camera, coordinate conversion
+│   ├── selection_manager.h   ← Selection state and style operations
+│   ├── tool_manager.h        ← Tool registration and dispatch
+│   ├── tool.h                ← Base class for custom tools
+│   ├── command.h             ← Undo/redo system
+│   ├── view/
+│   │   ├── panel.h           ← Base class for custom panels
+│   │   └── *.h               ← Built-in panels (optional)
 │   └── tools/
-│       ├── select_tool.h
-│       ├── pen_tool.h
-│       └── shape_tool.h
-├── src/
-│   ├── canvas.cpp
-│   ├── layer.cpp
-│   ├── selection_manager.cpp
-│   ├── tool_manager.cpp
-│   ├── command.cpp
-│   ├── meta_editor.cpp
-│   └── tools/
-│       ├── select_tool.cpp
-│       ├── pen_tool.cpp
-│       └── shape_tool.cpp
-├── examples/
-│   └── demo.cpp
-└── CMakeLists.txt
+│       └── *.h               ← Built-in tools
+└── examples/
+    ├── sdk_minimal.cpp       ← Minimal SDK usage
+    ├── line_tool_demo.cpp    ← Custom tool + panel example
+    └── demo.cpp              ← Full editor with all panels
 ```
 
-## Future Enhancements
+## Usage Patterns
 
-- UI panels (toolbar, layer panel, property panel)
-- More tools (text, transform, zoom)
-- File I/O (save/load .flex files)
-- Advanced features (guides, rulers, advanced snapping)
-- Keyboard shortcuts
-- Context menus
+### Minimal (SDK Core Only)
 
-## License
+```cpp
+#include <meta_editor/core/editor.h>
 
-Same as parent Flex project.
+Editor editor(800, 600);
+editor.init();
+
+// Handle events
+EditorEvent ev = sdl_to_editor_event(sdl_event);
+editor.handle_event(ev);
+
+// Render
+editor.update(dt);
+editor.render(renderer);
+```
+
+### Custom Tool
+
+```cpp
+#include <meta_editor/tool.h>
+
+class MyTool : public Tool {
+public:
+    const char* name() const override { return "MyTool"; }
+    
+    bool on_pointer_down(const Vec2& screen, const Vec2& world) override {
+        // Use canvas_, selection_, commands_ (auto-injected)
+        return true;
+    }
+};
+
+// Register
+editor.tools()->register_tool(std::make_unique<MyTool>());
+editor.tools()->set_active_tool("MyTool");
+```
+
+### Custom Panel
+
+```cpp
+#include <meta_editor/view/panel.h>
+
+class MyPanel : public Panel {
+public:
+    void render(flex::Renderer& r) override {
+        render_background(r);
+        // Draw your content...
+    }
+    
+    bool handle_click(float x, float y) override {
+        // Handle interaction
+        return true;
+    }
+};
+
+// Use
+MyPanel panel;
+panel.set_position(16, 200);
+panel.render(renderer);
+```
+
+### Full Application (All Built-in Panels)
+
+See `examples/demo.cpp` and `examples/full_editor_app.cpp` for a complete reference implementation with all built-in panels.
+
+## Building
+
+```bash
+cmake -B build
+cmake --build build
+
+# Run examples
+./build/sdk_minimal_demo      # Minimal SDK usage
+./build/line_tool_demo        # Custom tool example
+./build/meta_editor_demo      # Full editor with all panels
+```
+
+## Controls
+
+| Key | Action |
+|-----|--------|
+| V | Select tool |
+| P | Pen tool |
+| L | Line tool (with arrows) |
+| C | Connector tool |
+| D | Freehand/Draw tool |
+| R | Rectangle tool |
+| O | Circle tool |
+| E | Ellipse tool |
+| T | Text tool |
+| S | Star tool |
+| G | Toggle snap to grid |
+| A | Cycle arrow style (in Line tool) |
+| Ctrl+Z | Undo |
+| Ctrl+Y | Redo |
+| Ctrl+G | Group |
+| Ctrl+Shift+G | Ungroup |
+| Middle mouse | Pan |
+| Scroll | Zoom |
+| Delete | Delete selection |
+
+## Design Principles
+
+1. **Component-based** - Use only what you need
+2. **SDK-first** - Editor core has no UI dependencies
+3. **Extensible** - Tool and Panel base classes for customization
+4. **Platform-agnostic** - EditorEvent abstraction for any input system

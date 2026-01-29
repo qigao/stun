@@ -105,16 +105,20 @@ public:
     return static_cast<Element*>(parent());
   }
 
-  // 获取子元素列表（类型转换）
-  std::vector<Element*> child_elements() const {
-    std::vector<Element*> result;
-    result.reserve(children().size());
+  // 获取子元素数量
+  size_t child_count() const { return children().size(); }
+
+  // 获取第 i 个子元素（直接 static_cast，因为 append 只接受 Element*）
+  Element* child_at(size_t i) const {
+    return static_cast<Element*>(children()[i]);
+  }
+
+  // 遍历子元素（避免分配 vector）
+  template<typename Fn>
+  void for_each_child(Fn&& fn) const {
     for (auto* child : children()) {
-      if (auto* elem = dynamic_cast<Element*>(child)) {
-        result.push_back(elem);
-      }
+      fn(static_cast<Element*>(child));
     }
-    return result;
   }
 
   // ========== 布局访问 ==========
@@ -144,7 +148,8 @@ public:
   }
 
   // ========== 样式 ==========
-  ComputedStyle* computed_style = nullptr;  // 由 Box 分配
+  ComputedStyle style_;  // 内嵌样式（避免额外堆分配）
+  ComputedStyle* computed_style = &style_;  // 兼容指针访问
 
   // ========== Widget ==========
   Widget* widget = nullptr;
@@ -163,33 +168,22 @@ public:
   void on_click(ClickCallback cb) { onclick_ = std::move(cb); }
   const ClickCallback& click_callback() const { return onclick_; }
 
-  // ========== 脏标记（使用 Node 的 DirtyFlags） ==========
+  // ========== 脏标记（使用 Node 的 DirtyFlags，冒泡到 Box） ==========
 
   /**
    * 标记样式脏（会传播到布局和渲染）
    */
-  void mark_style_dirty() {
-    mark_dirty(flex::DirtyFlags::Content | flex::DirtyFlags::Layout | flex::DirtyFlags::Visual);
-    for (auto* child : children()) {
-      if (auto* elem = dynamic_cast<Element*>(child)) {
-        elem->mark_style_dirty();
-      }
-    }
-  }
+  void mark_style_dirty();
 
   /**
    * 标记布局脏
    */
-  void mark_layout_dirty() {
-    mark_dirty(flex::DirtyFlags::Layout | flex::DirtyFlags::Bounds);
-  }
+  void mark_layout_dirty();
 
   /**
    * 标记渲染脏（不影响布局）
    */
-  void mark_paint_dirty() {
-    mark_dirty(flex::DirtyFlags::Visual);
-  }
+  void mark_paint_dirty();
 
   // 兼容性方法
   bool dirty_style() const { return is_dirty(flex::DirtyFlags::Content); }

@@ -78,31 +78,14 @@ flex::Bounds SelectionManager::selection_bounds() const {
         return flex::Bounds{0, 0, 0, 0};
     }
 
-    // Calculate union of all selected node bounds in world space (WITHOUT camera transform)
-    // Use bounds() + position instead of world_bounds() to avoid camera transform
-    auto get_world_bounds = [](flex::Node* node) -> flex::Bounds {
-        auto b = node->bounds();
-        return flex::Bounds{
-            node->x() + b.x,
-            node->y() + b.y,
-            b.width,
-            b.height
-        };
-    };
-
-    flex::Bounds bounds = get_world_bounds(selected_nodes_[0]);
+    flex::Bounds bounds = selected_nodes_[0]->world_bounds();
     for (size_t i = 1; i < selected_nodes_.size(); ++i) {
-        auto node_bounds = get_world_bounds(selected_nodes_[i]);
-
-        float min_x = std::min(bounds.x, node_bounds.x);
-        float min_y = std::min(bounds.y, node_bounds.y);
-        float max_x = std::max(bounds.x + bounds.width, node_bounds.x + node_bounds.width);
-        float max_y = std::max(bounds.y + bounds.height, node_bounds.y + node_bounds.height);
-
-        bounds.x = min_x;
-        bounds.y = min_y;
-        bounds.width = max_x - min_x;
-        bounds.height = max_y - min_y;
+        auto nb = selected_nodes_[i]->world_bounds();
+        float min_x = std::min(bounds.x, nb.x);
+        float min_y = std::min(bounds.y, nb.y);
+        float max_x = std::max(bounds.x + bounds.width, nb.x + nb.width);
+        float max_y = std::max(bounds.y + bounds.height, nb.y + nb.height);
+        bounds = flex::Bounds{min_x, min_y, max_x - min_x, max_y - min_y};
     }
 
     return bounds;
@@ -121,17 +104,11 @@ void SelectionManager::render_selection_indicators(flex::Renderer& renderer) {
 
     auto bounds = selection_bounds();
 
-    // Convert to screen space
-    auto top_left = canvas_->world_to_screen(bounds.x, bounds.y);
-    auto bottom_right = canvas_->world_to_screen(
-        bounds.x + bounds.width,
-        bounds.y + bounds.height
-    );
-
-    float x = top_left.x();
-    float y = top_left.y();
-    float w = bottom_right.x() - top_left.x();
-    float h = bottom_right.y() - top_left.y();
+    // Draw in world coordinates (camera transform is applied by caller)
+    float x = bounds.x;
+    float y = bounds.y;
+    float w = bounds.width;
+    float h = bounds.height;
 
     // Draw bounding box (stroke only, no fill)
     flex::Paint no_fill = flex::Paint::none();
@@ -154,17 +131,36 @@ void SelectionManager::render_selection_indicators(flex::Renderer& renderer) {
     renderer.draw_rect(x + w/2 - hs/2, y + h - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);// bottom-center
     renderer.draw_rect(x - hs/2, y + h/2 - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);    // left-center
     renderer.draw_rect(x + w - hs/2, y + h/2 - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);// right-center
+
+    // Rotation handle (circle above top-center)
+    float rotate_offset = 25.0f;
+    float rotate_x = x + w / 2;
+    float rotate_y = y - rotate_offset;
+    renderer.draw_circle(rotate_x, rotate_y, 5.0f, handle_fill, handle_stroke, 1.5f);
+
+    // Line connecting rotation handle to top-center
+    char line_path[64];
+    snprintf(line_path, sizeof(line_path), "M %.1f %.1f L %.1f %.1f", rotate_x, y, rotate_x, rotate_y + 5);
+    renderer.stroke_path(line_path, handle_stroke, 1.0f);
 }
 
 HandleType SelectionManager::hit_test_handle(const flex::Vec2& screen_pos, float threshold) const {
     if (selected_nodes_.empty()) return HandleType::None;
 
-    // Check each handle position
+    // Check rotation handle first (higher priority)
+    flex::Vec2 rotate_pos = get_handle_position(HandleType::Rotate);
+    float dx = screen_pos.x() - rotate_pos.x();
+    float dy = screen_pos.y() - rotate_pos.y();
+    if (dx * dx + dy * dy < threshold * threshold) {
+        return HandleType::Rotate;
+    }
+
+    // Check resize handles
     for (int i = 0; i < 8; ++i) {
         HandleType handle = static_cast<HandleType>(i);
         flex::Vec2 hp = get_handle_position(handle);
-        float dx = screen_pos.x() - hp.x();
-        float dy = screen_pos.y() - hp.y();
+        dx = screen_pos.x() - hp.x();
+        dy = screen_pos.y() - hp.y();
         if (dx * dx + dy * dy < threshold * threshold) {
             return handle;
         }
@@ -194,6 +190,7 @@ flex::Vec2 SelectionManager::get_handle_position(HandleType handle) const {
         case HandleType::BottomCenter: return flex::Vec2(x + w/2, y + h);
         case HandleType::BottomLeft:   return flex::Vec2(x, y + h);
         case HandleType::LeftCenter:   return flex::Vec2(x, y + h/2);
+        case HandleType::Rotate:       return flex::Vec2(x + w/2, y - 25.0f);
         default:                       return flex::Vec2(x, y);
     }
 }
@@ -361,6 +358,30 @@ void SelectionManager::clear_stroke() {
         if (auto* shape = as_shape(node)) {
             shape->clear_stroke();
         }
+    }
+}
+
+void SelectionManager::lock_selection() {
+    for (auto* node : selected_nodes_) {
+        locked_nodes_.insert(node);
+    }
+}
+
+void SelectionManager::unlock_selection() {
+    for (auto* node : selected_nodes_) {
+        locked_nodes_.erase(node);
+    }
+}
+
+bool SelectionManager::is_locked(flex::Node* node) const {
+    return locked_nodes_.find(node) != locked_nodes_.end();
+}
+
+void SelectionManager::toggle_lock(flex::Node* node) {
+    if (is_locked(node)) {
+        locked_nodes_.erase(node);
+    } else {
+        locked_nodes_.insert(node);
     }
 }
 

@@ -71,6 +71,7 @@ set(FLEXUI_SOURCES
   src/widgets/pagination_widget.cpp
   src/widgets/stepper_widget.cpp
   src/widgets/gradient_editor_widget.cpp
+  src/widgets/markdown_widget.cpp
 )
 
 # 头文件
@@ -120,19 +121,21 @@ set(FLEXUI_HEADERS
   include/flexUI/widgets/pagination_widget.h
   include/flexUI/widgets/stepper_widget.h
   include/flexUI/widgets/gradient_editor_widget.h
+  include/flexUI/widgets/markdown_widget.h
 )
 
 # 创建库
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
 
 # 链接依赖（flex 提供后端无关的渲染抽象，thorvg 由 flex 传递依赖）
-target_link_libraries(flexUI PUBLIC ${LEXBOR_LIBRARY} flex fmtlog)
+target_link_libraries(flexUI PUBLIC ${LEXBOR_LIBRARY} flex fmtlog md_re2c)
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
   flexUI
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         ${CMAKE_SOURCE_DIR}/vendor/md-re2c/include
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 
@@ -144,3 +147,4 @@ install(DIRECTORY include/flexUI DESTINATION include)
 install(TARGETS flexUI DESTINATION lib)
 
 add_subdirectory(examples)
+add_subdirectory(tests)

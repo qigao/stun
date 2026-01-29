@@ -8,6 +8,10 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <vector>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 #ifndef M_PI
   #define M_PI 3.14159265358979323846
@@ -75,6 +79,22 @@ bool Exporter::save_svg(const std::string& path) const {
 
     file << to_svg();
     return true;
+}
+
+bool Exporter::save_png(const std::string& path, const uint32_t* buffer, int width, int height) const {
+    if (!buffer || width <= 0 || height <= 0) return false;
+
+    // Convert ARGB (ThorVG format) to RGBA (PNG format)
+    std::vector<uint8_t> rgba(width * height * 4);
+    for (int i = 0; i < width * height; i++) {
+        uint32_t c = buffer[i];
+        rgba[i * 4 + 0] = (c >> 16) & 0xFF;  // R
+        rgba[i * 4 + 1] = (c >> 8) & 0xFF;   // G
+        rgba[i * 4 + 2] = c & 0xFF;          // B
+        rgba[i * 4 + 3] = (c >> 24) & 0xFF;  // A
+    }
+
+    return stbi_write_png(path.c_str(), width, height, 4, rgba.data(), width * 4) != 0;
 }
 
 bool Exporter::copy_to_clipboard(const std::string& svg) const {

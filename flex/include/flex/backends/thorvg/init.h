@@ -30,12 +30,15 @@ namespace flex {
 
 // Initialize the Flex engine (call once at startup)
 inline void init() {
-  // Initialize ThorVG with auto-detected threads
-  tvg::Initializer::init(std::thread::hardware_concurrency());
-
-  // Initialize fmtlog
-  fmtlog::setLogLevel(fmtlog::DBG); // Enable all log levels (DBG, INF, WRN, ERR)
+  // Initialize fmtlog first so we can log
+  fmtlog::setLogLevel(fmtlog::DBG);
   fmtlog::setThreadName("main");
+
+  // Initialize ThorVG with auto-detected threads
+  unsigned int threads = std::thread::hardware_concurrency();
+  if (threads < 4) threads = 4;  // Minimum 4 threads
+  auto result = tvg::Initializer::init(threads);
+  logi("[flex::init] ThorVG initialized with {} threads (result={})", threads, (int)result);
 
   // Optional: Output to file for debugging
   // fmtlog::setLogFile("flex_engine.log", true);

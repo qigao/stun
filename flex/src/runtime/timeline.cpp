@@ -6,8 +6,6 @@
 
 #include "flex/runtime/timeline.h"
 #include "flex/runtime/node.h"
-#include "flex/runtime/shape.h"
-#include "flex/runtime/text.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -15,42 +13,10 @@
 namespace flex {
 
 // ============================================================================
-// Helper: Get color from AnimValue (supports Color or hex string)
+// Property ID lookup (implementation of declaration in types.h)
 // ============================================================================
 
-static Color get_color_value(const AnimValue& value) {
-    if (std::holds_alternative<Color>(value)) {
-        return std::get<Color>(value);
-    } else if (std::holds_alternative<std::string>(value)) {
-        return Color::from_hex(std::get<std::string>(value).c_str());
-    }
-    return Color::Black;
-}
-
-// ============================================================================
-// Property ID System - replaces hardcoded string comparisons
-// ============================================================================
-
-enum class PropertyID : uint16_t {
-    Unknown = 0,
-    // Transform
-    X, Y, Rotation, Scale, ScaleX, ScaleY,
-    // Size
-    Width, Height, Radius,
-    // Visual
-    Opacity, Visible,
-    // Shape
-    Fill, FillOpacity, Stroke, StrokeWidth,
-    // Text
-    Text, Content, FontSize, TextColor,
-    // Color (generic)
-    Color,
-};
-
-static PropertyID get_property_id(const char* prop) {
-    // Use a simple hash or switch - performance critical path
-    // Could be optimized with perfect hash if needed
-
+PropertyID get_property_id(const char* prop) {
     if (prop[0] == 'x' && prop[1] == '\0') return PropertyID::X;
     if (prop[0] == 'y' && prop[1] == '\0') return PropertyID::Y;
 
@@ -266,164 +232,9 @@ void Timeline::apply(Node* target, float time) const {
 
         if (!actual_target) continue;
 
+        // Virtual dispatch - no dynamic_cast needed
         PropertyID pid = get_property_id(actual_prop);
-
-        // Fast path: switch on PropertyID for common properties
-        switch (pid) {
-        case PropertyID::X:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->x() != *f) actual_target->set_x(*f);
-            }
-            break;
-
-        case PropertyID::Y:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->y() != *f) actual_target->set_y(*f);
-            }
-            break;
-
-        case PropertyID::Rotation:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->rotation() != *f) actual_target->set_rotation(*f);
-            }
-            break;
-
-        case PropertyID::Scale:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->scale_x() != *f || actual_target->scale_y() != *f) {
-                    actual_target->set_scale(*f);
-                }
-            }
-            break;
-
-        case PropertyID::ScaleX:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->scale_x() != *f) {
-                    actual_target->set_scale(*f, actual_target->scale_y());
-                }
-            }
-            break;
-
-        case PropertyID::ScaleY:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->scale_y() != *f) {
-                    actual_target->set_scale(actual_target->scale_x(), *f);
-                }
-            }
-            break;
-
-        case PropertyID::Opacity:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (actual_target->opacity() != *f) actual_target->set_opacity(*f);
-            }
-            break;
-
-        case PropertyID::Visible:
-            if (auto* f = std::get_if<float>(&value)) {
-                bool new_val = *f > 0.5f;
-                if (actual_target->visible() != new_val) actual_target->set_visible(new_val);
-            }
-            break;
-
-        case PropertyID::Width:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                    auto r = shape->rect();
-                    if (r.width != *f) shape->set_rect(*f, r.height, r.corner_radius);
-                }
-            }
-            break;
-
-        case PropertyID::Height:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                    auto r = shape->rect();
-                    if (r.height != *f) shape->set_rect(r.width, *f, r.corner_radius);
-                }
-            }
-            break;
-
-        case PropertyID::Radius:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                    auto c = shape->circle();
-                    if (c.radius != *f) shape->set_circle(*f);
-                }
-            }
-            break;
-
-        case PropertyID::Fill:
-        case PropertyID::Color: {
-            Color new_color = get_color_value(value);
-            if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                auto fill = shape->fill();
-                if (fill.color != new_color) shape->set_fill(new_color);
-            } else if (auto* text = dynamic_cast<Text*>(actual_target)) {
-                if (text->color() != new_color) text->set_color(new_color);
-            }
-            break;
-        }
-
-        case PropertyID::FillOpacity:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                    auto fill = shape->fill();
-                    if (fill.color.a != *f) {
-                        Color c = fill.color;
-                        c.a = *f;
-                        shape->set_fill(c);
-                    }
-                }
-            }
-            break;
-
-        case PropertyID::Stroke: {
-            Color new_color = get_color_value(value);
-            if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                auto stroke = shape->stroke();
-                if (stroke.color != new_color) shape->set_stroke(new_color, stroke.width);
-            }
-            break;
-        }
-
-        case PropertyID::StrokeWidth:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (auto* shape = dynamic_cast<Shape*>(actual_target)) {
-                    auto stroke = shape->stroke();
-                    if (stroke.width != *f) shape->set_stroke(stroke.color, *f);
-                }
-            }
-            break;
-
-        case PropertyID::Text:
-        case PropertyID::Content:
-            if (auto* s = std::get_if<std::string>(&value)) {
-                if (auto* text = dynamic_cast<Text*>(actual_target)) {
-                    if (text->content() != *s) text->set_content(*s);
-                }
-            }
-            break;
-
-        case PropertyID::FontSize:
-            if (auto* f = std::get_if<float>(&value)) {
-                if (auto* text = dynamic_cast<Text*>(actual_target)) {
-                    if (text->font_size() != *f) text->set_font_size(*f);
-                }
-            }
-            break;
-
-        case PropertyID::TextColor: {
-            Color new_color = get_color_value(value);
-            if (auto* text = dynamic_cast<Text*>(actual_target)) {
-                if (text->color() != new_color) text->set_color(new_color);
-            }
-            break;
-        }
-
-        case PropertyID::Unknown:
-            // Unknown property - silently ignore
-            break;
-        }
+        actual_target->set_animated_property(pid, value);
     }
 }
 

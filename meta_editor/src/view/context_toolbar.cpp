@@ -6,6 +6,7 @@
 #include "meta_editor/canvas.h"
 #include "meta_editor/selection_manager.h"
 #include <cmath>
+#include <stb_sprintf.h>
 
 namespace meta_editor {
 
@@ -163,7 +164,7 @@ void ContextToolbar::render_color_picker(flex::Renderer& r, float x, float y, bo
 void ContextToolbar::render_width_control(flex::Renderer& r, float x, float y) {
     // Show stroke width as text
     char buf[16];
-    snprintf(buf, sizeof(buf), "%.0fpx", current_stroke_width_);
+    stbsp_snprintf(buf, sizeof(buf), "%.0fpx", current_stroke_width_);
 
     flex::Paint text_color = flex::Paint::solid(flex::Color(0.8f, 0.8f, 0.8f, 1.0f));
     r.draw_text(buf, x, y + 15, "Arial", 12, false, text_color.color);

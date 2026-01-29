@@ -24,3 +24,4 @@ mark_as_advanced(
 add_subdirectory(lemon)
 add_subdirectory(memory)
 add_subdirectory(thorvg)
+add_subdirectory(md)

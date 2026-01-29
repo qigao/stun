@@ -59,6 +59,20 @@ public:
                py >= y_ && py <= y_ + content_height();
     }
 
+    // Event handling - returns true if event was consumed
+    // Subclasses override to handle clicks on their content
+    virtual bool handle_click(float screen_x, float screen_y) { return false; }
+
+    // Unified pointer event - handles both click and drag start
+    // Returns true if event was consumed
+    bool handle_pointer_down(float px, float py) {
+        if (!visible_ || !contains(px, py)) return false;
+        // Try click first (subclass content interaction)
+        if (handle_click(px, py)) return true;
+        // Then try drag
+        return handle_drag_start(px, py);
+    }
+
     // Drag handling - returns true if event was consumed
     bool handle_drag_start(float px, float py) {
         if (!draggable_ || !contains(px, py)) return false;

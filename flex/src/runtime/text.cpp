@@ -66,11 +66,15 @@ void Text::render(Renderer& renderer) {
 
     renderer.save();
     
-    // Use Eigen world transform for absolute positioning
-    renderer.set_transform(world_transform());
+    // Apply local transform (relative to parent, accumulated by renderer stack)
+    renderer.translate(x(), y());
+    if (rotation() != 0.0f) {
+        renderer.rotate(rotation());
+    }
+    if (scale_x() != 1.0f || scale_y() != 1.0f) {
+        renderer.scale(scale_x(), scale_y());
+    }
     
-    // Opacity needs to be handled via global alpha stack or world opacity
-    // For now keep it simple since ThorVG renderer handles it in draw_text
     renderer.set_global_alpha(opacity());
 
     // Apply shadow if set
@@ -100,4 +104,52 @@ void Text::render(Renderer& renderer) {
 
     renderer.restore();
 }
+
+// ============================================================================
+// Animation Property Dispatch
+// ============================================================================
+
+static Color get_color_value(const AnimValue& value) {
+    if (auto* c = std::get_if<Color>(&value)) {
+        return *c;
+    } else if (auto* s = std::get_if<std::string>(&value)) {
+        return Color::from_hex(s->c_str());
+    }
+    return Color::Black;
+}
+
+bool Text::set_animated_property(PropertyID pid, const AnimValue& value) {
+    // Try base class first
+    if (Node::set_animated_property(pid, value)) return true;
+
+    switch (pid) {
+    case PropertyID::Text:
+    case PropertyID::Content:
+        if (auto* s = std::get_if<std::string>(&value)) {
+            if (content_ != *s) set_content(*s);
+            return true;
+        }
+        break;
+
+    case PropertyID::FontSize:
+        if (auto* f = std::get_if<float>(&value)) {
+            if (font_size_ != *f) set_font_size(*f);
+            return true;
+        }
+        break;
+
+    case PropertyID::TextColor:
+    case PropertyID::Color: {
+        Color new_color = get_color_value(value);
+        if (color_ != new_color) set_color(new_color);
+        return true;
+    }
+
+    default:
+        break;
+    }
+
+    return false;
+}
+
 } // namespace flex

@@ -87,6 +87,22 @@ private:
     std::string new_path_;
 };
 
+class RotateCommand : public Command {
+public:
+    RotateCommand(std::vector<flex::Node*> nodes,
+                  std::vector<float> old_rotations,
+                  std::vector<float> new_rotations);
+
+    void execute() override;
+    void undo() override;
+    const char* name() const override { return "Rotate"; }
+
+private:
+    std::vector<flex::Node*> nodes_;
+    std::vector<float> old_rotations_;
+    std::vector<float> new_rotations_;
+};
+
 class CommandManager {
 public:
     CommandManager();
@@ -104,6 +120,10 @@ public:
 
     const char* undo_name() const;
     const char* redo_name() const;
+
+    // History access for UI
+    const std::vector<std::unique_ptr<Command>>& undo_stack() const { return undo_stack_; }
+    const std::vector<std::unique_ptr<Command>>& redo_stack() const { return redo_stack_; }
 
 private:
     std::vector<std::unique_ptr<Command>> undo_stack_;

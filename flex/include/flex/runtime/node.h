@@ -7,11 +7,13 @@
  * Memory Management:
  * - Default: shared_ptr for automatic memory management
  * - Arena mode: raw pointers with ArenaAllocator for high-performance scenarios
+ * - Layout data: on-demand allocation (only when flex properties are used)
  */
 
 #pragma once
 
 #include "types.h"
+#include "layout_data.h"
 #include "flex/runtime/event.h"
 #include <string>
 #include <vector>
@@ -35,13 +37,13 @@ using PaintHandle = void*;
 // ============================================================================
 
 enum class NodeType {
-    Group,      // Container with children
-    Shape,      // Geometry with fill/stroke
-    Text,       // Typography
-    Image,      // Raster image
-    Svg,        // Vector graphic
-    Instance,   // Component instance
-    Solo,       // Single-child switcher
+    Group,
+    Shape,
+    Text,
+    Image,
+    Svg,
+    Instance,
+    Solo,
 };
 
 // ============================================================================
@@ -50,19 +52,16 @@ enum class NodeType {
 
 class Node {
 public:
-    // Pointer type - raw pointer (Arena manages lifetime)
     using Ptr = Node*;
 
-    Node();  // Implemented in node.cpp (required for unique_ptr of incomplete type)
-    virtual ~Node();  // Need to delete EventDispatcher* and FSM
+    Node();
+    virtual ~Node();
 
-    // Non-copyable, non-movable
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
     Node(Node&&) = delete;
     Node& operator=(Node&&) = delete;
 
-    // Type identification
     virtual NodeType type() const = 0;
     virtual const char* type_name() const = 0;
 
@@ -81,7 +80,9 @@ public:
         if (!tags_) tags_ = std::vector<std::string>();
         tags_->push_back(tag);
     }
-    bool has_tag(const std::string& tag) const { return tags_ && std::find(tags_->begin(), tags_->end(), tag) != tags_->end(); }
+    bool has_tag(const std::string& tag) const {
+        return tags_ && std::find(tags_->begin(), tags_->end(), tag) != tags_->end();
+    }
 
     // -------------------------------------------
     // Transform Properties
@@ -89,20 +90,19 @@ public:
 
     float x() const { return x_; }
     float y() const { return y_; }
-    
-    // Optimized: inline dirty marking (no propagation needed for transform)
+
     void set_x(float x) {
         x_ = x;
         has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
-    
+
     void set_y(float y) {
         y_ = y;
         has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
-    
+
     void set_position(float x, float y) {
         x_ = x;
         y_ = y;
@@ -112,11 +112,19 @@ public:
 
     float scale_x() const { return scale_x_; }
     float scale_y() const { return scale_y_; }
-    void set_scale(float sx, float sy) { scale_x_ = sx; scale_y_ = sy; has_manual_transform_ = false; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
-    void set_scale(float s) { scale_x_ = scale_y_ = s; has_manual_transform_ = false; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_scale(float sx, float sy) {
+        scale_x_ = sx; scale_y_ = sy;
+        has_manual_transform_ = false;
+        mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
+    }
+    void set_scale(float s) { set_scale(s, s); }
 
     float rotation() const { return rotation_; }
-    void set_rotation(float degrees) { rotation_ = degrees; has_manual_transform_ = false; mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_rotation(float degrees) {
+        rotation_ = degrees;
+        has_manual_transform_ = false;
+        mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
+    }
 
     const Transform& transform() const { return local_transform(); }
     void set_transform(const Transform& t) {
@@ -143,10 +151,7 @@ public:
         static Shadow none;
         return shadow_ ? *shadow_ : none;
     }
-    void set_shadow(const Shadow& s) {
-        shadow_ = s;
-        mark_dirty(DirtyFlags::Visual);
-    }
+    void set_shadow(const Shadow& s) { shadow_ = s; mark_dirty(DirtyFlags::Visual); }
     void set_shadow(float ox, float oy, float blur, const Color& color) {
         shadow_ = Shadow(ox, oy, blur, color);
         mark_dirty(DirtyFlags::Visual);
@@ -157,112 +162,143 @@ public:
         static BlurFilter none;
         return blur_ ? *blur_ : none;
     }
-    void set_blur(const BlurFilter& b) {
-        blur_ = b;
-        mark_dirty(DirtyFlags::Visual);
-    }
-    void set_blur(float radius) {
-        blur_ = BlurFilter(radius);
-        mark_dirty(DirtyFlags::Visual);
-    }
+    void set_blur(const BlurFilter& b) { blur_ = b; mark_dirty(DirtyFlags::Visual); }
+    void set_blur(float radius) { blur_ = BlurFilter(radius); mark_dirty(DirtyFlags::Visual); }
     bool has_blur() const { return blur_ && !blur_->is_none(); }
 
     // -------------------------------------------
-    // Layout Properties (for flex children)
+    // Layout Properties (on-demand allocation)
     // -------------------------------------------
 
-    float layout_width() const { return layout_width_; }
-    float layout_height() const { return layout_height_; }
-    void set_layout_width(float w) { layout_width_ = w; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
-    void set_layout_height(float h) { layout_height_ = h; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
-    void set_layout_size(float w, float h) { layout_width_ = w; layout_height_ = h; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+    float layout_width() const { return layout_ ? layout_->width : 0; }
+    float layout_height() const { return layout_ ? layout_->height : 0; }
+    void set_layout_width(float w) { ensure_layout(); layout_->width = w; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+    void set_layout_height(float h) { ensure_layout(); layout_->height = h; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+    void set_layout_size(float w, float h) {
+        ensure_layout();
+        layout_->width = w;
+        layout_->height = h;
+        mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds);
+    }
 
-    float flex_grow() const { return flex_grow_; }
-    float flex_shrink() const { return flex_shrink_; }
-    float flex_basis() const { return flex_basis_; }
-    void set_flex_grow(float g) { flex_grow_ = g; mark_dirty(DirtyFlags::Layout); }
-    void set_flex_shrink(float s) { flex_shrink_ = s; mark_dirty(DirtyFlags::Layout); }
-    void set_flex_basis(float b) { flex_basis_ = b; mark_dirty(DirtyFlags::Layout); }
+    float flex_grow() const { return layout_ ? layout_->flex_grow : 0; }
+    float flex_shrink() const { return layout_ ? layout_->flex_shrink : 1; }
+    float flex_basis() const { return layout_ ? layout_->flex_basis : 0; }
+    void set_flex_grow(float g) { ensure_layout(); layout_->flex_grow = g; mark_dirty(DirtyFlags::Layout); }
+    void set_flex_shrink(float s) { ensure_layout(); layout_->flex_shrink = s; mark_dirty(DirtyFlags::Layout); }
+    void set_flex_basis(float b) { ensure_layout(); layout_->flex_basis = b; mark_dirty(DirtyFlags::Layout); }
     void set_flex(float grow, float shrink = 1.0f, float basis = 0.0f) {
-        flex_grow_ = grow;
-        flex_shrink_ = shrink;
-        flex_basis_ = basis;
+        ensure_layout();
+        layout_->flex_grow = grow;
+        layout_->flex_shrink = shrink;
+        layout_->flex_basis = basis;
         mark_dirty(DirtyFlags::Layout);
     }
 
-    AlignSelf align_self() const { return align_self_; }
-    void set_align_self(AlignSelf a) { align_self_ = a; mark_dirty(DirtyFlags::Layout); }
+    AlignSelf align_self() const { return layout_ ? layout_->align_self : AlignSelf::Auto; }
+    void set_align_self(AlignSelf a) { ensure_layout(); layout_->align_self = a; mark_dirty(DirtyFlags::Layout); }
 
-    // Position mode: absolute elements are excluded from flex layout
-    bool position_absolute() const { return position_absolute_ || position_mode_ == PositionMode::Absolute || position_mode_ == PositionMode::Fixed; }
-    void set_position_absolute(bool a) { position_absolute_ = a; mark_dirty(DirtyFlags::Layout); }
+    bool position_absolute() const {
+        if (!layout_) return false;
+        return layout_->position_absolute ||
+               layout_->position_mode == PositionMode::Absolute ||
+               layout_->position_mode == PositionMode::Fixed;
+    }
+    void set_position_absolute(bool a) { ensure_layout(); layout_->position_absolute = a; mark_dirty(DirtyFlags::Layout); }
 
-    // Anchor point: determines which point of the element x,y refers to
-    Anchor anchor() const { return anchor_; }
-    void set_anchor(Anchor a) { anchor_ = a; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    Anchor anchor() const { return layout_ ? layout_->anchor : Anchor::TopLeft; }
+    void set_anchor(Anchor a) { ensure_layout(); layout_->anchor = a; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
 
-    // -------------------------------------------
-    // Extended Layout Properties (CSS-like)
-    // -------------------------------------------
-
-    PositionMode position_mode() const { return position_mode_; }
+    // Extended Layout Properties
+    PositionMode position_mode() const { return layout_ ? layout_->position_mode : PositionMode::Static; }
     void set_position_mode(PositionMode m) {
-        position_mode_ = m;
-        position_absolute_ = (m == PositionMode::Absolute || m == PositionMode::Fixed);
+        ensure_layout();
+        layout_->position_mode = m;
+        layout_->position_absolute = (m == PositionMode::Absolute || m == PositionMode::Fixed);
         mark_dirty(DirtyFlags::Layout);
     }
 
-    float position_top() const { return position_top_; }
-    float position_right() const { return position_right_; }
-    float position_bottom() const { return position_bottom_; }
-    float position_left() const { return position_left_; }
-    void set_position_top(float v) { position_top_ = v; mark_dirty(DirtyFlags::Layout); }
-    void set_position_right(float v) { position_right_ = v; mark_dirty(DirtyFlags::Layout); }
-    void set_position_bottom(float v) { position_bottom_ = v; mark_dirty(DirtyFlags::Layout); }
-    void set_position_left(float v) { position_left_ = v; mark_dirty(DirtyFlags::Layout); }
+    float position_top() const { return layout_ ? layout_->position_top : NAN; }
+    float position_right() const { return layout_ ? layout_->position_right : NAN; }
+    float position_bottom() const { return layout_ ? layout_->position_bottom : NAN; }
+    float position_left() const { return layout_ ? layout_->position_left : NAN; }
+    void set_position_top(float v) { ensure_layout(); layout_->position_top = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_right(float v) { ensure_layout(); layout_->position_right = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_bottom(float v) { ensure_layout(); layout_->position_bottom = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_left(float v) { ensure_layout(); layout_->position_left = v; mark_dirty(DirtyFlags::Layout); }
     void set_position_offsets(float top, float right, float bottom, float left) {
-        position_top_ = top; position_right_ = right;
-        position_bottom_ = bottom; position_left_ = left;
+        ensure_layout();
+        layout_->position_top = top;
+        layout_->position_right = right;
+        layout_->position_bottom = bottom;
+        layout_->position_left = left;
         mark_dirty(DirtyFlags::Layout);
     }
 
-    int z_index() const { return z_index_; }
-    void set_z_index(int z) { z_index_ = z; mark_dirty(DirtyFlags::Visual); }
+    int z_index() const { return layout_ ? layout_->z_index : 0; }
+    void set_z_index(int z) { ensure_layout(); layout_->z_index = z; mark_dirty(DirtyFlags::Visual); }
 
-    BoxSizing box_sizing() const { return box_sizing_; }
-    void set_box_sizing(BoxSizing b) { box_sizing_ = b; mark_dirty(DirtyFlags::Layout); }
+    BoxSizing box_sizing() const { return layout_ ? layout_->box_sizing : BoxSizing::ContentBox; }
+    void set_box_sizing(BoxSizing b) { ensure_layout(); layout_->box_sizing = b; mark_dirty(DirtyFlags::Layout); }
 
-    bool width_is_percent() const { return width_is_percent_; }
-    bool height_is_percent() const { return height_is_percent_; }
-    void set_width_percent(float percent) { layout_width_ = percent; width_is_percent_ = true; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
-    void set_height_percent(float percent) { layout_height_ = percent; height_is_percent_ = true; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+    bool width_is_percent() const { return layout_ && layout_->width_is_percent; }
+    bool height_is_percent() const { return layout_ && layout_->height_is_percent; }
+    void set_width_percent(float percent) {
+        ensure_layout();
+        layout_->width = percent;
+        layout_->width_is_percent = true;
+        mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds);
+    }
+    void set_height_percent(float percent) {
+        ensure_layout();
+        layout_->height = percent;
+        layout_->height_is_percent = true;
+        mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds);
+    }
 
-    float margin_top() const { return margin_[0]; }
-    float margin_right() const { return margin_[1]; }
-    float margin_bottom() const { return margin_[2]; }
-    float margin_left() const { return margin_[3]; }
-    void set_margin(float all) { margin_[0] = margin_[1] = margin_[2] = margin_[3] = all; mark_dirty(DirtyFlags::Layout); }
+    float margin_top() const { return layout_ ? layout_->margin[0] : 0; }
+    float margin_right() const { return layout_ ? layout_->margin[1] : 0; }
+    float margin_bottom() const { return layout_ ? layout_->margin[2] : 0; }
+    float margin_left() const { return layout_ ? layout_->margin[3] : 0; }
+    void set_margin(float all) {
+        ensure_layout();
+        layout_->margin[0] = layout_->margin[1] = layout_->margin[2] = layout_->margin[3] = all;
+        mark_dirty(DirtyFlags::Layout);
+    }
     void set_margin(float top, float right, float bottom, float left) {
-        margin_[0] = top; margin_[1] = right; margin_[2] = bottom; margin_[3] = left;
+        ensure_layout();
+        layout_->margin[0] = top;
+        layout_->margin[1] = right;
+        layout_->margin[2] = bottom;
+        layout_->margin[3] = left;
         mark_dirty(DirtyFlags::Layout);
     }
 
-    float border_width_top() const { return border_width_[0]; }
-    float border_width_right() const { return border_width_[1]; }
-    float border_width_bottom() const { return border_width_[2]; }
-    float border_width_left() const { return border_width_[3]; }
-    void set_border_width(float all) { border_width_[0] = border_width_[1] = border_width_[2] = border_width_[3] = all; mark_dirty(DirtyFlags::Layout); }
+    float border_width_top() const { return layout_ ? layout_->border_width[0] : 0; }
+    float border_width_right() const { return layout_ ? layout_->border_width[1] : 0; }
+    float border_width_bottom() const { return layout_ ? layout_->border_width[2] : 0; }
+    float border_width_left() const { return layout_ ? layout_->border_width[3] : 0; }
+    void set_border_width(float all) {
+        ensure_layout();
+        layout_->border_width[0] = layout_->border_width[1] = layout_->border_width[2] = layout_->border_width[3] = all;
+        mark_dirty(DirtyFlags::Layout);
+    }
     void set_border_width(float top, float right, float bottom, float left) {
-        border_width_[0] = top; border_width_[1] = right; border_width_[2] = bottom; border_width_[3] = left;
+        ensure_layout();
+        layout_->border_width[0] = top;
+        layout_->border_width[1] = right;
+        layout_->border_width[2] = bottom;
+        layout_->border_width[3] = left;
         mark_dirty(DirtyFlags::Layout);
     }
 
-    // -------------------------------------------
-    // Dirty Flags (for optimization)
-    // -------------------------------------------
+    // Check if layout data is allocated
+    bool has_layout() const { return layout_ != nullptr; }
+    LayoutData* layout_data() { return layout_.get(); }
+    const LayoutData* layout_data() const { return layout_.get(); }
 
     // -------------------------------------------
-    // Matrix Transforms (Eigen Optimized)
+    // Matrix Transforms
     // -------------------------------------------
 
     const Transform& local_transform() const {
@@ -279,38 +315,25 @@ public:
         return world_transform_;
     }
 
-    // Convert point from world space to local space
-    Vec2 to_local(const Vec2& world_pos) const {
-        return world_transform().inverse() * world_pos;
-    }
-
-    // Convert point from local space to world space
-    Vec2 to_world(const Vec2& local_pos) const {
-        return world_transform() * local_pos;
-    }
+    Vec2 to_local(const Vec2& world_pos) const { return world_transform().inverse() * world_pos; }
+    Vec2 to_world(const Vec2& local_pos) const { return world_transform() * local_pos; }
 
     // -------------------------------------------
-    // Dirty Flags (for optimization)
+    // Dirty Flags
     // -------------------------------------------
 
     DirtyFlags dirty_flags() const { return dirty_flags_; }
     bool is_dirty() const { return dirty_flags_ != DirtyFlags::None; }
     bool is_dirty(DirtyFlags flag) const { return has_flag(dirty_flags_, flag); }
-    
-    // mark_dirty remains public, but we'll override it in Group to handle children
     virtual void mark_dirty(DirtyFlags flags);
-    
     void clear_dirty() { dirty_flags_ = DirtyFlags::None; }
     void clear_dirty(DirtyFlags flags) { dirty_flags_ &= ~flags; }
 
     // -------------------------------------------
-    // Batch Updates (Performance Optimization)
+    // Batch Updates
     // -------------------------------------------
 
-    // Begin batch update mode - accumulates dirty flags without propagation
     void begin_batch() { batch_mode_ = true; }
-
-    // End batch update mode - propagates accumulated dirty flags once
     void end_batch() {
         batch_mode_ = false;
         if (pending_dirty_flags_ != DirtyFlags::None) {
@@ -318,25 +341,19 @@ public:
             pending_dirty_flags_ = DirtyFlags::None;
         }
     }
-
-    // Check if in batch mode
     bool is_batching() const { return batch_mode_; }
 
     // -------------------------------------------
-    // Culling (for rendering optimization)
+    // Culling
     // -------------------------------------------
 
-    // Check culling against viewport bounds (cached)
     CullResult cull(const Bounds& viewport) const {
         if (!visible_) return CullResult::Hidden;
         if (opacity_ <= 0.0f) return CullResult::Transparent;
-        
-        // Viewport-based culling check
         if (!intersects_viewport(viewport)) return CullResult::OutOfView;
         return CullResult::Visible;
     }
 
-    // Check if node's bounds intersect with viewport
     bool intersects_viewport(const Bounds& viewport) const;
 
     // -------------------------------------------
@@ -345,9 +362,16 @@ public:
 
     Node* parent() const { return parent_; }
     virtual bool is_group() const { return false; }
-
-    // Find child node by ID (returns nullptr for non-Group nodes)
     virtual Node* find(const std::string& id) { return nullptr; }
+
+    // -------------------------------------------
+    // Animation Property Dispatch
+    // -------------------------------------------
+
+    // Set animated property by ID - returns true if handled
+    // Base class handles: x, y, rotation, scale, scaleX, scaleY, opacity, visible
+    // Subclasses override to handle their specific properties
+    virtual bool set_animated_property(PropertyID pid, const AnimValue& value);
 
     // -------------------------------------------
     // Rendering
@@ -367,7 +391,6 @@ public:
         return cached_bounds_;
     }
 
-    // Get node bounds in world space (cached)
     Bounds world_bounds() const {
         if (is_dirty(DirtyFlags::WorldBounds | DirtyFlags::Transform | DirtyFlags::Bounds)) {
             cached_world_bounds_ = bounds().transformed(world_transform());
@@ -376,53 +399,23 @@ public:
         return cached_world_bounds_;
     }
 
-    // Compute bounds (override in subclasses)
     virtual Bounds compute_bounds() const { return Bounds{0, 0, 0, 0}; }
-
-    // Test if point is inside node
     virtual bool hit_test(float px, float py) const;
 
     // Event callbacks - Pointer
-    void on_pointer_down(PointerEventCallback callback) {
-        ensure_events();
-        events_->on_pointer_down = std::move(callback);
-    }
-    void on_pointer_up(PointerEventCallback callback) {
-        ensure_events();
-        events_->on_pointer_up = std::move(callback);
-    }
-    void on_pointer_move(PointerEventCallback callback) {
-        ensure_events();
-        events_->on_pointer_move = std::move(callback);
-    }
-    void on_hover_enter(PointerEventCallback callback) {
-        ensure_events();
-        events_->on_hover_enter = std::move(callback);
-    }
-    void on_hover_leave(PointerEventCallback callback) {
-        ensure_events();
-        events_->on_hover_leave = std::move(callback);
-    }
-    void on_click(ClickCallback callback) {
-        ensure_events();
-        events_->on_click = std::move(callback);
-    }
+    void on_pointer_down(PointerEventCallback callback) { ensure_events(); events_->on_pointer_down = std::move(callback); }
+    void on_pointer_up(PointerEventCallback callback) { ensure_events(); events_->on_pointer_up = std::move(callback); }
+    void on_pointer_move(PointerEventCallback callback) { ensure_events(); events_->on_pointer_move = std::move(callback); }
+    void on_hover_enter(PointerEventCallback callback) { ensure_events(); events_->on_hover_enter = std::move(callback); }
+    void on_hover_leave(PointerEventCallback callback) { ensure_events(); events_->on_hover_leave = std::move(callback); }
+    void on_click(ClickCallback callback) { ensure_events(); events_->on_click = std::move(callback); }
 
     // Event callbacks - Keyboard
-    void on_key_down(KeyEventCallback callback) {
-        ensure_events();
-        events_->on_key_down = std::move(callback);
-    }
-    void on_key_up(KeyEventCallback callback) {
-        ensure_events();
-        events_->on_key_up = std::move(callback);
-    }
-    void on_focus(FocusCallback callback) {
-        ensure_events();
-        events_->on_focus = std::move(callback);
-    }
+    void on_key_down(KeyEventCallback callback) { ensure_events(); events_->on_key_down = std::move(callback); }
+    void on_key_up(KeyEventCallback callback) { ensure_events(); events_->on_key_up = std::move(callback); }
+    void on_focus(FocusCallback callback) { ensure_events(); events_->on_focus = std::move(callback); }
 
-    // Fire events (called by Instance during event propagation)
+    // Fire events
     void fire_pointer_down(PointerEvent& event);
     void fire_pointer_up(PointerEvent& event);
     void fire_pointer_move(PointerEvent& event);
@@ -433,7 +426,6 @@ public:
     void fire_key_up(KeyEvent& event);
     void fire_focus(bool gained);
 
-    // Check if node has event handlers
     bool has_pointer_handlers() const;
     bool has_key_handlers() const;
 
@@ -443,98 +435,74 @@ public:
 
     bool focusable() const { return focusable_; }
     void set_focusable(bool f) { focusable_ = f; }
-
     bool focused() const { return focused_; }
-    void set_focused(bool f);  // Internal: use Instance::set_focus() instead
+    void set_focused(bool f);
 
     // -------------------------------------------
-    // FSM and Pseudo-Class Styles (New architecture)
+    // FSM and Pseudo-Class Styles
     // -------------------------------------------
 
-    // Pseudo-class styles map (:hover, :pressed, :dragging, etc.)
     using PseudoClassStyleMap = std::unordered_map<std::string, class PseudoClassStyle>;
     PseudoClassStyleMap* pseudo_class_styles() const { return pseudo_styles_.get(); }
-
-    // Add a pseudo-class style (called by DSL parser)
     void add_pseudo_class_style(const std::string& name, const class PseudoClassStyle& style);
 
-    // FSM instance (optional, allocated on demand)
     void* fsm_instance() const { return fsm_instance_; }
     void set_fsm_instance(void* fsm) { fsm_instance_ = fsm; }
 
-    // Type-safe FSM access
     template<typename FsmType>
     FsmType* get_fsm() const { return static_cast<FsmType*>(fsm_instance_); }
 
-    // Dispatch event to FSM (if attached)
     template<typename EventType>
     void dispatch_fsm_event(const EventType& event);
 
-    // Find child by path (for property application: "bg.fill")
     Node* find_by_path(const std::string& path);
+
+    // -------------------------------------------
+    // Retained Mode Cache
+    // -------------------------------------------
+
+    PaintHandle cached_paint() const { return cached_paint_; }
+    void set_cached_paint(PaintHandle paint) { cached_paint_ = paint; }
+    void invalidate_cache() { cached_paint_ = nullptr; }
+    bool needs_rebuild() const { return cached_paint_ == nullptr || is_dirty(DirtyFlags::Content); }
 
 protected:
     friend class Group;
 
-    // Propagate dirty to parent (layout changes affect parent)
     void propagate_dirty();
-
-    // Lazy allocation for event handlers (Phase 2.1 optimization)
     void ensure_events();
+    void ensure_layout() { if (!layout_) layout_ = std::make_unique<LayoutData>(); }
 
+    // Identity
     std::string id_;
     std::optional<std::vector<std::string>> tags_;
 
     // Transform
     float x_ = 0, y_ = 0;
     float scale_x_ = 1, scale_y_ = 1;
-    float rotation_ = 0;  // degrees
+    float rotation_ = 0;
 
     // Visual
     float opacity_ = 1.0f;
     bool visible_ = true;
 
-    // Effects (Phase 2.2: Optional allocation)
+    // Effects (optional)
     std::optional<Shadow> shadow_;
     std::optional<BlurFilter> blur_;
 
-    // Layout (for flex children)
-    float layout_width_ = 0;    // 0 = auto (use bounds)
-    float layout_height_ = 0;   // 0 = auto (use bounds)
-    float flex_grow_ = 0;       // Grow factor
-    float flex_shrink_ = 1;     // Shrink factor
-    float flex_basis_ = 0;      // Initial main size (0 = auto)
-    AlignSelf align_self_ = AlignSelf::Auto;
-    bool position_absolute_ = false;  // If true, excluded from flex layout (deprecated, use position_mode_)
-    Anchor anchor_ = Anchor::TopLeft; // Anchor point for positioning
+    // Layout (on-demand allocation - saves ~80 bytes per node)
+    std::unique_ptr<LayoutData> layout_;
 
-    // Extended layout properties (CSS-like)
-    PositionMode position_mode_ = PositionMode::Static;  // CSS position
-    float position_top_ = NAN;     // CSS top (NAN = auto)
-    float position_right_ = NAN;   // CSS right
-    float position_bottom_ = NAN;  // CSS bottom
-    float position_left_ = NAN;    // CSS left
-    int z_index_ = 0;              // CSS z-index (only for positioned elements)
-    BoxSizing box_sizing_ = BoxSizing::ContentBox;  // CSS box-sizing
-    bool width_is_percent_ = false;   // If true, layout_width_ is a percentage
-    bool height_is_percent_ = false;  // If true, layout_height_ is a percentage
-    float margin_[4] = {0, 0, 0, 0};  // top, right, bottom, left
-    float border_width_[4] = {0, 0, 0, 0};  // top, right, bottom, left
-
-    // Dirty flags (for optimization)
-    DirtyFlags dirty_flags_ = DirtyFlags::All;  // Start dirty
-
-    // Batch update mode (for performance)
+    // Dirty flags
+    DirtyFlags dirty_flags_ = DirtyFlags::All;
     bool batch_mode_ = false;
     DirtyFlags pending_dirty_flags_ = DirtyFlags::None;
-
     bool has_manual_transform_ = false;
 
-    // Cached bounds (recomputed when Bounds flag is dirty)
+    // Cached bounds
     mutable Bounds cached_bounds_;
     mutable Bounds cached_world_bounds_;
 
-    // Internal dirty marking (respects batch mode)
     void mark_dirty_internal(DirtyFlags flags) {
         if (batch_mode_) {
             pending_dirty_flags_ |= flags;
@@ -543,47 +511,29 @@ protected:
         }
     }
 
-    // Cached transforms (Eigen Matrix3f)
+    // Cached transforms
     Transform local_transform_ = Transform::Identity();
     Transform world_transform_ = Transform::Identity();
 
-    // Internal update logic
     void update_local_transform();
     void update_world_transform();
 
-    // Hierarchy (set by parent)
+    // Hierarchy
     Node* parent_ = nullptr;
 
-    // Event callbacks - Phase 2.1: On-demand allocation
-    // Only 8B pointer instead of 360B inline storage
-    // Allocated only when node actually uses events (90% of nodes don't)
+    // Events (on-demand allocation)
     EventDispatcher* events_ = nullptr;
 
-    // Focus state
+    // Focus
     bool focusable_ = false;
     bool focused_ = false;
 
-    // FSM and Pseudo-Class Styles (new architecture)
-    std::unique_ptr<PseudoClassStyleMap> pseudo_styles_;  // On-demand allocation
-    void* fsm_instance_ = nullptr;  // Type-erased FSM pointer
+    // FSM
+    std::unique_ptr<PseudoClassStyleMap> pseudo_styles_;
+    void* fsm_instance_ = nullptr;
 
-    // -------------------------------------------
-    // Backend Retained Mode Cache
-    // -------------------------------------------
-    // Cached backend paint object for retained mode rendering.
-    // Owned by backend canvas after push(), we just keep a reference.
+    // Retained mode cache
     PaintHandle cached_paint_ = nullptr;
-
-public:
-    // Retained mode API
-    PaintHandle cached_paint() const { return cached_paint_; }
-    void set_cached_paint(PaintHandle paint) { cached_paint_ = paint; }
-    void invalidate_cache() { cached_paint_ = nullptr; }
-
-    // Check if node needs backend object rebuild (content changed)
-    bool needs_rebuild() const {
-        return cached_paint_ == nullptr || is_dirty(DirtyFlags::Content);
-    }
 };
 
 } // namespace flex

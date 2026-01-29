@@ -61,6 +61,7 @@ enum class KeyCode {
   // 功能键
   Escape = 256,
   Enter = 257,
+  Space = 32,
   Tab = 258,
   Backspace = 259,
   Delete = 261,

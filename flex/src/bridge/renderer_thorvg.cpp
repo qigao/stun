@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <iostream>
+#include <fmtlog.h>
 #include <stb_sprintf.h>
 #include <thorvg.h>
 #include <vector>
@@ -383,23 +383,18 @@ public:
     canvas_->sync();
     auto sync_done = std::chrono::high_resolution_clock::now();
 
-    // frame_count_++;
-    // if (frame_count_ % 100 == 0) {
-    //   double remove_ms = std::chrono::duration<double, std::milli>(remove_time_ -
-    //   frame_start_).count(); double push_ms = std::chrono::duration<double, std::milli>(push_done
-    //   - remove_time_).count(); double draw_ms = std::chrono::duration<double,
-    //   std::milli>(draw_done - push_done).count(); double sync_ms = std::chrono::duration<double,
-    //   std::milli>(sync_done - draw_done).count(); double total_ms = std::chrono::duration<double,
-    //   std::milli>(sync_done - frame_start_).count();
+    frame_count_++;
+    double remove_ms = std::chrono::duration<double, std::milli>(remove_time_ - frame_start_).count();
+    double push_ms = std::chrono::duration<double, std::milli>(push_done - remove_time_).count();
+    double draw_ms = std::chrono::duration<double, std::milli>(draw_done - push_done).count();
+    double sync_ms = std::chrono::duration<double, std::milli>(sync_done - draw_done).count();
+    double total_ms = std::chrono::duration<double, std::milli>(sync_done - frame_start_).count();
 
-    //   std::cout << "[Profile] Frame " << frame_count_
-    //             << " | remove: " << remove_ms << "ms"
-    //             << " | push(" << push_count_ << "): " << push_ms << "ms"
-    //             << " | draw: " << draw_ms << "ms"
-    //             << " | sync: " << sync_ms << "ms"
-    //             << " | total: " << total_ms << "ms"
-    //             << std::endl;
-    // }
+    // Log slow frames (> 32ms) or every 100 frames
+    if (total_ms > 32.0 || frame_count_ % 100 == 0) {
+      logi("[ThorVG] Frame {} | remove: {:.1f}ms | push({}): {:.1f}ms | draw: {:.1f}ms | sync: {:.1f}ms | total: {:.1f}ms",
+           frame_count_, remove_ms, push_count_, push_ms, draw_ms, sync_ms, total_ms);
+    }
   }
 
   // Transform Stack

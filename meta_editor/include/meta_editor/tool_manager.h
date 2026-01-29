@@ -31,6 +31,7 @@ public:
     bool on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& world_pos);
     bool on_key_down(int key, int mods);
     bool on_key_up(int key, int mods);
+    bool on_text_input(const char* text);
 
     void render_overlay(flex::Renderer& renderer);
     void update(float dt);

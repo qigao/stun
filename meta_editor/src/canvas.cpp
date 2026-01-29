@@ -230,13 +230,11 @@ flex::Node* Canvas::hit_test(const flex::Vec2& world_pos) {
                     return hit;
                 }
             }
-            // Groups themselves are not hit-testable
             return nullptr;
         }
 
-        // Leaf node - test bounds in world space
-        auto bounds = node->world_bounds();
-        if (bounds.contains(pos.x(), pos.y())) {
+        // Leaf node - world_bounds() is now clean (no camera pollution)
+        if (node->world_bounds().contains(pos.x(), pos.y())) {
             return node;
         }
         return nullptr;
@@ -299,14 +297,19 @@ void Canvas::rebuild_grid() {
 
 // Rendering
 void Canvas::render(flex::Renderer& renderer) {
-    // Apply camera transform to content layers
-    auto camera = camera_transform();
-    grid_layer_->set_transform(camera);
-    content_root_->set_transform(camera);
+    // Camera transform is applied via renderer stack, NOT via scene graph
+    // This keeps world_bounds() clean for hit testing
+    renderer.save();
+    renderer.translate(camera_pan_x_, camera_pan_y_);
+    renderer.scale(camera_zoom_, camera_zoom_);
     
-    // UI overlay stays in screen space (no transform)
+    grid_layer_->render(renderer);
+    content_root_->render(renderer);
     
-    instance_->render(renderer);
+    renderer.restore();
+    
+    // UI overlay stays in screen space (no camera transform)
+    ui_overlay_root_->render(renderer);
 }
 
 void Canvas::update(float dt) {

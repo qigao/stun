@@ -10,6 +10,7 @@
 #include <vector>
 #include <functional>
 #include <optional>
+#include <unordered_set>
 
 namespace meta_editor {
 
@@ -25,7 +26,8 @@ enum class HandleType {
     BottomRight,
     BottomCenter,
     BottomLeft,
-    LeftCenter
+    LeftCenter,
+    Rotate  // Rotation handle (above top-center)
 };
 
 class SelectionManager {
@@ -61,6 +63,12 @@ public:
     void clear_fill();
     void clear_stroke();
 
+    // Lock/Unlock nodes
+    void lock_selection();
+    void unlock_selection();
+    bool is_locked(flex::Node* node) const;
+    void toggle_lock(flex::Node* node);
+
     // Rendering
     void render_selection_indicators(flex::Renderer& renderer);
 
@@ -79,6 +87,7 @@ private:
 
     Canvas* canvas_;
     std::vector<flex::Node*> selected_nodes_;
+    std::unordered_set<flex::Node*> locked_nodes_;
     SelectionChangeCallback selection_change_callback_;
 };
 

@@ -21,7 +21,8 @@ using Catch::Matchers::WithinAbs;
 // ============================================================================
 
 TEST_CASE("Scene: Create with dimensions", "[runtime][scene]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
 
     REQUIRE(scene);
     REQUIRE_THAT(scene->width(), WithinAbs(800.0f, 0.001f));
@@ -29,7 +30,8 @@ TEST_CASE("Scene: Create with dimensions", "[runtime][scene]") {
 }
 
 TEST_CASE("Scene: Set size", "[runtime][scene]") {
-    auto scene = Scene::create(100.0f, 100.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(100.0f, 100.0f, arena);
 
     scene->set_size(1920.0f, 1080.0f);
 
@@ -38,7 +40,8 @@ TEST_CASE("Scene: Set size", "[runtime][scene]") {
 }
 
 TEST_CASE("Scene: Background color", "[runtime][scene]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
 
     Color bg = {0.2f, 0.3f, 0.4f, 1.0f};
     scene->set_background(bg);
@@ -51,9 +54,10 @@ TEST_CASE("Scene: Background color", "[runtime][scene]") {
 }
 
 TEST_CASE("Scene: Add children to root", "[runtime][scene]") {
-    auto scene = Scene::create(800.0f, 600.0f);
+    ArenaAllocator arena(4096);
+    auto scene = Scene::create(800.0f, 600.0f, arena);
 
-    auto group = Group::create();
+    auto group = Group::create(arena);
     scene->add_child(group);
 
     REQUIRE(scene->root() != nullptr);
@@ -65,32 +69,35 @@ TEST_CASE("Scene: Add children to root", "[runtime][scene]") {
 // ============================================================================
 
 TEST_CASE("Group: Create and add children", "[runtime][group]") {
-    auto group = Group::create();
+    ArenaAllocator arena(4096);
+    auto group = Group::create(arena);
 
-    auto child1 = Group::create();
-    auto child2 = Group::create();
+    auto child1 = Group::create(arena);
+    auto child2 = Group::create(arena);
 
     group->add_child(child1);
     group->add_child(child2);
 
     REQUIRE(group->child_count() == 2);
-    REQUIRE(group->child_at(0) == child1.get());
-    REQUIRE(group->child_at(1) == child2.get());
+    REQUIRE(group->child_at(0) == child1);
+    REQUIRE(group->child_at(1) == child2);
 }
 
 TEST_CASE("Group: Remove child", "[runtime][group]") {
-    auto group = Group::create();
-    auto child = Group::create();
+    ArenaAllocator arena(4096);
+    auto group = Group::create(arena);
+    auto child = Group::create(arena);
 
     group->add_child(child);
     REQUIRE(group->child_count() == 1);
 
-    group->remove_child(child.get());
+    group->remove_child(child);
     REQUIRE(group->child_count() == 0);
 }
 
 TEST_CASE("Node: ID and visibility", "[runtime][node]") {
-    auto node = Group::create();
+    ArenaAllocator arena(4096);
+    auto node = Group::create(arena);
 
     node->set_id("testNode");
     REQUIRE(node->id() == "testNode");
@@ -101,7 +108,8 @@ TEST_CASE("Node: ID and visibility", "[runtime][node]") {
 }
 
 TEST_CASE("Node: Opacity", "[runtime][node]") {
-    auto node = Group::create();
+    ArenaAllocator arena(4096);
+    auto node = Group::create(arena);
 
     REQUIRE_THAT(node->opacity(), WithinAbs(1.0f, 0.001f));
 
@@ -110,14 +118,15 @@ TEST_CASE("Node: Opacity", "[runtime][node]") {
 }
 
 TEST_CASE("Node: Find child by ID", "[runtime][node]") {
-    auto parent = Group::create();
-    auto child = Group::create();
+    ArenaAllocator arena(4096);
+    auto parent = Group::create(arena);
+    auto child = Group::create(arena);
     child->set_id("target");
 
     parent->add_child(child);
 
     Node* found = parent->find_child_recursive("target");
-    REQUIRE(found == child.get());
+    REQUIRE(found == child);
 
     Node* not_found = parent->find_child_recursive("nonexistent");
     REQUIRE(not_found == nullptr);
@@ -128,14 +137,16 @@ TEST_CASE("Node: Find child by ID", "[runtime][node]") {
 // ============================================================================
 
 TEST_CASE("Shape: Create with default properties", "[runtime][shape]") {
-    auto shape = Shape::create();
+    ArenaAllocator arena(4096);
+    auto shape = Shape::create(arena);
 
     REQUIRE(shape);
     REQUIRE_THAT(shape->opacity(), WithinAbs(1.0f, 0.001f));
 }
 
 TEST_CASE("Shape: Set rectangle geometry", "[runtime][shape]") {
-    auto shape = Shape::create();
+    ArenaAllocator arena(4096);
+    auto shape = Shape::create(arena);
 
     shape->set_rect(100.0f, 50.0f, 5.0f);
     REQUIRE(shape->geometry_type() == GeometryType::Rect);
@@ -147,7 +158,8 @@ TEST_CASE("Shape: Set rectangle geometry", "[runtime][shape]") {
 }
 
 TEST_CASE("Shape: Set circle geometry", "[runtime][shape]") {
-    auto shape = Shape::create();
+    ArenaAllocator arena(4096);
+    auto shape = Shape::create(arena);
 
     shape->set_circle(25.0f);
     REQUIRE(shape->geometry_type() == GeometryType::Circle);
@@ -157,7 +169,8 @@ TEST_CASE("Shape: Set circle geometry", "[runtime][shape]") {
 }
 
 TEST_CASE("Shape: Fill color", "[runtime][shape]") {
-    auto shape = Shape::create();
+    ArenaAllocator arena(4096);
+    auto shape = Shape::create(arena);
 
     Color red = {1.0f, 0.0f, 0.0f, 1.0f};
     shape->set_fill(red);
@@ -170,7 +183,8 @@ TEST_CASE("Shape: Fill color", "[runtime][shape]") {
 }
 
 TEST_CASE("Shape: Stroke properties", "[runtime][shape]") {
-    auto shape = Shape::create();
+    ArenaAllocator arena(4096);
+    auto shape = Shape::create(arena);
 
     Color blue = {0.0f, 0.0f, 1.0f, 1.0f};
     shape->set_stroke(blue, 3.0f);
@@ -186,14 +200,16 @@ TEST_CASE("Shape: Stroke properties", "[runtime][shape]") {
 // ============================================================================
 
 TEST_CASE("Text: Create with content", "[runtime][text]") {
-    auto text = Text::create();
+    ArenaAllocator arena(4096);
+    auto text = Text::create(arena);
 
     text->set_content("Hello World");
     REQUIRE(text->content() == "Hello World");
 }
 
 TEST_CASE("Text: Font properties", "[runtime][text]") {
-    auto text = Text::create();
+    ArenaAllocator arena(4096);
+    auto text = Text::create(arena);
 
     text->set_font_family("Arial");
     REQUIRE(text->font_family() == "Arial");
@@ -203,7 +219,8 @@ TEST_CASE("Text: Font properties", "[runtime][text]") {
 }
 
 TEST_CASE("Text: Color", "[runtime][text]") {
-    auto text = Text::create();
+    ArenaAllocator arena(4096);
+    auto text = Text::create(arena);
 
     Color black = {0.0f, 0.0f, 0.0f, 1.0f};
     text->set_color(black);
@@ -219,14 +236,16 @@ TEST_CASE("Text: Color", "[runtime][text]") {
 // ============================================================================
 
 TEST_CASE("Image: Create with source", "[runtime][image]") {
-    auto image = Image::create();
+    ArenaAllocator arena(4096);
+    auto image = Image::create(arena);
 
     image->set_src("test.png");
     REQUIRE(image->src() == "test.png");
 }
 
 TEST_CASE("Image: Dimensions", "[runtime][image]") {
-    auto image = Image::create();
+    ArenaAllocator arena(4096);
+    auto image = Image::create(arena);
 
     image->set_width(200.0f);
     image->set_height(150.0f);
@@ -291,7 +310,6 @@ TEST_CASE("Timeline: Sample track at time", "[runtime][timeline]") {
     track->add_keyframe(0.0f, 0.0f);
     track->add_keyframe(2.0f, 1.0f);
 
-    // Sample returns AnimValue (std::variant)
     AnimValue val0 = track->sample(0.0f);
     AnimValue val1 = track->sample(1.0f);
     AnimValue val2 = track->sample(2.0f);
@@ -399,7 +417,7 @@ TEST_CASE("Easing: EaseIn", "[runtime][easing]") {
     Easing easing = Easing::ease_in();
 
     REQUIRE_THAT(easing.evaluate(0.0f), WithinAbs(0.0f, 0.001f));
-    REQUIRE(easing.evaluate(0.5f) < 0.5f);  // EaseIn is slower at start
+    REQUIRE(easing.evaluate(0.5f) < 0.5f);
     REQUIRE_THAT(easing.evaluate(1.0f), WithinAbs(1.0f, 0.001f));
 }
 
@@ -407,7 +425,7 @@ TEST_CASE("Easing: EaseOut", "[runtime][easing]") {
     Easing easing = Easing::ease_out();
 
     REQUIRE_THAT(easing.evaluate(0.0f), WithinAbs(0.0f, 0.001f));
-    REQUIRE(easing.evaluate(0.5f) > 0.5f);  // EaseOut is faster at start
+    REQUIRE(easing.evaluate(0.5f) > 0.5f);
     REQUIRE_THAT(easing.evaluate(1.0f), WithinAbs(1.0f, 0.001f));
 }
 
@@ -415,7 +433,7 @@ TEST_CASE("Easing: EaseInOut", "[runtime][easing]") {
     Easing easing = Easing::ease_in_out();
 
     REQUIRE_THAT(easing.evaluate(0.0f), WithinAbs(0.0f, 0.001f));
-    REQUIRE_THAT(easing.evaluate(0.5f), WithinAbs(0.5f, 0.05f));  // Symmetric
+    REQUIRE_THAT(easing.evaluate(0.5f), WithinAbs(0.5f, 0.05f));
     REQUIRE_THAT(easing.evaluate(1.0f), WithinAbs(1.0f, 0.001f));
 }
 

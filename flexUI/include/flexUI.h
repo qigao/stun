@@ -43,4 +43,5 @@
 #include "flexUI/widgets/switch_widget.h"
 #include "flexUI/widgets/radio_widget.h"
 #include "flexUI/widgets/progressbar_widget.h"
+#include "flexUI/widgets/markdown_widget.h"
 

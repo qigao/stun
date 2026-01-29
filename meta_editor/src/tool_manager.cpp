@@ -66,6 +66,10 @@ bool ToolManager::on_key_up(int key, int mods) {
     return active_tool_ ? active_tool_->on_key_up(key, mods) : false;
 }
 
+bool ToolManager::on_text_input(const char* text) {
+    return active_tool_ ? active_tool_->on_text_input(text) : false;
+}
+
 void ToolManager::render_overlay(flex::Renderer& renderer) {
     if (active_tool_) {
         active_tool_->render_overlay(renderer);

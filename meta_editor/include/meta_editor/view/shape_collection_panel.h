@@ -48,7 +48,7 @@ public:
     explicit ShapeCollectionPanel(Canvas* canvas);
 
     void render(flex::Renderer& renderer) override;
-    bool handle_click(float screen_x, float screen_y);
+    bool handle_click(float screen_x, float screen_y) override;
 
     using ShapeAddedCallback = std::function<void(flex::Shape*)>;
     void set_shape_added_callback(ShapeAddedCallback cb) { on_shape_added_ = std::move(cb); }

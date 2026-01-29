@@ -387,10 +387,21 @@ void Shape::render(Renderer &r) {
   // IMMEDIATE MODE: Fallback for rough/complex shapes
   // -------------------------------------------
 
+  // Helper to apply local transform
+  auto apply_local_transform = [&]() {
+      r.translate(x_, y_);
+      if (rotation_ != 0.0f) {
+          r.rotate(rotation_);
+      }
+      if (scale_x_ != 1.0f || scale_y_ != 1.0f) {
+          r.scale(scale_x_, scale_y_);
+      }
+  };
+
   // OPTIMIZATION: Use direct primitive rendering if not rough
   if (!is_rough) {
       r.save();
-      r.set_transform(world_transform());
+      apply_local_transform();
       if (opacity_ < 1.0f) r.set_global_alpha(opacity_);
 
       bool handled = std::visit([&](auto&& g) -> bool {
@@ -426,8 +437,8 @@ void Shape::render(Renderer &r) {
 
   r.save();
 
-  // Use Eigen world transform
-  r.set_transform(world_transform());
+  // Apply local transform (relative to parent, accumulated by renderer stack)
+  apply_local_transform();
 
   if (opacity_ < 1.0f)
     r.set_global_alpha(opacity_);
@@ -521,6 +532,90 @@ Bounds Shape::compute_bounds() const {
       geometry_);
 
   return b;
+}
+
+// ============================================================================
+// Animation Property Dispatch
+// ============================================================================
+
+static Color get_color_value(const AnimValue& value) {
+    if (auto* c = std::get_if<Color>(&value)) {
+        return *c;
+    } else if (auto* s = std::get_if<std::string>(&value)) {
+        return Color::from_hex(s->c_str());
+    }
+    return Color::Black;
+}
+
+bool Shape::set_animated_property(PropertyID pid, const AnimValue& value) {
+    // Try base class first
+    if (Node::set_animated_property(pid, value)) return true;
+
+    switch (pid) {
+    case PropertyID::Width:
+        if (auto* f = std::get_if<float>(&value)) {
+            auto r = rect();
+            if (r.width != *f) set_rect(*f, r.height, r.corner_radius);
+            return true;
+        }
+        break;
+
+    case PropertyID::Height:
+        if (auto* f = std::get_if<float>(&value)) {
+            auto r = rect();
+            if (r.height != *f) set_rect(r.width, *f, r.corner_radius);
+            return true;
+        }
+        break;
+
+    case PropertyID::Radius:
+        if (auto* f = std::get_if<float>(&value)) {
+            auto c = circle();
+            if (c.radius != *f) set_circle(*f);
+            return true;
+        }
+        break;
+
+    case PropertyID::Fill:
+    case PropertyID::Color: {
+        Color new_color = get_color_value(value);
+        auto f = fill();
+        if (f.color != new_color) set_fill(new_color);
+        return true;
+    }
+
+    case PropertyID::FillOpacity:
+        if (auto* f = std::get_if<float>(&value)) {
+            auto current = fill();
+            if (current.color.a != *f) {
+                Color c = current.color;
+                c.a = *f;
+                set_fill(c);
+            }
+            return true;
+        }
+        break;
+
+    case PropertyID::Stroke: {
+        Color new_color = get_color_value(value);
+        auto s = stroke();
+        if (s.color != new_color) set_stroke(new_color, s.width);
+        return true;
+    }
+
+    case PropertyID::StrokeWidth:
+        if (auto* f = std::get_if<float>(&value)) {
+            auto s = stroke();
+            if (s.width != *f) set_stroke(s.color, *f);
+            return true;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return false;
 }
 
 } // namespace flex

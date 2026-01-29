@@ -18,10 +18,14 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 # Use GLAD from vcpkg
 find_package(glad CONFIG REQUIRED)
-
+find_package(libuv CONFIG REQUIRED)
+find_package(c-ares CONFIG REQUIRED)
+find_package(base64 CONFIG REQUIRED)
 find_package(qjs CONFIG REQUIRED)
 # Use robin-map from vcpkg
 find_package(tsl-robin-map CONFIG REQUIRED)
+find_package(TurboNet CONFIG REQUIRED PATHS ${EXTERNAL_ROOT}/turbonet)
+
 # Output files directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_EXECUTABLE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -32,3 +36,5 @@ add_subdirectory(vendor)
 add_subdirectory(flex) 
 add_subdirectory(flexUI) 
 add_subdirectory(meta_editor) 
+add_subdirectory(tui) 
+add_subdirectory(flexui_designer)

@@ -27,6 +27,7 @@ public:
     virtual bool on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& world_pos) { return false; }
     virtual bool on_key_down(int key, int mods) { return false; }
     virtual bool on_key_up(int key, int mods) { return false; }
+    virtual bool on_text_input(const char* text) { return false; }
 
     virtual void render_overlay(flex::Renderer& renderer) {}
     virtual void update(float dt) {}
