@@ -13,7 +13,7 @@ add_executable(flex-compiler
 )
 
 target_link_libraries(flex-compiler
-    PRIVATE flex_binary flex fmtlog cxxopts::cxxopts
+    PRIVATE flex_binary flex  cxxopts::cxxopts
 )
 
 set_target_properties(flex-compiler PROPERTIES

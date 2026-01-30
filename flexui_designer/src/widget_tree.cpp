@@ -50,21 +50,27 @@ const char* WidgetTree::widget_type_icon(WidgetType type) const {
 void WidgetTree::render(flex::Renderer& renderer) {
     if (!visible_) return;
 
+    renderer.save();
+    renderer.translate(x_, y_);
+
     // Background
     flex::Paint bg = flex::Paint::solid(flex::Color{0.14f, 0.14f, 0.16f, 1});
     flex::Paint border = flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.28f, 1});
-    renderer.draw_rect(x_, y_, width_, height_, 0, bg, border, 1);
+    renderer.draw_rect(0, 0, width_, height_, 0, bg, border, 1);
 
     // Title
-    renderer.draw_text("Widgets", x_ + PADDING, y_ + 18, "sans", 12, true, {0.7f, 0.7f, 0.75f, 1});
-    renderer.draw_rect(x_, y_ + 26, width_, 1, 0, border, flex::Paint::none(), 0);
+    renderer.draw_text("Widgets", PADDING, 12, "sans", 12, true, {0.7f, 0.7f, 0.75f, 1});
+    renderer.draw_rect(0, 26, width_, 1, 0, border, flex::Paint::none(), 0);
 
-    if (!widgets_) return;
+    if (!widgets_) {
+        renderer.restore();
+        return;
+    }
 
-    float item_y = y_ + 32 - scroll_y_;
+    float item_y = 32 - scroll_y_;
     for (size_t i = 0; i < widgets_->size(); ++i) {
-        if (item_y + ITEM_HEIGHT < y_ + 32) { item_y += ITEM_HEIGHT; continue; }
-        if (item_y > y_ + height_) break;
+        if (item_y + ITEM_HEIGHT < 32) { item_y += ITEM_HEIGHT; continue; }
+        if (item_y > height_) break;
 
         const auto& w = (*widgets_)[i];
         bool selected = selected_id_ && w.id == *selected_id_;
@@ -72,25 +78,27 @@ void WidgetTree::render(flex::Renderer& renderer) {
         // Selection highlight
         if (selected) {
             flex::Paint sel_bg = flex::Paint::solid(flex::Color{0.25f, 0.5f, 0.9f, 0.3f});
-            renderer.draw_rect(x_ + 2, item_y, width_ - 4, ITEM_HEIGHT - 2, 3, sel_bg, flex::Paint::none(), 0);
+            renderer.draw_rect(2, item_y, width_ - 4, ITEM_HEIGHT - 2, 3, sel_bg, flex::Paint::none(), 0);
         }
 
         // Icon
         flex::Color icon_col = selected ? flex::Color{0.4f, 0.7f, 1.0f, 1} : flex::Color{0.5f, 0.5f, 0.55f, 1};
-        renderer.draw_text(widget_type_icon(w.type), x_ + PADDING, item_y + 16, "sans", 10, false, icon_col);
+        renderer.draw_text(widget_type_icon(w.type), PADDING, item_y + 6, "sans", 10, false, icon_col);
 
         // Type name
         flex::Color text_col = selected ? flex::Color{1, 1, 1, 1} : flex::Color{0.8f, 0.8f, 0.85f, 1};
-        renderer.draw_text(widget_type_name(w.type), x_ + PADDING + 28, item_y + 16, "sans", 11, false, text_col);
+        renderer.draw_text(widget_type_name(w.type), PADDING + 28, item_y + 6, "sans", 11, false, text_col);
 
         // Widget text (truncated)
         if (!w.text.empty()) {
             std::string display = w.text.length() > 12 ? w.text.substr(0, 12) + ".." : w.text;
-            renderer.draw_text(display, x_ + PADDING + 80, item_y + 16, "sans", 10, false, {0.5f, 0.5f, 0.55f, 1});
+            renderer.draw_text(display, PADDING + 80, item_y + 6, "sans", 10, false, {0.5f, 0.5f, 0.55f, 1});
         }
 
         item_y += ITEM_HEIGHT;
     }
+
+    renderer.restore();
 }
 
 bool WidgetTree::handle_click(float px, float py) {

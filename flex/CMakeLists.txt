@@ -81,7 +81,7 @@ target_include_directories(
 
 set_target_properties(flex_compiler PROPERTIES FOLDER "flex"
                                                POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(flex_compiler PUBLIC TurboMemory fmtlog)
+target_link_libraries(flex_compiler PUBLIC   TurboNet::Utils)
 
 # ============================================================================
 # Runtime Library
@@ -105,7 +105,7 @@ find_package(box2d CONFIG REQUIRED)
 
 target_link_libraries(
   flex_runtime
-  PUBLIC thorvg TurboMemory fmtlog
+  PUBLIC thorvg  TurboNet::Utils
   PRIVATE qjs box2d::box2d)
 
 set_target_properties(flex_runtime PROPERTIES FOLDER "flex"

@@ -3,7 +3,6 @@
  *
  * Clean implementation using Geometry variant and Paint.
  */
-
 #include "flex/runtime/shape.h"
 #include "flex/runtime/renderer.h"
 #include <algorithm>
@@ -59,25 +58,25 @@ GeometryType Shape::geometry_type() const {
 // ============================================================================
 
 void Shape::set_rect(float width, float height, float corner_radius) {
-  geometry_ = RectData{std::max(0.f, width), std::max(0.f, height), std::max(0.f, corner_radius)};
+  geometry_ = RectData{(std::max)(0.f, width), (std::max)(0.f, height), (std::max)(0.f, corner_radius)};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
 void Shape::set_circle(float radius) {
-  geometry_ = CircleData{std::max(0.f, radius)};
+  geometry_ = CircleData{(std::max)(0.f, radius)};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
 void Shape::set_ellipse(float rx, float ry) {
-  geometry_ = EllipseData{std::max(0.f, rx), std::max(0.f, ry)};
+  geometry_ = EllipseData{(std::max)(0.f, rx), (std::max)(0.f, ry)};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
 void Shape::set_polygon(int sides, float radius) {
-  geometry_ = PolygonData{std::max(3, sides), std::max(0.f, radius)};
+  geometry_ = PolygonData{(std::max)(3, sides), (std::max)(0.f, radius)};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
@@ -89,14 +88,14 @@ void Shape::set_path(const std::string &d) {
 }
 
 void Shape::set_path(const std::string &d, float width, float height, float x, float y) {
-  geometry_ = PathData{d, std::max(0.f, width), std::max(0.f, height), x, y};
+  geometry_ = PathData{d, (std::max)(0.f, width), (std::max)(0.f, height), x, y};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
 void Shape::set_star(int points, float outer_radius, float inner_radius) {
   geometry_ =
-      StarData{std::max(3, points), std::max(0.f, outer_radius), std::max(0.f, inner_radius)};
+      StarData{(std::max)(3, points), (std::max)(0.f, outer_radius), (std::max)(0.f, inner_radius)};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
@@ -108,13 +107,13 @@ void Shape::set_line(float x2, float y2) {
 }
 
 void Shape::set_ring(float outer_radius, float inner_radius) {
-  geometry_ = RingData{std::max(0.f, outer_radius), std::max(0.f, inner_radius)};
+  geometry_ = RingData{(std::max)(0.f, outer_radius), (std::max)(0.f, inner_radius)};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
 
 void Shape::set_triangle(float width, float height, Direction direction) {
-  geometry_ = TriangleData{std::max(0.f, width), std::max(0.f, height), direction};
+  geometry_ = TriangleData{(std::max)(0.f, width), (std::max)(0.f, height), direction};
   update_cached_path();
   mark_dirty(DirtyFlags::Content | DirtyFlags::Bounds);
 }
@@ -309,7 +308,7 @@ static void split_and_render_rough(flex::Renderer &r, const std::string &path,
 
     // Randomize width: base_width * (1.0 +/- salt)
     float jitter = rng.range(-salt, salt);
-    float w = std::max(0.1f, base_width * (1.0f + jitter));
+    float w = (std::max)(0.1f, base_width * (1.0f + jitter));
 
     r.stroke_path(segment, paint, w);
     if (next_m == std::string::npos)

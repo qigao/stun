@@ -407,7 +407,8 @@ private:
 
         auto* card = box_->create("div", "");
         card->add_class("card");
-        card->computed_style->width = 800.0f;
+        card->add_class("wide-card");
+        // card->computed_style->width = 800.0f; // Removed manual override
         view->append(card);
 
         auto* head = box_->create_widget<LabelWidget>("label", "", "Employee Data");

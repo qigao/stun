@@ -36,7 +36,7 @@ PathPoint Path::interpolate(float t) const {
   }
 
   // Clamp t to [0, 1]
-  t = std::max(0.0f, std::min(1.0f, t));
+  t = (std::max)(0.0f, (std::min)(1.0f, t));
 
   // Use selected interpolation mode
   switch (mode_) {

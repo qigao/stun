@@ -74,6 +74,21 @@ yyloop:
         ")"    { state->last_token = TOK_RPAREN; return TOK_RPAREN; }
         "!"    { state->last_token = TOK_BANG; return TOK_BANG; }
         "|"    { state->last_token = TOK_PIPE; return TOK_PIPE; }
+        "`"    { state->last_token = TOK_BACKTICK; return TOK_BACKTICK; }
+
+        // Fenced code blocks
+        [ ]{0,3} "```" [^ \n\r\t\x00]* [ ]* ("\n" | "\x00") {
+            if (is_at_line_start) {
+                text = std::string(tok_start, state->cursor - tok_start);
+                state->last_token = TOK_CODE_FENCE;
+                return TOK_CODE_FENCE;
+            } else {
+                text = "```";
+                state->cursor = tok_start + 3;
+                state->last_token = TOK_TEXT;
+                return TOK_TEXT;
+            }
+        }
 
         "<br>" | "<br/>" { state->last_token = TOK_BR; return TOK_BR; }
         "<hr>" | "<hr/>" { state->last_token = TOK_HR_TAG; return TOK_HR_TAG; }

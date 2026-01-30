@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <fmtlog.h>
+#include <tlog.h>
 #include <fstream>
 #include <thread>
 #include <vector>
@@ -30,25 +30,19 @@ namespace flex {
 
 // Initialize the Flex engine (call once at startup)
 inline void init() {
-  // Initialize fmtlog first so we can log
-  fmtlog::setLogLevel(fmtlog::DBG);
-  fmtlog::setThreadName("main");
+ 
 
   // Initialize ThorVG with auto-detected threads
   unsigned int threads = std::thread::hardware_concurrency();
   if (threads < 4) threads = 4;  // Minimum 4 threads
   auto result = tvg::Initializer::init(threads);
-  logi("[flex::init] ThorVG initialized with {} threads (result={})", threads, (int)result);
+  TLOG_INFO("[flex::init] ThorVG initialized with {} threads (result={})", threads, (int)result);
 
-  // Optional: Output to file for debugging
-  // fmtlog::setLogFile("flex_engine.log", true);
-}
+  }
 
 // Shutdown the Flex engine (call at exit)
 inline void shutdown() {
-  // Flush and shutdown fmtlog
-  fmtlog::shutdown();
-
+ 
   // Terminate ThorVG
   tvg::Initializer::term();
 }

@@ -48,8 +48,14 @@ private:
   int selected_row_ = -1;
   int hover_row_ = -1;
   float scroll_y_ = 0;
+  float scroll_x_ = 0;
   float row_height_ = 40.0f;
   float header_height_ = 44.0f;
+  
+  // Resizing state
+  int resizing_col_ = -1;
+  float resize_start_x_ = 0;
+  float resize_start_width_ = 0;
   SelectCallback on_select_;
 };
 

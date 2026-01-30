@@ -6,19 +6,15 @@
 
 #pragma once
 
-#include <fmtlog.h>
+#include <tlog.h>
 
 namespace flex {
 
 // Initialize Flex with Skia backend
-inline void init() {
-    fmtlog::setLogLevel(fmtlog::DBG);
-    fmtlog::setThreadName("main");
-    // Skia doesn't require global init
+inline void init() { 
 }
 
 inline void shutdown() {
-    fmtlog::shutdown();
 }
 
 } // namespace flex

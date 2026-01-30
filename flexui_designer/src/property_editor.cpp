@@ -111,7 +111,15 @@ bool PropertyEditor::any_widget_has_type(WidgetType type) const {
 void PropertyEditor::render(flex::Renderer& renderer) {
     if (!visible_) return;
 
-    render_background(renderer);
+    renderer.save();
+    renderer.translate(x_, y_);
+
+    // Draw premium panel background (semi-transparent dark)
+    flex::Color panel_bg = flex::Color{0.1f, 0.1f, 0.12f, 0.98f};
+    renderer.draw_rect(0, 0, width_, height_, 0, flex::Paint::solid(panel_bg), flex::Paint::none(), 0);
+    // Right border separator
+    renderer.draw_rect(0, 0, 1, height_, 0, flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.3f, 1}), flex::Paint::none(), 0);
+    
     rows_.clear();
 
     flex::Color white{1, 1, 1, 1};
@@ -119,19 +127,20 @@ void PropertyEditor::render(flex::Renderer& renderer) {
     // Title changes based on batch mode
     if (is_batch_mode()) {
         char title[64];
-        snprintf(title, sizeof(title), "Properties (%zu selected)", widgets_batch_.size());
-        renderer.draw_text(title, x_ + 16, y_ + 28, "sans", 14, true, white);
+        snprintf(title, sizeof(title), "PROPERTIES (%zu objects)", widgets_batch_.size());
+        renderer.draw_text(title, 16, 14, "sans", 11, true, flex::Color{0.5f, 0.7f, 1.0f, 1});
     } else {
-        renderer.draw_text("Properties", x_ + 16, y_ + 28, "sans", 14, true, white);
+        renderer.draw_text("PROPERTIES", 16, 14, "sans", 11, true, flex::Color{0.5f, 0.7f, 1.0f, 1});
     }
 
     if (widgets_batch_.empty()) {
         flex::Color hint{0.5f, 0.5f, 0.5f, 1};
-        renderer.draw_text("Select a widget", x_ + 16, y_ + 60, "sans", 12, false, hint);
+        renderer.draw_text("Select a widget", 16, 50, "sans", 12, false, hint);
+        renderer.restore();
         return;
     }
 
-    float row_y = y_ + 50 - scroll_offset_;
+    float row_y = 50 - scroll_offset_;
     char buf[64];
 
     // In batch mode, show "Multiple" for type if types differ
@@ -291,72 +300,74 @@ void PropertyEditor::render(flex::Renderer& renderer) {
     render_property_row(renderer, row_y, "Font Size", font_mixed ? "Mixed" : get_batch_value(F_FONT_SIZE).c_str(), F_FONT_SIZE, font_mixed);
     row_y += 24;
     render_property_row(renderer, row_y, "Padding", padding_mixed ? "Mixed" : get_batch_value(F_PADDING).c_str(), F_PADDING, padding_mixed);
+
+    renderer.restore();
 }
 
 void PropertyEditor::render_section_header(flex::Renderer& r, float y, const char* title) {
-    if (y < y_ + 40 || y > y_ + height_) return;
-    flex::Color color{0.6f, 0.6f, 0.65f, 1};
-    r.draw_text(title, x_ + 12, y + 14, "sans", 11, true, color);
+    if (y < 40 || y > height_) return;
+    flex::Color color{0.4f, 0.4f, 0.45f, 1};
+    r.draw_rect(12, y + 18, 40, 1, 0, flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.3f, 1}), flex::Paint::none(), 0);
+    r.draw_text(title, 12, y + 14, "sans", 10, true, color);
 }
 
 void PropertyEditor::render_property_row(flex::Renderer& r, float y, const char* label, const char* value, int field_id, bool is_mixed) {
-    if (y < y_ + 40 || y > y_ + height_) return;
+    if (y < 40 || y > height_) return;
     
     flex::Color label_col{0.7f, 0.7f, 0.7f, 1};
     flex::Color value_col = is_mixed ? flex::Color{0.6f, 0.6f, 0.65f, 1} : flex::Color{0.9f, 0.9f, 0.9f, 1};
     
-    r.draw_text(label, x_ + 16, y + 12, "sans", 11, false, label_col);
+    r.draw_text(label, 16, y + 12, "sans", 11, false, label_col);
 
-    float field_x = x_ + 80;
+    float field_x = 80;
     float field_w = width_ - 96;
     
     bool editing = (editing_field_ == field_id && field_id > 0);
     
     if (field_id > 0) {
-        flex::Color bg = editing ? flex::Color{0.25f, 0.25f, 0.3f, 1} : flex::Color{0.2f, 0.2f, 0.22f, 1};
-        flex::Color border = editing ? flex::Color{0.4f, 0.6f, 1.0f, 1} : flex::Color{0.3f, 0.3f, 0.35f, 1};
-        r.draw_rect(field_x, y - 2, field_w, 18, 3, flex::Paint::solid(bg), flex::Paint::solid(border), 1);
-        rows_.push_back({label, y, field_id, is_mixed});
+        flex::Color bg = editing ? flex::Color{0.18f, 0.18f, 0.22f, 1} : flex::Color{0.14f, 0.14f, 0.16f, 1};
+        flex::Color border = editing ? flex::Color{0.3f, 0.6f, 1.0f, 1} : flex::Color{0.22f, 0.22f, 0.25f, 1};
+        r.draw_rect(field_x, y - 2, field_w, 20, 4, flex::Paint::solid(bg), flex::Paint::solid(border), 1);
+        rows_.push_back({label, y + y_, field_id, is_mixed});
     }
 
     const char* display = editing ? edit_buffer_.c_str() : value;
-    r.draw_text(display, field_x + 4, y + 11, "sans", 11, is_mixed && !editing, value_col);
+    r.draw_text(display, field_x + 6, y + 2, "sans", 11, is_mixed && !editing, value_col);
     
     if (editing) {
-        float cursor_x = field_x + 4 + edit_buffer_.length() * 6.5f;
-        r.draw_rect(cursor_x, y, 1, 14, 0, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
+        float cursor_x = field_x + 6 + edit_buffer_.length() * 6.5f;
+        r.draw_rect(cursor_x, y + 2, 1, 12, 0, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
     }
 }
 
 void PropertyEditor::render_color_row(flex::Renderer& r, float y, const char* label, uint32_t color, int field_id, bool is_mixed) {
-    if (y < y_ + 40 || y > y_ + height_) return;
+    if (y < 40 || y > height_) return;
     
     flex::Color label_col{0.7f, 0.7f, 0.7f, 1};
-    r.draw_text(label, x_ + 16, y + 12, "sans", 11, false, label_col);
+    r.draw_text(label, 16, y + 12, "sans", 11, false, label_col);
 
-    float field_x = x_ + 80;
+    float field_x = 80;
     float field_w = width_ - 96;
     
     bool editing = (editing_field_ == field_id);
-    
-    // Color preview box - show gray if mixed
-    float cr, cg, cb;
+
+    flex::Color border_color = editing ? flex::Color{0.4f, 0.6f, 1.0f, 1} : flex::Color{0.3f, 0.3f, 0.35f, 1};
+    flex::Color bg_color = editing ? flex::Color{0.25f, 0.25f, 0.3f, 1} : flex::Color{0.2f, 0.2f, 0.22f, 1};
+    r.draw_rect(field_x, y - 2, field_w, 20, 4, flex::Paint::solid(bg_color), flex::Paint::solid(border_color), 1);
+
+    // Color preview
+    float r_v, g_v, b_v, a_v;
     if (is_mixed) {
-        cr = cg = cb = 0.4f;
+        r_v = g_v = b_v = 0.4f;
+        a_v = 1.0f;
     } else {
-        cr = ((color >> 24) & 0xFF) / 255.0f;
-        cg = ((color >> 16) & 0xFF) / 255.0f;
-        cb = ((color >> 8) & 0xFF) / 255.0f;
+        r_v = ((color >> 24) & 0xFF) / 255.0f;
+        g_v = ((color >> 16) & 0xFF) / 255.0f;
+        b_v = ((color >> 8) & 0xFF) / 255.0f;
+        a_v = (color & 0xFF) / 255.0f;
     }
-    r.draw_rect(field_x, y - 2, 18, 18, 3, 
-        flex::Paint::solid(flex::Color{cr, cg, cb, 1}),
-        flex::Paint::solid(flex::Color{0.4f, 0.4f, 0.45f, 1}), 1);
     
-    // Hex input
-    flex::Color bg = editing ? flex::Color{0.25f, 0.25f, 0.3f, 1} : flex::Color{0.2f, 0.2f, 0.22f, 1};
-    flex::Color border = editing ? flex::Color{0.4f, 0.6f, 1.0f, 1} : flex::Color{0.3f, 0.3f, 0.35f, 1};
-    r.draw_rect(field_x + 22, y - 2, field_w - 22, 18, 3, flex::Paint::solid(bg), flex::Paint::solid(border), 1);
-    rows_.push_back({label, y, field_id, is_mixed});
+    r.draw_rect(field_x + 4, y, 16, 16, 3, flex::Paint::solid(flex::Color{r_v, g_v, b_v, a_v}), flex::Paint::none(), 0);
     
     char hex[16];
     const char* display;
@@ -365,11 +376,19 @@ void PropertyEditor::render_color_row(flex::Renderer& r, float y, const char* la
     } else if (is_mixed) {
         display = "Mixed";
     } else {
-        snprintf(hex, sizeof(hex), "#%06X", color >> 8);
+        snprintf(hex, sizeof(hex), "#%02X%02X%02X%02X", 
+            (int)(r_v*255), (int)(g_v*255), (int)(b_v*255), (int)(a_v*255));
         display = hex;
     }
-    flex::Color text_col = is_mixed && !editing ? flex::Color{0.6f, 0.6f, 0.65f, 1} : flex::Color{0.9f, 0.9f, 0.9f, 1};
-    r.draw_text(display, field_x + 26, y + 11, "sans", 11, is_mixed && !editing, text_col);
+    
+    r.draw_text(display, field_x + 24, y + 2, "sans", 10, is_mixed && !editing, {0.85f, 0.85f, 0.85f, 1});
+
+    if (editing) {
+        float cursor_x = field_x + 24 + edit_buffer_.length() * 6.0f;
+        r.draw_rect(cursor_x, y + 2, 1, 12, 0, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
+    }
+
+    rows_.push_back({label, y + y_, field_id, is_mixed});
 }
 
 bool PropertyEditor::handle_click(float x, float y) {

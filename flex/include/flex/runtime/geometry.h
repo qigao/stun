@@ -130,7 +130,7 @@ struct RoughRandom {
 inline void rough_line(std::string& path, float x1, float y1, float x2, float y2,
                       const RoughOptions& opts, RoughRandom& rng) {
     // Determine number of strokes (default to 2 if roughness is enabled)
-    int strokes = std::max(1, opts.stroke_count);
+    int strokes = (std::max)(1, opts.stroke_count);
     if (strokes == 1 && opts.roughness > 0) strokes = 2;
 
     float dx = x2 - x1;
@@ -155,7 +155,7 @@ inline void rough_line(std::string& path, float x1, float y1, float x2, float y2
 
         // Characteristic hand-drawn bow (curvature)
         // Alternating bow direction for multiple strokes creates that "sketchy" overlap
-        float bow_max = std::min(length * 0.15f, 2.5f) * opts.bowing;
+        float bow_max = (std::min)(length * 0.15f, 2.5f) * opts.bowing;
         float bow = (i % 2 == 0) ? rng.range(0.2f, 1.0f) : rng.range(-1.0f, -0.2f);
         bow *= bow_max;
 
@@ -179,7 +179,7 @@ inline std::string rect_to_path(float w, float h, float r) {
     } else {
         // Rounded rectangle with arc corners
         // Clamp radius to half the smaller dimension
-        float max_r = std::min(w, h) / 2.0f;
+        float max_r = (std::min)(w, h) / 2.0f;
         if (r > max_r) r = max_r;
 
         stbsp_snprintf(buf, sizeof(buf),
@@ -393,7 +393,7 @@ inline std::string rect_to_path_rough(float w, float h, float r, const RoughOpti
         detail::rough_line(path, 0, h, 0, 0, opts, rng);      // Left
     } else {
         // Rounded corners approximated with rough line segments
-        float max_r = std::min(w, h) / 2.0f;
+        float max_r = (std::min)(w, h) / 2.0f;
         if (r > max_r) r = max_r;
 
         detail::rough_line(path, r, 0, w - r, 0, opts, rng);    // Top
@@ -418,7 +418,7 @@ inline std::string circle_to_path_rough(float r, const RoughOptions& opts) {
     std::string path;
     path.reserve(1024);
 
-    int strokes = std::max(2, opts.stroke_count);
+    int strokes = (std::max)(2, opts.stroke_count);
     const float kappa = 0.55228f;
     const float pi = FLEX_PI;
 
@@ -482,7 +482,7 @@ inline std::string ellipse_to_path_rough(float rx, float ry, const RoughOptions&
     std::string path;
     path.reserve(1024);
 
-    int strokes = std::max(2, opts.stroke_count);
+    int strokes = (std::max)(2, opts.stroke_count);
     const float kappa = 0.55228f;
     const float pi = FLEX_PI;
 
@@ -653,12 +653,12 @@ inline void hachure_fill(std::string& path, const std::vector<Vec2>& points, con
         float rx = p.x() * cos_a - p.y() * sin_a;
         float ry = p.x() * sin_a + p.y() * cos_a;
         rotated.push_back({rx, ry});
-        min_y = std::min(min_y, ry);
-        max_y = std::max(max_y, ry);
+        min_y = (std::min)(min_y, ry);
+        max_y = (std::max)(max_y, ry);
     }
 
     // 2. Generate scanlines
-    float gap = std::max(1.0f, opts.hachure_gap);
+    float gap = (std::max)(1.0f, opts.hachure_gap);
     for (float y = min_y + gap; y < max_y; y += gap) {
         std::vector<float> intersections;
         for (size_t i = 0; i < rotated.size(); ++i) {

@@ -1,7 +1,11 @@
 /*
  * flexUI - Box Implementation
  */
-
+#ifdef _WIN32
+#define  WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
+#endif
 #include <flexUI/box.h>
 #include <flexUI/renderer.h>
 #include <flexUI/types.h>
@@ -9,10 +13,10 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
-#include <fmtlog.h>
-
+#include <tlog.h>
+ 
 // Profiling macro - set to 1 to enable
-#define FLEXUI_PROFILE 1
+#define FLEXUI_PROFILE 0
 
 #if FLEXUI_PROFILE
 #define PROFILE_START(name) auto _profile_##name = std::chrono::high_resolution_clock::now()
@@ -318,12 +322,12 @@ void sync_layout_to_flex(Element* elem, float container_w, float container_h) {
 
     // Minimum height for leaf nodes with text
     if (elem->children().empty() && !elem->text().empty()) {
-      float min_text_height = style->font_size > 0 ? style->font_size * 1.5f : 24.0f;
-      min_text_height += style->padding[0] + style->padding[2];
-      computed_height = std::max(computed_height, min_text_height);
+      float lh = style->font_size > 0 ? style->font_size * 1.4f : 24.0f; // More breathing room
+      float computed_lh = lh + style->padding[0] + style->padding[2];
+      computed_height = std::max(computed_height, computed_lh);
     } else if (computed_height <= 0 && elem->children().empty()) {
       // Fallback for empty leaf nodes
-      computed_height = 24.0f;
+      computed_height = style->font_size > 0 ? style->font_size : 24.0f;
     }
 
     elem->set_layout_height(computed_height);
@@ -372,9 +376,22 @@ void sync_layout_to_flex(Element* elem, float container_w, float container_h) {
 
   // ========== Auto width for leaf nodes with text ==========
   if (auto_width && elem->children().empty() && !elem->text().empty()) {
-    // Estimate text width: text_length * font_size * 0.6 (rough approximation)
+    // Estimate text width: more robust approximation
     float fs = style->font_size > 0 ? style->font_size : 14.0f;
-    float text_width = elem->text().length() * fs * 0.6f;
+    
+    // Bold text is wider
+    float multiplier = 0.68f;
+    if (style->font_weight >= FontWeight::Bold) {
+        multiplier = 0.85f;
+    }
+    
+    // Monospace fonts (Consolas) are usually slightly narrower than bold Arial but wider than normal
+    if (style->font_family.find("Consolas") != std::string::npos || 
+        style->font_family.find("Courier") != std::string::npos) {
+        multiplier = 0.65f;
+    }
+
+    float text_width = elem->text().length() * fs * multiplier + 10.0f; // Add a bit more safety padding
     float computed_width = text_width + style->padding[1] + style->padding[3];
 
     // Minimum width
@@ -655,7 +672,8 @@ void Box::render_element(Element* elem) {
     float text_y = (elem->height() + style->font_size) / 2;
 
     r.draw_text(elem->text(), text_x, text_y,
-                style->font_family, style->font_size, false, text_col);
+                style->font_family, style->font_size, 
+                style->font_weight >= FontWeight::Bold, text_col);
   }
 
   // 递归渲染所有子元素

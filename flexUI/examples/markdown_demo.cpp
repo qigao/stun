@@ -41,9 +41,10 @@ const char* DEMO_MARKDOWN =
 const char* MD_CSS = R"(
     #root {
         width: 100%;
-        height: 100%;
+        height: auto;
         padding: 40px;
-        background-color: #1e1e1e;
+        background-color: #1e2227;
+        color: #abb2bf;
         display: flex;
         flex-direction: column;
     }
@@ -54,71 +55,114 @@ const char* MD_CSS = R"(
         flex-direction: column;
     }
 
-    .md-p, .md-li, .md-header {
+    .md-p, .md-header {
         display: flex;
         flex-direction: row;
-        flex-wrap: nowrap; /* flexUI doesn't support wrap yet, so keep on one row */
         align-items: center;
-        width: 100%;
+        flex-wrap: nowrap;
+        margin-bottom: 8px;
+        flex-shrink: 0;
     }
 
-    .md-p {
-        margin-bottom: 15px;
-        color: #abb2bf;
+    .h1 { 
+        font-size: 34px; 
+        border-bottom: 2px solid #3e4451; 
+        padding-bottom: 15px; 
+        margin-top: 10px;
+        margin-bottom: 25px; 
+        font-weight: 700; 
+        color: #61afef; 
     }
-
-    .h1 { font-size: 32px; border-bottom: 1px solid #3e4451; padding-bottom: 10px; margin-bottom: 20px; font-weight: 700; color: #61afef; }
-    .h2 { font-size: 24px; margin-top: 20px; margin-bottom: 10px; font-weight: 700; color: #61afef; }
-    .h3 { font-size: 20px; margin-top: 15px; margin-bottom: 10px; font-weight: 700; color: #61afef; }
+    .h2 { 
+        font-size: 26px; 
+        margin-top: 30px; 
+        margin-bottom: 15px; 
+        font-weight: 700; 
+        color: #98c379; 
+    }
+    .h3 { 
+        font-size: 20px; 
+        margin-top: 25px; 
+        margin-bottom: 15px; 
+        font-weight: 700; 
+        color: #d19a66; 
+    }
 
     .md-quote {
         display: flex;
         flex-direction: column;
         border-left: 4px solid #528bff;
-        padding: 10px 15px;
+        padding: 12px 20px;
         margin-bottom: 15px;
         font-style: italic;
         background-color: #2c313a;
+        color: #abb2bf;
     }
 
     .md-code-block {
         display: flex;
         flex-direction: column;
-        background-color: #282c34;
+        background-color: #21252b;
         padding: 15px;
-        border-radius: 5px;
+        border-radius: 6px;
         margin-bottom: 15px;
-        font-family: "Courier New";
+        border: 1px solid #3e4451;
         color: #d19a66;
+        font-family: "Consolas";
+        font-size: 14px;
+        flex-shrink: 0;
     }
 
     .md-code {
         background-color: #3e4451;
-        padding: 2px 5px;
-        border-radius: 3px;
-        font-family: "Courier New";
+        padding: 2px 6px;
+        border-radius: 4px;
         color: #e06c75;
+        font-family: "Consolas";
+        flex-shrink: 0;
+    }
+
+    .md-ul, .md-ol {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 15px;
+        padding-left: 20px;
+        flex-shrink: 0;
+    }
+
+    .md-li {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        margin-bottom: 6px;
+        gap: 6px;
+        flex-shrink: 0;
     }
 
     .md-hr {
-        height: 1px;
+        height: 2px;
         background-color: #3e4451;
-        margin: 20px 0;
+        margin: 25px 0;
+        flex-shrink: 0;
     }
 
     .md-strong {
         color: #e06c75;
         font-weight: 700;
-        margin: 0 4px;
+        margin: 0 1px;
+        flex-shrink: 0;
     }
 
     .md-em {
         font-style: italic;
-        margin: 0 4px;
+        color: #c678dd;
+        margin: 0 1px;
+        flex-shrink: 0;
     }
     
     span {
         display: flex;
+        flex-shrink: 0;
     }
 )";
 
@@ -150,10 +194,13 @@ bool load_font(const char* name, const char* path) {
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
 
+    int width = 800;
+    int height = 600;
+
     SDL_Window* window = SDL_CreateWindow(
         "flexUI Markdown Demo",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        800, 600, SDL_WINDOW_SHOWN
+        width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
     );
 
     SDL_Surface* surface = SDL_GetWindowSurface(window);
@@ -162,13 +209,16 @@ int main(int argc, char** argv) {
     if (!load_font("Arial", "C:/Windows/Fonts/arial.ttf")) {
         std::cerr << "Warning: Could not load Arial font. Text might not render." << std::endl;
     }
+    if (!load_font("Consolas", "C:/Windows/Fonts/consola.ttf")) {
+        std::cerr << "Warning: Could not load Consolas font. Code blocks might not render." << std::endl;
+    }
     
     auto canvas = std::unique_ptr<tvg::SwCanvas>(tvg::SwCanvas::gen());
     canvas->target(static_cast<uint32_t*>(surface->pixels), surface->w, surface->pitch / 4, surface->h, tvg::ColorSpace::ARGB8888);
 
     auto flex_renderer = flex::create_thorvg_renderer(canvas.get());
     auto box = std::make_unique<Box>(flex_renderer.get());
-    box->set_viewport(800, 600);
+    box->set_viewport((float)width, (float)height);
     box->load_css(MD_CSS);
 
     auto* root = box->create("div", "root");
@@ -182,6 +232,21 @@ int main(int argc, char** argv) {
     while (running) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
+            if (event.type == SDL_WINDOWEVENT) {
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    width = event.window.data1;
+                    height = event.window.data2;
+                    
+                    // On Windows, the surface might be invalidated on resize
+                    surface = SDL_GetWindowSurface(window);
+                    if (surface) {
+                        canvas->target(static_cast<uint32_t*>(surface->pixels), 
+                                      surface->w, surface->pitch / 4, surface->h, 
+                                      tvg::ColorSpace::ARGB8888);
+                        box->set_viewport((float)width, (float)height);
+                    }
+                }
+            }
         }
 
         box->update_time(16.0f);

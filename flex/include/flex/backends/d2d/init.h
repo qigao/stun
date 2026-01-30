@@ -8,7 +8,7 @@
 
 #ifdef _WIN32
 
-#include <fmtlog.h>
+#include <tlog.h>
 #include <d2d1.h>
 #include <wrl/client.h>
 
@@ -21,9 +21,7 @@ inline Microsoft::WRL::ComPtr<ID2D1Factory> g_d2d_factory;
 
 // Initialize Flex with Direct2D backend
 inline void init() {
-    fmtlog::setLogLevel(fmtlog::DBG);
-    fmtlog::setThreadName("main");
-
+ 
     // Initialize Direct2D factory
     if (!g_d2d_factory) {
         D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, g_d2d_factory.GetAddressOf());
@@ -32,8 +30,7 @@ inline void init() {
 
 inline void shutdown() {
     g_d2d_factory.Reset();
-    fmtlog::shutdown();
-}
+ }
 
 } // namespace flex
 

@@ -110,6 +110,10 @@ const std::string DEMO_CSS = R"(
         height: 20;
         width: 380; /* Fixed width */
     }
+
+    .wide-card {
+        width: 860;
+    }
     
     .card-row {
         display: flex;
@@ -304,9 +308,20 @@ const std::string DEMO_CSS = R"(
         width: 100%;
         height: 240;
         background-color: var(--bg-input);
-        border-radius: 6;
+        border-radius: 8;
         border-width: 1;
         border-color: var(--border);
+        
+        /* Professional Table Variables */
+        --table-bg: var(--bg-input);
+        --table-header-bg: 30, 41, 59, 255;  /* slate-800 */
+        --table-header-text: 148, 163, 184, 255; /* slate-400 */
+        --table-text: var(--text-main);
+        --table-border: var(--border);
+        --table-divider: 71, 85, 105, 80; /* slate-600 with alpha */
+        --table-hover: 255, 255, 255, 12;
+        --table-selected: 59, 130, 246, 80; /* blue-500 with alpha */
+        --table-stripe: 255, 255, 255, 5;
     }
 
     calendar {

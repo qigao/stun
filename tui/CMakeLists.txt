@@ -11,6 +11,8 @@ target_include_directories(tui INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
+
 # Examples 
 add_subdirectory(examples)
+add_subdirectory(agent)
  

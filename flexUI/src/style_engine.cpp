@@ -142,13 +142,24 @@ public:
     if (!elem || !elem->computed_style)
       return;
 
-    // Step 1: Inherit CSS variables from parent
+    // Step 1: Inherit properties from parent
     if (elem->parent_elem() && elem->parent_elem()->computed_style) {
-      for (const auto &[name, value] : elem->parent_elem()->computed_style->variables) {
-        // Only inherit if not already defined on this element
-        // Inherit all parent variables
-        elem->computed_style->variables[name] = value;
+      auto* parent_style = elem->parent_elem()->computed_style;
+      auto* style = elem->computed_style;
+
+      // Inherit variables
+      for (const auto &[name, value] : parent_style->variables) {
+        style->variables[name] = value;
       }
+
+      // Inherit typographic properties
+      style->text_color = parent_style->text_color;
+      style->font_family = parent_style->font_family;
+      style->font_size = parent_style->font_size;
+      style->font_weight = parent_style->font_weight;
+      style->font_style = parent_style->font_style;
+      style->text_align = parent_style->text_align;
+      style->visibility = parent_style->visibility;
     }
 
     // Step 2: Collect and sort matching rules by specificity

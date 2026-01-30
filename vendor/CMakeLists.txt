@@ -1,5 +1,3 @@
-add_subdirectory(fmtlog)
-
 # Native file dialog library
 set(BUILD_SHARED_LIBS OFF)
 set(NFD_INSTALL OFF CACHE BOOL " " FORCE)
@@ -22,6 +20,5 @@ mark_as_advanced(
 )
 
 add_subdirectory(lemon)
-add_subdirectory(memory)
 add_subdirectory(thorvg)
 add_subdirectory(md)

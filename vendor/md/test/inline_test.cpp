@@ -20,43 +20,43 @@ static void dump_tree(Node* n, int indent = 0) {
     std::cout << type_to_string(n->type);
     if (!n->text.empty()) std::cout << " (\"" << n->text << "\")";
     std::cout << std::endl;
-    for(auto& child : n->children) dump_tree(child.get(), indent + 1);
+    for(auto& child : n->children) dump_tree(child, indent + 1);
 }
 
 int main() {
     std::cout << "=== Test 1: Bold ===\n";
     {
         std::string input = "Normal **Bold** text\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root1 = parse(input);
+        dump_tree(root1.root);
     }
     
     std::cout << "\n=== Test 2: Italic ===\n";
     {
         std::string input = "Normal *Italic* text\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root2 = parse(input);
+        dump_tree(root2.root);
     }
     
     std::cout << "\n=== Test 3: Bold and Italic ===\n";
     {
         std::string input = "Normal **Bold** *Italic* text\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root3= parse(input);
+        dump_tree(root3.root);
     }
     
     std::cout << "\n=== Test 4: Strikethrough ===\n";
     {
         std::string input = "Normal ~~Strike~~ text\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root4 = parse(input);
+        dump_tree(root4.root);
     }
     
     std::cout << "\n=== Test 5: Nested ===\n";
     {
         std::string input = "Normal **Bold *and italic* text** here\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root5 = parse(input);
+        dump_tree(root5.root);
     }
     
     return 0;

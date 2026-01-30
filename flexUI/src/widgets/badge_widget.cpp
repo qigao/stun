@@ -1,7 +1,6 @@
 /*
  * flexUI - BadgeWidget Implementation
  */
-
 #include <flexUI/widgets/badge_widget.h>
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>

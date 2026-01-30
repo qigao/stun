@@ -22,22 +22,22 @@ static void dump_tree(Node* n, int indent = 0) {
     std::cout << type_to_string(n->type);
     if (!n->text.empty()) std::cout << " (\"" << n->text << "\")";
     std::cout << std::endl;
-    for(auto& child : n->children) dump_tree(child.get(), indent + 1);
+    for(auto& child : n->children) dump_tree(child, indent + 1);
 }
 
 int main() {
     std::cout << "=== Test 1: Lists ===\n";
     {
         std::string input = "- Item 1\n* Item 2\n1. Item 3\n2. Item 4\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root1 = parse(input);
+        dump_tree(root1.root);
     }
     
     std::cout << "\n=== Test 2: Special Formatting ===\n";
     {
         std::string input = "~~Strikethrough~~ and <u>Underline</u>\n";
-        auto root = parse(input);
-        dump_tree(root.get());
+        auto root2 = parse(input);
+        dump_tree(root2.root);
     }
     
     return 0;

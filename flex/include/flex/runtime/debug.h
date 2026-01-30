@@ -1,10 +1,8 @@
 /*
  * Flex Engine - Debug and Profiling System
  *
- * Unified logging and profiling using fmtlog with async background thread.
  *
  * Features:
- *   - Async logging via fmtlog (lock-free ring buffer + background poller)
  *   - Profile data collection in background thread (sink mode)
  *   - Runtime control via environment variables
  *
@@ -18,8 +16,12 @@
  */
 
 #pragma once
-
-#include <fmtlog.h>
+#ifdef _WIN32
+#define  WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <Windows.h>
+#endif
+#include <tlog.h>
 #include <cstdlib>
 
 namespace flex {
@@ -42,14 +44,14 @@ inline bool is_profile_enabled() {
   return enabled;
 }
 
-inline fmtlog::LogLevel get_log_level() {
-  static fmtlog::LogLevel level = [] {
+inline turbo_log_level_t get_log_level() {
+  static turbo_log_level_t level = [] {
     const char* env = std::getenv("FLEX_LOG_LEVEL");
-    if (!env) return fmtlog::DBG;
-    if (env[0] == 'E' || env[0] == 'e') return fmtlog::ERR;
-    if (env[0] == 'W' || env[0] == 'w') return fmtlog::WRN;
-    if (env[0] == 'I' || env[0] == 'i') return fmtlog::INF;
-    return fmtlog::DBG;
+    if (!env) return TURBO_LOG_LEVEL_DEBUG;
+    if (env[0] == 'E' || env[0] == 'e') return TURBO_LOG_LEVEL_ERROR;
+    if (env[0] == 'W' || env[0] == 'w') return TURBO_LOG_LEVEL_WARN;
+    if (env[0] == 'I' || env[0] == 'i') return TURBO_LOG_LEVEL_INFO;
+    return TURBO_LOG_LEVEL_DEBUG;
   }();
   return level;
 }
@@ -62,16 +64,16 @@ inline fmtlog::LogLevel get_log_level() {
 // ============================================================================
 
 #define FLEX_LOGD(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) logd("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_DEBUG("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_LOGI(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) logi("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_INFO("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_LOGW(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) logw("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_WARN("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_LOGE(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) loge("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_ERROR("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_DEBUG_BLOCK(code) \
   do { if (::flex::debug::is_debug_enabled()) { code; } } while(0)
@@ -226,13 +228,13 @@ private:
           auto& stats = scope_stats_[e.name];
           stats.count++;
           stats.total_ns += e.value;
-          stats.min_ns = std::min(stats.min_ns, e.value);
-          stats.max_ns = std::max(stats.max_ns, e.value);
+          stats.min_ns = (std::min)(stats.min_ns, e.value);
+          stats.max_ns = (std::max)(stats.max_ns, e.value);
         } else if (e.type == EventType::FrameEnd) {
           frame_stats_.frame_count++;
           frame_stats_.total_ns += e.value;
-          frame_stats_.min_ns = std::min(frame_stats_.min_ns, e.value);
-          frame_stats_.max_ns = std::max(frame_stats_.max_ns, e.value);
+          frame_stats_.min_ns = (std::min)(frame_stats_.min_ns, e.value);
+          frame_stats_.max_ns = (std::max)(frame_stats_.max_ns, e.value);
         }
       }
     }
@@ -393,19 +395,40 @@ namespace flex {
 namespace debug {
 
 // Initialize debug/profile system (call once at startup)
+// Initialize debug/profile system (call once at startup)
 inline void init(const char* log_file = nullptr) {
   if (is_debug_enabled()) {
-    if (log_file) {
-      fmtlog::setLogFile(log_file, true);
+    static bool initialized = false;
+    if (!initialized) {
+        tlog_config_t config = {};
+        config.min_level = get_log_level();
+        config.async_mode = 1;
+        config.buffer_size = 64 * 1024;
+
+        tlog_t* logger = tlog_create(&config);
+        if (logger) {
+            turbo_console_sink_opts_t copts = {};
+            copts.output = stdout;
+            copts.use_colors = 1;
+            tlog_add_sink(logger, turbo_sink_console_create(&copts));
+
+            if (log_file) {
+                turbo_file_sink_opts_t fopts = {};
+                fopts.path = log_file;
+                fopts.max_size = 10 * 1024 * 1024;
+                fopts.max_files = 3;
+                tlog_add_sink(logger, turbo_sink_file_create(&fopts));
+            }
+            tlog_set_default(logger);
+            initialized = true;
+        }
     }
-    fmtlog::setLogLevel(get_log_level());
-    fmtlog::setThreadName("main");
-    logi("[flex] Debug mode enabled (FLEX_DEBUG=1)");
+    TLOG_INFO("[flex] Debug mode enabled (FLEX_DEBUG=1)");
   }
 
   if (is_profile_enabled()) {
     profile::ProfileSink::instance().start();
-    logi("[flex] Profiling enabled (FLEX_PROFILE=1)");
+    TLOG_INFO("[flex] Profiling enabled (FLEX_PROFILE=1)");
   }
 }
 
@@ -415,7 +438,7 @@ inline void shutdown() {
     profile::ProfileSink::instance().stop();
   }
   if (is_debug_enabled() || is_profile_enabled()) {
-    //fmtlog::poll(true);
+    tlog_flush(tlog_get_default());
   }
 }
 

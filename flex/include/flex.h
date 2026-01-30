@@ -26,7 +26,7 @@
 #include "flex/bridge/renderer.h"
 
 // Standard library
-#include <fmtlog.h>
+#include <tlog.h>
 #include <fstream>
 #include <functional>
 #include <map>

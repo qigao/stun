@@ -59,7 +59,7 @@ struct TokenHistory {
 
   // Find most recent token of given type
   const Token *find_recent(int type, size_t max_lookback = 10) const {
-    for (size_t i = 0; i < std::min(max_lookback, tokens.size()); i++) {
+    for (size_t i = 0; i < (std::min)(max_lookback, tokens.size()); i++) {
       const auto &tok = tokens[tokens.size() - 1 - i];
       if (tok.type == type) {
         return &tok;

@@ -110,6 +110,9 @@ bool SearchPanel::handle_key(int key) {
 void SearchPanel::render(flex::Renderer& renderer) {
     if (!visible_) return;
     
+    renderer.save();
+    renderer.translate(x_, y_);
+
     render_background(renderer);
     
     const float PADDING = 10.0f;
@@ -118,36 +121,37 @@ void SearchPanel::render(flex::Renderer& renderer) {
     
     // Header
     flex::Color header_text{0.9f, 0.9f, 0.9f, 1.0f};
-    renderer.draw_text("Search Widgets", x_ + PADDING, y_ + 22, "sans", 13, true, header_text);
+    renderer.draw_text("Search Widgets", PADDING, 12, "sans", 13, true, header_text);
     
     // Search input box
-    float input_y = y_ + 35;
+    float input_y = 35;
     flex::Paint input_bg = flex::Paint::solid(flex::Color{0.12f, 0.12f, 0.14f, 1.0f});
     flex::Paint input_border = flex::Paint::solid(flex::Color{0.35f, 0.55f, 0.9f, 1.0f});
-    renderer.draw_rect(x_ + PADDING, input_y, width_ - 2 * PADDING, INPUT_HEIGHT, 4, input_bg, input_border, 1.5f);
+    renderer.draw_rect(PADDING, input_y, width_ - 2 * PADDING, INPUT_HEIGHT, 4, input_bg, input_border, 1.5f);
     
     // Query text with cursor
     flex::Color query_color{0.95f, 0.95f, 0.95f, 1.0f};
     std::string display_query = query_ + "|";  // Simple cursor
     if (query_.empty()) {
         flex::Color placeholder{0.5f, 0.5f, 0.5f, 1.0f};
-        renderer.draw_text("Type to search...", x_ + PADDING + 8, input_y + 21, "sans", 12, false, placeholder);
+        renderer.draw_text("Type to search...", PADDING + 8, input_y + 10, "sans", 12, false, placeholder);
     } else {
-        renderer.draw_text(display_query, x_ + PADDING + 8, input_y + 21, "sans", 12, false, query_color);
+        renderer.draw_text(display_query, PADDING + 8, input_y + 10, "sans", 12, false, query_color);
     }
     
     // Results list
     float list_y = input_y + INPUT_HEIGHT + 10;
-    float list_h = height_ - (list_y - y_) - PADDING;
+    float list_h = height_ - list_y - PADDING;
     
     if (results_.empty()) {
         // No results message
         flex::Color dim{0.5f, 0.5f, 0.5f, 1.0f};
         if (!query_.empty()) {
-            renderer.draw_text("No results found", x_ + PADDING, list_y + 20, "sans", 11, false, dim);
+            renderer.draw_text("No results found", PADDING, list_y + 8, "sans", 11, false, dim);
         } else {
-            renderer.draw_text("Start typing to search", x_ + PADDING, list_y + 20, "sans", 11, false, dim);
+            renderer.draw_text("Start typing to search", PADDING, list_y + 8, "sans", 11, false, dim);
         }
+        renderer.restore();
         return;
     }
     
@@ -162,12 +166,12 @@ void SearchPanel::render(flex::Renderer& renderer) {
         // Highlight selected entry
         if (is_selected) {
             flex::Paint highlight = flex::Paint::solid(flex::Color{0.25f, 0.5f, 0.9f, 0.4f});
-            renderer.draw_rect(x_ + 5, entry_y, width_ - 10, ENTRY_HEIGHT - 2, 3, highlight, flex::Paint::none(), 0);
+            renderer.draw_rect(5, entry_y, width_ - 10, ENTRY_HEIGHT - 2, 3, highlight, flex::Paint::none(), 0);
         }
         
         // Widget ID
         flex::Color id_color = is_selected ? flex::Color{0.4f, 0.7f, 1.0f, 1.0f} : flex::Color{0.85f, 0.85f, 0.85f, 1.0f};
-        renderer.draw_text(w->id, x_ + PADDING + 4, entry_y + 18, "sans", 11, is_selected, id_color);
+        renderer.draw_text(w->id, PADDING + 4, entry_y + 8, "sans", 11, is_selected, id_color);
         
         // Widget text (if different from ID and not empty)
         if (!w->text.empty() && w->text != w->id) {
@@ -176,7 +180,7 @@ void SearchPanel::render(flex::Renderer& renderer) {
             if (preview.length() > 20) {
                 preview = preview.substr(0, 17) + "...";
             }
-            renderer.draw_text(preview, x_ + PADDING + 120, entry_y + 18, "sans", 10, false, text_color);
+            renderer.draw_text(preview, PADDING + 120, entry_y + 8, "sans", 10, false, text_color);
         }
         
         entry_y += ENTRY_HEIGHT;
@@ -186,8 +190,10 @@ void SearchPanel::render(flex::Renderer& renderer) {
     if ((int)results_.size() > max_visible) {
         flex::Color count_color{0.5f, 0.5f, 0.5f, 1.0f};
         std::string count_text = "+" + std::to_string(results_.size() - max_visible) + " more";
-        renderer.draw_text(count_text, x_ + PADDING, entry_y + 15, "sans", 10, false, count_color);
+        renderer.draw_text(count_text, PADDING, entry_y + 5, "sans", 10, false, count_color);
     }
+
+    renderer.restore();
 }
 
 bool SearchPanel::handle_click(float screen_x, float screen_y) {

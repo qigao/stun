@@ -226,7 +226,7 @@ void Group::perform_layout() {
     }
 
     // Add gaps
-    float total_gaps = gap_ * std::max(0, static_cast<int>(items.size()) - 1);
+    float total_gaps = gap_ * (std::max)(0, static_cast<int>(items.size()) - 1);
     total_base_main += total_gaps;
 
     // Calculate flex grow/shrink
@@ -247,7 +247,7 @@ void Group::perform_layout() {
             float shrink = item.node->flex_shrink();
             if (shrink > 0) {
                 item.final_main -= (shrink_amount * shrink / total_flex_shrink);
-                item.final_main = std::max(0.0f, item.final_main);
+                item.final_main = (std::max)(0.0f, item.final_main);
             }
         }
     }
@@ -570,10 +570,10 @@ Bounds Group::compute_bounds() const {
         Vec2 p3 = ct * Vec2(cb.x, cb.y + cb.height);
         Vec2 p4 = ct * Vec2(cb.x + cb.width, cb.y + cb.height);
         
-        float c_min_x = std::min({p1.x(), p2.x(), p3.x(), p4.x()});
-        float c_min_y = std::min({p1.y(), p2.y(), p3.y(), p4.y()});
-        float c_max_x = std::max({p1.x(), p2.x(), p3.x(), p4.x()});
-        float c_max_y = std::max({p1.y(), p2.y(), p3.y(), p4.y()});
+        float c_min_x = (std::min)({p1.x(), p2.x(), p3.x(), p4.x()});
+        float c_min_y = (std::min)({p1.y(), p2.y(), p3.y(), p4.y()});
+        float c_max_x = (std::max)({p1.x(), p2.x(), p3.x(), p4.x()});
+        float c_max_y = (std::max)({p1.y(), p2.y(), p3.y(), p4.y()});
 
 
         if (first) {
@@ -581,10 +581,10 @@ Bounds Group::compute_bounds() const {
             max_x = c_max_x; max_y = c_max_y;
             first = false;
         } else {
-            min_x = std::min(min_x, c_min_x);
-            min_y = std::min(min_y, c_min_y);
-            max_x = std::max(max_x, c_max_x);
-            max_y = std::max(max_y, c_max_y);
+            min_x = (std::min)(min_x, c_min_x);
+            min_y = (std::min)(min_y, c_min_y);
+            max_x = (std::max)(max_x, c_max_x);
+            max_y = (std::max)(max_y, c_max_y);
         }
     }
 
@@ -594,8 +594,8 @@ Bounds Group::compute_bounds() const {
     b.height = max_y - min_y;
 
     // Ensure at least layout size
-    b.width = std::max(b.width, layout_width());
-    b.height = std::max(b.height, layout_height());
+    b.width = (std::max)(b.width, layout_width());
+    b.height = (std::max)(b.height, layout_height());
 
     return b;
 }

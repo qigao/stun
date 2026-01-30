@@ -1,7 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.20)
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0) # macOS Big Sur (released Nov 2020, EOL
-                                      # Sep 2023)
+set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
 
 project(
   nanogui

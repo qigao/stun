@@ -128,14 +128,14 @@ set(FLEXUI_HEADERS
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
 
 # 链接依赖（flex 提供后端无关的渲染抽象，thorvg 由 flex 传递依赖）
-target_link_libraries(flexUI PUBLIC ${LEXBOR_LIBRARY} flex fmtlog md_re2c)
+target_link_libraries(flexUI PUBLIC ${LEXBOR_LIBRARY} flex TurboNet::Utils md_parser)
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
   flexUI
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
-         ${CMAKE_SOURCE_DIR}/vendor/md-re2c/include
+         ${CMAKE_SOURCE_DIR}/vendor/md/include
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 

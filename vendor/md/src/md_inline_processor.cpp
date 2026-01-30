@@ -271,6 +271,9 @@ void process_inline_emphasis(Node* node, MemoryPool* pool) {
             } else {
                 new_children.push_back(child);
             }
+        } else if (child->type == NodeType::CodeBlock || child->type == NodeType::CodeSpan) {
+            // Do not process emphasis inside code
+            new_children.push_back(child);
         } else {
             process_inline_emphasis(child, pool);
             new_children.push_back(child);

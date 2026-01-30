@@ -225,7 +225,7 @@ inline void FlexLayoutEngine::resolve_flexible_sizes() {
                 if (item->flexShrink > 0.0f) {
                     float shrink_amount = (-free_space * item->flexShrink) / total_flex_shrink;
                     item->mainSize -= shrink_amount;
-                    item->mainSize = std::max(item->mainSize, 0.0f);
+                    item->mainSize = (std::max)(item->mainSize, 0.0f);
                 }
             }
         }
@@ -248,7 +248,7 @@ inline void FlexLayoutEngine::calculate_cross_sizes() {
             }
 
             item->crossSize = cross_size;
-            line.crossSize = std::max(line.crossSize, cross_size);
+            line.crossSize = (std::max)(line.crossSize, cross_size);
         }
     }
 }

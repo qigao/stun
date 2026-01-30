@@ -20,7 +20,7 @@ static void dump_tree(Node* n, int indent = 0) {
     std::cout << type_to_string(n->type);
     if (!n->text.empty()) std::cout << " (\"" << n->text << "\")";
     std::cout << std::endl;
-    for(auto& child : n->children) dump_tree(child.get(), indent + 1);
+    for(auto& child : n->children) dump_tree(child, indent + 1);
 }
 
 int main() {
@@ -29,14 +29,14 @@ int main() {
     std::cout << "Input: \"" << input1 << "\"" << std::endl;
     auto root1 = parse(input1);
     std::cout << "\nTree structure:" << std::endl;
-    dump_tree(root1.get());
+    dump_tree(root1.root);
     
     std::cout << "\n=== Test 2: Tasklist-like ===" << std::endl;
     std::string input2 = " * [x] foo\n * [ ] bar\n";
     std::cout << "Input: \"" << input2 << "\"" << std::endl;
     auto root2 = parse(input2);
     std::cout << "\nTree structure:" << std::endl;
-    dump_tree(root2.get());
+    dump_tree(root2.root);
     
     return 0;
 }

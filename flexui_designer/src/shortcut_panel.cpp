@@ -61,12 +61,15 @@ static const ShortcutEntry shortcuts[] = {
 void ShortcutPanel::render(flex::Renderer& renderer) {
     if (!visible_) return;
 
-    float cx = x_ + (width_ - 340) / 2;
-    float cy = y_ + (height_ - 520) / 2;
+    renderer.save();
+    renderer.translate(x_, y_);
+
     float pw = 340, ph = 520;
+    float cx = (width_ - pw) / 2;
+    float cy = (height_ - ph) / 2;
 
     // Backdrop
-    renderer.draw_rect(x_, y_, width_, height_, 0,
+    renderer.draw_rect(0, 0, width_, height_, 0,
         flex::Paint::solid(flex::Color{0, 0, 0, 0.5f}), flex::Paint::none(), 0);
 
     // Panel
@@ -75,7 +78,7 @@ void ShortcutPanel::render(flex::Renderer& renderer) {
     renderer.draw_rect(cx, cy, pw, ph, 8, bg, border, 1);
 
     // Title
-    renderer.draw_text("Keyboard Shortcuts", cx + 20, cy + 30, "sans", 16, true, {1, 1, 1, 1});
+    renderer.draw_text("Keyboard Shortcuts", cx + 20, cy + 22, "sans", 16, true, {1, 1, 1, 1});
     renderer.draw_rect(cx + 20, cy + 45, pw - 40, 1, 0,
         flex::Paint::solid(flex::Color{0.3f, 0.3f, 0.35f, 1}), flex::Paint::none(), 0);
 
@@ -83,13 +86,15 @@ void ShortcutPanel::render(flex::Renderer& renderer) {
     float ly = cy + 65;
     constexpr size_t count = sizeof(shortcuts) / sizeof(shortcuts[0]);
     for (size_t i = 0; i < count && ly < cy + ph - 30; ++i) {
-        renderer.draw_text(shortcuts[i].key, cx + 30, ly, "sans", 11, false, {0.5f, 0.7f, 1.0f, 1});
-        renderer.draw_text(shortcuts[i].desc, cx + 130, ly, "sans", 11, false, {0.8f, 0.8f, 0.8f, 1});
+        renderer.draw_text(shortcuts[i].key, cx + 30, ly + 2, "sans", 11, false, {0.5f, 0.7f, 1.0f, 1});
+        renderer.draw_text(shortcuts[i].desc, cx + 130, ly + 2, "sans", 11, false, {0.8f, 0.8f, 0.8f, 1});
         ly += 20;
     }
 
     // Close hint
     renderer.draw_text("Press Esc or click to close", cx + pw/2 - 80, cy + ph - 20, "sans", 10, false, {0.5f, 0.5f, 0.55f, 1});
+
+    renderer.restore();
 }
 
 bool ShortcutPanel::handle_click(float x, float y) {

@@ -30,25 +30,33 @@ WidgetPalette::WidgetPalette() {
 void WidgetPalette::render(flex::Renderer& renderer) {
     if (!visible_) return;
 
-    render_background(renderer);
+    renderer.save();
+    renderer.translate(x_, y_);
 
-    flex::Color white{1, 1, 1, 1};
-    renderer.draw_text("Widgets", x_ + 16, y_ + 28, "sans", 14, true, white);
+    // Panel background
+    flex::Color palette_bg = flex::Color{0.1f, 0.1f, 0.12f, 0.98f};
+    renderer.draw_rect(0, 0, width_, height_, 0, flex::Paint::solid(palette_bg), flex::Paint::none(), 0);
+    // Vertical separator
+    renderer.draw_rect(width_ - 1, 0, 1, height_, 0, flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.3f, 1}), flex::Paint::none(), 0);
+
+    renderer.draw_text("COMPONENTS", 16, 14, "sans", 11, true, flex::Color{0.5f, 0.7f, 1.0f, 1});
 
     flex::Color item_text{0.9f, 0.9f, 0.9f, 1};
 
     for (size_t i = 0; i < items_.size(); ++i) {
         auto& item = items_[i];
-        float ix = x_ + 12;
-        float iy = y_ + item.y;
+        float ix = 12;
+        float iy = item.y;
 
         flex::Color bg_col = (hover_index_ == (int)i) 
-            ? flex::Color{0.3f, 0.5f, 0.9f, 1} 
-            : flex::Color{0.22f, 0.22f, 0.25f, 1};
+            ? flex::Color{0.25f, 0.35f, 0.55f, 1} 
+            : flex::Color{0.14f, 0.14f, 0.16f, 1};
         flex::Paint bg = flex::Paint::solid(bg_col);
-        renderer.draw_rect(ix, iy, width_ - 24, 30, 4, bg, flex::Paint::none(), 0);
-        renderer.draw_text(item.name, ix + 10, iy + 20, "sans", 12, false, item_text);
+        renderer.draw_rect(ix, iy, width_ - 24, 30, 6, bg, flex::Paint::none(), 0);
+        renderer.draw_text(item.name, ix + 12, iy + 9, "sans", 12, false, item_text);
     }
+
+    renderer.restore();
 }
 
 bool WidgetPalette::handle_click(float x, float y) {

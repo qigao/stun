@@ -1,7 +1,6 @@
 /*
  * Flex Engine - Text Node Implementation
  */
-
 #include "flex/runtime/text.h"
 #include "flex/runtime/renderer.h"
 #include <algorithm>
@@ -24,7 +23,7 @@ void Text::update_measurement() const {
     size_t char_count = content_.length();
 
     // Add letter spacing
-    float total_spacing = letter_spacing_ * std::max(0, static_cast<int>(char_count) - 1);
+    float total_spacing = letter_spacing_ * (std::max)(0, static_cast<int>(char_count) - 1);
 
     measured_width_ = char_count * avg_char_width + total_spacing;
 

@@ -92,9 +92,10 @@ public:
   const std::string& text() const { return text_content_; }
 
   // ========== 树操作 (委托给 Group) ==========
-  void append(Element* child) {
+  Element* append(Element* child) {
     add_child(child);
     child->owner_box_ = owner_box_;
+    return child;
   }
 
   void remove(Element* child) {

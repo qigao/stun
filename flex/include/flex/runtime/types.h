@@ -7,6 +7,12 @@
 
 #pragma once
 
+#ifdef _WIN32 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <cstdint>
 #include <cmath>
 #include <cstring>
@@ -592,10 +598,10 @@ struct Bounds {
         float c3y = t.m[3] * x1 + t.m[4] * y1 + t.m[5];
 
         // Find min/max
-        float min_x = std::min({c0x, c1x, c2x, c3x});
-        float max_x = std::max({c0x, c1x, c2x, c3x});
-        float min_y = std::min({c0y, c1y, c2y, c3y});
-        float max_y = std::max({c0y, c1y, c2y, c3y});
+        float min_x = (std::min)({c0x, c1x, c2x, c3x});
+        float max_x = (std::max)({c0x, c1x, c2x, c3x});
+        float min_y = (std::min)({c0y, c1y, c2y, c3y});
+        float max_y = (std::max)({c0y, c1y, c2y, c3y});
 
         return Bounds(min_x, min_y, max_x - min_x, max_y - min_y);
     }

@@ -377,14 +377,14 @@ void bind_math(ScriptContext *ctx) {
   // Min/Max
   ctx->bind_function("min", [](const std::vector<ScriptValue> &args) -> ScriptValue {
     if (args.size() >= 2 && args[0].is_number() && args[1].is_number()) {
-      return ScriptValue::from_number(std::min(args[0].as_number(), args[1].as_number()));
+      return ScriptValue::from_number((std::min)(args[0].as_number(), args[1].as_number()));
     }
     return ScriptValue::from_number(0);
   });
 
   ctx->bind_function("max", [](const std::vector<ScriptValue> &args) -> ScriptValue {
     if (args.size() >= 2 && args[0].is_number() && args[1].is_number()) {
-      return ScriptValue::from_number(std::max(args[0].as_number(), args[1].as_number()));
+      return ScriptValue::from_number((std::max)(args[0].as_number(), args[1].as_number()));
     }
     return ScriptValue::from_number(0);
   });
@@ -392,7 +392,7 @@ void bind_math(ScriptContext *ctx) {
   // Absolute value
   ctx->bind_function("abs", [](const std::vector<ScriptValue> &args) -> ScriptValue {
     if (args.size() >= 1 && args[0].is_number()) {
-      return ScriptValue::from_number(std::abs(args[0].as_number()));
+      return ScriptValue::from_number((std::abs)(args[0].as_number()));
     }
     return ScriptValue::from_number(0);
   });

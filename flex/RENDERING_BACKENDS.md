@@ -258,19 +258,17 @@ std::unique_ptr<Renderer> create_mybackend_renderer(CanvasHandle canvas) {
 ```cpp
 // flex/backends/mybackend/init.h
 #pragma once
-#include <fmtlog.h>
+#include <tlog.h>
 
 namespace flex {
 
 inline void init() {
-    fmtlog::setLogLevel(fmtlog::DBG);
-    // Initialize your backend here
+     // Initialize your backend here
 }
 
 inline void shutdown() {
     // Cleanup your backend
-    fmtlog::shutdown();
-}
+ }
 
 }
 ```

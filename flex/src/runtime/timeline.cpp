@@ -1,9 +1,3 @@
-/*
- * Flex Engine - Timeline Implementation
- *
- * Optimized with arena allocator and binary search for O(log n) keyframe lookup.
- */
-
 #include "flex/runtime/timeline.h"
 #include "flex/runtime/node.h"
 #include <algorithm>
@@ -205,7 +199,7 @@ void Timeline::clear_triggers() {
 float Timeline::auto_duration() const {
     float max_duration = 0;
     for (auto& track : tracks_) {
-        max_duration = std::max(max_duration, track->duration());
+        max_duration = (std::max)(max_duration, track->duration());
     }
     return max_duration;
 }
@@ -321,7 +315,7 @@ bool TimelinePlayer::advance(float dt) {
     // Update fade weight
     if (fade_duration_ > 0 && fade_time_ < fade_duration_) {
         fade_time_ += dt;
-        float t = std::min(fade_time_ / fade_duration_, 1.0f);
+        float t = (std::min)(fade_time_ / fade_duration_, 1.0f);
 
         // Linear interpolation for now (can be improved with easing)
         blend_weight_ = fade_start_weight_ + (fade_target_weight_ - fade_start_weight_) * t;

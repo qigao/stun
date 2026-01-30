@@ -13,7 +13,7 @@
 namespace flexUI {
 
 /**
- * @brief Helper to convert a md-re2c AST node down to flexUI elements.
+ * @brief Helper to convert a md AST node down to flexUI elements.
  */
 static void convert_node(md_re2c::Node* node, Element* parent, Box* box) {
     if (!node) return;
@@ -65,12 +65,8 @@ static void convert_node(md_re2c::Node* node, Element* parent, Box* box) {
         case md_re2c::NodeType::Text:
         case md_re2c::NodeType::HtmlEntity:
             if (!node->text.empty()) {
-                if (parent->child_count() > 0 || !node->children.empty()) {
-                    elem = box->create("span");
-                    elem->set_text(node->text);
-                } else {
-                    parent->set_text(parent->text() + node->text);
-                }
+                elem = box->create("span");
+                elem->set_text(node->text);
             }
             break;
 
@@ -147,13 +143,14 @@ static void convert_node(md_re2c::Node* node, Element* parent, Box* box) {
             process_children = false; 
             break;
 
+
         default:
-            elem = box->create("div");
+            elem = nullptr;
             break;
     }
 
     if (elem) {
-        parent->append(elem);
+        if (!elem->parent()) parent->append(elem);
         if (process_children) {
             for (auto child : node->children) {
                 convert_node(child, elem, box);
@@ -171,6 +168,7 @@ MarkdownWidget::MarkdownWidget(const std::string& markdown)
     : markdown_(markdown) {}
 
 void MarkdownWidget::set_markdown(const std::string& markdown) {
+    if (markdown_ == markdown) return;
     markdown_ = markdown;
     needs_rebuild_ = true;
 }
@@ -179,7 +177,10 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
     if (!needs_rebuild_) return;
     if (!elem.owner_box_) return;
 
-    std::cout << "MarkdownWidget: Rebuilding elements with md-re2c..." << std::endl;
+    // Ensure it's a vertical container
+    if (elem.computed_style) {
+        elem.computed_style->flex_direction = FlexDirection::Column;
+    }
 
     // Clear existing children
     elem.clear_children();

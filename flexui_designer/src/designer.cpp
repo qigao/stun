@@ -396,95 +396,109 @@ void Designer::render(flex::Renderer& renderer) {
 }
 
 void Designer::render_preview(flex::Renderer& renderer) {
-    // Dark background
+    // Stunning Premium Background: Dark Navy Mesh Gradient
     renderer.draw_rect(0, 0, width_, height_, 0, 
-        flex::Paint::solid(flex::Color{0.08f, 0.08f, 0.1f, 1}), flex::Paint::none(), 0);
+        flex::Paint::solid(flex::Color{0.05f, 0.05f, 0.07f, 1}), flex::Paint::none(), 0);
+    
+    // Add some subtle "glows" in the background for a mesh effect
+    renderer.draw_rect(width_ * 0.7f, 0, width_ * 0.3f, height_ * 0.5f, 0,
+        flex::Paint::solid(flex::Color{0.1f, 0.15f, 0.3f, 0.3f}), flex::Paint::none(), 0);
+    renderer.draw_rect(0, height_ * 0.6f, width_ * 0.4f, height_ * 0.4f, 0,
+        flex::Paint::solid(flex::Color{0.2f, 0.1f, 0.3f, 0.2f}), flex::Paint::none(), 0);
     
     // Render widgets without selection/handles
     for (const auto& w : widgets_) {
         float wx = 200 + w.x, wy = w.y;  // Offset from palette area
-        flex::Paint fill, stroke;
         flex::Color text_col{1, 1, 1, 1};
+
+        renderer.save();
+        renderer.translate(wx, wy);
+
+        // Subtle shadow
+        renderer.draw_rect(3, 3, w.width, w.height, 8, flex::Paint::solid(flex::Color{0,0,0,0.3f}), flex::Paint::none(), 0);
 
         switch (w.type) {
             case WidgetType::Button:
-                fill = flex::Paint::solid(flex::Color{0.25f, 0.5f, 0.9f, 1});
-                renderer.draw_rect(wx, wy, w.width, w.height, 4, fill, flex::Paint::none(), 0);
-                renderer.draw_text(w.text, wx + w.width/2 - w.text.length()*3, wy + w.height/2 + 5, "sans", 12, false, text_col);
+                renderer.draw_rect(0, 0, w.width, w.height, 6, flex::Paint::solid(flex::Color{0.25f, 0.5f, 0.9f, 1}), flex::Paint::none(), 0);
+                renderer.draw_rect(0, 0, w.width, w.height / 2, 6, flex::Paint::solid(flex::Color{1, 1, 1, 0.05f}), flex::Paint::none(), 0);
+                renderer.draw_text(w.text, w.width/2 - w.text.length()*3.5f, (w.height-12)/2, "sans", 12, true, text_col);
                 break;
             case WidgetType::Label:
-                renderer.draw_text(w.text, wx, wy + 14, "sans", 12, false, {0.9f, 0.9f, 0.9f, 1});
+                renderer.draw_text(w.text, 0, 1, "sans", 13, false, {1, 1, 1, 1});
                 break;
             case WidgetType::Input:
-                fill = flex::Paint::solid(flex::Color{0.15f, 0.15f, 0.18f, 1});
-                stroke = flex::Paint::solid(flex::Color{0.35f, 0.35f, 0.4f, 1});
-                renderer.draw_rect(wx, wy, w.width, w.height, 4, fill, stroke, 1);
-                renderer.draw_text(w.text, wx + 8, wy + w.height/2 + 5, "sans", 12, false, {0.5f, 0.5f, 0.5f, 1});
+                renderer.draw_rect(0, 0, w.width, w.height, 5, flex::Paint::solid(flex::Color{0.12f, 0.12f, 0.15f, 1}), flex::Paint::solid(flex::Color{0.3f, 0.3f, 0.35f, 1}), 1);
+                if (w.text.empty())
+                    renderer.draw_text("Search...", 10, (w.height-12)/2, "sans", 12, false, {0.4f, 0.4f, 0.45f, 1});
+                else
+                    renderer.draw_text(w.text, 10, (w.height-12)/2, "sans", 12, false, {0.9f, 0.9f, 0.95f, 1});
                 break;
-            case WidgetType::Checkbox:
-                fill = flex::Paint::solid(flex::Color{0.15f, 0.15f, 0.18f, 1});
-                stroke = flex::Paint::solid(flex::Color{0.35f, 0.35f, 0.4f, 1});
-                renderer.draw_rect(wx, wy, 18, 18, 3, fill, stroke, 1);
-                renderer.draw_text(w.text, wx + 26, wy + 14, "sans", 12, false, {0.9f, 0.9f, 0.9f, 1});
+            case WidgetType::Checkbox: {
+                float sz = std::min(w.height, 20.0f);
+                renderer.draw_rect(0, (w.height-sz)/2, sz, sz, 4, flex::Paint::solid(flex::Color{0.12f, 0.12f, 0.15f, 1}), flex::Paint::solid(flex::Color{0.3f, 0.3f, 0.35f, 1}), 1);
+                if (w.checked) {
+                    float inner = sz * 0.6f;
+                    renderer.draw_rect((sz-inner)/2, (w.height-inner)/2, inner, inner, 2, flex::Paint::solid(flex::Color{0.25f, 0.6f, 1.0f, 1}), flex::Paint::none(), 0);
+                }
+                renderer.draw_text(w.text, sz + 8, (w.height-12)/2, "sans", 12, false, {0.9f, 0.9f, 0.95f, 1});
                 break;
+            }
             case WidgetType::Switch: {
                 bool on = w.checked;
-                flex::Color bg = on ? flex::Color{0.25f, 0.5f, 0.9f, 1} : flex::Color{0.3f, 0.3f, 0.35f, 1};
-                renderer.draw_rect(wx, wy, 44, 24, 12, flex::Paint::solid(bg), flex::Paint::none(), 0);
-                float knob_x = on ? wx + 22 : wx + 2;
-                renderer.draw_rect(knob_x, wy + 2, 20, 20, 10, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
+                flex::Color bg = on ? flex::Color{0.2f, 0.7f, 0.5f, 1} : flex::Color{0.25f, 0.25f, 0.3f, 1};
+                float sw = 48, sh = 26;
+                renderer.draw_rect(0, (w.height-sh)/2, sw, sh, sh/2, flex::Paint::solid(bg), flex::Paint::none(), 0);
+                float knob_sz = sh - 4;
+                float knob_x = on ? sw - knob_sz - 2 : 2;
+                renderer.draw_rect(knob_x, (w.height-knob_sz)/2, knob_sz, knob_sz, knob_sz/2, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
                 break;
             }
             case WidgetType::Slider: {
-                fill = flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.28f, 1});
-                renderer.draw_rect(wx, wy + 8, w.width, 8, 4, fill, flex::Paint::none(), 0);
+                renderer.draw_rect(0, (w.height-6)/2, w.width, 6, 3, flex::Paint::solid(flex::Color{0.2f, 0.2f, 0.25f, 1}), flex::Paint::none(), 0);
                 float pct = (w.value - w.min_value) / (w.max_value - w.min_value);
-                renderer.draw_rect(wx, wy + 8, w.width * pct, 8, 4, flex::Paint::solid(flex::Color{0.25f, 0.5f, 0.9f, 1}), flex::Paint::none(), 0);
-                renderer.draw_rect(wx + w.width * pct - 8, wy + 4, 16, 16, 8, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
+                renderer.draw_rect(0, (w.height-6)/2, w.width * pct, 6, 3, flex::Paint::solid(flex::Color{0.25f, 0.5f, 1.0f, 1}), flex::Paint::none(), 0);
+                renderer.draw_rect(w.width * pct - 10, (w.height-20)/2, 20, 20, 10, flex::Paint::solid(flex::Color{1,1,1,1}), flex::Paint::none(), 0);
                 break;
             }
             case WidgetType::ProgressBar: {
-                fill = flex::Paint::solid(flex::Color{0.18f, 0.18f, 0.2f, 1});
-                renderer.draw_rect(wx, wy, w.width, w.height, 4, fill, flex::Paint::none(), 0);
+                renderer.draw_rect(0, 0, w.width, w.height, w.height/2, flex::Paint::solid(flex::Color{0.14f, 0.14f, 0.18f, 1}), flex::Paint::none(), 0);
                 float pct = (w.value - w.min_value) / (w.max_value - w.min_value);
-                renderer.draw_rect(wx, wy, w.width * pct, w.height, 4, flex::Paint::solid(flex::Color{0.2f, 0.7f, 0.4f, 1}), flex::Paint::none(), 0);
+                renderer.draw_rect(2, 2, (w.width - 4) * pct, w.height - 4, (w.height-4)/2, flex::Paint::solid(flex::Color{0.2f, 0.8f, 0.4f, 1}), flex::Paint::none(), 0);
                 break;
             }
             case WidgetType::Dropdown:
-                fill = flex::Paint::solid(flex::Color{0.15f, 0.15f, 0.18f, 1});
-                stroke = flex::Paint::solid(flex::Color{0.35f, 0.35f, 0.4f, 1});
-                renderer.draw_rect(wx, wy, w.width, w.height, 4, fill, stroke, 1);
-                renderer.draw_text(w.text, wx + 10, wy + w.height/2 + 5, "sans", 12, false, {0.9f, 0.9f, 0.9f, 1});
-                renderer.draw_text("v", wx + w.width - 20, wy + w.height/2 + 5, "sans", 10, false, {0.6f, 0.6f, 0.6f, 1});
+                renderer.draw_rect(0, 0, w.width, w.height, 5, flex::Paint::solid(flex::Color{0.12f, 0.12f, 0.15f, 1}), flex::Paint::solid(flex::Color{0.3f, 0.3f, 0.35f, 1}), 1);
+                renderer.draw_text(w.text, 12, (w.height-12)/2, "sans", 12, false, {0.95f, 0.95f, 1, 1});
+                renderer.draw_text("▼", w.width - 20, (w.height-10)/2, "sans", 10, false, {0.6f, 0.6f, 0.7f, 1});
                 break;
             case WidgetType::Tabs: {
-                float tab_w = w.width / std::max(1, (int)w.options.size());
+                renderer.draw_rect(0, 0, w.width, w.height, 6, flex::Paint::solid(flex::Color{0.12f, 0.12f, 0.15f, 1}), flex::Paint::none(), 0);
+                float tab_w = (w.width - 4) / std::max(1, (int)w.options.size());
                 for (size_t i = 0; i < w.options.size(); ++i) {
-                    flex::Color c = (i == 0) ? flex::Color{0.25f, 0.5f, 0.9f, 1} : flex::Color{0.18f, 0.18f, 0.2f, 1};
-                    renderer.draw_rect(wx + i * tab_w, wy, tab_w - 2, w.height, 4, flex::Paint::solid(c), flex::Paint::none(), 0);
-                    renderer.draw_text(w.options[i], wx + i * tab_w + 10, wy + w.height/2 + 5, "sans", 11, false, text_col);
+                    bool active = (i == 0);
+                    if (active) renderer.draw_rect(2 + i * tab_w, 2, tab_w, w.height - 4, 4, flex::Paint::solid(flex::Color{0.25f, 0.4f, 0.7f, 1}), flex::Paint::none(), 0);
+                    renderer.draw_text(w.options[i], 2 + i * tab_w + 10, (w.height-11)/2, "sans", 11, active, text_col);
                 }
                 break;
             }
             case WidgetType::Card:
-                fill = flex::Paint::solid(flex::Color{0.14f, 0.14f, 0.16f, 1});
-                stroke = flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.28f, 1});
-                renderer.draw_rect(wx, wy, w.width, w.height, 8, fill, stroke, 1);
-                renderer.draw_text(w.text, wx + 16, wy + 28, "sans", 14, true, text_col);
+                renderer.draw_rect(0, 0, w.width, w.height, 12, flex::Paint::solid(flex::Color{0.15f, 0.15f, 0.18f, 1}), flex::Paint::solid(flex::Color{0.25f, 0.25f, 0.3f, 1}), 1);
+                renderer.draw_text(w.text, 20, 28, "sans", 16, true, text_col);
                 break;
             case WidgetType::Divider:
-                renderer.draw_rect(wx, wy, w.width, 1, 0, flex::Paint::solid(flex::Color{0.3f, 0.3f, 0.35f, 1}), flex::Paint::none(), 0);
+                renderer.draw_rect(0, w.height/2, w.width, 1, 0, flex::Paint::solid(flex::Color{1,1,1,0.1f}), flex::Paint::none(), 0);
                 break;
             case WidgetType::Container:
-                stroke = flex::Paint::solid(flex::Color{0.3f, 0.3f, 0.35f, 0.3f});
-                renderer.draw_rect(wx, wy, w.width, w.height, 4, flex::Paint::none(), stroke, 1);
+                renderer.draw_rect(0, 0, w.width, w.height, 10, flex::Paint::none(), flex::Paint::solid(flex::Color{1,1,1,0.05f}), 1.5f);
                 break;
         }
+        renderer.restore();
     }
 
-    // Preview mode indicator
-    flex::Color indicator{0.9f, 0.7f, 0.2f, 1};
-    renderer.draw_text("PREVIEW MODE - Press P to exit", 10, 30, "sans", 14, true, indicator);
+    // Glassmorphic Preview Mode indicator
+    flex::Color indicator_bg{0.1f, 0.1f, 0.15f, 0.8f};
+    renderer.draw_rect(10, 10, 260, 40, 20, flex::Paint::solid(indicator_bg), flex::Paint::solid(flex::Color{0.5f,0.5f,0.8f,0.5f}), 1);
+    renderer.draw_text("LIVE PREVIEW - Press P to Exit", 30, 36, "sans", 12, true, {0.5f, 0.8f, 1.0f, 1});
 }
 
 bool Designer::handle_event(const meta_editor::EditorEvent& event) {
@@ -1645,9 +1659,9 @@ void Designer::render_context_menu(flex::Renderer& renderer) {
                 flex::Paint::solid(flex::Color{0.35f, 0.35f, 0.4f, 1}), flex::Paint::none(), 0);
             y += 8.0f;
         } else {
-            renderer.draw_text(item.label, context_menu_x_ + 12, y + 17, "sans", 12, false, {0.9f, 0.9f, 0.9f, 1});
+            renderer.draw_text(item.label, context_menu_x_ + 12, y + 19, "sans", 12, false, {0.9f, 0.9f, 0.9f, 1});
             if (!item.shortcut.empty()) {
-                renderer.draw_text(item.shortcut, context_menu_x_ + WIDTH - 60, y + 17, "sans", 10, false, {0.5f, 0.5f, 0.55f, 1});
+                renderer.draw_text(item.shortcut, context_menu_x_ + WIDTH - 60, y + 19, "sans", 10, false, {0.5f, 0.5f, 0.55f, 1});
             }
             y += ITEM_H;
         }

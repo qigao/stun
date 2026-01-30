@@ -6,7 +6,6 @@
  */
 
 #pragma once
-
 #include "flex/runtime/types.h"
 #include "flex/runtime/allocator.h"
 #include <string>
@@ -208,12 +207,12 @@ public:
     void set_blend_mode(BlendMode mode) { blend_mode_ = mode; }
 
     float blend_weight() const { return blend_weight_; }
-    void set_blend_weight(float weight) { blend_weight_ = std::max(0.0f, std::min(1.0f, weight)); }
+    void set_blend_weight(float weight) { blend_weight_ = (std::max)(0.0f, (std::min)(1.0f, weight)); }
 
     // Start a fade to target weight over duration
     void fade_to(float target_weight, float duration) {
         fade_start_weight_ = blend_weight_;
-        fade_target_weight_ = std::max(0.0f, std::min(1.0f, target_weight));
+        fade_target_weight_ = (std::max)(0.0f, (std::min)(1.0f, target_weight));
         fade_duration_ = duration;
         fade_time_ = 0;
     }

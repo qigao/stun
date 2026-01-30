@@ -3,7 +3,6 @@
  *
  * Box2D v3.0 (C API) integration.
  */
-
 #include "flex/runtime/physics.h"
 #include "flex/runtime/shape.h"
 #include <box2d/box2d.h>
@@ -823,7 +822,7 @@ bool IKChain::solve_2bone(float tolerance) {
 
     // Check if target is reachable
     float max_reach = l1 + l2;
-    float min_reach = std::abs(l1 - l2);
+    float min_reach = (std::abs)(l1 - l2);
     if (dist_to_target > max_reach || dist_to_target < min_reach) {
         // Target out of reach - point in maximum direction
         if (dist_to_target > max_reach) {
@@ -836,11 +835,11 @@ bool IKChain::solve_2bone(float tolerance) {
 
     // Use law of cosines to find angles
     float cos_angle2 = (l1 * l1 + l2 * l2 - dist_to_target * dist_to_target) / (2.0f * l1 * l2);
-    cos_angle2 = std::max(-1.0f, std::min(1.0f, cos_angle2));
+    cos_angle2 = (std::max)(-1.0f, (std::min)(1.0f, cos_angle2));
     float angle2 = std::acos(cos_angle2);  // Elbow angle
 
     float cos_angle1 = (l1 * l1 + dist_to_target * dist_to_target - l2 * l2) / (2.0f * l1 * dist_to_target);
-    cos_angle1 = std::max(-1.0f, std::min(1.0f, cos_angle1));
+    cos_angle1 = (std::max)(-1.0f, (std::min)(1.0f, cos_angle1));
     float angle1 = std::acos(cos_angle1);  // Shoulder angle
 
     // Calculate shoulder angle
@@ -854,8 +853,8 @@ bool IKChain::solve_2bone(float tolerance) {
     float shoulder_deg = shoulder_angle * 180.0f / b2_pi;
     float elbow_deg = elbow_angle * 180.0f / b2_pi;
 
-    shoulder_deg = std::max(joints[0].min_angle, std::min(joints[0].max_angle, shoulder_deg));
-    elbow_deg = std::max(joints[1].min_angle, std::min(joints[1].max_angle, elbow_deg));
+    shoulder_deg = (std::max)(joints[0].min_angle, (std::min)(joints[0].max_angle, shoulder_deg));
+    elbow_deg = (std::max)(joints[1].min_angle, (std::min)(joints[1].max_angle, elbow_deg));
 
     // Set rotations
     joints[0].body->set_rotation(shoulder_deg);
@@ -923,7 +922,7 @@ bool IKChain::solve_ccd(int max_iterations, float tolerance) {
 
             // Convert back to degrees and apply constraints
             float new_rot_deg = new_rot * 180.0f / b2_pi;
-            new_rot_deg = std::max(joints[i].min_angle, std::min(joints[i].max_angle, new_rot_deg));
+            new_rot_deg = (std::max)(joints[i].min_angle, (std::min)(joints[i].max_angle, new_rot_deg));
 
             // Apply rotation
             joints[i].body->set_rotation(new_rot_deg);

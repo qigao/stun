@@ -68,14 +68,17 @@ float TabBar::get_tab_width() const {
 }
 
 void TabBar::render(flex::Renderer& renderer) {
+    renderer.save();
+    renderer.translate(x_, y_);
+
     // Background
-    renderer.draw_rect(x_, y_, width_, height_, 0,
+    renderer.draw_rect(0, 0, width_, height_, 0,
         flex::Paint::solid(flex::Color{0.1f, 0.1f, 0.12f, 1}), flex::Paint::none(), 0);
-    renderer.draw_rect(x_, y_ + height_ - 1, width_, 1, 0,
+    renderer.draw_rect(0, height_ - 1, width_, 1, 0,
         flex::Paint::solid(flex::Color{0.2f, 0.2f, 0.22f, 1}), flex::Paint::none(), 0);
     
     float tab_w = get_tab_width();
-    float tx = x_;
+    float tx = 0;
     
     for (size_t i = 0; i < tabs_.size(); ++i) {
         const auto& tab = tabs_[i];
@@ -84,8 +87,8 @@ void TabBar::render(flex::Renderer& renderer) {
         
         float draw_x = tx;
         if (is_dragging_this) {
-            draw_x = drag_current_x_ - drag_offset_x_;
-            draw_x = std::max(x_, std::min(draw_x, x_ + width_ - tab_w));
+            draw_x = (drag_current_x_ - drag_offset_x_) - x_;
+            draw_x = std::max(0.0f, std::min(draw_x, width_ - tab_w));
         }
         
         // Tab background
@@ -93,11 +96,11 @@ void TabBar::render(flex::Renderer& renderer) {
                                 : flex::Color{0.12f, 0.12f, 0.14f, 1};
         if (is_dragging_this) bg = flex::Color{0.22f, 0.22f, 0.25f, 1};
         
-        renderer.draw_rect(draw_x, y_, tab_w - 1, height_, 0,
+        renderer.draw_rect(draw_x, 0, tab_w - 1, height_, 0,
             flex::Paint::solid(bg), flex::Paint::none(), 0);
         
         if (active) {
-            renderer.draw_rect(draw_x, y_ + height_ - 2, tab_w - 1, 2, 0,
+            renderer.draw_rect(draw_x, height_ - 2, tab_w - 1, 2, 0,
                 flex::Paint::solid(flex::Color{0.3f, 0.6f, 1.0f, 1}), flex::Paint::none(), 0);
         }
         
@@ -107,11 +110,11 @@ void TabBar::render(flex::Renderer& renderer) {
         
         flex::Color text_col = active ? flex::Color{1, 1, 1, 1}
                                       : flex::Color{0.6f, 0.6f, 0.65f, 1};
-        renderer.draw_text(display, draw_x + 10, y_ + 18, "sans", 11, false, text_col);
+        renderer.draw_text(display, draw_x + 10, 9, "sans", 11, false, text_col);
         
         // Close button
         if (tab.closable) {
-            renderer.draw_text("×", draw_x + tab_w - 20, y_ + height_ / 2 + 5, 
+            renderer.draw_text("×", draw_x + tab_w - 20, height_ / 2 + 5, 
                 "sans", 14, false, {0.5f, 0.5f, 0.55f, 1});
         }
         
@@ -119,23 +122,25 @@ void TabBar::render(flex::Renderer& renderer) {
     }
     
     // New tab button
-    renderer.draw_rect(tx + 5, y_ + 4, 20, 20, 4,
+    renderer.draw_rect(tx + 5, 4, 20, 20, 4,
         flex::Paint::solid(flex::Color{0.15f, 0.15f, 0.18f, 1}), flex::Paint::none(), 0);
-    renderer.draw_text("+", tx + 10, y_ + 18, "sans", 14, false, {0.5f, 0.5f, 0.55f, 1});
+    renderer.draw_text("+", tx + 10, 8, "sans", 14, false, {0.5f, 0.5f, 0.55f, 1});
     
     // Drop indicator when dragging
     if (dragging_) {
         int target = hit_test_tab(drag_current_x_, y_ + height_ / 2);
         if (target >= 0 && target != drag_tab_index_) {
-            float indicator_x = x_ + target * tab_w;
+            float indicator_x = target * tab_w;
             if (target > drag_tab_index_) indicator_x += tab_w;
-            renderer.draw_rect(indicator_x - 1, y_ + 2, 2, height_ - 4, 1,
+            renderer.draw_rect(indicator_x - 1, 2, 2, height_ - 4, 1,
                 flex::Paint::solid(flex::Color{0.3f, 0.6f, 1.0f, 1}), flex::Paint::none(), 0);
         }
     }
     
     // Context menu
     if (context_menu_visible_) render_context_menu(renderer);
+
+    renderer.restore();
 }
 
 bool TabBar::handle_click(float x, float y, bool right_click) {

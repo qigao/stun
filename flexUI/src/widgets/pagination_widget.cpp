@@ -1,7 +1,6 @@
 /*
  * flexUI - PaginationWidget Implementation
  */
-
 #include <flexUI/widgets/pagination_widget.h>
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
