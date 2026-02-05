@@ -326,11 +326,24 @@ void Shape::render(Renderer &r) {
   // -------------------------------------------
   // RETAINED MODE: Use cached paint objects
   // -------------------------------------------
+  // Calculate content offset (e.g. for centered shapes like Circle/Star)
+  Bounds b = compute_bounds();
+  float offset_x = -b.x;
+  float offset_y = -b.y;
+
+  // -------------------------------------------
+  // RETAINED MODE: Use cached paint objects
+  // -------------------------------------------
   if (!is_rough && r.supports_retained_mode()) {
+    Transform t = world_transform();
+    if (offset_x != 0 || offset_y != 0) {
+        t.translate(offset_x, offset_y);
+    }
+
     // Already cached and no changes? Skip entirely!
     if (cached_paint() && !is_dirty(DirtyFlags::Content)) {
       if (is_dirty(DirtyFlags::Transform)) {
-        r.update_transform(cached_paint(), world_transform());
+        r.update_transform(cached_paint(), t);
         clear_dirty(DirtyFlags::Transform);
       }
       return;  // Cached object still valid
@@ -353,22 +366,20 @@ void Shape::render(Renderer &r) {
       using T = std::decay_t<decltype(g)>;
 
       if constexpr (std::is_same_v<T, RectData>) {
-        return r.push_rect(0, 0, g.width, g.height, g.corner_radius, f, s, sw, world_transform(), alpha);
+        return r.push_rect(0, 0, g.width, g.height, g.corner_radius, f, s, sw, t, alpha);
       } else if constexpr (std::is_same_v<T, CircleData>) {
-        return r.push_circle(0, 0, g.radius, f, s, sw, world_transform(), alpha);
+        return r.push_circle(0, 0, g.radius, f, s, sw, t, alpha);
       } else if constexpr (std::is_same_v<T, EllipseData>) {
-        return r.push_ellipse(0, 0, g.rx, g.ry, f, s, sw, world_transform(), alpha);
+        return r.push_ellipse(0, 0, g.rx, g.ry, f, s, sw, t, alpha);
       } else if constexpr (std::is_same_v<T, PolygonData>) {
-        return r.push_polygon(g.sides, g.radius, f, s, sw, world_transform(), alpha);
+        return r.push_polygon(g.sides, g.radius, f, s, sw, t, alpha);
       } else if constexpr (std::is_same_v<T, StarData>) {
-        return r.push_star(g.points, g.outer_radius, g.inner_radius, f, s, sw, world_transform(), alpha);
+        return r.push_star(g.points, g.outer_radius, g.inner_radius, f, s, sw, t, alpha);
       } else if constexpr (std::is_same_v<T, PathData>) {
-        return r.push_path(g.d, f, s, sw, world_transform(), alpha);
+        return r.push_path(g.d, f, s, sw, t, alpha);
       } else if constexpr (std::is_same_v<T, LineData>) {
-        // Line not yet supported in retained mode
         return nullptr;
       } else if constexpr (std::is_same_v<T, RingData>) {
-        // Ring not yet supported in retained mode
         return nullptr;
       }
       return nullptr;
@@ -386,7 +397,7 @@ void Shape::render(Renderer &r) {
   // IMMEDIATE MODE: Fallback for rough/complex shapes
   // -------------------------------------------
 
-  // Helper to apply local transform
+  // Helper to apply local transform AND content offset
   auto apply_local_transform = [&]() {
       r.translate(x_, y_);
       if (rotation_ != 0.0f) {
@@ -394,6 +405,9 @@ void Shape::render(Renderer &r) {
       }
       if (scale_x_ != 1.0f || scale_y_ != 1.0f) {
           r.scale(scale_x_, scale_y_);
+      }
+      if (offset_x != 0 || offset_y != 0) {
+          r.translate(offset_x, offset_y);
       }
   };
 

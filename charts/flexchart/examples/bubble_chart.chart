@@ -1,0 +1,19 @@
+title: "Market Share vs. Growth (Bubble Chart)"
+width: 600
+height: 400
+
+data market_data {
+  values: [
+    { "product": "CoreSync", "market_pos": 20, "growth": 85, "revenue": 100 },
+    { "product": "EdgeLink", "market_pos": 45, "growth": 30, "revenue": 50 },
+    { "product": "CloudBase", "market_pos": 70, "growth": 55, "revenue": 80 },
+    { "product": "DataFlow", "market_pos": 85, "growth": 92, "revenue": 30 }
+  ]
+}
+
+point {
+  data: market_data
+  x: "market_pos"
+  y: "growth"
+  size: "revenue"
+}

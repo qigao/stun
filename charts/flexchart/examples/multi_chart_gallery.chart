@@ -1,0 +1,78 @@
+title: "Chart Gallery"
+width: 1000
+height: 800
+
+data distribution {
+  values: [
+    { "label": "A", "value": 30 },
+    { "label": "B", "value": 50 },
+    { "label": "C", "value": 20 }
+  ]
+}
+
+data scatter_data {
+  source: "data/points.json"
+}
+
+// 1. Pie Chart
+arc {
+  data: distribution
+  theta: "value"
+  color: "label"
+  style {
+    inner-radius: 60 // Makes it a donut
+  }
+}
+
+// 2. Scatter Plot
+point {
+  data: scatter_data
+  x: "x_val"
+  y: "y_val"
+  size: "magnitude"
+  color: "category"
+  opacity: 0.7
+  style {
+    shape: "circle"
+  }
+}
+
+// 3. Stacked Area Chart
+area {
+  data: "data/timeseries.json"
+  x: "timestamp" { type: "temporal" }
+  y: "value"
+  color: "series_name"
+  style {
+    interpolate: "monotone"
+  }
+}
+
+// 4. Heatmap (Rect)
+rect {
+  data: "data/matrix.json"
+  x: "col"
+  y: "row"
+  color: "intensity" { scale: { type: "sequential" } }
+}
+
+// 5. Box Plot (Composite Mark)
+boxplot {
+  data: "data/stats.json"
+  x: "experiment"
+  y: "value"
+  color: "experiment"
+}
+
+// 6. Annotation (Rule & Text)
+rule {
+  y: 75
+  style.stroke: "red"
+}
+
+text {
+  x: 0
+  y: 75
+  text: "Threshold"
+  style.fill: "red"
+}

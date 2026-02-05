@@ -283,10 +283,10 @@ bool DropdownWidget::handle_event(const Event& event, Element& elem) {
 }
 
 void DropdownWidget::update(float delta_ms, Element& elem) {
-  // Keep dirty while open so overlay renders each frame
-  if (open_) {
-    elem.mark_paint_dirty();
-  }
+  // Dropdown 只在状态变化时标记 dirty（在 handle_event 中处理）
+  // 不需要每帧重绘
+  (void)delta_ms;
+  (void)elem;
 }
 
 } // namespace flexUI

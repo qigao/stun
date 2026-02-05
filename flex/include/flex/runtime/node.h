@@ -92,18 +92,21 @@ public:
     float y() const { return y_; }
 
     void set_x(float x) {
+        if (x_ == x) return;
         x_ = x;
         has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
 
     void set_y(float y) {
+        if (y_ == y) return;
         y_ = y;
         has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
     }
 
     void set_position(float x, float y) {
+        if (x_ == x && y_ == y) return;
         x_ = x;
         y_ = y;
         has_manual_transform_ = false;
@@ -113,6 +116,7 @@ public:
     float scale_x() const { return scale_x_; }
     float scale_y() const { return scale_y_; }
     void set_scale(float sx, float sy) {
+        if (scale_x_ == sx && scale_y_ == sy) return;
         scale_x_ = sx; scale_y_ = sy;
         has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
@@ -121,6 +125,7 @@ public:
 
     float rotation() const { return rotation_; }
     void set_rotation(float degrees) {
+        if (rotation_ == degrees) return;
         rotation_ = degrees;
         has_manual_transform_ = false;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
@@ -128,6 +133,8 @@ public:
 
     const Transform& transform() const { return local_transform(); }
     void set_transform(const Transform& t) {
+        // Transform comparison is slightly expensive, but usually worth it to avoid layout drift
+        if (local_transform_ == t && has_manual_transform_) return;
         local_transform_ = t;
         has_manual_transform_ = true;
         mark_dirty_internal(DirtyFlags::Transform | DirtyFlags::Bounds);
@@ -138,10 +145,18 @@ public:
     // -------------------------------------------
 
     float opacity() const { return opacity_; }
-    void set_opacity(float o) { opacity_ = o; mark_dirty_internal(DirtyFlags::Visual); }
+    void set_opacity(float o) { 
+        if (opacity_ == o) return;
+        opacity_ = o; 
+        mark_dirty_internal(DirtyFlags::Visual); 
+    }
 
     bool visible() const { return visible_; }
-    void set_visible(bool v) { visible_ = v; mark_dirty_internal(DirtyFlags::Visual); }
+    void set_visible(bool v) { 
+        if (visible_ == v) return;
+        visible_ = v; 
+        mark_dirty_internal(DirtyFlags::Visual | DirtyFlags::Layout | DirtyFlags::Bounds); 
+    }
 
     // -------------------------------------------
     // Effects (Shadow and Blur)
@@ -172,22 +187,38 @@ public:
 
     float layout_width() const { return layout_ ? layout_->width : 0; }
     float layout_height() const { return layout_ ? layout_->height : 0; }
-    void set_layout_width(float w) { ensure_layout(); layout_->width = w; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
-    void set_layout_height(float h) { ensure_layout(); layout_->height = h; mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); }
+    void set_layout_width(float w) { 
+        if (layout_ && layout_->width == w && !layout_->width_is_percent) return;
+        ensure_layout(); 
+        layout_->width = w; 
+        layout_->width_is_percent = false;
+        mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); 
+    }
+    void set_layout_height(float h) { 
+        if (layout_ && layout_->height == h && !layout_->height_is_percent) return;
+        ensure_layout(); 
+        layout_->height = h; 
+        layout_->height_is_percent = false;
+        mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds); 
+    }
     void set_layout_size(float w, float h) {
+        if (layout_ && layout_->width == w && layout_->height == h && !layout_->width_is_percent && !layout_->height_is_percent) return;
         ensure_layout();
         layout_->width = w;
         layout_->height = h;
+        layout_->width_is_percent = false;
+        layout_->height_is_percent = false;
         mark_dirty(DirtyFlags::Layout | DirtyFlags::Bounds);
     }
 
     float flex_grow() const { return layout_ ? layout_->flex_grow : 0; }
     float flex_shrink() const { return layout_ ? layout_->flex_shrink : 1; }
     float flex_basis() const { return layout_ ? layout_->flex_basis : 0; }
-    void set_flex_grow(float g) { ensure_layout(); layout_->flex_grow = g; mark_dirty(DirtyFlags::Layout); }
-    void set_flex_shrink(float s) { ensure_layout(); layout_->flex_shrink = s; mark_dirty(DirtyFlags::Layout); }
-    void set_flex_basis(float b) { ensure_layout(); layout_->flex_basis = b; mark_dirty(DirtyFlags::Layout); }
+    void set_flex_grow(float g) { if (layout_ && layout_->flex_grow == g) return; ensure_layout(); layout_->flex_grow = g; mark_dirty(DirtyFlags::Layout); }
+    void set_flex_shrink(float s) { if (layout_ && layout_->flex_shrink == s) return; ensure_layout(); layout_->flex_shrink = s; mark_dirty(DirtyFlags::Layout); }
+    void set_flex_basis(float b) { if (layout_ && layout_->flex_basis == b) return; ensure_layout(); layout_->flex_basis = b; mark_dirty(DirtyFlags::Layout); }
     void set_flex(float grow, float shrink = 1.0f, float basis = 0.0f) {
+        if (layout_ && layout_->flex_grow == grow && layout_->flex_shrink == shrink && layout_->flex_basis == basis) return;
         ensure_layout();
         layout_->flex_grow = grow;
         layout_->flex_shrink = shrink;
@@ -196,7 +227,7 @@ public:
     }
 
     AlignSelf align_self() const { return layout_ ? layout_->align_self : AlignSelf::Auto; }
-    void set_align_self(AlignSelf a) { ensure_layout(); layout_->align_self = a; mark_dirty(DirtyFlags::Layout); }
+    void set_align_self(AlignSelf a) { if (layout_ && layout_->align_self == a) return; ensure_layout(); layout_->align_self = a; mark_dirty(DirtyFlags::Layout); }
 
     bool position_absolute() const {
         if (!layout_) return false;
@@ -204,14 +235,15 @@ public:
                layout_->position_mode == PositionMode::Absolute ||
                layout_->position_mode == PositionMode::Fixed;
     }
-    void set_position_absolute(bool a) { ensure_layout(); layout_->position_absolute = a; mark_dirty(DirtyFlags::Layout); }
+    void set_position_absolute(bool a) { if (layout_ && layout_->position_absolute == a) return; ensure_layout(); layout_->position_absolute = a; mark_dirty(DirtyFlags::Layout); }
 
     Anchor anchor() const { return layout_ ? layout_->anchor : Anchor::TopLeft; }
-    void set_anchor(Anchor a) { ensure_layout(); layout_->anchor = a; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
+    void set_anchor(Anchor a) { if (layout_ && layout_->anchor == a) return; ensure_layout(); layout_->anchor = a; mark_dirty(DirtyFlags::Transform | DirtyFlags::Bounds); }
 
     // Extended Layout Properties
     PositionMode position_mode() const { return layout_ ? layout_->position_mode : PositionMode::Static; }
     void set_position_mode(PositionMode m) {
+        if (layout_ && layout_->position_mode == m) return;
         ensure_layout();
         layout_->position_mode = m;
         layout_->position_absolute = (m == PositionMode::Absolute || m == PositionMode::Fixed);
@@ -222,10 +254,11 @@ public:
     float position_right() const { return layout_ ? layout_->position_right : NAN; }
     float position_bottom() const { return layout_ ? layout_->position_bottom : NAN; }
     float position_left() const { return layout_ ? layout_->position_left : NAN; }
-    void set_position_top(float v) { ensure_layout(); layout_->position_top = v; mark_dirty(DirtyFlags::Layout); }
-    void set_position_right(float v) { ensure_layout(); layout_->position_right = v; mark_dirty(DirtyFlags::Layout); }
-    void set_position_bottom(float v) { ensure_layout(); layout_->position_bottom = v; mark_dirty(DirtyFlags::Layout); }
-    void set_position_left(float v) { ensure_layout(); layout_->position_left = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_top(float v) { if (layout_ && layout_->position_top == v) return; ensure_layout(); layout_->position_top = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_right(float v) { if (layout_ && layout_->position_right == v) return; ensure_layout(); layout_->position_right = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_bottom(float v) { if (layout_ && layout_->position_bottom == v) return; ensure_layout(); layout_->position_bottom = v; mark_dirty(DirtyFlags::Layout); }
+    void set_position_left(float v) { if (layout_ && layout_->position_left == v) return; ensure_layout(); layout_->position_left = v; mark_dirty(DirtyFlags::Layout); }
+
     void set_position_offsets(float top, float right, float bottom, float left) {
         ensure_layout();
         layout_->position_top = top;

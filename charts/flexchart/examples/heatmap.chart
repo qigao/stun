@@ -1,0 +1,25 @@
+title: "Monthly Activity Heatmap"
+width: 600
+height: 400
+
+data activity_data {
+  values: [
+    { "day": "Mon", "hour": 10, "intensity": 20 },
+    { "day": "Tue", "hour": 10, "intensity": 50 },
+    { "day": "Wed", "hour": 10, "intensity": 80 },
+    { "day": "Thu", "hour": 10, "intensity": 40 },
+    { "day": "Fri", "hour": 10, "intensity": 90 },
+    { "day": "Mon", "hour": 20, "intensity": 10 },
+    { "day": "Tue", "hour": 20, "intensity": 30 },
+    { "day": "Wed", "hour": 20, "intensity": 60 },
+    { "day": "Thu", "hour": 20, "intensity": 20 },
+    { "day": "Fri", "hour": 20, "intensity": 75 }
+  ]
+}
+
+rect {
+  data: activity_data
+  x: "day"
+  y: "hour"
+  color: "intensity"
+}

@@ -40,6 +40,7 @@ protected:
     Canvas* canvas_ = nullptr;
     SelectionManager* selection_ = nullptr;
     CommandManager* commands_ = nullptr;
+    class ToolManager* tool_manager_ = nullptr;
 
     friend class ToolManager;
 };

@@ -7,11 +7,7 @@
 
 #pragma once
 
-#ifdef _WIN32 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#endif
+ 
 
 #include <cstdint>
 #include <cmath>
@@ -75,6 +71,8 @@ enum class EasingType {
     EaseOut,
     EaseInOut,
     CubicBezier,
+    EaseOutCubic,
+    BounceOut,
 };
 
 struct Easing {
@@ -86,6 +84,8 @@ struct Easing {
     static Easing ease_in() { return {EasingType::EaseIn, 0.42f, 0.0f, 1.0f, 1.0f}; }
     static Easing ease_out() { return {EasingType::EaseOut, 0.0f, 0.0f, 0.58f, 1.0f}; }
     static Easing ease_in_out() { return {EasingType::EaseInOut, 0.42f, 0.0f, 0.58f, 1.0f}; }
+    static Easing ease_out_cubic() { return {EasingType::EaseOutCubic}; }
+    static Easing bounce_out() { return {EasingType::BounceOut}; }
 
     // Evaluate easing at time t [0, 1]
     float evaluate(float t) const {
@@ -98,12 +98,30 @@ struct Easing {
             case EasingType::EaseInOut:
             case EasingType::CubicBezier:
                 return cubic_bezier(t, p1, p2, p3, p4);
+            case EasingType::EaseOutCubic:
+                return cubic_bezier(t, 0.33f, 1.0f, 0.68f, 1.0f);
+            case EasingType::BounceOut:
+                return evaluate_bounce_out(t);
             default:
                 return t;
         }
     }
 
 private:
+    static float evaluate_bounce_out(float t) {
+        if (t < 1 / 2.75f) {
+            return 7.5625f * t * t;
+        } else if (t < 2 / 2.75f) {
+            t -= 1.5f / 2.75f;
+            return 7.5625f * t * t + 0.75f;
+        } else if (t < 2.5f / 2.75f) {
+            t -= 2.25f / 2.75f;
+            return 7.5625f * t * t + 0.9375f;
+        } else {
+            t -= 2.625f / 2.75f;
+            return 7.5625f * t * t + 0.984375f;
+        }
+    }
     // Cubic Bezier implementation (CSS Animations spec compatible)
     // P0=(0,0), P1=(x1,y1), P2=(x2,y2), P3=(1,1)
     static float cubic_bezier(float t, float x1, float y1, float x2, float y2) {

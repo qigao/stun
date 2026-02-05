@@ -1,47 +1,39 @@
 /*
  * flexUI - Main Header
- * 
- * Bundles all core flexUI components:
- * - Elements and Base Classes
- * - Styling and Transitions
- * - Built-in Shapes
- * - Widget System
+ *
+ * Include this single header to use flexUI.
+ * For minimal builds, include only flexUI/box.h and specific widgets.
  */
 
 #pragma once
 
-// Core
+// Public API (users need these)
 #include "flexUI/types.h"
-#include "flexUI/renderer.h"
 #include "flexUI/event.h"
+#include "flexUI/element.h"
+#include "flexUI/widget.h"
+#include "flexUI/box.h"
+#include "flexUI/renderer.h"
 
-// Scene Graph
+// Scene Graph (optional, for custom rendering)
 #include "flexUI/group.h"
 #include "flexUI/shapes.h"
 
-// Layout and Styling
-#include "flexUI/box.h"
-#include "flexUI/computed_style.h"
-#include "flexUI/style_engine.h"
+// Animation
 #include "flexUI/transition.h"
 
-// Widget System
-#include "flexUI/element.h"
-#include "flexUI/widget.h"
-
-// Built-in Widgets
-#include "flexUI/widgets/button_widget.h"
-#include "flexUI/widgets/checkbox_widget.h"
-#include "flexUI/widgets/slider_widget.h"
-#include "flexUI/widgets/input_widget.h"
+// Widgets
 #include "flexUI/widgets/label_widget.h"
-#include "flexUI/widgets/card_widget.h"
-#include "flexUI/widgets/dropdown_widget.h"
+#include "flexUI/widgets/button_widget.h"
+#include "flexUI/widgets/input_widget.h"
+#include "flexUI/widgets/checkbox_widget.h"
+#include "flexUI/widgets/radio_widget.h"
+#include "flexUI/widgets/switch_widget.h"
+#include "flexUI/widgets/slider_widget.h"
+#include "flexUI/widgets/progressbar_widget.h"
 #include "flexUI/widgets/select_widget.h"
+#include "flexUI/widgets/dropdown_widget.h"
 #include "flexUI/widgets/tabs_widget.h"
 #include "flexUI/widgets/spinner_widget.h"
-#include "flexUI/widgets/switch_widget.h"
-#include "flexUI/widgets/radio_widget.h"
-#include "flexUI/widgets/progressbar_widget.h"
+#include "flexUI/widgets/card_widget.h"
 #include "flexUI/widgets/markdown_widget.h"
-

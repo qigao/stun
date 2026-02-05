@@ -208,6 +208,25 @@ static void parse_svg_path(tvg::Shape *shape, const std::string &d) {
       ++i;
     while (i < d.size() && ((d[i] >= '0' && d[i] <= '9') || d[i] == '.'))
       ++i;
+
+    // Handle scientific notation (e.g., 1.23e-5)
+    if (i < d.size() && (d[i] == 'e' || d[i] == 'E')) {
+      size_t e_start = i;
+      ++i; // consume 'e'
+      if (i < d.size() && (d[i] == '-' || d[i] == '+'))
+        ++i; // consume sign
+      
+      // key: requires at least one digit in exponent
+      size_t digit_start = i;
+      while (i < d.size() && (d[i] >= '0' && d[i] <= '9'))
+        ++i;
+        
+      if (i == digit_start) {
+        // Backtrack if no digits after 'e' (though unlikely with standard generator)
+        i = e_start;
+      }
+    }
+
     if (start == i)
       return 0;
     return std::stof(d.substr(start, i - start));
@@ -348,7 +367,7 @@ public:
   void begin_frame(float width, float height, float pixel_ratio) override {
     frame_start_ = std::chrono::high_resolution_clock::now();
 
-    // Only clear canvas in immediate mode
+    // Clear canvas to avoid leaking shapes from previous frames
     if (!retained_mode_) {
       canvas_->remove();
       background_shape_ = nullptr;
@@ -375,9 +394,9 @@ public:
   void end_frame() override {
     auto push_done = std::chrono::high_resolution_clock::now();
 
-    // Always use draw(true) - ThorVG partial rendering requires dirty region tracking
-    // which we don't implement yet. Full redraw is more predictable.
-    canvas_->draw(true);
+    // Use draw(false) to enable ThorVG's internal dirty region tracking
+    // ThorVG will only redraw regions that have changed
+    canvas_->draw(false);
     auto draw_done = std::chrono::high_resolution_clock::now();
 
     canvas_->sync();
@@ -722,7 +741,8 @@ public:
 
     auto shape = tvg::Shape::gen();
 
-    // Build star directly using ThorVG API (no SVG path parsing!)
+    // Build star using separate line segments for each edge (like rough stars)
+    // This avoids the self-intersection issue that causes the "butterfly" appearance
     const float pi = 3.14159265358979f;
     const float angle_step = pi / points; // Half step between outer and inner
     const float start_angle = -pi / 2.0f; // Start at top

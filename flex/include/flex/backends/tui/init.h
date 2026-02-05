@@ -298,28 +298,31 @@ public:
                      const Paint& fill, const Paint& stroke, float stroke_w) override {
         float abs_cx = cx + tx_;
         float abs_cy = cy + ty_;
+        
+        // Terminal chars are not square (8x16), so we need aspect ratio correction
+        constexpr float aspect = static_cast<float>(CHAR_HEIGHT) / CHAR_WIDTH;  // 2.0
 
-        // Fill using block characters (coarse)
+        // Fill using block characters
         if (fill.type != Paint::Type::None) {
             ::tui::Color c = to_color(fill.color);
             int col_min = px_to_col(abs_cx - r);
-            int row_min = px_to_row(abs_cy - r);
+            int row_min = px_to_row(abs_cy - r / aspect);
             int col_max = px_to_col(abs_cx + r);
-            int row_max = px_to_row(abs_cy + r);
+            int row_max = px_to_row(abs_cy + r / aspect);
 
             for (int y = row_min; y <= row_max; ++y) {
                 for (int x = col_min; x <= col_max; ++x) {
-                    // Check center of cell against circle
-                    float center_px_x = x * CHAR_WIDTH + CHAR_WIDTH/2.0f;
-                    float center_px_y = y * CHAR_HEIGHT + CHAR_HEIGHT/2.0f;
-                    float dist_sq = (center_px_x - abs_cx)*(center_px_x - abs_cx) + 
-                                  (center_px_y - abs_cy)*(center_px_y - abs_cy);
-                    if (dist_sq <= r*r) {
-                        if (buf_.in_bounds(x, y)) {
-                            // Clip check
-                            if (clip_rect_.contains(center_px_x, center_px_y)) {
-                                buf_.at(x, y).bg = c;
-                            }
+                    float center_px_x = x * CHAR_WIDTH + CHAR_WIDTH / 2.0f;
+                    float center_px_y = y * CHAR_HEIGHT + CHAR_HEIGHT / 2.0f;
+                    
+                    // Scale Y distance by aspect ratio for circular appearance
+                    float dx = center_px_x - abs_cx;
+                    float dy = (center_px_y - abs_cy) * aspect;
+                    float dist_sq = dx * dx + dy * dy;
+                    
+                    if (dist_sq <= r * r) {
+                        if (buf_.in_bounds(x, y) && clip_rect_.contains(center_px_x, center_px_y)) {
+                            buf_.at(x, y).bg = c;
                         }
                     }
                 }
@@ -328,16 +331,17 @@ public:
 
         // Stroke using Braille (high res)
         if (stroke.type != Paint::Type::None) {
-             ::tui::Color c = to_color(stroke.color);
-             int steps = static_cast<int>(2 * 3.14159f * r / 2.0f); // 1 point per 2px
-             if (steps < 8) steps = 8;
+            ::tui::Color c = to_color(stroke.color);
+            constexpr float PI = 3.14159265358979323846f;
+            int steps = static_cast<int>(2 * PI * r / 2.0f);
+            if (steps < 16) steps = 16;
 
-             for (int i = 0; i < steps; ++i) {
-                 float theta = 2.0f * 3.14159f * float(i) / float(steps);
-                 float px = abs_cx + r * std::cos(theta);
-                 float py = abs_cy + r * std::sin(theta);
-                 set_dot(px, py, c);
-             }
+            for (int i = 0; i < steps; ++i) {
+                float theta = 2.0f * PI * float(i) / float(steps);
+                float px = abs_cx + r * std::cos(theta);
+                float py = abs_cy + (r / aspect) * std::sin(theta);  // Scale Y for aspect
+                set_dot(px, py, c);
+            }
         }
     }
 
@@ -346,24 +350,48 @@ public:
         float abs_cx = cx + tx_;
         float abs_cy = cy + ty_;
         
-        // Simple fill ...
+        // Terminal chars are not square (8x16), apply aspect ratio correction
+        constexpr float aspect = static_cast<float>(CHAR_HEIGHT) / CHAR_WIDTH;  // 2.0
+        float ry_adjusted = ry / aspect;
+        
+        // Fill using scanline algorithm
         if (fill.type != Paint::Type::None) {
-             // Rough bounding box fill
-             draw_rect(cx - rx, cy - ry, rx*2, ry*2, 0, fill, Paint{}, 0); 
+            ::tui::Color c = to_color(fill.color);
+            int row_min = px_to_row(abs_cy - ry_adjusted);
+            int row_max = px_to_row(abs_cy + ry_adjusted);
+            
+            for (int row = row_min; row <= row_max; ++row) {
+                float cell_y = row * CHAR_HEIGHT + CHAR_HEIGHT / 2.0f;
+                float dy = (cell_y - abs_cy) / ry_adjusted;
+                if (std::abs(dy) > 1.0f) continue;
+                
+                // x² / rx² + y² / ry² = 1  =>  x = rx * sqrt(1 - (y/ry)²)
+                float half_width = rx * std::sqrt(1.0f - dy * dy);
+                int col_min = px_to_col(abs_cx - half_width);
+                int col_max = px_to_col(abs_cx + half_width);
+                
+                for (int col = col_min; col <= col_max; ++col) {
+                    float cell_x = col * CHAR_WIDTH + CHAR_WIDTH / 2.0f;
+                    if (clip_rect_.contains(cell_x, cell_y) && buf_.in_bounds(col, row)) {
+                        buf_.at(col, row).bg = c;
+                    }
+                }
+            }
         }
 
         // Stroke with Braille
         if (stroke.type != Paint::Type::None) {
-             ::tui::Color c = to_color(stroke.color);
-             int steps = static_cast<int>(2 * 3.14159f * std::max(rx, ry) / 2.0f);
-             if (steps < 12) steps = 12;
+            ::tui::Color c = to_color(stroke.color);
+            constexpr float PI = 3.14159265358979323846f;
+            int steps = static_cast<int>(2 * PI * std::max(rx, ry_adjusted) / 2.0f);
+            if (steps < 16) steps = 16;
 
-             for (int i = 0; i < steps; ++i) {
-                 float theta = 2.0f * 3.14159f * float(i) / float(steps);
-                 float px = abs_cx + rx * std::cos(theta);
-                 float py = abs_cy + ry * std::sin(theta);
-                 set_dot(px, py, c);
-             }
+            for (int i = 0; i < steps; ++i) {
+                float theta = 2.0f * PI * float(i) / float(steps);
+                float px = abs_cx + rx * std::cos(theta);
+                float py = abs_cy + ry_adjusted * std::sin(theta);
+                set_dot(px, py, c);
+            }
         }
     }
     // Helper to decode one UTF-8 codepoint

@@ -1,7 +1,6 @@
 /*
  * Meta Editor - Frame Tool Implementation
  */
-
 #include "meta_editor/tools/frame_tool.h"
 #include "meta_editor/canvas.h"
 #include "meta_editor/selection_manager.h"

@@ -31,14 +31,19 @@ int main() {
         std::string input = "- Item 1\n* Item 2\n1. Item 3\n2. Item 4\n";
         auto root1 = parse(input);
         dump_tree(root1.root);
+        std::cout << "Test 1 done\n";
     }
+    std::cout << "Test 1 scope exited\n";
     
     std::cout << "\n=== Test 2: Special Formatting ===\n";
     {
         std::string input = "~~Strikethrough~~ and <u>Underline</u>\n";
         auto root2 = parse(input);
         dump_tree(root2.root);
+        std::cout << "Test 2 done\n";
     }
+    std::cout << "Test 2 scope exited\n";
     
+    std::cout << "All tests completed\n";
     return 0;
 }

@@ -1,7 +1,7 @@
 /*
  * Meta Editor - Selection Manager Implementation
  */
-
+ 
 #include "meta_editor/selection_manager.h"
 #include "meta_editor/canvas.h"
 #include <algorithm>

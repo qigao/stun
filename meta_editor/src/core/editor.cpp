@@ -5,6 +5,8 @@
 #include "meta_editor/core/editor.h"
 #include "meta_editor/svg_importer.h"
 #include "meta_editor/tools/select_tool.h"
+#include "meta_editor/tools/path_edit_tool.h"
+#include "meta_editor/tools/text_edit_tool.h"
 #include "meta_editor/tools/pen_tool.h"
 #include "meta_editor/tools/shape_tool.h"
 #include "meta_editor/tools/text_tool.h"
@@ -50,6 +52,8 @@ void Editor::shutdown() {
 
 void Editor::setup_default_tools() {
     tool_manager_->register_tool(std::make_unique<SelectTool>());
+    tool_manager_->register_tool(std::make_unique<PathEditTool>());
+    tool_manager_->register_tool(std::make_unique<TextEditTool>());
     tool_manager_->register_tool(std::make_unique<PenTool>());
     tool_manager_->register_tool(std::make_unique<TextTool>());
     tool_manager_->register_tool(std::make_unique<LineTool>());

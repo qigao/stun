@@ -1,0 +1,20 @@
+title: "Sales Trend Analysis"
+width: 600
+height: 400
+
+data sales_data {
+  values: [
+    { "month": "Jan", "value": 20 },
+    { "month": "Feb", "value": 45 },
+    { "month": "Mar", "value": 30 },
+    { "month": "Apr", "value": 60 },
+    { "month": "May", "value": 50 },
+    { "month": "Jun", "value": 85 }
+  ]
+}
+
+area {
+  data: sales_data
+  x: "month"
+  y: "value"
+}

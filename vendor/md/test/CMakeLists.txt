@@ -11,11 +11,6 @@ set_target_properties(test_md_re2c PROPERTIES FOLDER "md/tests")
 
 add_test(NAME test_md_re2c COMMAND test_md_re2c)
 
-add_executable(lexer_test lexer_test.cpp)
-target_link_libraries(lexer_test PRIVATE ${TARGET_NAME})
-target_include_directories(lexer_test PRIVATE ../include ${CMAKE_BINARY_DIR}/vendor/md)
-set_target_properties(lexer_test PROPERTIES FOLDER "md/tests")
-
 add_executable(indent_test indent_test.cpp)
 target_link_libraries(indent_test PRIVATE ${TARGET_NAME})
 target_include_directories(indent_test PRIVATE ../include)

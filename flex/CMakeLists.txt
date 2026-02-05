@@ -79,9 +79,11 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/ $<INSTALL_INTERFACE:include>)
 
+target_compile_features(flex_compiler PUBLIC cxx_std_17)
+
 set_target_properties(flex_compiler PROPERTIES FOLDER "flex"
                                                POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(flex_compiler PUBLIC   TurboNet::Utils)
+target_link_libraries(flex_compiler PUBLIC TurboNet::Utils)
 
 # ============================================================================
 # Runtime Library
@@ -100,12 +102,14 @@ target_include_directories(
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/ $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 
+target_compile_features(flex_runtime PUBLIC cxx_std_17)
+
 # Link physics engine (Box2D)
 find_package(box2d CONFIG REQUIRED)
 
 target_link_libraries(
   flex_runtime
-  PUBLIC thorvg  TurboNet::Utils
+  PUBLIC thorvg TurboNet::Utils
   PRIVATE qjs box2d::box2d)
 
 set_target_properties(flex_runtime PROPERTIES FOLDER "flex"
@@ -122,6 +126,11 @@ add_library(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/renderer_thorvg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bridge/instance_node_bridge.cpp)
 
+# Windows: disable min/max macros that conflict with std::min/std::max
+if(WIN32)
+    target_compile_definitions(flex PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 target_link_libraries(flex PUBLIC flex_runtime flex_compiler thorvg)
 
 target_include_directories(
@@ -131,6 +140,8 @@ target_include_directories(
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
+
+target_compile_features(flex PUBLIC cxx_std_17)
 
 set_target_properties(flex PROPERTIES FOLDER "flex" POSITION_INDEPENDENT_CODE
                                                     ON)

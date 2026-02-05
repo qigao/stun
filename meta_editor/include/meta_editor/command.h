@@ -103,6 +103,20 @@ private:
     std::vector<float> new_rotations_;
 };
 
+class EditTextCommand : public Command {
+public:
+    EditTextCommand(flex::Node* node, std::string old_text, std::string new_text);
+
+    void execute() override;
+    void undo() override;
+    const char* name() const override { return "Edit Text"; }
+
+private:
+    flex::Node* node_;
+    std::string old_text_;
+    std::string new_text_;
+};
+
 class CommandManager {
 public:
     CommandManager();

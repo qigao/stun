@@ -1,0 +1,20 @@
+title: "Player Attribute Profile (Radar Chart)"
+width: 600
+height: 500
+
+data stats {
+  values: [
+    { "attr": "Speed", "val": 85 },
+    { "attr": "Power", "val": 92 },
+    { "attr": "Stamina", "val": 78 },
+    { "attr": "Defense", "val": 65 },
+    { "attr": "Agility", "val": 88 },
+    { "attr": "Skill", "val": 95 }
+  ]
+}
+
+radar {
+  data: stats
+  x: "attr"
+  y: "val"
+}

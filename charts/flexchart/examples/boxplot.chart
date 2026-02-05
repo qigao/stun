@@ -1,0 +1,21 @@
+title: "Device Performance Distribution (Boxplot)"
+width: 600
+height: 400
+
+data performance_data {
+  values: [
+    { "device": "Model A", "min": 20, "q1": 35, "median": 45, "q3": 60, "max": 85 },
+    { "device": "Model B", "min": 30, "q1": 40, "median": 55, "q3": 70, "max": 90 },
+    { "device": "Model C", "min": 15, "q1": 25, "median": 40, "q3": 50, "max": 75 }
+  ]
+}
+
+boxplot {
+  data: performance_data
+  x: "device"
+  min: "min"
+  q1: "q1"
+  median: "median"
+  q3: "q3"
+  max: "max"
+}

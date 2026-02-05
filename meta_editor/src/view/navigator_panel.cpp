@@ -1,7 +1,6 @@
 /*
  * Meta Editor - Navigator Panel Implementation
  */
-
 #include "meta_editor/view/navigator_panel.h"
 #include "meta_editor/canvas.h"
 #include <algorithm>

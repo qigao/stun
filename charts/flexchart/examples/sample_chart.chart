@@ -1,0 +1,65 @@
+// Premium Chart Dashboard
+title: "Monthly Revenue Analytics"
+width: 100%
+height: 600
+padding: 40
+
+data revenue_data {
+  values: [
+    { "month": "Jan", "revenue": 35, "category": "Product" },
+    { "month": "Feb", "revenue": 84, "category": "Product" },
+    { "month": "Mar", "revenue": 45, "category": "Service" },
+    { "month": "Apr", "revenue": 66, "category": "Product" },
+    { "month": "May", "revenue": 57, "category": "Service" },
+    { "month": "Jun", "revenue": 75, "category": "Product" },
+    { "month": "Jul", "revenue": 92, "category": "Product" },
+    { "month": "Aug", "revenue": 88, "category": "Service" }
+  ]
+}
+
+data target_data {
+  values: [
+    { "month": "Jan", "value": 40 },
+    { "month": "Feb", "value": 45 },
+    { "month": "Mar", "value": 50 },
+    { "month": "Apr", "value": 55 },
+    { "month": "May", "value": 60 },
+    { "month": "Jun", "value": 65 },
+    { "month": "Jul", "value": 70 },
+    { "month": "Aug", "value": 75 }
+  ]
+}
+
+// 1. Base Bars
+bar {
+  data: revenue_data
+  x: "month"
+  y: "revenue"
+  style {
+    corner-radius: 8
+  }
+}
+
+// 2. Trend Line
+line {
+  data: target_data
+  x: "month"
+  y: "value"
+  style {
+    stroke: "#ff4757"
+    stroke-width: 3
+  }
+}
+
+// 3. Highlight Points (Testing pop-in and hover)
+point {
+  data: revenue_data
+  x: "month"
+  y: "revenue"
+  size: 50
+  style {
+    fill: "#ffffff"
+    stroke: "#2f3542"
+    stroke-width: 2
+  }
+}

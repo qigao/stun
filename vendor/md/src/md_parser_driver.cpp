@@ -1,57 +1,27 @@
 #include "md_re2c.h"
-#include "md_parser_gen.h"
-#include <iostream>
-
-// Forward declarations from generated files (Compiled as C++ since they use std::string)
-void* MDParseAlloc(void* (*mallocProc)(size_t));
-void MDParse(void* parser, int tokenID, std::string* tokenData, md_re2c::ParseContext* ctx);
-void MDParseFree(void* parser, void (*freeProc)(void*));
+#include "md_block_parser.h"
+#include "md_inline_parser.h"
+#include "md_extension.h"
 
 namespace md_re2c {
 
-// Forward declaration for lex function (implemented in md_lexer_gen.cpp)
-int lex(LexerState* state, std::string& text);
-
 ParseResult parse(const std::string& input) {
     auto ctx_ptr = std::make_unique<ParseContext>();
-    ParseContext& ctx = *ctx_ptr;
-
-    // Ensure input ends with a newline so the grammar can close the last block
-    std::string normalized_input = input;
-    if (normalized_input.empty() || normalized_input.back() != '\n') {
-        normalized_input += '\n';
-    }
-
-    LexerState state;
-    state.start = normalized_input.c_str();
-    state.cursor = normalized_input.c_str();
-    state.marker = normalized_input.c_str();
-
-    void* parser = MDParseAlloc(malloc);
     
-    std::string text;
-    int token;
-    while ((token = lex(&state, text)) > 0) {
-        std::string* data = new std::string(text);
-        MDParse(parser, token, data, &ctx);
-        text.clear();
+    // 阶段1: Block 解析
+    BlockParser block_parser;
+    auto blocks = block_parser.parse(input);
+    
+    // 阶段2: Inline 解析 (Block → Node AST)
+    ctx_ptr->root = blocks_to_ast(*blocks, ctx_ptr->pool);
+    
+    // 阶段3: 扩展处理 (图表等)
+    if (ctx_ptr->root) {
+        process_blocks(ctx_ptr->root, ctx_ptr->pool);
     }
     
-    // Sentinel for EOF
-    MDParse(parser, 0, nullptr, &ctx);
-    MDParseFree(parser, free);
-
-    // Post-process blocks: merge paragraphs and identify tables
-    if (ctx.root) {
-        process_blocks(ctx.root, ctx.pool);
-    }
-
-    // Post-process inlines: resolve emphasis, links, etc.
-    if (ctx.root) {
-        process_inline_emphasis(ctx.root, ctx.pool);
-    }
-
-    return { std::move(ctx_ptr), ctx.root };
+    Node* root = ctx_ptr->root;
+    return { std::move(ctx_ptr), root };
 }
 
 } // namespace md_re2c

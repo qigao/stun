@@ -27,6 +27,7 @@ const char* DEMO_MARKDOWN =
 "- **CSS Styled**: Everything can be styled via CSS.\n"
 "\n"
 "### Code Example:\n"
+"\n"
 "```cpp\n"
 "auto* md = box->create_widget<MarkdownWidget>(\"div\", \"md1\", \"# Hello\");\n"
 "root->append(md);\n"

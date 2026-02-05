@@ -226,6 +226,13 @@ struct Transform {
         m[0] = sx; m[1] = 0;  m[2] = 0;
         m[3] = 0;  m[4] = sy; m[5] = 0;
     }
+
+    // Equality
+    bool operator==(const Transform& o) const {
+        for (int i = 0; i < 6; ++i) if (m[i] != o.m[i]) return false;
+        return true;
+    }
+    bool operator!=(const Transform& o) const { return !(*this == o); }
 };
 
 // ============================================================================

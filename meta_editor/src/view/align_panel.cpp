@@ -1,7 +1,7 @@
 /*
  * Meta Editor - Align Panel Implementation
  */
-
+ 
 #include "meta_editor/view/align_panel.h"
 #include "meta_editor/canvas.h"
 #include "meta_editor/selection_manager.h"

@@ -7,12 +7,16 @@
 
 #ifndef FLEXUI_GROUP_H
 #define FLEXUI_GROUP_H
-
+ #ifdef _WIN32
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+#endif
 #include "flex/runtime/types.h"
 #include "flex/runtime/renderer.h"
 #include <vector>
 #include <memory>
-
+#include <algorithm>
 namespace flexUI {
 
 // Re-export flex types

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 280">
+  <style>
+    .title { font: bold 18px system-ui, sans-serif; fill: #000; }
+    .label { font: bold 14px system-ui, sans-serif; fill: #000; }
+    .value { font: bold 11px system-ui, sans-serif; fill: white; }
+    .axis { font: 12px system-ui, sans-serif; fill: #000; }
+    .legend-text { font: bold 12px system-ui, sans-serif; fill: #000; }
+    .grid { stroke: #d1d5db; }
+    .baseline { stroke: #666; }
+    .bar-parse { fill: #10b981; }
+    .bar-layout { fill: #3b82f6; }
+    .bar-render { fill: #8b5cf6; }
+    @media (prefers-color-scheme: dark) {
+      .title, .label, .axis, .legend-text { fill: #e6edf3; }
+      .grid { stroke: #30363d; }
+      .baseline { stroke: #8b949e; }
+    }
+  </style>
+
+  <text x="250" y="28" text-anchor="middle" class="title">mmdr Pipeline Breakdown (ms)</text>
+
+  <!-- Legend -->
+  <rect x="130" y="46" width="14" height="14" rx="2" class="bar-parse"/>
+  <text x="148" y="58" class="legend-text">Parse</text>
+  <rect x="210" y="46" width="14" height="14" rx="2" class="bar-layout"/>
+  <text x="228" y="58" class="legend-text">Layout</text>
+  <rect x="295" y="46" width="14" height="14" rx="2" class="bar-render"/>
+  <text x="313" y="58" class="legend-text">Render</text>
+
+  <!-- Y-axis labels -->
+  <text x="38" y="82" text-anchor="end" class="axis">1.2</text>
+  <text x="38" y="122" text-anchor="end" class="axis">0.9</text>
+  <text x="38" y="162" text-anchor="end" class="axis">0.6</text>
+  <text x="38" y="202" text-anchor="end" class="axis">0.3</text>
+  <text x="38" y="242" text-anchor="end" class="axis">0</text>
+
+  <!-- Grid lines -->
+  <line x1="45" y1="78" x2="460" y2="78" class="grid" stroke-width="1"/>
+  <line x1="45" y1="118" x2="460" y2="118" class="grid" stroke-width="1"/>
+  <line x1="45" y1="158" x2="460" y2="158" class="grid" stroke-width="1"/>
+  <line x1="45" y1="198" x2="460" y2="198" class="grid" stroke-width="1"/>
+  <line x1="45" y1="238" x2="460" y2="238" class="baseline" stroke-width="1"/>
+
+  <!-- Flowchart: Parse 1.04, Layout 0.05, Render 0.05 -->
+  <rect x="55" y="100" width="55" height="138" rx="0" class="bar-parse"/>
+  <text x="82" y="175" text-anchor="middle" class="value">1.04</text>
+  <rect x="55" y="93" width="55" height="7" rx="0" class="bar-layout"/>
+  <rect x="55" y="86" width="55" height="7" rx="3 3 0 0" class="bar-render"/>
+  <text x="82" y="258" text-anchor="middle" class="label">Flowchart</text>
+
+  <!-- Class: Parse 0.36, Layout 0.23, Render 0.15 -->
+  <rect x="155" y="190" width="55" height="48" rx="0" class="bar-parse"/>
+  <text x="182" y="218" text-anchor="middle" class="value">0.36</text>
+  <rect x="155" y="159" width="55" height="31" rx="0" class="bar-layout"/>
+  <text x="182" y="179" text-anchor="middle" class="value">0.23</text>
+  <rect x="155" y="139" width="55" height="20" rx="3 3 0 0" class="bar-render"/>
+  <text x="182" y="258" text-anchor="middle" class="label">Class</text>
+
+  <!-- State: Parse 0.39, Layout 0.18, Render 0.10 -->
+  <rect x="255" y="186" width="55" height="52" rx="0" class="bar-parse"/>
+  <text x="282" y="216" text-anchor="middle" class="value">0.39</text>
+  <rect x="255" y="162" width="55" height="24" rx="0" class="bar-layout"/>
+  <text x="282" y="178" text-anchor="middle" class="value">0.18</text>
+  <rect x="255" y="149" width="55" height="13" rx="3 3 0 0" class="bar-render"/>
+  <text x="282" y="258" text-anchor="middle" class="label">State</text>
+
+  <!-- Sequence: Parse 0.37, Layout 0.03, Render 0.07 -->
+  <rect x="355" y="189" width="55" height="49" rx="0" class="bar-parse"/>
+  <text x="382" y="218" text-anchor="middle" class="value">0.37</text>
+  <rect x="355" y="185" width="55" height="4" rx="0" class="bar-layout"/>
+  <rect x="355" y="176" width="55" height="9" rx="3 3 0 0" class="bar-render"/>
+  <text x="382" y="258" text-anchor="middle" class="label">Sequence</text>
+</svg>

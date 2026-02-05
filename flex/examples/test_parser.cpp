@@ -101,7 +101,7 @@ void print_node(const flex::Node* node, int depth = 0) {
         }
 
         for (const auto& child : children) {
-            print_node(child.get(), depth + 1);
+            print_node(child, depth + 1);
         }
     }
 }
@@ -234,7 +234,7 @@ int main(int argc, char* argv[]) {
         const auto& children = root->children();
         std::cout << "Root has " << children.size() << " children:\n";
         for (const auto& child : children) {
-            print_node(child.get(), 1);
+            print_node(child, 1);
         }
     } else {
         std::cout << "  (empty root)\n";

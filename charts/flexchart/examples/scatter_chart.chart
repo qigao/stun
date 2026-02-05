@@ -1,0 +1,19 @@
+title: "Data Distribution"
+width: 600
+height: 400
+
+data distribution_data {
+  values: [
+    { "x": "A", "y": 25 },
+    { "x": "B", "y": 80 },
+    { "x": "C", "y": 45 },
+    { "x": "D", "y": 95 },
+    { "x": "E", "y": 60 }
+  ]
+}
+
+point {
+  data: distribution_data
+  x: "x"
+  y: "y"
+}

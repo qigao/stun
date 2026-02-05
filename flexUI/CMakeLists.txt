@@ -39,6 +39,9 @@ set(FLEXUI_SOURCES
   src/textedit.cpp
   src/transition.cpp
   src/text_util.cpp
+  src/event_dispatcher.cpp
+  src/layout_manager.cpp
+  src/render_manager.cpp
   src/widgets/input_widget.cpp
   src/widgets/button_widget.cpp
   src/widgets/label_widget.cpp
@@ -80,6 +83,9 @@ set(FLEXUI_HEADERS
   include/flexUI/computed_style.h
   include/flexUI/style_engine.h
   include/flexUI/event.h
+  include/flexUI/event_dispatcher.h
+  include/flexUI/layout_manager.h
+  include/flexUI/render_manager.h
   include/flexUI/widget.h
   include/flexUI/element.h
   include/flexUI/box.h
@@ -126,6 +132,11 @@ set(FLEXUI_HEADERS
 
 # 创建库
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
+
+# Windows: disable min/max macros that conflict with std::min/std::max
+if(WIN32)
+    target_compile_definitions(flexUI PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 
 # 链接依赖（flex 提供后端无关的渲染抽象，thorvg 由 flex 传递依赖）
 target_link_libraries(flexUI PUBLIC ${LEXBOR_LIBRARY} flex TurboNet::Utils md_parser)

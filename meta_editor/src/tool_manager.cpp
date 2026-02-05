@@ -13,6 +13,7 @@ void ToolManager::register_tool(std::unique_ptr<Tool> tool) {
     tool->canvas_ = canvas_;
     tool->selection_ = selection_;
     tool->commands_ = commands_;
+    tool->tool_manager_ = this;
     std::string name = tool->name();
     tools_[name] = std::move(tool);
 }

@@ -1,0 +1,26 @@
+title: "Revenue by Category & Region"
+width: 600
+height: 400
+
+data revenue_data {
+  values: [
+    { "category": "Software", "q1": 45, "q2": 30 },
+    { "category": "Hardware", "q1": 60, "q2": 45 },
+    { "category": "Services", "q1": 25, "q2": 80 },
+    { "category": "Cloud", "q1": 90, "q2": 55 }
+  ]
+}
+
+bar {
+  data: revenue_data
+  x: "category"
+  y: "q1"
+  style { corner-radius: 6 }
+}
+
+bar {
+  data: revenue_data
+  x: "category"
+  y: "q2"
+  style { corner-radius: 6 }
+}

@@ -1,0 +1,19 @@
+title: "Monthly Sales Distribution"
+width: 600
+height: 400
+
+data sales_data {
+  values: [
+    { "category": "Apples", "value": 30 },
+    { "category": "Bananas", "value": 20 },
+    { "category": "Cherries", "value": 15 },
+    { "category": "Dates", "value": 25 },
+    { "category": "Elderberries", "value": 10 }
+  ]
+}
+
+pie {
+  data: sales_data
+  theta: "value"
+  color: "category"
+}

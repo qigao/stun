@@ -1,8 +1,8 @@
 # Flex Engine - Vision (Theoretical Design)
 
 > **⚠️ IMPORTANT:** This document describes the **theoretical design and future vision** for Flex Engine.
-> For the **actual current implementation**, see [ARCHITECTURE.md](ARCHITECTURE.md).
-> For the **DSL specification**, see [dsl.md](dsl.md).
+> For the **actual current implementation**, see [ARCHITECTURE.md](../ARCHITECTURE.md).
+> For the **DSL specification**, see [DSL.md](DSL.md).
 
 ---
 

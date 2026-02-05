@@ -7,7 +7,8 @@
 
 #ifndef FLEXUI_SHAPES_H
 #define FLEXUI_SHAPES_H
-
+ 
+#include <algorithm>
 #include "flexUI/group.h"
 #include <stb_sprintf.h>
 #include <string>

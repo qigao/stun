@@ -3,6 +3,7 @@
  */
 
 #include "meta_editor/command.h"
+#include <flex/runtime/text.h>
 
 namespace meta_editor {
 
@@ -149,6 +150,24 @@ void RotateCommand::undo() {
     for (size_t i = 0; i < nodes_.size(); ++i) {
         nodes_[i]->set_rotation(old_rotations_[i]);
     }
+}
+
+// EditTextCommand
+EditTextCommand::EditTextCommand(flex::Node* node, std::string old_text, std::string new_text)
+    : node_(node)
+    , old_text_(std::move(old_text))
+    , new_text_(std::move(new_text)) {}
+
+void EditTextCommand::execute() {
+    if (node_->type() != flex::NodeType::Text) return;
+    auto* text = static_cast<flex::Text*>(node_);
+    text->set_content(new_text_.c_str());
+}
+
+void EditTextCommand::undo() {
+    if (node_->type() != flex::NodeType::Text) return;
+    auto* text = static_cast<flex::Text*>(node_);
+    text->set_content(old_text_.c_str());
 }
 
 // CommandManager

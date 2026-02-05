@@ -6,6 +6,7 @@
 #include "meta_editor/canvas.h"
 #include <cmath>
 #include <stb_sprintf.h>
+#include <algorithm>
 
 namespace meta_editor {
 

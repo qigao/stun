@@ -10,6 +10,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
+#include <algorithm>
 #include "flex/backends/thorvg/init.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -28,7 +29,7 @@ public:
             SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED,
             WIDTH, HEIGHT,
-            SDL_WINDOW_SHOWN
+            SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE
         );
         if (!window_) return false;
 
@@ -114,8 +115,8 @@ public:
     }
 
 private:
-    static constexpr int WIDTH = 900;
-    static constexpr int HEIGHT = 700;
+    static constexpr int WIDTH = 1000;
+    static constexpr int HEIGHT = 1200;
 
     SDL_Window* window_ = nullptr;
     SDL_Renderer* sdl_renderer_ = nullptr;
@@ -180,8 +181,28 @@ private:
         canvas_->sync();
 
         SDL_UpdateTexture(texture_, nullptr, buffer_.data(), WIDTH * sizeof(uint32_t));
+        // Clear background to match Flex scene color (#1a1a2e)
+        SDL_SetRenderDrawColor(sdl_renderer_, 26, 26, 46, 255);
         SDL_RenderClear(sdl_renderer_);
-        SDL_RenderCopy(sdl_renderer_, texture_, nullptr, nullptr);
+
+        // Calculate destination rect to center the drawing in the window
+        int ww, wh;
+        SDL_GetRendererOutputSize(sdl_renderer_, &ww, &wh);
+        
+        SDL_Rect dst;
+        dst.w = WIDTH;
+        dst.h = HEIGHT;
+        dst.x = (std::max)(0, (ww - WIDTH) / 2);
+        dst.y = (std::max)(0, (wh - HEIGHT) / 2);
+
+        static bool dimensions_logged = false;
+        if (!dimensions_logged) {
+            std::cout << "Window Output Size: " << ww << "x" << wh << "\n";
+            std::cout << "Drawing Center Pos: " << dst.x << ", " << dst.y << "\n";
+            dimensions_logged = true;
+        }
+
+        SDL_RenderCopy(sdl_renderer_, texture_, nullptr, &dst);
         SDL_RenderPresent(sdl_renderer_);
     }
 };

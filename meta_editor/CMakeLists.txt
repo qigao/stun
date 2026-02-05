@@ -3,7 +3,8 @@ project(meta_editor)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(SDL2 CONFIG QUIET)
+find_package(glfw3 CONFIG REQUIRED)
+find_package(glad CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
 # Find parent flex and flexUI
 set(FLEX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../flex)
@@ -16,10 +17,7 @@ endif()
 
 if(NOT TARGET flexUI)
     add_subdirectory(${FLEXUI_DIR} ${CMAKE_BINARY_DIR}/flexUI)
-endif()
-
-# Find SDL2
-find_package(SDL2 REQUIRED)
+endif() 
 
 # Meta Editor SDK library
 # Core SDK - always included
@@ -37,6 +35,8 @@ add_library(meta_editor
     src/svg_importer.cpp
     # Built-in tools
     src/tools/select_tool.cpp
+    src/tools/path_edit_tool.cpp
+    src/tools/text_edit_tool.cpp
     src/tools/pen_tool.cpp
     src/tools/shape_tool.cpp
     src/tools/text_tool.cpp
@@ -80,23 +80,19 @@ target_link_libraries(meta_editor
     PUBLIC 
         flex 
         flexUI
-        SDL2::SDL2 SDL2::SDL2main OpenGL::GL
+        glfw glad::glad OpenGL::GL
 )
-set_target_properties(meta_editor PROPERTIES FOLDER sdk/)
+set_target_properties(meta_editor PROPERTIES FOLDER "Modules/MetaEditor")
 
 # Demo executable (full app with all panels - reference implementation)
-add_executable(meta_editor_demo
-    examples/demo.cpp
-    examples/full_editor_app.cpp
-)
-
-target_include_directories(meta_editor_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples)
-
-target_link_libraries(meta_editor_demo
-    PRIVATE
-        meta_editor
-)
-set_target_properties(meta_editor_demo PROPERTIES FOLDER sdk/)
+# TODO: Convert to GLFW
+# add_executable(meta_editor_demo
+#     examples/demo.cpp
+#     examples/full_editor_app.cpp
+# )
+# target_include_directories(meta_editor_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+# target_link_libraries(meta_editor_demo PRIVATE meta_editor)
+# set_target_properties(meta_editor_demo PROPERTIES FOLDER "Modules/MetaEditor/Examples")
 # SDK minimal example (no UI panels)
 add_executable(sdk_minimal_demo
     examples/sdk_minimal.cpp
@@ -106,17 +102,14 @@ target_link_libraries(sdk_minimal_demo
     PRIVATE
         meta_editor
 )
+set_target_properties(sdk_minimal_demo PROPERTIES FOLDER "Modules/MetaEditor/Examples")
+
 
 # Line Tool demo (custom tool + panel example)
-add_executable(line_tool_demo
-    examples/line_tool_demo.cpp
-)
-
-target_link_libraries(line_tool_demo
-    PRIVATE
-        meta_editor
-)
-set_target_properties(line_tool_demo PROPERTIES FOLDER sdk/)
+# TODO: Convert to GLFW
+# add_executable(line_tool_demo examples/line_tool_demo.cpp)
+# target_link_libraries(line_tool_demo PRIVATE meta_editor)
+# set_target_properties(line_tool_demo PROPERTIES FOLDER "Modules/MetaEditor/Examples")
 # SVG Editor demo (Inkscape-like)
 add_executable(svg_editor_demo
     examples/svg_editor_demo.cpp
@@ -126,11 +119,11 @@ target_link_libraries(svg_editor_demo
     PRIVATE
         meta_editor
 )
-set_target_properties(svg_editor_demo PROPERTIES FOLDER sdk/)
+set_target_properties(svg_editor_demo PROPERTIES FOLDER "Modules/MetaEditor/Examples")
 # Copy assets to build directory
-add_custom_command(TARGET meta_editor_demo POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:meta_editor_demo>/assets
-    COMMENT "Copying assets to build directory"
-)
+# add_custom_command(TARGET meta_editor_demo POST_BUILD
+#     COMMAND ${CMAKE_COMMAND} -E copy_directory
+#         ${CMAKE_CURRENT_SOURCE_DIR}/assets
+#         $<TARGET_FILE_DIR:meta_editor_demo>/assets
+#     COMMENT "Copying assets to build directory"
+# )

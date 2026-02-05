@@ -15,8 +15,7 @@
 #include <chrono>
 #include <fstream>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
+#ifdef _WIN32 
 #include <windows.h>
 #include <timeapi.h>
 #pragma comment(lib, "winmm.lib")

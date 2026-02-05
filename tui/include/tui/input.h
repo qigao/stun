@@ -9,18 +9,16 @@
 #include <optional>
 #include <cstdint>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
+#ifdef _WIN32 
 #include <windows.h>
 #include <conio.h>
-#ifndef _WIN32
+#else
 #include <unistd.h>
 #include <sys/select.h>
-#endif
 #include <csignal>
 #include <atomic>
 
-// Global signal flag
+// Global signal flag for SIGWINCH (Unix only)
 inline std::atomic<bool> g_resize_pending{false};
 inline void handle_winch(int) { g_resize_pending = true; }
 #endif

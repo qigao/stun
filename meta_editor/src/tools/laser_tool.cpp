@@ -1,7 +1,7 @@
 /*
  * Meta Editor - Laser Pointer Tool Implementation
  */
-
+#include <algorithm>
 #include "meta_editor/tools/laser_tool.h"
 
 namespace meta_editor {
