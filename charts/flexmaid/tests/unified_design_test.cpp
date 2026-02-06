@@ -1,6 +1,6 @@
 #include <cassert>
 #include <chrono>
-#include <flex/modules/flexmaid/flexmaid.h>
+#include <flexmaid.h>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -195,6 +195,13 @@ void test_theme_customization() {
   assert(svg.find("Inter") != std::string::npos); // 现代字体
 
   std::cout << "  ✓ Theme customization working\n";
+
+  // Test official theme
+  auto official_theme = Theme::official();
+  maid.set_theme(official_theme);
+  svg = maid.mermaid_to_svg(diagram);
+  assert(svg.find("#F8FAFF") != std::string::npos); // Check primary color exists
+  std::cout << "  ✓ Official theme working\n";
 }
 
 void test_error_handling() {

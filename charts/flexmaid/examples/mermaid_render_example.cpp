@@ -4,8 +4,8 @@
 #include <flex.h>
 #include <flex/runtime/instance.h>
 #include <flex/backends/thorvg/init.h>
-#include <flex/modules/flexmaid/flexmaid.h>
-#include <flex/modules/flexmaid/mermaid_component.h>
+#include <flexmaid.h>
+#include <mermaid_component.h>
 
 using namespace flex;
 using namespace flex::modules::flexmaid;

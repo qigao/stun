@@ -1,4 +1,4 @@
-#include <flex/modules/flexmaid/ir/unified_diagram.h>
+#include <ir/unified_diagram.h>
 #include <stdexcept>
 
 namespace flex::modules::flexmaid {
@@ -24,12 +24,18 @@ std::unique_ptr<UnifiedDiagram> create_diagram(DiagramType type) {
         case DiagramType::ER:
             diagram->set_prop("direction", "TB");
             break;
+        case DiagramType::Architecture:
+            diagram->set_prop("direction", "LR");
+            break;
         case DiagramType::Pie:
             diagram->set_prop("show_data", "false");
             break;
         case DiagramType::Gantt:
             diagram->set_prop("date_format", "YYYY-MM-DD");
             diagram->set_prop("axis_format", "%m/%d");
+            break;
+        case DiagramType::Block:
+            diagram->set_prop("direction", "LR");
             break;
         default:
             diagram->set_prop("direction", "TD");
@@ -83,15 +89,15 @@ DiagramType string_to_diagram_type(const std::string& str) {
     if (str == "xychart" || str == "xychart-beta") return DiagramType::XYChart;
     if (str == "requirementDiagram") return DiagramType::Requirement;
     if (str == "sankey" || str == "sankey-beta") return DiagramType::Sankey;
-    if (str == "architecture") return DiagramType::Architecture;
-    if (str == "block") return DiagramType::Block;
-    if (str == "C4") return DiagramType::C4;
+    if (str == "architecture" || str == "architecture-beta") return DiagramType::Architecture;
+    if (str == "block" || str == "block-beta") return DiagramType::Block;
+    if (str == "C4" || str == "C4Context" || str == "C4Container" || str == "C4Component" || str == "C4Dynamic" || str == "C4Deployment") return DiagramType::C4;
     if (str == "kanban") return DiagramType::Kanban;
-    if (str == "packet") return DiagramType::Packet;
-    if (str == "radar") return DiagramType::Radar;
-    if (str == "treemap") return DiagramType::Treemap;
+    if (str == "packet" || str == "packet-beta") return DiagramType::Packet;
+    if (str == "radar" || str == "radar-beta") return DiagramType::Radar;
+    if (str == "treemap" || str == "treemap-beta") return DiagramType::Treemap;
     if (str == "zenuml") return DiagramType::ZenUML;
-    if (str == "quadrant") return DiagramType::Quadrant;
+    if (str == "quadrant" || str == "quadrantChart") return DiagramType::Quadrant;
     
     throw std::invalid_argument("Unknown diagram type: " + str);
 }
@@ -150,6 +156,19 @@ std::string edge_style_to_string(EdgeStyle style) {
         case EdgeStyle::Thick: return "thick";
         case EdgeStyle::Dashed: return "dashed";
         default: return "solid";
+    }
+}
+
+std::string edge_decoration_to_string(EdgeDecoration dec) {
+    switch (dec) {
+        case EdgeDecoration::None: return "none";
+        case EdgeDecoration::Arrow: return "arrow";
+        case EdgeDecoration::Triangle: return "triangle";
+        case EdgeDecoration::Diamond: return "diamond";
+        case EdgeDecoration::DiamondFilled: return "diamond_filled";
+        case EdgeDecoration::Circle: return "circle";
+        case EdgeDecoration::Cross: return "cross";
+        default: return "none";
     }
 }
 

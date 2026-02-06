@@ -2,7 +2,7 @@
 
 // 条件编译：只有链接了对应模块才启用
 #ifdef MD_HAS_FLEXMAID
-#include <flex/modules/flexmaid/flexmaid.h>
+#include <flexmaid/flexmaid.h>
 #endif
 
 #ifdef MD_HAS_FLEXCHART

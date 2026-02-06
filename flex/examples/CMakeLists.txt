@@ -22,6 +22,9 @@ foreach(CPP_FILE ${CPP_FILES})
   add_executable(${CPP_NAME} ${CPP_FILE})
   target_link_libraries(${CPP_NAME} PRIVATE flex OpenGL::GL)
   
+  # Link tango for tango backend examples
+    target_link_libraries(${CPP_NAME} PRIVATE tango)
+  
   # Link SDL2 if available
   if(TARGET SDL2::SDL2)
     target_link_libraries(${CPP_NAME} PRIVATE SDL2::SDL2 SDL2::SDL2main)

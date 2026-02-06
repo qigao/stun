@@ -72,7 +72,7 @@ theme {
 ## 2. 文件结构
 
 ```
-flex/modules/infographic/
+infographic/
 ├── compiler/
 │   ├── infographic_lexer.re       # re2c lexer 定义
 │   ├── infographic_grammar.y      # lemon grammar 定义

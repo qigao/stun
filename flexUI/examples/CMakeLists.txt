@@ -15,3 +15,10 @@ target_link_libraries(markdown_demo flexUI thorvg
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 )
 set_target_properties(markdown_demo PROPERTIES FOLDER flexUI/)
+
+# TUI Demo - Terminal UI using tango backend
+add_executable(flexui_tui_demo tui_demo.cpp)
+target_link_libraries(flexui_tui_demo flexUI flex tango)
+target_include_directories(flexui_tui_demo PRIVATE ${CMAKE_SOURCE_DIR}/flex/include)
+set_target_properties(flexui_tui_demo PROPERTIES FOLDER flexUI/)
+ 

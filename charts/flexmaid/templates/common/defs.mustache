@@ -1,0 +1,29 @@
+<defs>
+  <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+    <feOffset dx="2" dy="2" result="offsetblur"/>
+    <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <polygon points="0 0, 10 3.5, 0 7" fill="{{line_color}}"/>
+  </marker>
+  <marker id="diamond" markerWidth="12" markerHeight="12" refX="6" refY="6" orient="auto">
+    <polygon points="0 6, 6 0, 12 6, 6 12" fill="{{background_color}}" stroke="{{line_color}}"/>
+  </marker>
+  <marker id="diamond_filled" markerWidth="12" markerHeight="12" refX="6" refY="6" orient="auto">
+    <polygon points="0 6, 6 0, 12 6, 6 12" fill="{{line_color}}"/>
+  </marker>
+  <marker id="circle" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+    <circle cx="5" cy="5" r="4" fill="{{background_color}}" stroke="{{line_color}}"/>
+  </marker>
+  <marker id="cross" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+    <path d="M 2 2 L 8 8 M 8 2 L 2 8" stroke="{{line_color}}" stroke-width="2"/>
+  </marker>
+  <marker id="triangle" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <polygon points="0 0, 10 5, 0 10" fill="{{background_color}}" stroke="{{line_color}}"/>
+  </marker>
+  <marker id="triangle_filled" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+    <polygon points="0 0, 10 5, 0 10" fill="{{line_color}}"/>
+  </marker>
+</defs>

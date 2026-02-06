@@ -141,8 +141,3 @@ set_target_properties(flexinfographic_dsl_test PROPERTIES FOLDER "Modules/FlexIn
 add_executable(flexinfographic_e2e_test tests/test_e2e_pipeline.cpp)
 target_link_libraries(flexinfographic_e2e_test flexinfographic)
 set_target_properties(flexinfographic_e2e_test PROPERTIES FOLDER "Modules/FlexInfographic/Tests")
-
-add_executable(repro_pie_chart examples/repro_pie_chart.cpp)
-target_link_libraries(repro_pie_chart flexinfographic flex)
-set_target_properties(repro_pie_chart PROPERTIES FOLDER "Modules/FlexInfographic/Examples")
-

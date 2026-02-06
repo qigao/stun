@@ -9,6 +9,8 @@ project(
 
 include(CMakeOptions.cmake)
 
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 # Compiler flags are defined in presets/CompilerFlags.json Use C++17,
 # visibility=hidden by default
 set(CMAKE_CXX_STANDARD 17)
@@ -32,8 +34,10 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
-add_subdirectory(flex) 
-add_subdirectory(flexUI) 
-add_subdirectory(meta_editor) 
-add_subdirectory(tui) 
+add_subdirectory(flex)
+add_subdirectory(flexUI)
+add_subdirectory(meta_editor)
+add_subdirectory(tango)
 add_subdirectory(flexui_designer)
+add_subdirectory(FlexPlayer)
+add_subdirectory(charts)

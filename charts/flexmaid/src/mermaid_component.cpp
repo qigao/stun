@@ -1,5 +1,5 @@
-#include <flex/modules/flexmaid/mermaid_component.h>
-#include <flex/modules/flexmaid/flexmaid.h>
+#include "flexmaid/mermaid_component.h"
+#include "flexmaid/flexmaid.h"
 #include <flex/runtime/group.h>
 #include <flex/runtime/shape.h>
 #include <flex/runtime/text.h>
@@ -8,7 +8,9 @@
 #include <sstream>
 #include <cmath>
 
-namespace flex::modules::flexmaid {
+namespace flex {
+namespace modules {
+namespace flexmaid {
 
 namespace {
 
@@ -159,8 +161,8 @@ flex::Group* MermaidComponent::build(const UnifiedDiagram& diagram, const Layout
         }
     }
 
-    for (const auto& node : diagram.nodes) {
-        auto it = layout.node_bounds.find(node.id);
+    for (const auto& [id, node] : diagram.nodes) {
+        auto it = layout.node_bounds.find(id);
         if (it == layout.node_bounds.end()) continue;
         const auto& bounds = it->second;
         
@@ -171,4 +173,6 @@ flex::Group* MermaidComponent::build(const UnifiedDiagram& diagram, const Layout
     return root;
 }
 
-} // namespace flex::modules::flexmaid
+} // namespace flexmaid
+} // namespace modules
+} // namespace flex

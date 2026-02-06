@@ -71,7 +71,7 @@ ctest --test-dir build
 ### High-Level API
 
 ```cpp
-#include <flex/modules/flexmaid/flexmaid.h>
+#include <flexmaid.h>
 
 using namespace flex::modules::flexmaid;
 

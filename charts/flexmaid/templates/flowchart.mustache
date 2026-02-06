@@ -1,0 +1,29 @@
+<svg width="{{width}}" height="{{height}}" xmlns="http://www.w3.org/2000/svg">
+<rect width="100%" height="100%" fill="{{background_color}}"/>
+{{> defs}}
+<g>
+  {{#subgraphs}}{{> subgraph}}{{/subgraphs}}
+  {{#edges}}{{> edge}}{{/edges}}
+  {{#nodes}}
+  <g id="{{id}}">
+    {{#shape_rect}}<rect x="{{rect_x}}" y="{{rect_y}}" width="{{width}}" height="{{height}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}" rx="4"/>{{/shape_rect}}
+    {{#shape_round_rect}}<rect x="{{rect_x}}" y="{{rect_y}}" width="{{width}}" height="{{height}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}" rx="10"/>{{/shape_round_rect}}
+    {{#shape_stadium}}<rect x="{{rect_x}}" y="{{rect_y}}" width="{{width}}" height="{{height}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}" rx="{{radius}}"/>{{/shape_stadium}}
+    {{#shape_circle}}<circle cx="{{x}}" cy="{{y}}" r="{{radius}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>{{/shape_circle}}
+    {{#shape_diamond}}<polygon points="{{points_str}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>{{/shape_diamond}}
+    {{#shape_parallelogram}}<polygon points="{{points_str}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>{{/shape_parallelogram}}
+    {{#shape_trapezoid}}<polygon points="{{points_str}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>{{/shape_trapezoid}}
+    {{#shape_cylinder}}
+    <path d="M {{rect_x}} {{rect_y_cyl_top}} A {{cyl_rx}} {{cyl_ry}} 0 0 1 {{rect_x_end}} {{rect_y_cyl_top}} L {{rect_x_end}} {{rect_y_cyl_bot}} A {{cyl_rx}} {{cyl_ry}} 0 0 1 {{rect_x}} {{rect_y_cyl_bot}} Z" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>
+    <ellipse cx="{{x}}" cy="{{rect_y_cyl_top}}" rx="{{cyl_rx}}" ry="{{cyl_ry}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>
+    {{/shape_cylinder}}
+    {{#shape_subroutine}}
+    <rect x="{{rect_x}}" y="{{rect_y}}" width="{{width}}" height="{{height}}" fill="{{primary_color}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>
+    <line x1="{{rect_x_sub}}" y1="{{rect_y}}" x2="{{rect_x_sub}}" y2="{{rect_y_end}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>
+    <line x1="{{rect_x_sub_end}}" y1="{{rect_y}}" x2="{{rect_x_sub_end}}" y2="{{rect_y_end}}" stroke="{{line_color}}" stroke-width="{{line_width}}"/>
+    {{/shape_subroutine}}
+    <text x="{{x}}" y="{{text_y_node}}" text-anchor="middle" dominant-baseline="middle" font-family="{{font_family}}" font-size="{{font_size}}" fill="{{text_color}}">{{label}}</text>
+  </g>
+  {{/nodes}}
+</g>
+</svg>
