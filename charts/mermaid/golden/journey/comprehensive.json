@@ -1,0 +1,31 @@
+{
+  "sections": [
+    {
+      "name": "Section A",
+      "tasks": [
+        {
+          "actors": ["User"],
+          "name": "Task A1",
+          "score": 5
+        },
+        {
+          "actors": ["User", "Admin"],
+          "name": "Task A2",
+          "score": 3
+        }
+      ]
+    },
+    {
+      "name": "Section B",
+      "tasks": [
+        {
+          "actors": ["System"],
+          "name": "Task B1",
+          "score": 1
+        }
+      ]
+    }
+  ],
+  "title": "Comprehensive Test",
+  "type": "journey"
+}

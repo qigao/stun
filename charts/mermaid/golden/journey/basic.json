@@ -1,0 +1,52 @@
+{
+  "sections": [
+    {
+      "name": "Go to work",
+      "tasks": [
+        {
+          "actors": [
+            "Me"
+          ],
+          "name": "Make tea",
+          "score": 5
+        },
+        {
+          "actors": [
+            "Me"
+          ],
+          "name": "Go upstairs",
+          "score": 3
+        },
+        {
+          "actors": [
+            "Me",
+            "Cat"
+          ],
+          "name": "Do work",
+          "score": 1
+        }
+      ]
+    },
+    {
+      "name": "Go home",
+      "tasks": [
+        {
+          "actors": [
+            "Me"
+          ],
+          "name": "Go downstairs",
+          "score": 5
+        },
+        {
+          "actors": [
+            "Me"
+          ],
+          "name": "Sit down",
+          "score": 5
+        }
+      ]
+    }
+  ],
+  "title": "My working day",
+  "type": "journey"
+}

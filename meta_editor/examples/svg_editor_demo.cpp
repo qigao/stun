@@ -7,9 +7,11 @@
 #include <meta_editor/view/tool_panel.h>
 #include <meta_editor/view/properties_panel.h>
 #include <meta_editor/view/layers_panel.h>
+#include <meta_editor/view/top_bar.h>
+#include <meta_editor/view/bottom_bar.h>
 #include <flex/backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
-#include <flex/app/glfw_app.h>
+#include "glfw_app.h"
 #include <thorvg.h>
 #include <iostream>
 #include <string>
@@ -57,6 +59,8 @@ public:
     std::unique_ptr<ToolPanel> tool_panel_;
     std::unique_ptr<PropertiesPanel> props_panel_;
     std::unique_ptr<LayersPanel> layers_panel_;
+    std::unique_ptr<TopBar> top_bar_;
+    std::unique_ptr<BottomBar> bottom_bar_;
     std::string current_file_;
     bool panning_ = false;
     double last_mx_ = 0, last_my_ = 0;
@@ -74,28 +78,98 @@ public:
         props_panel_->set_position((float)width() - 220, 16);
 
         layers_panel_ = std::make_unique<LayersPanel>(editor_.canvas(), editor_.selection());
-        layers_panel_->set_position((float)width() - 220, 300);
+        // Init Top/Bottom bars
+        top_bar_ = std::make_unique<TopBar>(&editor_);
+        bottom_bar_ = std::make_unique<BottomBar>(&editor_);
+        
+        // Initial layout
+        int w = width();
+        int h = height();
+        if (top_bar_) top_bar_->set_layout(0, 0, (float)w);
+        if (bottom_bar_) bottom_bar_->set_layout(0, (float)h - 30, (float)w);
+        
+        float top_h = top_bar_ ? top_bar_->height() : 0;
+        
+        tool_panel_->set_position(16, top_h + 16);
+        props_panel_->set_position((float)w - 220, top_h + 16);
+        layers_panel_->set_position((float)w - 220, top_h + 300);
+
+        // Hook up callbacks
+        top_bar_->on_new = [this]() { on_new_file(); };
+        top_bar_->on_open = [this]() { on_open_file(); };
+        top_bar_->on_save = [this](const std::string&) { on_save_file(); };
 
         std::cout << "SVG Editor - Ctrl+O Open, Ctrl+S Save, Ctrl+N New\n";
         return true;
     }
 
+    void on_new_file() {
+        editor_.shutdown();
+        editor_.init();
+        current_file_.clear();
+        glfwSetWindowTitle(window(), "SVG Editor");
+    }
+
+    void on_open_file() {
+        auto file = open_file_dialog();
+        if (!file.empty() && editor_.import_svg(file)) {
+            current_file_ = file;
+            glfwSetWindowTitle(window(), ("SVG Editor - " + current_file_).c_str());
+        }
+    }
+
+    void on_save_file() {
+        auto file = save_file_dialog(current_file_);
+        if (!file.empty()) {
+            editor_.save_svg(file);
+            current_file_ = file;
+            glfwSetWindowTitle(window(), ("SVG Editor - " + current_file_).c_str());
+        }
+    }
+
     void on_resize(int w, int h) override {
         GlfwApp::on_resize(w, h);
-        editor_.set_viewport((float)w, (float)h);
-        props_panel_->set_position((float)w - 220, 16);
-        layers_panel_->set_position((float)w - 220, 300);
+        
+        // Use logical units for layout and viewport.
+        // On a 1.25x scale screen, physical 1280px = logical 1024px.
+        float lw = (float)w / content_scale_x_;
+        float lh = (float)h / content_scale_y_;
+        
+        editor_.set_viewport(lw, lh);
+        
+        float bottom_h = 30.0f;
+        
+        if (top_bar_) top_bar_->set_layout(0, 0, lw);
+        if (bottom_bar_) bottom_bar_->set_layout(0, lh - bottom_h, lw);
+        
+        float top_h = top_bar_ ? top_bar_->height() : 0;
+        
+        tool_panel_->set_position(16, top_h + 16);
+        props_panel_->set_position(lw - 220, top_h + 16);
+        layers_panel_->set_position(lw - 220, top_h + 300);
     }
 
     void on_render() override {
         editor_.update(1.0f / 60.0f);
-        renderer()->begin_frame((float)width(), (float)height(), 1.0f);
+        
+        // Passing content_scale_x_ here allows drawing in logical units (e.g. 1024 width)
+        // to fill the physical framebuffer (e.g. 1280 width).
+        renderer()->begin_frame((float)width(), (float)height(), content_scale_x_);
+        
         renderer()->clear(flex::Color{0.15f, 0.15f, 0.17f, 1.0f});
-        editor_.render(*renderer());
+        
+        // Render content and overlay
+        editor_.canvas()->render_content(*renderer());
+        editor_.canvas()->render_overlay(*renderer());
         editor_.render_tool_overlay(*renderer());
+        
         tool_panel_->render(*renderer());
         props_panel_->render(*renderer());
         layers_panel_->render(*renderer());
+        
+        if (top_bar_) top_bar_->render(*renderer());
+        if (bottom_bar_) bottom_bar_->render(*renderer());
+        
         renderer()->end_frame();
     }
 
@@ -107,9 +181,18 @@ public:
 
         if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
             float mx = (float)last_mx_, my = (float)last_my_;
-            if (tool_panel_->contains(mx, my)) { tool_panel_->handle_click(mx, my); return; }
-            if (props_panel_->contains(mx, my)) { props_panel_->handle_click(mx, my); return; }
-            if (layers_panel_->contains(mx, my)) { layers_panel_->handle_click(mx, my); return; }
+            
+            if (tool_panel_->handle_pointer_down(mx, my)) return;
+            if (props_panel_->handle_pointer_down(mx, my)) return;
+            if (layers_panel_->handle_pointer_down(mx, my)) return;
+        }
+
+        if (action == GLFW_RELEASE) {
+            if (top_bar_) top_bar_->handle_drag_end();
+            if (bottom_bar_) bottom_bar_->handle_drag_end();
+            if (tool_panel_) tool_panel_->handle_drag_end();
+            if (props_panel_) props_panel_->handle_drag_end();
+            if (layers_panel_) layers_panel_->handle_drag_end();
         }
 
         auto ev = glfw_mouse_button_event(button, action, mods, last_mx_, last_my_);
@@ -123,8 +206,19 @@ public:
             int mods = 0;
             if (glfwGetKey(window(), GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) mods |= GLFW_MOD_SHIFT;
             if (glfwGetKey(window(), GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) mods |= GLFW_MOD_CONTROL;
-            auto ev = glfw_cursor_event(x, y, mods);
-            editor_.handle_event(ev);
+
+            float mx = (float)x, my = (float)y;
+            bool dragging = false;
+            if (top_bar_ && top_bar_->handle_drag_move(mx, my)) dragging = true;
+            if (bottom_bar_ && bottom_bar_->handle_drag_move(mx, my)) dragging = true;
+            if (tool_panel_ && tool_panel_->handle_drag_move(mx, my)) dragging = true;
+            if (props_panel_ && props_panel_->handle_drag_move(mx, my)) dragging = true;
+            if (layers_panel_ && layers_panel_->handle_drag_move(mx, my)) dragging = true;
+
+            if (!dragging) {
+                auto ev = glfw_cursor_event(x, y, mods);
+                editor_.handle_event(ev);
+            }
         }
         last_mx_ = x;
         last_my_ = y;
@@ -144,27 +238,15 @@ public:
         bool ctrl = (mods & GLFW_MOD_CONTROL) != 0;
 
         if (ctrl && key == GLFW_KEY_O) {
-            auto file = open_file_dialog();
-            if (!file.empty() && editor_.import_svg(file)) {
-                current_file_ = file;
-                glfwSetWindowTitle(window(), ("SVG Editor - " + current_file_).c_str());
-            }
+            on_open_file();
             return;
         }
         if (ctrl && key == GLFW_KEY_S) {
-            auto file = save_file_dialog(current_file_);
-            if (!file.empty()) {
-                editor_.save_svg(file);
-                current_file_ = file;
-                glfwSetWindowTitle(window(), ("SVG Editor - " + current_file_).c_str());
-            }
+            on_save_file();
             return;
         }
         if (ctrl && key == GLFW_KEY_N) {
-            editor_.shutdown();
-            editor_.init();
-            current_file_.clear();
-            glfwSetWindowTitle(window(), "SVG Editor");
+            on_new_file();
             return;
         }
 

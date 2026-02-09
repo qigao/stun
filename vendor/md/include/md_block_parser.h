@@ -5,7 +5,7 @@
 #include <vector>
 #include <memory>
 
-namespace md_re2c {
+namespace md {
 
 // 块类型
 enum class BlockType {
@@ -78,7 +78,7 @@ private:
     
     // 块构建
     void close_block();
-    void add_line_to_block(const LineInfo& line);
+    void add_line_to_block(const LineInfo& line, std::string_view raw_line);
     
     // 列表处理
     int calculate_list_indent(std::string_view line);
@@ -95,4 +95,4 @@ private:
     std::string code_fence_marker_; // 记录开始的 fence (``` 或 ~~~)
 };
 
-} // namespace md_re2c
+} // namespace md

@@ -1,0 +1,53 @@
+cmake_minimum_required(VERSION 3.10)
+project(sankey_parser C)
+
+set(CMAKE_C_STANDARD 11)
+
+if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
+    find_program(RE2C_EXECUTABLE re2c REQUIRED)
+    find_program(LEMON_EXECUTABLE lemon REQUIRED)
+endif()
+
+if(NOT LEMPAR)
+    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
+endif()
+
+# Generate Parser
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sankey_parser_gen.c" "${CMAKE_CURRENT_BINARY_DIR}/sankey_parser_gen.h"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/src/sankey_parser.y" "${CMAKE_CURRENT_BINARY_DIR}/sankey_parser_gen.y"
+    COMMAND ${LEMON_EXECUTABLE} -q -d"${CMAKE_CURRENT_BINARY_DIR}" -T"${LEMPAR}" "${CMAKE_CURRENT_BINARY_DIR}/sankey_parser_gen.y"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/sankey_parser.y" "${LEMPAR}"
+    COMMENT "Generating Sankey C parser with lemon"
+)
+
+# Generate Lexer
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/sankey_lexer_gen.c"
+    COMMAND ${RE2C_EXECUTABLE} -o "${CMAKE_CURRENT_BINARY_DIR}/sankey_lexer_gen.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/sankey_lexer.re"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/sankey_lexer.re" "${CMAKE_CURRENT_BINARY_DIR}/sankey_parser_gen.h"
+    COMMENT "Generating Sankey C lexer with re2c"
+)
+
+add_library(sankey STATIC
+    src/sankey_parser_wrapper.c
+    src/sankey_ast.c
+    "${CMAKE_CURRENT_BINARY_DIR}/sankey_lexer_gen.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/sankey_parser_gen.c"
+)
+
+target_include_directories(sankey PUBLIC 
+    include 
+    "${CMAKE_CURRENT_BINARY_DIR}"
+)
+
+target_link_libraries(sankey PUBLIC TurboNet::Parser)
+
+# Test executable
+add_executable(sankey_test tests/test_parser.c)
+target_link_libraries(sankey_test sankey TurboNet::TinyTest)
+target_compile_definitions(sankey_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/sankey")
+
+add_test(NAME sankey_test COMMAND sankey_test)
+set_target_properties(sankey PROPERTIES FOLDER "Modules/Mermaid")
+set_target_properties(sankey_test PROPERTIES FOLDER "Modules/Mermaid/Tests")

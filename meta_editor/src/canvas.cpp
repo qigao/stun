@@ -16,7 +16,7 @@ Canvas::Canvas(float width, float height) {
     // 1. Grid layer (background, locked)
     grid_layer_ = scene_->root()->add<flex::Group>();
     grid_layer_->set_id("grid_layer");
-    locked_layers_[grid_layer_] = true;
+    locked_nodes_.insert(grid_layer_);
     rebuild_grid();
     
     // 2. Content root (user layers)
@@ -26,6 +26,8 @@ Canvas::Canvas(float width, float height) {
     // 3. UI overlay (screen space - selection handles, gizmos)
     ui_overlay_root_ = scene_->root()->add<flex::Group>();
     ui_overlay_root_->set_id("ui_overlay");
+    
+    dirty_ = true;
 }
 
 Canvas::~Canvas() = default;
@@ -49,8 +51,8 @@ flex::Group* Canvas::create_layer(const std::string& name, flex::Group* parent) 
     flex::Group* parent_group = parent ? parent : content_root_;
     auto* group = parent_group->add<flex::Group>();
     group->set_id(name);
-    locked_layers_[group] = false;
     notify_layer_change();
+    set_dirty(true);
     return group;
 }
 
@@ -61,8 +63,9 @@ bool Canvas::delete_layer(flex::Group* layer) {
     auto* parent = layer->parent();
     if (parent && parent->is_group()) {
         static_cast<flex::Group*>(parent)->remove_child(layer);
-        locked_layers_.erase(layer);
+        locked_nodes_.erase(layer);
         notify_layer_change();
+        set_dirty(true);
         return true;
     }
     return false;
@@ -74,6 +77,7 @@ void Canvas::reorder_layer(flex::Group* layer, int new_index) {
     if (parent && parent->is_group()) {
         static_cast<flex::Group*>(parent)->insert_child(layer, (size_t)new_index);
         notify_layer_change();
+        set_dirty(true);
     }
 }
 
@@ -117,37 +121,64 @@ void Canvas::set_layer_visible(flex::Group* layer, bool visible) {
     if (layer) {
         layer->set_visible(visible);
         notify_layer_change();
+        set_dirty(true);
     }
 }
 
 void Canvas::set_layer_locked(flex::Group* layer, bool locked) {
-    if (layer) {
-        locked_layers_[layer] = locked;
-        notify_layer_change();
+    if (!layer) return;
+    if (locked) {
+        locked_nodes_.insert(layer);
+    } else {
+        locked_nodes_.erase(layer);
     }
+    notify_layer_change();
 }
 
 void Canvas::set_layer_opacity(flex::Group* layer, float opacity) {
     if (layer) {
         layer->set_opacity(opacity);
+        set_dirty(true);
     }
 }
 
 bool Canvas::is_layer_locked(flex::Group* layer) const {
     if (!layer) return false;
-    auto it = locked_layers_.find(layer);
-    return it != locked_layers_.end() && it->second;
+    return locked_nodes_.count(layer) > 0;
+}
+
+void Canvas::lock_node(flex::Node* node) {
+    if (node) locked_nodes_.insert(node);
+}
+
+void Canvas::unlock_node(flex::Node* node) {
+    if (node) locked_nodes_.erase(node);
+}
+
+bool Canvas::is_node_locked(flex::Node* node) const {
+    return node && locked_nodes_.count(node) > 0;
+}
+
+void Canvas::toggle_node_lock(flex::Node* node) {
+    if (!node) return;
+    if (locked_nodes_.count(node)) {
+        locked_nodes_.erase(node);
+    } else {
+        locked_nodes_.insert(node);
+    }
 }
 
 // Camera Control
 void Canvas::pan(float dx, float dy) {
     camera_pan_x_ += dx;
     camera_pan_y_ += dy;
+    set_dirty(true);
 }
 
 void Canvas::zoom(float delta) {
     camera_zoom_ *= delta;
     camera_zoom_ = std::clamp(camera_zoom_, min_zoom_, max_zoom_);
+    set_dirty(true);
 }
 
 void Canvas::zoom_at(float screen_x, float screen_y, float delta) {
@@ -164,12 +195,14 @@ void Canvas::zoom_at(float screen_x, float screen_y, float delta) {
     auto offset = new_world_pos - world_pos;
     camera_pan_x_ -= offset.x() * camera_zoom_;
     camera_pan_y_ -= offset.y() * camera_zoom_;
+    set_dirty(true);
 }
 
 void Canvas::reset_camera() {
     camera_pan_x_ = 0;
     camera_pan_y_ = 0;
     camera_zoom_ = 1.0f;
+    set_dirty(true);
 }
 
 void Canvas::fit_to_view() {
@@ -210,43 +243,52 @@ flex::Node* Canvas::hit_test(float screen_x, float screen_y) {
 }
 
 flex::Node* Canvas::hit_test(const flex::Vec2& world_pos) {
+    // We use a recursive lambda to test nodes from top to bottom (reverse child order)
+    // and perform precise local-space hit testing instead of AABB bounds testing.
     std::function<flex::Node*(flex::Node*, const flex::Vec2&)>
     hit_test_node = [&](flex::Node* node, const flex::Vec2& pos) -> flex::Node* {
         if (!node || !node->visible()) return nullptr;
 
+        // Skip locked nodes (layers or individual nodes)
+        if (locked_nodes_.count(node)) return nullptr;
+
         if (node->is_group()) {
             auto* group = static_cast<flex::Group*>(node);
 
-            // Skip locked layers
-            auto it = locked_layers_.find(group);
-            if (it != locked_layers_.end() && it->second) {
-                return nullptr;
-            }
-
             // Test children in reverse order (top to bottom)
-            auto& children = group->children();
-            for (auto it = children.rbegin(); it != children.rend(); ++it) {
-                if (auto* hit = hit_test_node(*it, pos)) {
+            const auto& children = group->children();
+            for (int i = (int)children.size() - 1; i >= 0; --i) {
+                if (auto* hit = hit_test_node(children[i], pos)) {
                     return hit;
                 }
             }
+            
+            // Should we hit the group itself? Usually only if it has a background or specific hit area.
+            // For now, only return leaves (shapes).
             return nullptr;
         }
 
-        // Leaf node - world_bounds() is now clean (no camera pollution)
-        if (node->world_bounds().contains(pos.x(), pos.y())) {
+        // Precise hit test: Convert world position to node's local space
+        // This handles rotation and scale correctly.
+        auto world_to_local = node->world_transform().inverse();
+        flex::Vec2 local_pos = world_to_local * pos;
+
+        if (node->hit_test(local_pos.x(), local_pos.y())) {
             return node;
         }
+        
         return nullptr;
     };
 
     return hit_test_node(content_root_, world_pos);
 }
+ 
 
 // Grid
 void Canvas::set_grid_visible(bool visible) {
     grid_visible_ = visible;
     grid_layer_->set_visible(visible);
+    set_dirty(true);
 }
 
 void Canvas::set_grid_size(float size) {
@@ -312,6 +354,22 @@ void Canvas::render(flex::Renderer& renderer) {
     ui_overlay_root_->render(renderer);
 }
 
+void Canvas::render_content(flex::Renderer& renderer) {
+    renderer.save();
+    renderer.translate(camera_pan_x_, camera_pan_y_);
+    renderer.scale(camera_zoom_, camera_zoom_);
+    
+    grid_layer_->render(renderer);
+    content_root_->render(renderer);
+    
+    renderer.restore();
+    dirty_ = false;
+}
+
+void Canvas::render_overlay(flex::Renderer& renderer) {
+    ui_overlay_root_->render(renderer);
+}
+
 void Canvas::update(float dt) {
     instance_->advance(dt);
 }
@@ -320,6 +378,14 @@ void Canvas::notify_layer_change() {
     if (layer_change_callback_) {
         layer_change_callback_();
     }
+}
+
+void Canvas::set_dirty(bool dirty) {
+    dirty_ = dirty;
+}
+
+bool Canvas::is_dirty() const {
+    return dirty_;
 }
 
 } // namespace meta_editor

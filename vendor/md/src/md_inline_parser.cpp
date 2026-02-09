@@ -3,7 +3,7 @@
 #include <cctype>
 #include <algorithm>
 
-namespace md_re2c {
+namespace md {
 
 Node* InlineParser::create_node(NodeType type) {
     void* mem = pool_alloc(pool_, sizeof(Node));
@@ -39,7 +39,7 @@ Node* InlineParser::transform(const Block& block) {
         }
         case BlockType::CodeBlock: {
             Node* node = create_node(NodeType::CodeBlock);
-            node->text = block.info;
+            node->language = block.info;  // Store language identifier
             if (!block.content.empty()) {
                 node->children.push_back(create_text(block.content));
             }
@@ -618,4 +618,4 @@ Node* blocks_to_ast(const Block& root, MemoryPool* pool) {
     return parser.transform(root);
 }
 
-} // namespace md_re2c
+} // namespace md

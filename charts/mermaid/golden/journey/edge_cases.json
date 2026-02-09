@@ -1,0 +1,36 @@
+{
+  "sections": [
+    {
+      "name": "Empty Actors",
+      "tasks": [
+        {
+          "actors": [],
+          "name": "Task A",
+          "score": 5
+        }
+      ]
+    },
+    {
+      "name": "Zero Score",
+      "tasks": [
+        {
+          "actors": ["User"],
+          "name": "Task B",
+          "score": 0
+        }
+      ]
+    },
+    {
+      "name": "Special Chars",
+      "tasks": [
+        {
+          "actors": ["User"],
+          "name": "Task @$%&",
+          "score": 5
+        }
+      ]
+    }
+  ],
+  "title": "Edge Cases",
+  "type": "journey"
+}

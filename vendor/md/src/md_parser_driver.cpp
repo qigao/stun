@@ -1,9 +1,9 @@
-#include "md_re2c.h"
+#include "md.h"
 #include "md_block_parser.h"
 #include "md_inline_parser.h"
 #include "md_extension.h"
 
-namespace md_re2c {
+namespace md {
 
 ParseResult parse(const std::string& input) {
     auto ctx_ptr = std::make_unique<ParseContext>();
@@ -24,4 +24,4 @@ ParseResult parse(const std::string& input) {
     return { std::move(ctx_ptr), root };
 }
 
-} // namespace md_re2c
+} // namespace md

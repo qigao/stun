@@ -1,5 +1,0 @@
-<path d="{{path_d}}" fill="none" stroke="{{line_color}}" stroke-width="{{#is_thick}}{{line_width_thick}}{{/is_thick}}{{^is_thick}}{{line_width}}{{/is_thick}}" {{#is_dotted}}stroke-dasharray="2,2"{{/is_dotted}}{{#is_dashed}}stroke-dasharray="5,5"{{/is_dashed}}{{#marker_start}} marker-start="url(#{{marker_start}})"{{/marker_start}}{{#marker_end}} marker-end="url(#{{marker_end}})"{{/marker_end}}/>
-{{#has_label}}
-<rect x="{{label_rect_x}}" y="{{label_rect_y}}" width="{{label_rect_w}}" height="{{label_rect_h}}" fill="{{background_color}}" fill-opacity="0.8"/>
-<text x="{{label_x}}" y="{{label_y}}" text-anchor="middle" dominant-baseline="middle" font-family="{{font_family}}" font-size="{{label_font_size}}" fill="{{text_color}}">{{label}}</text>
-{{/has_label}}

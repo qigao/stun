@@ -18,10 +18,16 @@ class ToolManager {
 public:
     ToolManager(Canvas* canvas, SelectionManager* selection, CommandManager* commands);
 
+    void set_target(Canvas* canvas, SelectionManager* selection, CommandManager* commands);
+
     void register_tool(std::unique_ptr<Tool> tool);
 
     void set_active_tool(const std::string& tool_name);
     Tool* active_tool() const { return active_tool_; }
+
+    Canvas* canvas() const { return canvas_; }
+    SelectionManager* selection() const { return selection_; }
+    CommandManager* command_manager() const { return commands_; }
 
     Tool* get_tool(const std::string& name) const;
     std::vector<std::string> get_tool_names() const;
@@ -34,6 +40,7 @@ public:
     bool on_text_input(const char* text);
 
     void render_overlay(flex::Renderer& renderer);
+    void render_screen_overlay(flex::Renderer& renderer);
     void update(float dt);
 
 private:

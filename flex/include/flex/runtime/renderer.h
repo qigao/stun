@@ -58,6 +58,7 @@ public:
     // Core drawing (immediate mode)
     virtual void fill_path(const std::string& d, const Paint& paint) = 0;
     virtual void stroke_path(const std::string& d, const Paint& paint, float width) = 0;
+    virtual void draw_line(float x1, float y1, float x2, float y2, const Paint& paint, float width) = 0;
 
     // Optimized primitives (immediate mode)
     virtual void draw_rect(float x, float y, float w, float h, float r,

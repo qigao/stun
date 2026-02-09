@@ -43,6 +43,24 @@ void TextAreaWidget::set_cursor_position(int pos) {
   dirty_ = true;
 }
 
+void TextAreaWidget::get_caret_rect(const Element& elem, float& x, float& y, float& w, float& h) const {
+  auto* style = elem.computed_style;
+  if (!style) return;
+
+  float char_width = style->font_size * 0.6f;
+  float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
+  float padding_left = style->padding[3];
+  float padding_top = style->padding[0];
+
+  int line = get_line_from_cursor();
+  int col = get_column_from_cursor();
+
+  x = padding_left + col * char_width;
+  y = padding_top + line * line_height - scroll_offset_;
+  w = 2;
+  h = line_height;
+}
+
 // ============================================================================
 // Widget 接口实现
 // ============================================================================
@@ -61,7 +79,9 @@ void TextAreaWidget::render(const Element& elem, Renderer& renderer) {
       render_selection(r, elem);
     }
 
-    if (elem.has_state("focus") && cursor_visible_) {
+    if (is_composing_) {
+      render_composition(r, elem);
+    } else if (elem.has_state("focus") && cursor_visible_) {
       render_cursor(r, elem);
     }
   }
@@ -73,20 +93,23 @@ bool TextAreaWidget::handle_event(const Event& event, Element& elem) {
   }
 
   switch (event.type) {
-    case EventType::MouseDown:
-      return handle_mouse_down(event, elem);
-
-    case EventType::KeyDown:
-      return handle_key_down(event, elem);
-
-    case EventType::TextInput:
-      if (!readonly_ && !elem.has_state("readonly")) {
-        return handle_text_input(event, elem);
-      }
-      return false;
-
-    default:
-      return false;
+    case EventType::MouseDown: return handle_mouse_down(event, elem);
+    case EventType::MouseMove: return handle_mouse_move(event, elem);
+    case EventType::MouseUp: return handle_mouse_up(event, elem);
+    case EventType::KeyDown: return handle_key_down(event, elem);
+    case EventType::TextInput: return handle_text_input(event, elem);
+    case EventType::CompositionStart: return handle_composition_start(event, elem);
+    case EventType::CompositionUpdate: return handle_composition_update(event, elem);
+    case EventType::CompositionEnd: return handle_composition_end(event, elem);
+    case EventType::FocusIn:
+      elem.add_state("focus");
+      return true;
+    case EventType::FocusOut:
+      elem.remove_state("focus");
+      is_composing_ = false;
+      composition_text_.clear();
+      return true;
+    default: return false;
   }
 }
 
@@ -197,21 +220,23 @@ void TextAreaWidget::render_text_lines(flex::Renderer& r, const Element& elem) {
 
   float padding_left = style->padding[3];
   float padding_top = style->padding[0];
-  float y = padding_top + style->font_size;
+  float y_top = padding_top;
 
   for (const auto& line : lines_) {
-    if (y - scroll_offset_ > elem.height()) break;  // 超出可见区域
-    if (y - scroll_offset_ + line_height < 0) {     // 在可见区域之前
-      y += line_height;
+    if (y_top - scroll_offset_ > elem.height()) break;  // Over bottom
+    if (y_top + line_height - scroll_offset_ < 0) {     // Above top
+      y_top += line_height;
       continue;
     }
 
     if (!line.empty()) {
-      r.draw_text(line, padding_left, y - scroll_offset_,
+      // Center text vertically within the line_height box
+      float text_y = y_top + (line_height - style->font_size) / 2.0f;
+      r.draw_text(line, padding_left, text_y - scroll_offset_,
                   style->font_family, style->font_size, false, text_color);
     }
 
-    y += line_height;
+    y_top += line_height;
   }
 }
 
@@ -235,31 +260,55 @@ void TextAreaWidget::render_selection(flex::Renderer& r, const Element& elem) {
   float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
   float padding_left = style->padding[3];
   float padding_top = style->padding[0];
+  float char_width = style->font_size * 0.6f;
 
-  int sel_start = std::min(selection_start_, selection_end_);
-  int sel_end = std::max(selection_start_, selection_end_);
+  int start_pos = std::min(selection_start_, selection_end_);
+  int end_pos = std::max(selection_start_, selection_end_);
 
-  // 简化版：绘制单个矩形（完整实现需要多行选择）
-  float char_width = style->font_size * 0.6f;  // 近似
-  float x = padding_left + sel_start * char_width;
-  float y = padding_top;
-  float width = (sel_end - sel_start) * char_width;
-  float height = line_height;
+  if (start_pos == -1 || end_pos == -1 || start_pos == end_pos) return;
 
-  r.draw_rect(x, y - scroll_offset_, width, height, 0, Paint::solid(sel_color), Paint::none(), 0);
+  // Find start/end line and col
+  auto get_pos = [&](int p) -> std::pair<int, int> {
+    int curr = 0;
+    for (int i = 0; i < (int)lines_.size(); i++) {
+        int next = curr + (int)lines_[i].size();
+        if (p <= next) return {i, p - curr};
+        curr = next + 1; // +1 for \n
+    }
+    return {(int)lines_.size()-1, (int)lines_.back().size()};
+  };
+
+  auto start = get_pos(start_pos);
+  auto end = get_pos(end_pos);
+
+  for (int l = start.first; l <= end.first; l++) {
+    int col_s = (l == start.first) ? start.second : 0;
+    int col_e = (l == end.first) ? end.second : (int)lines_[l].size();
+
+    float x = padding_left + col_s * char_width;
+    float y = padding_top + l * line_height;
+    float w = (col_e - col_s) * char_width;
+    
+    // If it's a multi-line selection and we're not on the last line, add a bit for the \n
+    if (l < end.first) w += char_width * 0.5f;
+
+    if (w > 0) {
+        r.draw_rect(x, y - scroll_offset_, w, line_height, 0, Paint::solid(sel_color), Paint::none(), 0);
+    }
+  }
 }
 
 void TextAreaWidget::render_cursor(flex::Renderer& r, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
-  Color cursor_color = style->get_variable_color("--textarea-cursor", {0.0f, 0.0f, 0.0f, 1.0f});
-  float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
-
   int line = get_line_from_cursor();
   int col = get_column_from_cursor();
 
+  Color cursor_color = style->get_variable_color("--textarea-cursor", {0.0f, 0.0f, 0.0f, 1.0f});
+  float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
   float char_width = style->font_size * 0.6f;
+ 
   float padding_left = style->padding[3];
   float padding_top = style->padding[0];
 
@@ -276,7 +325,6 @@ void TextAreaWidget::render_cursor(flex::Renderer& r, const Element& elem) {
 bool TextAreaWidget::handle_mouse_down(const Event& event, Element& elem) {
   elem.add_state("focus");
 
-  // 简化：将点击转换为光标位置（完整实现需要精确计算）
   auto* style = elem.computed_style;
   if (!style) return true;
 
@@ -285,14 +333,62 @@ bool TextAreaWidget::handle_mouse_down(const Event& event, Element& elem) {
   float padding_left = style->padding[3];
   float padding_top = style->padding[0];
 
-  int line = static_cast<int>((event.y - padding_top + scroll_offset_) / line_height);
-  int col = static_cast<int>((event.x - padding_left) / char_width);
+  // Convert screen coordinates to local coordinates using the world transform inverse
+  flex::Vec2 local_pos = elem.to_local(flex::Vec2(event.x, event.y));
+  float rel_x = local_pos.x();
+  float rel_y = local_pos.y();
+
+  int line = static_cast<int>((rel_y - padding_top + scroll_offset_) / line_height);
+  int col = static_cast<int>((rel_x - padding_left) / char_width);
 
   move_cursor_to_line_column(line, col);
-  selection_start_ = -1;
-  selection_end_ = -1;
-
+  
+  is_dragging_ = true;
+  selection_start_ = cursor_pos_;
+  selection_end_ = cursor_pos_;
+  
+  elem.mark_paint_dirty();
   return true;
+}
+
+bool TextAreaWidget::handle_mouse_move(const Event& event, Element& elem) {
+  if (is_dragging_) {
+    auto* style = elem.computed_style;
+    if (!style) return true;
+
+    float char_width = style->font_size * 0.6f;
+    float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
+    float padding_left = style->padding[3];
+    float padding_top = style->padding[0];
+
+    // Convert screen coordinates to local coordinates using the world transform inverse
+    flex::Vec2 local_pos = elem.to_local(flex::Vec2(event.x, event.y));
+    float rel_x = local_pos.x();
+    float rel_y = local_pos.y();
+
+    int line = static_cast<int>((rel_y - padding_top + scroll_offset_) / line_height);
+    int col = static_cast<int>((rel_x - padding_left) / char_width);
+
+    move_cursor_to_line_column(line, col);
+    selection_end_ = cursor_pos_;
+    
+    elem.mark_paint_dirty();
+    return true;
+  }
+  return false;
+}
+
+bool TextAreaWidget::handle_mouse_up(const Event& event, Element& elem) {
+  if (is_dragging_) {
+    is_dragging_ = false;
+    if (selection_start_ == selection_end_) {
+      selection_start_ = -1;
+      selection_end_ = -1;
+    }
+    elem.mark_paint_dirty();
+    return true;
+  }
+  return false;
 }
 
 bool TextAreaWidget::handle_key_down(const Event& event, Element& elem) {
@@ -420,6 +516,7 @@ bool TextAreaWidget::handle_key_down(const Event& event, Element& elem) {
 }
 
 bool TextAreaWidget::handle_text_input(const Event& event, Element& elem) {
+  if (readonly_ || elem.has_state("readonly")) return false;
   insert_text(event.text);
   return true;
 }
@@ -496,6 +593,55 @@ void TextAreaWidget::update_cursor_blink(float delta_ms) {
     cursor_blink_time_ = 0.0f;
     dirty_ = true;
   }
+}
+
+bool TextAreaWidget::handle_composition_start(const Event& event, Element& elem) {
+  if (readonly_ || elem.has_state("readonly")) return false;
+  is_composing_ = true;
+  composition_text_.clear();
+  elem.mark_paint_dirty();
+  return true;
+}
+
+bool TextAreaWidget::handle_composition_update(const Event& event, Element& elem) {
+  if (readonly_ || elem.has_state("readonly")) return false;
+  composition_text_ = event.composition_text;
+  elem.mark_paint_dirty();
+  return true;
+}
+
+bool TextAreaWidget::handle_composition_end(const Event& event, Element& elem) {
+  if (readonly_ || elem.has_state("readonly")) return false;
+  is_composing_ = false;
+  composition_text_.clear();
+  elem.mark_paint_dirty();
+  return true;
+}
+
+void TextAreaWidget::render_composition(flex::Renderer& r, const Element& elem) {
+  auto* style = elem.computed_style;
+  if (!style || composition_text_.empty()) return;
+
+  float char_width = style->font_size * 0.6f;
+  float line_height = style->font_size * style->get_variable_float("--line-height", 1.5f);
+  float padding_left = style->padding[3];
+  float padding_top = style->padding[0];
+
+  int line = get_line_from_cursor();
+  int col = get_column_from_cursor();
+
+  float x = padding_left + col * char_width;
+  float y_top = padding_top + line * line_height;
+  float text_y = y_top + (line_height - style->font_size) / 2.0f;
+  
+  Color text_color = style->get_variable_color("--textarea-text", style->text_color);
+  r.draw_text(composition_text_, x, text_y - scroll_offset_, 
+              style->font_family, style->font_size, false, text_color);
+
+  // Draw underline for composition
+  float w = composition_text_.size() * char_width; // Simplified width calc
+  r.draw_rect(x, y_top + line_height - 2 - scroll_offset_, w, 2, 0, 
+              Paint::solid(text_color), Paint::none(), 0);
 }
 
 } // namespace flexUI

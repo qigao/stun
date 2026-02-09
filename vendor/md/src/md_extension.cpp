@@ -1,6 +1,6 @@
 #include "md_extension.h"
 
-namespace md_re2c {
+namespace md {
 
 ExtensionRegistry& ExtensionRegistry::instance() {
     static ExtensionRegistry registry;
@@ -26,4 +26,4 @@ std::optional<BlockResult> ExtensionRegistry::process(const std::string& languag
     return (*handler)(content);
 }
 
-} // namespace md_re2c
+} // namespace md

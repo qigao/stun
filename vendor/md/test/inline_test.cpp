@@ -1,7 +1,7 @@
-#include "md_re2c.h"
+#include "md.h"
 #include <iostream>
 
-using namespace md_re2c;
+using namespace md;
 
 static std::string type_to_string(NodeType t) {
     switch(t) {

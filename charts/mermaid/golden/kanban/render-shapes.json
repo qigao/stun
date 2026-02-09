@@ -1,0 +1,26 @@
+{
+  "nodes": [
+    {
+      "children": [],
+      "descr": "Round",
+      "id": "n1",
+      "indent": 0,
+      "type": 2
+    },
+    {
+      "children": [],
+      "descr": "Square",
+      "id": "n2",
+      "indent": 0,
+      "type": 1
+    },
+    {
+      "children": [],
+      "descr": "Diamond",
+      "id": "n3",
+      "indent": 0,
+      "type": 6
+    }
+  ],
+  "type": "kanban"
+}

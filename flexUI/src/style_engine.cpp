@@ -168,7 +168,7 @@ public:
       if (matches_selector(rule.selector, elem))
         matched_rules.push_back({rule.specificity, &rule});
     }
-    std::sort(matched_rules.begin(), matched_rules.end(),
+    std::stable_sort(matched_rules.begin(), matched_rules.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
 
     // Step 3: Pass 1 - Apply CSS Variables (--*)

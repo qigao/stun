@@ -41,6 +41,23 @@ enum class EventPhase : uint8_t {
   Bubble,  // Propagating from target to root
 };
 
+enum class MouseButton : uint8_t {
+  Left = 0,
+  Right = 1,
+  Middle = 2,
+  X1 = 3,
+  X2 = 4,
+  None = 255
+};
+
+enum class KeyMod : uint16_t {
+  None = 0,
+  Shift = 1 << 0,
+  Control = 1 << 1,
+  Alt = 1 << 2,
+  Super = 1 << 3,
+};
+
 // ============================================================================
 // Key Codes - Common key identifiers
 // ============================================================================
@@ -164,6 +181,7 @@ struct PointerEvent {
   float y = 0;                    // Global y coordinate
   float local_x = 0;              // Local x (relative to current_target)
   float local_y = 0;              // Local y (relative to current_target)
+  MouseButton button = MouseButton::Left; // Button that triggered the event
   Node *target = nullptr;         // Original target (deepest hit node)
   Node *current_target = nullptr; // Current node in propagation chain
 

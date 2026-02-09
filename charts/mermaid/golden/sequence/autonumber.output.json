@@ -1,0 +1,40 @@
+{
+  "type": "sequenceDiagram",
+  "participants": [
+    {
+      "id": "Bob"
+    },
+    {
+      "id": "Alice"
+    }
+  ],
+  "statements": [
+    {
+      "type": "autonumber",
+      "start": 1,
+      "step": 1,
+      "visible": true
+    },
+    {
+      "type": "signal",
+      "from": "Alice",
+      "to": "Bob",
+      "message": "Hello Bob",
+      "signalType": "solid"
+    },
+    {
+      "type": "signal",
+      "from": "Bob",
+      "to": "Alice",
+      "message": "Hi Alice",
+      "signalType": "dotted"
+    },
+    {
+      "type": "signal",
+      "from": "Alice",
+      "to": "Bob",
+      "message": "See ya!",
+      "signalType": "solid"
+    }
+  ]
+}

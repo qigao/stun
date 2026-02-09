@@ -5,6 +5,7 @@
 #include "meta_editor/selection_manager.h"
 #include "meta_editor/canvas.h"
 #include <algorithm>
+#include <cstdio>
 
 namespace meta_editor {
 
@@ -15,6 +16,8 @@ void SelectionManager::select(flex::Node* node) {
     
     selected_nodes_.clear();
     selected_nodes_.push_back(node);
+    printf("[SelectionManager] selected node ID='%s' type=%s\n", 
+           node->id().c_str(), node->type_name());
     notify_selection_change();
 }
 
@@ -25,6 +28,8 @@ void SelectionManager::add_to_selection(flex::Node* node) {
     auto it = std::find(selected_nodes_.begin(), selected_nodes_.end(), node);
     if (it == selected_nodes_.end()) {
         selected_nodes_.push_back(node);
+        printf("[SelectionManager] added to selection: ID='%s' type=%s (total: %zu)\n", 
+               node->id().c_str(), node->type_name(), selected_nodes_.size());
         notify_selection_change();
     }
 }
@@ -32,6 +37,7 @@ void SelectionManager::add_to_selection(flex::Node* node) {
 void SelectionManager::remove_from_selection(flex::Node* node) {
     auto it = std::find(selected_nodes_.begin(), selected_nodes_.end(), node);
     if (it != selected_nodes_.end()) {
+        printf("[SelectionManager] removed from selection: ID='%s'\n", node->id().c_str());
         selected_nodes_.erase(it);
         notify_selection_change();
     }
@@ -39,6 +45,7 @@ void SelectionManager::remove_from_selection(flex::Node* node) {
 
 void SelectionManager::clear_selection() {
     if (!selected_nodes_.empty()) {
+        printf("[SelectionManager] cleared selection (was %zu nodes)\n", selected_nodes_.size());
         selected_nodes_.clear();
         notify_selection_change();
     }
@@ -103,45 +110,63 @@ void SelectionManager::render_selection_indicators(flex::Renderer& renderer) {
     if (selected_nodes_.empty()) return;
 
     auto bounds = selection_bounds();
+    float zoom = canvas_->camera_zoom();
 
-    // Draw in world coordinates (camera transform is applied by caller)
+    static int sel_log = 0;
+    if (sel_log++ % 300 == 0) {
+        fprintf(stderr, "[selection_indicators] bounds=(%.1f, %.1f, %.1f, %.1f) zoom=%.2f\n",
+                bounds.x, bounds.y, bounds.width, bounds.height, zoom);
+        for (size_t i = 0; i < selected_nodes_.size(); ++i) {
+            auto* node = selected_nodes_[i];
+            auto wb = node->world_bounds();
+            auto lb = node->bounds();
+            fprintf(stderr, "  node[%zu] id='%s' pos=(%.1f,%.1f) local_bounds=(%.1f,%.1f,%.1f,%.1f) world_bounds=(%.1f,%.1f,%.1f,%.1f)\n",
+                    i, node->id().c_str(), node->x(), node->y(),
+                    lb.x, lb.y, lb.width, lb.height,
+                    wb.x, wb.y, wb.width, wb.height);
+            auto wt = node->world_transform();
+            fprintf(stderr, "         world_transform=[%.2f %.2f %.2f | %.2f %.2f %.2f]\n",
+                    wt.m[0], wt.m[1], wt.m[2], wt.m[3], wt.m[4], wt.m[5]);
+        }
+    }
+
     float x = bounds.x;
     float y = bounds.y;
     float w = bounds.width;
     float h = bounds.height;
 
-    // Draw bounding box (stroke only, no fill)
+    // Stroke width and handle size are divided by zoom to stay fixed-pixel
+    float inv_zoom = 1.0f / zoom;
+    float stroke_w = 2.0f * inv_zoom;
+    float hs = 8.0f * inv_zoom;
+    float handle_stroke_w = 1.0f * inv_zoom;
+
     flex::Paint no_fill = flex::Paint::none();
     flex::Paint stroke = flex::Paint::solid(flex::Color(0.23f, 0.51f, 0.96f, 1.0f));
-    renderer.draw_rect(x, y, w, h, 0, no_fill, stroke, 2.0f);
+    renderer.draw_rect(x, y, w, h, 0, no_fill, stroke, stroke_w);
 
-    // Draw resize handles (8 handles: 4 corners + 4 edges)
-    float hs = 8.0f;  // handle size
     flex::Paint handle_fill = flex::Paint::solid(flex::Color(1.0f, 1.0f, 1.0f, 1.0f));
     flex::Paint handle_stroke = flex::Paint::solid(flex::Color(0.23f, 0.51f, 0.96f, 1.0f));
 
-    // Corner handles
-    renderer.draw_rect(x - hs/2, y - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);           // top-left
-    renderer.draw_rect(x + w - hs/2, y - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);      // top-right
-    renderer.draw_rect(x - hs/2, y + h - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);      // bottom-left
-    renderer.draw_rect(x + w - hs/2, y + h - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);  // bottom-right
+    const flex::Vec2 offsets[] = {
+        {0, 0}, {w/2, 0}, {w, 0}, {w, h/2},
+        {w, h}, {w/2, h}, {0, h}, {0, h/2}
+    };
+    for (auto& off : offsets) {
+        renderer.draw_rect(x + off.x() - hs/2, y + off.y() - hs/2,
+                          hs, hs, 0, handle_fill, handle_stroke, handle_stroke_w);
+    }
 
-    // Edge handles
-    renderer.draw_rect(x + w/2 - hs/2, y - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);    // top-center
-    renderer.draw_rect(x + w/2 - hs/2, y + h - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);// bottom-center
-    renderer.draw_rect(x - hs/2, y + h/2 - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);    // left-center
-    renderer.draw_rect(x + w - hs/2, y + h/2 - hs/2, hs, hs, 0, handle_fill, handle_stroke, 1.0f);// right-center
-
-    // Rotation handle (circle above top-center)
-    float rotate_offset = 25.0f;
+    float rotate_offset = 25.0f * inv_zoom;
+    float rotate_r = 5.0f * inv_zoom;
     float rotate_x = x + w / 2;
     float rotate_y = y - rotate_offset;
-    renderer.draw_circle(rotate_x, rotate_y, 5.0f, handle_fill, handle_stroke, 1.5f);
+    renderer.draw_circle(rotate_x, rotate_y, rotate_r, handle_fill, handle_stroke, 1.5f * inv_zoom);
 
-    // Line connecting rotation handle to top-center
     char line_path[64];
-    snprintf(line_path, sizeof(line_path), "M %.1f %.1f L %.1f %.1f", rotate_x, y, rotate_x, rotate_y + 5);
-    renderer.stroke_path(line_path, handle_stroke, 1.0f);
+    snprintf(line_path, sizeof(line_path), "M %.1f %.1f L %.1f %.1f",
+             rotate_x, y, rotate_x, rotate_y + rotate_r);
+    renderer.stroke_path(line_path, handle_stroke, handle_stroke_w);
 }
 
 HandleType SelectionManager::hit_test_handle(const flex::Vec2& screen_pos, float threshold) const {
@@ -363,26 +388,22 @@ void SelectionManager::clear_stroke() {
 
 void SelectionManager::lock_selection() {
     for (auto* node : selected_nodes_) {
-        locked_nodes_.insert(node);
+        canvas_->lock_node(node);
     }
 }
 
 void SelectionManager::unlock_selection() {
     for (auto* node : selected_nodes_) {
-        locked_nodes_.erase(node);
+        canvas_->unlock_node(node);
     }
 }
 
 bool SelectionManager::is_locked(flex::Node* node) const {
-    return locked_nodes_.find(node) != locked_nodes_.end();
+    return canvas_->is_node_locked(node);
 }
 
 void SelectionManager::toggle_lock(flex::Node* node) {
-    if (is_locked(node)) {
-        locked_nodes_.erase(node);
-    } else {
-        locked_nodes_.insert(node);
-    }
+    canvas_->toggle_node_lock(node);
 }
 
 } // namespace meta_editor

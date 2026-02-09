@@ -99,6 +99,7 @@ add_library(flex_runtime STATIC ${FLEX_RUNTIME_SOURCES} ${FLEX_RUNTIME_HEADERS})
 target_include_directories(
   flex_runtime
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/ $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 

@@ -24,6 +24,7 @@ public:
     bool on_text_input(const char* text) override;
 
     void render_overlay(flex::Renderer& renderer) override;
+    void render_screen_overlay(flex::Renderer& renderer) override;
 
     const char* name() const override { return "TextEdit"; }
     const char* icon() const override { return "text-cursor"; }

@@ -1,0 +1,51 @@
+{
+  "sections": [
+    {
+      "name": "Discovery",
+      "tasks": [
+        {
+          "actors": [
+            "Customer"
+          ],
+          "name": "Find website",
+          "score": 5
+        },
+        {
+          "actors": [
+            "Customer"
+          ],
+          "name": "Browse products",
+          "score": 4
+        }
+      ]
+    },
+    {
+      "name": "Purchase",
+      "tasks": [
+        {
+          "actors": [
+            "Customer"
+          ],
+          "name": "Add to cart",
+          "score": 3
+        },
+        {
+          "actors": [
+            "Customer"
+          ],
+          "name": "Checkout",
+          "score": 2
+        },
+        {
+          "actors": [
+            "Customer"
+          ],
+          "name": "Payment",
+          "score": 1
+        }
+      ]
+    }
+  ],
+  "title": "Customer Journey",
+  "type": "journey"
+}

@@ -502,6 +502,16 @@ public:
     push_to_canvas(shape);
   }
 
+  void draw_line(float x1, float y1, float x2, float y2, const Paint &paint, float width) override {
+    auto shape = tvg::Shape::gen();
+    shape->moveTo(x1, y1);
+    shape->lineTo(x2, y2);
+    apply_paint_stroke(shape, paint, width);
+    apply_transform(shape);
+    apply_clip(shape);
+    push_to_canvas(shape);
+  }
+
   // Optimized primitive drawing
   void draw_rect(float x, float y, float w, float h, float r, const Paint &fill,
                  const Paint &stroke, float stroke_width) override {

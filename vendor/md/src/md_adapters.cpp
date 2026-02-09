@@ -13,7 +13,7 @@
 #include <infographic/flexinfographic.h>
 #endif
 
-namespace md_re2c {
+namespace md {
 
 void register_mermaid_handler() {
 #ifdef MD_HAS_FLEXMAID
@@ -58,4 +58,4 @@ void register_diagram_handlers() {
     register_infographic_handler();
 }
 
-} // namespace md_re2c
+} // namespace md

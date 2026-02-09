@@ -1,0 +1,29 @@
+{
+  "type": "sequenceDiagram",
+  "participants": [
+    {
+      "id": "Bob",
+      "type": "actor"
+    },
+    {
+      "id": "Alice",
+      "type": "actor"
+    }
+  ],
+  "statements": [
+    {
+      "type": "signal",
+      "from": "Alice",
+      "to": "Bob",
+      "message": "Hi Bob",
+      "signalType": "solid"
+    },
+    {
+      "type": "signal",
+      "from": "Bob",
+      "to": "Alice",
+      "message": "Hi Alice",
+      "signalType": "solid"
+    }
+  ]
+}

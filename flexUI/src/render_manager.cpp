@@ -7,7 +7,8 @@
 #include <flexUI/renderer.h>
 #include <flexUI/computed_style.h>
 #include <flexUI/widget.h>
- #include <flex/runtime/group.h>
+#include <flex/runtime/group.h>
+#include <iostream>
 
 namespace flexUI {
 

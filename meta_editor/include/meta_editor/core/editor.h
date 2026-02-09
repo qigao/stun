@@ -23,7 +23,7 @@
 #include "../serializer.h"
 #include "../connector.h"
 #include "../svg_importer.h"
-
+#include "../page.h"
 #include <flex.h>
 #include <memory>
 #include <string>
@@ -81,11 +81,14 @@ public:
     float height() const { return height_; }
 
     // Core systems access
-    Canvas* canvas() { return canvas_.get(); }
-    SelectionManager* selection() { return selection_.get(); }
+    PageManager* page_manager() { return page_manager_.get(); }
+    Page* active_page() { return page_manager_->active_page(); }
+
+    Canvas* canvas();
+    SelectionManager* selection();
     ToolManager* tools() { return tool_manager_.get(); }
-    CommandManager* commands() { return command_manager_.get(); }
-    ConnectorManager* connectors() { return connector_manager_.get(); }
+    CommandManager* command_manager();
+    ConnectorManager* connectors();
 
     // Serialization
     bool save_project(const std::string& path);
@@ -115,6 +118,12 @@ public:
     void ungroup_selection();
     void lock_selection();
     void unlock_selection();
+    
+    // Notification
+    void notify_change();
+
+    // Page handling
+    void set_active_page(int index);
 
     // Callbacks for UI integration
     using ChangeCallback = std::function<void()>;
@@ -125,7 +134,6 @@ public:
 
 protected:
     void setup_default_tools();
-    void notify_change();
 
     // Handle specific event types
     bool handle_pointer_down(const EditorEvent& event);
@@ -135,14 +143,8 @@ protected:
     bool handle_key_up(const EditorEvent& event);
 
     // Core systems
-    std::unique_ptr<Canvas> canvas_;
-    std::unique_ptr<SelectionManager> selection_;
+    std::unique_ptr<PageManager> page_manager_;
     std::unique_ptr<ToolManager> tool_manager_;
-    std::unique_ptr<CommandManager> command_manager_;
-    std::unique_ptr<ConnectorManager> connector_manager_;
-    std::unique_ptr<Exporter> exporter_;
-    std::unique_ptr<Serializer> serializer_;
-    std::unique_ptr<SvgImporter> svg_importer_;
 
     // State
     float width_;

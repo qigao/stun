@@ -26,7 +26,8 @@ public:
         Circle,
         Ellipse,
         Polygon,
-        Star
+        Star,
+        Triangle
     };
     
     explicit ShapeTool(ShapeType type);

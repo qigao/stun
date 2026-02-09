@@ -84,7 +84,6 @@ void FullEditorApp::init(flex::Renderer* ui_renderer) {
     navigator_panel_ = std::make_unique<NavigatorPanel>(canvas());
 
     shape_panel_ = std::make_unique<ShapeCollectionPanel>(canvas());
-    shape_panel_->set_position(16, 300);
     shape_panel_->set_shape_added_callback([this](flex::Shape* shape) {
         selection()->select(shape);
     });
@@ -92,13 +91,10 @@ void FullEditorApp::init(flex::Renderer* ui_renderer) {
     tool_panel_ = std::make_unique<ToolPanel>(tools());
 
     properties_panel_ = std::make_unique<PropertiesPanel>(canvas(), selection());
-    properties_panel_->set_position(width_ - 196, 16);
 
     layers_panel_ = std::make_unique<LayersPanel>(canvas(), selection());
-    layers_panel_->set_position(width_ - 196, 250);
 
     align_panel_ = std::make_unique<AlignPanel>(canvas(), selection());
-    align_panel_->set_position(width_ - 196, 450);
 
     shortcut_overlay_ = std::make_unique<ShortcutOverlay>();
 
@@ -110,6 +106,15 @@ void FullEditorApp::init(flex::Renderer* ui_renderer) {
         layers_panel_.get(),
         align_panel_.get()
     };
+
+    layout_.add_panel(tool_panel_.get(), DockSide::Left);
+    layout_.add_panel(shape_panel_.get(), DockSide::Left);
+    layout_.add_panel(properties_panel_.get(), DockSide::Right);
+    layout_.add_panel(layers_panel_.get(), DockSide::Right);
+    layout_.add_panel(align_panel_.get(), DockSide::Right);
+    layout_.add_panel(navigator_panel_.get(), DockSide::Bottom);
+    layout_.set_viewport(width_, height_);
+    layout_.layout();
 
     setup_panel_callbacks();
 
@@ -146,7 +151,6 @@ void FullEditorApp::setup_ui() {
     root->append(workspace);
 
     if (zoom_panel_) zoom_panel_->setup_ui(ui_box_.get(), root);
-    if (navigator_panel_) navigator_panel_->set_position(width_ - 160, height_ - 110);
 }
 
 void FullEditorApp::update(float dt) {
@@ -171,10 +175,8 @@ void FullEditorApp::set_viewport(float width, float height) {
     height_ = height;
     editor_->set_viewport(width, height);
     if (ui_box_) ui_box_->set_viewport(width, height);
-    if (navigator_panel_) navigator_panel_->set_position(width - 160, height - 110);
-    if (properties_panel_) properties_panel_->set_position(width - 196, 16);
-    if (layers_panel_) layers_panel_->set_position(width - 196, 250);
-    if (align_panel_) align_panel_->set_position(width - 196, 450);
+    layout_.set_viewport(width, height);
+    layout_.layout();
 }
 
 bool FullEditorApp::handle_event(const SDL_Event& event) {

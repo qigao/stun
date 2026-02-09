@@ -30,6 +30,9 @@ public:
     virtual bool on_text_input(const char* text) { return false; }
 
     virtual void render_overlay(flex::Renderer& renderer) {}
+    // Screen-space overlay (selection handles, fixed-pixel UI)
+    // Not affected by camera transform - coordinates are screen pixels
+    virtual void render_screen_overlay(flex::Renderer& renderer) {}
     virtual void update(float dt) {}
 
     virtual const char* name() const = 0;

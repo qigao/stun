@@ -37,7 +37,10 @@ void EventDispatcher::dispatch(Event& event, Element* root) {
   // 键盘事件路由到焦点元素
   else if (event.type == EventType::KeyDown ||
            event.type == EventType::KeyUp ||
-           event.type == EventType::TextInput) {
+           event.type == EventType::TextInput ||
+           event.type == EventType::CompositionStart ||
+           event.type == EventType::CompositionUpdate ||
+           event.type == EventType::CompositionEnd) {
     target = focused_;
   }
 

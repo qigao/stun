@@ -290,10 +290,13 @@ bool SelectTool::on_key_up(int key, int mods) {
 void SelectTool::render_overlay(flex::Renderer& renderer) {
     selection_->render_selection_indicators(renderer);
     render_snap_guides(renderer);
-    
+
     if (drag_mode_ == DragMode::Marquee) {
         render_marquee(renderer);
     }
+}
+
+void SelectTool::render_screen_overlay(flex::Renderer& renderer) {
 }
 
 bool SelectTool::is_double_click(const flex::Vec2& pos) {

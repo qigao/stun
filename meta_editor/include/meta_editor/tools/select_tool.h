@@ -31,6 +31,7 @@ public:
     bool on_key_up(int key, int mods) override;
 
     void render_overlay(flex::Renderer& renderer) override;
+    void render_screen_overlay(flex::Renderer& renderer) override;
 
     const char* name() const override { return "Select"; }
     const char* icon() const override { return "cursor"; }

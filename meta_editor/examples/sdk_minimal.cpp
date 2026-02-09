@@ -8,7 +8,7 @@
 #include <meta_editor/core/glfw_adapter.h>
 #include <flex/backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
-#include <flex/app/glfw_app.h>
+#include  "glfw_app.h"
 #include <thorvg.h>
 #include <iostream>
 

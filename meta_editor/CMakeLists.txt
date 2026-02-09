@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 # Find parent flex and flexUI
 set(FLEX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../flex)
 set(FLEXUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../flexUI)
@@ -24,6 +25,7 @@ endif()
 add_library(meta_editor
     # Core
     src/core/editor.cpp
+    src/core/page.cpp
     src/canvas.cpp
     src/selection_manager.cpp
     src/tool_manager.cpp
@@ -66,6 +68,13 @@ add_library(meta_editor
     src/view/context_menu.cpp
     src/view/history_panel.cpp
     src/view/widget_panel.cpp
+    src/view/top_bar.cpp
+    src/view/bottom_bar.cpp
+    src/view/panel_layout.cpp
+    src/view/cad_toolbox.cpp
+    src/view/cad_top_bar.cpp
+    src/view/cad_bottom_bar.cpp
+    src/view/icon_system.cpp
 )
 
 target_include_directories(meta_editor 
@@ -81,6 +90,7 @@ target_link_libraries(meta_editor
         flex 
         flexUI
         glfw glad::glad OpenGL::GL
+        nlohmann_json::nlohmann_json
 )
 set_target_properties(meta_editor PROPERTIES FOLDER "Modules/MetaEditor")
 
@@ -120,6 +130,17 @@ target_link_libraries(svg_editor_demo
         meta_editor
 )
 set_target_properties(svg_editor_demo PROPERTIES FOLDER "Modules/MetaEditor/Examples")
+
+# CAD Editor demo (Modern CAD layout)
+add_executable(cad_editor_demo
+    examples/cad_editor_demo.cpp
+)
+
+target_link_libraries(cad_editor_demo
+    PRIVATE
+        meta_editor
+)
+set_target_properties(cad_editor_demo PROPERTIES FOLDER "Modules/MetaEditor/Examples")
 # Copy assets to build directory
 # add_custom_command(TARGET meta_editor_demo POST_BUILD
 #     COMMAND ${CMAKE_COMMAND} -E copy_directory

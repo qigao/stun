@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cctype>
 
-namespace md_re2c {
+namespace md {
 
 namespace {
 
@@ -279,8 +279,8 @@ std::unique_ptr<Block> BlockParser::parse(std::string_view input) {
         size_t end = input.find('\n', pos);
         if (end == std::string_view::npos) end = input.size();
         
-        std::string_view line = input.substr(pos, end - pos + (end < input.size() ? 1 : 0));
-        add_line_to_block(analyze_line(line));
+        std::string_view line = input.substr(pos, end - pos);
+        add_line_to_block(analyze_line(line), line);
         
         pos = end + 1;
     }
@@ -296,7 +296,7 @@ void BlockParser::close_block() {
     stack_.pop_back();
 }
 
-void BlockParser::add_line_to_block(const LineInfo& line) {
+void BlockParser::add_line_to_block(const LineInfo& line, std::string_view raw_line) {
     Block* current = stack_.back();
     
     // 代码块内部: 只检查结束标记
@@ -308,9 +308,9 @@ void BlockParser::add_line_to_block(const LineInfo& line) {
             code_fence_marker_.clear();
             close_block();
         } else {
-            // 添加原始行到代码块
+            // 添加原始行到代码块（保留原始内容）
             if (current->type == BlockType::CodeBlock) {
-                current->content += std::string(line.content);
+                current->content += std::string(raw_line);
                 current->content += '\n';
             }
         }
@@ -327,6 +327,17 @@ void BlockParser::add_line_to_block(const LineInfo& line) {
             
         case LineType::ATXHeader: {
             if (current->type == BlockType::Paragraph) close_block();
+            // Break list if header is at indent 0
+            if (line.indent == 0) {
+                while (stack_.size() > 1) {
+                    BlockType t = stack_.back()->type;
+                    if (t == BlockType::ListItem || t == BlockType::List) {
+                        close_block();
+                    } else {
+                        break;
+                    }
+                }
+            }
             auto header = std::make_unique<Block>(BlockType::Header);
             header->level = line.level;
             header->content = std::string(line.content);
@@ -336,6 +347,17 @@ void BlockParser::add_line_to_block(const LineInfo& line) {
         
         case LineType::CodeFence: {
             if (current->type == BlockType::Paragraph) close_block();
+            // Break list if code fence is at indent 0
+            if (line.indent == 0) {
+                while (stack_.size() > 1) {
+                    BlockType t = stack_.back()->type;
+                    if (t == BlockType::ListItem || t == BlockType::List) {
+                        close_block();
+                    } else {
+                        break;
+                    }
+                }
+            }
             auto code = std::make_unique<Block>(BlockType::CodeBlock);
             code->info = std::string(line.info);
             stack_.back()->children.push_back(std::move(code));
@@ -362,6 +384,19 @@ void BlockParser::add_line_to_block(const LineInfo& line) {
         
         case LineType::HorizontalRule: {
             if (current->type == BlockType::Paragraph) close_block();
+
+            // Break list if HR is at indent 0
+            if (line.indent == 0) {
+                while (stack_.size() > 1) {
+                    BlockType t = stack_.back()->type;
+                    if (t == BlockType::ListItem || t == BlockType::List) {
+                        close_block();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
             auto hr = std::make_unique<Block>(BlockType::HorizontalRule);
             stack_.back()->children.push_back(std::move(hr));
             break;
@@ -601,4 +636,4 @@ void BlockParser::add_line_to_block(const LineInfo& line) {
     }
 }
 
-} // namespace md_re2c
+} // namespace md

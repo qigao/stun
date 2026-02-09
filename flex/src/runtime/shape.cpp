@@ -326,19 +326,8 @@ void Shape::render(Renderer &r) {
   // -------------------------------------------
   // RETAINED MODE: Use cached paint objects
   // -------------------------------------------
-  // Calculate content offset (e.g. for centered shapes like Circle/Star)
-  Bounds b = compute_bounds();
-  float offset_x = -b.x;
-  float offset_y = -b.y;
-
-  // -------------------------------------------
-  // RETAINED MODE: Use cached paint objects
-  // -------------------------------------------
   if (!is_rough && r.supports_retained_mode()) {
     Transform t = world_transform();
-    if (offset_x != 0 || offset_y != 0) {
-        t.translate(offset_x, offset_y);
-    }
 
     // Already cached and no changes? Skip entirely!
     if (cached_paint() && !is_dirty(DirtyFlags::Content)) {
@@ -397,7 +386,7 @@ void Shape::render(Renderer &r) {
   // IMMEDIATE MODE: Fallback for rough/complex shapes
   // -------------------------------------------
 
-  // Helper to apply local transform AND content offset
+  // Helper to apply local transform
   auto apply_local_transform = [&]() {
       r.translate(x_, y_);
       if (rotation_ != 0.0f) {
@@ -405,9 +394,6 @@ void Shape::render(Renderer &r) {
       }
       if (scale_x_ != 1.0f || scale_y_ != 1.0f) {
           r.scale(scale_x_, scale_y_);
-      }
-      if (offset_x != 0 || offset_y != 0) {
-          r.translate(offset_x, offset_y);
       }
   };
 
@@ -498,22 +484,23 @@ Bounds Shape::compute_bounds() const {
         } else if constexpr (std::is_same_v<T, RectData>) {
           b.width = g.width;
           b.height = g.height;
+          b.x = 0;
+          b.y = 0;
         } else if constexpr (std::is_same_v<T, CircleData>) {
           b.width = g.radius * 2;
           b.height = g.radius * 2;
-          b.x -= g.radius;
-          b.y -= g.radius;
+          b.x = -g.radius;
+          b.y = -g.radius;
         } else if constexpr (std::is_same_v<T, EllipseData>) {
           b.width = g.rx * 2;
           b.height = g.ry * 2;
-          b.x -= g.rx;
-          b.y -= g.ry;
+          b.x = -g.rx;
+          b.y = -g.ry;
         } else if constexpr (std::is_same_v<T, PolygonData>) {
-          // Polygon is centered by default in our generator
           b.width = g.radius * 2;
           b.height = g.radius * 2;
-          b.x -= g.radius;
-          b.y -= g.radius;
+          b.x = -g.radius;
+          b.y = -g.radius;
         } else if constexpr (std::is_same_v<T, PathData>) {
           b.width = (g.width > 0 ? g.width : 10);
           b.height = (g.height > 0 ? g.height : 10);
@@ -522,24 +509,23 @@ Bounds Shape::compute_bounds() const {
         } else if constexpr (std::is_same_v<T, StarData>) {
           b.width = g.outer_radius * 2;
           b.height = g.outer_radius * 2;
-          b.x -= g.outer_radius;
-          b.y -= g.outer_radius;
+          b.x = -g.outer_radius;
+          b.y = -g.outer_radius;
         } else if constexpr (std::is_same_v<T, LineData>) {
           b.width = std::abs(g.x2);
           b.height = std::abs(g.y2);
-          if (g.x2 < 0) b.x += g.x2;
-          if (g.y2 < 0) b.y += g.y2;
+          if (g.x2 < 0) b.x = g.x2;
+          if (g.y2 < 0) b.y = g.y2;
         } else if constexpr (std::is_same_v<T, RingData>) {
           b.width = g.outer_radius * 2;
           b.height = g.outer_radius * 2;
-          b.x -= g.outer_radius;
-          b.y -= g.outer_radius;
+          b.x = -g.outer_radius;
+          b.y = -g.outer_radius;
         } else if constexpr (std::is_same_v<T, TriangleData>) {
-          // Triangle is centered at origin
           b.width = g.width;
           b.height = g.height;
-          b.x -= g.width / 2;
-          b.y -= g.height / 2;
+          b.x = -g.width / 2;
+          b.y = -g.height / 2;
         }
       },
       geometry_);

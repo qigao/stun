@@ -15,6 +15,9 @@ include_directories(include)
 find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
 find_library(LEXBOR_LIBRARY NAMES lexbor)
 
+# Find tree-sitter for syntax highlighting (core only, languages via plugins)
+find_package(unofficial-tree-sitter CONFIG REQUIRED)
+
 if(NOT LEXBOR_INCLUDE_DIR)
     message(FATAL_ERROR
       "flexUI: Lexbor include directory not found. Please install via vcpkg: vcpkg install lexbor"
@@ -30,6 +33,8 @@ endif()
 message(STATUS "flexUI: Using lexbor from ${LEXBOR_INCLUDE_DIR}")
 include_directories(${LEXBOR_INCLUDE_DIR})
 
+
+
 # 源文件
 set(FLEXUI_SOURCES
   src/box.cpp
@@ -42,6 +47,9 @@ set(FLEXUI_SOURCES
   src/event_dispatcher.cpp
   src/layout_manager.cpp
   src/render_manager.cpp
+  src/syntax_highlighter.cpp
+  src/highlighters/treesitter_highlighter.cpp
+  src/highlighters/ts_plugin_loader.cpp
   src/widgets/input_widget.cpp
   src/widgets/button_widget.cpp
   src/widgets/label_widget.cpp
@@ -138,13 +146,17 @@ if(WIN32)
     target_compile_definitions(flexUI PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-# 链接依赖（flex 提供后端无关的渲染抽象，thorvg 由 flex 传递依赖）
-target_link_libraries(flexUI PUBLIC ${LEXBOR_LIBRARY} flex TurboNet::Utils md_parser)
+# 链接依赖
+target_link_libraries(flexUI 
+    PUBLIC ${LEXBOR_LIBRARY} flex TurboNet::Utils md_parser
+    PRIVATE unofficial::tree-sitter::tree-sitter
+)
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
   flexUI
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tree-sitter/plugins/
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
          ${CMAKE_SOURCE_DIR}/vendor/md/include
          $<INSTALL_INTERFACE:include>

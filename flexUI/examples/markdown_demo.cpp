@@ -1,18 +1,14 @@
 /*
- * flexUI - Markdown Demo
+ * flexUI - Markdown Demo (GLFW)
  */
-
-#include <SDL2/SDL.h>
-#include <thorvg.h>
-#include <flex/bridge/renderer.h>
+#include <flexUI.h>
+#include "glfw_app.h"
 #include <flexUI/box.h>
-#include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/widgets/label_widget.h>
 #include <iostream>
 #include <memory>
-#include <fstream>
-#include <vector>
+#include <string>
 
 using namespace flexUI;
 
@@ -28,9 +24,25 @@ const char* DEMO_MARKDOWN =
 "\n"
 "### Code Example:\n"
 "\n"
-"```cpp\n"
-"auto* md = box->create_widget<MarkdownWidget>(\"div\", \"md1\", \"# Hello\");\n"
-"root->append(md);\n"
+"```c\n"
+"#include <stdio.h>\n"
+"\n"
+"int main(void) {\n"
+"    const char* msg = \"Hello, World!\";\n"
+"    printf(\"%s\\n\", msg);\n"
+"    return 0;\n"
+"}\n"
+"```\n"
+"\n"
+"### JSON Example:\n"
+"\n"
+"```json\n"
+"{\n"
+"  \"name\": \"flexUI\",\n"
+"  \"features\": [\"fast\", \"flexible\", \"modern\"],\n"
+"  \"version\": 1.0,\n"
+"  \"active\": true\n"
+"}\n"
 "```\n"
 "\n"
 "> This is a blockquote showing the support for block structures.\n"
@@ -103,19 +115,37 @@ const char* MD_CSS = R"(
     .md-code-block {
         display: flex;
         flex-direction: column;
-        background-color: #21252b;
-        padding: 15px;
-        border-radius: 6px;
+        background-color: #1e1e2e;
+        padding: 16px 20px 20px 20px;
+        border-radius: 8px;
+        margin-top: 15px;
         margin-bottom: 15px;
-        border: 1px solid #3e4451;
-        color: #d19a66;
+        border: 1px solid #45475a;
+        color: #cdd6f4;
         font-family: "Consolas";
         font-size: 14px;
         flex-shrink: 0;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     }
 
+    .md-code-line {
+        display: flex;
+        flex-shrink: 0;
+        height: 22px;
+    }
+
+    /* One Dark Pro syntax highlighting */
+    .hl-keyword { color: #c678dd; }
+    .hl-type { color: #e5c07b; }
+    .hl-string { color: #98c379; }
+    .hl-number { color: #d19a66; }
+    .hl-comment { color: #5c6370; font-style: italic; }
+    .hl-preproc { color: #e06c75; }
+    .hl-operator { color: #56b6c2; }
+    .hl-plain { color: #abb2bf; }
+
     .md-code {
-        background-color: #3e4451;
+        background-color: #ae3987ff;
         padding: 2px 6px;
         border-radius: 4px;
         color: #e06c75;
@@ -167,97 +197,95 @@ const char* MD_CSS = R"(
     }
 )";
 
-bool load_font(const char* name, const char* path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open " << path << std::endl;
-        return false;
-    }
+class MarkdownDemoApp : public flex::GlfwApp {
+public:
+    MarkdownDemoApp() : flex::GlfwApp("flexUI Markdown Demo", 800, 600) {}
 
-    auto size = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    std::vector<char> buffer(size);
-    if (!file.read(buffer.data(), size)) {
-        std::cerr << "Failed to read " << path << std::endl;
-        return false;
-    }
-
-    if (tvg::Text::load(name, buffer.data(), static_cast<uint32_t>(size), "ttf", true) != tvg::Result::Success) {
-        std::cerr << "Failed to load " << name << " font" << std::endl;
-        return false;
-    }
-
-    std::cout << "Font loaded: " << name << std::endl;
-    return true;
-}
-
-int main(int argc, char** argv) {
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
-
-    int width = 800;
-    int height = 600;
-
-    SDL_Window* window = SDL_CreateWindow(
-        "flexUI Markdown Demo",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
-    );
-
-    SDL_Surface* surface = SDL_GetWindowSurface(window);
-    tvg::Initializer::init(0);
-
-    if (!load_font("Arial", "C:/Windows/Fonts/arial.ttf")) {
-        std::cerr << "Warning: Could not load Arial font. Text might not render." << std::endl;
-    }
-    if (!load_font("Consolas", "C:/Windows/Fonts/consola.ttf")) {
-        std::cerr << "Warning: Could not load Consolas font. Code blocks might not render." << std::endl;
-    }
-    
-    auto canvas = std::unique_ptr<tvg::SwCanvas>(tvg::SwCanvas::gen());
-    canvas->target(static_cast<uint32_t*>(surface->pixels), surface->w, surface->pitch / 4, surface->h, tvg::ColorSpace::ARGB8888);
-
-    auto flex_renderer = flex::create_thorvg_renderer(canvas.get());
-    auto box = std::make_unique<Box>(flex_renderer.get());
-    box->set_viewport((float)width, (float)height);
-    box->load_css(MD_CSS);
-
-    auto* root = box->create("div", "root");
-    box->set_root(root);
-
-    auto* md_widget = box->create_widget<MarkdownWidget>("div", "markdown", DEMO_MARKDOWN);
-    root->append(md_widget);
-
-    bool running = true;
-    SDL_Event event;
-    while (running) {
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) running = false;
-            if (event.type == SDL_WINDOWEVENT) {
-                if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
-                    width = event.window.data1;
-                    height = event.window.data2;
-                    
-                    // On Windows, the surface might be invalidated on resize
-                    surface = SDL_GetWindowSurface(window);
-                    if (surface) {
-                        canvas->target(static_cast<uint32_t*>(surface->pixels), 
-                                      surface->w, surface->pitch / 4, surface->h, 
-                                      tvg::ColorSpace::ARGB8888);
-                        box->set_viewport((float)width, (float)height);
-                    }
-                }
-            }
+protected:
+    bool on_init() override {
+        if (!load_font("Arial", "C:/Windows/Fonts/arial.ttf")) {
+            std::cerr << "Warning: Could not load Arial font." << std::endl;
+        }
+        if (!load_font("Consolas", "C:/Windows/Fonts/consola.ttf")) {
+            std::cerr << "Warning: Could not load Consolas font." << std::endl;
         }
 
-        box->update_time(16.0f);
-        box->update();
-        SDL_UpdateWindowSurface(window);
-        SDL_Delay(16);
+        box_ = std::make_unique<flexUI::Box>(renderer());
+        box_->set_viewport((float)width(), (float)height());
+        box_->load_css(MD_CSS);
+
+        auto* root = box_->create("div", "root");
+        box_->set_root(root);
+
+        auto* md_widget = box_->create_widget<flexUI::MarkdownWidget>("div", "markdown", DEMO_MARKDOWN);
+        root->append(md_widget);
+
+        return true;
     }
 
-    tvg::Initializer::term();
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    void on_update(float dt) override {
+        box_->update_time(dt * 1000.0f);
+    }
+
+    void on_render() override {
+        box_->invalidate(); // Force repaint for demo
+        box_->update();
+        
+        canvas()->draw();
+        canvas()->sync();
+    }
+
+    void on_resize(int w, int h) override {
+        flex::GlfwApp::on_resize(w, h);
+        if (box_) {
+            box_->set_viewport((float)w, (float)h);
+        }
+    }
+
+    void on_mouse_button(int button, int action, int mods) override {
+        double x, y;
+        glfwGetCursorPos(window(), &x, &y);
+        auto e = (action == GLFW_PRESS)
+            ? flexUI::Event::mouse_down((float)x, (float)y, glfw_to_button(button))
+            : flexUI::Event::mouse_up((float)x, (float)y, glfw_to_button(button));
+        box_->dispatch_event(e);
+    }
+
+    void on_cursor_pos(double x, double y) override {
+        auto e = flexUI::Event::mouse_move((float)x, (float)y);
+        box_->dispatch_event(e);
+    }
+
+    void on_scroll(double dx, double dy) override {
+        double x, y;
+        glfwGetCursorPos(window(), &x, &y);
+        auto e = flexUI::Event::mouse_wheel((float)x, (float)y, (float)dx, (float)dy);
+        box_->dispatch_event(e);
+    }
+
+    void on_char(unsigned int codepoint) override {
+        char buf[5] = {};
+        if (codepoint < 0x80) buf[0] = (char)codepoint;
+        else if (codepoint < 0x800) { buf[0] = 0xC0 | (codepoint >> 6); buf[1] = 0x80 | (codepoint & 0x3F); }
+        else { buf[0] = 0xE0 | (codepoint >> 12); buf[1] = 0x80 | ((codepoint >> 6) & 0x3F); buf[2] = 0x80 | (codepoint & 0x3F); }
+        auto e = flexUI::Event::text_input(buf);
+        box_->dispatch_event(e);
+    }
+
+    void on_key(int key, int action, int mods) override {
+        auto e = (action == GLFW_PRESS || action == GLFW_REPEAT)
+            ? flexUI::Event::key_down(glfw_to_keycode(key), glfw_to_mods(mods))
+            : flexUI::Event::key_up(glfw_to_keycode(key), glfw_to_mods(mods));
+        box_->dispatch_event(e);
+    }
+
+private:
+    std::unique_ptr<flexUI::Box> box_;
+};
+
+int main(int argc, char** argv) {
+    MarkdownDemoApp app;
+    if (!app.init()) return 1;
+    app.run();
     return 0;
 }

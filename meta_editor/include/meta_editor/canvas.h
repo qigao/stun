@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 
 namespace meta_editor {
@@ -37,6 +38,12 @@ public:
     void set_layer_locked(flex::Group* layer, bool locked);
     void set_layer_opacity(flex::Group* layer, float opacity);
     bool is_layer_locked(flex::Group* layer) const;
+
+    // Node locking (single source of truth for all lock state)
+    void lock_node(flex::Node* node);
+    void unlock_node(flex::Node* node);
+    bool is_node_locked(flex::Node* node) const;
+    void toggle_node_lock(flex::Node* node);
     
     // Camera Control
     void pan(float dx, float dy);
@@ -57,6 +64,8 @@ public:
     
     // Rendering
     void render(flex::Renderer& renderer);
+    void render_content(flex::Renderer& renderer);
+    void render_overlay(flex::Renderer& renderer);
     void update(float dt);
     
     // Grid
@@ -81,6 +90,10 @@ public:
     // Callbacks
     using LayerChangeCallback = std::function<void()>;
     void set_layer_change_callback(LayerChangeCallback cb) { layer_change_callback_ = std::move(cb); }
+
+    // Dirty state (for optimization)
+    void set_dirty(bool dirty);
+    bool is_dirty() const;
 
 private:
     flex::Transform inverse_camera_transform() const;
@@ -107,11 +120,14 @@ private:
     float grid_size_ = 50.0f;
     bool snap_to_grid_ = false;
     
-    // Layer metadata
-    std::unordered_map<flex::Group*, bool> locked_layers_;
+    // Lock state — single set for both layers and individual nodes
+    std::unordered_set<flex::Node*> locked_nodes_;
     
     // Callbacks
     LayerChangeCallback layer_change_callback_;
+    
+    // Dirty flag
+    bool dirty_ = true;
 };
 
 } // namespace meta_editor

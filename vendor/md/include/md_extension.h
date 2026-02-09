@@ -8,7 +8,7 @@
 #include <optional>
 #include <vector>
 
-namespace md_re2c {
+namespace md {
 
 // 代码块处理结果
 struct BlockResult {
@@ -48,6 +48,6 @@ private:
 
 // 便利宏 - 自动注册
 #define MD_REGISTER_HANDLER(lang, handler) \
-    static bool _md_reg_##lang = (md_re2c::ExtensionRegistry::instance().register_handler(#lang, handler), true)
+    static bool _md_reg_##lang = (md::ExtensionRegistry::instance().register_handler(#lang, handler), true)
 
-} // namespace md_re2c
+} // namespace md

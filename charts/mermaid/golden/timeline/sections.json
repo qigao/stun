@@ -1,0 +1,56 @@
+{
+  "sections": [
+    {
+      "name": "Q1",
+      "periods": [
+        {
+          "events": [
+            {
+              "text": "Planning"
+            }
+          ],
+          "name": "January"
+        },
+        {
+          "events": [
+            {
+              "text": "Design"
+            }
+          ],
+          "name": "February"
+        },
+        {
+          "events": [
+            {
+              "text": "Development"
+            }
+          ],
+          "name": "March"
+        }
+      ]
+    },
+    {
+      "name": "Q2",
+      "periods": [
+        {
+          "events": [
+            {
+              "text": "Testing"
+            }
+          ],
+          "name": "April"
+        },
+        {
+          "events": [
+            {
+              "text": "Launch"
+            }
+          ],
+          "name": "May"
+        }
+      ]
+    }
+  ],
+  "title": "Project Milestones",
+  "type": "timeline"
+}

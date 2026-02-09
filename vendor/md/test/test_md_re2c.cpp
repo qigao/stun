@@ -1,8 +1,8 @@
 #include <catch2/catch_all.hpp>
-#include "md_re2c.h"
+#include "md.h"
 #include <iostream>
 
-using namespace md_re2c;
+using namespace md;
 
 static std::string type_to_string(NodeType t) {
     switch(t) {
@@ -38,7 +38,7 @@ static void dump_tree(Node* n, int indent = 0) {
     for(auto child : n->children) dump_tree(child, indent + 1);
 }
 
-TEST_CASE("md_re2c Comprehensive Parsing", "[md_re2c]") {
+TEST_CASE("md Comprehensive Parsing", "[md]") {
     SECTION("Headers (H1, H2, H3)") {
         std::string input = "# H1\n## H2\n### H3\n";
         auto result = parse(input);

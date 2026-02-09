@@ -1,11 +1,11 @@
 #pragma once
 
-#include "md_re2c.h"
+#include "md.h"
 #include "md_block_parser.h"
 #include <string_view>
 #include <vector>
 
-namespace md_re2c {
+namespace md {
 
 struct DelimiterInfo;  // forward declaration
 
@@ -27,4 +27,4 @@ private:
 
 Node* blocks_to_ast(const Block& root, MemoryPool* pool);
 
-} // namespace md_re2c
+} // namespace md

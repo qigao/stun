@@ -1,0 +1,19 @@
+{
+  "sections": [
+    {
+      "name": "First",
+      "periods": [
+        {
+          "events": [
+            {
+              "text": "Event A"
+            }
+          ],
+          "name": "2023"
+        }
+      ]
+    }
+  ],
+  "title": "My Timeline",
+  "type": "timeline"
+}

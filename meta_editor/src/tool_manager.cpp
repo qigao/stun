@@ -9,6 +9,18 @@ namespace meta_editor {
 ToolManager::ToolManager(Canvas* canvas, SelectionManager* selection, CommandManager* commands)
     : canvas_(canvas), selection_(selection), commands_(commands) {}
 
+void ToolManager::set_target(Canvas* canvas, SelectionManager* selection, CommandManager* commands) {
+    canvas_ = canvas;
+    selection_ = selection;
+    commands_ = commands;
+    
+    for (auto& pair : tools_) {
+        pair.second->canvas_ = canvas;
+        pair.second->selection_ = selection;
+        pair.second->commands_ = commands;
+    }
+}
+
 void ToolManager::register_tool(std::unique_ptr<Tool> tool) {
     tool->canvas_ = canvas_;
     tool->selection_ = selection_;
@@ -74,6 +86,12 @@ bool ToolManager::on_text_input(const char* text) {
 void ToolManager::render_overlay(flex::Renderer& renderer) {
     if (active_tool_) {
         active_tool_->render_overlay(renderer);
+    }
+}
+
+void ToolManager::render_screen_overlay(flex::Renderer& renderer) {
+    if (active_tool_) {
+        active_tool_->render_screen_overlay(renderer);
     }
 }
 

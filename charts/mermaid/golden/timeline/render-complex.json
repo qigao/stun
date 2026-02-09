@@ -1,0 +1,46 @@
+{
+  "sections": [
+    {
+      "name": "Pre-war",
+      "periods": [
+        {
+          "events": [
+            {
+              "text": "Munich Agreement"
+            },
+            {
+              "text": "Kristallnacht"
+            }
+          ],
+          "name": "1938"
+        }
+      ]
+    },
+    {
+      "name": "War Years",
+      "periods": [
+        {
+          "events": [
+            {
+              "text": "Invasion of Poland"
+            }
+          ],
+          "name": "1939"
+        },
+        {
+          "events": [
+            {
+              "text": "Pearl Harbor"
+            },
+            {
+              "text": "US enters war"
+            }
+          ],
+          "name": "1941"
+        }
+      ]
+    }
+  ],
+  "title": "History of Events",
+  "type": "timeline"
+}

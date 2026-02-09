@@ -10,7 +10,6 @@
 #include <vector>
 #include <functional>
 #include <optional>
-#include <unordered_set>
 
 namespace meta_editor {
 
@@ -63,7 +62,7 @@ public:
     void clear_fill();
     void clear_stroke();
 
-    // Lock/Unlock nodes
+    // Lock/Unlock nodes (delegates to Canvas — single source of truth)
     void lock_selection();
     void unlock_selection();
     bool is_locked(flex::Node* node) const;
@@ -87,7 +86,6 @@ private:
 
     Canvas* canvas_;
     std::vector<flex::Node*> selected_nodes_;
-    std::unordered_set<flex::Node*> locked_nodes_;
     SelectionChangeCallback selection_change_callback_;
 };
 

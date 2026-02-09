@@ -1,161 +1,178 @@
-/*
- * Meta Editor - Vertical Tool Panel Implementation
- */
-
 #include "meta_editor/view/tool_panel.h"
 #include "meta_editor/tool_manager.h"
+#include <flex.h>
 #include <cmath>
-#include <sstream>
-#include <iomanip>
+#include <cstring>
+#include <cstdio>
 
 namespace meta_editor {
 
 ToolPanel::ToolPanel(ToolManager* tools) : tools_(tools) {
-    // Set default position and size
-    x_ = 16;
-    y_ = 16;
-    width_ = 44;
-
-    // Define tools with shortcuts
+    width_ = 52;
+    
     tool_defs_ = {
-        {"Select", "", "V"},
-        {"Pen", "", "P"},
-        {"Rectangle", "", "R"},
-        {"Circle", "", "O"},
-        {"Ellipse", "", "E"},
-        {"Star", "", "S"},
-        {"Polygon", "", "G"},
+        {"Select", "V", "M 12.586 12.586 L 19 19 M 3.688 3.037 a 0.497 0.497 0 0 0 -0.651 0.651 l 6.5 15.999 a 0.501 0.501 0 0 0 0.947 -0.062 l 1.569 -6.083 a 2 2 0 0 1 1.448 -1.479 l 6.124 -1.579 a 0.5 0.5 0 0 0 0.063 -0.947 z"}, 
+        {"Pen", "P", "M 21.174 6.812 a 1 1 0 0 0 -3.986 -3.987 L 3.842 16.174 a 2 2 0 0 0 -0.5 0.83 l -1.321 4.352 a 0.5 0.5 0 0 0 0.623 0.622 l 4.353 -1.32 a 2 2 0 0 0 0.83 -0.497 z"},
+        {"Rectangle", "R", "geometry:rect"},
+        {"Circle", "O", "geometry:circle"},
+        {"Ellipse", "E", "geometry:ellipse"},
+        {"Star", "S", "geometry:star"},
+        {"Polygon", "G", "geometry:polygon"},
+        {"Triangle", "W", "geometry:triangle"},
     };
+
+    // Create standalone Flex instance for this panel's UI
+    ui_instance_ = flex::Instance::create(200, 600); // Fixed capacity
+    rebuild_layout();
+}
+
+void ToolPanel::rebuild_layout() {
+    auto* scene = ui_instance_->scene();
+    root_group_ = scene->root()->add<flex::Group>();
+    root_group_->set_layout(flex::LayoutMode::Flex);
+    root_group_->set_flex_direction(flex::FlexDirection::Column);
+    root_group_->set_padding(padding_);
+    root_group_->set_gap(gap_);
+    root_group_->set_layout_width(width_); // Fixed width
+    root_group_->set_layout_height(800);   // Sufficient height for tools
+    
+    tool_buttons_.clear();
+
+    for (const auto& def : tool_defs_) {
+        // Button container
+        auto* btn = root_group_->add<flex::Group>();
+        btn->set_layout_size(button_size_, button_size_);
+        btn->set_flex_shrink(0);
+        btn->set_id(def.name);
+        
+        // Background (initially transparent/default)
+        auto* bg = btn->add<flex::Shape>();
+        bg->set_rect(button_size_, button_size_, 6.0f); // Rounded corners
+        bg->set_fill(flex::Color(0.24f, 0.24f, 0.26f, 1.0f));
+        bg->set_id("bg"); // Use ID for finding
+
+        // Icon
+        auto* icon = btn->add<flex::Shape>();
+        
+        if (def.icon_path.rfind("geometry:", 0) == 0) {
+            // Primitive shapes for icons (most are centered at 0,0 by default)
+            icon->set_position(button_size_/2, button_size_/2); 
+
+            if (def.name == "Rectangle") {
+                icon->set_rect(20, 14, 2);
+                icon->set_position((button_size_ - 20) / 2, (button_size_ - 14) / 2); // Rect is top-left aligned
+            }
+            else if (def.name == "Circle") icon->set_circle(9);
+            else if (def.name == "Ellipse") icon->set_ellipse(10, 7);
+            else if (def.name == "Star") icon->set_star(5, 10, 4);
+            else if (def.name == "Polygon") icon->set_polygon(5, 9);
+            else if (def.name == "Triangle") icon->set_triangle(18, 16, flex::Direction::Up);
+            
+            icon->set_stroke(flex::Color(0.75f, 0.75f, 0.75f, 1.0f), 1.5f);
+            icon->clear_fill();
+        } else {
+             // Use path from lucide (assumed 24x24)
+             icon->set_path(def.icon_path);
+             float icon_scale = 0.8f;
+             icon->set_scale(icon_scale);
+             
+             // Center 24x24 icon with scale
+             float scaled_size = 24.0f * icon_scale;
+             float offset = (button_size_ - scaled_size) / 2;
+             icon->set_position(offset, offset);
+             
+             icon->set_stroke(flex::Color(0.75f, 0.75f, 0.75f, 1.0f), 1.5f);
+             icon->clear_fill();
+        }
+        icon->set_id("icon");
+        
+        tool_buttons_[def.name] = btn;
+    }
+    update_layout();
+    
+    // Ensure parent panel height matches content
+    height_ = content_height(); 
 }
 
 float ToolPanel::content_height() const {
-    int count = static_cast<int>(tool_defs_.size());
-    return padding_ * 2 + count * button_size_ + (count - 1) * gap_;
+    // Flex auto-calculates height, but we can query the root group's layout height
+    // after a layout pass. For now, manual estimate is fine for panel sizing.
+    if (!root_group_) return 100;
+    return root_group_->layout_height();
 }
 
-void ToolPanel::draw_tool_icon(flex::Renderer& r, const std::string& name,
-                                float cx, float cy, float size, const flex::Color& color) {
-    std::ostringstream ss;
-    ss << std::fixed << std::setprecision(1);
-
-    if (name == "Select") {
-        // Arrow cursor
-        float s = size * 0.4f;
-        ss << "M " << (cx - s * 0.5f) << " " << (cy - s)
-           << " L " << (cx - s * 0.5f) << " " << (cy + s * 0.6f)
-           << " L " << (cx - s * 0.1f) << " " << (cy + s * 0.2f)
-           << " L " << (cx + s * 0.4f) << " " << (cy + s * 0.7f)
-           << " L " << (cx + s * 0.6f) << " " << (cy + s * 0.5f)
-           << " L " << (cx + s * 0.1f) << " " << (cy)
-           << " L " << (cx + s * 0.5f) << " " << (cy - s * 0.4f)
-           << " Z";
-        r.fill_path(ss.str(), flex::Paint::solid(color));
-    }
-    else if (name == "Pen") {
-        // Pen shape
-        float s = size * 0.35f;
-        ss << "M " << (cx - s) << " " << (cy + s)
-           << " L " << (cx - s * 0.6f) << " " << (cy + s * 0.4f)
-           << " L " << (cx + s * 0.6f) << " " << (cy - s * 0.8f)
-           << " L " << (cx + s) << " " << (cy - s * 0.4f)
-           << " L " << (cx) << " " << (cy + s * 0.6f)
-           << " Z";
-        r.fill_path(ss.str(), flex::Paint::solid(color));
-    }
-    else if (name == "Rectangle") {
-        float s = size * 0.35f;
-        r.draw_rect(cx - s, cy - s * 0.7f, s * 2, s * 1.4f, 2,
-                   flex::Paint::none(), flex::Paint::solid(color), 1.5f);
-    }
-    else if (name == "Circle") {
-        float radius = size * 0.35f;
-        r.draw_circle(cx, cy, radius, flex::Paint::none(), flex::Paint::solid(color), 1.5f);
-    }
-    else if (name == "Ellipse") {
-        float rx = size * 0.4f;
-        float ry = size * 0.25f;
-        r.draw_ellipse(cx, cy, rx, ry, flex::Paint::none(), flex::Paint::solid(color), 1.5f);
-    }
-    else if (name == "Star") {
-        float outer = size * 0.38f;
-        float inner = outer * 0.4f;
-        int points = 5;
-        for (int i = 0; i < points * 2; ++i) {
-            float angle = (float)i * 3.14159f / points - 3.14159f / 2;
-            float radius = (i % 2 == 0) ? outer : inner;
-            float px = cx + std::cos(angle) * radius;
-            float py = cy + std::sin(angle) * radius;
-            ss << (i == 0 ? "M " : " L ") << px << " " << py;
-        }
-        ss << " Z";
-        r.stroke_path(ss.str(), flex::Paint::solid(color), 1.5f);
-    }
-    else if (name == "Polygon") {
-        float radius = size * 0.35f;
-        int sides = 6;
-        for (int i = 0; i < sides; ++i) {
-            float angle = (float)i * 2 * 3.14159f / sides - 3.14159f / 2;
-            float px = cx + std::cos(angle) * radius;
-            float py = cy + std::sin(angle) * radius;
-            ss << (i == 0 ? "M " : " L ") << px << " " << py;
-        }
-        ss << " Z";
-        r.stroke_path(ss.str(), flex::Paint::solid(color), 1.5f);
+void ToolPanel::update_layout() {
+    if (root_group_) {
+        root_group_->perform_layout();
     }
 }
 
 void ToolPanel::render(flex::Renderer& renderer) {
     if (!visible_) return;
 
-    int count = static_cast<int>(tool_defs_.size());
-
-    // Draw panel background using base class
     render_background(renderer);
+    update_button_states();
+    update_layout();
 
+    // Sync Root position with Panel position
+    if (root_group_) {
+        root_group_->set_position(x_, y_);
+    }
+
+    // Render the isolated UI instance
+    ui_instance_->render(renderer);
+}
+
+void ToolPanel::update_button_states() {
     std::string active_tool = tools_->active_tool() ? tools_->active_tool()->name() : "";
-
-    for (int i = 0; i < count; ++i) {
-        float btn_x = x_ + padding_;
-        float btn_y = y_ + padding_ + i * (button_size_ + gap_);
-
-        bool is_active = (tool_defs_[i].name == active_tool);
-
-        // Button background
-        flex::Color btn_bg = is_active
-            ? flex::Color{0.41f, 0.40f, 0.86f, 1.0f}  // Active: purple
-            : flex::Color{0.24f, 0.24f, 0.26f, 1.0f}; // Normal: dark gray
-
-        renderer.draw_rect(btn_x, btn_y, button_size_, button_size_, 6,
-                          flex::Paint::solid(btn_bg), flex::Paint::none(), 0);
-
-        // Icon color
-        flex::Color icon_color = is_active
-            ? flex::Color{1.0f, 1.0f, 1.0f, 1.0f}
-            : flex::Color{0.75f, 0.75f, 0.75f, 1.0f};
-
-        // Draw geometric icon centered in button
-        float icon_cx = btn_x + button_size_ / 2;
-        float icon_cy = btn_y + button_size_ / 2;
-
-        draw_tool_icon(renderer, tool_defs_[i].name, icon_cx, icon_cy, button_size_, icon_color);
+    
+    for (auto& [name, group] : tool_buttons_) {
+        bool is_active = (name == active_tool);
+        
+        // Update styling based on state
+        auto* bg = dynamic_cast<flex::Shape*>(group->find("bg")); 
+        
+        if (bg) {
+             flex::Color bg_color = is_active 
+                ? flex::Color{0.41f, 0.40f, 0.86f, 1.0f} 
+                : flex::Color{0.24f, 0.24f, 0.26f, 1.0f};
+             bg->set_fill(bg_color);
+             
+             // Update icon color too
+             auto* icon = dynamic_cast<flex::Shape*>(group->find("icon"));
+             if (icon) {
+                 flex::Color icon_color = is_active
+                    ? flex::Color{1.0f, 1.0f, 1.0f, 1.0f}
+                    : flex::Color{0.75f, 0.75f, 0.75f, 1.0f};
+                 if (icon->has_fill()) icon->set_fill(icon_color);
+                 else icon->set_stroke(icon_color, 1.5f);
+             }
+        }
     }
 }
 
 bool ToolPanel::handle_click(float screen_x, float screen_y) {
     if (!contains(screen_x, screen_y)) return false;
 
-    int count = static_cast<int>(tool_defs_.size());
+    printf("[ToolPanel] Clicked at (%.2f, %.2f) | Panel Pos: (%.2f, %.2f) Width: %.2f Height: %.2f\n", 
+           screen_x, screen_y, x_, y_, width_, height_);
 
-    // Find which button was clicked
-    float local_y = screen_y - y_ - padding_;
-    int idx = static_cast<int>(local_y / (button_size_ + gap_));
+    if (root_group_) {
+        root_group_->set_position(x_, y_);
+        update_layout();
+    }
 
-    if (idx >= 0 && idx < count) {
-        // Check if actually within button bounds (not in gap)
-        float btn_top = idx * (button_size_ + gap_);
-        float btn_bottom = btn_top + button_size_;
-        if (local_y >= btn_top && local_y < btn_bottom) {
-            tools_->set_active_tool(tool_defs_[idx].name);
+    // Hit test against actual Flex layout positions
+    for (size_t i = 0; i < tool_defs_.size(); ++i) {
+        auto it = tool_buttons_.find(tool_defs_[i].name);
+        if (it == tool_buttons_.end()) continue;
+
+        auto wb = it->second->world_bounds();
+        printf("  Tool '%s' world_bounds: (%.2f, %.2f, %.2f, %.2f)\n", 
+               tool_defs_[i].name.c_str(), wb.x, wb.y, wb.width, wb.height);
+        if (screen_x >= wb.x && screen_x <= wb.x + wb.width &&
+            screen_y >= wb.y && screen_y <= wb.y + wb.height) {
+            tools_->set_active_tool(tool_defs_[i].name);
             return true;
         }
     }

@@ -111,11 +111,10 @@ bool TextEditTool::on_text_input(const char* text) {
 
 void TextEditTool::render_overlay(flex::Renderer& renderer) {
     if (!editing_text_) return;
-
-    // Draw selection indicator around editing text
     selection_->render_selection_indicators(renderer);
+}
 
-    // TODO: Draw text cursor at cursor_pos_
+void TextEditTool::render_screen_overlay(flex::Renderer& renderer) {
 }
 
 void TextEditTool::commit_edit() {

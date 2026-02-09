@@ -14,6 +14,8 @@
 #include <functional>
 #include <vector>
 
+namespace flex { class Renderer; }
+
 namespace flexUI {
 
 /**
@@ -35,7 +37,10 @@ public:
   void render(const Element& elem, Renderer& renderer) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
+  bool wants_mouse_capture() const override { return is_dragging_; }
   const char* type_name() const override { return "TextAreaWidget"; }
+  bool wants_text_input() const override { return !readonly_ && !disabled_; }
+  void get_caret_rect(const Element& elem, float& x, float& y, float& w, float& h) const override;
 
   const std::string& text() const { return text_; }
   void set_text(const std::string& text);
@@ -68,10 +73,16 @@ private:
   void render_placeholder(flex::Renderer& r, const Element& elem);
   void render_selection(flex::Renderer& r, const Element& elem);
   void render_cursor(flex::Renderer& r, const Element& elem);
+  void render_composition(flex::Renderer& r, const Element& elem);
 
   bool handle_mouse_down(const Event& event, Element& elem);
+  bool handle_mouse_move(const Event& event, Element& elem);
+  bool handle_mouse_up(const Event& event, Element& elem);
   bool handle_key_down(const Event& event, Element& elem);
   bool handle_text_input(const Event& event, Element& elem);
+  bool handle_composition_start(const Event& event, Element& elem);
+  bool handle_composition_update(const Event& event, Element& elem);
+  bool handle_composition_end(const Event& event, Element& elem);
 
   void insert_text(const std::string& str);
   void delete_selection();
@@ -97,6 +108,10 @@ private:
   float scroll_offset_ = 0.0f;
 
   ChangeCallback change_callback_;
+  bool is_dragging_ = false;
+
+  bool is_composing_ = false;
+  std::string composition_text_;
 };
 
 } // namespace flexUI

@@ -1,11 +1,11 @@
-#include "md_re2c.h"
+#include "md.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
 
-using namespace md_re2c;
+using namespace md;
 
 struct SpecTest {
     int number;

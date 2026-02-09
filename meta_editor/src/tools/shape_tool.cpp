@@ -19,6 +19,7 @@ const char* ShapeTool::name() const {
         case ShapeType::Ellipse: return "Ellipse";
         case ShapeType::Polygon: return "Polygon";
         case ShapeType::Star: return "Star";
+        case ShapeType::Triangle: return "Triangle";
         default: return "Shape";
     }
 }
@@ -30,6 +31,7 @@ const char* ShapeTool::icon() const {
         case ShapeType::Ellipse: return "ellipse";
         case ShapeType::Polygon: return "polygon";
         case ShapeType::Star: return "star";
+        case ShapeType::Triangle: return "triangle";
         default: return "shape";
     }
 }
@@ -216,7 +218,7 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
 
             // Draw preview
             if (shape_type_ == ShapeType::Polygon) {
-                // Simple hexagon preview
+                // Simple pentagon preview
                 renderer.draw_circle(cx, cy, radius, fill, stroke, 2.0f);
             } else {
                 renderer.draw_circle(cx, cy, radius, fill, stroke, 2.0f);
@@ -254,35 +256,49 @@ void ShapeTool::create_shape() {
     // Create shape based on type
     switch (shape_type_) {
         case ShapeType::Rectangle: {
-            auto* rect = flex::Shape::create(*allocator);
+            // Group acts as Bounding Box
+            auto* group = layer->add<flex::Group>();
+            group->set_id("rectangle");
+            group->set_position(x, y);
+            group->set_layout_size(width, height);
+            
+            // Shape is relative content
+            auto* rect = group->add<flex::Shape>();
             rect->set_rect(width, height, 0);
-            rect->set_position(x, y);
+            rect->set_position(0, 0); // Relative to group
             rect->set_fill(flex::Color(0.5f, 0.7f, 0.9f, 1.0f));
             rect->set_stroke(flex::Color::Black, 2.0f);
-            rect->set_rough(flex::RoughOptions::sketch());  // Hand-drawn style
-            layer->add_child(rect);
+            rect->set_rough(flex::RoughOptions::sketch());
             break;
         }
 
         case ShapeType::Circle: {
-            // Circle draws from center (start_pos_) with radius to current_pos_
             float cx = start_pos_.x();
             float cy = start_pos_.y();
             float r = std::sqrt(width * width + height * height) / 2;
-            if (r < 5) r = 5;  // Minimum size
+            if (r < 5) r = 5;
 
-            auto* shape = flex::Shape::create(*allocator);
+            // Calculate BBox for Group
+            float gx = cx - r;
+            float gy = cy - r;
+            float gw = r * 2;
+            float gh = r * 2;
+
+            auto* group = layer->add<flex::Group>();
+            group->set_id("circle");
+            group->set_position(gx, gy);
+            group->set_layout_size(gw, gh);
+
+            auto* shape = group->add<flex::Shape>();
             shape->set_circle(r);
-            shape->set_position(cx, cy);
+            shape->set_position(r, r); // Center relative to group
             shape->set_fill(flex::Color(0.9f, 0.5f, 0.5f, 1.0f));
             shape->set_stroke(flex::Color::Black, 2.0f);
             shape->set_rough(flex::RoughOptions::sketch());
-            layer->add_child(shape);
             break;
         }
 
         case ShapeType::Ellipse: {
-            // Ellipse draws from center with rx/ry to current_pos_
             float cx = start_pos_.x();
             float cy = start_pos_.y();
             float rx = std::abs(current_pos_.x() - start_pos_.x());
@@ -290,48 +306,90 @@ void ShapeTool::create_shape() {
             if (rx < 5) rx = 5;
             if (ry < 5) ry = 5;
 
-            auto* shape = flex::Shape::create(*allocator);
+            // BBox
+            float gx = cx - rx;
+            float gy = cy - ry;
+            float gw = rx * 2;
+            float gh = ry * 2;
+
+            auto* group = layer->add<flex::Group>();
+            group->set_id("ellipse");
+            group->set_position(gx, gy);
+            group->set_layout_size(gw, gh);
+
+            auto* shape = group->add<flex::Shape>();
             shape->set_ellipse(rx, ry);
-            shape->set_position(cx, cy);
+            shape->set_position(rx, ry); // Center relative to group
             shape->set_fill(flex::Color(0.9f, 0.5f, 0.5f, 1.0f));
             shape->set_stroke(flex::Color::Black, 2.0f);
             shape->set_rough(flex::RoughOptions::sketch());
-            layer->add_child(shape);
             break;
         }
 
         case ShapeType::Polygon: {
-            // Polygon draws from center with radius
             float cx = start_pos_.x();
             float cy = start_pos_.y();
             float radius = std::sqrt(width * width + height * height) / 2;
             if (radius < 5) radius = 5;
 
-            auto* shape = flex::Shape::create(*allocator);
-            shape->set_polygon(6, radius);  // Hexagon
-            shape->set_position(cx, cy);
+            float gx = cx - radius;
+            float gy = cy - radius;
+            float gw = radius * 2;
+
+            auto* group = layer->add<flex::Group>();
+            group->set_id("polygon");
+            group->set_position(gx, gy);
+            group->set_layout_size(gw, gw);
+
+            auto* shape = group->add<flex::Shape>();
+            shape->set_polygon(5, radius);
+            shape->set_position(radius, radius);
             shape->set_fill(flex::Color(0.5f, 0.9f, 0.5f, 1.0f));
             shape->set_stroke(flex::Color::Black, 2.0f);
             shape->set_rough(flex::RoughOptions::sketch());
-            layer->add_child(shape);
             break;
         }
 
         case ShapeType::Star: {
-            // Star draws from center with radius
             float cx = start_pos_.x();
             float cy = start_pos_.y();
             float outer_radius = std::sqrt(width * width + height * height) / 2;
             if (outer_radius < 5) outer_radius = 5;
             float inner_radius = outer_radius * 0.4f;
 
-            auto* shape = flex::Shape::create(*allocator);
+            float gx = cx - outer_radius;
+            float gy = cy - outer_radius;
+            float gw = outer_radius * 2;
+
+            auto* group = layer->add<flex::Group>();
+            group->set_id("star");
+            group->set_position(gx, gy);
+            group->set_layout_size(gw, gw);
+
+            auto* shape = group->add<flex::Shape>();
             shape->set_star(5, outer_radius, inner_radius);
-            shape->set_position(cx, cy);
+            shape->set_position(outer_radius, outer_radius);
             shape->set_fill(flex::Color(0.9f, 0.9f, 0.3f, 1.0f));
             shape->set_stroke(flex::Color::Black, 2.0f);
             shape->set_rough(flex::RoughOptions::sketch());
-            layer->add_child(shape);
+            break;
+        }
+
+        case ShapeType::Triangle: {
+            float cx = start_pos_.x() + width / 2;
+            float cy = start_pos_.y() + height / 2;
+            
+            auto* group = layer->add<flex::Group>();
+            group->set_id("triangle");
+            group->set_position(start_pos_.x(), start_pos_.y());
+            group->set_layout_size(width, height);
+
+            auto* shape = group->add<flex::Shape>();
+            shape->set_triangle(width, height, flex::Direction::Up);
+            shape->set_position(width/2, height/2);
+            shape->set_fill(flex::Color(0.5f, 0.7f, 0.9f, 1.0f));
+            shape->set_stroke(flex::Color::Black, 2.0f);
+            shape->set_rough(flex::RoughOptions::sketch());
             break;
         }
     }

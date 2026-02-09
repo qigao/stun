@@ -35,6 +35,11 @@ enum class EventType {
   // 焦点事件
   FocusIn,
   FocusOut,
+  
+  // IME 事件
+  CompositionStart,
+  CompositionUpdate,
+  CompositionEnd,
 
   // 触摸事件（未来）
   TouchStart,
@@ -118,6 +123,7 @@ struct Event {
   KeyCode key = KeyCode::Unknown;
   int mods = 0;          // KeyMod 位标记
   std::string text;      // TextInput 事件的文本（UTF-8）
+  std::string composition_text; // IME 构字文本
 
   // 目标元素（事件路由后填充）
   Element* target = nullptr;
@@ -199,6 +205,25 @@ struct Event {
   static Event focus_out() {
     Event e;
     e.type = EventType::FocusOut;
+    return e;
+  }
+
+  static Event composition_start() {
+    Event e;
+    e.type = EventType::CompositionStart;
+    return e;
+  }
+
+  static Event composition_update(const std::string& text) {
+    Event e;
+    e.type = EventType::CompositionUpdate;
+    e.composition_text = text;
+    return e;
+  }
+
+  static Event composition_end() {
+    Event e;
+    e.type = EventType::CompositionEnd;
     return e;
   }
 };

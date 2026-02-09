@@ -80,6 +80,17 @@ public:
    */
   virtual bool wants_mouse_capture() const { return false; }
 
+  /**
+   * Does this widget want to receive text input / IME?
+   */
+  virtual bool wants_text_input() const { return false; }
+
+  /**
+   * Get the current caret rectangle in local coordinates.
+   * Used for positioning the IME candidate window.
+   */
+  virtual void get_caret_rect(const Element& elem, float& x, float& y, float& w, float& h) const {}
+
 protected:
   // Widget 内部脏标记（避免每帧重新渲染）
   bool dirty_ = true;

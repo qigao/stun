@@ -12,6 +12,7 @@
 
 #include <meta_editor/core/editor.h>
 #include <meta_editor/view/panel.h>
+#include <meta_editor/view/panel_layout.h>
 #include <flexUI.h>
 #include <memory>
 #include <vector>
@@ -77,6 +78,7 @@ private:
     std::unique_ptr<ShortcutOverlay> shortcut_overlay_;
 
     std::vector<Panel*> panels_;
+    PanelLayout layout_;
     float width_;
     float height_;
 };

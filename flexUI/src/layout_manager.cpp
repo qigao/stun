@@ -7,6 +7,7 @@
 #include <flexUI/computed_style.h>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace flexUI {
 
@@ -136,9 +137,9 @@ void LayoutManager::sync_to_flex(Element* elem, float container_w, float contain
 
     float computed_height = children_height + style->padding[0] + style->padding[2];
 
-    // Minimum for text leaves
+    // Minimum for text leaves (1.6x for proper line-height with descenders)
     if (elem->children().empty() && !elem->text().empty()) {
-      float lh = style->font_size > 0 ? style->font_size * 1.4f : 24.0f;
+      float lh = style->font_size > 0 ? style->font_size * 1.6f : 24.0f;
       computed_height = std::max(computed_height, lh + style->padding[0] + style->padding[2]);
     } else if (computed_height <= 0 && elem->children().empty()) {
       computed_height = style->font_size > 0 ? style->font_size : 24.0f;

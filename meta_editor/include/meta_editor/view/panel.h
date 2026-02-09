@@ -40,6 +40,9 @@ public:
     float width() const { return width_; }
     float height() const { return height_; }
 
+    // Actual rendered height (subclasses may override for dynamic content)
+    virtual float content_height() const { return height_; }
+
     // Visibility
     bool is_visible() const { return visible_; }
     void set_visible(bool v) { visible_ = v; }
@@ -53,7 +56,7 @@ public:
     bool is_draggable() const { return draggable_; }
 
     // Hit testing - check if point is inside panel bounds
-    bool contains(float px, float py) const {
+    virtual bool contains(float px, float py) const {
         return visible_ &&
                px >= x_ && px <= x_ + width_ &&
                py >= y_ && py <= y_ + content_height();
@@ -96,9 +99,6 @@ public:
     bool is_dragging() const { return dragging_; }
 
 protected:
-    // Subclasses can override to return dynamic height
-    virtual float content_height() const { return height_; }
-
     // Render panel background with current style
     void render_background(flex::Renderer& renderer) const {
         render_background(renderer, content_height());

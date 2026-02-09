@@ -31,7 +31,7 @@ const std::string DEMO_CSS = R"(
         
         --border: 71, 85, 105, 255;         /* slate-600 */
         
-        font-family: Arial;
+        font-family: NotoSansSC;
         font-size: 14;
         
         /* Layout */
@@ -73,6 +73,23 @@ const std::string DEMO_CSS = R"(
         height: 60;
         padding: 0 0 20 0;
         width: 220;
+        display: flex;
+        align-items: center;
+    }
+
+    #view-container {
+        width: 860;
+        height: 800;
+        display: flex;
+        position: relative;
+    }
+
+    .view-pane {
+        width: 860;
+        height: 800;
+        display: flex;
+        flex-direction: column;
+        gap: 24;
     }
 
     /* =========================================

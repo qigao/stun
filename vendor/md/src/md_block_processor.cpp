@@ -1,10 +1,10 @@
-#include "md_re2c.h"
+#include "md.h"
 #include "md_extension.h"
 #include <vector>
 #include <string>
 #include <algorithm>
 
-namespace md_re2c {
+namespace md {
 
 static std::string get_raw_text(Node* n) {
     if (!n) return "";
@@ -92,8 +92,8 @@ void process_blocks(Node* node, MemoryPool* pool) {
     
     // 2. Process CodeBlocks with registered handlers
     for (auto& child : node->children) {
-        if (child->type == NodeType::CodeBlock && !child->text.empty()) {
-            auto result = ExtensionRegistry::instance().process(child->text, get_raw_text(child));
+        if (child->type == NodeType::CodeBlock && !child->language.empty()) {
+            auto result = ExtensionRegistry::instance().process(child->language, get_raw_text(child));
             if (result) {
                 // 转换为 Diagram 节点
                 child->type = NodeType::Diagram;
@@ -184,4 +184,4 @@ void process_blocks(Node* node, MemoryPool* pool) {
     }
 }
 
-} // namespace md_re2c
+} // namespace md

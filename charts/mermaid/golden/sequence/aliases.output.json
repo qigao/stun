@@ -1,0 +1,31 @@
+{
+  "type": "sequenceDiagram",
+  "participants": [
+    {
+      "id": "B",
+      "label": "Bob",
+      "type": "participant"
+    },
+    {
+      "id": "A",
+      "label": "Alice",
+      "type": "participant"
+    }
+  ],
+  "statements": [
+    {
+      "type": "signal",
+      "from": "A",
+      "to": "B",
+      "message": "Hello Bob!",
+      "signalType": "solid"
+    },
+    {
+      "type": "signal",
+      "from": "B",
+      "to": "A",
+      "message": "Hi Alice!",
+      "signalType": "dotted"
+    }
+  ]
+}

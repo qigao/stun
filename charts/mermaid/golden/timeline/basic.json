@@ -1,0 +1,43 @@
+{
+  "sections": [
+    {
+      "name": "",
+      "periods": [
+        {
+          "events": [
+            {
+              "text": "LinkedIn"
+            }
+          ],
+          "name": "2002"
+        },
+        {
+          "events": [
+            {
+              "text": "Facebook"
+            }
+          ],
+          "name": "2004"
+        },
+        {
+          "events": [
+            {
+              "text": "Youtube"
+            }
+          ],
+          "name": "2005"
+        },
+        {
+          "events": [
+            {
+              "text": "Twitter"
+            }
+          ],
+          "name": "2006"
+        }
+      ]
+    }
+  ],
+  "title": "History of Social Media Platform",
+  "type": "timeline"
+}
