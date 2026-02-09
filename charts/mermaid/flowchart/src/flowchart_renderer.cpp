@@ -10,6 +10,7 @@
 #include <queue>
 #include <deque>
 #include <unordered_map>
+#include "libavoid/libavoid.h"
 #include "mustache/mustache.h"
 #include "flowchart_template.h"
 namespace mermaid {
@@ -304,33 +305,120 @@ private:
         }
 
         const bool horizontal = is_horizontal_direction(diagram);
+        const double endpoint_pad = 1.0;
 
-        for (auto* e = diagram->edges; e; e = e->next) {
-            auto it_from = index_of.find(e->from ? e->from : "");
-            auto it_to = index_of.find(e->to ? e->to : "");
-            if (it_from == index_of.end() || it_to == index_of.end()) continue;
-            size_t u = it_from->second;
-            size_t v = it_to->second;
+        auto add_straight_edge = [&](FlowchartEdge* e, size_t u, size_t v) {
             RenderedEdge re;
             re.source_id = e->from;
             re.target_id = e->to;
             re.label = e->label ? e->label : "";
             if (horizontal) {
-                double sx = coords[u].first + widths[u];
+                double sx = coords[u].first + widths[u] + endpoint_pad;
                 double sy = coords[u].second + heights[u] / 2.0;
-                double tx = coords[v].first;
+                double tx = coords[v].first - endpoint_pad;
                 double ty = coords[v].second + heights[v] / 2.0;
                 re.points.push_back({sx, sy});
                 re.points.push_back({tx, ty});
             } else {
                 double sx = coords[u].first + widths[u] / 2.0;
-                double sy = coords[u].second + heights[u];
+                double sy = coords[u].second + heights[u] + endpoint_pad;
                 double tx = coords[v].first + widths[v] / 2.0;
-                double ty = coords[v].second;
+                double ty = coords[v].second - endpoint_pad;
                 re.points.push_back({sx, sy});
                 re.points.push_back({tx, ty});
             }
             snapshot.edges.push_back(re);
+        };
+
+        if (diagram->edges) {
+            const bool use_orthogonal = diagram->routing_mode == FC_ROUTE_ORTHOGONAL;
+            Avoid::Router router(use_orthogonal ? Avoid::OrthogonalRouting : Avoid::PolyLineRouting);
+            if (use_orthogonal) {
+                router.setRoutingParameter(Avoid::segmentPenalty, Avoid::chooseSensibleParamValue);
+            } else {
+                router.setRoutingParameter(Avoid::anglePenalty, Avoid::chooseSensibleParamValue);
+            }
+            if (diagram->routing_shape_buffer >= 0.0) {
+                router.setRoutingParameter(Avoid::shapeBufferDistance, diagram->routing_shape_buffer);
+            }
+            if (diagram->routing_nudging_distance >= 0.0) {
+                router.setRoutingParameter(Avoid::idealNudgingDistance, diagram->routing_nudging_distance);
+            }
+            if (diagram->routing_segment_penalty >= 0.0) {
+                router.setRoutingParameter(Avoid::segmentPenalty, diagram->routing_segment_penalty);
+            }
+            if (diagram->routing_angle_penalty >= 0.0) {
+                router.setRoutingParameter(Avoid::anglePenalty, diagram->routing_angle_penalty);
+            }
+            if (diagram->routing_crossing_penalty >= 0.0) {
+                router.setRoutingParameter(Avoid::crossingPenalty, diagram->routing_crossing_penalty);
+            }
+            if (diagram->routing_nudge_orthogonal_ends >= 0) {
+                router.setRoutingOption(Avoid::nudgeOrthogonalSegmentsConnectedToShapes,
+                                        diagram->routing_nudge_orthogonal_ends != 0);
+            }
+            if (diagram->routing_nudge_shared_paths >= 0) {
+                router.setRoutingOption(Avoid::nudgeSharedPathsWithCommonEndPoint,
+                                        diagram->routing_nudge_shared_paths != 0);
+            }
+
+            std::vector<Avoid::ShapeRef*> shapes;
+            shapes.reserve(ncount);
+            for (size_t i = 0; i < ncount; ++i) {
+                Avoid::Point tl(coords[i].first, coords[i].second);
+                Avoid::Point br(coords[i].first + widths[i], coords[i].second + heights[i]);
+                Avoid::Rectangle rect(tl, br);
+                shapes.push_back(new Avoid::ShapeRef(&router, rect));
+            }
+
+            std::vector<Avoid::ConnRef*> conns;
+            std::vector<FlowchartEdge*> edges;
+            for (auto* e = diagram->edges; e; e = e->next) {
+                auto it_from = index_of.find(e->from ? e->from : "");
+                auto it_to = index_of.find(e->to ? e->to : "");
+                if (it_from == index_of.end() || it_to == index_of.end()) continue;
+                size_t u = it_from->second;
+                size_t v = it_to->second;
+
+                Avoid::ConnRef* cr = new Avoid::ConnRef(&router);
+                if (horizontal) {
+                    Avoid::Point src(coords[u].first + widths[u] + endpoint_pad, coords[u].second + heights[u] / 2.0);
+                    Avoid::Point dst(coords[v].first - endpoint_pad, coords[v].second + heights[v] / 2.0);
+                    cr->setEndpoints(Avoid::ConnEnd(src, Avoid::ConnDirAll), Avoid::ConnEnd(dst, Avoid::ConnDirAll));
+                } else {
+                    Avoid::Point src(coords[u].first + widths[u] / 2.0, coords[u].second + heights[u] + endpoint_pad);
+                    Avoid::Point dst(coords[v].first + widths[v] / 2.0, coords[v].second - endpoint_pad);
+                    cr->setEndpoints(Avoid::ConnEnd(src, Avoid::ConnDirAll), Avoid::ConnEnd(dst, Avoid::ConnDirAll));
+                }
+                conns.push_back(cr);
+                edges.push_back(e);
+            }
+
+            router.processTransaction();
+
+            for (size_t i = 0; i < edges.size(); ++i) {
+                FlowchartEdge* e = edges[i];
+                auto it_from = index_of.find(e->from ? e->from : "");
+                auto it_to = index_of.find(e->to ? e->to : "");
+                if (it_from == index_of.end() || it_to == index_of.end()) continue;
+                size_t u = it_from->second;
+                size_t v = it_to->second;
+
+                Avoid::PolyLine& route = conns[i]->displayRoute();
+                if (route.ps.size() < 2) {
+                    add_straight_edge(e, u, v);
+                    continue;
+                }
+
+                RenderedEdge re;
+                re.source_id = e->from;
+                re.target_id = e->to;
+                re.label = e->label ? e->label : "";
+                for (const auto& p : route.ps) {
+                    re.points.push_back({p.x, p.y});
+                }
+                snapshot.edges.push_back(re);
+            }
         }
 
         return snapshot;

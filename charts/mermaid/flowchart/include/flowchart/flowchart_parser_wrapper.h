@@ -22,6 +22,8 @@ void flowchart_set_node_size(FlowchartDiagram* diagram, const char* id, double w
 
 void flowchart_set_layout_mode(FlowchartDiagram* diagram, int mode);
 
+void flowchart_set_routing_mode(FlowchartDiagram* diagram, int mode);
+
 #ifdef __cplusplus
 }
 #endif

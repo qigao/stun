@@ -174,7 +174,7 @@ char* timeline_to_json(const TimelineDiagram* d) {
 
     size_t out_len;
     char *json_str = turbo_json_serialize_pretty_crlf(root, &out_len);
-    turbo_free_json(root);
+    turbo_free_json(&root);
 
     return json_str;
 }

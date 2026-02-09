@@ -59,11 +59,11 @@ class VertID
         static const unsigned short src;
         static const unsigned short tar;
         
-        static const VertIDProps PROP_ConnPoint;
-        static const VertIDProps PROP_OrthShapeEdge;
-        static const VertIDProps PROP_ConnectionPin;
-        static const VertIDProps PROP_ConnCheckpoint;
-        static const VertIDProps PROP_DummyPinHelper;
+        static AVOID_EXPORT const VertIDProps PROP_ConnPoint;
+        static AVOID_EXPORT const VertIDProps PROP_OrthShapeEdge;
+        static AVOID_EXPORT const VertIDProps PROP_ConnectionPin;
+        static AVOID_EXPORT const VertIDProps PROP_ConnCheckpoint;
+        static AVOID_EXPORT const VertIDProps PROP_DummyPinHelper;
 
         VertID();
         VertID(unsigned int id, unsigned short n, VertIDProps p = 0);
@@ -222,5 +222,4 @@ typedef std::map<VertID, ShapeSet> ContainsMap;
 
 
 #endif
-
 

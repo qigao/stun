@@ -34,6 +34,14 @@ FlowchartDiagram *flowchart_parse(const char *input) {
     return NULL;
   memset(ctx.diagram, 0, sizeof(FlowchartDiagram));
   ctx.diagram->layout_mode = FC_LAYOUT_PROFESSIONAL;
+  ctx.diagram->routing_mode = FC_ROUTE_ORTHOGONAL;
+  ctx.diagram->routing_shape_buffer = -1.0;
+  ctx.diagram->routing_nudging_distance = -1.0;
+  ctx.diagram->routing_segment_penalty = -1.0;
+  ctx.diagram->routing_angle_penalty = -1.0;
+  ctx.diagram->routing_crossing_penalty = -1.0;
+  ctx.diagram->routing_nudge_orthogonal_ends = -1;
+  ctx.diagram->routing_nudge_shared_paths = -1;
 
   void *parser = FlowchartParserAlloc(malloc);
   if (!parser) {
@@ -133,6 +141,12 @@ void flowchart_set_layout_mode(FlowchartDiagram* diagram, int mode) {
   if (!diagram)
     return;
   diagram->layout_mode = (FlowchartLayoutMode)mode;
+}
+
+void flowchart_set_routing_mode(FlowchartDiagram* diagram, int mode) {
+  if (!diagram)
+    return;
+  diagram->routing_mode = (FlowchartRoutingMode)mode;
 }
 
 static const char *map_shape(FlowchartNodeShape shape) {

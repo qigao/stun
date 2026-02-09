@@ -28,6 +28,11 @@ typedef enum {
     FC_LAYOUT_PROFESSIONAL = 1
 } FlowchartLayoutMode;
 
+typedef enum {
+    FC_ROUTE_ORTHOGONAL = 0,
+    FC_ROUTE_POLYLINE = 1
+} FlowchartRoutingMode;
+
 typedef struct FlowchartNode {
     char* id;
     char* label;
@@ -61,6 +66,14 @@ typedef struct FlowchartSubGraph {
 typedef struct FlowchartDiagram {
     char* direction; 
     FlowchartLayoutMode layout_mode;
+    FlowchartRoutingMode routing_mode;
+    double routing_shape_buffer;
+    double routing_nudging_distance;
+    double routing_segment_penalty;
+    double routing_angle_penalty;
+    double routing_crossing_penalty;
+    int routing_nudge_orthogonal_ends;
+    int routing_nudge_shared_paths;
     FlowchartNode* nodes;
     FlowchartEdge* edges;
     FlowchartSubGraph* subgraphs;

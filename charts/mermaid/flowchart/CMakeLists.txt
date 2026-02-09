@@ -59,7 +59,7 @@ target_include_directories(mermaid_flowchart
 )
  
 target_link_libraries(mermaid_flowchart 
-    PUBLIC TurboNet::Parser flex_runtime TurboNet::Mustache
+    PUBLIC TurboNet::Parser flex_runtime TurboNet::Mustache avoid
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)

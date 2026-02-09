@@ -183,6 +183,6 @@ char* classdiagram_to_json(ClassDiagram* diagram) {
 
     size_t len;
     char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(root);
+    turbo_free_json(&root);
     return str;
 }

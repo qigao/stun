@@ -42,7 +42,7 @@ void sequence_scan(Scanner *s, void *parser, SequenceParserContext *ctx) {
         white = [ \t\r]+;
         newline = [\n];
         comment = ("%%"| "#") [^\n]* newline;
-        ident = [a-zA-Z0-9_]+ ([a-zA-Z0-9_\-]* [a-zA-Z0-9_]+)*;
+        ident = [a-zA-Z0-9_]+([a-zA-Z0-9_]* "-" [a-zA-Z0-9_]+)*;
         string = "\"" [^"\x00]* "\"";
 
         white { goto loop; }
