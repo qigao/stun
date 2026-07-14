@@ -5,7 +5,6 @@
 #include <flexUI/widgets/card_widget.h>
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
-#include <flexUI/renderer.h>
 
 namespace flexUI {
 
@@ -29,17 +28,20 @@ void CardWidget::rebuild_shapes(const Element& elem) {
     float padding = style->get_variable_float("--card-padding", 16.0f);
 
     // Main background
-    background_ = root_.add<RectShape>(0, 0, elem.width(), elem.height(), radius);
+    background_ =
+        root_.add<RectShape>(0.0f, 0.0f, elem.width(), elem.height(), radius);
 
     // Header background
     if (has_header_) {
-        header_bg_ = root_.add<RectShape>(0, 0, elem.width(), header_height_, radius);
+        header_bg_ =
+            root_.add<RectShape>(0.0f, 0.0f, elem.width(), header_height_, radius);
     }
 
     // Footer background
     if (has_footer_) {
         float footer_y = elem.height() - footer_height_;
-        footer_bg_ = root_.add<RectShape>(0, footer_y, elem.width(), footer_height_, radius);
+        footer_bg_ = root_.add<RectShape>(0.0f, footer_y, elem.width(),
+                                          footer_height_, radius);
     }
 
     // Title text
@@ -95,17 +97,17 @@ void CardWidget::update_shapes(const Element& elem) {
     }
 }
 
-void CardWidget::render(const Element& elem, Renderer& renderer) {
+void CardWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
 
     rebuild_shapes(elem);
     update_shapes(elem);
 
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    Transform local_transform = Transform{};
     float opacity = style->opacity;
 
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }

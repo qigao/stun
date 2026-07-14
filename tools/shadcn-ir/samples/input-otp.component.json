@@ -1,0 +1,89 @@
+{
+  "component": "InputOTP",
+  "kind": "composite",
+  "root": "input_otp_root",
+  "nodes": [
+    {
+      "id": "input_otp_root",
+      "type": "element",
+      "tag": "div",
+      "role": "group",
+      "states": ["disabled"],
+      "attrs": {
+        "data-slot": "input-otp",
+        "aria-label": "One-time password"
+      }
+    },
+    {
+      "id": "input_otp_group",
+      "type": "element",
+      "tag": "div",
+      "slot": "group",
+      "attrs": {
+        "data-slot": "input-otp-group"
+      }
+    },
+    {
+      "id": "input_otp_slot_0",
+      "type": "element",
+      "tag": "div",
+      "slot": "slot",
+      "states": ["active", "filled", "disabled"],
+      "attrs": {
+        "data-slot": "input-otp-slot",
+        "aria-label": "Digit 1"
+      },
+      "props": {
+        "text": "1"
+      }
+    },
+    {
+      "id": "input_otp_slot_1",
+      "type": "element",
+      "tag": "div",
+      "slot": "slot",
+      "states": ["active", "filled", "disabled"],
+      "attrs": {
+        "data-slot": "input-otp-slot",
+        "aria-label": "Digit 2"
+      },
+      "props": {
+        "text": "2"
+      }
+    },
+    {
+      "id": "input_otp_separator",
+      "type": "element",
+      "tag": "div",
+      "slot": "separator",
+      "attrs": {
+        "data-slot": "input-otp-separator",
+        "aria-hidden": "true"
+      },
+      "props": {
+        "text": "-"
+      }
+    },
+    {
+      "id": "input_otp_slot_2",
+      "type": "element",
+      "tag": "div",
+      "slot": "slot",
+      "states": ["active", "filled", "disabled"],
+      "attrs": {
+        "data-slot": "input-otp-slot",
+        "aria-label": "Digit 3"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "input_otp_root", "child": "input_otp_group" },
+    { "parent": "input_otp_group", "child": "input_otp_slot_0" },
+    { "parent": "input_otp_group", "child": "input_otp_slot_1" },
+    { "parent": "input_otp_group", "child": "input_otp_separator" },
+    { "parent": "input_otp_group", "child": "input_otp_slot_2" }
+  ],
+  "meta": {
+    "source": "shadcn/input-otp"
+  }
+}

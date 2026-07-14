@@ -1,0 +1,48 @@
+{
+  "rules": [
+    {
+      "target": "slider_root",
+      "selector": "&",
+      "decls": {
+        "position": "relative",
+        "display": "flex",
+        "width": "100%",
+        "height": "1rem",
+        "align-items": "center",
+        "touch-action": "none",
+        "user-select": "none",
+        "--track-height": "6",
+        "--track-bg": "59, 130, 246, 51",
+        "--track-fill": "59, 130, 246, 255",
+        "--thumb-size": "16",
+        "--thumb-bg": "255, 255, 255, 255",
+        "--thumb-border": "59, 130, 246, 128",
+        "--transition-duration": "150",
+        "--show-value": "false"
+      }
+    },
+    {
+      "target": "slider_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline": "none",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)"
+      }
+    },
+    {
+      "target": "slider_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "disabled" }
+      ],
+      "decls": {
+        "pointer-events": "none",
+        "opacity": "0.5"
+      }
+    }
+  ]
+}

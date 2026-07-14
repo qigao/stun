@@ -111,12 +111,36 @@ string_value(A) ::= STRING(V). { A = V; }
 string_value(A) ::= IDENTIFIER(V). { A = V; }
 string_value(A) ::= TEMPLATE_NAME(V). { A = V; }
 
-number_value(A) ::= NUMBER(V). { A = V; }
+number_value(A) ::= expr(V). { A = V; }
+
+expr(A) ::= expr(L) PLUS term(R). { A = ctx->add_string(*L + "+" + *R); }
+expr(A) ::= expr(L) MINUS term(R). { A = ctx->add_string(*L + "-" + *R); }
+expr(A) ::= term(V). { A = V; }
+
+term(A) ::= term(L) STAR power(R). { A = ctx->add_string(*L + "*" + *R); }
+term(A) ::= term(L) SLASH power(R). { A = ctx->add_string(*L + "/" + *R); }
+term(A) ::= term(L) PERCENT power(R). { A = ctx->add_string(*L + "%" + *R); }
+term(A) ::= power(V). { A = V; }
+
+power(A) ::= unary(V). { A = V; }
+
+unary(A) ::= MINUS unary(V). { A = ctx->add_string("-" + *V); }
+unary(A) ::= PLUS unary(V). { A = V; }
+unary(A) ::= primary(V). { A = V; }
+
+primary(A) ::= NUMBER(V). { A = V; }
+primary(A) ::= IDENTIFIER(F) LPAREN call_args(Args) RPAREN. {
+    A = ctx->add_string(*F + "(" + *Args + ")");
+}
+primary(A) ::= LPAREN expr(V) RPAREN. { A = ctx->add_string("(" + *V + ")"); }
+
+call_args(A) ::= expr(V). { A = V; }
+call_args(A) ::= call_args(L) COMMA expr(R). { A = ctx->add_string(*L + "," + *R); }
 
 bool_value(A) ::= BOOL(V). { A = V; }
 
 value(A) ::= STRING(V). { A = V; }
-value(A) ::= NUMBER(V). { A = V; }
+value(A) ::= number_value(V). { A = V; }
 value(A) ::= BOOL(V). { A = V; }
 value(A) ::= COLOR(V). { A = V; }
 value(A) ::= IDENTIFIER(V). { A = V; }

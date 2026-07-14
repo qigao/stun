@@ -1,0 +1,21 @@
+{
+  "bridges": [
+    {
+      "target": "toast_root",
+      "state": "open",
+      "properties": {
+        "open": true
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "toast_root",
+      "when": [
+        { "type": "prop", "name": "type", "equals": "error" }
+      ],
+      "properties": {
+        "type": "error"
+      }
+    }
+  ]
+}

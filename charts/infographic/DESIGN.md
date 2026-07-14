@@ -86,16 +86,25 @@ infographic/
 │   └── renderer/
 │       └── template_renderer.h    # 渲染器基类
 ├── src/
-│   ├── infographic.cpp            # 主入口
 │   ├── infographic_component.cpp  # flex 组件
-│   └── renderer/
-│       ├── template_renderer.cpp  # 基类实现
-│       ├── layout_engine.cpp      # 布局引擎
-│       └── renderers/
-│           ├── grid_renderer.cpp
-│           ├── zigzag_renderer.cpp
-│           ├── timeline_renderer.cpp
-│           └── ...
+│   ├── flexinfographic_new.cpp    # 对外入口
+│   ├── layout/layout_engine.cpp   # 布局引擎（libcola）
+│   └── renderer/                  # SVG 渲染器
+│       ├── template_renderer.cpp
+│       ├── list_renderer.cpp
+│       ├── sequence_renderer.cpp
+│       ├── compare_renderer.cpp
+│       └── chart_renderer.cpp
+├── grid/      # 布局模块：Grid
+├── timeline/  # 布局模块：Timeline
+├── funnel/    # 布局模块：Funnel
+├── pie/       # 布局模块：Pie/Donut
+├── bar/       # 布局模块：Bar/Column
+├── swot/      # 布局模块：SWOT/Compare
+├── tree/      # 布局模块：Tree
+├── zigzag/    # 布局模块：Zigzag
+├── circular/  # 布局模块：Circular
+├── roadmap/   # 布局模块：Roadmap
 └── CMakeLists.txt
 ```
 

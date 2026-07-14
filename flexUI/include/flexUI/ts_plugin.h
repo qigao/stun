@@ -32,8 +32,9 @@ typedef struct {
 } TSHighlightToken;
 
 typedef struct {
-    uint32_t count;
     TSHighlightToken* tokens;
+    uint32_t count;
+    uint32_t capacity;
 } TSHighlightResult;
 
 /*
@@ -52,6 +53,7 @@ typedef void (*TSFreeResultFunc)(TSHighlightResult* result);
  */
 typedef struct {
     const char* name;
+    const char* version;
     TSHighlightFunc highlight;
     TSFreeResultFunc free_result;
 } TSPluginInfo;

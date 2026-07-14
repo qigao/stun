@@ -4,6 +4,8 @@
 #include "sankey/sankey_ast.h"
 #include "sankey_parser_gen.h"
 
+void SankeyParser(void *parser, int token, void *value, SankeyParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

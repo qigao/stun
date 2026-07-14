@@ -26,8 +26,8 @@ bool FreehandTool::on_pointer_move(const flex::Vec2 &screen_pos, const flex::Vec
   // Only add point if far enough from last point
   if (!points_.empty()) {
     auto &last = points_.back();
-    float dx = world_pos.x() - last.x();
-    float dy = world_pos.y() - last.y();
+    float dx = world_pos.x - last.x;
+    float dy = world_pos.y - last.y;
     if (dx * dx + dy * dy < min_distance_ * min_distance_) {
       return true;
     }
@@ -87,32 +87,32 @@ std::string FreehandTool::points_to_path() const {
   ss << std::fixed << std::setprecision(1);
 
   // Start with move to first point
-  ss << "M " << points_[0].x() << " " << points_[0].y();
+  ss << "M " << points_[0].x << " " << points_[0].y;
 
   if (points_.size() == 2) {
     // Just a line
-    ss << " L " << points_[1].x() << " " << points_[1].y();
+    ss << " L " << points_[1].x << " " << points_[1].y;
   } else if (smoothing_ > 0 && points_.size() >= 3) {
     // Use quadratic bezier curves for smoothing
     // First segment: line to midpoint
-    float mx = (points_[0].x() + points_[1].x()) / 2;
-    float my = (points_[0].y() + points_[1].y()) / 2;
+    float mx = (points_[0].x + points_[1].x) / 2;
+    float my = (points_[0].y + points_[1].y) / 2;
     ss << " L " << mx << " " << my;
 
     // Middle segments: quadratic curves through midpoints
     for (size_t i = 1; i < points_.size() - 1; ++i) {
-      float next_mx = (points_[i].x() + points_[i + 1].x()) / 2;
-      float next_my = (points_[i].y() + points_[i + 1].y()) / 2;
+      float next_mx = (points_[i].x + points_[i + 1].x) / 2;
+      float next_my = (points_[i].y + points_[i + 1].y) / 2;
 
-      ss << " Q " << points_[i].x() << " " << points_[i].y() << " " << next_mx << " " << next_my;
+      ss << " Q " << points_[i].x << " " << points_[i].y << " " << next_mx << " " << next_my;
     }
 
     // Last segment: line to end
-    ss << " L " << points_.back().x() << " " << points_.back().y();
+    ss << " L " << points_.back().x << " " << points_.back().y;
   } else {
     // Raw polyline
     for (size_t i = 1; i < points_.size(); ++i) {
-      ss << " L " << points_[i].x() << " " << points_[i].y();
+      ss << " L " << points_[i].x << " " << points_[i].y;
     }
   }
 
@@ -138,28 +138,28 @@ void FreehandTool::simplify_points() {
     size_t max_idx = start;
 
     // Line from start to end
-    float dx = points_[end].x() - points_[start].x();
-    float dy = points_[end].y() - points_[start].y();
+    float dx = points_[end].x - points_[start].x;
+    float dy = points_[end].y - points_[start].y;
     float len_sq = dx * dx + dy * dy;
 
     for (size_t i = start + 1; i < end; ++i) {
       float dist;
       if (len_sq < 0.0001f) {
         // Start and end are same point
-        float px = points_[i].x() - points_[start].x();
-        float py = points_[i].y() - points_[start].y();
+        float px = points_[i].x - points_[start].x;
+        float py = points_[i].y - points_[start].y;
         dist = std::sqrt(px * px + py * py);
       } else {
         // Distance from point to line
-        float t = ((points_[i].x() - points_[start].x()) * dx +
-                   (points_[i].y() - points_[start].y()) * dy) /
+        float t = ((points_[i].x - points_[start].x) * dx +
+                   (points_[i].y - points_[start].y) * dy) /
                   len_sq;
         t = std::max(0.0f, std::min(1.0f, t));
 
-        float proj_x = points_[start].x() + t * dx;
-        float proj_y = points_[start].y() + t * dy;
-        float px = points_[i].x() - proj_x;
-        float py = points_[i].y() - proj_y;
+        float proj_x = points_[start].x + t * dx;
+        float proj_y = points_[start].y + t * dy;
+        float px = points_[i].x - proj_x;
+        float py = points_[i].y - proj_y;
         dist = std::sqrt(px * px + py * py);
       }
 

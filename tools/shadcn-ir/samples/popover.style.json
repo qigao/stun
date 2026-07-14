@@ -1,0 +1,33 @@
+{
+  "rules": [
+    {
+      "target": "popover_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--input)",
+        "border-radius": "0.375rem",
+        "padding-left": "0.75rem",
+        "padding-right": "0.75rem",
+        "padding-top": "0.5rem",
+        "padding-bottom": "0.5rem",
+        "background-color": "var(--background)"
+      }
+    },
+    {
+      "target": "popover_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "background-color": "var(--accent)",
+        "color": "var(--accent-foreground)"
+      }
+    }
+  ]
+}

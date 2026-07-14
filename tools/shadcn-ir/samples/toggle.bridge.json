@@ -1,0 +1,44 @@
+{
+  "bridges": [
+    {
+      "target": "toggle_root",
+      "state": "on",
+      "attributes": {
+        "data-state": "on",
+        "aria-pressed": "true"
+      },
+      "pseudo_states": ["checked"]
+    },
+    {
+      "target": "toggle_root",
+      "state": "off",
+      "attributes": {
+        "data-state": "off",
+        "aria-pressed": "false"
+      }
+    },
+    {
+      "target": "toggle_root",
+      "state": "disabled",
+      "attributes": {
+        "disabled": "",
+        "aria-disabled": "true",
+        "data-disabled": ""
+      },
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "toggle_root",
+      "state": "hover",
+      "pseudo_states": ["hover"]
+    },
+    {
+      "target": "toggle_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

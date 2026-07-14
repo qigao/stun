@@ -8,7 +8,7 @@
 #include <meta_editor/view/cad_top_bar.h>
 #include <meta_editor/view/cad_bottom_bar.h>
 #include <meta_editor/view/icon_system.h>
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include "../examples/glfw_app.h"
 #include <thorvg.h>

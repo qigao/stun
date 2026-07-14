@@ -41,9 +41,12 @@ public:
                          bool checked = false);
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
+    bool measure_intrinsic_size(const Element& elem, float available_width,
+                                float available_height, float& out_width,
+                                float& out_height) const override;
     const char* type_name() const override { return "RadioWidget"; }
 
     // State access
@@ -54,19 +57,28 @@ public:
     void set_label(const std::string& label);
 
     const std::string& value() const { return value_; }
-    void set_value(const std::string& value) { value_ = value; }
+    void set_value(const std::string& value) {
+        value_ = value;
+        dirty_ = true;
+        sync_host_semantics();
+    }
 
     const std::string& group() const { return group_; }
-    void set_group(const std::string& group) { group_ = group; }
+    void set_group(const std::string& group) {
+        group_ = group;
+        dirty_ = true;
+        sync_host_semantics();
+    }
 
     bool is_disabled() const { return disabled_; }
-    void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
+    void set_disabled(bool disabled);
 
     // Callback
     using ChangeCallback = std::function<void(const std::string& value, const std::string& group)>;
     void set_change_callback(ChangeCallback callback) { change_callback_ = std::move(callback); }
 
 private:
+    void sync_host_semantics() override;
     void rebuild_shapes(const Element& elem);
     void update_shapes(const Element& elem);
 

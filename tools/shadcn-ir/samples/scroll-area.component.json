@@ -1,0 +1,55 @@
+{
+  "component": "ScrollArea",
+  "kind": "composite",
+  "root": "scroll_area_root",
+  "nodes": [
+    {
+      "id": "scroll_area_root",
+      "type": "element",
+      "tag": "div",
+      "role": "region",
+      "states": ["scrolling"],
+      "attrs": {
+        "data-slot": "scroll-area"
+      }
+    },
+    {
+      "id": "scroll_area_viewport",
+      "type": "element",
+      "tag": "div",
+      "slot": "viewport",
+      "attrs": {
+        "data-slot": "scroll-area-viewport"
+      }
+    },
+    {
+      "id": "scroll_area_scrollbar",
+      "type": "element",
+      "tag": "div",
+      "slot": "scrollbar",
+      "states": ["vertical", "horizontal"],
+      "attrs": {
+        "data-slot": "scroll-area-scrollbar",
+        "data-orientation": "vertical"
+      }
+    },
+    {
+      "id": "scroll_area_thumb",
+      "type": "element",
+      "tag": "div",
+      "slot": "thumb",
+      "states": ["scrolling"],
+      "attrs": {
+        "data-slot": "scroll-area-thumb"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "scroll_area_root", "child": "scroll_area_viewport" },
+    { "parent": "scroll_area_root", "child": "scroll_area_scrollbar" },
+    { "parent": "scroll_area_scrollbar", "child": "scroll_area_thumb" }
+  ],
+  "meta": {
+    "source": "shadcn/scroll-area"
+  }
+}

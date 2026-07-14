@@ -3,8 +3,11 @@
  */
 
 #include <flexUI.h>
-#include <flex/backends/tui/init.h>
+#include <backends/tui/init.h>
 #include <tui.h>
+#include <flexUI/widgets/input_widget.h>
+#include "host_input_bridge.h"
+#include "renderer_capability_label.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -16,6 +19,109 @@
 
 constexpr float CELL_W = 8.0f;
 constexpr float CELL_H = 16.0f;
+
+static flexUI::MouseButton tui_to_button(tui_key_t key) {
+    switch (key) {
+        case TUI_KEY_MOUSE_RIGHT: return flexUI::MouseButton::Right;
+        case TUI_KEY_MOUSE_MIDDLE: return flexUI::MouseButton::Middle;
+        default: return flexUI::MouseButton::Left;
+    }
+}
+
+static flexUI::KeyCode tui_to_keycode(tui_key_t key) {
+    switch (key) {
+        case TUI_KEY_LEFT: return flexUI::KeyCode::Left;
+        case TUI_KEY_RIGHT: return flexUI::KeyCode::Right;
+        case TUI_KEY_UP: return flexUI::KeyCode::Up;
+        case TUI_KEY_DOWN: return flexUI::KeyCode::Down;
+        case TUI_KEY_HOME: return flexUI::KeyCode::Home;
+        case TUI_KEY_END: return flexUI::KeyCode::End;
+        case TUI_KEY_PAGE_UP: return flexUI::KeyCode::PageUp;
+        case TUI_KEY_PAGE_DOWN: return flexUI::KeyCode::PageDown;
+        case TUI_KEY_ENTER: return flexUI::KeyCode::Enter;
+        case TUI_KEY_TAB: return flexUI::KeyCode::Tab;
+        case TUI_KEY_ESCAPE: return flexUI::KeyCode::Escape;
+        case TUI_KEY_BACKSPACE: return flexUI::KeyCode::Backspace;
+        case TUI_KEY_DELETE: return flexUI::KeyCode::Delete;
+        case TUI_KEY_INSERT: return flexUI::KeyCode::Insert;
+        case TUI_KEY_SPACE: return flexUI::KeyCode::Space;
+        default:
+            if (key >= 'a' && key <= 'z') {
+                return static_cast<flexUI::KeyCode>('A' + (key - 'a'));
+            }
+            if (key >= 'A' && key <= 'Z') {
+                return static_cast<flexUI::KeyCode>(key);
+            }
+            if (key >= '0' && key <= '9') {
+                return static_cast<flexUI::KeyCode>(key);
+            }
+            return flexUI::KeyCode::Unknown;
+    }
+}
+
+static flexUI::KeyCode tui_event_to_keycode(const tui_event_t& event) {
+    auto key = tui_to_keycode(event.key);
+    if (key != flexUI::KeyCode::Unknown) {
+        return key;
+    }
+
+    if ((event.mod & TUI_MOD_CTRL) && event.ch >= 'a' && event.ch <= 'z') {
+        return static_cast<flexUI::KeyCode>('A' + (event.ch - 'a'));
+    }
+    if ((event.mod & TUI_MOD_CTRL) && event.ch >= 'A' && event.ch <= 'Z') {
+        return static_cast<flexUI::KeyCode>(event.ch);
+    }
+    if (event.ch >= 'a' && event.ch <= 'z') {
+        return static_cast<flexUI::KeyCode>('A' + (event.ch - 'a'));
+    }
+    if (event.ch >= 'A' && event.ch <= 'Z') {
+        return static_cast<flexUI::KeyCode>(event.ch);
+    }
+    if (event.ch >= '0' && event.ch <= '9') {
+        return static_cast<flexUI::KeyCode>(event.ch);
+    }
+
+    return flexUI::KeyCode::Unknown;
+}
+
+static int tui_to_mods(uint8_t mod) {
+    int result = 0;
+    if (mod & TUI_MOD_SHIFT) result |= static_cast<int>(flexUI::KeyMod::Shift);
+    if (mod & TUI_MOD_CTRL) result |= static_cast<int>(flexUI::KeyMod::Control);
+    if (mod & TUI_MOD_ALT) result |= static_cast<int>(flexUI::KeyMod::Alt);
+    return result;
+}
+
+static std::string utf8_from_codepoint(uint32_t codepoint) {
+    std::string utf8;
+    if (codepoint <= 0x7F) {
+        utf8.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7FF) {
+        utf8.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
+        utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+        utf8.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
+        utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else {
+        utf8.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+        utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+        utf8.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        utf8.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    }
+    return utf8;
+}
+
+static std::string backend_status_text(const flex::RendererCapabilities& caps) {
+    return std::string("● TUI ") + flexui_examples::renderer_capability_label(caps);
+}
+
+static bool is_text_input_event(const tui_event_t& event) {
+    return event.type == TUI_EVENT_KEY &&
+           event.ch >= 32 &&
+           !(event.mod & TUI_MOD_CTRL) &&
+           !(event.mod & TUI_MOD_ALT);
+}
 
 const char* CSS = R"(
 #root {
@@ -98,6 +204,18 @@ const char* CSS = R"(
     font-weight: bold;
     border-bottom: 1px solid #414868;
     padding-bottom: 8px;
+}
+
+#command-bar {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: center;
+}
+
+#command-input {
+    width: 320px;
+    height: 36px;
 }
 
 .card {
@@ -193,6 +311,7 @@ int main() {
     flexUI::Box box(renderer.get());
     box.set_viewport(frame_w, frame_h);
     box.load_css(CSS);
+    const auto caps = box.renderer_capabilities();
 
     // Build UI tree
     auto* root = box.create("div", "root");
@@ -207,7 +326,7 @@ int main() {
     header->append(title);
     
     auto* status = box.create("div", "status");
-    status->widget = new flexUI::LabelWidget("● Online");
+    status->widget = new flexUI::LabelWidget(backend_status_text(caps));
     header->append(status);
 
     // Main area
@@ -225,6 +344,16 @@ int main() {
     auto* content_title = box.create("div", "content-title");
     content_title->widget = new flexUI::LabelWidget("Dashboard View");
     content->append(content_title);
+
+    auto* command_bar = box.create("div", "command-bar");
+    auto* command_label = box.create("div", "");
+    command_label->widget = new flexUI::LabelWidget("Command");
+    command_bar->append(command_label);
+
+    auto* command_input = box.create_widget<flexUI::InputWidget>("input", "command-input");
+    static_cast<flexUI::InputWidget*>(command_input->widget)->set_placeholder("Type here...");
+    command_bar->append(command_input);
+    content->append(command_bar);
 
     const char* menu_items[] = {"Dashboard", "Analytics", "Reports", "Settings"};
     flexUI::Element* menu_elements[4];
@@ -335,9 +464,28 @@ int main() {
     while (running) {
         tui_event_t event;
         while (tui_terminal_poll(term, &event)) {
+            bool text_focus = flexui_examples::box_wants_text_input(&box);
+
             if (event.type == TUI_EVENT_KEY) {
-                if (event.key == TUI_KEY_ESCAPE || event.ch == 'q') {
+                if (event.key == TUI_KEY_ESCAPE) {
                     running = false;
+                    continue;
+                }
+
+                if (!text_focus && event.ch == 'q') {
+                    running = false;
+                    continue;
+                }
+
+                auto key = tui_event_to_keycode(event);
+                if (key != flexUI::KeyCode::Unknown) {
+                    auto e = flexUI::Event::key_down(key, tui_to_mods(event.mod));
+                    box.dispatch_event(e);
+                }
+
+                if (text_focus && is_text_input_event(event)) {
+                    flexui_examples::dispatch_text_input_if_focused(
+                        &box, utf8_from_codepoint(event.ch));
                 }
             } else if (event.type == TUI_EVENT_RESIZE) {
                 tui_terminal_query_size(term);
@@ -346,15 +494,29 @@ int main() {
                 frame_w = cols * CELL_W;
                 frame_h = rows * CELL_H;
                 box.set_viewport(frame_w, frame_h);
+            } else if (event.type == TUI_EVENT_MOUSE_MOVE) {
+                float mx = event.x * CELL_W + CELL_W / 2;
+                float my = event.y * CELL_H + CELL_H / 2;
+                auto e = flexUI::Event::mouse_move(mx, my);
+                box.dispatch_event(e);
             } else if (event.type == TUI_EVENT_MOUSE_PRESS) {
                 float mx = event.x * CELL_W + CELL_W / 2;
                 float my = event.y * CELL_H + CELL_H / 2;
-                auto e = flexUI::Event::mouse_down(mx, my);
-                box.dispatch_event(e);
+
+                if (event.key == TUI_KEY_MOUSE_WHEEL_UP) {
+                    auto e = flexUI::Event::mouse_wheel(mx, my, 0.0f, 1.0f);
+                    box.dispatch_event(e);
+                } else if (event.key == TUI_KEY_MOUSE_WHEEL_DOWN) {
+                    auto e = flexUI::Event::mouse_wheel(mx, my, 0.0f, -1.0f);
+                    box.dispatch_event(e);
+                } else {
+                    auto e = flexUI::Event::mouse_down(mx, my, tui_to_button(event.key));
+                    box.dispatch_event(e);
+                }
             } else if (event.type == TUI_EVENT_MOUSE_RELEASE) {
                 float mx = event.x * CELL_W + CELL_W / 2;
                 float my = event.y * CELL_H + CELL_H / 2;
-                auto e = flexUI::Event::mouse_up(mx, my);
+                auto e = flexUI::Event::mouse_up(mx, my, tui_to_button(event.key));
                 box.dispatch_event(e);
             }
         }

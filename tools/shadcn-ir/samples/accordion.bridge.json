@@ -1,0 +1,27 @@
+{
+  "bridges": [
+    {
+      "target": "accordion_root",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "aria-expanded": "true",
+        "data-expanded-count": "1",
+        "data-expanded-id": "general"
+      },
+      "properties": {
+        "expanded_id": "general"
+      }
+    },
+    {
+      "target": "accordion_root",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed",
+        "aria-expanded": "false",
+        "data-expanded-count": "0"
+      },
+      "missing_attributes": ["data-expanded-id"]
+    }
+  ]
+}

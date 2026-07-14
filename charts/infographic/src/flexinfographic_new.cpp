@@ -5,11 +5,42 @@
 #include <flexinfographic.h>
 #include <infographic_component.h>
 #include <renderer/template_renderer.h>
-#include <infographic_component.h>
-#include <renderer/template_renderer.h>
 #include <algorithm>
+#include <unordered_set>
 
 namespace flex::modules::infographic {
+
+namespace {
+
+std::unique_ptr<DataItem> clone_item(const DataItem& source) {
+    auto result = std::make_unique<DataItem>();
+    result->label = source.label;
+    result->desc = source.desc;
+    result->value = source.value;
+    result->icon = source.icon;
+    result->illus = source.illus;
+    result->time = source.time;
+    result->done = source.done;
+    result->properties = source.properties;
+    result->children.reserve(source.children.size());
+    for (const auto& child : source.children) result->children.push_back(clone_item(*child));
+    return result;
+}
+
+UnifiedInfographic clone_with_theme(const UnifiedInfographic& source, const Theme& theme) {
+    UnifiedInfographic result;
+    result.template_type = source.template_type;
+    result.category = source.category;
+    result.title = source.title;
+    result.desc = source.desc;
+    result.theme = theme;
+    result.properties = source.properties;
+    result.items.reserve(source.items.size());
+    for (const auto& item : source.items) result.items.push_back(clone_item(*item));
+    return result;
+}
+
+} // namespace
 
 FlexInfographic::FlexInfographic() 
     : parser_(std::make_unique<UnifiedParser>())
@@ -33,25 +64,29 @@ std::string FlexInfographic::infographic_to_svg(const std::string& infographic_t
 }
 
 std::string FlexInfographic::render_svg(const UnifiedInfographic& infographic) {
-    // 策略模式：委托给具体渲染器
     auto renderer = RendererFactory::create(infographic.template_type);
-    return renderer->render(infographic);
+    if (!has_theme_override_) return renderer->render(infographic);
+    auto themed = clone_with_theme(infographic, current_theme_);
+    return renderer->render(themed);
 }
 
 flex::Group* FlexInfographic::to_flex(const UnifiedInfographic& infographic, flex::Instance& instance) {
-    return InfographicComponent::build(infographic, instance);
+    if (!has_theme_override_) return InfographicComponent::build(infographic, instance);
+    auto themed = clone_with_theme(infographic, current_theme_);
+    return InfographicComponent::build(themed, instance);
 }
 
 flex::Group* FlexInfographic::to_flex(std::string_view source, flex::Instance& instance) {
     auto result = parse(std::string(source));
     if (!result.success) return nullptr;
-    return InfographicComponent::build(*result.infographic, instance);
+    return to_flex(*result.infographic, instance);
 }
 
 // ========== 主题管理 ==========
 
 void FlexInfographic::set_theme(const Theme& theme) {
     current_theme_ = theme;
+    has_theme_override_ = true;
 }
 
 const Theme& FlexInfographic::get_theme() const {
@@ -109,8 +144,11 @@ std::string FlexInfographic::get_template_description(TemplateType type) {
 }
 
 bool FlexInfographic::validate_template_name(const std::string& template_name) {
-    auto templates = get_available_templates();
-    return std::find(templates.begin(), templates.end(), template_name) != templates.end();
+    static const std::unordered_set<std::string> valid_templates = []() {
+        auto vec = get_available_templates();
+        return std::unordered_set<std::string>(vec.begin(), vec.end());
+    }();
+    return valid_templates.find(template_name) != valid_templates.end();
 }
 
 std::string FlexInfographic::get_template_requirements(TemplateType type) {

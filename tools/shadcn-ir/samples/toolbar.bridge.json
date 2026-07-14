@@ -1,0 +1,26 @@
+{
+  "bridges": [
+    {
+      "target": "toolbar_root",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "data-open-id": "more"
+      },
+      "properties": {
+        "open_dropdown": "more"
+      }
+    },
+    {
+      "target": "toolbar_root",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      },
+      "missing_attributes": ["data-open-id"],
+      "properties": {
+        "open_dropdown": ""
+      }
+    }
+  ]
+}

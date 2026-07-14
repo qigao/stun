@@ -1,0 +1,27 @@
+{
+  "name": "scroll-area",
+  "source": "https://ui.shadcn.com/r/styles/new-york/scroll-area.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "bg-border",
+    "border-l",
+    "border-l-transparent",
+    "border-t",
+    "border-t-transparent",
+    "flex",
+    "flex-1",
+    "flex-col",
+    "h-2.5",
+    "h-full",
+    "overflow-hidden",
+    "p-[1px]",
+    "relative",
+    "rounded-[inherit]",
+    "rounded-full",
+    "select-none",
+    "touch-none",
+    "transition-colors",
+    "w-2.5",
+    "w-full"
+  ]
+}

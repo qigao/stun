@@ -4,14 +4,37 @@
 
 #include <flexUI/widgets/select_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
+#include <flexUI/text_layout.h>
 #include <stb_sprintf.h>
 #include <algorithm>
 #include <cmath>
 
 namespace flexUI {
+
+namespace {
+
+struct OverlayRect {
+  float x = 0.0f;
+  float y = 0.0f;
+  float w = 0.0f;
+  float h = 0.0f;
+};
+
+bool hit_overlay(float px, float py, const OverlayRect& r) {
+  return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+}
+
+OverlayRect select_overlay_rect(const Element& elem, float dropdown_height) {
+  const auto anchor_bounds = detail::css_render_world_bounds(&elem);
+  return {anchor_bounds.x, anchor_bounds.y + anchor_bounds.height,
+          anchor_bounds.width, dropdown_height};
+}
+
+}  // namespace
 
 // ============================================================================
 // 构造函数
@@ -21,6 +44,49 @@ SelectWidget::SelectWidget(const std::vector<std::string>& options, int selected
     : options_(options), selected_index_(selected_index) {
   if (selected_index_ < -1 || selected_index_ >= static_cast<int>(options_.size())) {
     selected_index_ = -1;
+  }
+}
+
+bool SelectWidget::measure_intrinsic_size(const Element& elem, float available_width,
+                                          float available_height, float& out_width,
+                                          float& out_height) const {
+  (void)available_width;
+  (void)available_height;
+  const auto* style = elem.computed_style;
+  ComputedStyle measure_style;
+  if (style) {
+    measure_style = *style;
+  }
+  const float font_size =
+      style && style->font_size > 0.0f ? style->font_size : 14.0f;
+  measure_style.font_size = font_size;
+
+  float widest = 0.0f;
+  for (const auto& option : options_) {
+    widest = std::max(widest,
+                      approximate_segmented_text_width(&measure_style, option));
+  }
+  if (widest <= 0.0f) {
+    widest = approximate_segmented_text_width(&measure_style, "Select");
+  }
+
+  const float item_height =
+      style ? style->get_variable_float("--item-height", 32.0f) : 32.0f;
+  out_width = std::max(120.0f, widest + 50.0f);
+  out_height = item_height;
+  return true;
+}
+
+void SelectWidget::sync_host_semantics() {
+  set_host_attribute("role", "combobox");
+  set_host_data_state("open", "closed", expanded_);
+  set_host_boolean_attribute("aria-expanded", expanded_);
+  set_host_boolean_attribute("aria-disabled", disabled_);
+  set_host_presence_attribute("disabled", disabled_);
+  if (selected_index_ >= 0 && selected_index_ < static_cast<int>(options_.size())) {
+    set_host_attribute("data-value", options_[selected_index_]);
+  } else {
+    clear_host_attribute("data-value");
   }
 }
 
@@ -37,6 +103,10 @@ void SelectWidget::set_options(const std::vector<std::string>& options) {
   }
 
   dirty_ = true;
+  if (auto* host = host_element()) {
+    host->mark_paint_dirty();
+  }
+  sync_host_semantics();
 }
 
 void SelectWidget::set_selected_index(int index) {
@@ -47,6 +117,10 @@ void SelectWidget::set_selected_index(int index) {
   if (selected_index_ != index) {
     selected_index_ = index;
     dirty_ = true;
+    if (auto* host = host_element()) {
+      host->mark_paint_dirty();
+    }
+    sync_host_semantics();
 
     if (change_callback_) {
       change_callback_(index, selected_value());
@@ -66,28 +140,38 @@ void SelectWidget::set_expanded(bool expanded) {
     }
 
     dirty_ = true;
+    if (auto* host = host_element()) {
+      host->mark_paint_dirty();
+    }
+    sync_host_semantics();
   }
+}
+
+void SelectWidget::set_disabled(bool disabled) {
+  if (disabled_ == disabled) {
+    return;
+  }
+  disabled_ = disabled;
+  dirty_ = true;
+  if (auto* host = host_element()) {
+    host->mark_paint_dirty();
+  }
+  sync_host_semantics();
 }
 
 // ============================================================================
 // Widget 接口实现
 // ============================================================================
 
-void SelectWidget::render(const Element& elem, Renderer& renderer) {
-  auto& r = renderer.flex();
+void SelectWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+  render_select_box(commands, elem);
+  render_selected_text(commands, elem);
+  render_arrow(commands, elem);
+}
 
-  // 1. 渲染选择框
-  render_select_box(r, elem);
-
-  // 2. 渲染当前选中文本
-  render_selected_text(r, elem);
-
-  // 3. 渲染下拉箭头
-  render_arrow(r, elem);
-
-  // 4. 渲染下拉列表（如果展开）
+void SelectWidget::emit_overlay_commands(const Element& elem, RenderCommandList& commands) {
   if (dropdown_height_ > 0.1f) {
-    render_dropdown(r, elem);
+    render_dropdown(commands, elem);
   }
 }
 
@@ -116,13 +200,16 @@ bool SelectWidget::handle_event(const Event& event, Element& elem) {
 
 void SelectWidget::update(float delta_ms, Element& elem) {
   update_dropdown_animation(delta_ms);
+  if (dirty_) {
+    elem.mark_paint_dirty();
+  }
 }
 
 // ============================================================================
 // 渲染辅助
 // ============================================================================
 
-void SelectWidget::render_select_box(flex::Renderer& r, const Element& elem) {
+void SelectWidget::render_select_box(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -133,14 +220,15 @@ void SelectWidget::render_select_box(flex::Renderer& r, const Element& elem) {
   float height = style->get_variable_float("--item-height", 32.0f);
 
   // 背景
-  r.draw_rect(0, 0, width, height, 4, Paint::solid(bg_color), Paint::none(), 0);
+  commands.draw_rect(0, 0, width, height, 4, Paint::solid(bg_color), Paint::none(), 0);
 
   // 边框
   float stroke_width = (elem.has_state("focus") || expanded_) ? 2.0f : 1.0f;
-  r.draw_rect(0, 0, width, height, 4, Paint::none(), Paint::solid(border_color), stroke_width);
+  commands.draw_rect(0, 0, width, height, 4, Paint::none(),
+                     Paint::solid(border_color), stroke_width);
 }
 
-void SelectWidget::render_selected_text(flex::Renderer& r, const Element& elem) {
+void SelectWidget::render_selected_text(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -150,14 +238,16 @@ void SelectWidget::render_selected_text(flex::Renderer& r, const Element& elem) 
 
   Color text_color = style->get_variable_color("--select-text", {0.0f, 0.0f, 0.0f, 1.0f});
   float item_height = style->get_variable_float("--item-height", 32.0f);
-
-  float text_x = 12;
-  float text_y = (item_height - style->font_size) / 2;
-
-  r.draw_text(options_[selected_index_], text_x, text_y, style->font_family, style->font_size, false, text_color);
+  const float padding = 12.0f;
+  const float arrow_reserve = 26.0f;
+  const float text_width = std::max(0.0f, elem.width() - padding - arrow_reserve - padding);
+  const auto text_block = layout_text_block(
+      style, options_[selected_index_], padding, 0.0f, text_width, item_height,
+      text_color, TextVerticalAlign::Middle);
+  emit_text_block(commands, text_block);
 }
 
-void SelectWidget::render_arrow(flex::Renderer& r, const Element& elem) {
+void SelectWidget::render_arrow(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -185,10 +275,10 @@ void SelectWidget::render_arrow(flex::Renderer& r, const Element& elem) {
              arrow_x + arrow_size, arrow_y - arrow_size / 2);
   }
 
-  r.fill_path(path, Paint::solid(arrow_color));
+  commands.fill_path(path, Paint::solid(arrow_color));
 }
 
-void SelectWidget::render_dropdown(flex::Renderer& r, const Element& elem) {
+void SelectWidget::render_dropdown(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
   if (!style) return;
 
@@ -199,31 +289,41 @@ void SelectWidget::render_dropdown(flex::Renderer& r, const Element& elem) {
   Color selected_bg = style->get_variable_color("--dropdown-item-selected", {0.90f, 0.94f, 1.0f, 1.0f});
 
   float item_height = style->get_variable_float("--item-height", 32.0f);
-  float width = elem.width();
-  float y_offset = item_height;
+  const float interactive_height =
+      dropdown_height_ > 0.1f ? dropdown_height_ : target_dropdown_height_;
+  const OverlayRect dropdown_bounds = select_overlay_rect(elem, interactive_height);
+  float width = dropdown_bounds.w;
+  float dropdown_x = dropdown_bounds.x;
+  float dropdown_y = dropdown_bounds.y;
 
   // 下拉列表背景
-  r.draw_rect(0, y_offset, width, dropdown_height_, 4, Paint::solid(dropdown_bg), Paint::none(), 0);
+  commands.draw_rect(dropdown_x, dropdown_y, width, dropdown_height_, 4,
+                     Paint::solid(dropdown_bg), Paint::none(), 0);
 
   // 边框
-  r.draw_rect(0, y_offset, width, dropdown_height_, 4, Paint::none(), Paint::solid(border_color), 1);
+  commands.draw_rect(dropdown_x, dropdown_y, width, dropdown_height_, 4, Paint::none(),
+                     Paint::solid(border_color), 1);
 
   // 渲染每个选项
   int visible_items = static_cast<int>(dropdown_height_ / item_height);
 
   for (int i = 0; i < static_cast<int>(options_.size()) && i < visible_items; i++) {
-    float item_y = y_offset + i * item_height;
+    float item_y = dropdown_y + i * item_height;
 
     // 选项背景（悬停或选中）
     if (i == hovered_index_ || i == selected_index_) {
       Color bg = (i == hovered_index_) ? hover_bg : selected_bg;
-      r.draw_rect(0, item_y, width, item_height, 0, Paint::solid(bg), Paint::none(), 0);
+      commands.draw_rect(dropdown_x, item_y, width, item_height, 0,
+                         Paint::solid(bg), Paint::none(), 0);
     }
 
     // 选项文字
-    float text_x = 12;
-    float text_y = item_y + (item_height - style->font_size) / 2;
-    r.draw_text(options_[i], text_x, text_y, style->font_family, style->font_size, false, text_color);
+    const float padding = 12.0f;
+    const float text_width = std::max(0.0f, width - padding * 2.0f - 12.0f);
+    const auto text_block = layout_text_block(
+        style, options_[i], dropdown_x + padding, item_y, text_width,
+        item_height, text_color, TextVerticalAlign::Middle);
+    emit_text_block(commands, text_block);
   }
 }
 
@@ -237,24 +337,29 @@ bool SelectWidget::handle_mouse_down(const Event& event, Element& elem) {
 
   float item_height = style->get_variable_float("--item-height", 32.0f);
 
-  // Convert to local coordinates
-  float local_x = event.x - elem.absolute_x();
-  float local_y = event.y - elem.absolute_y();
+  const flex::Vec2 local_pos =
+      detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+  float local_x = local_pos.x;
+  float local_y = local_pos.y;
 
   // 点击选择框本身
-  if (local_y < item_height) {
+  if (local_x >= 0.0f && local_x <= elem.width() &&
+      local_y >= 0.0f && local_y < item_height) {
     toggle_dropdown(elem);
     return true;
   }
 
   // 点击下拉列表中的选项
-  if (expanded_ && local_y >= item_height) {
-    int clicked_index = static_cast<int>((local_y - item_height) / item_height);
+  const float interactive_height =
+      dropdown_height_ > 0.1f ? dropdown_height_ : target_dropdown_height_;
+  const OverlayRect dropdown_bounds = select_overlay_rect(elem, interactive_height);
+  if (expanded_ && hit_overlay(event.x, event.y, dropdown_bounds)) {
+    int clicked_index =
+        static_cast<int>((event.y - dropdown_bounds.y) / item_height);
 
     if (clicked_index >= 0 && clicked_index < static_cast<int>(options_.size())) {
       select_option(clicked_index, elem);
       set_expanded(false);
-      elem.remove_state("expanded");
       return true;
     }
   }
@@ -267,12 +372,13 @@ bool SelectWidget::handle_mouse_move(const Event& event, Element& elem) {
   if (!style) return false;
 
   float item_height = style->get_variable_float("--item-height", 32.0f);
+  const float interactive_height =
+      dropdown_height_ > 0.1f ? dropdown_height_ : target_dropdown_height_;
+  const OverlayRect dropdown_bounds = select_overlay_rect(elem, interactive_height);
 
-  // Convert to local coordinates
-  float local_y = event.y - elem.absolute_y();
-
-  if (local_y >= item_height) {
-    int new_hovered = static_cast<int>((local_y - item_height) / item_height);
+  if (hit_overlay(event.x, event.y, dropdown_bounds)) {
+    int new_hovered =
+        static_cast<int>((event.y - dropdown_bounds.y) / item_height);
 
     if (new_hovered >= 0 && new_hovered < static_cast<int>(options_.size())) {
       if (hovered_index_ != new_hovered) {
@@ -331,7 +437,6 @@ bool SelectWidget::handle_key_down(const Event& event, Element& elem) {
     case KeyCode::Escape:
       if (expanded_) {
         set_expanded(false);
-        elem.remove_state("expanded");
         return true;
       }
       break;
@@ -348,13 +453,11 @@ void SelectWidget::select_option(int index, Element& elem) {
 }
 
 void SelectWidget::toggle_dropdown(Element& elem) {
+  (void)elem;
   set_expanded(!expanded_);
 
   if (expanded_) {
-    elem.add_state("expanded");
     hovered_index_ = selected_index_;
-  } else {
-    elem.remove_state("expanded");
   }
 }
 

@@ -4,9 +4,10 @@
 
 #include <flexUI/widgets/stepper_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <stb_sprintf.h>
 
@@ -50,20 +51,21 @@ void StepperWidget::rebuild_shapes(const Element& elem) {
     float y = (elem.height() - height) / 2;
 
     // Minus button (left)
-    minus_bg_ = root_.add<RectShape>(0, y, btn_width, height, radius);
-    float minus_x = btn_width / 2 - style->font_size * 0.3f;
+    minus_bg_ = root_.add<RectShape>(0.0f, y, btn_width, height, radius);
+    const float minus_width = approximate_segmented_text_width(style, "-");
+    float minus_x = (btn_width - minus_width) / 2.0f;
     float text_y = y + (height - style->font_size) / 2;
     minus_text_ = root_.add<TextShape>(minus_x, text_y, "-");
     minus_text_->set_font_family(style->font_family);
     minus_text_->set_font_size(style->font_size);
 
     // Value display (center)
-    value_bg_ = root_.add<RectShape>(btn_width, y, value_width, height, 0);
+    value_bg_ =
+        root_.add<RectShape>(btn_width, y, value_width, height, 0.0f);
 
     char buf[32];
     stbsp_snprintf(buf, sizeof(buf), "%d", value_);
-    float char_width = style->font_size * 0.6f;
-    float text_width = strlen(buf) * char_width;
+    float text_width = approximate_segmented_text_width(style, buf);
     float value_x = btn_width + (value_width - text_width) / 2;
     value_text_ = root_.add<TextShape>(value_x, text_y, buf);
     value_text_->set_font_family(style->font_family);
@@ -72,7 +74,8 @@ void StepperWidget::rebuild_shapes(const Element& elem) {
     // Plus button (right)
     float plus_x_pos = btn_width + value_width;
     plus_bg_ = root_.add<RectShape>(plus_x_pos, y, btn_width, height, radius);
-    float plus_x = plus_x_pos + btn_width / 2 - style->font_size * 0.3f;
+    const float plus_width = approximate_segmented_text_width(style, "+");
+    float plus_x = plus_x_pos + (btn_width - plus_width) / 2.0f;
     plus_text_ = root_.add<TextShape>(plus_x, text_y, "+");
     plus_text_->set_font_family(style->font_family);
     plus_text_->set_font_size(style->font_size);
@@ -107,6 +110,15 @@ void StepperWidget::update_shapes(const Element& elem) {
     char buf[32];
     stbsp_snprintf(buf, sizeof(buf), "%d", value_);
     value_text_->set_text(buf);
+    const float btn_width =
+        style->get_variable_float("--stepper-button-width", 32.0f);
+    const float value_width = elem.width() - btn_width * 2;
+    const float text_width = approximate_segmented_text_width(style, buf);
+    const float height =
+        style->get_variable_float("--stepper-height", elem.height());
+    const float y = (elem.height() - height) / 2;
+    const float text_y = y + (height - style->font_size) / 2;
+    value_text_->set_position(btn_width + (value_width - text_width) / 2, text_y);
 
     // Plus button
     Color plus_color = (hovered_button_ == 1 && can_increase) ? btn_hover : btn_bg;
@@ -139,17 +151,17 @@ int StepperWidget::hit_test(float x, float y, const Element& elem) {
     return -1;
 }
 
-void StepperWidget::render(const Element& elem, Renderer& renderer) {
+void StepperWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
 
     rebuild_shapes(elem);
     update_shapes(elem);
 
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    Transform local_transform = Transform{};
     float opacity = style->opacity;
 
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }
@@ -159,8 +171,10 @@ bool StepperWidget::handle_event(const Event& event, Element& elem) {
 
     switch (event.type) {
         case EventType::MouseMove: {
-            float local_x = event.x - elem.absolute_x();
-            float local_y = event.y - elem.absolute_y();
+            const flex::Vec2 local_pos =
+                detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+            float local_x = local_pos.x;
+            float local_y = local_pos.y;
             int button = hit_test(local_x, local_y, elem);
 
             if (button != hovered_button_) {

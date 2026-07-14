@@ -1,0 +1,83 @@
+{
+  "bridges": [
+    {
+      "target": "navigation_menu_trigger",
+      "attributes": {
+        "aria-expanded": "false",
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "navigation_menu_content",
+      "attributes": {
+        "data-state": "closed",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "target": "navigation_menu_viewport",
+      "attributes": {
+        "data-state": "hidden"
+      }
+    },
+    {
+      "target": "navigation_menu_trigger",
+      "state": "open",
+      "attributes": {
+        "aria-expanded": "true",
+        "data-state": "open"
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "navigation_menu_content",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "aria-hidden": "false"
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "navigation_menu_content",
+      "state": "motion-from-start",
+      "attributes": {
+        "data-motion": "from-start"
+      },
+      "pseudo_states": ["motion-from-start"]
+    },
+    {
+      "target": "navigation_menu_content",
+      "state": "motion-to-end",
+      "attributes": {
+        "data-motion": "to-end"
+      },
+      "pseudo_states": ["motion-to-end"]
+    },
+    {
+      "target": "navigation_menu_viewport",
+      "state": "visible",
+      "attributes": {
+        "data-state": "visible"
+      },
+      "pseudo_states": ["visible"]
+    },
+    {
+      "target": "navigation_menu_indicator",
+      "state": "visible",
+      "attributes": {
+        "data-state": "visible"
+      },
+      "pseudo_states": ["visible"]
+    },
+    {
+      "target": "navigation_menu_trigger",
+      "state": "disabled",
+      "attributes": {
+        "disabled": "",
+        "aria-disabled": "true"
+      },
+      "pseudo_states": ["disabled"]
+    }
+  ]
+}

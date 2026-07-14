@@ -4,17 +4,6 @@ cmake_minimum_required(VERSION 3.20)
 # ============================================================================
 # Parser Generation (re2c + lemon)
 # ============================================================================
-
-# Use re2c and lemon from parent flex project
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c)
-    find_program(LEMON_EXECUTABLE lemon)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 # Generate parser with lemon
 set(INFO_PARSER_Y ${CMAKE_CURRENT_SOURCE_DIR}/compiler/infographic_grammar.y)
 set(INFO_PARSER_GEN_C ${CMAKE_CURRENT_BINARY_DIR}/infographic_parser_gen.c)
@@ -44,10 +33,10 @@ add_custom_command(
 )
 
 # ============================================================================
-# FlexInfographic Library
+# Infographic Core Library
 # ============================================================================
 
-add_library(flexinfographic STATIC
+add_library(infographic_core STATIC
     # Generated parser/lexer
     ${INFO_LEXER_GEN}
     ${INFO_PARSER_GEN}
@@ -63,20 +52,7 @@ add_library(flexinfographic STATIC
     
     # Render Helpers
     src/render_helpers.cpp
-    src/layout_renderer_factory.cpp
-    
-    # Layout Renderers (Factory Pattern)
-    src/renderers/grid_layout_renderer.cpp
-    src/renderers/timeline_layout_renderer.cpp
-    src/renderers/funnel_layout_renderer.cpp
-    src/renderers/pie_layout_renderer.cpp
-    src/renderers/bar_layout_renderer.cpp
-    src/renderers/swot_layout_renderer.cpp
-    src/renderers/tree_layout_renderer.cpp
-    src/renderers/zigzag_layout_renderer.cpp
-    src/renderers/circular_layout_renderer.cpp
-    src/renderers/roadmap_layout_renderer.cpp
-    
+
     # Layout Engine
     src/layout/layout_engine.cpp
     
@@ -86,9 +62,10 @@ add_library(flexinfographic STATIC
     src/renderer/sequence_renderer.cpp
     src/renderer/compare_renderer.cpp
     src/renderer/chart_renderer.cpp
+    src/renderer/hierarchy_renderer.cpp
 )
 
-target_include_directories(flexinfographic
+target_include_directories(infographic_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/infographic>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
@@ -96,7 +73,49 @@ target_include_directories(flexinfographic
         ${CMAKE_CURRENT_SOURCE_DIR}/compiler
 )
 
-target_link_libraries(flexinfographic PUBLIC flex)
+target_link_libraries(infographic_core PUBLIC flex cola)
+
+target_compile_features(infographic_core PUBLIC cxx_std_17)
+
+set_target_properties(infographic_core PROPERTIES FOLDER "Modules/FlexInfographic/Core")
+
+# ============================================================================
+# Layout Modules (by layout type)
+# ============================================================================
+
+add_subdirectory(grid)
+add_subdirectory(timeline)
+add_subdirectory(funnel)
+add_subdirectory(pie)
+add_subdirectory(bar)
+add_subdirectory(swot)
+add_subdirectory(tree)
+add_subdirectory(zigzag)
+add_subdirectory(circular)
+add_subdirectory(roadmap)
+
+# ============================================================================
+# Umbrella Library (Backwards Compatible)
+# ============================================================================
+
+add_library(flexinfographic STATIC
+    src/layout_renderer_factory.cpp
+)
+
+target_link_libraries(flexinfographic
+    PUBLIC
+        infographic_core
+        infographic_layout_grid
+        infographic_layout_timeline
+        infographic_layout_funnel
+        infographic_layout_pie
+        infographic_layout_bar
+        infographic_layout_swot
+        infographic_layout_tree
+        infographic_layout_zigzag
+        infographic_layout_circular
+        infographic_layout_roadmap
+)
 
 target_compile_features(flexinfographic PUBLIC cxx_std_17)
 
@@ -112,16 +131,17 @@ set_target_properties(flexinfographic_example PROPERTIES FOLDER "Modules/FlexInf
 
 add_executable(flexinfographic_new_templates_test examples/new_templates_test.cpp)
 target_link_libraries(flexinfographic_new_templates_test flexinfographic)
+add_test(NAME FlexInfographicNewTemplatesTest COMMAND flexinfographic_new_templates_test)
 set_target_properties(flexinfographic_new_templates_test PROPERTIES FOLDER "Modules/FlexInfographic/Tests")
 
 find_package(SDL2 CONFIG QUIET)
 if(SDL2_FOUND)
     add_executable(infographic_render_example examples/infographic_render_example.cpp)
-    target_link_libraries(infographic_render_example PRIVATE flexinfographic flex SDL2::SDL2 SDL2::SDL2main)
+    target_link_libraries(infographic_render_example PRIVATE flexinfographic flex flex_backend_thorvg SDL2::SDL2 SDL2::SDL2main)
     set_target_properties(infographic_render_example PROPERTIES FOLDER "Modules/FlexInfographic/Examples")
 
     add_executable(infographic_dsl_render examples/dsl_render_example.cpp)
-    target_link_libraries(infographic_dsl_render PRIVATE flexinfographic flex SDL2::SDL2 SDL2::SDL2main)
+    target_link_libraries(infographic_dsl_render PRIVATE flexinfographic flex flex_backend_thorvg SDL2::SDL2 SDL2::SDL2main)
     set_target_properties(infographic_dsl_render PROPERTIES FOLDER "Modules/FlexInfographic/Examples")
 endif()
 
@@ -131,13 +151,23 @@ endif()
 
 add_executable(flexinfographic_tests tests/unified_design_test.cpp)
 target_link_libraries(flexinfographic_tests flexinfographic)
+add_test(NAME FlexInfographicTests COMMAND flexinfographic_tests)
 set_target_properties(flexinfographic_tests PROPERTIES FOLDER "Modules/FlexInfographic/Tests")
 
 add_executable(flexinfographic_dsl_test tests/test_dsl_parser.cpp)
 target_link_libraries(flexinfographic_dsl_test flexinfographic)
+add_test(NAME FlexInfographicDslTest COMMAND flexinfographic_dsl_test)
 set_target_properties(flexinfographic_dsl_test PROPERTIES FOLDER "Modules/FlexInfographic/Tests")
 
 
 add_executable(flexinfographic_e2e_test tests/test_e2e_pipeline.cpp)
 target_link_libraries(flexinfographic_e2e_test flexinfographic)
+add_test(NAME FlexInfographicE2ETest COMMAND flexinfographic_e2e_test)
 set_target_properties(flexinfographic_e2e_test PROPERTIES FOLDER "Modules/FlexInfographic/Tests")
+
+add_executable(flexinfographic_unified_parser_test tests/test_unified_parser.cpp)
+target_link_libraries(flexinfographic_unified_parser_test PRIVATE
+    flexinfographic TurboUtils::TinyTest)
+add_test(NAME FlexInfographicUnifiedParserTest COMMAND flexinfographic_unified_parser_test)
+set_target_properties(flexinfographic_unified_parser_test PROPERTIES
+    FOLDER "Modules/FlexInfographic/Tests")

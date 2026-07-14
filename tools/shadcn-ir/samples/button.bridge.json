@@ -1,0 +1,27 @@
+{
+  "bridges": [
+    {
+      "target": "button_root",
+      "state": "disabled",
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "button_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "button_root",
+      "state": "hover",
+      "pseudo_states": ["hover"]
+    },
+    {
+      "target": "button_root",
+      "state": "active",
+      "pseudo_states": ["active"]
+    }
+  ]
+}

@@ -1,348 +1,332 @@
-# Flex Engine - Multiple Rendering Backends
+# Flex Engine - Rendering Backends
 
-Flex Engine supports multiple rendering backends through a clean abstraction layer. The runtime module defines the `Renderer` interface, and specific backends are implemented in the bridge layer.
+Flex 的渲染后端已经改成“核心运行时 + 后端工厂注册 + 可选 backend 模块”三层结构。
 
-## Architecture
+当前约束：
 
+- `flex/core/renderer.h` 定义纯抽象 `Renderer` 接口
+- `flex/bridge/renderer.h` 提供公开的 backend-neutral registry / factory API
+- `backends/*/init.h` 是仓库内或宿主应用的集成入口，用来初始化并注册具体后端
+- `flex_backend_*` 是分离的可选 CMake 目标，不再直接并进 `flex` 主库
+- 终端用户代码应优先走 `create_renderer(handle)`，而不是在业务层到处写死具体 backend 枚举
+
+## Current Layout
+
+```text
+┌───────────────────────────────────────────────┐
+│ flex/core/renderer.h                          │
+│   Renderer 抽象接口                            │
+└───────────────────────────────────────────────┘
+                      │
+                      ▼
+┌───────────────────────────────────────────────┐
+│ flex/bridge/renderer.h                        │
+│   renderer_backend_factory()                  │
+│   register_renderer_backend()                 │
+│   set_default_renderer_backend()              │
+│   create_renderer(CanvasHandle)               │
+└───────────────────────────────────────────────┘
+                      │
+                      ▼
+┌───────────────────────────────────────────────┐
+│ backends/<name>/init.h                        │
+│   <name>_backend::init()                      │
+│   <name>_backend::register_backend()          │
+│   <name>_backend::load_font(...)              │
+└───────────────────────────────────────────────┘
+                      │
+                      ▼
+┌───────────────────────────────────────────────┐
+│ src/backends/renderer_<name>.cpp              │
+│ flex_backend_<name>                           │
+└───────────────────────────────────────────────┘
 ```
-┌─────────────────────────────────────┐
-│     flex/runtime/renderer.h         │  ← Abstract Renderer interface
-│     (Backend-agnostic)               │
-└─────────────────────────────────────┘
-                  ↑
-                  │ implements
-                  │
-┌─────────────────┴───────────────────┐
-│      Bridge Layer Backends          │
-├─────────────────────────────────────┤
-│  flex/bridge/renderer_thorvg.h      │  → ThorVG (vector graphics)
-│  flex/bridge/renderer_nanovg.h      │  → NanoVG (lightweight)
-│  flex/bridge/renderer_skia.h        │  → Skia (Google Chrome)
-│  flex/bridge/renderer_d2d.h         │  → Direct2D (Windows)
-└─────────────────────────────────────┘
-```
 
-## Supported Backends
+## Public Surface Vs Integration Surface
 
-### 1. ThorVG (Default) - Best for Production
+安装后的公开 API 重点是：
 
-**Pros:**
-- ✅ High performance vector graphics
-- ✅ Full SVG support
-- ✅ Retained mode rendering (120 FPS optimization)
-- ✅ Cross-platform (Windows, Linux, macOS, mobile)
-- ✅ Small footprint (~200KB)
+- `#include <flex.h>`
+- `#include <flex/bridge/renderer.h>`
 
-**Use case:** Production applications, games, embedded systems
+backend-specific init 头例如：
 
-**Example:**
+- `backends/thorvg/init.h`
+- `backends/nanovg/init.h`
+- `backends/d2d/init.h`
+- `backends/tui/init.h`
+
+这些头现在属于集成层细节。仓库内示例、测试、宿主应用可以直接包含；面向终端用户的安装包不应把它们当成稳定公开表面。
+
+## Backend Selection Model
+
+推荐流程是两步：
+
+1. 启动阶段由宿主应用初始化并注册一个具体 backend
+2. 业务代码统一调用 `create_renderer(handle)`
+
+这样业务层只依赖“默认 renderer 工厂”，不依赖具体 backend 类型。
+
+### Registry API
+
 ```cpp
-#include "flex.h"
-#include "flex/backends/thorvg/init.h"
-#include "flex/bridge/renderer.h"
+#include <flex/bridge/renderer.h>
 
-// Initialize
-flex::init();
+flex::RendererFactory current = flex::default_renderer_factory();
+bool ok = flex::set_default_renderer_backend(flex::RendererBackend::Direct2D);
+auto renderer = flex::create_renderer(canvas_handle);
+```
 
-// Create ThorVG canvas
+## Supported Backends In Tree
+
+### ThorVG
+
+适合：
+
+- 软件栅格化
+- SVG/矢量图较多的场景
+- 跨平台宿主
+
+示例：
+
+```cpp
+#include <flex.h>
+#include "backends/thorvg/init.h"
+#include <thorvg.h>
+
+flex::thorvg_backend::init();
+flex::thorvg_backend::register_backend();
+flex::thorvg_backend::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf");
+
 auto canvas = tvg::SwCanvas::gen();
-canvas->target(buffer, width, width, height, tvg::SwCanvas::ARGB8888);
+canvas->target(buffer, width, width, height, tvg::ColorSpace::ARGB8888);
 
-// Create renderer
-auto renderer = flex::create_thorvg_renderer(canvas.get());
+auto renderer = flex::create_renderer(static_cast<flex::CanvasHandle>(canvas.get()));
+if (!renderer) {
+    return;
+}
 
-// Use with Flex
-auto scene = flex::Scene::create(800, 600);
-scene->render(*renderer);
+renderer->begin_frame(static_cast<float>(width), static_cast<float>(height), 1.0f);
+instance->render(*renderer);
+renderer->end_frame();
 
-// Cleanup
-flex::shutdown();
+flex::thorvg_backend::shutdown();
 ```
 
----
+### NanoVG
 
-### 2. NanoVG - Best for Lightweight UI
+适合：
 
-**Pros:**
-- ✅ Very lightweight (~50KB)
-- ✅ OpenGL-based rendering
-- ✅ Great for immediate mode UI
-- ✅ Easy integration
+- OpenGL 宿主
+- 即时绘制型桌面工具
+- 不依赖 ThorVG 的轻量窗口集成
 
-**Cons:**
-- ❌ No retained mode optimization
-- ❌ Limited SVG support
+示例：
 
-**Use case:** Lightweight desktop applications, tools, editors
-
-**Example:**
 ```cpp
-#include "flex.h"
-#include "flex/backends/nanovg/init.h"
-#include "flex/bridge/renderer_nanovg.h"
+#include <flex.h>
+#include "backends/nanovg/init.h"
 #include <nanovg.h>
 
-// Initialize
-flex::init();
+flex::nanovg_backend::init();
+flex::nanovg_backend::register_backend();
+flex::nanovg_backend::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf");
 
-// Create NanoVG context (OpenGL)
 NVGcontext* vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+auto renderer = flex::create_renderer(static_cast<flex::CanvasHandle>(vg));
+if (!renderer) {
+    return;
+}
 
-// Create renderer
-auto renderer = flex::create_nanovg_renderer(vg);
+renderer->begin_frame(window_width, window_height, pixel_ratio);
+renderer->clear(instance->scene()->background());
+instance->render(*renderer);
+renderer->end_frame();
 
-// Use with Flex
-auto scene = flex::Scene::create(800, 600);
-scene->render(*renderer);
-
-// Cleanup
 nvgDeleteGL3(vg);
-flex::shutdown();
+flex::nanovg_backend::shutdown();
 ```
 
----
+### Direct2D
 
-### 3. Skia - Best for Browser/Chrome-like Apps
+适合：
 
-**Pros:**
-- ✅ Used by Chrome, Android, Flutter
-- ✅ Excellent text rendering
-- ✅ GPU acceleration
-- ✅ Full 2D graphics capabilities
+- Windows 原生桌面程序
+- HWND / D2D render target 集成
+- 希望把 Windows 默认 backend 切到原生 2D API 的宿主
 
-**Cons:**
-- ❌ Large library (~10MB)
-- ❌ Complex build setup
+当前行为：
 
-**Use case:** Browser-based apps, document viewers, professional graphics tools
+- `d2d_backend::register_backend()` 会注册 `RendererBackend::Direct2D`
+- 在 Windows 上它还会把默认 backend 直接切成 Direct2D
 
-**Example:**
+示例：
+
 ```cpp
-#include "flex.h"
-#include "flex/backends/skia/init.h"
-#include "flex/bridge/renderer_skia.h"
-#include <include/core/SkCanvas.h>
+#include <flex.h>
+#include "backends/d2d/init.h"
+#include <d2d1.h>
 
-// Initialize
-flex::init();
+flex::d2d_backend::init();
+flex::d2d_backend::register_backend();
+flex::d2d_backend::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf");
 
-// Create Skia surface
-auto surface = SkSurface::MakeRasterN32Premul(800, 600);
-SkCanvas* canvas = surface->getCanvas();
-
-// Create renderer
-auto renderer = flex::create_skia_renderer(canvas);
-
-// Use with Flex
-auto scene = flex::Scene::create(800, 600);
-scene->render(*renderer);
-
-// Cleanup
-flex::shutdown();
-```
-
----
-
-### 4. Direct2D (Windows) - Best for Native Windows Apps
-
-**Pros:**
-- ✅ Native Windows API
-- ✅ Hardware accelerated
-- ✅ Excellent performance on Windows
-- ✅ Native DPI scaling support
-
-**Cons:**
-- ❌ Windows-only
-- ❌ Requires Windows 7+
-
-**Use case:** Native Windows desktop applications
-
-**Example:**
-```cpp
-#include "flex.h"
-#include "flex/backends/d2d/init.h"
-#include "flex/bridge/renderer_d2d.h"
-
-// Initialize (creates D2D factory)
-flex::init();
-
-// Create D2D render target (from HWND)
-ID2D1HwndRenderTarget* renderTarget = nullptr;
-flex::g_d2d_factory->CreateHwndRenderTarget(
+ID2D1HwndRenderTarget* render_target = nullptr;
+flex::d2d_backend::g_d2d_factory->CreateHwndRenderTarget(
     D2D1::RenderTargetProperties(),
     D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(800, 600)),
-    &renderTarget
-);
+    &render_target);
 
-// Create renderer
-auto renderer = flex::create_d2d_renderer(renderTarget);
+auto renderer = flex::create_renderer(
+    static_cast<flex::CanvasHandle>(render_target));
+if (!renderer) {
+    render_target->Release();
+    return;
+}
 
-// Use with Flex
-auto scene = flex::Scene::create(800, 600);
+renderer->begin_frame(800.0f, 600.0f, 1.0f);
+renderer->clear(instance->scene()->background());
+instance->render(*renderer);
+renderer->end_frame();
 
-renderTarget->BeginDraw();
-scene->render(*renderer);
-renderTarget->EndDraw();
-
-// Cleanup
-renderTarget->Release();
-flex::shutdown();
+render_target->Release();
+flex::d2d_backend::shutdown();
 ```
 
----
+### TUI
 
-## Choosing a Backend
+适合：
 
-| Backend    | Size   | Speed | Platform       | Best For                    |
-|------------|--------|-------|----------------|-----------------------------|
-| **ThorVG** | 200KB  | ⭐⭐⭐⭐⭐ | All            | Production apps, games      |
-| **NanoVG** | 50KB   | ⭐⭐⭐⭐  | All (OpenGL)   | Lightweight UI, tools       |
-| **Skia**   | 10MB   | ⭐⭐⭐⭐⭐ | All            | Browser-like apps           |
-| **D2D**    | Native | ⭐⭐⭐⭐⭐ | Windows only   | Native Windows apps         |
+- 终端 UI
+- 无窗口系统环境
+- 调试和轻量展示
 
----
+示例：
 
-## Implementing a Custom Backend
+```cpp
+#include <flex.h>
+#include <backends/tui/init.h>
+#include <tui.h>
 
-To add your own rendering backend:
+tui_terminal_t* term = tui_terminal_create();
+tui_terminal_init(term);
 
-### 1. Create Factory Header
+flex::tui_backend::register_backend();
+auto renderer = flex::create_renderer(static_cast<flex::CanvasHandle>(term));
+if (!renderer) {
+    return;
+}
+
+renderer->begin_frame(800.0f, 600.0f, 1.0f);
+renderer->clear(flex::Color{0.1f, 0.1f, 0.15f, 1.0f});
+instance->render(*renderer);
+renderer->end_frame();
+```
+
+## About Skia
+
+`RendererBackend::Skia` 以及 `flex/bridge/renderer_skia.h` 仍保留在接口层，用于兼容和未来扩展；但当前仓库的 CMake 并没有接好一个维护中的 `flex_backend_skia` 目标。不要把它当成“现成可用”的内置 backend。
+
+## Implementing A Custom Backend
+
+自定义 backend 现在建议围绕“注册工厂”实现，而不是直接把具体实现塞进 `flex` 主库。
+
+### 1. 定义 renderer factory
 
 ```cpp
 // flex/bridge/renderer_mybackend.h
 #pragma once
-#include "flex/runtime/renderer.h"
-#include <memory>
+
+#include "flex/core/renderer.h"
 
 namespace flex {
-std::unique_ptr<Renderer> create_mybackend_renderer(CanvasHandle canvas);
+std::unique_ptr<Renderer> create_mybackend_renderer(CanvasHandle handle);
 }
 ```
 
-### 2. Implement Renderer Class
+### 2. 实现 renderer
 
 ```cpp
-// flex/src/bridge/renderer_mybackend.cpp
+// src/backends/renderer_mybackend.cpp
 #include "flex/bridge/renderer_mybackend.h"
 
 namespace flex {
 
 class MyBackendRenderer : public Renderer {
 public:
-    explicit MyBackendRenderer(void* canvas) : canvas_(canvas) {}
+    explicit MyBackendRenderer(void* handle) : handle_(handle) {}
 
-    void begin_frame(float width, float height, float pixel_ratio) override {
-        // Initialize frame
-    }
+    void begin_frame(float width, float height, float pixel_ratio) override {}
+    void end_frame() override {}
 
-    void draw_rect(float x, float y, float w, float h, float r,
-                   const Paint& fill, const Paint& stroke, float stroke_width) override {
-        // Draw rectangle using your backend API
-    }
-
-    // ... implement all virtual methods ...
+    // 其余虚函数按接口补齐
 
 private:
-    void* canvas_;
+    void* handle_ = nullptr;
 };
 
-std::unique_ptr<Renderer> create_mybackend_renderer(CanvasHandle canvas) {
-    return std::make_unique<MyBackendRenderer>(canvas);
+std::unique_ptr<Renderer> create_mybackend_renderer(CanvasHandle handle) {
+    return std::make_unique<MyBackendRenderer>(handle);
 }
 
-}
+} // namespace flex
 ```
 
-### 3. Create Init Header
+### 3. 提供 backend 集成头
 
 ```cpp
-// flex/backends/mybackend/init.h
+// backends/mybackend/init.h
 #pragma once
-#include <tlog.h>
 
-namespace flex {
-
-inline void init() {
-     // Initialize your backend here
-}
-
-inline void shutdown() {
-    // Cleanup your backend
- }
-
-}
-```
-
-### 4. Use Your Backend
-
-```cpp
-#include "flex.h"
-#include "flex/backends/mybackend/init.h"
+#include "backends/renderer.h"
 #include "flex/bridge/renderer_mybackend.h"
 
-flex::init();
-auto renderer = flex::create_mybackend_renderer(my_canvas);
-// ... use renderer ...
-flex::shutdown();
+namespace flex {
+namespace mybackend {
+
+inline bool register_backend() {
+    register_renderer_backend(
+        RendererBackend::Custom,
+        static_cast<RendererFactory>(&create_mybackend_renderer));
+    return set_default_renderer_backend(RendererBackend::Custom);
+}
+
+} // namespace mybackend
+} // namespace flex
 ```
 
----
+### 4. 在宿主启动时注册默认工厂
+
+```cpp
+mybackend::register_backend();
+auto renderer = flex::create_renderer(my_handle);
+```
 
 ## CMake Integration
 
-Different backends can be compiled conditionally:
+当前推荐的编译方式是每个 backend 独立目标：
 
 ```cmake
-# Optional: ThorVG backend (default)
-option(FLEX_BACKEND_THORVG "Enable ThorVG backend" ON)
-if(FLEX_BACKEND_THORVG)
-    target_sources(flex PRIVATE src/bridge/renderer_thorvg.cpp)
-    target_link_libraries(flex PUBLIC thorvg)
-endif()
+option(FLEX_BUILD_BACKEND_THORVG "Build ThorVG renderer backend" ON)
+option(FLEX_BUILD_BACKEND_TUI "Build TUI renderer backend" ON)
+option(FLEX_BUILD_BACKEND_NANOVG "Build NanoVG renderer backend" ON)
+option(FLEX_BUILD_BACKEND_D2D "Build Direct2D renderer backend" ON)
 
-# Optional: NanoVG backend
-option(FLEX_BACKEND_NANOVG "Enable NanoVG backend" OFF)
-if(FLEX_BACKEND_NANOVG)
-    find_package(NanoVG REQUIRED)
-    target_sources(flex PRIVATE src/bridge/renderer_nanovg.cpp)
-    target_link_libraries(flex PUBLIC nanovg)
-endif()
-
-# Optional: Skia backend
-option(FLEX_BACKEND_SKIA "Enable Skia backend" OFF)
-if(FLEX_BACKEND_SKIA)
-    find_package(Skia REQUIRED)
-    target_sources(flex PRIVATE src/bridge/renderer_skia.cpp)
-    target_link_libraries(flex PUBLIC skia)
-endif()
-
-# Optional: Direct2D backend (Windows only)
-if(WIN32)
-    option(FLEX_BACKEND_D2D "Enable Direct2D backend" OFF)
-    if(FLEX_BACKEND_D2D)
-        target_sources(flex PRIVATE src/bridge/renderer_d2d.cpp)
-        target_link_libraries(flex PUBLIC d2d1)
-    endif()
-endif()
+target_link_libraries(my_app PRIVATE flex)
+target_link_libraries(my_app PRIVATE flex_backend_thorvg)
 ```
 
----
+也就是说：
 
-## Good Taste Architecture 🎯
+- `flex` 提供核心 facade + lowering + renderer factory registry
+- `flex_backend_*` 提供具体 backend 实现和依赖
+- 哪个宿主需要哪个 backend，就显式链接哪个 backend 目标
 
-**Linus 会认可的设计：**
+## Design Intent
 
-✅ **消除特殊情况** - 所有后端使用统一接口，无需 #ifdef 判断
-✅ **实用主义** - CanvasHandle (void*) 避免模板膨胀
-✅ **简洁执念** - 用户代码只需 3 行切换后端
-✅ **不破坏用户** - 添加后端不影响现有代码
+这套设计解决的是两个问题：
 
-```cpp
-// 从 ThorVG 切换到 Skia 只需改 2 行！
-- #include "flex/backends/thorvg/init.h"
-- #include "flex/bridge/renderer.h"
-+ #include "flex/backends/skia/init.h"
-+ #include "flex/bridge/renderer_skia.h"
-```
+- 不让 `flex_runtime` 或 `flex` 核心强绑某个图形库
+- 不把 backend-specific 头暴露成终端用户必须理解的公开 API
 
-这就是"好品味"的代码 - 让特殊情况消失在统一的抽象中。🚀
+因此现在的推荐写法不是“业务代码自行挑 backend”，而是“宿主在启动时选 backend，业务层只拿默认 renderer 工厂”。

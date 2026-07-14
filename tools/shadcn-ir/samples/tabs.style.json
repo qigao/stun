@@ -1,0 +1,38 @@
+{
+  "rules": [
+    {
+      "target": "tabs_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "border-radius": "0.5rem",
+        "background-color": "var(--muted)",
+        "padding": "0.25rem",
+        "color": "var(--muted-foreground)"
+      }
+    },
+    {
+      "target": "tabs_root",
+      "selector": "&[data-state=\"active\"]",
+      "decls": {
+        "background-color": "var(--background)",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "tabs_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "2px",
+        "ring-color": "var(--ring)",
+        "ring-offset": "2px"
+      }
+    }
+  ]
+}

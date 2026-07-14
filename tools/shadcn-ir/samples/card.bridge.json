@@ -1,0 +1,14 @@
+{
+  "bridges": [
+    {
+      "target": "card_root",
+      "state": "hover",
+      "pseudo_states": ["hover"]
+    },
+    {
+      "target": "card_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

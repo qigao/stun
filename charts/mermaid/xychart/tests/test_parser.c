@@ -5,6 +5,10 @@
 #include "xychart/xychart_ast.h"
 #include "turbo_parser.h"
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -63,6 +67,9 @@ static int json_equal(const char* a, const char* b) {
     return eq;
 }
 
+#ifdef check_double_eq
+#undef check_double_eq
+#endif
 #define check_double_eq(a, b) do { \
     double diff = (a) - (b); \
     if (diff < 0) diff = -diff; \
@@ -133,6 +140,37 @@ spec("xychart_parser") {
              check_double_eq(diagram->xAxis.range_min, 10.0);
              check_double_eq(diagram->xAxis.range_max, 50.0);
              
+             xychart_free_diagram(diagram);
+        }
+
+        it("should evaluate numeric expressions with MIR") {
+             const char* input =
+                "xychart-beta\n"
+                "x-axis 5*2 --> 40+10\n"
+                "y-axis 0 --> 100/2\n"
+                "line \"Series\" [2*3, 8+2, 25/5]\n";
+
+             XYDiagram* diagram = xychart_parse(input);
+             if (!diagram) {
+                 check(0, "diagram parsed");
+                 return;
+             }
+             check(diagram->xAxis.has_range == true, "x-axis range parsed");
+             check(diagram->yAxis.has_range == true, "y-axis range parsed");
+             check_double_eq(diagram->xAxis.range_min, 10.0);
+             check_double_eq(diagram->xAxis.range_max, 50.0);
+             check_double_eq(diagram->yAxis.range_max, 50.0);
+
+             if (!diagram->series) {
+                 check(0, "series parsed");
+                 xychart_free_diagram(diagram);
+                 return;
+             }
+             check(diagram->series->data.count == 3, "series data count");
+             check_double_eq(diagram->series->data.items[0], 6.0);
+             check_double_eq(diagram->series->data.items[1], 10.0);
+             check_double_eq(diagram->series->data.items[2], 5.0);
+
              xychart_free_diagram(diagram);
         }
     }

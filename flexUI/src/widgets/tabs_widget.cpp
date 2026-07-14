@@ -6,15 +6,118 @@
 
 #include <flexUI/widgets/tabs_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <cmath>
 
 namespace flexUI {
 
+namespace {
+
+constexpr const char* kPageStateAttribute = "data-state";
+constexpr const char* kPageAriaHiddenAttribute = "aria-hidden";
+
+void set_page_state(Element* page, bool active) {
+  if (!page) {
+    return;
+  }
+
+  page->set_attribute(kPageStateAttribute, active ? "active" : "inactive");
+  page->set_attribute(kPageAriaHiddenAttribute, active ? "false" : "true");
+  // Keep event dispatch and painting correct until CSS is recomputed.
+  page->set_visible(active);
+}
+
+void release_page_state(Element* page) {
+  if (!page) {
+    return;
+  }
+
+  page->remove_attribute(kPageStateAttribute);
+  page->remove_attribute(kPageAriaHiddenAttribute);
+  page->set_visible(true);
+}
+
+std::vector<float> resolve_tab_widths(const std::vector<TabsWidget::Tab>& tabs,
+                                      const ComputedStyle* style, float font_size,
+                                      float available_width) {
+  std::vector<float> widths;
+  widths.reserve(tabs.size());
+  if (tabs.empty()) {
+    return widths;
+  }
+
+  float desired_total = 0.0f;
+  for (const auto& tab : tabs) {
+    ComputedStyle measure_style;
+    if (style) {
+      measure_style = *style;
+    }
+    measure_style.font_size = font_size;
+    const float desired =
+        approximate_segmented_text_width(&measure_style, tab.label) + 32.0f;
+    widths.push_back(desired);
+    desired_total += desired;
+  }
+
+  if (available_width <= 0.0f || desired_total <= available_width) {
+    return widths;
+  }
+
+  const float even_width = available_width / static_cast<float>(tabs.size());
+  for (auto& width : widths) {
+    width = even_width;
+  }
+  return widths;
+}
+
+} // namespace
+
 TabsWidget::TabsWidget() {}
+
+bool TabsWidget::measure_intrinsic_size(const Element& elem, float available_width,
+                                        float available_height, float& out_width,
+                                        float& out_height) const {
+  (void)available_height;
+  const auto* style = elem.computed_style;
+  const float font_size =
+      style && style->font_size > 0.0f ? style->font_size : 14.0f;
+  const auto widths = resolve_tab_widths(tabs_, style, font_size, available_width);
+
+  float total_width = 8.0f;
+  for (float width : widths) {
+    total_width += width;
+  }
+  if (widths.size() > 1) {
+    total_width += 4.0f * static_cast<float>(widths.size() - 1);
+  }
+
+  out_width = std::max(total_width, 140.0f);
+  out_height = 36.0f;
+  return true;
+}
+
+void TabsWidget::sync_host_semantics() {
+  set_host_attribute("role", "tablist");
+  set_host_attribute("data-orientation", "horizontal");
+  set_host_attribute("aria-orientation", "horizontal");
+  const std::string active = active_id();
+  if (active.empty()) {
+    clear_host_attribute("data-active-id");
+    clear_host_attribute("data-active-index");
+    clear_host_attribute("aria-activedescendant");
+    set_host_attribute("data-state", "empty");
+  } else {
+    set_host_attribute("data-state", "active");
+    set_host_attribute("data-active-id", active);
+    set_host_attribute("data-active-index", std::to_string(active_index_));
+    set_host_attribute("aria-activedescendant", active);
+  }
+}
 
 void TabsWidget::add_tab(const std::string& label, const std::string& id, Element* page, bool disabled) {
   tabs_.push_back({label, id, page, disabled});
@@ -23,29 +126,45 @@ void TabsWidget::add_tab(const std::string& label, const std::string& id, Elemen
   }
   update_page_visibility();
   dirty_ = true;
+  sync_host_semantics();
 }
 
 void TabsWidget::remove_tab(const std::string& id) {
   auto it = std::find_if(tabs_.begin(), tabs_.end(),
     [&id](const Tab& t) { return t.id == id; });
   if (it != tabs_.end()) {
+    const int removed_index = static_cast<int>(std::distance(tabs_.begin(), it));
+    Element* removed_page = it->page;
     tabs_.erase(it);
-    if (active_index_ >= static_cast<int>(tabs_.size())) {
+    release_page_state(removed_page);
+    if (tabs_.empty()) {
+      active_index_ = -1;
+    } else if (removed_index < active_index_) {
+      --active_index_;
+    } else if (active_index_ >= static_cast<int>(tabs_.size())) {
       active_index_ = tabs_.empty() ? -1 : static_cast<int>(tabs_.size()) - 1;
     }
     update_page_visibility();
     dirty_ = true;
+    sync_host_semantics();
   }
 }
 
 void TabsWidget::clear_tabs() {
+  for (const auto& tab : tabs_) {
+    release_page_state(tab.page);
+  }
   tabs_.clear();
   active_index_ = -1;
   dirty_ = true;
+  sync_host_semantics();
 }
 
 void TabsWidget::set_tab_page(int index, Element* page) {
   if (index >= 0 && index < static_cast<int>(tabs_.size())) {
+    if (tabs_[index].page != page) {
+      release_page_state(tabs_[index].page);
+    }
     tabs_[index].page = page;
     update_page_visibility();
   }
@@ -54,6 +173,9 @@ void TabsWidget::set_tab_page(int index, Element* page) {
 void TabsWidget::set_tab_page(const std::string& id, Element* page) {
   for (auto& tab : tabs_) {
     if (tab.id == id) {
+      if (tab.page != page) {
+        release_page_state(tab.page);
+      }
       tab.page = page;
       update_page_visibility();
       return;
@@ -83,6 +205,7 @@ void TabsWidget::set_active_index(int index) {
       active_index_ = index;
       update_page_visibility();
       dirty_ = true;
+      sync_host_semantics();
       // Note: Element dirty marking should be done by the caller in handle_event
       // but we add it here for safety if called from elsewhere.
     }
@@ -104,6 +227,7 @@ void TabsWidget::set_active_id(const std::string& id) {
         active_index_ = static_cast<int>(i);
         update_page_visibility();
         dirty_ = true;
+        sync_host_semantics();
       }
       return;
     }
@@ -112,57 +236,48 @@ void TabsWidget::set_active_id(const std::string& id) {
 
 void TabsWidget::update_page_visibility() {
   for (size_t i = 0; i < tabs_.size(); i++) {
-    Element* page = tabs_[i].page;
-    if (page && page->computed_style) {
-      if (static_cast<int>(i) == active_index_) {
-        page->computed_style->visibility = Visibility::Visible;
-        page->set_visible(true);
-      } else {
-        page->computed_style->visibility = Visibility::Hidden;
-        page->set_visible(false);
-      }
-      page->mark_paint_dirty();
-    }
+    set_page_state(tabs_[i].page, static_cast<int>(i) == active_index_);
   }
 }
 
 float TabsWidget::get_tab_width(const Tab& tab, float font_size) const {
-  return tab.label.size() * font_size * 0.7f + 32.0f;
+  ComputedStyle measure_style;
+  measure_style.font_size = font_size;
+  return approximate_segmented_text_width(&measure_style, tab.label) + 32.0f;
 }
 
-void TabsWidget::render(const Element& elem, Renderer& renderer) {
-  auto& r = renderer.flex();
-  render_tabs(r, elem);
-  render_indicator(r, elem);
+void TabsWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+  render_tabs(commands, elem);
+  render_indicator(commands, elem);
 }
 
-void TabsWidget::render_tabs(flex::Renderer& r, const Element& elem) {
+void TabsWidget::render_tabs(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color bg_color = {0.96f, 0.96f, 0.96f, 1.0f};
   Color text_color = {0.39f, 0.39f, 0.39f, 1.0f};
   Color active_text = {0.0f, 0.0f, 0.0f, 1.0f};
   float font_size = 14.0f;
-  std::string font_family = "Arial";
-
   if (style) {
     bg_color = style->get_variable_color("--tabs-bg", bg_color);
     text_color = style->get_variable_color("--tabs-text", text_color);
     active_text = style->get_variable_color("--tabs-active-text", active_text);
     font_size = style->font_size > 0 ? style->font_size : font_size;
-    if (!style->font_family.empty()) font_family = style->font_family;
   }
 
-  r.draw_rect(0, 0, elem.width(), elem.height(), 0, Paint::solid(bg_color), Paint::none(), 0);
+  commands.draw_rect(0, 0, elem.width(), elem.height(), 0,
+                     Paint::solid(bg_color), Paint::none(), 0);
 
+  const auto tab_widths = resolve_tab_widths(tabs_, style, font_size, elem.width());
   float x = 0;
   for (size_t i = 0; i < tabs_.size(); i++) {
     const auto& tab = tabs_[i];
-    float tab_width = get_tab_width(tab, font_size);
+    const float tab_width = tab_widths[i];
 
     if (static_cast<int>(i) == hover_index_ && static_cast<int>(i) != active_index_) {
-      r.draw_rect(x, 0, tab_width, elem.height(), 0,
-                  Paint::solid(Color{0.90f, 0.90f, 0.90f, 1.0f}), Paint::none(), 0);
+      commands.draw_rect(x, 0, tab_width, elem.height(), 0,
+                         Paint::solid(Color{0.90f, 0.90f, 0.90f, 1.0f}),
+                         Paint::none(), 0);
     }
 
     Color tab_text_color;
@@ -174,9 +289,12 @@ void TabsWidget::render_tabs(flex::Renderer& r, const Element& elem) {
       tab_text_color = text_color;
     }
 
-    float text_x = x + (tab_width - tab.label.size() * font_size * 0.6f) / 2;
-    float text_y = elem.height() / 2 - font_size / 2;
-    r.draw_text(tab.label, text_x, text_y, font_family, font_size, false, tab_text_color);
+    if (style) {
+      const auto text_block = layout_text_block(
+          style, tab.label, x, 0.0f, tab_width, elem.height(), tab_text_color,
+          TextVerticalAlign::Middle);
+      emit_text_block(commands, text_block);
+    }
 
     if (static_cast<int>(i) == active_index_) {
       target_indicator_x_ = x;
@@ -187,7 +305,7 @@ void TabsWidget::render_tabs(flex::Renderer& r, const Element& elem) {
   }
 }
 
-void TabsWidget::render_indicator(flex::Renderer& r, const Element& elem) {
+void TabsWidget::render_indicator(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color indicator_color = {0.23f, 0.51f, 0.96f, 1.0f};
@@ -196,21 +314,24 @@ void TabsWidget::render_indicator(flex::Renderer& r, const Element& elem) {
   }
 
   if (indicator_width_ > 0) {
-    r.draw_rect(indicator_x_, elem.height() - 3, indicator_width_, 3, 1.5f,
-                Paint::solid(indicator_color), Paint::none(), 0);
+    commands.draw_rect(indicator_x_, elem.height() - 3, indicator_width_, 3, 1.5f,
+                       Paint::solid(indicator_color), Paint::none(), 0);
   }
 }
 
 bool TabsWidget::handle_event(const Event& event, Element& elem) {
   auto* style = elem.computed_style;
   float font_size = style ? (style->font_size > 0 ? style->font_size : 14.0f) : 14.0f;
+  const auto tab_widths = resolve_tab_widths(tabs_, style, font_size, elem.width());
 
   switch (event.type) {
     case EventType::MouseDown: {
-      float local_x = event.x - elem.absolute_x();
+      const flex::Vec2 local_pos =
+          detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+      float local_x = local_pos.x;
       float x = 0;
       for (size_t i = 0; i < tabs_.size(); i++) {
-        float tab_width = get_tab_width(tabs_[i], font_size);
+        const float tab_width = tab_widths[i];
         if (local_x >= x && local_x < x + tab_width) {
           if (!tabs_[i].disabled && static_cast<int>(i) != active_index_) {
             set_active_index(static_cast<int>(i));
@@ -226,11 +347,13 @@ bool TabsWidget::handle_event(const Event& event, Element& elem) {
     }
 
     case EventType::MouseMove: {
-      float local_x = event.x - elem.absolute_x();
+      const flex::Vec2 local_pos =
+          detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+      float local_x = local_pos.x;
       float x = 0;
       int new_hover = -1;
       for (size_t i = 0; i < tabs_.size(); i++) {
-        float tab_width = get_tab_width(tabs_[i], font_size);
+        const float tab_width = tab_widths[i];
         if (local_x >= x && local_x < x + tab_width) {
           new_hover = static_cast<int>(i);
           break;
@@ -249,6 +372,12 @@ bool TabsWidget::handle_event(const Event& event, Element& elem) {
   }
 
   return false;
+}
+
+bool TabsWidget::needs_frame_update(const Element& elem) const {
+  (void)elem;
+  return std::abs(indicator_x_ - target_indicator_x_) > 0.5f ||
+         std::abs(indicator_width_ - target_indicator_width_) > 0.5f;
 }
 
 void TabsWidget::update(float delta_ms, Element& elem) {

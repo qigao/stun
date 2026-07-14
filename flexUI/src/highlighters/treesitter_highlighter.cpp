@@ -12,6 +12,7 @@ namespace flexUI {
 
 const TSPluginInfo* get_ts_plugin(const std::string& name);
 void load_ts_plugins_from_dir(const std::string& dir);
+void load_default_ts_plugins();
 
 static HighlightType convert_type(TSHighlightType t) {
     switch (t) {
@@ -87,7 +88,7 @@ private:
 };
 
 void init_treesitter_highlighters() {
-    load_ts_plugins_from_dir(".");
+    load_default_ts_plugins();
 }
 
 SyntaxHighlighter* create_ts_highlighter(const std::string& lang) {

@@ -186,6 +186,68 @@ data {
     std::cout << "  ✓ Saved test_bar.svg (" << svg.size() << " bytes)\n";
 }
 
+void test_tree_layout() {
+    std::cout << "Test: Tree layout E2E\n";
+    
+    const char* dsl = R"(
+infographic hierarchy-tree-tech-style-capsule-item
+data {
+    title: "Org Tree"
+    items: [
+        { label: "CEO"
+          children: [
+            { label: "VP Eng"
+              children: [
+                { label: "Platform" }
+                { label: "Infrastructure" }
+              ]
+            }
+            { label: "VP Product" }
+            { label: "VP Sales" }
+          ]
+        }
+    ]
+}
+)";
+
+    std::string svg = render_dsl(dsl);
+    
+    assert(svg.find("<svg") != std::string::npos);
+    assert(svg.find("Org Tree") != std::string::npos);
+    assert(svg.find("CEO") != std::string::npos);
+    
+    std::ofstream("test_tree.svg") << svg;
+    std::cout << "  ✓ Saved test_tree.svg (" << svg.size() << " bytes)\n";
+}
+
+void test_donut_chart() {
+    std::cout << "Test: Donut chart E2E\n";
+    
+    const char* dsl = R"(
+infographic chart-pie-donut-plain-text
+data {
+    title: "Traffic Sources"
+    items: [
+        { label: "Search", value: 40 }
+        { label: "Social", value: 25 }
+        { label: "Email", value: 20 }
+        { label: "Referral", value: 15 }
+    ]
+}
+theme {
+    palette: #3b82f6 #22c55e #f59e0b #ef4444
+}
+)";
+
+    std::string svg = render_dsl(dsl);
+    
+    assert(svg.find("<svg") != std::string::npos);
+    assert(svg.find("Traffic Sources") != std::string::npos);
+    
+    std::ofstream("test_donut.svg") << svg;
+    std::cout << "  ✓ Saved test_donut.svg (" << svg.size() << " bytes)\n";
+}
+
 void test_layout_integration() {
     std::cout << "Test: Layout engine integration\n";
     
@@ -217,9 +279,11 @@ int main() {
     test_grid_infographic();
     test_timeline_infographic();
     test_pie_chart();
+    test_donut_chart();
     test_swot_analysis();
     test_funnel();
     test_bar_chart();
+    test_tree_layout();
     test_layout_integration();
     
     std::cout << "\n✅ All E2E tests passed!\n";
@@ -227,9 +291,11 @@ int main() {
     std::cout << "  - test_grid.svg\n";
     std::cout << "  - test_timeline.svg\n";
     std::cout << "  - test_pie.svg\n";
+    std::cout << "  - test_donut.svg\n";
     std::cout << "  - test_swot.svg\n";
     std::cout << "  - test_funnel.svg\n";
     std::cout << "  - test_bar.svg\n";
+    std::cout << "  - test_tree.svg\n";
     
     return 0;
 }

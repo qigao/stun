@@ -29,18 +29,20 @@ public:
     explicit WorkspaceWidget(FullEditorApp* app) : app_(app) {}
 
     void render(const flexUI::Element& elem, flexUI::Renderer& renderer) override {
+        (void)renderer;
+        flex::Renderer& native_renderer = app_->native_renderer();
         app_->canvas()->set_size(elem.width(), elem.height());
-        app_->canvas()->render(renderer.flex());
-        app_->editor()->render_tool_overlay(renderer.flex());
+        app_->canvas()->render(native_renderer);
+        app_->editor()->render_tool_overlay(native_renderer);
 
-        app_->render_tool_panel(renderer.flex());
-        app_->render_shape_panel(renderer.flex());
-        app_->render_properties_panel(renderer.flex());
-        app_->render_layers_panel(renderer.flex());
-        app_->render_align_panel(renderer.flex());
-        app_->render_context_toolbar(renderer.flex());
-        app_->render_navigator(renderer.flex());
-        app_->render_shortcut_overlay(renderer.flex());
+        app_->render_tool_panel(native_renderer);
+        app_->render_shape_panel(native_renderer);
+        app_->render_properties_panel(native_renderer);
+        app_->render_layers_panel(native_renderer);
+        app_->render_align_panel(native_renderer);
+        app_->render_context_toolbar(native_renderer);
+        app_->render_navigator(native_renderer);
+        app_->render_shortcut_overlay(native_renderer);
     }
 
     const char* type_name() const override { return "WorkspaceWidget"; }
@@ -76,6 +78,7 @@ FullEditorApp::FullEditorApp(float width, float height)
 FullEditorApp::~FullEditorApp() = default;
 
 void FullEditorApp::init(flex::Renderer* ui_renderer) {
+    native_renderer_ = ui_renderer;
     editor_ = std::make_unique<Editor>(width_, height_);
     editor_->init();
 

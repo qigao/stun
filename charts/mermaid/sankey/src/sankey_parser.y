@@ -9,12 +9,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "flex/core/expr_c.h"
 #include "sankey/sankey_ast.h"
 #include "sankey_parser_gen.h"
 
 static double to_double(char* s) {
     if(!s) return 0.0;
-    return atof(s);
+    double value = 0.0;
+    return flex_expr_eval_f64(s, &value) ? value : 0.0;
 }
 }
 

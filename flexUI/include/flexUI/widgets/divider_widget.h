@@ -14,6 +14,8 @@
 
 namespace flexUI {
 
+class RenderCommandList;
+
 /**
  * DividerWidget - Separator line
  *
@@ -30,14 +32,18 @@ public:
 
   explicit DividerWidget(Orientation orientation = Orientation::Horizontal);
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "DividerWidget"; }
 
   // Orientation
   Orientation orientation() const { return orientation_; }
-  void set_orientation(Orientation o) { orientation_ = o; dirty_ = true; }
+  void set_orientation(Orientation o) {
+    orientation_ = o;
+    sync_host_semantics();
+    dirty_ = true;
+  }
 
   // Style
   Style style() const { return style_; }
@@ -48,6 +54,7 @@ public:
   void set_label(const std::string& label) { label_ = label; dirty_ = true; }
 
 private:
+  void sync_host_semantics() override;
   Orientation orientation_ = Orientation::Horizontal;
   Style style_ = Style::Solid;
   std::string label_;

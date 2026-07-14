@@ -1,0 +1,65 @@
+{
+  "rules": [
+    {
+      "target": "avatar_root",
+      "selector": "&",
+      "decls": {
+        "position": "relative",
+        "display": "flex",
+        "height": "2.5rem",
+        "width": "2.5rem",
+        "flex-shrink": "0",
+        "overflow": "hidden",
+        "border-radius": "9999px"
+      }
+    },
+    {
+      "target": "avatar_image",
+      "selector": "&",
+      "decls": {
+        "aspect-ratio": "1 / 1",
+        "height": "100%",
+        "width": "100%",
+        "object-fit": "cover"
+      }
+    },
+    {
+      "target": "avatar_fallback",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "height": "100%",
+        "width": "100%",
+        "align-items": "center",
+        "justify-content": "center",
+        "border-radius": "9999px",
+        "background-color": "var(--muted)",
+        "color": "var(--muted-foreground)",
+        "font-size": "0.875rem",
+        "font-weight": "500"
+      }
+    },
+    {
+      "target": "avatar_fallback",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "hidden" }
+      ],
+      "decls": {
+        "display": "none"
+      }
+    },
+    {
+      "target": "avatar_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "2px",
+        "ring-color": "var(--ring)"
+      }
+    }
+  ]
+}

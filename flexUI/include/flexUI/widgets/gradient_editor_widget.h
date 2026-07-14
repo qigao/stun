@@ -8,6 +8,7 @@
 #define FLEXUI_GRADIENT_EDITOR_WIDGET_H
 
 #include "../widget.h"
+#include "../render_command.h"
 #include "../types.h"
 #include <flex.h>
 #include <functional>
@@ -21,7 +22,7 @@ public:
 
     GradientEditorWidget();
 
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "GradientEditorWidget"; }
@@ -56,8 +57,8 @@ public:
     void set_stop_select_callback(StopSelectCallback cb) { on_stop_select_ = std::move(cb); }
 
 private:
-    void render_gradient_bar(flex::Renderer& r, const Element& elem);
-    void render_stops(flex::Renderer& r, const Element& elem);
+    void render_gradient_bar(RenderCommandList& commands, const Element& elem);
+    void render_stops(RenderCommandList& commands, const Element& elem);
 
     float stop_to_x(float offset, float bar_x, float bar_w) const;
     float x_to_offset(float x, float bar_x, float bar_w) const;

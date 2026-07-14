@@ -4,6 +4,9 @@
 #include "timeline/timeline_ast.h"
 #include "timeline_parser_gen.h"
 
+void TimelineParser(void *parser, int token, void *value,
+                    TimelineParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

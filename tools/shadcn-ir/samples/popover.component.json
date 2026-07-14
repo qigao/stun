@@ -1,0 +1,27 @@
+{
+  "component": "Popover",
+  "kind": "leaf",
+  "root": "popover_root",
+  "nodes": [
+    {
+      "id": "popover_root",
+      "type": "widget",
+      "widget": "popover",
+      "tag": "button",
+      "role": "dialog",
+      "states": ["open", "closed"],
+      "props": {
+        "title": "Share",
+        "content": "Invite your team",
+        "position": "right"
+      }
+    }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": false
+  },
+  "meta": {
+    "source": "shadcn/popover"
+  }
+}

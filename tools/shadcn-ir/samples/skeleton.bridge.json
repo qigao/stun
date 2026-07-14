@@ -1,0 +1,19 @@
+{
+  "bridges": [
+    {
+      "target": "skeleton_root",
+      "state": "loading",
+      "attributes": {
+        "data-state": "loading"
+      },
+      "pseudo_states": ["loading"]
+    },
+    {
+      "target": "skeleton_root",
+      "state": "hidden",
+      "attributes": {
+        "aria-hidden": "true"
+      }
+    }
+  ]
+}

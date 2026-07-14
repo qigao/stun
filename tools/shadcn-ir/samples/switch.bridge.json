@@ -1,0 +1,25 @@
+{
+  "bridges": [
+    {
+      "target": "switch_root",
+      "state": "checked",
+      "properties": {
+        "checked": true
+      },
+      "pseudo_states": ["checked"]
+    },
+    {
+      "target": "switch_root",
+      "state": "disabled",
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "switch_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

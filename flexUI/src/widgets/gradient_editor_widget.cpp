@@ -4,9 +4,10 @@
 
 #include <flexUI/widgets/gradient_editor_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
 #include <algorithm>
 #include <cmath>
 
@@ -147,18 +148,16 @@ int GradientEditorWidget::hit_test_stop(float x, float y, const Element& elem) c
     return -1;
 }
 
-void GradientEditorWidget::render(const Element& elem, Renderer& renderer) {
-    auto& r = renderer.flex();
+void GradientEditorWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+    commands.draw_rect(0, 0, elem.width(), elem.height(), 4,
+                       Paint::solid(Color{0.15f, 0.15f, 0.15f, 1.0f}),
+                       Paint::none(), 0);
 
-    // Background
-    r.draw_rect(0, 0, elem.width(), elem.height(), 4,
-                Paint::solid(Color{0.15f, 0.15f, 0.15f, 1.0f}), Paint::none(), 0);
-
-    render_gradient_bar(r, elem);
-    render_stops(r, elem);
+    render_gradient_bar(commands, elem);
+    render_stops(commands, elem);
 }
 
-void GradientEditorWidget::render_gradient_bar(flex::Renderer& r, const Element& elem) {
+void GradientEditorWidget::render_gradient_bar(RenderCommandList& commands, const Element& elem) {
     float padding = 8.0f;
     float bar_h = 24.0f;
     float bar_x = padding;
@@ -204,16 +203,16 @@ void GradientEditorWidget::render_gradient_bar(flex::Renderer& r, const Element&
         }
 
         float x = bar_x + i * seg_w;
-        r.draw_rect(x, bar_y, seg_w + 0.5f, bar_h, 0,
-                    Paint::solid(Color{c.r, c.g, c.b, c.a}), Paint::none(), 0);
+        commands.draw_rect(x, bar_y, seg_w + 0.5f, bar_h, 0,
+                           Paint::solid(Color{c.r, c.g, c.b, c.a}), Paint::none(), 0);
     }
 
     // Border
-    r.draw_rect(bar_x, bar_y, bar_w, bar_h, 4,
-                Paint::none(), Paint::solid(Color{0.4f, 0.4f, 0.4f, 1.0f}), 1);
+    commands.draw_rect(bar_x, bar_y, bar_w, bar_h, 4,
+                       Paint::none(), Paint::solid(Color{0.4f, 0.4f, 0.4f, 1.0f}), 1);
 }
 
-void GradientEditorWidget::render_stops(flex::Renderer& r, const Element& elem) {
+void GradientEditorWidget::render_stops(RenderCommandList& commands, const Element& elem) {
     float padding = 8.0f;
     float bar_h = 24.0f;
     float stop_size = 12.0f;
@@ -234,14 +233,15 @@ void GradientEditorWidget::render_stops(flex::Renderer& r, const Element& elem) 
         std::string triangle = "M " + std::to_string(x) + " " + std::to_string(stop_y - 2) +
                               " L " + std::to_string(x - 5) + " " + std::to_string(stop_y + 6) +
                               " L " + std::to_string(x + 5) + " " + std::to_string(stop_y + 6) + " Z";
-        r.fill_path(triangle, Paint::solid(Color{0.3f, 0.3f, 0.3f, 1.0f}));
+        commands.fill_path(triangle, Paint::solid(Color{0.3f, 0.3f, 0.3f, 1.0f}));
 
         // Stop color circle
         Color stop_color{stops[i].color.r, stops[i].color.g, stops[i].color.b, stops[i].color.a};
         Color border_color = selected ? Color{0.2f, 0.6f, 1.0f, 1.0f} : Color{0.5f, 0.5f, 0.5f, 1.0f};
         float border_width = selected ? 2.0f : 1.0f;
 
-        r.draw_circle(x, y + 6, stop_size / 2, Paint::solid(stop_color), Paint::solid(border_color), border_width);
+        commands.draw_circle(x, y + 6, stop_size / 2, Paint::solid(stop_color),
+                             Paint::solid(border_color), border_width);
     }
 }
 
@@ -251,8 +251,10 @@ bool GradientEditorWidget::handle_event(const Event& event, Element& elem) {
     float bar_x = padding;
     float bar_w = elem.width() - padding * 2;
 
-    float local_x = event.x - elem.absolute_x();
-    float local_y = event.y - elem.absolute_y();
+    const flex::Vec2 local_pos =
+        detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+    float local_x = local_pos.x;
+    float local_y = local_pos.y;
 
     if (event.type == EventType::MouseDown) {
         int hit = hit_test_stop(local_x, local_y, elem);

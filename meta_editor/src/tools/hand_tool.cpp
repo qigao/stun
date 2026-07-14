@@ -16,8 +16,8 @@ bool HandTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2& w
 bool HandTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec2& world_pos) {
     if (!is_panning_) return false;
     
-    float dx = screen_pos.x() - last_screen_pos_.x();
-    float dy = screen_pos.y() - last_screen_pos_.y();
+    float dx = screen_pos.x - last_screen_pos_.x;
+    float dy = screen_pos.y - last_screen_pos_.y;
     
     canvas_->pan(dx, dy);
     last_screen_pos_ = screen_pos;

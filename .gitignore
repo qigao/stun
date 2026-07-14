@@ -1,59 +1,91 @@
-*\.exe
-*\.lib
-*\.cmake
-*\.pyi
-py\.typed
-.DS_Store
-ext_build
-nanogui_resources.*
-build
-CMakeCache.txt
-CMakeFiles
-\.ninja_deps
-\.ninja_log
-install_manifest\.txt
-build.ninja
-rules.ninja
-Makefile
-bin2c
-example[1-9]
-example[1-9].bc
-example[1-9].wasm
-example[1-9].js
-example[1-9].exe
-example_icons
-example_icons.bc
-example_icons.js
-example_icons.wasm
-example_icons.exe
-example_hdr
-example_hdr.bc
-example_hdr.js
-example_hdr.wasm
-example_hdr.exe
-icons
-*~
-nanogui*.so
-nanogui*.pyd
-libnanobind-static.a
-libnanogui.so
-libnanogui.a
-libnanogui.bc
-libnanogui.dylib
-*.metallib
+# Build directories and binary files
+build*/
+install/
+bin/
+out/
+cmake-build-*/
+conan-cache/
+coverage.xml
+.vcpkg*
+vcpkg*
+.codegraph/
+
+# IDE files
+.vs/
+.idea/
 .vscode/
-# html documentation specific
-*.pyc
-docs/_build
-docs/doxyoutput
-docs/api
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+*.swp
+*~
+_ReSharper*
+*.log
+.cache/
 
-# entypo update generation
-# this is it's own repo: https://github.com/svenevs/nanogui-entypo
-# should not ever be needed again unless there are new
-# icons added :)
-resources/nanogui-entypo
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
 
-compile_commands.json
-\.clangd
-\.cache
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# OS Generated Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.Trash-*
+$RECYCLE.BIN/
+.TemporaryItems
+ehthumbs.db
+Thumbs.db
+
+# User specific settings
+.env
+
+# agents
+.codex-*
+.claude
+.agents
+
+# Security - Entire projects directory (contains generated keys, licenses, and project-specific configs)
+# NEVER commit this directory - it contains:
+# - RSA private/public keys (private_key.rsa, public_key.rsa)
+# - Generated license files (.lic)
+# - Project-specific configuration headers (licensecc_properties.h, public_key.h)
+# - License encryption keys (license_encryption.key)
+projects/
+assets
+
+# Security - Additional protection for keys anywhere in the tree
+license_encryption.key
+*.key
+**/license_encryption.key
+**/*_key.rsa
+**/*.lic

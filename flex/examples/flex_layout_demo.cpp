@@ -5,7 +5,7 @@
 
 #include <SDL2/SDL.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 #include <iostream>
 #include <thorvg.h>
 
@@ -117,7 +117,7 @@ private:
   tvg::SwCanvas *canvas_ = nullptr;
   std::vector<uint32_t> buffer_;
 
-  flex::Instance::Ptr instance_;
+  flex::Instance::SharedPtr instance_;
   std::unique_ptr<flex::Renderer> flex_renderer_;
 
   bool running_ = false;

@@ -1,0 +1,16 @@
+{
+  "name": "sonner",
+  "source": "https://ui.shadcn.com/r/styles/new-york/sonner.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "group",
+    "group-[.toast]:bg-muted",
+    "group-[.toast]:bg-primary",
+    "group-[.toast]:text-muted-foreground",
+    "group-[.toast]:text-primary-foreground",
+    "group-[.toaster]:bg-background",
+    "group-[.toaster]:border-border",
+    "group-[.toaster]:shadow-lg",
+    "group-[.toaster]:text-foreground"
+  ]
+}

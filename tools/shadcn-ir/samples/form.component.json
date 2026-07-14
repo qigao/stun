@@ -1,0 +1,95 @@
+{
+  "component": "Form",
+  "kind": "composite",
+  "root": "form_root",
+  "nodes": [
+    {
+      "id": "form_root",
+      "type": "element",
+      "tag": "form",
+      "states": ["invalid", "disabled"],
+      "attrs": {
+        "data-slot": "form"
+      }
+    },
+    {
+      "id": "form_item",
+      "type": "element",
+      "tag": "div",
+      "slot": "item",
+      "states": ["invalid", "error", "disabled", "required"],
+      "attrs": {
+        "data-slot": "form-item",
+        "data-field": "email"
+      }
+    },
+    {
+      "id": "form_label",
+      "type": "element",
+      "tag": "label",
+      "slot": "label",
+      "states": ["disabled", "required"],
+      "attrs": {
+        "data-slot": "form-label",
+        "for": "email"
+      },
+      "props": {
+        "text": "Email"
+      }
+    },
+    {
+      "id": "form_control",
+      "type": "element",
+      "tag": "input",
+      "slot": "control",
+      "states": ["invalid", "error", "disabled", "required"],
+      "attrs": {
+        "data-slot": "form-control",
+        "id": "email",
+        "name": "email",
+        "type": "email",
+        "aria-describedby": "email-description"
+      },
+      "props": {
+        "placeholder": "name@example.com"
+      }
+    },
+    {
+      "id": "form_description",
+      "type": "element",
+      "tag": "p",
+      "slot": "description",
+      "attrs": {
+        "data-slot": "form-description",
+        "id": "email-description"
+      },
+      "props": {
+        "text": "Enter the email address for this account."
+      }
+    },
+    {
+      "id": "form_message",
+      "type": "element",
+      "tag": "p",
+      "slot": "message",
+      "states": ["visible", "hidden", "error"],
+      "attrs": {
+        "data-slot": "form-message",
+        "id": "email-message"
+      },
+      "props": {
+        "text": "Enter a valid email address."
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "form_root", "child": "form_item" },
+    { "parent": "form_item", "child": "form_label" },
+    { "parent": "form_item", "child": "form_control" },
+    { "parent": "form_item", "child": "form_description" },
+    { "parent": "form_item", "child": "form_message" }
+  ],
+  "meta": {
+    "source": "shadcn/form"
+  }
+}

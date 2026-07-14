@@ -1,0 +1,4217 @@
+{
+  "schema_version": 1,
+  "suite": "render-semantic",
+  "description": "Render semantic expectations for shadcn-style visuals via recorded rect/text draw calls.",
+  "cases": [
+    {
+      "name": "button-focus-visible-ring-render",
+      "component": "button",
+      "widget": "button",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "text": "Save"
+      },
+      "states": [
+        "focus",
+        "focus-visible"
+      ],
+      "css": "#field { width: 120px; height: 40px; background-color: #ffffff; color: #0f172a; outline-width: 0px; ring-width: 0px; } #field:focus-visible { outline-width: 2px; outline-color: rgba(51, 102, 255, 0.5); outline-offset: 4px; ring-width: 6px; ring-color: rgba(8, 16, 24, 0.5); ring-offset: 2px; ring-offset-color: #f8fafc; }",
+      "required_features": [
+        "ring",
+        "outline",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 4,
+          "texts": [
+            "Save"
+          ],
+          "rects": [
+            {
+              "stroke_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ],
+              "stroke_width": 2.0
+            },
+            {
+              "stroke_color": [
+                0.031373,
+                0.062745,
+                0.094118,
+                0.5
+              ],
+              "stroke_width": 6.0
+            },
+            {
+              "stroke_color": [
+                0.2,
+                0.4,
+                1.0,
+                0.5
+              ],
+              "stroke_width": 2.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "dropdown-open-overlay-render",
+      "component": "dropdown-menu",
+      "widget": "dropdown",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "placeholder": "Plan",
+        "options": [
+          {
+            "label": "Free",
+            "value": "free"
+          },
+          {
+            "label": "Pro",
+            "value": "pro"
+          }
+        ],
+        "selected_value": "pro",
+        "open": true
+      },
+      "css": "#field { width: 160px; height: 36px; background-color: #ffffff; color: #0f172a; --dropdown-bg: #ffffff; --dropdown-border: #cbd5e1; }",
+      "required_features": [
+        "overlay",
+        "dropdown",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 4,
+          "min_text_count": 3,
+          "texts": [
+            "Pro",
+            "Free"
+          ],
+          "rects": [
+            {
+              "stroke_width": 1.0,
+              "min_w": 120.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "popover-open-panel-render",
+      "component": "popover",
+      "widget": "popover",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "title": "Share",
+        "content": "Copy link",
+        "width": 160.0,
+        "height": 72.0,
+        "show": true
+      },
+      "css": "#field { width: 120px; height: 32px; font-size: 13px; }",
+      "required_features": [
+        "popover",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "Share",
+              "color": [
+                0.1,
+                0.1,
+                0.1,
+                1.0
+              ]
+            },
+            {
+              "text": "Copy link",
+              "color": [
+                0.3,
+                0.3,
+                0.3,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.85,
+                0.85,
+                0.85,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 160.0,
+              "min_h": 72.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "menu-open-overlay-render",
+      "component": "menubar",
+      "widget": "menu",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "show": true,
+        "x": 24.0,
+        "y": 28.0,
+        "items": [
+          {
+            "id": "new",
+            "label": "New File",
+            "shortcut": "Ctrl+N"
+          },
+          {
+            "id": "open",
+            "label": "Open"
+          }
+        ]
+      },
+      "css": "#field { width: 200px; height: 36px; font-size: 13px; --menu-bg: #ffffff; --menu-border: #e2e8f0; --menu-item-height: 32; --menu-padding: 4; }",
+      "required_features": [
+        "menu",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "New File",
+              "color": [
+                0.1,
+                0.1,
+                0.1,
+                1.0
+              ]
+            },
+            "Ctrl+N",
+            "Open"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 120.0,
+              "min_h": 72.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "select-open-dropdown-render",
+      "component": "select",
+      "widget": "select",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "options": [
+          "Apple",
+          "Banana",
+          "Cherry"
+        ],
+        "selected_index": 1,
+        "expanded": true
+      },
+      "update_time_ms": [
+        96
+      ],
+      "css": "#field { width: 180px; height: 32px; --select-bg: #ffffff; --select-border: #cbd5e1; --select-text: #0f172a; --dropdown-bg: #ffffff; --dropdown-item-hover: #f8fafc; --dropdown-item-selected: #dbeafe; }",
+      "required_features": [
+        "select",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 5,
+          "texts": [
+            {
+              "text": "Banana",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            },
+            "Apple",
+            "Cherry"
+          ],
+          "rects": [
+            {
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 2.0
+            },
+            {
+              "fill_color": [
+                0.858824,
+                0.917647,
+                0.996078,
+                1.0
+              ],
+              "min_w": 180.0,
+              "min_h": 30.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "checkbox-checked-accent-render",
+      "component": "checkbox",
+      "widget": "checkbox",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "label": "Email me",
+        "checked": true
+      },
+      "css": "#field { width: 140px; height: 24px; color: #0f172a; --checkbox-size: 20; --checkbox-border: #1d4ed8; --accent-color: #2563eb; --checkbox-checkmark: #ffffff; }",
+      "required_features": [
+        "checkbox",
+        "accent-color",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "Email me",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "stroke_color": [
+                0.113725,
+                0.305882,
+                0.847059,
+                1.0
+              ],
+              "stroke_width": 2.0,
+              "min_w": 20.0,
+              "min_h": 20.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "switch-checked-accent-render",
+      "component": "switch",
+      "widget": "switch",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "label": "Airplane mode",
+        "checked": true
+      },
+      "css": "#field { width: 180px; height: 28px; color: #0f172a; --switch-width: 44; --switch-height: 24; --accent-color: #22c55e; --switch-thumb: #ffffff; }",
+      "required_features": [
+        "switch",
+        "accent-color",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "Airplane mode",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.133333,
+                0.772549,
+                0.368627,
+                1.0
+              ],
+              "min_w": 44.0,
+              "min_h": 24.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "radio-checked-accent-render",
+      "component": "radio-group",
+      "widget": "radio",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "label": "Default",
+        "value": "default",
+        "group": "density",
+        "checked": true
+      },
+      "css": "#field { width: 140px; height: 24px; color: #0f172a; --radio-size: 20; --radio-border: #1d4ed8; --radio-dot: #ffffff; --accent-color: #2563eb; }",
+      "required_features": [
+        "radio",
+        "accent-color",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "texts": [
+            {
+              "text": "Default",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "circles": [
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "stroke_color": [
+                0.113725,
+                0.305882,
+                0.847059,
+                1.0
+              ],
+              "stroke_width": 2.0,
+              "min_radius": 10.0,
+              "max_radius": 10.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_radius": 5.0,
+              "max_radius": 5.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "toggle-group-selected-render",
+      "component": "toggle-group",
+      "widget": "toggle-group",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "options": [
+          {
+            "id": "left",
+            "label": "Left"
+          },
+          {
+            "id": "center",
+            "label": "Center"
+          },
+          {
+            "id": "right",
+            "label": "Right"
+          }
+        ],
+        "selected_index": 1
+      },
+      "css": "#field { width: 240px; height: 32px; --toggle-gap: 4; --toggle-radius: 6; --toggle-bg: #ffffff; --toggle-bg-active: #0f172a; --toggle-text: #64748b; --toggle-text-active: #f8fafc; --toggle-border: #cbd5e1; }",
+      "required_features": [
+        "toggle-group",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "Left",
+              "color": [
+                0.392157,
+                0.454902,
+                0.545098,
+                1.0
+              ]
+            },
+            {
+              "text": "Center",
+              "color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ]
+            },
+            {
+              "text": "Right",
+              "color": [
+                0.392157,
+                0.454902,
+                0.545098,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 70.0,
+              "min_h": 32.0
+            },
+            {
+              "fill_color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ],
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 70.0,
+              "min_h": 32.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "breadcrumb-current-item-render",
+      "component": "breadcrumb",
+      "widget": "breadcrumb",
+      "tag": "nav",
+      "id": "field",
+      "widget_props": {
+        "separator": ">",
+        "items": [
+          {
+            "id": "docs",
+            "label": "Docs"
+          },
+          {
+            "id": "components",
+            "label": "Components"
+          },
+          {
+            "id": "dialog",
+            "label": "Dialog"
+          }
+        ]
+      },
+      "css": "#field { width: 240px; height: 24px; font-size: 14px; --breadcrumb-color: #64748b; --breadcrumb-color-active: #0f172a; --breadcrumb-separator-color: #94a3b8; }",
+      "required_features": [
+        "breadcrumb",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "texts": [
+            {
+              "text": "Docs",
+              "color": [
+                0.392157,
+                0.454902,
+                0.545098,
+                1.0
+              ]
+            },
+            {
+              "text": "Components",
+              "color": [
+                0.392157,
+                0.454902,
+                0.545098,
+                1.0
+              ]
+            },
+            {
+              "text": "Dialog",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            },
+            {
+              "text": ">",
+              "color": [
+                0.580392,
+                0.639216,
+                0.721569,
+                1.0
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "tooltip-delayed-open-render",
+      "component": "tooltip",
+      "widget": "tooltip",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "text": "Helpful hint",
+        "position": "bottom",
+        "show": true
+      },
+      "update_time_ms": [
+        600
+      ],
+      "css": "#field { width: 160px; height: 36px; --tooltip-bg: rgba(15, 23, 42, 0.9); --tooltip-text: #f8fafc; }",
+      "required_features": [
+        "overlay",
+        "tooltip",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            "Helpful hint"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                0.9
+              ],
+              "min_w": 120.0,
+              "min_h": 30.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pagination-current-page-render",
+      "component": "pagination",
+      "widget": "pagination",
+      "tag": "nav",
+      "id": "field",
+      "widget_props": {
+        "total_pages": 5,
+        "current_page": 3,
+        "visible_pages": 5,
+        "show_prev_next": true
+      },
+      "css": "#field { width: 260px; height: 32px; font-size: 14px; --pagination-bg: #ffffff; --pagination-bg-active: #0f172a; --pagination-text: #374151; --pagination-text-active: #ffffff; --pagination-border: #d1d5db; }",
+      "required_features": [
+        "pagination",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 7,
+          "texts": [
+            {
+              "text": "3",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "text": "<",
+              "color": [
+                0.215686,
+                0.254902,
+                0.317647,
+                1.0
+              ]
+            },
+            {
+              "text": ">",
+              "color": [
+                0.215686,
+                0.254902,
+                0.317647,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.819608,
+                0.835294,
+                0.858824,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 32.0,
+              "min_h": 32.0
+            },
+            {
+              "fill_color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ],
+              "stroke_color": [
+                0.819608,
+                0.835294,
+                0.858824,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 32.0,
+              "min_h": 32.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "accordion-open-content-render",
+      "component": "accordion",
+      "widget": "accordion",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "sections": [
+          {
+            "title": "General",
+            "id": "general",
+            "content_height": 100.0
+          },
+          {
+            "title": "Advanced",
+            "id": "advanced",
+            "content_height": 100.0
+          }
+        ],
+        "expanded_id": "general"
+      },
+      "update_time_ms": [
+        100
+      ],
+      "css": "#field { width: 220px; height: 160px; --accordion-bg: #ffffff; --accordion-border: #e2e8f0; --accordion-text: #0f172a; }",
+      "required_features": [
+        "accordion",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "General",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            },
+            "Advanced"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 44.0
+            },
+            {
+              "fill_color": [
+                0.98,
+                0.98,
+                0.98,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 50.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "modal-open-dialog-render",
+      "component": "dialog",
+      "widget": "modal",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Preferences",
+        "open": true,
+        "show_close_button": true
+      },
+      "update_time_ms": [
+        100
+      ],
+      "css": "#field { width: 320px; height: 200px; --modal-bg: #f8fafc; --modal-text: #0f172a; --modal-width: 220px; --modal-height: 120px; }",
+      "required_features": [
+        "overlay",
+        "dialog",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "Preferences",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                0.8
+              ],
+              "min_size": 16.0
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.0,
+                0.0,
+                0.0,
+                0.4
+              ],
+              "min_w": 320.0,
+              "min_h": 200.0
+            },
+            {
+              "fill_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                0.8
+              ],
+              "min_w": 200.0,
+              "min_h": 110.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "dialog-confirm-buttons-render",
+      "component": "alert-dialog",
+      "widget": "dialog",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Delete project",
+        "message": "This action cannot be undone.",
+        "type": "confirm",
+        "width": 280.0,
+        "height": 160.0,
+        "open": true
+      },
+      "css": "#field { width: 320px; height: 200px; font-size: 13px; }",
+      "required_features": [
+        "dialog",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 7,
+          "texts": [
+            {
+              "text": "Delete project",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_size": 16.0
+            },
+            {
+              "text": "This action cannot be undone.",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "Cancel",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "OK",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.0,
+                0.0,
+                0.0,
+                0.4
+              ],
+              "min_w": 400.0,
+              "min_h": 200.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 280.0,
+              "min_h": 160.0
+            },
+            {
+              "fill_color": [
+                0.3,
+                0.5,
+                0.9,
+                1.0
+              ],
+              "min_w": 280.0,
+              "min_h": 48.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.9,
+                0.9,
+                1.0
+              ],
+              "min_w": 70.0,
+              "min_h": 36.0
+            },
+            {
+              "fill_color": [
+                0.3,
+                0.5,
+                0.9,
+                1.0
+              ],
+              "min_w": 45.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "dialog-warning-header-render",
+      "component": "dialog",
+      "widget": "dialog",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Unsaved changes",
+        "message": "Leave without saving your edits?",
+        "type": "warning",
+        "width": 280.0,
+        "height": 160.0,
+        "open": true
+      },
+      "css": "#field { width: 320px; height: 200px; font-size: 13px; }",
+      "required_features": [
+        "dialog",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 7,
+          "texts": [
+            {
+              "text": "Unsaved changes",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_size": 16.0
+            },
+            {
+              "text": "Leave without saving your edits?",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "OK",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.0,
+                0.0,
+                0.0,
+                0.4
+              ],
+              "min_w": 400.0,
+              "min_h": 200.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 280.0,
+              "min_h": 160.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.7,
+                0.2,
+                1.0
+              ],
+              "min_w": 280.0,
+              "min_h": 48.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.7,
+                0.2,
+                1.0
+              ],
+              "min_w": 45.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "alertdialog-error-destructive-render",
+      "component": "alert-dialog",
+      "widget": "dialog",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Delete project",
+        "message": "This action cannot be undone.",
+        "type": "error",
+        "alert_role": true,
+        "width": 280.0,
+        "height": 160.0,
+        "open": true
+      },
+      "css": "#field { width: 320px; height: 200px; font-size: 13px; }",
+      "required_features": [
+        "alert-dialog",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 7,
+          "texts": [
+            {
+              "text": "Delete project",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_size": 16.0
+            },
+            {
+              "text": "This action cannot be undone.",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "OK",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.0,
+                0.0,
+                0.0,
+                0.4
+              ],
+              "min_w": 400.0,
+              "min_h": 200.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 280.0,
+              "min_h": 160.0
+            },
+            {
+              "fill_color": [
+                0.85,
+                0.25,
+                0.25,
+                1.0
+              ],
+              "min_w": 280.0,
+              "min_h": 48.0
+            },
+            {
+              "fill_color": [
+                0.85,
+                0.25,
+                0.25,
+                1.0
+              ],
+              "min_w": 45.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "dialog-custom-button-set-render",
+      "component": "dialog",
+      "widget": "dialog",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Publish changes",
+        "message": "Choose how to handle the pending edits.",
+        "type": "custom",
+        "width": 320.0,
+        "height": 176.0,
+        "buttons": [
+          {
+            "id": "discard",
+            "label": "Discard",
+            "primary": false
+          },
+          {
+            "id": "cancel",
+            "label": "Cancel",
+            "primary": false
+          },
+          {
+            "id": "save",
+            "label": "Save",
+            "primary": true
+          }
+        ],
+        "open": true
+      },
+      "css": "#field { width: 360px; height: 220px; font-size: 13px; }",
+      "required_features": [
+        "dialog",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 9,
+          "texts": [
+            {
+              "text": "Publish changes",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_size": 16.0
+            },
+            {
+              "text": "Choose how to handle the pending edits.",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "Discard",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "Cancel",
+              "color": [
+                0.2,
+                0.2,
+                0.2,
+                1.0
+              ]
+            },
+            {
+              "text": "Save",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "text": "✕",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                0.8
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.0,
+                0.0,
+                0.0,
+                0.4
+              ],
+              "min_w": 400.0,
+              "min_h": 200.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 320.0,
+              "min_h": 176.0
+            },
+            {
+              "fill_color": [
+                0.4,
+                0.5,
+                0.6,
+                1.0
+              ],
+              "min_w": 320.0,
+              "min_h": 48.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.9,
+                0.9,
+                1.0
+              ],
+              "min_w": 70.0,
+              "min_h": 36.0
+            },
+            {
+              "fill_color": [
+                0.4,
+                0.5,
+                0.6,
+                1.0
+              ],
+              "min_w": 50.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "sheet-right-panel-render",
+      "component": "sheet",
+      "widget": "modal",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Settings",
+        "open": true,
+        "side": "right",
+        "show_close_button": true
+      },
+      "update_time_ms": [
+        100
+      ],
+      "css": "#field { width: 320px; height: 200px; --modal-bg: #f8fafc; --modal-text: #0f172a; --modal-width: 180px; --modal-height: 200px; }",
+      "required_features": [
+        "sheet",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "Settings",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                0.8
+              ],
+              "min_size": 16.0
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.0,
+                0.0,
+                0.0,
+                0.4
+              ],
+              "min_w": 320.0,
+              "min_h": 200.0
+            },
+            {
+              "fill_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                0.8
+              ],
+              "min_x": 140.0,
+              "max_x": 150.0,
+              "min_w": 170.0,
+              "min_h": 190.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "toast-error-live-region-render",
+      "component": "toast",
+      "widget": "toast",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "message": "Save failed",
+        "type": "error",
+        "show": true,
+        "duration": 0
+      },
+      "update_time_ms": [
+        200
+      ],
+      "css": "#field { width: 220px; height: 48px; --toast-bg: #7f1d1d; --toast-text: #fef2f2; }",
+      "required_features": [
+        "toast",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "Save failed",
+              "color": [
+                0.996078,
+                0.94902,
+                0.94902,
+                1.0
+              ],
+              "min_size": 14.0
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.498039,
+                0.113725,
+                0.113725,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 48.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "tabs-active-indicator-render",
+      "component": "tabs",
+      "widget": "tabs",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "tabs": [
+          {
+            "label": "Account",
+            "id": "tab-account"
+          },
+          {
+            "label": "Password",
+            "id": "tab-password"
+          }
+        ],
+        "active_id": "tab-password"
+      },
+      "update_time_ms": [
+        80
+      ],
+      "css": "#field { width: 240px; height: 40px; --tabs-bg: #f8fafc; --tabs-text: #64748b; --tabs-active-text: #0f172a; --tabs-indicator: #3b82f6; }",
+      "required_features": [
+        "tabs",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "Account",
+              "color": [
+                0.392157,
+                0.454902,
+                0.545098,
+                1.0
+              ]
+            },
+            {
+              "text": "Password",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ],
+              "min_w": 240.0,
+              "min_h": 40.0
+            },
+            {
+              "fill_color": [
+                0.231373,
+                0.509804,
+                0.964706,
+                1.0
+              ],
+              "min_w": 40.0,
+              "min_h": 3.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "table-selected-row-render",
+      "component": "table",
+      "widget": "table",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "columns": [
+          {
+            "header": "Name",
+            "width": 120.0
+          },
+          {
+            "header": "Role",
+            "width": 100.0
+          }
+        ],
+        "rows": [
+          [
+            "Alice",
+            "Admin"
+          ],
+          [
+            "Bob",
+            "Editor"
+          ]
+        ],
+        "selected_row": 1
+      },
+      "css": "#field { width: 220px; height: 100px; --table-bg: #0f172a; --table-border: #475569; --table-header-bg: #1e293b; --table-header-text: #94a3b8; --table-text: #f8fafc; --table-selected: rgba(59, 130, 246, 0.3); }",
+      "required_features": [
+        "table",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 4,
+          "texts": [
+            "NAME",
+            "ROLE",
+            {
+              "text": "Bob",
+              "color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ]
+            },
+            "Editor"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 100.0
+            },
+            {
+              "fill_color": [
+                0.117647,
+                0.160784,
+                0.231373,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 32.0
+            },
+            {
+              "fill_color": [
+                0.231373,
+                0.509804,
+                0.964706,
+                0.3
+              ],
+              "min_w": 220.0,
+              "min_h": 28.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "table-header-divider-paths-render",
+      "component": "table",
+      "widget": "table",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "columns": [
+          {
+            "header": "Name",
+            "width": 120.0
+          },
+          {
+            "header": "Role",
+            "width": 100.0
+          }
+        ],
+        "rows": [
+          [
+            "Alice",
+            "Admin"
+          ]
+        ]
+      },
+      "css": "#field { width: 220px; height: 72px; --table-bg: #0f172a; --table-border: #475569; --table-header-bg: #1e293b; --table-header-text: #94a3b8; --table-text: #f8fafc; --table-divider: rgba(71, 85, 105, 0.4); }",
+      "required_features": [
+        "table",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_path_count": 2,
+          "paths": [
+            {
+              "path": "M 120 12 L 120 32",
+              "stroke_color": [
+                0.278431,
+                0.333333,
+                0.411765,
+                0.4
+              ],
+              "stroke_width": 1.0
+            },
+            {
+              "path": "M 0 44 L 220 44",
+              "stroke_color": [
+                0.278431,
+                0.333333,
+                0.411765,
+                0.4
+              ],
+              "stroke_width": 1.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "tree-selected-expanded-render",
+      "component": "tree",
+      "widget": "tree",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "nodes": [
+          {
+            "id": "root",
+            "label": "Settings"
+          },
+          {
+            "id": "profile",
+            "label": "Profile",
+            "parent": "root"
+          },
+          {
+            "id": "security",
+            "label": "Security",
+            "parent": "root"
+          }
+        ],
+        "expanded_ids": [
+          "root"
+        ],
+        "selected_id": "security"
+      },
+      "css": "#field { width: 220px; height: 96px; --tree-bg: #ffffff; --tree-text: #0f172a; --tree-selected: #f1f5f9; --tree-hover: #f8fafc; }",
+      "required_features": [
+        "tree",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "Settings",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            },
+            "Profile",
+            "Security"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 96.0
+            },
+            {
+              "fill_color": [
+                0.945098,
+                0.960784,
+                0.976471,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 24.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "sidebar-selected-navigation-render",
+      "component": "sidebar",
+      "widget": "sidebar",
+      "tag": "nav",
+      "id": "field",
+      "widget_props": {
+        "sections": [
+          {
+            "title": "Main",
+            "items": [
+              {
+                "id": "dashboard",
+                "icon": "H",
+                "label": "Dashboard",
+                "badge": "3"
+              },
+              {
+                "id": "settings",
+                "icon": "S",
+                "label": "Settings"
+              }
+            ]
+          }
+        ],
+        "selected_id": "dashboard"
+      },
+      "css": "#field { width: 240px; height: 180px; }",
+      "required_features": [
+        "sidebar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 4,
+          "texts": [
+            {
+              "text": "Main",
+              "color": [
+                0.5,
+                0.5,
+                0.55,
+                1.0
+              ]
+            },
+            {
+              "text": "Dashboard",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "text": "Settings",
+              "color": [
+                0.85,
+                0.85,
+                0.88,
+                1.0
+              ]
+            },
+            "3"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.12,
+                0.14,
+                0.18,
+                1.0
+              ],
+              "min_w": 240.0,
+              "min_h": 180.0
+            },
+            {
+              "fill_color": [
+                0.25,
+                0.45,
+                0.85,
+                1.0
+              ],
+              "min_w": 232.0,
+              "min_h": 40.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.3,
+                0.3,
+                1.0
+              ],
+              "min_w": 20.0,
+              "min_h": 20.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "context-menu-open-overlay-render",
+      "component": "context-menu",
+      "widget": "menu",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "show": true,
+        "x": 24.0,
+        "y": 28.0,
+        "items": [
+          {
+            "id": "copy",
+            "label": "Copy"
+          },
+          {
+            "id": "paste",
+            "label": "Paste"
+          }
+        ]
+      },
+      "css": "#field { width: 200px; height: 36px; font-size: 13px; --menu-bg: #ffffff; --menu-border: #e2e8f0; --menu-item-height: 32; --menu-padding: 4; }",
+      "required_features": [
+        "context-menu",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "Copy",
+              "color": [
+                0.1,
+                0.1,
+                0.1,
+                1.0
+              ]
+            },
+            "Paste"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 120.0,
+              "min_h": 64.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "input-placeholder-caret-render",
+      "component": "input",
+      "widget": "input",
+      "tag": "input",
+      "id": "field",
+      "widget_props": {
+        "placeholder": "Search"
+      },
+      "states": [
+        "focus"
+      ],
+      "css": "#field { width: 180px; height: 36px; --input-bg: #ffffff; --input-border: #cbd5e1; --input-border-focus: #cbd5e1; --input-placeholder: #94a3b8; --caret-color: #2563eb; }",
+      "required_features": [
+        "input",
+        "placeholder",
+        "caret",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "Search",
+              "color": [
+                0.580392,
+                0.639216,
+                0.721569,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 180.0,
+              "min_h": 36.0
+            },
+            {
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.5
+            },
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_w": 1.0,
+              "min_h": 14.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "textarea-caret-render",
+      "component": "textarea",
+      "widget": "textarea",
+      "tag": "textarea",
+      "id": "field",
+      "widget_props": {
+        "text": "A",
+        "cursor_position": 1
+      },
+      "states": [
+        "focus"
+      ],
+      "css": "#field { width: 220px; height: 80px; --textarea-bg: #ffffff; --textarea-border: #cbd5e1; --caret-color: #2563eb; color: #0f172a; }",
+      "required_features": [
+        "textarea",
+        "caret",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            {
+              "text": "A",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 80.0
+            },
+            {
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 2.0
+            },
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_w": 2.0,
+              "min_h": 16.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "progress-loading-fill-render",
+      "component": "progress",
+      "widget": "progress",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "value": 62.0
+      },
+      "css": "#field { width: 200px; height: 20px; --progress-height: 8; --progress-bg: #e2e8f0; --progress-fill: #2563eb; --progress-border-radius: 999; }",
+      "required_features": [
+        "progress",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "min_w": 200.0,
+              "min_h": 8.0
+            },
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_w": 124.0,
+              "min_h": 8.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "progress-indeterminate-segment-render",
+      "component": "progress",
+      "widget": "progress",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "value": 62.0,
+        "indeterminate": true
+      },
+      "update_time_ms": [
+        250
+      ],
+      "css": "#field { width: 200px; height: 20px; --progress-height: 8; --progress-bg: #e2e8f0; --progress-fill: #2563eb; --progress-border-radius: 999; }",
+      "required_features": [
+        "progress",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "min_w": 200.0,
+              "min_h": 8.0
+            },
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_x": 100.0,
+              "min_w": 60.0,
+              "min_h": 8.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "spinner-ring-render",
+      "component": "spinner",
+      "widget": "spinner",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "variant": "ring"
+      },
+      "update_time_ms": [
+        250
+      ],
+      "css": "#field { width: 24px; height: 24px; --spinner-color: #2563eb; --spinner-track: #e2e8f0; --spinner-stroke: 3; }",
+      "required_features": [
+        "spinner",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_path_count": 1,
+          "circles": [
+            {
+              "stroke_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "stroke_width": 3.0,
+              "min_radius": 9.0,
+              "max_radius": 9.0
+            }
+          ],
+          "paths": [
+            {
+              "path_contains": "M",
+              "stroke_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "stroke_width": 3.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "spinner-dots-render",
+      "component": "spinner",
+      "widget": "spinner",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "variant": "dots"
+      },
+      "update_time_ms": [
+        250
+      ],
+      "css": "#field { width: 24px; height: 24px; --spinner-color: #2563eb; }",
+      "required_features": [
+        "spinner",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_circle_count": 8,
+          "circles": [
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                0.875
+              ],
+              "min_radius": 1.4,
+              "max_radius": 1.5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "spinner-bars-render",
+      "component": "spinner",
+      "widget": "spinner",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "variant": "bars"
+      },
+      "update_time_ms": [
+        250
+      ],
+      "css": "#field { width: 24px; height: 24px; --spinner-color: #2563eb; }",
+      "required_features": [
+        "spinner",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "rects": [
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_h": 24.0
+            },
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_h": 11.0,
+              "max_y": 6.5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "spinner-stopped-no-render",
+      "component": "spinner",
+      "widget": "spinner",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "variant": "ring",
+        "spinning": false
+      },
+      "css": "#field { width: 24px; height: 24px; --spinner-color: #2563eb; --spinner-track: #e2e8f0; --spinner-stroke: 3; }",
+      "required_features": [
+        "spinner",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "max_rect_count": 0,
+          "max_circle_count": 0,
+          "max_path_count": 0,
+          "max_text_count": 0
+        }
+      }
+    },
+    {
+      "name": "group-button-default-render",
+      "component": "group-button",
+      "widget": "group-button",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "text": "Save"
+      },
+      "css": "#field { width: 80px; height: 36px; }",
+      "required_features": [
+        "group-button",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "Save",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.23,
+                0.51,
+                0.97,
+                1.0
+              ],
+              "min_w": 80.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "group-button-hover-render",
+      "component": "group-button",
+      "widget": "group-button",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "text": "Save"
+      },
+      "events": [
+        {
+          "type": "mouse_move",
+          "x": 40.0,
+          "y": 18.0
+        }
+      ],
+      "css": "#field { width: 80px; height: 36px; }",
+      "required_features": [
+        "group-button",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "Save",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.33,
+                0.56,
+                0.92,
+                1.0
+              ],
+              "min_w": 80.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "group-button-active-render",
+      "component": "group-button",
+      "widget": "group-button",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "text": "Save"
+      },
+      "events": [
+        {
+          "type": "mouse_move",
+          "x": 40.0,
+          "y": 18.0
+        },
+        {
+          "type": "mouse_down",
+          "x": 40.0,
+          "y": 18.0
+        }
+      ],
+      "css": "#field { width: 80px; height: 36px; }",
+      "required_features": [
+        "group-button",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "Save",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.18,
+                0.41,
+                0.78,
+                1.0
+              ],
+              "min_w": 80.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "group-button-mouseup-returns-hover-render",
+      "component": "group-button",
+      "widget": "group-button",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "text": "Save"
+      },
+      "events": [
+        {
+          "type": "mouse_move",
+          "x": 40.0,
+          "y": 18.0
+        },
+        {
+          "type": "mouse_down",
+          "x": 40.0,
+          "y": 18.0
+        },
+        {
+          "type": "mouse_up",
+          "x": 40.0,
+          "y": 18.0
+        }
+      ],
+      "css": "#field { width: 80px; height: 36px; }",
+      "required_features": [
+        "group-button",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "Save",
+              "color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.33,
+                0.56,
+                0.92,
+                1.0
+              ],
+              "min_w": 80.0,
+              "min_h": 36.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "badge-pill-render",
+      "component": "badge",
+      "widget": "badge",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "text": "NEW"
+      },
+      "css": "#field { width: 52px; height: 24px; font-size: 11px; --badge-bg: #0f172a; --badge-text: #f8fafc; }",
+      "required_features": [
+        "badge",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "NEW",
+              "color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ],
+              "min_w": 52.0,
+              "min_h": 24.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "badge-dot-render",
+      "component": "badge",
+      "widget": "badge",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "dot": true
+      },
+      "css": "#field { width: 12px; height: 12px; --badge-bg: #ef4444; }",
+      "required_features": [
+        "badge",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "rects": [
+            {
+              "fill_color": [
+                0.937255,
+                0.266667,
+                0.266667,
+                1.0
+              ],
+              "min_w": 12.0,
+              "min_h": 12.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "card-header-subtitle-render",
+      "component": "card",
+      "widget": "card",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Analytics",
+        "subtitle": "Visitors this week",
+        "has_header": true,
+        "header_height": 56.0
+      },
+      "css": "#field { width: 220px; height: 120px; font-size: 14px; color: #0f172a; --card-bg: #ffffff; --card-border: #e2e8f0; --card-border-width: 1; --card-radius: 12; --header-bg: #f8fafc; --subtitle-color: #64748b; }",
+      "required_features": [
+        "card",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "Analytics",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            },
+            {
+              "text": "Visitors this week",
+              "color": [
+                0.392157,
+                0.454902,
+                0.545098,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 220.0,
+              "min_h": 120.0
+            },
+            {
+              "fill_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ],
+              "min_w": 220.0,
+              "min_h": 56.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "card-footer-panel-render",
+      "component": "card",
+      "widget": "card",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "title": "Billing",
+        "has_footer": true,
+        "footer_height": 28.0
+      },
+      "css": "#field { width: 220px; height: 120px; font-size: 14px; color: #0f172a; --card-bg: #ffffff; --card-border: #e2e8f0; --card-border-width: 1; --card-radius: 12; --footer-bg: #f8fafc; }",
+      "required_features": [
+        "card",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            {
+              "text": "Billing",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 220.0,
+              "min_h": 120.0
+            },
+            {
+              "fill_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ],
+              "min_y": 92.0,
+              "max_y": 92.0,
+              "min_w": 220.0,
+              "min_h": 28.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "separator-labeled-horizontal-render",
+      "component": "separator",
+      "widget": "divider",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "orientation": "horizontal",
+        "label": "OR"
+      },
+      "css": "#field { width: 220px; height: 32px; font-size: 12px; --divider-color: #cbd5e1; --divider-thickness: 1; }",
+      "required_features": [
+        "separator",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_text_count": 1,
+          "min_path_count": 2,
+          "texts": [
+            {
+              "text": "OR",
+              "color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ]
+            }
+          ],
+          "paths": [
+            {
+              "path_contains": "M 0 16 L",
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.0
+            },
+            {
+              "path_contains": "L 220 16",
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "separator-vertical-render",
+      "component": "separator",
+      "widget": "divider",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "orientation": "vertical"
+      },
+      "css": "#field { width: 12px; height: 80px; --divider-color: #cbd5e1; --divider-thickness: 1; }",
+      "required_features": [
+        "separator",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_path_count": 1,
+          "paths": [
+            {
+              "path": "M 6 0 L 6 80",
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "slider-thumb-and-track-render",
+      "component": "slider",
+      "widget": "slider",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "min": 0.0,
+        "max": 100.0,
+        "value": 42.0,
+        "step": 1.0
+      },
+      "css": "#field { width: 200px; height: 24px; --track-height: 4; --track-bg: #e2e8f0; --track-fill: #2563eb; --thumb-size: 20; --thumb-bg: #ffffff; --thumb-border: #94a3b8; }",
+      "required_features": [
+        "slider",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "min_w": 200.0,
+              "min_h": 4.0
+            },
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                1.0
+              ],
+              "min_w": 80.0,
+              "min_h": 4.0
+            }
+          ],
+          "circles": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_color": [
+                0.580392,
+                0.639216,
+                0.721569,
+                1.0
+              ],
+              "stroke_width": 2.0,
+              "min_radius": 10.0,
+              "max_radius": 10.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "avatar-fallback-initials-render",
+      "component": "avatar",
+      "widget": "avatar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "name": "Alice Smith"
+      },
+      "css": "#field { width: 48px; height: 48px; font-size: 12px; --avatar-bg: #e2e8f0; --avatar-text: #0f172a; }",
+      "required_features": [
+        "avatar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "AS",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "min_w": 48.0,
+              "min_h": 48.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "avatar-online-status-render",
+      "component": "avatar",
+      "widget": "avatar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "name": "Alice Smith",
+        "status": "online"
+      },
+      "css": "#field { width: 48px; height: 48px; font-size: 12px; --avatar-bg: #e2e8f0; --avatar-text: #0f172a; --status-online: #22c55e; }",
+      "required_features": [
+        "avatar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            {
+              "text": "AS",
+              "color": [
+                0.058824,
+                0.090196,
+                0.164706,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "min_w": 48.0,
+              "min_h": 48.0
+            }
+          ],
+          "circles": [
+            {
+              "fill_color": [
+                0.133333,
+                0.772549,
+                0.368627,
+                1.0
+              ],
+              "min_radius": 5.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "calendar-selected-day-render",
+      "component": "calendar",
+      "widget": "calendar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "selected": {
+          "year": 2024,
+          "month": 4,
+          "day": 22
+        },
+        "view": {
+          "year": 2024,
+          "month": 4,
+          "day": 1
+        }
+      },
+      "css": "#field { width: 280px; height: 280px; --calendar-bg: #ffffff; --calendar-selected: #3b82f6; }",
+      "required_features": [
+        "calendar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            "April 2024",
+            "22"
+          ],
+          "circles": [
+            {
+              "fill_color": [
+                0.231373,
+                0.509804,
+                0.964706,
+                1.0
+              ],
+              "min_radius": 10.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "datepicker-open-calendar-render",
+      "component": "date-picker",
+      "widget": "datepicker",
+      "tag": "button",
+      "id": "field",
+      "widget_props": {
+        "date": {
+          "year": 2024,
+          "month": 4,
+          "day": 22
+        },
+        "open": true
+      },
+      "css": "#field { width: 180px; height: 36px; }",
+      "required_features": [
+        "datepicker",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            "2024-04-22",
+            "📅",
+            "April 2024"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 180.0,
+              "min_h": 36.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 280.0,
+              "min_h": 280.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "scroll-area-vertical-scrollbar-render",
+      "component": "scroll-area",
+      "widget": "scrollview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "v_policy": "auto"
+      },
+      "css": "#field { width: 120px; height: 80px; --scrollbar-width: 6; --scrollbar-bg: #111111; --scrollbar-thumb: #336699; } #field-content { position: relative; width: 120px; height: 160px; }",
+      "required_features": [
+        "scroll-area",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.066667,
+                0.066667,
+                0.066667,
+                1.0
+              ],
+              "min_w": 6.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.2,
+                0.4,
+                0.6,
+                1.0
+              ],
+              "min_w": 6.0,
+              "min_h": 20.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "scroll-area-dragged-scrollbar-thumb-render",
+      "component": "scroll-area",
+      "widget": "scrollview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "v_policy": "auto"
+      },
+      "events": [
+        {
+          "type": "mouse_down",
+          "x": 117.0,
+          "y": 10.0
+        },
+        {
+          "type": "mouse_move",
+          "x": 117.0,
+          "y": 34.0
+        }
+      ],
+      "css": "#field { width: 120px; height: 80px; --scrollbar-width: 6; --scrollbar-bg: #111111; --scrollbar-thumb: #336699; --scrollbar-thumb-hover: #6699cc; } #field-content { position: relative; width: 120px; height: 160px; }",
+      "required_features": [
+        "scroll-area",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.066667,
+                0.066667,
+                0.066667,
+                1.0
+              ],
+              "min_x": 114.0,
+              "max_x": 116.5,
+              "min_w": 6.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.4,
+                0.6,
+                0.8,
+                1.0
+              ],
+              "min_x": 114.0,
+              "max_x": 116.5,
+              "min_y": 23.0,
+              "max_y": 25.5,
+              "min_w": 6.0,
+              "min_h": 40.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "scroll-area-horizontal-scrollbar-render",
+      "component": "scroll-area",
+      "widget": "scrollview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "h_policy": "auto",
+        "v_policy": "never"
+      },
+      "css": "#field { width: 120px; height: 80px; --scrollbar-width: 6; --scrollbar-bg: #111111; --scrollbar-thumb: #336699; } #field-content { position: relative; width: 240px; height: 80px; }",
+      "required_features": [
+        "scroll-area",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.066667,
+                0.066667,
+                0.066667,
+                1.0
+              ],
+              "min_y": 74.0,
+              "max_y": 75.5,
+              "min_w": 120.0,
+              "min_h": 6.0
+            },
+            {
+              "fill_color": [
+                0.2,
+                0.4,
+                0.6,
+                1.0
+              ],
+              "min_x": 0.0,
+              "max_x": 1.0,
+              "min_y": 74.0,
+              "max_y": 75.5,
+              "min_w": 60.0,
+              "min_h": 6.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "scroll-area-horizontal-dragged-thumb-render",
+      "component": "scroll-area",
+      "widget": "scrollview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "h_policy": "auto",
+        "v_policy": "never"
+      },
+      "events": [
+        {
+          "type": "mouse_down",
+          "x": 10.0,
+          "y": 77.0
+        },
+        {
+          "type": "mouse_move",
+          "x": 34.0,
+          "y": 77.0
+        }
+      ],
+      "css": "#field { width: 120px; height: 80px; --scrollbar-width: 6; --scrollbar-bg: #111111; --scrollbar-thumb: #336699; --scrollbar-thumb-hover: #6699cc; } #field-content { position: relative; width: 240px; height: 80px; }",
+      "required_features": [
+        "scroll-area",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "rects": [
+            {
+              "fill_color": [
+                0.066667,
+                0.066667,
+                0.066667,
+                1.0
+              ],
+              "min_y": 74.0,
+              "max_y": 75.5,
+              "min_w": 120.0,
+              "min_h": 6.0
+            },
+            {
+              "fill_color": [
+                0.4,
+                0.6,
+                0.8,
+                1.0
+              ],
+              "min_x": 23.0,
+              "max_x": 25.5,
+              "min_y": 74.0,
+              "max_y": 75.5,
+              "min_w": 60.0,
+              "min_h": 6.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification-success-overlay-render",
+      "component": "notification",
+      "widget": "notification",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "position": "top-right",
+        "notifications": [
+          {
+            "title": "Saved",
+            "message": "File uploaded",
+            "type": "success",
+            "duration": 5000.0
+          }
+        ]
+      },
+      "update_time_ms": [
+        250.0
+      ],
+      "css": "#field { width: 8px; height: 8px; }",
+      "required_features": [
+        "notification",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            "✓",
+            "Saved",
+            "File uploaded"
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification-error-overlay-render",
+      "component": "notification",
+      "widget": "notification",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "position": "top-right",
+        "notifications": [
+          {
+            "title": "Failed",
+            "message": "Network error",
+            "type": "error",
+            "duration": 5000.0
+          }
+        ]
+      },
+      "update_time_ms": [
+        250.0
+      ],
+      "css": "#field { width: 8px; height: 8px; }",
+      "required_features": [
+        "notification",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            "✕",
+            "Failed",
+            "Network error"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                0.93,
+                0.93,
+                1.0
+              ],
+              "min_w": 320.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.85,
+                0.25,
+                0.25,
+                1.0
+              ],
+              "min_w": 4.0,
+              "min_h": 80.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification-bottom-left-position-render",
+      "component": "notification",
+      "widget": "notification",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "position": "bottom-left",
+        "notifications": [
+          {
+            "title": "Queued",
+            "message": "Upload scheduled",
+            "type": "info",
+            "duration": 5000.0
+          }
+        ]
+      },
+      "update_time_ms": [
+        250.0
+      ],
+      "css": "#field { width: 8px; height: 8px; }",
+      "required_features": [
+        "notification",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            "ℹ",
+            "Queued",
+            "Upload scheduled"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.95,
+                0.97,
+                1.0,
+                1.0
+              ],
+              "min_x": 16.0,
+              "max_x": 18.5,
+              "min_y": 100.0,
+              "max_y": 106.0,
+              "min_w": 320.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.3,
+                0.5,
+                0.9,
+                1.0
+              ],
+              "min_x": 16.0,
+              "max_x": 18.5,
+              "min_y": 100.0,
+              "max_y": 106.0,
+              "min_w": 4.0,
+              "min_h": 80.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification-top-right-stack-render",
+      "component": "notification",
+      "widget": "notification",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "position": "top-right",
+        "notifications": [
+          {
+            "title": "Saved",
+            "message": "File uploaded",
+            "type": "success",
+            "duration": 5000.0
+          },
+          {
+            "title": "Warning",
+            "message": "Sync delayed",
+            "type": "warning",
+            "duration": 5000.0
+          }
+        ]
+      },
+      "update_time_ms": [
+        250.0
+      ],
+      "css": "#field { width: 8px; height: 8px; }",
+      "required_features": [
+        "notification",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 6,
+          "texts": [
+            "✓",
+            "Saved",
+            "File uploaded",
+            "⚠",
+            "Warning",
+            "Sync delayed"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.92,
+                0.98,
+                0.92,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 16.0,
+              "max_y": 18.5,
+              "min_w": 320.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.2,
+                0.7,
+                0.3,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 16.0,
+              "max_y": 18.5,
+              "min_w": 4.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                0.98,
+                0.9,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 104.0,
+              "max_y": 106.5,
+              "min_w": 320.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.7,
+                0.2,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 104.0,
+              "max_y": 106.5,
+              "min_w": 4.0,
+              "min_h": 80.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification-bottom-right-stack-render",
+      "component": "notification",
+      "widget": "notification",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "position": "bottom-right",
+        "notifications": [
+          {
+            "title": "Saved",
+            "message": "File uploaded",
+            "type": "success",
+            "duration": 5000.0
+          },
+          {
+            "title": "Warning",
+            "message": "Sync delayed",
+            "type": "warning",
+            "duration": 5000.0
+          }
+        ]
+      },
+      "update_time_ms": [
+        250.0
+      ],
+      "css": "#field { width: 8px; height: 8px; }",
+      "required_features": [
+        "notification",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 6,
+          "texts": [
+            "✓",
+            "Saved",
+            "File uploaded",
+            "⚠",
+            "Warning",
+            "Sync delayed"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.92,
+                0.98,
+                0.92,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 104.0,
+              "max_y": 106.5,
+              "min_w": 320.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.2,
+                0.7,
+                0.3,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 104.0,
+              "max_y": 106.5,
+              "min_w": 4.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                1.0,
+                0.98,
+                0.9,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 16.0,
+              "max_y": 18.5,
+              "min_w": 320.0,
+              "min_h": 80.0
+            },
+            {
+              "fill_color": [
+                0.9,
+                0.7,
+                0.2,
+                1.0
+              ],
+              "min_x": 64.0,
+              "max_x": 66.5,
+              "min_y": 16.0,
+              "max_y": 18.5,
+              "min_w": 4.0,
+              "min_h": 80.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "searchbox-open-suggestions-render",
+      "component": "command",
+      "widget": "searchbox",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "placeholder": "Search docs...",
+        "text": "api",
+        "focused": true,
+        "open": true,
+        "suggestions": [
+          {
+            "id": "docs-api",
+            "text": "API Reference"
+          },
+          {
+            "id": "docs-api-client",
+            "text": "API Client"
+          }
+        ]
+      },
+      "css": "#field { width: 260px; height: 36px; }",
+      "required_features": [
+        "command",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 4,
+          "texts": [
+            "🔍",
+            "api",
+            "API Reference",
+            "API Client"
+          ]
+        }
+      }
+    },
+    {
+      "name": "searchbox-typed-text-render",
+      "component": "command",
+      "widget": "searchbox",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "placeholder": "Search docs...",
+        "text": "api"
+      },
+      "css": "#field { width: 260px; height: 36px; }",
+      "required_features": [
+        "command",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 1,
+          "texts": [
+            "🔍",
+            "api"
+          ]
+        }
+      }
+    },
+    {
+      "name": "toolbar-dropdown-overlay-render",
+      "component": "toolbar",
+      "widget": "toolbar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "items": [
+          {
+            "type": "dropdown",
+            "id": "more",
+            "icon": "⚙",
+            "items": [
+              {
+                "id": "more-options",
+                "label": "More Options"
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "toggle",
+            "id": "snap",
+            "icon": "⌖",
+            "toggled": true
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "mouse_down",
+          "x": 10.0,
+          "y": 10.0
+        }
+      ],
+      "css": "#field { width: 180px; height: 40px; }",
+      "required_features": [
+        "toolbar",
+        "overlay",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            "⚙",
+            "▾",
+            "More Options"
+          ]
+        }
+      }
+    },
+    {
+      "name": "toolbar-toggled-and-disabled-render",
+      "component": "toolbar",
+      "widget": "toolbar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "items": [
+          {
+            "type": "toggle",
+            "id": "snap",
+            "icon": "⌖",
+            "toggled": true
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "button",
+            "id": "save",
+            "icon": "S",
+            "enabled": false
+          }
+        ]
+      },
+      "css": "#field { width: 180px; height: 40px; }",
+      "required_features": [
+        "toolbar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 4,
+          "texts": [
+            {
+              "text": "⌖",
+              "color": [
+                0.9,
+                0.9,
+                0.9,
+                1.0
+              ]
+            },
+            {
+              "text": "S",
+              "color": [
+                0.5,
+                0.5,
+                0.5,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.18,
+                0.2,
+                0.24,
+                1.0
+              ],
+              "stroke_color": [
+                0.25,
+                0.27,
+                0.3,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 180.0,
+              "min_h": 40.0
+            },
+            {
+              "fill_color": [
+                0.25,
+                0.35,
+                0.5,
+                1.0
+              ],
+              "min_x": 4.0,
+              "max_x": 6.0,
+              "min_y": 4.0,
+              "max_y": 6.0,
+              "min_w": 32.0,
+              "min_h": 32.0
+            },
+            {
+              "fill_color": [
+                0.3,
+                0.3,
+                0.3,
+                0.5
+              ],
+              "min_x": 47.0,
+              "max_x": 49.0,
+              "min_y": 4.0,
+              "max_y": 6.0,
+              "min_w": 32.0,
+              "min_h": 32.0
+            },
+            {
+              "fill_color": [
+                0.8,
+                0.8,
+                0.8,
+                1.0
+              ],
+              "min_x": 42.0,
+              "max_x": 44.0,
+              "min_y": 6.0,
+              "max_y": 8.0,
+              "min_w": 1.0,
+              "min_h": 28.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "toolbar-hover-button-render",
+      "component": "toolbar",
+      "widget": "toolbar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "items": [
+          {
+            "type": "button",
+            "id": "save",
+            "icon": "S"
+          },
+          {
+            "type": "button",
+            "id": "open",
+            "icon": "O"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "mouse_move",
+          "x": 16.0,
+          "y": 16.0
+        }
+      ],
+      "css": "#field { width: 120px; height: 40px; }",
+      "required_features": [
+        "toolbar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            "S",
+            "O"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.18,
+                0.2,
+                0.24,
+                1.0
+              ],
+              "stroke_color": [
+                0.25,
+                0.27,
+                0.3,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 120.0,
+              "min_h": 40.0
+            },
+            {
+              "fill_color": [
+                0.25,
+                0.27,
+                0.32,
+                1.0
+              ],
+              "min_x": 4.0,
+              "max_x": 6.0,
+              "min_y": 4.0,
+              "max_y": 6.0,
+              "min_w": 32.0,
+              "min_h": 32.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "toolbar-active-button-render",
+      "component": "toolbar",
+      "widget": "toolbar",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "items": [
+          {
+            "type": "button",
+            "id": "save",
+            "icon": "S"
+          },
+          {
+            "type": "button",
+            "id": "open",
+            "icon": "O"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "mouse_down",
+          "x": 16.0,
+          "y": 16.0
+        }
+      ],
+      "css": "#field { width: 120px; height: 40px; }",
+      "required_features": [
+        "toolbar",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            "S",
+            "O"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.18,
+                0.2,
+                0.24,
+                1.0
+              ],
+              "stroke_color": [
+                0.25,
+                0.27,
+                0.3,
+                1.0
+              ],
+              "stroke_width": 1.0,
+              "min_w": 120.0,
+              "min_h": 40.0
+            },
+            {
+              "fill_color": [
+                0.3,
+                0.4,
+                0.6,
+                1.0
+              ],
+              "min_x": 4.0,
+              "max_x": 6.0,
+              "min_y": 4.0,
+              "max_y": 6.0,
+              "min_w": 32.0,
+              "min_h": 32.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "listview-selected-item-render",
+      "component": "list",
+      "widget": "listview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "selected_index": 1,
+        "items": [
+          {
+            "id": "alpha",
+            "text": "Alpha",
+            "secondary": "First row"
+          },
+          {
+            "id": "beta",
+            "text": "Beta",
+            "secondary": "Selected row"
+          },
+          {
+            "id": "gamma",
+            "text": "Gamma",
+            "secondary": "Last row"
+          }
+        ]
+      },
+      "css": "#field { width: 220px; height: 90px; --listview-bg: #ffffff; --listview-item-hover: #f8fafc; --listview-item-selected: #dbeafe; --scrollbar-bg: #e2e8f0; --scrollbar-thumb: #94a3b8; }",
+      "required_features": [
+        "list",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            "Alpha",
+            "Beta",
+            "Gamma"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.858824,
+                0.917647,
+                0.996078,
+                1.0
+              ],
+              "min_w": 200.0,
+              "min_h": 30.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "listview-hover-item-render",
+      "component": "list",
+      "widget": "listview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "items": [
+          {
+            "id": "alpha",
+            "text": "Alpha",
+            "secondary": "First row"
+          },
+          {
+            "id": "beta",
+            "text": "Beta",
+            "secondary": "Hovered row"
+          },
+          {
+            "id": "gamma",
+            "text": "Gamma",
+            "secondary": "Last row"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "mouse_move",
+          "x": 20.0,
+          "y": 52.0
+        }
+      ],
+      "css": "#field { width: 220px; height: 90px; --listview-bg: #ffffff; --listview-item-hover: #f8fafc; --listview-item-selected: #dbeafe; --scrollbar-bg: #e2e8f0; --scrollbar-thumb: #94a3b8; }",
+      "required_features": [
+        "list",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "texts": [
+            "Alpha",
+            "Beta",
+            "Gamma"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.972549,
+                0.980392,
+                0.988235,
+                1.0
+              ],
+              "min_y": 38.0,
+              "max_y": 42.0,
+              "min_w": 200.0,
+              "min_h": 38.0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "listview-scrollbar-render",
+      "component": "list",
+      "widget": "listview",
+      "tag": "div",
+      "id": "field",
+      "widget_props": {
+        "items": [
+          {
+            "id": "alpha",
+            "text": "Alpha"
+          },
+          {
+            "id": "beta",
+            "text": "Beta"
+          },
+          {
+            "id": "gamma",
+            "text": "Gamma"
+          }
+        ]
+      },
+      "css": "#field { width: 220px; height: 90px; --listview-bg: #ffffff; --listview-item-hover: #f8fafc; --listview-item-selected: #dbeafe; --scrollbar-bg: #e2e8f0; --scrollbar-thumb: #94a3b8; }",
+      "required_features": [
+        "list",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 3,
+          "texts": [
+            "Alpha",
+            "Beta",
+            "Gamma"
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                0.886275,
+                0.909804,
+                0.941176,
+                1.0
+              ],
+              "min_x": 212.0,
+              "max_x": 214.5,
+              "min_w": 8.0,
+              "min_h": 90.0
+            },
+            {
+              "fill_color": [
+                0.580392,
+                0.639216,
+                0.721569,
+                1.0
+              ],
+              "min_x": 212.0,
+              "max_x": 214.5,
+              "min_y": 0.0,
+              "max_y": 1.0,
+              "min_w": 8.0,
+              "min_h": 67.0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

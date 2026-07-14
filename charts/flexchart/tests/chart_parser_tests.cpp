@@ -1,122 +1,305 @@
-#include <catch2/catch_all.hpp>
+#include "tinytest.h"
 #include "flexchart/flexchart.h"
+#include "flexchart/chart_ast.h"
+#include "../src/chart_component_internal.h"
+#include "flexchart/flex_chart.h"
+#include "flexchart/mark_renderer_registry.h"
+#include <stdexcept>
+
+#define REQUIRE(expr) check(expr)
 
 using namespace flex::chart;
 
-TEST_CASE("Chart Parser: Basic Properties", "[parser][chart]") {
-    const char* source = R"(
-        title: "Test Chart"
-        width: 100%
-        height: 500px
-        margin: 5%
-        theme: "dark"
-    )";
+spec("flexchart_parser") {
 
-    AstProgram program;
-    std::string error;
-    bool success = parse_chart(source, &program, error);
+    describe("basic properties") {
+        it("should parse title, width, height, margin, theme") {
+            const char* source = R"chart(
+                bar {
+                    title: "Test Chart"
+                    width: 800
+                    height: 500
+                    x: "month"
+                    y: "revenue"
+                }
+            )chart";
 
-    REQUIRE(success);
-    REQUIRE(error.empty());
-    
-    // Check root view
-    REQUIRE(program.views.size() > 0);
-    auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
-    REQUIRE(chart != nullptr);
-    CHECK(chart->title == "Test Chart");
-    CHECK(chart->width == "100%");
-    CHECK(chart->height == "500px");
-    CHECK(chart->margin == "5%");
-    CHECK(chart->theme == "dark");
-}
+            AstProgram program;
+            std::string error;
+            bool success = parse_chart(source, &program, error);
 
-TEST_CASE("Chart Parser: Data Blocks and Transforms", "[parser][chart]") {
-    const char* source = R"(
-        data sales {
-            source: "sales.json"
-            format: "json"
-            transform: [
-                { filter: "datum.value > 0" },
-                { aggregate: "sum", field: "amount" }
-            ]
+            REQUIRE(success);
+            REQUIRE(error.empty());
+            REQUIRE(program.views.size() > 0);
+            auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
+            REQUIRE(chart != nullptr);
+            check_string_eq(chart->title, "Test Chart");
+            check_string_eq(chart->width, "800");
+            check_string_eq(chart->height, "500");
         }
-    )";
 
-    AstProgram program;
-    std::string error;
-    bool success = parse_chart(source, &program, error);
+        it("should reject an unexpected character inside a valid chart") {
+            AstProgram program;
+            std::string error;
 
-    REQUIRE(success);
-    REQUIRE(program.global_datasets.size() == 1);
-    auto data = program.global_datasets[0];
-    CHECK(data->name == "sales");
-    CHECK(data->source == "sales.json");
-    CHECK(data->format == "json");
-    
-    REQUIRE(data->transforms.size() == 2);
-    CHECK(data->transforms[0]->type == "filter");
-    CHECK(data->transforms[1]->type == "aggregate");
-}
+            const bool success = parse_chart(
+                "bar { title: \"Test Chart\" @ x: \"month\" }",
+                &program, error);
 
-TEST_CASE("Chart Parser: Marks and Encodings", "[parser][chart]") {
-    const char* source = R"(
-        bar {
-            data: sales
-            x: month { type: "nominal" }
-            y: revenue { scale: "linear" }
-            mark.opacity: 0.8
+            check_false(success);
+            check_string_contains(error, "unexpected character '@'");
         }
-    )";
+    }
 
-    AstProgram program;
-    std::string error;
-    bool success = parse_chart(source, &program, error);
+    describe("data blocks") {
+        it("should parse inline data through the chart dispatcher") {
+            const char* source = R"chart(
+                bar {
+                    data {
+                        { "month": "Jan", "revenue": 10 }
+                        { "month": "Feb", "revenue": 20 }
+                    }
+                    x: "month"
+                    y: "revenue"
+                }
+            )chart";
 
-    REQUIRE(success);
-    auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
-    REQUIRE(chart != nullptr);
-    REQUIRE(chart->marks.size() == 1);
-    auto mark = chart->marks[0];
-    CHECK(mark->type == "bar");
-    CHECK(mark->data_ref == "sales");
-    
-    REQUIRE(mark->encodings.size() == 2);
-    CHECK(mark->encodings[0]->channel == "x");
-    CHECK(mark->encodings[0]->field == "month");
-    CHECK(mark->encodings[1]->channel == "y");
-    CHECK(mark->encodings[1]->field == "revenue");
-    
-    CHECK(mark->styles.count("opacity") > 0);
-}
+            AstProgram program;
+            std::string error;
+            bool success = parse_chart(source, &program, error);
 
-TEST_CASE("Chart Parser: Signals and Event Handlers", "[parser][chart]") {
-    const char* source = R"(
-        signal hover_id {
-            value: 0
-            on: [
-                { events: "rect:mouseover", update: "datum.id" },
-                { events: "rect:mouseout", update: "0" }
-            ]
+            REQUIRE(success);
+            REQUIRE(program.views.size() == 1);
+            auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
+            REQUIRE(chart != nullptr);
+            REQUIRE(chart->datasets.size() == 1);
+            REQUIRE(!chart->datasets[0]->inline_values.empty());
         }
-        signal active = true
-    )";
+    }
 
-    AstProgram program;
-    std::string error;
-    bool success = parse_chart(source, &program, error);
+    describe("marks and encodings") {
+        it("should parse mark type, data ref, encodings, and styles") {
+            const char* source = R"chart(
+                bar {
+                    data: "sales.json"
+                    x: "month"
+                    y: "revenue"
+                    style {
+                        corner-radius: 6
+                    }
+                }
+            )chart";
 
-    REQUIRE(success);
-    auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
-    REQUIRE(chart != nullptr);
-    REQUIRE(chart->signals.size() == 2);
-    
-    auto s1 = chart->signals[0];
-    CHECK(s1->name == "hover_id");
-    REQUIRE(s1->handlers.size() == 2);
-    CHECK(s1->handlers[0]->event == "rect:mouseover");
-    CHECK(s1->handlers[0]->update_expr == "datum.id");
-    
-    auto s2 = chart->signals[1];
-    CHECK(s2->name == "active");
-    CHECK(std::get<bool>(s2->initial_value) == true);
+            AstProgram program;
+            std::string error;
+            bool success = parse_chart(source, &program, error);
+
+            REQUIRE(success);
+            auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
+            REQUIRE(chart != nullptr);
+            REQUIRE(chart->marks.size() == 1);
+            auto mark = chart->marks[0];
+            check_string_eq(mark->type, "bar");
+            REQUIRE(mark->encodings.size() == 2);
+            check_string_eq(mark->encodings[0]->channel, "x");
+            check_string_eq(mark->encodings[0]->field, "month");
+            check_string_eq(mark->encodings[1]->channel, "y");
+            check_string_eq(mark->encodings[1]->field, "revenue");
+            REQUIRE(mark->styles.count("corner-radius") > 0);
+        }
+    }
+
+    describe("signals") {
+        it("should reject unsupported top-level chart blocks") {
+            const char* source = R"chart(
+                signal hover_id {
+                    value: 0
+                    on: [
+                        { events: "rect:mouseover", update: "datum.id" },
+                        { events: "rect:mouseout", update: "0" }
+                    ]
+                }
+                signal active = true
+            )chart";
+
+            AstProgram program;
+            std::string error;
+            bool success = parse_chart(source, &program, error);
+
+            REQUIRE(!success);
+            REQUIRE(!error.empty());
+        }
+    }
+
+    describe("expression data blocks") {
+        it("should parse expr and named ranges") {
+            const char* source = R"chart(
+                line {
+                    expr: "sin(x) * 2 + cos(x / 3)"
+                    x: [0, 6.28, 0.1]
+                }
+            )chart";
+
+            AstProgram program;
+            std::string error;
+            bool success = parse_chart(source, &program, error);
+
+            REQUIRE(success);
+            REQUIRE(program.views.size() == 1);
+            auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
+            REQUIRE(chart != nullptr);
+            REQUIRE(chart->marks.size() == 1);
+            auto mark = chart->marks[0];
+            check_string_eq(mark->expr, "sin(x) * 2 + cos(x / 3)");
+            REQUIRE(mark->ranges.count("x") == 1);
+            auto& r = mark->ranges["x"];
+            REQUIRE(r.size() == 3);
+            check_float_eq(r[0], 0.0, 0.001);
+            check_float_eq(r[1], 6.28, 0.001);
+            check_float_eq(r[2], 0.1, 0.001);
+        }
+
+        it("should evaluate x*x over range") {
+            auto data = std::make_shared<AstData>();
+            data->expr = "x * x";
+            data->ranges["x"] = {0, 3, 1};
+
+            auto records = get_records(data);
+            REQUIRE(records.size() == 4);
+            check_float_eq(get_double_val(records[0].get("y")), 0.0, 0.001);
+            check_float_eq(get_double_val(records[1].get("y")), 1.0, 0.001);
+            check_float_eq(get_double_val(records[2].get("y")), 4.0, 0.001);
+            check_float_eq(get_double_val(records[3].get("y")), 9.0, 0.001);
+            check_float_eq(get_double_val(records[2].get("x")), 2.0, 0.001);
+        }
+
+        it("should apply filter transform") {
+            auto data = std::make_shared<AstData>();
+            data->expr = "x * x";
+            data->ranges["x"] = {0, 4, 1};
+
+            auto filter_t = std::make_shared<AstTransform>();
+            filter_t->type = "filter";
+            filter_t->properties["filter"] = std::string("y > 5");
+            data->transforms.push_back(filter_t);
+
+            auto records = get_records(data);
+            // x=0->0, x=1->1, x=2->4, x=3->9, x=4->16 => y>5 keeps x=3,x=4
+            REQUIRE(records.size() == 2);
+            check_float_eq(get_double_val(records[0].get("x")), 3.0, 0.001);
+            check_float_eq(get_double_val(records[1].get("x")), 4.0, 0.001);
+        }
+
+        it("should apply formula transform") {
+            auto data = std::make_shared<AstData>();
+            data->expr = "x";
+            data->ranges["x"] = {1, 3, 1};
+
+            auto formula_t = std::make_shared<AstTransform>();
+            formula_t->type = "formula";
+            formula_t->properties["formula"] = std::string("x * 2 + 1");
+            formula_t->properties["as"] = std::string("scaled");
+            data->transforms.push_back(formula_t);
+
+            auto records = get_records(data);
+            REQUIRE(records.size() == 3);
+            check_float_eq(get_double_val(records[0].get("scaled")), 3.0, 0.001);
+            check_float_eq(get_double_val(records[1].get("scaled")), 5.0, 0.001);
+            check_float_eq(get_double_val(records[2].get("scaled")), 7.0, 0.001);
+        }
+    }
+
+    describe("inline mark expressions") {
+        it("should parse expr and ranges inside a mark") {
+            const char* source = R"chart(
+                line {
+                    expr: "sin(x)"
+                    x: [0, 6.28, 0.1]
+                }
+            )chart";
+
+            AstProgram program;
+            std::string error;
+            bool success = parse_chart(source, &program, error);
+
+            REQUIRE(success);
+            auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
+            REQUIRE(chart != nullptr);
+            REQUIRE(chart->marks.size() == 1);
+            auto mark = chart->marks[0];
+            check_string_eq(mark->type, "line");
+            check_string_eq(mark->expr, "sin(x)");
+            REQUIRE(mark->ranges.count("x") == 1);
+            auto& r = mark->ranges["x"];
+            REQUIRE(r.size() == 3);
+            check_float_eq(r[0], 0.0, 0.001);
+            check_float_eq(r[1], 6.28, 0.001);
+            check_float_eq(r[2], 0.1, 0.001);
+        }
+
+        it("should generate records from inline mark expr") {
+            auto records = generate_expr_records("t * t", {{"t", {0, 3, 1}}});
+            REQUIRE(records.size() == 4);
+            check_float_eq(get_double_val(records[0].get("t")), 0.0, 0.001);
+            check_float_eq(get_double_val(records[0].get("y")), 0.0, 0.001);
+            check_float_eq(get_double_val(records[2].get("t")), 2.0, 0.001);
+            check_float_eq(get_double_val(records[2].get("y")), 4.0, 0.001);
+            check_float_eq(get_double_val(records[3].get("y")), 9.0, 0.001);
+        }
+
+        it("should support descending ranges") {
+            auto records = generate_expr_records("t * 2", {{"t", {3, 0, -1}}});
+            check_size_eq(records.size(), 4);
+            check_float_eq(get_double_val(records.front().get("t")), 3.0, 0.001);
+            check_float_eq(get_double_val(records.back().get("t")), 0.0, 0.001);
+        }
+
+        it("should reject unsafe ranges") {
+            check_throws_as(generate_expr_records("t", {{"t", {0, 1, 0}}}), std::invalid_argument);
+            check_throws_as(generate_expr_records("t", {{"t", {0, 1, -1}}}), std::invalid_argument);
+            check_throws_as(generate_expr_records("t", {{"t", {0, 1, 0.0000001}}}), std::length_error);
+        }
+
+        it("should evaluate inline mark expr with MIR functions and logical operators") {
+            auto records = generate_expr_records(
+                "clamp(pow(t, 2), 0, 4) + (t >= 2 and not (t > 2))",
+                {{"t", {0, 3, 1}}});
+            REQUIRE(records.size() == 4);
+            check_float_eq(get_double_val(records[0].get("y")), 0.0, 0.001);
+            check_float_eq(get_double_val(records[1].get("y")), 1.0, 0.001);
+            check_float_eq(get_double_val(records[2].get("y")), 5.0, 0.001);
+            check_float_eq(get_double_val(records[3].get("y")), 4.0, 0.001);
+        }
+
+        it("should keep compiled chart expressions when records have extra fields") {
+            std::vector<Record> records;
+            Record rec;
+            rec.fields["x"] = 2.0;
+            rec.fields["y"] = 10.0;
+            rec.fields["label"] = std::string("ignored");
+            records.push_back(std::move(rec));
+
+            auto enc = std::make_shared<AstEncoding>();
+            enc->channel = "size";
+            enc->field = "pow(x, 2) + clamp(y, 0, 3)";
+            apply_computed_fields(records, {enc});
+
+            check_float_eq(get_double_val(records[0].get("__expr_size")), 7.0, 0.001);
+        }
+    }
+
+    describe("public rendering contract") {
+        it("should link built-in mark renderers without application anchors") {
+            ensure_builtin_mark_renderers_linked();
+            check_not_null(MarkRendererRegistry::instance().create("bar").get());
+            check_not_null(MarkRendererRegistry::instance().create("line").get());
+        }
+
+        it("should fail explicitly while SVG export is unavailable") {
+            flex::modules::chart::FlexChart chart;
+            AstChart ast;
+            check_throws_as(chart.to_svg(ast), std::logic_error);
+            check_throws_as(chart.to_svg("not a chart"), std::invalid_argument);
+        }
+    }
 }

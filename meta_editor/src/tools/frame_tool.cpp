@@ -25,10 +25,10 @@ bool FrameTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& wo
     if (!is_drawing_) return false;
     is_drawing_ = false;
     
-    float x = std::min(start_pos_.x(), world_pos.x());
-    float y = std::min(start_pos_.y(), world_pos.y());
-    float w = std::abs(world_pos.x() - start_pos_.x());
-    float h = std::abs(world_pos.y() - start_pos_.y());
+    float x = std::min(start_pos_.x, world_pos.x);
+    float y = std::min(start_pos_.y, world_pos.y);
+    float w = std::abs(world_pos.x - start_pos_.x);
+    float h = std::abs(world_pos.y - start_pos_.y);
     
     // Minimum size
     if (w < 20 || h < 20) {
@@ -70,10 +70,10 @@ bool FrameTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& wo
 void FrameTool::render_overlay(flex::Renderer& renderer) {
     if (!is_drawing_) return;
     
-    float x = std::min(start_pos_.x(), current_pos_.x());
-    float y = std::min(start_pos_.y(), current_pos_.y());
-    float w = std::abs(current_pos_.x() - start_pos_.x());
-    float h = std::abs(current_pos_.y() - start_pos_.y());
+    float x = std::min(start_pos_.x, current_pos_.x);
+    float y = std::min(start_pos_.y, current_pos_.y);
+    float w = std::abs(current_pos_.x - start_pos_.x);
+    float h = std::abs(current_pos_.y - start_pos_.y);
     
     flex::Paint fill = flex::Paint::solid(flex::Color{0.9f, 0.95f, 1.0f, 0.3f});
     flex::Paint stroke = flex::Paint::solid(flex::Color{0.2f, 0.5f, 1.0f, 0.8f});

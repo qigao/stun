@@ -3,6 +3,7 @@
 #include <renderer/sequence_renderer.h>
 #include <renderer/compare_renderer.h>
 #include <renderer/chart_renderer.h>
+#include <renderer/hierarchy_renderer.h>
 #include <vector>
 
 namespace flex::modules::infographic {
@@ -200,7 +201,7 @@ std::unique_ptr<TemplateRenderer> RendererFactory::create_chart_renderer(Templat
 }
 
 std::unique_ptr<TemplateRenderer> RendererFactory::create_hierarchy_renderer(TemplateType) {
-    return std::make_unique<ListGridRenderer>();  // 暂用 Grid 作为默认
+    return std::make_unique<HierarchyTreeRenderer>();
 }
 
 std::unique_ptr<TemplateRenderer> RendererFactory::create_quadrant_renderer(TemplateType) {

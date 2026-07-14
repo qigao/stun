@@ -83,6 +83,20 @@ track "x" {
 }
 ```
 
+### C++ 数值表达式采样
+
+运行时可用 `Track::set_numeric_expression()` 为浮点轨道安装 MIR 表达式。可用输入为
+`time`（轨道绝对采样时间）、`progress`（经过 easing 的区间进度）、`from` 和 `to`
+（相邻关键帧值）。表达式仅替代区间内的浮点插值，不改变播放、循环、混合或渲染：
+
+```cpp
+track->set_numeric_expression(
+    "lerp(from, to, progress * progress) + sin(time)");
+```
+
+无效表达式在设置时抛出 `std::invalid_argument`，非有限计算结果在采样时抛出
+`std::runtime_error`。
+
 ### 循环模式
 
 #### 1. Loop - 无限循环

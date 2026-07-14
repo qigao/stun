@@ -4,6 +4,8 @@
 #include "xychart/xychart_ast.h"
 #include "xychart_parser_gen.h"
 
+void XYParser(void *parser, int token, void *value, XYParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;
@@ -91,7 +93,7 @@ void xychart_scan(Scanner *s, void *parser, XYParserContext *ctx) {
         }
 
         // AlphaNum and more (General Text)
-        [a-zA-Z0-9_+=\.*#\-\&]+ {
+        [a-zA-Z0-9_+=\.*#\-\&/]+ {
              XYParser(parser, XY_TEXT, copy_token(token, s->cursor), ctx);
              goto loop;
         }

@@ -1,0 +1,21 @@
+{
+  "component": "Switch",
+  "kind": "leaf",
+  "root": "switch_root",
+  "nodes": [
+    {
+      "id": "switch_root",
+      "type": "widget",
+      "widget": "switch",
+      "tag": "label",
+      "role": "switch",
+      "states": ["checked", "disabled", "focus-visible"],
+      "props": {
+        "label": "Airplane mode"
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/switch"
+  }
+}

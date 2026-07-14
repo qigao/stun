@@ -52,14 +52,20 @@ void gantt_diagram_free(GanttDiagram* diagram) {
 }
 
 GanttDiagram* gantt_parse(const char* input) {
+    if (!input) return NULL;
     GanttParserContext ctx;
     ctx.diagram = (GanttDiagram*)malloc(sizeof(GanttDiagram));
+    if (!ctx.diagram) return NULL;
     memset(ctx.diagram, 0, sizeof(GanttDiagram));
     ctx.error_count = 0;
     ctx.error_message = NULL;
     ctx.current_section = NULL;
 
     void* parser = GanttParserAlloc(malloc);
+    if (!parser) {
+        gantt_diagram_free(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

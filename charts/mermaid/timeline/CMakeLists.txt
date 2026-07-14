@@ -3,15 +3,6 @@ project(timeline_parser C)
 
 set(CMAKE_C_STANDARD 11)
 
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c REQUIRED)
-    find_program(LEMON_EXECUTABLE lemon REQUIRED)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 # Generate Parser
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/timeline_parser_gen.c" "${CMAKE_CURRENT_BINARY_DIR}/timeline_parser_gen.h"
@@ -41,11 +32,11 @@ target_include_directories(timeline PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(timeline PUBLIC TurboNet::Parser)
+target_link_libraries(timeline PUBLIC TurboUtils::Parser)
 
 # Test executable
 add_executable(timeline_test tests/test_parser.c)
-target_link_libraries(timeline_test timeline TurboNet::TinyTest)
+target_link_libraries(timeline_test timeline TurboUtils::TinyTest)
 target_compile_definitions(timeline_test PRIVATE
     GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/timeline"
 )

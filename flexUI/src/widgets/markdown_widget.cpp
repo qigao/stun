@@ -285,7 +285,10 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
     elem.mark_style_dirty(); // Force style and layout update for the new children
 }
 
-void MarkdownWidget::render(const Element& elem, Renderer& renderer) {
+void MarkdownWidget::emit_render_commands(const Element& elem,
+                                          RenderCommandList& commands) {
+    (void)elem;
+    (void)commands;
     // The actual rendering is handled by the Element::render for each child.
 }
 

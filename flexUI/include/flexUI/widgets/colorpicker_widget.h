@@ -1,7 +1,7 @@
 /*
  * flexUI - ColorPickerWidget
  *
- * Color picker - 使用 flex::Renderer 渲染
+ * Color picker - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_COLORPICKER_WIDGET_H
@@ -9,6 +9,7 @@
 
 #include "../widget.h"
 #include "../group.h"
+#include "../render_command.h"
 #include "../shapes.h"
 #include "../types.h"
 #include <functional>
@@ -19,7 +20,7 @@ class ColorPickerWidget : public Widget {
 public:
   ColorPickerWidget();
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ColorPickerWidget"; }
@@ -37,10 +38,10 @@ public:
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_gradient(flex::Renderer& r, const Element& elem);
-  void render_hue_bar(flex::Renderer& r, const Element& elem);
-  void render_preview(flex::Renderer& r, const Element& elem);
-  void render_cursor(flex::Renderer& r, const Element& elem);
+  void render_gradient(RenderCommandList& commands, const Element& elem);
+  void render_hue_bar(RenderCommandList& commands, const Element& elem);
+  void render_preview(RenderCommandList& commands, const Element& elem);
+  void render_cursor(RenderCommandList& commands, const Element& elem);
 
   void hsv_to_rgb(float h, float s, float v, float& r, float& g, float& b);
   void rgb_to_hsv(float r, float g, float b, float& h, float& s, float& v);

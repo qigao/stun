@@ -1,0 +1,34 @@
+{
+  "component": "TextArea",
+  "kind": "leaf",
+  "root": "textarea_root",
+  "nodes": [
+    {
+      "id": "textarea_root",
+      "type": "widget",
+      "widget": "textarea",
+      "tag": "textarea",
+      "role": "textbox",
+      "states": [
+        "focus",
+        "focus-visible",
+        "disabled",
+        "read-only",
+        "placeholder-shown"
+      ],
+      "props": {
+        "text": "",
+        "placeholder": "Describe your issue"
+      }
+    }
+  ],
+  "variants": {
+    "size": ["default", "sm", "lg"]
+  },
+  "defaults": {
+    "size": "default"
+  },
+  "meta": {
+    "source": "shadcn/textarea"
+  }
+}

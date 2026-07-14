@@ -23,10 +23,15 @@ XYDiagram* xychart_parse(const char* input) {
 
     XYParserContext ctx;
     ctx.diagram = xychart_create_diagram();
+    if (!ctx.diagram) return NULL;
     ctx.error_count = 0;
     ctx.error_message = NULL;
 
     void* parser = XYParserAlloc(malloc);
+    if (!parser) {
+        xychart_free_diagram(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

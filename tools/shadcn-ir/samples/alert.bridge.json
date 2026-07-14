@@ -1,0 +1,18 @@
+{
+  "bridges": [
+    {
+      "target": "alert_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "alert_root",
+      "when": [
+        { "type": "variant", "name": "variant", "equals": "destructive" }
+      ],
+      "attributes": {
+        "data-variant": "destructive"
+      }
+    }
+  ]
+}

@@ -16,7 +16,18 @@
 #define PLUGIN_UNLOAD(handle) FreeLibrary((HMODULE)handle)
 #define PLUGIN_EXT ".dll"
 typedef HMODULE PluginHandle;
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <limits.h>
+#include <dlfcn.h>
+#define PLUGIN_LOAD(path) dlopen(path, RTLD_LAZY)
+#define PLUGIN_SYM(handle, name) dlsym(handle, name)
+#define PLUGIN_UNLOAD(handle) dlclose(handle)
+#define PLUGIN_EXT ".so"
+typedef void* PluginHandle;
 #else
+#include <limits.h>
+#include <unistd.h>
 #include <dlfcn.h>
 #define PLUGIN_LOAD(path) dlopen(path, RTLD_LAZY)
 #define PLUGIN_SYM(handle, name) dlsym(handle, name)
@@ -48,6 +59,27 @@ static std::unordered_map<std::string, const TSPluginInfo*>& get_plugin_map() {
     return map;
 }
 
+static std::filesystem::path executable_dir() {
+#ifdef _WIN32
+    char buffer[MAX_PATH];
+    DWORD len = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
+    if (len == 0 || len == MAX_PATH) return {};
+    return std::filesystem::path(buffer).parent_path();
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) return {};
+    return std::filesystem::path(buffer.c_str()).parent_path();
+#else
+    char buffer[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (len <= 0) return {};
+    buffer[len] = '\0';
+    return std::filesystem::path(buffer).parent_path();
+#endif
+}
+
 bool load_ts_plugin(const std::string& path) {
     PluginHandle handle = PLUGIN_LOAD(path.c_str());
     if (!handle) return false;
@@ -69,6 +101,11 @@ bool load_ts_plugin(const std::string& path) {
     plugin.info = info;
     plugin.handle = handle;
 
+    if (get_plugin_map().find(plugin.name) != get_plugin_map().end()) {
+        PLUGIN_UNLOAD(handle);
+        return true;
+    }
+
     get_loaded_plugins().push_back(plugin);
     get_plugin_map()[plugin.name] = info;
     return true;
@@ -84,6 +121,18 @@ void load_ts_plugins_from_dir(const std::string& dir) {
         if (filename.find("ts-lang-") == 0 && ends_with(filename, PLUGIN_EXT)) {
             load_ts_plugin(entry.path().string());
         }
+    }
+}
+
+void load_default_ts_plugins() {
+    const std::filesystem::path exe_dir = executable_dir();
+    if (!exe_dir.empty()) {
+        load_ts_plugins_from_dir(exe_dir.string());
+    }
+
+    const std::filesystem::path cwd = std::filesystem::current_path();
+    if (cwd != exe_dir) {
+        load_ts_plugins_from_dir(cwd.string());
     }
 }
 

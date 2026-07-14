@@ -7,13 +7,13 @@
 
 #ifndef FLEXUI_GROUP_H
 #define FLEXUI_GROUP_H
- #ifdef _WIN32
-  #ifndef NOMINMAX
-    #define NOMINMAX
-  #endif
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #endif
 #include "flex/runtime/types.h"
-#include "flex/runtime/renderer.h"
+#include "render_command.h"
 #include <vector>
 #include <memory>
 #include <algorithm>
@@ -23,6 +23,7 @@ namespace flexUI {
 using flex::Transform;
 using flex::Bounds;
 using flex::Color;
+using flex::operator*;
 using flex::Paint;
 
 /**
@@ -40,11 +41,11 @@ public:
     /**
      * Draw this drawable
      *
-     * @param r         The renderer to draw to
+     * @param commands  The backend-neutral command list to append to
      * @param parent    Parent's world transform (already accumulated)
      * @param alpha     Parent's accumulated alpha (0.0-1.0)
      */
-    virtual void draw(flex::Renderer& r, const Transform& parent, float alpha) = 0;
+    virtual void draw(RenderCommandList& commands, const Transform& parent, float alpha) = 0;
 
     /**
      * Get local bounds (in local coordinates)
@@ -160,7 +161,7 @@ public:
     void set_opacity(float a) { opacity_ = a; }
 
     // Drawable interface
-    void draw(flex::Renderer& r, const Transform& parent, float alpha) override {
+    void draw(RenderCommandList& commands, const Transform& parent, float alpha) override {
         if (!visible_ || opacity_ <= 0) return;
 
         // Build world transform: parent * local_translation * transform
@@ -170,7 +171,7 @@ public:
 
         // Draw all children
         for (auto& child : children_) {
-            if (child) child->draw(r, world, world_alpha);
+            if (child) child->draw(commands, world, world_alpha);
         }
     }
 
@@ -198,7 +199,7 @@ public:
 
 protected:
     std::vector<std::unique_ptr<Drawable>> children_;
-    Transform transform_ = Transform::Identity();
+    Transform transform_ = Transform{};
     float opacity_ = 1.0f;
     float rotation_ = 0;
     float scale_x_ = 1.0f;

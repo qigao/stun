@@ -4,14 +4,90 @@
 
 #include <flexUI/widgets/tree_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <stb_sprintf.h>
 #include <functional>
 
 namespace flexUI {
+
+namespace {
+
+struct TreeBridgeStats {
+  size_t node_count = 0;
+  size_t expanded_count = 0;
+};
+
+void accumulate_tree_stats(const std::vector<std::shared_ptr<TreeNode>>& nodes,
+                           TreeBridgeStats& stats) {
+  for (const auto& node : nodes) {
+    if (!node) {
+      continue;
+    }
+    ++stats.node_count;
+    if (node->expanded) {
+      ++stats.expanded_count;
+    }
+    accumulate_tree_stats(node->children, stats);
+  }
+}
+
+bool subtree_contains(TreeNode* root, const TreeNode* target) {
+  if (!root || !target) {
+    return false;
+  }
+  if (root == target) {
+    return true;
+  }
+  for (const auto& child : root->children) {
+    if (subtree_contains(child.get(), target)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void sync_tree_host(Element* host,
+                    const std::vector<std::shared_ptr<TreeNode>>& roots,
+                    const TreeNode* selected) {
+  if (!host) {
+    return;
+  }
+
+  TreeBridgeStats stats;
+  accumulate_tree_stats(roots, stats);
+  const bool has_selection = selected != nullptr;
+
+  host->set_attribute("role", "tree");
+  host->set_attribute("data-state", stats.node_count == 0
+                                        ? "empty"
+                                        : has_selection ? "selected"
+                                                        : stats.expanded_count > 0
+                                                              ? "expanded"
+                                                              : "idle");
+  host->set_attribute("data-node-count", std::to_string(stats.node_count));
+  host->set_attribute("data-expanded-count",
+                      std::to_string(stats.expanded_count));
+  host->set_attribute("data-selected-count", has_selection ? "1" : "0");
+  host->set_attribute("aria-multiselectable", "false");
+
+  if (has_selection) {
+    host->set_attribute("data-selected-id", selected->id);
+    host->set_attribute("aria-activedescendant", selected->id);
+  } else {
+    host->remove_attribute("data-selected-id");
+    host->remove_attribute("aria-activedescendant");
+  }
+
+  host->set_state("selected", has_selection);
+  host->set_state("open", stats.expanded_count > 0);
+}
+
+} // namespace
 
 TreeWidget::TreeWidget() {}
 
@@ -27,6 +103,7 @@ std::shared_ptr<TreeNode> TreeWidget::add_node(const std::string& id, const std:
     roots_.push_back(node);
   }
   dirty_ = true;
+  sync_tree_host(host_element(), roots_, selected_);
   return node;
 }
 
@@ -34,6 +111,13 @@ void TreeWidget::remove_node(const std::string& id) {
   auto remove_from = [&](std::vector<std::shared_ptr<TreeNode>>& nodes) -> bool {
     for (auto it = nodes.begin(); it != nodes.end(); ++it) {
       if ((*it)->id == id) {
+        TreeNode* removed = it->get();
+        if (subtree_contains(removed, selected_)) {
+          selected_ = nullptr;
+        }
+        if (subtree_contains(removed, hover_)) {
+          hover_ = nullptr;
+        }
         nodes.erase(it);
         return true;
       }
@@ -41,7 +125,11 @@ void TreeWidget::remove_node(const std::string& id) {
     return false;
   };
 
-  if (remove_from(roots_)) { dirty_ = true; return; }
+  if (remove_from(roots_)) {
+    dirty_ = true;
+    sync_tree_host(host_element(), roots_, selected_);
+    return;
+  }
 
   for (auto& root : roots_) {
     std::function<bool(TreeNode*)> search = [&](TreeNode* node) -> bool {
@@ -51,7 +139,11 @@ void TreeWidget::remove_node(const std::string& id) {
       }
       return false;
     };
-    if (search(root.get())) { dirty_ = true; return; }
+    if (search(root.get())) {
+      dirty_ = true;
+      sync_tree_host(host_element(), roots_, selected_);
+      return;
+    }
   }
 }
 
@@ -60,6 +152,7 @@ void TreeWidget::clear() {
   selected_ = nullptr;
   hover_ = nullptr;
   dirty_ = true;
+  sync_tree_host(host_element(), roots_, selected_);
 }
 
 TreeNode* TreeWidget::find_node(const std::string& id, TreeNode* root) {
@@ -83,42 +176,54 @@ TreeNode* TreeWidget::find_node(const std::string& id, TreeNode* root) {
 void TreeWidget::set_selected(const std::string& id) {
   selected_ = find_node(id);
   dirty_ = true;
+  sync_tree_host(host_element(), roots_, selected_);
 }
 
 void TreeWidget::expand(const std::string& id) {
-  if (auto node = find_node(id)) { node->expanded = true; dirty_ = true; }
-}
-
-void TreeWidget::collapse(const std::string& id) {
-  if (auto node = find_node(id)) { node->expanded = false; dirty_ = true; }
-}
-
-void TreeWidget::toggle(const std::string& id) {
-  if (auto node = find_node(id)) { node->expanded = !node->expanded; dirty_ = true; }
-}
-
-void TreeWidget::render(const Element& elem, Renderer& renderer) {
-  auto& r = renderer.flex();
-  auto* style = elem.computed_style;
-  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
-  if (style) bg_color = style->get_variable_color("--tree-bg", bg_color);
-
-  r.draw_rect(0, 0, elem.width(), elem.height(), 4, Paint::solid(bg_color), Paint::none(), 0);
-
-  float y = -scroll_y_;
-  for (auto& root : roots_) {
-    render_node(r, elem, root.get(), y, 0);
+  if (auto node = find_node(id)) {
+    node->expanded = true;
+    dirty_ = true;
+    sync_tree_host(host_element(), roots_, selected_);
   }
 }
 
-void TreeWidget::render_node(flex::Renderer& r, const Element& elem, TreeNode* node, float& y, int depth) {
+void TreeWidget::collapse(const std::string& id) {
+  if (auto node = find_node(id)) {
+    node->expanded = false;
+    dirty_ = true;
+    sync_tree_host(host_element(), roots_, selected_);
+  }
+}
+
+void TreeWidget::toggle(const std::string& id) {
+  if (auto node = find_node(id)) {
+    node->expanded = !node->expanded;
+    dirty_ = true;
+    sync_tree_host(host_element(), roots_, selected_);
+  }
+}
+
+void TreeWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+  auto* style = elem.computed_style;
+  sync_tree_host(host_element(), roots_, selected_);
+  Color bg_color = {1.0f, 1.0f, 1.0f, 1.0f};
+  if (style) bg_color = style->get_variable_color("--tree-bg", bg_color);
+
+  commands.draw_rect(0, 0, elem.width(), elem.height(), 4,
+                     Paint::solid(bg_color), Paint::none(), 0);
+
+  float y = -scroll_y_;
+  for (auto& root : roots_) {
+    render_node(commands, elem, root.get(), y, 0);
+  }
+}
+
+void TreeWidget::render_node(RenderCommandList& commands, const Element& elem, TreeNode* node, float& y, int depth) {
   if (y + item_height_ < 0) { y += item_height_; goto recurse; }
   if (y > elem.height()) return;
 
   {
     auto* style = elem.computed_style;
-    float font_size = style && style->font_size > 0 ? style->font_size : 14.0f;
-    std::string font_family = style && !style->font_family.empty() ? style->font_family : "Arial";
     Color text_color = {0.0f, 0.0f, 0.0f, 1.0f};
     Color selected_bg = {0.94f, 0.96f, 1.0f, 1.0f};
     Color hover_bg = {0.98f, 0.98f, 0.98f, 1.0f};
@@ -131,9 +236,11 @@ void TreeWidget::render_node(flex::Renderer& r, const Element& elem, TreeNode* n
     float x = depth * indent_ + 8;
 
     if (node == selected_) {
-      r.draw_rect(0, y, elem.width(), item_height_, 0, Paint::solid(selected_bg), Paint::none(), 0);
+      commands.draw_rect(0, y, elem.width(), item_height_, 0,
+                         Paint::solid(selected_bg), Paint::none(), 0);
     } else if (node == hover_) {
-      r.draw_rect(0, y, elem.width(), item_height_, 0, Paint::solid(hover_bg), Paint::none(), 0);
+      commands.draw_rect(0, y, elem.width(), item_height_, 0,
+                         Paint::solid(hover_bg), Paint::none(), 0);
     }
 
     if (!node->children.empty()) {
@@ -146,11 +253,15 @@ void TreeWidget::render_node(flex::Renderer& r, const Element& elem, TreeNode* n
         stbsp_snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g L %.4g %.4g",
                  ax - 2, ay - 4, ax + 3, ay, ax - 2, ay + 4);
       }
-      r.stroke_path(path, Paint::solid(Color{0.39f, 0.39f, 0.39f, 1.0f}), 1.5f);
+      commands.stroke_path(path, Paint::solid(Color{0.39f, 0.39f, 0.39f, 1.0f}), 1.5f);
     }
-
-    float text_y = y + (item_height_ - font_size) / 2;
-    r.draw_text(node->label, x + 12, text_y, font_family, font_size, false, text_color);
+    if (style) {
+      const auto text_block = layout_text_block(
+          style, node->label, x + 12.0f, y,
+          std::max(0.0f, elem.width() - x - 20.0f), item_height_, text_color,
+          TextVerticalAlign::Middle);
+      emit_text_block(commands, text_block);
+    }
   }
 
   y += item_height_;
@@ -158,7 +269,7 @@ void TreeWidget::render_node(flex::Renderer& r, const Element& elem, TreeNode* n
 recurse:
   if (node->expanded) {
     for (auto& child : node->children) {
-      render_node(r, elem, child.get(), y, depth + 1);
+      render_node(commands, elem, child.get(), y, depth + 1);
     }
   }
 }
@@ -179,14 +290,16 @@ TreeNode* TreeWidget::hit_test(float y, TreeNode* root, float& current_y, int de
 }
 
 bool TreeWidget::handle_event(const Event& event, Element& elem) {
-  float local_y = event.y - elem.absolute_y() + scroll_y_;
+  const flex::Vec2 local_pos =
+      detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+  float local_y = local_pos.y + scroll_y_;
 
   if (event.type == EventType::MouseDown) {
     float current_y = 0;
     for (auto& root : roots_) {
       auto hit = hit_test(local_y, root.get(), current_y, 0);
       if (hit) {
-        float local_x = event.x - elem.absolute_x();
+        float local_x = local_pos.x;
         int depth = 0;
         for (auto p = hit->parent; p; p = p->parent) depth++;
         float arrow_x = depth * indent_ + 8;
@@ -198,6 +311,7 @@ bool TreeWidget::handle_event(const Event& event, Element& elem) {
           if (on_select_) on_select_(hit);
         }
         dirty_ = true;
+        sync_tree_host(host_element(), roots_, selected_);
         elem.mark_paint_dirty();
         return true;
       }

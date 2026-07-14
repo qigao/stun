@@ -6,7 +6,7 @@
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <cmath>
 
@@ -19,11 +19,54 @@ RadioWidget::RadioWidget(const std::string& label, const std::string& value,
     dot_scale_ = target_dot_scale_;
 }
 
+bool RadioWidget::measure_intrinsic_size(const Element& elem, float available_width,
+                                         float available_height, float& out_width,
+                                         float& out_height) const {
+    (void)available_width;
+    (void)available_height;
+    auto* style = elem.computed_style;
+    const float radio_size =
+        style ? style->get_variable_float("--radio-size", 20.0f) : 20.0f;
+    const float label_spacing =
+        style ? style->get_variable_float("--label-spacing", 8.0f) : 8.0f;
+    const float font_size = style && style->font_size > 0.0f ? style->font_size : 14.0f;
+    ComputedStyle measure_style;
+    if (style) {
+        measure_style = *style;
+    }
+    measure_style.font_size = font_size;
+    const float label_width =
+        label_.empty() ? 0.0f : approximate_segmented_text_width(&measure_style, label_);
+    out_width = radio_size + (label_.empty() ? 0.0f : label_spacing + label_width);
+    out_height = std::max(radio_size, font_size);
+    return true;
+}
+
+void RadioWidget::sync_host_semantics() {
+    set_host_attribute("role", "radio");
+    set_host_data_state("checked", "unchecked", checked_);
+    set_host_boolean_attribute("aria-checked", checked_);
+    set_host_boolean_attribute("aria-disabled", disabled_);
+    set_host_presence_attribute("disabled", disabled_);
+    if (group_.empty()) {
+        clear_host_attribute("data-group");
+    } else {
+        set_host_attribute("data-group", group_);
+    }
+    if (value_.empty()) {
+        clear_host_attribute("data-value");
+    } else {
+        set_host_attribute("data-value", value_);
+    }
+    set_host_state("checked", checked_);
+}
+
 void RadioWidget::set_checked(bool checked) {
     if (checked_ != checked) {
         checked_ = checked;
         target_dot_scale_ = checked ? 1.0f : 0.0f;
         dirty_ = true;
+        sync_host_semantics();
 
         if (checked && change_callback_) {
             change_callback_(value_, group_);
@@ -37,6 +80,15 @@ void RadioWidget::set_label(const std::string& label) {
         text_->set_text(label);
     }
     dirty_ = true;
+}
+
+void RadioWidget::set_disabled(bool disabled) {
+    if (disabled_ == disabled) {
+        return;
+    }
+    disabled_ = disabled;
+    dirty_ = true;
+    sync_host_semantics();
 }
 
 void RadioWidget::rebuild_shapes(const Element& elem) {
@@ -88,7 +140,10 @@ void RadioWidget::update_shapes(const Element& elem) {
     // Circle color based on state
     Color bg_color;
     if (checked_ || elem.has_state("checked")) {
-        bg_color = style->get_variable_color("--radio-bg-checked", color_from_u8(59, 130, 246, 255));
+        bg_color = style->get_variable_color(
+            "--radio-bg-checked",
+            style->get_variable_color("--accent-color",
+                                      color_from_u8(59, 130, 246, 255)));
     } else {
         bg_color = style->get_variable_color("--radio-bg", color_from_u8(255, 255, 255, 255));
     }
@@ -112,7 +167,7 @@ void RadioWidget::update_shapes(const Element& elem) {
     }
 }
 
-void RadioWidget::render(const Element& elem, Renderer& renderer) {
+void RadioWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
 
@@ -122,11 +177,11 @@ void RadioWidget::render(const Element& elem, Renderer& renderer) {
     // Update shape properties
     update_shapes(elem);
 
-    // Draw using flex::Renderer
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    // Draw through backend-neutral commands.
+    Transform local_transform = Transform{};
 
     float opacity = style->opacity;
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }
@@ -141,7 +196,6 @@ bool RadioWidget::handle_event(const Event& event, Element& elem) {
             if (event.button == MouseButton::Left) {
                 if (!checked_) {
                     set_checked(true);
-                    elem.add_state("checked");
                     elem.mark_paint_dirty();
                 }
                 return true;
@@ -152,7 +206,6 @@ bool RadioWidget::handle_event(const Event& event, Element& elem) {
             if (event.key == KeyCode::Enter || event.key == KeyCode::Num0) {
                 if (!checked_) {
                     set_checked(true);
-                    elem.add_state("checked");
                     elem.mark_paint_dirty();
                 }
                 return true;

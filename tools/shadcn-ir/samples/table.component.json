@@ -1,0 +1,136 @@
+{
+  "component": "Table",
+  "kind": "composite",
+  "root": "table_container",
+  "nodes": [
+    {
+      "id": "table_container",
+      "type": "element",
+      "tag": "div",
+      "attrs": {
+        "data-slot": "table-container"
+      }
+    },
+    {
+      "id": "table_root",
+      "type": "element",
+      "tag": "table",
+      "attrs": {
+        "data-slot": "table"
+      }
+    },
+    {
+      "id": "table_caption",
+      "type": "element",
+      "tag": "caption",
+      "slot": "caption",
+      "attrs": {
+        "data-slot": "table-caption"
+      },
+      "props": {
+        "text": "A list of recent invoices."
+      }
+    },
+    {
+      "id": "table_header",
+      "type": "element",
+      "tag": "thead",
+      "slot": "header",
+      "attrs": {
+        "data-slot": "table-header"
+      }
+    },
+    {
+      "id": "table_header_row",
+      "type": "element",
+      "tag": "tr",
+      "attrs": {
+        "data-slot": "table-row"
+      }
+    },
+    {
+      "id": "table_head_invoice",
+      "type": "element",
+      "tag": "th",
+      "slot": "head",
+      "attrs": {
+        "data-slot": "table-head",
+        "scope": "col"
+      },
+      "props": {
+        "text": "Invoice"
+      }
+    },
+    {
+      "id": "table_head_status",
+      "type": "element",
+      "tag": "th",
+      "slot": "head",
+      "attrs": {
+        "data-slot": "table-head",
+        "scope": "col"
+      },
+      "props": {
+        "text": "Status"
+      }
+    },
+    {
+      "id": "table_body",
+      "type": "element",
+      "tag": "tbody",
+      "slot": "body",
+      "attrs": {
+        "data-slot": "table-body"
+      }
+    },
+    {
+      "id": "table_row_selected",
+      "type": "element",
+      "tag": "tr",
+      "slot": "row",
+      "states": ["selected", "hover"],
+      "attrs": {
+        "data-slot": "table-row"
+      }
+    },
+    {
+      "id": "table_cell_invoice",
+      "type": "element",
+      "tag": "td",
+      "slot": "cell",
+      "attrs": {
+        "data-slot": "table-cell"
+      },
+      "props": {
+        "text": "INV001"
+      }
+    },
+    {
+      "id": "table_cell_status",
+      "type": "element",
+      "tag": "td",
+      "slot": "cell",
+      "attrs": {
+        "data-slot": "table-cell"
+      },
+      "props": {
+        "text": "Paid"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "table_container", "child": "table_root" },
+    { "parent": "table_root", "child": "table_caption" },
+    { "parent": "table_root", "child": "table_header" },
+    { "parent": "table_header", "child": "table_header_row" },
+    { "parent": "table_header_row", "child": "table_head_invoice" },
+    { "parent": "table_header_row", "child": "table_head_status" },
+    { "parent": "table_root", "child": "table_body" },
+    { "parent": "table_body", "child": "table_row_selected" },
+    { "parent": "table_row_selected", "child": "table_cell_invoice" },
+    { "parent": "table_row_selected", "child": "table_cell_status" }
+  ],
+  "meta": {
+    "source": "shadcn/table"
+  }
+}

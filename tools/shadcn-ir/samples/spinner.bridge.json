@@ -1,0 +1,30 @@
+{
+  "bridges": [
+    {
+      "target": "spinner_root",
+      "state": "spinning",
+      "attributes": {
+        "data-state": "spinning",
+        "aria-busy": "true",
+        "data-variant": "bars"
+      },
+      "properties": {
+        "spinning": true,
+        "variant": "bars"
+      }
+    },
+    {
+      "target": "spinner_root",
+      "state": "stopped",
+      "attributes": {
+        "data-state": "stopped",
+        "aria-busy": "false",
+        "data-variant": "ring"
+      },
+      "properties": {
+        "spinning": false,
+        "variant": "ring"
+      }
+    }
+  ]
+}

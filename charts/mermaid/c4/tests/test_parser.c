@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "c4/c4_ast.h"
 #include "turbo_parser.h"
 #include "../src/c4_parser_wrapper.h"

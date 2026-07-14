@@ -1,0 +1,77 @@
+{
+  "component": "Card",
+  "kind": "composite",
+  "root": "card_root",
+  "nodes": [
+    {
+      "id": "card_root",
+      "type": "element",
+      "tag": "div",
+      "states": ["hover", "focus-visible"],
+      "attrs": {
+        "data-slot": "card"
+      }
+    },
+    {
+      "id": "card_header",
+      "type": "element",
+      "tag": "div",
+      "slot": "header",
+      "attrs": {
+        "data-slot": "card-header"
+      }
+    },
+    {
+      "id": "card_title",
+      "type": "element",
+      "tag": "div",
+      "slot": "title",
+      "attrs": {
+        "data-slot": "card-title"
+      },
+      "props": {
+        "text": "Card title"
+      }
+    },
+    {
+      "id": "card_description",
+      "type": "element",
+      "tag": "div",
+      "slot": "description",
+      "attrs": {
+        "data-slot": "card-description"
+      },
+      "props": {
+        "text": "Card description"
+      }
+    },
+    {
+      "id": "card_content",
+      "type": "element",
+      "tag": "div",
+      "slot": "content",
+      "attrs": {
+        "data-slot": "card-content"
+      }
+    },
+    {
+      "id": "card_footer",
+      "type": "element",
+      "tag": "div",
+      "slot": "footer",
+      "attrs": {
+        "data-slot": "card-footer"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "card_root", "child": "card_header" },
+    { "parent": "card_header", "child": "card_title" },
+    { "parent": "card_header", "child": "card_description" },
+    { "parent": "card_root", "child": "card_content" },
+    { "parent": "card_root", "child": "card_footer" }
+  ],
+  "meta": {
+    "source": "shadcn/card"
+  }
+}

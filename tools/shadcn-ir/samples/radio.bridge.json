@@ -1,0 +1,20 @@
+{
+  "bridges": [
+    {
+      "target": "radio_root",
+      "state": "checked",
+      "properties": {
+        "checked": true
+      },
+      "pseudo_states": ["checked"]
+    },
+    {
+      "target": "radio_root",
+      "state": "disabled",
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    }
+  ]
+}

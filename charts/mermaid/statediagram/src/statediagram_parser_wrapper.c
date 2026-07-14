@@ -62,10 +62,16 @@ void statediagram_free(StateDiagram* diagram) {
 }
 
 StateDiagram* statediagram_parse(const char* input) {
+    if (!input) return NULL;
     StateParserContext ctx;
     ctx.diagram = (StateDiagram*)malloc(sizeof(StateDiagram));
+    if (!ctx.diagram) return NULL;
     memset(ctx.diagram, 0, sizeof(StateDiagram));
     ctx.diagram->root = (StateDoc*)malloc(sizeof(StateDoc));
+    if (!ctx.diagram->root) {
+        free(ctx.diagram);
+        return NULL;
+    }
     memset(ctx.diagram->root, 0, sizeof(StateDoc));
     
     ctx.current_doc = ctx.diagram->root;
@@ -74,6 +80,10 @@ StateDiagram* statediagram_parse(const char* input) {
     ctx.error_message = NULL;
 
     void* parser = StateParserAlloc(malloc);
+    if (!parser) {
+        statediagram_free(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

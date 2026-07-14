@@ -1,0 +1,25 @@
+{
+  "name": "checkbox",
+  "source": "https://ui.shadcn.com/r/styles/new-york/checkbox.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "border",
+    "border-primary",
+    "data-[state=checked]:bg-primary",
+    "data-[state=checked]:text-primary-foreground",
+    "disabled:cursor-not-allowed",
+    "disabled:opacity-50",
+    "focus-visible:outline-none",
+    "focus-visible:ring-1",
+    "focus-visible:ring-ring",
+    "grid",
+    "h-4",
+    "peer",
+    "place-content-center",
+    "rounded-sm",
+    "shadow",
+    "shrink-0",
+    "text-current",
+    "w-4"
+  ]
+}

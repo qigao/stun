@@ -8,8 +8,10 @@
 #define FLEXUI_SPLITTER_WIDGET_H
 
 #include "../widget.h"
+#include "../detail/css_render_transform.h"
 #include "../element.h"
 #include "../event.h"
+#include "../render_command.h"
 #include <iostream>
 
 namespace flexUI {
@@ -32,24 +34,25 @@ public:
 
     void set_target(ResizeTarget target) { target_ = target; }
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         // Render simple bar
         Color col = {0.2f, 0.2f, 0.2f, 1.0f}; // Darker default
         if (hovered_) col = {0.0f, 0.48f, 0.8f, 1.0f}; // Active blue
         if (dragging_) col = {0.0f, 0.58f, 0.9f, 1.0f};
-
-        renderer.draw_rect(0, 0, elem.width(), elem.height(), 0,
-                          Paint::solid(col), Paint::none(), 0);
+        commands.draw_rect(0, 0, elem.width(), elem.height(), 0,
+                           Paint::solid(col), Paint::none(), 0);
     }
 
     bool handle_event(const Event& event, Element& elem) override {
+        const auto parent_pos =
+            detail::css_render_to_parent_content(&elem, flex::Vec2(event.x, event.y));
         if (event.type == EventType::MouseDown) {
             dragging_ = true;
-            last_pos_ = (orientation_ == Orientation::Horizontal) ? event.x : event.y;
+            last_pos_ = (orientation_ == Orientation::Horizontal) ? parent_pos.x : parent_pos.y;
             return true;
         } else if (event.type == EventType::MouseMove) {
             if (dragging_) {
-                float current_pos = (orientation_ == Orientation::Horizontal) ? event.x : event.y;
+                float current_pos = (orientation_ == Orientation::Horizontal) ? parent_pos.x : parent_pos.y;
                 float delta = current_pos - last_pos_;
                 
                 Element* sibling = (target_ == ResizeTarget::Previous) ? 
@@ -71,9 +74,13 @@ public:
                     if (orientation_ == Orientation::Horizontal) {
                         sibling->computed_style->width = new_size;
                         sibling->computed_style->width_is_percent = false;
+                        sibling->computed_style->width_size =
+                            {CssSizeKind::Length, new_size, {}};
                     } else {
                         sibling->computed_style->height = new_size;
                         sibling->computed_style->height_is_percent = false;
+                        sibling->computed_style->height_size =
+                            {CssSizeKind::Length, new_size, {}};
                     }
                     sibling->mark_layout_dirty();
                 }

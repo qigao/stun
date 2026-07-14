@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "target": "menu_root",
+      "selector": "&",
+      "decls": {
+        "display": "block",
+        "min-width": "12rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--border)",
+        "border-radius": "0.375rem",
+        "background-color": "var(--popover)",
+        "color": "var(--popover-foreground)",
+        "box-shadow": "0 10px 15px rgba(0,0,0,0.18)"
+      }
+    },
+    {
+      "target": "menu_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "opacity": "1"
+      }
+    },
+    {
+      "target": "menu_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "closed" }
+      ],
+      "decls": {
+        "opacity": "0"
+      }
+    }
+  ]
+}

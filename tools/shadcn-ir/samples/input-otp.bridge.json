@@ -1,0 +1,42 @@
+{
+  "bridges": [
+    {
+      "target": "input_otp_root",
+      "state": "disabled",
+      "attributes": {
+        "aria-disabled": "true",
+        "data-disabled": ""
+      }
+    },
+    {
+      "target": "input_otp_slot_0",
+      "state": "active",
+      "attributes": {
+        "data-active": "true"
+      },
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "input_otp_slot_0",
+      "state": "filled",
+      "attributes": {
+        "data-filled": "true"
+      }
+    },
+    {
+      "target": "input_otp_slot_1",
+      "state": "filled",
+      "attributes": {
+        "data-filled": "true"
+      }
+    },
+    {
+      "target": "input_otp_slot_2",
+      "state": "disabled",
+      "attributes": {
+        "aria-disabled": "true",
+        "data-disabled": ""
+      }
+    }
+  ]
+}

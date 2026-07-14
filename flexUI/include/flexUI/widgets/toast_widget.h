@@ -1,7 +1,7 @@
 /*
  * flexUI - ToastWidget
  *
- * Auto-dismissing notification - 使用 flex::Renderer 渲染
+ * Auto-dismissing notification - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_TOAST_WIDGET_H
@@ -9,6 +9,7 @@
 
 #include "../widget.h"
 #include "../group.h"
+#include "../render_command.h"
 #include "../shapes.h"
 #include "../types.h"
 #include <string>
@@ -30,9 +31,12 @@ public:
 
   explicit ToastWidget(const std::string& message = "", Type type = Type::Default);
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
+  bool measure_intrinsic_size(const Element& elem, float available_width,
+                              float available_height, float& out_width,
+                              float& out_height) const override;
   const char* type_name() const override { return "ToastWidget"; }
 
   // Content
@@ -57,10 +61,10 @@ public:
   void set_dismiss_callback(DismissCallback cb) { on_dismiss_ = std::move(cb); }
 
 private:
-  void render_background(flex::Renderer& r, const Element& elem);
-  void render_icon(flex::Renderer& r, const Element& elem);
-  void render_text(flex::Renderer& r, const Element& elem);
-  void render_close_button(flex::Renderer& r, const Element& elem);
+  void render_background(RenderCommandList& commands, const Element& elem);
+  void render_icon(RenderCommandList& commands, const Element& elem);
+  void render_text(RenderCommandList& commands, const Element& elem);
+  void render_close_button(RenderCommandList& commands, const Element& elem);
   Color get_type_color() const;
 
   std::string message_;

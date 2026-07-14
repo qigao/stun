@@ -1,0 +1,92 @@
+{
+  "component": "NavigationMenu",
+  "kind": "composite",
+  "root": "navigation_menu_root",
+  "nodes": [
+    {
+      "id": "navigation_menu_root",
+      "type": "element",
+      "tag": "nav",
+      "role": "navigation",
+      "attrs": {
+        "data-slot": "navigation-menu"
+      }
+    },
+    {
+      "id": "navigation_menu_list",
+      "type": "element",
+      "tag": "ul",
+      "slot": "list",
+      "attrs": {
+        "data-slot": "navigation-menu-list"
+      }
+    },
+    {
+      "id": "navigation_menu_item",
+      "type": "element",
+      "tag": "li",
+      "slot": "item",
+      "states": ["open", "active"],
+      "attrs": {
+        "data-slot": "navigation-menu-item"
+      }
+    },
+    {
+      "id": "navigation_menu_trigger",
+      "type": "element",
+      "tag": "button",
+      "slot": "trigger",
+      "states": ["open", "focus", "disabled"],
+      "attrs": {
+        "data-slot": "navigation-menu-trigger",
+        "aria-expanded": "false",
+        "data-state": "closed"
+      }
+    },
+    {
+      "id": "navigation_menu_content",
+      "type": "element",
+      "tag": "div",
+      "slot": "content",
+      "states": ["open", "motion-from-start", "motion-to-end"],
+      "attrs": {
+        "data-slot": "navigation-menu-content",
+        "data-state": "closed",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "id": "navigation_menu_viewport",
+      "type": "element",
+      "tag": "div",
+      "slot": "viewport",
+      "states": ["visible"],
+      "attrs": {
+        "data-slot": "navigation-menu-viewport",
+        "data-state": "hidden"
+      }
+    },
+    {
+      "id": "navigation_menu_indicator",
+      "type": "element",
+      "tag": "div",
+      "slot": "indicator",
+      "states": ["visible"],
+      "attrs": {
+        "data-slot": "navigation-menu-indicator",
+        "data-state": "hidden"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "navigation_menu_root", "child": "navigation_menu_list" },
+    { "parent": "navigation_menu_root", "child": "navigation_menu_viewport" },
+    { "parent": "navigation_menu_root", "child": "navigation_menu_indicator" },
+    { "parent": "navigation_menu_list", "child": "navigation_menu_item" },
+    { "parent": "navigation_menu_item", "child": "navigation_menu_trigger" },
+    { "parent": "navigation_menu_item", "child": "navigation_menu_content" }
+  ],
+  "meta": {
+    "source": "shadcn/navigation-menu"
+  }
+}

@@ -1,4 +1,6 @@
-#include <catch2/catch_all.hpp>
+#include <tinytest.h>
+#undef group
+#include "test_support.h"
 #include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
@@ -7,14 +9,14 @@
 
 using namespace flexUI;
 
-TEST_CASE("MarkdownWidget Parsing", "[markdown]") {
+spec("MarkdownWidget Parsing") {
     // We need a dummy renderer for Box
     // In actual tests, we might not need a real renderer if we only check elements
     auto box = std::make_unique<Box>(nullptr); 
-    auto* root = box->create("div", "root");
+    auto* root = box->create("div");
     box->set_root(root);
 
-    SECTION("Basic Paragraph") {
+    it("Basic Paragraph") {
         auto* md = box->create_widget<MarkdownWidget>("div", "md", "Hello World");
         root->append(md);
         
@@ -23,38 +25,38 @@ TEST_CASE("MarkdownWidget Parsing", "[markdown]") {
         
         // Check children
         // md -> [p] -> "Hello World"
-        REQUIRE(md->child_count() == 1);
+        check(md->child_count() == 1);
         auto* p = static_cast<Element*>(md->children()[0]);
-        REQUIRE(p->has_class(Symbol("md-p")));
-        REQUIRE(p->text() == "Hello World");
+        check(p->has_class(Symbol("md-p")));
+        check(p->text() == "Hello World");
     }
 
-    SECTION("Headers") {
+    it("Headers") {
         auto* md = box->create_widget<MarkdownWidget>("div", "md", "# H1\n## H2");
         root->append(md);
         
         md->widget->update(0.0f, *md);
         
-        REQUIRE(md->child_count() == 2);
+        check(md->child_count() == 2);
         auto* h1 = static_cast<Element*>(md->children()[0]);
         auto* h2 = static_cast<Element*>(md->children()[1]);
         
-        REQUIRE(h1->has_class(Symbol("h1")));
-        REQUIRE(h1->text() == "H1");
+        check(h1->has_class(Symbol("h1")));
+        check(h1->text() == "H1");
         
-        REQUIRE(h2->has_class(Symbol("h2")));
-        REQUIRE(h2->text() == "H2");
+        check(h2->has_class(Symbol("h2")));
+        check(h2->text() == "H2");
     }
 
-    SECTION("Emphasis and Strong") {
+    it("Emphasis and Strong") {
         auto* md = box->create_widget<MarkdownWidget>("div", "md", "**Strong** and *Emphasis*");
         root->append(md);
         
         md->widget->update(0.0f, *md);
         
-        REQUIRE(md->child_count() == 1);
+        check(md->child_count() == 1);
         auto* p = static_cast<Element*>(md->children()[0]);
-        REQUIRE(p->has_class(Symbol("md-p")));
+        check(p->has_class(Symbol("md-p")));
         
         // Should have children for spans: [strong, text, em]
         // Actually md_parse result depends on how we implemented text_callback.
@@ -66,18 +68,18 @@ TEST_CASE("MarkdownWidget Parsing", "[markdown]") {
         // enter_span(em) -> current(p) has text (none?) -> creates span(em) -> appends
         // text("Emphasis") -> current(span em) has no children -> span(em)->set_text("Emphasis")
 
-        REQUIRE(p->child_count() == 3);
+        check(p->child_count() == 3);
         auto* s1 = static_cast<Element*>(p->children()[0]);
         auto* s2 = static_cast<Element*>(p->children()[1]);
         auto* s3 = static_cast<Element*>(p->children()[2]);
         
-        REQUIRE(s1->has_class(Symbol("md-strong")));
-        REQUIRE(s1->text() == "Strong");
+        check(s1->has_class(Symbol("md-strong")));
+        check(s1->text() == "Strong");
         
-        REQUIRE(s2->text() == " and ");
+        check(s2->text() == " and ");
         
-        REQUIRE(s3->has_class(Symbol("md-em")));
-        REQUIRE(s3->text() == "Emphasis");
+        check(s3->has_class(Symbol("md-em")));
+        check(s3->text() == "Emphasis");
     }
 }
 
@@ -199,66 +201,66 @@ static std::vector<Token> tokenize_cpp(std::string_view code) {
 
 } // anonymous namespace
 
-TEST_CASE("C++ Tokenizer", "[syntax-highlight]") {
+spec("C++ Tokenizer") {
     
-    SECTION("Keywords") {
+    it("Keywords") {
         auto tokens = tokenize_cpp("if else for while return");
-        REQUIRE(tokens.size() == 9); // 5 keywords + 4 spaces
-        REQUIRE(tokens[0].type == TokenType::Keyword);
-        REQUIRE(tokens[0].text == "if");
-        REQUIRE(tokens[2].type == TokenType::Keyword);
-        REQUIRE(tokens[2].text == "else");
+        check(tokens.size() == 9); // 5 keywords + 4 spaces
+        check(tokens[0].type == TokenType::Keyword);
+        check(tokens[0].text == "if");
+        check(tokens[2].type == TokenType::Keyword);
+        check(tokens[2].text == "else");
     }
     
-    SECTION("Types") {
+    it("Types") {
         auto tokens = tokenize_cpp("int x");
-        REQUIRE(tokens.size() == 3);
-        REQUIRE(tokens[0].type == TokenType::Type);
-        REQUIRE(tokens[0].text == "int");
-        REQUIRE(tokens[2].type == TokenType::Plain);
-        REQUIRE(tokens[2].text == "x");
+        check(tokens.size() == 3);
+        check(tokens[0].type == TokenType::Type);
+        check(tokens[0].text == "int");
+        check(tokens[2].type == TokenType::Plain);
+        check(tokens[2].text == "x");
     }
     
-    SECTION("String literals") {
+    it("String literals") {
         auto tokens = tokenize_cpp("\"hello world\"");
-        REQUIRE(tokens.size() == 1);
-        REQUIRE(tokens[0].type == TokenType::String);
-        REQUIRE(tokens[0].text == "\"hello world\"");
+        check(tokens.size() == 1);
+        check(tokens[0].type == TokenType::String);
+        check(tokens[0].text == "\"hello world\"");
     }
     
-    SECTION("Numbers") {
+    it("Numbers") {
         auto tokens = tokenize_cpp("42 3.14 0xFF");
-        REQUIRE(tokens.size() == 5);
-        REQUIRE(tokens[0].type == TokenType::Number);
-        REQUIRE(tokens[0].text == "42");
-        REQUIRE(tokens[2].type == TokenType::Number);
-        REQUIRE(tokens[2].text == "3.14");
-        REQUIRE(tokens[4].type == TokenType::Number);
-        REQUIRE(tokens[4].text == "0xFF");
+        check(tokens.size() == 5);
+        check(tokens[0].type == TokenType::Number);
+        check(tokens[0].text == "42");
+        check(tokens[2].type == TokenType::Number);
+        check(tokens[2].text == "3.14");
+        check(tokens[4].type == TokenType::Number);
+        check(tokens[4].text == "0xFF");
     }
     
-    SECTION("Single-line comment") {
+    it("Single-line comment") {
         auto tokens = tokenize_cpp("x // comment");
-        REQUIRE(tokens.size() == 3);
-        REQUIRE(tokens[0].type == TokenType::Plain);
-        REQUIRE(tokens[2].type == TokenType::Comment);
-        REQUIRE(tokens[2].text == "// comment");
+        check(tokens.size() == 3);
+        check(tokens[0].type == TokenType::Plain);
+        check(tokens[2].type == TokenType::Comment);
+        check(tokens[2].text == "// comment");
     }
     
-    SECTION("Multi-line comment") {
+    it("Multi-line comment") {
         auto tokens = tokenize_cpp("/* multi\nline */");
-        REQUIRE(tokens.size() == 1);
-        REQUIRE(tokens[0].type == TokenType::Comment);
+        check(tokens.size() == 1);
+        check(tokens[0].type == TokenType::Comment);
     }
     
-    SECTION("Preprocessor") {
+    it("Preprocessor") {
         auto tokens = tokenize_cpp("#include <iostream>");
-        REQUIRE(tokens.size() == 1);
-        REQUIRE(tokens[0].type == TokenType::Preprocessor);
-        REQUIRE(tokens[0].text == "#include <iostream>");
+        check(tokens.size() == 1);
+        check(tokens[0].type == TokenType::Preprocessor);
+        check(tokens[0].text == "#include <iostream>");
     }
     
-    SECTION("Complex code") {
+    it("Complex code") {
         auto tokens = tokenize_cpp("int main() { return 0; }");
         // int main ( ) { return 0 ; }
         // Type Plain Op Op Plain Keyword Number Op Op
@@ -268,8 +270,8 @@ TEST_CASE("C++ Tokenizer", "[syntax-highlight]") {
             if (t.type == TokenType::Keyword && t.text == "return") has_keyword = true;
             if (t.type == TokenType::Number && t.text == "0") has_number = true;
         }
-        REQUIRE(has_type);
-        REQUIRE(has_keyword);
-        REQUIRE(has_number);
+        check(has_type);
+        check(has_keyword);
+        check(has_number);
     }
 }

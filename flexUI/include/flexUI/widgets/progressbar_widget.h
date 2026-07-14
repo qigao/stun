@@ -1,25 +1,24 @@
 /*
  * flexUI - ProgressBarWidget
  *
- * Progress bar using Group/Shape composition system.
+ * Progress bar exposing stable widget-owned Element parts.
  */
 
 #ifndef FLEXUI_PROGRESSBAR_WIDGET_H
 #define FLEXUI_PROGRESSBAR_WIDGET_H
 
 #include "../widget.h"
-#include "../group.h"
-#include "../shapes.h"
+#include "../render_command.h"
 
 namespace flexUI {
 
 /**
- * ProgressBarWidget - Progress bar using Group/Shape composition
+ * ProgressBarWidget - Progress bar with a CSS-visible semantic subtree
  *
  * Structure:
- *   Group (root)
- *   ├── RectShape (background)
- *   └── RectShape (fill)
+ *   progressbar (host)
+ *   |-- track
+ *   `-- fill
  *
  * CSS variables:
  *   --progress-height: "8"
@@ -33,10 +32,18 @@ public:
     explicit ProgressBarWidget(float value = 0.0f, bool indeterminate = false);
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
+    bool needs_frame_update(const Element& elem) const override;
     const char* type_name() const override { return "ProgressBarWidget"; }
+    bool paints_host_box() const override { return true; }
+    void sync_host_semantics_for_layout(Element& elem) override;
+
+    Element* track_element() { return track_; }
+    Element* fill_element() { return fill_; }
+    const Element* track_element() const { return track_; }
+    const Element* fill_element() const { return fill_; }
 
     // Value access
     float value() const { return value_; }
@@ -46,13 +53,13 @@ public:
     void set_indeterminate(bool indeterminate);
 
 private:
-    void rebuild_shapes(const Element& elem);
-    void update_shapes(const Element& elem);
+    void build_semantic_tree() override;
+    void update_part_geometry(const Element& elem);
+    void sync_host_semantics() override;
+    void invalidate_render_cache();
 
-    // Visual composition
-    Group root_;
-    RectShape* background_ = nullptr;
-    RectShape* fill_ = nullptr;
+    Element* track_ = nullptr;
+    Element* fill_ = nullptr;
 
     // State
     float value_ = 0.0f;  // 0-100
@@ -62,10 +69,6 @@ private:
     float animation_time_ = 0.0f;
     float animation_position_ = 0.0f;
 
-    // Cached dimensions
-    float cached_width_ = 0;
-    float cached_height_ = 0;
-    float cached_bar_height_ = 0;
 };
 
 } // namespace flexUI

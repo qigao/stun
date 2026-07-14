@@ -231,6 +231,16 @@ std::string TextEdit::selected_text() const {
   return text_->substr(start, end - start);
 }
 
+void TextEdit::set_selection(int start, int end) {
+  if (!state_ || !state_->initialized || !text_) return;
+  const int length = static_cast<int>(text_->length());
+  start = std::max(0, std::min(start, length));
+  end = std::max(0, std::min(end, length));
+  state_->stb_state.select_start = start;
+  state_->stb_state.select_end = end;
+  state_->stb_state.cursor = end;
+}
+
 int TextEdit::cursor() const {
   if (!state_ || !state_->initialized) return 0;
   return state_->stb_state.cursor;

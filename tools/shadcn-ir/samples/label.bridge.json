@@ -1,0 +1,21 @@
+{
+  "bridges": [
+    {
+      "target": "label_root",
+      "state": "disabled",
+      "attributes": {
+        "aria-disabled": "true",
+        "data-disabled": ""
+      },
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "label_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

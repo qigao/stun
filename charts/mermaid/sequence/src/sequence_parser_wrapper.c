@@ -7,7 +7,7 @@
 // Lexer and Parser functions (generated)
 void *SequenceParserAlloc(void *(*mallocProc)(size_t));
 void SequenceParser(void *yyp, int yymajor, void* yyminor, SequenceParserContext *ctx);
-// void SequenceParserFree(void *p, void (*freeProc)(void*));
+void SequenceParserFree(void *p, void (*freeProc)(void*));
 
 typedef struct {
     const char *start;
@@ -43,6 +43,7 @@ static void free_statements(SequenceStatement* s) {
             free(s->data.note.text);
         } else if (s->type == SEQ_STMT_BLOCK) {
             free(s->data.block.text);
+            free(s->data.block.alternate_text);
             free_statements(s->data.block.body);
             free_statements(s->data.block.alternate_body);
         } else if (s->type == SEQ_STMT_ACTIVATE || s->type == SEQ_STMT_DEACTIVATE) {
@@ -62,26 +63,46 @@ void sequence_diagram_free(SequenceDiagram* diagram) {
 }
 
 SequenceDiagram* sequence_parse(const char* input) {
+    if (!input) return NULL;
+    const size_t input_size = strlen(input);
+    enum { SEQUENCE_SCANNER_PADDING = 16 };
+    char* scanner_input =
+        (char*)calloc(input_size + SEQUENCE_SCANNER_PADDING, sizeof(char));
+    if (!scanner_input) return NULL;
+    memcpy(scanner_input, input, input_size);
+
     SequenceParserContext ctx;
     ctx.diagram = (SequenceDiagram*)malloc(sizeof(SequenceDiagram));
+    if (!ctx.diagram) {
+        free(scanner_input);
+        return NULL;
+    }
     memset(ctx.diagram, 0, sizeof(SequenceDiagram));
     ctx.error_count = 0;
     ctx.error_message = NULL;
     ctx.active_blocks = NULL;
 
     void* parser = SequenceParserAlloc(malloc);
+    if (!parser) {
+        free(scanner_input);
+        sequence_diagram_free(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
-    s.start = input;
-    s.cursor = input;
-    s.limit = input + strlen(input);
+    s.start = scanner_input;
+    s.cursor = scanner_input;
+    // With YYFILL disabled, re2c requires zeroed lookahead padding at EOF.
+    s.limit = scanner_input + input_size + SEQUENCE_SCANNER_PADDING;
     s.marker = NULL;
     s.line = 1;
 
     sequence_scan(&s, parser, &ctx);
+    free(scanner_input);
     
     // Send EOF
     SequenceParser(parser, 0, NULL, &ctx);
+    SequenceParserFree(parser, free);
 
     if (ctx.error_count > 0) {
         sequence_diagram_free(ctx.diagram);

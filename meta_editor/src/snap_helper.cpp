@@ -65,49 +65,49 @@ SnapResult SnapHelper::snap_point(const flex::Vec2& world_pos,
     if (snap_to_objects_) {
         for (const auto& target : targets_) {
             // Check X snaps (vertical guides)
-            float dx_left = std::abs(world_pos.x() - target.left);
-            float dx_center = std::abs(world_pos.x() - target.center_x);
-            float dx_right = std::abs(world_pos.x() - target.right);
+            float dx_left = std::abs(world_pos.x - target.left);
+            float dx_center = std::abs(world_pos.x - target.center_x);
+            float dx_right = std::abs(world_pos.x - target.right);
 
             if (dx_left < best_dx) {
                 best_dx = dx_left;
-                result.snapped_pos = flex::Vec2(target.left, result.snapped_pos.y());
+                result.snapped_pos = flex::Vec2(target.left, result.snapped_pos.y);
                 result.snapped_x = true;
                 result.guide_x = target.left;
             }
             if (dx_center < best_dx) {
                 best_dx = dx_center;
-                result.snapped_pos = flex::Vec2(target.center_x, result.snapped_pos.y());
+                result.snapped_pos = flex::Vec2(target.center_x, result.snapped_pos.y);
                 result.snapped_x = true;
                 result.guide_x = target.center_x;
             }
             if (dx_right < best_dx) {
                 best_dx = dx_right;
-                result.snapped_pos = flex::Vec2(target.right, result.snapped_pos.y());
+                result.snapped_pos = flex::Vec2(target.right, result.snapped_pos.y);
                 result.snapped_x = true;
                 result.guide_x = target.right;
             }
 
             // Check Y snaps (horizontal guides)
-            float dy_top = std::abs(world_pos.y() - target.top);
-            float dy_center = std::abs(world_pos.y() - target.center_y);
-            float dy_bottom = std::abs(world_pos.y() - target.bottom);
+            float dy_top = std::abs(world_pos.y - target.top);
+            float dy_center = std::abs(world_pos.y - target.center_y);
+            float dy_bottom = std::abs(world_pos.y - target.bottom);
 
             if (dy_top < best_dy) {
                 best_dy = dy_top;
-                result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.top);
+                result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.top);
                 result.snapped_y = true;
                 result.guide_y = target.top;
             }
             if (dy_center < best_dy) {
                 best_dy = dy_center;
-                result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.center_y);
+                result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.center_y);
                 result.snapped_y = true;
                 result.guide_y = target.center_y;
             }
             if (dy_bottom < best_dy) {
                 best_dy = dy_bottom;
-                result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.bottom);
+                result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.bottom);
                 result.snapped_y = true;
                 result.guide_y = target.bottom;
             }
@@ -117,19 +117,19 @@ SnapResult SnapHelper::snap_point(const flex::Vec2& world_pos,
     // Snap to grid
     if (snap_to_grid_ && canvas_->is_snap_to_grid()) {
         float grid_size = canvas_->grid_size();
-        float snapped_x = std::round(world_pos.x() / grid_size) * grid_size;
-        float snapped_y = std::round(world_pos.y() / grid_size) * grid_size;
+        float snapped_x = std::round(world_pos.x / grid_size) * grid_size;
+        float snapped_y = std::round(world_pos.y / grid_size) * grid_size;
 
-        float dx_grid = std::abs(world_pos.x() - snapped_x);
-        float dy_grid = std::abs(world_pos.y() - snapped_y);
+        float dx_grid = std::abs(world_pos.x - snapped_x);
+        float dy_grid = std::abs(world_pos.y - snapped_y);
 
         if (dx_grid < best_dx) {
-            result.snapped_pos = flex::Vec2(snapped_x, result.snapped_pos.y());
+            result.snapped_pos = flex::Vec2(snapped_x, result.snapped_pos.y);
             result.snapped_x = true;
             result.guide_x = snapped_x;
         }
         if (dy_grid < best_dy) {
-            result.snapped_pos = flex::Vec2(result.snapped_pos.x(), snapped_y);
+            result.snapped_pos = flex::Vec2(result.snapped_pos.x, snapped_y);
             result.snapped_y = true;
             result.guide_y = snapped_y;
         }
@@ -179,51 +179,51 @@ SnapResult SnapHelper::snap_bounds(const flex::Bounds& bounds,
         for (const auto& target : targets_) {
             // Left edge snaps
             float dx = std::abs(my_left - target.left);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.left, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.left; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.left, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.left; }
             dx = std::abs(my_left - target.center_x);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.center_x, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.center_x; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.center_x, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.center_x; }
             dx = std::abs(my_left - target.right);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.right, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.right; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.right, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.right; }
 
             // Center X snaps
             dx = std::abs(my_center_x - target.left);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.left - bounds.width / 2, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.left; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.left - bounds.width / 2, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.left; }
             dx = std::abs(my_center_x - target.center_x);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.center_x - bounds.width / 2, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.center_x; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.center_x - bounds.width / 2, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.center_x; }
             dx = std::abs(my_center_x - target.right);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.right - bounds.width / 2, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.right; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.right - bounds.width / 2, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.right; }
 
             // Right edge snaps
             dx = std::abs(my_right - target.left);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.left - bounds.width, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.left; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.left - bounds.width, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.left; }
             dx = std::abs(my_right - target.center_x);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.center_x - bounds.width, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.center_x; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.center_x - bounds.width, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.center_x; }
             dx = std::abs(my_right - target.right);
-            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.right - bounds.width, result.snapped_pos.y()); result.snapped_x = true; result.guide_x = target.right; }
+            if (dx < best_dx) { best_dx = dx; result.snapped_pos = flex::Vec2(target.right - bounds.width, result.snapped_pos.y); result.snapped_x = true; result.guide_x = target.right; }
 
             // Top edge snaps
             float dy = std::abs(my_top - target.top);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.top); result.snapped_y = true; result.guide_y = target.top; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.top); result.snapped_y = true; result.guide_y = target.top; }
             dy = std::abs(my_top - target.center_y);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.center_y); result.snapped_y = true; result.guide_y = target.center_y; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.center_y); result.snapped_y = true; result.guide_y = target.center_y; }
             dy = std::abs(my_top - target.bottom);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.bottom); result.snapped_y = true; result.guide_y = target.bottom; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.bottom); result.snapped_y = true; result.guide_y = target.bottom; }
 
             // Center Y snaps
             dy = std::abs(my_center_y - target.top);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.top - bounds.height / 2); result.snapped_y = true; result.guide_y = target.top; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.top - bounds.height / 2); result.snapped_y = true; result.guide_y = target.top; }
             dy = std::abs(my_center_y - target.center_y);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.center_y - bounds.height / 2); result.snapped_y = true; result.guide_y = target.center_y; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.center_y - bounds.height / 2); result.snapped_y = true; result.guide_y = target.center_y; }
             dy = std::abs(my_center_y - target.bottom);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.bottom - bounds.height / 2); result.snapped_y = true; result.guide_y = target.bottom; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.bottom - bounds.height / 2); result.snapped_y = true; result.guide_y = target.bottom; }
 
             // Bottom edge snaps
             dy = std::abs(my_bottom - target.top);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.top - bounds.height); result.snapped_y = true; result.guide_y = target.top; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.top - bounds.height); result.snapped_y = true; result.guide_y = target.top; }
             dy = std::abs(my_bottom - target.center_y);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.center_y - bounds.height); result.snapped_y = true; result.guide_y = target.center_y; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.center_y - bounds.height); result.snapped_y = true; result.guide_y = target.center_y; }
             dy = std::abs(my_bottom - target.bottom);
-            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x(), target.bottom - bounds.height); result.snapped_y = true; result.guide_y = target.bottom; }
+            if (dy < best_dy) { best_dy = dy; result.snapped_pos = flex::Vec2(result.snapped_pos.x, target.bottom - bounds.height); result.snapped_y = true; result.guide_y = target.bottom; }
         }
     }
 
@@ -234,11 +234,11 @@ SnapResult SnapHelper::snap_bounds(const flex::Bounds& bounds,
         float snapped_y = std::round(bounds.y / grid_size) * grid_size;
 
         if (std::abs(bounds.x - snapped_x) < best_dx) {
-            result.snapped_pos = flex::Vec2(snapped_x, result.snapped_pos.y());
+            result.snapped_pos = flex::Vec2(snapped_x, result.snapped_pos.y);
             result.snapped_x = true;
         }
         if (std::abs(bounds.y - snapped_y) < best_dy) {
-            result.snapped_pos = flex::Vec2(result.snapped_pos.x(), snapped_y);
+            result.snapped_pos = flex::Vec2(result.snapped_pos.x, snapped_y);
             result.snapped_y = true;
         }
     }

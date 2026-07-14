@@ -1,0 +1,101 @@
+{
+  "rules": [
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "border-radius": "0.375rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "transparent",
+        "padding-left": "0.5rem",
+        "padding-right": "0.5rem",
+        "height": "1.25rem",
+        "font-size": "0.75rem",
+        "font-weight": "500",
+        "white-space": "nowrap",
+        "transition": "background-color 150ms ease, color 150ms ease, border-color 150ms ease, opacity 150ms ease"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "variant", "value": "default" }
+      ],
+      "decls": {
+        "background-color": "var(--primary)",
+        "color": "var(--primary-foreground)"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "variant", "value": "secondary" }
+      ],
+      "decls": {
+        "background-color": "var(--secondary)",
+        "color": "var(--secondary-foreground)"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "variant", "value": "destructive" }
+      ],
+      "decls": {
+        "background-color": "var(--destructive)",
+        "color": "var(--destructive-foreground)"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "variant", "value": "outline" }
+      ],
+      "decls": {
+        "border-color": "var(--border)",
+        "background-color": "transparent",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "hover" }
+      ],
+      "decls": {
+        "opacity": "0.85"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)"
+      }
+    },
+    {
+      "target": "badge_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "disabled" }
+      ],
+      "decls": {
+        "opacity": "0.5"
+      }
+    }
+  ]
+}

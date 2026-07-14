@@ -6,7 +6,7 @@
 
 #include <meta_editor/core/editor.h>
 #include <meta_editor/core/glfw_adapter.h>
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include  "glfw_app.h"
 #include <thorvg.h>

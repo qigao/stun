@@ -1,0 +1,70 @@
+{
+  "rules": [
+    {
+      "target": "alert_root",
+      "selector": "&",
+      "decls": {
+        "position": "relative",
+        "display": "grid",
+        "gap": "0.25rem",
+        "width": "100%",
+        "border-radius": "0.5rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "padding": "1rem",
+        "font-size": "0.875rem"
+      }
+    },
+    {
+      "target": "alert_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "variant", "value": "default" }
+      ],
+      "decls": {
+        "border-color": "var(--border)",
+        "background-color": "var(--background)",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "alert_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "variant", "value": "destructive" }
+      ],
+      "decls": {
+        "border-color": "color-mix(in oklab, var(--destructive) 50%, transparent)",
+        "color": "var(--destructive)"
+      }
+    },
+    {
+      "target": "alert_title",
+      "selector": "&",
+      "decls": {
+        "font-weight": "500",
+        "line-height": "1"
+      }
+    },
+    {
+      "target": "alert_description",
+      "selector": "&",
+      "decls": {
+        "color": "var(--muted-foreground)",
+        "line-height": "1.5"
+      }
+    },
+    {
+      "target": "alert_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)"
+      }
+    }
+  ]
+}

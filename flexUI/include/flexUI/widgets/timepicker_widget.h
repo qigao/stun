@@ -8,9 +8,11 @@
 #define FLEXUI_TIMEPICKER_WIDGET_H
 
 #include "../widget.h"
+#include "../detail/css_render_transform.h"
 #include "../element.h"
 #include "../event.h"
-#include "../renderer.h"
+#include "../render_command.h"
+#include "../text_layout.h"
 #include <string>
 #include <functional>
 #include <cstdio>
@@ -30,7 +32,7 @@ public:
     TimePickerWidget(const Time& initial = {12, 0, 0}, bool show_seconds = false)
         : time_(initial), show_seconds_(show_seconds) {}
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         auto* style = elem.computed_style;
         if (!style) return;
 
@@ -40,7 +42,8 @@ public:
         // Background
         Color bg = focused_ ? Color{1, 1, 1, 1} : Color{0.98f, 0.98f, 0.98f, 1};
         Color border = focused_ ? Color{0.4f, 0.5f, 0.9f, 1} : Color{0.85f, 0.85f, 0.85f, 1};
-        renderer.draw_rect(0, 0, w, h, 4, Paint::solid(bg), Paint::solid(border), 1);
+        commands.draw_rect(0, 0, w, h, 4, Paint::solid(bg),
+                           Paint::solid(border), 1);
 
         // Time display
         char buf[16];
@@ -49,47 +52,55 @@ public:
         } else {
             std::snprintf(buf, sizeof(buf), "%02d:%02d", time_.hour, time_.minute);
         }
-        renderer.draw_text(buf, 12, h * 0.65f, style->font_family, 14, false, {0.1f, 0.1f, 0.1f, 1});
+        draw_inline_text(commands, style, buf, 12, h * 0.65f, 14.0f, false,
+                         {0.1f, 0.1f, 0.1f, 1});
 
         // Clock icon
-        renderer.draw_text("🕐", w - 28, h * 0.65f, style->font_family, 14, false, {0.4f, 0.4f, 0.4f, 1});
+        draw_inline_text(commands, style, "🕐", w - 28, h * 0.65f, 14.0f, false,
+                         {0.4f, 0.4f, 0.4f, 1});
     }
 
-    void render_overlay(const Element& elem, Renderer& renderer) override {
+    void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override {
         if (!open_) return;
 
         auto* style = elem.computed_style;
-        float x = elem.absolute_x();
-        float y = elem.absolute_y() + elem.height() + 4;
+        const auto anchor_bounds = detail::css_render_world_bounds(&elem);
+        float x = anchor_bounds.x;
+        float y = anchor_bounds.y + anchor_bounds.height + 4;
         float col_w = 60;
         float w = show_seconds_ ? col_w * 3 + 20 : col_w * 2 + 16;
         float h = 180;
-
-        // Shadow + background
-        renderer.draw_rect(x + 2, y + 2, w, h, 6, Paint::solid({0, 0, 0, 0.12f}), Paint::none(), 0);
-        renderer.draw_rect(x, y, w, h, 6, Paint::solid({1, 1, 1, 1}), Paint::solid({0.85f, 0.85f, 0.85f, 1}), 1);
+        commands.draw_rect(x + 2, y + 2, w, h, 6,
+                           Paint::solid({0, 0, 0, 0.12f}), Paint::none(), 0);
+        commands.draw_rect(x, y, w, h, 6, Paint::solid({1, 1, 1, 1}),
+                           Paint::solid({0.85f, 0.85f, 0.85f, 1}), 1);
 
         // Column headers
         Color header_c{0.5f, 0.5f, 0.5f, 1};
-        renderer.draw_text("Hour", x + 8, y + 20, style->font_family, 11, false, header_c);
-        renderer.draw_text("Min", x + 8 + col_w, y + 20, style->font_family, 11, false, header_c);
+        draw_inline_text(commands, style, "Hour", x + 8, y + 20, 11.0f, false, header_c);
+        draw_inline_text(commands, style, "Min", x + 8 + col_w, y + 20, 11.0f, false,
+                         header_c);
         if (show_seconds_) {
-            renderer.draw_text("Sec", x + 8 + col_w * 2, y + 20, style->font_family, 11, false, header_c);
+            draw_inline_text(commands, style, "Sec", x + 8 + col_w * 2, y + 20, 11.0f,
+                             false, header_c);
         }
 
         // Spinners
         float spinner_y = y + 35;
-        render_spinner(x + 8, spinner_y, col_w - 8, time_.hour, 0, 23, 0, style, renderer);
-        render_spinner(x + 8 + col_w, spinner_y, col_w - 8, time_.minute, 0, 59, 1, style, renderer);
+        render_spinner(commands, x + 8, spinner_y, col_w - 8, time_.hour, 0, 23, 0, style);
+        render_spinner(commands, x + 8 + col_w, spinner_y, col_w - 8, time_.minute, 0, 59, 1, style);
         if (show_seconds_) {
-            render_spinner(x + 8 + col_w * 2, spinner_y, col_w - 8, time_.second, 0, 59, 2, style, renderer);
+            render_spinner(commands, x + 8 + col_w * 2, spinner_y, col_w - 8, time_.second, 0, 59, 2, style);
         }
 
         // OK button
         float btn_y = y + h - 40;
         Color btn_bg = hover_ok_ ? Color{0.4f, 0.5f, 0.9f, 1} : Color{0.3f, 0.4f, 0.8f, 1};
-        renderer.draw_rect(x + w/2 - 30, btn_y, 60, 28, 4, Paint::solid(btn_bg), Paint::none(), 0);
-        renderer.draw_text("OK", x + w/2 - 8, btn_y + 19, style->font_family, 13, true, {1, 1, 1, 1});
+        commands.draw_rect(x + w/2 - 30, btn_y, 60, 28, 4,
+                           Paint::solid(btn_bg), Paint::none(), 0);
+        draw_inline_text(commands, style,
+                         "OK", x + w * 0.5f - text_width(style, "OK", 13.0f, true) * 0.5f,
+                         btn_y + 19, 13.0f, true, {1, 1, 1, 1});
 
         popup_bounds_ = {x, y, w, h};
         ok_bounds_ = {x + w/2 - 30, btn_y, 60, 28};
@@ -100,8 +111,10 @@ public:
     bool has_overlay() const override { return open_; }
 
     bool handle_event(const Event& event, Element& elem) override {
-        float lx = event.x - elem.absolute_x();
-        float ly = event.y - elem.absolute_y();
+        const flex::Vec2 local_pos =
+            detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+        float lx = local_pos.x;
+        float ly = local_pos.y;
 
         if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
             // Click input
@@ -156,27 +169,61 @@ public:
 private:
     struct Rect { float x, y, w, h; };
 
+    static ComputedStyle make_text_style(const ComputedStyle* base_style, float font_size,
+                                         bool bold) {
+        ComputedStyle style;
+        if (base_style) {
+            style = *base_style;
+        }
+        style.font_size = font_size;
+        style.font_weight = bold ? FontWeight::Bold : FontWeight::Normal;
+        return style;
+    }
+
+    static float text_width(const ComputedStyle* base_style, const std::string& text,
+                            float font_size, bool bold) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return approximate_segmented_text_width(&text_style, text);
+    }
+
+    static float draw_inline_text(RenderCommandList& commands, const ComputedStyle* base_style,
+                                  const std::string& text, float x, float baseline_y,
+                                  float font_size, bool bold, const Color& color) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return emit_segmented_text_line(commands, &text_style, text, x,
+                                                       baseline_y, color, bold);
+    }
+
     bool hit(float px, float py, const Rect& r) const {
         return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
     }
 
-    void render_spinner(float x, float y, float w, int value, int min_v, int max_v, int idx,
-                        const ComputedStyle* style, Renderer& renderer) {
+    void render_spinner(RenderCommandList& commands, float x, float y, float w,
+                        int value, int min_v, int max_v, int idx,
+                        const ComputedStyle* style) {
         float h = 100;
         
         // Up arrow
         Color arrow_c = (hover_spinner_ == idx && hover_up_) ? Color{0.3f, 0.4f, 0.8f, 1} : Color{0.4f, 0.4f, 0.4f, 1};
-        renderer.draw_text("▲", x + w/2 - 6, y + 16, style->font_family, 14, false, arrow_c);
+        draw_inline_text(commands, style, "▲",
+                         x + w * 0.5f - text_width(style, "▲", 14.0f, false) * 0.5f, y + 16,
+                         14.0f, false, arrow_c);
 
         // Value
         char buf[8];
         std::snprintf(buf, sizeof(buf), "%02d", value);
-        renderer.draw_rect(x, y + 25, w, 40, 4, Paint::solid({0.95f, 0.95f, 0.95f, 1}), Paint::none(), 0);
-        renderer.draw_text(buf, x + w/2 - 10, y + 52, style->font_family, 20, true, {0.1f, 0.1f, 0.1f, 1});
+        commands.draw_rect(x, y + 25, w, 40, 4,
+                           Paint::solid({0.95f, 0.95f, 0.95f, 1}),
+                           Paint::none(), 0);
+        draw_inline_text(commands, style, buf,
+                         x + w * 0.5f - text_width(style, buf, 20.0f, true) * 0.5f, y + 52,
+                         20.0f, true, {0.1f, 0.1f, 0.1f, 1});
 
         // Down arrow
         arrow_c = (hover_spinner_ == idx && !hover_up_) ? Color{0.3f, 0.4f, 0.8f, 1} : Color{0.4f, 0.4f, 0.4f, 1};
-        renderer.draw_text("▼", x + w/2 - 6, y + 85, style->font_family, 14, false, arrow_c);
+        draw_inline_text(commands, style, "▼",
+                         x + w * 0.5f - text_width(style, "▼", 14.0f, false) * 0.5f, y + 85,
+                         14.0f, false, arrow_c);
 
         spinner_bounds_[idx] = {x, y, w, h};
     }

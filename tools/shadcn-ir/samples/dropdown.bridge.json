@@ -1,0 +1,26 @@
+{
+  "bridges": [
+    {
+      "target": "dropdown_root",
+      "state": "open",
+      "properties": {
+        "open": true
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "dropdown_root",
+      "when": [
+        { "type": "prop", "name": "selected_value", "equals": "vue" }
+      ],
+      "properties": {
+        "selected_value": "vue"
+      }
+    },
+    {
+      "target": "dropdown_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

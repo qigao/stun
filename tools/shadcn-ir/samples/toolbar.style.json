@@ -1,0 +1,13 @@
+{
+  "rules": [
+    {
+      "target": "toolbar_root",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "width": "100%",
+        "height": "2.5rem"
+      }
+    }
+  ]
+}

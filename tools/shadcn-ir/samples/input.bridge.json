@@ -1,0 +1,25 @@
+{
+  "bridges": [
+    {
+      "target": "input_root",
+      "state": "disabled",
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "input_root",
+      "state": "read-only",
+      "properties": {
+        "readonly": true
+      },
+      "pseudo_states": ["read-only"]
+    },
+    {
+      "target": "input_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

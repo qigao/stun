@@ -1,0 +1,109 @@
+{
+  "component": "Drawer",
+  "kind": "composite",
+  "root": "drawer_root",
+  "nodes": [
+    {
+      "id": "drawer_root",
+      "type": "element",
+      "tag": "div",
+      "role": "dialog",
+      "states": ["open", "closed", "modal"],
+      "attrs": {
+        "data-slot": "drawer",
+        "aria-modal": true,
+        "aria-hidden": true
+      }
+    },
+    {
+      "id": "drawer_overlay",
+      "type": "element",
+      "tag": "div",
+      "slot": "overlay",
+      "states": ["open", "closed"],
+      "attrs": {
+        "data-slot": "drawer-overlay",
+        "data-state": "closed"
+      }
+    },
+    {
+      "id": "drawer_content",
+      "type": "element",
+      "tag": "div",
+      "slot": "content",
+      "states": ["open", "closed"],
+      "attrs": {
+        "data-slot": "drawer-content",
+        "data-state": "closed"
+      }
+    },
+    {
+      "id": "drawer_handle",
+      "type": "element",
+      "tag": "div",
+      "slot": "handle",
+      "attrs": {
+        "data-slot": "drawer-handle",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "id": "drawer_header",
+      "type": "element",
+      "tag": "div",
+      "slot": "header",
+      "attrs": {
+        "data-slot": "drawer-header"
+      }
+    },
+    {
+      "id": "drawer_title",
+      "type": "element",
+      "tag": "div",
+      "slot": "title",
+      "attrs": {
+        "data-slot": "drawer-title"
+      },
+      "props": {
+        "text": "Drawer title"
+      }
+    },
+    {
+      "id": "drawer_description",
+      "type": "element",
+      "tag": "div",
+      "slot": "description",
+      "attrs": {
+        "data-slot": "drawer-description"
+      },
+      "props": {
+        "text": "Drawer description"
+      }
+    },
+    {
+      "id": "drawer_footer",
+      "type": "element",
+      "tag": "div",
+      "slot": "footer",
+      "attrs": {
+        "data-slot": "drawer-footer"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "drawer_root", "child": "drawer_overlay" },
+    { "parent": "drawer_root", "child": "drawer_content" },
+    { "parent": "drawer_content", "child": "drawer_handle" },
+    { "parent": "drawer_content", "child": "drawer_header" },
+    { "parent": "drawer_header", "child": "drawer_title" },
+    { "parent": "drawer_header", "child": "drawer_description" },
+    { "parent": "drawer_content", "child": "drawer_footer" }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": true
+  },
+  "meta": {
+    "source": "shadcn/drawer"
+  }
+}

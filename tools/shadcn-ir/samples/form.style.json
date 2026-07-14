@@ -1,0 +1,54 @@
+{
+  "rules": [
+    {
+      "target": "form_root",
+      "selector": "& > * + *",
+      "decls": {
+        "margin-top": "1.5rem"
+      }
+    },
+    {
+      "target": "form_item",
+      "selector": "& > * + *",
+      "decls": {
+        "margin-top": "0.5rem"
+      }
+    },
+    {
+      "target": "form_label",
+      "selector": "&",
+      "decls": {
+        "font-size": "0.875rem",
+        "font-weight": "500",
+        "line-height": "1"
+      }
+    },
+    {
+      "target": "form_description",
+      "selector": "&",
+      "decls": {
+        "font-size": "0.875rem",
+        "color": "var(--muted-foreground)"
+      }
+    },
+    {
+      "target": "form_message",
+      "selector": "&",
+      "decls": {
+        "font-size": "0.875rem",
+        "font-weight": "500",
+        "color": "var(--destructive)"
+      }
+    },
+    {
+      "target": "form_message",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "hidden" }
+      ],
+      "decls": {
+        "display": "none"
+      }
+    }
+  ]
+}

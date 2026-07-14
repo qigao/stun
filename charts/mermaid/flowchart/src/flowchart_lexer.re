@@ -13,6 +13,9 @@ typedef struct {
     int line;
 } LexerState;
 
+void FlowchartParser(void *parser, int token, void *value,
+                     FlowchartParserContext *ctx);
+
 static char* copy_token(const char* start, const char* end) {
     size_t len = end - start;
     char* s = (char*)malloc(len + 1);
@@ -37,6 +40,7 @@ loop:
         // 限制标识符，不包括特殊操作符字符，或者将操作符放在前面
         ident = [a-zA-Z0-9_][a-zA-Z0-9_]*; 
         string = "\"" [^"\000]* "\"";
+        html = "<" [^>\n\000]* ">";
         comment = "%%" [^\n\000]*;
 
         white { goto loop; }
@@ -79,6 +83,13 @@ loop:
         "}"               { FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
         ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); goto loop; }
+        ":"               { FlowchartParser(parser, FC_COLON, NULL, ctx); goto loop; }
+        "-"               { FlowchartParser(parser, FC_DASH, NULL, ctx); goto loop; }
+
+        html {
+            FlowchartParser(parser, FC_HTML, copy_token(token, s->cursor), ctx);
+            goto loop;
+        }
 
         // 优先级 4: 通用标识符
         ident {
@@ -94,7 +105,7 @@ loop:
 
         "\000" { FlowchartParser(parser, FC_EOF, NULL, ctx); return; }
 
-        . { goto loop; }
+        . { ctx->error_count++; goto loop; }
     */
 }
 

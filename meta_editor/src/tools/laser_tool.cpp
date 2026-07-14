@@ -53,8 +53,8 @@ void LaserTool::render_overlay(flex::Renderer& renderer) {
         
         char path[128];
         snprintf(path, sizeof(path), "M %.1f %.1f L %.1f %.1f",
-                 trail_[i-1].pos.x(), trail_[i-1].pos.y(),
-                 trail_[i].pos.x(), trail_[i].pos.y());
+                 trail_[i-1].pos.x, trail_[i-1].pos.y,
+                 trail_[i].pos.x, trail_[i].pos.y);
         renderer.stroke_path(path, stroke, 4.0f);
     }
     
@@ -63,9 +63,9 @@ void LaserTool::render_overlay(flex::Renderer& renderer) {
     flex::Paint glow = flex::Paint::solid(flex::Color{color_.r, color_.g, color_.b, 0.3f});
     
     // Glow effect
-    renderer.draw_circle(cursor_pos_.x(), cursor_pos_.y(), point_radius_ * 2, glow, flex::Paint::none(), 0);
+    renderer.draw_circle(cursor_pos_.x, cursor_pos_.y, point_radius_ * 2, glow, flex::Paint::none(), 0);
     // Main dot
-    renderer.draw_circle(cursor_pos_.x(), cursor_pos_.y(), point_radius_, fill, flex::Paint::none(), 0);
+    renderer.draw_circle(cursor_pos_.x, cursor_pos_.y, point_radius_, fill, flex::Paint::none(), 0);
 }
 
 } // namespace meta_editor

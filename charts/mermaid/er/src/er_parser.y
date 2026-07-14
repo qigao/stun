@@ -3,7 +3,7 @@
 %extra_argument { ERParserContext *ctx }
 
 %token NL START LBRACE RBRACE COLON ZERO_OR_ONE ZERO_OR_MORE ONE_OR_MORE ONLY_ONE 
-       REL_IDENTIFYING REL_NON_IDENTIFYING PK FK UK STRING ID EOF.
+       IDENTIFYING_LINK NON_IDENTIFYING_LINK PK FK UK STRING ID EOF.
 
 %token_type { char* }
 %type id { char* }
@@ -121,8 +121,8 @@ cardinality(R) ::= ZERO_OR_MORE. { R = ER_CARDINALITY_ZERO_OR_MORE; }
 cardinality(R) ::= ONE_OR_MORE. { R = ER_CARDINALITY_ONE_OR_MORE; }
 cardinality(R) ::= ONLY_ONE. { R = ER_CARDINALITY_ONLY_ONE; }
 
-rel_type(R) ::= REL_IDENTIFYING. { R = ER_REL_IDENTIFYING; }
-rel_type(R) ::= REL_NON_IDENTIFYING. { R = ER_REL_NON_IDENTIFYING; }
+rel_type(R) ::= IDENTIFYING_LINK. { R = ER_REL_IDENTIFYING; }
+rel_type(R) ::= NON_IDENTIFYING_LINK. { R = ER_REL_NON_IDENTIFYING; }
 
 id(R) ::= ID(A). { R = A; }
 id(R) ::= STRING(A). { R = A; }

@@ -29,7 +29,7 @@ public:
     explicit StepperWidget(int value = 0, int min_value = 0, int max_value = 100, int step = 1);
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "StepperWidget"; }

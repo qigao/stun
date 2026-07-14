@@ -6,7 +6,8 @@
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <stb_sprintf.h>
 
@@ -14,15 +15,62 @@ namespace flexUI {
 
 TooltipWidget::TooltipWidget(const std::string& text) : text_(text) {}
 
-void TooltipWidget::render(const Element& elem, Renderer& renderer) {
-  if (!visible_ || opacity_ <= 0) return;
-
-  auto& r = renderer.flex();
-  render_background(r, elem);
-  render_text(r, elem);
+bool TooltipWidget::measure_intrinsic_size(const Element& elem, float available_width,
+                                           float available_height, float& out_width,
+                                           float& out_height) const {
+  (void)available_width;
+  (void)available_height;
+  const auto* style = elem.computed_style;
+  ComputedStyle measure_style;
+  if (style) {
+    measure_style = *style;
+  }
+  measure_style.font_size = 13.0f;
+  const float text_width =
+      text_.empty() ? 48.0f : approximate_segmented_text_width(&measure_style, text_);
+  out_width = std::max(80.0f, text_width + 24.0f);
+  out_height = 32.0f;
+  return true;
 }
 
-void TooltipWidget::render_background(flex::Renderer& r, const Element& elem) {
+void TooltipWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+  const char* side = "top";
+  switch (position_) {
+    case Position::Top:
+      side = "top";
+      break;
+    case Position::Bottom:
+      side = "bottom";
+      break;
+    case Position::Left:
+      side = "left";
+      break;
+    case Position::Right:
+      side = "right";
+      break;
+  }
+  set_host_attribute("role", "tooltip");
+  if (visible_) {
+    set_host_attribute("data-state", "open");
+  } else if (target_visible_) {
+    set_host_attribute("data-state", "delayed-open");
+  } else {
+    set_host_attribute("data-state", "closed");
+  }
+  set_host_attribute("data-side", side);
+  set_host_boolean_attribute("aria-hidden", !visible_);
+  if (text_.empty()) {
+    clear_host_attribute("aria-label");
+  } else {
+    set_host_attribute("aria-label", text_);
+  }
+  if (!visible_ || opacity_ <= 0) return;
+
+  render_background(commands, elem);
+  render_text(commands, elem);
+}
+
+void TooltipWidget::render_background(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color bg_color = {0.12f, 0.12f, 0.12f, 0.9f};  // Dark background
@@ -36,16 +84,16 @@ void TooltipWidget::render_background(flex::Renderer& r, const Element& elem) {
   // Apply opacity
   Color final_color = {bg_color.r, bg_color.g, bg_color.b, bg_color.a * opacity_};
 
-  r.draw_rect(0, 0, elem.width(), elem.height(), radius,
-              Paint::solid(final_color), Paint::none(), 0);
+  commands.draw_rect(0, 0, elem.width(), elem.height(), radius,
+                     Paint::solid(final_color), Paint::none(), 0);
 
   // Arrow
   if (style && style->get_variable("--tooltip-arrow", "true") == "true") {
-    render_arrow(r, elem);
+    render_arrow(commands, elem);
   }
 }
 
-void TooltipWidget::render_arrow(flex::Renderer& r, const Element& elem) {
+void TooltipWidget::render_arrow(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color bg_color = {0.12f, 0.12f, 0.12f, 0.9f};
@@ -92,30 +140,29 @@ void TooltipWidget::render_arrow(flex::Renderer& r, const Element& elem) {
       break;
   }
 
-  r.fill_path(path, Paint::solid(final_color));
+  commands.fill_path(path, Paint::solid(final_color));
 }
 
-void TooltipWidget::render_text(flex::Renderer& r, const Element& elem) {
+void TooltipWidget::render_text(RenderCommandList& commands, const Element& elem) {
   if (text_.empty()) return;
 
   auto* style = elem.computed_style;
 
   Color text_color = {1.0f, 1.0f, 1.0f, 1.0f};
   float font_size = 12.0f;
-  std::string font_family = "Arial";
-
   if (style) {
     text_color = style->get_variable_color("--tooltip-text", text_color);
     font_size = style->font_size > 0 ? style->font_size : font_size;
-    if (!style->font_family.empty()) font_family = style->font_family;
   }
 
   Color final_color = {text_color.r, text_color.g, text_color.b, text_color.a * opacity_};
-
-  float padding = 8.0f;
-  float text_y = elem.height() / 2 - font_size / 2;
-
-  r.draw_text(text_, padding, text_y, font_family, font_size, false, final_color);
+  if (style) {
+    const float padding = 8.0f;
+    const auto text_block = layout_text_block(
+        style, text_, padding, 0.0f, std::max(0.0f, elem.width() - padding * 2.0f),
+        elem.height(), final_color, TextVerticalAlign::Middle);
+    emit_text_block(commands, text_block);
+  }
 }
 
 bool TooltipWidget::handle_event(const Event& event, Element& elem) {
@@ -154,6 +201,37 @@ void TooltipWidget::update(float delta_ms, Element& elem) {
         visible_ = false;
       }
     }
+  }
+
+  const char* side = "top";
+  switch (position_) {
+    case Position::Top:
+      side = "top";
+      break;
+    case Position::Bottom:
+      side = "bottom";
+      break;
+    case Position::Left:
+      side = "left";
+      break;
+    case Position::Right:
+      side = "right";
+      break;
+  }
+  set_host_attribute("role", "tooltip");
+  if (visible_) {
+    set_host_attribute("data-state", "open");
+  } else if (target_visible_) {
+    set_host_attribute("data-state", "delayed-open");
+  } else {
+    set_host_attribute("data-state", "closed");
+  }
+  set_host_attribute("data-side", side);
+  set_host_boolean_attribute("aria-hidden", !visible_);
+  if (text_.empty()) {
+    clear_host_attribute("aria-label");
+  } else {
+    set_host_attribute("aria-label", text_);
   }
 }
 

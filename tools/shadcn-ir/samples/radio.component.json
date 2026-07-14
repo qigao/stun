@@ -1,0 +1,23 @@
+{
+  "component": "Radio",
+  "kind": "leaf",
+  "root": "radio_root",
+  "nodes": [
+    {
+      "id": "radio_root",
+      "type": "widget",
+      "widget": "radio",
+      "tag": "label",
+      "role": "radio",
+      "states": ["checked", "disabled", "focus-visible"],
+      "props": {
+        "label": "Email",
+        "value": "email",
+        "group": "contact"
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/radio-group"
+  }
+}

@@ -29,10 +29,10 @@ void demo_state_machine() {
   layer->add_state("negative", false, "shake");
 
   // Add transitions
-  layer->add_transition("neutral", "positive", "counter", ">", 0);
-  layer->add_transition("positive", "neutral", "counter", "<", 0.1);
-  layer->add_transition("neutral", "negative", "counter", "<", 0);
-  layer->add_transition("negative", "neutral", "counter", ">", -0.1);
+  layer->add_transition("neutral", "positive", "counter > 0");
+  layer->add_transition("positive", "neutral", "counter < 0.1");
+  layer->add_transition("neutral", "negative", "counter < 0");
+  layer->add_transition("negative", "neutral", "counter > -0.1");
 
   std::cout << "Created state machine with 3 states\n";
   std::cout << "Initial state: " << layer->current_state() << "\n\n";

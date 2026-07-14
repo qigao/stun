@@ -4,6 +4,9 @@
 #include "quadrant/quadrant_ast.h"
 #include "quadrant_parser_gen.h"
 
+void QuadrantParser(void *parser, int token, void *value,
+                    QuadrantParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;
@@ -124,7 +127,7 @@ void quadrant_scan(Scanner *s, void *parser, QuadrantParserContext *ctx) {
     point_x_state:
     token = s->cursor;
     /*!re2c
-        [0-9]+ ("." [0-9]+)? {
+        [^,\]\x00]+ {
              QuadrantParser(parser, QUADRANT_POINT_X, copy_token(token, s->cursor), ctx);
              goto point_comma_state;
         }
@@ -141,7 +144,7 @@ void quadrant_scan(Scanner *s, void *parser, QuadrantParserContext *ctx) {
     point_y_state:
     token = s->cursor;
     /*!re2c
-        [0-9]+ ("." [0-9]+)? {
+        [^\]\x00]+ {
              QuadrantParser(parser, QUADRANT_POINT_Y, copy_token(token, s->cursor), ctx);
              goto point_end_state;
         }

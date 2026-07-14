@@ -1,0 +1,31 @@
+{
+  "component": "Toolbar",
+  "kind": "leaf",
+  "root": "toolbar_root",
+  "nodes": [
+    {
+      "id": "toolbar_root",
+      "type": "widget",
+      "widget": "toolbar",
+      "tag": "div",
+      "states": ["open", "closed"],
+      "props": {
+        "items": [
+          {
+            "type": "dropdown",
+            "id": "more",
+            "icon": "⋯",
+            "items": [
+              { "id": "more-options", "label": "More Options" }
+            ]
+          },
+          {
+            "type": "button",
+            "id": "save",
+            "icon": "S"
+          }
+        ]
+      }
+    }
+  ]
+}

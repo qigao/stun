@@ -47,6 +47,7 @@ public:
     Canvas* canvas() { return editor_->canvas(); }
     SelectionManager* selection() { return editor_->selection(); }
     ToolManager* tools() { return editor_->tools(); }
+    flex::Renderer& native_renderer() { return *native_renderer_; }
 
     bool save_project(const std::string& path) { return editor_->save_project(path); }
     bool load_project(const std::string& path) { return editor_->load_project(path); }
@@ -66,6 +67,7 @@ private:
 
     std::unique_ptr<Editor> editor_;
     std::unique_ptr<flexUI::Box> ui_box_;
+    flex::Renderer* native_renderer_ = nullptr;
 
     std::unique_ptr<ContextToolbar> context_toolbar_;
     std::unique_ptr<ZoomPanel> zoom_panel_;

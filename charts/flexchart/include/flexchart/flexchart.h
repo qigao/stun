@@ -2,20 +2,18 @@
 
 #include "flexchart/chart_ast.h"
 #include <string>
+#include <string_view>
 #include <memory>
 
 namespace flex {
 namespace chart {
 
-/**
- * @brief Parses a Chart DSL source string into an AST.
- * 
- * @param source The DSL source text.
- * @param program Pointer to an AstProgram to populate.
- * @param error_msg String to populate with error message if parsing fails.
- * @return true if parsing was successful, false otherwise.
- */
-bool parse_chart(const char *source, AstProgram *program, std::string &error_msg);
+// Unified helper function to detect chart type from source by parsing the first alphabetical word.
+std::string detect_type(std::string_view src);
+
+// Unified parse entry point — detects chart type from source,
+// dispatches to the appropriate per-mark parser, and builds an AstProgram.
+bool parse_chart(const char* source, AstProgram* program, std::string& error);
 
 } // namespace chart
 } // namespace flex

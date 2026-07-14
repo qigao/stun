@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flexui.dev/schema/bridge_ir.schema.json",
+  "title": "BridgeIR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bridges"],
+  "properties": {
+    "bridges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bridge" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "bridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string"
+        },
+        "when": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/condition" },
+          "default": []
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean"]
+          },
+          "default": {}
+        },
+        "missing_attributes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "pseudo_states": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean"]
+          },
+          "default": {}
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["state", "attr", "variant", "prop"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "equals": {
+          "type": ["string", "number", "boolean"]
+        }
+      }
+    }
+  }
+}

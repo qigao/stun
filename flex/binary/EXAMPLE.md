@@ -149,15 +149,15 @@ scene MyApp {
 ```cpp
 #include <flex.h>
 #include "flex/binary/reader.h"
-#include "flex/backends/thorvg/init.h"
-#include <SDL2/SDL.h>
+#include "backends/thorvg/init.h"
+#include <iostream>
+#include <vector>
 #include <thorvg.h>
 
 int main() {
-    // Initialize
-    SDL_Init(SDL_INIT_VIDEO);
-    tvg::Initializer::init(0);
-    flex::init();
+    // Initialize backend integration
+    flex::thorvg_backend::init();
+    flex::thorvg_backend::register_backend();
 
     // Option 1: Load .flexb directly with Definition
     auto definition = flex::Definition::load_binary("app.flexb");
@@ -181,16 +181,19 @@ int main() {
     std::vector<uint32_t> buffer(800 * 600);
     canvas->target(buffer.data(), 800, 800, 600, tvg::ColorSpace::ARGB8888);
 
-    auto renderer = flex::create_thorvg_renderer(canvas);
-    renderer->render(instance->scene().get());
+    auto renderer = flex::create_renderer(static_cast<flex::CanvasHandle>(canvas.get()));
+    if (!renderer) {
+        std::cerr << "Failed to create renderer\n";
+        return 1;
+    }
 
-    canvas->draw();
-    canvas->sync();
+    renderer->begin_frame(800.0f, 600.0f, 1.0f);
+    renderer->clear(instance->scene()->background());
+    instance->render(*renderer);
+    renderer->end_frame();
 
     // Cleanup
-    flex::shutdown();
-    tvg::Initializer::term();
-    SDL_Quit();
+    flex::thorvg_backend::shutdown();
 
     return 0;
 }

@@ -9,7 +9,7 @@
 #include <meta_editor/view/layers_panel.h>
 #include <meta_editor/view/top_bar.h>
 #include <meta_editor/view/bottom_bar.h>
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include "glfw_app.h"
 #include <thorvg.h>

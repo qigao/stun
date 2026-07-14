@@ -75,12 +75,10 @@ private:
     std::string error_message_;
     Stats stats_;
 
-    // Internal state
-    Scene::Ptr scene_;
-    std::vector<Timeline::Ptr> timelines_;
-
     // Write binary data
-    std::vector<uint8_t> write_binary();
+    std::vector<uint8_t> write_binary(
+        Scene::RawPtr scene,
+        const std::vector<Timeline::SharedPtr>& timelines);
 };
 
 } // namespace binary

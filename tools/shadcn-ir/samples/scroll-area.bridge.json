@@ -1,0 +1,32 @@
+{
+  "bridges": [
+    {
+      "target": "scroll_area_root",
+      "state": "scrolling",
+      "attributes": {
+        "data-state": "scrolling"
+      }
+    },
+    {
+      "target": "scroll_area_scrollbar",
+      "state": "vertical",
+      "attributes": {
+        "data-orientation": "vertical"
+      }
+    },
+    {
+      "target": "scroll_area_scrollbar",
+      "state": "horizontal",
+      "attributes": {
+        "data-orientation": "horizontal"
+      }
+    },
+    {
+      "target": "scroll_area_thumb",
+      "state": "scrolling",
+      "attributes": {
+        "data-state": "scrolling"
+      }
+    }
+  ]
+}

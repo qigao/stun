@@ -4,6 +4,8 @@
 #include "kanban/kanban_ast.h"
 #include "kanban_parser_gen.h"
 
+void KanbanParser(void *parser, int token, void *value, KanbanParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;
@@ -141,7 +143,7 @@ void kanban_scan(Scanner *s, void *parser, KanbanParserContext *ctx) {
     class_state:
     token = s->cursor;
     /*!re2c
-        [^\n]+ {
+        [^\n\000]+ {
              KanbanParser(parser, KANBAN_CLASS, copy_token(token, s->cursor), ctx);
              goto loop;
         }
@@ -150,15 +152,17 @@ void kanban_scan(Scanner *s, void *parser, KanbanParserContext *ctx) {
             s->at_bol = 1;
             goto loop; 
         }
+        "\000" { return; }
     */
 
     icon_state:
     token = s->cursor;
     /*!re2c
-        [^\)]+ {
+        [^\)\000]+ {
              KanbanParser(parser, KANBAN_ICON, copy_token(token, s->cursor), ctx);
              goto icon_end;
         }
+        "\000" { return; }
     */
     icon_end:
     token = s->cursor;

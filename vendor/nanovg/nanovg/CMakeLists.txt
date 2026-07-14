@@ -1,5 +1,7 @@
 ﻿find_package(OpenGL REQUIRED)
+if(NOT TARGET glad::glad)
 find_package(glad CONFIG REQUIRED)
+endif()
 # ============================================================================
 # Build NanoVG internally
 # ============================================================================

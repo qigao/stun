@@ -4,7 +4,7 @@
 
 #include <flex/app/glfw_app.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 
 class Demo : public flex::GlfwApp {
 public:

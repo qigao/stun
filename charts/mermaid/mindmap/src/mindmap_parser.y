@@ -12,11 +12,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "flex/core/expr_c.h"
 #include "mindmap/mindmap_ast.h"
 
 static int parse_indent_val(const char* s) {
     if (!s) return 0;
-    return atoi(s);
+    int value = 0;
+    return flex_expr_eval_i32(s, &value) ? value : 0;
 }
 }
 

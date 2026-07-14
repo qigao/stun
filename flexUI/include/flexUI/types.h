@@ -63,6 +63,7 @@ enum class Position {
   Relative,
   Absolute,
   Fixed,
+  Sticky,
 };
 
 enum class Visibility {
@@ -83,11 +84,37 @@ enum class BoxSizing {
   BorderBox,
 };
 
+enum class BorderStyle {
+  None,
+  Solid,
+  Dashed,
+  Dotted,
+  Double,
+  Groove,
+  Ridge,
+  Inset,
+  Outset,
+  Wavy,
+};
+
 enum class TextAlign {
   Left,
   Center,
   Right,
   Justify,
+  Start,
+  End,
+};
+
+enum class Direction {
+  Ltr,
+  Rtl,
+};
+
+enum class UnicodeBidi {
+  Normal,
+  Plaintext,
+  Isolate,
 };
 
 enum class FontWeight {
@@ -127,6 +154,25 @@ enum class EasingType {
   EaseOut,
   EaseInOut,
   CubicBezier,
+};
+
+enum class AnimationFillMode {
+  None,
+  Forwards,
+  Backwards,
+  Both,
+};
+
+enum class AnimationDirection {
+  Normal,
+  Reverse,
+  Alternate,
+  AlternateReverse,
+};
+
+enum class AnimationPlayState {
+  Running,
+  Paused,
 };
 
 // ============================================================================

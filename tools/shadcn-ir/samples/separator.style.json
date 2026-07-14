@@ -1,0 +1,34 @@
+{
+  "rules": [
+    {
+      "target": "separator_root",
+      "selector": "&",
+      "decls": {
+        "flex-shrink": "0",
+        "background-color": "var(--border)"
+      }
+    },
+    {
+      "target": "separator_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "orientation", "value": "horizontal" }
+      ],
+      "decls": {
+        "height": "1px",
+        "width": "100%"
+      }
+    },
+    {
+      "target": "separator_root",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "orientation", "value": "vertical" }
+      ],
+      "decls": {
+        "height": "100%",
+        "width": "1px"
+      }
+    }
+  ]
+}

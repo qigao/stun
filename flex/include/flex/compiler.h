@@ -1,22 +1,12 @@
 /*
- * Flex Engine - Compiler Module
+ * Flex Engine - Compiler Module (Legacy Compatibility Header)
  *
- * Pure DSL compilation: Lexer, Parser, AST generation
- * No runtime dependencies, no rendering dependencies
+ * Preferred semantic name: #include "flex/dsl.h"
  *
- * Usage:
- *   #include "flex/compiler.h"
- *   auto program = flex::parser::parse(source);
+ * This header remains as a stable alias for existing code that still uses
+ * the older compiler/runtime/bridge naming.
  */
 
 #pragma once
 
-// Compiler components
-#include "flex/compiler/flex_ast.h"
-#include "flex/compiler/flex_parser.h"
-#include "flex/compiler/flex_token.h"
-
-// Standard library (minimal dependencies)
-#include <memory>
-#include <string>
-#include <vector>
+#include "flex/dsl.h"

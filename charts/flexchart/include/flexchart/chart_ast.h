@@ -30,6 +30,8 @@ struct AstData : AstNode {
     std::string name;
     std::string source;
     std::string format;
+    std::string expr;                                  // math expression string
+    std::map<std::string, std::vector<double>> ranges; // variable ranges {name: [start, end, step]}
     std::vector<AstValue> inline_values;
     std::vector<std::shared_ptr<AstTransform>> transforms;
 };
@@ -61,6 +63,8 @@ struct AstMark : AstNode {
     std::string type;
     std::string name;
     std::string data_ref;
+    std::string expr;                                  // inline math expression
+    std::map<std::string, std::vector<double>> ranges; // inline variable ranges
     std::vector<std::shared_ptr<AstEncoding>> encodings;
     std::map<std::string, AstValue> styles;
     std::vector<std::shared_ptr<AstState>> states;

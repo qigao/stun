@@ -8,9 +8,11 @@
 #define FLEXUI_TOOLBAR_WIDGET_H
 
 #include "../widget.h"
+#include "../detail/css_render_transform.h"
 #include "../element.h"
 #include "../event.h"
-#include "../renderer.h"
+#include "../render_command.h"
+#include "../text_layout.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -32,38 +34,45 @@ public:
 
     ToolbarWidget() = default;
 
+    void sync_host_semantics_for_layout(Element& elem) override {
+        (void)elem;
+        sync_host_semantics();
+    }
+
     void add_button(const std::string& id, const std::string& icon, 
                     std::function<void()> action, const std::string& tooltip = "") {
         items_.push_back({Item::Button, id, icon, tooltip, true, false, {}, action});
+        sync_host_semantics();
     }
 
     void add_toggle(const std::string& id, const std::string& icon, bool initial = false,
                     const std::string& tooltip = "") {
         items_.push_back({Item::Toggle, id, icon, tooltip, true, initial, {}, nullptr});
+        sync_host_semantics();
     }
 
     void add_separator() {
         items_.push_back({Item::Separator, "", "", "", true, false, {}, nullptr});
+        sync_host_semantics();
     }
 
     void add_dropdown(const std::string& id, const std::string& icon,
                       std::vector<std::pair<std::string, std::string>> items,
                       const std::string& tooltip = "") {
         items_.push_back({Item::Dropdown, id, icon, tooltip, true, false, std::move(items), nullptr});
+        sync_host_semantics();
     }
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         auto* style = elem.computed_style;
         if (!style) return;
 
         float h = elem.height();
         float btn_size = h - 8;
         float x = 4;
-
-        // Background - dark theme
-        renderer.draw_rect(0, 0, elem.width(), h, 0, 
-                          Paint::solid({0.18f, 0.2f, 0.24f, 1}),
-                          Paint::solid({0.25f, 0.27f, 0.3f, 1}), 1);
+        commands.draw_rect(0, 0, elem.width(), h, 0,
+                           Paint::solid({0.18f, 0.2f, 0.24f, 1}),
+                           Paint::solid({0.25f, 0.27f, 0.3f, 1}), 1);
 
         item_bounds_.clear();
 
@@ -71,8 +80,9 @@ public:
             const auto& item = items_[i];
 
             if (item.type == Item::Separator) {
-                renderer.draw_rect(x + 4, 6, 1, h - 12, 0,
-                                  Paint::solid({0.8f, 0.8f, 0.8f, 1}), Paint::none(), 0);
+                commands.draw_rect(x + 4, 6, 1, h - 12, 0,
+                                   Paint::solid({0.8f, 0.8f, 0.8f, 1}),
+                                   Paint::none(), 0);
                 item_bounds_.push_back({x, 4, 9, btn_size});
                 x += 9;
                 continue;
@@ -91,18 +101,19 @@ public:
             }
 
             if (bg.a > 0) {
-                renderer.draw_rect(x, 4, btn_size, btn_size, 4, Paint::solid(bg), Paint::none(), 0);
+                commands.draw_rect(x, 4, btn_size, btn_size, 4, Paint::solid(bg),
+                                   Paint::none(), 0);
             }
 
             // Icon - light color for dark theme
             Color icon_c = item.enabled ? Color{0.9f, 0.9f, 0.9f, 1} : Color{0.5f, 0.5f, 0.5f, 1};
-            renderer.draw_text(item.icon, x + btn_size/2 - 7, 4 + btn_size * 0.65f,
-                              style->font_family, 16, false, icon_c);
+            draw_inline_text(commands, style, item.icon, x + btn_size/2 - 7,
+                             4 + btn_size * 0.65f, 16.0f, false, icon_c);
 
             // Dropdown arrow
             if (item.type == Item::Dropdown) {
-                renderer.draw_text("▾", x + btn_size - 10, 4 + btn_size * 0.7f,
-                                  style->font_family, 10, false, icon_c);
+                draw_inline_text(commands, style, "▾", x + btn_size - 10,
+                                 4 + btn_size * 0.7f, 10.0f, false, icon_c);
             }
 
             item_bounds_.push_back({x, 4, btn_size, btn_size});
@@ -110,7 +121,7 @@ public:
         }
     }
 
-    void render_overlay(const Element& elem, Renderer& renderer) override {
+    void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override {
         if (dropdown_open_ < 0 || dropdown_open_ >= static_cast<int>(items_.size())) return;
 
         const auto& item = items_[dropdown_open_];
@@ -118,23 +129,28 @@ public:
 
         auto* style = elem.computed_style;
         const auto& bounds = item_bounds_[dropdown_open_];
-        float x = elem.absolute_x() + bounds.x;
-        float y = elem.absolute_y() + bounds.y + bounds.h + 2;
-        float w = 120;
+        const auto anchor_bounds =
+            detail::css_render_rect_bounds(&elem, bounds.x, bounds.y,
+                                           bounds.w, bounds.h);
+        float x = anchor_bounds.x;
+        float y = anchor_bounds.y + anchor_bounds.height + 2;
+        float w = dropdown_width(item, style);
         float item_h = 28;
         float h = item.dropdown_items.size() * item_h + 8;
-
-        // Shadow + bg
-        renderer.draw_rect(x + 2, y + 2, w, h, 4, Paint::solid({0, 0, 0, 0.1f}), Paint::none(), 0);
-        renderer.draw_rect(x, y, w, h, 4, Paint::solid({1, 1, 1, 1}), Paint::solid({0.85f, 0.85f, 0.85f, 1}), 1);
+        commands.draw_rect(x + 2, y + 2, w, h, 4,
+                           Paint::solid({0, 0, 0, 0.1f}), Paint::none(), 0);
+        commands.draw_rect(x, y, w, h, 4, Paint::solid({1, 1, 1, 1}),
+                           Paint::solid({0.85f, 0.85f, 0.85f, 1}), 1);
 
         float iy = y + 4;
         for (size_t i = 0; i < item.dropdown_items.size(); ++i) {
             if (static_cast<int>(i) == dropdown_hover_) {
-                renderer.draw_rect(x + 4, iy, w - 8, item_h, 4, Paint::solid({0.94f, 0.94f, 0.94f, 1}), Paint::none(), 0);
+                commands.draw_rect(x + 4, iy, w - 8, item_h, 4,
+                                   Paint::solid({0.94f, 0.94f, 0.94f, 1}),
+                                   Paint::none(), 0);
             }
-            renderer.draw_text(item.dropdown_items[i].second, x + 12, iy + item_h * 0.65f,
-                              style->font_family, 12, false, {0.1f, 0.1f, 0.1f, 1});
+            draw_inline_text(commands, style, item.dropdown_items[i].second, x + 12,
+                             iy + item_h * 0.65f, 12.0f, false, {0.1f, 0.1f, 0.1f, 1});
             iy += item_h;
         }
 
@@ -145,8 +161,10 @@ public:
     bool has_overlay() const override { return dropdown_open_ >= 0; }
 
     bool handle_event(const Event& event, Element& elem) override {
-        float lx = event.x - elem.absolute_x();
-        float ly = event.y - elem.absolute_y();
+        const flex::Vec2 local_pos =
+            detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+        float lx = local_pos.x;
+        float ly = local_pos.y;
 
         if (event.type == EventType::MouseMove) {
             int new_hover = item_at(lx, ly);
@@ -172,6 +190,7 @@ public:
                     dropdown_open_ = (dropdown_open_ == idx) ? -1 : idx;
                     dropdown_hover_ = -1;
                 }
+                sync_host_semantics();
                 elem.mark_paint_dirty();
                 return true;
             }
@@ -185,6 +204,7 @@ public:
                     }
                 }
                 dropdown_open_ = -1;
+                sync_host_semantics();
                 elem.mark_paint_dirty();
                 return true;
             }
@@ -192,6 +212,7 @@ public:
             // Click outside dropdown
             if (dropdown_open_ >= 0) {
                 dropdown_open_ = -1;
+                sync_host_semantics();
                 elem.mark_paint_dirty();
             }
         }
@@ -206,6 +227,7 @@ public:
                     if (on_toggle_) on_toggle_(item.id, item.toggled);
                 }
                 active_index_ = -1;
+                sync_host_semantics();
                 elem.mark_paint_dirty();
                 return true;
             }
@@ -226,14 +248,34 @@ public:
 
     void set_toggled(const std::string& id, bool v) {
         for (auto& item : items_) {
-            if (item.id == id) { item.toggled = v; break; }
+            if (item.id == id) {
+                item.toggled = v;
+                sync_host_semantics();
+                break;
+            }
         }
     }
 
     void set_enabled(const std::string& id, bool v) {
         for (auto& item : items_) {
-            if (item.id == id) { item.enabled = v; break; }
+            if (item.id == id) {
+                item.enabled = v;
+                sync_host_semantics();
+                break;
+            }
         }
+    }
+
+    void set_open_dropdown(const std::string& id) {
+        dropdown_open_ = -1;
+        dropdown_hover_ = -1;
+        for (size_t i = 0; i < items_.size(); ++i) {
+            if (items_[i].type == Item::Dropdown && items_[i].id == id) {
+                dropdown_open_ = static_cast<int>(i);
+                break;
+            }
+        }
+        sync_host_semantics();
     }
 
     using ToggleCallback = std::function<void(const std::string& id, bool toggled)>;
@@ -246,8 +288,53 @@ public:
 private:
     struct Rect { float x, y, w, h; };
 
+    static ComputedStyle make_text_style(const ComputedStyle* base_style, float font_size,
+                                         bool bold) {
+        ComputedStyle style;
+        if (base_style) {
+            style = *base_style;
+        }
+        style.font_size = font_size;
+        style.font_weight = bold ? FontWeight::Bold : FontWeight::Normal;
+        return style;
+    }
+
+    static float text_width(const ComputedStyle* base_style, const std::string& text,
+                            float font_size, bool bold) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return approximate_segmented_text_width(&text_style, text);
+    }
+
+    static float draw_inline_text(RenderCommandList& commands, const ComputedStyle* base_style,
+                                  const std::string& text, float x, float baseline_y,
+                                  float font_size, bool bold, const Color& color) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return emit_segmented_text_line(commands, &text_style, text, x,
+                                                       baseline_y, color, bold);
+    }
+
+    static float dropdown_width(const Item& item, const ComputedStyle* style) {
+        float width = 120.0f;
+        for (const auto& entry : item.dropdown_items) {
+            width = std::max(width, text_width(style, entry.second, 12.0f, false) + 24.0f);
+        }
+        return width;
+    }
+
     bool hit(float px, float py, const Rect& r) const {
         return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+    }
+
+    void sync_host_semantics() override {
+        set_host_attribute("role", "toolbar");
+        set_host_attribute("aria-orientation", "horizontal");
+        set_host_attribute("data-state", dropdown_open_ >= 0 ? "open" : "closed");
+        if (dropdown_open_ >= 0 && dropdown_open_ < static_cast<int>(items_.size()) &&
+            !items_[static_cast<size_t>(dropdown_open_)].id.empty()) {
+            set_host_attribute("data-open-id", items_[static_cast<size_t>(dropdown_open_)].id);
+        } else {
+            clear_host_attribute("data-open-id");
+        }
     }
 
     int item_at(float lx, float ly) const {

@@ -19,22 +19,29 @@ namespace flexUI {
 
 // Forward declaration
 class Element;
+class RenderCommandList;
 
 class TabsWidget : public Widget {
 public:
   struct Tab {
     std::string label;
     std::string id;
-    Element* page = nullptr;  // Associated page element
+    // While associated, TabsWidget owns the page's data-state and aria-hidden.
+    Element* page = nullptr;
     bool disabled = false;
   };
 
   TabsWidget();
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
+  bool needs_frame_update(const Element& elem) const override;
+  bool measure_intrinsic_size(const Element& elem, float available_width,
+                              float available_height, float& out_width,
+                              float& out_height) const override;
   const char* type_name() const override { return "TabsWidget"; }
+  bool paints_host_box() const override { return true; }
 
   // Tab management
   void add_tab(const std::string& label, const std::string& id, Element* page = nullptr, bool disabled = false);
@@ -59,8 +66,9 @@ public:
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_tabs(flex::Renderer& r, const Element& elem);
-  void render_indicator(flex::Renderer& r, const Element& elem);
+  void sync_host_semantics() override;
+  void render_tabs(RenderCommandList& commands, const Element& elem);
+  void render_indicator(RenderCommandList& commands, const Element& elem);
   float get_tab_width(const Tab& tab, float font_size) const;
   void update_page_visibility();
 

@@ -4,9 +4,10 @@
 
 #include <flexUI/widgets/toggle_group_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <cmath>
 
@@ -26,12 +27,52 @@ void ToggleGroupWidget::set_options(const std::vector<Option>& options) {
     backgrounds_.clear();
     labels_.clear();
     dirty_ = true;
+
+    const bool has_single_selection =
+        !multi_select_ && selected_index_ >= 0 &&
+        selected_index_ < static_cast<int>(options_.size());
+    set_host_attribute("role", multi_select_ ? "group" : "radiogroup");
+    set_host_attribute("data-orientation", "horizontal");
+    set_host_attribute("aria-orientation", "horizontal");
+    if (options_.empty()) {
+        set_host_attribute("data-state", "empty");
+    } else {
+        set_host_attribute("data-state", has_single_selection ? "selected" : "unselected");
+    }
+    set_host_state("selected", has_single_selection);
+    set_host_attribute("data-selected-count", has_single_selection ? "1" : "0");
+    if (has_single_selection) {
+        set_host_attribute("data-value", options_[selected_index_].id);
+        set_host_attribute("data-selected-index", std::to_string(selected_index_));
+    } else {
+        clear_host_attribute("data-value");
+        clear_host_attribute("data-selected-index");
+    }
 }
 
 void ToggleGroupWidget::set_selected_index(int index) {
     if (index >= -1 && index < static_cast<int>(options_.size())) {
         selected_index_ = index;
         dirty_ = true;
+        const bool has_selection =
+            selected_index_ >= 0 && selected_index_ < static_cast<int>(options_.size());
+        set_host_attribute("role", multi_select_ ? "group" : "radiogroup");
+        set_host_attribute("data-orientation", "horizontal");
+        set_host_attribute("aria-orientation", "horizontal");
+        if (options_.empty()) {
+            set_host_attribute("data-state", "empty");
+        } else {
+            set_host_attribute("data-state", has_selection ? "selected" : "unselected");
+        }
+        set_host_state("selected", has_selection);
+        set_host_attribute("data-selected-count", has_selection ? "1" : "0");
+        if (has_selection) {
+            set_host_attribute("data-value", options_[selected_index_].id);
+            set_host_attribute("data-selected-index", std::to_string(selected_index_));
+        } else {
+            clear_host_attribute("data-value");
+            clear_host_attribute("data-selected-index");
+        }
         if (change_callback_ && index >= 0) {
             change_callback_(index, options_[index].id);
         }
@@ -48,6 +89,25 @@ std::string ToggleGroupWidget::selected_id() const {
 void ToggleGroupWidget::set_selected_indices(const std::vector<int>& indices) {
     selected_indices_ = indices;
     dirty_ = true;
+
+    size_t selected_count = 0;
+    for (int index : selected_indices_) {
+        if (index >= 0 && index < static_cast<int>(options_.size())) {
+            ++selected_count;
+        }
+    }
+    set_host_attribute("role", multi_select_ ? "group" : "radiogroup");
+    set_host_attribute("data-orientation", "horizontal");
+    set_host_attribute("aria-orientation", "horizontal");
+    if (options_.empty()) {
+        set_host_attribute("data-state", "empty");
+    } else {
+        set_host_attribute("data-state", selected_count > 0 ? "selected" : "unselected");
+    }
+    set_host_state("selected", selected_count > 0);
+    set_host_attribute("data-selected-count", std::to_string(selected_count));
+    clear_host_attribute("data-value");
+    clear_host_attribute("data-selected-index");
 }
 
 bool ToggleGroupWidget::is_selected(int index) const {
@@ -88,12 +148,12 @@ void ToggleGroupWidget::rebuild_shapes(const Element& elem) {
         float x = i * (btn_width + gap);
 
         // Button background
-        auto* bg = root_.add<RectShape>(x, 0, btn_width, btn_height, radius);
+        auto* bg =
+            root_.add<RectShape>(x, 0.0f, btn_width, btn_height, radius);
         backgrounds_.push_back(bg);
 
         // Button label
-        float char_width = style->font_size * 0.6f;
-        float text_width = options_[i].label.size() * char_width;
+        float text_width = approximate_segmented_text_width(style, options_[i].label);
         float text_x = x + (btn_width - text_width) / 2;
         float text_y = (btn_height - style->font_size) / 2;
 
@@ -144,17 +204,46 @@ int ToggleGroupWidget::hit_test(float x, float y, const Element& elem) {
     return -1;
 }
 
-void ToggleGroupWidget::render(const Element& elem, Renderer& renderer) {
+void ToggleGroupWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
+
+    size_t selected_count = 0;
+    if (multi_select_) {
+        for (int index : selected_indices_) {
+            if (index >= 0 && index < static_cast<int>(options_.size())) {
+                ++selected_count;
+            }
+        }
+    } else if (selected_index_ >= 0 && selected_index_ < static_cast<int>(options_.size())) {
+        selected_count = 1;
+    }
+    set_host_attribute("role", multi_select_ ? "group" : "radiogroup");
+    set_host_attribute("data-orientation", "horizontal");
+    set_host_attribute("aria-orientation", "horizontal");
+    if (options_.empty()) {
+        set_host_attribute("data-state", "empty");
+    } else {
+        set_host_attribute("data-state", selected_count > 0 ? "selected" : "unselected");
+    }
+    set_host_state("selected", selected_count > 0);
+    set_host_attribute("data-selected-count", std::to_string(selected_count));
+    if (!multi_select_ && selected_index_ >= 0 &&
+        selected_index_ < static_cast<int>(options_.size())) {
+        set_host_attribute("data-value", options_[selected_index_].id);
+        set_host_attribute("data-selected-index", std::to_string(selected_index_));
+    } else {
+        clear_host_attribute("data-value");
+        clear_host_attribute("data-selected-index");
+    }
 
     rebuild_shapes(elem);
     update_shapes(elem);
 
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    Transform local_transform = Transform{};
     float opacity = style->opacity;
 
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }
@@ -165,8 +254,10 @@ bool ToggleGroupWidget::handle_event(const Event& event, Element& elem) {
     switch (event.type) {
         case EventType::MouseDown:
             if (event.button == MouseButton::Left) {
-                float local_x = event.x - elem.absolute_x();
-                float local_y = event.y - elem.absolute_y();
+                const flex::Vec2 local_pos =
+                    detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+                float local_x = local_pos.x;
+                float local_y = local_pos.y;
                 int index = hit_test(local_x, local_y, elem);
 
                 if (index >= 0) {
@@ -181,6 +272,37 @@ bool ToggleGroupWidget::handle_event(const Event& event, Element& elem) {
                         selected_index_ = index;
                     }
 
+                    size_t selected_count = 0;
+                    if (multi_select_) {
+                        for (int selected : selected_indices_) {
+                            if (selected >= 0 && selected < static_cast<int>(options_.size())) {
+                                ++selected_count;
+                            }
+                        }
+                    } else if (selected_index_ >= 0 &&
+                               selected_index_ < static_cast<int>(options_.size())) {
+                        selected_count = 1;
+                    }
+                    set_host_attribute("role", multi_select_ ? "group" : "radiogroup");
+                    set_host_attribute("data-orientation", "horizontal");
+                    set_host_attribute("aria-orientation", "horizontal");
+                    if (options_.empty()) {
+                        set_host_attribute("data-state", "empty");
+                    } else {
+                        set_host_attribute("data-state",
+                                           selected_count > 0 ? "selected" : "unselected");
+                    }
+                    set_host_state("selected", selected_count > 0);
+                    set_host_attribute("data-selected-count", std::to_string(selected_count));
+                    if (!multi_select_ && selected_index_ >= 0 &&
+                        selected_index_ < static_cast<int>(options_.size())) {
+                        set_host_attribute("data-value", options_[selected_index_].id);
+                        set_host_attribute("data-selected-index", std::to_string(selected_index_));
+                    } else {
+                        clear_host_attribute("data-value");
+                        clear_host_attribute("data-selected-index");
+                    }
+
                     if (change_callback_) {
                         change_callback_(index, options_[index].id);
                     }
@@ -192,8 +314,10 @@ bool ToggleGroupWidget::handle_event(const Event& event, Element& elem) {
             break;
 
         case EventType::MouseMove: {
-            float local_x = event.x - elem.absolute_x();
-            float local_y = event.y - elem.absolute_y();
+            const flex::Vec2 local_pos =
+                detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+            float local_x = local_pos.x;
+            float local_y = local_pos.y;
             int index = hit_test(local_x, local_y, elem);
             if (index != hovered_index_) {
                 hovered_index_ = index;

@@ -46,8 +46,8 @@ bool ConnectorTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2
     is_drawing_ = false;
     
     // Check minimum distance
-    float dx = current_pos_.x() - start_pos_.x();
-    float dy = current_pos_.y() - start_pos_.y();
+    float dx = current_pos_.x - start_pos_.x;
+    float dy = current_pos_.y - start_pos_.y;
     if (std::abs(dx) < 5 && std::abs(dy) < 5) return true;
     
     auto* layer = canvas_->content_root();
@@ -80,7 +80,7 @@ bool ConnectorTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2
     
     auto* line = flex::Shape::create(*allocator);
     line->set_path(path_data);
-    line->set_position(start_pos_.x(), start_pos_.y());
+    line->set_position(start_pos_.x, start_pos_.y);
     line->set_stroke(stroke_color_, stroke_width_);
     layer->add_child(line);
     
@@ -125,12 +125,12 @@ void ConnectorTool::render_overlay(flex::Renderer& renderer) {
     if (!is_drawing_) return;
     
     // Draw preview line
-    float dx = current_pos_.x() - start_pos_.x();
-    float dy = current_pos_.y() - start_pos_.y();
+    float dx = current_pos_.x - start_pos_.x;
+    float dy = current_pos_.y - start_pos_.y;
     
     char path[128];
     snprintf(path, sizeof(path), "M %.1f %.1f L %.1f %.1f",
-             start_pos_.x(), start_pos_.y(), current_pos_.x(), current_pos_.y());
+             start_pos_.x, start_pos_.y, current_pos_.x, current_pos_.y);
     renderer.stroke_path(path, stroke, 2.0f);
     
     // Draw arrow preview
@@ -144,8 +144,8 @@ void ConnectorTool::render_overlay(flex::Renderer& renderer) {
         float wing_back = arrow_size * 0.8f;
         float wing_width = arrow_size * 0.4f;
         
-        float tip_x = current_pos_.x();
-        float tip_y = current_pos_.y();
+        float tip_x = current_pos_.x;
+        float tip_y = current_pos_.y;
         float left_x = tip_x - ux * wing_back + px * wing_width;
         float left_y = tip_y - uy * wing_back + py * wing_width;
         float right_x = tip_x - ux * wing_back - px * wing_width;
@@ -158,13 +158,13 @@ void ConnectorTool::render_overlay(flex::Renderer& renderer) {
     }
     
     // Draw start point
-    renderer.draw_circle(start_pos_.x(), start_pos_.y(), 5.0f, point_fill, stroke, 1.0f);
+    renderer.draw_circle(start_pos_.x, start_pos_.y, 5.0f, point_fill, stroke, 1.0f);
     
     // Draw end point (highlight if snapping to shape)
     if (hover_target_.node && hover_target_.node != start_target_.node) {
-        renderer.draw_circle(current_pos_.x(), current_pos_.y(), 6.0f, point_fill, stroke, 2.0f);
+        renderer.draw_circle(current_pos_.x, current_pos_.y, 6.0f, point_fill, stroke, 2.0f);
     } else {
-        renderer.draw_circle(current_pos_.x(), current_pos_.y(), 4.0f, 
+        renderer.draw_circle(current_pos_.x, current_pos_.y, 4.0f, 
                             flex::Paint::solid(flex::Color(1.0f, 0.4f, 0.4f, 1.0f)), stroke, 1.0f);
     }
 }
@@ -190,10 +190,10 @@ ConnectionSide ConnectorTool::closest_side(flex::Node* node, const flex::Vec2& p
     float cy = bounds.y + bounds.height / 2;
     
     // Calculate distance to each side's center
-    float dist_top = std::abs(pos.y() - bounds.y) + std::abs(pos.x() - cx) * 0.5f;
-    float dist_bottom = std::abs(pos.y() - (bounds.y + bounds.height)) + std::abs(pos.x() - cx) * 0.5f;
-    float dist_left = std::abs(pos.x() - bounds.x) + std::abs(pos.y() - cy) * 0.5f;
-    float dist_right = std::abs(pos.x() - (bounds.x + bounds.width)) + std::abs(pos.y() - cy) * 0.5f;
+    float dist_top = std::abs(pos.y - bounds.y) + std::abs(pos.x - cx) * 0.5f;
+    float dist_bottom = std::abs(pos.y - (bounds.y + bounds.height)) + std::abs(pos.x - cx) * 0.5f;
+    float dist_left = std::abs(pos.x - bounds.x) + std::abs(pos.y - cy) * 0.5f;
+    float dist_right = std::abs(pos.x - (bounds.x + bounds.width)) + std::abs(pos.y - cy) * 0.5f;
     
     float min_dist = dist_top;
     ConnectionSide side = ConnectionSide::Top;

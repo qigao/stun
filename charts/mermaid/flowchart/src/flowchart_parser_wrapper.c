@@ -1,4 +1,4 @@
-#include "flowchart/flowchart_ast.h"
+#include "flowchart/flowchart_parser_wrapper.h"
 #include "flowchart_parser_gen.h"
 #include "turbo_parser.h"
 #include <stdio.h>
@@ -20,9 +20,92 @@ void *FlowchartParserAlloc(void *(*mallocProc)(size_t));
 void FlowchartParser(void *yyp, int yymajor, void *yyminor, FlowchartParserContext *ctx);
 void FlowchartParserFree(void *p, void (*freeProc)(void*));
 
-FlowchartDiagram *flowchart_parse(const char *input) {
-  if (!input)
-    return NULL;
+void flowchart_diagram_free(FlowchartDiagram *diagram);
+
+#if defined(_MSC_VER)
+__declspec(thread) static char g_flowchart_last_error[128] = {0};
+#else
+static _Thread_local char g_flowchart_last_error[128] = {0};
+#endif
+
+const char* flowchart_get_last_error() {
+  return g_flowchart_last_error;
+}
+
+static FlowchartNode *reverse_nodes(FlowchartNode *head) {
+  FlowchartNode *result = NULL;
+  while (head) {
+    FlowchartNode *next = head->next;
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
+static FlowchartEdge *reverse_edges(FlowchartEdge *head) {
+  FlowchartEdge *result = NULL;
+  while (head) {
+    FlowchartEdge *next = head->next;
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
+static FlowchartNodeRef *reverse_node_refs(FlowchartNodeRef *head) {
+  FlowchartNodeRef *result = NULL;
+  while (head) {
+    FlowchartNodeRef *next = head->next;
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
+static FlowchartSubGraph *reverse_subgraphs(FlowchartSubGraph *head) {
+  FlowchartSubGraph *result = NULL;
+  while (head) {
+    FlowchartSubGraph *next = head->next;
+    head->node_refs = reverse_node_refs(head->node_refs);
+    head->children = reverse_subgraphs(head->children);
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
+static void restore_source_order(FlowchartDiagram *diagram) {
+  diagram->nodes = reverse_nodes(diagram->nodes);
+  diagram->edges = reverse_edges(diagram->edges);
+  diagram->subgraphs = reverse_subgraphs(diagram->subgraphs);
+}
+
+static void free_active_subgraphs(FlowchartParserContext *ctx) {
+  while (ctx->active_subgraphs) {
+    FlowchartSubGraphStack *entry =
+        (FlowchartSubGraphStack *)ctx->active_subgraphs;
+    ctx->active_subgraphs = entry->next;
+    free(entry);
+  }
+}
+
+FlowchartParseStatus flowchart_parse_ex(const char *input,
+                                        FlowchartDiagram **out_diagram) {
+  if (!out_diagram) {
+    snprintf(g_flowchart_last_error, sizeof(g_flowchart_last_error),
+             "Output diagram pointer is null");
+    return FLOWCHART_PARSE_ERROR;
+  }
+  *out_diagram = NULL;
+  if (!input) {
+    snprintf(g_flowchart_last_error, sizeof(g_flowchart_last_error), "Input is null");
+    return FLOWCHART_PARSE_ERROR;
+  }
+  g_flowchart_last_error[0] = '\0';
 
   // extern void FlowchartParserTrace(FILE *, char *);
   // FlowchartParserTrace(stdout, "Parser >> ");
@@ -30,8 +113,10 @@ FlowchartDiagram *flowchart_parse(const char *input) {
   FlowchartParserContext ctx;
   memset(&ctx, 0, sizeof(FlowchartParserContext));
   ctx.diagram = (FlowchartDiagram *)malloc(sizeof(FlowchartDiagram));
-  if (!ctx.diagram)
-    return NULL;
+  if (!ctx.diagram) {
+    snprintf(g_flowchart_last_error, sizeof(g_flowchart_last_error), "Failed to allocate flowchart AST");
+    return FLOWCHART_PARSE_ERROR;
+  }
   memset(ctx.diagram, 0, sizeof(FlowchartDiagram));
   ctx.diagram->layout_mode = FC_LAYOUT_PROFESSIONAL;
   ctx.diagram->routing_mode = FC_ROUTE_ORTHOGONAL;
@@ -46,7 +131,8 @@ FlowchartDiagram *flowchart_parse(const char *input) {
   void *parser = FlowchartParserAlloc(malloc);
   if (!parser) {
     free(ctx.diagram);
-    return NULL;
+    snprintf(g_flowchart_last_error, sizeof(g_flowchart_last_error), "Failed to allocate flowchart parser");
+    return FLOWCHART_PARSE_ERROR;
   }
 
   Scanner s;
@@ -59,12 +145,28 @@ FlowchartDiagram *flowchart_parse(const char *input) {
   flowchart_scan(&s, parser, &ctx);
   FlowchartParser(parser, 0, NULL, &ctx);
   FlowchartParserFree(parser, free);
+  free_active_subgraphs(&ctx);
+  restore_source_order(ctx.diagram);
 
   if (ctx.error_count > 0) {
-    // We keep the diagram even with errors if it has nodes, but here we follow original safety
+    snprintf(g_flowchart_last_error, sizeof(g_flowchart_last_error),
+             "Syntax error near line %d", s.line);
+    if (!ctx.diagram->nodes && !ctx.diagram->edges && !ctx.diagram->subgraphs) {
+      flowchart_diagram_free(ctx.diagram);
+      return FLOWCHART_PARSE_ERROR;
+    }
+    *out_diagram = ctx.diagram;
+    return FLOWCHART_PARSE_PARTIAL;
   }
 
-  return ctx.diagram;
+  *out_diagram = ctx.diagram;
+  return FLOWCHART_PARSE_COMPLETE;
+}
+
+FlowchartDiagram *flowchart_parse(const char *input) {
+  FlowchartDiagram *diagram = NULL;
+  (void)flowchart_parse_ex(input, &diagram);
+  return diagram;
 }
 
 static void free_subgraph_node_refs(FlowchartNodeRef *nr) {
@@ -158,7 +260,24 @@ static const char *map_shape(FlowchartNodeShape shape) {
   case FC_SHAPE_CIRCLE:
     return "circle";
   case FC_SHAPE_RHOMBUS:
-    return "rhombus";
+  case FC_SHAPE_DIAMOND:
+    return "diamond";
+  case FC_SHAPE_STADIUM:
+    return "stadium";
+  case FC_SHAPE_SUBROUTINE:
+    return "subroutine";
+  case FC_SHAPE_CYLINDER:
+    return "cylinder";
+  case FC_SHAPE_DOUBLECIRCLE:
+    return "doublecircle";
+  case FC_SHAPE_TRAPEZOID:
+    return "trapezoid";
+  case FC_SHAPE_INV_TRAPEZOID:
+    return "inv_trapezoid";
+  case FC_SHAPE_HEXAGON:
+    return "hexagon";
+  case FC_SHAPE_ELLIPSE:
+    return "ellipse";
   default:
     return "rect";
   }
@@ -227,10 +346,12 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
       turbo_json_object_set_string(n_det, "id", n->id);
       turbo_json_object_set_string(n_det, "shape", map_shape(n->shape));
 
-      json_value_t *text_obj = turbo_json_create_object();
-      turbo_json_object_set_string(text_obj, "text", n->label ? n->label : n->id);
-      turbo_json_object_set_string(text_obj, "type", "text");
-      turbo_json_object_add(n_det, "text", text_obj);
+      if (n->label && strcmp(n->label, n->id) != 0) {
+        json_value_t *text_obj = turbo_json_create_object();
+        turbo_json_object_set_string(text_obj, "text", n->label);
+        turbo_json_object_set_string(text_obj, "type", "text");
+        turbo_json_object_add(n_det, "text", text_obj);
+      }
 
       turbo_json_object_add(nodes_obj, n->id, n_det);
     }
@@ -240,8 +361,13 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
 
   // Edges
   json_value_t *links_arr = turbo_json_create_array();
-  FlowchartEdge *e = diagram->edges;
-  while (e) {
+  for (int labelled_pass = 1; labelled_pass >= 0; --labelled_pass) {
+    FlowchartEdge *e = diagram->edges;
+    while (e) {
+      if ((e->label != NULL) != labelled_pass) {
+        e = e->next;
+        continue;
+      }
     json_value_t *e_det = turbo_json_create_object();
     turbo_json_object_set_number(e_det, "length", 1);
     turbo_json_object_set_string(e_det, "source", e->from ? e->from : "");
@@ -262,6 +388,7 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
     }
     turbo_json_array_add(links_arr, e_det);
     e = e->next;
+    }
   }
   turbo_json_object_add(root, "links", links_arr);
 

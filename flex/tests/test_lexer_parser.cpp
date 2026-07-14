@@ -1,23 +1,42 @@
 /*
  * Flex DSL Lexer & Parser Tests
- * Comprehensive test suite using Catch2
+ * TinyTest version
  */
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include <string>
+#include <variant>
 
-#include "flex/compiler.h"
+#include "tinytest.h"
+#include "flex/dsl.h"
 
 using namespace flex;
 using namespace flex::parser;
-using Catch::Matchers::ContainsSubstring;
+
+namespace {
+
+inline void check_close(float actual, float expected, float eps = 0.001f) {
+  check_float_eq(actual, expected, eps);
+}
+
+#define REQUIRE(expr) check(expr)
+#define REQUIRE_FALSE(expr) check_false(expr)
+#define REQUIRE_THAT(actual, matcher) \
+  check_close((actual), (matcher).expected, (matcher).epsilon)
+#define REQUIRE_NOTHROW(expr) check_nothrow(expr)
+#define TEST_CASE(description, tags) it(description)
+
+}  // namespace
+
+suite("flex::lexer_parser") {
+
+group("lexer") {
 
 // ============================================================================
 // LEXER TESTS
 // ============================================================================
 
-TEST_CASE("Lexer: Basic tokens", "[lexer]") {
-  SECTION("Keywords") {
+group("Lexer: Basic tokens") {
+  it("Keywords") {
     auto lexer = lexer_create("scene group rect circle text");
 
     REQUIRE(lex_next_token(lexer).type == TOK_SCENE);
@@ -30,7 +49,7 @@ TEST_CASE("Lexer: Basic tokens", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Animation keywords") {
+  it("Animation keywords") {
     auto lexer = lexer_create("anim track keyframe");
 
     REQUIRE(lex_next_token(lexer).type == TOK_ANIM);
@@ -41,7 +60,7 @@ TEST_CASE("Lexer: Basic tokens", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("State machine keywords") {
+  it("State machine keywords") {
     auto lexer = lexer_create("machine layer state transition when");
 
     REQUIRE(lex_next_token(lexer).type == TOK_MACHINE);
@@ -54,7 +73,7 @@ TEST_CASE("Lexer: Basic tokens", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Punctuation") {
+  it("Punctuation") {
     auto lexer = lexer_create("{ } : , ->");
 
     REQUIRE(lex_next_token(lexer).type == TOK_LBRACE);
@@ -67,7 +86,7 @@ TEST_CASE("Lexer: Basic tokens", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Operators") {
+  it("Operators") {
     auto lexer = lexer_create("> < == !=");
 
     REQUIRE(lex_next_token(lexer).type == TOK_GT);
@@ -80,8 +99,8 @@ TEST_CASE("Lexer: Basic tokens", "[lexer]") {
   }
 }
 
-TEST_CASE("Lexer: Literals", "[lexer]") {
-  SECTION("Numbers") {
+group("Lexer: Literals") {
+  it("Numbers") {
     auto lexer = lexer_create("123 45.67 0.5 100");
 
     auto tok1 = lex_next_token(lexer);
@@ -103,7 +122,7 @@ TEST_CASE("Lexer: Literals", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Strings") {
+  it("Strings") {
     auto lexer = lexer_create("\"hello\" \"world with spaces\"");
 
     auto tok1 = lex_next_token(lexer);
@@ -117,7 +136,7 @@ TEST_CASE("Lexer: Literals", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Colors") {
+  it("Colors") {
     auto lexer = lexer_create("#FF0000 #00ff00 #0000FF88 #abc");
 
     auto tok1 = lex_next_token(lexer);
@@ -139,7 +158,34 @@ TEST_CASE("Lexer: Literals", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Booleans") {
+  it("Hash references are not tokenized as colors") {
+    auto lexer = lexer_create("set #box.x: 42 set #abcNode.opacity: 1");
+
+    REQUIRE(lex_next_token(lexer).type == TOK_SET);
+    REQUIRE(lex_next_token(lexer).type == TOK_HASH);
+    auto node = lex_next_token(lexer);
+    REQUIRE(node.type == TOK_IDENTIFIER);
+    REQUIRE(node.value == "box");
+    REQUIRE(lex_next_token(lexer).type == TOK_DOT);
+    REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);
+    REQUIRE(lex_next_token(lexer).type == TOK_COLON);
+    REQUIRE(lex_next_token(lexer).type == TOK_NUMBER);
+
+    REQUIRE(lex_next_token(lexer).type == TOK_SET);
+    REQUIRE(lex_next_token(lexer).type == TOK_HASH);
+    node = lex_next_token(lexer);
+    REQUIRE(node.type == TOK_IDENTIFIER);
+    REQUIRE(node.value == "abcNode");
+    REQUIRE(lex_next_token(lexer).type == TOK_DOT);
+    REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);
+    REQUIRE(lex_next_token(lexer).type == TOK_COLON);
+    REQUIRE(lex_next_token(lexer).type == TOK_NUMBER);
+    REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+    lexer_destroy(lexer);
+  }
+
+  it("Booleans") {
     auto lexer = lexer_create("true false");
 
     auto tok1 = lex_next_token(lexer);
@@ -153,7 +199,7 @@ TEST_CASE("Lexer: Literals", "[lexer]") {
     lexer_destroy(lexer);
   }
 
-  SECTION("Identifiers") {
+  it("Identifiers") {
     auto lexer = lexer_create("myNode _private camelCase snake_case");
 
     REQUIRE(lex_next_token(lexer).type == TOK_IDENTIFIER);
@@ -165,8 +211,8 @@ TEST_CASE("Lexer: Literals", "[lexer]") {
   }
 }
 
-TEST_CASE("Lexer: Comments", "[lexer]") {
-  SECTION("Line comments") {
+group("Lexer: Comments") {
+  it("Line comments") {
     auto lexer = lexer_create("scene // this is a comment\nTest {}");
 
     REQUIRE(lex_next_token(lexer).type == TOK_SCENE);
@@ -190,6 +236,10 @@ TEST_CASE("Lexer: Line and column tracking", "[lexer]") {
 
   lexer_destroy(lexer);
 }
+
+}
+
+group("parser") {
 
 // ============================================================================
 // PARSER TESTS: SCENE
@@ -217,6 +267,22 @@ TEST_CASE("Parser: Scene with dimensions", "[parser][scene]") {
   REQUIRE(program->scene->name == "MyScene");
   REQUIRE(program->scene->width == 1920.0f);
   REQUIRE(program->scene->height == 1080.0f);
+}
+
+TEST_CASE("Parser: Constant math expressions use MIR evaluator", "[parser][expr]") {
+  auto program = parse(R"(
+        const base = 10 * 2
+        const offset = (base + 5) / 5
+        scene ExprScene {
+            width: base + offset
+            height: (base - offset) * 2
+        }
+    )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->width == 25.0f);
+  REQUIRE(program->scene->height == 30.0f);
 }
 
 TEST_CASE("Parser: Scene with nodes", "[parser][scene]") {
@@ -496,16 +562,12 @@ TEST_CASE("Parser: Basic state machine", "[parser][machine]") {
   auto &trans1 = layer.transitions[0];
   REQUIRE(trans1.from_state == "idle");
   REQUIRE(trans1.to_state == "active");
-  REQUIRE(trans1.condition_var == "counter");
-  REQUIRE(trans1.condition_op == ">");
-  REQUIRE(trans1.condition_val == 0.0f);
+  REQUIRE(trans1.condition_expr == "counter > 0.000000");
 
   auto &trans2 = layer.transitions[1];
   REQUIRE(trans2.from_state == "active");
   REQUIRE(trans2.to_state == "idle");
-  REQUIRE(trans2.condition_var == "counter");
-  REQUIRE(trans2.condition_op == "<");
-  REQUIRE(trans2.condition_val == 0.1f);
+  REQUIRE(trans2.condition_expr == "counter < 0.100000");
 }
 
 TEST_CASE("Parser: State machine with multiple layers", "[parser][machine]") {
@@ -569,9 +631,9 @@ TEST_CASE("Parser: Transition operators", "[parser][machine]") {
   REQUIRE(program != nullptr);
   auto &layer = program->machines[0]->layers[0];
 
-  REQUIRE(layer.transitions[0].condition_op == ">");
-  REQUIRE(layer.transitions[1].condition_op == "<");
-  REQUIRE(layer.transitions[2].condition_op == "==");
+  REQUIRE(layer.transitions[0].condition_expr.find(">") != std::string::npos);
+  REQUIRE(layer.transitions[1].condition_expr.find("<") != std::string::npos);
+  REQUIRE(layer.transitions[2].condition_expr.find("==") != std::string::npos);
 }
 
 // ============================================================================
@@ -610,6 +672,60 @@ TEST_CASE("Parser: Component instantiation", "[parser][component]") {
   REQUIRE(button->type == "Button");
   REQUIRE(button->id == "submitBtn");
   REQUIRE(std::get<std::string>(button->properties["label"]) == "Submit");
+}
+
+TEST_CASE("Parser: Component template captures props and children", "[parser][component]") {
+  auto program = parse(R"(
+        component Badge {
+            width: 10
+            fill: #ff6600
+
+            rect icon {
+                width: $width
+                height: 12
+                fill: $fill
+            }
+        }
+    )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->components.size() == 1);
+
+  auto &component = program->components[0];
+  REQUIRE(component->name == "Badge");
+  REQUIRE(component->default_props.size() == 2);
+  REQUIRE(std::get<float>(component->default_props["width"]) == 10.0f);
+  REQUIRE(std::get<std::string>(component->default_props["fill"]) == "#ff6600");
+  REQUIRE(component->children.size() == 1);
+
+  auto &icon = component->children[0];
+  REQUIRE(icon->type == "rect");
+  REQUIRE(icon->id == "icon");
+  REQUIRE(std::get<std::string>(icon->properties["width"]) == "$width");
+  REQUIRE(std::get<std::string>(icon->properties["fill"]) == "$fill");
+}
+
+TEST_CASE("Parser: Pseudo-class block preserves base style", "[parser][pseudo]") {
+  auto program = parse(R"(
+        scene PseudoDemo {
+            rect badge {
+                fill: #111111
+                :hover {
+                    fill: #222222
+                }
+            }
+        }
+    )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->children.size() == 1);
+
+  auto &badge = program->scene->children[0];
+  REQUIRE(std::get<std::string>(badge->properties["fill"]) == "#111111");
+  REQUIRE(badge->pseudo_classes.size() == 1);
+  REQUIRE(badge->pseudo_classes.count(":hover") == 1);
+  REQUIRE(std::get<std::string>(badge->pseudo_classes[":hover"]["fill"]) == "#222222");
 }
 
 // ============================================================================
@@ -906,11 +1022,11 @@ TEST_CASE("Parser: Repeat block", "[parser][repeat]") {
     )");
 
   if (!program) {
-    INFO("Parse error: " << get_error());
+    check(false);
   }
   REQUIRE(program != nullptr);
   if (program && !program->scene) {
-    INFO("Scene is null but program exists - check AstBuilder");
+    check(false);
   }
   REQUIRE(program->scene != nullptr);
   REQUIRE(program->scene->name == "RepeatTest");
@@ -1200,23 +1316,33 @@ machine statusTracker {
   auto program = parse(source);
 
   REQUIRE(program != nullptr);
+  if (!program) {
+    return;
+  }
 
-  SECTION("Scene structure") {
+{
+  {
     REQUIRE(program->scene != nullptr);
+    if (!program->scene) {
+      return;
+    }
     REQUIRE(program->scene->name == "counter");
     REQUIRE(program->scene->width == 400.0f);
     REQUIRE(program->scene->height == 300.0f);
     REQUIRE(program->scene->children.size() == 2); // background + mainLayout
+    if (program->scene->children.size() < 2) {
+      return;
+    }
   }
 
-  SECTION("Background rect") {
+  {
     auto &bg = program->scene->children[0];
     REQUIRE(bg->type == "rect");
     REQUIRE(bg->id == "background");
     REQUIRE(std::get<std::string>(bg->properties["fill"]) == "#1a1a2e");
   }
 
-  SECTION("Main layout group") {
+  {
     auto &mainLayout = program->scene->children[1];
     REQUIRE(mainLayout->type == "group");
     REQUIRE(mainLayout->id == "mainLayout");
@@ -1228,7 +1354,7 @@ machine statusTracker {
     REQUIRE(mainLayout->children.size() == 4);
   }
 
-  SECTION("Nested groups - counterBox") {
+  {
     auto &mainLayout = program->scene->children[1];
     auto &counterBox = mainLayout->children[1]; // Second child
     REQUIRE(counterBox->type == "group");
@@ -1244,7 +1370,7 @@ machine statusTracker {
     REQUIRE(std::get<std::string>(counterValue->properties["content"]) == "0");
   }
 
-  SECTION("Button row structure") {
+  {
     auto &mainLayout = program->scene->children[1];
     auto &buttonRow = mainLayout->children[2];
     REQUIRE(buttonRow->type == "group");
@@ -1262,8 +1388,11 @@ machine statusTracker {
     REQUIRE(decBtn->id == "decrementButton");
   }
 
-  SECTION("Animations") {
+  {
     REQUIRE(program->animations.size() == 6);
+    if (program->animations.size() < 6) {
+      return;
+    }
 
     // Check animation names
     REQUIRE(program->animations[0]->name == "toVeryHigh");
@@ -1282,18 +1411,27 @@ machine statusTracker {
     REQUIRE(std::get<std::string>(toVeryHigh->tracks[0].keyframes[0].value) == "Very High!");
   }
 
-  SECTION("State machine") {
+  {
     REQUIRE(program->machines.size() == 1);
+    if (program->machines.empty()) {
+      return;
+    }
 
     auto &machine = program->machines[0];
     REQUIRE(machine->name == "statusTracker");
     REQUIRE(machine->layers.size() == 1);
+    if (machine->layers.empty()) {
+      return;
+    }
 
     auto &layer = machine->layers[0];
     REQUIRE(layer.name == "status");
 
     // 6 states: neutral, positive, high, veryHigh, negative, veryLow
     REQUIRE(layer.states.size() == 6);
+    if (layer.states.size() < 6) {
+      return;
+    }
 
     // Check initial state
     REQUIRE(layer.states[0].name == "neutral");
@@ -1308,28 +1446,30 @@ machine statusTracker {
 
     // 10 transitions total
     REQUIRE(layer.transitions.size() == 10);
+    if (layer.transitions.size() < 8) {
+      return;
+    }
 
     // Check first transition: neutral -> positive when counter > 0
     auto &t0 = layer.transitions[0];
     REQUIRE(t0.from_state == "neutral");
     REQUIRE(t0.to_state == "positive");
-    REQUIRE(t0.condition_var == "counter");
-    REQUIRE(t0.condition_op == ">");
-    REQUIRE(t0.condition_val == 0.0f);
+    REQUIRE(t0.condition_expr == "counter > 0.000000");
 
     // Check backward transition: veryHigh -> high when counter < 10.1
     auto &t3 = layer.transitions[3];
     REQUIRE(t3.from_state == "veryHigh");
     REQUIRE(t3.to_state == "high");
-    REQUIRE(t3.condition_op == "<");
-    REQUIRE(t3.condition_val == 10.1f);
+    REQUIRE(t3.condition_expr.find("<") != std::string::npos);
+    REQUIRE(t3.condition_expr.find("10.1") != std::string::npos);
 
     // Check negative transition with negative value
     auto &t7 = layer.transitions[7];
     REQUIRE(t7.from_state == "negative");
     REQUIRE(t7.to_state == "veryLow");
-    REQUIRE(t7.condition_val == -5.0f);
+    REQUIRE(t7.condition_expr.find("-5") != std::string::npos);
   }
+}
 }
 
 // ============================================================================
@@ -1375,6 +1515,74 @@ TEST_CASE("Lexer: Binding syntax ${}", "[lexer][binding]") {
   REQUIRE(lex_next_token(lexer).type == TOK_EOF);
 
   lexer_destroy(lexer);
+}
+
+TEST_CASE("Lexer: Binding syntax $()", "[lexer][binding]") {
+  auto lexer = lexer_create("$(item.name) $(index)");
+
+  auto tok1 = lex_next_token(lexer);
+  REQUIRE(tok1.type == TOK_BINDING);
+  REQUIRE(tok1.value == "$(item.name)");
+
+  auto tok2 = lex_next_token(lexer);
+  REQUIRE(tok2.type == TOK_BINDING);
+  REQUIRE(tok2.value == "$(index)");
+
+  REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+  lexer_destroy(lexer);
+}
+
+TEST_CASE("Parser: Node property named data", "[parser][node]") {
+  auto program = parse(R"(
+    scene SvgScene {
+      svg inlineBadge {
+        width: 40
+        height: 30
+        data: "<svg viewBox='0 0 10 10'></svg>"
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->children.size() == 1);
+
+  auto &svg = program->scene->children[0];
+  REQUIRE(svg->type == "svg");
+  REQUIRE(std::get<float>(svg->properties["width"]) == 40.0f);
+  REQUIRE(std::get<float>(svg->properties["height"]) == 30.0f);
+  REQUIRE(std::get<std::string>(svg->properties["data"]) == "<svg viewBox='0 0 10 10'></svg>");
+}
+
+TEST_CASE("Parser: Data item property named data", "[parser][for]") {
+  auto program = parse(R"(
+    data payloads {
+      first: {
+        data: "inline"
+        value: 42
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->data_blocks.size() == 1);
+  REQUIRE(program->data_blocks[0]->items.size() == 1);
+
+  auto &item = program->data_blocks[0]->items[0];
+  REQUIRE(item.key == "first");
+  REQUIRE(std::get<std::string>(item.properties["data"]) == "inline");
+  REQUIRE(std::get<float>(item.properties["value"]) == 42.0f);
+}
+
+TEST_CASE("Parser: Scene property named data remains invalid", "[parser][scene]") {
+  auto program = parse(R"(
+    scene InvalidScene {
+      data: "top-level"
+    }
+  )");
+
+  REQUIRE(program == nullptr);
 }
 
 TEST_CASE("Parser: Data block", "[parser][for]") {
@@ -1423,7 +1631,7 @@ TEST_CASE("Parser: For loop basic", "[parser][for]") {
   )");
 
   if (!program) {
-    INFO("Parse error: " << get_error());
+    check(false);
   }
   REQUIRE(program != nullptr);
   REQUIRE(program->scene != nullptr);
@@ -1485,6 +1693,39 @@ TEST_CASE("Parser: For loop with index", "[parser][for]") {
   REQUIRE(std::get<std::string>(group1->children[0]->properties["content"]) == "Item B");
 }
 
+TEST_CASE("Parser: For loop can use a later top-level data block", "[parser][for][order]") {
+  auto program = parse(R"(
+    scene OrderedScene {
+      for item in products {
+        rect item {
+          fill: ${item.color}
+        }
+      }
+    }
+
+    data products {
+      first: { color: "#ff0000" }
+      second: { color: "#00ff00" }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->name == "OrderedScene");
+  REQUIRE(program->data_blocks.size() == 1);
+  REQUIRE(program->scene->children.size() == 2);
+
+  auto &first = program->scene->children[0];
+  REQUIRE(first->type == "rect");
+  REQUIRE(first->id == "item0");
+  REQUIRE(std::get<std::string>(first->properties["fill"]) == "#ff0000");
+
+  auto &second = program->scene->children[1];
+  REQUIRE(second->type == "rect");
+  REQUIRE(second->id == "item1");
+  REQUIRE(std::get<std::string>(second->properties["fill"]) == "#00ff00");
+}
+
 TEST_CASE("Parser: For loop with numeric properties", "[parser][for]") {
   auto program = parse(R"(
     data positions {
@@ -1513,6 +1754,41 @@ TEST_CASE("Parser: For loop with numeric properties", "[parser][for]") {
   auto &circle1 = program->scene->children[1];
   REQUIRE(std::get<float>(circle1->properties["x"]) == 200.0f);
   REQUIRE(std::get<float>(circle1->properties["y"]) == 100.0f);
+}
+
+TEST_CASE("Parser: For loop with $() binding syntax", "[parser][for][binding]") {
+  auto program = parse(R"(
+    data positions {
+      p1: { x: 100, y: 50 }
+      p2: { x: 200, y: 100 }
+    }
+
+    scene BindingParenTest {
+      for pos in positions {
+        circle pos {
+          x: $(pos.x)
+          y: $(pos.y)
+          radius: $(index) + 20
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->children.size() == 2);
+
+  auto &circle0 = program->scene->children[0];
+  REQUIRE(circle0->id == "pos0");
+  REQUIRE(std::get<float>(circle0->properties["x"]) == 100.0f);
+  REQUIRE(std::get<float>(circle0->properties["y"]) == 50.0f);
+  REQUIRE(std::get<float>(circle0->properties["radius"]) == 20.0f);
+
+  auto &circle1 = program->scene->children[1];
+  REQUIRE(circle1->id == "pos1");
+  REQUIRE(std::get<float>(circle1->properties["x"]) == 200.0f);
+  REQUIRE(std::get<float>(circle1->properties["y"]) == 100.0f);
+  REQUIRE(std::get<float>(circle1->properties["radius"]) == 21.0f);
 }
 
 TEST_CASE("Parser: For loop with ${} binding syntax", "[parser][for][binding]") {
@@ -1958,4 +2234,232 @@ TEST_CASE("Parser: Import preserves line info", "[parser][import]") {
   REQUIRE(program != nullptr);
   REQUIRE(program->imports.size() == 1);
   REQUIRE(program->imports[0].line == 1);
+}
+
+// ============================================================================
+// LEXER TESTS: NEW KEYWORDS (set, play, with)
+// ============================================================================
+
+TEST_CASE("Lexer: New keywords set, play, with", "[lexer]") {
+  auto lexer = lexer_create("set play with");
+
+  REQUIRE(lex_next_token(lexer).type == TOK_SET);
+  REQUIRE(lex_next_token(lexer).type == TOK_PLAY);
+  REQUIRE(lex_next_token(lexer).type == TOK_WITH);
+  REQUIRE(lex_next_token(lexer).type == TOK_EOF);
+
+  lexer_destroy(lexer);
+}
+
+// ============================================================================
+// PARSER TESTS: EXPRESSION TRANSITION CONDITIONS
+// ============================================================================
+
+TEST_CASE("Parser: Transition with binding condition", "[parser][machine][expr]") {
+  auto program = parse(R"(
+    machine test {
+      layer main {
+        state idle { initial: true }
+        state active {}
+
+        transition idle -> active when ${speed > 5 and health < 50}
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->machines.size() == 1);
+
+  auto &layer = program->machines[0]->layers[0];
+  REQUIRE(layer.transitions.size() == 1);
+
+  auto &trans = layer.transitions[0];
+  REQUIRE(trans.from_state == "idle");
+  REQUIRE(trans.to_state == "active");
+  REQUIRE(trans.condition_expr == "speed > 5 and health < 50");
+}
+
+TEST_CASE("Parser: Legacy transition backward compat", "[parser][machine][expr]") {
+  auto program = parse(R"(
+    machine test {
+      layer main {
+        state a { initial: true }
+        state b {}
+        transition a -> b when speed > 5
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  auto &trans = program->machines[0]->layers[0].transitions[0];
+  REQUIRE(trans.from_state == "a");
+  REQUIRE(trans.to_state == "b");
+  // Legacy path synthesizes expression string
+  REQUIRE(trans.condition_expr.find("speed") != std::string::npos);
+  REQUIRE(trans.condition_expr.find(">") != std::string::npos);
+  REQUIRE(trans.condition_expr.find("5") != std::string::npos);
+}
+
+// ============================================================================
+// PARSER TESTS: STATE ENTRY ACTIONS
+// ============================================================================
+
+TEST_CASE("Parser: State with set action", "[parser][machine][actions]") {
+  auto program = parse(R"(
+    machine test {
+      layer main {
+        state active {
+          initial: true
+          set #hand.rotation: ${angle * 6}
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->machines.size() == 1);
+
+  auto &state = program->machines[0]->layers[0].states[0];
+  REQUIRE(state.name == "active");
+  REQUIRE(state.actions.size() == 1);
+  REQUIRE(state.actions[0].node_id == "hand");
+  REQUIRE(state.actions[0].property == "rotation");
+  REQUIRE(state.actions[0].expression == "angle * 6");
+}
+
+TEST_CASE("Parser: Scene and machine with set action", "[parser][scene][machine][actions]") {
+  auto program = parse(R"(
+    scene Motion {}
+
+    machine test {
+      layer main {
+        state idle {
+          initial: true
+        }
+
+        state active {
+          set #box.x: 42
+        }
+
+        transition idle -> active when ${trigger}
+      }
+    }
+  )");
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->machines.size() == 1);
+
+  auto &state = program->machines[0]->layers[0].states[1];
+  REQUIRE(state.name == "active");
+  REQUIRE(state.actions.size() == 1);
+  REQUIRE(state.actions[0].node_id == "box");
+  REQUIRE(state.actions[0].property == "x");
+  REQUIRE(state.actions[0].expression == "42.000000");
+}
+
+TEST_CASE("Parser: Scene node and machine with set action", "[parser][scene][machine][actions]") {
+  auto program = parse(R"(
+    scene Motion {
+      rect box {
+        x: 0
+      }
+    }
+
+    machine test {
+      layer main {
+        state idle {
+          initial: true
+        }
+
+        state active {
+          set #box.x: 42
+        }
+
+        transition idle -> active when ${trigger}
+      }
+    }
+  )");
+  REQUIRE(program != nullptr);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->children.size() == 1);
+  REQUIRE(program->machines.size() == 1);
+
+  auto &state = program->machines[0]->layers[0].states[1];
+  REQUIRE(state.name == "active");
+  REQUIRE(state.actions.size() == 1);
+  REQUIRE(state.actions[0].node_id == "box");
+  REQUIRE(state.actions[0].property == "x");
+  REQUIRE(state.actions[0].expression == "42.000000");
+}
+
+// ============================================================================
+// PARSER TESTS: PARAMETERIZED ANIMATION TRIGGERS
+// ============================================================================
+
+TEST_CASE("Parser: State with play and params", "[parser][machine][anim_params]") {
+  auto program = parse(R"(
+    machine test {
+      layer main {
+        state active {
+          initial: true
+          play "rotate" with {
+            duration: ${durationInput}
+            speed: ${speedInput}
+          }
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->machines.size() == 1);
+
+  auto &state = program->machines[0]->layers[0].states[0];
+  REQUIRE(state.name == "active");
+  REQUIRE(state.animation == "rotate");
+  REQUIRE(state.animation_params.size() == 2);
+  REQUIRE(state.animation_params.count("duration") == 1);
+  REQUIRE(state.animation_params.at("duration") == "durationInput");
+  REQUIRE(state.animation_params.count("speed") == 1);
+  REQUIRE(state.animation_params.at("speed") == "speedInput");
+}
+
+TEST_CASE("Parser: State with play no params", "[parser][machine][anim_params]") {
+  auto program = parse(R"(
+    machine test {
+      layer main {
+        state active {
+          initial: true
+          play "fadeIn"
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  auto &state = program->machines[0]->layers[0].states[0];
+  REQUIRE(state.animation == "fadeIn");
+  REQUIRE(state.animation_params.empty());
+}
+
+TEST_CASE("Parser: State with play colon backward compat", "[parser][machine][audio]") {
+  // play: audioId should still work as audio playback
+  auto program = parse(R"(
+    machine test {
+      layer main {
+        state active {
+          initial: true
+          play: bgm
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  auto &state = program->machines[0]->layers[0].states[0];
+  REQUIRE(state.play_audio == "bgm");
+}
+
+}
+
 }

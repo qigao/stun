@@ -3,6 +3,8 @@
 #include "gantt/gantt_ast.h"
 #include "gantt_parser_gen.h"
 
+void GanttParser(void *parser, int token, void *value, GanttParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

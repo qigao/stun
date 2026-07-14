@@ -7,7 +7,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_parser_wrapper.h"
 

@@ -1,0 +1,11 @@
+{
+  "name": "toggle-group",
+  "source": "https://ui.shadcn.com/r/styles/new-york/toggle-group.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "flex",
+    "gap-1",
+    "items-center",
+    "justify-center"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "target": "notification_root",
+      "selector": "&",
+      "decls": {
+        "display": "block",
+        "width": "8px",
+        "height": "8px",
+        "background-color": "var(--background)",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--border)",
+        "color": "var(--muted-foreground)"
+      }
+    },
+    {
+      "target": "notification_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "border-color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "notification_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-position", "equals": "top-right" },
+        { "type": "attr", "name": "data-type", "equals": "success" }
+      ],
+      "decls": {
+        "color": "var(--foreground)"
+      }
+    }
+  ]
+}

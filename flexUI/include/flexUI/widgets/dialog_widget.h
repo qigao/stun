@@ -10,7 +10,8 @@
 #include "../widget.h"
 #include "../element.h"
 #include "../event.h"
-#include "../renderer.h"
+#include "../render_command.h"
+#include "../text_layout.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -32,23 +33,20 @@ public:
         setup_default_buttons();
     }
 
-    void show() { visible_ = true; }
-    void hide() { visible_ = false; }
+    void show() { visible_ = true; sync_host_semantics(); }
+    void hide() { visible_ = false; sync_host_semantics(); }
     bool is_visible() const { return visible_; }
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         // Dialog renders as overlay
     }
 
-    void render_overlay(const Element& elem, Renderer& renderer) override {
+    void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override {
         if (!visible_) return;
 
         auto* style = elem.computed_style;
         float vp_w = elem.owner_box_ ? elem.owner_box_->get_viewport_width() : 800;
         float vp_h = elem.owner_box_ ? elem.owner_box_->get_viewport_height() : 600;
-
-        // Backdrop
-        renderer.draw_rect(0, 0, vp_w, vp_h, 0, Paint::solid({0, 0, 0, 0.4f}), Paint::none(), 0);
 
         // Dialog
         float w = width_ > 0 ? width_ : 400;
@@ -56,30 +54,33 @@ public:
         float x = (vp_w - w) / 2;
         float y = (vp_h - h) / 2;
 
-        // Shadow
-        renderer.draw_rect(x + 4, y + 4, w, h, 8, Paint::solid({0, 0, 0, 0.2f}), Paint::none(), 0);
-
-        // Background
-        renderer.draw_rect(x, y, w, h, 8, Paint::solid({1, 1, 1, 1}), Paint::none(), 0);
-
-        // Header
         Color header_bg = type_color();
-        renderer.draw_rect(x, y, w, 48, 0, Paint::solid(header_bg), Paint::none(), 0);
-        
-        // Round top corners
-        renderer.draw_rect(x, y, 8, 8, 0, Paint::solid(header_bg), Paint::none(), 0);
-        renderer.draw_rect(x + w - 8, y, 8, 8, 0, Paint::solid(header_bg), Paint::none(), 0);
+        commands.draw_rect(0, 0, vp_w, vp_h, 0,
+                           Paint::solid({0, 0, 0, 0.4f}), Paint::none(), 0);
+        commands.draw_rect(x + 4, y + 4, w, h, 8,
+                           Paint::solid({0, 0, 0, 0.2f}), Paint::none(), 0);
+        commands.draw_rect(x, y, w, h, 8, Paint::solid({1, 1, 1, 1}),
+                           Paint::none(), 0);
+        commands.draw_rect(x, y, w, 48, 0, Paint::solid(header_bg),
+                           Paint::none(), 0);
+        commands.draw_rect(x, y, 8, 8, 0, Paint::solid(header_bg),
+                           Paint::none(), 0);
+        commands.draw_rect(x + w - 8, y, 8, 8, 0, Paint::solid(header_bg),
+                           Paint::none(), 0);
 
         // Title
-        renderer.draw_text(title_, x + 16, y + 30, style->font_family, 16, true, {1, 1, 1, 1});
+        draw_inline_text(commands, style, title_, x + 16, y + 30, 16.0f, true,
+                         {1, 1, 1, 1});
 
         // Close button
-        renderer.draw_text("✕", x + w - 28, y + 30, style->font_family, 16, false, {1, 1, 1, 0.8f});
+        draw_inline_text(commands, style, "✕", x + w - 28, y + 30, 16.0f, false,
+                         {1, 1, 1, 0.8f});
         close_bounds_ = {x + w - 36, y + 8, 28, 32};
 
         // Content
         float content_y = y + 60;
-        renderer.draw_text(message_, x + 16, content_y + 16, style->font_family, 13, false, {0.2f, 0.2f, 0.2f, 1});
+        draw_inline_text(commands, style, message_, x + 16, content_y + 16, 13.0f,
+                         false, {0.2f, 0.2f, 0.2f, 1});
 
         // Buttons
         float btn_y = y + h - 52;
@@ -88,7 +89,7 @@ public:
 
         for (int i = static_cast<int>(buttons_.size()) - 1; i >= 0; --i) {
             const auto& btn = buttons_[i];
-            float btn_w = btn.label.size() * 9 + 24;
+            float btn_w = text_width(style, btn.label, 13.0f, true) + 24.0f;
             btn_x -= btn_w + 8;
 
             Color bg = btn.primary ? header_bg : Color{0.9f, 0.9f, 0.9f, 1};
@@ -98,8 +99,10 @@ public:
                 bg.r *= 0.9f; bg.g *= 0.9f; bg.b *= 0.9f;
             }
 
-            renderer.draw_rect(btn_x, btn_y, btn_w, 36, 4, Paint::solid(bg), Paint::none(), 0);
-            renderer.draw_text(btn.label, btn_x + 12, btn_y + 24, style->font_family, 13, true, text_c);
+            commands.draw_rect(btn_x, btn_y, btn_w, 36, 4,
+                               Paint::solid(bg), Paint::none(), 0);
+            draw_inline_text(commands, style, btn.label, btn_x + 12, btn_y + 24, 13.0f,
+                             true, text_c);
 
             button_bounds_.push_back({i, btn_x, btn_y, btn_w, 36});
         }
@@ -128,6 +131,7 @@ public:
             // Close button
             if (hit(event.x, event.y, close_bounds_)) {
                 visible_ = false;
+                sync_host_semantics();
                 if (on_close_) on_close_();
                 elem.mark_paint_dirty();
                 return true;
@@ -137,6 +141,7 @@ public:
             for (const auto& b : button_bounds_) {
                 if (hit(event.x, event.y, {b.x, b.y, b.w, b.h})) {
                     visible_ = false;
+                    sync_host_semantics();
                     if (on_action_) on_action_(buttons_[b.idx].id);
                     elem.mark_paint_dirty();
                     return true;
@@ -146,6 +151,7 @@ public:
             // Click outside dialog closes it
             if (!hit(event.x, event.y, dialog_bounds_)) {
                 visible_ = false;
+                sync_host_semantics();
                 if (on_close_) on_close_();
                 elem.mark_paint_dirty();
             }
@@ -155,6 +161,7 @@ public:
 
         if (event.type == EventType::KeyDown && event.key == KeyCode::Escape) {
             visible_ = false;
+            sync_host_semantics();
             if (on_close_) on_close_();
             elem.mark_paint_dirty();
             return true;
@@ -166,10 +173,11 @@ public:
     bool wants_mouse_capture() const override { return visible_; }
 
     // API
-    void set_title(const std::string& t) { title_ = t; }
+    void set_title(const std::string& t) { title_ = t; sync_host_semantics(); }
     void set_message(const std::string& m) { message_ = m; }
     void set_size(float w, float h) { width_ = w; height_ = h; }
-    void set_type(Type t) { type_ = t; setup_default_buttons(); }
+    void set_type(Type t) { type_ = t; setup_default_buttons(); sync_host_semantics(); }
+    void set_alert_role(bool v) { alert_role_ = v; sync_host_semantics(); }
 
     void set_buttons(std::vector<Button> btns) { buttons_ = std::move(btns); }
     void add_button(const std::string& id, const std::string& label, bool primary = false) {
@@ -186,6 +194,31 @@ public:
 private:
     struct Rect { float x, y, w, h; };
     struct BtnBounds { int idx; float x, y, w, h; };
+
+    static ComputedStyle make_text_style(const ComputedStyle* base_style, float font_size,
+                                         bool bold) {
+        ComputedStyle style;
+        if (base_style) {
+            style = *base_style;
+        }
+        style.font_size = font_size;
+        style.font_weight = bold ? FontWeight::Bold : FontWeight::Normal;
+        return style;
+    }
+
+    static float text_width(const ComputedStyle* base_style, const std::string& text,
+                            float font_size, bool bold) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return approximate_segmented_text_width(&text_style, text);
+    }
+
+    static float draw_inline_text(RenderCommandList& commands, const ComputedStyle* base_style,
+                                  const std::string& text, float x, float baseline_y,
+                                  float font_size, bool bold, const Color& color) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return emit_segmented_text_line(commands, &text_style, text, x,
+                                                       baseline_y, color, bold);
+    }
 
     bool hit(float px, float py, const Rect& r) const {
         return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
@@ -216,6 +249,18 @@ private:
         }
     }
 
+    void sync_host_semantics() override {
+        set_host_attribute("role", alert_role_ ? "alertdialog" : "dialog");
+        set_host_attribute("data-state", visible_ ? "open" : "closed");
+        set_host_boolean_attribute("aria-modal", visible_);
+        set_host_boolean_attribute("aria-hidden", !visible_);
+        if (!title_.empty()) {
+            set_host_attribute("aria-label", title_);
+        } else {
+            clear_host_attribute("aria-label");
+        }
+    }
+
     std::string title_;
     std::string message_;
     Type type_;
@@ -228,6 +273,7 @@ private:
     Rect close_bounds_{};
     std::vector<BtnBounds> button_bounds_;
     int hover_button_ = -1;
+    bool alert_role_ = false;
 
     ActionCallback on_action_;
     CloseCallback on_close_;

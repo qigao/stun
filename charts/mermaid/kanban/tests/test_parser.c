@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 extern KanbanDiagram* kanban_parse(const char* input);
 extern void kanban_free_diagram(KanbanDiagram* diagram);
 extern char* kanban_to_json(KanbanDiagram* diagram);
@@ -188,8 +192,6 @@ spec("kanban_parser") {
             char* actual = kanban_to_json(diagram);
             REQUIRE(actual != NULL);
 
-            printf("\n=== ACTUAL JSON ===\n%s\n", actual);
-            printf("=== EXPECTED JSON ===\n%s\n", expected);
             check(json_equal(actual, expected), "JSON mismatch");
 
             turbo_json_serialize_free(actual);

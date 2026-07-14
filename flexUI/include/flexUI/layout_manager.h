@@ -8,6 +8,7 @@
 #define FLEXUI_LAYOUT_MANAGER_H
 
 #include <flex/runtime/group.h>
+#include <optional>
 #include "types.h"
 
 namespace flexUI {
@@ -31,6 +32,11 @@ public:
   static void perform_layout(Element* elem);
 
 private:
+  static void sync_to_flex_impl(
+      Element* elem, float container_w, float container_h,
+      std::optional<float> used_width = std::nullopt,
+      std::optional<float> used_height = std::nullopt);
+
   // 类型转换（内联实现）
   static flex::PositionMode to_flex_position(Position p) {
     switch (p) {
@@ -38,6 +44,7 @@ private:
       case Position::Relative: return flex::PositionMode::Relative;
       case Position::Absolute: return flex::PositionMode::Absolute;
       case Position::Fixed:    return flex::PositionMode::Fixed;
+      case Position::Sticky:   return flex::PositionMode::Relative;
       default:                 return flex::PositionMode::Static;
     }
   }

@@ -3,6 +3,9 @@
 #include "sequence/sequence_ast.h"
 #include "sequence_parser_gen.h"
 
+void SequenceParser(void *parser, int token, void *value,
+                    SequenceParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;
@@ -41,7 +44,7 @@ void sequence_scan(Scanner *s, void *parser, SequenceParserContext *ctx) {
 
         white = [ \t\r]+;
         newline = [\n];
-        comment = ("%%"| "#") [^\n]* newline;
+        comment = ("%%"| "#") [^\n\x00]* newline;
         ident = [a-zA-Z0-9_]+([a-zA-Z0-9_]* "-" [a-zA-Z0-9_]+)*;
         string = "\"" [^"\x00]* "\"";
 
@@ -64,57 +67,57 @@ void sequence_scan(Scanner *s, void *parser, SequenceParserContext *ctx) {
         "right of" | "right_of"    { SequenceParser(parser, SEQ_RIGHT_OF, NULL, ctx); goto loop; }
         "over" | "Over"            { SequenceParser(parser, SEQ_OVER, NULL, ctx); goto loop; }
 
-        "box" [ \t]+ [^#\n;]* { 
+        "box" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_BOX, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 3, s->cursor), ctx);
             goto loop; 
         }
-        "loop" [ \t]+ [^#\n;]* { 
+        "loop" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_LOOP, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 4, s->cursor), ctx);
             goto loop; 
         }
-        "rect" [ \t]+ [^#\n;]* { 
+        "rect" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_RECT, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 4, s->cursor), ctx);
             goto loop; 
         }
-        "opt" [ \t]+ [^#\n;]* { 
+        "opt" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_OPT, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 3, s->cursor), ctx);
             goto loop; 
         }
-        "alt" [ \t]+ [^#\n;]* { 
+        "alt" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_ALT, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 3, s->cursor), ctx);
             goto loop; 
         }
-        "else" [ \t]+ [^#\n;]* { 
+        "else" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_ELSE, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 4, s->cursor), ctx);
             goto loop; 
         }
-        "par" [ \t]+ [^#\n;]* { 
+        "par" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_PAR, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 3, s->cursor), ctx);
             goto loop; 
         }
-        "and" [ \t]+ [^#\n;]* { 
+        "and" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_AND, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 3, s->cursor), ctx);
             goto loop; 
         }
-        "critical" [ \t]+ [^#\n;]* { 
+        "critical" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_CRITICAL, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 8, s->cursor), ctx);
             goto loop; 
         }
-        "option" [ \t]+ [^#\n;]* { 
+        "option" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_OPTION, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 6, s->cursor), ctx);
             goto loop; 
         }
-        "break" [ \t]+ [^#\n;]* { 
+        "break" [ \t]+ [^#\n;\x00]* {
             SequenceParser(parser, SEQ_BREAK, NULL, ctx); 
             SequenceParser(parser, SEQ_TXT, trim_label(token + 5, s->cursor), ctx);
             goto loop; 
@@ -140,7 +143,7 @@ void sequence_scan(Scanner *s, void *parser, SequenceParserContext *ctx) {
         "-))"    { SequenceParser(parser, SEQ_ARROW, strdup("-))"), ctx); goto loop; }
 
         // Message text (starts with :)
-        ":" [^#\n;]* {
+        ":" [^#\n;\x00]* {
             SequenceParser(parser, SEQ_TXT, trim_label(token, s->cursor), ctx);
             goto loop;
         }
@@ -159,7 +162,9 @@ void sequence_scan(Scanner *s, void *parser, SequenceParserContext *ctx) {
             goto loop;
         }
 
-        "\000" { return; }
+        // Grammar productions terminate statements with NEWLINE. Treat EOF as
+        // a line terminator so files without a final newline parse identically.
+        "\000" { SequenceParser(parser, SEQ_NEWLINE, NULL, ctx); return; }
         * { goto loop; }
     */
 }

@@ -91,10 +91,10 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
     if (!is_drawing_) return;
 
     // Calculate bounds
-    float x = std::min(start_pos_.x(), current_pos_.x());
-    float y = std::min(start_pos_.y(), current_pos_.y());
-    float w = std::abs(current_pos_.x() - start_pos_.x());
-    float h = std::abs(current_pos_.y() - start_pos_.y());
+    float x = std::min(start_pos_.x, current_pos_.x);
+    float y = std::min(start_pos_.y, current_pos_.y);
+    float w = std::abs(current_pos_.x - start_pos_.x);
+    float h = std::abs(current_pos_.y - start_pos_.y);
 
     if (w < 1 || h < 1) return;
 
@@ -118,12 +118,12 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
             renderer.draw_rect(x, y, w, h, 0, fill, stroke, 2.0f);
 
             // Draw corner points (start -> end)
-            renderer.draw_circle(start_pos_.x(), start_pos_.y(), 4.0f, point_fill, stroke, 1.0f);
-            renderer.draw_circle(current_pos_.x(), current_pos_.y(), 4.0f, point_fill, stroke, 1.0f);
+            renderer.draw_circle(start_pos_.x, start_pos_.y, 4.0f, point_fill, stroke, 1.0f);
+            renderer.draw_circle(current_pos_.x, current_pos_.y, 4.0f, point_fill, stroke, 1.0f);
 
             // Draw diagonal guide line
-            renderer.stroke_path(make_line(start_pos_.x(), start_pos_.y(),
-                                          current_pos_.x(), current_pos_.y()), guide_stroke, 1.0f);
+            renderer.stroke_path(make_line(start_pos_.x, start_pos_.y,
+                                          current_pos_.x, current_pos_.y), guide_stroke, 1.0f);
 
             // Draw dimension lines
             float dim_offset = 8.0f;
@@ -142,8 +142,8 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
 
         case ShapeType::Circle: {
             float r = std::min(w, h) / 2;
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
 
             // Draw shape preview (from center)
             renderer.draw_circle(cx, cy, r, fill, stroke, 2.0f);
@@ -161,11 +161,11 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
 
             // Draw radius line to current position
             std::string radius_line = "M " + std::to_string(cx) + " " + std::to_string(cy) +
-                                     " L " + std::to_string(current_pos_.x()) + " " + std::to_string(current_pos_.y());
+                                     " L " + std::to_string(current_pos_.x) + " " + std::to_string(current_pos_.y);
             renderer.stroke_path(radius_line, guide_stroke, 1.5f);
 
             // Draw endpoint
-            renderer.draw_circle(current_pos_.x(), current_pos_.y(), 3.0f, point_fill, stroke, 1.0f);
+            renderer.draw_circle(current_pos_.x, current_pos_.y, 3.0f, point_fill, stroke, 1.0f);
 
             // Draw radius dimension text
             char dim_text[32];
@@ -176,10 +176,10 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
         }
 
         case ShapeType::Ellipse: {
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
-            float rx = std::abs(current_pos_.x() - start_pos_.x());
-            float ry = std::abs(current_pos_.y() - start_pos_.y());
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
+            float rx = std::abs(current_pos_.x - start_pos_.x);
+            float ry = std::abs(current_pos_.y - start_pos_.y);
 
             // Draw shape preview (from center)
             renderer.draw_ellipse(cx, cy, rx, ry, fill, stroke, 2.0f);
@@ -212,8 +212,8 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
 
         case ShapeType::Polygon:
         case ShapeType::Star: {
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
             float radius = std::sqrt(w * w + h * h) / 2;
 
             // Draw preview
@@ -227,9 +227,9 @@ void ShapeTool::render_overlay(flex::Renderer& renderer) {
             // Draw center and radius
             renderer.draw_circle(cx, cy, 4.0f, point_fill, stroke, 1.0f);
             std::string radius_line = "M " + std::to_string(cx) + " " + std::to_string(cy) +
-                                     " L " + std::to_string(current_pos_.x()) + " " + std::to_string(current_pos_.y());
+                                     " L " + std::to_string(current_pos_.x) + " " + std::to_string(current_pos_.y);
             renderer.stroke_path(radius_line, guide_stroke, 1.5f);
-            renderer.draw_circle(current_pos_.x(), current_pos_.y(), 3.0f, point_fill, stroke, 1.0f);
+            renderer.draw_circle(current_pos_.x, current_pos_.y, 3.0f, point_fill, stroke, 1.0f);
             break;
         }
     }
@@ -240,10 +240,10 @@ void ShapeTool::create_shape() {
     auto* allocator = canvas_->instance()->object_allocator();
 
     // Calculate bounds (already snapped during drawing)
-    float x = std::min(start_pos_.x(), current_pos_.x());
-    float y = std::min(start_pos_.y(), current_pos_.y());
-    float width = std::abs(current_pos_.x() - start_pos_.x());
-    float height = std::abs(current_pos_.y() - start_pos_.y());
+    float x = std::min(start_pos_.x, current_pos_.x);
+    float y = std::min(start_pos_.y, current_pos_.y);
+    float width = std::abs(current_pos_.x - start_pos_.x);
+    float height = std::abs(current_pos_.y - start_pos_.y);
 
     if (width < 1 || height < 1) return;  // Too small
 
@@ -273,8 +273,8 @@ void ShapeTool::create_shape() {
         }
 
         case ShapeType::Circle: {
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
             float r = std::sqrt(width * width + height * height) / 2;
             if (r < 5) r = 5;
 
@@ -299,10 +299,10 @@ void ShapeTool::create_shape() {
         }
 
         case ShapeType::Ellipse: {
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
-            float rx = std::abs(current_pos_.x() - start_pos_.x());
-            float ry = std::abs(current_pos_.y() - start_pos_.y());
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
+            float rx = std::abs(current_pos_.x - start_pos_.x);
+            float ry = std::abs(current_pos_.y - start_pos_.y);
             if (rx < 5) rx = 5;
             if (ry < 5) ry = 5;
 
@@ -327,8 +327,8 @@ void ShapeTool::create_shape() {
         }
 
         case ShapeType::Polygon: {
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
             float radius = std::sqrt(width * width + height * height) / 2;
             if (radius < 5) radius = 5;
 
@@ -351,8 +351,8 @@ void ShapeTool::create_shape() {
         }
 
         case ShapeType::Star: {
-            float cx = start_pos_.x();
-            float cy = start_pos_.y();
+            float cx = start_pos_.x;
+            float cy = start_pos_.y;
             float outer_radius = std::sqrt(width * width + height * height) / 2;
             if (outer_radius < 5) outer_radius = 5;
             float inner_radius = outer_radius * 0.4f;
@@ -376,12 +376,12 @@ void ShapeTool::create_shape() {
         }
 
         case ShapeType::Triangle: {
-            float cx = start_pos_.x() + width / 2;
-            float cy = start_pos_.y() + height / 2;
+            float cx = start_pos_.x + width / 2;
+            float cy = start_pos_.y + height / 2;
             
             auto* group = layer->add<flex::Group>();
             group->set_id("triangle");
-            group->set_position(start_pos_.x(), start_pos_.y());
+            group->set_position(start_pos_.x, start_pos_.y);
             group->set_layout_size(width, height);
 
             auto* shape = group->add<flex::Shape>();

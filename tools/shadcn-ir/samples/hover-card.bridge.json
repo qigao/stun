@@ -1,0 +1,45 @@
+{
+  "bridges": [
+    {
+      "target": "hover_card_root",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "hover_card_trigger",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "aria-expanded": "true"
+      }
+    },
+    {
+      "target": "hover_card_content",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "hover_card_content",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "hover_card_content",
+      "state": "side-bottom",
+      "attributes": {
+        "data-side": "bottom"
+      }
+    },
+    {
+      "target": "hover_card_trigger",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

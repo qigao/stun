@@ -16,6 +16,8 @@
 
 namespace flexUI {
 
+class RenderCommandList;
+
 /**
  * SelectWidget - 下拉选择器
  *
@@ -36,10 +38,16 @@ public:
   explicit SelectWidget(const std::vector<std::string>& options = {},
                        int selected_index = -1);
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
+  void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
+  bool measure_intrinsic_size(const Element& elem, float available_width,
+                              float available_height, float& out_width,
+                              float& out_height) const override;
   const char* type_name() const override { return "SelectWidget"; }
+  bool paints_host_box() const override { return true; }
+  bool has_overlay() const override { return expanded_ && dropdown_height_ > 0.1f; }
   bool wants_mouse_capture() const override { return expanded_; }
 
   // State access
@@ -60,17 +68,18 @@ public:
   void set_expanded(bool expanded);
 
   bool is_disabled() const { return disabled_; }
-  void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
+  void set_disabled(bool disabled);
 
   // Callback
   using ChangeCallback = std::function<void(int index, const std::string& value)>;
   void set_change_callback(ChangeCallback callback) { change_callback_ = callback; }
 
 private:
-  void render_select_box(flex::Renderer& r, const Element& elem);
-  void render_selected_text(flex::Renderer& r, const Element& elem);
-  void render_arrow(flex::Renderer& r, const Element& elem);
-  void render_dropdown(flex::Renderer& r, const Element& elem);
+  void sync_host_semantics() override;
+  void render_select_box(RenderCommandList& commands, const Element& elem);
+  void render_selected_text(RenderCommandList& commands, const Element& elem);
+  void render_arrow(RenderCommandList& commands, const Element& elem);
+  void render_dropdown(RenderCommandList& commands, const Element& elem);
 
   bool handle_mouse_down(const Event& event, Element& elem);
   bool handle_mouse_move(const Event& event, Element& elem);

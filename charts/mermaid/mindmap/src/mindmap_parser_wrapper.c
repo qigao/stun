@@ -178,7 +178,7 @@ char* mindmap_to_json(MindmapDiagram* d) {
         json_value_t *null_val = turbo_json_create_null();
         size_t len;
         char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(null_val);
+        turbo_free_json(&null_val);
         return s;
     }
     
@@ -194,18 +194,24 @@ char* mindmap_to_json(MindmapDiagram* d) {
     
     size_t len;
     char *s = turbo_json_serialize_pretty_crlf(root, &len);
-    turbo_free_json(root);
+    turbo_free_json(&root);
     return s;
 }
 
 MindmapDiagram* mindmap_parse(const char* input) {
+    if (!input) return NULL;
     MindmapParserContext ctx;
     ctx.diagram = (MindmapDiagram*)malloc(sizeof(MindmapDiagram));
+    if (!ctx.diagram) return NULL;
     memset(ctx.diagram, 0, sizeof(MindmapDiagram));
     ctx.error_count = 0;
     ctx.error_message = NULL;
 
     void* parser = MindmapParserAlloc(malloc);
+    if (!parser) {
+        mindmap_free(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

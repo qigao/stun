@@ -42,7 +42,7 @@ public:
 
     // Write with timelines
     std::vector<uint8_t> write(Scene* scene,
-                                const std::vector<Timeline::Ptr>& timelines);
+                                const std::vector<Timeline::SharedPtr>& timelines);
 
     // Get statistics
     size_t binary_size() const { return binary_size_; }
@@ -71,7 +71,8 @@ private:
     void write_text(std::vector<uint8_t>& buffer, Text* text);
     void write_image(std::vector<uint8_t>& buffer, Image* image);
     void write_group(std::vector<uint8_t>& buffer, Group* group);
-    void write_timelines(std::vector<uint8_t>& buffer, const std::vector<Timeline::Ptr>& timelines);
+    void write_instance(std::vector<uint8_t>& buffer, InstanceNode* instance);
+    void write_timelines(std::vector<uint8_t>& buffer, const std::vector<Timeline::SharedPtr>& timelines);
 
     // Compression (zstd)
     std::vector<uint8_t> compress_data(const std::vector<uint8_t>& data);

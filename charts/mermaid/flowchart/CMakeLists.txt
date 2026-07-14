@@ -5,15 +5,6 @@ cmake_minimum_required(VERSION 3.16)
 # Parser Generation (re2c + lemon)
 # ============================================================================
 
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c)
-    find_program(LEMON_EXECUTABLE lemon)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 set(FC_PARSER_Y ${CMAKE_CURRENT_SOURCE_DIR}/src/flowchart_parser.y)
 set(FC_PARSER_GEN_C ${CMAKE_CURRENT_BINARY_DIR}/flowchart_parser_gen.c)
 set(FC_PARSER_GEN_H ${CMAKE_CURRENT_BINARY_DIR}/flowchart_parser_gen.h)
@@ -59,7 +50,7 @@ target_include_directories(mermaid_flowchart
 )
  
 target_link_libraries(mermaid_flowchart 
-    PUBLIC TurboNet::Parser flex_runtime TurboNet::Mustache avoid
+    PUBLIC TurboUtils::Parser flex_runtime TurboUtils::Mustache avoid
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
@@ -72,30 +63,37 @@ endif()
 
 # 原有的 Parser 测试
 add_executable(flowchart_test tests/test_parser.c)
-target_link_libraries(flowchart_test PRIVATE mermaid_flowchart TurboNet::TinyTest TurboNet::Parser)
-target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${CMAKE_SOURCE_DIR}/charts/mermaid/golden/flowchart")
+target_link_libraries(flowchart_test PRIVATE mermaid_flowchart TurboUtils::TinyTest TurboUtils::Parser)
+target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
+add_test(NAME flowchart_test COMMAND flowchart_test)
 set_target_properties(flowchart_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
 # 新的 Renderer 测试
 add_executable(flowchart_renderer_test tests/test_renderer.cpp)
 target_link_libraries(flowchart_renderer_test PRIVATE mermaid_flowchart)
+add_test(NAME flowchart_renderer_test COMMAND flowchart_renderer_test)
 set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
 # 新的 Flex 集成测试
 add_executable(flowchart_flex_test tests/test_flex.cpp)
-target_link_libraries(flowchart_flex_test PRIVATE mermaid_flowchart flex_runtime)
+target_link_libraries(flowchart_flex_test PRIVATE
+    mermaid_flowchart flex_runtime TurboUtils::TinyTest)
+add_test(NAME flowchart_flex_test COMMAND flowchart_flex_test)
 set_target_properties(flowchart_flex_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
 # 终极 GUI 演示
-find_package(SDL2 REQUIRED)
-add_executable(flowchart_gui_demo tests/gui_demo.cpp)
-target_link_libraries(flowchart_gui_demo PRIVATE 
-    mermaid_flowchart 
-    flex_runtime 
-    flex
-    SDL2::SDL2
-    thorvg
-)
-set_target_properties(flowchart_gui_demo PROPERTIES FOLDER "Modules/Mermaid/Tests")
+find_package(SDL2 CONFIG QUIET)
+if(SDL2_FOUND)
+    add_executable(flowchart_gui_demo tests/gui_demo.cpp)
+    target_link_libraries(flowchart_gui_demo PRIVATE
+        mermaid_flowchart
+        flex_runtime
+        flex
+        flex_backend_thorvg
+        SDL2::SDL2
+        thorvg
+    )
+    set_target_properties(flowchart_gui_demo PROPERTIES FOLDER "Modules/Mermaid/Tests")
+endif()
 
 set_target_properties(mermaid_flowchart PROPERTIES FOLDER "Modules/Mermaid")

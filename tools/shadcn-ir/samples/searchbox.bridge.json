@@ -1,0 +1,20 @@
+{
+  "bridges": [
+    {
+      "target": "searchbox_root",
+      "state": "open",
+      "properties": {
+        "open": true,
+        "focused": true
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "searchbox_root",
+      "state": "with-query",
+      "properties": {
+        "text": "api"
+      }
+    }
+  ]
+}

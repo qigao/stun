@@ -1,12 +1,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "flex/core/expr_c.h"
 #include "journey/journey_ast.h"
 #include "turbo_parser.h"
 
 static char* copy_string(const char* s) {
     if(!s) return NULL;
     return strdup(s);
+}
+
+static int eval_score_expr(const char* begin, const char* end) {
+    while(begin < end && (*begin == ' ' || *begin == '\t')) begin++;
+    while(end > begin && (end[-1] == ' ' || end[-1] == '\t')) end--;
+
+    size_t len = (size_t)(end - begin);
+    char* expr = (char*)malloc(len + 1);
+    if(!expr) return 0;
+    memcpy(expr, begin, len);
+    expr[len] = '\0';
+
+    int value = 0;
+    if(!flex_expr_eval_i32(expr, &value)) {
+        value = 0;
+    }
+    free(expr);
+    return value;
 }
 
 JourneyDiagram* journey_create_diagram() {
@@ -100,11 +119,13 @@ void journey_add_task(JourneyParserContext* ctx, const char* title, const char* 
         const char *p = data;
         while(*p == ':' || *p == ' ') p++;
         
-        // Parse score
-        t->score = atoi(p);
-        
         // Find next colon
          const char *colon = strchr(p, ':');
+         const char *score_end = colon ? colon : p + strlen(p);
+
+         // Parse score through the shared MIR backend.
+         t->score = eval_score_expr(p, score_end);
+
          if(colon) {
              const char *actors_str = colon + 1;
              int count = 1;
@@ -143,7 +164,7 @@ char* journey_to_json(JourneyDiagram* d) {
         json_value_t *null_val = turbo_json_create_null();
         size_t len;
         char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(null_val);
+        turbo_free_json(&null_val);
         return s;
     }
 
@@ -178,7 +199,7 @@ char* journey_to_json(JourneyDiagram* d) {
 
     size_t out_len;
     char *json_str = turbo_json_serialize_pretty_crlf(root, &out_len);
-    turbo_free_json(root);
+    turbo_free_json(&root);
 
     return json_str;
 }

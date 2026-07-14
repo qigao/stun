@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -62,6 +66,9 @@ static int json_equal(const char* a, const char* b) {
     return eq;
 }
 
+#ifdef check_double_eq
+#undef check_double_eq
+#endif
 #define check_double_eq(a, b) do { \
     double diff = (a) - (b); \
     if (diff < 0) diff = -diff; \
@@ -129,6 +136,28 @@ spec("quadrant_parser") {
              check_double_eq(p->x, 0.1);
              check_double_eq(p->y, 0.1);
              
+             quadrant_free_diagram(diagram);
+        }
+
+        it("should evaluate point expressions with MIR") {
+             const char* input =
+                "quadrantChart\n"
+                "  Campaign Expr: [0.1+0.2, 0.9/3]\n";
+
+             QuadrantDiagram* diagram = quadrant_parse(input);
+             if (!diagram) {
+                 check(0, "diagram parsed");
+                 return;
+             }
+             if (!diagram->points) {
+                 check(0, "point parsed");
+                 quadrant_free_diagram(diagram);
+                 return;
+             }
+             check_str_eq(diagram->points->text, "Campaign Expr");
+             check_double_eq(diagram->points->x, 0.3);
+             check_double_eq(diagram->points->y, 0.3);
+
              quadrant_free_diagram(diagram);
         }
     }

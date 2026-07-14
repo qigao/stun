@@ -2,12 +2,13 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <thorvg.h>
+#include <flex/bridge/renderer_thorvg.h>
+#include <flexUI/host_bridge.h>
+#include "host_media_bridge.h"
+#include "win32_ime_helper.h"
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
-#include <windows.h>
-#include <imm.h>
-#pragma comment(lib, "imm32.lib")
 #endif
 #include <flex/bridge/renderer.h>
 #include <iostream>
@@ -15,6 +16,10 @@
 #include <vector>
 #include <string>
 #include <memory>
+
+namespace flexUI {
+class Box;
+}
 
 namespace flex {
 
@@ -27,6 +32,17 @@ public:
         renderer_.reset();
         canvas_.reset();
         tvg::Initializer::term();
+#ifdef _WIN32
+        if (window_ && original_wnd_proc) {
+            flexui_examples::win32_ime::restore_window_proc(glfwGetWin32Window(window_), original_wnd_proc);
+        }
+#endif
+        destroy_cursor(arrow_cursor_);
+        destroy_cursor(ibeam_cursor_);
+        destroy_cursor(hand_cursor_);
+        destroy_cursor(crosshair_cursor_);
+        destroy_cursor(hresize_cursor_);
+        destroy_cursor(vresize_cursor_);
         if (window_) glfwDestroyWindow(window_);
         glfwTerminate();
     }
@@ -64,17 +80,8 @@ public:
 
 #ifdef _WIN32
         HWND hwnd = glfwGetWin32Window(window_);
-        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)this);
-        original_wnd_proc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)hook_wnd_proc);
-        
-        // GLFW disables IME by default, re-enable it by associating a new context
-        HIMC himc = ImmGetContext(hwnd);
-        if (!himc) {
-            himc = ImmCreateContext();
-            ImmAssociateContext(hwnd, himc);
-        } else {
-            ImmReleaseContext(hwnd, himc);
-        }
+        original_wnd_proc = flexui_examples::win32_ime::subclass_window(hwnd, this, hook_wnd_proc);
+        flexui_examples::win32_ime::enable_ime(hwnd);
 #endif
 
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -115,13 +122,25 @@ public:
             last = now;
 
             glfwPollEvents();
+            flexui_examples::media::sync_environment(host_box());
             on_update(dt);
+            sync_host_cursor();
+#ifdef _WIN32
+            flexui_examples::media::sync_window_color_scheme(
+                glfwGetWin32Window(window_), host_box(), current_color_scheme_);
+#endif
 
-            glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            canvas_->remove();
-            on_render();
-            glfwSwapBuffers(window_);
+            if (should_render_frame()) {
+                glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                if (remove_canvas_before_render()) {
+                    canvas_->remove();
+                }
+                on_render();
+                glfwSwapBuffers(window_);
+            } else {
+                glfwWaitEventsTimeout(0.005);
+            }
         }
     }
 
@@ -129,39 +148,12 @@ public:
 
     void update_ime_position(int x, int y) {
 #ifdef _WIN32
-        HWND hwnd = glfwGetWin32Window(window_);
-        HIMC himc = ImmGetContext(hwnd);
-        if (himc) {
-            // COMPOSITIONFORM needs client coordinates
-            COMPOSITIONFORM cf;
-            cf.dwStyle = CFS_POINT;
-            cf.ptCurrentPos.x = x;
-            cf.ptCurrentPos.y = y;
-            ImmSetCompositionWindow(himc, &cf);
-
-            // Also set candidate window position
-            CANDIDATEFORM caf;
-            caf.dwIndex = 0;
-            caf.dwStyle = CFS_CANDIDATEPOS;
-            caf.ptCurrentPos.x = x;
-            caf.ptCurrentPos.y = y;
-            ImmSetCandidateWindow(himc, &caf);
-
-            // Set font height to help IME positioning
-            LOGFONTA lf;
-            memset(&lf, 0, sizeof(lf));
-            lf.lfHeight = (int)(-20 * content_scale_y_); 
-            lf.lfWeight = FW_NORMAL;
-            lf.lfCharSet = DEFAULT_CHARSET;
-            strcpy(lf.lfFaceName, "Microsoft YaHei");
-            ImmSetCompositionFontA(himc, &lf);
-
-            ImmReleaseContext(hwnd, himc);
-        }
+        flexui_examples::win32_ime::update_ime_position(
+            glfwGetWin32Window(window_), content_scale_y_, x, y);
 #endif
     }
 
-    // Physical pixel position of mouse
+    // Cursor position in the same coordinate space used by flexUI layout.
     float mouse_x() const { return (float)mouse_x_; }
     float mouse_y() const { return (float)mouse_y_; }
 
@@ -257,6 +249,10 @@ protected:
     virtual void on_composition_start() {}
     virtual void on_composition_update(const std::string& text) {}
     virtual void on_composition_end() {}
+    virtual flexUI::Box* ime_box() { return nullptr; }
+    virtual flexUI::Box* host_box() { return ime_box(); }
+    virtual bool should_render_frame() const { return true; }
+    virtual bool remove_canvas_before_render() const { return true; }
     virtual void on_resize(int w, int h) {
         width_ = w;
         height_ = h;
@@ -275,27 +271,98 @@ protected:
         return tvg::Text::load(name, buf.data(), (uint32_t)size, "ttf", true) == tvg::Result::Success;
     }
 
+    void sync_ime_caret(flexUI::Box* box) {
+#ifdef _WIN32
+        flexui_examples::win32_ime::sync_ime_caret(
+            glfwGetWin32Window(window_), box, content_scale_y_);
+#else
+        (void)box;
+#endif
+    }
+
+    void sync_ime_caret() {
+        sync_ime_caret(ime_box());
+    }
+
+    void sync_host_cursor() {
+        if (!window_) return;
+        flexUI::host::sync_cursor(host_box(), current_cursor_name_,
+                                  [this](const std::string& desired) {
+                                      current_cursor_name_ = desired;
+                                      glfwSetCursor(window_, resolve_host_cursor(desired));
+                                  });
+    }
+
+    void cursor_position(float& x, float& y) const {
+        double cursor_x = 0.0;
+        double cursor_y = 0.0;
+        glfwGetCursorPos(window_, &cursor_x, &cursor_y);
+        x = static_cast<float>(cursor_x);
+        y = static_cast<float>(cursor_y);
+    }
+
 private:
+    GLFWcursor* resolve_host_cursor(const std::string& cursor_name) {
+        if (cursor_name == "text" || cursor_name == "vertical-text") {
+            return ensure_standard_cursor(GLFW_IBEAM_CURSOR, ibeam_cursor_);
+        }
+        if (cursor_name == "pointer") {
+            return ensure_standard_cursor(GLFW_HAND_CURSOR, hand_cursor_);
+        }
+        if (cursor_name == "crosshair") {
+            return ensure_standard_cursor(GLFW_CROSSHAIR_CURSOR, crosshair_cursor_);
+        }
+#ifdef GLFW_HRESIZE_CURSOR
+        if (cursor_name == "ew-resize" || cursor_name == "col-resize" ||
+            cursor_name == "e-resize" || cursor_name == "w-resize") {
+            return ensure_standard_cursor(GLFW_HRESIZE_CURSOR, hresize_cursor_);
+        }
+#endif
+#ifdef GLFW_VRESIZE_CURSOR
+        if (cursor_name == "ns-resize" || cursor_name == "row-resize" ||
+            cursor_name == "n-resize" || cursor_name == "s-resize") {
+            return ensure_standard_cursor(GLFW_VRESIZE_CURSOR, vresize_cursor_);
+        }
+#endif
+        return ensure_standard_cursor(GLFW_ARROW_CURSOR, arrow_cursor_);
+    }
+
+    static void destroy_cursor(GLFWcursor*& cursor) {
+        if (!cursor) return;
+        glfwDestroyCursor(cursor);
+        cursor = nullptr;
+    }
+
+    static GLFWcursor* ensure_standard_cursor(int shape, GLFWcursor*& slot) {
+        if (!slot) slot = glfwCreateStandardCursor(shape);
+        return slot;
+    }
+
     static void key_callback(GLFWwindow* w, int key, int, int action, int mods) {
         auto* app = static_cast<GlfwApp*>(glfwGetWindowUserPointer(w));
         if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) app->quit();
         else app->on_key(key, action, mods);
+        app->sync_host_cursor();
     }
 
     static void mouse_button_callback(GLFWwindow* w, int button, int action, int mods) {
-        static_cast<GlfwApp*>(glfwGetWindowUserPointer(w))->on_mouse_button(button, action, mods);
+        auto* app = static_cast<GlfwApp*>(glfwGetWindowUserPointer(w));
+        app->on_mouse_button(button, action, mods);
+        app->sync_host_cursor();
     }
 
     static void cursor_pos_callback(GLFWwindow* w, double x, double y) {
         auto* app = static_cast<GlfwApp*>(glfwGetWindowUserPointer(w));
-        // Scale to physical pixels
-        app->mouse_x_ = x * app->content_scale_x_;
-        app->mouse_y_ = y * app->content_scale_y_;
+        app->mouse_x_ = x;
+        app->mouse_y_ = y;
         app->on_cursor_pos(app->mouse_x_, app->mouse_y_);
+        app->sync_host_cursor();
     }
 
     static void scroll_callback(GLFWwindow* w, double dx, double dy) {
-        static_cast<GlfwApp*>(glfwGetWindowUserPointer(w))->on_scroll(dx, dy);
+        auto* app = static_cast<GlfwApp*>(glfwGetWindowUserPointer(w));
+        app->on_scroll(dx, dy);
+        app->sync_host_cursor();
     }
 
     static void char_callback(GLFWwindow* w, unsigned int codepoint) {
@@ -310,53 +377,24 @@ private:
     static WNDPROC original_wnd_proc;
     static LRESULT CALLBACK hook_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GlfwApp* app = (GlfwApp*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
-        if (app) {
-            switch (msg) {
-                case WM_IME_SETCONTEXT:
-                    // Ensure all IME UI components are shown
-                    lp |= ISC_SHOWUIALL; 
-                    break;
-                case WM_IME_STARTCOMPOSITION:
-                    // std::cout << "IME Start" << std::endl;
-                    {
-                        HIMC himc = ImmGetContext(hwnd);
-                        if (himc) {
-                            ImmSetOpenStatus(himc, TRUE);
-                            ImmReleaseContext(hwnd, himc);
-                        }
-                    }
-                    app->on_composition_start();
-                    break;
-                case WM_IME_COMPOSITION: {
-                    // std::cout << "IME Comp: " << lp << std::endl;
-                    HIMC himc = ImmGetContext(hwnd);
-                    if (lp & GCS_COMPSTR) {
-                        int len = ImmGetCompositionStringW(himc, GCS_COMPSTR, NULL, 0);
-                        if (len > 0) {
-                            std::vector<wchar_t> buf(len / 2 + 1);
-                            ImmGetCompositionStringW(himc, GCS_COMPSTR, buf.data(), len);
-                            buf[len / 2] = 0;
-                            // Convert WCHAR to UTF-8
-                            int utf8_len = WideCharToMultiByte(CP_UTF8, 0, buf.data(), -1, NULL, 0, NULL, NULL);
-                            std::string utf8_buf(utf8_len - 1, '\0');
-                            WideCharToMultiByte(CP_UTF8, 0, buf.data(), -1, &utf8_buf[0], utf8_len, NULL, NULL);
-                            app->on_composition_update(utf8_buf);
-                        } else {
-                            app->on_composition_update("");
-                        }
-                    }
-                    ImmReleaseContext(hwnd, himc);
-                    break;
-                }
-                case WM_IME_ENDCOMPOSITION:
-                    // std::cout << "IME End" << std::endl;
-                    app->on_composition_end();
-                    break;
-                case WM_IME_NOTIFY:
-                    // std::cout << "IME Notify: " << wp << std::endl;
-                    break;
-            }
+        if (app && app->ime_box() && flexui_examples::win32_ime::handle_ime_for_box(
+                                      hwnd,
+                                      msg,
+                                      lp,
+                                      app->ime_box(),
+                                      app->content_scale_y_)) {
+            return 0;
         }
+        if (app && flexui_examples::win32_ime::handle_ime_message(
+                       hwnd,
+                       msg,
+                       lp,
+                       [app]() { app->on_composition_start(); },
+                       [app](const std::string& text) { app->on_composition_update(text); },
+                       [app]() { app->on_composition_end(); })) {
+            return 0;
+        }
+        (void)wp;
         return CallWindowProc(original_wnd_proc, hwnd, msg, wp, lp);
     }
 #endif
@@ -369,6 +407,14 @@ private:
     GLFWwindow* window_ = nullptr;
     std::unique_ptr<tvg::GlCanvas> canvas_;
     std::unique_ptr<Renderer> renderer_;
+    std::string current_cursor_name_ = "default";
+    std::string current_color_scheme_ = "normal";
+    GLFWcursor* arrow_cursor_ = nullptr;
+    GLFWcursor* ibeam_cursor_ = nullptr;
+    GLFWcursor* hand_cursor_ = nullptr;
+    GLFWcursor* crosshair_cursor_ = nullptr;
+    GLFWcursor* hresize_cursor_ = nullptr;
+    GLFWcursor* vresize_cursor_ = nullptr;
 };
 
 #ifdef _WIN32

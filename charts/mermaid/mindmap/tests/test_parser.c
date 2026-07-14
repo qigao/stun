@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include "turbo_parser.h"
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 extern MindmapDiagram* mindmap_parse(const char* input);
 extern void mindmap_free(MindmapDiagram* diagram);
 

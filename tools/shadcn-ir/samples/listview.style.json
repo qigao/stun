@@ -1,0 +1,15 @@
+{
+  "rules": [
+    {
+      "target": "listview_root",
+      "selector": "&",
+      "decls": {
+        "display": "block",
+        "width": "100%",
+        "height": "8rem",
+        "--listview-item-height": "40",
+        "--listview-scrollbar-width": "8"
+      }
+    }
+  ]
+}

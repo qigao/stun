@@ -14,6 +14,8 @@ class InfographicComponent {
 public:
     static void register_component();
     static flex::Group* build(const UnifiedInfographic& infographic, flex::Instance& instance);
+    static flex::Group* build(const UnifiedInfographic& infographic, flex::Instance& instance,
+                              float width, float height);
 };
 
 } // namespace flex::modules::infographic

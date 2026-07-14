@@ -4,6 +4,8 @@
 #include "journey/journey_ast.h"
 #include "journey_parser_gen.h"
 
+void JourneyParser(void *parser, int token, void *value, JourneyParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

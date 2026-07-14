@@ -12,7 +12,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h" 
+#include "backends/thorvg/init.h" 
 
 // ============================================================================
 // Model - Application State
@@ -51,7 +51,7 @@ struct NestedModel {
 
 class NestedView {
 public:
-    NestedView(flex::Instance::Ptr instance) : instance_(instance) {
+    NestedView(flex::Instance::SharedPtr instance) : instance_(instance) {
         auto* scene = instance_->scene();
         
         // Find nodes by ID
@@ -199,7 +199,7 @@ private:
         }
     }
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     flex::Node *basic_slider, *basic_toggle, *basic_progress;
     flex::Node *volume, *brightness, *contrast;
     flex::Node *dark_mode, *notifications, *auto_save;
@@ -422,7 +422,7 @@ private:
     tvg::SwCanvas* canvas_ = nullptr;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
     std::unique_ptr<NestedModel> model_;
@@ -437,7 +437,7 @@ private:
         slider_comp->add_prop("value", 0.5f);
         slider_comp->add_prop("width", 300.0f);
         slider_comp->add_prop("color", uint32_t(0xFF0D6EFD));
-        slider_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
+        slider_comp->set_builder([](const flex::Props& props) -> flex::ComponentNodePtr {
             auto slider = flex::Group::create();
             float val = flex::get_prop_float(props, "value", 0.5f);
             float w = flex::get_prop_float(props, "width", 300.0f);
@@ -472,7 +472,7 @@ private:
         progress_comp->add_prop("width", 300.0f);
         progress_comp->add_prop("height", 20.0f);
         progress_comp->add_prop("color", uint32_t(0xFF198754));
-        progress_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
+        progress_comp->set_builder([](const flex::Props& props) -> flex::ComponentNodePtr {
             auto progress = flex::Group::create();
             float val = flex::get_prop_float(props, "progress", 0.5f);
             float w = flex::get_prop_float(props, "width", 300.0f);
@@ -499,7 +499,7 @@ private:
         toggle_comp->add_prop("on", false);
         toggle_comp->add_prop("width", 50.0f);
         toggle_comp->add_prop("color", uint32_t(0xFF198754));
-        toggle_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
+        toggle_comp->set_builder([](const flex::Props& props) -> flex::ComponentNodePtr {
             auto toggle = flex::Group::create();
             bool on = flex::get_prop_bool(props, "on");
             float w = flex::get_prop_float(props, "width", 50.0f);
@@ -534,7 +534,7 @@ private:
         labeled_slider_comp->add_prop("value", 0.5f);
         labeled_slider_comp->add_prop("width", 400.0f);
         labeled_slider_comp->add_prop("color", uint32_t(0xFF0D6EFD));
-        labeled_slider_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
+        labeled_slider_comp->set_builder([](const flex::Props& props) -> flex::ComponentNodePtr {
             auto group = flex::Group::create();
             std::string label = flex::get_prop_string(props, "label");
             float val = flex::get_prop_float(props, "value");
@@ -566,7 +566,7 @@ private:
         auto settings_row_comp = flex::Component::create("SettingsRow");
         settings_row_comp->add_prop("label", std::string(""));
         settings_row_comp->add_prop("on", false);
-        settings_row_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
+        settings_row_comp->set_builder([](const flex::Props& props) -> flex::ComponentNodePtr {
             auto group = flex::Group::create();
             std::string label = flex::get_prop_string(props, "label");
             bool on = flex::get_prop_bool(props, "on");
@@ -589,7 +589,7 @@ private:
         auto volume_ctrl_comp = flex::Component::create("VolumeControl");
         volume_ctrl_comp->add_prop("volume", 0.5f);
         volume_ctrl_comp->add_prop("muted", false);
-        volume_ctrl_comp->set_builder([](const flex::Props& props) -> std::shared_ptr<flex::Node> {
+        volume_ctrl_comp->set_builder([](const flex::Props& props) -> flex::ComponentNodePtr {
             auto group = flex::Group::create();
             float vol = flex::get_prop_float(props, "volume");
             bool muted = flex::get_prop_bool(props, "muted");

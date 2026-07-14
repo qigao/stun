@@ -94,7 +94,7 @@ void StickyNoteTool::render_overlay(flex::Renderer& renderer) {
     
     flex::Paint fill = flex::Paint::solid(color);
     flex::Paint stroke = flex::Paint::solid(flex::Color{0, 0, 0, 0.2f});
-    renderer.draw_rect(preview_pos_.x(), preview_pos_.y(), 
+    renderer.draw_rect(preview_pos_.x, preview_pos_.y, 
                        note_width_, note_min_height_, 4.0f,
                        fill, stroke, 1.0f);
 }
@@ -118,7 +118,7 @@ void StickyNoteTool::create_note() {
     
     // Create group for note
     auto* group = flex::Group::create(*allocator);
-    group->set_position(note_pos_.x(), note_pos_.y());
+    group->set_position(note_pos_.x, note_pos_.y);
     
     // Background rectangle
     auto* bg = flex::Shape::create(*allocator);

@@ -16,7 +16,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "flex/core/expr_c.h"
 #include "block/block_ast.h"
+
+static int to_int(const char* s) {
+    if (!s) return 0;
+    int value = 0;
+    return flex_expr_eval_i32(s, &value) ? value : 0;
+}
 
 static void add_statement(BlockParserContext *ctx, BlockStatement* stmt) {
     if (!stmt) return;
@@ -181,7 +188,7 @@ columns_stmt ::= KW_COLUMNS id(C). {
     memset(s, 0, sizeof(BlockStatement));
     s->type = BLOCK_STMT_COLUMNS;
     if (strcmp(C, "auto") == 0) s->data.columns.count = -1;
-    else s->data.columns.count = atoi(C);
+    else s->data.columns.count = to_int(C);
     add_statement(ctx, s);
     free(C);
 }
@@ -206,7 +213,7 @@ space_stmt ::= KW_SPACE_NUM(N). {
     BlockStatement* s = (BlockStatement*)malloc(sizeof(BlockStatement));
     memset(s, 0, sizeof(BlockStatement));
     s->type = BLOCK_STMT_SPACE;
-    s->data.space.width = atoi(N);
+    s->data.space.width = to_int(N);
     add_statement(ctx, s);
     free(N);
 }

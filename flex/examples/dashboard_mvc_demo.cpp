@@ -17,7 +17,7 @@
 #include <thorvg.h>
 #include <flex.h>
 #include <stb_sprintf.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
  
 
 // ============================================================================
@@ -85,7 +85,7 @@ struct DashboardModel {
 
 class DashboardView {
 public:
-    DashboardView(flex::Instance::Ptr instance) : instance_(instance) {
+    DashboardView(flex::Instance::SharedPtr instance) : instance_(instance) {
         auto* scene = instance_->scene();
         if (!scene) return;
 
@@ -177,7 +177,7 @@ public:
     }
 
 private:
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     flex::Node* metric_cards_[4] = {};
     flex::Shape* chart_bars_[7] = {};
     flex::Shape* status_dot_ = nullptr;
@@ -193,7 +193,7 @@ private:
 
 class DashboardController {
 public:
-    DashboardController(DashboardModel& model, DashboardView& view, flex::Instance::Ptr instance)
+    DashboardController(DashboardModel& model, DashboardView& view, flex::Instance::SharedPtr instance)
         : model_(model), view_(view), instance_(instance) {}
 
     void update(float dt) {
@@ -250,7 +250,7 @@ public:
 private:
     DashboardModel& model_;
     DashboardView& view_;
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
 };
 
 // ============================================================================
@@ -382,7 +382,7 @@ private:
     tvg::SwCanvas* canvas_ = nullptr;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
     std::unique_ptr<DashboardModel> model_;

@@ -8,14 +8,14 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 
 // ============================================================================
 // CounterController - Handles UI business logic and state
 // ============================================================================
 class CounterController {
 public:
-    CounterController(flex::Instance::Ptr instance) : instance_(instance) {
+    CounterController(flex::Instance::SharedPtr instance) : instance_(instance) {
         // Find UI elements
         auto* scene = instance_->scene();
         counter_value_text_ = scene->find("counterValue");
@@ -99,7 +99,7 @@ private:
         std::cout << "Counter: " << counter_ << "\n";
     }
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     flex::Node* counter_value_text_ = nullptr;
     flex::Node* status_text_ = nullptr;
     flex::Node* increment_button_ = nullptr;
@@ -232,7 +232,7 @@ private:
     tvg::SwCanvas* canvas_ = nullptr;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
     std::unique_ptr<CounterController> controller_;
 

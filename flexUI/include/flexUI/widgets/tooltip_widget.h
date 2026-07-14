@@ -1,7 +1,7 @@
 /*
  * flexUI - TooltipWidget
  *
- * Hover information popup - 使用 flex::Renderer 渲染
+ * Hover information popup - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_TOOLTIP_WIDGET_H
@@ -9,6 +9,7 @@
 
 #include "../widget.h"
 #include "../group.h"
+#include "../render_command.h"
 #include "../shapes.h"
 #include <string>
 
@@ -36,9 +37,12 @@ public:
 
   explicit TooltipWidget(const std::string& text = "");
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
+  bool measure_intrinsic_size(const Element& elem, float available_width,
+                              float available_height, float& out_width,
+                              float& out_height) const override;
   const char* type_name() const override { return "TooltipWidget"; }
 
   // Content
@@ -55,9 +59,9 @@ public:
   void set_position(Position pos) { position_ = pos; dirty_ = true; }
 
 private:
-  void render_background(flex::Renderer& r, const Element& elem);
-  void render_text(flex::Renderer& r, const Element& elem);
-  void render_arrow(flex::Renderer& r, const Element& elem);
+  void render_background(RenderCommandList& commands, const Element& elem);
+  void render_text(RenderCommandList& commands, const Element& elem);
+  void render_arrow(RenderCommandList& commands, const Element& elem);
 
   std::string text_;
   Position position_ = Position::Top;

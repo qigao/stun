@@ -6,16 +6,23 @@
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
+#include <flexUI/text_layout.h>
 #include <stb_sprintf.h>
 
 namespace flexUI {
 
 DividerWidget::DividerWidget(Orientation orientation) : orientation_(orientation) {}
 
-void DividerWidget::render(const Element& elem, Renderer& renderer) {
+void DividerWidget::sync_host_semantics() {
+  set_host_attribute("role", "separator");
+  set_host_attribute("aria-orientation",
+                     orientation_ == Orientation::Vertical ? "vertical"
+                                                           : "horizontal");
+}
+
+void DividerWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
   auto* style = elem.computed_style;
-  auto& r = renderer.flex();
 
   Color color = {0.78f, 0.78f, 0.78f, 1.0f};  // 200/255
   float thickness = 1.0f;
@@ -34,6 +41,8 @@ void DividerWidget::render(const Element& elem, Renderer& renderer) {
     else style_ = Style::Solid;
   }
 
+  sync_host_semantics();
+
   Paint stroke = Paint::solid(color);
 
   if (orientation_ == Orientation::Horizontal) {
@@ -43,41 +52,45 @@ void DividerWidget::render(const Element& elem, Renderer& renderer) {
       // Simple horizontal line
       char path[128];
       stbsp_snprintf(path, sizeof(path), "M 0 %.4g L %.4g %.4g", y, elem.width(), y);
-      r.stroke_path(path, stroke, thickness);
+      commands.stroke_path(path, stroke, thickness);
     } else {
       // Line with gap for label
-      float label_width = label_.size() * 8.0f;  // Approximate
       float gap = 8.0f;
+      float label_width = style ? approximate_segmented_text_width(style, label_)
+                                : static_cast<float>(label_.size()) * 8.0f;
+      const float available_label_width =
+          std::max(0.0f, elem.width() - gap * 2.0f - 24.0f);
+      label_width = std::min(label_width, available_label_width);
       float center = elem.width() / 2;
 
       // Left segment
       char path1[128];
       stbsp_snprintf(path1, sizeof(path1), "M 0 %.4g L %.4g %.4g",
                y, center - label_width / 2 - gap, y);
-      r.stroke_path(path1, stroke, thickness);
+      commands.stroke_path(path1, stroke, thickness);
 
       // Right segment
       char path2[128];
       stbsp_snprintf(path2, sizeof(path2), "M %.4g %.4g L %.4g %.4g",
                center + label_width / 2 + gap, y, elem.width(), y);
-      r.stroke_path(path2, stroke, thickness);
-
+      commands.stroke_path(path2, stroke, thickness);
       // Render label
-      float font_size = style ? style->font_size : 12.0f;
-      std::string font_family = style ? style->font_family : "Arial";
-      r.draw_text(label_, center - label_width / 2, y + 4, font_family, font_size, false, color);
+      if (style) {
+        const auto text_block = layout_text_block(
+            style, label_, center - label_width / 2.0f, y - style->font_size,
+            label_width, resolve_line_height(style), color, TextVerticalAlign::Top);
+        emit_text_block(commands, text_block);
+      }
     }
   } else {
     // Vertical line
     float x = elem.width() / 2;
     char path[128];
     stbsp_snprintf(path, sizeof(path), "M %.4g 0 L %.4g %.4g", x, x, elem.height());
-    r.stroke_path(path, stroke, thickness);
+    commands.stroke_path(path, stroke, thickness);
   }
 
-  // Note: dash pattern would require custom stroke_path extension
-  // For now, solid lines only. Dashed/dotted styles could be implemented
-  // by adding dash support to flex::Renderer::stroke_path
+  // Dash pattern support belongs in the backend-neutral stroke command.
 }
 
 bool DividerWidget::handle_event(const Event& event, Element& elem) {

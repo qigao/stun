@@ -72,8 +72,9 @@ private:
         bool parse_data_field();
         bool parse_items_array();
         bool parse_item();
-        bool parse_item_field();
-        bool parse_children_array();
+        std::unique_ptr<DataItem> parse_item_at_indent(int item_indent);
+        bool parse_item_field(DataItem& item, int item_indent);
+        bool parse_children_array(DataItem& parent, int child_indent);
         bool parse_theme_field();
         bool parse_palette();
         

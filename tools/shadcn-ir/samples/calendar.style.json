@@ -1,0 +1,29 @@
+{
+  "rules": [
+    {
+      "target": "calendar_root",
+      "selector": "&",
+      "decls": {
+        "width": "280px",
+        "height": "280px",
+        "padding": "0.75rem",
+        "background-color": "var(--background)",
+        "--calendar-bg": "255, 255, 255, 255",
+        "--calendar-selected": "59, 130, 246, 255",
+        "--cell-size": "2rem"
+      }
+    },
+    {
+      "target": "calendar_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline": "none",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)"
+      }
+    }
+  ]
+}

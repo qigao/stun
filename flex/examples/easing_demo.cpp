@@ -14,7 +14,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 
 class EasingDemo {
 public:
@@ -127,12 +127,13 @@ public:
         scene->add_child(instructions);
 
         // Create animation status text
-        status_text_ = flex::Text::create();
+        auto status_text = flex::Text::create();
+        status_text_ = status_text.get();
         status_text_->set_content("Current: Bounce Animation");
         status_text_->set_font_size(18);
         status_text_->set_color(flex::Color(1, 1, 0, 1));
         status_text_->set_position(250, 100);
-        scene->add_child(status_text_);
+        scene->add_child(status_text);
 
         // Create bounce animation (y-axis movement)
         // Each circle gets its own timeline with different easing
@@ -299,11 +300,11 @@ private:
     std::unique_ptr<tvg::SwCanvas> canvas_;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
     flex::Node* circles_[5] = {nullptr};
-    flex::Text::Ptr status_text_;  // Use shared_ptr
+    flex::Text* status_text_ = nullptr;
     const char* current_anim_ = "bounce";
     bool running_ = false;
 };

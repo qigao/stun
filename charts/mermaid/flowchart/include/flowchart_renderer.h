@@ -38,6 +38,7 @@ struct RenderOptions {
     std::string text_color = "#000000";
     double line_width = 2.0;
     std::string font_family = "Inter, -apple-system, sans-serif";
+    double font_size = 14.0;
 };
 
 struct LayoutSnapshot {

@@ -1,0 +1,22 @@
+{
+  "component": "Label",
+  "kind": "leaf",
+  "root": "label_root",
+  "nodes": [
+    {
+      "id": "label_root",
+      "type": "element",
+      "tag": "label",
+      "states": ["disabled", "focus-visible"],
+      "attrs": {
+        "data-slot": "label"
+      },
+      "props": {
+        "text": "Label"
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/label"
+  }
+}

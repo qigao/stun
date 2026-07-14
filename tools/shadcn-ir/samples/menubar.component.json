@@ -1,0 +1,98 @@
+{
+  "component": "Menubar",
+  "kind": "composite",
+  "root": "menubar_root",
+  "nodes": [
+    {
+      "id": "menubar_root",
+      "type": "element",
+      "tag": "div",
+      "role": "menubar",
+      "attrs": {
+        "data-slot": "menubar"
+      }
+    },
+    {
+      "id": "menubar_trigger",
+      "type": "element",
+      "tag": "button",
+      "slot": "trigger",
+      "role": "menuitem",
+      "states": ["open", "focus"],
+      "attrs": {
+        "data-slot": "menubar-trigger",
+        "aria-haspopup": "menu",
+        "aria-expanded": "false",
+        "data-state": "closed"
+      }
+    },
+    {
+      "id": "menubar_content",
+      "type": "element",
+      "tag": "div",
+      "slot": "content",
+      "role": "menu",
+      "states": ["open", "side-top", "side-bottom"],
+      "attrs": {
+        "data-slot": "menubar-content",
+        "data-state": "closed",
+        "data-side": "bottom",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "id": "menubar_item",
+      "type": "element",
+      "tag": "div",
+      "slot": "item",
+      "role": "menuitem",
+      "states": ["focus", "disabled"],
+      "attrs": {
+        "data-slot": "menubar-item"
+      }
+    },
+    {
+      "id": "menubar_checkbox_item",
+      "type": "element",
+      "tag": "div",
+      "slot": "checkbox-item",
+      "role": "menuitemcheckbox",
+      "states": ["checked"],
+      "attrs": {
+        "data-slot": "menubar-checkbox-item",
+        "aria-checked": "false",
+        "data-state": "unchecked"
+      }
+    },
+    {
+      "id": "menubar_separator",
+      "type": "element",
+      "tag": "div",
+      "slot": "separator",
+      "role": "separator",
+      "attrs": {
+        "data-slot": "menubar-separator"
+      }
+    },
+    {
+      "id": "menubar_shortcut",
+      "type": "element",
+      "tag": "span",
+      "slot": "shortcut",
+      "attrs": {
+        "data-slot": "menubar-shortcut"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "menubar_root", "child": "menubar_trigger" },
+    { "parent": "menubar_root", "child": "menubar_content" },
+    { "parent": "menubar_content", "child": "menubar_item" },
+    { "parent": "menubar_content", "child": "menubar_checkbox_item" },
+    { "parent": "menubar_content", "child": "menubar_separator" },
+    { "parent": "menubar_item", "child": "menubar_shortcut" }
+  ],
+  "meta": {
+    "source": "shadcn/menubar"
+  }
+}

@@ -23,10 +23,15 @@ SankeyDiagram* sankey_parse(const char* input) {
 
     SankeyParserContext ctx;
     ctx.diagram = sankey_create_diagram();
+    if (!ctx.diagram) return NULL;
     ctx.error_count = 0;
     ctx.error_message = NULL;
 
     void* parser = SankeyParserAlloc(malloc);
+    if (!parser) {
+        sankey_free_diagram(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

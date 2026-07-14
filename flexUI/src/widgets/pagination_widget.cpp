@@ -3,9 +3,10 @@
  */
 #include <flexUI/widgets/pagination_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
 #include <climits>
 #include <stb_sprintf.h>
@@ -15,11 +16,31 @@ namespace flexUI {
 PaginationWidget::PaginationWidget(int total_pages, int current_page)
     : total_pages_(total_pages), current_page_(current_page) {}
 
+void PaginationWidget::sync_host_semantics() {
+    set_host_attribute("role", "navigation");
+    set_host_attribute("aria-label", "Pagination");
+    set_host_attribute("data-current-page", std::to_string(current_page_));
+    set_host_attribute("data-total-pages", std::to_string(total_pages_));
+    set_host_attribute("data-visible-pages", std::to_string(visible_pages_));
+    set_host_boolean_attribute("data-can-prev", current_page_ > 1);
+    set_host_boolean_attribute("data-can-next", current_page_ < total_pages_);
+    if (total_pages_ <= 1) {
+        set_host_attribute("data-state", "single");
+    } else if (current_page_ <= 1) {
+        set_host_attribute("data-state", "start");
+    } else if (current_page_ >= total_pages_) {
+        set_host_attribute("data-state", "end");
+    } else {
+        set_host_attribute("data-state", "middle");
+    }
+}
+
 void PaginationWidget::set_total_pages(int pages) {
     total_pages_ = std::max(1, pages);
     if (current_page_ > total_pages_) {
         current_page_ = total_pages_;
     }
+    sync_host_semantics();
     dirty_ = true;
 }
 
@@ -27,6 +48,7 @@ void PaginationWidget::set_current_page(int page) {
     int new_page = std::clamp(page, 1, total_pages_);
     if (new_page != current_page_) {
         current_page_ = new_page;
+        sync_host_semantics();
         dirty_ = true;
         if (page_change_callback_) {
             page_change_callback_(current_page_);
@@ -112,7 +134,8 @@ void PaginationWidget::rebuild_shapes(const Element& elem) {
     // Prev button
     if (show_prev_next_) {
         prev_bg_ = root_.add<RectShape>(x, y, btn_size, btn_size, radius);
-        float text_x = x + btn_size / 2 - style->font_size * 0.3f;
+        const float prev_width = approximate_segmented_text_width(style, "<");
+        float text_x = x + (btn_size - prev_width) / 2.0f;
         float text_y = y + (btn_size - style->font_size) / 2;
         prev_text_ = root_.add<TextShape>(text_x, text_y, "<");
         prev_text_->set_font_family(style->font_family);
@@ -135,8 +158,7 @@ void PaginationWidget::rebuild_shapes(const Element& elem) {
             label = buf;
         }
 
-        float char_width = style->font_size * 0.6f;
-        float text_width = label.size() * char_width;
+        float text_width = approximate_segmented_text_width(style, label);
         float text_x = x + (btn_size - text_width) / 2;
         float text_y = y + (btn_size - style->font_size) / 2;
 
@@ -151,7 +173,8 @@ void PaginationWidget::rebuild_shapes(const Element& elem) {
     // Next button
     if (show_prev_next_) {
         next_bg_ = root_.add<RectShape>(x, y, btn_size, btn_size, radius);
-        float text_x = x + btn_size / 2 - style->font_size * 0.3f;
+        const float next_width = approximate_segmented_text_width(style, ">");
+        float text_x = x + (btn_size - next_width) / 2.0f;
         float text_y = y + (btn_size - style->font_size) / 2;
         next_text_ = root_.add<TextShape>(text_x, text_y, ">");
         next_text_->set_font_family(style->font_family);
@@ -255,17 +278,18 @@ int PaginationWidget::hit_test(float x, float y, const Element& elem) {
     return -1;
 }
 
-void PaginationWidget::render(const Element& elem, Renderer& renderer) {
+void PaginationWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
+    sync_host_semantics();
 
     rebuild_shapes(elem);
     update_shapes(elem);
 
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    Transform local_transform = Transform{};
     float opacity = style->opacity;
 
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }
@@ -273,8 +297,10 @@ void PaginationWidget::render(const Element& elem, Renderer& renderer) {
 bool PaginationWidget::handle_event(const Event& event, Element& elem) {
     switch (event.type) {
         case EventType::MouseMove: {
-            float local_x = event.x - elem.absolute_x();
-            float local_y = event.y - elem.absolute_y();
+            const flex::Vec2 local_pos =
+                detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+            float local_x = local_pos.x;
+            float local_y = local_pos.y;
             int index = hit_test(local_x, local_y, elem);
 
             if (index != hovered_index_) {

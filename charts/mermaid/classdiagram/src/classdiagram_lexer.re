@@ -3,6 +3,8 @@
 #include "classdiagram/classdiagram_ast.h"
 #include "classdiagram_parser_gen.h"
 
+void ClassParser(void *parser, int token, void *value, ClassParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;
@@ -77,8 +79,8 @@ void classdiagram_scan(Scanner *s, void *parser, ClassParserContext *ctx) {
         "--o"  { ClassParser(parser, CLASS_REL_AGGR, NULL, ctx); goto loop; }
         "-->"  { ClassParser(parser, CLASS_REL_ASSOC, NULL, ctx); goto loop; }
         "..>"  { ClassParser(parser, CLASS_REL_DEP, NULL, ctx); goto loop; }
-        "--"   { ClassParser(parser, CLASS_REL_LINK, NULL, ctx); goto loop; }
-        ".."   { ClassParser(parser, CLASS_REL_LINK, NULL, ctx); goto loop; }
+        "--"   { ClassParser(parser, CLASS_REL_LINK_TOKEN, NULL, ctx); goto loop; }
+        ".."   { ClassParser(parser, CLASS_REL_LINK_TOKEN, NULL, ctx); goto loop; }
 
         "+" { ClassParser(parser, CLASS_PLUS, NULL, ctx); goto loop; }
         "-" { ClassParser(parser, CLASS_MINUS, NULL, ctx); goto loop; }

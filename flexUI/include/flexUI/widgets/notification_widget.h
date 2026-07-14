@@ -10,7 +10,8 @@
 #include "../widget.h"
 #include "../element.h"
 #include "../event.h"
-#include "../renderer.h"
+#include "../render_command.h"
+#include "../text_layout.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -40,6 +41,7 @@ public:
                Type type = Type::Info, float duration = 5000) {
         int id = next_id_++;
         notifications_.push_back({id, title, message, type, duration, 0, 0, false});
+        sync_host_semantics();
         return id;
     }
 
@@ -47,13 +49,14 @@ public:
         for (auto& n : notifications_) {
             if (n.id == id) n.closing = true;
         }
+        sync_host_semantics();
     }
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         // Notifications render as overlay
     }
 
-    void render_overlay(const Element& elem, Renderer& renderer) override {
+    void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override {
         if (notifications_.empty()) return;
 
         auto* style = elem.computed_style;
@@ -69,12 +72,12 @@ public:
                        ? vp_w - notif_w - margin : margin;
         float base_y = (position_ == Position::TopRight || position_ == Position::TopLeft)
                        ? margin : vp_h - margin;
-        float dir = (position_ == Position::TopRight || position_ == Position::TopLeft) ? 1 : -1;
+        float dir = (position_ == Position::TopRight || position_ == Position::TopLeft) ? 1.0f
+                                                                                         : -1.0f;
 
-        float y = base_y;
+        float y = (dir > 0.0f) ? base_y : (base_y - notif_h);
         for (size_t i = 0; i < notifications_.size(); ++i) {
             const auto& n = notifications_[i];
-            if (dir < 0) y -= notif_h;
 
             float alpha = n.opacity;
             if (alpha <= 0) { y += dir * (notif_h + gap); continue; }
@@ -87,33 +90,34 @@ public:
                 case Type::Error:   bg = {1.0f, 0.93f, 0.93f, alpha}; accent = {0.85f, 0.25f, 0.25f, alpha}; break;
                 default:            bg = {0.95f, 0.97f, 1.0f, alpha}; accent = {0.3f, 0.5f, 0.9f, alpha}; break;
             }
-
-            // Shadow
-            renderer.draw_rect(base_x + 2, y + 2, notif_w, notif_h, 8, 
-                              Paint::solid({0, 0, 0, 0.1f * alpha}), Paint::none(), 0);
-
-            // Background
-            renderer.draw_rect(base_x, y, notif_w, notif_h, 8, Paint::solid(bg), Paint::none(), 0);
-
-            // Accent bar
-            renderer.draw_rect(base_x, y, 4, notif_h, 0, Paint::solid(accent), Paint::none(), 0);
+            commands.draw_rect(base_x + 2, y + 2, notif_w, notif_h, 8,
+                               Paint::solid({0, 0, 0, 0.1f * alpha}),
+                               Paint::none(), 0);
+            commands.draw_rect(base_x, y, notif_w, notif_h, 8, Paint::solid(bg),
+                               Paint::none(), 0);
+            commands.draw_rect(base_x, y, 4, notif_h, 0, Paint::solid(accent),
+                               Paint::none(), 0);
 
             // Icon
             const char* icon = n.type == Type::Success ? "✓" : n.type == Type::Warning ? "⚠" : 
                               n.type == Type::Error ? "✕" : "ℹ";
-            renderer.draw_text(icon, base_x + 16, y + 28, style->font_family, 18, false, accent);
+            draw_inline_text(commands, style, icon, base_x + 16, y + 28, 18.0f, false,
+                             accent);
 
             // Title
             Color title_c{0.1f, 0.1f, 0.1f, alpha};
-            renderer.draw_text(n.title, base_x + 44, y + 26, style->font_family, 14, true, title_c);
+            draw_inline_text(commands, style, n.title, base_x + 44, y + 26, 14.0f, true,
+                             title_c);
 
             // Message
             Color msg_c{0.4f, 0.4f, 0.4f, alpha};
-            renderer.draw_text(n.message, base_x + 44, y + 50, style->font_family, 12, false, msg_c);
+            draw_inline_text(commands, style, n.message, base_x + 44, y + 50, 12.0f, false,
+                             msg_c);
 
             // Close button
             Color close_c{0.5f, 0.5f, 0.5f, alpha};
-            renderer.draw_text("✕", base_x + notif_w - 24, y + 24, style->font_family, 14, false, close_c);
+            draw_inline_text(commands, style, "✕", base_x + notif_w - 24, y + 24, 14.0f,
+                             false, close_c);
 
             notif_bounds_.push_back({static_cast<int>(i), base_x, y, notif_w, notif_h});
 
@@ -122,6 +126,11 @@ public:
     }
 
     bool has_overlay() const override { return !notifications_.empty(); }
+
+    void sync_host_semantics_for_layout(Element& elem) override {
+        (void)elem;
+        sync_host_semantics();
+    }
 
     void update(float delta_ms, Element& elem) override {
         bool changed = false;
@@ -153,6 +162,8 @@ public:
                           [](const Notification& n) { return n.closing && n.opacity <= 0; }),
             notifications_.end());
 
+        sync_host_semantics();
+
         notif_bounds_.clear();
 
         if (changed) elem.mark_paint_dirty();
@@ -165,6 +176,7 @@ public:
                     // Close button area
                     if (event.x > b.x + b.w - 32) {
                         notifications_[b.idx].closing = true;
+                        sync_host_semantics();
                         elem.mark_paint_dirty();
                         return true;
                     }
@@ -174,10 +186,79 @@ public:
         return false;
     }
 
+    bool measure_intrinsic_size(const Element& elem, float available_width,
+                                float available_height, float& out_width,
+                                float& out_height) const override {
+        (void)elem;
+        (void)available_width;
+        (void)available_height;
+        out_width = 320.0f;
+        if (notifications_.empty()) {
+            out_height = 0.0f;
+        } else {
+            out_height = static_cast<float>(notifications_.size()) * 80.0f +
+                         std::max(0.0f, static_cast<float>(notifications_.size() - 1) * 8.0f);
+        }
+        return true;
+    }
+
     const char* type_name() const override { return "NotificationWidget"; }
 
 private:
     struct Bounds { int idx; float x, y, w, h; };
+
+    static ComputedStyle make_text_style(const ComputedStyle* base_style, float font_size,
+                                         bool bold) {
+        ComputedStyle style;
+        if (base_style) {
+            style = *base_style;
+        }
+        style.font_size = font_size;
+        style.font_weight = bold ? FontWeight::Bold : FontWeight::Normal;
+        return style;
+    }
+
+    static float draw_inline_text(RenderCommandList& commands, const ComputedStyle* base_style,
+                                  const std::string& text, float x, float baseline_y,
+                                  float font_size, bool bold, const Color& color) {
+        const auto text_style = make_text_style(base_style, font_size, bold);
+        return emit_segmented_text_line(commands, &text_style, text, x,
+                                                       baseline_y, color, bold);
+    }
+
+    static const char* position_name(Position position) {
+        switch (position) {
+            case Position::TopLeft: return "top-left";
+            case Position::BottomRight: return "bottom-right";
+            case Position::BottomLeft: return "bottom-left";
+            default: return "top-right";
+        }
+    }
+
+    static const char* type_name(Type type) {
+        switch (type) {
+            case Type::Success: return "success";
+            case Type::Warning: return "warning";
+            case Type::Error: return "error";
+            default: return "info";
+        }
+    }
+
+    void sync_host_semantics() override {
+        set_host_attribute("role", "region");
+        set_host_attribute("aria-live", "polite");
+        set_host_attribute("aria-atomic", "true");
+        set_host_boolean_attribute("aria-hidden", notifications_.empty());
+        set_host_attribute("data-state", notifications_.empty() ? "closed" : "open");
+        set_host_attribute("data-position", position_name(position_));
+        set_host_attribute("data-count", std::to_string(notifications_.size()));
+        if (!notifications_.empty()) {
+            const auto& current = notifications_.back();
+            set_host_attribute("data-type", type_name(current.type));
+        } else {
+            clear_host_attribute("data-type");
+        }
+    }
 
     Position position_;
     std::vector<Notification> notifications_;

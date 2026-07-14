@@ -14,9 +14,10 @@
 #define FLEXUI_SCROLLVIEW_WIDGET_H
 
 #include "../widget.h"
+#include "../detail/css_render_transform.h"
 #include "../element.h"
 #include "../event.h"
-#include "../renderer.h"
+#include "../render_command.h"
 #include <algorithm>
 #include <cmath>
 
@@ -29,31 +30,45 @@ public:
     ScrollViewWidget(Policy h = Policy::Auto, Policy v = Policy::Auto)
         : h_policy_(h), v_policy_(v) {}
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         auto* style = elem.computed_style;
         if (!style) return;
 
         update_metrics(elem);
-        render_scrollbars(elem, renderer);
+        sync_host_semantics();
+        render_scrollbars(elem, commands);
     }
 
-    void begin_scroll(const Element& elem, flex::Renderer& r) {
-        if (!has_scroll()) return;
-        r.save();
-        r.clip_rect(elem.absolute_x(), elem.absolute_y(), view_width_, view_height_);
-        r.translate(-scroll_x_, -scroll_y_);
+    void sync_host_semantics_for_layout(Element& elem) override {
+        if (!elem.computed_style) {
+            return;
+        }
+        update_metrics(elem);
+        sync_host_semantics();
     }
 
-    void end_scroll(flex::Renderer& r) {
+    void begin_scroll(const Element& elem, RenderCommandList& commands) {
         if (!has_scroll()) return;
-        r.restore();
+        commands.save();
+        commands.clip_rect(0, 0, view_width_, view_height_);
+        commands.translate(-scroll_x_, -scroll_y_);
+        commands.push_transform_prefix(
+            flex::make_translation(-scroll_x_, -scroll_y_));
+    }
+
+    void end_scroll(RenderCommandList& commands) {
+        if (!has_scroll()) return;
+        commands.pop_transform_prefix();
+        commands.restore();
     }
 
     bool has_scroll() const { return max_scroll_x_ > 0 || max_scroll_y_ > 0; }
 
     bool handle_event(const Event& event, Element& elem) override {
-        float lx = event.x - elem.absolute_x();
-        float ly = event.y - elem.absolute_y();
+        const flex::Vec2 local_pos =
+            detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+        float lx = local_pos.x;
+        float ly = local_pos.y;
 
         if (event.type == EventType::MouseWheel) {
             if (max_scroll_y_ > 0) {
@@ -126,6 +141,13 @@ private:
         return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
     }
 
+    void sync_host_semantics() override {
+        set_host_attribute("role", "region");
+        set_host_attribute("data-state", has_scroll() ? "scrollable" : "idle");
+        set_host_boolean_attribute("data-scroll-x", max_scroll_x_ > 0.0f);
+        set_host_boolean_attribute("data-scroll-y", max_scroll_y_ > 0.0f);
+    }
+
     void update_metrics(const Element& elem) {
         auto* style = elem.computed_style;
         float w = elem.width(), h = elem.height();
@@ -135,48 +157,63 @@ private:
         for (size_t i = 0; i < elem.child_count(); ++i) {
             auto* child = elem.child_at(i);
             if (!child || !child->computed_style) continue;
-            content_width_ = std::max(content_width_, child->computed_style->left + child->width());
-            content_height_ = std::max(content_height_, child->computed_style->top + child->height());
+            float child_x = child->x();
+            float child_y = child->y();
+            float child_width = child->width();
+            float child_height = child->height();
+            if (child_width <= 0.0f && child->computed_style->width > 0.0f) {
+                child_width = child->computed_style->width;
+            }
+            if (child_height <= 0.0f && child->computed_style->height > 0.0f) {
+                child_height = child->computed_style->height;
+            }
+            content_width_ = std::max(content_width_, child_x + child_width);
+            content_height_ = std::max(content_height_, child_y + child_height);
         }
 
         show_v_ = (v_policy_ == Policy::Always) || (v_policy_ == Policy::Auto && content_height_ > h);
-        show_h_ = (h_policy_ == Policy::Always) || (h_policy_ == Policy::Auto && content_width_ > (show_v_ ? w - bar_width_ : w));
-        if (show_h_ && !show_v_ && v_policy_ == Policy::Auto) show_v_ = content_height_ > h - bar_width_;
+        show_h_ = (h_policy_ == Policy::Always) || (h_policy_ == Policy::Auto && content_width_ > w);
 
-        view_width_ = show_v_ ? w - bar_width_ : w;
-        view_height_ = show_h_ ? h - bar_width_ : h;
+        view_width_ = w;
+        view_height_ = h;
         max_scroll_x_ = std::max(0.0f, content_width_ - view_width_);
         max_scroll_y_ = std::max(0.0f, content_height_ - view_height_);
         scroll_x_ = std::clamp(scroll_x_, 0.0f, max_scroll_x_);
         scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll_y_);
     }
 
-    void render_scrollbars(const Element& elem, Renderer& renderer) {
+    void render_scrollbars(const Element& elem, RenderCommandList& commands) {
         auto* style = elem.computed_style;
         Color bg = style->get_variable_color("--scrollbar-bg", {0, 0, 0, 0.1f});
         Color thumb = style->get_variable_color("--scrollbar-thumb", {0, 0, 0, 0.3f});
         Color hover = style->get_variable_color("--scrollbar-thumb-hover", {0, 0, 0, 0.5f});
         float w = elem.width(), h = elem.height();
 
-        if (show_v_ && content_height_ > 0) {
-            float tx = w - bar_width_, th = show_h_ ? h - bar_width_ : h;
-            renderer.draw_rect(tx, 0, bar_width_, th, bar_width_/2, Paint::solid(bg), Paint::none(), 0);
+        if (show_v_ && content_height_ > 0 && bar_width_ > 0.0f) {
+            float tx = w - bar_width_, th = h;
+            commands.draw_rect(tx, 0, bar_width_, th, bar_width_/2,
+                               Paint::solid(bg), Paint::none(), 0);
             
             float thumbH = std::max(20.0f, th * view_height_ / content_height_);
             float thumbY = max_scroll_y_ > 0 ? (th - thumbH) * scroll_y_ / max_scroll_y_ : 0;
-            renderer.draw_rect(tx, thumbY, bar_width_, thumbH, bar_width_/2, Paint::solid(dragging_v_ ? hover : thumb), Paint::none(), 0);
+            commands.draw_rect(tx, thumbY, bar_width_, thumbH, bar_width_/2,
+                               Paint::solid(dragging_v_ ? hover : thumb),
+                               Paint::none(), 0);
             
             v_track_ = {tx, 0, bar_width_, th};
             v_thumb_ = {tx, thumbY, bar_width_, thumbH};
         }
 
-        if (show_h_ && content_width_ > 0) {
-            float ty = h - bar_width_, tw = show_v_ ? w - bar_width_ : w;
-            renderer.draw_rect(0, ty, tw, bar_width_, bar_width_/2, Paint::solid(bg), Paint::none(), 0);
+        if (show_h_ && content_width_ > 0 && bar_width_ > 0.0f) {
+            float ty = h - bar_width_, tw = w;
+            commands.draw_rect(0, ty, tw, bar_width_, bar_width_/2,
+                               Paint::solid(bg), Paint::none(), 0);
             
             float thumbW = std::max(20.0f, tw * view_width_ / content_width_);
             float thumbX = max_scroll_x_ > 0 ? (tw - thumbW) * scroll_x_ / max_scroll_x_ : 0;
-            renderer.draw_rect(thumbX, ty, thumbW, bar_width_, bar_width_/2, Paint::solid(dragging_h_ ? hover : thumb), Paint::none(), 0);
+            commands.draw_rect(thumbX, ty, thumbW, bar_width_, bar_width_/2,
+                               Paint::solid(dragging_h_ ? hover : thumb),
+                               Paint::none(), 0);
             
             h_track_ = {0, ty, tw, bar_width_};
             h_thumb_ = {thumbX, ty, thumbW, bar_width_};

@@ -1,7 +1,7 @@
 /*
  * flexUI - CalendarWidget
  *
- * Date picker - 使用 flex::Renderer 渲染
+ * Date picker - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_CALENDAR_WIDGET_H
@@ -9,9 +9,11 @@
 
 #include "../widget.h"
 #include "../group.h"
+#include "../render_command.h"
 #include "../shapes.h"
 #include <string>
 #include <functional>
+#include <vector>
 
 namespace flexUI {
 
@@ -29,10 +31,19 @@ class CalendarWidget : public Widget {
 public:
   CalendarWidget();
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
+  bool needs_frame_update(const Element& elem) const override {
+    (void)elem;
+    return false;
+  }
+  bool state_affects_paint(Symbol state) const override {
+    (void)state;
+    return false;
+  }
   const char* type_name() const override { return "CalendarWidget"; }
+  bool paints_host_box() const override { return true; }
 
   Date selected_date() const { return selected_; }
   void set_selected_date(const Date& date);
@@ -49,17 +60,32 @@ public:
   void set_select_callback(SelectCallback cb) { on_select_ = std::move(cb); }
 
 private:
-  void render_header(flex::Renderer& r, const Element& elem);
-  void render_weekdays(flex::Renderer& r, const Element& elem);
-  void render_days(flex::Renderer& r, const Element& elem);
+  void sync_host_semantics() override;
+  void render_static_layer(RenderCommandList& commands, const Element& elem);
+  void render_header(RenderCommandList& commands, const Element& elem);
+  void render_weekdays(RenderCommandList& commands, const Element& elem);
+  void render_day_labels(RenderCommandList& commands, const Element& elem);
+  void render_selected_day(RenderCommandList& commands, const Element& elem);
+  bool static_cache_matches(const Element& elem) const;
+  void update_static_cache_key(const Element& elem);
 
   int days_in_month(int year, int month) const;
   int day_of_week(int year, int month, int day) const;  // 0=Sun
+  std::string format_date(const Date& date) const;
+  std::string format_view_label() const;
 
   Date selected_;
   Date view_;
-  int hover_day_ = -1;
   SelectCallback on_select_;
+
+  bool static_cache_valid_ = false;
+  int cached_year_ = 0;
+  int cached_month_ = 0;
+  float cached_width_ = 0.0f;
+  float cached_height_ = 0.0f;
+  float cached_font_size_ = 0.0f;
+  std::string cached_font_family_;
+  std::vector<RenderCommand> static_commands_;
 };
 
 } // namespace flexUI

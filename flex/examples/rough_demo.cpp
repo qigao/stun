@@ -9,7 +9,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 #include <algorithm>
 class RoughDemo {
 public:
@@ -84,7 +84,7 @@ public:
         circle->set_rough(current_rough_);
         circle->set_position(120, 150);
         scene->add_child(circle);
-        shapes_.push_back(circle);
+        shapes_.push_back(circle.get());
 
         auto label1 = flex::Text::create();
         label1->set_content("Circle");
@@ -101,7 +101,7 @@ public:
         ellipse->set_rough(current_rough_);
         ellipse->set_position(280, 150);
         scene->add_child(ellipse);
-        shapes_.push_back(ellipse);
+        shapes_.push_back(ellipse.get());
 
         auto label2 = flex::Text::create();
         label2->set_content("Ellipse");
@@ -118,7 +118,7 @@ public:
         rect->set_rough(current_rough_);
         rect->set_position(400, 115);
         scene->add_child(rect);
-        shapes_.push_back(rect);
+        shapes_.push_back(rect.get());
 
         auto label3 = flex::Text::create();
         label3->set_content("Rectangle");
@@ -136,7 +136,7 @@ public:
         triangle->set_rough(current_rough_);
         triangle->set_position(120, 320);
         scene->add_child(triangle);
-        shapes_.push_back(triangle);
+        shapes_.push_back(triangle.get());
 
         auto label4 = flex::Text::create();
         label4->set_content("Triangle");
@@ -153,7 +153,7 @@ public:
         pentagon->set_rough(current_rough_);
         pentagon->set_position(280, 320);
         scene->add_child(pentagon);
-        shapes_.push_back(pentagon);
+        shapes_.push_back(pentagon.get());
 
         auto label5 = flex::Text::create();
         label5->set_content("Pentagon");
@@ -170,7 +170,7 @@ public:
         hexagon->set_rough(current_rough_);
         hexagon->set_position(445, 320);
         scene->add_child(hexagon);
-        shapes_.push_back(hexagon);
+        shapes_.push_back(hexagon.get());
 
         auto label6 = flex::Text::create();
         label6->set_content("Hexagon");
@@ -188,7 +188,7 @@ public:
         star->set_rough(current_rough_);
         star->set_position(120, 490);
         scene->add_child(star);
-        shapes_.push_back(star);
+        shapes_.push_back(star.get());
 
         auto label7 = flex::Text::create();
         label7->set_content("Star");
@@ -205,7 +205,7 @@ public:
         ring->set_rough(current_rough_);
         ring->set_position(280, 490);
         scene->add_child(ring);
-        shapes_.push_back(ring);
+        shapes_.push_back(ring.get());
 
         auto label8 = flex::Text::create();
         label8->set_content("Ring");
@@ -221,7 +221,7 @@ public:
         line->set_rough(current_rough_);
         line->set_position(405, 460);
         scene->add_child(line);
-        shapes_.push_back(line);
+        shapes_.push_back(line.get());
 
         auto label9 = flex::Text::create();
         label9->set_content("Line");
@@ -331,9 +331,9 @@ private:
     std::unique_ptr<tvg::SwCanvas> canvas_;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
-    std::vector<flex::Shape::Ptr> shapes_;
+    std::vector<flex::Shape::RawPtr> shapes_;
     flex::RoughOptions current_rough_ = flex::RoughOptions::disabled();
 
     bool running_ = false;

@@ -1,0 +1,82 @@
+{
+  "bridges": [
+    {
+      "target": "slider_root",
+      "attributes": {
+        "aria-valuemin": 0.5,
+        "aria-valuemax": 99.5,
+        "aria-valuenow": 37.5,
+        "aria-disabled": false,
+        "data-state": "enabled",
+        "data-value": 37.5,
+        "data-min": 0.5,
+        "data-max": 99.5
+      },
+      "properties": {
+        "min": 0.5,
+        "max": 99.5,
+        "value": 37.5,
+        "step": 0.25,
+        "disabled": false
+      }
+    },
+    {
+      "target": "slider_root",
+      "when": [
+        { "type": "prop", "name": "value", "equals": 12.75 }
+      ],
+      "attributes": {
+        "aria-valuenow": 12.75,
+        "data-value": 12.75
+      },
+      "properties": {
+        "value": 12.75
+      },
+      "pseudo_states": ["value"]
+    },
+    {
+      "target": "slider_root",
+      "when": [
+        { "type": "prop", "name": "min", "equals": -10.5 }
+      ],
+      "attributes": {
+        "aria-valuemin": -10.5,
+        "data-min": -10.5
+      },
+      "properties": {
+        "min": -10.5
+      }
+    },
+    {
+      "target": "slider_root",
+      "when": [
+        { "type": "prop", "name": "max", "equals": 125.25 }
+      ],
+      "attributes": {
+        "aria-valuemax": 125.25,
+        "data-max": 125.25
+      },
+      "properties": {
+        "max": 125.25
+      }
+    },
+    {
+      "target": "slider_root",
+      "state": "disabled",
+      "attributes": {
+        "aria-disabled": true,
+        "disabled": true,
+        "data-state": "disabled"
+      },
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "slider_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

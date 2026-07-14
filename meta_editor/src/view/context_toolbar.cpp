@@ -58,8 +58,8 @@ void ContextToolbar::update_position() {
         bounds.y + bounds.height
     );
 
-    toolbar_x_ = bottom_center.x() - toolbar_width_ / 2;
-    toolbar_y_ = bottom_center.y() + 16;  // 16px below selection
+    toolbar_x_ = bottom_center.x - toolbar_width_ / 2;
+    toolbar_y_ = bottom_center.y + 16;  // 16px below selection
 
     // Clamp to viewport
     float vw = canvas_->width();
@@ -73,7 +73,7 @@ void ContextToolbar::update_position() {
             bounds.x + bounds.width / 2,
             bounds.y
         );
-        toolbar_y_ = top_center.y() - toolbar_height_ - 16;
+        toolbar_y_ = top_center.y - toolbar_height_ - 16;
     }
 }
 

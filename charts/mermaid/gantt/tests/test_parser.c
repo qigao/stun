@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "gantt/gantt_ast.h"
 #include "turbo_parser.h"
 #include <stdlib.h>

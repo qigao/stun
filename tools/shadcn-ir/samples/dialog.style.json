@@ -1,0 +1,267 @@
+{
+  "rules": [
+    {
+      "target": "overlay",
+      "selector": "&",
+      "decls": {
+        "position": "fixed",
+        "left": "0px",
+        "top": "0px",
+        "right": "0px",
+        "bottom": "0px",
+        "background-color": "rgba(0, 0, 0, 0.8)"
+      }
+    },
+    {
+      "target": "overlay",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "animation-name": "dialog-overlay-in",
+        "animation-duration": "200ms"
+      }
+    },
+    {
+      "target": "overlay",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "closed" }
+      ],
+      "decls": {
+        "animation-name": "dialog-overlay-out",
+        "animation-duration": "200ms"
+      }
+    },
+    {
+      "target": "content",
+      "selector": "&",
+      "decls": {
+        "position": "fixed",
+        "left": "50%",
+        "top": "50%",
+        "display": "grid",
+        "width": "100%",
+        "gap": "1rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--border)",
+        "background-color": "var(--background)",
+        "padding": "1.5rem",
+        "box-shadow": "0 10px 15px rgba(0,0,0,0.2)",
+        "transform": "translate(-50%, -50%)"
+      }
+    },
+    {
+      "target": "content",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "size", "value": "sm" }
+      ],
+      "decls": {
+        "max-width": "24rem"
+      }
+    },
+    {
+      "target": "content",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "size", "value": "default" }
+      ],
+      "decls": {
+        "max-width": "32rem"
+      }
+    },
+    {
+      "target": "content",
+      "selector": "&",
+      "when": [
+        { "type": "variant", "name": "size", "value": "lg" }
+      ],
+      "decls": {
+        "max-width": "40rem"
+      }
+    },
+    {
+      "target": "content",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "animation-name": "dialog-content-in",
+        "animation-duration": "200ms"
+      }
+    },
+    {
+      "target": "content",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "closed" }
+      ],
+      "decls": {
+        "animation-name": "dialog-content-out",
+        "animation-duration": "200ms"
+      }
+    },
+    {
+      "target": "header",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "flex-direction": "column",
+        "gap": "0.375rem",
+        "text-align": "center"
+      }
+    },
+    {
+      "target": "title",
+      "selector": "&",
+      "decls": {
+        "font-size": "1.125rem",
+        "font-weight": "600",
+        "line-height": "1",
+        "letter-spacing": "-0.02em",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "description",
+      "selector": "&",
+      "decls": {
+        "font-size": "0.875rem",
+        "color": "var(--muted-foreground)"
+      }
+    },
+    {
+      "target": "footer",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "flex-direction": "column-reverse",
+        "gap": "0.5rem"
+      }
+    },
+    {
+      "target": "close",
+      "selector": "&",
+      "decls": {
+        "position": "absolute",
+        "right": "1rem",
+        "top": "1rem",
+        "border-radius": "0.125rem",
+        "opacity": "0.7",
+        "transition": "opacity 150ms ease, background-color 150ms ease, color 150ms ease, ring-width 150ms ease, ring-color 150ms ease, ring-offset 150ms ease"
+      }
+    },
+    {
+      "target": "close",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "hover" }
+      ],
+      "decls": {
+        "opacity": "1"
+      }
+    },
+    {
+      "target": "close",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus" }
+      ],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "2px",
+        "ring-color": "var(--ring)",
+        "ring-offset": "2px"
+      }
+    },
+    {
+      "target": "close",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "background-color": "var(--accent)",
+        "color": "var(--muted-foreground)"
+      }
+    }
+  ],
+  "keyframes": [
+    {
+      "name": "dialog-overlay-in",
+      "steps": [
+        {
+          "offset": 0.0,
+          "decls": {
+            "opacity": "0"
+          }
+        },
+        {
+          "offset": 1.0,
+          "decls": {
+            "opacity": "1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dialog-overlay-out",
+      "steps": [
+        {
+          "offset": 0.0,
+          "decls": {
+            "opacity": "1"
+          }
+        },
+        {
+          "offset": 1.0,
+          "decls": {
+            "opacity": "0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dialog-content-in",
+      "steps": [
+        {
+          "offset": 0.0,
+          "decls": {
+            "opacity": "0",
+            "transform": "translate(-50%, -48%) scale(0.95)"
+          }
+        },
+        {
+          "offset": 1.0,
+          "decls": {
+            "opacity": "1",
+            "transform": "translate(-50%, -50%) scale(1)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dialog-content-out",
+      "steps": [
+        {
+          "offset": 0.0,
+          "decls": {
+            "opacity": "1",
+            "transform": "translate(-50%, -50%) scale(1)"
+          }
+        },
+        {
+          "offset": 1.0,
+          "decls": {
+            "opacity": "0",
+            "transform": "translate(-50%, -48%) scale(0.95)"
+          }
+        }
+      ]
+    }
+  ]
+}

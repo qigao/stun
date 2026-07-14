@@ -126,7 +126,7 @@ void SelectionManager::render_selection_indicators(flex::Renderer& renderer) {
                     wb.x, wb.y, wb.width, wb.height);
             auto wt = node->world_transform();
             fprintf(stderr, "         world_transform=[%.2f %.2f %.2f | %.2f %.2f %.2f]\n",
-                    wt.m[0], wt.m[1], wt.m[2], wt.m[3], wt.m[4], wt.m[5]);
+                    wt.data[0], wt.data[1], wt.data[2], wt.data[3], wt.data[4], wt.data[5]);
         }
     }
 
@@ -153,7 +153,7 @@ void SelectionManager::render_selection_indicators(flex::Renderer& renderer) {
         {w, h}, {w/2, h}, {0, h}, {0, h/2}
     };
     for (auto& off : offsets) {
-        renderer.draw_rect(x + off.x() - hs/2, y + off.y() - hs/2,
+        renderer.draw_rect(x + off.x - hs/2, y + off.y - hs/2,
                           hs, hs, 0, handle_fill, handle_stroke, handle_stroke_w);
     }
 
@@ -174,8 +174,8 @@ HandleType SelectionManager::hit_test_handle(const flex::Vec2& screen_pos, float
 
     // Check rotation handle first (higher priority)
     flex::Vec2 rotate_pos = get_handle_position(HandleType::Rotate);
-    float dx = screen_pos.x() - rotate_pos.x();
-    float dy = screen_pos.y() - rotate_pos.y();
+    float dx = screen_pos.x - rotate_pos.x;
+    float dy = screen_pos.y - rotate_pos.y;
     if (dx * dx + dy * dy < threshold * threshold) {
         return HandleType::Rotate;
     }
@@ -184,8 +184,8 @@ HandleType SelectionManager::hit_test_handle(const flex::Vec2& screen_pos, float
     for (int i = 0; i < 8; ++i) {
         HandleType handle = static_cast<HandleType>(i);
         flex::Vec2 hp = get_handle_position(handle);
-        dx = screen_pos.x() - hp.x();
-        dy = screen_pos.y() - hp.y();
+        dx = screen_pos.x - hp.x;
+        dy = screen_pos.y - hp.y;
         if (dx * dx + dy * dy < threshold * threshold) {
             return handle;
         }
@@ -201,10 +201,10 @@ flex::Vec2 SelectionManager::get_handle_position(HandleType handle) const {
         bounds.y + bounds.height
     );
 
-    float x = top_left.x();
-    float y = top_left.y();
-    float w = bottom_right.x() - top_left.x();
-    float h = bottom_right.y() - top_left.y();
+    float x = top_left.x;
+    float y = top_left.y;
+    float w = bottom_right.x - top_left.x;
+    float h = bottom_right.y - top_left.y;
 
     switch (handle) {
         case HandleType::TopLeft:      return flex::Vec2(x, y);

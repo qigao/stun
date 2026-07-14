@@ -1,0 +1,12 @@
+{
+  "name": "label",
+  "source": "https://ui.shadcn.com/r/styles/new-york/label.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "font-medium",
+    "leading-none",
+    "peer-disabled:cursor-not-allowed",
+    "peer-disabled:opacity-70",
+    "text-sm"
+  ]
+}

@@ -10,12 +10,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "flex/core/expr_c.h"
 #include "kanban/kanban_ast.h"
 #include "kanban_parser_gen.h"
 
 static int to_int(char* s) {
     if(!s) return 0;
-    return atoi(s);
+    int value = 0;
+    return flex_expr_eval_i32(s, &value) ? value : 0;
 }
 }
 

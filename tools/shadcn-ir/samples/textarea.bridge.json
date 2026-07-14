@@ -1,0 +1,38 @@
+{
+  "bridges": [
+    {
+      "target": "textarea_root",
+      "state": "disabled",
+      "attributes": {
+        "disabled": "",
+        "aria-disabled": "true"
+      },
+      "properties": {
+        "disabled": true
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "textarea_root",
+      "state": "read-only",
+      "attributes": {
+        "readonly": "",
+        "aria-readonly": "true"
+      },
+      "properties": {
+        "readonly": true
+      },
+      "pseudo_states": ["read-only"]
+    },
+    {
+      "target": "textarea_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "textarea_root",
+      "state": "placeholder-shown",
+      "pseudo_states": ["placeholder-shown"]
+    }
+  ]
+}

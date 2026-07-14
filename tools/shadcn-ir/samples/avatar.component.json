@@ -1,0 +1,48 @@
+{
+  "component": "Avatar",
+  "kind": "composite",
+  "root": "avatar_root",
+  "nodes": [
+    {
+      "id": "avatar_root",
+      "type": "element",
+      "tag": "span",
+      "states": ["focus-visible"],
+      "attrs": {
+        "data-slot": "avatar"
+      }
+    },
+    {
+      "id": "avatar_image",
+      "type": "element",
+      "tag": "img",
+      "slot": "image",
+      "states": ["loading", "loaded", "error"],
+      "attrs": {
+        "data-slot": "avatar-image",
+        "src": "https://github.com/shadcn.png",
+        "alt": "User avatar"
+      }
+    },
+    {
+      "id": "avatar_fallback",
+      "type": "element",
+      "tag": "span",
+      "slot": "fallback",
+      "states": ["visible", "hidden"],
+      "attrs": {
+        "data-slot": "avatar-fallback"
+      },
+      "props": {
+        "text": "CN"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "avatar_root", "child": "avatar_image" },
+    { "parent": "avatar_root", "child": "avatar_fallback" }
+  ],
+  "meta": {
+    "source": "shadcn/avatar"
+  }
+}

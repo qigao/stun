@@ -1,0 +1,49 @@
+{
+  "bridges": [
+    {
+      "target": "calendar_root",
+      "attributes": {
+        "role": "grid",
+        "data-value": "2024-04-22",
+        "data-view-month": "4",
+        "data-view-year": "2024"
+      },
+      "properties": {
+        "selected_date": "2024-04-22",
+        "view_date": "2024-04-01"
+      }
+    },
+    {
+      "target": "calendar_root",
+      "when": [
+        { "type": "prop", "name": "selected_date", "equals": "2024-05-06" }
+      ],
+      "attributes": {
+        "data-value": "2024-05-06"
+      },
+      "properties": {
+        "selected_date": "2024-05-06"
+      },
+      "pseudo_states": ["selected_date"]
+    },
+    {
+      "target": "calendar_root",
+      "when": [
+        { "type": "prop", "name": "view_date", "equals": "2024-05-01" }
+      ],
+      "attributes": {
+        "data-view-month": "5",
+        "data-view-year": "2024"
+      },
+      "properties": {
+        "view_date": "2024-05-01"
+      },
+      "pseudo_states": ["view_date"]
+    },
+    {
+      "target": "calendar_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

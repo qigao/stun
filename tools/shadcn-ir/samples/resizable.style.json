@@ -1,0 +1,92 @@
+{
+  "rules": [
+    {
+      "target": "resizable_group",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "width": "100%",
+        "height": "100%"
+      }
+    },
+    {
+      "target": "resizable_group",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-panel-group-direction", "equals": "vertical" }
+      ],
+      "decls": {
+        "flex-direction": "column"
+      }
+    },
+    {
+      "target": "resizable_panel_start",
+      "selector": "&",
+      "decls": {
+        "flex": "1 1 0%",
+        "overflow": "hidden"
+      }
+    },
+    {
+      "target": "resizable_panel_end",
+      "selector": "&",
+      "decls": {
+        "flex": "1 1 0%",
+        "overflow": "hidden"
+      }
+    },
+    {
+      "target": "resizable_handle",
+      "selector": "&",
+      "decls": {
+        "position": "relative",
+        "display": "flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "width": "1px",
+        "height": "100%",
+        "background-color": "var(--border)"
+      }
+    },
+    {
+      "target": "resizable_handle",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "vertical" }
+      ],
+      "decls": {
+        "width": "100%",
+        "height": "1px"
+      }
+    },
+    {
+      "target": "resizable_handle",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline": "none",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)",
+        "ring-offset": "1px"
+      }
+    },
+    {
+      "target": "resizable_handle_grip",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "width": "0.625rem",
+        "height": "1rem",
+        "align-items": "center",
+        "justify-content": "center",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--border)",
+        "border-radius": "0.125rem",
+        "background-color": "var(--border)"
+      }
+    }
+  ]
+}

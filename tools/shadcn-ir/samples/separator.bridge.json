@@ -1,0 +1,28 @@
+{
+  "bridges": [
+    {
+      "target": "separator_root",
+      "state": "horizontal",
+      "attributes": {
+        "data-orientation": "horizontal",
+        "aria-orientation": "horizontal"
+      }
+    },
+    {
+      "target": "separator_root",
+      "state": "vertical",
+      "attributes": {
+        "data-orientation": "vertical",
+        "aria-orientation": "vertical"
+      }
+    },
+    {
+      "target": "separator_root",
+      "state": "decorative",
+      "attributes": {
+        "aria-hidden": "true",
+        "data-decorative": ""
+      }
+    }
+  ]
+}

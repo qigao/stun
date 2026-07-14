@@ -33,17 +33,17 @@ std::vector<uint8_t> BinaryCompiler::compile_source(const char* source) {
     }
 
     // Get scene from definition
-    scene_ = definition->scene();
-    if (!scene_) {
+    Scene::RawPtr scene = definition->scene();
+    if (!scene) {
         error_message_ = "No scene in definition";
         return {};
     }
 
-    timelines_ = definition->timelines();
+    const auto& timelines = definition->timelines();
 
     stats_.source_size = strlen(source);
 
-    return write_binary();
+    return write_binary(scene, timelines);
 }
 
 std::vector<uint8_t> BinaryCompiler::compile_file(const char* path) {
@@ -97,15 +97,17 @@ bool BinaryCompiler::compile_to_file(const char* input_path, const char* output_
     return true;
 }
 
-std::vector<uint8_t> BinaryCompiler::write_binary() {
-    if (!scene_) {
+std::vector<uint8_t> BinaryCompiler::write_binary(
+    Scene::RawPtr scene,
+    const std::vector<Timeline::SharedPtr>& timelines) {
+    if (!scene) {
         error_message_ = "No scene to serialize";
         return {};
     }
 
     BinaryWriter writer;
     writer.set_compress(compress_);
-    std::vector<uint8_t> binary = writer.write(scene_ );
+    std::vector<uint8_t> binary = writer.write(scene, timelines);
     if (binary.empty()) {
         error_message_ = "Failed to serialize scene";
         return {};
@@ -114,7 +116,7 @@ std::vector<uint8_t> BinaryCompiler::write_binary() {
     stats_.binary_size = writer.binary_size();
     stats_.node_count = writer.node_count();
     stats_.string_count = writer.string_count();
-    stats_.timeline_count = timelines_.size();
+    stats_.timeline_count = timelines.size();
 
     return binary;
 }

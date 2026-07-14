@@ -1,13 +1,12 @@
 #include "tinytest.h"
-#include "flowchart/flowchart_ast.h"
+#define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
+#include "flowchart/flowchart_parser_wrapper.h"
 #include "turbo_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
-extern FlowchartDiagram* flowchart_parse(const char* input);
 extern char* flowchart_to_json(FlowchartDiagram* diagram);
-extern void flowchart_diagram_free(FlowchartDiagram* diagram);
 
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -58,6 +57,40 @@ static void normalize_json(json_value_t* v) {
     }
 }
 
+static int json_value_equal(const json_value_t* a, const json_value_t* b) {
+    if (!a || !b || turbo_json_type(a) != turbo_json_type(b)) return a == b;
+    switch (turbo_json_type(a)) {
+        case TURBO_JSON_NULL:
+            return 1;
+        case TURBO_JSON_BOOL:
+            return turbo_json_bool(a) == turbo_json_bool(b);
+        case TURBO_JSON_NUMBER:
+            return turbo_json_number(a) == turbo_json_number(b);
+        case TURBO_JSON_STRING:
+            return strcmp(turbo_json_string(a), turbo_json_string(b)) == 0;
+        case TURBO_JSON_ARRAY: {
+            size_t count = turbo_json_array_size(a);
+            if (count != turbo_json_array_size(b)) return 0;
+            for (size_t i = 0; i < count; ++i) {
+                if (!json_value_equal(turbo_json_array_get(a, i),
+                                      turbo_json_array_get(b, i))) return 0;
+            }
+            return 1;
+        }
+        case TURBO_JSON_OBJECT: {
+            size_t count = turbo_json_object_size(a);
+            if (count != turbo_json_object_size(b)) return 0;
+            for (size_t i = 0; i < count; ++i) {
+                const char* key = turbo_json_object_key(a, i);
+                if (!json_value_equal(turbo_json_object_value(a, i),
+                                      turbo_json_object_get(b, key))) return 0;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
     if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
@@ -69,11 +102,7 @@ static int json_equal(const char* a, const char* b) {
     normalize_json(ja);
     normalize_json(jb);
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
-    int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
+    int eq = json_value_equal(ja, jb);
     turbo_free_json(&ja);
     turbo_free_json(&jb);
     return eq;
@@ -89,6 +118,34 @@ spec("flowchart_parser") {
             FlowchartDiagram* diagram = flowchart_parse(input);
             REQUIRE(diagram != NULL);
             check_str_eq(diagram->direction, "LR");
+            flowchart_diagram_free(diagram);
+        }
+
+        it("distinguishes complete and partial parses") {
+            FlowchartDiagram* diagram = NULL;
+            check_int_eq(flowchart_parse_ex("flowchart LR\nA[Good label]", &diagram),
+                         FLOWCHART_PARSE_COMPLETE);
+            REQUIRE(diagram != NULL);
+            check_str_eq(diagram->nodes->label, "Good label");
+            flowchart_diagram_free(diagram);
+
+            diagram = NULL;
+            check_int_eq(flowchart_parse_ex("flowchart LR\na --> b --> c", &diagram),
+                         FLOWCHART_PARSE_COMPLETE);
+            REQUIRE(diagram != NULL);
+            check_str_eq(diagram->nodes->id, "a");
+            check_str_eq(diagram->nodes->next->id, "b");
+            check_str_eq(diagram->nodes->next->next->id, "c");
+            check_str_eq(diagram->edges->from, "a");
+            check_str_eq(diagram->edges->to, "b");
+            check_str_eq(diagram->edges->next->from, "b");
+            check_str_eq(diagram->edges->next->to, "c");
+            flowchart_diagram_free(diagram);
+
+            diagram = NULL;
+            check_int_eq(flowchart_parse_ex("flowchart LR\nA[Good] @", &diagram),
+                         FLOWCHART_PARSE_PARTIAL);
+            REQUIRE(diagram != NULL);
             flowchart_diagram_free(diagram);
         }
     }

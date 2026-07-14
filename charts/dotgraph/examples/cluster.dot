@@ -1,0 +1,17 @@
+// Cluster subgraph example
+digraph G {
+    subgraph cluster_frontend {
+        label="Frontend";
+        color="#6366f1";
+        UI -> Router -> Store;
+    }
+
+    subgraph cluster_backend {
+        label="Backend";
+        color="#059669";
+        API -> Service -> DB;
+    }
+
+    Store -> API [label="HTTP"];
+    Router -> API [label="REST", style=dashed];
+}

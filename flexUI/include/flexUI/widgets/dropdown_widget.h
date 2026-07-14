@@ -1,7 +1,7 @@
 /*
  * flexUI - DropdownWidget
  *
- * Select from a list of options - 使用 flex::Renderer 渲染
+ * Select from a list of options - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_DROPDOWN_WIDGET_H
@@ -15,6 +15,8 @@
 #include <functional>
 
 namespace flexUI {
+
+class RenderCommandList;
 
 /**
  * DropdownWidget - Selection dropdown
@@ -36,12 +38,13 @@ public:
 
   explicit DropdownWidget(const std::string& placeholder = "Select...");
 
-  void render(const Element& elem, Renderer& renderer) override;
-  void render_overlay(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
+  void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override;
   bool has_overlay() const override { return open_; }
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "DropdownWidget"; }
+  bool paints_host_box() const override { return true; }
   bool wants_mouse_capture() const override { return open_; }
 
   // Options
@@ -61,18 +64,19 @@ public:
 
   // State
   bool is_open() const { return open_; }
-  void open() { open_ = true; dirty_ = true; }
-  void close() { open_ = false; dirty_ = true; }
-  void toggle() { open_ = !open_; dirty_ = true; }
+  void open();
+  void close();
+  void toggle();
 
   // Callback
   using ChangeCallback = std::function<void(const std::string& value)>;
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_button(flex::Renderer& r, const Element& elem);
-  void render_arrow(flex::Renderer& r, const Element& elem);
-  void render_dropdown(flex::Renderer& r, const Element& elem);
+  void sync_host_semantics() override;
+  void render_button(RenderCommandList& commands, const Element& elem);
+  void render_arrow(RenderCommandList& commands, const Element& elem);
+  void render_dropdown(RenderCommandList& commands, const Element& elem);
 
   std::string placeholder_;
   std::vector<Option> options_;

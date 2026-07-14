@@ -1,0 +1,23 @@
+{
+  "name": "card",
+  "source": "https://ui.shadcn.com/r/styles/new-york/card.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "bg-card",
+    "border",
+    "flex",
+    "flex-col",
+    "font-semibold",
+    "items-center",
+    "leading-none",
+    "p-6",
+    "pt-0",
+    "rounded-xl",
+    "shadow",
+    "space-y-1.5",
+    "text-card-foreground",
+    "text-muted-foreground",
+    "text-sm",
+    "tracking-tight"
+  ]
+}

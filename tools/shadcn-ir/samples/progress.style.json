@@ -1,0 +1,47 @@
+{
+  "rules": [
+    {
+      "target": "progress_root",
+      "selector": "&",
+      "decls": {
+        "position": "relative",
+        "height": "0.5rem",
+        "width": "100%",
+        "overflow": "hidden",
+        "border-radius": "9999px",
+        "background-color": "color-mix(in srgb, var(--primary) 20%, transparent)"
+      }
+    },
+    {
+      "target": "progress_indicator",
+      "selector": "&",
+      "decls": {
+        "height": "100%",
+        "width": "100%",
+        "flex": "1",
+        "background-color": "var(--primary)",
+        "transition": "transform 150ms ease"
+      }
+    },
+    {
+      "target": "progress_indicator",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "value" }
+      ],
+      "decls": {
+        "transform": "translateX(-60%)"
+      }
+    },
+    {
+      "target": "progress_indicator",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "indeterminate" }
+      ],
+      "decls": {
+        "transform": "translateX(-100%)"
+      }
+    }
+  ]
+}

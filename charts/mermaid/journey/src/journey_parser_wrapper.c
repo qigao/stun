@@ -24,11 +24,16 @@ JourneyDiagram* journey_parse(const char* input) {
 
     JourneyParserContext ctx;
     ctx.diagram = journey_create_diagram();
+    if (!ctx.diagram) return NULL;
     ctx.error_count = 0;
     ctx.error_message = NULL;
     ctx.current_section = NULL;
 
     void* parser = JourneyParserAlloc(malloc);
+    if (!parser) {
+        journey_free_diagram(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

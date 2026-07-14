@@ -1,0 +1,39 @@
+{
+  "component": "Progress",
+  "kind": "composite",
+  "root": "progress_root",
+  "nodes": [
+    {
+      "id": "progress_root",
+      "type": "element",
+      "tag": "div",
+      "role": "progressbar",
+      "states": ["value", "indeterminate"],
+      "attrs": {
+        "data-slot": "progress",
+        "aria-valuemin": 0,
+        "aria-valuemax": 100
+      },
+      "props": {
+        "value": 40,
+        "max": 100
+      }
+    },
+    {
+      "id": "progress_indicator",
+      "type": "element",
+      "tag": "div",
+      "slot": "indicator",
+      "states": ["value", "indeterminate"],
+      "attrs": {
+        "data-slot": "progress-indicator"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "progress_root", "child": "progress_indicator" }
+  ],
+  "meta": {
+    "source": "shadcn/progress"
+  }
+}

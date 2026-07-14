@@ -25,6 +25,7 @@ KanbanDiagram* kanban_parse(const char* input) {
 
     KanbanParserContext ctx;
     ctx.diagram = kanban_create_diagram();
+    if (!ctx.diagram) return NULL;
     ctx.error_count = 0;
     ctx.error_message = NULL;
     // Initialize tree state
@@ -32,11 +33,15 @@ KanbanDiagram* kanban_parse(const char* input) {
     ctx.last_added_node = NULL;
 
     void* parser = KanbanParserAlloc(malloc);
+    if (!parser) {
+        kanban_free_diagram(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;
     s.cursor = input;
-    s.limit = input + strlen(input);
+    s.limit = input + strlen(input) + 1;
     s.marker = NULL;
     s.line = 1;
     s.at_bol = 1;
@@ -100,7 +105,7 @@ char* kanban_to_json(KanbanDiagram* d) {
         json_value_t *null_val = turbo_json_create_null();
         size_t len;
         char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(null_val);
+        turbo_free_json(&null_val);
         return s;
     }
     
@@ -126,6 +131,6 @@ char* kanban_to_json(KanbanDiagram* d) {
     
     size_t len;
     char *s = turbo_json_serialize_pretty_crlf(root, &len);
-    turbo_free_json(root);
+    turbo_free_json(&root);
     return s;
 }

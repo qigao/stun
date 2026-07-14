@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "target": "spinner_root",
+      "selector": "&",
+      "decls": {
+        "display": "block",
+        "width": "1.5rem",
+        "height": "1.5rem",
+        "--spinner-color": "#2563eb",
+        "--spinner-track": "#e2e8f0",
+        "--spinner-stroke": "3"
+      }
+    }
+  ]
+}

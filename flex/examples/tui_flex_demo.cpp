@@ -7,8 +7,9 @@
  * - Keyboard input handling
  */
 
-#include <flex.h>
-#include <flex/backends/tui/init.h>
+#include <flex/core.h>
+#include <backends/renderer.h>
+#include <backends/tui/init.h>
 #include <tui.h>
 #include <cmath>
 
@@ -21,8 +22,14 @@ int main() {
     tui_terminal_hide_cursor(term);
     tui_terminal_enable_mouse(term);
 
-    // Create flex renderer
-    auto renderer = flex::tui_backend::create_renderer(term);
+    // Register TUI, then create through the backend-neutral factory.
+    flex::tui_backend::register_backend();
+    auto renderer = flex::create_renderer(static_cast<flex::CanvasHandle>(term));
+    if (!renderer) {
+        tui_terminal_cleanup(term);
+        tui_terminal_destroy(term);
+        return 1;
+    }
 
     int width = tui_terminal_width(term);
     int height = tui_terminal_height(term);

@@ -1,0 +1,6 @@
+// Simple directed graph
+digraph {
+    A -> B;
+    B -> C;
+    A -> C;
+}

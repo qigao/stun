@@ -1,0 +1,12 @@
+{
+  "bridges": [
+    {
+      "target": "menu_root",
+      "state": "open",
+      "properties": {
+        "open": true
+      },
+      "pseudo_states": ["open"]
+    }
+  ]
+}

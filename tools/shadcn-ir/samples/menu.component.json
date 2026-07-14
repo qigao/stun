@@ -1,0 +1,32 @@
+{
+  "component": "Menu",
+  "kind": "leaf",
+  "root": "menu_root",
+  "nodes": [
+    {
+      "id": "menu_root",
+      "type": "widget",
+      "widget": "menu",
+      "tag": "div",
+      "role": "menu",
+      "states": ["open", "closed"],
+      "props": {
+        "items": [
+          { "id": "new", "label": "New File", "shortcut": "Ctrl+N" },
+          { "separator": true },
+          { "id": "share", "label": "Share", "children": [
+            { "id": "email", "label": "Email" },
+            { "id": "link", "label": "Copy link", "checked": true }
+          ] }
+        ]
+      }
+    }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": false
+  },
+  "meta": {
+    "source": "shadcn/context-menu"
+  }
+}

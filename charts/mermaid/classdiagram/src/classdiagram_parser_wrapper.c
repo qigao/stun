@@ -64,14 +64,20 @@ void classdiagram_free(ClassDiagram* diagram) {
 }
 
 ClassDiagram* classdiagram_parse(const char* input) {
+    if (!input) return NULL;
     ClassParserContext ctx;
     ctx.diagram = (ClassDiagram*)malloc(sizeof(ClassDiagram));
+    if (!ctx.diagram) return NULL;
     memset(ctx.diagram, 0, sizeof(ClassDiagram));
     ctx.error_count = 0;
     ctx.error_message = NULL;
     ctx.current_class = NULL;
 
     void* parser = ClassParserAlloc(malloc);
+    if (!parser) {
+        classdiagram_free(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

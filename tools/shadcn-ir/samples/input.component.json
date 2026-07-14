@@ -1,0 +1,30 @@
+{
+  "component": "Input",
+  "kind": "leaf",
+  "root": "input_root",
+  "nodes": [
+    {
+      "id": "input_root",
+      "type": "widget",
+      "widget": "input",
+      "tag": "input",
+      "role": "textbox",
+      "states": ["focus", "focus-visible", "disabled", "read-only", "placeholder-shown"],
+      "attrs": {
+        "type": "text"
+      },
+      "props": {
+        "placeholder": "Email"
+      }
+    }
+  ],
+  "variants": {
+    "size": ["default", "sm", "lg"]
+  },
+  "defaults": {
+    "size": "default"
+  },
+  "meta": {
+    "source": "shadcn/input"
+  }
+}

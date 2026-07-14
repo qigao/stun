@@ -1,0 +1,21 @@
+{
+  "bridges": [
+    {
+      "target": "table_row_selected",
+      "state": "selected",
+      "attributes": {
+        "data-state": "selected",
+        "aria-selected": "true"
+      },
+      "properties": {
+        "selected": true
+      },
+      "pseudo_states": ["selected"]
+    },
+    {
+      "target": "table_row_selected",
+      "state": "hover",
+      "pseudo_states": ["hover"]
+    }
+  ]
+}

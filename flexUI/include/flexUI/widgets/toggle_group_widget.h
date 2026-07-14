@@ -47,7 +47,7 @@ public:
     explicit ToggleGroupWidget(const std::vector<Option>& options = {});
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "ToggleGroupWidget"; }

@@ -4,6 +4,8 @@
 #include "block/block_ast.h"
 #include "block_parser_gen.h"
 
+void BlockParser(void *parser, int token, void *value, BlockParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

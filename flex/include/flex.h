@@ -1,7 +1,7 @@
 /*
  * Flex Engine - Main Header
  *
- * Complete Flex Engine: Compiler + Runtime + Bridge
+ * Complete Flex Engine: DSL + Core + Lowering + Backends
  *
  * Features:
  * - Declarative scene graph (Group, Shape, Text, Image)
@@ -10,19 +10,23 @@
  * - DSL parser for .flex files
  * - Arena allocator for zero-allocation performance
  *
- * For modular usage:
- *   #include "flex/compiler.h"  // Only lexer/parser/AST
- *   #include "flex/runtime.h"   // Only scene graph/animation/rendering
+ * Preferred modular usage:
+ *   #include "flex/dsl.h"       // DSL frontend: lexer/parser/AST
+ *   #include "flex/core.h"      // Core scene graph/animation/layout/binding
+ *
+ * Legacy aliases still work:
+ *   #include "flex/compiler.h"
+ *   #include "flex/runtime.h"
  */
 
 #pragma once
 
 // Modular headers
-#include "flex/compiler.h"
-#include "flex/runtime.h"
+#include "flex/dsl.h"
+#include "flex/core.h"
 
-// Bridge: AST to Runtime converter and renderer factory
-#include "flex/bridge/ast_to_runtime.h"
+// Integration: lowering + backend-neutral renderer factory
+#include "flex/lowering.h"
 #include "flex/bridge/renderer.h"
 
 // Standard library
@@ -42,7 +46,7 @@ namespace flex {
 // Forward Declarations
 // ============================================================================
 
-// Forward declaration for bridge converter
+// Forward declaration for lowering converter
 class AstToRuntimeConverter;
 
 // ============================================================================
@@ -54,22 +58,23 @@ class Definition {
   friend class AstToRuntimeConverter; // In flex namespace
 
 public:
-  using Ptr = std::shared_ptr<Definition>;
+  using SharedPtr = std::shared_ptr<Definition>;
+  using Ptr = SharedPtr;
 
   ~Definition() = default;
 
   // Load from .flex source
-  static Ptr load(const char *source);
-  static Ptr load_file(const char *path);
+  static SharedPtr load(const char *source);
+  static SharedPtr load_file(const char *path);
 
   // Load from .flexb binary (fast loading, no parsing)
   // Note: Use BinaryReader directly for more control (see flex/binary/reader.h)
-  static Ptr load_binary(const char *path);
-  static Ptr load_binary_data(const void *data, size_t size);
+  static SharedPtr load_binary(const char *path);
+  static SharedPtr load_binary_data(const void *data, size_t size);
 
   // Load encrypted binary - NOT YET IMPLEMENTED
   // This method exists for future compatibility but currently not supported
-  static Ptr load_binary_encrypted(const char *path, const char *password);
+  static SharedPtr load_binary_encrypted(const char *path, const char *password);
 
   // Check for parse errors
   bool has_error() const { return impl_->has_error; }
@@ -78,11 +83,11 @@ public:
   int error_column() const { return impl_->error_column; }
 
   // Access parsed objects (no more ast::Document)
-  Scene::Ptr scene() const { return impl_->scene; }
-  const std::vector<Timeline::Ptr> &timelines() const { return impl_->timelines; }
+  Scene::RawPtr scene() const { return impl_->scene; }
+  const std::vector<Timeline::SharedPtr> &timelines() const { return impl_->timelines; }
 
-  // Access runtime objects
-  const std::vector<std::shared_ptr<class RuntimeStateMachine>> &machines() const {
+  // Access executable core objects
+  const std::vector<RuntimeStateMachine::SharedPtr> &machines() const {
     return impl_->machines;
   }
 
@@ -92,11 +97,11 @@ private:
     // Arena allocator for this definition's objects
     ArenaAllocator object_alloc{1024 * 1024}; // 1MB
 
-    Scene::Ptr scene;
-    std::vector<Timeline::Ptr> timelines;
+    Scene::RawPtr scene;
+    std::vector<Timeline::SharedPtr> timelines;
 
     // Runtime objects
-    std::vector<std::shared_ptr<class RuntimeStateMachine>> machines;
+    std::vector<RuntimeStateMachine::SharedPtr> machines;
 
     // Parsed assets from DSL
     struct ParsedAsset {
@@ -108,6 +113,148 @@ private:
       bool preload = true;
     };
     std::vector<ParsedAsset> parsed_assets;
+
+    struct ParsedNodeRef {
+      const Impl *owner = nullptr;
+      const std::string *node_id = nullptr;
+
+      ParsedNodeRef() = default;
+      ParsedNodeRef(const Impl *impl, const std::string *id)
+          : owner(impl), node_id(id) {}
+
+      Node::RawPtr get() const {
+        if (!owner || !owner->scene || !node_id || node_id->empty()) {
+          return nullptr;
+        }
+        return owner->scene->find(*node_id);
+      }
+
+      Node::RawPtr operator->() const { return get(); }
+      operator Node::RawPtr() const { return get(); }
+      explicit operator bool() const { return get() != nullptr; }
+    };
+
+    struct ParsedBinding {
+      const Impl *owner = nullptr;
+      std::string node_id;
+      ParsedNodeRef target;
+      std::string property;
+      Binding binding;
+
+      ParsedBinding() = default;
+      ParsedBinding(const Impl *impl, std::string id, std::string prop, Binding bind)
+          : owner(impl), node_id(std::move(id)), property(std::move(prop)), binding(std::move(bind)) {
+        rebind_target();
+      }
+
+      ParsedBinding(const ParsedBinding &other)
+          : owner(other.owner), node_id(other.node_id), property(other.property), binding(other.binding) {
+        rebind_target();
+      }
+
+      ParsedBinding(ParsedBinding &&other) noexcept
+          : owner(other.owner), node_id(std::move(other.node_id)),
+            property(std::move(other.property)), binding(std::move(other.binding)) {
+        rebind_target();
+      }
+
+      ParsedBinding &operator=(const ParsedBinding &other) {
+        if (this == &other) {
+          return *this;
+        }
+        owner = other.owner;
+        node_id = other.node_id;
+        property = other.property;
+        binding = other.binding;
+        rebind_target();
+        return *this;
+      }
+
+      ParsedBinding &operator=(ParsedBinding &&other) noexcept {
+        if (this == &other) {
+          return *this;
+        }
+        owner = other.owner;
+        node_id = std::move(other.node_id);
+        property = std::move(other.property);
+        binding = std::move(other.binding);
+        rebind_target();
+        return *this;
+      }
+
+    private:
+      void rebind_target() { target = ParsedNodeRef(owner, &node_id); }
+    };
+    std::vector<ParsedBinding> bindings;
+
+    struct ParsedComponentBinding {
+      const Impl *owner = nullptr;
+      std::string component_name;
+      std::string node_id;
+      ParsedNodeRef node;
+      Component::SharedPtr component;
+      Props base_props;
+      std::map<std::string, Binding> prop_bindings;
+
+      ParsedComponentBinding() = default;
+      ParsedComponentBinding(const Impl *impl, std::string name, std::string id,
+                             Component::SharedPtr comp, Props props,
+                             std::map<std::string, Binding> bindings)
+          : owner(impl), component_name(std::move(name)), node_id(std::move(id)),
+            component(std::move(comp)), base_props(std::move(props)),
+            prop_bindings(std::move(bindings)) {
+        rebind_node();
+      }
+
+      ParsedComponentBinding(const ParsedComponentBinding &other)
+          : owner(other.owner), component_name(other.component_name), node_id(other.node_id),
+            component(other.component), base_props(other.base_props),
+            prop_bindings(other.prop_bindings) {
+        rebind_node();
+      }
+
+      ParsedComponentBinding(ParsedComponentBinding &&other) noexcept
+          : owner(other.owner), component_name(std::move(other.component_name)),
+            node_id(std::move(other.node_id)), component(std::move(other.component)),
+            base_props(std::move(other.base_props)),
+            prop_bindings(std::move(other.prop_bindings)) {
+        rebind_node();
+      }
+
+      ParsedComponentBinding &operator=(const ParsedComponentBinding &other) {
+        if (this == &other) {
+          return *this;
+        }
+        owner = other.owner;
+        component_name = other.component_name;
+        node_id = other.node_id;
+        component = other.component;
+        base_props = other.base_props;
+        prop_bindings = other.prop_bindings;
+        rebind_node();
+        return *this;
+      }
+
+      ParsedComponentBinding &operator=(ParsedComponentBinding &&other) noexcept {
+        if (this == &other) {
+          return *this;
+        }
+        owner = other.owner;
+        component_name = std::move(other.component_name);
+        node_id = std::move(other.node_id);
+        component = std::move(other.component);
+        base_props = std::move(other.base_props);
+        prop_bindings = std::move(other.prop_bindings);
+        rebind_node();
+        return *this;
+      }
+
+    private:
+      void rebind_node() { node = ParsedNodeRef(owner, &node_id); }
+    };
+    std::vector<ParsedComponentBinding> component_bindings;
+    std::vector<ComponentNodePtr> component_instances;
+    std::map<std::string, Component::SharedPtr> dsl_components;
 
     std::string error_message;
     int error_line = 0;
@@ -123,18 +270,19 @@ private:
 
 class Instance : public IInstanceContext {
 public:
-  using Ptr = std::shared_ptr<Instance>;
+  using SharedPtr = std::shared_ptr<Instance>;
+  using Ptr = SharedPtr;
 
   ~Instance();
 
   // Create instance from definition
-  static Ptr create(Definition::Ptr definition);
+  static SharedPtr create(Definition::SharedPtr definition);
 
   // Create standalone instance (no definition)
-  static Ptr create(float width, float height);
+  static SharedPtr create(float width, float height);
 
   // Create instance with custom arena allocator (optional)
-  static Ptr create(float width, float height, ArenaAllocator &frame_alloc,
+  static SharedPtr create(float width, float height, ArenaAllocator &frame_alloc,
                     ArenaAllocator &object_alloc);
 
   // Get raw pointer (for TimelinePlayer)
@@ -144,7 +292,7 @@ public:
   // Scene Access (IInstanceContext interface)
   // -------------------------------------------
 
-  Scene *scene() const override { return impl_->scene ; }
+  Scene::RawPtr scene() const override { return impl_->scene ; }
 
   // -------------------------------------------
   // Input Control (IInstanceContext interface)
@@ -152,6 +300,7 @@ public:
 
   void set_input(const char *name, float value) override;
   void set_input(const char *name, const char *value) override;
+  void set_input(const char *name, bool value);
   float get_input(const char *name) const override;
 
   // -------------------------------------------
@@ -172,6 +321,15 @@ public:
   // -------------------------------------------
 
   void send_pointer_event(float x, float y, bool is_down);
+  void send_key_event(KeyCode key, bool is_down, const KeyModifiers& modifiers = {},
+                      bool repeat = false);
+  void send_text_input(const char* utf8, bool from_ime = false);
+  void send_composition_event(CompositionEventType type, const char* utf8,
+                              int selection_start = -1, int selection_end = -1);
+  bool request_focus(Node::RawPtr node,
+                     FocusChangeReason reason = FocusChangeReason::Programmatic);
+  void clear_focus(FocusChangeReason reason = FocusChangeReason::Clear);
+  Node::RawPtr focused_node() const;
   void send_event(const char *name) override;
 
   // -------------------------------------------
@@ -182,7 +340,7 @@ public:
   AnimationController *animation_controller() const override;
 
   // Add a timeline
-  void add_timeline(Timeline::Ptr timeline);
+  void add_timeline(Timeline::SharedPtr timeline);
 
   // Play a timeline on a node
   TimelinePlayer *play(const char *timeline_name, Node *target) override;
@@ -250,8 +408,8 @@ public:
 private:
   Instance();
   struct Impl {
-    Definition::Ptr definition;
-    Scene::Ptr scene;
+    Definition::SharedPtr definition;
+    Scene::RawPtr scene;
     float time = 0;
 
     // Arena allocators (based on memory_pool) - MUST be declared first!
@@ -259,15 +417,12 @@ private:
     ArenaAllocator object_alloc{1024 * 1024}; // 1MB
 
     // Input values (Phase 2.3: Single map with variant)
-    using InputValue = std::variant<float, std::string>;
+    using InputValue = std::variant<float, std::string, bool>;
     std::unordered_map<Symbol, InputValue, SymbolHash> inputs;
     std::unordered_map<Symbol, std::string, SymbolHash> assets;
 
     // Data bindings
     std::unique_ptr<BindingContext> bindings;
-
-    // Script context for expression evaluation
-    std::unique_ptr<ScriptContext> script_ctx;
 
     // Phase 2: Animation and State Machine
     AnimationController animation_controller{object_alloc};
@@ -277,14 +432,15 @@ private:
     std::map<std::string, std::string> layer_states;
 
     // Runtime systems (Phase 3)
-    std::vector<std::shared_ptr<class RuntimeStateMachine>> machines;
+    std::vector<RuntimeStateMachine::SharedPtr> machines;
 
     // Asset management (Phase 4)
     std::unique_ptr<class AssetManager> asset_manager;
 
     // Pointer state for event handling
-    Node* hover_node = nullptr;
-    Node* pointer_down_node = nullptr;
+    Node::RawPtr hover_node = nullptr;
+    Node::RawPtr pointer_down_node = nullptr;
+    Node::RawPtr focused_node = nullptr;
     bool is_pointer_down = false;
   };
   std::unique_ptr<Impl> impl_;
@@ -298,7 +454,7 @@ namespace parser {
 
 // Parse .flex source and build Runtime objects directly
 // Returns nullptr on error - use get_error() for details
-Scene::Ptr parse(const char *source, std::vector<Timeline::Ptr> *out_timelines,
+Scene::RawPtr parse(const char *source, std::vector<Timeline::SharedPtr> *out_timelines,
                     void *out_machine, // REMOVED: Machine::Ptr* out_machine (old system)
                     ArenaAllocator &alloc);
 
@@ -313,8 +469,10 @@ int get_error_column();
 // Backend Initialization
 // ============================================================================
 
-// For backend-specific initialization, include the corresponding header:
-// ThorVG:  #include "flex/backends/thorvg/init.h"
-// NanoVG:  #include "flex/backends/nanovg/init.h" (planned)
+// Backend modules are considered integration details. End-user code should
+// prefer the backend-agnostic create_renderer(handle) entry point after the
+// hosting application has registered and selected a default renderer factory.
+// Backend-specific init/register headers remain available for in-repo or app
+// integration code, but are not part of the intended public user surface.
 
 } // namespace flex

@@ -1,0 +1,22 @@
+{
+  "component": "ListView",
+  "kind": "leaf",
+  "root": "listview_root",
+  "nodes": [
+    {
+      "id": "listview_root",
+      "type": "widget",
+      "widget": "listview",
+      "tag": "div",
+      "states": ["selected", "unselected"],
+      "props": {
+        "items": [
+          { "id": "alpha", "text": "Alpha" },
+          { "id": "beta", "text": "Beta" },
+          { "id": "gamma", "text": "Gamma" }
+        ],
+        "selected_index": 1
+      }
+    }
+  ]
+}

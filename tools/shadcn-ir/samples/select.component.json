@@ -1,0 +1,28 @@
+{
+  "component": "Select",
+  "kind": "leaf",
+  "root": "select_root",
+  "nodes": [
+    {
+      "id": "select_root",
+      "type": "widget",
+      "widget": "select",
+      "tag": "button",
+      "role": "combobox",
+      "states": ["open", "closed", "disabled", "focus-visible"],
+      "props": {
+        "options": ["Alpha", "Beta", "Gamma"],
+        "selected_index": 0
+      }
+    }
+  ],
+  "variants": {
+    "size": ["default", "sm", "lg"]
+  },
+  "defaults": {
+    "size": "default"
+  },
+  "meta": {
+    "source": "shadcn/select"
+  }
+}

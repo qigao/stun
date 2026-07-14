@@ -1,0 +1,35 @@
+{
+  "bridges": [
+    {
+      "target": "progress_root",
+      "state": "value",
+      "attributes": {
+        "aria-valuenow": 40,
+        "data-value": 40,
+        "data-max": 100
+      },
+      "properties": {
+        "value": 40,
+        "max": 100
+      }
+    },
+    {
+      "target": "progress_root",
+      "state": "indeterminate",
+      "attributes": {
+        "data-state": "indeterminate"
+      },
+      "missing_attributes": ["aria-valuenow", "data-value"]
+    },
+    {
+      "target": "progress_indicator",
+      "state": "value",
+      "attributes": {
+        "data-value": 40
+      },
+      "properties": {
+        "value": 40
+      }
+    }
+  ]
+}

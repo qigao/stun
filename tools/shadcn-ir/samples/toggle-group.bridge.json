@@ -1,0 +1,30 @@
+{
+  "bridges": [
+    {
+      "target": "toggle_group_root",
+      "state": "selected",
+      "attributes": {
+        "data-state": "selected",
+        "data-selected-count": "1",
+        "data-value": "center",
+        "data-selected-index": "1"
+      },
+      "properties": {
+        "selected_index": 1
+      },
+      "pseudo_states": ["selected"]
+    },
+    {
+      "target": "toggle_group_root",
+      "state": "empty",
+      "attributes": {
+        "data-state": "unselected",
+        "data-selected-count": "0"
+      },
+      "missing_attributes": ["data-value", "data-selected-index"],
+      "properties": {
+        "selected_index": -1
+      }
+    }
+  ]
+}

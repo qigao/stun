@@ -1,0 +1,25 @@
+{
+  "component": "ToggleGroup",
+  "kind": "leaf",
+  "root": "toggle_group_root",
+  "nodes": [
+    {
+      "id": "toggle_group_root",
+      "type": "widget",
+      "widget": "toggle-group",
+      "tag": "div",
+      "states": ["selected", "empty"],
+      "props": {
+        "options": [
+          { "id": "left", "label": "Left" },
+          { "id": "center", "label": "Center" },
+          { "id": "right", "label": "Right" }
+        ],
+        "selected_index": 1
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/toggle-group"
+  }
+}

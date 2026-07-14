@@ -1,0 +1,19 @@
+{
+  "bridges": [
+    {
+      "target": "sidebar_root",
+      "state": "collapsed",
+      "properties": {
+        "collapsed": true
+      },
+      "pseudo_states": ["collapsed"]
+    },
+    {
+      "target": "sidebar_root",
+      "state": "selected",
+      "properties": {
+        "selected_id": "search"
+      }
+    }
+  ]
+}

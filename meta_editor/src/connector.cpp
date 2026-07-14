@@ -8,6 +8,10 @@
 
 namespace meta_editor {
 
+using flex::operator+;
+using flex::operator-;
+using flex::operator*;
+
 flex::Vec2 Connector::get_connection_point(flex::Node* node, ConnectionSide side) {
     if (!node) return flex::Vec2(0, 0);
     
@@ -48,10 +52,10 @@ void Connector::update_position() {
     }
     
     // Update line position and geometry
-    line->set_position(p1.x(), p1.y());
+    line->set_position(p1.x, p1.y);
     
-    float dx = p2.x() - p1.x();
-    float dy = p2.y() - p1.y();
+    float dx = p2.x - p1.x;
+    float dy = p2.y - p1.y;
     
     // Rebuild path with arrow (simplified - assumes arrow at end)
     std::string path_data = "M 0 0 L " + std::to_string(dx) + " " + std::to_string(dy);

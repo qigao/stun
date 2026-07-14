@@ -4,13 +4,32 @@
 
 #include <flexUI/widgets/breadcrumb_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/text_layout.h>
 
 namespace flexUI {
 
 BreadcrumbWidget::BreadcrumbWidget() {}
+
+void BreadcrumbWidget::sync_host_semantics() {
+    set_host_attribute("role", "navigation");
+    set_host_attribute("aria-label", "Breadcrumb");
+    set_host_attribute("data-count", std::to_string(items_.size()));
+    if (items_.empty()) {
+        set_host_attribute("data-state", "empty");
+        clear_host_attribute("data-current-id");
+    } else {
+        set_host_attribute("data-state", "ready");
+        set_host_attribute("data-current-id", items_.back().id);
+    }
+    if (hovered_index_ >= 0 && hovered_index_ < static_cast<int>(items_.size())) {
+        set_host_attribute("data-hovered-id", items_[hovered_index_].id);
+    } else {
+        clear_host_attribute("data-hovered-id");
+    }
+}
 
 void BreadcrumbWidget::set_items(const std::vector<Item>& items) {
     items_ = items;
@@ -18,6 +37,7 @@ void BreadcrumbWidget::set_items(const std::vector<Item>& items) {
     separator_texts_.clear();
     item_x_positions_.clear();
     item_widths_.clear();
+    sync_host_semantics();
     dirty_ = true;
 }
 
@@ -40,14 +60,13 @@ void BreadcrumbWidget::rebuild_shapes(const Element& elem) {
     if (items_.empty()) return;
 
     float gap = style->get_variable_float("--breadcrumb-gap", 8.0f);
-    float char_width = style->font_size * 0.6f;
     float x = 0;
     float y = (elem.height() - style->font_size) / 2;
 
     for (size_t i = 0; i < items_.size(); ++i) {
         // Item text
         item_x_positions_.push_back(x);
-        float text_width = items_[i].label.size() * char_width;
+        float text_width = approximate_segmented_text_width(style, items_[i].label);
         item_widths_.push_back(text_width);
 
         auto* item = root_.add<TextShape>(x, y, items_[i].label);
@@ -60,7 +79,7 @@ void BreadcrumbWidget::rebuild_shapes(const Element& elem) {
         // Separator (except for last item)
         if (i < items_.size() - 1) {
             x += gap;
-            float sep_width = separator_.size() * char_width;
+            float sep_width = approximate_segmented_text_width(style, separator_);
 
             auto* sep = root_.add<TextShape>(x, y, separator_);
             sep->set_font_family(style->font_family);
@@ -122,17 +141,18 @@ int BreadcrumbWidget::hit_test(float x, float y, const Element& elem) {
     return -1;
 }
 
-void BreadcrumbWidget::render(const Element& elem, Renderer& renderer) {
+void BreadcrumbWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
+    sync_host_semantics();
 
     rebuild_shapes(elem);
     update_shapes(elem);
 
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    Transform local_transform = Transform{};
     float opacity = style->opacity;
 
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }
@@ -140,8 +160,10 @@ void BreadcrumbWidget::render(const Element& elem, Renderer& renderer) {
 bool BreadcrumbWidget::handle_event(const Event& event, Element& elem) {
     switch (event.type) {
         case EventType::MouseMove: {
-            float local_x = event.x - elem.absolute_x();
-            float local_y = event.y - elem.absolute_y();
+            const flex::Vec2 local_pos =
+                detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+            float local_x = local_pos.x;
+            float local_y = local_pos.y;
             int index = hit_test(local_x, local_y, elem);
 
             // Don't hover the last (current) item
@@ -151,6 +173,7 @@ bool BreadcrumbWidget::handle_event(const Event& event, Element& elem) {
 
             if (index != hovered_index_) {
                 hovered_index_ = index;
+                sync_host_semantics();
                 elem.mark_paint_dirty();
             }
             break;

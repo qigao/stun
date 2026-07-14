@@ -14,6 +14,8 @@
 
 namespace flexUI {
 
+class RenderCommandList;
+
 /**
  * CardWidget - Container card with header, content, footer areas
  *
@@ -41,10 +43,11 @@ public:
     CardWidget();
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "CardWidget"; }
+    bool paints_host_box() const override { return true; }
 
     // Properties
     const std::string& title() const { return title_; }

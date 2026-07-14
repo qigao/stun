@@ -97,8 +97,8 @@ bool NavigatorPanel::handle_drag(float mx, float my) {
     float vp_world_w = canvas_->width() / canvas_->camera_zoom();
     float vp_world_h = canvas_->height() / canvas_->camera_zoom();
 
-    float new_pan_x = -(world_pos.x() - vp_world_w / 2) * canvas_->camera_zoom();
-    float new_pan_y = -(world_pos.y() - vp_world_h / 2) * canvas_->camera_zoom();
+    float new_pan_x = -(world_pos.x - vp_world_w / 2) * canvas_->camera_zoom();
+    float new_pan_y = -(world_pos.y - vp_world_h / 2) * canvas_->camera_zoom();
 
     // Calculate delta and apply
     float dx = new_pan_x - canvas_->camera_pan_x();

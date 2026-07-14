@@ -1,0 +1,27 @@
+{
+  "component": "Checkbox",
+  "kind": "leaf",
+  "root": "checkbox_root",
+  "nodes": [
+    {
+      "id": "checkbox_root",
+      "type": "widget",
+      "widget": "checkbox",
+      "tag": "label",
+      "role": "checkbox",
+      "states": ["checked", "disabled", "focus-visible"],
+      "props": {
+        "label": "Accept terms"
+      }
+    }
+  ],
+  "variants": {
+    "size": ["default", "sm", "lg"]
+  },
+  "defaults": {
+    "size": "default"
+  },
+  "meta": {
+    "source": "shadcn/checkbox"
+  }
+}

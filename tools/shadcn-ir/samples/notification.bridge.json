@@ -1,0 +1,9 @@
+{
+  "bridges": [
+    {
+      "target": "notification_root",
+      "state": "open",
+      "pseudo_states": ["open"]
+    }
+  ]
+}

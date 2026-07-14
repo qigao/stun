@@ -1,0 +1,82 @@
+{
+  "bridges": [
+    {
+      "target": "form_item",
+      "state": "invalid",
+      "attributes": {
+        "data-invalid": "true"
+      }
+    },
+    {
+      "target": "form_item",
+      "state": "error",
+      "attributes": {
+        "data-invalid": "true"
+      }
+    },
+    {
+      "target": "form_control",
+      "state": "invalid",
+      "attributes": {
+        "aria-invalid": "true",
+        "aria-describedby": "email-description email-message"
+      }
+    },
+    {
+      "target": "form_control",
+      "state": "error",
+      "attributes": {
+        "aria-invalid": "true",
+        "aria-describedby": "email-description email-message"
+      }
+    },
+    {
+      "target": "form_control",
+      "state": "disabled",
+      "attributes": {
+        "disabled": "",
+        "aria-disabled": "true"
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "form_label",
+      "state": "required",
+      "attributes": {
+        "data-required": "true"
+      }
+    },
+    {
+      "target": "form_control",
+      "state": "required",
+      "attributes": {
+        "required": "",
+        "aria-required": "true"
+      }
+    },
+    {
+      "target": "form_message",
+      "state": "visible",
+      "attributes": {
+        "data-state": "visible"
+      },
+      "missing_attributes": ["hidden"]
+    },
+    {
+      "target": "form_message",
+      "state": "hidden",
+      "attributes": {
+        "data-state": "hidden",
+        "hidden": ""
+      }
+    },
+    {
+      "target": "form_message",
+      "state": "error",
+      "attributes": {
+        "data-state": "visible"
+      },
+      "missing_attributes": ["hidden"]
+    }
+  ]
+}

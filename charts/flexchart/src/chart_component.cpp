@@ -1,5 +1,6 @@
 #include "flexchart/chart_component.h"
 #include "chart_component_internal.h"
+#include "flexchart/mark_renderer_registry.h"
 #include "flex/runtime/group.h"
 #include "flex/runtime/text.h"
 #include "flex/runtime/shape.h"
@@ -10,15 +11,16 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 #include <tlog.h>
 
 namespace flex {
 namespace chart {
 
 void ChartComponent::register_component() {
-    ComponentRegistry::instance().register_component("Chart", [](const Props& props) {
+    ComponentRegistry::instance().register_component("Chart", [](const Props& props) -> std::shared_ptr<Node> {
         std::string source = get_prop_string(props, "source", "");
-        if (source.empty()) return std::shared_ptr<Node>(nullptr);
+        if (source.empty()) return nullptr;
 
         std::string content;
         std::ifstream file(source);
@@ -34,28 +36,50 @@ void ChartComponent::register_component() {
         std::string error;
         if (!parse_chart(content.c_str(), &program, error)) {
              TLOG_ERROR("Chart parse error: {}", error);
-             return std::shared_ptr<Node>(nullptr);
+             return nullptr;
         }
 
-        if (program.views.empty()) return std::shared_ptr<Node>(nullptr);
+        if (program.views.empty()) return nullptr;
         auto chart_ast = std::dynamic_pointer_cast<AstChart>(program.views[0]);
-        if (!chart_ast) return std::shared_ptr<Node>(nullptr);
+        if (!chart_ast) return nullptr;
 
-        return std::shared_ptr<Node>(nullptr);
+        // Build the chart into a flex node tree using a component-local Instance.
+        // The instance lifetime is tied to the returned Group via shared_ptr.
+        Instance::SharedPtr inst = Instance::create(800.0f, 600.0f);
+        Group* root = ChartComponent::build(chart_ast, *inst);
+        if (!root) return nullptr;
+
+        // Wrap the raw Group pointer in a shared_ptr that keeps `inst` alive.
+        return std::shared_ptr<Node>(root, [inst](Node*) mutable { inst.reset(); });
     });
 }
 
 Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& instance) {
+    ensure_builtin_mark_renderers_linked();
     ArenaAllocator& arena = *instance.object_allocator();
     auto root = Group::create(arena);
     root->set_id("chart-root");
     
-    float root_w = 0.0f;
-    float root_h = 0.0f;
-    if (chart->width.back() == '%') root_w = 800.0f * (std::stof(chart->width.substr(0, chart->width.size()-1)) / 100.0f);
-    else root_w = std::stof(chart->width);
-    if (chart->height.back() == '%') root_h = 600.0f * (std::stof(chart->height.substr(0, chart->height.size()-1)) / 100.0f);
-    else root_h = std::stof(chart->height);
+    // Safe dimension parser: handles "", "px" suffix, "%" suffix, and stof exceptions.
+    auto parse_size = [](const std::string& s, float default_px, float percent_base) -> float {
+        if (s.empty()) return default_px;
+        try {
+            if (s.back() == '%') {
+                float pct = std::stof(s.substr(0, s.size() - 1));
+                return percent_base * (pct / 100.0f);
+            }
+            // Strip a trailing "px" suffix if present
+            size_t end = s.size();
+            if (end >= 2 && s[end-1] == 'x' && s[end-2] == 'p') end -= 2;
+            return std::stof(s.substr(0, end));
+        } catch (...) {
+            TLOG_WARN("Chart: could not parse size '{}', using default {:.0f}", s, default_px);
+            return default_px;
+        }
+    };
+
+    float root_w = parse_size(chart->width,  800.0f, 800.0f);
+    float root_h = parse_size(chart->height, 600.0f, 600.0f);
 
     root->set_layout_size(root_w, root_h);
     root->set_layout(LayoutMode::Flex);
@@ -90,31 +114,77 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
 
     std::vector<Record> all_records;
     float data_y_max = 0.0f;
+    float data_x_min = 0.0f, data_x_max = 0.0f;
+    bool has_numeric_x = false;
     std::vector<std::string> x_labels;
     for (const auto& mark : chart->marks) {
         auto ds = find_dataset(chart, mark->data_ref);
-        auto records = get_records(ds);
+        std::vector<Record> records;
+        if (!mark->expr.empty() && !mark->ranges.empty()) {
+            records = generate_expr_records(mark->expr, mark->ranges);
+            has_numeric_x = true;
+        } else {
+            records = get_records(ds);
+        }
+        apply_computed_fields(records, mark->encodings);
+        // Resolve field names after computed-field expansion (expression
+        // encodings produce synthetic fields stored in the record itself).
         std::string x_field, y_field;
-        for (const auto& enc : mark->encodings) {
-            if (enc->channel == "x") x_field = enc->field;
-            if (enc->channel == "y") y_field = enc->field;
+        if (!records.empty()) {
+            const Record& first_rec = records.front();
+            for (const auto& enc : mark->encodings) {
+                if (enc->channel == "x") x_field = resolved_field_name(*enc, first_rec);
+                if (enc->channel == "y") y_field = resolved_field_name(*enc, first_rec);
+            }
+            if (x_field.empty() || y_field.empty()) {
+                for (const auto& enc : mark->encodings) {
+                    if (x_field.empty() && enc->channel == "color") x_field = resolved_field_name(*enc, first_rec);
+                    if (y_field.empty() && enc->channel == "theta") y_field = resolved_field_name(*enc, first_rec);
+                }
+            }
+        } else {
+            for (const auto& enc : mark->encodings) {
+                if (enc->channel == "x") x_field = enc->field;
+                if (enc->channel == "y") y_field = enc->field;
+            }
         }
-        if (x_field.empty() || y_field.empty()) {
-             for (const auto& enc : mark->encodings) {
-                 if (x_field.empty() && enc->channel == "color") x_field = enc->field;
-                 if (y_field.empty() && enc->channel == "theta") y_field = enc->field;
-             }
-        }
+        // Detect if x data is numeric (from expression ranges)
+        if (ds && !ds->expr.empty()) has_numeric_x = true;
+        bool first_x = true;
         for (const auto& rec : records) {
             float val = (float)get_double_val(rec.get(y_field));
             if (val > data_y_max) data_y_max = val;
-            std::string x_val = get_string_val(rec.get(x_field));
-            if (!x_val.empty()) {
-                bool found = false;
-                for (const auto& l : x_labels) if (l == x_val) found = true;
-                if (!found) x_labels.push_back(x_val);
+            if (has_numeric_x) {
+                float xv = (float)get_double_val(rec.get(x_field));
+                if (first_x) { data_x_min = data_x_max = xv; first_x = false; }
+                else { if (xv < data_x_min) data_x_min = xv; if (xv > data_x_max) data_x_max = xv; }
+            } else {
+                std::string x_val = get_string_val(rec.get(x_field));
+                if (!x_val.empty()) {
+                    bool found = false;
+                    for (const auto& l : x_labels) if (l == x_val) found = true;
+                    if (!found) x_labels.push_back(x_val);
+                }
             }
         }
+    }
+
+    // Lookup axis definitions for title/ticks
+    auto x_axis_def = find_axis(chart, "x");
+    auto y_axis_def = find_axis(chart, "y");
+    std::string x_axis_title, y_axis_title;
+    int y_ticks = 4, x_ticks = 5;
+    if (x_axis_def) {
+        auto it = x_axis_def->properties.find("title");
+        if (it != x_axis_def->properties.end()) x_axis_title = get_string_val(it->second);
+        auto tt = x_axis_def->properties.find("ticks");
+        if (tt != x_axis_def->properties.end()) x_ticks = (int)get_double_val(tt->second);
+    }
+    if (y_axis_def) {
+        auto it = y_axis_def->properties.find("title");
+        if (it != y_axis_def->properties.end()) y_axis_title = get_string_val(it->second);
+        auto tt = y_axis_def->properties.find("ticks");
+        if (tt != y_axis_def->properties.end()) y_ticks = (int)get_double_val(tt->second);
     }
 
     // 3. Legend (Inserted before Plot)
@@ -161,6 +231,8 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
             dot->set_margin(0, 5.0f, 0, 0);
             item->add_child(dot);
             auto text = arena.create<Text>();
+            text->set_content(legend_items[i].first);  // legend label text
+            text->set_font_size(12.0f);
             text->set_color(Color(0.44f, 0.5f, 0.56f));
             item->add_child(text);
 
@@ -192,7 +264,11 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
     float available_plot_w = root_w - (padding * 2);
     if (!has_pie) available_plot_w -= (yaxis_w + yaxis_margin);
     
-    float full_plot_h = root_h - 180.0f; // Simplified height estimation
+    float occupied_h = 80.0f; // 2 * padding (top + bottom padding = 2 * 40.0)
+    if (!chart->title.empty()) occupied_h += 48.0f;
+    if (!legend_items.empty()) occupied_h += 32.0f;
+    float full_plot_h = (std::max)(100.0f, root_h - occupied_h);
+    
     float baseline_offset = has_pie ? 0.0f : 40.0f;
     float effective_plot_h = full_plot_h - baseline_offset;
     float y_max = (std::max)(100.0f, data_y_max * 1.1f);
@@ -205,34 +281,53 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
         yaxis->set_layout(LayoutMode::None); // Absolute positioning for precise alignment
         yaxis->set_margin(0, yaxis_margin, 0, 0);
         content->add_child(yaxis);
-        
+
         float by = full_plot_h - baseline_offset; // Baseline Y position
 
-        for (int i = 0; i <= 4; ++i) {
-            float val = i * (y_max / 4.0f);
+        for (int i = 0; i <= y_ticks; ++i) {
+            float val = i * (y_max / (float)y_ticks);
             float py = by - (val * y_scale);
 
             auto label = arena.create<Text>();
-            label->set_content(std::to_string((int)val));
+            // Format: use decimal for small ranges, integer for large
+            if (y_max < 10.0f) {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%.1f", val);
+                label->set_content(buf);
+            } else {
+                label->set_content(std::to_string((int)val));
+            }
             label->set_font_size(12.0f);
             label->set_color(Color(0.44f, 0.5f, 0.56f));
-            
+
             label->set_position_absolute(true);
             label->set_anchor(Anchor::Right);
             label->set_position(yaxis_w - 5.0f, py); // Right align, 5px gap from axis
-            
+
             yaxis->add_child(label);
 
             // Entry Animation
             std::string id = "ylbl_" + std::to_string(i);
             auto tl = Timeline::create(id.c_str(), arena);
             auto trk = tl->add_track("opacity");
-            float d = 0.6f + (4 - i) * 0.1f;
+            float d = 0.6f + (y_ticks - i) * 0.1f;
             trk->add_keyframe(d, 0.0f);
             trk->add_keyframe(d + 0.4f, 1.0f);
             instance.add_timeline(tl);
             instance.play(id.c_str(), label);
             label->set_opacity(0.0f);
+        }
+
+        // Y-axis title
+        if (!y_axis_title.empty()) {
+            auto ytitle = arena.create<Text>();
+            ytitle->set_content(y_axis_title);
+            ytitle->set_font_size(13.0f);
+            ytitle->set_color(Color(0.3f, 0.34f, 0.38f));
+            ytitle->set_position_absolute(true);
+            ytitle->set_anchor(Anchor::Right);
+            ytitle->set_position(yaxis_w - 5.0f, by + 15.0f);
+            yaxis->add_child(ytitle);
         }
     }
     
@@ -296,38 +391,88 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
         overlay_layer->add_child(x_arrow);
 
         float inner_w = available_plot_w - 20.0f;
-        float band_w = x_labels.empty() ? 0 : inner_w / x_labels.size();
-        for (size_t i = 0; i < x_labels.size(); ++i) {
-            auto lbl = arena.create<Text>();
-            lbl->set_content(x_labels[i]);
-            lbl->set_font_size(12.0f);
-            lbl->set_color(Color(0.44f, 0.5f, 0.56f));
-            lbl->set_anchor(Anchor::Top);
-            lbl->set_position(10.0f + (i + 0.5f) * band_w, full_plot_h - baseline_offset + 10.0f);
-            overlay_layer->add_child(lbl);
+        if (has_numeric_x) {
+            // Numeric x-axis ticks
+            for (int i = 0; i <= x_ticks; ++i) {
+                float val = data_x_min + i * ((data_x_max - data_x_min) / (float)x_ticks);
+                float px = 10.0f + (inner_w * i / (float)x_ticks);
 
-            // Entry Animation
-            std::string anim_id = "xlab_" + std::to_string(i);
-            auto tl = Timeline::create(anim_id.c_str(), arena);
-            auto trk = tl->add_track("opacity");
-            float delay = 0.6f + i * 0.05f;
-            trk->add_keyframe(delay, 0.0f);
-            trk->add_keyframe(delay + 0.4f, 1.0f);
-            instance.add_timeline(tl);
-            instance.play(anim_id.c_str(), lbl);
-            lbl->set_opacity(0.0f);
+                auto lbl = arena.create<Text>();
+                if ((data_x_max - data_x_min) < 10.0f) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%.1f", val);
+                    lbl->set_content(buf);
+                } else {
+                    lbl->set_content(std::to_string((int)val));
+                }
+                lbl->set_font_size(12.0f);
+                lbl->set_color(Color(0.44f, 0.5f, 0.56f));
+                lbl->set_anchor(Anchor::Top);
+                lbl->set_position(px, full_plot_h - baseline_offset + 10.0f);
+                overlay_layer->add_child(lbl);
+
+                std::string anim_id = "xlab_" + std::to_string(i);
+                auto tl = Timeline::create(anim_id.c_str(), arena);
+                auto trk = tl->add_track("opacity");
+                float delay = 0.6f + i * 0.05f;
+                trk->add_keyframe(delay, 0.0f);
+                trk->add_keyframe(delay + 0.4f, 1.0f);
+                instance.add_timeline(tl);
+                instance.play(anim_id.c_str(), lbl);
+                lbl->set_opacity(0.0f);
+            }
+        } else {
+            // Categorical x-axis labels
+            float band_w = x_labels.empty() ? 0 : inner_w / x_labels.size();
+            for (size_t i = 0; i < x_labels.size(); ++i) {
+                auto lbl = arena.create<Text>();
+                lbl->set_content(x_labels[i]);
+                lbl->set_font_size(12.0f);
+                lbl->set_color(Color(0.44f, 0.5f, 0.56f));
+                lbl->set_anchor(Anchor::Top);
+                lbl->set_position(10.0f + (i + 0.5f) * band_w, full_plot_h - baseline_offset + 10.0f);
+                overlay_layer->add_child(lbl);
+
+                std::string anim_id = "xlab_" + std::to_string(i);
+                auto tl = Timeline::create(anim_id.c_str(), arena);
+                auto trk = tl->add_track("opacity");
+                float delay = 0.6f + i * 0.05f;
+                trk->add_keyframe(delay, 0.0f);
+                trk->add_keyframe(delay + 0.4f, 1.0f);
+                instance.add_timeline(tl);
+                instance.play(anim_id.c_str(), lbl);
+                lbl->set_opacity(0.0f);
+            }
+        }
+
+        // X-axis title
+        if (!x_axis_title.empty()) {
+            auto xtitle = arena.create<Text>();
+            xtitle->set_content(x_axis_title);
+            xtitle->set_font_size(13.0f);
+            xtitle->set_color(Color(0.3f, 0.34f, 0.38f));
+            xtitle->set_anchor(Anchor::Top);
+            xtitle->set_position(available_plot_w / 2.0f, full_plot_h - baseline_offset + 26.0f);
+            overlay_layer->add_child(xtitle);
         }
     }
 
     MarkRenderContext ctx{arena, marks_layer, overlay_layer, available_plot_w, effective_plot_h, y_scale, x_labels, &instance};
     for (const auto& mark : chart->marks) {
-        auto ds = find_dataset(chart, mark->data_ref);
-        auto records = get_records(ds);
-        auto renderer = MarkRendererFactory::create(mark->type);
-        if (renderer) {
-            renderer->render(mark, records, ctx);
-            ctx.mark_index++;
+        std::vector<Record> records;
+        if (!mark->expr.empty() && !mark->ranges.empty()) {
+            records = generate_expr_records(mark->expr, mark->ranges);
+        } else {
+            auto ds = find_dataset(chart, mark->data_ref);
+            records = get_records(ds);
         }
+        apply_computed_fields(records, mark->encodings);
+        auto renderer = MarkRendererRegistry::instance().create(mark->type);
+        if (!renderer) {
+            throw std::runtime_error("No renderer registered for chart mark type: " + mark->type);
+        }
+        renderer->render(mark, records, ctx);
+        ctx.mark_index++;
     }
 
     return root;

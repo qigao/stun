@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "suite": "compute-style",
+  "description": "Computed style and variable expectations for high-frequency shadcn CSS semantics.",
+  "cases": [
+    {
+      "name": "button-focus-visible-ring",
+      "component": "button",
+      "widget": "button",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "focus-visible:ring-2",
+        "focus-visible:ring-ring",
+        "focus-visible:ring-offset-2"
+      ],
+      "required_features": [
+        "focus-visible",
+        "outline",
+        "ring",
+        "ring-offset-color"
+      ],
+      "widget_props": {
+        "text": "Save"
+      },
+      "states": [
+        "focus",
+        "focus-visible"
+      ],
+      "css": "#field { outline-width: 0px; outline-offset: 0px; ring-width: 0px; ring-offset: 0px; } #field:focus-visible { outline-width: 2px; outline-color: rgba(51, 102, 255, 0.5); outline-offset: 4px; ring-width: 6px; ring-color: rgba(8, 16, 24, 0.5); ring-offset: 2px; ring-offset-color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "outline_width": 2.0,
+          "outline_offset": 4.0,
+          "ring_width": 6.0,
+          "ring_offset": 2.0,
+          "outline_color": [
+            0.2,
+            0.4,
+            1.0,
+            0.5
+          ],
+          "ring_color": [
+            0.031373,
+            0.062745,
+            0.094118,
+            0.5
+          ],
+          "ring_offset_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "name": "tailwind-escaped-focus-visible-class-selector",
+      "component": "button",
+      "widget": "button",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "focus-visible:ring-2"
+      ],
+      "required_features": [
+        "tailwind-escaped-class-selector",
+        "focus-visible",
+        "ring"
+      ],
+      "widget_props": {
+        "text": "Save"
+      },
+      "states": [
+        "focus-visible"
+      ],
+      "css": ".focus-visible\\:ring-2:focus-visible { ring-width: 2px; }",
+      "expect": {
+        "computed": {
+          "ring_width": 2.0
+        }
+      }
+    },
+    {
+      "name": "input-placeholder-caret-selection",
+      "component": "input",
+      "widget": "input",
+      "tag": "input",
+      "id": "field",
+      "class_tokens": [
+        "placeholder:text-muted-foreground",
+        "selection:bg-primary",
+        "selection:text-primary-foreground",
+        "caret-sky-500"
+      ],
+      "required_features": [
+        "placeholder-shown",
+        "placeholder",
+        "selection",
+        "caret-color"
+      ],
+      "widget_props": {
+        "placeholder": "Email",
+        "text": ""
+      },
+      "css": "#field { border-color: #cbd5e1; caret-color: #0ea5e9; } #field:placeholder-shown { border-color: #f59e0b; } #field::placeholder { color: #64748b; } #field::selection { background-color: #1d4ed8; color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.960784,
+            0.619608,
+            0.043137,
+            1.0
+          ]
+        },
+        "variables": {
+          "--caret-color": [
+            0.054902,
+            0.647059,
+            0.913725,
+            1.0
+          ],
+          "--input-placeholder": [
+            0.392157,
+            0.454902,
+            0.545098,
+            1.0
+          ],
+          "--selection-bg": [
+            0.113725,
+            0.305882,
+            0.847059,
+            1.0
+          ],
+          "--selection-color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "name": "textarea-placeholder-selection-caret",
+      "component": "textarea",
+      "widget": "textarea",
+      "tag": "textarea",
+      "id": "field",
+      "class_tokens": [
+        "placeholder:text-muted-foreground",
+        "selection:bg-primary",
+        "selection:text-primary-foreground",
+        "caret-sky-500"
+      ],
+      "required_features": [
+        "placeholder-shown",
+        "selection",
+        "caret-color"
+      ],
+      "widget_props": {
+        "placeholder": "Describe your issue",
+        "text": ""
+      },
+      "css": "#field { border-color: #cbd5e1; caret-color: #0ea5e9; } #field:placeholder-shown { border-color: #f59e0b; } #field::selection { background-color: #1d4ed8; color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.960784,
+            0.619608,
+            0.043137,
+            1.0
+          ]
+        },
+        "variables": {
+          "--caret-color": [
+            0.054902,
+            0.647059,
+            0.913725,
+            1.0
+          ],
+          "--selection-bg": [
+            0.113725,
+            0.305882,
+            0.847059,
+            1.0
+          ],
+          "--selection-color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        }
+      }
+    }
+  ]
+}

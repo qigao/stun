@@ -58,13 +58,19 @@ void er_free(ERDiagram* diagram) {
 }
 
 ERDiagram* er_parse(const char* input) {
+    if (!input) return NULL;
     ERParserContext ctx;
     ctx.diagram = (ERDiagram*)malloc(sizeof(ERDiagram));
+    if (!ctx.diagram) return NULL;
     memset(ctx.diagram, 0, sizeof(ERDiagram));
     ctx.error_count = 0;
     ctx.error_message = NULL;
 
     void* parser = ERParserAlloc(malloc);
+    if (!parser) {
+        er_free(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

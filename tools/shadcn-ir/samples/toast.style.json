@@ -1,0 +1,40 @@
+{
+  "rules": [
+    {
+      "target": "toast_root",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center",
+        "gap": "0.75rem",
+        "border-radius": "0.5rem",
+        "padding-left": "1rem",
+        "padding-right": "1rem",
+        "padding-top": "0.75rem",
+        "padding-bottom": "0.75rem",
+        "background-color": "var(--background)",
+        "box-shadow": "0 10px 15px rgba(0,0,0,0.18)"
+      }
+    },
+    {
+      "target": "toast_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "open" }
+      ],
+      "decls": {
+        "opacity": "1"
+      }
+    },
+    {
+      "target": "toast_root",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "closed" }
+      ],
+      "decls": {
+        "opacity": "0"
+      }
+    }
+  ]
+}

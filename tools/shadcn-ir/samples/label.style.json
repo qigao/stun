@@ -1,0 +1,40 @@
+{
+  "rules": [
+    {
+      "target": "label_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "align-items": "center",
+        "gap": "0.5rem",
+        "font-size": "0.875rem",
+        "font-weight": "500",
+        "line-height": "1",
+        "user-select": "none"
+      }
+    },
+    {
+      "target": "label_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "disabled" }
+      ],
+      "decls": {
+        "opacity": "0.5",
+        "cursor": "not-allowed"
+      }
+    },
+    {
+      "target": "label_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "focus-visible" }
+      ],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)"
+      }
+    }
+  ]
+}

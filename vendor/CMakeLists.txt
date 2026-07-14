@@ -19,12 +19,11 @@ mark_as_advanced(
   NFD_USE_ALLOWEDCONTENTTYPES_IF_AVAILABLE
 )
 
-add_subdirectory(lemon)
 add_subdirectory(thorvg)
-add_subdirectory(md)
 add_subdirectory(nanovg)
-add_subdirectory(linmath)
 add_subdirectory(pdfgen)
 add_subdirectory(dxf)
 add_subdirectory(OpenXLSX)
 add_subdirectory(cola)
+add_subdirectory(mir)
+add_subdirectory(miniblas)

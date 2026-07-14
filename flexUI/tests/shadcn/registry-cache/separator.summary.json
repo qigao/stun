@@ -1,0 +1,13 @@
+{
+  "name": "separator",
+  "source": "https://ui.shadcn.com/r/styles/new-york/separator.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "bg-border",
+    "h-[1px]",
+    "h-full",
+    "shrink-0",
+    "w-[1px]",
+    "w-full"
+  ]
+}

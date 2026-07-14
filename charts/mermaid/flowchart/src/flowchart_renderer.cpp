@@ -10,6 +10,7 @@
 #include <queue>
 #include <deque>
 #include <unordered_map>
+#include <stdexcept>
 #include "libavoid/libavoid.h"
 #include "mustache/mustache.h"
 #include "flowchart_template.h"
@@ -419,6 +420,13 @@ private:
                 }
                 snapshot.edges.push_back(re);
             }
+
+            for (auto* cr : conns) {
+                router.deleteConnector(cr);
+            }
+            for (auto* sr : shapes) {
+                router.deleteShape(sr);
+            }
         }
 
         return snapshot;
@@ -487,12 +495,14 @@ static void* get_child_by_name(void* node, const char* name, size_t size, void* 
     if (proxy->type == ProxyType::Root) {
         if (key == "width") return create_val(format_double(proxy->snapshot->total_width));
         if (key == "height") return create_val(format_double(proxy->snapshot->total_height));
-        if (key == "background_color") return create_val("#ffffff");
-        if (key == "line_color") return create_val("#4b5563");
-        if (key == "line_width") return create_val("1.5");
-        if (key == "primary_color") return create_val("#6366f1"); // Indigo
-        if (key == "primary_color_alt") return create_val("#a5b4fc"); // Lighter Indigo
-        if (key == "text_color") return create_val("#1f2937");
+        if (key == "background_color") return create_val(opt.background_color);
+        if (key == "line_color") return create_val(opt.line_color);
+        if (key == "line_width") return create_val(format_double(opt.line_width));
+        if (key == "primary_color") return create_val(opt.primary_color);
+        if (key == "primary_color_alt") return create_val(opt.primary_color);
+        if (key == "text_color") return create_val(opt.text_color);
+        if (key == "font_family") return create_val(opt.font_family);
+        if (key == "font_size") return create_val(format_double(opt.font_size));
         if (key == "nodes") return pool->create(ProxyType::NodesList, proxy->snapshot, 0, proxy->ox, proxy->oy);
         if (key == "edges") return pool->create(ProxyType::EdgesList, proxy->snapshot, 0, proxy->ox, proxy->oy);
     } else if (proxy->type == ProxyType::Node) {
@@ -543,9 +553,9 @@ static void* get_child_by_name(void* node, const char* name, size_t size, void* 
         if (key == "has_label") return !e.label.empty() ? (void*)node : nullptr;
         if (key == "label_x") return create_val(format_double((e.points[0].x + e.points[1].x) / 2 + proxy->ox));
         if (key == "label_y") return create_val(format_double((e.points[0].y + e.points[1].y) / 2 + proxy->oy));
-        if (key == "label_rect_w") return create_val(format_double(e.label.length() * 8 + 12));
+        if (key == "label_rect_w") return create_val(format_double(static_cast<double>(e.label.length()) * 8.0 + 12.0));
         if (key == "label_rect_h") return create_val("20");
-        if (key == "label_rect_x") return create_val(format_double((e.points[0].x + e.points[1].x) / 2 + proxy->ox - (e.label.length() * 8 + 12) / 2));
+        if (key == "label_rect_x") return create_val(format_double((e.points[0].x + e.points[1].x) / 2 + proxy->ox - (static_cast<double>(e.label.length()) * 8.0 + 12.0) / 2.0));
         if (key == "label_rect_y") return create_val(format_double((e.points[0].y + e.points[1].y) / 2 + proxy->oy - 10));
     }
 
@@ -634,10 +644,10 @@ std::string FlowchartRenderer::to_svg(const LayoutSnapshot& snapshot) {
     std::stringstream ss;
     const char* tpl_str = get_svg_template();
     MUSTACHE_TEMPLATE* t = mustache_compile(tpl_str, strlen(tpl_str), nullptr, nullptr, 0);
-    if (t) {
-        mustache_process(t, &renderer, &ss, &provider, &pool);
-        mustache_release(t);
-    }
+    if (!t) throw std::runtime_error("Failed to compile the flowchart SVG template");
+    const int process_result = mustache_process(t, &renderer, &ss, &provider, &pool);
+    mustache_release(t);
+    if (process_result != 0) throw std::runtime_error("Failed to render the flowchart SVG template");
 
     return ss.str();
 }

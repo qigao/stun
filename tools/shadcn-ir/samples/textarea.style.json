@@ -1,0 +1,55 @@
+{
+  "rules": [
+    {
+      "target": "textarea_root",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "width": "100%",
+        "min-height": "5rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--input)",
+        "border-radius": "0.5rem",
+        "background-color": "transparent",
+        "padding": "0.75rem",
+        "font-size": "0.875rem",
+        "transition": "border-color 150ms ease, ring-width 150ms ease, ring-color 150ms ease",
+        "caret-color": "var(--ring)"
+      }
+    },
+    {
+      "target": "textarea_root",
+      "selector": "&::placeholder",
+      "decls": {
+        "color": "var(--muted-foreground)"
+      }
+    },
+    {
+      "target": "textarea_root",
+      "selector": "&::selection",
+      "decls": {
+        "background-color": "var(--primary)",
+        "color": "var(--primary-foreground)"
+      }
+    },
+    {
+      "target": "textarea_root",
+      "selector": "&",
+      "when": [{ "type": "state", "name": "focus-visible" }],
+      "decls": {
+        "outline-width": "0px",
+        "ring-width": "1px",
+        "ring-color": "var(--ring)"
+      }
+    },
+    {
+      "target": "textarea_root",
+      "selector": "&",
+      "when": [{ "type": "state", "name": "disabled" }],
+      "decls": {
+        "opacity": "0.5"
+      }
+    }
+  ]
+}

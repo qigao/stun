@@ -19,7 +19,7 @@
 #include <memory>
 
 #include "flex.h"
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 #include <thorvg.h>
 
 #ifdef _WIN32

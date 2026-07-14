@@ -17,7 +17,11 @@
 #include <flex/runtime/types.h>
 #include <string>
 #include <vector>
+
 namespace meta_editor {
+
+using flex::operator+;
+using flex::operator-;
 
 /**
  * Point type determines how handles behave when one is moved.
@@ -47,8 +51,8 @@ struct PathEditPoint {
   flex::Vec2 handle_out_abs() const { return position + handle_out; }
 
   // Check if point has curve handles
-  bool has_handle_in() const { return handle_in.x() != 0 || handle_in.y() != 0; }
-  bool has_handle_out() const { return handle_out.x() != 0 || handle_out.y() != 0; }
+  bool has_handle_in() const { return handle_in.x != 0 || handle_in.y != 0; }
+  bool has_handle_out() const { return handle_out.x != 0 || handle_out.y != 0; }
   bool is_curve_point() const { return has_handle_in() || has_handle_out(); }
 
   // Apply handle constraints based on point type
@@ -59,24 +63,24 @@ struct PathEditPoint {
     if (moved_out) {
       // Adjust handle_in based on handle_out
       if (type == PointType::Symmetric) {
-        handle_in = flex::Vec2(-handle_out.x(), -handle_out.y());
+        handle_in = flex::Vec2(-handle_out.x, -handle_out.y);
       } else if (type == PointType::Smooth) {
-        float len = std::sqrt(handle_in.x() * handle_in.x() + handle_in.y() * handle_in.y());
+        float len = std::sqrt(handle_in.x * handle_in.x + handle_in.y * handle_in.y);
         float out_len =
-            std::sqrt(handle_out.x() * handle_out.x() + handle_out.y() * handle_out.y());
+            std::sqrt(handle_out.x * handle_out.x + handle_out.y * handle_out.y);
         if (out_len > 0.001f) {
-          handle_in = flex::Vec2(-handle_out.x() / out_len * len, -handle_out.y() / out_len * len);
+          handle_in = flex::Vec2(-handle_out.x / out_len * len, -handle_out.y / out_len * len);
         }
       }
     } else {
       // Adjust handle_out based on handle_in
       if (type == PointType::Symmetric) {
-        handle_out = flex::Vec2(-handle_in.x(), -handle_in.y());
+        handle_out = flex::Vec2(-handle_in.x, -handle_in.y);
       } else if (type == PointType::Smooth) {
-        float len = std::sqrt(handle_out.x() * handle_out.x() + handle_out.y() * handle_out.y());
-        float in_len = std::sqrt(handle_in.x() * handle_in.x() + handle_in.y() * handle_in.y());
+        float len = std::sqrt(handle_out.x * handle_out.x + handle_out.y * handle_out.y);
+        float in_len = std::sqrt(handle_in.x * handle_in.x + handle_in.y * handle_in.y);
         if (in_len > 0.001f) {
-          handle_out = flex::Vec2(-handle_in.x() / in_len * len, -handle_in.y() / in_len * len);
+          handle_out = flex::Vec2(-handle_in.x / in_len * len, -handle_in.y / in_len * len);
         }
       }
     }
@@ -102,7 +106,7 @@ struct PathData {
 
       if (i == 0) {
         // Move to first point
-        path += "M " + std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y());
+        path += "M " + std::to_string(pt.position.x) + " " + std::to_string(pt.position.y);
       } else {
         const auto &prev = points[i - 1];
 
@@ -110,12 +114,12 @@ struct PathData {
           // Cubic bezier curve
           auto c1 = prev.handle_out_abs();
           auto c2 = pt.handle_in_abs();
-          path += " C " + std::to_string(c1.x()) + " " + std::to_string(c1.y()) + " " +
-                  std::to_string(c2.x()) + " " + std::to_string(c2.y()) + " " +
-                  std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y());
+          path += " C " + std::to_string(c1.x) + " " + std::to_string(c1.y) + " " +
+                  std::to_string(c2.x) + " " + std::to_string(c2.y) + " " +
+                  std::to_string(pt.position.x) + " " + std::to_string(pt.position.y);
         } else {
           // Straight line
-          path += " L " + std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y());
+          path += " L " + std::to_string(pt.position.x) + " " + std::to_string(pt.position.y);
         }
       }
     }
@@ -127,9 +131,9 @@ struct PathData {
       if (last.has_handle_out() || first.has_handle_in()) {
         auto c1 = last.handle_out_abs();
         auto c2 = first.handle_in_abs();
-        path += " C " + std::to_string(c1.x()) + " " + std::to_string(c1.y()) + " " +
-                std::to_string(c2.x()) + " " + std::to_string(c2.y()) + " " +
-                std::to_string(first.position.x()) + " " + std::to_string(first.position.y());
+        path += " C " + std::to_string(c1.x) + " " + std::to_string(c1.y) + " " +
+                std::to_string(c2.x) + " " + std::to_string(c2.y) + " " +
+                std::to_string(first.position.x) + " " + std::to_string(first.position.y);
       }
       path += " Z";
     }
@@ -142,31 +146,31 @@ struct PathData {
     if (points.empty())
       return {0, 0, 0, 0};
 
-    float min_x = points[0].position.x();
-    float min_y = points[0].position.y();
+    float min_x = points[0].position.x;
+    float min_y = points[0].position.y;
     float max_x = min_x;
     float max_y = min_y;
 
     for (const auto &pt : points) {
-      min_x = (std::min)(min_x, pt.position.x());
-      min_y = (std::min)(min_y, pt.position.y());
-      max_x = (std::max)(max_x, pt.position.x());
-      max_y = (std::max)(max_y, pt.position.y());
+      min_x = (std::min)(min_x, pt.position.x);
+      min_y = (std::min)(min_y, pt.position.y);
+      max_x = (std::max)(max_x, pt.position.x);
+      max_y = (std::max)(max_y, pt.position.y);
 
       // Include handles in bounds
       if (pt.has_handle_in()) {
         auto h = pt.handle_in_abs();
-        min_x = (std::min)(min_x, h.x());
-        min_y = (std::min)(min_y, h.y());
-        max_x = (std::max)(max_x, h.x());
-        max_y = (std::max)(max_y, h.y());
+        min_x = (std::min)(min_x, h.x);
+        min_y = (std::min)(min_y, h.y);
+        max_x = (std::max)(max_x, h.x);
+        max_y = (std::max)(max_y, h.y);
       }
       if (pt.has_handle_out()) {
         auto h = pt.handle_out_abs();
-        min_x = (std::min)(min_x, h.x());
-        min_y = (std::min)(min_y, h.y());
-        max_x = (std::max)(max_x, h.x());
-        max_y = (std::max)(max_y, h.y());
+        min_x = (std::min)(min_x, h.x);
+        min_y = (std::min)(min_y, h.y);
+        max_x = (std::max)(max_x, h.x);
+        max_y = (std::max)(max_y, h.y);
       }
     }
 

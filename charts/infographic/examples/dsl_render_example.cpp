@@ -1,7 +1,7 @@
 // Infographic DSL -> Flex Runtime rendering example
 #include <SDL2/SDL.h>
 #include <flex.h>
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <ir/unified_infographic.h>
 #include <infographic_component.h>
 #include <flex/runtime/instance.h>

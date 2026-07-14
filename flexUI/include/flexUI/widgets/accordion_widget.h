@@ -1,7 +1,7 @@
 /*
  * flexUI - AccordionWidget
  *
- * Collapsible sections - 使用 flex::Renderer 渲染
+ * Collapsible sections - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_ACCORDION_WIDGET_H
@@ -9,6 +9,7 @@
 
 #include "../widget.h"
 #include "../group.h"
+#include "../render_command.h"
 #include "../shapes.h"
 #include <string>
 #include <vector>
@@ -27,7 +28,7 @@ public:
 
   AccordionWidget();
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "AccordionWidget"; }
@@ -48,8 +49,8 @@ public:
   void set_change_callback(ChangeCallback cb) { on_change_ = std::move(cb); }
 
 private:
-  void render_section(flex::Renderer& r, const Element& elem, Section& section, float y, size_t idx);
-  void render_arrow(flex::Renderer& r, float x, float y, bool expanded);
+  void render_section(RenderCommandList& commands, const Element& elem, Section& section, float y, size_t idx);
+  void render_arrow(RenderCommandList& commands, float x, float y, bool expanded);
 
   std::vector<Section> sections_;
   bool allow_multiple_ = false;

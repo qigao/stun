@@ -1,0 +1,34 @@
+{
+  "component": "Button",
+  "kind": "leaf",
+  "root": "button_root",
+  "nodes": [
+    {
+      "id": "button_root",
+      "type": "widget",
+      "widget": "button",
+      "tag": "button",
+      "role": "button",
+      "slots": ["icon-leading", "label", "icon-trailing"],
+      "states": ["hover", "active", "focus", "focus-visible", "disabled"],
+      "attrs": {
+        "type": "button"
+      },
+      "props": {
+        "text": "Button"
+      }
+    }
+  ],
+  "variants": {
+    "variant": ["default", "destructive", "outline", "secondary", "ghost", "link"],
+    "size": ["default", "sm", "lg", "icon"]
+  },
+  "defaults": {
+    "variant": "default",
+    "size": "default"
+  },
+  "meta": {
+    "source": "shadcn/button",
+    "supports_as_child": false
+  }
+}

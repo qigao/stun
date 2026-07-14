@@ -7,6 +7,7 @@
 #include "meta_editor/command.h"
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/render_command.h>
 #include <flexUI/renderer.h>
 #include <flexUI/computed_style.h>
 #include <flexUI/widgets/colorpicker_widget.h>
@@ -27,11 +28,11 @@ StylePanel::StylePanel(SelectionManager* selection, CommandManager* commands)
 }
 
 void StylePanel::render(const flexUI::Element& elem, flexUI::Renderer& renderer) {
-    auto& r = renderer.flex();
-
-    r.draw_rect(0, 0, elem.width(), elem.height(), 0,
-                flexUI::Paint::solid(flexUI::Color{0.13f, 0.13f, 0.13f, 1.0f}),
-                flexUI::Paint::none(), 0);
+    flexUI::RenderCommandList commands(renderer.capabilities());
+    commands.draw_rect(0, 0, elem.width(), elem.height(), 0,
+                       flexUI::Paint::solid(flexUI::Color{0.13f, 0.13f, 0.13f, 1.0f}),
+                       flexUI::Paint::none(), 0);
+    commands.replay(renderer);
 }
 
 bool StylePanel::handle_event(const flexUI::Event& event, flexUI::Element& elem) {

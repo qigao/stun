@@ -11,6 +11,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 包含目录
 include_directories(include)
 
+find_package(nlohmann_json CONFIG REQUIRED)
+
 # Find lexbor for CSS parsing
 find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
 find_library(LEXBOR_LIBRARY NAMES lexbor)
@@ -38,15 +40,24 @@ include_directories(${LEXBOR_INCLUDE_DIR})
 # 源文件
 set(FLEXUI_SOURCES
   src/box.cpp
+  src/binding_runtime.cpp
+  src/keyed_repeater.cpp
+  src/view_pipeline.cpp
   src/element.cpp
+  src/widget.cpp
   src/computed_style.cpp
   src/style_engine.cpp
+  src/clipboard.cpp
   src/textedit.cpp
   src/transition.cpp
   src/text_util.cpp
+  src/text_layout.cpp
   src/event_dispatcher.cpp
   src/layout_manager.cpp
   src/render_manager.cpp
+  src/render_command.cpp
+  src/shadcn_ir.cpp
+  src/utility_jit.cpp
   src/syntax_highlighter.cpp
   src/highlighters/treesitter_highlighter.cpp
   src/highlighters/ts_plugin_loader.cpp
@@ -88,17 +99,26 @@ set(FLEXUI_SOURCES
 # 头文件
 set(FLEXUI_HEADERS
   include/flexUI/types.h
+  include/flexUI/binding_runtime.h
+  include/flexUI/keyed_repeater.h
+  include/flexUI/text_value_widget.h
   include/flexUI/computed_style.h
   include/flexUI/style_engine.h
   include/flexUI/event.h
   include/flexUI/event_dispatcher.h
+  include/flexUI/view_pipeline.h
   include/flexUI/layout_manager.h
   include/flexUI/render_manager.h
+  include/flexUI/render_command.h
+  include/flexUI/render_frame.h
+  include/flexUI/shadcn_ir.h
+  include/flexUI/utility_jit.h
   include/flexUI/widget.h
   include/flexUI/element.h
   include/flexUI/box.h
   include/flexUI/textedit.h
   include/flexUI/transition.h
+  include/flexUI/text_layout.h
   include/flexUI/text_util.h
   include/flexUI/renderer.h
   include/flexUI/group.h
@@ -148,7 +168,7 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} flex TurboNet::Utils md_parser
+    PUBLIC ${LEXBOR_LIBRARY} flex_runtime flex_render flex_animation TurboUtils::Core md_parser nlohmann_json::nlohmann_json
     PRIVATE unofficial::tree-sitter::tree-sitter
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
@@ -156,7 +176,7 @@ target_include_directories(
   flexUI
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tree-sitter/plugins/
+         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
          ${CMAKE_SOURCE_DIR}/vendor/md/include
          $<INSTALL_INTERFACE:include>
@@ -165,6 +185,7 @@ target_include_directories(
 
 # 安装头文件
 install(DIRECTORY include/flexUI DESTINATION include)
+install(FILES include/flexUI.h DESTINATION include)
 
 # 安装库
 install(TARGETS flexUI DESTINATION lib)

@@ -47,7 +47,7 @@ bool TextTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2& w
 
     auto* allocator = canvas_->instance()->object_allocator();
     auto* text = flex::Text::create(*allocator);
-    text->set_position(world_pos.x(), world_pos.y());
+    text->set_position(world_pos.x, world_pos.y);
     text->set_content("Text");
     text->set_font_size(24.0f);
     text->set_color(flex::Color{0.0f, 0.0f, 0.0f, 1.0f});
@@ -147,7 +147,7 @@ void TextTool::render_overlay(flex::Renderer& renderer) {
     // Show preview cursor in place mode
     if (mode_ == Mode::Place && show_preview_) {
         flex::Paint cursor_paint = flex::Paint::solid(flex::Color(0.3f, 0.3f, 0.3f, 0.5f));
-        renderer.draw_text("T", preview_pos_.x(), preview_pos_.y(), "Arial", 24, false,
+        renderer.draw_text("T", preview_pos_.x, preview_pos_.y, "Arial", 24, false,
                           flex::Color{0.3f, 0.3f, 0.3f, 0.5f});
     }
 

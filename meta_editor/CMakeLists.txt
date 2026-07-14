@@ -88,6 +88,7 @@ target_include_directories(meta_editor
 target_link_libraries(meta_editor 
     PUBLIC 
         flex 
+        flex_backend_thorvg
         flexUI
         glfw glad::glad OpenGL::GL
         nlohmann_json::nlohmann_json

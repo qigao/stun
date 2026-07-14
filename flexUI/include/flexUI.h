@@ -13,7 +13,14 @@
 #include "flexUI/element.h"
 #include "flexUI/widget.h"
 #include "flexUI/box.h"
+#include "flexUI/binding_runtime.h"
+#include "flexUI/keyed_repeater.h"
+#include "flexUI/text_value_widget.h"
 #include "flexUI/renderer.h"
+#include "flexUI/render_command.h"
+#include "flexUI/render_frame.h"
+#include "flexUI/view_pipeline.h"
+#include "flexUI/utility_jit.h"
 
 // Scene Graph (optional, for custom rendering)
 #include "flexUI/group.h"

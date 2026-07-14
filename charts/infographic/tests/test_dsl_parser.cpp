@@ -79,6 +79,34 @@ theme {
     std::cout << "  ✓ Passed\n";
 }
 
+void test_mir_value_expressions() {
+    std::cout << "Test: MIR value expressions\n";
+
+    const char* dsl = R"(
+infographic chart-pie-plain-text
+data {
+    items: [
+        { label: "Calculated", value: 10 + 5 * 2 }
+        { label: "Negative", value: -5 + 2 }
+        { label: "Clamped", value: clamp(120 / 2, 0, 50) }
+    ]
+}
+)";
+
+    UnifiedInfographic info;
+    std::string error;
+    bool ok = parse_infographic_dsl(dsl, &info, error);
+
+    if (!ok) std::cerr << "  Parse error: " << error << "\n";
+    assert(ok);
+    assert(info.items.size() == 3);
+    assert(info.items[0]->value.value_or(0) == 20);
+    assert(info.items[1]->value.value_or(0) == -3);
+    assert(info.items[2]->value.value_or(0) == 50);
+
+    std::cout << "  ✓ Passed\n";
+}
+
 void test_nested_children() {
     std::cout << "Test: Nested children parsing\n";
     
@@ -258,6 +286,7 @@ int main() {
     
     test_basic_dsl();
     test_theme_dsl();
+    test_mir_value_expressions();
     test_nested_children();
     test_timeline_template();
     test_swot_template();

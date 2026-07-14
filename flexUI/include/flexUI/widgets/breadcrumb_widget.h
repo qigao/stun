@@ -16,6 +16,8 @@
 
 namespace flexUI {
 
+class RenderCommandList;
+
 /**
  * BreadcrumbWidget - Navigation breadcrumb trail
  *
@@ -44,7 +46,7 @@ public:
     BreadcrumbWidget();
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "BreadcrumbWidget"; }
@@ -62,6 +64,7 @@ public:
     void set_click_callback(ClickCallback callback) { click_callback_ = std::move(callback); }
 
 private:
+    void sync_host_semantics() override;
     void rebuild_shapes(const Element& elem);
     void update_shapes(const Element& elem);
     int hit_test(float x, float y, const Element& elem);

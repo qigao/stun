@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else

@@ -1,0 +1,22 @@
+{
+  "component": "Accordion",
+  "kind": "leaf",
+  "root": "accordion_root",
+  "nodes": [
+    {
+      "id": "accordion_root",
+      "type": "widget",
+      "widget": "accordion",
+      "tag": "div",
+      "states": ["open", "closed"],
+      "props": {
+        "sections": [
+          { "title": "General", "id": "general", "content_height": 96 }
+        ]
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/accordion"
+  }
+}

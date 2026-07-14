@@ -13,10 +13,10 @@ static const char* get_svg_template() {
 <style>
   .node { cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
   .node:hover .shape { transform: translateY(-3px); filter: drop-shadow(0 8px 16px rgba(0,0,0,0.12)); }
-  .node-text { font-family: 'Segoe UI', system-ui, sans-serif; user-select: none; pointer-events: none; }
+  .node-text { font-family: {{font_family}}; user-select: none; pointer-events: none; }
   .edge-path { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: draw 2.2s cubic-bezier(0.45, 0, 0.55, 1) forwards; }
   @keyframes draw { to { stroke-dashoffset: 0; } }
-  .label-text { font-family: 'Segoe UI', system-ui, sans-serif; font-weight: 600; font-size: 11px; }
+  .label-text { font-family: {{font_family}}; font-weight: 600; font-size: 11px; }
 </style>
 <rect width="100%" height="100%" fill="{{background_color}}"/>
 <defs>
@@ -50,7 +50,7 @@ static const char* get_svg_template() {
       <rect x="{{rect_x}}" y="{{rect_y}}" width="{{width}}" height="{{height}}" rx="12" fill="url(#nodeGrad)" stroke="{{line_color}}" stroke-width="1.5" stroke-opacity="0.4" />
       {{/shape_rect}}
     </g>
-    <text class="node-text" x="{{x}}" y="{{text_y_node}}" text-anchor="middle" dominant-baseline="middle" font-size="14" font-weight="600" fill="{{text_color}}" opacity="0.85">{{label}}</text>
+    <text class="node-text" x="{{x}}" y="{{text_y_node}}" text-anchor="middle" dominant-baseline="middle" font-size="{{font_size}}" font-weight="600" fill="{{text_color}}" opacity="0.85">{{label}}</text>
   </g>
   {{/nodes}}
 </g>

@@ -1,6 +1,6 @@
 #include <SDL2/SDL.h>
 #include <flex.h>
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <flexinfographic.h>
 #include <infographic_component.h>
 #include <flex/runtime/instance.h>

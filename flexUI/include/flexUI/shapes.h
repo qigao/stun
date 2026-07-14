@@ -2,7 +2,7 @@
  * flexUI - Basic Shape Classes
  *
  * Concrete drawable shapes for widget composition.
- * All shapes use flex::Renderer for backend-agnostic drawing.
+ * All shapes emit RenderCommandList commands for backend-agnostic drawing.
  */
 
 #ifndef FLEXUI_SHAPES_H
@@ -10,6 +10,8 @@
  
 #include <algorithm>
 #include "flexUI/group.h"
+#include "flexUI/text_layout.h"
+#include "flexUI/text_util.h"
 #include <stb_sprintf.h>
 #include <string>
 
@@ -54,7 +56,7 @@ public:
     float stroke_width() const { return stroke_width_; }
 
     // Drawable interface
-    void draw(flex::Renderer& r, const Transform& parent, float alpha) override {
+    void draw(RenderCommandList& commands, const Transform& parent, float alpha) override {
         if (!visible_ || (fill_.type == Paint::Type::None && stroke_.type == Paint::Type::None))
             return;
 
@@ -71,10 +73,10 @@ public:
             stroke_with_alpha.color.a *= alpha;
         }
 
-        r.save();
-        r.set_transform(world);
-        r.draw_rect(0, 0, width_, height_, radius_, fill_with_alpha, stroke_with_alpha, stroke_width_);
-        r.restore();
+        commands.save();
+        commands.set_transform(world);
+        commands.draw_rect(0, 0, width_, height_, radius_, fill_with_alpha, stroke_with_alpha, stroke_width_);
+        commands.restore();
     }
 
     Bounds local_bounds() const override {
@@ -127,7 +129,7 @@ public:
     }
 
     // Drawable interface
-    void draw(flex::Renderer& r, const Transform& parent, float alpha) override {
+    void draw(RenderCommandList& commands, const Transform& parent, float alpha) override {
         if (!visible_) return;
 
         Transform world = parent * flex::make_translation(x_, y_);
@@ -142,14 +144,14 @@ public:
             stroke_with_alpha.color.a *= alpha;
         }
 
-        r.save();
-        r.set_transform(world);
+        commands.save();
+        commands.set_transform(world);
         if (radius_x_ == radius_y_) {
-            r.draw_circle(0, 0, radius_x_, fill_with_alpha, stroke_with_alpha, stroke_width_);
+            commands.draw_circle(0, 0, radius_x_, fill_with_alpha, stroke_with_alpha, stroke_width_);
         } else {
-            r.draw_ellipse(0, 0, radius_x_, radius_y_, fill_with_alpha, stroke_with_alpha, stroke_width_);
+            commands.draw_ellipse(0, 0, radius_x_, radius_y_, fill_with_alpha, stroke_with_alpha, stroke_width_);
         }
-        r.restore();
+        commands.restore();
     }
 
     Bounds local_bounds() const override {
@@ -197,7 +199,7 @@ public:
     void set_color(const Color& c) { color_ = c; }
 
     // Drawable interface
-    void draw(flex::Renderer& r, const Transform& parent, float alpha) override {
+    void draw(RenderCommandList& commands, const Transform& parent, float alpha) override {
         if (!visible_ || text_.empty()) return;
 
         Transform world = parent * flex::make_translation(x_, y_);
@@ -205,20 +207,52 @@ public:
         Color color_with_alpha = color_;
         color_with_alpha.a *= alpha;
 
-        r.save();
-        r.set_transform(world);
-        r.draw_text(text_, 0, 0, font_family_, font_size_, bold_, color_with_alpha);
-        r.restore();
+        commands.save();
+        commands.set_transform(world);
+        float current_x = 0.0f;
+        for (const auto& segment : segment_text(text_)) {
+            const std::string font_name =
+                segment.type == TextSegmentType::Emoji ? get_emoji_font_name()
+                                                       : resolved_font_family();
+            commands.draw_text(segment.text, current_x, 0, font_name, font_size_, bold_,
+                               color_with_alpha);
+            current_x += segment_width(segment);
+        }
+        commands.restore();
     }
 
     Bounds local_bounds() const override {
-        // Approximate bounds - actual bounds depend on font metrics
-        float approx_width = text_.length() * font_size_ * 0.6f;
+        float approx_width = 0.0f;
+        for (const auto& segment : segment_text(text_)) {
+            approx_width += segment_width(segment);
+        }
         float approx_height = font_size_;
         return Bounds{x_, y_ - approx_height, approx_width, approx_height};
     }
 
 private:
+    std::string resolved_font_family() const {
+        return font_family_.empty() ? "Arial" : font_family_;
+    }
+
+    float segment_width(const TextSegment& segment) const {
+        if (segment.type == TextSegmentType::Emoji) {
+            size_t count = 0;
+            size_t pos = 0;
+            while (pos < segment.text.size()) {
+                utf8_decode(segment.text, pos);
+                count++;
+            }
+            return static_cast<float>(count) * font_size_;
+        }
+
+        ComputedStyle measure_style;
+        measure_style.font_family = resolved_font_family();
+        measure_style.font_size = font_size_;
+        measure_style.font_weight = bold_ ? FontWeight::Bold : FontWeight::Normal;
+        return approximate_text_width(&measure_style, segment.text);
+    }
+
     std::string text_;
     std::string font_family_ = "Arial";
     float font_size_ = 14.0f;
@@ -243,6 +277,7 @@ public:
     // End point (start point is x_, y_)
     float x2() const { return x2_; }
     float y2() const { return y2_; }
+    float stroke_width() const { return stroke_width_; }
     void set_end(float x2, float y2) { x2_ = x2; y2_ = y2; }
 
     // Stroke
@@ -252,7 +287,7 @@ public:
     }
 
     // Drawable interface
-    void draw(flex::Renderer& r, const Transform& parent, float alpha) override {
+    void draw(RenderCommandList& commands, const Transform& parent, float alpha) override {
         if (!visible_) return;
 
         Paint stroke_with_alpha = stroke_;
@@ -260,14 +295,10 @@ public:
             stroke_with_alpha.color.a *= alpha;
         }
 
-        // Build path string for line
-        char path[128];
-        stbsp_snprintf(path, sizeof(path), "M %.4g %.4g L %.4g %.4g", x_, y_, x2_, y2_);
-
-        r.save();
-        r.set_transform(parent);
-        r.stroke_path(path, stroke_with_alpha, stroke_width_);
-        r.restore();
+        commands.save();
+        commands.set_transform(parent);
+        commands.draw_line(x_, y_, x2_, y2_, stroke_with_alpha, stroke_width_);
+        commands.restore();
     }
 
     Bounds local_bounds() const override {
@@ -309,7 +340,7 @@ public:
     }
 
     // Drawable interface
-    void draw(flex::Renderer& r, const Transform& parent, float alpha) override {
+    void draw(RenderCommandList& commands, const Transform& parent, float alpha) override {
         if (!visible_ || path_data_.empty()) return;
 
         Transform world = parent * flex::make_translation(x_, y_);
@@ -324,15 +355,15 @@ public:
             stroke_with_alpha.color.a *= alpha;
         }
 
-        r.save();
-        r.set_transform(world);
+        commands.save();
+        commands.set_transform(world);
         if (fill_.type != Paint::Type::None) {
-            r.fill_path(path_data_, fill_with_alpha);
+            commands.fill_path(path_data_, fill_with_alpha);
         }
         if (stroke_.type != Paint::Type::None) {
-            r.stroke_path(path_data_, stroke_with_alpha, stroke_width_);
+            commands.stroke_path(path_data_, stroke_with_alpha, stroke_width_);
         }
-        r.restore();
+        commands.restore();
     }
 
     Bounds local_bounds() const override {

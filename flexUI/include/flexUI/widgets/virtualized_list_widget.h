@@ -12,7 +12,8 @@
 
 #include "../widget.h"
 #include "../box.h"
-#include "../renderer.h"
+#include "../detail/css_render_transform.h"
+#include "../render_command.h"
 #include <vector>
 #include <deque>
 #include <functional>
@@ -87,7 +88,7 @@ public:
 
     void update(float delta_ms, Element& elem) override { }
 
-    void render(const Element& elem, Renderer& renderer) override {
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
         float w = elem.width();
         float h = elem.height();
         
@@ -99,12 +100,12 @@ public:
             Color bar_bg{0.1f, 0.1f, 0.1f, 0.5f}; 
             Color thumb_c{0.4f, 0.4f, 0.4f, 0.8f}; 
 
-            renderer.draw_rect(w - bar_w, 0, bar_w, h, 0, Paint::solid(bar_bg), Paint::none(), 0);
-
             float thumb_h = std::max(20.0f, h * h / content_h);
             float thumb_y = (content_h - h) > 0 ? (h - thumb_h) * scroll_y_ / (content_h - h) : 0;
-            
-            renderer.draw_rect(w - bar_w, thumb_y, bar_w, thumb_h, 3, Paint::solid(thumb_c), Paint::none(), 0);
+            commands.draw_rect(w - bar_w, 0, bar_w, h, 0,
+                               Paint::solid(bar_bg), Paint::none(), 0);
+            commands.draw_rect(w - bar_w, thumb_y, bar_w, thumb_h, 3,
+                               Paint::solid(thumb_c), Paint::none(), 0);
         }
 
         // Logical Update
@@ -137,19 +138,23 @@ public:
         }
 
         if (event.type == EventType::MouseDown) {
-             float lx = event.x - elem.absolute_x();
+             const flex::Vec2 local_pos =
+                 detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+             float lx = local_pos.x;
              if (lx > elem.width() - 15) { 
                   dragging_ = true;
-                  drag_start_y_ = event.y;
+                  drag_start_y_ = local_pos.y;
                   drag_start_scroll_ = scroll_y_;
                   return true;
              }
         }
         
         if (event.type == EventType::MouseMove && dragging_) {
+             const flex::Vec2 local_pos =
+                 detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
              float h = elem.height();
              float max_scroll = std::max(0.0f, get_content_height() - h);
-             float dy = event.y - drag_start_y_;
+             float dy = local_pos.y - drag_start_y_;
              float scroll_ratio = (max_scroll > 0) ? max_scroll / h : 0;
              scroll_y_ = std::clamp(drag_start_scroll_ + dy * scroll_ratio, 0.0f, max_scroll);
              update_visible_rows(elem);
@@ -269,6 +274,10 @@ private:
                  row.elem->computed_style->width_is_percent = false;
                  row.elem->computed_style->width = w;
                  row.elem->computed_style->height = row_height;
+                 row.elem->computed_style->width_size =
+                     {CssSizeKind::Length, w, {}};
+                 row.elem->computed_style->height_size =
+                     {CssSizeKind::Length, row_height, {}};
              }
              
              row.elem->set_x(0);

@@ -4,6 +4,8 @@
 #include "mindmap/mindmap_ast.h"
 #include "mindmap_parser_gen.h"
 
+void MindmapParser(void *parser, int token, void *value, MindmapParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

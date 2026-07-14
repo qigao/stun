@@ -1,0 +1,13 @@
+{
+  "rules": [
+    {
+      "target": "toggle_group_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "width": "100%",
+        "height": "2.5rem"
+      }
+    }
+  ]
+}

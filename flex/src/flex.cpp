@@ -6,59 +6,21 @@
  */
 
 #include "flex.h"
-#include "flex/runtime/debug.h"
+#include "flex/core/debug.h"
 #include "flex/bridge/ast_to_runtime.h"
-#include "flex/compiler/flex_parser.h"
+#include "flex/dsl/flex_parser.h"
+#include "flex/core/expr_compiled.h"
+#include "runtime/asset_resolver.h"
+#include "runtime/scene_clone.h"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <set>
 #include <sstream>
-#include <thorvg.h>
+#include <unordered_map>
 #include <vector>
 
-// Filesystem for path manipulation
-#ifdef _WIN32
-#include <direct.h>
-#define PATH_SEP '\\'
-#else
-#include <unistd.h>
-#define PATH_SEP '/'
-#endif
-
 namespace flex {
-
-// ============================================================================
-// Helper: Path utilities for import resolution
-// ============================================================================
-
-static std::string get_directory(const std::string &path) {
-  size_t pos = path.find_last_of("/\\");
-  if (pos == std::string::npos) {
-    return ".";
-  }
-  return path.substr(0, pos);
-}
-
-static std::string join_path(const std::string &dir, const std::string &file) {
-  if (dir.empty() || dir == ".") {
-    return file;
-  }
-  char last = dir.back();
-  if (last == '/' || last == '\\') {
-    return dir + file;
-  }
-  return dir + PATH_SEP + file;
-}
-
-static std::string normalize_path(const std::string &path) {
-  // Simple normalization: replace backslashes with forward slashes
-  std::string result = path;
-  for (char &c : result) {
-    if (c == '\\') c = '/';
-  }
-  return result;
-}
 
 // ============================================================================
 // Definition Implementation (stores Runtime objects)
@@ -74,8 +36,8 @@ static bool load_imports_recursive(
     int &error_column) {
 
   for (const auto &import : program.imports) {
-    std::string import_path = join_path(base_dir, import.path);
-    std::string normalized = normalize_path(import_path);
+    std::string import_path = runtime::join_path(base_dir, import.path);
+    std::string normalized = runtime::normalize_path(import_path);
 
     // Check for circular import
     if (loaded_files.count(normalized)) {
@@ -112,8 +74,14 @@ static bool load_imports_recursive(
               imported_program->animations.size(),
               imported_program->machines.size());
 
+    std::string import_dir = runtime::get_directory(import_path);
+
+    // Imported assets are declared relative to the imported file, but once
+    // merged into the parent program they need to keep resolving correctly.
+    // Rebase only the current file's own assets before nested imports merge in.
+    runtime::rebase_program_asset_paths(import_dir, *imported_program);
+
     // Recursively process imports in the imported file
-    std::string import_dir = get_directory(import_path);
     if (!load_imports_recursive(import_dir, *imported_program, loaded_files,
                                 error_message, error_line, error_column)) {
       return false;
@@ -153,7 +121,7 @@ static bool load_imports_recursive(
   return true;
 }
 
-Definition::Ptr Definition::load(const char *source) {
+Definition::SharedPtr Definition::load(const char *source) {
   auto def = std::shared_ptr<Definition>(new Definition());
   def->impl_ = std::make_unique<Impl>();
 
@@ -180,7 +148,9 @@ Definition::Ptr Definition::load(const char *source) {
     def->impl_->scene = Scene::create(800, 600, def->impl_->object_alloc);
   }
 
-  def->impl_->has_error = false;
+  if (!def->impl_->has_error) {
+    def->impl_->has_error = false;
+  }
 
   // AST PRUNING: The AST is no longer needed after conversion.
   // Since 'program' is a shared_ptr to AstProgram, it will be deleted when it goes out of scope here.
@@ -190,7 +160,7 @@ Definition::Ptr Definition::load(const char *source) {
   return def;
 }
 
-Definition::Ptr Definition::load_file(const char *path) {
+Definition::SharedPtr Definition::load_file(const char *path) {
   auto def = std::shared_ptr<Definition>(new Definition());
   def->impl_ = std::make_unique<Impl>();
 
@@ -215,9 +185,9 @@ Definition::Ptr Definition::load_file(const char *path) {
   }
 
   // Process imports recursively
-  std::string base_dir = get_directory(path);
+  std::string base_dir = runtime::get_directory(path);
   std::set<std::string> loaded_files;
-  loaded_files.insert(normalize_path(path));  // Mark main file as loaded
+  loaded_files.insert(runtime::normalize_path(path));  // Mark main file as loaded
 
   std::string import_error;
   int import_error_line = 0;
@@ -243,7 +213,9 @@ Definition::Ptr Definition::load_file(const char *path) {
     def->impl_->scene = Scene::create(800, 600, def->impl_->object_alloc);
   }
 
-  def->impl_->has_error = false;
+  if (!def->impl_->has_error) {
+    def->impl_->has_error = false;
+  }
 
   // AST PRUNING: The AST is discarded as it's no longer needed.
   
@@ -290,13 +262,17 @@ Instance::~Instance() {
   }
 }
 
-Instance::Ptr Instance::create(Definition::Ptr definition) {
+Instance::SharedPtr Instance::create(Definition::SharedPtr definition) {
   auto instance = std::shared_ptr<Instance>(new Instance());
   instance->impl_->definition = definition;
 
   if (definition && definition->scene()) {
-    // No Builder - Definition already has Runtime objects
-    instance->impl_->scene = definition->scene();
+    std::unordered_map<Node::RawPtr, Node::SharedPtr> cloned_shared_nodes;
+
+    // Each instance needs an isolated scene graph.
+    instance->impl_->scene = runtime::clone_scene(definition->scene(),
+                                                  instance->impl_->object_alloc,
+                                                  &cloned_shared_nodes);
 
     // Initialize bindings context
     instance->impl_->bindings = std::make_unique<BindingContext>();
@@ -315,23 +291,61 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
       // Set up callback to trigger animations and audio on state changes
       std::weak_ptr<Instance> weak_inst = instance;
       cloned_machine->set_state_change_callback(
-          [weak_inst](const std::string &layer, const std::string &from_state,
-                     const std::string &to_state, const std::string &animation,
-                     const std::string &play_audio, const std::string &stop_audio) {
+          [weak_inst](const StateChangeInfo& info) {
             auto inst = weak_inst.lock();
             if (!inst) return;
 
-            if (!animation.empty()) {
-              FLEX_LOGD("State change triggers animation: {}", animation);
-              inst->start_animation(animation);
+            // Handle animation with optional params
+            if (!info.animation.empty()) {
+              FLEX_LOGD("State change triggers animation: {}", info.animation);
+              auto* player = inst->play_animation(info.animation);
+              if (player && !info.animation_params.empty()) {
+                for (const auto& [name, expr_str] : info.animation_params) {
+                  // Evaluate expression with current inputs
+                  std::shared_ptr<void> compiled;
+                  std::unordered_map<Symbol, float, SymbolHash> float_inputs;
+                  for (const auto& [sym, val] : inst->impl_->inputs) {
+                    if (auto* fval = std::get_if<float>(&val)) {
+                      float_inputs[sym] = *fval;
+                    } else if (auto* bval = std::get_if<bool>(&val)) {
+                      float_inputs[sym] = *bval ? 1.0f : 0.0f;
+                    }
+                  }
+                  float value = evaluate_exprtk_inputs(expr_str, compiled, float_inputs);
+                  if (name == "duration") player->set_duration_override(value);
+                  else if (name == "speed") player->set_speed(value);
+                }
+              }
             }
-            if (!stop_audio.empty()) {
-              FLEX_LOGD("State change stops audio: {}", stop_audio);
-              inst->stop_audio(stop_audio.c_str());
+            if (!info.stop_audio.empty()) {
+              FLEX_LOGD("State change stops audio: {}", info.stop_audio);
+              inst->stop_audio(info.stop_audio.c_str());
             }
-            if (!play_audio.empty()) {
-              FLEX_LOGD("State change plays audio: {}", play_audio);
-              inst->play_audio(play_audio.c_str());
+            if (!info.play_audio.empty()) {
+              FLEX_LOGD("State change plays audio: {}", info.play_audio);
+              inst->play_audio(info.play_audio.c_str());
+            }
+
+            // Handle state entry actions: set #node.prop: ${expr}
+            if (!info.actions.empty() && inst->impl_->scene) {
+              std::unordered_map<Symbol, float, SymbolHash> float_inputs;
+              for (const auto& [sym, val] : inst->impl_->inputs) {
+                if (auto* fval = std::get_if<float>(&val)) {
+                  float_inputs[sym] = *fval;
+                } else if (auto* bval = std::get_if<bool>(&val)) {
+                  float_inputs[sym] = *bval ? 1.0f : 0.0f;
+                }
+              }
+              for (const auto& action : info.actions) {
+                Node* target = inst->impl_->scene->find(action.node_id);
+                if (!target) continue;
+                std::shared_ptr<void> compiled;
+                float result = evaluate_exprtk_inputs(action.expression, compiled, float_inputs);
+                PropertyID pid = get_property_id(action.property.c_str());
+                if (pid != PropertyID::Unknown) {
+                  target->set_animated_property(pid, AnimValue(result));
+                }
+              }
             }
           });
 
@@ -339,9 +353,52 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
       cloned_machine->trigger_initial_animations();
     }
 
-    // NOTE: ScriptContext is NOT created by default (saves ~15MB per Instance)
-    // It will be created on-demand if expression bindings are actually used
-    // in BindingContext::evaluate() or when user calls script APIs
+    // Register bindings from definition
+    if (!definition->impl_->bindings.empty()) {
+      for (const auto &binding_def : definition->impl_->bindings) {
+        Node *target = instance->impl_->scene
+                           ? instance->impl_->scene->find(binding_def.node_id)
+                           : nullptr;
+        if (!target) {
+          FLEX_LOGW("Skipping binding setup for missing cloned target '{}'",
+                    binding_def.node_id);
+          continue;
+        }
+        Binding binding = binding_def.binding;
+        binding.target = target;
+        instance->impl_->bindings->add_binding(target,
+                                               binding_def.property.c_str(),
+                                               binding);
+      }
+      instance->impl_->bindings->mark_dirty();
+    }
+
+    if (!definition->impl_->component_bindings.empty()) {
+      for (const auto &binding_def : definition->impl_->component_bindings) {
+        Node *target = instance->impl_->scene
+                           ? instance->impl_->scene->find(binding_def.node_id)
+                           : nullptr;
+        if (!target) {
+          FLEX_LOGW("Skipping component binding setup for missing cloned node '{}'",
+                    binding_def.node_id);
+          continue;
+        }
+        auto shared_it = cloned_shared_nodes.find(target);
+        if (shared_it == cloned_shared_nodes.end()) {
+          FLEX_LOGW("Skipping component binding setup for missing shared node '{}'",
+                    binding_def.node_id);
+          continue;
+        }
+        ComponentPropBinding def;
+        def.component_name = binding_def.component_name;
+        def.node = shared_it->second;
+        def.component = binding_def.component;
+        def.base_props = binding_def.base_props;
+        def.prop_bindings = binding_def.prop_bindings;
+        instance->impl_->bindings->add_component_binding(def);
+      }
+      instance->impl_->bindings->mark_dirty();
+    }
 
     // Auto-play timelines set to Loop
     // (Optional: logic to auto-play)
@@ -366,11 +423,9 @@ Instance::Ptr Instance::create(Definition::Ptr definition) {
   return instance;
 }
 
-Instance::Ptr Instance::create(float width, float height) {
+Instance::SharedPtr Instance::create(float width, float height) {
   auto instance = std::shared_ptr<Instance>(new Instance());
   instance->impl_->scene = Scene::create(width, height, instance->impl_->object_alloc);
-
-  // It will be created on-demand if script APIs are used
 
   return instance;
 }
@@ -394,6 +449,18 @@ void Instance::set_input(const char *name, const char *value) {
   if (impl_->bindings) {
     impl_->bindings->set_input(sym, std::string(value));
     impl_->bindings->mark_dirty();
+  }
+}
+
+void Instance::set_input(const char *name, bool value) {
+  Symbol sym(name);
+  impl_->inputs[sym] = value;
+  if (impl_->bindings) {
+    impl_->bindings->set_input(sym, value);
+    impl_->bindings->mark_dirty();
+  }
+  for (auto &machine : impl_->machines) {
+    machine->set_input(sym, value ? 1.0f : 0.0f);
   }
 }
 
@@ -436,23 +503,34 @@ static Node *hit_test_recursive(Node *node, float x, float y) {
   // Convert global point to node's local space using Eigen matrices
   Vec2 global_pos(x, y);
   Vec2 local_pos = node->to_local(global_pos);
+  bool contains_point = node->bounds().contains(local_pos.x, local_pos.y);
 
-  // Check if point is within this node's bounds in its own local coordinate space
-  // Note: Node::bounds() now returns bounds in local space
-  if (!node->bounds().contains(local_pos.x(), local_pos.y())) {
-    return nullptr;
-  }
-
-  // For groups, check children first (they may be on top)
   if (node->is_group()) {
     auto *group = static_cast<Group *>(node);
     const auto &children = group->children();
     for (auto it = children.rbegin(); it != children.rend(); ++it) {
+      Node* child = *it;
+      if (!child || !child->visible()) {
+        continue;
+      }
+
+      bool can_reach_child =
+          child->position_mode() == PositionMode::Fixed || contains_point || !group->clip();
+      if (!can_reach_child) {
+        continue;
+      }
+
       // Pass the SAME global coordinates to children, they will do their own to_local
-      Node *hit = hit_test_recursive(*it, x, y);  // children() returns vector<Node*>
+      Node *hit = hit_test_recursive(child, x, y);  // children() returns vector<Node*>
       if (hit)
         return hit;
     }
+  }
+
+  // Check if point is within this node's bounds in its own local coordinate space
+  // Note: Node::bounds() now returns bounds in local space
+  if (!contains_point) {
+    return nullptr;
   }
 
   return node;
@@ -474,6 +552,27 @@ static size_t build_propagation_path(Node *target, Node **path_buffer, size_t ma
   return count;
 }
 
+static void set_event_local_coordinates(PointerEvent &event, Node *node) {
+  if (!node) {
+    event.local_x = 0.0f;
+    event.local_y = 0.0f;
+    return;
+  }
+
+  Vec2 local = node->to_local(Vec2(event.x, event.y));
+  event.local_x = local.x;
+  event.local_y = local.y;
+}
+
+static Node* find_focus_candidate(Node* node) {
+  for (Node* current = node; current; current = current->parent()) {
+    if (current->focusable()) {
+      return current;
+    }
+  }
+  return nullptr;
+}
+
 // Helper: dispatch event through propagation path with bubbling
 static void dispatch_with_bubbling(PointerEvent &event, Node **path, size_t count,
                                    void (Node::*fire_method)(PointerEvent &)) {
@@ -484,8 +583,7 @@ static void dispatch_with_bubbling(PointerEvent &event, Node **path, size_t coun
   Node *target = path[count - 1];
   event.phase = EventPhase::Target;
   event.current_target = target;
-  event.local_x = event.x - target->x();
-  event.local_y = event.y - target->y();
+  set_event_local_coordinates(event, target);
   (target->*fire_method)(event);
   if (event.propagation_stopped())
     return;
@@ -496,9 +594,29 @@ static void dispatch_with_bubbling(PointerEvent &event, Node **path, size_t coun
   for (int i = static_cast<int>(count) - 2; i >= 0; --i) {
     Node *node = path[i];
     event.current_target = node;
-    event.local_x = event.x - node->x();
-    event.local_y = event.y - node->y();
+    set_event_local_coordinates(event, node);
     (node->*fire_method)(event);
+    if (event.propagation_stopped())
+      return;
+  }
+}
+
+static void dispatch_key_with_bubbling(KeyEvent &event, Node **path, size_t count,
+                                       void (Node::*fire_method)(KeyEvent &)) {
+  if (count == 0)
+    return;
+
+  Node* target = path[count - 1];
+  event.phase = EventPhase::Target;
+  event.current_target = target;
+  (target->*fire_method)(event);
+  if (event.propagation_stopped())
+    return;
+
+  event.phase = EventPhase::Bubble;
+  for (int i = static_cast<int>(count) - 2; i >= 0; --i) {
+    event.current_target = path[i];
+    (path[i]->*fire_method)(event);
     if (event.propagation_stopped())
       return;
   }
@@ -532,8 +650,7 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
       leave_event.y = y;
       leave_event.target = prev_hover;
       leave_event.current_target = prev_hover;
-      leave_event.local_x = x - prev_hover->x();
-      leave_event.local_y = y - prev_hover->y();
+      set_event_local_coordinates(leave_event, prev_hover);
       prev_hover->fire_hover_leave(leave_event);
     }
 
@@ -546,8 +663,7 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
       enter_event.y = y;
       enter_event.target = hit_node;
       enter_event.current_target = hit_node;
-      enter_event.local_x = x - hit_node->x();
-      enter_event.local_y = y - hit_node->y();
+      set_event_local_coordinates(enter_event, hit_node);
       hit_node->fire_hover_enter(enter_event);
 
       impl_->hover_node = hit_node;
@@ -559,6 +675,13 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
   // Handle pointer down (with bubbling)
   if (is_down && !impl_->is_pointer_down) {
     impl_->is_pointer_down = true;
+    Node* focus_candidate = find_focus_candidate(hit_node);
+    if (focus_candidate) {
+      request_focus(focus_candidate, FocusChangeReason::Pointer);
+    } else {
+      clear_focus(FocusChangeReason::Pointer);
+    }
+
     if (hit_node) {
       impl_->pointer_down_node = hit_node;
       PointerEvent event;
@@ -611,6 +734,112 @@ void Instance::send_pointer_event(float x, float y, bool is_down) {
   }
 }
 
+bool Instance::request_focus(Node::RawPtr node, FocusChangeReason reason) {
+  if (node && !node->focusable()) {
+    return false;
+  }
+
+  Node* previous = impl_->focused_node;
+  if (previous == node) {
+    return true;
+  }
+
+  if (previous) {
+    impl_->focused_node = nullptr;
+    previous->set_focused(false);
+
+    FocusEvent event;
+    event.gained = false;
+    event.reason = reason;
+    event.target = previous;
+    event.related_target = node;
+    event.current_target = previous;
+    previous->fire_focus_event(event);
+  }
+
+  if (!node) {
+    return true;
+  }
+
+  impl_->focused_node = node;
+  node->set_focused(true);
+
+  FocusEvent event;
+  event.gained = true;
+  event.reason = reason;
+  event.target = node;
+  event.related_target = previous;
+  event.current_target = node;
+  node->fire_focus_event(event);
+  return true;
+}
+
+void Instance::clear_focus(FocusChangeReason reason) {
+  request_focus(nullptr, reason);
+}
+
+Node::RawPtr Instance::focused_node() const {
+  return impl_->focused_node;
+}
+
+void Instance::send_key_event(KeyCode key, bool is_down, const KeyModifiers& modifiers,
+                              bool repeat) {
+  Node* target = impl_->focused_node;
+  if (!target || !target->visible()) {
+    return;
+  }
+
+  constexpr size_t kMaxPathDepth = 64;
+  Node* path[kMaxPathDepth];
+  size_t path_count = build_propagation_path(target, path, kMaxPathDepth);
+  if (path_count == 0) {
+    return;
+  }
+
+  KeyEvent event;
+  event.type = is_down ? KeyEventType::Down : KeyEventType::Up;
+  event.key = key;
+  event.modifiers = modifiers;
+  event.repeat = repeat;
+  event.target = target;
+  dispatch_key_with_bubbling(
+      event,
+      path,
+      path_count,
+      is_down ? &Node::fire_key_down : &Node::fire_key_up);
+}
+
+void Instance::send_text_input(const char* utf8, bool from_ime) {
+  Node* target = impl_->focused_node;
+  if (!target || !target->visible() || !utf8) {
+    return;
+  }
+
+  TextInputEvent event;
+  event.text = utf8;
+  event.from_ime = from_ime;
+  event.target = target;
+  event.current_target = target;
+  target->fire_text_input(event);
+}
+
+void Instance::send_composition_event(CompositionEventType type, const char* utf8,
+                                      int selection_start, int selection_end) {
+  Node* target = impl_->focused_node;
+  if (!target || !target->visible()) {
+    return;
+  }
+
+  CompositionEvent event;
+  event.type = type;
+  event.text = utf8 ? utf8 : "";
+  event.selection_start = selection_start;
+  event.selection_end = selection_end;
+  event.target = target;
+  event.current_target = target;
+  target->fire_composition(event);
+}
+
 void Instance::send_event(const char *name) { impl_->fired_events.insert(std::string(name)); }
 
 // ============================================================================
@@ -619,7 +848,7 @@ void Instance::send_event(const char *name) { impl_->fired_events.insert(std::st
 
 AnimationController *Instance::animation_controller() const { return &impl_->animation_controller; }
 
-void Instance::add_timeline(Timeline::Ptr timeline) {
+void Instance::add_timeline(Timeline::SharedPtr timeline) {
   impl_->animation_controller.add_timeline(timeline);
 }
 
@@ -638,8 +867,13 @@ void Instance::stop_all() { impl_->animation_controller.stop_all(); }
 float Instance::get_input(const char *name) const {
   Symbol sym(name);
   auto it = impl_->inputs.find(sym);
-  if (it != impl_->inputs.end() && std::holds_alternative<float>(it->second)) {
-    return std::get<float>(it->second);
+  if (it != impl_->inputs.end()) {
+    if (std::holds_alternative<float>(it->second)) {
+      return std::get<float>(it->second);
+    }
+    if (std::holds_alternative<bool>(it->second)) {
+      return std::get<bool>(it->second) ? 1.0f : 0.0f;
+    }
   }
   return 0.0f;
 }

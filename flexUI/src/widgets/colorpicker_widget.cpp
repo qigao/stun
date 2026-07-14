@@ -4,9 +4,10 @@
 
 #include <flexUI/widgets/colorpicker_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -58,21 +59,21 @@ void ColorPickerWidget::rgb_to_hsv(float r, float g, float b, float& h, float& s
   v = cmax;
 }
 
-void ColorPickerWidget::render(const Element& elem, Renderer& renderer) {
-  auto& r = renderer.flex();
+void ColorPickerWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
   auto* style = elem.computed_style;
   Color bg_color{1.0f, 1.0f, 1.0f, 1.0f};
   if (style) bg_color = style->get_variable_color("--picker-bg", bg_color);
 
-  r.draw_rect(0, 0, elem.width(), elem.height(), 8, Paint::solid(bg_color), Paint::none(), 0);
+  commands.draw_rect(0, 0, elem.width(), elem.height(), 8,
+                     Paint::solid(bg_color), Paint::none(), 0);
 
-  render_gradient(r, elem);
-  render_hue_bar(r, elem);
-  render_preview(r, elem);
-  render_cursor(r, elem);
+  render_gradient(commands, elem);
+  render_hue_bar(commands, elem);
+  render_preview(commands, elem);
+  render_cursor(commands, elem);
 }
 
-void ColorPickerWidget::render_gradient(flex::Renderer& r, const Element& elem) {
+void ColorPickerWidget::render_gradient(RenderCommandList& commands, const Element& elem) {
   float padding = 12.0f;
   float hue_bar_w = 24.0f;
   float preview_h = 40.0f;
@@ -100,17 +101,17 @@ void ColorPickerWidget::render_gradient(flex::Renderer& r, const Element& elem) 
       float x = padding + col * cell_w;
       float y = padding + row * cell_h;
 
-      r.draw_rect(x, y, cell_w + 0.5f, cell_h + 0.5f, 0,
-                  Paint::solid(Color{cr, cg, cb, 1.0f}), Paint::none(), 0);
+      commands.draw_rect(x, y, cell_w + 0.5f, cell_h + 0.5f, 0,
+                         Paint::solid(Color{cr, cg, cb, 1.0f}), Paint::none(), 0);
     }
   }
 
   // Border around gradient area
-  r.draw_rect(padding, padding, grad_w, grad_h, 4,
-              Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
+  commands.draw_rect(padding, padding, grad_w, grad_h, 4,
+                     Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
 }
 
-void ColorPickerWidget::render_hue_bar(flex::Renderer& r, const Element& elem) {
+void ColorPickerWidget::render_hue_bar(RenderCommandList& commands, const Element& elem) {
   float padding = 12.0f;
   float hue_bar_w = 24.0f;
   float preview_h = 40.0f;
@@ -127,36 +128,33 @@ void ColorPickerWidget::render_hue_bar(flex::Renderer& r, const Element& elem) {
     hsv_to_rgb(hue, 1.0f, 1.0f, cr, cg, cb);
 
     float y = padding + i * seg_h;
-    r.draw_rect(bar_x, y, hue_bar_w, seg_h + 0.5f, 0,
-                Paint::solid(Color{cr, cg, cb, 1.0f}), Paint::none(), 0);
+    commands.draw_rect(bar_x, y, hue_bar_w, seg_h + 0.5f, 0,
+                       Paint::solid(Color{cr, cg, cb, 1.0f}), Paint::none(), 0);
   }
 
   // Border around hue bar
-  r.draw_rect(bar_x, padding, hue_bar_w, bar_h, 2,
-              Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
+  commands.draw_rect(bar_x, padding, hue_bar_w, bar_h, 2,
+                     Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
 
   // Hue indicator
   float indicator_y = padding + (hue_ / 360.0f) * bar_h;
-  r.draw_rect(bar_x - 2, indicator_y - 3, hue_bar_w + 4, 6, 2,
-              Paint::none(), Paint::solid(Color{1.0f, 1.0f, 1.0f, 1.0f}), 2);
+  commands.draw_rect(bar_x - 2, indicator_y - 3, hue_bar_w + 4, 6, 2,
+                     Paint::none(), Paint::solid(Color{1.0f, 1.0f, 1.0f, 1.0f}), 2);
 }
 
-void ColorPickerWidget::render_preview(flex::Renderer& r, const Element& elem) {
+void ColorPickerWidget::render_preview(RenderCommandList& commands, const Element& elem) {
   float padding = 12.0f;
   float preview_h = 40.0f;
   float preview_y = elem.height() - padding - preview_h;
   float preview_w = elem.width() - padding * 2;
 
-  // Preview rectangle with current color
-  r.draw_rect(padding, preview_y, preview_w, preview_h, 4,
-              Paint::solid(color_), Paint::none(), 0);
-
-  // Border
-  r.draw_rect(padding, preview_y, preview_w, preview_h, 4,
-              Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
+  commands.draw_rect(padding, preview_y, preview_w, preview_h, 4,
+                     Paint::solid(color_), Paint::none(), 0);
+  commands.draw_rect(padding, preview_y, preview_w, preview_h, 4,
+                     Paint::none(), Paint::solid(Color{0.78f, 0.78f, 0.78f, 1.0f}), 1);
 }
 
-void ColorPickerWidget::render_cursor(flex::Renderer& r, const Element& elem) {
+void ColorPickerWidget::render_cursor(RenderCommandList& commands, const Element& elem) {
   float padding = 12.0f;
   float hue_bar_w = 24.0f;
   float preview_h = 40.0f;
@@ -166,11 +164,10 @@ void ColorPickerWidget::render_cursor(flex::Renderer& r, const Element& elem) {
   float cx = padding + sat_ * grad_w;
   float cy = padding + (1 - val_) * grad_h;
 
-  // Outer circle (white)
-  r.draw_circle(cx, cy, 8, Paint::none(), Paint::solid(Color{1.0f, 1.0f, 1.0f, 1.0f}), 2);
-
-  // Inner circle (black)
-  r.draw_circle(cx, cy, 6, Paint::none(), Paint::solid(Color{0.0f, 0.0f, 0.0f, 1.0f}), 1);
+  commands.draw_circle(cx, cy, 8, Paint::none(),
+                       Paint::solid(Color{1.0f, 1.0f, 1.0f, 1.0f}), 2);
+  commands.draw_circle(cx, cy, 6, Paint::none(),
+                       Paint::solid(Color{0.0f, 0.0f, 0.0f, 1.0f}), 1);
 }
 
 bool ColorPickerWidget::handle_event(const Event& event, Element& elem) {
@@ -181,8 +178,10 @@ bool ColorPickerWidget::handle_event(const Event& event, Element& elem) {
   float grad_h = elem.height() - padding * 2 - preview_h - 8;
   float bar_x = elem.width() - padding - hue_bar_w;
 
-  float local_x = event.x - elem.absolute_x();
-  float local_y = event.y - elem.absolute_y();
+  const flex::Vec2 local_pos =
+      detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+  float local_x = local_pos.x;
+  float local_y = local_pos.y;
 
   if (event.type == EventType::MouseDown) {
     if (local_x >= bar_x && local_x <= bar_x + hue_bar_w &&

@@ -2,15 +2,6 @@ cmake_minimum_required(VERSION 3.14)
 
 project(mermaid_c4)
 
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c REQUIRED)
-    find_program(LEMON_EXECUTABLE lemon REQUIRED)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 # Generate Parser
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/c4_parser_gen.c" "${CMAKE_CURRENT_BINARY_DIR}/c4_parser_gen.h"
@@ -34,7 +25,7 @@ add_library(mermaid_c4 STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/c4_lexer_gen.c"
 )
 
-target_link_libraries(mermaid_c4 PUBLIC TurboNet::Parser)
+target_link_libraries(mermaid_c4 PUBLIC TurboUtils::Parser)
 
 target_include_directories(mermaid_c4 PUBLIC
     include
@@ -47,8 +38,8 @@ add_executable(c4_test
     tests/test_parser.c
 )
 
-target_link_libraries(c4_test PRIVATE mermaid_c4 TurboNet::TinyTest TurboNet::Parser)
-target_compile_definitions(c4_test PRIVATE GOLDEN_DIR="${CMAKE_SOURCE_DIR}/charts/mermaid/golden/c4") 
+target_link_libraries(c4_test PRIVATE mermaid_c4 TurboUtils::TinyTest TurboUtils::Parser)
+target_compile_definitions(c4_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/c4")
 
 enable_testing()
 add_test(NAME c4_test COMMAND c4_test)

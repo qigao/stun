@@ -1,0 +1,28 @@
+{
+  "name": "radio-group",
+  "source": "https://ui.shadcn.com/r/styles/new-york/radio-group.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "aspect-square",
+    "border",
+    "border-primary",
+    "disabled:cursor-not-allowed",
+    "disabled:opacity-50",
+    "fill-primary",
+    "flex",
+    "focus-visible:ring-1",
+    "focus-visible:ring-ring",
+    "focus:outline-none",
+    "gap-2",
+    "grid",
+    "h-3.5",
+    "h-4",
+    "items-center",
+    "justify-center",
+    "rounded-full",
+    "shadow",
+    "text-primary",
+    "w-3.5",
+    "w-4"
+  ]
+}

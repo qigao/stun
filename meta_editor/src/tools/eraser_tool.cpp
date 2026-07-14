@@ -47,7 +47,7 @@ void EraserTool::render_overlay(flex::Renderer& renderer) {
     flex::Paint stroke = flex::Paint::solid(flex::Color{1.0f, 0.3f, 0.3f, 0.8f});
     flex::Paint fill = flex::Paint::solid(flex::Color{1.0f, 0.3f, 0.3f, 0.15f});
     
-    renderer.draw_circle(cursor_pos_.x(), cursor_pos_.y(), size_ / 2,
+    renderer.draw_circle(cursor_pos_.x, cursor_pos_.y, size_ / 2,
                          fill, stroke, 2.0f);
 }
 

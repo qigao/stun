@@ -8,9 +8,10 @@
 #define FLEXUI_LABEL_WIDGET_H
 
 #include "../widget.h"
-#include "../group.h"
-#include "../shapes.h"
+#include "../render_command.h"
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace flexUI {
 
@@ -33,9 +34,17 @@ public:
     explicit LabelWidget(const std::string& text = "");
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
+    bool needs_frame_update(const Element& elem) const override {
+        (void)elem;
+        return false;
+    }
+    bool state_affects_paint(Symbol state) const override {
+        (void)state;
+        return false;
+    }
     const char* type_name() const override { return "LabelWidget"; }
 
     // Text access
@@ -43,19 +52,44 @@ public:
     void set_text(const std::string& text);
 
 private:
-    void rebuild_shapes(const Element& elem);
-    std::string process_text(const std::string& text, const Element& elem);
-    std::string apply_ellipsis(const std::string& text, float max_width, float font_size);
+    void sync_host_semantics() override;
+    bool render_cache_matches(const Element& elem,
+                              const std::string& display_text) const;
+    void update_render_cache_key(const Element& elem,
+                                 const std::string& display_text);
+    void invalidate_render_cache();
 
-    // Visual composition
-    Group root_;
-    TextShape* text_shape_ = nullptr;
-
-    // State
     std::string text_;
-    std::string cached_display_text_;
-    float cached_width_ = 0;
-    float cached_height_ = 0;
+    bool render_cache_valid_ = false;
+    std::string cached_text_;
+    float cached_width_ = 0.0f;
+    float cached_height_ = 0.0f;
+    float cached_font_size_ = 0.0f;
+    float cached_letter_spacing_ = 0.0f;
+    float cached_word_spacing_ = 0.0f;
+    float cached_text_indent_ = 0.0f;
+    float cached_tab_size_ = 8.0f;
+    int cached_font_weight_ = 0;
+    int cached_font_style_ = 0;
+    int cached_text_align_ = 0;
+    int cached_text_transform_ = 0;
+    int cached_direction_ = 0;
+    uint64_t cached_style_signature_ = 0;
+    std::string cached_font_family_;
+    Color cached_text_color_;
+    std::string cached_white_space_;
+    std::string cached_overflow_wrap_;
+    std::string cached_word_break_;
+    std::string cached_text_overflow_;
+    std::string cached_max_lines_;
+    std::string cached_line_clamp_;
+    std::string cached_vertical_align_;
+    std::string cached_line_height_;
+    std::string cached_text_decoration_;
+    std::string cached_text_decoration_thickness_;
+    std::string cached_text_underline_offset_;
+    std::string cached_font_variant_numeric_;
+    std::vector<RenderCommand> render_cache_;
 };
 
 } // namespace flexUI

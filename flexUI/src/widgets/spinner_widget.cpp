@@ -6,7 +6,7 @@
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
 #include <cmath>
 #include <stb_sprintf.h>
 
@@ -16,18 +16,36 @@ constexpr float PI = 3.14159265358979f;
 
 SpinnerWidget::SpinnerWidget(Variant variant) : variant_(variant) {}
 
-void SpinnerWidget::render(const Element& elem, Renderer& renderer) {
-  if (!spinning_) return;
-
-  auto& r = renderer.flex();
+void SpinnerWidget::sync_host_semantics() {
+  set_host_attribute("role", "status");
+  set_host_boolean_attribute("aria-busy", spinning_);
+  set_host_attribute("data-state", spinning_ ? "spinning" : "stopped");
   switch (variant_) {
-    case Variant::Ring: render_ring(r, elem); break;
-    case Variant::Dots: render_dots(r, elem); break;
-    case Variant::Bars: render_bars(r, elem); break;
+    case Variant::Dots:
+      set_host_attribute("data-variant", "dots");
+      break;
+    case Variant::Bars:
+      set_host_attribute("data-variant", "bars");
+      break;
+    case Variant::Ring:
+    default:
+      set_host_attribute("data-variant", "ring");
+      break;
   }
 }
 
-void SpinnerWidget::render_ring(flex::Renderer& r, const Element& elem) {
+void SpinnerWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+  sync_host_semantics();
+  if (!spinning_) return;
+
+  switch (variant_) {
+    case Variant::Ring: render_ring(commands, elem); break;
+    case Variant::Dots: render_dots(commands, elem); break;
+    case Variant::Bars: render_bars(commands, elem); break;
+  }
+}
+
+void SpinnerWidget::render_ring(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color color = {0.23f, 0.51f, 0.96f, 1.0f};  // Default: blue
@@ -43,9 +61,6 @@ void SpinnerWidget::render_ring(flex::Renderer& r, const Element& elem) {
   float cx = elem.width() / 2;
   float cy = elem.height() / 2;
   float radius = std::min(cx, cy) - stroke_width;
-
-  // Draw track (full circle)
-  r.draw_circle(cx, cy, radius, Paint::none(), Paint::solid(track), stroke_width);
 
   // Draw arc (270 degrees) as path
   float start_angle = rotation_ * PI / 180.0f;
@@ -69,10 +84,12 @@ void SpinnerWidget::render_ring(flex::Renderer& r, const Element& elem) {
     }
   }
 
-  r.stroke_path(path, Paint::solid(color), stroke_width);
+  commands.draw_circle(cx, cy, radius, Paint::none(), Paint::solid(track),
+                       stroke_width);
+  commands.stroke_path(path, Paint::solid(color), stroke_width);
 }
 
-void SpinnerWidget::render_dots(flex::Renderer& r, const Element& elem) {
+void SpinnerWidget::render_dots(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color color = {0.23f, 0.51f, 0.96f, 1.0f};
@@ -96,11 +113,12 @@ void SpinnerWidget::render_dots(flex::Renderer& r, const Element& elem) {
     Color dot_color = color;
     dot_color.a = alpha_factor * color.a;
 
-    r.draw_circle(x, y, dot_radius, Paint::solid(dot_color), Paint::none(), 0);
+    commands.draw_circle(x, y, dot_radius, Paint::solid(dot_color),
+                         Paint::none(), 0);
   }
 }
 
-void SpinnerWidget::render_bars(flex::Renderer& r, const Element& elem) {
+void SpinnerWidget::render_bars(RenderCommandList& commands, const Element& elem) {
   auto* style = elem.computed_style;
 
   Color color = {0.23f, 0.51f, 0.96f, 1.0f};
@@ -125,7 +143,8 @@ void SpinnerWidget::render_bars(flex::Renderer& r, const Element& elem) {
     float h = bar_height * (0.3f + 0.7f * scale);
     float y = (elem.height() - h) / 2;
 
-    r.draw_rect(x, y, bar_width, h, bar_width / 2, Paint::solid(color), Paint::none(), 0);
+    commands.draw_rect(x, y, bar_width, h, bar_width / 2, Paint::solid(color),
+                       Paint::none(), 0);
   }
 }
 
@@ -134,6 +153,7 @@ bool SpinnerWidget::handle_event(const Event& event, Element& elem) {
 }
 
 void SpinnerWidget::update(float delta_ms, Element& elem) {
+  sync_host_semantics();
   if (!spinning_) return;
 
   auto* style = elem.computed_style;

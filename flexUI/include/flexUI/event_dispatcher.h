@@ -48,6 +48,7 @@ public:
   // 状态查询
   Element* hovered_element() const { return hovered_; }
   Element* active_element() const { return active_; }
+  void detach_subtree(Element* root);
 
   // 全局事件回调
   void set_event_callback(EventCallback cb) { callback_ = cb; }
@@ -70,6 +71,7 @@ private:
   Element* active_ = nullptr;
   Element* focused_ = nullptr;
   Element* capturing_ = nullptr;
+  bool prefers_focus_visible_ = false;
 
   EventCallback callback_;
 };

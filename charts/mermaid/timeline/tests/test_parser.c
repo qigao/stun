@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "tinytest.h"
+#define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "timeline/timeline_ast.h"
 #include "turbo_parser.h"
 

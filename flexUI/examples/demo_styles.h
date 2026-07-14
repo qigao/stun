@@ -171,6 +171,10 @@ const std::string DEMO_CSS = R"(
         height: 24;
     }
 
+    #backend-status {
+        --text-overflow: ellipsis;
+    }
+
     input {
         background-color: var(--bg-input);
         --text-color: var(--text-main);
@@ -185,6 +189,21 @@ const std::string DEMO_CSS = R"(
         /* Widget specific variables */
         --input-bg: var(--bg-input);
         --input-text: var(--text-main);
+    }
+
+    textarea {
+        background-color: var(--bg-input);
+        color: var(--text-main);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--border);
+        border-radius: 6;
+        padding: 8 12 8 12;
+        font-size: 13;
+        --textarea-bg: var(--bg-input);
+        --textarea-border: var(--border);
+        --textarea-text: var(--text-main);
+        --textarea-placeholder: var(--text-muted);
     }
 
     /* =========================================
@@ -220,8 +239,8 @@ const std::string DEMO_CSS = R"(
        Widgets: Toggles
        ========================================= */
     checkbox {
-        width: 20;
         height: 20;
+        --checkbox-size: 20;
         border-radius: 4;
         border-width: 1;
         border-color: var(--border);
@@ -235,7 +254,6 @@ const std::string DEMO_CSS = R"(
     }
 
     switch {
-        width: 44;
         height: 24;
         border-radius: 12;
         background-color: var(--bg-panel);
@@ -261,17 +279,29 @@ const std::string DEMO_CSS = R"(
     slider {
         width: 100%;
         height: 32;
-        --track-color: var(--bg-panel);
-        --thumb-color: var(--primary);
-        --active-color: var(--primary);
+    }
+
+    slider > track {
+        background-color: var(--bg-panel);
+    }
+
+    slider > fill,
+    slider > thumb {
+        background-color: var(--primary);
     }
 
     progressbar {
         width: 100%;
         height: 6;
         border-radius: 3;
+    }
+
+    progressbar > track {
         background-color: var(--bg-panel);
-        --fill-color: var(--primary);
+    }
+
+    progressbar > fill {
+        background-color: var(--primary);
     }
 
     spinner {
@@ -290,6 +320,25 @@ const std::string DEMO_CSS = R"(
         flex-shrink: 0;
         background-color: var(--danger);
         --text-color: 255,255,255,255;
+    }
+
+    avatar {
+        width: 56;
+        height: 56;
+        --avatar-size: 48;
+        --avatar-bg: var(--primary);
+        --avatar-text: 255,255,255,255;
+        --avatar-border: 15,23,42,255;
+        --avatar-border-width: 2;
+        --status-size: 12;
+    }
+
+    .avatar-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 12;
+        height: 64;
     }
 
     /* =========================================
@@ -445,6 +494,30 @@ const std::string DEMO_CSS = R"(
     /* Utility: Hidden */
     .hidden {
         display: none;
+    }
+)";
+
+const std::string DEMO_STATE_CSS = R"(
+    .hidden {
+        display: none;
+    }
+
+    .tab-page[data-state=inactive] {
+        display: none;
+    }
+
+    .live-task-row {
+        border: 1px solid var(--border);
+        color: var(--foreground);
+        cursor: pointer;
+    }
+
+    .live-task-row:hover {
+        background-color: var(--accent);
+    }
+
+    .live-task-row[data-state=complete] {
+        color: var(--muted-foreground);
     }
 )";
 

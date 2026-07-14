@@ -1,0 +1,28 @@
+{
+  "component": "Separator",
+  "kind": "leaf",
+  "root": "separator_root",
+  "nodes": [
+    {
+      "id": "separator_root",
+      "type": "element",
+      "tag": "div",
+      "role": "separator",
+      "states": ["horizontal", "vertical", "decorative"],
+      "attrs": {
+        "data-slot": "separator",
+        "data-orientation": "horizontal",
+        "aria-orientation": "horizontal"
+      }
+    }
+  ],
+  "variants": {
+    "orientation": ["horizontal", "vertical"]
+  },
+  "defaults": {
+    "orientation": "horizontal"
+  },
+  "meta": {
+    "source": "shadcn/separator"
+  }
+}

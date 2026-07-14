@@ -166,30 +166,30 @@ bool SelectTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec2&
         const auto& selected = selection_->selection();
 
         flex::Bounds new_bounds = selection_->selection_bounds();
-        new_bounds.x += delta.x();
-        new_bounds.y += delta.y();
+        new_bounds.x += delta.x;
+        new_bounds.y += delta.y;
 
         if (snap_helper_) {
             std::vector<flex::Node*> excluded(selected.begin(), selected.end());
             auto snap_result = snap_helper_->snap_bounds(new_bounds, excluded);
 
-            float snap_dx = snap_result.snapped_pos.x() - new_bounds.x + delta.x();
-            float snap_dy = snap_result.snapped_pos.y() - new_bounds.y + delta.y();
+            float snap_dx = snap_result.snapped_pos.x - new_bounds.x + delta.x;
+            float snap_dy = snap_result.snapped_pos.y - new_bounds.y + delta.y;
 
             for (size_t i = 0; i < selected.size(); ++i) {
                 auto original_pos = original_positions_[i];
-                selected[i]->set_position(original_pos.x() + snap_dx, original_pos.y() + snap_dy);
+                selected[i]->set_position(original_pos.x + snap_dx, original_pos.y + snap_dy);
             }
         } else {
             for (size_t i = 0; i < selected.size(); ++i) {
                 auto original_pos = original_positions_[i];
-                float new_x = original_pos.x() + delta.x();
-                float new_y = original_pos.y() + delta.y();
+                float new_x = original_pos.x + delta.x;
+                float new_y = original_pos.y + delta.y;
 
                 if (canvas_->is_snap_to_grid()) {
                     auto snapped = canvas_->snap_to_grid(flex::Vec2(new_x, new_y));
-                    new_x = snapped.x();
-                    new_y = snapped.y();
+                    new_x = snapped.x;
+                    new_y = snapped.y;
                 }
                 selected[i]->set_position(new_x, new_y);
             }
@@ -254,15 +254,15 @@ bool SelectTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& w
         
         for (size_t i = 0; i < selected.size(); ++i) {
             new_positions.push_back(flex::Vec2(selected[i]->x(), selected[i]->y()));
-            if (new_positions[i].x() != original_positions_[i].x() ||
-                new_positions[i].y() != original_positions_[i].y()) {
+            if (new_positions[i].x != original_positions_[i].x ||
+                new_positions[i].y != original_positions_[i].y) {
                 moved = true;
             }
         }
 
         if (moved && commands_) {
             for (size_t i = 0; i < selected.size(); ++i) {
-                selected[i]->set_position(original_positions_[i].x(), original_positions_[i].y());
+                selected[i]->set_position(original_positions_[i].x, original_positions_[i].y);
             }
             auto cmd = std::make_unique<MoveCommand>(
                 std::vector<flex::Node*>(selected.begin(), selected.end()),
@@ -303,20 +303,20 @@ bool SelectTool::is_double_click(const flex::Vec2& pos) {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_click_time_).count();
 
-    float dx = pos.x() - last_click_pos_.x();
-    float dy = pos.y() - last_click_pos_.y();
+    float dx = pos.x - last_click_pos_.x;
+    float dy = pos.y - last_click_pos_.y;
     float dist_sq = dx * dx + dy * dy;
 
     return (elapsed < 400 && dist_sq < 100.0f);
 }
 
 void SelectTool::apply_rotate(const flex::Vec2& screen_pos) {
-    float dx = screen_pos.x() - rotation_center_.x();
-    float dy = screen_pos.y() - rotation_center_.y();
+    float dx = screen_pos.x - rotation_center_.x;
+    float dy = screen_pos.y - rotation_center_.y;
     float current_angle = std::atan2(dy, dx) * 180.0f / 3.14159f;
 
-    float start_dx = drag_start_screen_.x() - rotation_center_.x();
-    float start_dy = drag_start_screen_.y() - rotation_center_.y();
+    float start_dx = drag_start_screen_.x - rotation_center_.x;
+    float start_dy = drag_start_screen_.y - rotation_center_.y;
     float start_angle = std::atan2(start_dy, start_dx) * 180.0f / 3.14159f;
 
     float delta_angle = current_angle - start_angle;
@@ -339,8 +339,8 @@ void SelectTool::apply_resize(const flex::Vec2& screen_pos) {
     }
 
     flex::Vec2 start_world = canvas_->screen_to_world(drag_start_screen_);
-    float dx = world_pos.x() - start_world.x();
-    float dy = world_pos.y() - start_world.y();
+    float dx = world_pos.x - start_world.x;
+    float dy = world_pos.y - start_world.y;
 
     float ox = original_bounds_.x;
     float oy = original_bounds_.y;
@@ -405,15 +405,15 @@ void SelectTool::apply_resize(const flex::Vec2& screen_pos) {
         const auto& orig_pos = original_positions_[i];
         const auto& orig_size = original_sizes_[i];
 
-        float rel_x = ow > 0 ? (orig_pos.x() - ox) / ow : 0;
-        float rel_y = oh > 0 ? (orig_pos.y() - oy) / oh : 0;
+        float rel_x = ow > 0 ? (orig_pos.x - ox) / ow : 0;
+        float rel_y = oh > 0 ? (orig_pos.y - oy) / oh : 0;
         node->set_position(nx + rel_x * nw, ny + rel_y * nh);
 
         if (node->type() == flex::NodeType::Shape) {
             auto* shape = static_cast<flex::Shape*>(node);
-            float new_w = orig_size.x() * scale_x;
-            float new_h = orig_size.y() * scale_y;
-            float new_radius = (orig_size.x() + orig_size.y()) / 4 * (scale_x + scale_y) / 2;
+            float new_w = orig_size.x * scale_x;
+            float new_h = orig_size.y * scale_y;
+            float new_radius = (orig_size.x + orig_size.y) / 4 * (scale_x + scale_y) / 2;
 
             switch (shape->geometry_type()) {
                 case flex::GeometryType::Rect: {
@@ -425,7 +425,7 @@ void SelectTool::apply_resize(const flex::Vec2& screen_pos) {
                     shape->set_circle(new_radius);
                     break;
                 case flex::GeometryType::Ellipse:
-                    shape->set_ellipse(orig_size.x() / 2 * scale_x, orig_size.y() / 2 * scale_y);
+                    shape->set_ellipse(orig_size.x / 2 * scale_x, orig_size.y / 2 * scale_y);
                     break;
                 case flex::GeometryType::Polygon: {
                     auto p = shape->polygon();
@@ -442,7 +442,7 @@ void SelectTool::apply_resize(const flex::Vec2& screen_pos) {
                     shape->set_triangle(new_w, new_h, shape->triangle().direction);
                     break;
                 case flex::GeometryType::Line:
-                    shape->set_line(orig_size.x() * scale_x, orig_size.y() * scale_y);
+                    shape->set_line(orig_size.x * scale_x, orig_size.y * scale_y);
                     break;
                 case flex::GeometryType::Ring: {
                     auto r = shape->ring();
@@ -481,10 +481,10 @@ void SelectTool::render_snap_guides(flex::Renderer& renderer) {
 }
 
 void SelectTool::render_marquee(flex::Renderer& renderer) {
-    float x = std::min(drag_start_world_.x(), marquee_end_.x());
-    float y = std::min(drag_start_world_.y(), marquee_end_.y());
-    float w = std::abs(marquee_end_.x() - drag_start_world_.x());
-    float h = std::abs(marquee_end_.y() - drag_start_world_.y());
+    float x = std::min(drag_start_world_.x, marquee_end_.x);
+    float y = std::min(drag_start_world_.y, marquee_end_.y);
+    float w = std::abs(marquee_end_.x - drag_start_world_.x);
+    float h = std::abs(marquee_end_.y - drag_start_world_.y);
 
     flex::Paint fill = flex::Paint::solid(flex::Color{0.3f, 0.5f, 0.9f, 0.15f});
     flex::Paint stroke = flex::Paint::solid(flex::Color{0.3f, 0.5f, 0.9f, 0.8f});
@@ -500,10 +500,10 @@ void SelectTool::render_marquee(flex::Renderer& renderer) {
 std::vector<flex::Node*> SelectTool::get_nodes_in_marquee() {
     std::vector<flex::Node*> result;
 
-    float x1 = std::min(drag_start_world_.x(), marquee_end_.x());
-    float y1 = std::min(drag_start_world_.y(), marquee_end_.y());
-    float x2 = std::max(drag_start_world_.x(), marquee_end_.x());
-    float y2 = std::max(drag_start_world_.y(), marquee_end_.y());
+    float x1 = std::min(drag_start_world_.x, marquee_end_.x);
+    float y1 = std::min(drag_start_world_.y, marquee_end_.y);
+    float x2 = std::max(drag_start_world_.x, marquee_end_.x);
+    float y2 = std::max(drag_start_world_.y, marquee_end_.y);
 
     flex::Bounds marquee{x1, y1, x2 - x1, y2 - y1};
 

@@ -133,7 +133,7 @@ char* timeline_to_json(const TimelineDiagram* d) {
         json_value_t *null_val = turbo_json_create_null();
         size_t len;
         char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(null_val);
+        turbo_free_json(&null_val);
         return s;
     }
 

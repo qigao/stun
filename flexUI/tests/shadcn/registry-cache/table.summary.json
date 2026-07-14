@@ -1,0 +1,31 @@
+{
+  "name": "table",
+  "source": "https://ui.shadcn.com/r/styles/new-york/table.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "[&_tr:last-child]:border-0",
+    "[&_tr]:border-b",
+    "[&:has([role=checkbox])]:pr-0",
+    "[&>[role=checkbox]]:translate-y-[2px]",
+    "[&>tr]:last:border-b-0",
+    "align-middle",
+    "bg-muted/50",
+    "border-b",
+    "border-t",
+    "caption-bottom",
+    "data-[state=selected]:bg-muted",
+    "font-medium",
+    "h-10",
+    "hover:bg-muted/50",
+    "mt-4",
+    "overflow-auto",
+    "p-2",
+    "px-2",
+    "relative",
+    "text-left",
+    "text-muted-foreground",
+    "text-sm",
+    "transition-colors",
+    "w-full"
+  ]
+}

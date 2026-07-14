@@ -77,6 +77,13 @@ yyloop:
         "}" { update_position(state, tok_start); return Token{TOK_RBRACE, "}", state->line, state->column}; }
         "[" { update_position(state, tok_start); return Token{TOK_LBRACKET, "[", state->line, state->column}; }
         "]" { update_position(state, tok_start); return Token{TOK_RBRACKET, "]", state->line, state->column}; }
+        "(" { update_position(state, tok_start); return Token{TOK_LPAREN, "(", state->line, state->column}; }
+        ")" { update_position(state, tok_start); return Token{TOK_RPAREN, ")", state->line, state->column}; }
+        "+" { update_position(state, tok_start); return Token{TOK_PLUS, "+", state->line, state->column}; }
+        "-" { update_position(state, tok_start); return Token{TOK_MINUS, "-", state->line, state->column}; }
+        "*" { update_position(state, tok_start); return Token{TOK_STAR, "*", state->line, state->column}; }
+        "/" { update_position(state, tok_start); return Token{TOK_SLASH, "/", state->line, state->column}; }
+        "%" { update_position(state, tok_start); return Token{TOK_PERCENT, "%", state->line, state->column}; }
         ":" { update_position(state, tok_start); return Token{TOK_COLON, ":", state->line, state->column}; }
         "," { update_position(state, tok_start); return Token{TOK_COMMA, ",", state->line, state->column}; }
 
@@ -88,7 +95,7 @@ yyloop:
         }
 
         // Number
-        "-"? digit+ ("." digit+)? {
+        digit+ ("." digit+)? {
             update_position(state, tok_start);
             std::string value(tok_start, state->cursor - tok_start);
             return Token{TOK_NUMBER, value, state->line, state->column};

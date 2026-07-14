@@ -1,0 +1,72 @@
+{
+  "component": "Resizable",
+  "kind": "composite",
+  "root": "resizable_group",
+  "nodes": [
+    {
+      "id": "resizable_group",
+      "type": "element",
+      "tag": "div",
+      "role": "group",
+      "states": ["vertical", "resizing"],
+      "attrs": {
+        "data-slot": "resizable-panel-group",
+        "data-panel-group-direction": "horizontal"
+      }
+    },
+    {
+      "id": "resizable_panel_start",
+      "type": "element",
+      "tag": "div",
+      "slot": "panel",
+      "states": ["collapsed"],
+      "attrs": {
+        "data-slot": "resizable-panel",
+        "data-panel-id": "start"
+      }
+    },
+    {
+      "id": "resizable_handle",
+      "type": "element",
+      "tag": "div",
+      "slot": "handle",
+      "role": "separator",
+      "states": ["vertical", "dragging", "focus-visible"],
+      "attrs": {
+        "data-slot": "resizable-handle",
+        "data-panel-resize-handle-id": "handle",
+        "data-orientation": "horizontal",
+        "aria-orientation": "vertical"
+      }
+    },
+    {
+      "id": "resizable_handle_grip",
+      "type": "element",
+      "tag": "span",
+      "slot": "handle-grip",
+      "attrs": {
+        "data-slot": "resizable-handle-grip",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "id": "resizable_panel_end",
+      "type": "element",
+      "tag": "div",
+      "slot": "panel",
+      "attrs": {
+        "data-slot": "resizable-panel",
+        "data-panel-id": "end"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "resizable_group", "child": "resizable_panel_start" },
+    { "parent": "resizable_group", "child": "resizable_handle" },
+    { "parent": "resizable_handle", "child": "resizable_handle_grip" },
+    { "parent": "resizable_group", "child": "resizable_panel_end" }
+  ],
+  "meta": {
+    "source": "shadcn/resizable"
+  }
+}

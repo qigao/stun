@@ -1,0 +1,52 @@
+{
+  "bridges": [
+    {
+      "target": "pagination_page_current",
+      "state": "current",
+      "attributes": {
+        "aria-current": "page",
+        "data-active": "true"
+      },
+      "properties": {
+        "current": true
+      }
+    },
+    {
+      "target": "pagination_previous",
+      "state": "disabled",
+      "attributes": {
+        "aria-disabled": "true",
+        "data-disabled": ""
+      },
+      "properties": {
+        "disabled": true
+      }
+    },
+    {
+      "target": "pagination_next",
+      "state": "disabled",
+      "attributes": {
+        "aria-disabled": "true",
+        "data-disabled": ""
+      },
+      "properties": {
+        "disabled": true
+      }
+    },
+    {
+      "target": "pagination_previous",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "pagination_page_current",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "pagination_next",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

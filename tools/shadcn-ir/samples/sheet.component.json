@@ -1,0 +1,119 @@
+{
+  "component": "Sheet",
+  "kind": "composite",
+  "root": "sheet_root",
+  "nodes": [
+    {
+      "id": "sheet_root",
+      "type": "element",
+      "tag": "div",
+      "role": "dialog",
+      "states": ["open", "closed", "modal"],
+      "attrs": {
+        "data-slot": "sheet",
+        "aria-modal": true,
+        "aria-hidden": true
+      }
+    },
+    {
+      "id": "sheet_overlay",
+      "type": "element",
+      "tag": "div",
+      "slot": "overlay",
+      "states": ["open", "closed"],
+      "attrs": {
+        "data-slot": "sheet-overlay",
+        "data-state": "closed"
+      }
+    },
+    {
+      "id": "sheet_content",
+      "type": "element",
+      "tag": "div",
+      "slot": "content",
+      "states": ["open", "closed"],
+      "attrs": {
+        "data-slot": "sheet-content",
+        "data-state": "closed",
+        "data-side": "right"
+      }
+    },
+    {
+      "id": "sheet_close",
+      "type": "element",
+      "tag": "button",
+      "slot": "close",
+      "role": "button",
+      "states": ["hover", "focus", "disabled"],
+      "attrs": {
+        "data-slot": "sheet-close",
+        "type": "button",
+        "aria-label": "Close"
+      }
+    },
+    {
+      "id": "sheet_header",
+      "type": "element",
+      "tag": "div",
+      "slot": "header",
+      "attrs": {
+        "data-slot": "sheet-header"
+      }
+    },
+    {
+      "id": "sheet_title",
+      "type": "element",
+      "tag": "div",
+      "slot": "title",
+      "attrs": {
+        "data-slot": "sheet-title"
+      },
+      "props": {
+        "text": "Sheet title"
+      }
+    },
+    {
+      "id": "sheet_description",
+      "type": "element",
+      "tag": "div",
+      "slot": "description",
+      "attrs": {
+        "data-slot": "sheet-description"
+      },
+      "props": {
+        "text": "Sheet description"
+      }
+    },
+    {
+      "id": "sheet_footer",
+      "type": "element",
+      "tag": "div",
+      "slot": "footer",
+      "attrs": {
+        "data-slot": "sheet-footer"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "sheet_root", "child": "sheet_overlay" },
+    { "parent": "sheet_root", "child": "sheet_content" },
+    { "parent": "sheet_content", "child": "sheet_close" },
+    { "parent": "sheet_content", "child": "sheet_header" },
+    { "parent": "sheet_header", "child": "sheet_title" },
+    { "parent": "sheet_header", "child": "sheet_description" },
+    { "parent": "sheet_content", "child": "sheet_footer" }
+  ],
+  "variants": {
+    "side": ["top", "bottom", "left", "right"]
+  },
+  "defaults": {
+    "side": "right"
+  },
+  "overlay": {
+    "portal": true,
+    "modal": true
+  },
+  "meta": {
+    "source": "shadcn/sheet"
+  }
+}

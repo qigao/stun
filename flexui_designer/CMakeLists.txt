@@ -35,7 +35,7 @@ target_link_libraries(flexui_designer
         meta_editor
         flexUI
         flex
-        TurboNet::Core
+        TurboNet::CoroNet
         nfd
 )
 

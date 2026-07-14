@@ -30,6 +30,7 @@ struct LayoutResult {
     int canvas_height = 600;
     int content_start_y = 100;
     std::vector<LayoutNode> nodes;
+    std::vector<int> parent_index;
 };
 
 // ============================================================================

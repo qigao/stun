@@ -146,8 +146,10 @@ char* block_to_json(BlockDiagram* diagram) {
 }
 
 BlockDiagram* block_parse(const char* input) {
+    if (!input) return NULL;
     BlockParserContext ctx;
     ctx.diagram = (BlockDiagram*)malloc(sizeof(BlockDiagram));
+    if (!ctx.diagram) return NULL;
     memset(ctx.diagram, 0, sizeof(BlockDiagram));
     ctx.current_container = NULL;
     ctx.container_stack = NULL;
@@ -155,6 +157,10 @@ BlockDiagram* block_parse(const char* input) {
     ctx.error_message = NULL;
 
     void* parser = BlockParserAlloc(malloc);
+    if (!parser) {
+        block_free(ctx.diagram);
+        return NULL;
+    }
 
     Scanner s;
     s.start = input;

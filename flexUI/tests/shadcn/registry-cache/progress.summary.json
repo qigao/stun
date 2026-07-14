@@ -1,0 +1,17 @@
+{
+  "name": "progress",
+  "source": "https://ui.shadcn.com/r/styles/new-york/progress.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "bg-primary",
+    "bg-primary/20",
+    "flex-1",
+    "h-2",
+    "h-full",
+    "overflow-hidden",
+    "relative",
+    "rounded-full",
+    "transition-all",
+    "w-full"
+  ]
+}

@@ -5,11 +5,13 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <thorvg.h> 
+#include <nlohmann/json.hpp>
 #include <flexUI.h>
 #include "glfw_app.h"
 #include <flex/bridge/renderer.h>
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/shadcn_ir.h>
 #include <flexUI/widgets/button_widget.h>
 #include <flexUI/widgets/label_widget.h>
 #include <flexUI/widgets/input_widget.h>
@@ -39,13 +41,83 @@
 #include <flexUI/widgets/pagination_widget.h>
 #include <flexUI/widgets/stepper_widget.h>
 #include <flexUI/widgets/textarea_widget.h>
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <fstream>
-#include <vector>
+#include <filesystem>
+#include <initializer_list>
+#include <stdexcept>
 #include "demo_styles.h"
+#include "host_input_bridge.h"
+#include "renderer_capability_label.h"
 
 using namespace flexUI;
+
+namespace {
+
+std::string demo_asset_path(const char* relative_path) {
+    const auto root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+    return (root / relative_path).string();
+}
+
+nlohmann::json load_json_file(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    if (!input) {
+        throw std::runtime_error("unable to open json file: " + path.string());
+    }
+    nlohmann::json value;
+    input >> value;
+    return value;
+}
+
+void enable_shadcn_utility_jit(flexUI::Box& box) {
+    const auto root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+    const auto whitelist_path =
+        root / "tools" / "shadcn-ir" / "schema" / "utility_whitelist.json";
+    box.enable_utility_jit(load_json_file(whitelist_path));
+}
+
+void add_classes(flexUI::Element* elem, std::initializer_list<const char*> classes) {
+    if (!elem) {
+        return;
+    }
+    for (const char* cls : classes) {
+        if (cls && *cls) {
+            elem->add_class(cls);
+        }
+    }
+}
+
+const char* kShadcnThemeCss = R"(
+    * {
+        box-sizing: border-box;
+    }
+
+    #root {
+        --background: #0f172a;
+        --foreground: #f8fafc;
+        --card: #334155;
+        --card-foreground: #f8fafc;
+        --popover: #1e293b;
+        --popover-foreground: #f8fafc;
+        --primary: #3b82f6;
+        --primary-foreground: #ffffff;
+        --secondary: #475569;
+        --secondary-foreground: #f8fafc;
+        --muted: #1e293b;
+        --muted-foreground: #94a3b8;
+        --accent: #2563eb;
+        --accent-foreground: #ffffff;
+        --destructive: #ef4444;
+        --destructive-foreground: #ffffff;
+        --border: #475569;
+        --input: #0f172a;
+        --ring: #60a5fa;
+    }
+)";
+
+} // namespace
 
 class VisualDemo : public ::flex::GlfwApp {
 public:
@@ -56,6 +128,8 @@ protected:
         // Try multiple paths for the font file
         const char* font_paths[] = {
             "fonts/NotoSansSC-Regular.ttf",
+            "C:/Windows/Fonts/msyh.ttc",
+            "C:/Windows/Fonts/arial.ttf",
          };
 
         bool loaded = false;
@@ -75,17 +149,32 @@ protected:
 
         box_ = std::make_unique<flexUI::Box>(renderer());
         box_->set_viewport((float)width(), (float)height());
+        box_->load_css(kShadcnThemeCss);
         box_->load_css(examples::DEMO_CSS);
+        try {
+            enable_shadcn_utility_jit(*box_);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Could not enable shadcn utility JIT: "
+                      << e.what() << std::endl;
+            return false;
+        }
+        box_->load_css(examples::DEMO_STATE_CSS);
 
         auto* root = box_->create("div", "root");
+        add_classes(root, {"flex", "flex-row", "w-[1200px]", "h-[900px]",
+                           "bg-background"});
         box_->set_root(root);
 
         // Sidebar
         auto* sidebar = box_->create("div", "sidebar");
+        add_classes(sidebar, {"flex", "flex-col", "w-[260px]", "h-[900px]",
+                              "p-5", "gap-2.5", "bg-muted", "shadow-lg"});
         root->append(sidebar);
 
         auto* brand = box_->create("div");
         brand->add_class("brand");
+        add_classes(brand, {"flex", "items-center", "text-2xl", "w-[220px]",
+                            "h-[60px]", "pb-5", "text-foreground"});
         brand->append(box_->create_widget<LabelWidget>("span", "", "flexUI"));
         sidebar->append(brand);
 
@@ -93,6 +182,9 @@ protected:
         for (int i = 0; i < 4; ++i) {
             auto* btn = box_->create_widget<ButtonWidget>("button", "");
             btn->add_class("nav-item");
+            add_classes(btn, {"flex", "items-center", "w-[220px]", "h-[40px]",
+                              "rounded-lg", "px-3", "bg-transparent",
+                              "text-muted-foreground"});
             static_cast<ButtonWidget*>(btn->widget)->set_text(menu_items[i]);
             if (i == 0) btn->add_class("active");
             
@@ -100,26 +192,34 @@ protected:
             sidebar->append(btn);
         }
 
-        sidebar->append(box_->create("divider", ""));
+        auto* divider = box_->create("divider", "");
+        add_classes(divider, {"w-[220px]", "h-[1px]", "bg-border", "my-2.5"});
+        sidebar->append(divider);
 
         // Main Content
         auto* main = box_->create("div", "main-content");
+        add_classes(main, {"flex", "flex-col", "w-[940px]", "h-[900px]",
+                           "p-10", "gap-6", "bg-background"});
         root->append(main);
 
         // Header
         auto* header = box_->create("div");
-        header->style_.display = Display::Flex;
-        header->style_.flex_direction = FlexDirection::Row;
-        header->style_.justify_content = JustifyContent::SpaceBetween;
-        header->style_.align_items = AlignItems::Center;
-        header->style_.width = 860.0f;
-        header->style_.height = 60.0f;
-        header->style_.margin[2] = 20.0f; 
+        add_classes(header, {"flex", "flex-row", "justify-between",
+                             "items-center", "w-[860px]", "h-[60px]",
+                             "mb-5"});
 
         title_label_ = box_->create_widget<LabelWidget>("label", "", "Component Gallery");
-        title_label_->style_.font_size = 24.0f;
-        title_label_->style_.width = 400.0f;
+        add_classes(title_label_, {"text-2xl", "w-[400px]", "text-foreground"});
         header->append(title_label_);
+
+        backend_label_ = box_->create_widget<LabelWidget>(
+            "label", "backend-status",
+            std::string("Renderer ") +
+                flexui_examples::renderer_capability_label(box_->renderer_capabilities()));
+        add_classes(backend_label_, {"text-[11px]", "w-[240px]",
+                                     "text-muted-foreground", "overflow-hidden",
+                                     "whitespace-nowrap"});
+        header->append(backend_label_);
         
         auto* search = box_->create_widget<InputWidget>("input", "search-box");
         static_cast<InputWidget*>(search->widget)->set_placeholder("Search...");
@@ -128,6 +228,7 @@ protected:
 
         // View Container
         auto* container = box_->create("div", "view-container");
+        add_classes(container, {"flex", "relative", "w-[860px]", "h-[800px]"});
         main->append(container);
 
         // Build all views
@@ -153,12 +254,12 @@ protected:
             }
         });
 
-        box_->update();
         return true;
     }
 
     void switch_view(int index) {
         if (index < 0 || index >= 4) return;
+        active_view_ = index;
         
         static const char* titles[] = {"Component Gallery", "Calendar & Scheduling", "Data Management", "Interface Tabs"};
         static_cast<LabelWidget*>(title_label_->widget)->set_text(titles[index]);
@@ -175,35 +276,15 @@ protected:
         }
         
         box_->invalidate();
-        box_->update();
     }
 
     void on_update(float dt) override {
         box_->update_time(dt * 1000.0f);
-        progress_val_ += dt * 0.05f;
-        if (progress_val_ > 1.0f) progress_val_ = 0.0f;
-        if (progress_elem_) {
-            static_cast<ProgressBarWidget*>(progress_elem_->widget)->set_value(progress_val_ * 100.0f);
-            progress_elem_->mark_paint_dirty();
-        }
-
-        // Sync IME position
-        box_->update();
-        auto* focused = box_->focused_element();
-        if (focused && focused->widget && focused->widget->wants_text_input()) {
-            float x = 0, y = 0, w = 0, h = 0;
-            focused->widget->get_caret_rect(*focused, x, y, w, h);
-            // Convert local caret pos to screen pos (physical pixels)
-            flex::Vec2 screen_pos = focused->to_world(flex::Vec2(x, y + h));
-            update_ime_position((int)screen_pos.x(), (int)screen_pos.y());
-        }
+        sync_ime_caret();
     }
 
     void on_render() override {
-        box_->invalidate();
         box_->update();
-        canvas()->draw();
-        canvas()->sync();
     }
 
     void on_resize(int w, int h) override {
@@ -212,11 +293,12 @@ protected:
     }
 
     void on_mouse_button(int button, int action, int mods) override {
-        double x, y;
-        glfwGetCursorPos(window(), &x, &y);
+        float x = 0.0f;
+        float y = 0.0f;
+        cursor_position(x, y);
         auto e = (action == GLFW_PRESS)
-            ? Event::mouse_down((float)x, (float)y, glfw_to_button(button))
-            : Event::mouse_up((float)x, (float)y, glfw_to_button(button));
+            ? Event::mouse_down(x, y, glfw_to_button(button))
+            : Event::mouse_up(x, y, glfw_to_button(button));
         box_->dispatch_event(e);
     }
 
@@ -238,9 +320,10 @@ protected:
     }
 
     void on_scroll(double dx, double dy) override {
-        double x, y;
-        glfwGetCursorPos(window(), &x, &y);
-        auto e = flexUI::Event::mouse_wheel((float)x, (float)y, (float)dx, (float)dy);
+        float x = 0.0f;
+        float y = 0.0f;
+        cursor_position(x, y);
+        auto e = flexUI::Event::mouse_wheel(x, y, (float)dx, (float)dy);
         box_->dispatch_event(e);
     }
 
@@ -255,80 +338,150 @@ protected:
             utf8 += (char)(0x80 | ((codepoint >> 6) & 0x3f));
             utf8 += (char)(0x80 | (codepoint & 0x3f));
         }
-        auto e = Event::text_input(utf8);
-        box_->dispatch_event(e);
-    }
-
-    void on_composition_start() override {
-        auto e = Event::composition_start();
-        box_->dispatch_event(e);
-    }
-
-    void on_composition_update(const std::string& text) override {
-        auto e = Event::composition_update(text);
-        box_->dispatch_event(e);
-    }
-
-    void on_composition_end() override {
-        auto e = Event::composition_end();
-        box_->dispatch_event(e);
+        flexui_examples::dispatch_text_input_if_focused(box_.get(), utf8);
     }
 
 private:
-    Element* build_gallery_view() {
+    struct TaskItem {
+        std::string key;
+        std::string label;
+        bool complete = false;
+    };
+
+    flexUI::Box* ime_box() override { return box_.get(); }
+    bool should_render_frame() const override { return box_ && box_->is_dirty(); }
+    bool remove_canvas_before_render() const override { return false; }
+
+    Element* create_view_pane() {
+        auto* view = box_->create("div");
+        view->add_class("view-pane");
+        add_classes(view, {"flex", "flex-col", "w-[860px]", "h-[800px]",
+                           "gap-6"});
+        return view;
+    }
+
+    Element* create_gallery_view_pane() {
         auto* view = box_->create("div");
         view->add_class("view-pane");
         view->add_class("gallery-grid");
-        
-        auto* col1 = box_->create("div");
-        col1->add_class("col");
+        add_classes(view, {"flex", "flex-row", "w-[860px]", "h-[800px]",
+                           "gap-5"});
+        return view;
+    }
+
+    Element* create_gallery_column() {
+        auto* col = box_->create("div");
+        col->add_class("col");
+        add_classes(col, {"flex", "flex-col", "w-[420px]", "gap-5"});
+        return col;
+    }
+
+    Element* create_card(const char* title) {
+        auto* card = box_->create("div");
+        card->add_class("card");
+        add_classes(card, {"flex", "flex-col", "w-[420px]", "p-5", "gap-4",
+                           "rounded-xl", "bg-card", "shadow-md"});
+
+        auto* heading = box_->create("div");
+        heading->add_class("card-title");
+        add_classes(heading, {"text-base", "w-[380px]", "h-[20px]",
+                              "text-muted-foreground"});
+        heading->append(box_->create_widget<LabelWidget>("span", "", title));
+        card->append(heading);
+        return card;
+    }
+
+    Element* create_card_row() {
+        auto* row = box_->create("div");
+        row->add_class("card-row");
+        add_classes(row, {"flex", "flex-row", "items-center", "gap-3",
+                          "h-[40px]"});
+        return row;
+    }
+
+    Element* create_avatar_row() {
+        auto* row = box_->create("div");
+        row->add_class("avatar-row");
+        add_classes(row, {"flex", "flex-row", "items-center", "gap-3",
+                          "h-[64px]"});
+        return row;
+    }
+
+    Element* create_tab_page(const char* id, const char* title) {
+        auto* page = box_->create("div", id);
+        page->add_class("tab-page");
+        add_classes(page, {"absolute", "top-0", "left-0", "w-full", "p-5",
+                           "rounded-xl", "gap-4", "flex", "flex-col",
+                           "bg-card", "shadow-md"});
+        page->append(box_->create_widget<LabelWidget>("h2", "", title));
+        return page;
+    }
+
+    Element* create_section_heading(const char* text) {
+        auto* heading = box_->create_widget<LabelWidget>("h2", "", text);
+        add_classes(heading, {"text-2xl", "w-[400px]", "h-[40px]",
+                              "text-foreground"});
+        return heading;
+    }
+
+    Element* build_gallery_view() {
+        auto* view = create_gallery_view_pane();
+
+        auto* col1 = create_gallery_column();
         view->append(col1);
 
-        auto* card1 = box_->create("div");
-        card1->add_class("card");
-        auto* t1 = box_->create("div"); t1->add_class("card-title");
-        t1->append(box_->create_widget<LabelWidget>("span", "", "UI Components"));
-        card1->append(t1);
+        auto* card1 = create_card("UI Components");
 
-        auto* r1 = box_->create("div"); r1->add_class("card-row");
+        auto* r1 = create_card_row();
         r1->append(box_->create_widget<ButtonWidget>("button", "", "Primary"));
         auto* g = box_->create_widget<ButtonWidget>("button", "", "Secondary");
         g->add_class("ghost");
         r1->append(g);
         card1->append(r1);
 
-        auto* r2 = box_->create("div"); r2->add_class("card-row");
+        auto* r2 = create_card_row();
         r2->append(box_->create_widget<CheckboxWidget>("checkbox", "", "Push Status", true));
         r2->append(box_->create_widget<SwitchWidget>("switch", "", "Power", true));
         card1->append(r2);
         
-        auto* r3 = box_->create("div"); r3->add_class("card-row");
-        auto* text_input = box_->create_widget<TextAreaWidget>("div", "");
+        auto* r3 = create_card_row();
+        auto* text_input = box_->create_widget<TextAreaWidget>("textarea", "");
         auto* taw = static_cast<TextAreaWidget*>(text_input->widget);
         taw->set_placeholder("Type with IME here...");
-        text_input->style_.width = 360.0f;
-        text_input->style_.height = 80.0f;
+        add_classes(text_input, {"w-[360px]", "h-[80px]"});
         r3->append(text_input);
         card1->append(r3);
 
+        auto* r4 = create_avatar_row();
+        auto* a1 = box_->create_widget<AvatarWidget>("avatar", "",
+                                                     "Alice Smith",
+                                                     demo_asset_path("assets/undraw/svgs/profile-image.svg"));
+        static_cast<AvatarWidget*>(a1->widget)->set_status(AvatarWidget::Status::Online);
+        r4->append(a1);
+
+        auto* a2 = box_->create_widget<AvatarWidget>("avatar", "", "Bob Jones");
+        static_cast<AvatarWidget*>(a2->widget)->set_status(AvatarWidget::Status::Away);
+        r4->append(a2);
+
+        auto* a3 = box_->create_widget<AvatarWidget>("avatar", "",
+                                                     "Charlie Brown",
+                                                     demo_asset_path("assets/undraw/svgs/account.svg"));
+        static_cast<AvatarWidget*>(a3->widget)->set_status(AvatarWidget::Status::Busy);
+        r4->append(a3);
+        card1->append(r4);
+
         col1->append(card1);
 
-        auto* col2 = box_->create("div");
-        col2->add_class("col");
+        auto* col2 = create_gallery_column();
         view->append(col2);
 
-        auto* card2 = box_->create("div");
-        card2->add_class("card");
-        auto* t2 = box_->create("div"); t2->add_class("card-title");
-        t2->append(box_->create_widget<LabelWidget>("span", "", "System Metrics"));
-        card2->append(t2);
+        auto* card2 = create_card("System Metrics");
 
         progress_elem_ = box_->create_widget<ProgressBarWidget>("progressbar", "");
         static_cast<ProgressBarWidget*>(progress_elem_->widget)->set_value(65.0f);
         card2->append(progress_elem_);
 
-        auto* badges = box_->create("div");
-        badges->add_class("card-row");
+        auto* badges = create_card_row();
         auto* b1 = box_->create_widget<BadgeWidget>("badge", "", "System OK"); b1->add_class("success");
         badges->append(b1);
         auto* b2 = box_->create_widget<BadgeWidget>("badge", "", "High Load"); b2->add_class("danger");
@@ -340,17 +493,15 @@ private:
     }
 
     Element* build_calendar_view() {
-        auto* view = box_->create("div");
-        view->add_class("view-pane");
-        view->append(box_->create_widget<LabelWidget>("h2", "", "Monthly Schedule"));
+        auto* view = create_view_pane();
+        view->append(create_section_heading("Monthly Schedule"));
         view->append(box_->create_widget<CalendarWidget>("calendar", ""));
         return view;
     }
 
     Element* build_data_view() {
-        auto* view = box_->create("div");
-        view->add_class("view-pane");
-        view->append(box_->create_widget<LabelWidget>("h2", "", "User Database"));
+        auto* view = create_view_pane();
+        view->append(create_section_heading("User Database"));
         auto* table = box_->create_widget<TableWidget>("table", "");
         auto* tw = static_cast<TableWidget*>(table->widget);
         tw->add_column("ID", 60.0f);
@@ -365,46 +516,103 @@ private:
         tw->add_row({"005", "Edward Norton", "HR", "Active"});
         
         view->append(table);
+
+        auto* task_header = box_->create("div");
+        add_classes(task_header, {"flex", "flex-row", "items-center",
+                                  "justify-between", "w-[860px]", "h-[40px]"});
+        task_header->append(
+            box_->create_widget<LabelWidget>("h2", "", "Keyed Live Tasks"));
+
+        auto* task_actions = box_->create("div");
+        add_classes(task_actions, {"flex", "flex-row", "items-center", "gap-2"});
+        auto* rotate = box_->create_widget<ButtonWidget>("button", "", "Rotate");
+        auto* clear = box_->create_widget<ButtonWidget>("button", "", "Clear");
+        auto* restore = box_->create_widget<ButtonWidget>("button", "", "Restore");
+        rotate->on_click([this] { rotate_tasks(); });
+        clear->on_click([this] {
+            tasks_.clear();
+            reconcile_tasks();
+        });
+        restore->on_click([this] {
+            tasks_ = initial_tasks_;
+            reconcile_tasks();
+        });
+        task_actions->append(rotate);
+        task_actions->append(clear);
+        task_actions->append(restore);
+        task_header->append(task_actions);
+        view->append(task_header);
+
+        task_list_ = box_->create("div", "live-task-list");
+        add_classes(task_list_, {"flex", "flex-col", "w-[860px]", "gap-2"});
+        view->append(task_list_);
+        task_repeater_ = std::make_unique<UiKeyedRepeater>(*box_, *task_list_);
+        tasks_ = initial_tasks_;
+        reconcile_tasks();
         return view;
+    }
+
+    void reconcile_tasks() {
+        if (!task_repeater_) return;
+        task_repeater_->reconcile(
+            tasks_, [](const TaskItem& item) { return item.key; },
+            [this](Box& box, const TaskItem& item) {
+                auto* row = box.create_widget<ButtonWidget>(
+                    "button", "task-" + item.key, item.label);
+                row->add_class("live-task-row");
+                add_classes(row, {"flex", "flex-row", "items-center",
+                                  "w-[860px]", "h-[40px]", "px-3", "py-2",
+                                  "rounded-md", "bg-card", "text-sm"});
+                row->on_click([this, key = item.key] { toggle_task(key); });
+                return row;
+            },
+            [](Element& row, const TaskItem& item) {
+                row.set_text(item.label);
+                row.set_attribute("data-state", item.complete ? "complete" : "open");
+                row.toggle_class("opacity-50", item.complete);
+            });
+        box_->invalidate();
+    }
+
+    void rotate_tasks() {
+        if (tasks_.size() > 1) {
+            std::rotate(tasks_.begin(), tasks_.begin() + 1, tasks_.end());
+            reconcile_tasks();
+        }
+    }
+
+    void toggle_task(const std::string& key) {
+        const auto task = std::find_if(
+            tasks_.begin(), tasks_.end(),
+            [&](const TaskItem& item) { return item.key == key; });
+        if (task == tasks_.end()) return;
+        task->complete = !task->complete;
+        reconcile_tasks();
     }
 
     Element* build_tabs_view() {
         auto* view = box_->create("div");
         view->add_class("view-pane");
         view->add_class("tabs-view");
+        add_classes(view, {"flex", "flex-col", "w-[860px]", "h-[800px]",
+                           "gap-0"});
         
         auto* tabs_elem = box_->create_widget<TabsWidget>("tabs", "");
         auto* tw = static_cast<TabsWidget*>(tabs_elem->widget);
         
-        // Page 1 - Selectable Text using TextAreaWidget (Read-Only)
-        auto* page1 = box_->create("div", "tab-page-1");
-        page1->add_class("tab-page");
-        page1->append(box_->create_widget<LabelWidget>("h2", "", "Selectable Content"));
+        auto* page1 = create_tab_page("tab-page-1", "Selectable Content");
         
-        auto* selectable_text = box_->create_widget<TextAreaWidget>("div", "");
+        auto* selectable_text = box_->create_widget<TextAreaWidget>("textarea", "");
         auto* taw = static_cast<TextAreaWidget*>(selectable_text->widget);
         taw->set_text("This text is rendered using a TextAreaWidget set to read-only mode.\n\n"
                       "Unlike static labels, you can click and drag to SELECT this text.\n"
                       "This demonstrates how to achieve selectable content in flexUI.");
         taw->set_readonly(true);
-        selectable_text->style_.width = 820.0f;
-        selectable_text->style_.height = 300.0f;
-        // Adjust background to look like a normal page area
-        selectable_text->style_.background_color = Color(1,1,1,0); 
-        selectable_text->style_.variables[Symbol("--textarea-bg")] = "0,0,0,0";
+        add_classes(selectable_text, {"w-[820px]", "h-[300px]", "bg-transparent"});
         page1->append(selectable_text);
         
-        // Page 2
-        auto* page2 = box_->create("div", "tab-page-2");
-        page2->add_class("tab-page");
-        page2->add_class("hidden");
-        page2->append(box_->create_widget<LabelWidget>("h2", "", "Advanced Components"));
-
-        // Page 3
-        auto* page3 = box_->create("div", "tab-page-3");
-        page3->add_class("tab-page");
-        page3->add_class("hidden");
-        page3->append(box_->create_widget<LabelWidget>("h2", "", "Network Config"));
+        auto* page2 = create_tab_page("tab-page-2", "Advanced Components");
+        auto* page3 = create_tab_page("tab-page-3", "Network Config");
         page3->append(box_->create_widget<LabelWidget>("p", "", "Manage connections and proxy settings."));
 
         tw->add_tab("Selectable Text", "gen", page1);
@@ -415,6 +623,7 @@ private:
         
         auto* content = box_->create("div", "tab-content");
         content->add_class("tab-content");
+        add_classes(content, {"relative", "w-full", "h-[700px]"});
         content->append(page1);
         content->append(page2);
         content->append(page3);
@@ -424,11 +633,20 @@ private:
     }
 
     std::unique_ptr<Box> box_;
-    float progress_val_ = 0.0f;
+    int active_view_ = 0;
     Element* progress_elem_ = nullptr;
     Element* title_label_ = nullptr;
+    Element* backend_label_ = nullptr;
+    Element* task_list_ = nullptr;
     Element* nav_buttons_[4] = {nullptr};
     Element* views_[4] = {nullptr};
+    const std::vector<TaskItem> initial_tasks_ = {
+        {"layout", "Rectangle tree owns layout", true},
+        {"style", "CSS and Tailwind own visual style", false},
+        {"state", "C++ and MIR own dynamic state", false},
+    };
+    std::vector<TaskItem> tasks_;
+    std::unique_ptr<UiKeyedRepeater> task_repeater_;
 };
 
 int main() {

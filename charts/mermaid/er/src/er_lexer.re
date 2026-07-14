@@ -3,6 +3,8 @@
 #include "er/er_ast.h"
 #include "er_parser_gen.h"
 
+void ERParser(void *parser, int token, void *value, ERParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;
@@ -64,8 +66,8 @@ void er_scan(Scanner *s, void *parser, ERParserContext *ctx) {
         "}|" | "|{" | "one or more" | "one or many" | "1+" { ERParser(parser, ER_ONE_OR_MORE, NULL, ctx); goto loop; }
         "||" | "only one" | "1" { ERParser(parser, ER_ONLY_ONE, NULL, ctx); goto loop; }
 
-        "--" | "to"         { ERParser(parser, ER_REL_IDENTIFYING, NULL, ctx); goto loop; }
-        ".."                { ERParser(parser, ER_REL_NON_IDENTIFYING, NULL, ctx); goto loop; }
+        "--" | "to"         { ERParser(parser, ER_IDENTIFYING_LINK, NULL, ctx); goto loop; }
+        ".."                { ERParser(parser, ER_NON_IDENTIFYING_LINK, NULL, ctx); goto loop; }
 
         "PK"                { ERParser(parser, ER_PK, NULL, ctx); goto loop; }
         "FK"                { ERParser(parser, ER_FK, NULL, ctx); goto loop; }

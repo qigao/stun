@@ -1,0 +1,33 @@
+{
+  "name": "tabs",
+  "source": "https://ui.shadcn.com/r/styles/new-york/tabs.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "bg-muted",
+    "data-[state=active]:bg-background",
+    "data-[state=active]:shadow",
+    "data-[state=active]:text-foreground",
+    "disabled:opacity-50",
+    "disabled:pointer-events-none",
+    "focus-visible:outline-none",
+    "focus-visible:ring-2",
+    "focus-visible:ring-offset-2",
+    "focus-visible:ring-ring",
+    "font-medium",
+    "h-9",
+    "inline-flex",
+    "items-center",
+    "justify-center",
+    "mt-2",
+    "p-1",
+    "px-3",
+    "py-1",
+    "ring-offset-background",
+    "rounded-lg",
+    "rounded-md",
+    "text-muted-foreground",
+    "text-sm",
+    "transition-all",
+    "whitespace-nowrap"
+  ]
+}

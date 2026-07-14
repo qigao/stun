@@ -63,6 +63,11 @@ typedef struct FlowchartSubGraph {
     struct FlowchartSubGraph* next;
 } FlowchartSubGraph;
 
+typedef struct FlowchartSubGraphStack {
+    FlowchartSubGraph* sg;
+    struct FlowchartSubGraphStack* next;
+} FlowchartSubGraphStack;
+
 typedef struct FlowchartDiagram {
     char* direction; 
     FlowchartLayoutMode layout_mode;

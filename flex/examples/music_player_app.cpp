@@ -23,10 +23,10 @@
 #include <thorvg.h>
 
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
-#include <flex/dsl/group.h>
-#include <flex/dsl/shape.h>
-#include <flex/dsl/text.h>
+#include "backends/thorvg/init.h"
+#include <flex/core/group.h>
+#include <flex/core/shape.h>
+#include <flex/core/text.h>
 
 // ============================================================================
 // Utilities
@@ -107,7 +107,7 @@ public:
 
 class MusicPlayerView {
 public:
-    MusicPlayerView(flex::Instance::Ptr instance) : instance_(instance) {
+    MusicPlayerView(flex::Instance::SharedPtr instance) : instance_(instance) {
         auto* scene = instance_->scene();
         if (!scene) return;
 
@@ -117,7 +117,7 @@ public:
             auto* group = static_cast<flex::Group*>(visualizer);
             const auto& children = group->children();
             for (size_t i = 0; i < children.size() && i < 20; ++i) {
-                visualizer_bars_[i] = dynamic_cast<flex::Shape*>(children[i].get());
+                visualizer_bars_[i] = dynamic_cast<flex::Shape*>(children[i]);
             }
         }
 
@@ -206,7 +206,7 @@ public:
     }
 
 private:
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     flex::Shape* visualizer_bars_[20] = {};
     flex::Shape* track_fill_ = nullptr;
     flex::Shape* playhead_ = nullptr;
@@ -395,7 +395,7 @@ private:
     tvg::SwCanvas* canvas_ = nullptr;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
     std::unique_ptr<MusicPlayerModel> model_;

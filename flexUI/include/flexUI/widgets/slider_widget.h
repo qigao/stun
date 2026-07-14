@@ -1,7 +1,7 @@
 /*
  * flexUI - SliderWidget
  *
- * Slider control using Group/Shape composition system.
+ * Slider control exposing stable widget-owned Element parts.
  */
 
 #ifndef FLEXUI_SLIDER_WIDGET_H
@@ -15,14 +15,14 @@
 namespace flexUI {
 
 /**
- * SliderWidget - Slider using Group/Shape composition
+ * SliderWidget - Slider with a CSS-visible semantic subtree
  *
  * Structure:
- *   Group (root)
- *   ├── RectShape (track background)
- *   ├── RectShape (track fill)
- *   ├── CircleShape (thumb)
- *   └── TextShape (value label, optional)
+ *   slider (host)
+ *   |-- track
+ *   |-- fill
+ *   |-- thumb
+ *   `-- value
  *
  * CSS variables:
  *   --track-height: "4"
@@ -40,46 +40,56 @@ public:
                           float value = 50.0f, float step = 0.0f);
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "SliderWidget"; }
     bool wants_mouse_capture() const override { return is_dragging_; }
+    void sync_host_semantics_for_layout(Element& elem) override;
+
+    Element* track_element() { return track_; }
+    Element* fill_element() { return fill_; }
+    Element* thumb_element() { return thumb_; }
+    Element* value_element() { return value_label_; }
+    const Element* track_element() const { return track_; }
+    const Element* fill_element() const { return fill_; }
+    const Element* thumb_element() const { return thumb_; }
+    const Element* value_element() const { return value_label_; }
 
     // Value access
     float value() const { return value_; }
     void set_value(float value);
 
     float min() const { return min_; }
-    void set_min(float min) { min_ = min; update_value_position(); dirty_ = true; }
+    void set_min(float min);
 
     float max() const { return max_; }
-    void set_max(float max) { max_ = max; update_value_position(); dirty_ = true; }
+    void set_max(float max);
 
     float step() const { return step_; }
     void set_step(float step) { step_ = step; }
 
     bool is_disabled() const { return disabled_; }
-    void set_disabled(bool disabled) { disabled_ = disabled; dirty_ = true; }
+    void set_disabled(bool disabled);
 
     // Callback
     using ChangeCallback = std::function<void(float value)>;
     void set_change_callback(ChangeCallback callback) { change_callback_ = std::move(callback); }
 
 private:
-    void rebuild_shapes(const Element& elem);
-    void update_shapes(const Element& elem);
+    void build_semantic_tree() override;
+    void update_part_geometry(const Element& elem);
+    void sync_host_semantics() override;
 
-    void update_value_from_x(float x, const Element& elem);
+    void update_value_from_position(float x, float y, const Element& elem);
     void update_value_position();
+    void invalidate_parts();
     float snap_to_step(float value);
 
-    // Visual composition
-    Group root_;
-    RectShape* track_ = nullptr;
-    RectShape* fill_ = nullptr;
-    CircleShape* thumb_ = nullptr;
-    TextShape* value_label_ = nullptr;
+    Element* track_ = nullptr;
+    Element* fill_ = nullptr;
+    Element* thumb_ = nullptr;
+    Element* value_label_ = nullptr;
 
     // State
     float min_ = 0.0f;
@@ -96,12 +106,6 @@ private:
     float target_thumb_scale_ = 1.0f;
 
     // Cached dimensions
-    float cached_width_ = 0;
-    float cached_height_ = 0;
-    float cached_track_height_ = 0;
-    float cached_thumb_size_ = 0;
-    bool cached_show_value_ = false;
-
     // Callback
     ChangeCallback change_callback_;
 };

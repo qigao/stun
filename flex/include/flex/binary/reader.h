@@ -8,7 +8,7 @@
  * - ✅ CRC32 integrity verification
  * - ✅ String table deduplication
  * - ✅ Create runtime objects (scene, timelines)
- * - ❌ Compression (decompress_data) - NOT YET IMPLEMENTED
+ * - ✅ Compression (zstd)
  * - ❌ Encryption (decrypt_data) - NOT YET IMPLEMENTED
  */
 
@@ -16,7 +16,7 @@
 
 #include "flex/binary/format.h"
 #include "flex/runtime.h"
-#include "flex/runtime/allocator.h"
+#include "flex/core/allocator.h"
 #include <vector>
 #include <memory>
 
@@ -51,7 +51,7 @@ public:
 
     // Create runtime objects (uses internal arena)
     Scene* create_scene();
-    std::vector<Timeline::Ptr> create_timelines();
+    std::vector<Timeline::SharedPtr> create_timelines();
 
     // Access arena
     ArenaAllocator& arena() { return arena_; }
@@ -84,14 +84,16 @@ private:
     bool parse_header();
     bool parse_string_table();
     bool verify_integrity();
+    bool validate_section_bounds();
 
-    Node* read_node(const uint8_t* node_data);
+    Node* read_node(const uint8_t* node_data, size_t* bytes_consumed = nullptr);
     Shape* read_shape(const uint8_t* shape_data);
     Text* read_text(const uint8_t* text_data);
     Image* read_image(const uint8_t* image_data);
     Group* read_group(const uint8_t* group_data);
+    InstanceNode* read_instance(const uint8_t* instance_data, size_t* bytes_consumed = nullptr);
 
-    Timeline::Ptr read_timeline(const uint8_t* timeline_data);
+    Timeline::SharedPtr read_timeline(const uint8_t* timeline_data, size_t* bytes_consumed = nullptr);
 
     // Decompression
     std::vector<uint8_t> decompress_data(const std::vector<uint8_t>& data);

@@ -1,0 +1,54 @@
+{
+  "rules": [
+    {
+      "target": "hover_card_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "position": "relative"
+      }
+    },
+    {
+      "target": "hover_card_trigger",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "font-size": "0.875rem",
+        "font-weight": "500",
+        "text-decoration-line": "underline",
+        "text-underline-offset": "4px"
+      }
+    },
+    {
+      "target": "hover_card_content",
+      "selector": "&",
+      "decls": {
+        "position": "absolute",
+        "top": "100%",
+        "left": "0px",
+        "z-index": "50",
+        "width": "16rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--border)",
+        "border-radius": "0.375rem",
+        "background-color": "var(--popover)",
+        "color": "var(--popover-foreground)",
+        "padding": "1rem",
+        "box-shadow": "0 10px 15px rgba(0,0,0,0.12)"
+      }
+    },
+    {
+      "target": "hover_card_content",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-state", "equals": "closed" }
+      ],
+      "decls": {
+        "display": "none"
+      }
+    }
+  ]
+}

@@ -4,9 +4,9 @@
 
 #include <flexUI/widgets/group_button_widget.h>
 #include <flexUI/computed_style.h>
+#include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
 
 namespace flexUI {
 
@@ -14,11 +14,32 @@ GroupButtonWidget::GroupButtonWidget() {
     // Initial shapes will be created in first render when we know dimensions
 }
 
+void GroupButtonWidget::sync_host_semantics() {
+    set_host_attribute("role", "button");
+    if (label_.empty()) {
+        clear_host_attribute("aria-label");
+    } else {
+        set_host_attribute("aria-label", label_);
+    }
+
+    const Element* host = host_element();
+    const bool active = host != nullptr && host->is_active();
+    const bool hover = host != nullptr && host->is_hover();
+    if (active) {
+        set_host_attribute("data-state", "active");
+    } else if (hover) {
+        set_host_attribute("data-state", "hover");
+    } else {
+        set_host_attribute("data-state", "idle");
+    }
+}
+
 void GroupButtonWidget::set_label(const std::string& label) {
     label_ = label;
     if (text_) {
         text_->set_text(label);
     }
+    sync_host_semantics();
     dirty_ = true;
 }
 
@@ -32,7 +53,7 @@ void GroupButtonWidget::rebuild_shapes(float width, float height) {
     cached_height_ = height;
 
     // Background rectangle (fills entire button)
-    background_ = root_.add<RectShape>(0, 0, width, height, 6.0f);
+    background_ = root_.add<RectShape>(0.0f, 0.0f, width, height, 6.0f);
 
     // Text centered in button
     text_ = root_.add<TextShape>(width / 2, height / 2 + 5, label_);
@@ -62,7 +83,7 @@ void GroupButtonWidget::update_colors() {
     text_->set_color(text_color);
 }
 
-void GroupButtonWidget::render(const Element& elem, Renderer& renderer) {
+void GroupButtonWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     float width = elem.width();
     float height = elem.height();
 
@@ -75,10 +96,11 @@ void GroupButtonWidget::render(const Element& elem, Renderer& renderer) {
         pressed_ = elem.is_active();
         update_colors();
     }
+    sync_host_semantics();
 
-    // Draw using flex::Renderer
+    // Draw through backend-neutral commands.
     // Position comes from element's absolute position
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
+    Transform local_transform = Transform{};
 
     // Get opacity from style
     float opacity = 1.0f;
@@ -87,14 +109,16 @@ void GroupButtonWidget::render(const Element& elem, Renderer& renderer) {
     }
 
     // Draw the group
-    root_.draw(renderer.flex(), world_transform, opacity);
+    root_.draw(commands, local_transform, opacity);
 
     dirty_ = false;
 }
 
 bool GroupButtonWidget::handle_event(const Event& event, Element& elem) {
-    float local_x = event.x - elem.absolute_x();
-    float local_y = event.y - elem.absolute_y();
+    const flex::Vec2 local_pos =
+        detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
+    float local_x = local_pos.x;
+    float local_y = local_pos.y;
 
     bool inside = local_x >= 0 && local_x <= elem.width() &&
                   local_y >= 0 && local_y <= elem.height();

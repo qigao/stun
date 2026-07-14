@@ -9,18 +9,18 @@
 #define FLEXUI_DRAGGABLE_WIDGET_H
 
 #include "../widget.h"
+#include "../detail/css_render_transform.h"
 #include "../event.h"
 #include "../element.h"
 #include "../computed_style.h"
-#include "../renderer.h"
 #include <cmath>
 
 namespace flexUI {
 
 class DraggableWidget : public Widget {
 public:
-    void render(const Element& elem, Renderer& renderer) override {
-        // Ghosting and lift effects are disabled for TUI to reduce lag and artifacts
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override {
+        // Transient drag effects belong in style/render capability handling, not here.
     }
 
     bool handle_event(const Event& event, Element& elem) override {
@@ -29,8 +29,10 @@ public:
             drag_start_x_ = event.x;
             drag_start_y_ = event.y;
 
-            offset_x_ = event.x - elem.x();
-            offset_y_ = event.y - elem.y();
+            const auto parent_pos =
+                detail::css_render_to_parent_content(&elem, flex::Vec2(event.x, event.y));
+            offset_x_ = parent_pos.x - elem.x();
+            offset_y_ = parent_pos.y - elem.y();
 
             return false;
         }
@@ -50,8 +52,10 @@ public:
             }
 
             if (dragging_ && elem.computed_style) {
-                elem.computed_style->left = event.x - offset_x_;
-                elem.computed_style->top = event.y - offset_y_;
+                const auto parent_pos =
+                    detail::css_render_to_parent_content(&elem, flex::Vec2(event.x, event.y));
+                elem.computed_style->left = parent_pos.x - offset_x_;
+                elem.computed_style->top = parent_pos.y - offset_y_;
                 elem.mark_layout_dirty();
                 return true;
             }
@@ -71,7 +75,7 @@ public:
 
     bool has_overlay() const override { return dragging_; }
 
-    void render_overlay(const Element& elem, Renderer& renderer) override {
+    void emit_overlay_commands(const Element& elem, RenderCommandList& commands) override {
         // Overlay check ensures it's on top, 
         // but render() is already providing the "lifted" look.
     }

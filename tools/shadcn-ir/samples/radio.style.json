@@ -1,0 +1,35 @@
+{
+  "rules": [
+    {
+      "target": "radio_root",
+      "selector": "&",
+      "decls": {
+        "display": "inline-flex",
+        "align-items": "center",
+        "gap": "0.5rem",
+        "font-size": "0.875rem",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "radio_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "checked" }
+      ],
+      "decls": {
+        "accent-color": "var(--primary)"
+      }
+    },
+    {
+      "target": "radio_root",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "disabled" }
+      ],
+      "decls": {
+        "opacity": "0.5"
+      }
+    }
+  ]
+}

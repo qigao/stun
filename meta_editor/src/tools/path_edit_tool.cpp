@@ -76,8 +76,8 @@ bool PathEditTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec
     if (drag_mode_ == DragMode::MovePoint) {
         auto delta = world_pos - drag_start_;
         pt.position = flex::Vec2(
-            original_point_.position.x() + delta.x(),
-            original_point_.position.y() + delta.y()
+            original_point_.position.x + delta.x,
+            original_point_.position.y + delta.y
         );
         apply_path_to_node();
         return true;
@@ -85,8 +85,8 @@ bool PathEditTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec
 
     if (drag_mode_ == DragMode::MoveHandleIn) {
         pt.handle_in = flex::Vec2(
-            world_pos.x() - pt.position.x(),
-            world_pos.y() - pt.position.y()
+            world_pos.x - pt.position.x,
+            world_pos.y - pt.position.y
         );
         pt.constrain_handles(false);
         apply_path_to_node();
@@ -95,8 +95,8 @@ bool PathEditTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec
 
     if (drag_mode_ == DragMode::MoveHandleOut) {
         pt.handle_out = flex::Vec2(
-            world_pos.x() - pt.position.x(),
-            world_pos.y() - pt.position.y()
+            world_pos.x - pt.position.x,
+            world_pos.y - pt.position.y
         );
         pt.constrain_handles(true);
         apply_path_to_node();
@@ -170,24 +170,24 @@ void PathEditTool::render_overlay(flex::Renderer& renderer) {
         // Draw handle lines and circles
         if (pt.has_handle_in()) {
             auto h = pt.handle_in_abs();
-            std::string line = "M " + std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y()) +
-                              " L " + std::to_string(h.x()) + " " + std::to_string(h.y());
+            std::string line = "M " + std::to_string(pt.position.x) + " " + std::to_string(pt.position.y) +
+                              " L " + std::to_string(h.x) + " " + std::to_string(h.y);
             renderer.stroke_path(line, handle_line, 1.0f);
-            renderer.draw_circle(h.x(), h.y(), 4.0f, handle_fill, point_stroke, 1.0f);
+            renderer.draw_circle(h.x, h.y, 4.0f, handle_fill, point_stroke, 1.0f);
         }
         if (pt.has_handle_out()) {
             auto h = pt.handle_out_abs();
-            std::string line = "M " + std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y()) +
-                              " L " + std::to_string(h.x()) + " " + std::to_string(h.y());
+            std::string line = "M " + std::to_string(pt.position.x) + " " + std::to_string(pt.position.y) +
+                              " L " + std::to_string(h.x) + " " + std::to_string(h.y);
             renderer.stroke_path(line, handle_line, 1.0f);
-            renderer.draw_circle(h.x(), h.y(), 4.0f, handle_fill, point_stroke, 1.0f);
+            renderer.draw_circle(h.x, h.y, 4.0f, handle_fill, point_stroke, 1.0f);
         }
 
         // Draw anchor point
         bool is_selected = (static_cast<int>(i) == selected_point_);
         float radius = is_selected ? 6.0f : 5.0f;
         auto& fill = is_selected ? selected_fill : point_fill;
-        renderer.draw_circle(pt.position.x(), pt.position.y(), radius, fill, point_stroke, 1.5f);
+        renderer.draw_circle(pt.position.x, pt.position.y, radius, fill, point_stroke, 1.5f);
     }
 }
 
@@ -218,8 +218,8 @@ void PathEditTool::load_path_from_node() {
             case 'L': case 'l':
                 iss >> x >> y;
                 if (cmd == 'l' && last_point) {
-                    x += last_point->position.x();
-                    y += last_point->position.y();
+                    x += last_point->position.x;
+                    y += last_point->position.y;
                 }
                 path_data_.points.push_back(PathEditPoint(x, y));
                 last_point = &path_data_.points.back();
@@ -228,17 +228,17 @@ void PathEditTool::load_path_from_node() {
             case 'C': case 'c': {
                 iss >> x1 >> y1 >> x2 >> y2 >> x >> y;
                 if (cmd == 'c' && last_point) {
-                    x1 += last_point->position.x();
-                    y1 += last_point->position.y();
-                    x2 += last_point->position.x();
-                    y2 += last_point->position.y();
-                    x += last_point->position.x();
-                    y += last_point->position.y();
+                    x1 += last_point->position.x;
+                    y1 += last_point->position.y;
+                    x2 += last_point->position.x;
+                    y2 += last_point->position.y;
+                    x += last_point->position.x;
+                    y += last_point->position.y;
                 }
                 if (last_point) {
                     last_point->handle_out = flex::Vec2(
-                        x1 - last_point->position.x(),
-                        y1 - last_point->position.y()
+                        x1 - last_point->position.x,
+                        y1 - last_point->position.y
                     );
                     if (last_point->type == PointType::Corner) {
                         last_point->type = PointType::Smooth;
@@ -290,8 +290,8 @@ int PathEditTool::hit_test_point(const flex::Vec2& pos, float threshold) {
     float thresh_sq = threshold * threshold;
     for (size_t i = 0; i < path_data_.points.size(); ++i) {
         const auto& pt = path_data_.points[i];
-        float dx = pos.x() - pt.position.x();
-        float dy = pos.y() - pt.position.y();
+        float dx = pos.x - pt.position.x;
+        float dy = pos.y - pt.position.y;
         if (dx * dx + dy * dy < thresh_sq) {
             return static_cast<int>(i);
         }
@@ -305,8 +305,8 @@ int PathEditTool::hit_test_handle_in(const flex::Vec2& pos, float threshold) {
         const auto& pt = path_data_.points[i];
         if (pt.has_handle_in()) {
             auto h = pt.handle_in_abs();
-            float dx = pos.x() - h.x();
-            float dy = pos.y() - h.y();
+            float dx = pos.x - h.x;
+            float dy = pos.y - h.y;
             if (dx * dx + dy * dy < thresh_sq) {
                 return static_cast<int>(i);
             }
@@ -321,8 +321,8 @@ int PathEditTool::hit_test_handle_out(const flex::Vec2& pos, float threshold) {
         const auto& pt = path_data_.points[i];
         if (pt.has_handle_out()) {
             auto h = pt.handle_out_abs();
-            float dx = pos.x() - h.x();
-            float dy = pos.y() - h.y();
+            float dx = pos.x - h.x;
+            float dy = pos.y - h.y;
             if (dx * dx + dy * dy < thresh_sq) {
                 return static_cast<int>(i);
             }

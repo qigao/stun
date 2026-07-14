@@ -1,7 +1,7 @@
 /*
  * flexUI - ImageWidget
  *
- * Display images - 使用 flex::Renderer 渲染
+ * Display images - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_IMAGE_WIDGET_H
@@ -18,17 +18,17 @@ namespace flexUI {
 /**
  * ImageWidget - Image display widget
  *
- * Uses flex::Renderer's draw_image() for loading and rendering.
+ * Emits image commands for the backend adapter to load and render.
  *
  * CSS variables:
  *   --object-fit: "contain" | "cover" | "fill" | "none"
- *   --object-position: "center" | "top" | "bottom" | "left" | "right"
+ *   --object-position: CSS object-position keywords and edge offsets
  */
 class ImageWidget : public Widget {
 public:
   explicit ImageWidget(const std::string& src = "");
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ImageWidget"; }
@@ -40,6 +40,10 @@ public:
   // Image dimensions (original)
   float natural_width() const { return natural_width_; }
   float natural_height() const { return natural_height_; }
+  void set_natural_size(float width, float height) {
+    natural_width_ = width;
+    natural_height_ = height;
+  }
 
   // Load state
   bool is_loaded() const { return loaded_; }

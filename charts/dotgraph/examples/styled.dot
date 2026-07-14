@@ -1,0 +1,16 @@
+// Styled graph with attributes
+digraph G {
+    rankdir=LR;
+
+    node [shape=box, style=filled, fillcolor="#e8e8ff"];
+
+    Start [shape=circle, fillcolor="#90EE90"];
+    End   [shape=doublecircle, fillcolor="#FFB6C1"];
+
+    Start -> Process1 [label="begin"];
+    Process1 -> Decision [label="check"];
+    Decision -> Process2 [label="yes", color=green];
+    Decision -> Process3 [label="no", color=red];
+    Process2 -> End;
+    Process3 -> End;
+}

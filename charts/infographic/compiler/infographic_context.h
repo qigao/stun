@@ -1,5 +1,6 @@
 #pragma once
 
+#include <flex/core/expr_c.h>
 #include <ir/unified_infographic.h>
 #include "infographic_token.h"
 #include <memory>
@@ -24,7 +25,8 @@ struct ParseContext {
 
     double to_number(std::string* s) {
         if (!s) return 0.0;
-        try { return std::stod(*s); } catch (...) { return 0.0; }
+        double value = 0.0;
+        return flex_expr_eval_f64(s->c_str(), &value) ? value : 0.0;
     }
 
     bool to_bool(std::string* s) { return s && *s == "true"; }

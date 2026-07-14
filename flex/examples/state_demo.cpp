@@ -4,7 +4,7 @@
  */
 
 #include "flex.h"
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 
 #include <SDL.h>
 #include <thorvg.h>
@@ -17,7 +17,7 @@
 // Component Registration
 // ============================================================================
 
-flex::Node::Ptr build_slider(const flex::Props& props) {
+flex::ComponentNodePtr build_slider(const flex::Props& props) {
     auto slider = flex::Group::create();
     float value = flex::get_prop<float>(props, "value", 0.5f);
     float width = flex::get_prop<float>(props, "width", 300.0f);
@@ -49,7 +49,7 @@ flex::Node::Ptr build_slider(const flex::Props& props) {
     return slider;
 }
 
-flex::Node::Ptr build_progress_bar(const flex::Props& props) {
+flex::ComponentNodePtr build_progress_bar(const flex::Props& props) {
     auto bar = flex::Group::create();
     float progress = flex::get_prop<float>(props, "progress", 0.5f);
     float width = flex::get_prop<float>(props, "width", 300.0f);
@@ -112,10 +112,10 @@ public:
         state_->end_batch();
     }
 
-    flex::ObservableState::Ptr state() const { return state_; }
+    flex::ObservableState::SharedPtr state() const { return state_; }
 
 private:
-    flex::ObservableState::Ptr state_;
+    flex::ObservableState::SharedPtr state_;
 };
 
 // ============================================================================
@@ -124,7 +124,7 @@ private:
 
 class MetricsView {
 public:
-    MetricsView(flex::Instance::Ptr instance, flex::ObservableState::Ptr state) 
+    MetricsView(flex::Instance::SharedPtr instance, flex::ObservableState::SharedPtr state) 
         : instance_(instance), state_(state) 
     {
         build_ui();
@@ -206,8 +206,8 @@ private:
         instance_->scene()->add_child(group);
     }
 
-    flex::Instance::Ptr instance_;
-    flex::ObservableState::Ptr state_;
+    flex::Instance::SharedPtr instance_;
+    flex::ObservableState::SharedPtr state_;
 };
 
 // ============================================================================
@@ -216,7 +216,7 @@ private:
 
 class MetricsController {
 public:
-    MetricsController(MetricsModel& model, MetricsView& view, flex::Instance::Ptr instance) 
+    MetricsController(MetricsModel& model, MetricsView& view, flex::Instance::SharedPtr instance) 
         : model_(model), view_(view), instance_(instance) {}
 
     void update(float dt) {
@@ -228,7 +228,7 @@ public:
 private:
     MetricsModel& model_;
     MetricsView& view_;
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     float time_ = 0;
 };
 
@@ -313,7 +313,7 @@ private:
     SDL_Surface* offscreen_surface_ = nullptr;
     tvg::SwCanvas* canvas_ = nullptr;
     std::unique_ptr<flex::Renderer> renderer_;
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<MetricsModel> model_;
     std::unique_ptr<MetricsView> view_;
     std::unique_ptr<MetricsController> controller_;

@@ -1,0 +1,50 @@
+{
+  "bridges": [
+    {
+      "target": "avatar_image",
+      "state": "loading",
+      "attributes": {
+        "data-state": "loading"
+      },
+      "properties": {
+        "loading": true
+      }
+    },
+    {
+      "target": "avatar_image",
+      "state": "loaded",
+      "attributes": {
+        "data-state": "loaded"
+      },
+      "properties": {
+        "complete": true
+      }
+    },
+    {
+      "target": "avatar_image",
+      "state": "error",
+      "attributes": {
+        "data-state": "error"
+      }
+    },
+    {
+      "target": "avatar_fallback",
+      "state": "visible",
+      "attributes": {
+        "data-state": "visible"
+      }
+    },
+    {
+      "target": "avatar_fallback",
+      "state": "hidden",
+      "attributes": {
+        "data-state": "hidden"
+      }
+    },
+    {
+      "target": "avatar_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

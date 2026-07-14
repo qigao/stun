@@ -1,0 +1,9 @@
+{
+  "bridges": [
+    {
+      "target": "tabs_root",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    }
+  ]
+}

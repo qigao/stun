@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flexui.dev/schema/component_ir.schema.json",
+  "title": "ComponentIR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["component", "kind", "root", "nodes"],
+  "properties": {
+    "component": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["leaf", "composite"]
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" },
+      "default": []
+    },
+    "variants": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "default": {}
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      },
+      "default": {}
+    },
+    "overlay": {
+      "$ref": "#/$defs/overlay"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "tag"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": ["widget", "element", "repeat", "slot"]
+        },
+        "widget": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "slot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "states": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "slots": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean"]
+          },
+          "default": {}
+        },
+        "props": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean", "array", "object", "null"]
+          },
+          "default": {}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "widget" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["widget"]
+          }
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "child"],
+      "properties": {
+        "parent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "child": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "overlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "portal": {
+          "type": "boolean",
+          "default": false
+        },
+        "modal": {
+          "type": "boolean",
+          "default": false
+        },
+        "anchor": {
+          "type": "string"
+        }
+      },
+      "default": {}
+    }
+  }
+}

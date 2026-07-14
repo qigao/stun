@@ -1,0 +1,21 @@
+{
+  "bridges": [
+    {
+      "target": "popover_root",
+      "state": "open",
+      "properties": {
+        "open": true
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "popover_root",
+      "when": [
+        { "type": "prop", "name": "position", "equals": "right" }
+      ],
+      "properties": {
+        "position": "right"
+      }
+    }
+  ]
+}

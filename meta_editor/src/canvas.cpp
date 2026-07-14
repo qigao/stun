@@ -8,6 +8,10 @@
 
 namespace meta_editor {
 
+using flex::operator+;
+using flex::operator-;
+using flex::operator*;
+
 Canvas::Canvas(float width, float height) {
     instance_ = flex::Instance::create(width, height);
     scene_ = instance_->scene();
@@ -193,8 +197,8 @@ void Canvas::zoom_at(float screen_x, float screen_y, float delta) {
     
     // Adjust pan to keep world position stationary
     auto offset = new_world_pos - world_pos;
-    camera_pan_x_ -= offset.x() * camera_zoom_;
-    camera_pan_y_ -= offset.y() * camera_zoom_;
+    camera_pan_x_ -= offset.x * camera_zoom_;
+    camera_pan_y_ -= offset.y * camera_zoom_;
     set_dirty(true);
 }
 
@@ -217,7 +221,7 @@ flex::Transform Canvas::camera_transform() const {
 }
 
 flex::Transform Canvas::inverse_camera_transform() const {
-    return camera_transform().inverse();
+    return flex::inverse(camera_transform());
 }
 
 flex::Vec2 Canvas::screen_to_world(float screen_x, float screen_y) const {
@@ -229,11 +233,11 @@ flex::Vec2 Canvas::world_to_screen(float world_x, float world_y) const {
 }
 
 flex::Vec2 Canvas::screen_to_world(const flex::Vec2& screen_pos) const {
-    return screen_to_world(screen_pos.x(), screen_pos.y());
+    return screen_to_world(screen_pos.x, screen_pos.y);
 }
 
 flex::Vec2 Canvas::world_to_screen(const flex::Vec2& world_pos) const {
-    return world_to_screen(world_pos.x(), world_pos.y());
+    return world_to_screen(world_pos.x, world_pos.y);
 }
 
 // Hit Testing
@@ -270,10 +274,10 @@ flex::Node* Canvas::hit_test(const flex::Vec2& world_pos) {
 
         // Precise hit test: Convert world position to node's local space
         // This handles rotation and scale correctly.
-        auto world_to_local = node->world_transform().inverse();
+        auto world_to_local = flex::inverse(node->world_transform());
         flex::Vec2 local_pos = world_to_local * pos;
 
-        if (node->hit_test(local_pos.x(), local_pos.y())) {
+        if (node->hit_test(local_pos.x, local_pos.y)) {
             return node;
         }
         
@@ -306,8 +310,8 @@ flex::Vec2 Canvas::snap_to_grid(const flex::Vec2& pos) const {
     if (!snap_to_grid_) return pos;
     
     return flex::Vec2(
-        std::round(pos.x() / grid_size_) * grid_size_,
-        std::round(pos.y() / grid_size_) * grid_size_
+        std::round(pos.x / grid_size_) * grid_size_,
+        std::round(pos.y / grid_size_) * grid_size_
     );
 }
 

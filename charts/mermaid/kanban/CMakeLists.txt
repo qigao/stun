@@ -2,16 +2,6 @@ cmake_minimum_required(VERSION 3.10)
 project(kanban_parser C)
 
 set(CMAKE_C_STANDARD 11)
-
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c REQUIRED)
-    find_program(LEMON_EXECUTABLE lemon REQUIRED)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 # Generate Parser
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/kanban_parser_gen.c" "${CMAKE_CURRENT_BINARY_DIR}/kanban_parser_gen.h"
@@ -41,12 +31,13 @@ target_include_directories(kanban PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(kanban PUBLIC TurboNet::Parser)
+target_link_libraries(kanban PUBLIC TurboUtils::Parser flex_runtime)
 
 # Test executable
 add_executable(kanban_test tests/test_parser.c)
-target_link_libraries(kanban_test kanban TurboNet::TinyTest)
-target_compile_definitions(kanban_test PRIVATE GOLDEN_DIR="${CMAKE_SOURCE_DIR}/charts/mermaid/golden/kanban")
+target_link_libraries(kanban_test kanban TurboUtils::TinyTest)
+set_target_properties(kanban_test PROPERTIES LINKER_LANGUAGE CXX)
+target_compile_definitions(kanban_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/kanban")
 
 add_test(NAME kanban_test COMMAND kanban_test)
 set_target_properties(kanban PROPERTIES FOLDER "Modules/Mermaid")

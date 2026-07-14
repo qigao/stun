@@ -1,0 +1,30 @@
+{
+  "component": "Sidebar",
+  "kind": "leaf",
+  "root": "sidebar_root",
+  "nodes": [
+    {
+      "id": "sidebar_root",
+      "type": "widget",
+      "widget": "sidebar",
+      "tag": "nav",
+      "role": "navigation",
+      "states": ["expanded", "collapsed"],
+      "props": {
+        "collapsible": true,
+        "sections": [
+          {
+            "title": "Workspace",
+            "items": [
+              { "id": "files", "icon": "F", "label": "Files" },
+              { "id": "search", "icon": "S", "label": "Search", "badge": "3" }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/sidebar"
+  }
+}

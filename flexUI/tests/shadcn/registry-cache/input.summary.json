@@ -1,0 +1,31 @@
+{
+  "name": "input",
+  "source": "https://ui.shadcn.com/r/styles/new-york/input.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "bg-transparent",
+    "border",
+    "border-input",
+    "disabled:cursor-not-allowed",
+    "disabled:opacity-50",
+    "file:bg-transparent",
+    "file:border-0",
+    "file:font-medium",
+    "file:text-foreground",
+    "file:text-sm",
+    "flex",
+    "focus-visible:outline-none",
+    "focus-visible:ring-1",
+    "focus-visible:ring-ring",
+    "h-9",
+    "md:text-sm",
+    "placeholder:text-muted-foreground",
+    "px-3",
+    "py-1",
+    "rounded-md",
+    "shadow-sm",
+    "text-base",
+    "transition-colors",
+    "w-full"
+  ]
+}

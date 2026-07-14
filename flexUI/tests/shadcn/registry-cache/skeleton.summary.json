@@ -1,0 +1,10 @@
+{
+  "name": "skeleton",
+  "source": "https://ui.shadcn.com/r/styles/new-york/skeleton.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "animate-pulse",
+    "bg-primary/10",
+    "rounded-md"
+  ]
+}

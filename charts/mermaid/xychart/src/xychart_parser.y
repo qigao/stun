@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "flex/core/expr_c.h"
 #include "xychart/xychart_ast.h"
 #include "xychart_parser_gen.h"
 
@@ -60,7 +61,8 @@ static XYNumberList convert_number_list(NumberNode* head) {
 
 static double to_double(char* s) {
     if(!s) return 0.0;
-    return atof(s);
+    double value = 0.0;
+    return flex_expr_eval_f64(s, &value) ? value : 0.0;
 }
 }
 
@@ -76,6 +78,7 @@ static double to_double(char* s) {
 %type text_list {TextNode*}
 %type number_list {NumberNode*}
 %type text_item {char*}
+%type number_expr {char*}
 %type series_data {XYNumberList}
 %type series_def {struct { char* name; XYNumberList data; }}
 
@@ -110,14 +113,14 @@ x_axis_def ::= text_item(T) x_axis_data. { xychart_set_x_axis_title(ctx, T); fre
 x_axis_def ::= x_axis_data.
 
 x_axis_data ::= SQR_START text_list(L) SQR_END. { xychart_set_x_axis_categories(ctx, convert_text_list(L)); }
-x_axis_data ::= NUMBER(N1) ARROW NUMBER(N2). { xychart_set_x_axis_range(ctx, to_double(N1), to_double(N2)); free(N1); free(N2); }
+x_axis_data ::= number_expr(N1) ARROW number_expr(N2). { xychart_set_x_axis_range(ctx, to_double(N1), to_double(N2)); free(N1); free(N2); }
 
 y_axis_def ::= text_item(T). { xychart_set_y_axis_title(ctx, T); free(T); }
 y_axis_def ::= text_item(T) y_axis_data. { xychart_set_y_axis_title(ctx, T); free(T); }
 y_axis_def ::= y_axis_data.
 
 
-y_axis_data ::= NUMBER(N1) ARROW NUMBER(N2). { xychart_set_y_axis_range(ctx, to_double(N1), to_double(N2)); free(N1); free(N2); }
+y_axis_data ::= number_expr(N1) ARROW number_expr(N2). { xychart_set_y_axis_range(ctx, to_double(N1), to_double(N2)); free(N1); free(N2); }
 
 series_def(R) ::= text_item(T) series_data(D). { R.name = T; R.data = D; }
 series_def(R) ::= series_data(D). { R.name = strdup(""); R.data = D; }
@@ -133,12 +136,12 @@ text_list(L) ::= text_item(T) COMMA text_list(Next). {
     L->text = T; L->next = Next;
 }
 
-number_list(L) ::= NUMBER(N). {
+number_list(L) ::= number_expr(N). {
     L = (NumberNode*)malloc(sizeof(NumberNode));
     L->value = to_double(N); L->next = NULL;
     free(N);
 }
-number_list(L) ::= NUMBER(N) COMMA number_list(Next). {
+number_list(L) ::= number_expr(N) COMMA number_list(Next). {
     L = (NumberNode*)malloc(sizeof(NumberNode));
     L->value = to_double(N); L->next = Next;
     free(N);
@@ -146,3 +149,5 @@ number_list(L) ::= NUMBER(N) COMMA number_list(Next). {
 
 text_item(T) ::= TEXT(X). { T = X; }
 text_item(T) ::= NUMBER(X). { T = X; } // Sometimes numbers are used as labels
+number_expr(N) ::= NUMBER(X). { N = X; }
+number_expr(N) ::= TEXT(X). { N = X; }

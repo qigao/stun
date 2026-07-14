@@ -1,0 +1,17 @@
+{
+  "rules": [
+    {
+      "target": "accordion_root",
+      "selector": "&",
+      "decls": {
+        "display": "block",
+        "width": "100%",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--border)",
+        "border-radius": "0.5rem",
+        "background-color": "var(--background)"
+      }
+    }
+  ]
+}

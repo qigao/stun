@@ -1,0 +1,66 @@
+{
+  "bridges": [
+    {
+      "target": "resizable_group",
+      "attributes": {
+        "data-panel-group-direction": "horizontal",
+        "data-resizing": "false"
+      }
+    },
+    {
+      "target": "resizable_handle",
+      "attributes": {
+        "data-orientation": "horizontal",
+        "aria-orientation": "vertical",
+        "data-resize-handle-state": "idle"
+      }
+    },
+    {
+      "target": "resizable_group",
+      "state": "vertical",
+      "attributes": {
+        "data-panel-group-direction": "vertical"
+      },
+      "pseudo_states": ["vertical"]
+    },
+    {
+      "target": "resizable_handle",
+      "state": "vertical",
+      "attributes": {
+        "data-orientation": "vertical",
+        "aria-orientation": "horizontal"
+      },
+      "pseudo_states": ["vertical"]
+    },
+    {
+      "target": "resizable_group",
+      "state": "resizing",
+      "attributes": {
+        "data-resizing": "true"
+      },
+      "pseudo_states": ["resizing"]
+    },
+    {
+      "target": "resizable_handle",
+      "state": "dragging",
+      "attributes": {
+        "data-resize-handle-state": "drag"
+      },
+      "pseudo_states": ["dragging"]
+    },
+    {
+      "target": "resizable_handle",
+      "state": "focus-visible",
+      "pseudo_states": ["focus-visible"]
+    },
+    {
+      "target": "resizable_panel_start",
+      "state": "collapsed",
+      "attributes": {
+        "data-panel-state": "collapsed",
+        "aria-hidden": "true"
+      },
+      "pseudo_states": ["collapsed"]
+    }
+  ]
+}

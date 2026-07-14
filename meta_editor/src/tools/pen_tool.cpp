@@ -58,11 +58,11 @@ bool PenTool::on_pointer_move(const flex::Vec2& screen_pos, const flex::Vec2& wo
     if (is_dragging_ && !path_.points.empty()) {
         // User is dragging - create handles
         auto& pt = path_.points.back();
-        flex::Vec2 delta(world_pos.x() - drag_start_.x(), world_pos.y() - drag_start_.y());
+        flex::Vec2 delta(world_pos.x - drag_start_.x, world_pos.y - drag_start_.y);
 
         // Create symmetric handles
         pt.handle_out = delta;
-        pt.handle_in = flex::Vec2(-delta.x(), -delta.y());
+        pt.handle_in = flex::Vec2(-delta.x, -delta.y);
         pt.type = PointType::Symmetric;
 
         return true;
@@ -79,8 +79,8 @@ bool PenTool::on_pointer_up(const flex::Vec2& screen_pos, const flex::Vec2& worl
         if (!path_.points.empty()) {
             auto& pt = path_.points.back();
             float drag_dist = std::sqrt(
-                pt.handle_out.x() * pt.handle_out.x() +
-                pt.handle_out.y() * pt.handle_out.y()
+                pt.handle_out.x * pt.handle_out.x +
+                pt.handle_out.y * pt.handle_out.y
             );
             if (drag_dist < 5.0f) {
                 pt.handle_in = flex::Vec2(0, 0);
@@ -125,11 +125,11 @@ void PenTool::render_overlay(flex::Renderer& renderer) {
         if (last.has_handle_out()) {
             // Curve preview (use handle_out reflected as control point)
             auto c1 = last.handle_out_abs();
-            preview_path += " C " + std::to_string(c1.x()) + " " + std::to_string(c1.y()) +
-                           " " + std::to_string(current_point_.x()) + " " + std::to_string(current_point_.y()) +
-                           " " + std::to_string(current_point_.x()) + " " + std::to_string(current_point_.y());
+            preview_path += " C " + std::to_string(c1.x) + " " + std::to_string(c1.y) +
+                           " " + std::to_string(current_point_.x) + " " + std::to_string(current_point_.y) +
+                           " " + std::to_string(current_point_.x) + " " + std::to_string(current_point_.y);
         } else {
-            preview_path += " L " + std::to_string(current_point_.x()) + " " + std::to_string(current_point_.y());
+            preview_path += " L " + std::to_string(current_point_.x) + " " + std::to_string(current_point_.y);
         }
     }
 
@@ -142,28 +142,28 @@ void PenTool::render_overlay(flex::Renderer& renderer) {
         // Draw handle lines
         if (pt.has_handle_in()) {
             auto h = pt.handle_in_abs();
-            std::string line = "M " + std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y()) +
-                              " L " + std::to_string(h.x()) + " " + std::to_string(h.y());
+            std::string line = "M " + std::to_string(pt.position.x) + " " + std::to_string(pt.position.y) +
+                              " L " + std::to_string(h.x) + " " + std::to_string(h.y);
             renderer.stroke_path(line, handle_stroke, 1.0f);
-            renderer.draw_circle(h.x(), h.y(), 3.0f, handle_fill, handle_stroke, 1.0f);
+            renderer.draw_circle(h.x, h.y, 3.0f, handle_fill, handle_stroke, 1.0f);
         }
         if (pt.has_handle_out()) {
             auto h = pt.handle_out_abs();
-            std::string line = "M " + std::to_string(pt.position.x()) + " " + std::to_string(pt.position.y()) +
-                              " L " + std::to_string(h.x()) + " " + std::to_string(h.y());
+            std::string line = "M " + std::to_string(pt.position.x) + " " + std::to_string(pt.position.y) +
+                              " L " + std::to_string(h.x) + " " + std::to_string(h.y);
             renderer.stroke_path(line, handle_stroke, 1.0f);
-            renderer.draw_circle(h.x(), h.y(), 3.0f, handle_fill, handle_stroke, 1.0f);
+            renderer.draw_circle(h.x, h.y, 3.0f, handle_fill, handle_stroke, 1.0f);
         }
 
         // Draw anchor point
         float pt_radius = (i == 0) ? 5.0f : 4.0f;
-        renderer.draw_circle(pt.position.x(), pt.position.y(), pt_radius, point_fill, point_stroke, 1.5f);
+        renderer.draw_circle(pt.position.x, pt.position.y, pt_radius, point_fill, point_stroke, 1.5f);
     }
 
     // Show close indicator when near first point
     if (path_.points.size() >= 2 && is_near_first_point(current_point_)) {
         const auto& first = path_.points.front();
-        renderer.draw_circle(first.position.x(), first.position.y(), 8.0f, close_indicator, point_stroke, 2.0f);
+        renderer.draw_circle(first.position.x, first.position.y, 8.0f, close_indicator, point_stroke, 2.0f);
     }
 }
 
@@ -213,8 +213,8 @@ bool PenTool::is_near_first_point(const flex::Vec2& pos, float threshold) const 
     if (path_.points.empty()) return false;
 
     const auto& first = path_.points.front();
-    float dx = pos.x() - first.position.x();
-    float dy = pos.y() - first.position.y();
+    float dx = pos.x - first.position.x;
+    float dy = pos.y - first.position.y;
     return (dx * dx + dy * dy) < (threshold * threshold);
 }
 

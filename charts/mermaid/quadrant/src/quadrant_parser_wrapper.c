@@ -24,10 +24,15 @@ QuadrantDiagram* quadrant_parse(const char* input) {
 
     QuadrantParserContext ctx;
     ctx.diagram = quadrant_create_diagram();
+    if (!ctx.diagram) return NULL;
     ctx.error_count = 0;
     ctx.error_message = NULL;
 
     void* parser = QuadrantParserAlloc(malloc);
+    if (!parser) {
+        quadrant_free_diagram(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     s.start = input;

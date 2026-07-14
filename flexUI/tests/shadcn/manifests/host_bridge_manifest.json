@@ -1,0 +1,2505 @@
+{
+  "schema_version": 1,
+  "suite": "host-bridge",
+  "description": "Host data/aria/state bridge expectations for widget-backed shadcn semantics.",
+  "cases": [
+    {
+      "name": "badge-count-bridge",
+      "component": "badge",
+      "widget": "badge",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[status]:bg-slate-50",
+        "data-[state=visible]:border-slate-950",
+        "data-[count='8']:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-count",
+        "data-value",
+        "aria-hidden"
+      ],
+      "widget_props": {
+        "count": 8
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='status'] { background-color: #f8fafc; } #field[data-state='visible'] { border-color: #020617; } #field[data-count='8'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "status",
+          "aria-hidden": "false",
+          "data-state": "visible",
+          "data-dot": "false",
+          "data-count": "8",
+          "data-value": "8",
+          "aria-label": "8"
+        }
+      }
+    },
+    {
+      "name": "avatar-fallback-status-bridge",
+      "component": "avatar",
+      "widget": "avatar",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[img]:bg-slate-50",
+        "data-[state=fallback]:border-slate-950",
+        "data-[status=online]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-status",
+        "data-shape"
+      ],
+      "widget_props": {
+        "name": "Alice Smith",
+        "status": "online",
+        "shape": "rounded"
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='img'] { background-color: #f8fafc; } #field[data-state='fallback'] { border-color: #020617; } #field[data-status='online'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "img",
+          "aria-label": "Alice Smith",
+          "data-state": "fallback",
+          "data-status": "online",
+          "data-shape": "rounded"
+        }
+      }
+    },
+    {
+      "name": "badge-dot-bridge",
+      "component": "badge",
+      "widget": "badge",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[status]:bg-slate-50",
+        "data-[dot=true]:border-slate-950",
+        "data-[state=visible]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-dot",
+        "data-state",
+        "aria-hidden"
+      ],
+      "widget_props": {
+        "dot": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='status'] { background-color: #f8fafc; } #field[data-dot='true'] { border-color: #020617; } #field[data-state='visible'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "status",
+          "aria-hidden": "false",
+          "data-state": "visible",
+          "data-dot": "true",
+          "aria-label": "Badge"
+        },
+        "missing_attributes": [
+          "data-count",
+          "data-value"
+        ]
+      }
+    },
+    {
+      "name": "avatar-image-shape-bridge",
+      "component": "avatar",
+      "widget": "avatar",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[img]:bg-slate-50",
+        "data-[state=image]:border-slate-950",
+        "data-[shape=square]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-shape"
+      ],
+      "widget_props": {
+        "name": "Alice Smith",
+        "image_url": "avatar.png",
+        "shape": "square"
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='img'] { background-color: #f8fafc; } #field[data-state='image'] { border-color: #020617; } #field[data-shape='square'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "img",
+          "aria-label": "Alice Smith",
+          "data-state": "image",
+          "data-shape": "square"
+        },
+        "missing_attributes": [
+          "data-status"
+        ]
+      }
+    },
+    {
+      "name": "button-loading-variant-bridge",
+      "component": "button",
+      "widget": "button",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "role-[button]:bg-slate-50",
+        "data-[state=loading]:border-slate-950",
+        "data-[variant=outline]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-variant",
+        "aria-busy",
+        "aria-disabled"
+      ],
+      "widget_props": {
+        "text": "Submit",
+        "loading": true,
+        "variant": "outline",
+        "size": "sm"
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='button'] { background-color: #f8fafc; } #field[data-state='loading'] { border-color: #020617; } #field[data-variant='outline'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "button",
+          "aria-disabled": "true",
+          "aria-busy": "true",
+          "data-state": "loading",
+          "data-variant": "outline",
+          "data-size": "sm"
+        }
+      }
+    },
+    {
+      "name": "group-button-hover-bridge",
+      "component": "group-button",
+      "widget": "group-button",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "role-[button]:bg-slate-50",
+        "data-[state=hover]:border-slate-950",
+        "aria-[label='Save']:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-label"
+      ],
+      "widget_props": {
+        "text": "Save"
+      },
+      "events": [
+        {
+          "type": "mouse_move",
+          "x": 40.0,
+          "y": 18.0
+        }
+      ],
+      "css": "#field { width: 80px; height: 36px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='button'] { background-color: #f8fafc; } #field[data-state='hover'] { border-color: #020617; } #field[aria-label='Save'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "button",
+          "data-state": "hover",
+          "aria-label": "Save"
+        }
+      }
+    },
+    {
+      "name": "spinner-bars-busy-bridge",
+      "component": "spinner",
+      "widget": "spinner",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[status]:bg-slate-50",
+        "data-[state=spinning]:border-sky-500",
+        "data-[variant=bars]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-variant",
+        "aria-busy"
+      ],
+      "widget_props": {
+        "variant": "bars"
+      },
+      "css": "#field { width: 24px; height: 24px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='status'] { background-color: #f8fafc; } #field[data-state='spinning'] { border-color: #0ea5e9; } #field[data-variant='bars'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.054902,
+            0.647059,
+            0.913725,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "status",
+          "aria-busy": "true",
+          "data-state": "spinning",
+          "data-variant": "bars"
+        }
+      }
+    },
+    {
+      "name": "spinner-stopped-bridge",
+      "component": "spinner",
+      "widget": "spinner",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[status]:bg-slate-50",
+        "data-[state=stopped]:border-slate-950",
+        "aria-[busy=false]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-busy"
+      ],
+      "widget_props": {
+        "variant": "ring",
+        "spinning": false
+      },
+      "css": "#field { width: 24px; height: 24px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='status'] { background-color: #f8fafc; } #field[data-state='stopped'] { border-color: #020617; } #field[aria-busy='false'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "status",
+          "aria-busy": "false",
+          "data-state": "stopped",
+          "data-variant": "ring"
+        }
+      }
+    },
+    {
+      "name": "input-readonly-disabled-bridge",
+      "component": "input",
+      "widget": "input",
+      "tag": "input",
+      "id": "field",
+      "class_tokens": [
+        "role-[textbox]:bg-slate-50",
+        "aria-[readonly=true]:border-slate-950",
+        "aria-[disabled=true]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "aria-readonly",
+        "aria-disabled",
+        "readonly-attribute",
+        "disabled-attribute"
+      ],
+      "widget_props": {
+        "placeholder": "Email",
+        "readonly": true,
+        "disabled": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='textbox'] { background-color: #f8fafc; } #field[aria-readonly='true'] { border-color: #020617; } #field[aria-disabled='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "textbox",
+          "aria-readonly": "true",
+          "aria-disabled": "true",
+          "readonly": "",
+          "disabled": ""
+        }
+      }
+    },
+    {
+      "name": "textarea-readonly-disabled-bridge",
+      "component": "textarea",
+      "widget": "textarea",
+      "tag": "textarea",
+      "id": "field",
+      "class_tokens": [
+        "role-[textbox]:bg-slate-50",
+        "aria-[multiline=true]:border-slate-950",
+        "aria-[readonly=true]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "aria-multiline",
+        "aria-readonly",
+        "aria-disabled",
+        "readonly-attribute",
+        "disabled-attribute"
+      ],
+      "widget_props": {
+        "placeholder": "Describe your issue",
+        "readonly": true,
+        "disabled": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='textbox'] { background-color: #f8fafc; } #field[aria-multiline='true'] { border-color: #020617; } #field[aria-readonly='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "textbox",
+          "aria-multiline": "true",
+          "aria-readonly": "true",
+          "aria-disabled": "true",
+          "readonly": "",
+          "disabled": ""
+        }
+      }
+    },
+    {
+      "name": "popover-open-side-bridge",
+      "component": "popover",
+      "widget": "popover",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:border-slate-950",
+        "data-[side=left]:text-slate-950",
+        "aria-expanded:bg-slate-50"
+      ],
+      "required_features": [
+        "data-state",
+        "data-side",
+        "aria-expanded",
+        "aria-hidden",
+        "aria-haspopup"
+      ],
+      "widget_props": {
+        "content": "More details",
+        "open": true,
+        "position": "left"
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[data-state='open'] { border-color: #020617; } #field[data-side='left'] { color: #020617; } #field[aria-expanded='true'] { background-color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "data-state": "open",
+          "data-side": "left",
+          "aria-expanded": "true",
+          "aria-hidden": "false",
+          "aria-haspopup": "dialog",
+          "aria-label": "More details"
+        }
+      }
+    },
+    {
+      "name": "menu-open-orientation-bridge",
+      "component": "menu",
+      "widget": "menu",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[menu]:bg-slate-50",
+        "data-[state=open]:border-slate-950",
+        "aria-[hidden=false]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-orientation",
+        "aria-hidden"
+      ],
+      "widget_props": {
+        "items": [
+          {
+            "id": "new",
+            "label": "New File"
+          }
+        ],
+        "show": true,
+        "x": 24.0,
+        "y": 18.0
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='menu'] { background-color: #f8fafc; } #field[data-state='open'] { border-color: #020617; } #field[aria-hidden='false'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "menu",
+          "data-state": "open",
+          "aria-orientation": "vertical",
+          "aria-hidden": "false"
+        }
+      }
+    },
+    {
+      "name": "sidebar-collapsed-selection-bridge",
+      "component": "sidebar",
+      "widget": "sidebar",
+      "tag": "nav",
+      "id": "field",
+      "class_tokens": [
+        "role-[navigation]:bg-slate-50",
+        "data-[state=collapsed]:border-slate-950",
+        "data-[selected-id=search]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-item-count",
+        "data-selected-id",
+        "aria-orientation"
+      ],
+      "widget_props": {
+        "sections": [
+          {
+            "title": "Workspace",
+            "items": [
+              {
+                "id": "files",
+                "icon": "F",
+                "label": "Files"
+              },
+              {
+                "id": "search",
+                "icon": "S",
+                "label": "Search",
+                "badge": "3"
+              }
+            ]
+          }
+        ],
+        "selected_id": "search",
+        "collapsed": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='navigation'] { background-color: #f8fafc; } #field[data-state='collapsed'] { border-color: #020617; } #field[data-selected-id='search'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "navigation",
+          "aria-orientation": "vertical",
+          "data-state": "collapsed",
+          "data-collapsible": "true",
+          "data-item-count": "2",
+          "data-selected-id": "search"
+        }
+      }
+    },
+    {
+      "name": "searchbox-open-active-descendant-bridge",
+      "component": "searchbox",
+      "widget": "searchbox",
+      "tag": "input",
+      "id": "field",
+      "class_tokens": [
+        "role-[combobox]:bg-slate-50",
+        "data-[state=open]:border-slate-950",
+        "data-[active-id=api-ref]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "aria-autocomplete",
+        "aria-haspopup",
+        "aria-expanded",
+        "data-result-count",
+        "data-active-id"
+      ],
+      "widget_props": {
+        "placeholder": "Search docs",
+        "suggestions": [
+          {
+            "id": "api-ref",
+            "text": "API Reference"
+          },
+          {
+            "id": "guide",
+            "text": "Guide",
+            "description": "Getting started"
+          }
+        ],
+        "text": "api",
+        "focused": true,
+        "dropdown_open": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='combobox'] { background-color: #f8fafc; } #field[data-state='open'] { border-color: #020617; } #field[data-active-id='api-ref'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "combobox",
+          "aria-autocomplete": "list",
+          "aria-haspopup": "listbox",
+          "aria-expanded": "true",
+          "aria-hidden": "false",
+          "aria-activedescendant": "api-ref",
+          "data-state": "open",
+          "data-result-count": "1",
+          "data-active-id": "api-ref",
+          "data-value": "api",
+          "aria-label": "api"
+        }
+      }
+    },
+    {
+      "name": "select-open-state-bridge",
+      "component": "select",
+      "widget": "select",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:border-green-500",
+        "aria-expanded:bg-slate-900"
+      ],
+      "required_features": [
+        "data-state",
+        "aria-expanded",
+        "attribute-selector"
+      ],
+      "widget_props": {
+        "options": [
+          "Apple",
+          "Banana",
+          "Cherry"
+        ],
+        "selected_index": 1,
+        "expanded": true
+      },
+      "css": "#field { border-color: #cbd5e1; background-color: #ffffff; color: #0f172a; } #field[data-state='open'] { border-color: #22c55e; } #field[aria-expanded='true'] { background-color: #111827; color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.133333,
+            0.772549,
+            0.368627,
+            1.0
+          ],
+          "background_color": [
+            0.066667,
+            0.094118,
+            0.152941,
+            1.0
+          ],
+          "text_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        },
+        "attributes": {
+          "data-state": "open",
+          "aria-expanded": "true"
+        }
+      }
+    },
+    {
+      "name": "checkbox-checked-accent-bridge",
+      "component": "checkbox",
+      "widget": "checkbox",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=checked]:border-emerald-500",
+        "aria-checked:text-emerald-900",
+        "accent-emerald-500"
+      ],
+      "required_features": [
+        "data-state",
+        "aria-checked",
+        "accent-color",
+        "attribute-selector"
+      ],
+      "widget_props": {
+        "label": "Accept terms",
+        "checked": true
+      },
+      "css": "#field { border-color: #cbd5e1; color: #0f172a; accent-color: #10b981; } #field[data-state='checked'] { border-color: #10b981; } #field[aria-checked='true'] { color: #064e3b; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.062745,
+            0.72549,
+            0.505882,
+            1.0
+          ],
+          "text_color": [
+            0.023529,
+            0.305882,
+            0.231373,
+            1.0
+          ]
+        },
+        "variables": {
+          "--accent-color": [
+            0.062745,
+            0.72549,
+            0.505882,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "checkbox",
+          "data-state": "checked",
+          "aria-checked": "true"
+        }
+      }
+    },
+    {
+      "name": "switch-checked-accent-bridge",
+      "component": "switch",
+      "widget": "switch",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=checked]:border-emerald-500",
+        "aria-checked:bg-slate-950",
+        "accent-emerald-500"
+      ],
+      "required_features": [
+        "data-state",
+        "aria-checked",
+        "accent-color",
+        "attribute-selector"
+      ],
+      "widget_props": {
+        "label": "Airplane mode",
+        "checked": true
+      },
+      "css": "#field { border-color: #cbd5e1; background-color: #ffffff; accent-color: #10b981; } #field[data-state='checked'] { border-color: #10b981; } #field[aria-checked='true'] { background-color: #020617; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.062745,
+            0.72549,
+            0.505882,
+            1.0
+          ],
+          "background_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "variables": {
+          "--accent-color": [
+            0.062745,
+            0.72549,
+            0.505882,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "switch",
+          "data-state": "checked",
+          "aria-checked": "true"
+        }
+      }
+    },
+    {
+      "name": "tabs-active-state-bridge",
+      "component": "tabs",
+      "widget": "tabs",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=active]:bg-slate-950",
+        "data-[orientation=horizontal]:text-slate-50"
+      ],
+      "required_features": [
+        "data-state",
+        "data-orientation",
+        "aria-activedescendant",
+        "attribute-selector"
+      ],
+      "widget_props": {
+        "tabs": [
+          {
+            "label": "Account",
+            "id": "tab-account"
+          },
+          {
+            "label": "Password",
+            "id": "tab-password"
+          }
+        ],
+        "active_id": "tab-password"
+      },
+      "css": "#field { background-color: #ffffff; color: #0f172a; } #field[data-state='active'] { background-color: #020617; } #field[data-orientation='horizontal'] { color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "tablist",
+          "data-state": "active",
+          "data-orientation": "horizontal",
+          "data-active-id": "tab-password",
+          "data-active-index": "1",
+          "aria-activedescendant": "tab-password"
+        }
+      }
+    },
+    {
+      "name": "modal-open-dialog-bridge",
+      "component": "dialog",
+      "widget": "modal",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-slate-950",
+        "aria-[modal=true]:text-slate-50"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-modal",
+        "aria-hidden"
+      ],
+      "widget_props": {
+        "title": "Preferences",
+        "open": true,
+        "show_close_button": true
+      },
+      "css": "#field { background-color: #ffffff; color: #0f172a; } #field[role='dialog'][data-state='open'] { background-color: #020617; } #field[aria-modal='true'] { color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "dialog",
+          "data-state": "open",
+          "aria-modal": "true",
+          "aria-hidden": "false",
+          "aria-label": "Preferences"
+        }
+      }
+    },
+    {
+      "name": "popover-open-host-bridge",
+      "component": "popover",
+      "widget": "popover",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-slate-950",
+        "aria-[expanded=true]:text-slate-50",
+        "data-[side=bottom]:border-slate-300"
+      ],
+      "required_features": [
+        "data-state",
+        "data-side",
+        "aria-expanded",
+        "aria-haspopup",
+        "aria-hidden"
+      ],
+      "widget_props": {
+        "title": "Share",
+        "content": "Copy link",
+        "width": 160.0,
+        "height": 72.0,
+        "show": true
+      },
+      "css": "#field { background-color: #ffffff; color: #0f172a; border-color: #cbd5e1; } #field[data-state='open'] { background-color: #020617; } #field[aria-expanded='true'] { color: #f8fafc; } #field[data-side='bottom'] { border-color: #cbd5e1; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.796078,
+            0.835294,
+            0.882353,
+            1.0
+          ]
+        },
+        "attributes": {
+          "data-state": "open",
+          "data-side": "bottom",
+          "aria-expanded": "true",
+          "aria-haspopup": "dialog",
+          "aria-hidden": "false",
+          "aria-label": "Share"
+        }
+      }
+    },
+    {
+      "name": "dropdown-open-combobox-bridge",
+      "component": "dropdown-menu",
+      "widget": "dropdown",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:border-primary",
+        "aria-expanded:bg-accent",
+        "data-[value=pro]:text-foreground"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-expanded",
+        "data-value"
+      ],
+      "widget_props": {
+        "placeholder": "Plan",
+        "options": [
+          {
+            "label": "Free",
+            "value": "free"
+          },
+          {
+            "label": "Pro",
+            "value": "pro"
+          }
+        ],
+        "selected_value": "pro",
+        "open": true
+      },
+      "css": "#field { border-color: #cbd5e1; background-color: #ffffff; color: #64748b; } #field[role='combobox'][data-state='open'] { border-color: #0f172a; } #field[aria-expanded='true'] { background-color: #e2e8f0; } #field[data-value='pro'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.058824,
+            0.090196,
+            0.164706,
+            1.0
+          ],
+          "background_color": [
+            0.886275,
+            0.909804,
+            0.941176,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "combobox",
+          "data-state": "open",
+          "aria-expanded": "true",
+          "data-value": "pro"
+        }
+      }
+    },
+    {
+      "name": "accordion-open-state-bridge",
+      "component": "accordion",
+      "widget": "accordion",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-muted",
+        "aria-expanded:text-foreground"
+      ],
+      "required_features": [
+        "data-state",
+        "data-expanded-count",
+        "data-expanded-id",
+        "aria-expanded"
+      ],
+      "widget_props": {
+        "sections": [
+          {
+            "title": "General",
+            "id": "general"
+          },
+          {
+            "title": "Advanced",
+            "id": "advanced"
+          }
+        ],
+        "expanded_id": "advanced"
+      },
+      "css": "#field { background-color: #ffffff; color: #64748b; } #field[data-state='open'] { background-color: #f1f5f9; } #field[aria-expanded='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "data-state": "open",
+          "data-orientation": "vertical",
+          "aria-orientation": "vertical",
+          "aria-expanded": "true",
+          "data-expanded-count": "1",
+          "data-expanded-id": "advanced"
+        }
+      }
+    },
+    {
+      "name": "toggle-group-multi-select-bridge",
+      "component": "toggle-group",
+      "widget": "toggle-group",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=selected]:bg-muted",
+        "data-[selected-count=2]:text-foreground"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-selected-count",
+        "multi-select"
+      ],
+      "widget_props": {
+        "multi_select": true,
+        "options": [
+          {
+            "id": "left",
+            "label": "Left"
+          },
+          {
+            "id": "center",
+            "label": "Center"
+          },
+          {
+            "id": "right",
+            "label": "Right"
+          }
+        ],
+        "selected_indices": [
+          0,
+          2
+        ]
+      },
+      "css": "#field { background-color: #ffffff; color: #64748b; } #field[role='group'][data-state='selected'] { background-color: #f1f5f9; } #field[data-selected-count='2'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "group",
+          "data-orientation": "horizontal",
+          "aria-orientation": "horizontal",
+          "data-state": "selected",
+          "data-selected-count": "2"
+        }
+      }
+    },
+    {
+      "name": "radio-checked-group-bridge",
+      "component": "radio-group",
+      "widget": "radio",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=checked]:border-primary",
+        "data-[group=size]:text-foreground"
+      ],
+      "required_features": [
+        "data-state",
+        "aria-checked",
+        "data-group",
+        "data-value"
+      ],
+      "widget_props": {
+        "label": "Large",
+        "value": "lg",
+        "group": "size",
+        "checked": true
+      },
+      "css": "#field { border-color: #cbd5e1; color: #64748b; } #field[data-state='checked'] { border-color: #0f172a; } #field[data-group='size'][data-value='lg'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.058824,
+            0.090196,
+            0.164706,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "radio",
+          "data-state": "checked",
+          "aria-checked": "true",
+          "data-group": "size",
+          "data-value": "lg"
+        }
+      }
+    },
+    {
+      "name": "table-selected-collection-bridge",
+      "component": "table",
+      "widget": "table",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=selected]:bg-muted",
+        "data-[selected-count=1]:text-foreground"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-column-count",
+        "data-row-count",
+        "data-selected-row"
+      ],
+      "widget_props": {
+        "columns": [
+          {
+            "header": "Name",
+            "width": 140.0
+          },
+          {
+            "header": "Role",
+            "width": 100.0
+          }
+        ],
+        "rows": [
+          ["Ada", "Admin"],
+          ["Linus", "Owner"]
+        ],
+        "selected_row": 1
+      },
+      "css": "#field { background-color: #ffffff; color: #64748b; } #field[role='table'][data-state='selected'] { background-color: #f1f5f9; } #field[data-selected-count='1'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "table",
+          "data-state": "selected",
+          "data-column-count": "2",
+          "data-row-count": "2",
+          "data-selected-count": "1",
+          "data-selected-row": "1",
+          "aria-colcount": "2",
+          "aria-rowcount": "2"
+        }
+      }
+    },
+    {
+      "name": "tree-selected-expanded-bridge",
+      "component": "tree",
+      "widget": "tree",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=selected]:bg-muted",
+        "data-[expanded-count=1]:text-foreground"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-node-count",
+        "data-expanded-count",
+        "aria-activedescendant"
+      ],
+      "widget_props": {
+        "nodes": [
+          {
+            "id": "settings",
+            "label": "Settings"
+          },
+          {
+            "id": "display",
+            "label": "Display",
+            "parent": "settings"
+          }
+        ],
+        "expanded_ids": [
+          "settings"
+        ],
+        "selected_id": "display"
+      },
+      "css": "#field { background-color: #ffffff; color: #64748b; } #field[role='tree'][data-state='selected'] { background-color: #f1f5f9; } #field[data-expanded-count='1'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "tree",
+          "data-state": "selected",
+          "data-node-count": "2",
+          "data-expanded-count": "1",
+          "data-selected-count": "1",
+          "data-selected-id": "display",
+          "aria-activedescendant": "display",
+          "aria-multiselectable": "false"
+        }
+      }
+    },
+    {
+      "name": "alert-dialog-open-bridge",
+      "component": "alert-dialog",
+      "widget": "dialog",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-slate-950",
+        "aria-[modal=true]:text-slate-50",
+        "role-[alertdialog]:border-red-500"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-modal",
+        "aria-hidden"
+      ],
+      "widget_props": {
+        "title": "Delete project",
+        "message": "This action cannot be undone.",
+        "type": "error",
+        "alert_role": true,
+        "open": true
+      },
+      "css": "#field { background-color: #ffffff; color: #0f172a; border-color: #cbd5e1; } #field[role='alertdialog'] { border-color: #ef4444; } #field[data-state='open'] { background-color: #020617; } #field[aria-modal='true'] { color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.937255,
+            0.266667,
+            0.266667,
+            1.0
+          ],
+          "background_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "alertdialog",
+          "data-state": "open",
+          "aria-modal": "true",
+          "aria-hidden": "false",
+          "aria-label": "Delete project"
+        }
+      }
+    },
+    {
+      "name": "context-menu-open-bridge",
+      "component": "context-menu",
+      "widget": "menu",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:border-slate-950",
+        "aria-[hidden=false]:bg-slate-100",
+        "role-[menu]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-hidden",
+        "aria-orientation"
+      ],
+      "widget_props": {
+        "show": true,
+        "x": 24.0,
+        "y": 28.0,
+        "items": [
+          {
+            "id": "copy",
+            "label": "Copy"
+          },
+          {
+            "id": "paste",
+            "label": "Paste"
+          }
+        ]
+      },
+      "css": "#field { border-color: #cbd5e1; background-color: #ffffff; color: #64748b; } #field[role='menu'] { color: #020617; } #field[data-state='open'] { border-color: #020617; } #field[aria-hidden='false'] { background-color: #f1f5f9; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "menu",
+          "data-state": "open",
+          "aria-hidden": "false",
+          "aria-orientation": "vertical"
+        }
+      }
+    },
+    {
+      "name": "sheet-right-open-bridge",
+      "component": "sheet",
+      "widget": "modal",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-slate-950",
+        "aria-[modal=true]:text-slate-50",
+        "data-[side=right]:border-l"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-modal",
+        "data-side"
+      ],
+      "widget_props": {
+        "title": "Settings",
+        "open": true,
+        "side": "right",
+        "show_close_button": true
+      },
+      "css": "#field { background-color: #ffffff; color: #0f172a; border-color: #cbd5e1; } #field[role='dialog'][data-state='open'] { background-color: #020617; } #field[aria-modal='true'] { color: #f8fafc; } #field[data-side='right'] { border-left-width: 1px; border-left-color: #cbd5e1; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "dialog",
+          "data-state": "open",
+          "data-side": "right",
+          "aria-modal": "true",
+          "aria-hidden": "false",
+          "aria-label": "Settings"
+        }
+      }
+    },
+    {
+      "name": "progress-loading-bridge",
+      "component": "progress",
+      "widget": "progress",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[progressbar]:bg-slate-100",
+        "data-[state=loading]:border-sky-500",
+        "aria-[valuenow='62']:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-valuenow"
+      ],
+      "widget_props": {
+        "value": 62.0
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='progressbar'] { background-color: #f1f5f9; } #field[data-state='loading'] { border-color: #0ea5e9; } #field[aria-valuenow='62'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "border_color": [
+            0.054902,
+            0.647059,
+            0.913725,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "progressbar",
+          "data-state": "loading",
+          "aria-valuemin": "0",
+          "aria-valuemax": "100",
+          "aria-valuenow": "62"
+        }
+      }
+    },
+    {
+      "name": "separator-vertical-bridge",
+      "component": "separator",
+      "widget": "divider",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[separator]:border-slate-300",
+        "aria-[orientation=vertical]:bg-slate-50"
+      ],
+      "required_features": [
+        "role-selector",
+        "aria-orientation"
+      ],
+      "widget_props": {
+        "orientation": "vertical"
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; } #field[role='separator'] { border-color: #cbd5e1; } #field[aria-orientation='vertical'] { background-color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.796078,
+            0.835294,
+            0.882353,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "separator",
+          "aria-orientation": "vertical"
+        }
+      }
+    },
+    {
+      "name": "slider-value-bridge",
+      "component": "slider",
+      "widget": "slider",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[slider]:bg-slate-50",
+        "aria-[valuenow='42']:text-slate-950",
+        "data-[state=enabled]:border-sky-500"
+      ],
+      "required_features": [
+        "role-selector",
+        "aria-valuenow",
+        "data-state"
+      ],
+      "widget_props": {
+        "min": 0.0,
+        "max": 100.0,
+        "value": 42.0,
+        "step": 1.0
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='slider'] { background-color: #f8fafc; } #field[aria-valuenow='42'] { color: #020617; } #field[data-state='enabled'] { border-color: #0ea5e9; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.054902,
+            0.647059,
+            0.913725,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "slider",
+          "aria-orientation": "horizontal",
+          "aria-valuemin": "0",
+          "aria-valuemax": "100",
+          "aria-valuenow": "42",
+          "data-state": "enabled"
+        }
+      }
+    },
+    {
+      "name": "calendar-selected-date-bridge",
+      "component": "calendar",
+      "widget": "calendar",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[grid]:border-slate-950",
+        "data-[value=2024-04-22]:text-slate-950",
+        "data-[view-month='4']:bg-slate-50"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-value",
+        "data-view-month",
+        "data-view-year"
+      ],
+      "widget_props": {
+        "selected": {
+          "year": 2024,
+          "month": 4,
+          "day": 22
+        },
+        "view": {
+          "year": 2024,
+          "month": 4,
+          "day": 1
+        }
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='grid'] { border-color: #020617; } #field[data-value='2024-04-22'] { color: #020617; } #field[data-view-month='4'] { background-color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "grid",
+          "aria-label": "April 2024",
+          "data-value": "2024-04-22",
+          "data-view-month": "4",
+          "data-view-year": "2024"
+        }
+      }
+    },
+    {
+      "name": "datepicker-open-combobox-bridge",
+      "component": "date-picker",
+      "widget": "datepicker",
+      "tag": "button",
+      "id": "field",
+      "class_tokens": [
+        "role-[combobox]:border-slate-950",
+        "aria-[expanded=true]:bg-slate-100",
+        "data-[state=open]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "aria-expanded",
+        "data-state",
+        "data-value"
+      ],
+      "widget_props": {
+        "date": {
+          "year": 2024,
+          "month": 4,
+          "day": 22
+        },
+        "open": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='combobox'] { border-color: #020617; } #field[aria-expanded='true'] { background-color: #f1f5f9; } #field[data-state='open'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.945098,
+            0.960784,
+            0.976471,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "combobox",
+          "aria-haspopup": "dialog",
+          "aria-expanded": "true",
+          "data-state": "open",
+          "data-value": "2024-04-22",
+          "aria-label": "2024-04-22"
+        }
+      }
+    },
+    {
+      "name": "pagination-current-page-bridge",
+      "component": "pagination",
+      "widget": "pagination",
+      "tag": "nav",
+      "id": "field",
+      "class_tokens": [
+        "role-[navigation]:border-slate-950",
+        "data-[current-page='3']:text-slate-950",
+        "data-[state=middle]:bg-slate-50"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-current-page",
+        "data-total-pages",
+        "data-state"
+      ],
+      "widget_props": {
+        "total_pages": 5,
+        "current_page": 3,
+        "visible_pages": 5,
+        "show_prev_next": true
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='navigation'] { border-color: #020617; } #field[data-current-page='3'] { color: #020617; } #field[data-state='middle'] { background-color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "navigation",
+          "aria-label": "Pagination",
+          "data-current-page": "3",
+          "data-total-pages": "5",
+          "data-visible-pages": "5",
+          "data-can-prev": "true",
+          "data-can-next": "true",
+          "data-state": "middle"
+        }
+      }
+    },
+    {
+      "name": "breadcrumb-current-item-bridge",
+      "component": "breadcrumb",
+      "widget": "breadcrumb",
+      "tag": "nav",
+      "id": "field",
+      "class_tokens": [
+        "role-[navigation]:border-slate-950",
+        "data-[current-id=settings]:text-slate-950",
+        "data-[state=ready]:bg-slate-50"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-current-id",
+        "data-count",
+        "data-state"
+      ],
+      "widget_props": {
+        "items": [
+          {
+            "id": "home",
+            "label": "Home"
+          },
+          {
+            "id": "docs",
+            "label": "Docs"
+          },
+          {
+            "id": "settings",
+            "label": "Settings"
+          }
+        ],
+        "separator": "/"
+      },
+      "css": "#field { background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='navigation'] { border-color: #020617; } #field[data-current-id='settings'] { color: #020617; } #field[data-state='ready'] { background-color: #f8fafc; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "navigation",
+          "aria-label": "Breadcrumb",
+          "data-count": "3",
+          "data-state": "ready",
+          "data-current-id": "settings"
+        },
+        "missing_attributes": [
+          "data-hovered-id"
+        ]
+      }
+    },
+    {
+      "name": "sidebar-selected-navigation-bridge",
+      "component": "sidebar",
+      "widget": "sidebar",
+      "tag": "nav",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=expanded]:border-slate-950",
+        "data-[selected-id=dashboard]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-selected-id"
+      ],
+      "widget_props": {
+        "sections": [
+          {
+            "title": "Main",
+            "items": [
+              {
+                "id": "dashboard",
+                "icon": "H",
+                "label": "Dashboard",
+                "badge": "3"
+              },
+              {
+                "id": "settings",
+                "icon": "S",
+                "label": "Settings"
+              }
+            ]
+          }
+        ],
+        "selected_id": "dashboard",
+        "collapsed": false
+      },
+      "css": "#field { width: 240px; height: 180px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='navigation'] { background-color: #f8fafc; } #field[data-state='expanded'] { border-color: #020617; } #field[data-selected-id='dashboard'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "navigation",
+          "aria-orientation": "vertical",
+          "data-state": "expanded",
+          "data-collapsible": "true",
+          "data-item-count": "2",
+          "data-selected-id": "dashboard"
+        }
+      }
+    },
+    {
+      "name": "notification-open-stack-bridge",
+      "component": "notification",
+      "widget": "notification",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:border-slate-950",
+        "data-[type=success]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-position",
+        "data-type"
+      ],
+      "widget_props": {
+        "position": "top-right",
+        "notifications": [
+          {
+            "title": "Saved",
+            "message": "File uploaded",
+            "type": "success",
+            "duration": 5000.0
+          }
+        ]
+      },
+      "css": "#field { width: 8px; height: 8px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='region'] { background-color: #f8fafc; } #field[data-state='open'] { border-color: #020617; } #field[data-position='top-right'][data-type='success'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "region",
+          "aria-live": "polite",
+          "aria-atomic": "true",
+          "aria-hidden": "false",
+          "data-state": "open",
+          "data-position": "top-right",
+          "data-count": "1",
+          "data-type": "success"
+        }
+      }
+    },
+    {
+      "name": "searchbox-active-suggestion-bridge",
+      "component": "command",
+      "widget": "searchbox",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[result-count=2]:border-slate-950",
+        "data-[active-id=docs-api]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-result-count",
+        "data-active-id",
+        "aria-activedescendant"
+      ],
+      "widget_props": {
+        "placeholder": "Search docs...",
+        "text": "api",
+        "focused": true,
+        "open": true,
+        "suggestions": [
+          {
+            "id": "docs-api",
+            "text": "API Reference"
+          },
+          {
+            "id": "docs-api-client",
+            "text": "API Client"
+          }
+        ]
+      },
+      "css": "#field { width: 260px; height: 36px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[data-result-count='2'] { border-color: #020617; } #field[data-active-id='docs-api'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "combobox",
+          "aria-expanded": "true",
+          "data-state": "open",
+          "data-result-count": "2",
+          "data-active-id": "docs-api",
+          "aria-activedescendant": "docs-api",
+          "data-value": "api"
+        }
+      }
+    },
+    {
+      "name": "searchbox-open-combobox-bridge",
+      "component": "command",
+      "widget": "searchbox",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-slate-50",
+        "aria-expanded:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "aria-expanded",
+        "aria-autocomplete"
+      ],
+      "widget_props": {
+        "placeholder": "Search docs...",
+        "suggestions": [
+          {
+            "id": "api",
+            "text": "API Reference"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "mouse_down",
+          "x": 12.0,
+          "y": 12.0
+        }
+      ],
+      "css": "#field { width: 260px; height: 36px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='combobox'] { border-color: #020617; } #field[data-state='open'] { background-color: #f8fafc; } #field[aria-expanded='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "combobox",
+          "aria-autocomplete": "list",
+          "aria-haspopup": "listbox",
+          "aria-expanded": "true",
+          "data-state": "open",
+          "aria-label": "Search docs..."
+        }
+      }
+    },
+    {
+      "name": "toolbar-open-dropdown-bridge",
+      "component": "toolbar",
+      "widget": "toolbar",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=open]:bg-slate-50",
+        "data-[open-id=more]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-open-id"
+      ],
+      "widget_props": {
+        "open_dropdown": "more",
+        "items": [
+          {
+            "type": "dropdown",
+            "id": "more",
+            "icon": "⚙",
+            "items": [
+              {
+                "id": "more-options",
+                "label": "More Options"
+              }
+            ]
+          },
+          {
+            "type": "separator"
+          },
+          {
+            "type": "toggle",
+            "id": "snap",
+            "icon": "⌖",
+            "toggled": true
+          }
+        ]
+      },
+      "css": "#field { width: 180px; height: 40px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='toolbar'] { border-color: #020617; } #field[data-state='open'] { background-color: #f8fafc; } #field[data-open-id='more'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "toolbar",
+          "aria-orientation": "horizontal",
+          "data-state": "open",
+          "data-open-id": "more"
+        }
+      }
+    },
+    {
+      "name": "listview-selected-scroll-bridge",
+      "component": "list",
+      "widget": "listview",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "data-[state=selected]:border-slate-950",
+        "data-[scroll-y=true]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-scroll-y",
+        "aria-activedescendant"
+      ],
+      "widget_props": {
+        "selected_index": 1,
+        "items": [
+          {
+            "id": "alpha",
+            "text": "Alpha"
+          },
+          {
+            "id": "beta",
+            "text": "Beta"
+          },
+          {
+            "id": "gamma",
+            "text": "Gamma"
+          }
+        ]
+      },
+      "css": "#field { width: 220px; height: 80px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field[role='listbox'] { background-color: #f8fafc; } #field[data-state='selected'] { border-color: #020617; } #field[data-scroll-y='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "listbox",
+          "aria-multiselectable": "false",
+          "data-state": "selected",
+          "data-selected-count": "1",
+          "data-selected-id": "beta",
+          "aria-activedescendant": "beta",
+          "data-scroll-y": "true"
+        }
+      }
+    },
+    {
+      "name": "scroll-area-vertical-bridge",
+      "component": "scroll-area",
+      "widget": "scrollview",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[region]:bg-slate-50",
+        "data-[state=scrollable]:border-slate-950",
+        "data-[scroll-y=true]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-scroll-y"
+      ],
+      "widget_props": {
+        "v_policy": "auto"
+      },
+      "css": "#field { width: 120px; height: 80px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field-content { position: relative; width: 120px; height: 160px; } #field[role='region'] { background-color: #f8fafc; } #field[data-state='scrollable'] { border-color: #020617; } #field[data-scroll-y='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "region",
+          "data-state": "scrollable",
+          "data-scroll-x": "false",
+          "data-scroll-y": "true"
+        }
+      }
+    },
+    {
+      "name": "scroll-area-horizontal-bridge",
+      "component": "scroll-area",
+      "widget": "scrollview",
+      "tag": "div",
+      "id": "field",
+      "class_tokens": [
+        "role-[region]:bg-slate-50",
+        "data-[state=scrollable]:border-slate-950",
+        "data-[scroll-x=true]:text-slate-950"
+      ],
+      "required_features": [
+        "role-selector",
+        "data-state",
+        "data-scroll-x"
+      ],
+      "widget_props": {
+        "h_policy": "auto",
+        "v_policy": "never"
+      },
+      "css": "#field { width: 120px; height: 80px; background-color: #ffffff; border-color: #cbd5e1; color: #64748b; } #field-content { position: relative; width: 240px; height: 80px; } #field[role='region'] { background-color: #f8fafc; } #field[data-state='scrollable'] { border-color: #020617; } #field[data-scroll-x='true'] { color: #020617; }",
+      "expect": {
+        "computed": {
+          "background_color": [
+            0.972549,
+            0.980392,
+            0.988235,
+            1.0
+          ],
+          "border_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ],
+          "text_color": [
+            0.007843,
+            0.023529,
+            0.090196,
+            1.0
+          ]
+        },
+        "attributes": {
+          "role": "region",
+          "data-state": "scrollable",
+          "data-scroll-x": "true",
+          "data-scroll-y": "false"
+        }
+      }
+    }
+  ]
+}

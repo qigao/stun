@@ -1,0 +1,30 @@
+{
+  "name": "accordion",
+  "source": "https://ui.shadcn.com/r/styles/new-york/accordion.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "[&[data-state=open]>svg]:rotate-180",
+    "border-b",
+    "data-[state=closed]:animate-accordion-up",
+    "data-[state=open]:animate-accordion-down",
+    "duration-200",
+    "flex",
+    "flex-1",
+    "font-medium",
+    "h-4",
+    "hover:underline",
+    "items-center",
+    "justify-between",
+    "overflow-hidden",
+    "pb-4",
+    "pt-0",
+    "py-4",
+    "shrink-0",
+    "text-left",
+    "text-muted-foreground",
+    "text-sm",
+    "transition-all",
+    "transition-transform",
+    "w-4"
+  ]
+}

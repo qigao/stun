@@ -17,13 +17,13 @@ MoveCommand::MoveCommand(std::vector<flex::Node*> nodes,
 
 void MoveCommand::execute() {
     for (size_t i = 0; i < nodes_.size(); ++i) {
-        nodes_[i]->set_position(new_positions_[i].x(), new_positions_[i].y());
+        nodes_[i]->set_position(new_positions_[i].x, new_positions_[i].y);
     }
 }
 
 void MoveCommand::undo() {
     for (size_t i = 0; i < nodes_.size(); ++i) {
-        nodes_[i]->set_position(old_positions_[i].x(), old_positions_[i].y());
+        nodes_[i]->set_position(old_positions_[i].x, old_positions_[i].y);
     }
 }
 

@@ -17,7 +17,7 @@ namespace binary {
 // ============================================================================
 
 constexpr uint32_t MAGIC_NUMBER = 0x58454C46;  // "FLEX" in little-endian
-constexpr uint32_t FORMAT_VERSION = 0x00010000; // Version 1.0.0
+constexpr uint32_t FORMAT_VERSION = 0x00010004; // Version 1.0.4
 
 // ============================================================================
 // Header Structure
@@ -66,7 +66,7 @@ struct FileHeader {
 
 enum FormatFlags : uint32_t {
     FLAG_NONE           = 0,
-    FLAG_COMPRESSED     = 1 << 0,  // Data is zlib compressed
+    FLAG_COMPRESSED     = 1 << 0,  // Data is zstd compressed
     FLAG_ENCRYPTED      = 1 << 1,  // Data is AES encrypted
     FLAG_DEBUG_INFO     = 1 << 2,  // Contains debug symbols
     FLAG_EMBEDDED_ASSETS = 1 << 3, // Assets embedded inline
@@ -77,7 +77,7 @@ enum FormatFlags : uint32_t {
 // String Table (deduplicated strings)
 // ============================================================================
 
-// Strings stored as: [count: uint32_t] [offset1, offset2, ...] [string_data...]
+// Strings stored as a packed stream of [length: uint32_t][utf8 bytes].
 using StringIndex = uint32_t;
 
 // ============================================================================
@@ -91,8 +91,8 @@ enum class NodeType : uint8_t {
     Image = 3,
     Svg = 4,
     Instance = 5,
-    Solo = 6,
-    Scene = 7,
+    Solo = 6,   // Reserved in the binary format, not currently deserialized by BinaryReader
+    Scene = 7,  // Reserved for the synthetic root header handled by BinaryReader::create_scene()
 };
 
 // ============================================================================
@@ -185,6 +185,16 @@ struct PathGeometry {
     StringIndex path_data;  // SVG path string
 };
 
+struct LineGeometry {
+    float x2;
+    float y2;
+};
+
+struct RingGeometry {
+    float outer_radius;
+    float inner_radius;
+};
+
 // ============================================================================
 // Paint Data
 // ============================================================================
@@ -223,6 +233,7 @@ struct RadialGradientPaint {
     PaintType type;  // = RadialGradient
     uint8_t reserved[3];
     float cx, cy, radius;
+    float fx, fy;
     uint32_t stop_count;
     // Followed by stop_count * ColorStop
 };
@@ -253,6 +264,39 @@ struct ImageData {
     uint8_t reserved[3];
 };
 
+struct SvgData {
+    StringIndex source;       // File path
+    StringIndex data;         // Inline SVG xml
+    float width;
+    float height;
+    uint8_t has_source;
+    uint8_t has_data;
+    uint16_t reserved;
+};
+
+struct InstanceData {
+    StringIndex source;
+    uint32_t float_input_count;
+    uint32_t string_input_count;
+    uint32_t bool_input_count;
+};
+
+struct InstanceFloatInput {
+    StringIndex name;
+    float value;
+};
+
+struct InstanceStringInput {
+    StringIndex name;
+    StringIndex value;
+};
+
+struct InstanceBoolInput {
+    StringIndex name;
+    uint8_t value;
+    uint8_t reserved[3];
+};
+
 // ============================================================================
 // Animation Data
 // ============================================================================
@@ -272,11 +316,20 @@ struct TrackHeader {
     uint32_t keyframe_count;
 };
 
+enum class AnimationValueType : uint8_t {
+    Float = 0,
+    String = 1,
+    Color = 2,
+};
+
 struct Keyframe {
     float time;
-    float value;
+    uint8_t value_type;       // AnimationValueType
     uint8_t easing;           // Easing function
-    uint8_t reserved[3];
+    uint16_t reserved;
+    float float_value;
+    StringIndex string_value;
+    ColorData color_value;
 };
 
 // ============================================================================

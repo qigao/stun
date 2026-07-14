@@ -1,0 +1,29 @@
+{
+  "bridges": [
+    {
+      "target": "listview_root",
+      "state": "selected",
+      "attributes": {
+        "data-state": "selected",
+        "data-selected-count": "1",
+        "data-selected-id": "beta",
+        "aria-activedescendant": "beta"
+      },
+      "properties": {
+        "selected_index": 1
+      }
+    },
+    {
+      "target": "listview_root",
+      "state": "unselected",
+      "attributes": {
+        "data-state": "unselected",
+        "data-selected-count": "0"
+      },
+      "missing_attributes": ["data-selected-id", "aria-activedescendant"],
+      "properties": {
+        "selected_index": -1
+      }
+    }
+  ]
+}

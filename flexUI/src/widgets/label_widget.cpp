@@ -6,9 +6,9 @@
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
 #include <flexUI/event.h>
-#include <flexUI/renderer.h>
+#include <flexUI/render_command.h>
+#include <flexUI/text_layout.h>
 #include <algorithm>
-#include <sstream>
 
 namespace flexUI {
 
@@ -17,97 +17,104 @@ LabelWidget::LabelWidget(const std::string& text)
 
 void LabelWidget::set_text(const std::string& text) {
     text_ = text;
-    dirty_ = true;
+    sync_host_semantics();
+    invalidate_render_cache();
 }
 
-void LabelWidget::rebuild_shapes(const Element& elem) {
-    auto* style = elem.computed_style;
-    if (!style) return;
-
-    // Get display text
-    std::string display_text = !elem.text().empty() ? elem.text() : text_;
-    if (display_text.empty()) {
-        root_.clear();
-        text_shape_ = nullptr;
-        return;
+void LabelWidget::sync_host_semantics() {
+    if (auto* host = host_element()) {
+        host->set_text(text_);
     }
-
-    // Process text (ellipsis, line clamp, etc.)
-    std::string processed_text = process_text(display_text, elem);
-
-    // Check if rebuild needed
-    if (processed_text == cached_display_text_ &&
-        elem.width() == cached_width_ &&
-        elem.height() == cached_height_ &&
-        text_shape_ != nullptr) {
-        return;
-    }
-
-    root_.clear();
-    cached_display_text_ = processed_text;
-    cached_width_ = elem.width();
-    cached_height_ = elem.height();
-
-    if (processed_text.empty()) {
-        text_shape_ = nullptr;
-        return;
-    }
-
-    // Text alignment
-    std::string text_align = style->get_variable("--text-align", "left");
-    std::string vertical_align = style->get_variable("--vertical-align", "top");
-
-    // Calculate text width (simplified: monospace assumption)
-    float char_width = style->font_size * 0.6f;
-    float text_width = processed_text.size() * char_width;
-
-    // Base position with padding
-    float base_x = style->padding[3];  // left padding
-    float base_y = style->padding[0];  // top padding
-
-    // Horizontal alignment
-    if (text_align == "center") {
-        base_x = (elem.width() - text_width) / 2;
-    } else if (text_align == "right") {
-        base_x = elem.width() - text_width - style->padding[1];
-    }
-
-    // Vertical alignment
-    if (vertical_align == "middle") {
-        base_y = (elem.height() - style->font_size) / 2;
-    } else if (vertical_align == "bottom") {
-        base_y = elem.height() - style->padding[2];
-    } else {
-        base_y += 0;  // top: already at top with padding
-    }
-
-    // Create text shape
-    text_shape_ = root_.add<TextShape>(base_x, base_y, processed_text);
-    text_shape_->set_font_family(style->font_family);
-    text_shape_->set_font_size(style->font_size);
-    text_shape_->set_bold(static_cast<int>(style->font_weight) >= 700);
-
-    // Text color
-    Color text_color = style->get_variable_color("--text-color", style->text_color);
-    text_shape_->set_color(text_color);
 }
 
-void LabelWidget::render(const Element& elem, Renderer& renderer) {
+void LabelWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
+    const std::string display_text = !elem.text().empty() ? elem.text() : text_;
+    if (display_text.empty()) return;
 
-    // Rebuild shapes if needed
-    rebuild_shapes(elem);
+    if (render_cache_matches(elem, display_text)) {
+        commands.append(render_cache_);
+        dirty_ = false;
+        return;
+    }
 
-    if (!text_shape_) return;
+    const float content_x = style->padding[3];
+    const float content_y = style->padding[0];
+    const float content_width =
+        std::max(0.0f, elem.width() - style->padding[1] - style->padding[3]);
+    const float content_height =
+        std::max(0.0f, elem.height() - style->padding[0] - style->padding[2]);
+    const Color text_color =
+        style->get_variable_color("--text-color", style->text_color);
+    const auto text_block = layout_text_block(
+        style, display_text, content_x, content_y, content_width, content_height,
+        text_color, resolve_text_vertical_align(style, TextVerticalAlign::Top));
 
-    // Draw using flex::Renderer
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
-
-    float opacity = style->opacity;
-    root_.draw(renderer.flex(), world_transform, opacity);
+    RenderCommandList rebuilt(commands.capabilities());
+    emit_text_block(rebuilt, text_block);
+    render_cache_ = rebuilt.commands();
+    update_render_cache_key(elem, display_text);
+    commands.append(render_cache_);
 
     dirty_ = false;
+}
+
+bool LabelWidget::render_cache_matches(const Element& elem,
+                                       const std::string& display_text) const {
+    const auto* style = elem.computed_style;
+    if (!render_cache_valid_ || !style) {
+        return false;
+    }
+
+    return cached_text_ == display_text &&
+           cached_width_ == elem.width() &&
+           cached_height_ == elem.height() &&
+           cached_font_size_ == style->font_size &&
+           cached_letter_spacing_ == style->letter_spacing &&
+           cached_word_spacing_ == style->word_spacing &&
+           cached_text_indent_ == style->text_indent &&
+           cached_tab_size_ == style->tab_size &&
+           cached_font_weight_ == static_cast<int>(style->font_weight) &&
+           cached_font_style_ == static_cast<int>(style->font_style) &&
+           cached_text_align_ == static_cast<int>(style->text_align) &&
+           cached_text_transform_ == static_cast<int>(style->text_transform) &&
+           cached_direction_ == static_cast<int>(style->direction) &&
+           cached_style_signature_ == style->variables_signature() &&
+           cached_font_family_ == style->font_family &&
+           cached_text_color_ == style->text_color;
+}
+
+void LabelWidget::update_render_cache_key(const Element& elem,
+                                          const std::string& display_text) {
+    const auto* style = elem.computed_style;
+    if (!style) {
+        render_cache_valid_ = false;
+        return;
+    }
+
+    cached_text_ = display_text;
+    cached_width_ = elem.width();
+    cached_height_ = elem.height();
+    cached_font_size_ = style->font_size;
+    cached_letter_spacing_ = style->letter_spacing;
+    cached_word_spacing_ = style->word_spacing;
+    cached_text_indent_ = style->text_indent;
+    cached_tab_size_ = style->tab_size;
+    cached_font_weight_ = static_cast<int>(style->font_weight);
+    cached_font_style_ = static_cast<int>(style->font_style);
+    cached_text_align_ = static_cast<int>(style->text_align);
+    cached_text_transform_ = static_cast<int>(style->text_transform);
+    cached_direction_ = static_cast<int>(style->direction);
+    cached_style_signature_ = style->variables_signature();
+    cached_font_family_ = style->font_family;
+    cached_text_color_ = style->text_color;
+    render_cache_valid_ = true;
+}
+
+void LabelWidget::invalidate_render_cache() {
+    render_cache_valid_ = false;
+    dirty_ = true;
 }
 
 bool LabelWidget::handle_event(const Event& event, Element& elem) {
@@ -117,68 +124,6 @@ bool LabelWidget::handle_event(const Event& event, Element& elem) {
 
 void LabelWidget::update(float delta_ms, Element& elem) {
     // Label has no animation
-}
-
-std::string LabelWidget::process_text(const std::string& text, const Element& elem) {
-    auto* style = elem.computed_style;
-    if (!style) return text;
-
-    std::string result = text;
-
-    // 1. white-space handling
-    std::string white_space = style->get_variable("--white-space", "normal");
-    if (white_space == "nowrap") {
-        result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
-    }
-
-    // 2. text-overflow handling
-    std::string text_overflow = style->get_variable("--text-overflow", "clip");
-    if (text_overflow == "ellipsis") {
-        float max_width = elem.width() - style->padding[1] - style->padding[3];
-        result = apply_ellipsis(result, max_width, style->font_size);
-    }
-
-    // 3. max-lines / line-clamp handling
-    std::string max_lines_str = style->get_variable("--max-lines", "");
-    if (max_lines_str.empty()) {
-        max_lines_str = style->get_variable("--line-clamp", "");
-    }
-
-    if (!max_lines_str.empty()) {
-        int max_lines = std::stoi(max_lines_str);
-        if (max_lines > 0) {
-            std::istringstream ss(result);
-            std::string line;
-            std::string limited_text;
-            int line_count = 0;
-
-            while (std::getline(ss, line) && line_count < max_lines) {
-                if (line_count > 0) limited_text += "\n";
-                limited_text += line;
-                line_count++;
-            }
-
-            if (std::getline(ss, line)) {
-                limited_text += "...";
-            }
-
-            result = limited_text;
-        }
-    }
-
-    return result;
-}
-
-std::string LabelWidget::apply_ellipsis(const std::string& text, float max_width, float font_size) {
-    float char_width = font_size * 0.6f;
-    size_t max_chars = static_cast<size_t>(max_width / char_width);
-
-    if (text.size() <= max_chars) {
-        return text;
-    }
-
-    if (max_chars < 3) return "...";
-    return text.substr(0, max_chars - 3) + "...";
 }
 
 } // namespace flexUI

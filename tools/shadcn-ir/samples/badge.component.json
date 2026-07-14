@@ -1,0 +1,29 @@
+{
+  "component": "Badge",
+  "kind": "leaf",
+  "root": "badge_root",
+  "nodes": [
+    {
+      "id": "badge_root",
+      "type": "element",
+      "tag": "span",
+      "role": "status",
+      "states": ["hover", "focus-visible", "disabled"],
+      "attrs": {
+        "data-slot": "badge"
+      },
+      "props": {
+        "text": "Badge"
+      }
+    }
+  ],
+  "variants": {
+    "variant": ["default", "secondary", "destructive", "outline"]
+  },
+  "defaults": {
+    "variant": "default"
+  },
+  "meta": {
+    "source": "shadcn/badge"
+  }
+}

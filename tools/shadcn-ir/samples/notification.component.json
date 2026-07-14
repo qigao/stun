@@ -1,0 +1,33 @@
+{
+  "component": "Notification",
+  "kind": "leaf",
+  "root": "notification_root",
+  "nodes": [
+    {
+      "id": "notification_root",
+      "type": "widget",
+      "widget": "notification",
+      "tag": "div",
+      "role": "region",
+      "states": ["open", "closed"],
+      "props": {
+        "position": "top-right",
+        "notifications": [
+          {
+            "title": "Saved",
+            "message": "File uploaded",
+            "type": "success",
+            "duration": 5000
+          }
+        ]
+      }
+    }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": false
+  },
+  "meta": {
+    "source": "shadcn/sonner"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "bridges": [
+    {
+      "target": "menubar_trigger",
+      "attributes": {
+        "aria-expanded": "false",
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "menubar_content",
+      "attributes": {
+        "data-state": "closed",
+        "data-side": "bottom",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "target": "menubar_trigger",
+      "state": "open",
+      "attributes": {
+        "aria-expanded": "true",
+        "data-state": "open"
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "menubar_content",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "aria-hidden": "false"
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "menubar_content",
+      "state": "side-top",
+      "attributes": {
+        "data-side": "top"
+      },
+      "pseudo_states": ["side-top"]
+    },
+    {
+      "target": "menubar_item",
+      "state": "focus",
+      "attributes": {
+        "data-focus": "true"
+      },
+      "pseudo_states": ["focus"]
+    },
+    {
+      "target": "menubar_item",
+      "state": "disabled",
+      "attributes": {
+        "data-disabled": "",
+        "aria-disabled": "true"
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "menubar_checkbox_item",
+      "state": "checked",
+      "attributes": {
+        "aria-checked": "true",
+        "data-state": "checked"
+      },
+      "pseudo_states": ["checked"]
+    }
+  ]
+}

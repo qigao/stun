@@ -4,6 +4,8 @@
 #include "c4/c4_ast.h"
 #include "c4_parser_gen.h"
 
+void C4Parser(void *parser, int token, char *value, C4ParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

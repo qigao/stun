@@ -7,9 +7,51 @@
 #include <thorvg.h>
 #include <flex.h>
 #include <flex/runtime/instance.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 #include "flexchart/flexchart.h"
 #include "flexchart/chart_component.h"
+
+// Force-link mark renderers so static registration isn't stripped by the linker
+extern "C" {
+    void flexchart_bar_force_link(void);
+    void flexchart_line_force_link(void);
+    void flexchart_area_force_link(void);
+    void flexchart_pie_force_link(void);
+    void flexchart_arc_force_link(void);
+    void flexchart_point_force_link(void);
+    void flexchart_rect_force_link(void);
+    void flexchart_rule_force_link(void);
+    void flexchart_tick_force_link(void);
+    void flexchart_text_force_link(void);
+    void flexchart_radar_force_link(void);
+    void flexchart_trail_force_link(void);
+    void flexchart_boxplot_force_link(void);
+    void flexchart_errorbar_force_link(void);
+    void flexchart_errorband_force_link(void);
+    void flexchart_geoshape_force_link(void);
+    void flexchart_image_force_link(void);
+}
+static struct _ForceLink {
+    _ForceLink() {
+        flexchart_bar_force_link();
+        flexchart_line_force_link();
+        flexchart_area_force_link();
+        flexchart_pie_force_link();
+        flexchart_arc_force_link();
+        flexchart_point_force_link();
+        flexchart_rect_force_link();
+        flexchart_rule_force_link();
+        flexchart_tick_force_link();
+        flexchart_text_force_link();
+        flexchart_radar_force_link();
+        flexchart_trail_force_link();
+        flexchart_boxplot_force_link();
+        flexchart_errorbar_force_link();
+        flexchart_errorband_force_link();
+        flexchart_geoshape_force_link();
+        flexchart_image_force_link();
+    }
+} _force_link;
 
 using namespace flex;
 using namespace flex::chart;

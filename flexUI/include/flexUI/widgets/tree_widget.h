@@ -1,7 +1,7 @@
 /*
  * flexUI - TreeWidget
  *
- * Tree view - 使用 flex::Renderer 渲染
+ * Tree view - 使用 RenderCommandList 渲染
  */
 
 #ifndef FLEXUI_TREE_WIDGET_H
@@ -17,6 +17,8 @@
 
 namespace flexUI {
 
+class RenderCommandList;
+
 struct TreeNode {
   std::string id;
   std::string label;
@@ -29,7 +31,7 @@ class TreeWidget : public Widget {
 public:
   TreeWidget();
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "TreeWidget"; }
@@ -48,7 +50,7 @@ public:
   void set_select_callback(SelectCallback cb) { on_select_ = std::move(cb); }
 
 private:
-  void render_node(flex::Renderer& r, const Element& elem, TreeNode* node, float& y, int depth);
+  void render_node(RenderCommandList& commands, const Element& elem, TreeNode* node, float& y, int depth);
   TreeNode* find_node(const std::string& id, TreeNode* root = nullptr);
   TreeNode* hit_test(float y, TreeNode* root, float& current_y, int depth);
 

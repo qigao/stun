@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "flex/runtime/renderer.h"
+#include "flex/core/renderer.h"
 #include <memory>
 
 namespace flex {

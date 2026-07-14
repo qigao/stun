@@ -1,0 +1,26 @@
+{
+  "component": "Toast",
+  "kind": "leaf",
+  "root": "toast_root",
+  "nodes": [
+    {
+      "id": "toast_root",
+      "type": "widget",
+      "widget": "toast",
+      "tag": "div",
+      "states": ["open", "closed"],
+      "props": {
+        "message": "Saved changes",
+        "type": "success",
+        "duration": 4000
+      }
+    }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": false
+  },
+  "meta": {
+    "source": "shadcn/toast"
+  }
+}

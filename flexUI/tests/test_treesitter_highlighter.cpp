@@ -2,41 +2,43 @@
  * Unit tests for tree-sitter highlighter integration
  */
 
-#include <catch2/catch_all.hpp>
+#include <tinytest.h>
+#undef group
+#include "test_support.h"
 #include <flexUI/syntax_highlighter.h>
 
 using namespace flexUI;
 
-SCENARIO("Tree-sitter highlighter loads C and JSON language plugins", "[highlighter][plugin]") {
-    GIVEN("the HighlighterFactory") {
+spec("Tree-sitter highlighter loads C and JSON language plugins") {
+    describe("the HighlighterFactory") {
         auto& factory = HighlighterFactory::instance();
 
-        WHEN("requesting highlighter for 'c'") {
+        describe("requesting highlighter for 'c'") {
             auto* highlighter = factory.get("c");
 
-            THEN("it should return a valid highlighter") {
-                REQUIRE(highlighter != nullptr);
-                REQUIRE(std::string(highlighter->language()) == "c");
+            it("it should return a valid highlighter") {
+                check(highlighter != nullptr);
+                check(std::string(highlighter->language()) == "c");
             }
         }
 
-        WHEN("requesting highlighter for 'json'") {
+        describe("requesting highlighter for 'json'") {
             auto* highlighter = factory.get("json");
 
-            THEN("it should return a valid highlighter") {
-                REQUIRE(highlighter != nullptr);
-                REQUIRE(std::string(highlighter->language()) == "json");
+            it("it should return a valid highlighter") {
+                check(highlighter != nullptr);
+                check(std::string(highlighter->language()) == "json");
             }
         }
     }
 }
 
-SCENARIO("Tree-sitter C highlighter tokenizes code correctly", "[highlighter][c]") {
-    GIVEN("a C highlighter") {
+spec("Tree-sitter C highlighter tokenizes code correctly") {
+    describe("a C highlighter") {
         auto* highlighter = HighlighterFactory::instance().get("c");
-        REQUIRE(highlighter != nullptr);
+        check(highlighter != nullptr);
 
-        WHEN("highlighting a simple C program") {
+        describe("highlighting a simple C program") {
             const char* code = R"(#include <stdio.h>
 
 int main(void) {
@@ -45,11 +47,11 @@ int main(void) {
 })";
             auto tokens = highlighter->highlight(code);
 
-            THEN("it should produce tokens") {
-                REQUIRE(!tokens.empty());
+            it("it should produce tokens") {
+                check(!tokens.empty());
             }
 
-            THEN("it should identify preprocessor directive") {
+            it("it should identify preprocessor directive") {
                 bool found_preproc = false;
                 for (const auto& tok : tokens) {
                     if (tok.type == HighlightType::Preprocessor) {
@@ -57,10 +59,10 @@ int main(void) {
                         break;
                     }
                 }
-                REQUIRE(found_preproc);
+                check(found_preproc);
             }
 
-            THEN("it should identify keywords") {
+            it("it should identify keywords") {
                 bool found_return = false;
                 std::string_view src = code;
                 for (const auto& tok : tokens) {
@@ -69,10 +71,10 @@ int main(void) {
                         if (text == "return") found_return = true;
                     }
                 }
-                REQUIRE(found_return);
+                check(found_return);
             }
 
-            THEN("it should identify functions") {
+            it("it should identify functions") {
                 bool found_printf = false;
                 bool found_main = false;
                 std::string_view src = code;
@@ -83,11 +85,11 @@ int main(void) {
                         if (text == "main") found_main = true;
                     }
                 }
-                REQUIRE(found_printf);
-                REQUIRE(found_main);
+                check(found_printf);
+                check(found_main);
             }
 
-            THEN("it should identify types") {
+            it("it should identify types") {
                 bool found_int = false;
                 bool found_void = false;
                 std::string_view src = code;
@@ -98,11 +100,11 @@ int main(void) {
                         if (text == "void") found_void = true;
                     }
                 }
-                REQUIRE(found_int);
-                REQUIRE(found_void);
+                check(found_int);
+                check(found_void);
             }
 
-            THEN("it should identify numbers") {
+            it("it should identify numbers") {
                 bool found_zero = false;
                 std::string_view src = code;
                 for (const auto& tok : tokens) {
@@ -111,15 +113,15 @@ int main(void) {
                         if (text == "0") found_zero = true;
                     }
                 }
-                REQUIRE(found_zero);
+                check(found_zero);
             }
         }
 
-        WHEN("highlighting string literals") {
+        describe("highlighting string literals") {
             const char* code = R"(const char* s = "hello";)";
             auto tokens = highlighter->highlight(code);
 
-            THEN("it should identify string literal") {
+            it("it should identify string literal") {
                 bool found_string = false;
                 std::string_view src = code;
                 for (const auto& tok : tokens) {
@@ -128,39 +130,39 @@ int main(void) {
                         if (text.find("hello") != std::string::npos) found_string = true;
                     }
                 }
-                REQUIRE(found_string);
+                check(found_string);
             }
         }
 
-        WHEN("highlighting comments") {
+        describe("highlighting comments") {
             const char* code = "int x; // comment\nint y; /* block */";
             auto tokens = highlighter->highlight(code);
 
-            THEN("it should identify comments") {
+            it("it should identify comments") {
                 int comment_count = 0;
                 for (const auto& tok : tokens) {
                     if (tok.type == HighlightType::Comment) comment_count++;
                 }
-                REQUIRE(comment_count >= 2);
+                check(comment_count >= 2);
             }
         }
     }
 }
 
-SCENARIO("Tree-sitter JSON highlighter tokenizes code correctly", "[highlighter][json]") {
-    GIVEN("a JSON highlighter") {
+spec("Tree-sitter JSON highlighter tokenizes code correctly") {
+    describe("a JSON highlighter") {
         auto* highlighter = HighlighterFactory::instance().get("json");
-        REQUIRE(highlighter != nullptr);
+        check(highlighter != nullptr);
 
-        WHEN("highlighting a JSON object") {
+        describe("highlighting a JSON object") {
             const char* code = "{\"name\": \"flexUI\", \"version\": 1, \"active\": true}";
             auto tokens = highlighter->highlight(code);
 
-            THEN("it should produce tokens") {
-                REQUIRE(!tokens.empty());
+            it("it should produce tokens") {
+                check(!tokens.empty());
             }
 
-            THEN("it should identify keys as variables") {
+            it("it should identify keys as variables") {
                 bool found_name = false;
                 bool found_version = false;
                 std::string_view src = code;
@@ -171,11 +173,11 @@ SCENARIO("Tree-sitter JSON highlighter tokenizes code correctly", "[highlighter]
                         if (text == "\"version\"") found_version = true;
                     }
                 }
-                REQUIRE(found_name);
-                REQUIRE(found_version);
+                check(found_name);
+                check(found_version);
             }
 
-            THEN("it should identify values") {
+            it("it should identify values") {
                 bool found_string = false;
                 bool found_number = false;
                 bool found_constant = false;
@@ -185,49 +187,49 @@ SCENARIO("Tree-sitter JSON highlighter tokenizes code correctly", "[highlighter]
                     if (tok.type == HighlightType::Number) found_number = true;
                     if (tok.type == HighlightType::Constant) found_constant = true;
                 }
-                REQUIRE(found_string);
-                REQUIRE(found_number);
-                REQUIRE(found_constant);
+                check(found_string);
+                check(found_number);
+                check(found_constant);
             }
         }
     }
 }
 
-SCENARIO("Tree-sitter highlighter handles edge cases", "[highlighter][edge]") {
-    GIVEN("a C highlighter") {
+spec("Tree-sitter highlighter handles edge cases") {
+    describe("a C highlighter") {
         auto* highlighter = HighlighterFactory::instance().get("c");
-        REQUIRE(highlighter != nullptr);
+        check(highlighter != nullptr);
 
-        WHEN("highlighting empty string") {
+        describe("highlighting empty string") {
             auto tokens = highlighter->highlight("");
 
-            THEN("it should return empty tokens") {
-                REQUIRE(tokens.empty());
+            it("it should return empty tokens") {
+                check(tokens.empty());
             }
         }
 
-        WHEN("highlighting whitespace only") {
+        describe("highlighting whitespace only") {
             auto tokens = highlighter->highlight("   \n\t  ");
 
-            THEN("it should return plain tokens") {
-                REQUIRE(!tokens.empty());
+            it("it should return plain tokens") {
+                check(!tokens.empty());
                 for (const auto& tok : tokens) {
-                    REQUIRE(tok.type == HighlightType::Plain);
+                    check(tok.type == HighlightType::Plain);
                 }
             }
         }
     }
 }
 
-SCENARIO("Unsupported language returns nullptr", "[highlighter][unsupported]") {
-    GIVEN("the HighlighterFactory") {
+spec("Unsupported language returns nullptr") {
+    describe("the HighlighterFactory") {
         auto& factory = HighlighterFactory::instance();
 
-        WHEN("requesting highlighter for unknown language") {
+        describe("requesting highlighter for unknown language") {
             auto* highlighter = factory.get("unknown_language_xyz");
 
-            THEN("it should return nullptr") {
-                REQUIRE(highlighter == nullptr);
+            it("it should return nullptr") {
+                check(highlighter == nullptr);
             }
         }
     }

@@ -1,0 +1,26 @@
+{
+  "component": "Tooltip",
+  "kind": "leaf",
+  "root": "tooltip_root",
+  "nodes": [
+    {
+      "id": "tooltip_root",
+      "type": "widget",
+      "widget": "tooltip",
+      "tag": "div",
+      "role": "tooltip",
+      "states": ["open", "closed"],
+      "props": {
+        "text": "Helpful hint",
+        "position": "top"
+      }
+    }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": false
+  },
+  "meta": {
+    "source": "shadcn/tooltip"
+  }
+}

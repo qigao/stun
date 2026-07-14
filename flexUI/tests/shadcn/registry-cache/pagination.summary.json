@@ -1,0 +1,21 @@
+{
+  "name": "pagination",
+  "source": "https://ui.shadcn.com/r/styles/new-york/pagination.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "flex",
+    "flex-row",
+    "gap-1",
+    "h-4",
+    "h-9",
+    "items-center",
+    "justify-center",
+    "mx-auto",
+    "pl-2.5",
+    "pr-2.5",
+    "sr-only",
+    "w-4",
+    "w-9",
+    "w-full"
+  ]
+}

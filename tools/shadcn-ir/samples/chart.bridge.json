@@ -1,0 +1,42 @@
+{
+  "bridges": [
+    {
+      "target": "chart_root",
+      "attributes": {
+        "data-chart": "chart-demo"
+      }
+    },
+    {
+      "target": "chart_tooltip",
+      "attributes": {
+        "data-state": "inactive",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "target": "chart_root",
+      "state": "theme-dark",
+      "attributes": {
+        "data-theme": "dark"
+      },
+      "pseudo_states": ["theme-dark"]
+    },
+    {
+      "target": "chart_tooltip",
+      "state": "active",
+      "attributes": {
+        "data-state": "active",
+        "aria-hidden": "false"
+      },
+      "pseudo_states": ["active"]
+    },
+    {
+      "target": "chart_legend_item",
+      "state": "highlighted",
+      "attributes": {
+        "data-highlighted": "true"
+      },
+      "pseudo_states": ["highlighted"]
+    }
+  ]
+}

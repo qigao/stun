@@ -42,7 +42,7 @@ public:
     PaginationWidget(int total_pages = 1, int current_page = 1);
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "PaginationWidget"; }
@@ -65,6 +65,7 @@ public:
     void set_page_change_callback(PageChangeCallback callback) { page_change_callback_ = std::move(callback); }
 
 private:
+    void sync_host_semantics() override;
     void rebuild_shapes(const Element& elem);
     void update_shapes(const Element& elem);
     int hit_test(float x, float y, const Element& elem);

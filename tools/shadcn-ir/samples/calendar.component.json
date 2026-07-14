@@ -1,0 +1,25 @@
+{
+  "component": "Calendar",
+  "kind": "leaf",
+  "root": "calendar_root",
+  "nodes": [
+    {
+      "id": "calendar_root",
+      "type": "widget",
+      "widget": "calendar",
+      "tag": "div",
+      "role": "grid",
+      "states": ["selected_date", "view_date", "focus-visible"],
+      "attrs": {
+        "data-slot": "calendar"
+      },
+      "props": {
+        "selected_date": "2024-04-22",
+        "view_date": "2024-04-01"
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/calendar"
+  }
+}

@@ -10,7 +10,9 @@
 #define FLEXUI_TRANSITION_H
 
 #include <flexUI/types.h>
+#include <flex/animation.h>
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <map>
 #include <vector>
@@ -87,6 +89,50 @@ inline EasingFunction get(const std::string& name) {
     return ease_in_out;  // Default
 }
 
+inline float sample_bezier_x(float t, float x1, float x2) {
+    return 3.0f * (1.0f - t) * (1.0f - t) * t * x1 + 3.0f * (1.0f - t) * t * t * x2 + t * t * t;
+}
+
+inline float sample_bezier_y(float t, float y1, float y2) {
+    return 3.0f * (1.0f - t) * (1.0f - t) * t * y1 + 3.0f * (1.0f - t) * t * t * y2 + t * t * t;
+}
+
+inline float sample_bezier_derivative_x(float t, float x1, float x2) {
+    return 3.0f * (1.0f - 3.0f * x2 + 3.0f * x1) * t * t + 6.0f * (x2 - 2.0f * x1) * t + 3.0f * x1;
+}
+
+inline float evaluate_cubic_bezier(float x1, float y1, float x2, float y2, float x) {
+    float t = x;
+    for (int i = 0; i < 8; ++i) {
+        float x_est = sample_bezier_x(t, x1, x2) - x;
+        if (std::abs(x_est) < 1e-6f) {
+            break;
+        }
+        float dx = sample_bezier_derivative_x(t, x1, x2);
+        if (std::abs(dx) < 1e-6f) {
+            break;
+        }
+        t -= x_est / dx;
+    }
+    if (t < 0.0f || t > 1.0f) {
+        float low = 0.0f, high = 1.0f;
+        t = x;
+        for (int i = 0; i < 12; ++i) {
+            float x_est = sample_bezier_x(t, x1, x2);
+            if (std::abs(x_est - x) < 1e-5f) {
+                break;
+            }
+            if (x_est < x) {
+                low = t;
+            } else {
+                high = t;
+            }
+            t = (low + high) * 0.5f;
+        }
+    }
+    return sample_bezier_y(t, y1, y2);
+}
+
 } // namespace easing
 
 // ============================================================================
@@ -101,6 +147,27 @@ struct TransitionDef {
     float bezier[4] = {0.25f, 0.1f, 0.25f, 1.0f};
 };
 
+struct AnimationKeyframeStep {
+    float offset = 0.0f;
+    std::map<std::string, std::string> properties;
+};
+
+struct AnimationDef {
+    float duration_ms = 0.0f;
+    float delay_ms = 0.0f;
+    EasingType easing = EasingType::Ease;
+    float iteration_count = 1.0f;
+    bool infinite = false;
+    AnimationFillMode fill_mode = AnimationFillMode::None;
+    AnimationDirection direction = AnimationDirection::Normal;
+    AnimationPlayState play_state = AnimationPlayState::Running;
+};
+
+struct AnimationValuePoint {
+    float offset = 0.0f;
+    float value = 0.0f;
+};
+
 /**
  * Parse CSS transition shorthand
  * Examples:
@@ -109,6 +176,14 @@ struct TransitionDef {
  *   "transform 200ms linear"
  */
 TransitionDef parse_transition(const std::string& value);
+
+/**
+ * Parse a comma-separated CSS transition list
+ * Examples:
+ *   "opacity 0.3s ease, transform 200ms linear"
+ *   "all 0.5s ease-in-out 0.1s, opacity 100ms linear"
+ */
+std::vector<TransitionDef> parse_transition_list(const std::string& value);
 
 // ============================================================================
 // Active Transition State
@@ -122,14 +197,21 @@ struct ActiveTransition {
     float duration_ms;
     float delay_ms;
     easing::EasingFunction easing_fn;
+    EasingType easing_type = EasingType::Ease;
+    float bezier[4] = {0.25f, 0.1f, 0.25f, 1.0f};
 
     float current_value(float time_ms) const {
         float elapsed = time_ms - start_time_ms - delay_ms;
         if (elapsed < 0) return start_value;
         if (elapsed >= duration_ms) return end_value;
         float t = elapsed / duration_ms;
-        float eased_t = easing_fn(t);
-        return start_value + (end_value - start_value) * eased_t;
+        float eased_t = 0.0f;
+        if (easing_type == EasingType::CubicBezier || easing_type == EasingType::Ease) {
+            eased_t = easing::evaluate_cubic_bezier(bezier[0], bezier[1], bezier[2], bezier[3], t);
+        } else {
+            eased_t = easing_fn(t);
+        }
+        return flex::animation::interpolate(start_value, end_value, eased_t);
     }
 
     bool is_complete(float time_ms) const {
@@ -146,19 +228,19 @@ public:
     /**
      * Start a transition for an element property
      */
-    void start(int element_id, const std::string& property,
+    void start(std::uintptr_t element_id, const std::string& property,
                float from, float to, const TransitionDef& def, float current_time_ms);
 
     /**
      * Get current value for a property (interpolated if transitioning)
      */
-    float get(int element_id, const std::string& property,
+    float get(std::uintptr_t element_id, const std::string& property,
               float default_value, float current_time_ms);
 
     /**
      * Check if element has active transitions
      */
-    bool has_active(int element_id, float current_time_ms);
+    bool has_active(std::uintptr_t element_id, float current_time_ms);
 
     /**
      * Update and remove completed transitions
@@ -169,6 +251,7 @@ public:
      * Check if any transitions are active
      */
     bool has_any_active() const { return !transitions_.empty(); }
+    void clear_element(std::uintptr_t element_id);
 
     /**
      * Clear all transitions
@@ -177,6 +260,51 @@ public:
 
 private:
     std::map<std::string, ActiveTransition> transitions_;
+};
+
+struct ActiveAnimation {
+    std::string property;
+    std::vector<AnimationValuePoint> keyframes;
+    float start_time_ms = 0.0f;
+    float duration_ms = 0.0f;
+    float delay_ms = 0.0f;
+    float iteration_count = 1.0f;
+    bool infinite = false;
+    AnimationFillMode fill_mode = AnimationFillMode::None;
+    AnimationDirection direction = AnimationDirection::Normal;
+    AnimationPlayState play_state = AnimationPlayState::Running;
+    bool paused = false;
+    float paused_at_ms = 0.0f;
+    float total_paused_ms = 0.0f;
+    easing::EasingFunction easing_fn = easing::ease_in_out;
+
+    float current_value(float default_value, float time_ms) const;
+    bool is_active(float time_ms) const;
+    bool retains_fill_value() const;
+    void set_paused(bool should_pause, float current_time_ms);
+};
+
+class AnimationManager {
+public:
+    void start(std::uintptr_t element_id, const std::string& property,
+               const std::vector<AnimationValuePoint>& keyframes,
+               const AnimationDef& def, float current_time_ms);
+
+    float get(std::uintptr_t element_id, const std::string& property,
+              float default_value, float current_time_ms) const;
+
+    bool has_active(std::uintptr_t element_id, float current_time_ms) const;
+    bool has_effect(std::uintptr_t element_id, float current_time_ms) const;
+    bool has_any_effects() const { return !animations_.empty(); }
+    bool has_any_active(float current_time_ms) const;
+    void set_play_state(std::uintptr_t element_id, AnimationPlayState play_state,
+                        float current_time_ms);
+    void clear_element(std::uintptr_t element_id);
+    void update(float current_time_ms);
+    void clear() { animations_.clear(); }
+
+private:
+    std::map<std::string, ActiveAnimation> animations_;
 };
 
 } // namespace flexUI

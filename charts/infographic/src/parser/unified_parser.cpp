@@ -1,7 +1,9 @@
 #include <parser/unified_parser.h>
+#include <flex/core/expr_c.h>
 #include <regex>
 #include <sstream>
 #include <cctype>
+#include <cmath>
 #include <iostream>
 
 namespace flex::modules::infographic {
@@ -93,12 +95,15 @@ std::vector<UnifiedParser::Token> UnifiedParser::tokenize(const std::string& tex
             }
             
             // 标识符、关键字、数字
-            if (std::isalpha(c) || c == '_' || std::isdigit(c)) {
+            const auto uc = static_cast<unsigned char>(c);
+            if (std::isalpha(uc) || c == '_' || std::isdigit(uc)) {
                 std::string value;
                 int start_column = column;
                 
                 // 收集字符
-                while (i < line_text.length() && (std::isalnum(line_text[i]) || line_text[i] == '_' || line_text[i] == '-' || line_text[i] == '.')) {
+                while (i < line_text.length() &&
+                       (std::isalnum(static_cast<unsigned char>(line_text[i])) ||
+                        line_text[i] == '_' || line_text[i] == '-' || line_text[i] == '.')) {
                     value += line_text[i];
                     i++; column++;
                 }
@@ -133,8 +138,9 @@ std::vector<UnifiedParser::Token> UnifiedParser::tokenize(const std::string& tex
                 continue;
             }
             
-            // 其他未知字符，跳过
-            i++; column++;
+            throw std::runtime_error("Unexpected character at line " +
+                                     std::to_string(line_number) + ", column " +
+                                     std::to_string(column));
         }
         
         // 行结束，添加换行token
@@ -197,7 +203,7 @@ bool UnifiedParser::Parser::parse_infographic() {
         } else if (match(Token::THEME)) {
             if (!parse_theme_block()) return false;
         } else {
-            advance(); // 跳过未知 token
+            error("Unexpected top-level token '" + current_token().value + "'");
         }
     }
     
@@ -223,6 +229,9 @@ bool UnifiedParser::Parser::parse_header() {
     
     std::string template_name = current_token().value;
     TemplateType type = identify_template_type(template_name);
+    if (template_type_to_string(type) != template_name) {
+        error("Unknown infographic template: " + template_name);
+    }
     
     infographic_ = create_infographic(type);
     advance();
@@ -252,7 +261,7 @@ bool UnifiedParser::Parser::parse_data_block() {
             // 回到顶级，结束数据块
             break;
         } else {
-            advance(); // 跳过其他级别的 token
+            error("Unexpected indentation in data block");
         }
     }
     
@@ -302,7 +311,7 @@ bool UnifiedParser::Parser::parse_items_array() {
         } else if (current_token().indent_level < 2) {
             break;
         } else {
-            advance();
+            error("Unexpected token in items array");
         }
     }
     
@@ -310,90 +319,66 @@ bool UnifiedParser::Parser::parse_items_array() {
 }
 
 bool UnifiedParser::Parser::parse_item() {
-    if (!consume(Token::DASH)) return false;
-    
-    auto item = DataItem::create("");
-    
-    // 检查 dash 后面是否有同行的字段（如 "- label Item 1"）
-    if (match(Token::IDENTIFIER)) {
-        std::string field_name = current_token().value;
-        advance();
-        
-        if (field_name == "label") {
-            item->label = parse_string_value();
-        } else if (field_name == "desc") {
-            item->desc = parse_string_value();
-        } else if (field_name == "value") {
-            item->value = parse_number_value();
-        } else {
-            // 其他字段作为属性
-            std::string value = parse_string_value();
-            item->set_prop(field_name, value);
-        }
-    }
-    
-    // 解析后续行的字段（缩进级别 >= 3）
-    while (!at_end()) {
-        if (match(Token::NEWLINE)) {
-            advance();
-            continue;
-        }
-        
-        // 停止条件：缩进级别 < 3 或遇到新的 DASH token（新 item）
-        if (current_token().indent_level < 3) {
-            break;
-        }
-        
-        if (match(Token::DASH) && current_token().indent_level == 2) {
-            // 遇到新的 item，停止解析当前 item
-            break;
-        }
-        
-        if (current_token().indent_level == 3 && match(Token::IDENTIFIER)) {
-            std::string field_name = current_token().value;
-            advance();
-            
-            if (field_name == "label") {
-                item->label = parse_string_value();
-            } else if (field_name == "desc") {
-                item->desc = parse_string_value();
-            } else if (field_name == "value") {
-                item->value = parse_number_value();
-            } else if (field_name == "icon") {
-                item->icon = parse_string_value();
-            } else if (field_name == "illus") {
-                item->illus = parse_string_value();
-            } else if (field_name == "time") {
-                item->time = parse_string_value();
-            } else if (field_name == "done") {
-                item->done = parse_boolean_value();
-            } else if (field_name == "children") {
-                if (!parse_children_array()) return false;
-            } else {
-                // 其他字段作为属性
-                std::string value = parse_string_value();
-                item->set_prop(field_name, value);
-            }
-        } else {
-            // 跳过不匹配的 token
-            advance();
-        }
-    }
-    
+    auto item = parse_item_at_indent(2);
     infographic_->add_item(std::move(item));
     return true;
 }
 
-bool UnifiedParser::Parser::parse_children_array() {
-    // 类似 parse_items_array，但用于子项
+std::unique_ptr<DataItem> UnifiedParser::Parser::parse_item_at_indent(int item_indent) {
+    if (!match(Token::DASH) || current_token().indent_level != item_indent) {
+        error("Expected an item at indentation level " + std::to_string(item_indent));
+    }
+    advance();
+
+    auto item = DataItem::create("");
+    if (match(Token::IDENTIFIER)) {
+        if (!parse_item_field(*item, item_indent)) {
+            error("Invalid item field");
+        }
+    }
+
+    while (!at_end()) {
+        while (match(Token::NEWLINE)) advance();
+        if (at_end() || current_token().indent_level <= item_indent) break;
+        if (current_token().indent_level != item_indent + 1 || !match(Token::IDENTIFIER)) {
+            error("Unexpected indentation or token in item");
+        }
+        if (!parse_item_field(*item, item_indent)) {
+            error("Invalid item field");
+        }
+    }
+    return item;
+}
+
+bool UnifiedParser::Parser::parse_item_field(DataItem& item, int item_indent) {
+    if (!match(Token::IDENTIFIER)) return false;
+    const std::string field_name = current_token().value;
+    advance();
+
+    if (field_name == "label") item.label = parse_string_value();
+    else if (field_name == "desc") item.desc = parse_string_value();
+    else if (field_name == "value") item.value = parse_number_value();
+    else if (field_name == "icon") item.icon = parse_string_value();
+    else if (field_name == "illus") item.illus = parse_string_value();
+    else if (field_name == "time") item.time = parse_string_value();
+    else if (field_name == "done") item.done = parse_boolean_value();
+    else if (field_name == "children") return parse_children_array(item, item_indent + 2);
+    else item.set_prop(field_name, parse_string_value());
+    return true;
+}
+
+bool UnifiedParser::Parser::parse_children_array(DataItem& parent, int child_indent) {
     while (match(Token::NEWLINE)) {
         advance();
     }
-    
-    // 这里需要更复杂的逻辑来处理嵌套的子项
-    // 为了简化，暂时跳过子项解析
-    // TODO: 实现完整的嵌套解析
-    
+
+    if (!match(Token::DASH) || current_token().indent_level != child_indent) {
+        error("Children must contain at least one indented item");
+    }
+    while (match(Token::DASH) && current_token().indent_level == child_indent) {
+        parent.children.push_back(parse_item_at_indent(child_indent));
+        while (match(Token::NEWLINE)) advance();
+    }
     return true;
 }
 
@@ -407,6 +392,8 @@ bool UnifiedParser::Parser::parse_theme_block() {
             infographic_->set_theme(Theme::dark());
         } else if (preset == "hand-drawn") {
             infographic_->set_theme(Theme::hand_drawn());
+        } else {
+            error("Unknown infographic theme preset: " + preset);
         }
         advance();
         return true;
@@ -570,12 +557,21 @@ std::string UnifiedParser::Parser::parse_string_value() {
 }
 
 double UnifiedParser::Parser::parse_number_value() {
-    if (match(Token::NUMBER)) {
-        double value = std::stod(current_token().value);
+    std::string expression;
+    while (!at_end() && !match(Token::NEWLINE) && !match(Token::END_OF_FILE)) {
+        if (!expression.empty()) {
+            expression += ' ';
+        }
+        expression += current_token().value;
         advance();
-        return value;
     }
-    return 0.0;
+
+    if (expression.empty()) error("Expected numeric value or expression");
+    double value = 0.0;
+    if (!flex_expr_eval_f64(expression.c_str(), &value) || !std::isfinite(value)) {
+        error("Invalid numeric expression: " + expression);
+    }
+    return value;
 }
 
 bool UnifiedParser::Parser::parse_boolean_value() {
@@ -584,6 +580,7 @@ bool UnifiedParser::Parser::parse_boolean_value() {
         advance();
         return value;
     }
+    error("Expected boolean value");
     return false;
 }
 

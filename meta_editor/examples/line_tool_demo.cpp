@@ -21,7 +21,7 @@
 #include <meta_editor/core/sdl_adapter.h>
 #include <meta_editor/tools/line_tool.h>
 #include <meta_editor/view/line_style_panel.h>
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include <SDL2/SDL.h>
 #include <thorvg.h>

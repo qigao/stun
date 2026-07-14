@@ -1,0 +1,18 @@
+{
+  "component": "Spinner",
+  "kind": "leaf",
+  "root": "spinner_root",
+  "nodes": [
+    {
+      "id": "spinner_root",
+      "type": "widget",
+      "widget": "spinner",
+      "tag": "div",
+      "states": ["spinning", "stopped"],
+      "props": {
+        "variant": "ring",
+        "spinning": true
+      }
+    }
+  ]
+}

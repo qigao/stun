@@ -1,0 +1,20 @@
+{
+  "component": "Skeleton",
+  "kind": "leaf",
+  "root": "skeleton_root",
+  "nodes": [
+    {
+      "id": "skeleton_root",
+      "type": "element",
+      "tag": "div",
+      "states": ["loading", "hidden"],
+      "attrs": {
+        "data-slot": "skeleton",
+        "aria-hidden": "true"
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/skeleton"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "component": "Tabs",
+  "kind": "leaf",
+  "root": "tabs_root",
+  "nodes": [
+    {
+      "id": "tabs_root",
+      "type": "widget",
+      "widget": "tabs",
+      "tag": "div",
+      "role": "tablist",
+      "states": ["focus-visible"],
+      "props": {
+        "tabs": [
+          { "label": "General", "id": "general" },
+          { "label": "Billing", "id": "billing" }
+        ],
+        "active_id": "general"
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/tabs"
+  }
+}

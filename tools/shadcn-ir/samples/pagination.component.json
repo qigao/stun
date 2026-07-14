@@ -1,0 +1,109 @@
+{
+  "component": "Pagination",
+  "kind": "composite",
+  "root": "pagination_root",
+  "nodes": [
+    {
+      "id": "pagination_root",
+      "type": "element",
+      "tag": "nav",
+      "role": "navigation",
+      "attrs": {
+        "data-slot": "pagination",
+        "aria-label": "pagination"
+      }
+    },
+    {
+      "id": "pagination_content",
+      "type": "element",
+      "tag": "ul",
+      "slot": "content",
+      "attrs": {
+        "data-slot": "pagination-content"
+      }
+    },
+    {
+      "id": "pagination_item_previous",
+      "type": "element",
+      "tag": "li",
+      "slot": "item",
+      "attrs": {
+        "data-slot": "pagination-item"
+      }
+    },
+    {
+      "id": "pagination_previous",
+      "type": "element",
+      "tag": "a",
+      "slot": "previous",
+      "states": ["disabled", "focus-visible"],
+      "attrs": {
+        "data-slot": "pagination-link",
+        "href": "#",
+        "aria-label": "Go to previous page"
+      },
+      "props": {
+        "text": "Previous"
+      }
+    },
+    {
+      "id": "pagination_item_current",
+      "type": "element",
+      "tag": "li",
+      "slot": "item",
+      "attrs": {
+        "data-slot": "pagination-item"
+      }
+    },
+    {
+      "id": "pagination_page_current",
+      "type": "element",
+      "tag": "a",
+      "slot": "page",
+      "states": ["current", "focus-visible"],
+      "attrs": {
+        "data-slot": "pagination-link",
+        "href": "#"
+      },
+      "props": {
+        "text": "2"
+      }
+    },
+    {
+      "id": "pagination_item_next",
+      "type": "element",
+      "tag": "li",
+      "slot": "item",
+      "attrs": {
+        "data-slot": "pagination-item"
+      }
+    },
+    {
+      "id": "pagination_next",
+      "type": "element",
+      "tag": "a",
+      "slot": "next",
+      "states": ["disabled", "focus-visible"],
+      "attrs": {
+        "data-slot": "pagination-link",
+        "href": "#",
+        "aria-label": "Go to next page"
+      },
+      "props": {
+        "text": "Next"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "pagination_root", "child": "pagination_content" },
+    { "parent": "pagination_content", "child": "pagination_item_previous" },
+    { "parent": "pagination_item_previous", "child": "pagination_previous" },
+    { "parent": "pagination_content", "child": "pagination_item_current" },
+    { "parent": "pagination_item_current", "child": "pagination_page_current" },
+    { "parent": "pagination_content", "child": "pagination_item_next" },
+    { "parent": "pagination_item_next", "child": "pagination_next" }
+  ],
+  "meta": {
+    "source": "shadcn/pagination"
+  }
+}

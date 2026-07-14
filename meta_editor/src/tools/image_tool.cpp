@@ -16,7 +16,7 @@ bool ImageTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2& 
         // Create actual image
         auto* img = flex::Image::create(*allocator);
         img->set_src(pending_image_path_);
-        img->set_position(world_pos.x(), world_pos.y());
+        img->set_position(world_pos.x, world_pos.y);
         img->set_width(default_width_);
         img->set_height(default_height_);
         layer->add_child(img);
@@ -27,7 +27,7 @@ bool ImageTool::on_pointer_down(const flex::Vec2& screen_pos, const flex::Vec2& 
     } else {
         // Create placeholder (rect with X)
         auto* group = flex::Group::create(*allocator);
-        group->set_position(world_pos.x(), world_pos.y());
+        group->set_position(world_pos.x, world_pos.y);
         
         // Background
         auto* bg = flex::Shape::create(*allocator);
@@ -81,7 +81,7 @@ void ImageTool::render_overlay(flex::Renderer& renderer) {
     flex::Paint fill = flex::Paint::solid(flex::Color{0.9f, 0.9f, 0.9f, 0.5f});
     flex::Paint stroke = flex::Paint::solid(flex::Color{0.5f, 0.5f, 0.5f, 0.8f});
     
-    renderer.draw_rect(preview_pos_.x(), preview_pos_.y(),
+    renderer.draw_rect(preview_pos_.x, preview_pos_.y,
                        default_width_, default_height_, 4.0f,
                        fill, stroke, 2.0f);
 }

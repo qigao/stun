@@ -8,7 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h" 
+#include "backends/thorvg/init.h" 
 
 using namespace flex;
 
@@ -170,7 +170,7 @@ int main(int argc, char* argv[]) {
 
     // Register test components for parsing demo
     using namespace flex;
-    auto dummy_builder = [](const Props& props) -> Node::Ptr {
+    auto dummy_builder = [](const Props& props) -> ComponentNodePtr {
         auto g = std::make_shared<Group>();
         return g;
     };

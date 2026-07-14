@@ -3,6 +3,8 @@
 #include "statediagram/statediagram_ast.h"
 #include "statediagram_parser_gen.h"
 
+void StateParser(void *parser, int token, void *value, StateParserContext *ctx);
+
 typedef struct {
     const char *start;
     const char *cursor;

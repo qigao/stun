@@ -245,8 +245,7 @@ bool has_emoji(const std::string& text) {
 // ============================================================================
 
 const char* get_emoji_font_name() {
-    // ThorVG is a vector renderer - color emoji fonts may not work
-    // Try symbol font first (monochrome vectors) as fallback
+    // Prefer symbol fonts so vector and terminal-oriented backends get stable glyphs.
 #ifdef _WIN32
     return "Segoe UI Symbol";  // Monochrome, vector-based
 #elif __APPLE__

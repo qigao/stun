@@ -3,15 +3,27 @@
 ## 📚 文档导航
 
 - **[dsl.md](docs/dsl.md)** - DSL 语法规范（当前实现）
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - 实际架构和实现细节
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 实际架构和实现细节
 - **[VISION.md](docs/VISION.md)** - 理论设计和未来愿景
-- **[REFACTORED_DESIGN.md](REFACTORED_DESIGN.md)** - 简化架构说明
 
 ---
 
 ## 🎯 项目简介
 
-Flex Engine 是一个现代化的 2.5D 游戏引擎和 UI 框架，具有强大的动画系统。本项目实现了完整的动画系统，包括类型安全的 C++ API、声明式 DSL 语法，以及 SDL2 + ThorVG 的实时渲染支持。
+Flex Engine 是一个现代化的 2.5D 游戏引擎和 UI 框架，具有强大的动画系统。本项目实现了完整的动画系统，包括类型安全的 C++ API、声明式 DSL 语法，以及可插拔的渲染后端接入能力。
+
+## 🧭 模块命名
+
+当前推荐的语义化入口是：
+
+- `#include "flex/dsl.h"`：DSL 前端，负责 lexer/parser/AST
+- `#include "flex/core.h"`：核心执行模型，负责 scene/layout/timeline/binding
+- `#include "flex/lowering.h"`：DSL 到 core object 的装配/落地
+- `#include "flex/bridge/renderer.h"`：公开的后端无关 renderer factory/registry
+
+`backends/*` 目录中的 backend init / register 头主要用于仓库内或宿主应用集成层，不是面向安装包终端用户的公开表面。
+
+旧名字 `flex/compiler.h`、`flex/runtime.h`、`flex/bridge/*` 仍然保留，用作兼容层。
 
 ## ✨ 核心特性
 
@@ -22,7 +34,7 @@ Flex Engine 是一个现代化的 2.5D 游戏引擎和 UI 框架，具有强大�
 - ✅ **缓动函数**: linear、ease、ease-in、ease-out、ease-in-out
 - ✅ **循环模式**: Once、Loop、PingPong
 - ✅ **动画混合**: Override、Additive、Multiply 模式
-- ✅ **实时渲染**: SDL2 + ThorVG 高质量向量渲染
+- ✅ **实时渲染**: 支持 ThorVG / NanoVG / Direct2D / TUI 等可插拔后端
 
 ### 模块导入
 ```flex
@@ -65,7 +77,7 @@ anim "PlayerMove" {
 ### C++ API
 ```cpp
 // 创建动画
-auto anim = flex::Timeline::create("Move");
+auto anim = flex::Timeline::create("Move", *instance->object_allocator());
 auto track = anim->add_track("x");
 track->add_keyframe(0.0f, 100.0f);
 track->add_keyframe(1.0f, 200.0f);
@@ -79,28 +91,25 @@ instance->play("Move", player_node);
 
 ```
 flex/
-├── include/flex/           # 头文件
-│   ├── timeline.h          # 动画系统
-│   ├── types.h             # 类型定义
-│   ├── node.h              # 场景图节点
-│   └── ...
-├── src/                    # 实现文件
-│   ├── timeline.cpp        # 动画实现
-│   ├── builder.cpp         # DSL 构建器
-│   ├── renderer_thorvg.cpp # ThorVG 渲染器
-│   └── ...
+├── include/flex/
+│   ├── dsl.h              # 语义化 DSL 前端入口
+│   ├── core.h             # 语义化核心运行时入口
+│   ├── lowering.h         # AST/runtime 装配入口
+│   ├── bridge/renderer.h  # 公开 renderer registry/factory
+│   ├── compiler.h         # 旧入口（兼容）
+│   ├── runtime.h          # 旧入口（兼容）
+│   └── bridge/            # 旧路径（兼容）
+├── src/
+│   ├── dsl/               # DSL frontend implementation
+│   ├── core/              # Core runtime implementation
+│   ├── lowering/          # AST/runtime lowering implementation
+│   ├── backends/          # Backend 实现与仓库内集成头
+│   └── binary/            # .flexb format support
 ├── examples/               # 示例程序
-│   ├── flex_simple_demo.cpp           # 基础示例
-│   ├── flex_animation_test.cpp        # 动画测试
-│   ├── flex_advanced_animation_test.cpp # 高级动画
-│   ├── flex_thorvg_simple.cpp         # 简化渲染
-│   ├── flex_thorvg_animation.cpp      # 完整渲染演示
-│   └── advanced_animation.flex        # DSL 示例
-├── docs/                   # 文档
-│   ├── ANIMATION.md               # 动画指南
-│   ├── THORVG_RENDERING.md        # 渲染指南
-│   ├── ANIMATION_SUMMARY.md       # 技术总结
-│   └── PROJECT_SUMMARY.md         # 项目总结
+│   ├── *_demo.cpp         # SDL/ThorVG/TUI examples
+│   └── *.flex             # DSL examples
+├── docs/
+│   └── dsl.md             # DSL reference
 └── CMakeLists.txt          # 构建配置
 ```
 
@@ -125,40 +134,41 @@ cmake --build . --config Release
 ### 2. 运行示例
 
 ```bash
-# 基础动画测试（无 SDL2）
-./bin/flex_animation_test.exe
+# ThorVG 动画演示
+./bin/loading_animation_demo.exe
 
-# 高级动画测试（无 SDL2）
-./bin/flex_advanced_animation_test.exe
+# NanoVG + GLFW 演示
+./bin/nanovg_glfw_demo.exe
 
-# 简化渲染示例（需要 SDL2）
-./bin/flex_thorvg_simple.exe
+# Direct2D + HWND 演示（Windows）
+./bin/direct2d_hwnd_demo.exe
 
-# 完整渲染演示（需要 SDL2）
-./bin/flex_thorvg_animation.exe
+# 终端渲染演示
+./bin/tui_flex_demo.exe
 ```
 
 ### 3. 创建你的第一个动画
 
 ```cpp
 #include <flex.h>
+#include <iostream>
 
 int main() {
-    flex::init();
-
     // 创建实例
     auto instance = flex::Instance::create(800, 600);
     auto* scene = instance->scene();
+    auto* object_alloc = instance->object_allocator();
+    if (!object_alloc) return 1;
 
-    // 创建节点
-    auto player = flex::Shape::create();
+    // 创建节点（当前 core API 由对象分配器持有节点生命周期）
+    auto* player = flex::Shape::create(*object_alloc);
     player->set_rect(80, 80);
     player->set_position(100, 350);
     player->set_fill(flex::Color::Blue);
     scene->add_child(player);
 
     // 创建动画
-    auto anim = flex::Timeline::create("Move");
+    auto anim = flex::Timeline::create("Move", *object_alloc);
     anim->set_loop_mode(flex::LoopMode::Loop);
 
     auto track = anim->add_track("x");
@@ -167,7 +177,7 @@ int main() {
     track->add_keyframe(2.0f, 100.0f);
 
     instance->add_timeline(anim);
-    instance->play("Move", player.get());
+    instance->play("Move", player);
 
     // 模拟游戏循环
     for (int i = 0; i < 60; i++) {
@@ -175,7 +185,6 @@ int main() {
         std::cout << "Frame " << i << ": x = " << player->x() << "\n";
     }
 
-    flex::shutdown();
     return 0;
 }
 ```
@@ -184,16 +193,16 @@ int main() {
 
 ### 核心文档
 - **[ANIMATION.md](docs/ANIMATION.md)** - DSL 动画完整指南
-- **[THORVG_RENDERING.md](docs/THORVG_RENDERING.md)** - SDL2 + ThorVG 渲染指南
-- **[ANIMATION_SUMMARY.md](docs/ANIMATION_SUMMARY.md)** - 技术架构总结
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 当前模块边界与装配方式
+- **[RENDERING_BACKENDS.md](RENDERING_BACKENDS.md)** - 当前 backend registry / plugin 结构
 
 ### 示例程序
 | 示例 | 描述 | 依赖 |
 |------|------|------|
-| `flex_animation_test.cpp` | 基础动画测试 | 无 |
-| `flex_advanced_animation_test.cpp` | 复杂动画演示 | 无 |
-| `flex_thorvg_simple.cpp` | 简化实时渲染 | SDL2 + ThorVG |
-| `flex_thorvg_animation.cpp` | 完整交互演示 | SDL2 + ThorVG |
+| `loading_animation_demo.cpp` | 动画与状态演示 | ThorVG |
+| `nanovg_glfw_demo.cpp` | NanoVG + GLFW 集成 | NanoVG + GLFW + OpenGL |
+| `direct2d_hwnd_demo.cpp` | Direct2D + HWND 集成 | Direct2D |
+| `tui_flex_demo.cpp` | 终端渲染演示 | TUI |
 
 ## 🎮 应用场景
 
@@ -222,8 +231,8 @@ int main() {
 - **CMake** - 跨平台构建
 
 ### 渲染
-- **SDL2** - 窗口和输入管理
-- **ThorVG** - 向量图形渲染
+- **ThorVG / NanoVG / Direct2D / TUI** - 可插拔渲染后端
+- **SDL2 / GLFW / Win32** - 典型宿主窗口与输入集成方式
 
 ### 工具链
 - **re2c** - 词法分析器生成器

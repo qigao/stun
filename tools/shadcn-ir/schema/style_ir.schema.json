@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flexui.dev/schema/style_ir.schema.json",
+  "title": "StyleIR",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rules"],
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" },
+      "default": []
+    },
+    "keyframes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/keyframes" },
+      "default": []
+    },
+    "media": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mediaBlock" },
+      "default": []
+    },
+    "container": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/containerBlock" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "selector", "decls"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "when": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/condition" },
+          "default": []
+        },
+        "decls": {
+          "$ref": "#/$defs/declarations"
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["state", "attr", "variant", "media", "container"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": ["string", "number", "boolean"]
+        },
+        "equals": {
+          "type": ["string", "number", "boolean"]
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    },
+    "declarations": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "keyframes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "steps"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/keyframeStep" }
+        }
+      }
+    },
+    "keyframeStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "decls"],
+      "properties": {
+        "offset": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "decls": {
+          "$ref": "#/$defs/declarations"
+        }
+      }
+    },
+    "mediaBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query", "rules"],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule" }
+        }
+      }
+    },
+    "containerBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query", "rules"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule" }
+        }
+      }
+    }
+  }
+}

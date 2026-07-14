@@ -130,6 +130,30 @@ theme
   std::cout << "  ✓ Theme parsing works correctly\n";
 }
 
+void test_mir_value_expressions() {
+  std::cout << "Test: MIR Value Expressions\n";
+
+  FlexInfographic flex;
+
+  std::string text = R"(
+infographic list-grid-badge-card
+data
+  items
+    - label Calculated
+      value 10 + 5 * 2
+    - label Clamped
+      value clamp(120 / 2, 0, 50)
+)";
+
+  auto result = flex.parse(text);
+  assert(result.success);
+  assert(result.infographic->items.size() == 2);
+  assert(result.infographic->items[0]->value.value_or(0) == 20);
+  assert(result.infographic->items[1]->value.value_or(0) == 50);
+
+  std::cout << "  ✓ MIR-backed value expressions work\n";
+}
+
 void test_svg_generation() {
   std::cout << "Test: SVG Generation\n";
 
@@ -234,8 +258,8 @@ data
 )";
 
   result = flex.parse(invalid_template);
-  // 应该使用默认模板而不是失败
-  assert(result.success);
+  assert(!result.success);
+  assert(result.get_error().find("Unknown infographic template") != std::string::npos);
 
   std::cout << "  ✓ Error handling works correctly\n";
 }
@@ -278,6 +302,7 @@ int main() {
     test_basic_parsing();
     test_template_validation();
     test_theme_parsing();
+    test_mir_value_expressions();
     test_svg_generation();
     test_convenience_functions();
     test_template_information();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ir/unified_infographic.h>
+#include <layout/layout_engine.h>
 #include <flex/runtime/allocator.h>
 #include <flex/runtime/group.h>
 #include <memory>
@@ -19,6 +20,7 @@ struct LayoutRenderContext {
     float width;
     float height;
     Instance* instance;
+    const LayoutResult* layout = nullptr;
 };
 
 // Base class for layout renderers

@@ -12,7 +12,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "flex/backends/thorvg/init.h"
+#include "backends/thorvg/init.h"
 
 // ============================================================================
 // Model - Clock State
@@ -59,7 +59,7 @@ struct ClockModel {
 
 class ClockView {
 public:
-    ClockView(flex::Instance::Ptr instance) : instance_(instance) {
+    ClockView(flex::Instance::SharedPtr instance) : instance_(instance) {
         auto* scene = instance_->scene();
         if (!scene) return;
 
@@ -92,7 +92,7 @@ public:
     }
 
 private:
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     flex::Node* hands_group_ = nullptr;
     flex::Node* hour_hand_ = nullptr;
     flex::Node* minute_hand_ = nullptr;
@@ -227,7 +227,7 @@ private:
     tvg::SwCanvas* canvas_ = nullptr;
     std::vector<uint32_t> buffer_;
 
-    flex::Instance::Ptr instance_;
+    flex::Instance::SharedPtr instance_;
     std::unique_ptr<flex::Renderer> flex_renderer_;
 
     std::unique_ptr<ClockModel> model_;

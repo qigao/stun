@@ -5,6 +5,10 @@
 #include "sankey/sankey_ast.h"
 #include "turbo_parser.h"
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 extern SankeyDiagram* sankey_parse(const char* input);
 extern void sankey_free_diagram(SankeyDiagram* diagram);
 
@@ -51,6 +55,9 @@ static int json_equal(const char* a, const char* b) {
     return eq;
 }
 
+#ifdef check_double_eq
+#undef check_double_eq
+#endif
 #define check_double_eq(a, b) do { \
     double diff = (a) - (b); \
     if (diff < 0) diff = -diff; \
@@ -100,6 +107,35 @@ spec("sankey_parser") {
              check_str_eq(l->target, "Target, Name");
              check_double_eq(l->value, 12.5);
              
+             sankey_free_diagram(diagram);
+        }
+
+        it("should evaluate link value expressions with MIR") {
+             const char* input =
+                "sankey-beta\n"
+                "source,target,2*3\n"
+                "a,b,\"pow(2,3)\"\n";
+
+             SankeyDiagram* diagram = sankey_parse(input);
+             if (!diagram) {
+                 check(0, "diagram parsed");
+                 return;
+             }
+
+             if (!diagram->links) {
+                 check(0, "first link parsed");
+                 sankey_free_diagram(diagram);
+                 return;
+             }
+             check_double_eq(diagram->links->value, 6.0);
+
+             if (!diagram->links->next) {
+                 check(0, "second link parsed");
+                 sankey_free_diagram(diagram);
+                 return;
+             }
+             check_double_eq(diagram->links->next->value, 8.0);
+
              sankey_free_diagram(diagram);
         }
     }

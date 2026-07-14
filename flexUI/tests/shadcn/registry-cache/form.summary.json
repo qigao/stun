@@ -1,0 +1,12 @@
+{
+  "name": "form",
+  "source": "https://ui.shadcn.com/r/styles/new-york/form.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "font-medium",
+    "space-y-2",
+    "text-[0.8rem]",
+    "text-destructive",
+    "text-muted-foreground"
+  ]
+}

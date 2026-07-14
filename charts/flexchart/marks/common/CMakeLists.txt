@@ -1,0 +1,5 @@
+add_library(flexchart_common STATIC src/chart_types.c src/mark_parser_context.cpp)
+target_include_directories(flexchart_common PUBLIC include)
+target_link_libraries(flexchart_common PUBLIC flexchart)
+target_compile_features(flexchart_common PUBLIC cxx_std_17)
+set_target_properties(flexchart_common PROPERTIES FOLDER "Modules/FlexChart/Marks")

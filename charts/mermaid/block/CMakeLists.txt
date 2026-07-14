@@ -3,15 +3,6 @@ project(block_parser C)
 
 set(CMAKE_C_STANDARD 11)
 
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c REQUIRED)
-    find_program(LEMON_EXECUTABLE lemon REQUIRED)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 # Generate Parser
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/block_parser_gen.c" "${CMAKE_CURRENT_BINARY_DIR}/block_parser_gen.h"
@@ -35,7 +26,7 @@ add_library(block STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/block_parser_gen.c"
 )
 
-target_link_libraries(block PUBLIC TurboNet::Parser)
+target_link_libraries(block PUBLIC TurboUtils::Parser flex_runtime)
 target_include_directories(block PUBLIC 
     include 
     "${CMAKE_CURRENT_BINARY_DIR}"
@@ -43,8 +34,9 @@ target_include_directories(block PUBLIC
 
 # Test executable
 add_executable(block_test tests/test_parser.c)
-target_link_libraries(block_test block TurboNet::TinyTest TurboNet::Parser)
-target_compile_definitions(block_test PRIVATE GOLDEN_DIR="${CMAKE_SOURCE_DIR}/charts/mermaid/golden/block")
+target_link_libraries(block_test block TurboUtils::TinyTest TurboUtils::Parser)
+set_target_properties(block_test PROPERTIES LINKER_LANGUAGE CXX)
+target_compile_definitions(block_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/block")
 
 add_test(NAME block_test COMMAND block_test)
 set_target_properties(block PROPERTIES FOLDER "Modules/Mermaid")

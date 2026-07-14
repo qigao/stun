@@ -3,15 +3,6 @@ project(classdiagram_parser C)
 
 set(CMAKE_C_STANDARD 11)
 
-if(NOT RE2C_EXECUTABLE OR NOT LEMON_EXECUTABLE)
-    find_program(RE2C_EXECUTABLE re2c REQUIRED)
-    find_program(LEMON_EXECUTABLE lemon REQUIRED)
-endif()
-
-if(NOT LEMPAR)
-    set(LEMPAR ${CMAKE_SOURCE_DIR}/vendor/lemon/lempar.c)
-endif()
-
 # Generate Parser
 add_custom_command(
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/classdiagram_parser_gen.c" "${CMAKE_CURRENT_BINARY_DIR}/classdiagram_parser_gen.h"
@@ -35,7 +26,7 @@ add_library(classdiagram STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/classdiagram_parser_gen.c"
 )
 
-target_link_libraries(classdiagram PUBLIC TurboNet::Parser)
+target_link_libraries(classdiagram PUBLIC TurboUtils::Parser)
 
 target_include_directories(classdiagram PUBLIC
     include
@@ -44,8 +35,8 @@ target_include_directories(classdiagram PUBLIC
 
 # Test executable
 add_executable(classdiagram_test tests/test_parser.c)
-target_link_libraries(classdiagram_test classdiagram TurboNet::TinyTest TurboNet::Parser)
-target_compile_definitions(classdiagram_test PRIVATE GOLDEN_DIR="${CMAKE_SOURCE_DIR}/charts/mermaid/golden/class")
+target_link_libraries(classdiagram_test classdiagram TurboUtils::TinyTest TurboUtils::Parser)
+target_compile_definitions(classdiagram_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/class")
 
 add_test(NAME classdiagram_test COMMAND classdiagram_test)
 set_target_properties(classdiagram PROPERTIES FOLDER "Modules/Mermaid")

@@ -1,0 +1,29 @@
+{
+  "component": "SearchBox",
+  "kind": "leaf",
+  "root": "searchbox_root",
+  "nodes": [
+    {
+      "id": "searchbox_root",
+      "type": "widget",
+      "widget": "searchbox",
+      "tag": "input",
+      "role": "combobox",
+      "states": ["open", "closed"],
+      "props": {
+        "placeholder": "Search docs",
+        "suggestions": [
+          { "id": "api-ref", "text": "API Reference" },
+          { "id": "guide", "text": "Guide", "description": "Getting started" }
+        ]
+      }
+    }
+  ],
+  "overlay": {
+    "portal": true,
+    "modal": false
+  },
+  "meta": {
+    "source": "shadcn/command"
+  }
+}

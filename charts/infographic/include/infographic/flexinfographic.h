@@ -49,6 +49,7 @@ public:
 private:
     std::unique_ptr<UnifiedParser> parser_;
     Theme current_theme_;
+    bool has_theme_override_ = false;
 };
 
 // 便利函数

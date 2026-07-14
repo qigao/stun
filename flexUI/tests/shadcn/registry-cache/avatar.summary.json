@@ -1,0 +1,20 @@
+{
+  "name": "avatar",
+  "source": "https://ui.shadcn.com/r/styles/new-york/avatar.json",
+  "format": "registry-item-json",
+  "extracted_class_tokens": [
+    "aspect-square",
+    "bg-muted",
+    "flex",
+    "h-10",
+    "h-full",
+    "items-center",
+    "justify-center",
+    "overflow-hidden",
+    "relative",
+    "rounded-full",
+    "shrink-0",
+    "w-10",
+    "w-full"
+  ]
+}

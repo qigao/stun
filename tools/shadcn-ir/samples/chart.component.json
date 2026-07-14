@@ -1,0 +1,71 @@
+{
+  "component": "Chart",
+  "kind": "composite",
+  "root": "chart_root",
+  "nodes": [
+    {
+      "id": "chart_root",
+      "type": "element",
+      "tag": "div",
+      "role": "figure",
+      "states": ["theme-dark"],
+      "attrs": {
+        "data-slot": "chart",
+        "data-chart": "chart-demo"
+      }
+    },
+    {
+      "id": "chart_surface",
+      "type": "element",
+      "tag": "svg",
+      "slot": "surface",
+      "role": "img",
+      "attrs": {
+        "data-slot": "chart-surface",
+        "aria-label": "Chart"
+      }
+    },
+    {
+      "id": "chart_tooltip",
+      "type": "element",
+      "tag": "div",
+      "slot": "tooltip",
+      "role": "status",
+      "states": ["active"],
+      "attrs": {
+        "data-slot": "chart-tooltip",
+        "data-state": "inactive",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "id": "chart_legend",
+      "type": "element",
+      "tag": "div",
+      "slot": "legend",
+      "attrs": {
+        "data-slot": "chart-legend"
+      }
+    },
+    {
+      "id": "chart_legend_item",
+      "type": "element",
+      "tag": "span",
+      "slot": "legend-item",
+      "states": ["highlighted"],
+      "attrs": {
+        "data-slot": "chart-legend-item",
+        "data-series": "desktop"
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "chart_root", "child": "chart_surface" },
+    { "parent": "chart_root", "child": "chart_tooltip" },
+    { "parent": "chart_root", "child": "chart_legend" },
+    { "parent": "chart_legend", "child": "chart_legend_item" }
+  ],
+  "meta": {
+    "source": "shadcn/chart"
+  }
+}

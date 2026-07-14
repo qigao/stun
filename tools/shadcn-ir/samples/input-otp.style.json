@@ -1,0 +1,89 @@
+{
+  "rules": [
+    {
+      "target": "input_otp_root",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center",
+        "gap": "0.5rem"
+      }
+    },
+    {
+      "target": "input_otp_group",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center"
+      }
+    },
+    {
+      "target": "input_otp_slot_0",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "width": "2.25rem",
+        "height": "2.25rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--input)",
+        "font-size": "0.875rem"
+      }
+    },
+    {
+      "target": "input_otp_slot_1",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "width": "2.25rem",
+        "height": "2.25rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--input)",
+        "font-size": "0.875rem"
+      }
+    },
+    {
+      "target": "input_otp_slot_2",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "width": "2.25rem",
+        "height": "2.25rem",
+        "border-width": "1px",
+        "border-style": "solid",
+        "border-color": "var(--input)",
+        "font-size": "0.875rem"
+      }
+    },
+    {
+      "target": "input_otp_slot_0",
+      "selector": "&",
+      "when": [
+        { "type": "attr", "name": "data-active", "equals": "true" }
+      ],
+      "decls": {
+        "z-index": "10",
+        "ring-width": "2px",
+        "ring-color": "var(--ring)"
+      }
+    },
+    {
+      "target": "input_otp_separator",
+      "selector": "&",
+      "decls": {
+        "display": "flex",
+        "align-items": "center",
+        "justify-content": "center",
+        "padding-left": "0.5rem",
+        "padding-right": "0.5rem"
+      }
+    }
+  ]
+}

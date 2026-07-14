@@ -142,11 +142,17 @@ void c4_add_rel(C4ParserContext* ctx, C4Rel* rel) {
 // --- Parse Function ---
 
 C4Diagram* c4_parse(const char* input) {
+    if (!input) return NULL;
     C4ParserContext ctx;
     memset(&ctx, 0, sizeof(C4ParserContext));
     ctx.diagram = (C4Diagram*)calloc(1, sizeof(C4Diagram));
+    if (!ctx.diagram) return NULL;
     
     void* parser = C4ParserAlloc(malloc);
+    if (!parser) {
+        c4_free_diagram(ctx.diagram);
+        return NULL;
+    }
     
     Scanner s;
     memset(&s, 0, sizeof(Scanner));
@@ -160,7 +166,10 @@ C4Diagram* c4_parse(const char* input) {
     C4Parser(parser, 0, NULL, &ctx); // EOF
     
     C4ParserFree(parser, free);
-    
+    if (ctx.error_count > 0) {
+        c4_free_diagram(ctx.diagram);
+        return NULL;
+    }
     return ctx.diagram;
 }
 
@@ -329,6 +338,6 @@ char* c4_to_json(C4Diagram* diagram) {
 
     size_t len;
     char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(root);
+    turbo_free_json(&root);
     return str;
 }

@@ -1,0 +1,26 @@
+{
+  "bridges": [
+    {
+      "target": "tooltip_root",
+      "state": "open",
+      "properties": {
+        "open": true
+      },
+      "pseudo_states": ["open"]
+    },
+    {
+      "target": "tooltip_root",
+      "state": "right",
+      "properties": {
+        "position": "right"
+      }
+    },
+    {
+      "target": "tooltip_root",
+      "state": "retitled",
+      "properties": {
+        "text": "Pinned help"
+      }
+    }
+  ]
+}

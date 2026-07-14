@@ -1,0 +1,29 @@
+{
+  "component": "Slider",
+  "kind": "leaf",
+  "root": "slider_root",
+  "nodes": [
+    {
+      "id": "slider_root",
+      "type": "widget",
+      "widget": "slider",
+      "tag": "span",
+      "role": "slider",
+      "states": ["value", "disabled", "focus-visible"],
+      "attrs": {
+        "data-slot": "slider",
+        "aria-orientation": "horizontal"
+      },
+      "props": {
+        "min": 0.5,
+        "max": 99.5,
+        "value": 37.5,
+        "step": 0.25,
+        "disabled": false
+      }
+    }
+  ],
+  "meta": {
+    "source": "shadcn/slider"
+  }
+}

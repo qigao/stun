@@ -32,7 +32,7 @@ public:
     GroupButtonWidget();
 
     // Widget interface
-    void render(const Element& elem, Renderer& renderer) override;
+    void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     const char* type_name() const override { return "GroupButtonWidget"; }
 
@@ -50,6 +50,7 @@ public:
 private:
     void rebuild_shapes(float width, float height);
     void update_colors();
+    void sync_host_semantics() override;
 
     // Visual composition
     Group root_;

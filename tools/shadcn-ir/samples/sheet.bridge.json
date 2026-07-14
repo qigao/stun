@@ -1,0 +1,104 @@
+{
+  "bridges": [
+    {
+      "target": "sheet_root",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "aria-hidden": "false"
+      },
+      "pseudo_states": ["open", "modal"]
+    },
+    {
+      "target": "sheet_root",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "target": "sheet_overlay",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "sheet_overlay",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "sheet_content",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "sheet_content",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "sheet_content",
+      "when": [
+        { "type": "variant", "name": "side", "equals": "left" }
+      ],
+      "attributes": {
+        "data-side": "left"
+      }
+    },
+    {
+      "target": "sheet_content",
+      "when": [
+        { "type": "variant", "name": "side", "equals": "top" }
+      ],
+      "attributes": {
+        "data-side": "top"
+      }
+    },
+    {
+      "target": "sheet_content",
+      "when": [
+        { "type": "variant", "name": "side", "equals": "bottom" }
+      ],
+      "attributes": {
+        "data-side": "bottom"
+      }
+    },
+    {
+      "target": "sheet_content",
+      "when": [
+        { "type": "variant", "name": "side", "equals": "right" }
+      ],
+      "attributes": {
+        "data-side": "right"
+      }
+    },
+    {
+      "target": "sheet_close",
+      "state": "disabled",
+      "attributes": {
+        "disabled": "",
+        "aria-disabled": "true"
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "sheet_close",
+      "state": "hover",
+      "pseudo_states": ["hover"]
+    },
+    {
+      "target": "sheet_close",
+      "state": "focus",
+      "pseudo_states": ["focus"]
+    }
+  ]
+}

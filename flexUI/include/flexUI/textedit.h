@@ -95,6 +95,7 @@ public:
   int selection_start() const;
   int selection_end() const;
   std::string selected_text() const;
+  void set_selection(int start, int end);
 
   // ========================================================================
   // Cursor

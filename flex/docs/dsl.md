@@ -562,6 +562,27 @@ ComponentRegistry::instance().register_component(labeled);
 - Component必须先在C++中注册，然后才能在.flex中使用
 - Component可以嵌套其他Component（通过`create_component_instance`）
 - Props支持float, string, bool, uint32_t（颜色）类型
+- Component props 与节点属性重名时，优先按组件 props 处理；未定义则按节点属性处理
+- 当组件 props 绑定 width/height 时，布局尺寸与几何尺寸保持一致
+
+**开发规范（必须遵守）：**
+- 组件要显式声明 props，并保持类型一致（错误类型会导致加载失败）
+- 组件 builder 若使用 width/height，应同步设置 layout 尺寸
+- 只有明确需要时才与节点属性重名，并理解优先级规则
+
+**重名优先级示例：**
+```flex
+component Badge {
+    x: 10 // 这里的 x 是组件 prop
+    rect icon { width: $x, height: 6 }
+}
+
+scene demo {
+    Badge badge {
+        x: ${$badgeW}  // 会驱动组件 prop，不会改节点位置
+    }
+}
+```
 
 ---
 

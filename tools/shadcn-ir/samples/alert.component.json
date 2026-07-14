@@ -1,0 +1,54 @@
+{
+  "component": "Alert",
+  "kind": "composite",
+  "root": "alert_root",
+  "nodes": [
+    {
+      "id": "alert_root",
+      "type": "element",
+      "tag": "div",
+      "role": "alert",
+      "states": ["focus-visible"],
+      "attrs": {
+        "data-slot": "alert"
+      }
+    },
+    {
+      "id": "alert_title",
+      "type": "element",
+      "tag": "div",
+      "slot": "title",
+      "attrs": {
+        "data-slot": "alert-title"
+      },
+      "props": {
+        "text": "Heads up"
+      }
+    },
+    {
+      "id": "alert_description",
+      "type": "element",
+      "tag": "div",
+      "slot": "description",
+      "attrs": {
+        "data-slot": "alert-description"
+      },
+      "props": {
+        "text": "This is an alert message."
+      }
+    }
+  ],
+  "edges": [
+    { "parent": "alert_root", "child": "alert_title" },
+    { "parent": "alert_root", "child": "alert_description" }
+  ],
+  "variants": {
+    "variant": ["default", "destructive"]
+  },
+  "defaults": {
+    "variant": "default"
+  },
+  "meta": {
+    "source": "shadcn/alert"
+  }
+}

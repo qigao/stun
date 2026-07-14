@@ -1,0 +1,49 @@
+{
+  "bridges": [
+    {
+      "target": "drawer_root",
+      "state": "open",
+      "attributes": {
+        "data-state": "open",
+        "aria-hidden": "false"
+      },
+      "pseudo_states": ["open", "modal"]
+    },
+    {
+      "target": "drawer_root",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed",
+        "aria-hidden": "true"
+      }
+    },
+    {
+      "target": "drawer_overlay",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "drawer_overlay",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "drawer_content",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "drawer_content",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    }
+  ]
+}

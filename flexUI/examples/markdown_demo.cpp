@@ -3,6 +3,7 @@
  */
 #include <flexUI.h>
 #include "glfw_app.h"
+#include "host_input_bridge.h"
 #include <flexUI/box.h>
 #include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/widgets/label_widget.h>
@@ -268,8 +269,7 @@ protected:
         if (codepoint < 0x80) buf[0] = (char)codepoint;
         else if (codepoint < 0x800) { buf[0] = 0xC0 | (codepoint >> 6); buf[1] = 0x80 | (codepoint & 0x3F); }
         else { buf[0] = 0xE0 | (codepoint >> 12); buf[1] = 0x80 | ((codepoint >> 6) & 0x3F); buf[2] = 0x80 | (codepoint & 0x3F); }
-        auto e = flexUI::Event::text_input(buf);
-        box_->dispatch_event(e);
+        flexui_examples::dispatch_text_input_if_focused(box_.get(), buf);
     }
 
     void on_key(int key, int action, int mods) override {
@@ -280,6 +280,7 @@ protected:
     }
 
 private:
+    flexUI::Box* host_box() override { return box_.get(); }
     std::unique_ptr<flexUI::Box> box_;
 };
 

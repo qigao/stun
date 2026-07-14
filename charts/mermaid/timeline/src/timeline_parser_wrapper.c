@@ -24,12 +24,17 @@ TimelineDiagram* timeline_parse(const char* input) {
 
     TimelineParserContext ctx;
     ctx.diagram = timeline_create_diagram();
+    if (!ctx.diagram) return NULL;
     ctx.current_section = NULL;
     ctx.current_period = NULL;
     ctx.error_count = 0;
     ctx.error_message = NULL;
 
     void* parser = TimelineParserAlloc(malloc);
+    if (!parser) {
+        timeline_free_diagram(ctx.diagram);
+        return NULL;
+    }
     // TimelineParserTrace(stdout, "parser >> ");
     
     Scanner s;

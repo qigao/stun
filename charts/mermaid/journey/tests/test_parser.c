@@ -5,6 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifndef REQUIRE
+#define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
+#endif
+
 extern JourneyDiagram* journey_parse(const char* input);
 
 #ifndef GOLDEN_DIR
@@ -100,6 +104,37 @@ spec("journey_parser") {
             REQUIRE(diagram != NULL);
             check_str_eq(diagram->acc_title, "My Title");
             check_str_eq(diagram->acc_descr, "My Description");
+            journey_free_diagram(diagram);
+        }
+
+        it("should evaluate task score expressions with MIR") {
+            const char* input =
+                "journey\n"
+                "  section Calculated\n"
+                "    Compile score: 2+3: Me\n"
+                "    Clamp score: clamp(12, 0, 10): Bot\n";
+
+            JourneyDiagram* diagram = journey_parse(input);
+            if (!diagram) {
+                check(0, "diagram parsed");
+                return;
+            }
+
+            JourneySection* s = diagram->sections;
+            if (!s || !s->tasks) {
+                check(0, "tasks parsed");
+                journey_free_diagram(diagram);
+                return;
+            }
+
+            check_int_eq(s->tasks->score, 5);
+            if (!s->tasks->next) {
+                check(0, "second task parsed");
+                journey_free_diagram(diagram);
+                return;
+            }
+            check_int_eq(s->tasks->next->score, 10);
+
             journey_free_diagram(diagram);
         }
         

@@ -1,0 +1,66 @@
+{
+  "bridges": [
+    {
+      "target": "dialog_root",
+      "state": "open",
+      "properties": {
+        "open": true
+      },
+      "pseudo_states": ["open", "modal"]
+    },
+    {
+      "target": "dialog_root",
+      "state": "closed",
+      "properties": {
+        "open": false
+      }
+    },
+    {
+      "target": "overlay",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "overlay",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "content",
+      "state": "open",
+      "attributes": {
+        "data-state": "open"
+      }
+    },
+    {
+      "target": "content",
+      "state": "closed",
+      "attributes": {
+        "data-state": "closed"
+      }
+    },
+    {
+      "target": "close",
+      "state": "disabled",
+      "attributes": {
+        "disabled": "",
+        "aria-disabled": "true"
+      },
+      "pseudo_states": ["disabled"]
+    },
+    {
+      "target": "close",
+      "state": "hover",
+      "pseudo_states": ["hover"]
+    },
+    {
+      "target": "close",
+      "state": "focus",
+      "pseudo_states": ["focus"]
+    }
+  ]
+}

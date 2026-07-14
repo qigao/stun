@@ -1,0 +1,113 @@
+{
+  "rules": [
+    {
+      "target": "table_container",
+      "selector": "&",
+      "decls": {
+        "position": "relative",
+        "width": "100%",
+        "overflow-x": "auto"
+      }
+    },
+    {
+      "target": "table_root",
+      "selector": "&",
+      "decls": {
+        "width": "100%",
+        "caption-side": "bottom",
+        "border-collapse": "collapse",
+        "font-size": "0.875rem"
+      }
+    },
+    {
+      "target": "table_caption",
+      "selector": "&",
+      "decls": {
+        "margin-top": "1rem",
+        "color": "var(--muted-foreground)",
+        "font-size": "0.875rem"
+      }
+    },
+    {
+      "target": "table_header",
+      "selector": "&",
+      "decls": {
+        "border-bottom-width": "1px",
+        "border-bottom-style": "solid",
+        "border-bottom-color": "var(--border)"
+      }
+    },
+    {
+      "target": "table_head_invoice",
+      "selector": "&",
+      "decls": {
+        "height": "2.5rem",
+        "padding-left": "0.5rem",
+        "padding-right": "0.5rem",
+        "text-align": "left",
+        "vertical-align": "middle",
+        "font-weight": "500",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "table_head_status",
+      "selector": "&",
+      "decls": {
+        "height": "2.5rem",
+        "padding-left": "0.5rem",
+        "padding-right": "0.5rem",
+        "text-align": "left",
+        "vertical-align": "middle",
+        "font-weight": "500",
+        "color": "var(--foreground)"
+      }
+    },
+    {
+      "target": "table_row_selected",
+      "selector": "&",
+      "decls": {
+        "border-bottom-width": "1px",
+        "border-bottom-style": "solid",
+        "border-bottom-color": "var(--border)",
+        "transition": "background-color 150ms ease"
+      }
+    },
+    {
+      "target": "table_row_selected",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "hover" }
+      ],
+      "decls": {
+        "background-color": "color-mix(in srgb, var(--muted) 50%, transparent)"
+      }
+    },
+    {
+      "target": "table_row_selected",
+      "selector": "&",
+      "when": [
+        { "type": "state", "name": "selected" }
+      ],
+      "decls": {
+        "background-color": "var(--muted)"
+      }
+    },
+    {
+      "target": "table_cell_invoice",
+      "selector": "&",
+      "decls": {
+        "padding": "0.5rem",
+        "vertical-align": "middle"
+      }
+    },
+    {
+      "target": "table_cell_status",
+      "selector": "&",
+      "decls": {
+        "padding": "0.5rem",
+        "vertical-align": "middle"
+      }
+    }
+  ]
+}

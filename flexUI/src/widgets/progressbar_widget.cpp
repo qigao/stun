@@ -5,7 +5,6 @@
 #include <flexUI/widgets/progressbar_widget.h>
 #include <flexUI/computed_style.h>
 #include <flexUI/element.h>
-#include <flexUI/renderer.h>
 #include <algorithm>
 #include <cmath>
 
@@ -15,9 +14,36 @@ ProgressBarWidget::ProgressBarWidget(float value, bool indeterminate)
     : value_(std::max(0.0f, std::min(100.0f, value))),
       indeterminate_(indeterminate) {}
 
+void ProgressBarWidget::build_semantic_tree() {
+    track_ = create_part("track", "track");
+    fill_ = create_part("fill", "fill");
+}
+
+void ProgressBarWidget::sync_host_semantics() {
+    set_host_attribute("role", "progressbar");
+    set_host_attribute("aria-valuemin", "0");
+    set_host_attribute("aria-valuemax", "100");
+    if (indeterminate_) {
+        set_host_attribute("data-state", "indeterminate");
+        clear_host_attribute("aria-valuenow");
+        set_host_state("indeterminate", true);
+        return;
+    }
+
+    const int rounded = static_cast<int>(std::round(value_));
+    set_host_attribute("aria-valuenow", std::to_string(rounded));
+    set_host_attribute("data-state", value_ >= 100.0f ? "complete" : "loading");
+    set_host_state("indeterminate", false);
+}
+
 void ProgressBarWidget::set_value(float value) {
-    value_ = std::max(0.0f, std::min(100.0f, value));
-    dirty_ = true;
+    const float clamped = std::max(0.0f, std::min(100.0f, value));
+    if (value_ == clamped) {
+        return;
+    }
+    value_ = clamped;
+    sync_host_semantics();
+    invalidate_render_cache();
 }
 
 void ProgressBarWidget::set_indeterminate(bool indeterminate) {
@@ -25,97 +51,66 @@ void ProgressBarWidget::set_indeterminate(bool indeterminate) {
         indeterminate_ = indeterminate;
         animation_time_ = 0.0f;
         animation_position_ = 0.0f;
-        dirty_ = true;
+        sync_host_semantics();
+        invalidate_render_cache();
     }
 }
 
-void ProgressBarWidget::rebuild_shapes(const Element& elem) {
-    auto* style = elem.computed_style;
-    if (!style) return;
-
-    float bar_height = style->get_variable_float("--progress-height", 8.0f);
-
-    // Check if rebuild needed
-    if (elem.width() == cached_width_ &&
-        elem.height() == cached_height_ &&
-        bar_height == cached_bar_height_ &&
-        background_ != nullptr) {
+void ProgressBarWidget::update_part_geometry(const Element& elem) {
+    if (!track_ || !fill_ || !track_->computed_style || !fill_->computed_style) {
         return;
     }
+    const auto height = [](const Element& part, float fallback) {
+        return part.computed_style->height_size.kind == CssSizeKind::Auto
+                   ? fallback
+                   : std::max(part.computed_style->height, 0.0f);
+    };
+    const float legacy_height = elem.computed_style->get_variable_float(
+        "--progress-height", 8.0f);
+    const float track_height = height(*track_, legacy_height);
+    const float fill_height = height(*fill_, track_height);
+    const float track_y = (elem.height() - track_height) * 0.5f;
+    const float fill_y = (elem.height() - fill_height) * 0.5f;
+    track_->set_layout_bounds(0.0f, track_y, elem.width(), track_height);
 
-    root_.clear();
-    cached_width_ = elem.width();
-    cached_height_ = elem.height();
-    cached_bar_height_ = bar_height;
-
-    float radius = style->get_variable_float("--progress-border-radius", 4.0f);
-    float y = (elem.height() - bar_height) / 2;
-
-    // Background
-    background_ = root_.add<RectShape>(0, y, elem.width(), bar_height, radius);
-
-    // Fill (width will be updated in update_shapes)
-    fill_ = root_.add<RectShape>(0, y, 0, bar_height, radius);
-}
-
-void ProgressBarWidget::update_shapes(const Element& elem) {
-    if (!background_ || !fill_) return;
-
-    auto* style = elem.computed_style;
-    if (!style) return;
-
-    float bar_height = style->get_variable_float("--progress-height", 8.0f);
-
-    // Colors
-    Color bg_color = style->get_variable_color("--progress-bg", color_from_u8(229, 231, 235, 255));
-    Color fill_color = style->get_variable_color("--progress-fill", color_from_u8(59, 130, 246, 255));
-
-    background_->set_fill(bg_color);
-    fill_->set_fill(fill_color);
-
-    // Calculate fill dimensions based on mode
-    bool is_indet = indeterminate_ || elem.has_state("indeterminate");
-
-    if (is_indet) {
-        // Indeterminate: moving segment
-        float segment_width = elem.width() * 0.3f;
-        float x = (elem.width() - segment_width) * animation_position_;
-        float y = (elem.height() - bar_height) / 2;
-        fill_->set_position(x, y);
-        fill_->set_size(segment_width, bar_height);
+    const bool is_indeterminate =
+        indeterminate_ || elem.has_state("indeterminate");
+    if (is_indeterminate) {
+        const float segment_width = elem.width() * 0.3f;
+        const float x = (elem.width() - segment_width) * animation_position_;
+        fill_->set_layout_bounds(x, fill_y, segment_width, fill_height);
     } else {
-        // Determinate: progress from left
-        float fill_width = elem.width() * (value_ / 100.0f);
-        float y = (elem.height() - bar_height) / 2;
-        fill_->set_position(0, y);
-        fill_->set_size(fill_width, bar_height);
+        fill_->set_layout_bounds(0.0f, fill_y,
+                                 elem.width() * (value_ / 100.0f), fill_height);
     }
-
-    fill_->set_visible(value_ > 0.0f || is_indet);
+    fill_->set_visible(value_ > 0.0f || is_indeterminate);
 }
 
-void ProgressBarWidget::render(const Element& elem, Renderer& renderer) {
-    auto* style = elem.computed_style;
-    if (!style) return;
+void ProgressBarWidget::sync_host_semantics_for_layout(Element& elem) {
+    sync_host_semantics();
+    update_part_geometry(elem);
+}
 
-    // Rebuild shapes if needed
-    rebuild_shapes(elem);
+void ProgressBarWidget::invalidate_render_cache() {
+    dirty_ = true;
+    if (auto* host = host_element()) {
+        host->mark_paint_dirty();
+    }
+}
 
-    // Update shape properties
-    update_shapes(elem);
-
-    // Draw using flex::Renderer
-    Transform world_transform = flex::make_translation(elem.absolute_x(), elem.absolute_y());
-
-    float opacity = style->opacity;
-    root_.draw(renderer.flex(), world_transform, opacity);
-
+void ProgressBarWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
+    (void)elem;
+    (void)commands;
     dirty_ = false;
 }
 
 bool ProgressBarWidget::handle_event(const Event& event, Element& elem) {
     // ProgressBar has no interaction
     return false;
+}
+
+bool ProgressBarWidget::needs_frame_update(const Element& elem) const {
+    return indeterminate_ || elem.has_state("indeterminate");
 }
 
 void ProgressBarWidget::update(float delta_ms, Element& elem) {

@@ -1,7 +1,7 @@
 /*
  * flexUI - SpinnerWidget
  *
- * Animated loading indicator using Group/Shape composition.
+ * Animated loading indicator using RenderCommandList.
  */
 
 #ifndef FLEXUI_SPINNER_WIDGET_H
@@ -12,6 +12,8 @@
 #include "../shapes.h"
 
 namespace flexUI {
+
+class RenderCommandList;
 
 /**
  * SpinnerWidget - Loading animation
@@ -34,24 +36,37 @@ public:
 
   explicit SpinnerWidget(Variant variant = Variant::Ring);
 
-  void render(const Element& elem, Renderer& renderer) override;
+  void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "SpinnerWidget"; }
 
   // Control
-  void start() { spinning_ = true; dirty_ = true; }
-  void stop() { spinning_ = false; dirty_ = true; }
+  void start() {
+    spinning_ = true;
+    sync_host_semantics();
+    dirty_ = true;
+  }
+  void stop() {
+    spinning_ = false;
+    sync_host_semantics();
+    dirty_ = true;
+  }
   bool is_spinning() const { return spinning_; }
 
   // Variant
   Variant variant() const { return variant_; }
-  void set_variant(Variant v) { variant_ = v; dirty_ = true; }
+  void set_variant(Variant v) {
+    variant_ = v;
+    sync_host_semantics();
+    dirty_ = true;
+  }
 
 private:
-  void render_ring(flex::Renderer& r, const Element& elem);
-  void render_dots(flex::Renderer& r, const Element& elem);
-  void render_bars(flex::Renderer& r, const Element& elem);
+  void render_ring(RenderCommandList& commands, const Element& elem);
+  void render_dots(RenderCommandList& commands, const Element& elem);
+  void render_bars(RenderCommandList& commands, const Element& elem);
+  void sync_host_semantics() override;
 
   Variant variant_ = Variant::Ring;
   bool spinning_ = true;

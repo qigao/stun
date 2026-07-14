@@ -13,12 +13,15 @@ add_library(flex_binary STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/reader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/compiler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/definition_binary.cpp
 )
 
 target_include_directories(flex_binary
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 target_link_libraries(flex_binary

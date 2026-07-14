@@ -1,0 +1,33 @@
+{
+  "component": "Toggle",
+  "kind": "leaf",
+  "root": "toggle_root",
+  "nodes": [
+    {
+      "id": "toggle_root",
+      "type": "element",
+      "tag": "button",
+      "role": "button",
+      "states": ["on", "off", "disabled", "hover", "focus-visible"],
+      "attrs": {
+        "data-slot": "toggle",
+        "type": "button",
+        "aria-pressed": false
+      },
+      "props": {
+        "text": "Toggle"
+      }
+    }
+  ],
+  "variants": {
+    "variant": ["default", "outline"],
+    "size": ["default", "sm", "lg"]
+  },
+  "defaults": {
+    "variant": "default",
+    "size": "default"
+  },
+  "meta": {
+    "source": "shadcn/toggle"
+  }
+}
