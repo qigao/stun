@@ -2,7 +2,12 @@
 
 #include <flex.h>
 #include <flexinfographic.h>
+#include <flexui_infographic.h>
 #include <infographic_component.h>
+#include <flexUI/box.h>
+#include <flexUI/element.h>
+#include <flexUI/render_command.h>
+#include <flexUI/widget.h>
 
 using namespace flex::modules::infographic;
 
@@ -55,5 +60,53 @@ data
         check_not_null(node.get());
         check_float_eq(node->layout_width(), 720.0f, 0.001f);
         check_float_eq(node->layout_height(), 480.0f, 0.001f);
+    }
+
+    it("builds a Box-owned utility styled interactive infographic") {
+        FlexInfographic api;
+        auto parsed = api.parse(
+            "infographic list-grid-badge-card\n"
+            "data\n"
+            "  items\n"
+            "    - label Revenue\n");
+        check_true(parsed.success);
+        parsed.infographic->set_title("Metrics");
+
+        flexUI::Box box(nullptr);
+        InfographicViewOptions options;
+        options.width = 640.0f;
+        options.height = 360.0f;
+        options.accessible_label = "Business metrics";
+        auto result = create_flexui_infographic(
+            box, *parsed.infographic, options);
+        check_true(static_cast<bool>(result));
+        check_string_eq(result.error, "");
+        box.set_root(result.root);
+        box.set_viewport(options.width, options.height);
+        box.update();
+
+        check_not_null(box.query_selector("[data-slot=infographic]"));
+        check_not_null(box.query_selector("[data-slot=infographic-title]"));
+        check(result.plot ==
+              box.query_selector("[data-slot=infographic-plot]"));
+        check_not_null(result.plot->widget);
+        flexUI::RenderCommandList commands(flex::RendererCapabilities{});
+        result.plot->widget->emit_render_commands(*result.plot, commands);
+        check_false(commands.commands().empty());
+        check(result.root->computed_style->display == flexUI::Display::Flex);
+        check_true(box.missing_utility_tokens().empty());
+    }
+
+    it("does not expose a partial tree for invalid interactive dimensions") {
+        UnifiedInfographic infographic;
+        flexUI::Box box(nullptr);
+        InfographicViewOptions options;
+        options.height = 0.0f;
+        const auto result = create_flexui_infographic(
+            box, infographic, options);
+        check_false(static_cast<bool>(result));
+        check_null(result.root);
+        check_false(result.error.empty());
+        check_null(box.root());
     }
 }

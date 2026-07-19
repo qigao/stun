@@ -160,6 +160,18 @@ flex::Color parse_dot_color(const std::string& value,
     return it == named.end() ? fallback : it->second;
 }
 
+std::string css_color(const flex::Color& color) {
+    const auto channel = [](float value) {
+        return static_cast<int>(std::lround(std::clamp(value, 0.0f, 1.0f) *
+                                            255.0f));
+    };
+    std::ostringstream result;
+    result << "rgba(" << channel(color.r) << ", " << channel(color.g) << ", "
+           << channel(color.b) << ", " << std::clamp(color.a, 0.0f, 1.0f)
+           << ')';
+    return result.str();
+}
+
 const char* shape_name(DotGraphShape shape) {
     switch (shape) {
     case DG_SHAPE_BOX: return "box";
@@ -380,11 +392,14 @@ flexUI::Element* create_label(flexUI::Box& box, const char* tag,
                               const flex::Color& color) {
     auto* label = box.create(tag);
     label->add_class("dot-label");
+    label->set_attribute("data-slot", tag);
+    label->add_utilities("absolute flex items-center justify-center text-sm");
     label->set_text(text);
     set_absolute_box(*label, x, y, width, height);
     label->style_.font_family = font_family;
     label->style_.font_size = font_size;
     label->style_.text_color = color;
+    label->set_custom_property("--dot-label-color", css_color(color));
     label->style_.text_align = flexUI::TextAlign::Center;
     label->set_z_index(1);
     return label;
@@ -413,14 +428,17 @@ flexUI::Element* create_flexui_dotgraph(
 
     auto* root = box.create("dotgraph");
     root->add_class("dotgraph");
+    root->set_attribute("data-slot", "dotgraph");
     root->set_attribute("role", "graphics-document");
     root->set_attribute("data-render-mode", "tree");
+    root->add_utilities("relative overflow-hidden");
     root->style_.position = flexUI::Position::Relative;
     root->style_.overflow_x = flexUI::Overflow::Hidden;
     root->style_.overflow_y = flexUI::Overflow::Hidden;
     if (const auto background = snapshot.graph_extra.find("bgcolor");
         background != snapshot.graph_extra.end()) {
         root->set_attribute("data-dot-bgcolor", background->second);
+        root->set_custom_property("--dot-background", background->second);
         root->style_.background_color = parse_dot_color(
             background->second, flex::Color::White);
     }
@@ -434,9 +452,12 @@ flexUI::Element* create_flexui_dotgraph(
         auto* element = box.create(
             "dot-cluster", element_id("cluster-", cluster.id));
         element->add_class("dot-cluster");
+        element->set_attribute("data-slot", "dotgraph-cluster");
+        element->add_utility("absolute");
         element->set_attribute("data-cluster-id", cluster.id);
         element->set_attribute("data-dot-color", cluster.color);
         element->set_attribute("data-dot-style", cluster.style);
+        element->set_custom_property("--dot-stroke", cluster.color);
         set_absolute_box(*element, static_cast<float>(top_left.x),
                          static_cast<float>(top_left.y), width, height);
         element->style_.background_color = flex::Color::Transparent;
@@ -492,11 +513,14 @@ flexUI::Element* create_flexui_dotgraph(
         auto widget = std::make_unique<DotEdgeWidget>(mapped, edge.directed);
         auto* element = box.create_with_widget("dot-edge", std::move(widget));
         element->add_class("dot-edge");
+        element->set_attribute("data-slot", "dotgraph-edge");
+        element->add_utility("absolute");
         element->set_attribute("data-from", edge.from);
         element->set_attribute("data-to", edge.to);
         element->set_attribute("data-directed", edge.directed ? "true" : "false");
         element->set_attribute("data-dot-color", edge.color);
         element->set_attribute("data-dot-style", edge.style);
+        element->set_custom_property("--dot-stroke", edge.color);
         set_absolute_box(*element, left, top, width, height);
         element->style_.background_color = flex::Color::Transparent;
         set_uniform_border(element->style_,
@@ -543,12 +567,17 @@ flexUI::Element* create_flexui_dotgraph(
             "dot-node", std::move(widget), element_id("node-", node.id));
         element->add_class("dot-node");
         element->add_class(std::string("shape-") + shape_name(node.shape));
+        element->set_attribute("data-slot", "dotgraph-node");
+        element->add_utility("absolute");
         element->set_attribute("data-node-id", node.id);
         element->set_attribute("data-shape", shape_name(node.shape));
         element->set_attribute("data-dot-color", node.color);
         element->set_attribute("data-dot-fill", node.fillcolor);
         element->set_attribute("data-dot-font-color", node.fontcolor);
         element->set_attribute("data-dot-style", node.style);
+        element->set_custom_property("--dot-fill", node.fillcolor);
+        element->set_custom_property("--dot-stroke", node.color);
+        element->set_custom_property("--dot-text", node.fontcolor);
         set_absolute_box(*element, static_cast<float>(top_left.x),
                          static_cast<float>(top_left.y), width, height);
         element->style_.background_color = parse_dot_color(

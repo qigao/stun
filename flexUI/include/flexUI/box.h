@@ -33,6 +33,7 @@ class RenderManager;
 struct RenderFrame;
 class ViewPipeline;
 class UiKeyedRepeater;
+class UiDocumentInstantiator;
 
 enum class PointerPrecision {
   None,
@@ -57,14 +58,36 @@ struct MediaEnvironment {
   ContrastPreference contrast_preference = ContrastPreference::NoPreference;
 };
 
+enum class UtilityJitMode {
+  BuiltIn,
+  Disabled,
+};
+
+enum class ThemeMode {
+  System,
+  Light,
+  Dark,
+};
+
+struct BoxOptions {
+  UtilityJitMode utility_jit = UtilityJitMode::BuiltIn;
+  ThemeMode theme = ThemeMode::System;
+  tailwind::UtilityJitOptions utility_limits{};
+
+  static BoxOptions legacy_without_jit();
+};
+
 /**
  * Box - flexUI 主入口
  *
  * 职责：管理 Element 树，协调样式/布局/渲染流程
+ * 默认 cascade 依次为内建 widget CSS、内嵌 theme、Utility JIT slot，
+ * 调用方之后加载的 stylesheet 可覆盖默认 utility。内嵌 asset 解析失败时
+ * 构造函数抛出异常，不返回半初始化实例。
  */
 class Box : private ViewPipelineHost {
 public:
-  explicit Box(flex::Renderer* renderer);
+  explicit Box(flex::Renderer* renderer, BoxOptions options = {});
   ~Box();
 
   Box(const Box&) = delete;
@@ -81,8 +104,23 @@ public:
   void enable_utility_jit(
       nlohmann::json utility_whitelist,
       tailwind::UtilityJitOptions options = {});
+  void enable_utility_jit(
+      std::shared_ptr<const tailwind::UtilityCatalog> utility_catalog,
+      tailwind::UtilityJitOptions options = {});
   void disable_utility_jit();
   bool utility_jit_enabled() const { return utility_jit_ != nullptr; }
+  bool is_known_utility(std::string_view token) const {
+    return utility_jit_ && utility_jit_->contains(token);
+  }
+  std::uint64_t utility_jit_revision() const {
+    return utility_jit_ ? utility_jit_->revision() : 0;
+  }
+  std::size_t active_utility_count() const {
+    return utility_jit_ ? utility_jit_->active_token_count() : 0;
+  }
+  std::size_t utility_stylesheet_size() const {
+    return utility_jit_ ? utility_jit_->stylesheet().size() : 0;
+  }
   const std::vector<std::string>& missing_utility_tokens() const {
     return missing_utility_tokens_;
   }
@@ -114,6 +152,8 @@ public:
   float viewport_height() const { return viewport_height_; }
   void set_media_environment(const MediaEnvironment& env);
   const MediaEnvironment& media_environment() const { return media_environment_; }
+  void set_theme_mode(ThemeMode mode);
+  ThemeMode theme_mode() const { return theme_mode_; }
   flex::RendererCapabilities renderer_capabilities() const;
 
   // 更新
@@ -162,12 +202,15 @@ public:
 
 private:
   friend class UiKeyedRepeater;
+  friend class UiDocumentInstantiator;
   friend class Element;
   friend class Widget;
 
   void reindex_element_id(Element* elem, const std::string& old_id, const std::string& new_id);
   void notify_utility_tree_changed();
   void sync_utility_stylesheet();
+  void validate_utility_token(std::string_view token) const;
+  void apply_theme_to_root();
   bool owns_element(const Element* element) const;
   void deactivate_subtree(Element* root);
   Element* create_widget_part(Element& host, const std::string& tag,
@@ -200,6 +243,7 @@ private:
   float viewport_width_ = 800;
   float viewport_height_ = 600;
   MediaEnvironment media_environment_;
+  ThemeMode theme_mode_ = ThemeMode::System;
 
   // 时间
   float time_ms_ = 0;

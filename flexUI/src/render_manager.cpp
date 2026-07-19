@@ -1721,6 +1721,24 @@ void draw_background_image_layer(RenderCommandList& commands,
 
 } // namespace
 
+RenderCommandList RenderManager::build_frame_commands(
+    const RenderFrame& frame,
+    const flex::RendererCapabilities& capabilities) {
+  RenderCommandList commands = make_render_commands(capabilities);
+  commands.reserve(512);
+  commands.begin_frame(frame.viewport);
+  commands.clear(frame.clear_color);
+  if (frame.root) {
+    const Bounds viewport{0.0f, 0.0f, frame.viewport.width,
+                          frame.viewport.height};
+    render_element(frame.root, flex::make_identity(), capabilities, viewport,
+                   commands);
+    render_overlays(frame.root, capabilities, commands);
+  }
+  commands.end_frame();
+  return commands;
+}
+
 void RenderManager::render_frame(const RenderFrame& frame) {
   RenderProfile profile;
   const bool profile_enabled = render_profile_enabled();
@@ -2645,12 +2663,13 @@ void RenderManager::render_element(Element* elem,
                                x + width * 0.5f, y + h, width, style_kind,
                                color);
   };
-  if (!widget_paints_host_box) {
-    draw_outer_stroke(ring_offset, 0.0f, ring_offset_color);
-    draw_outer_stroke(ring_width, ring_offset, ring_color);
-    draw_outer_stroke(outline_width, outline_offset, outline_color,
-                      style->outline_style);
-  }
+  // Ring and outline live outside the host surface. Widgets that paint their
+  // own background/border still rely on the shared renderer for these CSS
+  // focus affordances.
+  draw_outer_stroke(ring_offset, 0.0f, ring_offset_color);
+  draw_outer_stroke(ring_width, ring_offset, ring_color);
+  draw_outer_stroke(outline_width, outline_offset, outline_color,
+                    style->outline_style);
   if (active_render_profile) {
     add_profile_time(active_render_profile->stroke_ms, stroke_start);
   }

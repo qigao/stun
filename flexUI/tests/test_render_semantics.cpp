@@ -4441,7 +4441,7 @@ spec("CalendarWidget maps pointer hits to the rendered day grid") {
     check(calendar.selected_date().day == 14);
   }
 
-  it("keeps transient hover out of DOM and paint output") {
+  it("bridges the hovered day without changing widget paint output") {
     Element elem;
     elem.set_layout_bounds(20.0f, 30.0f, 320.0f, 340.0f);
     elem.computed_style->font_size = 10.0f;
@@ -4461,8 +4461,11 @@ spec("CalendarWidget maps pointer hits to the rendered day grid") {
     const float hover_x = elem.absolute_x() + col * cell_w + cell_w * 0.5f;
     const float hover_y = elem.absolute_y() + start_y + row * cell_h + cell_h * 0.5f;
 
-    check(!calendar.handle_event(Event::mouse_move(hover_x, hover_y), elem));
-    check(elem.attribute("data-hover-day") == nullptr);
+    check(calendar.handle_event(Event::mouse_move(hover_x, hover_y), elem));
+    check(elem.attribute("data-hover-day") != nullptr);
+    if (const auto* hovered = elem.attribute("data-hover-day")) {
+      check(*hovered == "30");
+    }
 
     RecordingRenderer backend;
     backend.begin_frame(800.0f, 600.0f, 1.0f);
@@ -4473,6 +4476,12 @@ spec("CalendarWidget maps pointer hits to the rendered day grid") {
     if (!backend.circles.empty()) {
       require_color(backend.circles.front().fill_color, 0.23f, 0.51f, 0.96f);
     }
+
+    check(calendar.handle_event(
+        Event::mouse_move(elem.absolute_x() + 2.0f,
+                          elem.absolute_y() + start_y - 2.0f),
+        elem));
+    check(elem.attribute("data-hover-day") == nullptr);
   }
 }
 

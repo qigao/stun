@@ -111,6 +111,60 @@ namespace parser {
 // Event-Driven AST Builder
 // ============================================================================
 
+class UiPropertySeparatorValidator {
+public:
+  bool accept(const Token &token) {
+    if (ui_brace_depth_ == 0) {
+      if (token.type == TOK_UI) {
+        header_state_ = HeaderState::Name;
+      } else if (header_state_ == HeaderState::Name) {
+        header_state_ = token.type == TOK_IDENTIFIER ? HeaderState::Brace : HeaderState::None;
+      } else if (header_state_ == HeaderState::Brace) {
+        if (token.type == TOK_LBRACE) {
+          ui_brace_depth_ = 1;
+        }
+        header_state_ = HeaderState::None;
+      }
+      return true;
+    }
+
+    if (in_property_value_) {
+      if (token.type == TOK_COMMA) {
+        in_property_value_ = false;
+      } else if (token.type == TOK_RBRACE) {
+        in_property_value_ = false;
+        --ui_brace_depth_;
+      } else if (token.type == TOK_COLON || token.type == TOK_LBRACE) {
+        error_line_ = token.line;
+        error_column_ = token.column;
+        return false;
+      }
+      return true;
+    }
+
+    if (token.type == TOK_COLON) {
+      in_property_value_ = true;
+    } else if (token.type == TOK_LBRACE) {
+      ++ui_brace_depth_;
+    } else if (token.type == TOK_RBRACE) {
+      --ui_brace_depth_;
+    }
+    return true;
+  }
+
+  int error_line() const { return error_line_; }
+  int error_column() const { return error_column_; }
+
+private:
+  enum class HeaderState { None, Name, Brace };
+
+  HeaderState header_state_ = HeaderState::None;
+  int ui_brace_depth_ = 0;
+  bool in_property_value_ = false;
+  int error_line_ = 0;
+  int error_column_ = 0;
+};
+
 class AstBuilder {
 public:
   AstBuilder(AstProgram *program) : program_(program) {}
@@ -121,7 +175,8 @@ public:
   void on_token(const Token &tok, const Token *prev_tok) {
     // Flush pending const/var value when encountering a new top-level block or EOF
     if (expecting_const_value_ && !pending_value_tokens_.empty()) {
-      bool should_flush = (tok.type == TOK_SCENE || tok.type == TOK_ARTBOARD ||
+      bool should_flush = (tok.type == TOK_SCENE || tok.type == TOK_UI ||
+                           tok.type == TOK_ARTBOARD ||
                            tok.type == TOK_CONST || tok.type == TOK_VAR ||
                            tok.type == TOK_DATA || tok.type == TOK_ANIM ||
                            tok.type == TOK_MACHINE || tok.type == TOK_COMPONENT ||
@@ -138,6 +193,10 @@ public:
     case TOK_ARTBOARD:
       // Next IDENTIFIER will be scene name
       expecting_scene_name_ = true;
+      break;
+
+    case TOK_UI:
+      expecting_ui_name_ = true;
       break;
 
     case TOK_IDENTIFIER:
@@ -215,6 +274,7 @@ public:
       }
       // Previous IDENTIFIER / DATA token is a property key
       if (prev_tok && (prev_tok->type == TOK_IDENTIFIER ||
+                       prev_tok->type == TOK_NODE_TYPE ||
           (prev_tok->type == TOK_DATA &&
            (!node_stack_.empty() || in_pseudo_block_ || in_data_item_ ||
             (current_component_ && component_brace_depth_ > 0))))) {
@@ -223,6 +283,7 @@ public:
             // The previous token (which is the new key) may have been buffered as part of the prior value.
             // We must remove it from the value buffer of the *previous* property.
             if ((pending_value_tokens_.back().type == TOK_IDENTIFIER ||
+                 pending_value_tokens_.back().type == TOK_NODE_TYPE ||
                  pending_value_tokens_.back().type == TOK_DATA) &&
                 pending_value_tokens_.back().value == prev_tok->value) {
                 pending_value_tokens_.pop_back();
@@ -237,6 +298,8 @@ public:
       // Clear any pending component type/id since this is a property, not a node
       pending_node_type_.clear();
       pending_node_id_.clear();
+      expecting_node_id_ = false;
+      expecting_template_suffix_ = false;
       break;
 
     case TOK_NUMBER:
@@ -537,6 +600,11 @@ public:
     if (program_->scene) {
       expand_for_loops(program_->scene->children);
     }
+    for (auto &ui_document : program_->ui_documents) {
+      if (ui_document) {
+        expand_for_loops(ui_document->children);
+      }
+    }
     for (auto &component : program_->components) {
       if (component) {
         expand_for_loops(component->children);
@@ -607,6 +675,9 @@ private:
     } else if (expecting_scene_name_) {
       current_scene_ = std::make_shared<AstScene>(tok.value);
       expecting_scene_name_ = false;
+    } else if (expecting_ui_name_) {
+      current_ui_ = std::make_shared<AstUiDocument>(tok.value);
+      expecting_ui_name_ = false;
     } else if (expecting_template_suffix_) {
       // Append suffix to template ID (e.g., "item@" + "index" = "item@index")
       pending_node_id_ += tok.value;
@@ -901,6 +972,8 @@ private:
       node_stack_.top()->children.push_back(node);
     } else if (current_scene_) {
       current_scene_->children.push_back(node);
+    } else if (current_ui_) {
+      current_ui_->children.push_back(node);
     } else if (current_component_ && component_brace_depth_ > 0) {
       current_component_->children.push_back(node);
     }
@@ -1396,6 +1469,11 @@ private:
       current_scene_ = nullptr;
     }
 
+    if (current_ui_ && brace_depth_ == 0 && node_stack_.empty()) {
+      program_->ui_documents.push_back(current_ui_);
+      current_ui_ = nullptr;
+    }
+
     // Check for animation completion
     // Track closes when we drop back to anim level (from depth N to N-1, where N was track depth)
     if (current_anim_ && in_track_ && brace_depth_ == anim_brace_depth_) {
@@ -1560,6 +1638,7 @@ private:
 
   // Scene building
   std::shared_ptr<AstScene> current_scene_;
+  std::shared_ptr<AstUiDocument> current_ui_;
   std::stack<std::shared_ptr<AstNode>> node_stack_;
   int scene_node_depth_ = 0;
 
@@ -1610,6 +1689,7 @@ private:
 
   // Expectation flags
   bool expecting_scene_name_ = false;
+  bool expecting_ui_name_ = false;
   bool expecting_node_id_ = false;
   bool expecting_template_suffix_ = false;
   bool expecting_value_ = false;
@@ -1714,6 +1794,7 @@ std::shared_ptr<AstProgram> parse(const char *source) {
 
   // Create AST builder
   AstBuilder builder(program.get());
+  UiPropertySeparatorValidator ui_separator_validator;
 
   // Create lexer and parser
   LexerState *lexer = lexer_create(source);
@@ -1732,6 +1813,15 @@ std::shared_ptr<AstProgram> parse(const char *source) {
       g_last_error += "'";
       g_last_error_line = tok.line;
       g_last_error_column = tok.column;
+      ParseFree(parser, free);
+      lexer_destroy(lexer);
+      return nullptr;
+    }
+
+    if (!ui_separator_validator.accept(tok)) {
+      g_last_error = "UI properties must be separated by commas";
+      g_last_error_line = ui_separator_validator.error_line();
+      g_last_error_column = ui_separator_validator.error_column();
       ParseFree(parser, free);
       lexer_destroy(lexer);
       return nullptr;

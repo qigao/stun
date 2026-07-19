@@ -77,12 +77,18 @@ void demo_animation() {
   std::cout << "Duration: " << timeline->duration() << "s\n";
   std::cout << "Loop: " << (timeline->loop_mode() == LoopMode::Once ? "once" :
                             timeline->loop_mode() == LoopMode::Loop ? "loop" : "pingpong") << "\n";
-  std::cout << "Tracks: " << timeline->track_count() << "\n";
+  std::cout << "Tracks: " << timeline->tracks().size() << "\n";
   std::cout << "Keyframes: " << track->keyframe_count() << "\n\n";
 
   // Create animation controller and player
   AnimationController controller(alloc);
-  auto* player = controller.play(timeline.get(), nullptr);
+  auto target = Shape::create();
+  controller.add_timeline(timeline);
+  auto* player = controller.play(timeline->name(), target.get());
+  if (!player) {
+    std::cerr << "Failed to start animation: " << timeline->name() << "\n";
+    return;
+  }
 
   std::cout << "Playing animation...\n";
 

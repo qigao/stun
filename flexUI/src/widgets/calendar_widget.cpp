@@ -67,6 +67,11 @@ void CalendarWidget::sync_host_semantics() {
   set_host_attribute("data-value", format_date(selected_));
   set_host_attribute("data-view-month", std::to_string(view_.month));
   set_host_attribute("data-view-year", std::to_string(view_.year));
+  if (hovered_day_ > 0) {
+    set_host_attribute("data-hover-day", std::to_string(hovered_day_));
+  } else {
+    clear_host_attribute("data-hover-day");
+  }
 }
 
 void CalendarWidget::set_selected_date(const Date& date) {
@@ -121,6 +126,22 @@ int CalendarWidget::day_of_week(int year, int month, int day) const {
   int k = year % 100, j = year / 100;
   int h = (day + (13 * (month + 1)) / 5 + k + k / 4 + j / 4 - 2 * j) % 7;
   return ((h + 6) % 7);
+}
+
+int CalendarWidget::day_at_local_position(float local_x, float local_y,
+                                          const Element& elem) const {
+  const auto metrics = calendar_grid_metrics(elem);
+  if (metrics.cell_w <= 0.0f || metrics.cell_h <= 0.0f || local_x < 0.0f ||
+      local_x >= elem.width() || local_y < metrics.start_y ||
+      local_y >= elem.height()) {
+    return 0;
+  }
+
+  const int col = static_cast<int>(local_x / metrics.cell_w);
+  const int row = static_cast<int>((local_y - metrics.start_y) / metrics.cell_h);
+  const int first_day = day_of_week(view_.year, view_.month, 1);
+  const int day = row * 7 + col - first_day + 1;
+  return day >= 1 && day <= days_in_month(view_.year, view_.month) ? day : 0;
 }
 
 void CalendarWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
@@ -295,25 +316,28 @@ bool CalendarWidget::handle_event(const Event& event, Element& elem) {
       detail::css_render_to_local(&elem, flex::Vec2(event.x, event.y));
   float local_x = local_pos.x, local_y = local_pos.y;
 
+  if (event.type == EventType::MouseMove) {
+    const int next_hovered_day = day_at_local_position(local_x, local_y, elem);
+    if (next_hovered_day == hovered_day_) {
+      return false;
+    }
+    hovered_day_ = next_hovered_day;
+    sync_host_semantics();
+    return true;
+  }
+
   if (event.type == EventType::MouseDown) {
     if (local_y < metrics.header_h) {
       if (local_x < metrics.padding + 24) { prev_month(); elem.mark_paint_dirty(); return true; }
       if (local_x > elem.width() - metrics.padding - 24) { next_month(); elem.mark_paint_dirty(); return true; }
     }
-    if (local_x >= 0.0f && local_x < elem.width() &&
-        local_y >= metrics.start_y && local_y < elem.height()) {
-      int first_day = day_of_week(view_.year, view_.month, 1);
-      int days = days_in_month(view_.year, view_.month);
-      int col = static_cast<int>(local_x / metrics.cell_w);
-      int row = static_cast<int>((local_y - metrics.start_y) / metrics.cell_h);
-      int day = row * 7 + col - first_day + 1;
-      if (day >= 1 && day <= days) {
+    const int day = day_at_local_position(local_x, local_y, elem);
+    if (day > 0) {
         selected_.year = view_.year; selected_.month = view_.month; selected_.day = day;
         sync_host_semantics();
         dirty_ = true; elem.mark_paint_dirty();
         if (on_select_) on_select_(selected_);
         return true;
-      }
     }
   }
   return false;

@@ -71,11 +71,14 @@ private:
 
   int days_in_month(int year, int month) const;
   int day_of_week(int year, int month, int day) const;  // 0=Sun
+  int day_at_local_position(float local_x, float local_y,
+                            const Element& elem) const;
   std::string format_date(const Date& date) const;
   std::string format_view_label() const;
 
   Date selected_;
   Date view_;
+  int hovered_day_ = 0;
   SelectCallback on_select_;
 
   bool static_cache_valid_ = false;

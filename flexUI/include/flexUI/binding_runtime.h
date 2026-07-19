@@ -70,6 +70,9 @@ class UiBindingTargets {
   UiBindingHandle bind_class(Element& target, std::string class_name,
                              std::string bool_expression);
   UiBindingHandle bind_classes(Element& target, std::string string_input);
+  UiBindingHandle bind_utility(Element& target, std::string utility,
+                               std::string bool_expression);
+  UiBindingHandle bind_utilities(Element& target, std::string string_input);
   UiBindingHandle bind_attribute(Element& target, std::string attribute,
                                  std::string string_input);
   UiBindingHandle bind_attribute(Element& target, std::string attribute,

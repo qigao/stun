@@ -1080,7 +1080,10 @@ void check_thorvg_renderer_capabilities() {
     }
 
     const RendererCapabilities caps = renderer->capabilities();
-    check(caps.retained_mode);
+    // ThorVG paint handles do not yet preserve ordering across arbitrary
+    // flexUI subtree replacement, so the backend intentionally advertises
+    // full-frame replay even though it has internal cached-paint primitives.
+    check(!caps.retained_mode);
     check(!caps.surface_recreation);
     check(caps.path_drawing);
     check(caps.raster_images);

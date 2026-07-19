@@ -10,6 +10,7 @@ add_library(flexchart STATIC
     src/chart_component.cpp
     src/chart_component_helpers.cpp
     src/chart_parser_dispatch.cpp
+    src/flexui_chart.cpp
     src/mark_renderer_registry.cpp
 )
 
@@ -40,7 +41,7 @@ target_include_directories(flexchart
         marks/common/include
 )
 
-target_link_libraries(flexchart PUBLIC flex TurboUtils::Core)
+target_link_libraries(flexchart PUBLIC flex chart_ui TurboUtils::Core)
 
 target_compile_features(flexchart PUBLIC cxx_std_17)
 

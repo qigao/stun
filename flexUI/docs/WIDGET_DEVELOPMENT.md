@@ -19,17 +19,32 @@ Do not mirror those parts in a private Group/Shape tree.
 
 ### Tailwind classes and C++/MIR bindings
 
-`Element` accepts the same whitespace-separated class form used by HTML and
-Tailwind. The class text is stored on the rectangle tree, where the utility JIT
-discovers it and emits CSS into the normal `StyleEngine` cascade:
+默认 `Box` 已启用内嵌 Tailwind-like Utility JIT。新 UI 应使用显式 utility API，
+使拼写错误在进入样式树时立即失败；业务身份使用 `data-slot`、`part`、`role` 或
+`data-state`。`add_class()` 仅用于需要普通 CSS selector 的兼容/语义 class：
 
 ```cpp
-button->set_classes(
+button->set_attribute("data-slot", "dialog-action");
+button->add_utilities(
     "inline-flex items-center rounded-md px-3 "
     "focus-visible:ring-1 data-[state=open]:bg-accent");
-button->toggle_class("opacity-50", disabled);
-button->set_attribute("class", "grid grid-cols-2 gap-4");
+button->toggle_utility("opacity-50", disabled);
+button->add_class("legacy-dialog-action");
 ```
+
+自定义 catalog 只用于产品级受控扩展或测试，并在构造 UI 前一次性替换：
+
+```cpp
+flexUI::Box box(renderer);
+box.enable_utility_jit(custom_catalog_json, limits);
+if (!box.is_known_utility("product-card")) {
+  throw std::runtime_error("required product utility is missing");
+}
+```
+
+诊断面保持只读：`utility_jit_revision()`、`active_utility_count()` 和
+`utility_stylesheet_size()` 可用于测试/性能观测；`missing_utility_tokens()` 只表示
+显式 utility 契约异常。不要用这些值驱动另一套业务状态或运行时 fallback。
 
 Dynamic UI state uses the typed C++ binding runtime. Numeric and boolean
 expressions are compiled once by the flex MIR backend; string inputs remain
@@ -43,7 +58,9 @@ ui.inputs().set_number("progress", 0.25);
 ui.inputs().set_string("title", "Loading");
 
 ui.targets().bind_class(*panel, "is-open", "open");
+ui.targets().bind_utility(*panel, "opacity-50", "!open");
 // ui.targets().bind_classes(*panel, "class-list-input"); // owns all classes
+// ui.targets().bind_utilities(*panel, "utility-list-input"); // owns utilities
 ui.targets().bind_attribute(*panel, "data-state", "open", "open", "closed");
 ui.targets().bind_text(*title, "title");
 ui.targets().bind_custom_property(*bar, "--progress", "progress * 100", "%");
@@ -61,13 +78,14 @@ rows.reconcile(
     [](const Item& item) { return item.id; },
     [](Box& owner, const Item&) {
       auto* row = owner.create("button");
-      row->set_classes("flex items-center w-full h-10 px-3 rounded-md");
+      row->set_attribute("data-slot", "list-row");
+      row->add_utilities("flex items-center w-full h-10 px-3 rounded-md");
       return row;
     },
     [](Element& row, const Item& item) {
       row.set_text(item.title);
       row.set_attribute("data-state", item.done ? "complete" : "open");
-      row.toggle_class("opacity-50", item.done);
+      row.toggle_utility("opacity-50", item.done);
     });
 ```
 

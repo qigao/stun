@@ -18,6 +18,7 @@ namespace parser {
 // Forward declarations
 struct AstNode;
 struct AstScene;
+struct AstUiDocument;
 struct AstComponent;
 struct AstAnim;
 struct AstMachine;
@@ -84,6 +85,13 @@ struct AstScene {
   std::vector<std::shared_ptr<AstNode>> children;
 
   AstScene(const std::string &n) : name(n) {}
+};
+
+struct AstUiDocument {
+  std::string name;
+  std::vector<std::shared_ptr<AstNode>> children;
+
+  explicit AstUiDocument(const std::string &n) : name(n) {}
 };
 
 struct AstComponent {
@@ -240,6 +248,7 @@ struct AstProgram {
   std::vector<AstImport> imports;  // import statements (processed first)
   std::vector<AstConst> constants; // const/var declarations (processed before scene)
   std::shared_ptr<AstScene> scene;
+  std::vector<std::shared_ptr<AstUiDocument>> ui_documents;
   std::vector<std::shared_ptr<AstComponent>> components;
   std::vector<std::shared_ptr<AstAnim>> animations;
   std::vector<std::shared_ptr<AstMachine>> machines;

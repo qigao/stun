@@ -54,6 +54,15 @@ struct ClassListTarget {
   std::string previous;
 };
 
+struct UtilityTarget {
+  std::string name;
+  bool previous = false;
+};
+
+struct UtilityListTarget {
+  std::string previous;
+};
+
 struct AttributeTarget {
   std::string name;
   std::optional<std::string> previous;
@@ -78,8 +87,9 @@ struct CustomPropertyTarget {
 };
 
 using BindingTarget =
-    std::variant<ClassTarget, ClassListTarget, AttributeTarget, TextTarget,
-                 ValueTarget, CustomPropertyTarget>;
+    std::variant<ClassTarget, ClassListTarget, UtilityTarget,
+                 UtilityListTarget, AttributeTarget, TextTarget, ValueTarget,
+                 CustomPropertyTarget>;
 
 enum class BindingSource : std::uint8_t { StringInput, BoolExpression,
                                           NumberExpression };
@@ -96,6 +106,11 @@ std::string target_key(const Element& target, const BindingTarget& binding_targe
           name = value.name;
         } else if constexpr (std::is_same_v<T, ClassListTarget>) {
           prefix = "classes:";
+        } else if constexpr (std::is_same_v<T, UtilityTarget>) {
+          prefix = "utility:";
+          name = value.name;
+        } else if constexpr (std::is_same_v<T, UtilityListTarget>) {
+          prefix = "utilities:";
         } else if constexpr (std::is_same_v<T, AttributeTarget>) {
           prefix = "attribute:";
           name = value.name;
@@ -332,9 +347,21 @@ struct UiBindingRuntime::Impl {
   UiBindingHandle add_binding(Binding binding) {
     const std::string key = target_key(*binding.element, binding.target);
     const bool new_owns_class_list =
-        std::holds_alternative<ClassListTarget>(binding.target);
+        std::holds_alternative<ClassListTarget>(binding.target) ||
+        std::holds_alternative<UtilityListTarget>(binding.target);
     const bool new_owns_one_class =
-        std::holds_alternative<ClassTarget>(binding.target);
+        std::holds_alternative<ClassTarget>(binding.target) ||
+        std::holds_alternative<UtilityTarget>(binding.target);
+    const auto class_token = [](const BindingTarget& target)
+        -> const std::string* {
+      if (const auto* value = std::get_if<ClassTarget>(&target)) {
+        return &value->name;
+      }
+      if (const auto* value = std::get_if<UtilityTarget>(&target)) {
+        return &value->name;
+      }
+      return nullptr;
+    };
     const bool class_conflict =
         (new_owns_class_list || new_owns_one_class) &&
         std::any_of(bindings.begin(), bindings.end(), [&](const Binding& existing) {
@@ -342,12 +369,17 @@ struct UiBindingRuntime::Impl {
             return false;
           }
           const bool existing_owns_class_list =
-              std::holds_alternative<ClassListTarget>(existing.target);
+              std::holds_alternative<ClassListTarget>(existing.target) ||
+              std::holds_alternative<UtilityListTarget>(existing.target);
           const bool existing_owns_one_class =
-              std::holds_alternative<ClassTarget>(existing.target);
+              std::holds_alternative<ClassTarget>(existing.target) ||
+              std::holds_alternative<UtilityTarget>(existing.target);
           return (new_owns_class_list &&
                   (existing_owns_class_list || existing_owns_one_class)) ||
-                 (new_owns_one_class && existing_owns_class_list);
+                 (new_owns_one_class && existing_owns_class_list) ||
+                 (new_owns_one_class && existing_owns_one_class &&
+                  *class_token(binding.target) ==
+                      *class_token(existing.target));
         });
     if (class_conflict || owned_targets.count(key) != 0) {
       throw std::invalid_argument("UI binding target is already owned");
@@ -411,6 +443,10 @@ struct UiBindingRuntime::Impl {
             binding.element->toggle_class(target.name, target.previous);
           } else if constexpr (std::is_same_v<T, ClassListTarget>) {
             binding.element->set_classes(target.previous);
+          } else if constexpr (std::is_same_v<T, UtilityTarget>) {
+            binding.element->toggle_utility(target.name, target.previous);
+          } else if constexpr (std::is_same_v<T, UtilityListTarget>) {
+            binding.element->set_utilities(target.previous);
           } else if constexpr (std::is_same_v<T, AttributeTarget>) {
             if (target.previous) {
               binding.element->set_attribute(target.name, *target.previous);
@@ -480,6 +516,48 @@ UiBindingHandle UiBindingTargets::bind_classes(Element& target,
   UiBindingRuntime::Impl::Binding binding;
   binding.element = &target;
   binding.target = ClassListTarget{previous ? *previous : std::string{}};
+  binding.source = BindingSource::StringInput;
+  binding.string_input = input_symbol;
+  binding.dependencies = {input_symbol};
+  return runtime_->impl_->add_binding(std::move(binding));
+}
+
+UiBindingHandle UiBindingTargets::bind_utility(Element& target,
+                                               std::string utility,
+                                               std::string bool_expression) {
+  if (utility.empty()) {
+    throw std::invalid_argument("bound utility name must not be empty");
+  }
+  const bool previous = target.utility_names().count(utility) > 0;
+  if (!previous) {
+    target.add_utility(utility);
+    target.remove_utility(utility);
+  }
+  UiBindingRuntime::Impl::Binding binding;
+  binding.element = &target;
+  binding.target = UtilityTarget{std::move(utility), previous};
+  binding.source = BindingSource::BoolExpression;
+  runtime_->impl_->compile_expression(bool_expression, binding);
+  return runtime_->impl_->add_binding(std::move(binding));
+}
+
+UiBindingHandle UiBindingTargets::bind_utilities(Element& target,
+                                                 std::string string_input) {
+  const flex::Symbol input_symbol(string_input);
+  runtime_->impl_->require_input(string_input, InputKind::String);
+  std::vector<std::string> previous_tokens(target.utility_names().begin(),
+                                           target.utility_names().end());
+  std::sort(previous_tokens.begin(), previous_tokens.end());
+  std::string previous;
+  for (const auto& token : previous_tokens) {
+    if (!previous.empty()) {
+      previous.push_back(' ');
+    }
+    previous += token;
+  }
+  UiBindingRuntime::Impl::Binding binding;
+  binding.element = &target;
+  binding.target = UtilityListTarget{std::move(previous)};
   binding.source = BindingSource::StringInput;
   binding.string_input = input_symbol;
   binding.dependencies = {input_symbol};
@@ -653,6 +731,8 @@ bool UiBindingRuntime::update() {
               binding.element->set_attribute(target.name, input->second);
             } else if constexpr (std::is_same_v<T, ClassListTarget>) {
               binding.element->set_classes(input->second);
+            } else if constexpr (std::is_same_v<T, UtilityListTarget>) {
+              binding.element->set_utilities(input->second);
             } else if constexpr (std::is_same_v<T, TextTarget>) {
               binding.element->set_text(input->second);
             } else if constexpr (std::is_same_v<T, ValueTarget>) {
@@ -676,6 +756,8 @@ bool UiBindingRuntime::update() {
             using T = std::decay_t<decltype(target)>;
             if constexpr (std::is_same_v<T, ClassTarget>) {
               binding.element->toggle_class(target.name, result != 0.0);
+            } else if constexpr (std::is_same_v<T, UtilityTarget>) {
+              binding.element->toggle_utility(target.name, result != 0.0);
             } else if constexpr (std::is_same_v<T, AttributeTarget>) {
               binding.element->set_attribute(
                   target.name, result != 0.0 ? target.true_value : target.false_value);

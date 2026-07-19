@@ -237,6 +237,31 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check_false(root->has_class(flex::Symbol("flex")));
   }
 
+  it("binds explicit utilities without creating a second target owner") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    box.set_root(root);
+
+    auto& runtime = box.bindings();
+    runtime.inputs().set_bool("enabled", true);
+    const auto utility_binding =
+        runtime.targets().bind_utility(*root, "flex", "enabled");
+    box.update();
+    check(root->utility_names().count("flex") == 1);
+    check(root->computed_style->display == flexUI::Display::Flex);
+
+    runtime.inputs().set_bool("enabled", false);
+    box.update();
+    check(root->utility_names().count("flex") == 0);
+    check(root->computed_style->display == flexUI::Display::Block);
+    check_throws_as(runtime.targets().bind_classes(*root, "missing-input"),
+                    std::invalid_argument);
+    check_throws_as(runtime.targets().bind_utility(
+                        *root, "not-a-utility", "enabled"),
+                    std::invalid_argument);
+    check_true(runtime.targets().unbind(utility_binding.id));
+  }
+
   it("inherits bound custom properties through the CSS cascade") {
     flexUI::Box box(nullptr);
     auto* root = box.create("div", "root");

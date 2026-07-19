@@ -60,8 +60,7 @@ struct delete_object
 
 /** 
  * Sum over the results of calling operation for each member in the
- * iterator.  Handier than std::accumulate because we can use with
- * mem_fun to pass in a getter method.
+ * iterator. Handier than std::accumulate when applying a getter callable.
  */
 template <class InputIterator, class T, class Operation >
 T sum_over(InputIterator beg, InputIterator end, T init, Operation op)

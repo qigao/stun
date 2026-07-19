@@ -271,10 +271,10 @@ std::set<std::string> visual_demo_used_utility_tokens(
     const std::string& source) {
   std::set<std::string> tokens;
   size_t pos = 0;
-  while ((pos = source.find("add_classes(", pos)) != std::string::npos) {
+  while ((pos = source.find("add_utilities(", pos)) != std::string::npos) {
     const size_t end_pos = source.find(");", pos);
     if (end_pos == std::string::npos) {
-      throw std::runtime_error("unterminated add_classes() call");
+      throw std::runtime_error("unterminated add_utilities() call");
     }
     const auto call_tokens =
         quoted_strings_in(source.substr(pos, end_pos - pos));
@@ -687,24 +687,21 @@ spec("shadcn utility whitelist can emit tailwind-like css") {
     const fs::path schema_dir = ir_root() / "schema";
     const auto whitelist = load_json_file(schema_dir / "utility_whitelist.json");
 
-    flexUI::Box box(nullptr);
+    flexUI::Box box(nullptr, flexUI::BoxOptions::legacy_without_jit());
+    box.enable_utility_jit(whitelist);
     auto* root = box.create("div", "root");
     auto* button = box.create("button", "jit-button");
-    button->add_class("inline-flex");
-    button->add_class("rounded-md");
-    button->add_class("focus-visible:ring-1");
+    button->add_utilities(
+        "inline-flex rounded-md focus-visible:ring-1");
     button->add_class("unknown-live-token");
     root->append(button);
     box.set_root(root);
     box.set_viewport(320.0f, 120.0f);
-    box.enable_utility_jit(whitelist);
-
     box.update();
     check(button->computed_style->display == flexUI::Display::Flex);
     check(approx_eq(button->computed_style->border_radius[0], 6.0f, 0.001f));
     check(approx_eq(button->computed_style->ring_width, 0.0f, 0.001f));
-    check(box.missing_utility_tokens() ==
-          std::vector<std::string>({"unknown-live-token"}));
+    check(box.missing_utility_tokens().empty());
 
     button->set_focus_visible(true);
     box.update();

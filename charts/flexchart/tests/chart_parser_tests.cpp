@@ -3,7 +3,12 @@
 #include "flexchart/chart_ast.h"
 #include "../src/chart_component_internal.h"
 #include "flexchart/flex_chart.h"
+#include "flexchart/flexui_chart.h"
 #include "flexchart/mark_renderer_registry.h"
+#include <flexUI/box.h>
+#include <flexUI/element.h>
+#include <flexUI/render_command.h>
+#include <flexUI/widget.h>
 #include <stdexcept>
 
 #define REQUIRE(expr) check(expr)
@@ -300,6 +305,60 @@ spec("flexchart_parser") {
             AstChart ast;
             check_throws_as(chart.to_svg(ast), std::logic_error);
             check_throws_as(chart.to_svg("not a chart"), std::invalid_argument);
+        }
+
+        it("builds a Box-owned utility styled interactive chart") {
+            AstProgram program;
+            std::string error;
+            check_true(parse_chart(R"chart(
+                bar {
+                    title: "Revenue"
+                    data {
+                        { "month": "Jan", "revenue": 10 }
+                        { "month": "Feb", "revenue": 20 }
+                    }
+                    x: "month"
+                    y: "revenue"
+                }
+            )chart", &program, error));
+            auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
+            check_not_null(chart.get());
+
+            flexUI::Box box(nullptr);
+            flex::modules::chart::ChartViewOptions options;
+            options.width = 640.0f;
+            options.height = 360.0f;
+            options.accessible_label = "Monthly revenue";
+            auto result = flex::modules::chart::create_flexui_chart(
+                box, *chart, options);
+            check_true(static_cast<bool>(result));
+            check_string_eq(result.error, "");
+            box.set_root(result.root);
+            box.set_viewport(options.width, options.height);
+            box.update();
+
+            check_not_null(box.query_selector("[data-slot=chart]"));
+            check_not_null(box.query_selector("[data-slot=chart-title]"));
+            check(result.plot == box.query_selector("[data-slot=chart-plot]"));
+            check_not_null(result.plot->widget);
+            flexUI::RenderCommandList commands(flex::RendererCapabilities{});
+            result.plot->widget->emit_render_commands(*result.plot, commands);
+            check_false(commands.commands().empty());
+            check(result.root->computed_style->display == flexUI::Display::Flex);
+            check_true(box.missing_utility_tokens().empty());
+        }
+
+        it("does not expose a partial chart tree for invalid view options") {
+            flexUI::Box box(nullptr);
+            AstChart chart;
+            flex::modules::chart::ChartViewOptions options;
+            options.width = 0.0f;
+            const auto result = flex::modules::chart::create_flexui_chart(
+                box, chart, options);
+            check_false(static_cast<bool>(result));
+            check_null(result.root);
+            check_false(result.error.empty());
+            check_null(box.root());
         }
     }
 }

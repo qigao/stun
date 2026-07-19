@@ -114,7 +114,8 @@ Block::Block(Variable* v)
  * \f$\frac{1}{|V|}\sum_{v_i\in V} d_i - b_i\f$.
  */
 double Block::optimalPosition() const {
-    return sum_over(V.begin(),V.end(),0.0,mem_fun(&Variable::displacement)) / w;
+    return sum_over(V.begin(), V.end(), 0.0,
+                    [](Variable* variable) { return variable->displacement(); }) / w;
 }
 
 /**
@@ -146,7 +147,8 @@ double compute_dfdv(Variable const* v, Constraint const* last) {
  * Compute the lagrange multipliers for each active constraint in the block
  */
 void Block::computeLagrangians() {
-    for_each(C.begin(),C.end(),mem_fun(&Constraint::resetLM));
+    for_each(C.begin(), C.end(),
+             [](Constraint* constraint) { constraint->resetLM(); });
     compute_dfdv(V[0],nullptr);
 }
 
@@ -178,7 +180,8 @@ solve() {
     bool optimal=true;
     do {
         makeOptimal();
-        for_each(vs.begin(),vs.end(),mem_fun(&Variable::updatePosition));
+        for_each(vs.begin(), vs.end(),
+                 [](Variable* variable) { variable->updatePosition(); });
         ASSERT_COST_DECREASE(this);
         optimal=splitBlocks();
     } while(!optimal);
@@ -194,7 +197,8 @@ initBlocksAndConstraints() {
         Block *b=new Block(v);
         b->listIndex=blocks.insert(blocks.end(),b);
     }
-    for_each(cs.begin(),cs.end(),bind2nd(mem_fun(&Constraint::setActive),false));
+    for_each(cs.begin(), cs.end(),
+             [](Constraint* constraint) { constraint->setActive(false); });
 }
 
 /** 
@@ -234,7 +238,7 @@ double Constraint::maxSafeAlpha() const {
  * Functor used for finding the largest move (alpha) we can make along the line from 
  * current positions to desired positions without violating a constraint.
  */
-struct MaxSafeMove : unary_function<Constraint*,void> {
+struct MaxSafeMove {
     MaxSafeMove(Constraint *&c, double &alpha) : c(c), alpha(alpha) { }
     /**
      * Compute the distance along the line from current to desired positions we would
@@ -454,7 +458,8 @@ makeInactive(Constraint *c) {
  * computes cost of the goal function over all variables
  */
 double Project::cost() const {
-    return sum_over(vs.begin(),vs.end(),0.0,mem_fun(&Variable::cost));
+    return sum_over(vs.begin(), vs.end(), 0.0,
+                    [](Variable* variable) { return variable->cost(); });
 }
 
 } // namespace project

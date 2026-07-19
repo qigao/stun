@@ -1,0 +1,31 @@
+#include "default_style_assets.h"
+
+#include <flexUI/utility_jit.h>
+
+#include <nlohmann/json.hpp>
+
+#include <memory>
+#include <string_view>
+
+namespace flexUI::detail {
+
+namespace {
+
+constexpr std::string_view kUtilityWhitelistJson =
+@FLEXUI_DEFAULT_UTILITY_WHITELIST_CPP@;
+constexpr std::string_view kDefaultThemeCss =
+@FLEXUI_DEFAULT_THEME_CPP@;
+
+}  // namespace
+
+std::shared_ptr<const tailwind::UtilityCatalog> builtin_utility_catalog() {
+  static const auto catalog = std::make_shared<const tailwind::UtilityCatalog>(
+      nlohmann::json::parse(kUtilityWhitelistJson));
+  return catalog;
+}
+
+std::string_view default_theme_css() {
+  return kDefaultThemeCss;
+}
+
+}  // namespace flexUI::detail

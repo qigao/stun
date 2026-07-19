@@ -45,13 +45,39 @@ std::vector<std::string> set_difference(const TokenSet& lhs,
 
 }  // namespace
 
-struct UtilityJit::Impl {
-  Impl(nlohmann::json whitelist, UtilityJitOptions limits)
-      : utility_whitelist(std::move(whitelist)), options(limits) {
+struct UtilityCatalog::Impl {
+  explicit Impl(nlohmann::json value) : utility_whitelist(std::move(value)) {
     if (!utility_whitelist.contains("tokens") ||
         !utility_whitelist.at("tokens").is_object()) {
       throw std::invalid_argument(
           "utility whitelist must contain an object named 'tokens'");
+    }
+  }
+
+  nlohmann::json utility_whitelist;
+};
+
+UtilityCatalog::UtilityCatalog(nlohmann::json utility_whitelist)
+    : impl_(std::make_unique<Impl>(std::move(utility_whitelist))) {}
+
+UtilityCatalog::~UtilityCatalog() = default;
+UtilityCatalog::UtilityCatalog(UtilityCatalog&&) noexcept = default;
+UtilityCatalog& UtilityCatalog::operator=(UtilityCatalog&&) noexcept = default;
+
+bool UtilityCatalog::contains(std::string_view token) const {
+  return impl_->utility_whitelist.at("tokens").contains(std::string(token));
+}
+
+const nlohmann::json& UtilityCatalog::definitions() const {
+  return impl_->utility_whitelist;
+}
+
+struct UtilityJit::Impl {
+  Impl(std::shared_ptr<const UtilityCatalog> catalog_value,
+       UtilityJitOptions limits)
+      : utility_catalog(std::move(catalog_value)), options(limits) {
+    if (!utility_catalog) {
+      throw std::invalid_argument("utility catalog must not be null");
     }
     if (options.max_token_length == 0 ||
         options.max_tokens_per_update == 0 ||
@@ -66,7 +92,8 @@ struct UtilityJit::Impl {
       return cached->second;
     }
 
-    std::string css = shadcn_ir::emit_utility_css(utility_whitelist, {token});
+    std::string css =
+        shadcn_ir::emit_utility_css(utility_catalog->definitions(), {token});
     if (css.empty()) {
       throw std::runtime_error("utility token emitted no CSS: " + token);
     }
@@ -76,7 +103,7 @@ struct UtilityJit::Impl {
 
   std::vector<std::string> ordered_tokens(const TokenSet& tokens) const {
     std::vector<std::string> result(tokens.begin(), tokens.end());
-    const auto& definitions = utility_whitelist.at("tokens");
+    const auto& definitions = utility_catalog->definitions().at("tokens");
     std::sort(result.begin(), result.end(), [&definitions](const auto& lhs,
                                                            const auto& rhs) {
       const auto lhs_it = definitions.find(lhs);
@@ -95,7 +122,7 @@ struct UtilityJit::Impl {
     const TokenSet requested = unique_tokens(class_tokens, options);
     const auto missing =
         shadcn_ir::missing_utility_tokens(
-            utility_whitelist,
+            utility_catalog->definitions(),
             std::vector<std::string>(requested.begin(), requested.end()));
     const std::unordered_set<std::string> missing_set(missing.begin(),
                                                        missing.end());
@@ -137,7 +164,7 @@ struct UtilityJit::Impl {
     return result;
   }
 
-  nlohmann::json utility_whitelist;
+  std::shared_ptr<const UtilityCatalog> utility_catalog;
   UtilityJitOptions options;
   TokenSet active_tokens;
   std::unordered_map<std::string, std::string> rule_cache;
@@ -147,7 +174,14 @@ struct UtilityJit::Impl {
 
 UtilityJit::UtilityJit(nlohmann::json utility_whitelist,
                        UtilityJitOptions options)
-    : impl_(std::make_unique<Impl>(std::move(utility_whitelist), options)) {}
+    : UtilityJit(
+          std::make_shared<const UtilityCatalog>(std::move(utility_whitelist)),
+          options) {}
+
+UtilityJit::UtilityJit(
+    std::shared_ptr<const UtilityCatalog> utility_catalog,
+    UtilityJitOptions options)
+    : impl_(std::make_unique<Impl>(std::move(utility_catalog), options)) {}
 
 UtilityJit::~UtilityJit() = default;
 UtilityJit::UtilityJit(UtilityJit&&) noexcept = default;
@@ -187,6 +221,10 @@ std::size_t UtilityJit::active_token_count() const {
 
 std::size_t UtilityJit::cached_token_count() const {
   return impl_->rule_cache.size();
+}
+
+bool UtilityJit::contains(std::string_view token) const {
+  return impl_->utility_catalog->contains(token);
 }
 
 }  // namespace flexUI::tailwind

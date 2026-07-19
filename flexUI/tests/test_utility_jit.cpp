@@ -120,7 +120,7 @@ spec("UtilityJit incrementally compiles deterministic CSS snapshots") {
 
   it("atomically replaces the utility stylesheet used by the rectangle tree") {
     flexUI::tailwind::UtilityJit jit(utility_fixture());
-    flexUI::Box box(nullptr);
+    flexUI::Box box(nullptr, flexUI::BoxOptions::legacy_without_jit());
     auto* root = box.create("div", "root");
     root->add_class("rounded-md");
     box.set_root(root);
@@ -144,7 +144,7 @@ spec("UtilityJit incrementally compiles deterministic CSS snapshots") {
   }
 
   it("lets Box scan class changes and update the utility stylesheet") {
-    flexUI::Box box(nullptr);
+    flexUI::Box box(nullptr, flexUI::BoxOptions::legacy_without_jit());
     auto* root = box.create("div", "root");
     auto* child = box.create("div", "child");
     child->set_classes("rounded-md unknown-utility");
@@ -154,21 +154,105 @@ spec("UtilityJit incrementally compiles deterministic CSS snapshots") {
     box.enable_utility_jit(utility_fixture());
 
     box.update();
-    check(box.utility_jit_enabled());
-    check(child->computed_style->border_radius[0] == 6.0f);
-    check(box.missing_utility_tokens() ==
-          std::vector<std::string>({"unknown-utility"}));
+    check_true(box.utility_jit_enabled());
+    check_float_eq(child->computed_style->border_radius[0], 6.0f, 0.001f);
+    check_true(box.missing_utility_tokens().empty());
 
     child->set_classes("inline-flex");
     box.update();
-    check(child->computed_style->border_radius[0] == 0.0f);
+    check_float_eq(child->computed_style->border_radius[0], 0.0f, 0.001f);
     check(child->computed_style->display == flexUI::Display::Flex);
-    check(box.missing_utility_tokens().empty());
+    check_true(box.missing_utility_tokens().empty());
 
     box.disable_utility_jit();
     box.update();
     check_false(box.utility_jit_enabled());
     check(child->computed_style->display == flexUI::Display::Block);
+  }
+
+  it("enables the built-in catalog and explicit utility API by default") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    root->add_utilities("flex rounded-md bg-background");
+    box.set_root(root);
+    box.set_viewport(100.0f, 100.0f);
+
+    box.update();
+    check_true(box.utility_jit_enabled());
+    check(root->computed_style->display == flexUI::Display::Flex);
+    check_float_eq(root->computed_style->border_radius[0], 6.0f, 0.001f);
+    check(root->utility_names().count("bg-background") == 1);
+    check_throws_as(root->add_utility("not-in-the-built-in-catalog"),
+                    std::invalid_argument);
+  }
+
+  it("applies system light and dark theme modes at the root boundary") {
+    flexUI::BoxOptions options;
+    options.theme = flexUI::ThemeMode::Light;
+    flexUI::Box box(nullptr, options);
+    auto* root = box.create("div", "root");
+    root->add_utility("bg-background");
+    box.set_root(root);
+
+    check(root->attribute("data-theme") != nullptr);
+    check(*root->attribute("data-theme") == "light");
+    box.set_theme_mode(flexUI::ThemeMode::Dark);
+    check(*root->attribute("data-theme") == "dark");
+    box.set_theme_mode(flexUI::ThemeMode::System);
+    check_false(root->has_attribute("data-theme"));
+    flexUI::MediaEnvironment media;
+    media.prefers_dark_scheme = true;
+    box.set_media_environment(media);
+    box.update();
+    check_string_eq(root->computed_style->get_variable(flex::Symbol("--background")),
+                    "#0f172a");
+    check_float_eq(root->computed_style->background_color.r,
+                   0x0f / 255.0f, 0.001f);
+    check_float_eq(root->computed_style->background_color.g,
+                   0x17 / 255.0f, 0.001f);
+    check_float_eq(root->computed_style->background_color.b,
+                   0x2a / 255.0f, 0.001f);
+  }
+
+  it("keeps application styles after the default JIT cascade slot") {
+    flexUI::Box box(nullptr);
+    box.load_css(".flex { display: none; }");
+    auto* root = box.create("div", "root");
+    root->add_utility("flex");
+    box.set_root(root);
+    box.update();
+    check(root->computed_style->display == flexUI::Display::None);
+  }
+
+  it("revises only when the active utility program changes") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    root->add_utilities("flex rounded-md");
+    box.set_root(root);
+    box.update();
+
+    const auto initial_revision = box.utility_jit_revision();
+    check(initial_revision > 0);
+    check(box.active_utility_count() == 2);
+    check(box.utility_stylesheet_size() > 0);
+    check(box.is_known_utility("bg-background"));
+    check_false(box.is_known_utility("not-a-utility"));
+
+    root->set_attribute("data-state", "open");
+    root->set_custom_property("--accent", "#3366ff");
+    box.update();
+    check(box.utility_jit_revision() == initial_revision);
+
+    root->add_utility("bg-background");
+    box.update();
+    check(box.utility_jit_revision() == initial_revision + 1);
+    check(box.active_utility_count() == 3);
+  }
+
+  it("rejects explicit utilities when JIT is intentionally disabled") {
+    flexUI::Box box(nullptr, flexUI::BoxOptions::legacy_without_jit());
+    auto* root = box.create("div", "root");
+    check_throws_as(root->add_utility("flex"), std::logic_error);
   }
 
   it("keeps the JIT stylesheet at its enable-time cascade position") {

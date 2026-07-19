@@ -49,6 +49,12 @@ flex::Group* InfographicComponent::build(const UnifiedInfographic& info, flex::I
 
 flex::Group* InfographicComponent::build(const UnifiedInfographic& info, flex::Instance& instance,
                                          float width, float height) {
+    return build(info, instance, width, height, {});
+}
+
+flex::Group* InfographicComponent::build(
+    const UnifiedInfographic& info, flex::Instance& instance, float width,
+    float height, const InfographicComponentBuildOptions& options) {
     flex::ArenaAllocator& arena = *instance.object_allocator();
     
     auto root = flex::Group::create(arena);
@@ -56,13 +62,15 @@ flex::Group* InfographicComponent::build(const UnifiedInfographic& info, flex::I
     root->set_layout_size(width, height);
     
     // Background
-    auto bg = arena.create<flex::Shape>();
-    bg->set_rect(width, height);
-    bg->set_fill(flex::Color(0.98f, 0.98f, 0.98f));
-    root->add_child(bg);
+    if (options.show_background) {
+        auto bg = arena.create<flex::Shape>();
+        bg->set_rect(width, height);
+        bg->set_fill(flex::Color(0.98f, 0.98f, 0.98f));
+        root->add_child(bg);
+    }
     
     // Title
-    if (info.title) {
+    if (options.show_title && info.title) {
         auto title = arena.create<flex::Text>();
         title->set_content(*info.title);
         title->set_font_size(24.0f);

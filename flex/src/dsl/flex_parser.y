@@ -96,6 +96,7 @@ top_level_block ::= import_stmt.
 top_level_block ::= const_decl.
 top_level_block ::= var_decl.
 top_level_block ::= scene_block.
+top_level_block ::= ui_block.
 top_level_block ::= component_block.
 top_level_block ::= anim_block.
 top_level_block ::= machine_block.
@@ -140,6 +141,19 @@ scene_item ::= for_block.
 scene_property ::= prop_key COLON value_expr opt_comma.
 
 // ============================================================================
+// UI Document Block
+// ============================================================================
+
+ui_block ::= UI IDENTIFIER LBRACE ui_body RBRACE.
+
+ui_body ::= ui_body ui_item.
+ui_body ::= .
+
+ui_item ::= node_def.
+ui_item ::= repeat_block.
+ui_item ::= for_block.
+
+// ============================================================================
 // Node Definition
 // ============================================================================
 
@@ -174,6 +188,7 @@ node_property ::= prop_key COLON value_expr opt_comma.
 node_property ::= DATA COLON value_expr opt_comma.
 
 prop_key ::= IDENTIFIER.
+prop_key ::= NODE_TYPE.
 prop_key ::= IDENTIFIER DOT IDENTIFIER.
 
 // ============================================================================

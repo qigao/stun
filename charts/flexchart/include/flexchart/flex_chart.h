@@ -72,6 +72,7 @@ private:
 class ChartComponent {
 public:
     static void register_component();
+    [[deprecated("use create_flexui_chart for interactive UI")]]
     static flex::Group* build(const flex::chart::AstChart& chart, flex::Instance& instance);
 };
 

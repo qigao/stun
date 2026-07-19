@@ -73,6 +73,11 @@ yyloop:
           return Token{TOK_SCENE, "scene", state->line, state->column};
       }
 
+      "ui" {
+          update_position(state, tok_start);
+          return Token{TOK_UI, "ui", state->line, state->column};
+      }
+
       "artboard" {
           update_position(state, tok_start);
           return Token{TOK_ARTBOARD, "artboard", state->line, state->column};

@@ -48,6 +48,7 @@ add_library(infographic_core STATIC
     
     # Core API
     src/flexinfographic_new.cpp 
+    src/flexui_infographic.cpp
     src/infographic_component.cpp
     
     # Render Helpers
@@ -73,7 +74,7 @@ target_include_directories(infographic_core
         ${CMAKE_CURRENT_SOURCE_DIR}/compiler
 )
 
-target_link_libraries(infographic_core PUBLIC flex cola)
+target_link_libraries(infographic_core PUBLIC flex chart_ui cola)
 
 target_compile_features(infographic_core PUBLIC cxx_std_17)
 

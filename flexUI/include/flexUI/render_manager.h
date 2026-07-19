@@ -35,6 +35,17 @@ public:
   // 渲染一帧
   void render_frame(const RenderFrame& frame);
 
+  /**
+   * Build the backend-neutral commands for a complete frame without replaying
+   * them. Intended for diagnostics, deterministic visual regression tests and
+   * offscreen consumers.
+   *
+   * @complexity Time O(elements + commands), space O(commands).
+   */
+  RenderCommandList build_frame_commands(
+      const RenderFrame& frame,
+      const flex::RendererCapabilities& capabilities);
+
   // 渲染整个树
   void render_tree(Element* root);
 

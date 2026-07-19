@@ -15,6 +15,7 @@
 #include "flexUI/box.h"
 #include "flexUI/binding_runtime.h"
 #include "flexUI/keyed_repeater.h"
+#include "flexUI/ui_document.h"
 #include "flexUI/text_value_widget.h"
 #include "flexUI/renderer.h"
 #include "flexUI/render_command.h"

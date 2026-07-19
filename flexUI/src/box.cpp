@@ -8,6 +8,7 @@
 #include <flexUI/render_manager.h>
 #include <flexUI/view_pipeline.h>
 #include <flexUI/utility_jit.h>
+#include "default_style_assets.h"
 #include <flex/bridge/renderer.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -26,6 +27,13 @@ namespace {
 CssLoadOptions tailwind_jit_load_options() {
   CssLoadOptions options;
   options.source = "<tailwind-jit>";
+  options.strict = true;
+  return options;
+}
+
+CssLoadOptions default_theme_load_options() {
+  CssLoadOptions options;
+  options.source = "<flexui-default-theme>";
   options.strict = true;
   return options;
 }
@@ -1101,8 +1109,15 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
 
 } // namespace
 
-Box::Box(flex::Renderer* renderer)
-    : bindings_([this]() {
+BoxOptions BoxOptions::legacy_without_jit() {
+  BoxOptions options;
+  options.utility_jit = UtilityJitMode::Disabled;
+  return options;
+}
+
+Box::Box(flex::Renderer* renderer, BoxOptions options)
+    : theme_mode_(options.theme),
+      bindings_([this]() {
         dirty_style_ = true;
         dirty_layout_ = true;
         dirty_paint_ = true;
@@ -1263,6 +1278,16 @@ Box::Box(flex::Renderer* renderer)
       border-radius: var(--progress-border-radius, 4px);
     }
   )");
+
+  const auto theme_result = style_engine_.load_stylesheet(
+      std::string(detail::default_theme_css()), default_theme_load_options());
+  if (!theme_result.applied) {
+    throw std::runtime_error("failed to load flexUI default theme");
+  }
+  if (options.utility_jit == UtilityJitMode::BuiltIn) {
+    enable_utility_jit(detail::builtin_utility_catalog(),
+                       options.utility_limits);
+  }
 }
 
 Box::~Box() {
@@ -1360,8 +1385,37 @@ bool Box::remove_stylesheet(StylesheetId stylesheet_id) {
 
 void Box::enable_utility_jit(nlohmann::json utility_whitelist,
                              tailwind::UtilityJitOptions options) {
+  enable_utility_jit(std::make_shared<const tailwind::UtilityCatalog>(
+                         std::move(utility_whitelist)),
+                     options);
+}
+
+void Box::enable_utility_jit(
+    std::shared_ptr<const tailwind::UtilityCatalog> utility_catalog,
+    tailwind::UtilityJitOptions options) {
   auto next_jit = std::make_unique<tailwind::UtilityJit>(
-      std::move(utility_whitelist), options);
+      std::move(utility_catalog), options);
+
+  std::vector<Element*> pending;
+  if (root_) {
+    pending.push_back(root_);
+  }
+  while (!pending.empty()) {
+    Element* element = pending.back();
+    pending.pop_back();
+    for (const auto& token : element->utility_names()) {
+      if (!next_jit->contains(token)) {
+        throw std::invalid_argument(
+            "active explicit utility is absent from the new catalog: " +
+            token);
+      }
+    }
+    for (auto* child : element->children()) {
+      if (child) {
+        pending.push_back(static_cast<Element*>(child));
+      }
+    }
+  }
 
   const auto load_options = tailwind_jit_load_options();
   const CssLoadResult slot = utility_stylesheet_id_ == 0
@@ -1402,6 +1456,16 @@ void Box::notify_utility_tree_changed() {
   }
 }
 
+void Box::validate_utility_token(std::string_view token) const {
+  if (!utility_jit_) {
+    throw std::logic_error("explicit utilities require an enabled utility JIT");
+  }
+  if (!utility_jit_->contains(token)) {
+    throw std::invalid_argument("unknown explicit utility token: " +
+                                std::string(token));
+  }
+}
+
 bool Box::owns_element(const Element* element) const {
   return element && element->owner_box_ == this;
 }
@@ -1411,7 +1475,8 @@ void Box::sync_utility_stylesheet() {
     return;
   }
 
-  std::vector<std::string> tokens;
+  std::unordered_set<std::string> active_tokens;
+  std::vector<std::string> missing_required;
   std::vector<Element*> pending;
   if (root_) {
     pending.push_back(root_);
@@ -1419,8 +1484,16 @@ void Box::sync_utility_stylesheet() {
   while (!pending.empty()) {
     Element* elem = pending.back();
     pending.pop_back();
-    tokens.insert(tokens.end(), elem->class_names().begin(),
-                  elem->class_names().end());
+    for (const auto& token : elem->class_names()) {
+      if (utility_jit_->contains(token)) {
+        active_tokens.insert(token);
+      }
+    }
+    for (const auto& token : elem->utility_names()) {
+      if (!utility_jit_->contains(token)) {
+        missing_required.push_back(token);
+      }
+    }
     for (auto* child : elem->children()) {
       if (child) {
         pending.push_back(static_cast<Element*>(child));
@@ -1428,6 +1501,18 @@ void Box::sync_utility_stylesheet() {
     }
   }
 
+  std::sort(missing_required.begin(), missing_required.end());
+  missing_required.erase(
+      std::unique(missing_required.begin(), missing_required.end()),
+      missing_required.end());
+  missing_utility_tokens_ = missing_required;
+  if (!missing_required.empty()) {
+    throw std::runtime_error("explicit utility is absent from the active catalog: " +
+                             missing_required.front());
+  }
+
+  std::vector<std::string> tokens(active_tokens.begin(), active_tokens.end());
+  std::sort(tokens.begin(), tokens.end());
   const auto compiled = utility_jit_->replace_tokens(tokens);
   missing_utility_tokens_ = compiled.missing_tokens;
   utility_tree_dirty_ = false;
@@ -1592,9 +1677,42 @@ void Box::reindex_element_id(Element* elem, const std::string& old_id,
 }
 
 void Box::set_root(Element* elem) {
+  if (root_ && root_ != elem) {
+    root_->remove_attribute("data-flexui-theme-root");
+    root_->remove_attribute("data-theme");
+  }
   root_ = elem;
+  if (root_) {
+    root_->set_attribute("data-flexui-theme-root");
+  }
+  apply_theme_to_root();
   notify_utility_tree_changed();
   if (root_) root_->mark_style_dirty();
+}
+
+void Box::set_theme_mode(ThemeMode mode) {
+  if (theme_mode_ == mode) {
+    return;
+  }
+  theme_mode_ = mode;
+  apply_theme_to_root();
+}
+
+void Box::apply_theme_to_root() {
+  if (!root_) {
+    return;
+  }
+  switch (theme_mode_) {
+    case ThemeMode::System:
+      root_->remove_attribute("data-theme");
+      break;
+    case ThemeMode::Light:
+      root_->set_attribute("data-theme", "light");
+      break;
+    case ThemeMode::Dark:
+      root_->set_attribute("data-theme", "dark");
+      break;
+  }
 }
 
 void Box::set_viewport(float width, float height) {

@@ -54,7 +54,14 @@ void ChartComponent::register_component() {
     });
 }
 
-Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& instance) {
+Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart,
+                             Instance& instance) {
+    return build(chart, instance, {});
+}
+
+Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart,
+                             Instance& instance,
+                             const ChartComponentBuildOptions& options) {
     ensure_builtin_mark_renderers_linked();
     ArenaAllocator& arena = *instance.object_allocator();
     auto root = Group::create(arena);
@@ -88,7 +95,7 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
     root->set_padding(40.0f);
     
     // 1. Title
-    if (!chart->title.empty()) {
+    if (options.show_title && !chart->title.empty()) {
         auto title = arena.create<Text>();
         title->set_content(chart->title);
         title->set_font_size(28.0f);
@@ -211,7 +218,7 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart, Instance& i
         }
     }
 
-    if (!legend_items.empty()) {
+    if (options.show_legend && !legend_items.empty()) {
         auto legend_root = arena.create<Group>();
         legend_root->set_layout(LayoutMode::Flex);
         legend_root->set_flex_direction(FlexDirection::Row);

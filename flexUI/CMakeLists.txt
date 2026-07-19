@@ -35,12 +35,57 @@ endif()
 message(STATUS "flexUI: Using lexbor from ${LEXBOR_INCLUDE_DIR}")
 include_directories(${LEXBOR_INCLUDE_DIR})
 
+set(FLEXUI_UTILITY_WHITELIST
+    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/shadcn-ir/schema/utility_whitelist.json")
+set(FLEXUI_DEFAULT_THEME
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/default_theme.css")
+set_property(
+  DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${FLEXUI_UTILITY_WHITELIST}"
+  "${FLEXUI_DEFAULT_THEME}")
+file(READ "${FLEXUI_UTILITY_WHITELIST}"
+     FLEXUI_DEFAULT_UTILITY_WHITELIST_JSON)
+file(READ "${FLEXUI_DEFAULT_THEME}" FLEXUI_DEFAULT_THEME_CSS)
+
+# Keep each generated literal below MSVC's per-literal size limit. Adjacent C++
+# string literals are concatenated by the compiler without changing the asset.
+function(flexui_make_cpp_raw_string input output)
+  set(chunk_size 8192)
+  string(LENGTH "${input}" input_length)
+  set(offset 0)
+  set(result "")
+  while(offset LESS input_length)
+    math(EXPR remaining "${input_length} - ${offset}")
+    if(remaining GREATER chunk_size)
+      set(length ${chunk_size})
+    else()
+      set(length ${remaining})
+    endif()
+    string(SUBSTRING "${input}" ${offset} ${length} chunk)
+    string(APPEND result "R\"FLEXUI_ASSET(${chunk})FLEXUI_ASSET\"\n")
+    math(EXPR offset "${offset} + ${length}")
+  endwhile()
+  set(${output} "${result}" PARENT_SCOPE)
+endfunction()
+
+flexui_make_cpp_raw_string("${FLEXUI_DEFAULT_UTILITY_WHITELIST_JSON}"
+                           FLEXUI_DEFAULT_UTILITY_WHITELIST_CPP)
+flexui_make_cpp_raw_string("${FLEXUI_DEFAULT_THEME_CSS}"
+                           FLEXUI_DEFAULT_THEME_CPP)
+set(FLEXUI_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${FLEXUI_GENERATED_DIR}")
+configure_file(
+  src/default_style_assets.cpp.in
+  "${FLEXUI_GENERATED_DIR}/default_style_assets.cpp"
+  @ONLY)
 
 
 # 源文件
 set(FLEXUI_SOURCES
+  "${FLEXUI_GENERATED_DIR}/default_style_assets.cpp"
   src/box.cpp
   src/binding_runtime.cpp
+  src/ui_document.cpp
   src/keyed_repeater.cpp
   src/view_pipeline.cpp
   src/element.cpp
@@ -100,6 +145,7 @@ set(FLEXUI_SOURCES
 set(FLEXUI_HEADERS
   include/flexUI/types.h
   include/flexUI/binding_runtime.h
+  include/flexUI/ui_document.h
   include/flexUI/keyed_repeater.h
   include/flexUI/text_value_widget.h
   include/flexUI/computed_style.h
@@ -169,11 +215,12 @@ endif()
 # 链接依赖
 target_link_libraries(flexUI 
     PUBLIC ${LEXBOR_LIBRARY} flex_runtime flex_render flex_animation TurboUtils::Core md_parser nlohmann_json::nlohmann_json
-    PRIVATE unofficial::tree-sitter::tree-sitter
+    PRIVATE flex_compiler unofficial::tree-sitter::tree-sitter
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
   flexUI
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>

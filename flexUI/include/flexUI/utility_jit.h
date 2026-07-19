@@ -6,9 +6,28 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace flexUI::tailwind {
+
+class UtilityCatalog {
+ public:
+  explicit UtilityCatalog(nlohmann::json utility_whitelist);
+  ~UtilityCatalog();
+
+  UtilityCatalog(const UtilityCatalog&) = delete;
+  UtilityCatalog& operator=(const UtilityCatalog&) = delete;
+  UtilityCatalog(UtilityCatalog&&) noexcept;
+  UtilityCatalog& operator=(UtilityCatalog&&) noexcept;
+
+  bool contains(std::string_view token) const;
+  const nlohmann::json& definitions() const;
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
 
 struct UtilityJitOptions {
   std::size_t max_token_length = 512;
@@ -39,6 +58,8 @@ class UtilityJit {
  public:
   explicit UtilityJit(nlohmann::json utility_whitelist,
                       UtilityJitOptions options = {});
+  explicit UtilityJit(std::shared_ptr<const UtilityCatalog> utility_catalog,
+                      UtilityJitOptions options = {});
   ~UtilityJit();
 
   UtilityJit(const UtilityJit&) = delete;
@@ -60,6 +81,7 @@ class UtilityJit {
   std::uint64_t revision() const;
   std::size_t active_token_count() const;
   std::size_t cached_token_count() const;
+  bool contains(std::string_view token) const;
 
  private:
   struct Impl;

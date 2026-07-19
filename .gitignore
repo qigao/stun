@@ -83,6 +83,11 @@ Thumbs.db
 projects/
 assets
 
+# flexUI's default theme is a reviewed build input embedded in the library.
+!flexUI/assets/
+flexUI/assets/*
+!flexUI/assets/default_theme.css
+
 # Security - Additional protection for keys anywhere in the tree
 license_encryption.key
 *.key

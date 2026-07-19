@@ -4,7 +4,7 @@
 
 #include "flexui_designer/designer.h"
 #include "flexui_designer/property_editor.h"
-#include <flex/backends/thorvg/init.h>
+#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include <SDL2/SDL.h>
 #include <thorvg.h>

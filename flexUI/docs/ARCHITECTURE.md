@@ -12,7 +12,16 @@ flexUI 的目标是用 CSS 描述界面状态，再把同一棵 Element 树投�
 2. StyleEngine
    解析 CSS，并把选择器、媒体条件、容器查询和动画声明计算成 `ComputedStyle`。
 
-2.1 C++ binding runtime
+2.1 Utility JIT 与默认 theme
+   `Box(renderer)` 会在内建 widget 规则之后加载内嵌 theme，并预留默认 Utility JIT
+   stylesheet slot。utility 定义的唯一事实源是
+   `tools/shadcn-ir/schema/utility_whitelist.json`；构建时将其内嵌，运行时多个 Box
+   共享同一个不可变 `UtilityCatalog`，但 active token、revision 和 stylesheet 仍由
+   各 Box 独立拥有。应用随后加载的 CSS 位于 JIT slot 之后，可以正常覆盖 utility。
+   兼容调用点必须显式使用 `BoxOptions::legacy_without_jit()`，默认构造不读取源码树
+   或当前工作目录。
+
+2.2 C++ binding runtime
    管理类型化输入与 Element target 的单向投影。数值/布尔表达式在绑定创建时编译为
    MIR program，输入版本变化后才重新求值；class、attribute、text 和 inline custom
    property 的最终状态仍写回 Element 树。每个 target 在绑定期间只有一个 owner，解除绑定时
@@ -20,7 +29,7 @@ flexUI 的目标是用 CSS 描述界面状态，再把同一棵 Element 树投�
    `TextValueWidget` 适配真实 value model，用户编辑回写同一个 `UiDataContext`，不占用应用
    callback。binding runtime 不持有 CSS 或渲染状态。
 
-2.2 Keyed collection reconciliation
+2.3 Keyed collection reconciliation
    `UiKeyedRepeater` 按应用稳定 key 显式协调一个容器的直接子 Element。它只负责创建、复用、
    排序和退役节点，不拥有业务集合、CSS 或每帧更新。条目仍是普通 Element/Widget 子树，class、
    attribute、事件和 binding 继续走同一矩形树。

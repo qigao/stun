@@ -93,6 +93,14 @@ public:
   const std::unordered_set<std::string>& class_names() const {
     return class_names_;
   }
+  void add_utility(const std::string& utility);
+  void add_utilities(std::string_view utility_list);
+  void set_utilities(std::string_view utility_list);
+  void toggle_utility(const std::string& utility, bool enabled);
+  void remove_utility(const std::string& utility);
+  const std::unordered_set<std::string>& utility_names() const {
+    return utility_names_;
+  }
 
   // ========== Attributes ==========
   void set_attribute(Symbol name, const std::string& value = "");
@@ -525,6 +533,7 @@ private:
   std::unordered_set<Symbol, SymbolHash> classes_;
   std::unordered_set<Symbol, SymbolHash> symbol_only_classes_;
   std::unordered_set<std::string> class_names_;
+  std::unordered_set<std::string> utility_names_;
   std::string class_attribute_;
   std::unordered_map<Symbol, std::string, SymbolHash> attributes_;
   std::unordered_map<Symbol, std::string, SymbolHash> custom_properties_;

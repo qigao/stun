@@ -11,6 +11,11 @@ namespace flex {
 
 namespace chart {
 
+struct ChartComponentBuildOptions {
+    bool show_title = true;
+    bool show_legend = true;
+};
+
 /**
  * @brief Component that renders a chart based on the Chart DSL.
  */
@@ -26,6 +31,9 @@ public:
      * @return A Group node containing the chart representation.
      */
     static flex::Group* build(const std::shared_ptr<AstChart>& chart, flex::Instance& instance);
+    static flex::Group* build(const std::shared_ptr<AstChart>& chart,
+                              flex::Instance& instance,
+                              const ChartComponentBuildOptions& options);
 };
 
 } // namespace chart

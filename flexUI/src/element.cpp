@@ -14,6 +14,27 @@ namespace flexUI {
 
 namespace {
 
+std::unordered_set<std::string> split_class_tokens(
+    std::string_view class_list) {
+  std::unordered_set<std::string> tokens;
+  size_t cursor = 0;
+  while (cursor < class_list.size()) {
+    while (cursor < class_list.size() &&
+           std::isspace(static_cast<unsigned char>(class_list[cursor]))) {
+      ++cursor;
+    }
+    const size_t start = cursor;
+    while (cursor < class_list.size() &&
+           !std::isspace(static_cast<unsigned char>(class_list[cursor]))) {
+      ++cursor;
+    }
+    if (start != cursor) {
+      tokens.emplace(class_list.substr(start, cursor - start));
+    }
+  }
+  return tokens;
+}
+
 void mark_selector_scope_dirty(Element* elem) {
   if (!elem) {
     return;
@@ -133,27 +154,19 @@ void Element::add_classes(std::string_view class_list) {
 }
 
 void Element::set_classes(std::string_view class_list) {
-  std::unordered_set<std::string> next_names;
-  size_t cursor = 0;
-  while (cursor < class_list.size()) {
-    while (cursor < class_list.size() &&
-           std::isspace(static_cast<unsigned char>(class_list[cursor]))) {
-      ++cursor;
-    }
-    const size_t start = cursor;
-    while (cursor < class_list.size() &&
-           !std::isspace(static_cast<unsigned char>(class_list[cursor]))) {
-      ++cursor;
-    }
-    if (start != cursor) {
-      next_names.emplace(class_list.substr(start, cursor - start));
-    }
-  }
+  auto next_names = split_class_tokens(class_list);
   if (next_names == class_names_) {
     return;
   }
 
   class_names_ = std::move(next_names);
+  for (auto it = utility_names_.begin(); it != utility_names_.end();) {
+    if (class_names_.count(*it) == 0) {
+      it = utility_names_.erase(it);
+    } else {
+      ++it;
+    }
+  }
   classes_ = symbol_only_classes_;
   for (const auto& name : class_names_) {
     classes_.insert(Symbol(name));
@@ -179,6 +192,10 @@ bool Element::replace_class(const std::string& old_class,
       class_names_.count(old_class) == 0) {
     return false;
   }
+  const bool replaces_utility = utility_names_.count(old_class) > 0;
+  if (replaces_utility && owner_box_) {
+    owner_box_->validate_utility_token(new_class);
+  }
   auto next_names = class_names_;
   next_names.erase(old_class);
   next_names.insert(new_class);
@@ -186,6 +203,10 @@ bool Element::replace_class(const std::string& old_class,
     return false;
   }
   class_names_ = std::move(next_names);
+  if (replaces_utility) {
+    utility_names_.erase(old_class);
+    utility_names_.insert(new_class);
+  }
   classes_ = symbol_only_classes_;
   for (const auto& name : class_names_) {
     classes_.insert(Symbol(name));
@@ -203,6 +224,7 @@ void Element::remove_class(Symbol cls) {
   const auto previous_name_count = class_names_.size();
   for (auto it = class_names_.begin(); it != class_names_.end();) {
     if (Symbol(*it) == cls) {
+      utility_names_.erase(*it);
       it = class_names_.erase(it);
     } else {
       ++it;
@@ -229,6 +251,7 @@ void Element::remove_class(const std::string& cls) {
   if (cls.empty() || class_names_.erase(cls) == 0) {
     return;
   }
+  utility_names_.erase(cls);
 
   const Symbol symbol(cls);
   const bool has_named_source = std::any_of(
@@ -242,6 +265,77 @@ void Element::remove_class(const std::string& cls) {
   if (owner_box_) {
     owner_box_->notify_utility_tree_changed();
   }
+}
+
+void Element::add_utility(const std::string& utility) {
+  if (utility.empty()) {
+    throw std::invalid_argument("utility token must not be empty");
+  }
+  if (owner_box_) {
+    owner_box_->validate_utility_token(utility);
+  }
+  const bool requirement_added = utility_names_.insert(utility).second;
+  const bool class_existed = class_names_.count(utility) > 0;
+  add_class(utility);
+  if (requirement_added && class_existed && owner_box_) {
+    owner_box_->notify_utility_tree_changed();
+  }
+}
+
+void Element::add_utilities(std::string_view utility_list) {
+  const auto tokens = split_class_tokens(utility_list);
+  for (const auto& token : tokens) {
+    if (owner_box_) {
+      owner_box_->validate_utility_token(token);
+    }
+  }
+  for (const auto& token : tokens) {
+    add_utility(token);
+  }
+}
+
+void Element::set_utilities(std::string_view utility_list) {
+  auto next = split_class_tokens(utility_list);
+  for (const auto& token : next) {
+    if (owner_box_) {
+      owner_box_->validate_utility_token(token);
+    }
+  }
+  if (next == utility_names_) {
+    return;
+  }
+
+  for (const auto& token : utility_names_) {
+    class_names_.erase(token);
+  }
+  for (const auto& token : next) {
+    class_names_.insert(token);
+  }
+  utility_names_ = std::move(next);
+  classes_ = symbol_only_classes_;
+  for (const auto& name : class_names_) {
+    classes_.insert(Symbol(name));
+  }
+  sync_class_attribute();
+  mark_selector_scope_dirty(this);
+  if (owner_box_) {
+    owner_box_->notify_utility_tree_changed();
+  }
+}
+
+void Element::toggle_utility(const std::string& utility, bool enabled) {
+  if (enabled) {
+    add_utility(utility);
+  } else {
+    remove_utility(utility);
+  }
+}
+
+void Element::remove_utility(const std::string& utility) {
+  if (utility_names_.erase(utility) == 0) {
+    return;
+  }
+  remove_class(utility);
 }
 
 void Element::sync_class_attribute() {

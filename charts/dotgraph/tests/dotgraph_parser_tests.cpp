@@ -234,6 +234,7 @@ spec("dotgraph") {
             check_not_null(result.root);
             check_string_eq(result.root->tag(), "dotgraph");
             check(result.root->has_class("dotgraph"));
+            check_str_eq(result.root->attribute("data-slot")->c_str(), "dotgraph");
             check_str_eq(result.root->attribute("data-render-mode")->c_str(), "tree");
 
             box.set_root(result.root);
@@ -245,14 +246,20 @@ spec("dotgraph") {
             box.update();
 
             auto* node_a = box.query_selector(".dot-node[data-node-id=\"A\"]");
+            auto* semantic_node_a = box.query_selector(
+                "[data-slot=dotgraph-node][data-node-id=\"A\"]");
             auto* node_b = box.query_selector("#node-B");
             auto* edge = box.query_selector(".dot-edge[data-from=\"A\"][data-to=\"B\"]");
             check_not_null(node_a);
+            check(node_a == semantic_node_a);
             check_not_null(node_b);
             check_not_null(edge);
             check_not_null(node_a->widget);
             check_not_null(edge->widget);
             check_str_eq(node_a->attribute("data-shape")->c_str(), "diamond");
+            check(node_a->utility_names().count("absolute") == 1);
+            check(result.root->computed_style->position == flexUI::Position::Relative);
+            check_true(box.missing_utility_tokens().empty());
             check_float_eq(node_a->style_.background_color.r, 0x22 / 255.0f, 1e-5f);
             check_float_eq(node_a->style_.background_color.g, 0x44 / 255.0f, 1e-5f);
             check_float_eq(node_a->style_.background_color.b, 0x66 / 255.0f, 1e-5f);

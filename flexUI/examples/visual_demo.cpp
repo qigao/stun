@@ -5,7 +5,6 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <thorvg.h> 
-#include <nlohmann/json.hpp>
 #include <flexUI.h>
 #include "glfw_app.h"
 #include <flex/bridge/renderer.h>
@@ -44,10 +43,8 @@
 #include <algorithm>
 #include <iostream>
 #include <memory>
-#include <fstream>
 #include <filesystem>
 #include <initializer_list>
-#include <stdexcept>
 #include "demo_styles.h"
 #include "host_input_bridge.h"
 #include "renderer_capability_label.h"
@@ -61,61 +58,17 @@ std::string demo_asset_path(const char* relative_path) {
     return (root / relative_path).string();
 }
 
-nlohmann::json load_json_file(const std::filesystem::path& path) {
-    std::ifstream input(path);
-    if (!input) {
-        throw std::runtime_error("unable to open json file: " + path.string());
-    }
-    nlohmann::json value;
-    input >> value;
-    return value;
-}
-
-void enable_shadcn_utility_jit(flexUI::Box& box) {
-    const auto root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
-    const auto whitelist_path =
-        root / "tools" / "shadcn-ir" / "schema" / "utility_whitelist.json";
-    box.enable_utility_jit(load_json_file(whitelist_path));
-}
-
-void add_classes(flexUI::Element* elem, std::initializer_list<const char*> classes) {
+void add_utilities(flexUI::Element* elem,
+                   std::initializer_list<const char*> utilities) {
     if (!elem) {
         return;
     }
-    for (const char* cls : classes) {
-        if (cls && *cls) {
-            elem->add_class(cls);
+    for (const char* utility : utilities) {
+        if (utility && *utility) {
+            elem->add_utility(utility);
         }
     }
 }
-
-const char* kShadcnThemeCss = R"(
-    * {
-        box-sizing: border-box;
-    }
-
-    #root {
-        --background: #0f172a;
-        --foreground: #f8fafc;
-        --card: #334155;
-        --card-foreground: #f8fafc;
-        --popover: #1e293b;
-        --popover-foreground: #f8fafc;
-        --primary: #3b82f6;
-        --primary-foreground: #ffffff;
-        --secondary: #475569;
-        --secondary-foreground: #f8fafc;
-        --muted: #1e293b;
-        --muted-foreground: #94a3b8;
-        --accent: #2563eb;
-        --accent-foreground: #ffffff;
-        --destructive: #ef4444;
-        --destructive-foreground: #ffffff;
-        --border: #475569;
-        --input: #0f172a;
-        --ring: #60a5fa;
-    }
-)";
 
 } // namespace
 
@@ -149,31 +102,23 @@ protected:
 
         box_ = std::make_unique<flexUI::Box>(renderer());
         box_->set_viewport((float)width(), (float)height());
-        box_->load_css(kShadcnThemeCss);
         box_->load_css(examples::DEMO_CSS);
-        try {
-            enable_shadcn_utility_jit(*box_);
-        } catch (const std::exception& e) {
-            std::cerr << "Error: Could not enable shadcn utility JIT: "
-                      << e.what() << std::endl;
-            return false;
-        }
         box_->load_css(examples::DEMO_STATE_CSS);
 
         auto* root = box_->create("div", "root");
-        add_classes(root, {"flex", "flex-row", "w-[1200px]", "h-[900px]",
+        add_utilities(root, {"flex", "flex-row", "w-[1200px]", "h-[900px]",
                            "bg-background"});
         box_->set_root(root);
 
         // Sidebar
         auto* sidebar = box_->create("div", "sidebar");
-        add_classes(sidebar, {"flex", "flex-col", "w-[260px]", "h-[900px]",
+        add_utilities(sidebar, {"flex", "flex-col", "w-[260px]", "h-[900px]",
                               "p-5", "gap-2.5", "bg-muted", "shadow-lg"});
         root->append(sidebar);
 
         auto* brand = box_->create("div");
         brand->add_class("brand");
-        add_classes(brand, {"flex", "items-center", "text-2xl", "w-[220px]",
+        add_utilities(brand, {"flex", "items-center", "text-2xl", "w-[220px]",
                             "h-[60px]", "pb-5", "text-foreground"});
         brand->append(box_->create_widget<LabelWidget>("span", "", "flexUI"));
         sidebar->append(brand);
@@ -182,7 +127,7 @@ protected:
         for (int i = 0; i < 4; ++i) {
             auto* btn = box_->create_widget<ButtonWidget>("button", "");
             btn->add_class("nav-item");
-            add_classes(btn, {"flex", "items-center", "w-[220px]", "h-[40px]",
+            add_utilities(btn, {"flex", "items-center", "w-[220px]", "h-[40px]",
                               "rounded-lg", "px-3", "bg-transparent",
                               "text-muted-foreground"});
             static_cast<ButtonWidget*>(btn->widget)->set_text(menu_items[i]);
@@ -193,30 +138,30 @@ protected:
         }
 
         auto* divider = box_->create("divider", "");
-        add_classes(divider, {"w-[220px]", "h-[1px]", "bg-border", "my-2.5"});
+        add_utilities(divider, {"w-[220px]", "h-[1px]", "bg-border", "my-2.5"});
         sidebar->append(divider);
 
         // Main Content
         auto* main = box_->create("div", "main-content");
-        add_classes(main, {"flex", "flex-col", "w-[940px]", "h-[900px]",
+        add_utilities(main, {"flex", "flex-col", "w-[940px]", "h-[900px]",
                            "p-10", "gap-6", "bg-background"});
         root->append(main);
 
         // Header
         auto* header = box_->create("div");
-        add_classes(header, {"flex", "flex-row", "justify-between",
+        add_utilities(header, {"flex", "flex-row", "justify-between",
                              "items-center", "w-[860px]", "h-[60px]",
                              "mb-5"});
 
         title_label_ = box_->create_widget<LabelWidget>("label", "", "Component Gallery");
-        add_classes(title_label_, {"text-2xl", "w-[400px]", "text-foreground"});
+        add_utilities(title_label_, {"text-2xl", "w-[400px]", "text-foreground"});
         header->append(title_label_);
 
         backend_label_ = box_->create_widget<LabelWidget>(
             "label", "backend-status",
             std::string("Renderer ") +
                 flexui_examples::renderer_capability_label(box_->renderer_capabilities()));
-        add_classes(backend_label_, {"text-[11px]", "w-[240px]",
+        add_utilities(backend_label_, {"text-[11px]", "w-[240px]",
                                      "text-muted-foreground", "overflow-hidden",
                                      "whitespace-nowrap"});
         header->append(backend_label_);
@@ -228,7 +173,7 @@ protected:
 
         // View Container
         auto* container = box_->create("div", "view-container");
-        add_classes(container, {"flex", "relative", "w-[860px]", "h-[800px]"});
+        add_utilities(container, {"flex", "relative", "w-[860px]", "h-[800px]"});
         main->append(container);
 
         // Build all views
@@ -355,7 +300,7 @@ private:
     Element* create_view_pane() {
         auto* view = box_->create("div");
         view->add_class("view-pane");
-        add_classes(view, {"flex", "flex-col", "w-[860px]", "h-[800px]",
+        add_utilities(view, {"flex", "flex-col", "w-[860px]", "h-[800px]",
                            "gap-6"});
         return view;
     }
@@ -364,7 +309,7 @@ private:
         auto* view = box_->create("div");
         view->add_class("view-pane");
         view->add_class("gallery-grid");
-        add_classes(view, {"flex", "flex-row", "w-[860px]", "h-[800px]",
+        add_utilities(view, {"flex", "flex-row", "w-[860px]", "h-[800px]",
                            "gap-5"});
         return view;
     }
@@ -372,19 +317,19 @@ private:
     Element* create_gallery_column() {
         auto* col = box_->create("div");
         col->add_class("col");
-        add_classes(col, {"flex", "flex-col", "w-[420px]", "gap-5"});
+        add_utilities(col, {"flex", "flex-col", "w-[420px]", "gap-5"});
         return col;
     }
 
     Element* create_card(const char* title) {
         auto* card = box_->create("div");
         card->add_class("card");
-        add_classes(card, {"flex", "flex-col", "w-[420px]", "p-5", "gap-4",
+        add_utilities(card, {"flex", "flex-col", "w-[420px]", "p-5", "gap-4",
                            "rounded-xl", "bg-card", "shadow-md"});
 
         auto* heading = box_->create("div");
         heading->add_class("card-title");
-        add_classes(heading, {"text-base", "w-[380px]", "h-[20px]",
+        add_utilities(heading, {"text-base", "w-[380px]", "h-[20px]",
                               "text-muted-foreground"});
         heading->append(box_->create_widget<LabelWidget>("span", "", title));
         card->append(heading);
@@ -394,7 +339,7 @@ private:
     Element* create_card_row() {
         auto* row = box_->create("div");
         row->add_class("card-row");
-        add_classes(row, {"flex", "flex-row", "items-center", "gap-3",
+        add_utilities(row, {"flex", "flex-row", "items-center", "gap-3",
                           "h-[40px]"});
         return row;
     }
@@ -402,7 +347,7 @@ private:
     Element* create_avatar_row() {
         auto* row = box_->create("div");
         row->add_class("avatar-row");
-        add_classes(row, {"flex", "flex-row", "items-center", "gap-3",
+        add_utilities(row, {"flex", "flex-row", "items-center", "gap-3",
                           "h-[64px]"});
         return row;
     }
@@ -410,7 +355,7 @@ private:
     Element* create_tab_page(const char* id, const char* title) {
         auto* page = box_->create("div", id);
         page->add_class("tab-page");
-        add_classes(page, {"absolute", "top-0", "left-0", "w-full", "p-5",
+        add_utilities(page, {"absolute", "top-0", "left-0", "w-full", "p-5",
                            "rounded-xl", "gap-4", "flex", "flex-col",
                            "bg-card", "shadow-md"});
         page->append(box_->create_widget<LabelWidget>("h2", "", title));
@@ -419,7 +364,7 @@ private:
 
     Element* create_section_heading(const char* text) {
         auto* heading = box_->create_widget<LabelWidget>("h2", "", text);
-        add_classes(heading, {"text-2xl", "w-[400px]", "h-[40px]",
+        add_utilities(heading, {"text-2xl", "w-[400px]", "h-[40px]",
                               "text-foreground"});
         return heading;
     }
@@ -448,7 +393,7 @@ private:
         auto* text_input = box_->create_widget<TextAreaWidget>("textarea", "");
         auto* taw = static_cast<TextAreaWidget*>(text_input->widget);
         taw->set_placeholder("Type with IME here...");
-        add_classes(text_input, {"w-[360px]", "h-[80px]"});
+        add_utilities(text_input, {"w-[360px]", "h-[80px]"});
         r3->append(text_input);
         card1->append(r3);
 
@@ -518,13 +463,13 @@ private:
         view->append(table);
 
         auto* task_header = box_->create("div");
-        add_classes(task_header, {"flex", "flex-row", "items-center",
+        add_utilities(task_header, {"flex", "flex-row", "items-center",
                                   "justify-between", "w-[860px]", "h-[40px]"});
         task_header->append(
             box_->create_widget<LabelWidget>("h2", "", "Keyed Live Tasks"));
 
         auto* task_actions = box_->create("div");
-        add_classes(task_actions, {"flex", "flex-row", "items-center", "gap-2"});
+        add_utilities(task_actions, {"flex", "flex-row", "items-center", "gap-2"});
         auto* rotate = box_->create_widget<ButtonWidget>("button", "", "Rotate");
         auto* clear = box_->create_widget<ButtonWidget>("button", "", "Clear");
         auto* restore = box_->create_widget<ButtonWidget>("button", "", "Restore");
@@ -544,7 +489,7 @@ private:
         view->append(task_header);
 
         task_list_ = box_->create("div", "live-task-list");
-        add_classes(task_list_, {"flex", "flex-col", "w-[860px]", "gap-2"});
+        add_utilities(task_list_, {"flex", "flex-col", "w-[860px]", "gap-2"});
         view->append(task_list_);
         task_repeater_ = std::make_unique<UiKeyedRepeater>(*box_, *task_list_);
         tasks_ = initial_tasks_;
@@ -560,7 +505,7 @@ private:
                 auto* row = box.create_widget<ButtonWidget>(
                     "button", "task-" + item.key, item.label);
                 row->add_class("live-task-row");
-                add_classes(row, {"flex", "flex-row", "items-center",
+                add_utilities(row, {"flex", "flex-row", "items-center",
                                   "w-[860px]", "h-[40px]", "px-3", "py-2",
                                   "rounded-md", "bg-card", "text-sm"});
                 row->on_click([this, key = item.key] { toggle_task(key); });
@@ -594,7 +539,7 @@ private:
         auto* view = box_->create("div");
         view->add_class("view-pane");
         view->add_class("tabs-view");
-        add_classes(view, {"flex", "flex-col", "w-[860px]", "h-[800px]",
+        add_utilities(view, {"flex", "flex-col", "w-[860px]", "h-[800px]",
                            "gap-0"});
         
         auto* tabs_elem = box_->create_widget<TabsWidget>("tabs", "");
@@ -608,7 +553,7 @@ private:
                       "Unlike static labels, you can click and drag to SELECT this text.\n"
                       "This demonstrates how to achieve selectable content in flexUI.");
         taw->set_readonly(true);
-        add_classes(selectable_text, {"w-[820px]", "h-[300px]", "bg-transparent"});
+        add_utilities(selectable_text, {"w-[820px]", "h-[300px]", "bg-transparent"});
         page1->append(selectable_text);
         
         auto* page2 = create_tab_page("tab-page-2", "Advanced Components");
@@ -623,7 +568,7 @@ private:
         
         auto* content = box_->create("div", "tab-content");
         content->add_class("tab-content");
-        add_classes(content, {"relative", "w-full", "h-[700px]"});
+        add_utilities(content, {"relative", "w-full", "h-[700px]"});
         content->append(page1);
         content->append(page2);
         content->append(page3);

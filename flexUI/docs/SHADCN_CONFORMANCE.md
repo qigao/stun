@@ -4,9 +4,9 @@
 
 ## Ready scope
 
-当前目标是 **staged migration ready**：已有 flexUI 界面可以用显式 token 清单逐步迁移到 Tailwind-like utility CSS，并且缺失 token 会被本地检查暴露。
+当前目标是 **default utility runtime ready**：普通 `Box(renderer)` 无需额外初始化即可使用内嵌 Tailwind-like utility catalog 与 light/dark/system theme；显式 utility 缺失会在运行时 fail fast。
 
-当前尚不是完整 Tailwind 或完整 shadcn registry pipeline：已有基于显式白名单的 utility JIT 和矩形树 class 自动扫描，但不包含完整 Tailwind 配置/插件系统、主题文件解析，也不保证 registry 中每个组件都已有 IR 实例化定义。registry coverage 只证明 class token 已有白名单展开，不等于组件实例化或视觉完全一致。
+当前仍不是完整 Tailwind 或完整 shadcn registry pipeline：运行时只接受显式白名单，不包含 Tailwind 配置/插件系统，也不保证 registry 中每个组件都已有 IR 实例化定义。registry coverage 只证明 class token 已有白名单展开，不等于组件实例化或视觉完全一致。
 
 当前闭环包含：
 
@@ -113,9 +113,9 @@ registry 分类只用于维护口径，不能替代上面的三类 coverage：
 - `kind: "pseudo"`：映射到伪元素，如 `placeholder:text-muted-foreground`、`file:text-sm`。
 - `kind: "macro"`：展开为多个已知 token，用于复用组合语义。
 
-离线生成或静态资产可先用 `flexUI::shadcn_ir::missing_utility_tokens(whitelist, tokens)` 检查输入，再通过 `flexUI::shadcn_ir::emit_utility_css(whitelist, tokens)` 生成 CSS。运行时 UI 应优先调用 `Box::enable_utility_jit()`：`Box` 会扫描当前矩形树的 class 原文，并在 class 或树结构变化后增量编译、原子替换其专属 stylesheet。
+离线生成或静态资产可先用 `flexUI::shadcn_ir::missing_utility_tokens(whitelist, tokens)` 检查输入，再通过 `flexUI::shadcn_ir::emit_utility_css(whitelist, tokens)` 生成 CSS。运行时默认由 `Box` 内嵌 catalog；新 UI 使用 `add_utility()` / `add_utilities()`，自定义 catalog 或测试才调用 `enable_utility_jit()`。
 
-`emit_utility_css` 本身不会扫描组件树，也不会自动补齐 registry 中尚未列出的 token。JIT 同样只编译 whitelist 中已知的 utility；registry 外 class 仍保留给普通 CSS selector 使用，并通过 `Box::missing_utility_tokens()` 提供诊断。新增 shadcn utility 时，应补 `utility_whitelist.json`，再用下面的 fixture 和 registry coverage 命令验证。
+`emit_utility_css` 本身不会扫描组件树，也不会自动补齐 registry 中尚未列出的 token。JIT 同样只编译 whitelist 中已知的 utility；catalog 外普通 class 保留给 CSS selector，不产生 missing 噪声。显式 utility 未知时立即失败；`Box::missing_utility_tokens()` 仅表达已声明 utility 在 catalog 重配置后缺失的异常状态。
 
 ## IR instantiation API
 
@@ -149,7 +149,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/shadcn/check_registry_covera
 
 ## visual_demo staged migration
 
-`flexUI/examples/visual_demo.cpp` 是当前 staged migration 示例。它向 `Box` 提供 `utility_whitelist.json` 并启用 utility JIT；`Box` 从矩形树中的 class 原文扫描活跃 token，生成完整 CSS snapshot，再原子替换 JIT 所属 stylesheet。
+`flexUI/examples/visual_demo.cpp` 直接使用默认 Box catalog/theme，不再定位源码树 JSON。它通过显式 utility API 构建界面；Box 从矩形树扫描活跃 token，生成完整 CSS snapshot，再原子替换自己的 JIT stylesheet。
 
 `visual_demo` 是 smoke 示例：whitelist 读取或 JIT 构造失败会让 demo 初始化失败。registry 外 class 保留给普通 CSS 使用，并由 `missing_utility_tokens()` 与 fixture 提供可检查的诊断。
 

@@ -202,6 +202,12 @@
         "display": "block"
       }
     },
+    "box-border": {
+      "kind": "decl",
+      "decls": {
+        "box-sizing": "border-box"
+      }
+    },
     "border": {
       "kind": "decl",
       "decls": {
@@ -369,6 +375,12 @@
       "kind": "decl",
       "decls": {
         "flex-grow": "1"
+      }
+    },
+    "hidden": {
+      "kind": "decl",
+      "decls": {
+        "display": "none"
       }
     },
     "flex-col": {

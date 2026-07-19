@@ -37,9 +37,10 @@ group("lexer") {
 
 group("Lexer: Basic tokens") {
   it("Keywords") {
-    auto lexer = lexer_create("scene group rect circle text");
+    auto lexer = lexer_create("scene ui group rect circle text");
 
     REQUIRE(lex_next_token(lexer).type == TOK_SCENE);
+    REQUIRE(lex_next_token(lexer).type == TOK_UI);
     REQUIRE(lex_next_token(lexer).type == TOK_NODE_TYPE); // group
     REQUIRE(lex_next_token(lexer).type == TOK_NODE_TYPE); // rect
     REQUIRE(lex_next_token(lexer).type == TOK_NODE_TYPE); // circle
@@ -267,6 +268,68 @@ TEST_CASE("Parser: Scene with dimensions", "[parser][scene]") {
   REQUIRE(program->scene->name == "MyScene");
   REQUIRE(program->scene->width == 1920.0f);
   REQUIRE(program->scene->height == 1080.0f);
+}
+
+TEST_CASE("Parser: UI document preserves generic element tree",
+          "[parser][ui]") {
+  auto program = parse(R"(
+    ui MainWindow {
+      div root {
+        utility: "flex",
+        role: "application",
+        button save {
+          text: "Save",
+          on.click: "save_document"
+        }
+      }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->ui_documents.size() == 1);
+  const auto& document = program->ui_documents.front();
+  REQUIRE(document->name == "MainWindow");
+  REQUIRE(document->children.size() == 1);
+  const auto& root = document->children.front();
+  REQUIRE(root->type == "div");
+  REQUIRE(root->id == "root");
+  REQUIRE(std::get<std::string>(root->properties.at("utility")) == "flex");
+  REQUIRE(root->children.size() == 1);
+  REQUIRE(root->children.front()->type == "button");
+  REQUIRE(std::get<std::string>(
+              root->children.front()->properties.at("text")) == "Save");
+}
+
+TEST_CASE("Parser: UI and scene remain independent", "[parser][ui][scene]") {
+  auto program = parse(R"(
+    ui Inspector {
+      div root {}
+    }
+    scene Preview {
+      rect background { width: 320, height: 200 }
+    }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->ui_documents.size() == 1);
+  REQUIRE(program->ui_documents.front()->name == "Inspector");
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->name == "Preview");
+  REQUIRE(program->scene->children.size() == 1);
+}
+
+TEST_CASE("Parser: UI properties require explicit separators", "[parser][ui]") {
+  auto program = parse(R"(
+    ui Invalid {
+      div root {
+        role: "application"
+        button save {}
+      }
+    }
+  )");
+
+  REQUIRE(program == nullptr);
+  REQUIRE(std::string(get_error()).find("separated by commas") != std::string::npos);
 }
 
 TEST_CASE("Parser: Constant math expressions use MIR evaluator", "[parser][expr]") {
