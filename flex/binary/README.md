@@ -2,6 +2,9 @@
 
 Fast binary serialization format for Flex UI files (`.flex` → `.flexb`).
 
+See [FORMAT.md](FORMAT.md) for the wire-format specification and
+[EXAMPLE.md](EXAMPLE.md) for complete usage examples.
+
 ## Features
 
 ### ✅ Currently Implemented

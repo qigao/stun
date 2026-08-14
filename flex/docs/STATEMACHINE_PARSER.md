@@ -90,7 +90,7 @@ int main() {
 }
 ```
 
-### 3. `flex/examples/test_parser.cpp` (modified)
+### 3. `flex/examples/legacy/thorvg/test_parser.cpp` (retired reference)
 Extended to print state machine information:
 ```cpp
 // Print state machines

@@ -1,7 +1,7 @@
 // Infographic DSL -> Flex Runtime rendering example
 #include <SDL2/SDL.h>
 #include <flex.h>
-#include <backends/thorvg/init.h>
+#include <flex/render/engines/thorvg.h>
 #include <ir/unified_infographic.h>
 #include <infographic_component.h>
 #include <flex/runtime/instance.h>
@@ -229,13 +229,13 @@ public:
         sdl_renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         texture_ = SDL_CreateTexture(sdl_renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
 
-        flex::init();
+        flex::render::engines::thorvg::init();
         canvas_ = tvg::SwCanvas::gen();
         buffer_.resize(WIDTH * HEIGHT);
         canvas_->target(buffer_.data(), WIDTH, WIDTH, HEIGHT, tvg::ColorSpace::ARGB8888);
-        flex::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf");
+        flex::render::engines::thorvg::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf");
 
-        flex_renderer_ = flex::create_thorvg_renderer(canvas_);
+        flex_renderer_ = flex::render::engines::thorvg::create_renderer(canvas_);
         load_dsl(DEMO_DSL);
         return true;
     }
@@ -312,7 +312,7 @@ public:
     ~DslRenderExample() {
         flex_renderer_.reset();
         instance_.reset();
-        flex::shutdown();
+        flex::render::engines::thorvg::shutdown();
         delete canvas_;
         SDL_DestroyTexture(texture_);
         SDL_DestroyRenderer(sdl_renderer_);

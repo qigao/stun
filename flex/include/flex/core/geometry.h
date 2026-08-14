@@ -618,7 +618,7 @@ inline std::string ring_to_path_rough(float outer_r, float inner_r, const RoughO
     }
 
     // Concatenate outer and inner paths.
-    // ThorVG uses even-odd fill rule by default for complex paths.
+    // Complex paths use the even-odd fill rule across renderer backends.
     return circle_to_path_rough(outer_r, opts) + " " + circle_to_path_rough(inner_r, opts);
 }
 

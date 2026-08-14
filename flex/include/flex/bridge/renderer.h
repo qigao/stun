@@ -13,23 +13,22 @@
 namespace flex {
 
 enum class RendererBackend {
-    ThorVG,
-    TUI,
-    NanoVG,
-    Skia,
-    Direct2D,
-    // Keep Custom last; the registry uses it as the fixed backend count.
-    Custom
+  OpenGL,
+  Vulkan,
+  TUI,
+  Direct2D,
+  // Keep Custom last; the registry uses it as the fixed backend count.
+  Custom
 };
 
 struct RendererCreateInfo {
-    RendererBackend backend = RendererBackend::Custom;
-    CanvasHandle handle = nullptr;
+  RendererBackend backend = RendererBackend::Custom;
+  CanvasHandle handle = nullptr;
 };
 
 using RendererFactory = std::unique_ptr<Renderer> (*)(CanvasHandle handle);
 
-const char* renderer_backend_name(RendererBackend backend);
+const char *renderer_backend_name(RendererBackend backend);
 RendererFactory renderer_backend_factory(RendererBackend backend);
 RendererFactory default_renderer_factory();
 RendererFactory set_default_renderer_factory(RendererFactory factory);
@@ -44,6 +43,6 @@ bool is_renderer_backend_available(RendererBackend backend);
 // has selected a default renderer plugin/factory.
 std::unique_ptr<Renderer> create_renderer(CanvasHandle handle);
 std::unique_ptr<Renderer> create_renderer(RendererBackend backend, CanvasHandle handle);
-std::unique_ptr<Renderer> create_renderer(const RendererCreateInfo& info);
+std::unique_ptr<Renderer> create_renderer(const RendererCreateInfo &info);
 
 } // namespace flex

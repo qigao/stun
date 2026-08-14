@@ -68,13 +68,13 @@ scene name {
     circle name {
         x: 100, y: 100
         radius: 50
-        color: red
+        fill: #ff0000
     }
 
     rect name {
         x: 200, y: 200
         width: 100, height: 50
-        color: blue
+        fill: #0000ff
     }
 
     // 高级几何体
@@ -116,13 +116,13 @@ scene name {
         x: 400, y: 400
         outerRadius: 50
         innerRadius: 30
-        fill: #cyan
+        fill: #00ffff
     }
 
     text name {
         x: 300, y: 300
         content: "Hello"
-        color: white
+        color: #ffffff
         fontSize: 24
     }
 
@@ -160,7 +160,7 @@ scene name {
 }
 ```
 
-**重要：支持任意深度的group嵌套！**
+**重要：group 支持深层嵌套；解析器栈上限为 256 个语法状态，超限会明确报错。**
 
 ### Repeat Block
 
@@ -594,6 +594,7 @@ anim "moveAndFade" {
     loop: loop    // once, loop, pingpong
 
     track "x" {
+        expression: ${lerp(from, to, smoothstep(0, 1, progress))}
         keyframe 0s -> 0
         keyframe 2s -> 100
     }
@@ -603,6 +604,8 @@ anim "moveAndFade" {
         keyframe 1s -> 0.5
         keyframe 2s -> 0.0
     }
+
+    trigger 1s -> "halfway"
 
     track "#statusText/content" {
         keyframe 0s -> "Loading..."
@@ -619,7 +622,18 @@ anim "moveAndFade" {
 **Track语法：**
 - 简单属性：`"x"`, `"y"`, `"opacity"`, `"rotation"`
 - 带ID定位：`"#nodeId/property"`, `"#nodeId/text.color"`
-- 支持float, string, Color值
+- 支持 float、string、Color 和 `vec2(x, y)` 值
+- float 轨道可用 `expression: ${...}` 覆盖默认插值；固定输入为 `time`、`progress`、`from`、`to`，加载时编译为 MIR/JIT
+- `position` 轨道可设置 `interpolation: catmullRom`，自动生成经过二维关键点的平滑路径
+- `position` 轨道可设置 `interpolation: cubicBezier`，并用
+  `bezier(position, inTangent, outTangent)` 为每个关键帧显式给出相对空间切线
+- `trigger <time> -> "event"` 在播放跨过时间点时发送交互事件
+- 每条 track 至少有一个关键帧；时间必须非负并严格递增，重复时间会在加载时失败
+- 动画名和同一动画内的 track 路径必须唯一，`loop` 只接受 `once`、`loop`、`pingpong`
+- `#node/property` 会在加载期检查节点是否存在、该节点类型是否支持目标属性，以及
+  keyframe 是 scalar、string、color 还是 vec2；错误目标不会再在播放时静默跳过
+- scene 中显式声明的节点 ID 必须唯一。注册组件及其 builder 内部结构属于不透明边界，
+  无法静态证明的内部目标保留到运行时解析
 
 ---
 
@@ -658,22 +672,53 @@ machine statusTracker {
 **Condition类型：**
 - 输入比较：`when input > value`, `when input < value`, `when input == value`
 - 事件触发：`when eventName`
-- 时间条件：`after 2.0s`
-- 动画结束：`on_anim_end`
+
+`after 2.0s` 与 `on_anim_end` 当前尚未进入 grammar，不属于可用语法。
+
+加载期会验证同一 layer 内 state 名唯一、最多一个 `initial: true`，以及 transition
+两端必须引用该 layer 中已声明的 state。state 的 `animation` 也必须引用当前 Definition
+中已声明的动画。条件、set action 和动画参数表达式都会在 lowering 前编译为 MIR/JIT；
+失败时不会创建部分状态机。`set #node.property` 还会验证节点存在、属性可动画且能够
+接收 MIR 返回的 scalar 值；字符串、颜色和 vec2 属性不能由当前数值 set action 写入。
 
 ---
 
 ## 6. INPUT
 
 ```flex
-// 不需要显式声明input，直接在C++中设置
+var counter = 0
+var username = "Guest"
+var enabled = true
+
+scene dashboard {
+    text greeting {
+        content: $username
+    }
+}
 ```
+
+顶层 `var` 声明一个带默认值的运行时输入。类型由默认值推断，并在该 Definition
+创建的每个 Instance 中独立保存；支持 `number`、`string`、`boolean`。`$name` 用于
+直接绑定，`${...}` / `$(...)` 用于 MIR 数值表达式。字符串变量不能进入数值表达式，
+已声明变量也不能在 C++ 端改成另一种类型，这些错误会立即报告。
+
+`const` 和裸 `var` 名称仍会在解析属性时替换为声明值；需要运行时响应变化的属性必须
+显式写成 `$name` 或表达式绑定。未声明输入仍可由 C++ 动态注入，以兼容宿主应用按需
+提供的数据。
 
 **C++端使用：**
 ```cpp
+for (const auto& [name, defaultValue] : definition->input_schema()) {
+    // 可在创建 Instance 前检查宿主需要提供的输入及其推断类型
+}
+
 instance->set_input("counter", 5.0f);
 instance->set_input("username", "Alice");
 ```
+
+当前 `.flexb` 格式尚未携带运行时 input schema；`flex-compiler` 遇到 `var` 会明确
+失败，避免生成丢失默认值和绑定语义的二进制。此类 Definition 暂时应直接从 `.flex`
+源码加载。
 
 **状态机中引用：**
 ```flex
@@ -903,7 +948,7 @@ component IconButton {
 - Component和内置节点使用相同语法
 
 **2. Composability（可组合性）**
-- Group支持任意深度嵌套
+- Group 支持深层嵌套，并受解析器 256 状态栈上限保护
 - Component可以嵌套Component
 - 动画和状态机可以组合使用
 
@@ -943,8 +988,8 @@ component IconButton {
 - `$(index)` - for循环中的索引
 
 **重要特性：**
-- ✅ 支持任意深度的group嵌套
-- ✅ 支持任意深度的Component嵌套
+- ✅ 支持有界的深层 group 嵌套
+- ✅ 支持有界的深层 Component 嵌套
 - ✅ repeat生成重复元素，@index自动替换
 - ✅ data + for循环数据驱动UI生成
 - ✅ 统一的相对定位规则

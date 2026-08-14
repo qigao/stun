@@ -8,10 +8,8 @@
 #include <meta_editor/view/cad_top_bar.h>
 #include <meta_editor/view/cad_bottom_bar.h>
 #include <meta_editor/view/icon_system.h>
-#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include "../examples/glfw_app.h"
-#include <thorvg.h>
 #include <iostream>
 
 using namespace meta_editor;
@@ -79,7 +77,9 @@ public:
     void on_render() override {
         editor_.update(1.0f / 60.0f);
         
-        renderer()->begin_frame((float)width(), (float)height(), content_scale_x_);
+        renderer()->begin_frame((float)width() / content_scale_x_,
+                                (float)height() / content_scale_y_,
+                                content_scale_x_);
         renderer()->clear(flex::Color{0.25f, 0.25f, 0.25f, 1.0f}); // CAD gray-ish background
         
         // Render canvas

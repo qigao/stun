@@ -11,7 +11,7 @@
 #include "binding_runtime.h"
 #include "event.h"
 #include "style_engine.h"
-#include "utility_jit.h"
+#include "tailwindcss.h"
 #include "transition.h"
 #include "event_dispatcher.h"
 #include "view_pipeline.h"

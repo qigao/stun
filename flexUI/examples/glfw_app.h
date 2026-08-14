@@ -1,8 +1,7 @@
 #pragma once
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <thorvg.h>
-#include <flex/bridge/renderer_thorvg.h>
+#include "backends/opengl/init.h"
 #include <flexUI/host_bridge.h>
 #include "host_media_bridge.h"
 #include "win32_ime_helper.h"
@@ -30,8 +29,7 @@ public:
 
     virtual ~GlfwApp() {
         renderer_.reset();
-        canvas_.reset();
-        tvg::Initializer::term();
+        flex::opengl_backend::shutdown();
 #ifdef _WIN32
         if (window_ && original_wnd_proc) {
             flexui_examples::win32_ime::restore_window_proc(glfwGetWin32Window(window_), original_wnd_proc);
@@ -91,19 +89,13 @@ public:
 
         glfwSwapInterval(1);
 
-        if (tvg::Initializer::init(4) != tvg::Result::Success) {
-            std::cerr << "ThorVG init failed" << std::endl;
-            return false;
-        }
-
-        canvas_.reset(tvg::GlCanvas::gen());
-        if (!canvas_) {
-            std::cerr << "GlCanvas creation failed" << std::endl;
-            return false;
-        }
-
-        canvas_->target(glfwGetCurrentContext(), 0, width_, height_, tvg::ColorSpace::ABGR8888S);
-        renderer_ = create_thorvg_renderer(canvas_.get());
+        flex::opengl_backend::init();
+        flex::opengl_backend::register_backend();
+        canvas_.get_proc_address = [](void*, const char* name) {
+            return reinterpret_cast<flex::opengl_backend::OpenGLProcAddress>(
+                glfwGetProcAddress(name));
+        };
+        renderer_ = flex::opengl_backend::create_renderer(&canvas_);
 
         if (!renderer_) {
             std::cerr << "Renderer creation failed" << std::endl;
@@ -133,9 +125,6 @@ public:
             if (should_render_frame()) {
                 glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
-                if (remove_canvas_before_render()) {
-                    canvas_->remove();
-                }
                 on_render();
                 glfwSwapBuffers(window_);
             } else {
@@ -159,7 +148,6 @@ public:
 
     // Accessors
     Renderer* renderer() { return renderer_.get(); }
-    tvg::GlCanvas* canvas() { return canvas_.get(); }
     GLFWwindow* window() { return window_; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -252,23 +240,15 @@ protected:
     virtual flexUI::Box* ime_box() { return nullptr; }
     virtual flexUI::Box* host_box() { return ime_box(); }
     virtual bool should_render_frame() const { return true; }
-    virtual bool remove_canvas_before_render() const { return true; }
     virtual void on_resize(int w, int h) {
         width_ = w;
         height_ = h;
         glfwGetWindowContentScale(window_, &content_scale_x_, &content_scale_y_);
         glViewport(0, 0, w, h);
-        if (canvas_) canvas_->target(glfwGetCurrentContext(), 0, w, h, tvg::ColorSpace::ABGR8888S);
     }
 
     bool load_font(const char* name, const char* path) {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file) return false;
-        auto size = file.tellg();
-        file.seekg(0);
-        std::vector<char> buf(size);
-        file.read(buf.data(), size);
-        return tvg::Text::load(name, buf.data(), (uint32_t)size, "ttf", true) == tvg::Result::Success;
+        return flex::opengl_backend::load_font(name, path);
     }
 
     void sync_ime_caret(flexUI::Box* box) {
@@ -405,7 +385,7 @@ private:
     double mouse_x_ = 0, mouse_y_ = 0;
 
     GLFWwindow* window_ = nullptr;
-    std::unique_ptr<tvg::GlCanvas> canvas_;
+    flex::opengl_backend::OpenGLCanvas canvas_;
     std::unique_ptr<Renderer> renderer_;
     std::string current_cursor_name_ = "default";
     std::string current_color_scheme_ = "normal";

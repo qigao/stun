@@ -13,6 +13,12 @@ flexUI 的目标是用 CSS 描述界面状态，再把同一棵 Element 树投�
    解析 CSS，并把选择器、媒体条件、容器查询和动画声明计算成 `ComputedStyle`。
 
 2.1 Utility JIT 与默认 theme
+   Tailwind-like 编译能力由独立的 `FlexUI::TailwindCSS` 静态模块拥有，源码位于
+   `flexUI/modules/tailwindcss/`，公开入口为 `flexUI/tailwindcss.h`。该模块只依赖
+   nlohmann-json，负责 catalog 校验、token → CSS、缓存、revision 和资源上限，不读取或
+   修改 Element 树。`flexUI/utility_jit.h` 是源码兼容头；旧的
+   `shadcn_ir::emit_utility_css` / `missing_utility_tokens` 是委托给该模块的兼容包装。
+
    `Box(renderer)` 会在内建 widget 规则之后加载内嵌 theme，并预留默认 Utility JIT
    stylesheet slot。utility 定义的唯一事实源是
    `tools/shadcn-ir/schema/utility_whitelist.json`；构建时将其内嵌，运行时多个 Box
@@ -52,6 +58,9 @@ flexUI 的目标是用 CSS 描述界面状态，再把同一棵 Element 树投�
 ## 约束
 
 - CSS 语义只在 StyleEngine 和 LayoutManager 层落地。
+- `FlexUI::TailwindCSS` 不依赖 FlexUI Core；依赖方向固定为
+  `FlexUI::Core → FlexUI::TailwindCSS → nlohmann-json`。Element 扫描、stylesheet slot
+  和 cascade 状态仍归 `Box` / `StyleEngine` 所有。
 - `UiKeyedRepeater` 独占其容器的直接子节点顺序；应用不得绕过 repeater 增删或重排这些节点。
   集合变化时由应用显式调用 `reconcile()`，不得在每帧无条件扫描。退役节点保留稳定身份，但会清除
   focus、capture、交互伪状态、transition 和 animation；历史 key 数量受容量上限约束。

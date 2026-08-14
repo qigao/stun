@@ -48,7 +48,7 @@ target_include_directories(flexchart_geoshape
     PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}"
     PRIVATE ../../src
 )
-target_link_libraries(flexchart_geoshape PUBLIC flexchart_common flexchart PRIVATE TurboUtils::Parser)
+target_link_libraries(flexchart_geoshape PUBLIC flexchart_common flexchart PRIVATE TurboParser::Parser)
 set_target_properties(flexchart_geoshape PROPERTIES FOLDER "Modules/FlexChart/Marks")
 
 # Parser test

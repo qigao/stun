@@ -937,6 +937,42 @@ scene Child {
             check_close(std::get<float>(loaded_track->sample(1.5f)), 1.0f);
         }
 
+        it("rejects MIR tracks that the current binary format cannot preserve") {
+            ArenaAllocator arena(8192);
+            auto scene = Scene::create(640.0f, 360.0f, arena);
+            auto timeline = Timeline::create("jit", arena);
+            auto track = timeline->add_track("x");
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 1.0f);
+            track->set_numeric_expression("smoothstep(0, 1, progress)");
+
+            BinaryWriter writer;
+            check(writer.write(scene, {timeline}).empty());
+        }
+
+        it("rejects vec2 motion paths that the current binary format cannot preserve") {
+            ArenaAllocator arena(8192);
+            auto scene = Scene::create(640.0f, 360.0f, arena);
+            auto timeline = Timeline::create("curve", arena);
+            auto track = timeline->add_track("position");
+            track->set_spatial_interpolation(SpatialInterpolation::CatmullRom);
+            track->add_keyframe(0.0f, Vec2{0.0f, 0.0f});
+            track->add_keyframe(1.0f, Vec2{10.0f, 20.0f});
+
+            BinaryWriter writer;
+            check(writer.write(scene, {timeline}).empty());
+        }
+
+        it("rejects timeline triggers that the current binary format cannot preserve") {
+            ArenaAllocator arena(8192);
+            auto scene = Scene::create(640.0f, 360.0f, arena);
+            auto timeline = Timeline::create("interactive", arena);
+            timeline->add_trigger(0.5f, "halfway");
+
+            BinaryWriter writer;
+            check(writer.write(scene, {timeline}).empty());
+        }
+
         it("round-trips string and color timelines") {
             ArenaAllocator arena(8192);
             auto scene = Scene::create(640.0f, 360.0f, arena);
@@ -1223,6 +1259,132 @@ scene TestScene {
                 return;
             }
             check(std::strlen(error_message) > 0);
+        }
+
+        it("rejects runtime var schemas until the binary format can preserve them") {
+            const char* source = R"(
+var offset = 12
+scene RuntimeInput {
+    rect box { x: $offset, y: 0, width: 10, height: 10 }
+}
+)";
+
+            BinaryCompiler compiler;
+            std::vector<uint8_t> binary = compiler.compile_source(source);
+
+            check(compiler.has_error());
+            check(binary.empty());
+            check_str_contains(compiler.error_message(), "runtime var schemas");
+        }
+
+        it("rejects property bindings instead of silently dropping them") {
+            const char* source = R"(
+scene BoundScene {
+    rect box { x: $offset, y: 0, width: 10, height: 10 }
+}
+)";
+
+            BinaryCompiler compiler;
+            std::vector<uint8_t> binary = compiler.compile_source(source);
+
+            check(compiler.has_error());
+            check(binary.empty());
+            check_str_contains(compiler.error_message(), "property bindings");
+        }
+
+        it("rejects component bindings instead of silently dropping them") {
+            const char* source = R"(
+component Badge {
+    width: 10
+    rect body { width: $width, height: 10 }
+}
+scene ComponentScene {
+    Badge badge { width: $badgeWidth }
+}
+)";
+
+            BinaryCompiler compiler;
+            std::vector<uint8_t> binary = compiler.compile_source(source);
+
+            check(compiler.has_error());
+            check(binary.empty());
+            check_str_contains(compiler.error_message(), "component bindings");
+        }
+
+        it("rejects state machines instead of silently dropping them") {
+            const char* source = R"(
+scene StatefulScene {
+    rect box { x: 0, y: 0, width: 10, height: 10 }
+}
+machine visibility {
+    layer main {
+        state visible { initial: true }
+        state hidden {}
+        transition visible -> hidden when ${hide}
+    }
+}
+)";
+
+            BinaryCompiler compiler;
+            std::vector<uint8_t> binary = compiler.compile_source(source);
+
+            check(compiler.has_error());
+            check(binary.empty());
+            check_str_contains(compiler.error_message(), "state machines");
+        }
+
+        it("rejects asset manifests instead of silently dropping them") {
+            const char* source = R"(
+assets {
+    image logo: "images/logo.png"
+}
+scene AssetScene {}
+)";
+
+            BinaryCompiler compiler;
+            std::vector<uint8_t> binary = compiler.compile_source(source);
+
+            check(compiler.has_error());
+            check(binary.empty());
+            check_str_contains(compiler.error_message(), "asset manifests");
+        }
+
+        it("clears stale errors and statistics before each compilation") {
+            BinaryCompiler compiler;
+
+            std::vector<uint8_t> failed = compiler.compile_source(nullptr);
+            check(failed.empty());
+            check(compiler.has_error());
+
+            const char* valid_source = R"(
+scene Recovered {
+    width: 64
+    height: 64
+}
+)";
+            std::vector<uint8_t> recovered = compiler.compile_source(valid_source);
+
+            check(!recovered.empty());
+            check(!compiler.has_error());
+            check(compiler.stats().source_size == std::strlen(valid_source));
+            check(compiler.stats().binary_size == recovered.size());
+
+            std::vector<uint8_t> failed_again = compiler.compile_source("");
+            check(failed_again.empty());
+            check(compiler.has_error());
+            check(compiler.stats().source_size == 0);
+            check(compiler.stats().binary_size == 0);
+            check(compiler.stats().node_count == 0);
+            check(compiler.stats().string_count == 0);
+            check(compiler.stats().timeline_count == 0);
+        }
+
+        it("rejects an empty output path before reading the input") {
+            BinaryCompiler compiler;
+
+            check(!compiler.compile_to_file("missing.flex", nullptr));
+            check(compiler.has_error());
+            check_str_eq(compiler.error_message(), "Empty output path");
         }
 
         it("collects compilation statistics") {

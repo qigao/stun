@@ -13,6 +13,10 @@ include_directories(include)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 
+set(FLEXUI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+set(FLEXUI_INCLUDE_DIR "${FLEXUI_ROOT}/include")
+add_subdirectory(modules/tailwindcss)
+
 # Find lexbor for CSS parsing
 find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
 find_library(LEXBOR_LIBRARY NAMES lexbor)
@@ -102,7 +106,6 @@ set(FLEXUI_SOURCES
   src/render_manager.cpp
   src/render_command.cpp
   src/shadcn_ir.cpp
-  src/utility_jit.cpp
   src/syntax_highlighter.cpp
   src/highlighters/treesitter_highlighter.cpp
   src/highlighters/ts_plugin_loader.cpp
@@ -158,6 +161,7 @@ set(FLEXUI_HEADERS
   include/flexUI/render_command.h
   include/flexUI/render_frame.h
   include/flexUI/shadcn_ir.h
+  include/flexUI/tailwindcss.h
   include/flexUI/utility_jit.h
   include/flexUI/widget.h
   include/flexUI/element.h
@@ -206,6 +210,7 @@ set(FLEXUI_HEADERS
 
 # 创建库
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
+add_library(FlexUI::Core ALIAS flexUI)
 
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
@@ -214,13 +219,14 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} flex_runtime flex_render flex_animation TurboUtils::Core md_parser nlohmann_json::nlohmann_json
-    PRIVATE flex_compiler unofficial::tree-sitter::tree-sitter
+    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS TurboUtils::Core md_parser nlohmann_json::nlohmann_json
+    PRIVATE Flex::Compiler unofficial::tree-sitter::tree-sitter
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
   flexUI
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+          ${CMAKE_CURRENT_SOURCE_DIR}/modules/tailwindcss
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
@@ -235,7 +241,7 @@ install(DIRECTORY include/flexUI DESTINATION include)
 install(FILES include/flexUI.h DESTINATION include)
 
 # 安装库
-install(TARGETS flexUI DESTINATION lib)
+install(TARGETS flexUI flexUI_tailwindcss DESTINATION lib)
 
 add_subdirectory(examples)
 add_subdirectory(tests)

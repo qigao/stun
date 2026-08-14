@@ -31,11 +31,11 @@ target_include_directories(sequence PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(sequence PUBLIC TurboUtils::Parser)
+target_link_libraries(sequence PUBLIC TurboParser::Parser)
 
 # Test executable
 add_executable(sequence_test tests/test_parser.c)
-target_link_libraries(sequence_test sequence TurboUtils::TinyTest TurboUtils::Parser)
+target_link_libraries(sequence_test sequence TurboUtils::TinyTest TurboParser::Parser)
 target_compile_definitions(sequence_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/sequence")
 
 add_test(NAME sequence_test COMMAND sequence_test)

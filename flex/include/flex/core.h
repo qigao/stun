@@ -24,6 +24,7 @@
 #include "flex/core/path.h"
 #include "flex/core/instance.h"
 
+#include "flex/core/animation_program.h"
 #include "flex/core/timeline.h"
 
 #include "flex/core/fsm.h"

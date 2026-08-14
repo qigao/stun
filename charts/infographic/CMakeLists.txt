@@ -135,16 +135,8 @@ target_link_libraries(flexinfographic_new_templates_test flexinfographic)
 add_test(NAME FlexInfographicNewTemplatesTest COMMAND flexinfographic_new_templates_test)
 set_target_properties(flexinfographic_new_templates_test PROPERTIES FOLDER "Modules/FlexInfographic/Tests")
 
-find_package(SDL2 CONFIG QUIET)
-if(SDL2_FOUND)
-    add_executable(infographic_render_example examples/infographic_render_example.cpp)
-    target_link_libraries(infographic_render_example PRIVATE flexinfographic flex flex_backend_thorvg SDL2::SDL2 SDL2::SDL2main)
-    set_target_properties(infographic_render_example PROPERTIES FOLDER "Modules/FlexInfographic/Examples")
-
-    add_executable(infographic_dsl_render examples/dsl_render_example.cpp)
-    target_link_libraries(infographic_dsl_render PRIVATE flexinfographic flex flex_backend_thorvg SDL2::SDL2 SDL2::SDL2main)
-    set_target_properties(infographic_dsl_render PROPERTIES FOLDER "Modules/FlexInfographic/Examples")
-endif()
+# The former SDL software-rendered examples depended on the retired ThorVG
+# engine. The renderer-independent examples and end-to-end tests stay enabled.
 
 # ============================================================================
 # Tests

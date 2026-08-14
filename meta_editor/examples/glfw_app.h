@@ -1,7 +1,7 @@
 #pragma once
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <thorvg.h>
+#include "backends/opengl/init.h"
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
@@ -25,8 +25,7 @@ public:
 
     virtual ~GlfwApp() {
         renderer_.reset();
-        canvas_.reset();
-        tvg::Initializer::term();
+        flex::opengl_backend::shutdown();
         if (window_) glfwDestroyWindow(window_);
         glfwTerminate();
     }
@@ -84,19 +83,13 @@ public:
 
         glfwSwapInterval(1);
 
-        if (tvg::Initializer::init(4) != tvg::Result::Success) {
-            std::cerr << "ThorVG init failed" << std::endl;
-            return false;
-        }
-
-        canvas_.reset(tvg::GlCanvas::gen());
-        if (!canvas_) {
-            std::cerr << "GlCanvas creation failed" << std::endl;
-            return false;
-        }
-
-        canvas_->target(glfwGetCurrentContext(), 0, width_, height_, tvg::ColorSpace::ABGR8888S);
-        renderer_ = create_thorvg_renderer(canvas_.get());
+        flex::opengl_backend::init();
+        flex::opengl_backend::register_backend();
+        canvas_.get_proc_address = [](void*, const char* name) {
+            return reinterpret_cast<flex::opengl_backend::OpenGLProcAddress>(
+                glfwGetProcAddress(name));
+        };
+        renderer_ = flex::opengl_backend::create_renderer(&canvas_);
 
         if (!renderer_) {
             std::cerr << "Renderer creation failed" << std::endl;
@@ -119,7 +112,6 @@ public:
 
             glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
-            canvas_->remove();
             on_render();
             glfwSwapBuffers(window_);
         }
@@ -167,7 +159,6 @@ public:
 
     // Accessors
     Renderer* renderer() { return renderer_.get(); }
-    tvg::GlCanvas* canvas() { return canvas_.get(); }
     GLFWwindow* window() { return window_; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -262,17 +253,10 @@ protected:
         height_ = h;
         glfwGetWindowContentScale(window_, &content_scale_x_, &content_scale_y_);
         glViewport(0, 0, w, h);
-        if (canvas_) canvas_->target(glfwGetCurrentContext(), 0, w, h, tvg::ColorSpace::ABGR8888S);
     }
 
     bool load_font(const char* name, const char* path) {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file) return false;
-        auto size = file.tellg();
-        file.seekg(0);
-        std::vector<char> buf(size);
-        file.read(buf.data(), size);
-        return tvg::Text::load(name, buf.data(), (uint32_t)size, "ttf", true) == tvg::Result::Success;
+        return flex::opengl_backend::load_font(name, path);
     }
 
 private:
@@ -369,7 +353,7 @@ protected:
     double mouse_x_ = 0, mouse_y_ = 0;
 
     GLFWwindow* window_ = nullptr;
-    std::unique_ptr<tvg::GlCanvas> canvas_;
+    flex::opengl_backend::OpenGLCanvas canvas_;
     std::unique_ptr<Renderer> renderer_;
 };
 

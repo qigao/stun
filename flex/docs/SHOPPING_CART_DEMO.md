@@ -8,7 +8,7 @@
 
 ## 📊 Demo概览
 
-### **File**: `shopping_cart_demo.cpp` + `shopping_cart.flex`
+### **Files**: `examples/legacy/thorvg/shopping_cart_demo.cpp` + `shopping_cart.flex`
 
 **运行**:
 ```bash

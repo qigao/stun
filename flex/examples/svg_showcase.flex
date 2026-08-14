@@ -5,7 +5,7 @@ scene SvgShowcase {
     text heading {
         x: 48
         y: 42
-        content: "NanoVG + lunasvg"
+        content: "Flex + PlutoSVG"
         fontFamily: "sans-serif"
         fontSize: 26
         color: #ffffff

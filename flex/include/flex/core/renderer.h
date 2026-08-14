@@ -2,7 +2,7 @@
  * Flex Engine - Renderer Interface (Runtime)
  *
  * Abstract renderer interface for the runtime layer.
- * Backend implementations (ThorVG, NanoVG, etc.) are in the bridge layer.
+ * Backend implementations (gCanvas, NanoVG compatibility, etc.) are in the bridge layer.
  */
 
 #pragma once

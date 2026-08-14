@@ -36,7 +36,7 @@ if(TARGET infographic)
     target_compile_definitions(${TARGET_NAME} PRIVATE MD_HAS_INFOGRAPHIC)
 endif()
 
-set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "tools/md")
+set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "md")
 # ============================================================================
 # Unit Tests
 # ============================================================================

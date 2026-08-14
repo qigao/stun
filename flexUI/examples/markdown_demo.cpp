@@ -231,9 +231,6 @@ protected:
     void on_render() override {
         box_->invalidate(); // Force repaint for demo
         box_->update();
-        
-        canvas()->draw();
-        canvas()->sync();
     }
 
     void on_resize(int w, int h) override {

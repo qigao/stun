@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <limits>
+#include <stdexcept>
 #include <utility>
 #include <new>
 
@@ -359,8 +361,23 @@ public:
 
 private:
     void grow() {
+        if (!allocator_) {
+            throw std::logic_error("PoolVector growth requires an ArenaAllocator");
+        }
+        if (capacity_ > (std::numeric_limits<size_t>::max)() / 2) {
+            throw std::length_error("PoolVector capacity overflow");
+        }
+
         size_t new_capacity = capacity_ == 0 ? 1 : capacity_ * 2;
-        T* new_data = allocator_->create_array<T>(new_capacity);
+        if (new_capacity > (std::numeric_limits<size_t>::max)() / sizeof(T)) {
+            throw std::length_error("PoolVector allocation size overflow");
+        }
+
+        void* storage = allocator_->allocate(new_capacity * sizeof(T), alignof(T));
+        if (!storage) {
+            throw std::bad_alloc();
+        }
+        T* new_data = static_cast<T*>(storage);
 
         // Move existing elements
         for (size_t i = 0; i < size_; i++) {

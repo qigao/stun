@@ -72,8 +72,8 @@
       "version>=": "1.4.0"
     },
     {
-      "name": "lunasvg",
-      "version>=": "3.4.0"
+      "name": "plutosvg",
+      "version>=": "0.0.8"
     },
     {
       "name": "libdatachannel"
@@ -149,6 +149,23 @@
     },
     {
       "name": "tree-sitter-c"
+    },
+    {
+      "name": "vulkan-headers"
+    },
+    {
+      "name": "vulkan-loader"
+    },
+    {
+      "name": "vulkan-memory-allocator"
+    },
+    {
+      "name": "vulkan-tools",
+      "platform": "!osx"
+    },
+    {
+      "name": "vulkan-validationlayers",
+      "platform": "!osx"
     }
   ],
   "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"

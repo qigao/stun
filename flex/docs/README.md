@@ -13,11 +13,11 @@ Welcome to the Flex Engine documentation.
 - **[Component DSL](COMPONENT_DSL.md)**  
   Guide to using and creating reusable components in Flex DSL.
 
-## 🏗️ Core Architecture (Root)
+## 🏗️ Core Architecture
 
-- [Architecture](../ARCHITECTURE.md) - High-level architecture overview.
-- [Binary Format](../BINARY_FORMAT.md) - Specification of the Flex binary format.
-- [Rendering Backends](../RENDERING_BACKENDS.md) - Details on ThorVG and other backends.
+- [Architecture](ARCHITECTURE.md) - Current module boundaries and assembly.
+- [Binary Format](../binary/FORMAT.md) - Specification of the Flex binary format.
+- [Rendering Backends](RENDERING_BACKENDS.md) - Current platform backends and internal engines.
 
 ## 🛠 Systems & Architecture
 

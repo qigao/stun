@@ -149,15 +149,20 @@ scene MyApp {
 ```cpp
 #include <flex.h>
 #include "flex/binary/reader.h"
-#include "backends/thorvg/init.h"
+#include "backends/tui/init.h"
+#include <tui.h>
 #include <iostream>
-#include <vector>
-#include <thorvg.h>
 
 int main() {
-    // Initialize backend integration
-    flex::thorvg_backend::init();
-    flex::thorvg_backend::register_backend();
+    tui_terminal_t* terminal = tui_terminal_create();
+    if (!terminal) {
+        return 1;
+    }
+    if (!tui_terminal_init(terminal)) {
+        tui_terminal_destroy(terminal);
+        return 1;
+    }
+    flex::tui_backend::register_backend();
 
     // Option 1: Load .flexb directly with Definition
     auto definition = flex::Definition::load_binary("app.flexb");
@@ -176,14 +181,11 @@ int main() {
     // Create instance
     auto instance = flex::Instance::create(definition);
 
-    // Render
-    auto canvas = tvg::SwCanvas::gen();
-    std::vector<uint32_t> buffer(800 * 600);
-    canvas->target(buffer.data(), 800, 800, 600, tvg::ColorSpace::ARGB8888);
-
-    auto renderer = flex::create_renderer(static_cast<flex::CanvasHandle>(canvas.get()));
+    auto renderer = flex::tui_backend::create_renderer(terminal);
     if (!renderer) {
         std::cerr << "Failed to create renderer\n";
+        tui_terminal_cleanup(terminal);
+        tui_terminal_destroy(terminal);
         return 1;
     }
 
@@ -191,9 +193,11 @@ int main() {
     renderer->clear(instance->scene()->background());
     instance->render(*renderer);
     renderer->end_frame();
+    tui_terminal_render(terminal);
 
-    // Cleanup
-    flex::thorvg_backend::shutdown();
+    renderer.reset();
+    tui_terminal_cleanup(terminal);
+    tui_terminal_destroy(terminal);
 
     return 0;
 }

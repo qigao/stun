@@ -4,10 +4,10 @@
 
 #include "flexui_designer/designer.h"
 #include "flexui_designer/property_editor.h"
-#include <backends/thorvg/init.h>
+#include "backends/opengl/init.h"
 #include <flex/bridge/renderer.h>
+#include <glad/glad.h>
 #include <SDL2/SDL.h>
-#include <thorvg.h>
 #include <iostream>
 
 using namespace flexui_designer;
@@ -15,22 +15,54 @@ using namespace flexui_designer;
 int main(int argc, char* argv[]) {
     int width = 1280, height = 720;
 
-    SDL_Init(SDL_INIT_VIDEO);
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        std::cerr << "SDL init failed: " << SDL_GetError() << "\n";
+        return 1;
+    }
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_Window* window = SDL_CreateWindow("flexUI Designer",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+        width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    if (!window) {
+        std::cerr << "Window creation failed: " << SDL_GetError() << "\n";
+        SDL_Quit();
+        return 1;
+    }
+    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
+    if (!gl_context || SDL_GL_MakeCurrent(window, gl_context) != 0) {
+        std::cerr << "OpenGL context creation failed: " << SDL_GetError() << "\n";
+        if (gl_context) SDL_GL_DeleteContext(gl_context);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(SDL_GL_GetProcAddress))) {
+        std::cerr << "GLAD init failed\n";
+        SDL_GL_DeleteContext(gl_context);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_GL_SetSwapInterval(1);
 
-    SDL_Surface* surface = SDL_GetWindowSurface(window);
-
-    flex::init();
-    flex::load_font("sans", "C:/Windows/Fonts/arial.ttf");
-
-    std::unique_ptr<tvg::SwCanvas> tvg_canvas(tvg::SwCanvas::gen());
-    tvg_canvas->target(reinterpret_cast<uint32_t*>(surface->pixels),
-                       surface->w, surface->pitch / 4, surface->h,
-                       tvg::ColorSpace::ARGB8888);
-
-    auto renderer = flex::create_thorvg_renderer(tvg_canvas.get());
+    flex::opengl_backend::init();
+    flex::opengl_backend::register_backend();
+    flex::opengl_backend::load_font("sans", "C:/Windows/Fonts/arial.ttf");
+    flex::opengl_backend::OpenGLCanvas canvas;
+    canvas.get_proc_address = [](void*, const char* name) {
+        return reinterpret_cast<flex::opengl_backend::OpenGLProcAddress>(
+            SDL_GL_GetProcAddress(name));
+    };
+    auto renderer = flex::opengl_backend::create_renderer(&canvas);
+    if (!renderer) {
+        std::cerr << "gCanvas renderer creation failed\n";
+        SDL_GL_DeleteContext(gl_context);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
 
     Designer designer((float)width, (float)height);
     designer.init(renderer.get());
@@ -64,11 +96,6 @@ int main(int argc, char* argv[]) {
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
                 width = e.window.data1;
                 height = e.window.data2;
-                surface = SDL_GetWindowSurface(window);
-                tvg_canvas->target(reinterpret_cast<uint32_t*>(surface->pixels),
-                                   surface->w, surface->pitch / 4, surface->h,
-                                   tvg::ColorSpace::ARGB8888);
-                renderer = flex::create_thorvg_renderer(tvg_canvas.get());
                 continue;
             }
 
@@ -177,17 +204,28 @@ int main(int argc, char* argv[]) {
         last_time = now;
         designer.update(dt);
 
-        renderer->begin_frame((float)surface->w, (float)surface->h, 1.0f);
+        int drawable_width = 0;
+        int drawable_height = 0;
+        SDL_GL_GetDrawableSize(window, &drawable_width, &drawable_height);
+        if (width <= 0 || height <= 0 || drawable_width <= 0 || drawable_height <= 0) {
+            SDL_Delay(16);
+            continue;
+        }
+        const float pixel_ratio = static_cast<float>(drawable_width) /
+                                  static_cast<float>(width);
+        glViewport(0, 0, drawable_width, drawable_height);
+        renderer->begin_frame((float)width, (float)height, pixel_ratio);
         renderer->clear(flex::Color{0.1f, 0.1f, 0.12f, 1.0f});
         designer.render(*renderer);
         renderer->end_frame();
 
-        SDL_UpdateWindowSurface(window);
-        SDL_Delay(16);
+        SDL_GL_SwapWindow(window);
     }
 
     designer.shutdown();
-    flex::shutdown();
+    renderer.reset();
+    flex::opengl_backend::shutdown();
+    SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;

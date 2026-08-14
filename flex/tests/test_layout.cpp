@@ -8,17 +8,18 @@
 #include "flex/dsl.h"
 #include "flex/core.h"
 #include "flex/lowering.h"
-#include "backends/renderer.h"
+#include "flex/bridge/renderer.h"
 #include "flex/dsl/parser.h"
 #include "flex/core/renderer.h"
 #include "flex/core/scene.h"
 #include "flex/lowering/ast_to_runtime.h"
 #include "flex.h"
-#include "backends/thorvg/init.h"
+#include "backends/opengl/init.h"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #ifdef _WIN32
 #include "backends/d2d/init.h"
 #endif
@@ -92,13 +93,13 @@ suite("flex::layout") {
 // ============================================================================
 
 TEST_CASE("Renderer factory: backend registry", "[renderer][backend]") {
-  REQUIRE(std::string(renderer_backend_name(RendererBackend::ThorVG)) == "ThorVG");
-  REQUIRE_FALSE(is_renderer_backend_available(RendererBackend::ThorVG));
+  REQUIRE(std::string(renderer_backend_name(RendererBackend::OpenGL)) == "OpenGL");
+  REQUIRE_FALSE(is_renderer_backend_available(RendererBackend::OpenGL));
   REQUIRE_FALSE(is_renderer_backend_available(RendererBackend::Custom));
   REQUIRE(default_renderer_factory() == nullptr);
 
-  REQUIRE(thorvg_backend::register_backend());
-  REQUIRE(is_renderer_backend_available(RendererBackend::ThorVG));
+  REQUIRE(opengl_backend::register_backend());
+  REQUIRE(is_renderer_backend_available(RendererBackend::OpenGL));
   REQUIRE(default_renderer_factory() != nullptr);
 
   auto previous = register_renderer_backend(RendererBackend::Custom, &null_renderer_factory);
@@ -114,17 +115,17 @@ TEST_CASE("Renderer factory: backend registry", "[renderer][backend]") {
 #ifdef _WIN32
 TEST_CASE("Renderer factory: direct2d becomes default on Windows", "[renderer][backend][d2d]") {
   auto previous_default = set_default_renderer_factory(nullptr);
-  auto previous_thorvg = register_renderer_backend(RendererBackend::ThorVG, nullptr);
+  auto previous_opengl = register_renderer_backend(RendererBackend::OpenGL, nullptr);
   auto previous_d2d = register_renderer_backend(RendererBackend::Direct2D, nullptr);
 
-  REQUIRE(thorvg_backend::register_backend());
-  REQUIRE(default_renderer_factory() == renderer_backend_factory(RendererBackend::ThorVG));
+  REQUIRE(opengl_backend::register_backend());
+  REQUIRE(default_renderer_factory() == renderer_backend_factory(RendererBackend::OpenGL));
 
   REQUIRE(d2d_backend::register_backend());
   REQUIRE(default_renderer_factory() == renderer_backend_factory(RendererBackend::Direct2D));
 
   register_renderer_backend(RendererBackend::Direct2D, previous_d2d);
-  register_renderer_backend(RendererBackend::ThorVG, previous_thorvg);
+  register_renderer_backend(RendererBackend::OpenGL, previous_opengl);
   set_default_renderer_factory(previous_default);
 }
 #endif
@@ -1080,7 +1081,7 @@ TEST_CASE("Integration: Parse and apply layout from DSL", "[layout][integration]
   REQUIRE(toolbar->children.size() == 3);
 }
 
-TEST_CASE("Integration: data_binding.flex layout properties", "[layout][integration]") {
+TEST_CASE("Integration: data-binding layout properties", "[layout][integration]") {
   const char *source = R"(
         scene counter {
             width: 400
@@ -1140,6 +1141,123 @@ TEST_CASE("Integration: data_binding.flex layout properties", "[layout][integrat
   REQUIRE(buttonRow->children.size() == 2);
   REQUIRE(buttonRow->children[0]->id == "incrementButton");
   REQUIRE(buttonRow->children[1]->id == "decrementButton");
+}
+
+TEST_CASE("Definition: typed var defaults initialize and isolate runtime inputs",
+          "[definition][binding][var]") {
+  auto definition = Definition::load(R"(
+        var offset = 24
+        var title = "Ready"
+        var shown = true
+
+        scene RuntimeDefaults {
+          rect box {
+            x: $offset
+            y: ${offset * 2}
+            width: 20
+            height: 20
+            visible: $shown
+          }
+          text label {
+            content: $title
+          }
+        }
+      )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  REQUIRE(definition->input_schema().size() == 3);
+  REQUIRE(std::get<float>(definition->input_schema().at("offset")) == 24.0f);
+  REQUIRE(std::get<std::string>(definition->input_schema().at("title")) == "Ready");
+  REQUIRE(std::get<bool>(definition->input_schema().at("shown")));
+
+  auto first = Instance::create(definition);
+  auto second = Instance::create(definition);
+  REQUIRE(first != nullptr);
+  REQUIRE(second != nullptr);
+  first->advance(0.0f);
+  second->advance(0.0f);
+
+  auto *first_box = first->scene()->find("box");
+  auto *second_box = second->scene()->find("box");
+  auto *first_label = dynamic_cast<Text *>(first->scene()->find("label"));
+  REQUIRE(first_box != nullptr);
+  REQUIRE(second_box != nullptr);
+  REQUIRE(first_label != nullptr);
+  REQUIRE_THAT(first_box->x(), WithinAbs(24.0f, 0.001f));
+  REQUIRE_THAT(first_box->y(), WithinAbs(48.0f, 0.001f));
+  REQUIRE(first_box->visible());
+  check_eq(first_label->content(), std::string("Ready"));
+
+  first->set_input("offset", 42.0f);
+  first->set_input("title", "Running");
+  first->set_input("shown", false);
+  first->advance(0.0f);
+
+  REQUIRE_THAT(first_box->x(), WithinAbs(42.0f, 0.001f));
+  REQUIRE_THAT(first_box->y(), WithinAbs(84.0f, 0.001f));
+  REQUIRE_FALSE(first_box->visible());
+  check_eq(first_label->content(), std::string("Running"));
+  REQUIRE_THAT(second_box->x(), WithinAbs(24.0f, 0.001f));
+
+  check_throws_as(first->set_input("offset", "wrong"), std::invalid_argument);
+  check_throws_as(first->set_input("title", 1.0f), std::invalid_argument);
+  check_throws_as(first->set_input("shown", 1.0f), std::invalid_argument);
+}
+
+TEST_CASE("Definition: typed var schema rejects invalid declarations and uses",
+          "[definition][binding][var][validation]") {
+  auto duplicate = Definition::load(R"(
+        var value = 1
+        const value = 2
+        scene Duplicate {}
+      )");
+  REQUIRE(duplicate != nullptr);
+  REQUIRE(duplicate->has_error());
+
+  auto direct_mismatch = Definition::load(R"(
+        var label = "not a number"
+        scene Mismatch {
+          rect box { x: $label }
+        }
+      )");
+  REQUIRE(direct_mismatch != nullptr);
+  REQUIRE(direct_mismatch->has_error());
+
+  auto expression_mismatch = Definition::load(R"(
+        var label = "not a number"
+        scene Mismatch {
+          rect box { x: ${label + 1} }
+        }
+      )");
+  REQUIRE(expression_mismatch != nullptr);
+  REQUIRE(expression_mismatch->has_error());
+}
+
+TEST_CASE("Definition: initial machine actions observe var defaults",
+          "[definition][machine][var]") {
+  auto definition = Definition::load(R"(
+        var initialX = 37
+        scene InitialAction {
+          rect box { x: 0, y: 0, width: 10, height: 10 }
+        }
+        machine placement {
+          layer main {
+            state idle {
+              initial: true
+              set #box.x: ${initialX}
+            }
+          }
+        }
+      )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  auto instance = Instance::create(definition);
+  REQUIRE(instance != nullptr);
+  auto *box = instance->scene()->find("box");
+  REQUIRE(box != nullptr);
+  REQUIRE_THAT(box->x(), WithinAbs(37.0f, 0.001f));
 }
 
 // ============================================================================
@@ -1829,6 +1947,30 @@ TEST_CASE("Definition: imported constants do not affect main file parse-time pro
   REQUIRE_THAT(definition->scene()->height(), WithinAbs(200.0f, 0.001f));
 }
 
+TEST_CASE("Definition: imported vars contribute runtime defaults",
+          "[definition][import][var]") {
+  TempWorkspace workspace;
+  auto main_file = workspace.write_file(
+      "main.flex",
+      R"(
+        import "shared.flex"
+        scene Main {
+          rect item { x: $sharedOffset, y: 0, width: 10, height: 10 }
+        }
+      )");
+  workspace.write_file("shared.flex", "var sharedOffset = 73\n");
+
+  auto definition = Definition::load_file(main_file.string().c_str());
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  auto instance = Instance::create(definition);
+  REQUIRE(instance != nullptr);
+  instance->advance(0.0f);
+  auto *item = instance->scene()->find("item");
+  REQUIRE(item != nullptr);
+  REQUIRE_THAT(item->x(), WithinAbs(73.0f, 0.001f));
+}
+
 TEST_CASE("Definition: imported asset paths are rebased to the imported file directory",
           "[definition][import][asset]") {
   TempWorkspace workspace;
@@ -2394,6 +2536,442 @@ TEST_CASE("Instance: focused node receives key text and composition input",
 
   REQUIRE(instance->focused_node() == nullptr);
   REQUIRE_FALSE(other->focused());
+}
+
+TEST_CASE("Definition: DSL track expressions lower to MIR/JIT", "[dsl][animation][mir]") {
+  auto definition = Definition::load(R"(
+      anim "jitTrack" {
+        duration: 2s
+        track "x" {
+          expression: ${lerp(from, to, progress * progress) + time}
+          keyframe 0s -> 10
+          keyframe 2s -> 30
+        }
+      }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  REQUIRE(definition->timelines().size() == 1);
+  const auto &timeline = definition->timelines()[0];
+  const auto &tracks = timeline->tracks();
+  REQUIRE(tracks.size() == 1);
+  REQUIRE(tracks[0]->has_numeric_expression());
+  const auto &program = timeline->program();
+  REQUIRE(program.track_count() == 1);
+  REQUIRE(program.keyframe_count() == 2);
+  REQUIRE(program.operations()[0].keyframe_offset == 0);
+  REQUIRE(program.operations()[0].keyframe_count == 2);
+  check_close(std::get<float>(program.sample(0, 1.0f)), 16.0f);
+  check_close(std::get<float>(tracks[0]->sample(1.0f)), 16.0f);
+}
+
+TEST_CASE("Definition: DSL track expressions compile time derivatives",
+          "[dsl][animation][mir][derivative]") {
+  auto definition = Definition::load(R"(
+      anim "velocityTrack" {
+        duration: 2s
+        track "x" {
+          expression: ${derivative(lerp(from, to, progress) + time^2, time)}
+          keyframe 0s -> 10
+          keyframe 2s -> 30
+        }
+      }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  const auto &tracks = definition->timelines()[0]->tracks();
+  REQUIRE(tracks.size() == 1);
+  REQUIRE(tracks[0]->has_numeric_expression());
+  check_close(std::get<float>(tracks[0]->sample(1.0f)), 2.0f);
+}
+
+TEST_CASE("Definition: DSL vec2 keyframes lower to a Catmull-Rom motion path",
+          "[dsl][animation][motion-path]") {
+  const char *source = R"(
+    scene MotionPathScene {
+      rect dot { width: 10, height: 10 }
+    }
+
+    anim "curve" {
+      duration: 3s
+      track "#dot/position" {
+        interpolation: catmullRom
+        keyframe 0s -> vec2(0, 0)
+        keyframe 1s -> vec2(10, 10)
+        keyframe 2s -> vec2(20, 10)
+        keyframe 3s -> vec2(30, 0)
+      }
+    }
+  )";
+
+  auto definition = Definition::load(source);
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  REQUIRE(definition->timelines().size() == 1);
+
+  const auto &track = definition->timelines()[0]->tracks()[0];
+  REQUIRE(track->spatial_interpolation() == SpatialInterpolation::CatmullRom);
+  const Vec2 sampled = std::get<Vec2>(track->sample(1.5f));
+  REQUIRE_THAT(sampled.x, WithinAbs(15.0f, 0.001f));
+  REQUIRE_THAT(sampled.y, WithinAbs(11.25f, 0.001f));
+
+  auto instance = Instance::create(definition);
+  REQUIRE(instance != nullptr);
+  REQUIRE(instance->play("curve") != nullptr);
+  instance->advance(1.5f);
+  auto *dot = instance->scene()->find("dot");
+  REQUIRE(dot != nullptr);
+  REQUIRE_THAT(dot->x(), WithinAbs(15.0f, 0.001f));
+  REQUIRE_THAT(dot->y(), WithinAbs(11.25f, 0.001f));
+}
+
+TEST_CASE("Definition: DSL cubic Bezier tangents lower to a motion path",
+          "[dsl][animation][motion-path][bezier]") {
+  auto definition = Definition::load(R"(
+    scene BezierMotionPathScene {
+      rect dot { width: 10, height: 10 }
+    }
+
+    anim "curve" {
+      duration: 1s
+      track "#dot/position" {
+        interpolation: cubicBezier
+        keyframe 0s -> bezier(vec2(0, 0), vec2(0, 0), vec2(0, 10))
+        keyframe 1s -> bezier(vec2(10, 0), vec2(0, 10), vec2(0, 0))
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  const auto &track = definition->timelines()[0]->tracks()[0];
+  REQUIRE(track->spatial_interpolation() == SpatialInterpolation::CubicBezier);
+  const Vec2 sampled = std::get<Vec2>(track->sample(0.5f));
+  REQUIRE_THAT(sampled.x, WithinAbs(5.0f, 0.001f));
+  REQUIRE_THAT(sampled.y, WithinAbs(7.5f, 0.001f));
+}
+
+TEST_CASE("Definition: cubic Bezier tracks require explicit tangents",
+          "[dsl][animation][motion-path][bezier][error]") {
+  auto definition = Definition::load(R"(
+    scene InvalidBezierMotionPath { rect dot { width: 10, height: 10 } }
+    anim "bad" {
+      track "#dot/position" {
+        interpolation: cubicBezier
+        keyframe 0s -> vec2(0, 0)
+        keyframe 1s -> vec2(10, 0)
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("bezier(position") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: Catmull-Rom tracks reject scalar keyframes",
+          "[dsl][animation][motion-path][error]") {
+  auto definition = Definition::load(R"(
+    scene InvalidMotionPath { rect dot { width: 10, height: 10 } }
+    anim "bad" {
+      track "#dot/position" {
+        interpolation: catmullRom
+        keyframe 0s -> 0
+        keyframe 1s -> 10
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+}
+
+TEST_CASE("Definition: DSL timeline triggers emit interactive events",
+          "[dsl][animation][trigger]") {
+  auto definition = Definition::load(R"(
+    scene TriggerScene { rect dot { width: 10, height: 10 } }
+    anim "notify" {
+      duration: 1s
+      trigger 500ms -> "halfway"
+      track "#dot/x" {
+        keyframe 0s -> 0
+        keyframe 1s -> 100
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  REQUIRE(definition->timelines().size() == 1);
+  REQUIRE(definition->timelines()[0]->trigger_count() == 1);
+
+  auto instance = Instance::create(definition);
+  REQUIRE(instance != nullptr);
+  std::string event;
+  instance->animation_controller()->set_trigger_callback(
+      [&event](const std::string &value) { event = value; });
+  REQUIRE(instance->play("notify") != nullptr);
+  instance->advance(0.6f);
+  REQUIRE(event == "halfway");
+}
+
+TEST_CASE("Definition: invalid DSL track expression fails during load",
+          "[dsl][animation][mir][error]") {
+  auto definition = Definition::load(R"(
+      anim "invalid" {
+        duration: 1s
+        track "x" {
+          expression: ${progress + (}
+          keyframe 0s -> 0
+          keyframe 1s -> 1
+        }
+      }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("Invalid MIR expression") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: keyframe times must be strictly increasing",
+          "[dsl][animation][semantic][error]") {
+  auto definition = Definition::load(R"(
+    anim "unordered" {
+      track "x" {
+        keyframe 1s -> 10
+        keyframe 500ms -> 20
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("strictly increasing") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: duplicate keyframe times fail semantic validation",
+          "[dsl][animation][semantic][error]") {
+  auto definition = Definition::load(R"(
+    anim "duplicateTime" {
+      track "opacity" {
+        keyframe 0s -> 0
+        keyframe 0s -> 1
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("strictly increasing") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: invalid property bindings fail during load",
+          "[dsl][binding][semantic][error]") {
+  auto definition = Definition::load(R"(
+    scene InvalidBinding {
+      rect box { x: ${progress + (} }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("Invalid MIR expression for binding") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: unknown node and component types fail during load",
+          "[dsl][node][semantic][error]") {
+  auto definition = Definition::load(R"(
+    scene UnknownNode { ract typo { width: 10, height: 10 } }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("Unknown node or component type") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: duplicate scene node IDs fail during load",
+          "[dsl][node][semantic][error]") {
+  auto definition = Definition::load(R"(
+    scene DuplicateIds {
+      rect item { width: 10, height: 10 }
+      text item { content: "duplicate" }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("Duplicate scene node ID 'item'") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: animation targets must exist and support their properties",
+          "[dsl][animation][semantic][error]") {
+  auto missing_target = Definition::load(R"(
+    scene MissingTarget { rect box { width: 10, height: 10 } }
+    anim "bad" { track "#missing/x" { keyframe 0 -> 1 } }
+  )");
+  REQUIRE(missing_target != nullptr);
+  REQUIRE(missing_target->has_error());
+  REQUIRE(std::string(missing_target->error_message()).find("targets unknown node '#missing'") !=
+          std::string::npos);
+
+  auto unsupported_property = Definition::load(R"(
+    scene WrongTarget { text label { content: "label" } }
+    anim "bad" { track "#label/fill" { keyframe 0 -> #ff0000 } }
+  )");
+  REQUIRE(unsupported_property != nullptr);
+  REQUIRE(unsupported_property->has_error());
+  REQUIRE(std::string(unsupported_property->error_message()).find("not supported by node") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: animation keyframes must match property value types",
+          "[dsl][animation][semantic][error]") {
+  auto definition = Definition::load(R"(
+    scene WrongKeyframeType { rect box { width: 10, height: 10 } }
+    anim "bad" { track "#box/fill" { keyframe 0 -> 1 } }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("expects color keyframes, got scalar") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: unknown properties and invalid enum values fail during load",
+          "[dsl][property][semantic][error]") {
+  auto unknown_property = Definition::load(R"(
+    scene UnknownProperty { rect box { widht: 10 } }
+  )");
+  REQUIRE(unknown_property != nullptr);
+  REQUIRE(unknown_property->has_error());
+  REQUIRE(std::string(unknown_property->error_message()).find("Unknown property 'widht'") !=
+          std::string::npos);
+
+  auto invalid_enum = Definition::load(R"(
+    scene InvalidEnum { rect box { anchor: middle } }
+  )");
+  REQUIRE(invalid_enum != nullptr);
+  REQUIRE(invalid_enum->has_error());
+  REQUIRE(std::string(invalid_enum->error_message()).find("Invalid value 'middle'") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: state transitions must reference states in their layer",
+          "[dsl][machine][semantic][error]") {
+  auto definition = Definition::load(R"(
+    machine invalidMachine {
+      layer main {
+        state idle { initial: true }
+        transition idle -> missing when ${ready}
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("references an unknown state") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: layers reject multiple initial states",
+          "[dsl][machine][semantic][error]") {
+  auto definition = Definition::load(R"(
+    machine invalidMachine {
+      layer main {
+        state first { initial: true }
+        state second { initial: true }
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE(definition->has_error());
+  REQUIRE(std::string(definition->error_message()).find("more than one initial state") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: state set actions require valid scalar node properties",
+          "[dsl][machine][semantic][error]") {
+  auto missing_target = Definition::load(R"(
+    scene ActionTarget { rect box { width: 10, height: 10 } }
+    machine invalidMachine {
+      layer main {
+        state idle {
+          initial: true
+          set #missing.x: 1
+        }
+      }
+    }
+  )");
+  REQUIRE(missing_target != nullptr);
+  REQUIRE(missing_target->has_error());
+  REQUIRE(std::string(missing_target->error_message()).find("targets unknown node '#missing'") !=
+          std::string::npos);
+
+  auto non_scalar = Definition::load(R"(
+    scene ActionType { text label { content: "idle" } }
+    machine invalidMachine {
+      layer main {
+        state idle {
+          initial: true
+          set #label.content: 1
+        }
+      }
+    }
+  )");
+  REQUIRE(non_scalar != nullptr);
+  REQUIRE(non_scalar->has_error());
+  REQUIRE(std::string(non_scalar->error_message()).find("requires a scalar property") !=
+          std::string::npos);
+}
+
+TEST_CASE("Definition: static transform visibility position and text properties lower",
+          "[dsl][property][semantic]") {
+  auto definition = Definition::load(R"(
+    scene StaticProperties {
+      rect box {
+        scale: 2
+        visible: false
+        position: fixed
+      }
+      rect xScaled { scaleX: 3 }
+      text label {
+        content: "hello"
+        fontFamily: "serif"
+        textAlign: right
+        fontWeight: bold
+        fontStyle: italic
+      }
+    }
+  )");
+
+  REQUIRE(definition != nullptr);
+  REQUIRE_FALSE(definition->has_error());
+  auto *box = definition->scene()->find("box");
+  auto *x_scaled = definition->scene()->find("xScaled");
+  auto *label = dynamic_cast<Text *>(definition->scene()->find("label"));
+  REQUIRE(box != nullptr);
+  REQUIRE(x_scaled != nullptr);
+  REQUIRE(label != nullptr);
+  REQUIRE_THAT(box->scale_x(), WithinAbs(2.0f, 0.001f));
+  REQUIRE_THAT(box->scale_y(), WithinAbs(2.0f, 0.001f));
+  REQUIRE_THAT(x_scaled->scale_x(), WithinAbs(3.0f, 0.001f));
+  REQUIRE_THAT(x_scaled->scale_y(), WithinAbs(1.0f, 0.001f));
+  REQUIRE_FALSE(box->visible());
+  REQUIRE(box->position_mode() == PositionMode::Fixed);
+  REQUIRE(label->font_family() == "serif");
+  REQUIRE(label->text_align() == TextAlign::Right);
+  REQUIRE(label->font_weight() == FontWeight::Bold);
+  REQUIRE(label->font_style() == FontStyle::Italic);
 }
 
 }

@@ -20,6 +20,7 @@ set(NANOVG_SOURCES
 
 # Build NanoVG as a static library
 add_library(nanovg STATIC ${NANOVG_SOURCES})
+target_compile_definitions(nanovg PRIVATE STB_IMAGE_STATIC=1)
 
 # Set C standard for NanoVG
 set_target_properties(

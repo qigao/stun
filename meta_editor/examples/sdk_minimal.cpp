@@ -6,10 +6,8 @@
 
 #include <meta_editor/core/editor.h>
 #include <meta_editor/core/glfw_adapter.h>
-#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include  "glfw_app.h"
-#include <thorvg.h>
 #include <iostream>
 
 using namespace meta_editor;
@@ -73,7 +71,9 @@ public:
 
     void on_render() override {
         editor_.update(1.0f / 60.0f);
-        renderer()->begin_frame((float)width(), (float)height(), 1.0f);
+        renderer()->begin_frame((float)width() / content_scale_x_,
+                                (float)height() / content_scale_y_,
+                                content_scale_x_);
         renderer()->clear(flex::Color{0.12f, 0.12f, 0.14f, 1.0f});
         editor_.render(*renderer());
         editor_.render_tool_overlay(*renderer());

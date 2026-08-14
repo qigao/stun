@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(SDL2 REQUIRED)
+find_package(glad CONFIG REQUIRED)
+find_package(OpenGL REQUIRED)
 
 add_library(flexui_designer
     src/designer.cpp
@@ -46,6 +48,9 @@ add_executable(flexui_designer_app
 target_link_libraries(flexui_designer_app
     PRIVATE
         flexui_designer
+        flex_backend_opengl
+        glad::glad
+        OpenGL::GL
         SDL2::SDL2 SDL2::SDL2main
 )
 

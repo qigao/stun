@@ -43,8 +43,8 @@ UI 线程。脚本只能读取事件快照和通过命令批次申请 UI 变更�
 - 数字/布尔 binding 已通过 Flex MIR 编译一次后重复求值，字符串 binding 使用类型化
   直接引用。证据：`flexUI/src/binding_runtime.cpp`。
 - Timeline 使用原生关键帧查找、easing 与属性写入；只有表达式插值使用
-  `NumericExpression` 的 MIR 路径。证据：`flex/src/core/timeline.cpp`、
-  `flex/src/core/numeric_expression.cpp`。
+  `NumericExpression` 的 MIR 路径。证据：`flex/modules/runtime/timeline.cpp`、
+  `flex/modules/runtime/numeric_expression.cpp`。
 - QuickJS 只存在于理论愿景文档，当前 CMake 和实现没有 QuickJS 集成。
   证据：`flex/docs/VISION.md` 与仓库检索结果。
 - TurboScript 的公开 `turbo_script_compiled_t` 当前只保存源码，

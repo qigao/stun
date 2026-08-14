@@ -1,7 +1,7 @@
 # Flex Engine - Vision (Theoretical Design)
 
 > **⚠️ IMPORTANT:** This document describes the **theoretical design and future vision** for Flex Engine.
-> For the **actual current implementation**, see [ARCHITECTURE.md](../ARCHITECTURE.md).
+> For the **actual current implementation**, see [ARCHITECTURE.md](ARCHITECTURE.md).
 > For the **DSL specification**, see [DSL.md](DSL.md).
 
 ---
@@ -142,7 +142,7 @@ To save memory, we separate **Definition** from **Instance**.
     *   Update World Matrices (Parent * Local).
 5.  **Render:**
     *   Cull invisible nodes.
-    *   Generate Draw Commands (ThorVG/Skia).
+    *   Generate backend-neutral draw commands for gCanvas and platform renderers.
     *   **Scatter:** Issue GPU Instancing calls for massive arrays.
 
 ---
@@ -160,7 +160,7 @@ We use "Game Engine" grade libraries to ensure performance across Mobile, Web, a
 | **ECS** | **EnTT** | Entity Component System for CAD scale data. |
 | **Physics** | **Box2D v3** | SIMD-optimized 2D physics. |
 | **Events** | **NanoSignalSlots** | Fast, header-only event dispatching. |
-| **Rendering** | **ThorVG** | Lightweight, portable vector rasterizer. |
+| **Rendering** | **gCanvas** | Immediate-mode GPU canvas shared by the OpenGL and Vulkan backends. |
 | **Profiling** | **Tracy** | Frame profiling telemetry. |
 
 ---
@@ -230,8 +230,8 @@ while (app.running) {
 1.  **Phase 1: The Visual Core**
     *   Setup CMake with profiles.
     *   Implement `Node`, `Group`, `Shape`.
-    *   Integrate `ThorVG`.
-    *   *Result:* Static vector rendering.
+    *   Integrate `gCanvas` through the backend-neutral renderer bridge.
+    *   *Result:* Static GPU vector rendering on OpenGL and Vulkan.
 
 2.  **Phase 2: The Animator**
     *   Implement `Timeline` and `PropertyRegistry`.

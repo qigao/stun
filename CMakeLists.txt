@@ -1,5 +1,9 @@
 ﻿cmake_minimum_required(VERSION 3.20)
 
+if(POLICY CMP0144)
+  cmake_policy(SET CMP0144 NEW)
+endif()
+
 set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)
 
 project(
@@ -26,11 +30,13 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${NANOGUI_OUTPUT_DIR}")
 find_package(base64 CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
+find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
+find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
 find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
-find_package(TurboUtils REQUIRED PATHS ${TURBO_UTILS_ROOT})
 
 # Cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(Sanitizers)
 add_subdirectory(tools)
 include(FindTools)
 # Add vendor libraries before creating nanogui target
@@ -41,7 +47,9 @@ add_subdirectory(TextEdit)
 add_subdirectory(meta_editor)
 add_subdirectory(tango)
 add_subdirectory(flexui_designer)
-add_subdirectory(FlexPlayer)
+# FlexPlayer's legacy SDL software compositor depends on the retired ThorVG
+# renderer and an external FFmpeg SDK. Keep it outside the supported build
+# until it has a native GPU compositor.
 add_subdirectory(charts)
 
 function(nanogui_set_target_output_dir target_name)

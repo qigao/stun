@@ -25,6 +25,28 @@ inline void check_close(float actual, float expected, float eps = 0.001f) {
 } // namespace
 
 suite("flex::runtime") {
+    group("allocator") {
+        it("fails fast when a pool vector grows without an allocator") {
+            PoolVector<int> values;
+
+            check_throws_as(values.push_back(1), std::logic_error);
+        }
+
+        it("preserves non-trivial values while growing pool storage") {
+            ArenaAllocator alloc(4096);
+            PoolVector<std::unique_ptr<int>> values(alloc);
+
+            values.push_back(std::make_unique<int>(10));
+            values.push_back(std::make_unique<int>(20));
+            values.push_back(std::make_unique<int>(30));
+
+            check_size_eq(values.size(), 3);
+            check_int_eq(*values[0], 10);
+            check_int_eq(*values[1], 20);
+            check_int_eq(*values[2], 30);
+        }
+    }
+
     group("scene") {
         it("creates with dimensions") {
             ArenaAllocator arena(4096);
@@ -98,6 +120,20 @@ suite("flex::runtime") {
             group->remove_child(child);
             check(group->child_count() == 0);
         }
+
+        it("releases an owned child safely when removing by index") {
+            auto group = Group::create();
+            auto child = Group::create();
+            std::weak_ptr<Group> lifetime = child;
+
+            group->add_child(child);
+            child.reset();
+            check_false(lifetime.expired());
+
+            group->remove_child_at(0);
+            check_size_eq(group->child_count(), 0);
+            check_true(lifetime.expired());
+        }
     }
 
     group("node") {
@@ -136,6 +172,32 @@ suite("flex::runtime") {
 
             Node* not_found = parent->find_child_recursive("nonexistent");
             check(not_found == nullptr);
+        }
+    }
+
+    group("animated property metadata") {
+        it("resolves canonical names and compatibility aliases") {
+            check_int_eq(static_cast<int>(get_property_id("x")),
+                         static_cast<int>(PropertyID::X));
+            check_int_eq(static_cast<int>(get_property_id("fontSize")),
+                         static_cast<int>(PropertyID::FontSize));
+            check_int_eq(static_cast<int>(get_property_id("font_size")),
+                         static_cast<int>(PropertyID::FontSize));
+            check_int_eq(static_cast<int>(get_property_id("scaleX")),
+                         static_cast<int>(PropertyID::ScaleX));
+            check_int_eq(static_cast<int>(get_property_id("scale_x")),
+                         static_cast<int>(PropertyID::ScaleX));
+            check_int_eq(static_cast<int>(get_property_id("text.color")),
+                         static_cast<int>(PropertyID::TextColor));
+        }
+
+        it("rejects empty and unknown property names") {
+            check_int_eq(static_cast<int>(get_property_id(nullptr)),
+                         static_cast<int>(PropertyID::Unknown));
+            check_int_eq(static_cast<int>(get_property_id("")),
+                         static_cast<int>(PropertyID::Unknown));
+            check_int_eq(static_cast<int>(get_property_id("widht")),
+                         static_cast<int>(PropertyID::Unknown));
         }
     }
 
@@ -317,6 +379,449 @@ suite("flex::runtime") {
             check_close(std::get<float>(val2), 1.0f);
         }
 
+        it("interpolates color keyframes continuously") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("color", alloc);
+            auto* track = timeline->add_track("fill").get();
+            track->add_keyframe(0.0f, Color{0.0f, 0.0f, 0.0f, 0.0f});
+            track->add_keyframe(2.0f, Color{1.0f, 0.5f, 0.25f, 1.0f});
+
+            const Color value = std::get<Color>(track->sample(1.0f));
+            check_close(value.r, 0.5f);
+            check_close(value.g, 0.25f);
+            check_close(value.b, 0.125f);
+            check_close(value.a, 0.5f);
+        }
+
+        it("samples typed position keyframes without splitting x and y tracks") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("position", alloc);
+            auto* track = timeline->add_track("position").get();
+            track->add_keyframe(0.0f, Vec2{0.0f, 10.0f});
+            track->add_keyframe(2.0f, Vec2{20.0f, 30.0f});
+
+            const Vec2 value = std::get<Vec2>(track->sample(1.0f));
+            check_close(value.x, 10.0f);
+            check_close(value.y, 20.0f);
+
+            auto node = Group::create(alloc);
+            timeline->apply(node, 1.0f);
+            check_close(node->x(), 10.0f);
+            check_close(node->y(), 20.0f);
+        }
+
+        it("resolves a replaced descendant on every apply") {
+            ArenaAllocator alloc(8192);
+            auto *root = Group::create(alloc);
+            auto *first = Shape::create(alloc);
+            first->set_id("animated");
+            root->add_child(first);
+
+            auto timeline = Timeline::create("replaceTarget", alloc);
+            auto *track = timeline->add_track("#animated/x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 20.0f);
+
+            timeline->apply(root, 0.5f);
+            check_close(first->x(), 10.0f);
+
+            root->remove_child(first);
+            auto *replacement = Shape::create(alloc);
+            replacement->set_id("animated");
+            root->add_child(replacement);
+
+            timeline->apply(root, 1.0f);
+            check_close(first->x(), 10.0f);
+            check_close(replacement->x(), 20.0f);
+        }
+
+        it("preserves track order while reusing adjacent target resolution") {
+            ArenaAllocator alloc(8192);
+            auto *root = Group::create(alloc);
+            auto *first = Shape::create(alloc);
+            auto *second = Shape::create(alloc);
+            first->set_id("first");
+            second->set_id("second");
+            root->add_child(first);
+            root->add_child(second);
+
+            auto timeline = Timeline::create("targetRuns", alloc);
+            timeline->add_track("#first/x")->add_keyframe(0.0f, 10.0f);
+            timeline->add_track("#first/y")->add_keyframe(0.0f, 20.0f);
+            timeline->add_track("#second/x")->add_keyframe(0.0f, 30.0f);
+            timeline->add_track("#first/opacity")->add_keyframe(0.0f, 0.25f);
+
+            timeline->apply(root, 0.0f);
+
+            check_close(first->x(), 10.0f);
+            check_close(first->y(), 20.0f);
+            check_close(first->opacity(), 0.25f);
+            check_close(second->x(), 30.0f);
+        }
+
+        it("rebuilds a player execution plan after target replacement") {
+            ArenaAllocator alloc(8192);
+            auto *root = Group::create(alloc);
+            auto *nested = Group::create(alloc);
+            auto *first = Shape::create(alloc);
+            first->set_id("animated");
+            nested->add_child(first);
+            root->add_child(nested);
+
+            auto timeline = Timeline::create("replacePlayerTarget", alloc);
+            timeline->set_duration(1.0f);
+            auto *track = timeline->add_track("#animated/x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 20.0f);
+
+            TimelinePlayer player(timeline.get(), root);
+            player.play();
+            player.advance(0.25f);
+            player.apply();
+            check_close(first->x(), 5.0f);
+
+            nested->remove_child(first);
+            auto *replacement = Shape::create(alloc);
+            replacement->set_id("animated");
+            nested->add_child(replacement);
+
+            player.advance(0.25f);
+            player.apply();
+            check_close(first->x(), 5.0f);
+            check_close(replacement->x(), 10.0f);
+        }
+
+        it("invalidates a player execution plan after target id changes") {
+            ArenaAllocator alloc(8192);
+            auto *root = Group::create(alloc);
+            auto *first = Shape::create(alloc);
+            first->set_id("animated");
+            root->add_child(first);
+
+            auto timeline = Timeline::create("renamePlayerTarget", alloc);
+            timeline->set_duration(1.0f);
+            auto *track = timeline->add_track("#animated/x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 20.0f);
+
+            TimelinePlayer player(timeline.get(), root);
+            player.play();
+            player.advance(0.25f);
+            player.apply();
+            check_close(first->x(), 5.0f);
+
+            first->set_id("renamed");
+            player.advance(0.25f);
+            player.apply();
+            check_close(first->x(), 5.0f);
+
+            auto *replacement = Shape::create(alloc);
+            replacement->set_id("animated");
+            root->add_child(replacement);
+            player.advance(0.25f);
+            player.apply();
+            check_close(replacement->x(), 15.0f);
+        }
+
+        it("extends a player execution plan when tracks are appended") {
+            ArenaAllocator alloc(8192);
+            auto *root = Group::create(alloc);
+            auto *shape = Shape::create(alloc);
+            shape->set_id("animated");
+            root->add_child(shape);
+
+            auto timeline = Timeline::create("appendTrack", alloc);
+            timeline->set_duration(1.0f);
+            auto *x_track = timeline->add_track("#animated/x").get();
+            x_track->add_keyframe(0.0f, 0.0f);
+            x_track->add_keyframe(1.0f, 20.0f);
+
+            TimelinePlayer player(timeline.get(), root);
+            player.play();
+            player.advance(0.25f);
+            player.apply();
+            check_close(shape->x(), 5.0f);
+
+            auto *y_track = timeline->add_track("#animated/y").get();
+            y_track->add_keyframe(0.0f, 0.0f);
+            y_track->add_keyframe(1.0f, 40.0f);
+
+            player.advance(0.25f);
+            player.apply();
+            check_close(shape->x(), 10.0f);
+            check_close(shape->y(), 20.0f);
+        }
+
+        it("compiles track metadata into an immutable animation program") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("compiledMetadata", alloc);
+            auto* track = timeline->add_track("#animated/x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 10.0f);
+
+            const AnimationProgram& program = timeline->program();
+            check_size_eq(program.track_count(), 1);
+            check_size_eq(program.operations().size(), 1);
+
+            const auto& operation = program.operations()[0];
+            check_size_eq(operation.keyframe_offset, 0);
+            check_size_eq(operation.keyframe_count, 2);
+            check_int_eq(static_cast<int>(operation.value_kind),
+                         static_cast<int>(AnimationProgram::ValueKind::Scalar));
+            check_int_eq(static_cast<int>(operation.property_id),
+                         static_cast<int>(PropertyID::X));
+            check_string_eq(operation.target_id, "animated");
+            check_true(operation.has_target_selector);
+            check_size_eq(program.keyframe_count(), 2);
+            check_close(std::get<float>(program.sample(0, 0.5f)), 5.0f);
+            check_ptr_eq(&timeline->program(), &program);
+        }
+
+        it("keeps compiled keyframes isolated until recompilation") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("recompileProgram", alloc);
+            auto* track = timeline->add_track("x").get();
+            track->add_keyframe(0.0f, 0.0f);
+
+            const AnimationProgram& initial = timeline->program();
+            const uint64_t initial_revision = initial.source_revision();
+            track->add_keyframe(1.0f, 10.0f);
+            check_size_eq(initial.keyframe_count(), 1);
+            check_close(std::get<float>(initial.sample(0, 1.0f)), 0.0f);
+
+            const AnimationProgram& rebuilt = timeline->program();
+            check_true(rebuilt.source_revision() > initial_revision);
+            check_size_eq(rebuilt.track_count(), 1);
+            check_size_eq(rebuilt.keyframe_count(), 2);
+            check_size_eq(rebuilt.operations()[0].keyframe_count, 2);
+            check_close(std::get<float>(rebuilt.sample(0, 1.0f)), 10.0f);
+        }
+
+        it("matches editable sampling for every animation value category") {
+            ArenaAllocator alloc(16384);
+            auto timeline = Timeline::create("compiledValueParity", alloc);
+
+            auto* number = timeline->add_track("x").get();
+            number->add_keyframe(0.0f, 10.0f, Easing::ease_in());
+            number->add_keyframe(2.0f, 30.0f);
+            number->set_numeric_expression(
+                "lerp(from, to, progress * progress) + time");
+
+            auto* color = timeline->add_track("fill").get();
+            color->add_keyframe(0.0f, Color{0.0f, 0.0f, 0.0f, 0.0f});
+            color->add_keyframe(2.0f, Color{1.0f, 0.5f, 0.25f, 1.0f});
+
+            auto* position = timeline->add_track("position").get();
+            position->add_keyframe(0.0f, Vec2{0.0f, 10.0f});
+            position->add_keyframe(2.0f, Vec2{20.0f, 30.0f});
+
+            auto* text = timeline->add_track("text").get();
+            text->add_keyframe(0.0f, "first");
+            text->add_keyframe(2.0f, "second");
+
+            const AnimationProgram& program = timeline->program();
+            check_size_eq(program.track_count(), 4);
+            check_size_eq(program.keyframe_count(), 8);
+            check_size_eq(program.scalar_keyframe_count(), 2);
+            check_size_eq(program.color_keyframe_count(), 2);
+            check_size_eq(program.vec2_keyframe_count(), 2);
+            check_size_eq(program.generic_keyframe_count(), 2);
+            for (size_t index = 0; index < program.track_count(); ++index) {
+                check_size_eq(program.operations()[index].keyframe_offset,
+                              index * 2);
+                check_size_eq(program.operations()[index].keyframe_count, 2);
+            }
+
+            check_close(std::get<float>(program.sample(0, 1.0f)),
+                        std::get<float>(number->sample(1.0f)));
+
+            const Color compiled_color = std::get<Color>(program.sample(1, 1.0f));
+            const Color editable_color = std::get<Color>(color->sample(1.0f));
+            check_close(compiled_color.r, editable_color.r);
+            check_close(compiled_color.g, editable_color.g);
+            check_close(compiled_color.b, editable_color.b);
+            check_close(compiled_color.a, editable_color.a);
+
+            const Vec2 compiled_position =
+                std::get<Vec2>(program.sample(2, 1.0f));
+            const Vec2 editable_position =
+                std::get<Vec2>(position->sample(1.0f));
+            check_close(compiled_position.x, editable_position.x);
+            check_close(compiled_position.y, editable_position.y);
+
+            check_string_eq(std::get<std::string>(program.sample(3, 1.0f)),
+                            std::get<std::string>(text->sample(1.0f)));
+        }
+
+        it("preserves interpolation inside a heterogeneous generic track") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("compiledGenericParity", alloc);
+            auto* track = timeline->add_track("x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 10.0f);
+            track->add_keyframe(2.0f, "done");
+
+            const AnimationProgram& program = timeline->program();
+            check_int_eq(
+                static_cast<int>(program.operations()[0].value_kind),
+                static_cast<int>(AnimationProgram::ValueKind::Generic));
+            check_size_eq(program.generic_keyframe_count(), 3);
+            check_close(std::get<float>(program.sample(0, 0.5f)), 5.0f);
+            check_string_eq(std::get<std::string>(program.sample(0, 1.5f)),
+                            "done");
+        }
+
+        it("samples all compiled tracks into caller-owned storage") {
+            ArenaAllocator alloc(8192);
+            auto timeline = Timeline::create("compiledBatch", alloc);
+            auto* number = timeline->add_track("x").get();
+            number->add_keyframe(0.0f, 0.0f);
+            number->add_keyframe(1.0f, 10.0f);
+            auto* position = timeline->add_track("position").get();
+            position->add_keyframe(0.0f, Vec2{0.0f, 10.0f});
+            position->add_keyframe(1.0f, Vec2{20.0f, 30.0f});
+            auto* text = timeline->add_track("text").get();
+            text->add_keyframe(0.0f, "first");
+            text->add_keyframe(1.0f, "second");
+
+            const AnimationProgram& program = timeline->program();
+            std::vector<AnimValue> outputs(program.track_count());
+            program.sample_all(0.5f, outputs.data(), outputs.size());
+            check_close(std::get<float>(outputs[0]),
+                        std::get<float>(program.sample(0, 0.5f)));
+            const Vec2 batch_position = std::get<Vec2>(outputs[1]);
+            const Vec2 single_position =
+                std::get<Vec2>(program.sample(1, 0.5f));
+            check_close(batch_position.x, single_position.x);
+            check_close(batch_position.y, single_position.y);
+            check_string_eq(std::get<std::string>(outputs[2]), "second");
+        }
+
+        it("validates caller-owned batch storage before writing") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("compiledBatchBounds", alloc);
+            timeline->add_track("x")->add_keyframe(0.0f, 1.0f);
+            const AnimationProgram& program = timeline->program();
+            AnimValue unchanged = 42.0f;
+
+            check_throws_as(program.sample_all(0.0f, &unchanged, 0),
+                            std::invalid_argument);
+            check_close(std::get<float>(unchanged), 42.0f);
+            check_throws_as(program.sample_all(0.0f, nullptr, 1),
+                            std::invalid_argument);
+
+            auto empty = Timeline::create("compiledEmptyBatch", alloc);
+            check_nothrow(empty->program().sample_all(0.0f, nullptr, 0));
+        }
+
+        it("retains a compiled MIR expression until program replacement") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("compiledExpressionSnapshot", alloc);
+            auto* track = timeline->add_track("x").get();
+            track->add_keyframe(0.0f, 10.0f);
+            track->add_keyframe(2.0f, 30.0f);
+            track->set_numeric_expression(
+                "lerp(from, to, progress * progress) + time");
+
+            const AnimationProgram& initial = timeline->program();
+            check_close(std::get<float>(initial.sample(0, 1.0f)), 16.0f);
+
+            track->clear_numeric_expression();
+            check_close(std::get<float>(initial.sample(0, 1.0f)), 16.0f);
+
+            const AnimationProgram& rebuilt = timeline->program();
+            check_close(std::get<float>(rebuilt.sample(0, 1.0f)), 20.0f);
+        }
+
+        it("rejects sampling an operation outside the compiled program") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("programBounds", alloc);
+            timeline->add_track("x")->add_keyframe(0.0f, 1.0f);
+
+            const AnimationProgram& program = timeline->program();
+            check_throws_as(program.sample(1, 0.0f), std::out_of_range);
+        }
+
+        it("preserves the empty track default in a compiled program") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("emptyCompiledTrack", alloc);
+            timeline->add_track("x");
+
+            const AnimationProgram& program = timeline->program();
+            check_size_eq(program.keyframe_count(), 0);
+            check_close(std::get<float>(program.sample(0, 0.5f)), 0.0f);
+        }
+
+        it("samples a smooth Catmull-Rom motion path through vec2 keyframes") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("curve", alloc);
+            auto* track = timeline->add_track("position").get();
+            track->set_spatial_interpolation(SpatialInterpolation::CatmullRom);
+            track->add_keyframe(0.0f, Vec2{0.0f, 0.0f});
+            track->add_keyframe(1.0f, Vec2{10.0f, 10.0f});
+            track->add_keyframe(2.0f, Vec2{20.0f, 10.0f});
+            track->add_keyframe(3.0f, Vec2{30.0f, 0.0f});
+
+            const Vec2 midpoint = std::get<Vec2>(track->sample(1.5f));
+            check_close(midpoint.x, 15.0f);
+            check_close(midpoint.y, 11.25f);
+            const Vec2 compiled =
+                std::get<Vec2>(timeline->program().sample(0, 1.5f));
+            check_close(compiled.x, midpoint.x);
+            check_close(compiled.y, midpoint.y);
+        }
+
+        it("samples explicit cubic Bezier spatial tangents") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("bezierCurve", alloc);
+            auto* track = timeline->add_track("position").get();
+            track->set_spatial_interpolation(SpatialInterpolation::CubicBezier);
+            track->add_spatial_keyframe(0.0f, Vec2{0.0f, 0.0f},
+                                        Vec2{0.0f, 0.0f}, Vec2{0.0f, 10.0f});
+            track->add_spatial_keyframe(1.0f, Vec2{10.0f, 0.0f},
+                                        Vec2{0.0f, 10.0f}, Vec2{0.0f, 0.0f});
+
+            const Vec2 midpoint = std::get<Vec2>(track->sample(0.5f));
+            check_close(midpoint.x, 5.0f);
+            check_close(midpoint.y, 7.5f);
+            const Vec2 compiled =
+                std::get<Vec2>(timeline->program().sample(0, 0.5f));
+            check_close(compiled.x, midpoint.x);
+            check_close(compiled.y, midpoint.y);
+        }
+
+        it("rejects missing cubic Bezier spatial tangents at sampling") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("invalidBezierCurve", alloc);
+            auto* track = timeline->add_track("position").get();
+            track->set_spatial_interpolation(SpatialInterpolation::CubicBezier);
+            track->add_keyframe(0.0f, Vec2{0.0f, 0.0f});
+            track->add_keyframe(1.0f, Vec2{10.0f, 0.0f});
+
+            check_throws_as(track->sample(0.5f), std::logic_error);
+            check_throws_as(timeline->program().sample(0, 0.5f),
+                            std::logic_error);
+        }
+
+        it("blends a position track as one coherent vector") {
+            ArenaAllocator alloc(4096);
+            auto timeline = Timeline::create("positionBlend", alloc);
+            timeline->set_duration(1.0f);
+            auto* track = timeline->add_track("position").get();
+            track->add_keyframe(0.0f, Vec2{0.0f, 0.0f});
+            track->add_keyframe(1.0f, Vec2{30.0f, 40.0f});
+
+            auto node = Group::create(alloc);
+            TimelinePlayer player(timeline.get(), node);
+            player.set_blend_weight(0.5f);
+            player.play();
+            player.advance(1.0f);
+            player.apply();
+
+            check_close(node->x(), 15.0f);
+            check_close(node->y(), 20.0f);
+        }
+
         it("samples float keyframes through a MIR track expression") {
             ArenaAllocator alloc(4096);
             auto timeline = Timeline::create("expressionTrack", alloc);
@@ -440,6 +945,84 @@ suite("flex::runtime") {
             check(fired);
         }
 
+        it("returns active players only for the requested target") {
+            ArenaAllocator alloc(8192);
+            AnimationController controller(alloc);
+            auto first = Timeline::create("firstTargetQuery", alloc);
+            auto second = Timeline::create("secondTargetQuery", alloc);
+            first->set_duration(1.0f);
+            second->set_duration(1.0f);
+            controller.add_timeline(first);
+            controller.add_timeline(second);
+
+            auto requested = Group::create();
+            auto other = Group::create();
+            auto* first_player = controller.play(first->name(), requested.get());
+            auto* second_player = controller.play(second->name(), requested.get());
+            controller.play(first->name(), other.get());
+
+            const auto players =
+                controller.get_players_for_target(requested.get());
+            check_size_eq(players.size(), 2);
+            check_ptr_eq(players[0], first_player);
+            check_ptr_eq(players[1], second_player);
+        }
+
+        it("plays through a default-constructed controller") {
+            ArenaAllocator timeline_alloc(4096);
+            AnimationController controller;
+            auto timeline = Timeline::create("defaultController", timeline_alloc);
+            timeline->set_duration(1.0f);
+            auto* track = timeline->add_track("x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 10.0f);
+            controller.add_timeline(timeline);
+
+            auto target = Group::create();
+            auto* player = controller.play(timeline->name(), target.get());
+            check_not_null(player);
+
+            controller.advance(0.5f);
+            check_close(target->x(), 5.0f);
+            check_size_eq(controller.get_players_for_target(target.get()).size(), 1);
+        }
+
+        it("excludes stopped players from a target query") {
+            ArenaAllocator alloc(8192);
+            AnimationController controller(alloc);
+            auto stopped = Timeline::create("stoppedTargetQuery", alloc);
+            auto playing = Timeline::create("playingTargetQuery", alloc);
+            stopped->set_duration(1.0f);
+            playing->set_duration(1.0f);
+            controller.add_timeline(stopped);
+            controller.add_timeline(playing);
+
+            auto target = Group::create();
+            controller.play(stopped->name(), target.get());
+            auto* playing_player = controller.play(playing->name(), target.get());
+            controller.stop(stopped->name());
+
+            const auto players = controller.get_players_for_target(target.get());
+            check_size_eq(players.size(), 1);
+            check_ptr_eq(players[0], playing_player);
+        }
+
+        it("returns no players for null or destroyed targets") {
+            ArenaAllocator alloc(4096);
+            AnimationController controller(alloc);
+            auto timeline = Timeline::create("destroyedTargetQuery", alloc);
+            timeline->set_duration(1.0f);
+            controller.add_timeline(timeline);
+
+            auto target = Group::create();
+            Node* destroyed_target = target.get();
+            controller.play(timeline->name(), destroyed_target);
+            target.reset();
+
+            check_empty(controller.get_players_for_target(nullptr));
+            check_empty(controller.get_players_for_target(destroyed_target));
+        }
+
         it("fires loop triggers for every crossed cycle") {
             ArenaAllocator alloc(4096);
             auto timeline = Timeline::create("loopTriggerTest", alloc);
@@ -481,6 +1064,51 @@ suite("flex::runtime") {
             check_null(player.target());
             check_false(player.is_playing());
             check(player.is_finished());
+        }
+
+        it("stops before accessing a destroyed shared timeline") {
+            ArenaAllocator alloc(4096);
+            auto target = Group::create();
+            auto timeline = Timeline::create("destroyedTimeline", alloc);
+            timeline->set_duration(1.0f);
+            auto* track = timeline->add_track("x").get();
+            track->add_keyframe(0.0f, 0.0f);
+            track->add_keyframe(1.0f, 10.0f);
+
+            TimelinePlayer player(timeline.get(), target.get());
+            player.play();
+            timeline.reset();
+
+            check_false(player.advance(0.5f));
+            player.apply();
+            check_null(player.timeline());
+            check(player.target() == target.get());
+            check_false(player.is_playing());
+            check(player.is_finished());
+            check_close(player.normalized_time(), 0.0f);
+        }
+
+        it("stops before accessing a destroyed stack timeline") {
+            ArenaAllocator alloc(4096);
+            auto target = Group::create();
+            std::unique_ptr<TimelinePlayer> player;
+            {
+                Timeline timeline("stackTimeline", alloc);
+                timeline.set_duration(1.0f);
+                auto* track = timeline.add_track("x").get();
+                track->add_keyframe(0.0f, 0.0f);
+                track->add_keyframe(1.0f, 10.0f);
+
+                player = std::make_unique<TimelinePlayer>(&timeline, target.get());
+                player->play();
+            }
+
+            check_false(player->advance(0.5f));
+            player->apply();
+            check_null(player->timeline());
+            check(player->target() == target.get());
+            check_false(player->is_playing());
+            check(player->is_finished());
         }
 
         it("stops before accessing a reset arena target") {
@@ -691,6 +1319,27 @@ suite("flex::runtime") {
             check(!expression.try_eval("x + (").has_value());
         }
 
+        it("reuses a shared MIR program and reports compilation failure") {
+            std::shared_ptr<void> compiled;
+            std::unordered_map<Symbol, float, SymbolHash> inputs;
+            inputs[Symbol("x")] = 2.0f;
+
+            float result = -1.0f;
+            check(evaluate_mir_expression_inputs("x - x", compiled, inputs, result));
+            check_close(result, 0.0f);
+            void *first_program = compiled.get();
+
+            inputs[Symbol("x")] = 9.0f;
+            check(evaluate_mir_expression_inputs("x - x", compiled, inputs, result));
+            check(compiled.get() == first_program);
+            check_close(result, 0.0f);
+            check_false(evaluate_mir_expression_inputs("x + 1", compiled, inputs, result));
+
+            std::shared_ptr<void> invalid;
+            check_false(evaluate_mir_expression_inputs("x + (", invalid, inputs, result));
+            check(invalid == nullptr);
+        }
+
         it("evaluates a MIR comparison expression program") {
             auto program = MirExpressionProgram::compile("a >= 3 && b < 10", {"a", "b"});
             check(program != nullptr);
@@ -747,6 +1396,24 @@ suite("flex::runtime") {
             check_close(program->evaluate(inputs), 10.0f);
         }
 
+        it("evaluates animation-oriented MIR helpers") {
+            auto program = MirExpressionProgram::compile(
+                "select(enabled, lerp(from, to, smoothstep(0, 1, progress)), "
+                "step(0.5, saturate(progress)))",
+                {"enabled", "from", "to", "progress"});
+            check(program != nullptr);
+            if (!program) {
+                return;
+            }
+
+            check_close(program->evaluate_slots(
+                            std::vector<float>{1.0f, 10.0f, 30.0f, 0.5f}),
+                        20.0f);
+            check_close(program->evaluate_slots(
+                            std::vector<float>{0.0f, 10.0f, 30.0f, 0.75f}),
+                        1.0f);
+        }
+
         it("evaluates MIR word logical operators and power") {
             auto program = MirExpressionProgram::compile(
                 "value > 3 and not disabled or pow(value, 2) == 4", {"value", "disabled"});
@@ -765,6 +1432,84 @@ suite("flex::runtime") {
             check_close(program->evaluate(inputs), 0.0f);
         }
 
+        it("compiles MIR derivatives for arithmetic and functions") {
+            auto program = MirExpressionProgram::compile(
+                "derivative(sin(time * 2) + time ^ 3, time)", {"time"});
+            check(program != nullptr);
+            if (!program) return;
+
+            check_close(program->evaluate_slots(std::vector<float>{2.0f}),
+                        static_cast<float>(2.0 * std::cos(4.0) + 12.0));
+        }
+
+        it("supports nested MIR derivatives") {
+            auto program = MirExpressionProgram::compile(
+                "derivative(derivative(time ^ 4, time), time)", {"time"});
+            check(program != nullptr);
+            if (!program) return;
+
+            check_close(program->evaluate_slots(std::vector<float>{2.0f}), 48.0f);
+        }
+
+        it("differentiates the MIR elementary function set") {
+            auto program = MirExpressionProgram::compile(
+                "derivative(tan(time) + sqrt(time) + exp(time) + log(time) + "
+                "pow(time, time) + pow(time, 0), time)",
+                {"time"});
+            check(program != nullptr);
+            if (!program) return;
+
+            const double expected = 1.0 / (std::cos(1.0) * std::cos(1.0)) +
+                                    0.5 + std::exp(1.0) + 1.0 + 1.0;
+            check_close(program->evaluate_slots(std::vector<float>{1.0f}),
+                        static_cast<float>(expected));
+        }
+
+        it("defines abs derivatives at smooth and corner points") {
+            auto program = MirExpressionProgram::compile(
+                "derivative(abs(time), time)", {"time"});
+            check(program != nullptr);
+            if (!program) return;
+
+            check_close(program->evaluate_slots(std::vector<float>{0.5f}), 1.0f);
+            check_close(program->evaluate_slots(std::vector<float>{-1.0f}), -1.0f);
+            check_close(program->evaluate_slots(std::vector<float>{0.0f}), 0.0f);
+        }
+
+        it("defines clamp derivatives by active branch") {
+            auto program = MirExpressionProgram::compile(
+                "derivative(clamp(time, 0, 1), time)", {"time"});
+            check(program != nullptr);
+            if (!program) return;
+
+            check_close(program->evaluate_slots(std::vector<float>{0.5f}), 1.0f);
+            check_close(program->evaluate_slots(std::vector<float>{-1.0f}), 0.0f);
+        }
+
+        it("defines smoothstep derivatives by active branch") {
+            auto program = MirExpressionProgram::compile(
+                "derivative(smoothstep(0, 1, time), time)", {"time"});
+            check(program != nullptr);
+            if (!program) return;
+
+            check_close(program->evaluate_slots(std::vector<float>{0.5f}), 1.5f);
+            check_close(program->evaluate_slots(std::vector<float>{-1.0f}), 0.0f);
+
+            auto equal_edges = MirExpressionProgram::compile(
+                "derivative(smoothstep(1, 1, time), time)", {"time"});
+            check(equal_edges != nullptr);
+            if (equal_edges) {
+                check_close(equal_edges->evaluate_slots(std::vector<float>{1.0f}), 0.0f);
+            }
+        }
+
+        it("rejects discontinuous modulo derivatives and invalid variables") {
+            check(MirExpressionProgram::compile(
+                      "derivative(fmod(time, 2), time)", {"time"}) == nullptr);
+            check(MirExpressionProgram::compile(
+                      "derivative(time, time + 0)", {"time"}) == nullptr);
+        }
+
         it("updates property from input binding") {
             ArenaAllocator alloc(4096);
             auto node = Group::create(alloc);
@@ -776,6 +1521,23 @@ suite("flex::runtime") {
             ctx.evaluate();
 
             check_close(node->opacity(), 0.25f);
+        }
+
+        it("keeps one active type for each input name") {
+            BindingContext ctx;
+            const Symbol value("value");
+
+            ctx.set_input(value, 3.0f);
+            check(ctx.has_input(value));
+            check_close(ctx.get_float_input(value), 3.0f);
+
+            ctx.set_input(value, std::string("ready"));
+            check_close(ctx.get_float_input(value), 0.0f);
+            check(ctx.get_string_input(value) == "ready");
+
+            ctx.set_input(value, true);
+            check(ctx.get_string_input(value).empty());
+            check(ctx.get_bool_input(value));
         }
 
         it("evaluates expression binding") {

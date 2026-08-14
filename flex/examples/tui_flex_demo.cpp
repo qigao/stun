@@ -8,7 +8,7 @@
  */
 
 #include <flex/core.h>
-#include <backends/renderer.h>
+#include <flex/bridge/renderer.h>
 #include <backends/tui/init.h>
 #include <tui.h>
 #include <cmath>

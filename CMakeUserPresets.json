@@ -9,7 +9,8 @@
             "hidden": true,
             "cacheVariables": {
                 "TURBO_UTILS_ROOT": "C:/projects/cpp/external/pkgs/turboutils",
-                "TURBO_NET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
+                "TURBOPARSER_ROOT": "C:/projects/cpp/external/pkgs/turboparser",
+                "TURBONET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
                 "RulesForge_ROOT": "c:/projects/cpp/external/pkgs/rules_forge",
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
@@ -32,6 +33,7 @@
             "name": "linux-paths",
             "hidden": true,
             "cacheVariables": {
+                "TURBOPARSER_ROOT": "/opt/turboparser",
                 "TURBONET_ROOT": "/opt/turbonet",
                 "TURBOSCRIPT_ROOT": "/opt/turboscript",
                 "TURBOHTTP_ROOT": "/opt/turbohttp",

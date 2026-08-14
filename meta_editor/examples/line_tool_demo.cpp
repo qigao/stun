@@ -21,7 +21,7 @@
 #include <meta_editor/core/sdl_adapter.h>
 #include <meta_editor/tools/line_tool.h>
 #include <meta_editor/view/line_style_panel.h>
-#include <backends/thorvg/init.h>
+#include <flex/render/engines/thorvg.h>
 #include <flex/bridge/renderer.h>
 #include <SDL2/SDL.h>
 #include <thorvg.h>
@@ -41,15 +41,15 @@ int main(int argc, char* argv[]) {
 
     SDL_Surface* surface = SDL_GetWindowSurface(window);
 
-    flex::init();
-    flex::load_font("Arial", "C:/Windows/Fonts/arial.ttf");
+    flex::render::engines::thorvg::init();
+    flex::render::engines::thorvg::load_font("Arial", "C:/Windows/Fonts/arial.ttf");
 
     std::unique_ptr<tvg::SwCanvas> tvg_canvas(tvg::SwCanvas::gen());
     tvg_canvas->target(reinterpret_cast<uint32_t*>(surface->pixels),
                        surface->w, surface->pitch / 4, surface->h,
                        tvg::ColorSpace::ARGB8888);
 
-    auto renderer = flex::create_thorvg_renderer(tvg_canvas.get());
+    auto renderer = flex::render::engines::thorvg::create_renderer(tvg_canvas.get());
 
     // Create Editor
     Editor editor((float)WIDTH, (float)HEIGHT);
@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
                 tvg_canvas->target(reinterpret_cast<uint32_t*>(surface->pixels),
                                    surface->w, surface->pitch / 4, surface->h,
                                    tvg::ColorSpace::ARGB8888);
-                renderer = flex::create_thorvg_renderer(tvg_canvas.get());
+                renderer = flex::render::engines::thorvg::create_renderer(tvg_canvas.get());
                 editor.set_viewport((float)surface->w, (float)surface->h);
                 continue;
             }
@@ -167,7 +167,7 @@ int main(int argc, char* argv[]) {
     }
 
     editor.shutdown();
-    flex::shutdown();
+    flex::render::engines::thorvg::shutdown();
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;

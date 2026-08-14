@@ -16,6 +16,7 @@
 #include "types.h"
 #include "layout_data.h"
 #include "flex/core/event.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <memory>
@@ -30,6 +31,7 @@ class Group;
 class Renderer;
 class Machine;
 class ArenaAllocator;
+class TimelinePlayer;
 
 using NodeRawPtr = Node*;
 using SharedNodePtr = std::shared_ptr<Node>;
@@ -91,7 +93,7 @@ public:
     // -------------------------------------------
 
     const std::string& id() const { return id_; }
-    void set_id(const std::string& id) { id_ = id; }
+    void set_id(const std::string& id);
 
     const std::vector<std::string>& tags() const {
         static const std::vector<std::string> empty;
@@ -553,8 +555,10 @@ public:
 
 protected:
     friend class Group;
+    friend class TimelinePlayer;
 
     void propagate_dirty();
+    void mark_topology_changed();
     void ensure_events();
     void ensure_layout() { if (!layout_) layout_ = std::make_unique<LayoutData>(); }
 
@@ -587,6 +591,7 @@ protected:
     // Borrowers use this token to reject access after heap destruction or arena reset.
     mutable std::shared_ptr<const void> lifetime_owner_;
     mutable LifetimeToken lifetime_token_;
+    uint64_t topology_revision_ = 1;
 
     // Cached bounds
     mutable Bounds cached_bounds_;

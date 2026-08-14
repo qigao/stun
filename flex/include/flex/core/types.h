@@ -666,10 +666,12 @@ enum class PropertyID : uint16_t {
     Text, Content, FontSize, TextColor,
     // Color (generic)
     Color,
+    // Appended to preserve the numeric values of existing property IDs.
+    Position,
 };
 
-// Forward declaration for AnimValue (full definition after Color)
-// AnimValue = variant<float, std::string, Color>
+// Forward declaration for AnimValue (full definition after Color).
+// Position animation uses Vec2 as one coherent value rather than two tracks.
 
 // ============================================================================
 // Geometry Types
@@ -757,7 +759,7 @@ struct Bounds {
 
 namespace flex {
 
-using AnimValue = std::variant<float, std::string, Color>;
+using AnimValue = std::variant<float, std::string, Color, Vec2>;
 
 // Helper to get PropertyID from string (fast path using first char switch)
 PropertyID get_property_id(const char* prop);

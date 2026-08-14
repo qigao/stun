@@ -10,7 +10,6 @@
 #include <cmath>
 #include <vector>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
 #ifndef M_PI
@@ -84,7 +83,7 @@ bool Exporter::save_svg(const std::string& path) const {
 bool Exporter::save_png(const std::string& path, const uint32_t* buffer, int width, int height) const {
     if (!buffer || width <= 0 || height <= 0) return false;
 
-    // Convert ARGB (ThorVG format) to RGBA (PNG format)
+    // The public exporter contract accepts packed ARGB and PNG requires RGBA bytes.
     std::vector<uint8_t> rgba(width * height * 4);
     for (int i = 0; i < width * height; i++) {
         uint32_t c = buffer[i];

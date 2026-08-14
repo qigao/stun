@@ -1,6 +1,7 @@
 # FlexUI TurboScript 行为控制器实施计划
 
-- 状态：P0 已落地；P1/P2 涉及公开接口，等待用户确认
+- 状态：P0 已落地；TurboScript ABI、FlexUI controller 与 DLL service 扩展已获确认，
+  retained-mode 公开契约变更仍需在实施前单独审查
 - 日期：2026-07-15
 - 设计依据：[TURBOSCRIPT_CONTROLLER_DESIGN.md](TURBOSCRIPT_CONTROLLER_DESIGN.md)
 - 外部源码：`C:\projects\cpp\TurboScript`
@@ -20,7 +21,8 @@
 - 不把 `exprtk_value_t`、MIR handle 或 `Element*` 暴露到跨模块接口。
 - 用户工作树已有 Tailwind/charts 改动；脚本接入不修改这些文件，发生 overlap 时停止并
   重新审计。
-- P1、P2 的公开接口和依赖变化必须在用户确认后开始。
+- P1 retained-mode 的公开接口变化仍需单独审查；P2 TurboScript 宿主 ABI 可按
+  `FLEXUI_DESKTOP_PLAN.md` 推进，但冻结 ABI 前仍需完成兼容性测试。
 
 ## 依赖顺序
 

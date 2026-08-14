@@ -19,8 +19,8 @@ mark_as_advanced(
   NFD_USE_ALLOWEDCONTENTTYPES_IF_AVAILABLE
 )
 
-add_subdirectory(thorvg)
 add_subdirectory(nanovg)
+add_subdirectory(gCanvas)
 add_subdirectory(pdfgen)
 add_subdirectory(dxf)
 add_subdirectory(OpenXLSX)

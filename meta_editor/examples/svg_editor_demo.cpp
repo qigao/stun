@@ -9,10 +9,8 @@
 #include <meta_editor/view/layers_panel.h>
 #include <meta_editor/view/top_bar.h>
 #include <meta_editor/view/bottom_bar.h>
-#include <backends/thorvg/init.h>
 #include <flex/bridge/renderer.h>
 #include "glfw_app.h"
-#include <thorvg.h>
 #include <iostream>
 #include <string>
 
@@ -154,7 +152,9 @@ public:
         
         // Passing content_scale_x_ here allows drawing in logical units (e.g. 1024 width)
         // to fill the physical framebuffer (e.g. 1280 width).
-        renderer()->begin_frame((float)width(), (float)height(), content_scale_x_);
+        renderer()->begin_frame((float)width() / content_scale_x_,
+                                (float)height() / content_scale_y_,
+                                content_scale_x_);
         
         renderer()->clear(flex::Color{0.15f, 0.15f, 0.17f, 1.0f});
         

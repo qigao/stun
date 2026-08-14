@@ -550,6 +550,145 @@ TEST_CASE("Parser: Animation with path property", "[parser][anim]") {
   REQUIRE(std::get<std::string>(track_content.keyframes[1].value) == "Complete!");
 }
 
+TEST_CASE("Parser: MIR track expression and time units", "[parser][anim][mir]") {
+  auto program = parse(R"(
+        anim "spring" {
+            duration: 1500ms
+            track "x" {
+                expression: ${lerp(from, to, progress * progress) + sin(time)}
+                keyframe 0ms -> 10
+                keyframe 1500ms -> 30
+            }
+        }
+    )");
+
+  check_eq(std::string(get_error()), std::string());
+  REQUIRE(program != nullptr);
+  REQUIRE(program->animations.size() == 1);
+  check_close(program->animations[0]->duration, 1.5f);
+  REQUIRE(program->animations[0]->tracks.size() == 1);
+  const auto &track = program->animations[0]->tracks[0];
+  REQUIRE(track.numeric_expression ==
+          "lerp(from, to, progress * progress) + sin(time)");
+  REQUIRE(track.keyframes.size() == 2);
+  check_close(track.keyframes[0].time, 0.0f);
+  check_close(track.keyframes[1].time, 1.5f);
+}
+
+TEST_CASE("Parser: vec2 motion path and timeline trigger", "[parser][anim][motion]") {
+  auto program = parse(R"(
+        anim "guidedMove" {
+            duration: 2s
+            trigger 750ms -> "passedGuide"
+            track "#cursor/position" {
+                interpolation: catmullRom
+                keyframe 0s -> vec2(0, 10)
+                keyframe 2s -> vec2(20, 30)
+            }
+        }
+    )");
+
+  check_eq(std::string(get_error()), std::string());
+  REQUIRE(program != nullptr);
+  REQUIRE(program->animations.size() == 1);
+  const auto &anim = program->animations[0];
+  REQUIRE(anim->triggers.size() == 1);
+  check_close(anim->triggers[0].time, 0.75f);
+  check_eq(anim->triggers[0].event, std::string("passedGuide"));
+  REQUIRE(anim->tracks.size() == 1);
+
+  const auto &track = anim->tracks[0];
+  REQUIRE(track.property == "#cursor/position");
+  REQUIRE(track.spatial_interpolation == AstSpatialInterpolation::CatmullRom);
+  REQUIRE(track.keyframes.size() == 2);
+  REQUIRE(std::holds_alternative<AstVec2>(track.keyframes[0].value));
+  const auto &start = std::get<AstVec2>(track.keyframes[0].value);
+  check_close(start.x, 0.0f);
+  check_close(start.y, 10.0f);
+  const auto &end = std::get<AstVec2>(track.keyframes[1].value);
+  check_close(end.x, 20.0f);
+  check_close(end.y, 30.0f);
+}
+
+TEST_CASE("Parser: cubic Bezier motion keyframes preserve explicit tangents",
+          "[parser][anim][motion][bezier]") {
+  auto program = parse(R"(
+        anim "guidedCurve" {
+            duration: 1s
+            track "#cursor/position" {
+                interpolation: cubicBezier
+                keyframe 0s -> bezier(vec2(0, 0), vec2(0, 0), vec2(0, 10))
+                keyframe 1s -> bezier(vec2(10, 0), vec2(0, 10), vec2(0, 0))
+            }
+        }
+    )");
+
+  check_eq(std::string(get_error()), std::string());
+  REQUIRE(program != nullptr);
+  REQUIRE(program->animations.size() == 1);
+  const auto &track = program->animations[0]->tracks[0];
+  REQUIRE(track.spatial_interpolation == AstSpatialInterpolation::CubicBezier);
+  REQUIRE(track.keyframes.size() == 2);
+  REQUIRE(track.keyframes[0].spatial_tangents.has_value());
+  const auto &position = std::get<AstVec2>(track.keyframes[0].value);
+  const auto &tangents = *track.keyframes[0].spatial_tangents;
+  check_close(position.x, 0.0f);
+  check_close(position.y, 0.0f);
+  check_close(tangents.in.x, 0.0f);
+  check_close(tangents.in.y, 0.0f);
+  check_close(tangents.out.x, 0.0f);
+  check_close(tangents.out.y, 10.0f);
+}
+
+TEST_CASE("Parser: rejects malformed cubic Bezier motion keyframes",
+          "[parser][anim][motion][bezier][error]") {
+  REQUIRE(parse(R"(
+        anim "badCurve" {
+            track "position" {
+                interpolation: cubicBezier
+                keyframe 0s -> bezier(vec2(0, 0), vec2(1, 1))
+            }
+        }
+    )") == nullptr);
+  REQUIRE(std::string(get_error()).find("three vec2 arguments") != std::string::npos);
+}
+
+TEST_CASE("Parser: rejects malformed vec2 keyframes", "[parser][anim][motion][error]") {
+  REQUIRE(parse(R"(
+        anim "badMove" {
+            duration: 1s
+            track "position" { keyframe 0s -> vec2(10) }
+        }
+    )") == nullptr);
+  REQUIRE_FALSE(std::string(get_error()).empty());
+}
+
+TEST_CASE("Parser: rejects invalid bounded literals", "[parser][error]") {
+  REQUIRE(parse("scene Bad { rect r { width: 999999999999999999999999999999999999999999 } }") ==
+          nullptr);
+  REQUIRE(std::string(get_error()).find("numeric literal") != std::string::npos);
+
+  REQUIRE(parse("scene Bad { repeat 0 { rect r {} } }") == nullptr);
+  REQUIRE(std::string(get_error()).find("repeat count") != std::string::npos);
+}
+
+TEST_CASE("Parser: rejects unterminated delimited literals", "[parser][error][lexer]") {
+  REQUIRE(parse("scene Bad { text t { content: \"unterminated") == nullptr);
+  REQUIRE(parse("scene Bad { rect r { x: ${unterminated") == nullptr);
+}
+
+TEST_CASE("Parser: rejects unknown for-loop data", "[parser][data][error]") {
+  REQUIRE(parse(R"(
+        scene Bad {
+            for item in missing {
+                rect row {}
+            }
+        }
+    )") == nullptr);
+  REQUIRE(std::string(get_error()).find("unknown data block 'missing'") !=
+          std::string::npos);
+}
+
 TEST_CASE("Parser: Multiple animations", "[parser][anim]") {
   auto program = parse(R"(
         anim "toPositive" {
@@ -780,6 +919,7 @@ TEST_CASE("Parser: Pseudo-class block preserves base style", "[parser][pseudo]")
         }
     )");
 
+  check_eq(std::string(get_error()), std::string());
   REQUIRE(program != nullptr);
   REQUIRE(program->scene != nullptr);
   REQUIRE(program->scene->children.size() == 1);
@@ -996,8 +1136,23 @@ TEST_CASE("Parser: Deeply nested groups", "[parser][edge]") {
   REQUIRE(node->type == "rect");
 }
 
+TEST_CASE("Parser: Reports the nesting resource limit", "[parser][edge][error]") {
+  std::string source = "scene Deep { ";
+  for (int depth = 0; depth < 300; ++depth) {
+    source += "group g" + std::to_string(depth) + " { ";
+  }
+  source += "rect leaf {} ";
+  for (int depth = 0; depth < 300; ++depth) {
+    source += "} ";
+  }
+  source += "}";
+
+  REQUIRE(parse(source.c_str()) == nullptr);
+  REQUIRE(std::string(get_error()).find("nesting limit") != std::string::npos);
+}
+
 TEST_CASE("Parser: Inline child node with properties", "[parser][edge]") {
-  // This tests the analog_clock.flex pattern where a group has properties
+  // This tests the retired example's analog-clock pattern where a group has properties
   // followed by an inline child node on the same line
   auto program = parse(R"(
         scene InlineTest {
@@ -1184,10 +1339,10 @@ TEST_CASE("Parser: All node types", "[parser][edge]") {
 }
 
 // ============================================================================
-// PARSER TESTS: REAL-WORLD EXAMPLE (data_binding.flex)
+// PARSER TESTS: REAL-WORLD DATA-BINDING PATTERN
 // ============================================================================
 
-TEST_CASE("Parser: data_binding.flex example", "[parser][example]") {
+TEST_CASE("Parser: data-binding example", "[parser][example]") {
   const char *source = R"(
 // Data Binding Demo
 // Simple counter with reactive UI

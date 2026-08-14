@@ -8,7 +8,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "backends/thorvg/init.h"
+#include "flex/render/engines/thorvg.h"
 
 // Include Player headers
 #include "engine/player.h"
@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
     }
 
     // 2. Init Flex
-    flex::init();
+    flex::render::engines::thorvg::init();
     if (tvg::Initializer::init(0) != tvg::Result::Success) return 1;
 
     // Load Flex UI
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
     canvas = tvg::SwCanvas::gen();
     ui_buffer.resize(WINDOW_WIDTH * WINDOW_HEIGHT);
     canvas->target(ui_buffer.data(), WINDOW_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, tvg::ColorSpace::ARGB8888);
-    flex_renderer = flex::create_thorvg_renderer(canvas);
+    flex_renderer = flex::render::engines::thorvg::create_renderer(canvas);
 
 
     // 4. Init Player
@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     
-    flex::shutdown();
+    flex::render::engines::thorvg::shutdown();
     SDL_Quit();
 
     return 0;

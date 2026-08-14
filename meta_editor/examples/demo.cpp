@@ -6,7 +6,7 @@
 
 #include "full_editor_app.h"
 #include <SDL2/SDL.h>
-#include <backends/thorvg/init.h>
+#include <flex/render/engines/thorvg.h>
 #include <flex/bridge/renderer.h>
 #include <iostream>
 #include <thorvg.h>
@@ -146,10 +146,10 @@ int main(int argc, char *argv[]) {
   try {
     // Initialize flex engine (handles ThorVG init with proper thread count)
     std::cout << "Initializing Flex engine..." << std::endl;
-    flex::init();
+    flex::render::engines::thorvg::init();
 
     // Load fonts (must be after flex::init which initializes ThorVG)
-    flex::load_font("Arial", "C:/Windows/Fonts/arial.ttf");
+    flex::render::engines::thorvg::load_font("Arial", "C:/Windows/Fonts/arial.ttf");
 
 #if USE_OPENGL_RENDERER
     // Create FBO for ThorVG to render into
@@ -173,7 +173,7 @@ int main(int argc, char *argv[]) {
 #endif
 
     // Create flex renderer
-    auto renderer = flex::create_thorvg_renderer(tvg_canvas.get());
+    auto renderer = flex::render::engines::thorvg::create_renderer(tvg_canvas.get());
     if (!renderer) {
       throw std::runtime_error("Failed to create flex renderer");
     }
@@ -255,7 +255,7 @@ int main(int argc, char *argv[]) {
     // Cleanup
     std::cout << "Shutting down..." << std::endl;
     editor.shutdown();
-    flex::shutdown(); // Also terminates ThorVG
+    flex::render::engines::thorvg::shutdown(); // Also terminates ThorVG
 
   } catch (const std::exception &e) {
     std::cerr << "FATAL ERROR: " << e.what() << std::endl;

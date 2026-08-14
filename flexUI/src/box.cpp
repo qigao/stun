@@ -7,7 +7,7 @@
 #include <flexUI/layout_manager.h>
 #include <flexUI/render_manager.h>
 #include <flexUI/view_pipeline.h>
-#include <flexUI/utility_jit.h>
+#include <flexUI/tailwindcss.h>
 #include "default_style_assets.h"
 #include <flex/bridge/renderer.h>
 #include <nlohmann/json.hpp>

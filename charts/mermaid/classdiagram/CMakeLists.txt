@@ -26,7 +26,7 @@ add_library(classdiagram STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/classdiagram_parser_gen.c"
 )
 
-target_link_libraries(classdiagram PUBLIC TurboUtils::Parser)
+target_link_libraries(classdiagram PUBLIC TurboParser::Parser)
 
 target_include_directories(classdiagram PUBLIC
     include
@@ -35,7 +35,7 @@ target_include_directories(classdiagram PUBLIC
 
 # Test executable
 add_executable(classdiagram_test tests/test_parser.c)
-target_link_libraries(classdiagram_test classdiagram TurboUtils::TinyTest TurboUtils::Parser)
+target_link_libraries(classdiagram_test classdiagram TurboUtils::TinyTest TurboParser::Parser)
 target_compile_definitions(classdiagram_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/class")
 
 add_test(NAME classdiagram_test COMMAND classdiagram_test)

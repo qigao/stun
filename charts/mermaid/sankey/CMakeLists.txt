@@ -32,7 +32,7 @@ target_include_directories(sankey PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(sankey PUBLIC TurboUtils::Parser flex_runtime)
+target_link_libraries(sankey PUBLIC TurboParser::Parser flex_runtime)
 
 # Test executable
 add_executable(sankey_test tests/test_parser.c)

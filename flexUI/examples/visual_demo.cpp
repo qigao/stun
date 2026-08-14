@@ -4,7 +4,6 @@
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <thorvg.h> 
 #include <flexUI.h>
 #include "glfw_app.h"
 #include <flex/bridge/renderer.h>
@@ -295,8 +294,6 @@ private:
 
     flexUI::Box* ime_box() override { return box_.get(); }
     bool should_render_frame() const override { return box_ && box_->is_dirty(); }
-    bool remove_canvas_before_render() const override { return false; }
-
     Element* create_view_pane() {
         auto* view = box_->create("div");
         view->add_class("view-pane");

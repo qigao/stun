@@ -7,13 +7,9 @@
  */
 
 #include "flex.h"
-#if defined(FLEX_HAS_NANOVG)
-#include "backends/nanovg/init.h"
-#include "flex/bridge/renderer_nanovg.h"
+#if defined(FLEX_HAS_OPENGL)
+#include "backends/opengl/init.h"
 #include <glad/glad.h>
-#define NANOVG_GL3 1
-#include <nanovg.h>
-#include <nanovg_gl.h>
 #endif
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -22,15 +18,15 @@
 #include <windows.h>
 #include "backends/d2d/init.h"
 #endif
-#include "flex/bridge/renderer_thorvg.h"
 #include "backends/tui/init.h"
 #include "tinytest.h"
 #include "test_render_trace.h"
-#include "thorvg.h"
 #include "tui.h"
 
 #include <array>
+#include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -373,141 +369,57 @@ const tui_cell_t* tui_cell_at_const(tui_terminal_t* term, int x, int y) {
     return buffer ? tui_buffer_at_const(buffer, x, y) : nullptr;
 }
 
-struct ThorvgCanvasGuard {
-    bool initialized = false;
-    std::unique_ptr<tvg::SwCanvas> canvas;
-    std::vector<uint32_t> buffer;
-    uint32_t width = 0;
-    uint32_t height = 0;
+#if defined(FLEX_HAS_OPENGL) && defined(_WIN32)
 
-    ThorvgCanvasGuard() = default;
-    ThorvgCanvasGuard(const ThorvgCanvasGuard&) = delete;
-    ThorvgCanvasGuard& operator=(const ThorvgCanvasGuard&) = delete;
-    ThorvgCanvasGuard(ThorvgCanvasGuard&& other) noexcept
-        : initialized(other.initialized),
-          canvas(std::move(other.canvas)),
-          buffer(std::move(other.buffer)),
-          width(other.width),
-          height(other.height) {
-        other.initialized = false;
-        other.width = 0;
-        other.height = 0;
-    }
-
-    ThorvgCanvasGuard& operator=(ThorvgCanvasGuard&& other) noexcept {
-        if (this != &other) {
-            if (initialized) {
-                tvg::Initializer::term();
-            }
-            initialized = other.initialized;
-            canvas = std::move(other.canvas);
-            buffer = std::move(other.buffer);
-            width = other.width;
-            height = other.height;
-            other.initialized = false;
-            other.width = 0;
-            other.height = 0;
-        }
-        return *this;
-    }
-
-    ~ThorvgCanvasGuard() {
-        if (initialized) {
-            tvg::Initializer::term();
-        }
-    }
-};
-
-ThorvgCanvasGuard make_thorvg_canvas(uint32_t width, uint32_t height) {
-    ThorvgCanvasGuard guard;
-    auto init_result = tvg::Initializer::init(0);
-    check(init_result == tvg::Result::Success);
-    if (init_result != tvg::Result::Success) {
-        return guard;
-    }
-    guard.initialized = true;
-    guard.width = width;
-    guard.height = height;
-    guard.buffer.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0u);
-    guard.canvas.reset(tvg::SwCanvas::gen());
-    check(guard.canvas != nullptr);
-    if (!guard.canvas) {
-        return guard;
-    }
-    auto target_result =
-        guard.canvas->target(guard.buffer.data(), width, width, height, tvg::ColorSpace::ARGB8888);
-    check(target_result == tvg::Result::Success);
-    if (target_result != tvg::Result::Success) {
-        guard.canvas.reset();
-    }
-    return guard;
-}
-
-uint32_t thorvg_pixel_at(const ThorvgCanvasGuard& guard, uint32_t x, uint32_t y) {
-    if (x >= guard.width || y >= guard.height || guard.buffer.empty()) {
-        return 0;
-    }
-    return guard.buffer[static_cast<size_t>(y) * guard.width + x];
-}
-
-#if defined(FLEX_HAS_NANOVG) && defined(_WIN32)
-
-LRESULT CALLBACK nanovg_test_window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT CALLBACK opengl_test_window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     return DefWindowProcA(hwnd, message, wparam, lparam);
 }
 
-ATOM ensure_nanovg_test_window_class() {
+ATOM ensure_opengl_test_window_class() {
     static ATOM atom = []() -> ATOM {
         WNDCLASSA window_class{};
         window_class.style = CS_OWNDC;
-        window_class.lpfnWndProc = nanovg_test_window_proc;
+        window_class.lpfnWndProc = opengl_test_window_proc;
         window_class.hInstance = GetModuleHandleA(nullptr);
-        window_class.lpszClassName = "FlexNanoVGStandardTestWindow";
+        window_class.lpszClassName = "FlexOpenGLStandardTestWindow";
         return RegisterClassA(&window_class);
     }();
     return atom;
 }
 
-bool load_nanovg_test_font() {
-    if (flex::nanovg_backend::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
+bool load_opengl_test_font() {
+    if (flex::opengl_backend::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
         return true;
     }
-    return flex::nanovg_backend::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
+    return flex::opengl_backend::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
 }
 
-struct NanoVGSurfaceGuard {
+struct OpenGLSurfaceGuard {
     HWND hwnd = nullptr;
     HDC device_context = nullptr;
     HGLRC gl_context = nullptr;
-    NVGcontext* vg = nullptr;
     uint32_t width = 0;
     uint32_t height = 0;
 
-    NanoVGSurfaceGuard() = default;
-    NanoVGSurfaceGuard(const NanoVGSurfaceGuard&) = delete;
-    NanoVGSurfaceGuard& operator=(const NanoVGSurfaceGuard&) = delete;
+    OpenGLSurfaceGuard() = default;
+    OpenGLSurfaceGuard(const OpenGLSurfaceGuard&) = delete;
+    OpenGLSurfaceGuard& operator=(const OpenGLSurfaceGuard&) = delete;
 
-    NanoVGSurfaceGuard(NanoVGSurfaceGuard&& other) noexcept
+    OpenGLSurfaceGuard(OpenGLSurfaceGuard&& other) noexcept
         : hwnd(other.hwnd),
           device_context(other.device_context),
           gl_context(other.gl_context),
-          vg(other.vg),
           width(other.width),
           height(other.height) {
         other.hwnd = nullptr;
         other.device_context = nullptr;
         other.gl_context = nullptr;
-        other.vg = nullptr;
         other.width = 0;
         other.height = 0;
     }
 
-    NanoVGSurfaceGuard& operator=(NanoVGSurfaceGuard&& other) noexcept {
+    OpenGLSurfaceGuard& operator=(OpenGLSurfaceGuard&& other) noexcept {
         if (this != &other) {
-            if (vg) {
-                wglMakeCurrent(device_context, gl_context);
-                nvgDeleteGL3(vg);
-            }
             if (gl_context) {
                 wglMakeCurrent(nullptr, nullptr);
                 wglDeleteContext(gl_context);
@@ -522,25 +434,19 @@ struct NanoVGSurfaceGuard {
             hwnd = other.hwnd;
             device_context = other.device_context;
             gl_context = other.gl_context;
-            vg = other.vg;
             width = other.width;
             height = other.height;
 
             other.hwnd = nullptr;
             other.device_context = nullptr;
             other.gl_context = nullptr;
-            other.vg = nullptr;
             other.width = 0;
             other.height = 0;
         }
         return *this;
     }
 
-    ~NanoVGSurfaceGuard() {
-        if (vg) {
-            wglMakeCurrent(device_context, gl_context);
-            nvgDeleteGL3(vg);
-        }
+    ~OpenGLSurfaceGuard() {
         if (gl_context) {
             wglMakeCurrent(nullptr, nullptr);
             wglDeleteContext(gl_context);
@@ -554,13 +460,13 @@ struct NanoVGSurfaceGuard {
     }
 };
 
-NanoVGSurfaceGuard make_nanovg_surface(uint32_t width, uint32_t height) {
-    NanoVGSurfaceGuard guard;
+OpenGLSurfaceGuard make_opengl_surface(uint32_t width, uint32_t height) {
+    OpenGLSurfaceGuard guard;
     guard.width = width;
     guard.height = height;
 
-    flex::nanovg_backend::init();
-    const ATOM atom = ensure_nanovg_test_window_class();
+    flex::opengl_backend::init();
+    const ATOM atom = ensure_opengl_test_window_class();
     check(atom != 0);
     if (!atom) {
         return guard;
@@ -575,8 +481,8 @@ NanoVGSurfaceGuard make_nanovg_surface(uint32_t width, uint32_t height) {
     }
 
     guard.hwnd = CreateWindowExA(0,
-                                 "FlexNanoVGStandardTestWindow",
-                                 "Flex NanoVG Standard Test",
+                                 "FlexOpenGLStandardTestWindow",
+                                 "Flex OpenGL Standard Test",
                                  window_style,
                                  CW_USEDEFAULT,
                                  CW_USEDEFAULT,
@@ -648,19 +554,16 @@ NanoVGSurfaceGuard make_nanovg_surface(uint32_t width, uint32_t height) {
         return guard;
     }
 
-    load_nanovg_test_font();
-
-    guard.vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-    check(guard.vg != nullptr);
+    load_opengl_test_font();
     return guard;
 }
 
-bool surface_ready(const NanoVGSurfaceGuard& guard) {
-    return guard.vg != nullptr;
+bool surface_ready(const OpenGLSurfaceGuard& guard) {
+    return guard.gl_context != nullptr;
 }
 
-uint32_t nanovg_pixel_at(const NanoVGSurfaceGuard& guard, uint32_t x, uint32_t y) {
-    if (!guard.vg || x >= guard.width || y >= guard.height) {
+uint32_t opengl_pixel_at(const OpenGLSurfaceGuard& guard, uint32_t x, uint32_t y) {
+    if (!guard.gl_context || x >= guard.width || y >= guard.height) {
         return 0;
     }
 
@@ -680,9 +583,20 @@ uint32_t nanovg_pixel_at(const NanoVGSurfaceGuard& guard, uint32_t x, uint32_t y
            (static_cast<uint32_t>(rgba[2]) << 8) | static_cast<uint32_t>(rgba[3]);
 }
 
-std::unique_ptr<Renderer> create_nanovg_test_renderer(NVGcontext* vg) {
-    flex::nanovg_backend::register_backend();
-    auto renderer = flex::nanovg_backend::create_renderer(vg);
+std::unique_ptr<Renderer> create_opengl_test_renderer() {
+    flex::opengl_backend::register_backend();
+    flex::opengl_backend::OpenGLCanvas canvas;
+    canvas.get_proc_address = [](void*, const char* name) {
+        PROC address = wglGetProcAddress(name);
+        const auto raw = reinterpret_cast<std::intptr_t>(address);
+        if (address && raw != 1 && raw != 2 && raw != 3 && raw != -1) {
+            return reinterpret_cast<flex::opengl_backend::OpenGLProcAddress>(address);
+        }
+        HMODULE module = GetModuleHandleA("opengl32.dll");
+        return reinterpret_cast<flex::opengl_backend::OpenGLProcAddress>(
+            module ? GetProcAddress(module, name) : nullptr);
+    };
+    auto renderer = flex::opengl_backend::create_renderer(&canvas);
     check(renderer != nullptr);
     return renderer;
 }
@@ -770,10 +684,6 @@ std::unique_ptr<Renderer> create_d2d_test_renderer(ID2D1RenderTarget* render_tar
 }
 
 #endif
-
-bool surface_ready(const ThorvgCanvasGuard& guard) {
-    return guard.canvas != nullptr;
-}
 
 #ifdef _WIN32
 bool surface_ready(const D2DTargetGuard& guard) {
@@ -1067,22 +977,19 @@ void check_tui_renderer_capabilities() {
     check(!caps.blur);
 }
 
-void check_thorvg_renderer_capabilities() {
-    auto surface = make_thorvg_canvas(64, 64);
+#if defined(FLEX_HAS_OPENGL) && defined(_WIN32)
+void check_opengl_renderer_capabilities() {
+    auto surface = make_opengl_surface(64, 64);
     if (!surface_ready(surface)) {
         return;
     }
 
-    auto renderer = flex::create_thorvg_renderer(surface.canvas.get());
-    check(renderer != nullptr);
+    auto renderer = create_opengl_test_renderer();
     if (!renderer) {
         return;
     }
 
     const RendererCapabilities caps = renderer->capabilities();
-    // ThorVG paint handles do not yet preserve ordering across arbitrary
-    // flexUI subtree replacement, so the backend intentionally advertises
-    // full-frame replay even though it has internal cached-paint primitives.
     check(!caps.retained_mode);
     check(!caps.surface_recreation);
     check(caps.path_drawing);
@@ -1091,31 +998,7 @@ void check_thorvg_renderer_capabilities() {
     check(caps.rotation);
     check(caps.scaling);
     check(caps.shadow);
-    check(!caps.blur);
-}
-
-#if defined(FLEX_HAS_NANOVG) && defined(_WIN32)
-void check_nanovg_renderer_capabilities() {
-    auto surface = make_nanovg_surface(64, 64);
-    if (!surface_ready(surface)) {
-        return;
-    }
-
-    auto renderer = create_nanovg_test_renderer(surface.vg);
-    if (!renderer) {
-        return;
-    }
-
-    const RendererCapabilities caps = renderer->capabilities();
-    check(!caps.retained_mode);
-    check(!caps.surface_recreation);
-    check(caps.path_drawing);
-    check(caps.raster_images);
-    check(caps.svg_images);
-    check(caps.rotation);
-    check(caps.scaling);
-    check(!caps.shadow);
-    check(!caps.blur);
+    check(caps.blur);
 }
 #endif
 
@@ -1139,8 +1022,49 @@ void check_d2d_renderer_capabilities() {
     check(caps.svg_images);
     check(caps.rotation);
     check(caps.scaling);
-    check(caps.shadow);
-    check(caps.blur);
+    check(!caps.shadow);
+    check(!caps.blur);
+}
+
+void check_d2d_blur_contract() {
+    auto surface = make_d2d_target(64, 64);
+    if (!surface_ready(surface)) {
+        return;
+    }
+
+    auto renderer = create_d2d_test_renderer(surface.target.Get());
+    if (!renderer) {
+        return;
+    }
+
+    renderer->set_blur(BlurFilter{});
+    renderer->clear_blur();
+    check_throws_as(renderer->set_blur(BlurFilter{-1.0f}), std::invalid_argument);
+    check_throws_as(renderer->set_blur(BlurFilter{2.0f}), std::logic_error);
+}
+
+void check_d2d_shadow_contract() {
+    auto surface = make_d2d_target(64, 64);
+    if (!surface_ready(surface)) {
+        return;
+    }
+
+    auto renderer = create_d2d_test_renderer(surface.target.Get());
+    if (!renderer) {
+        return;
+    }
+
+    renderer->set_shadow(Shadow{});
+    Shadow transparent = Shadow::drop(2.0f, 2.0f, 2.0f, Color::Black);
+    transparent.color.a = 0.0f;
+    renderer->set_shadow(transparent);
+    renderer->clear_shadow();
+
+    Shadow invalid = Shadow::drop(1.0f, 1.0f, -1.0f, Color::Black);
+    check_throws_as(renderer->set_shadow(invalid), std::invalid_argument);
+    check_throws_as(
+        renderer->set_shadow(Shadow::drop(2.0f, 2.0f, 3.0f, Color::Black)),
+        std::logic_error);
 }
 #endif
 
@@ -1188,6 +1112,30 @@ suite("flex::standard") {
     }
 
     group("svg contract") {
+        it("propagates image and SVG effect state to their renderer calls") {
+            ArenaAllocator arena(4096);
+            RecordingRenderer renderer;
+            const Shadow shadow = Shadow::drop(2.0f, 3.0f, 4.0f, Color::Black);
+
+            auto image = Image::create(arena);
+            image->set_src("image.png");
+            image->set_width(16.0f);
+            image->set_height(8.0f);
+            image->set_shadow(shadow);
+            image->render(renderer);
+
+            auto svg = Svg::create(arena);
+            svg->set_data("<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>");
+            svg->set_layout_size(4.0f, 4.0f);
+            svg->set_shadow(shadow);
+            svg->render(renderer);
+
+            check_size_eq(renderer.count("set_shadow"), std::size_t{2});
+            check_size_eq(renderer.count("clear_shadow"), std::size_t{2});
+            check_size_eq(renderer.count("draw_image"), std::size_t{1});
+            check_size_eq(renderer.count("draw_svg_data"), std::size_t{1});
+        }
+
         it("renders file-backed svg nodes through draw_svg") {
             ArenaAllocator arena(4096);
             auto scene = build_svg_scene(arena);
@@ -1267,77 +1215,38 @@ suite("flex::standard") {
         }
     }
 
-    group("thorvg backend") {
+#if defined(FLEX_HAS_OPENGL) && defined(_WIN32)
+    group("opengl backend") {
         it("projects the canonical scene into distinct software pixels") {
             check_standard_pixel_backend(
-                make_thorvg_canvas,
-                [](auto& surface) {
-                    auto renderer = flex::create_thorvg_renderer(surface.canvas.get());
-                    check(renderer != nullptr);
-                    return renderer;
-                },
-                thorvg_pixel_at);
+                make_opengl_surface,
+                [](auto& surface) { return create_opengl_test_renderer(); },
+                opengl_pixel_at);
         }
 
         it("moves the marker pixels after animation advance") {
             check_animation_pixel_backend(
-                make_thorvg_canvas,
-                [](auto& surface) {
-                    auto renderer = flex::create_thorvg_renderer(surface.canvas.get());
-                    check(renderer != nullptr);
-                    return renderer;
-                },
-                thorvg_pixel_at);
+                make_opengl_surface,
+                [](auto& surface) { return create_opengl_test_renderer(); },
+                opengl_pixel_at);
         }
 
         it("keeps fully clipped content out of software pixels") {
             check_clipped_pixel_backend(
-                make_thorvg_canvas,
-                [](auto& surface) {
-                    auto renderer = flex::create_thorvg_renderer(surface.canvas.get());
-                    check(renderer != nullptr);
-                    return renderer;
-                },
-                thorvg_pixel_at);
-        }
-
-        it("reports the expected capability matrix") {
-            check_thorvg_renderer_capabilities();
-        }
-    }
-
-#if defined(FLEX_HAS_NANOVG) && defined(_WIN32)
-    group("nanovg backend") {
-        it("projects the canonical scene into distinct software pixels") {
-            check_standard_pixel_backend(
-                make_nanovg_surface,
-                [](auto& surface) { return create_nanovg_test_renderer(surface.vg); },
-                nanovg_pixel_at);
-        }
-
-        it("moves the marker pixels after animation advance") {
-            check_animation_pixel_backend(
-                make_nanovg_surface,
-                [](auto& surface) { return create_nanovg_test_renderer(surface.vg); },
-                nanovg_pixel_at);
-        }
-
-        it("keeps fully clipped content out of software pixels") {
-            check_clipped_pixel_backend(
-                make_nanovg_surface,
-                [](auto& surface) { return create_nanovg_test_renderer(surface.vg); },
-                nanovg_pixel_at);
+                make_opengl_surface,
+                [](auto& surface) { return create_opengl_test_renderer(); },
+                opengl_pixel_at);
         }
 
         it("renders svg content into software pixels") {
             check_svg_pixel_backend(
-                make_nanovg_surface,
-                [](auto& surface) { return create_nanovg_test_renderer(surface.vg); },
-                nanovg_pixel_at);
+                make_opengl_surface,
+                [](auto& surface) { return create_opengl_test_renderer(); },
+                opengl_pixel_at);
         }
 
         it("reports the expected capability matrix") {
-            check_nanovg_renderer_capabilities();
+            check_opengl_renderer_capabilities();
         }
     }
 #endif
@@ -1374,6 +1283,14 @@ suite("flex::standard") {
 
         it("reports the expected capability matrix") {
             check_d2d_renderer_capabilities();
+        }
+
+        it("rejects unsupported nonzero blur without silently dropping it") {
+            check_d2d_blur_contract();
+        }
+
+        it("rejects unsupported visible shadows without silently dropping them") {
+            check_d2d_shadow_contract();
         }
     }
 #endif

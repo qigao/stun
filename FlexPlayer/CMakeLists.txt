@@ -49,7 +49,7 @@ target_link_directories(FlexPlayer PRIVATE ${FFMPEG_DIR}/lib)
 # Link Libraries
 target_link_libraries(FlexPlayer PRIVATE
     flex
-    flex_backend_thorvg
+    flex_render_engine_thorvg
    SDL2::SDL2 SDL2::SDL2main OpenGL::GL
     avcodec
     avformat

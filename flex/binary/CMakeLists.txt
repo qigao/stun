@@ -9,11 +9,11 @@ find_package(zstd CONFIG REQUIRED)
 # ============================================================================
 
 add_library(flex_binary STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/format.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/writer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/reader.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/compiler.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/binary/definition_binary.cpp
+    src/format.cpp
+    src/writer.cpp
+    src/reader.cpp
+    src/compiler.cpp
+    src/definition_binary.cpp
 )
 
 target_include_directories(flex_binary
@@ -21,15 +21,17 @@ target_include_directories(flex_binary
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src
+        ${FLEX_ENGINE_ROOT}/modules/engine
 )
 
 target_link_libraries(flex_binary
-    PUBLIC flex flex_compiler flex_runtime
+    PUBLIC Flex::Engine Flex::Compiler Flex::Runtime
     PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>
 )
 
 set_target_properties(flex_binary PROPERTIES
-    FOLDER "flex"
+    FOLDER "flex/binary"
     POSITION_INDEPENDENT_CODE ON
 )
+
+add_library(Flex::Binary ALIAS flex_binary)

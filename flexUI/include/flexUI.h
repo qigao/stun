@@ -21,7 +21,7 @@
 #include "flexUI/render_command.h"
 #include "flexUI/render_frame.h"
 #include "flexUI/view_pipeline.h"
-#include "flexUI/utility_jit.h"
+#include "flexUI/tailwindcss.h"
 
 // Scene Graph (optional, for custom rendering)
 #include "flexUI/group.h"

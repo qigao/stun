@@ -6,13 +6,16 @@
  */
 
 #pragma once
+#include "flex/animation/keyframe.h"
 #include "flex/animation/numeric_expression.h"
 #include "flex/animation/playback.h"
+#include "flex/core/animation_program.h"
 #include "flex/core/types.h"
 #include "flex/core/allocator.h"
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <functional>
 #include <variant>
@@ -25,8 +28,6 @@ class Node;
 // ============================================================================
 // Animation Value Types (using std::variant for type safety)
 // ============================================================================
-
-using AnimValue = std::variant<float, std::string, Color>;
 
 // ============================================================================
 // Loop Mode
@@ -60,20 +61,6 @@ using TriggerCallback = std::function<void(const std::string& event)>;
 // Keyframe - Single animation keyframe
 // ============================================================================
 
-struct Keyframe {
-    float time = 0;           // Time in seconds
-    AnimValue value;          // Value at this time
-    Easing easing = Easing::linear();  // Easing function
-
-    Keyframe() = default;
-    Keyframe(float t, float v, Easing e = Easing::linear())
-        : time(t), value(v), easing(e) {}
-    Keyframe(float t, const std::string& v, Easing e = Easing::linear())
-        : time(t), value(v), easing(e) {}
-    Keyframe(float t, const Color& v, Easing e = Easing::linear())
-        : time(t), value(v), easing(e) {}
-};
-
 // ============================================================================
 // Track - Single property animation channel
 // ============================================================================
@@ -98,6 +85,11 @@ public:
     void add_keyframe(float time, float value, Easing easing = Easing::linear());
     void add_keyframe(float time, const char* value, Easing easing = Easing::linear());
     void add_keyframe(float time, const Color& value, Easing easing = Easing::linear());
+    void add_keyframe(float time, const Vec2& value, Easing easing = Easing::linear());
+    void add_spatial_keyframe(float time, const Vec2& value,
+                              const Vec2& in_tangent,
+                              const Vec2& out_tangent,
+                              Easing easing = Easing::linear());
     void clear_keyframes();
     size_t keyframe_count() const { return keyframes_.size(); }
     const PoolVector<Keyframe>& keyframes() const { return keyframes_; }
@@ -107,6 +99,9 @@ public:
     void clear_numeric_expression();
     bool has_numeric_expression() const { return numeric_expression_ != nullptr; }
 
+    void set_spatial_interpolation(SpatialInterpolation interpolation);
+    SpatialInterpolation spatial_interpolation() const { return spatial_interpolation_; }
+
     // Sample value at time
     AnimValue sample(float time) const;
 
@@ -114,12 +109,24 @@ public:
     float duration() const;
 
 private:
+    friend class Timeline;
+    friend class TimelinePlayer;
+
+    struct ProgramRevisionState;
+
+    void bind_program_revision(
+        const std::shared_ptr<ProgramRevisionState>& revision);
+    void mark_program_dirty();
+
     std::string property_;  // Own the string to avoid dangling pointer
+    std::string target_id_;
+    PropertyID property_id_ = PropertyID::Unknown;
+    bool has_target_selector_ = false;
     PoolVector<Keyframe> keyframes_;  // Uses arena allocator
     std::shared_ptr<animation::NumericExpression> numeric_expression_;
+    SpatialInterpolation spatial_interpolation_ = SpatialInterpolation::Linear;
+    std::weak_ptr<ProgramRevisionState> program_revision_;
 
-    // Find surrounding keyframes for interpolation (optimized with binary search)
-    void find_keyframes(float time, const Keyframe** prev, const Keyframe** next) const;
 };
 
 // ============================================================================
@@ -162,6 +169,16 @@ public:
     Track* get_track(const char* property) const;
     const PoolVector<Track::SharedPtr>& tracks() const { return tracks_; }
 
+    /**
+     * Compile or return the cached immutable track operation table.
+     *
+     * The returned reference is borrowed and remains valid until this Timeline
+     * is destroyed or a later program() call observes a Track mutation.
+     * Compile complexity is O(track_count + keyframe_count) time and space;
+     * cached lookup is O(1).
+     */
+    const AnimationProgram& program() const;
+
     // Trigger management
     void add_trigger(float time, const char* event);
     void clear_triggers();
@@ -172,6 +189,17 @@ public:
     void apply(Node* target, float time) const;
 
 private:
+    friend class TimelinePlayer;
+
+    std::weak_ptr<const void> lifetime_token() const {
+        if (lifetime_token_.expired()) {
+            lifetime_owner_ = std::make_shared<int>(0);
+            lifetime_token_ = lifetime_owner_;
+        }
+        return lifetime_token_;
+    }
+
+    std::shared_ptr<Track::ProgramRevisionState> program_revision_;
     std::string name_;  // Own the string to avoid dangling pointer
     PoolVector<Track::SharedPtr> tracks_;  // Uses arena allocator
     mutable PoolVector<Trigger> triggers_;   // Uses arena allocator (mutable for lazy sorting)
@@ -180,6 +208,10 @@ private:
     LoopMode loop_mode_ = LoopMode::Once;
     float speed_ = 1.0f;
     ArenaAllocator* allocator_;  // For creating tracks
+    // Players borrow Timeline; this marker lets them reject access after destruction.
+    mutable std::shared_ptr<const void> lifetime_owner_;
+    mutable std::weak_ptr<const void> lifetime_token_;
+    mutable std::unique_ptr<const AnimationProgram> compiled_program_;
 
     float auto_duration() const;
 };
@@ -194,12 +226,16 @@ public:
     ~TimelinePlayer() = default;
 
     // Access
-    Timeline* timeline() const { return timeline_; }
+    Timeline* timeline() const { return timeline_alive() ? timeline_ : nullptr; }
     Node* target() const { return target_alive() ? target_ : nullptr; }
 
     // Playback state
-    bool is_playing() const { return target_alive() && playback_.playing(); }
-    bool is_finished() const { return !target_alive() || playback_.finished(); }
+    bool is_playing() const {
+        return timeline_alive() && target_alive() && playback_.playing();
+    }
+    bool is_finished() const {
+        return !timeline_alive() || !target_alive() || playback_.finished();
+    }
     float current_time() const { return playback_.time(); }
     float normalized_time() const;  // 0-1 progress
 
@@ -247,9 +283,22 @@ public:
     void apply();
 
 private:
+    struct ResolvedTargetRun {
+        size_t first_track = 0;
+        size_t track_count = 0;
+        Node* target = nullptr;
+        std::weak_ptr<const void> target_lifetime;
+    };
+
     Timeline* timeline_;
+    std::weak_ptr<const void> timeline_lifetime_;
     Node* target_;
     std::weak_ptr<const void> target_lifetime_;
+    // Single-threaded derived cache. Runs borrow nodes, lifetime tokens guard
+    // destruction, and capacity never exceeds the timeline's track count.
+    std::vector<ResolvedTargetRun> execution_plan_;
+    uint64_t execution_plan_topology_revision_ = 0;
+    uint64_t execution_plan_program_revision_ = 0;
     animation::PlaybackCursor playback_;
     BlendMode blend_mode_ = BlendMode::Override;
     float blend_weight_ = 1.0f;
@@ -272,8 +321,13 @@ private:
                                         const animation::PlaybackInterval& interval);
     float effective_duration() const;
     float sample_time(float player_time) const;
+    bool timeline_alive() const;
     bool target_alive() const;
+    void invalidate_timeline();
     void invalidate_target();
+    // Rebuild: O(track_count * target_lookup), stable apply: O(track_count).
+    // Rebuild space is O(target_runs), where target_runs <= track_count.
+    void rebuild_execution_plan(const AnimationProgram& program);
 };
 
 // ============================================================================
@@ -282,7 +336,10 @@ private:
 
 class AnimationController {
 public:
-    AnimationController() : players_() {}  // Default: no allocator
+    AnimationController()
+        : owned_allocator_(std::make_unique<ArenaAllocator>(
+              default_player_arena_bytes_)),
+          players_(*owned_allocator_) {}
     explicit AnimationController(ArenaAllocator& alloc) : players_(alloc) {}
     ~AnimationController() = default;
 
@@ -304,8 +361,14 @@ public:
     // Check if playing
     bool is_playing(const char* timeline_name) const;
 
-    // Get all active players for a target (for manual blending)
-    PoolVector<TimelinePlayer*> get_players_for_target(Node* target) const;
+    /**
+     * Get unfinished players currently associated with a target.
+     *
+     * The returned vector owns its pointer array, but each TimelinePlayer is
+     * borrowed from this controller. Those pointers become invalid when the
+     * controller removes finished players or is destroyed.
+     */
+    std::vector<TimelinePlayer*> get_players_for_target(Node* target) const;
 
     // Global trigger callback (receives event from any timeline)
     void set_trigger_callback(TriggerCallback callback);
@@ -319,7 +382,11 @@ public:
                    float fade_duration, BlendMode blend_mode = BlendMode::Override);
 
 private:
+    static constexpr size_t default_player_arena_bytes_ = 64 * 1024;
+
     std::unordered_map<std::string, Timeline::SharedPtr> timelines_;
+    // Declared before players_ so the borrowed arena outlives its container.
+    std::unique_ptr<ArenaAllocator> owned_allocator_;
     PoolVector<std::unique_ptr<TimelinePlayer>> players_;  // Uses arena allocator
     TriggerCallback trigger_callback_;
     bool players_dirty_ = false;  // Track if players_ needs sorting

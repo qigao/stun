@@ -7,7 +7,7 @@
 #include <thorvg.h>
 #include <flex.h>
 #include <flex/runtime/instance.h>
-#include "backends/thorvg/init.h"
+#include "flex/render/engines/thorvg.h"
 #include "flexchart/flexchart.h"
 #include "flexchart/chart_component.h"
 
@@ -65,12 +65,12 @@ public:
         sdl_renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         texture_ = SDL_CreateTexture(sdl_renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 1000, 700);
 
-        flex::init();
+        flex::render::engines::thorvg::init();
         canvas_ = tvg::SwCanvas::gen();
         buffer_.resize(1000 * 700);
         canvas_->target(buffer_.data(), 1000, 1000, 700, tvg::ColorSpace::ARGB8888);
-        if (!flex::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
-            flex::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
+        if (!flex::render::engines::thorvg::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
+            flex::render::engines::thorvg::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
         }
 
         // Parse Chart DSL
@@ -112,7 +112,7 @@ public:
         // Run Flex Layout
         scene->root()->perform_layout();
 
-        flex_renderer_ = flex::create_thorvg_renderer(canvas_);
+        flex_renderer_ = flex::render::engines::thorvg::create_renderer(canvas_);
         return true;
     }
 
@@ -160,7 +160,7 @@ public:
     ~ChartExample() {
         flex_renderer_.reset();
         instance_.reset();
-        flex::shutdown();
+        flex::render::engines::thorvg::shutdown();
         if (canvas_) delete canvas_;
         if (texture_) SDL_DestroyTexture(texture_);
         if (sdl_renderer_) SDL_DestroyRenderer(sdl_renderer_);

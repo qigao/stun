@@ -6,6 +6,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -103,19 +104,51 @@ struct AstComponent {
   AstComponent(const std::string &n) : name(n) {}
 };
 
+struct AstVec2 {
+  float x = 0.0f;
+  float y = 0.0f;
+};
+
+using AstKeyframeValue = std::variant<float, std::string, bool, AstVec2>;
+
+enum class AstSpatialInterpolation {
+  Linear,
+  CatmullRom,
+  CubicBezier,
+};
+
+struct AstSpatialTangents {
+  AstVec2 in;
+  AstVec2 out;
+};
+
 struct AstKeyframe {
   float time;
-  AstValue value;
+  AstKeyframeValue value;
+  std::optional<AstSpatialTangents> spatial_tangents;
 
-  AstKeyframe(float t, const AstValue &v) : time(t), value(v) {}
+  AstKeyframe(float t, const AstKeyframeValue &v) : time(t), value(v) {}
+  AstKeyframe(float t, const AstVec2 &position, const AstVec2 &in_tangent,
+              const AstVec2 &out_tangent)
+      : time(t), value(position),
+        spatial_tangents(AstSpatialTangents{in_tangent, out_tangent}) {}
 };
 
 struct AstTrack {
   std::string property; // "x", "#node/opacity", etc.
+  // Optional MIR/JIT expression replacing float interpolation. Its fixed
+  // inputs are time, progress, from, and to.
+  std::string numeric_expression;
+  AstSpatialInterpolation spatial_interpolation = AstSpatialInterpolation::Linear;
   std::vector<AstKeyframe> keyframes;
 
   AstTrack() = default;
   AstTrack(const std::string &p) : property(p) {}
+};
+
+struct AstTrigger {
+  float time = 0.0f;
+  std::string event;
 };
 
 struct AstAnim {
@@ -123,6 +156,7 @@ struct AstAnim {
   float duration = 0;
   std::string loop_mode = "once"; // "once", "loop", "pingpong"
   std::vector<AstTrack> tracks;
+  std::vector<AstTrigger> triggers;
 
   AstAnim() = default;
   AstAnim(const std::string &n) : name(n) {}

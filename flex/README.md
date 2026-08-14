@@ -2,8 +2,8 @@
 
 ## 📚 文档导航
 
-- **[dsl.md](docs/dsl.md)** - DSL 语法规范（当前实现）
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 实际架构和实现细节
+- **[DSL.md](docs/DSL.md)** - DSL 语法规范（当前实现）
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - 实际架构和实现细节
 - **[VISION.md](docs/VISION.md)** - 理论设计和未来愿景
 
 ---
@@ -34,7 +34,7 @@ Flex Engine 是一个现代化的 2.5D 游戏引擎和 UI 框架，具有强大�
 - ✅ **缓动函数**: linear、ease、ease-in、ease-out、ease-in-out
 - ✅ **循环模式**: Once、Loop、PingPong
 - ✅ **动画混合**: Override、Additive、Multiply 模式
-- ✅ **实时渲染**: 支持 ThorVG / NanoVG / Direct2D / TUI 等可插拔后端
+- ✅ **实时渲染**: 支持 OpenGL、Vulkan、TUI 与 Direct2D 四种平台后端
 
 ### 模块导入
 ```flex
@@ -103,10 +103,12 @@ flex/
 │   ├── dsl/               # DSL frontend implementation
 │   ├── core/              # Core runtime implementation
 │   ├── lowering/          # AST/runtime lowering implementation
-│   ├── backends/          # Backend 实现与仓库内集成头
+│   ├── render/            # Backend-neutral registry 与渲染公共实现
 │   └── binary/            # .flexb format support
+├── backends/               # opengl/vulkan/tui/d2d 四种公开平台后端
+├── render/engines/         # gCanvas 默认适配器与 NanoVG 迁移对比适配器
 ├── examples/               # 示例程序
-│   ├── *_demo.cpp         # SDL/ThorVG/TUI examples
+│   ├── *_demo.cpp         # OpenGL/Vulkan/TUI/Direct2D 与开发工具示例
 │   └── *.flex             # DSL examples
 ├── docs/
 │   └── dsl.md             # DSL reference
@@ -134,11 +136,12 @@ cmake --build . --config Release
 ### 2. 运行示例
 
 ```bash
-# ThorVG 动画演示
-./bin/loading_animation_demo.exe
+# gCanvas GPU 示例（OpenGL/Vulkan 共用 Flex adapter）
+./bin/loading_animation_demo.exe opengl
+./bin/loading_animation_demo.exe vulkan
 
-# NanoVG + GLFW 演示
-./bin/nanovg_glfw_demo.exe
+# OpenGL + GLFW 演示
+./bin/opengl_glfw_demo.exe
 
 # Direct2D + HWND 演示（Windows）
 ./bin/direct2d_hwnd_demo.exe
@@ -193,14 +196,16 @@ int main() {
 
 ### 核心文档
 - **[ANIMATION.md](docs/ANIMATION.md)** - DSL 动画完整指南
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 当前模块边界与装配方式
-- **[RENDERING_BACKENDS.md](RENDERING_BACKENDS.md)** - 当前 backend registry / plugin 结构
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - 当前模块边界与装配方式
+- **[RENDERING_BACKENDS.md](docs/RENDERING_BACKENDS.md)** - 当前 backend registry / plugin 结构
+- **[FORMAT.md](binary/FORMAT.md)** - `.flexb` 二进制格式规范
 
 ### 示例程序
 | 示例 | 描述 | 依赖 |
 |------|------|------|
-| `loading_animation_demo.cpp` | 动画与状态演示 | ThorVG |
-| `nanovg_glfw_demo.cpp` | NanoVG + GLFW 集成 | NanoVG + GLFW + OpenGL |
+| `component_binding_demo.cpp` | 组件与数据绑定示例 | backend-neutral runtime |
+| `loading_animation_demo.cpp` | 动画场景与双 GPU gCanvas host | gCanvas OpenGL/Vulkan |
+| `opengl_glfw_demo.cpp` | OpenGL + GLFW 集成 | OpenGL backend + GLFW |
 | `direct2d_hwnd_demo.cpp` | Direct2D + HWND 集成 | Direct2D |
 | `tui_flex_demo.cpp` | 终端渲染演示 | TUI |
 
@@ -231,7 +236,8 @@ int main() {
 - **CMake** - 跨平台构建
 
 ### 渲染
-- **ThorVG / NanoVG / Direct2D / TUI** - 可插拔渲染后端
+- **OpenGL / Vulkan / TUI / Direct2D** - 公开平台渲染后端
+- **gCanvas** - OpenGL/Vulkan 默认内部渲染引擎；NanoVG 仅用于显式迁移回滚与 A/B 验证
 - **SDL2 / GLFW / Win32** - 典型宿主窗口与输入集成方式
 
 ### 工具链
@@ -326,7 +332,7 @@ printf("FPS: %.1f\n", frame_stats.avg_fps());
 **性能优化**: 通过 bounds 缓存和内联优化,性能提升 **43%**
 
 详细 benchmark 结果请查看:
-- [PERFORMANCE.md](PERFORMANCE.md) - 完整性能报告
+- [FINAL_PERFORMANCE_REPORT.md](docs/FINAL_PERFORMANCE_REPORT.md) - 完整性能报告
 - [docs/FINAL_PERFORMANCE_REPORT.md](docs/FINAL_PERFORMANCE_REPORT.md) - 最终报告
 
 ## 🎯 支持的动画类型
@@ -371,11 +377,11 @@ printf("FPS: %.1f\n", frame_stats.avg_fps());
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+本项目采用 MIT 许可证 - 查看 [LICENSE](../LICENSE) 文件了解详情
 
 ## 🙏 致谢
 
-- **ThorVG** - 优秀的向量图形库
+- **PlutoSVG / PlutoVG** - SVG 解析与栅格化
 - **SDL2** - 跨平台多媒体库
 - **Flex/Lex** - 词法和语法分析器
 

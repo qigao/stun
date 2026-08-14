@@ -27,8 +27,19 @@ elseif(WIN32)
   list(APPEND FLEX_EXAMPLES_OPENGL_LIB opengl32)
 endif()
 
-# Find all cpp files and create executables
-file(GLOB CPP_FILES *.cpp)
+# Build only examples backed by the public OpenGL, Vulkan, TUI or Direct2D
+# contracts. Retired ThorVG hosts are archived under legacy/thorvg and are
+# intentionally not part of the supported build.
+set(CPP_FILES
+  component_binding_demo.cpp
+  direct2d_hwnd_demo.cpp
+  opengl_glfw_demo.cpp
+  runtime_system_demo.cpp
+  tui_flex_demo.cpp)
+
+if(TARGET flex_render_engine_gcanvas AND TARGET gcanvas_window)
+  list(APPEND CPP_FILES loading_animation_demo.cpp)
+endif()
 
 foreach(CPP_FILE ${CPP_FILES})
   get_filename_component(CPP_NAME ${CPP_FILE} NAME_WE)
@@ -39,18 +50,18 @@ foreach(CPP_FILE ${CPP_FILES})
     if(TARGET flex_backend_tui)
       target_link_libraries(${CPP_NAME} PRIVATE flex_backend_tui)
     endif()
-  elseif(CPP_NAME STREQUAL "nanovg_glfw_demo")
-    if(TARGET flex_backend_nanovg)
-      target_link_libraries(${CPP_NAME} PRIVATE flex_backend_nanovg)
+  elseif(CPP_NAME STREQUAL "opengl_glfw_demo")
+    if(TARGET flex_backend_opengl)
+      target_link_libraries(${CPP_NAME} PRIVATE flex_backend_opengl)
     endif()
   elseif(CPP_NAME STREQUAL "direct2d_hwnd_demo")
     if(TARGET flex_backend_d2d)
       target_link_libraries(${CPP_NAME} PRIVATE flex_backend_d2d)
     endif()
-  else()
-    if(TARGET flex_backend_thorvg)
-      target_link_libraries(${CPP_NAME} PRIVATE flex_backend_thorvg)
-    endif()
+  elseif(CPP_NAME STREQUAL "loading_animation_demo")
+    target_link_libraries(${CPP_NAME} PRIVATE flex_render_engine_gcanvas gCanvas::Window)
+    target_compile_definitions(${CPP_NAME} PRIVATE
+      FLEX_EXAMPLE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
   
   # Link tango for tango backend examples
@@ -73,5 +84,20 @@ foreach(CPP_FILE ${CPP_FILES})
   
   set_target_properties(${CPP_NAME} PROPERTIES FOLDER "flex/examples")
 endforeach()
+
+if(BUILD_TESTING AND TARGET loading_animation_demo)
+  if(GCANVAS_BUILD_OPENGL)
+    add_test(NAME flex_loading_animation_gcanvas_opengl
+             COMMAND loading_animation_demo opengl --smoke)
+    set_tests_properties(flex_loading_animation_gcanvas_opengl PROPERTIES
+      LABELS "app;flex;gpu;opengl")
+  endif()
+  if(GCANVAS_BUILD_VULKAN)
+    add_test(NAME flex_loading_animation_gcanvas_vulkan
+             COMMAND loading_animation_demo vulkan --smoke)
+    set_tests_properties(flex_loading_animation_gcanvas_vulkan PROPERTIES
+      LABELS "app;flex;gpu;vulkan")
+  endif()
+endif()
 
   

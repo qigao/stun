@@ -7,7 +7,7 @@
 #include <SDL2/SDL.h>
 #include <thorvg.h>
 #include <flex.h>
-#include "backends/thorvg/init.h"
+#include "flex/render/engines/thorvg.h"
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_parser_wrapper.h"
 
@@ -34,11 +34,11 @@ public:
         buffer_.resize(WIDTH * HEIGHT);
         canvas_->target(buffer_.data(), WIDTH, WIDTH, HEIGHT, tvg::ColorSpace::ARGB8888);
 
-        flex::init();
+        flex::render::engines::thorvg::init();
         
         // 加载字体，确保文字可见
-        if (!flex::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
-            flex::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
+        if (!flex::render::engines::thorvg::load_font("sans-serif", "C:/Windows/Fonts/segoeui.ttf")) {
+            flex::render::engines::thorvg::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
         }
 
         flex::register_flowchart_component();
@@ -52,7 +52,7 @@ public:
         node_ = flex::create_component_instance("flowchart", props);
         node_->set_position(50, 50);
 
-        flex_renderer_ = flex::create_thorvg_renderer(canvas_);
+        flex_renderer_ = flex::render::engines::thorvg::create_renderer(canvas_);
         return true;
     }
 
@@ -86,7 +86,7 @@ public:
     }
 
     ~FlowchartGuiDemo() {
-        flex::shutdown();
+        flex::render::engines::thorvg::shutdown();
         tvg::Initializer::term();
         SDL_DestroyTexture(texture_);
         SDL_DestroyRenderer(sdl_renderer_);

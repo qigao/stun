@@ -441,7 +441,7 @@ Change `.flex` file → reload → see changes instantly (no recompile).
 
 **Demo App**:
 - component_dsl_demo.cpp: ~450 lines
-- component_dsl_demo.flex: ~170 lines
+- `examples/legacy/thorvg/component_dsl_demo.flex`: retired host reference
 - Demonstrates: 12 component instances from DSL
 
 **Performance**:

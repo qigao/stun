@@ -4,7 +4,7 @@
 
 #include <flex/app/glfw_app.h>
 #include <flex.h>
-#include "backends/thorvg/init.h"
+#include "flex/render/engines/thorvg.h"
 
 class Demo : public flex::GlfwApp {
 public:
@@ -12,9 +12,9 @@ public:
 
 protected:
     bool on_init() override {
-        flex::init();
+        flex::render::engines::thorvg::init();
         load_font("Arial", "C:/Windows/Fonts/arial.ttf");
-        flex::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
+        flex::render::engines::thorvg::load_font("sans-serif", "C:/Windows/Fonts/arial.ttf");
         
         def_ = flex::Definition::load_file("hello.flex");
         if (!def_ || def_->has_error()) {

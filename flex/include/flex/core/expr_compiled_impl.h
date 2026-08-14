@@ -1,7 +1,7 @@
 /*
  * Flex Engine - compiled expression struct definition
  *
- * Include this in .cpp files that need the full ExprTkCompiled definition.
+ * Include this in .cpp files that need the full compiled MIR definition.
  * Headers should use the forward declaration from expr_compiled.h instead.
  */
 
@@ -12,7 +12,7 @@
 
 namespace flex {
 
-struct ExprTkCompiled {
+struct MirCompiledExpression {
     std::string expression_str;
     std::vector<std::string> names;
     std::vector<Symbol> symbol_ids;

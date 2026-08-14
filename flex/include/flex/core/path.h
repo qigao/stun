@@ -5,9 +5,10 @@
 
 #pragma once
 
+#include "flex/core/cubic_bezier.h"
+
 #include <memory>
 #include <vector>
-
 
 namespace flex {
 
@@ -54,8 +55,9 @@ public:
   // Clear all points
   void clear() { points_.clear(); }
 
-  // Check if path is valid (has at least 2 points)
-  bool is_valid() const { return points_.size() >= 2; }
+  // Bezier paths use P0,C1,C2,P3 followed by zero or more C1,C2,P3
+  // groups. Only endpoint times (indices 0,3,6,...) define segment timing.
+  bool is_valid() const;
 
 private:
   std::vector<PathPoint> points_;
@@ -64,6 +66,7 @@ private:
   // Interpolation helpers
   PathPoint interpolate_linear(float t) const;
   PathPoint interpolate_catmull_rom(float t) const;
+  PathPoint interpolate_bezier(float t) const;
 };
 
 // Path animation controller

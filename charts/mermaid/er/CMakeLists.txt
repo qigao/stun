@@ -31,11 +31,11 @@ target_include_directories(er PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(er PUBLIC TurboUtils::Parser)
+target_link_libraries(er PUBLIC TurboParser::Parser)
 
 # Test executable
 add_executable(er_test tests/test_parser.c)
-target_link_libraries(er_test er TurboUtils::TinyTest TurboUtils::Parser)
+target_link_libraries(er_test er TurboUtils::TinyTest TurboParser::Parser)
 target_compile_definitions(er_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/er")
 
 add_test(NAME er_test COMMAND er_test)

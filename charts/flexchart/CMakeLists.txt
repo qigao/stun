@@ -72,16 +72,8 @@ target_link_libraries(flexchart_all_marks INTERFACE
 # Examples
 # ============================================================================
 
-find_package(SDL2 CONFIG QUIET)
-if (SDL2_FOUND)
-    add_executable(basic_chart_example examples/basic_chart_example.cpp)
-    target_link_libraries(basic_chart_example PRIVATE flexchart_all_marks flex flex_backend_thorvg SDL2::SDL2 SDL2::SDL2main)
-    set_target_properties(basic_chart_example PROPERTIES FOLDER "Modules/FlexChart/Examples")
-
-    # Copy chart examples to binary dir
-    file(GLOB CHART_FILES examples/*.chart)
- 
-endif()
+# The former SDL software-rendered example depended on the retired ThorVG
+# engine. Chart behavior remains covered by the renderer-independent tests.
 
 # ============================================================================
 # Tests

@@ -39,6 +39,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <variant>
 
 namespace flex {
 
@@ -48,6 +49,9 @@ namespace flex {
 
 // Forward declaration for lowering converter
 class AstToRuntimeConverter;
+namespace binary {
+class BinaryCompiler;
+}
 
 // ============================================================================
 // Definition - Immutable blueprint loaded from .flex file
@@ -56,10 +60,13 @@ class AstToRuntimeConverter;
 class Definition {
   friend class Instance;
   friend class AstToRuntimeConverter; // In flex namespace
+  friend class binary::BinaryCompiler;
 
 public:
   using SharedPtr = std::shared_ptr<Definition>;
   using Ptr = SharedPtr;
+  using InputValue = std::variant<float, std::string, bool>;
+  using InputSchema = std::map<std::string, InputValue, std::less<>>;
 
   ~Definition() = default;
 
@@ -91,6 +98,9 @@ public:
     return impl_->machines;
   }
 
+  // Runtime inputs declared with top-level `var`, including inferred types and defaults.
+  const InputSchema &input_schema() const;
+
 private:
   Definition() = default;
   struct Impl {
@@ -102,6 +112,10 @@ private:
 
     // Runtime objects
     std::vector<RuntimeStateMachine::SharedPtr> machines;
+
+    // Runtime input declarations from top-level `var` statements. The variant
+    // alternative is the schema type; each Instance owns a copy of the value.
+    InputSchema parsed_variables;
 
     // Parsed assets from DSL
     struct ParsedAsset {
@@ -417,7 +431,7 @@ private:
     ArenaAllocator object_alloc{1024 * 1024}; // 1MB
 
     // Input values (Phase 2.3: Single map with variant)
-    using InputValue = std::variant<float, std::string, bool>;
+    using InputValue = Definition::InputValue;
     std::unordered_map<Symbol, InputValue, SymbolHash> inputs;
     std::unordered_map<Symbol, std::string, SymbolHash> assets;
 
@@ -434,6 +448,10 @@ private:
     // Runtime systems (Phase 3)
     std::vector<RuntimeStateMachine::SharedPtr> machines;
 
+    // MIR programs keep mutable input slots and therefore belong to exactly
+    // one runtime instance rather than the shared Definition.
+    std::unordered_map<std::string, std::shared_ptr<void>> compiled_expressions;
+
     // Asset management (Phase 4)
     std::unique_ptr<class AssetManager> asset_manager;
 
@@ -443,6 +461,8 @@ private:
     Node::RawPtr focused_node = nullptr;
     bool is_pointer_down = false;
   };
+
+  void set_input_value(const char *name, Impl::InputValue value);
   std::unique_ptr<Impl> impl_;
 };
 

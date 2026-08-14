@@ -1,6 +1,7 @@
 #include "flex/animation.h"
 #include "tinytest.h"
 
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 
@@ -35,6 +36,15 @@ suite("flex::animation") {
 
         NumericExpression expression("sqrt(-1) + progress");
         check_throws_as(expression.sample({}), std::runtime_error);
+    }
+
+    it("samples a compiled time derivative without finite differences") {
+        NumericExpression expression(
+            "derivative(lerp(from, to, progress) + sin(time), time)");
+
+        check(expression.uses_jit());
+        check_float_eq(expression.sample({0.75f, 0.5f, 10.0f, 30.0f}),
+                       static_cast<float>(std::cos(0.75)), 0.001f);
     }
 
     it("rejects a non-positive duration") {

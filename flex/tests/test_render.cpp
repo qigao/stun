@@ -5,30 +5,34 @@ using namespace flex;
 
 namespace {
 
-std::unique_ptr<Renderer> null_renderer_factory(CanvasHandle) {
-    return nullptr;
-}
+std::unique_ptr<Renderer> null_renderer_factory(CanvasHandle) { return nullptr; }
 
 } // namespace
 
 suite("flex::render") {
-    it("registers backend factories without a window or GPU") {
-        const auto previous = register_renderer_backend(RendererBackend::Custom,
-                                                        null_renderer_factory);
+  it("exposes only platform rendering backends") {
+    check_str_eq(renderer_backend_name(RendererBackend::OpenGL), "OpenGL");
+    check_str_eq(renderer_backend_name(RendererBackend::Vulkan), "Vulkan");
+    check_str_eq(renderer_backend_name(RendererBackend::TUI), "TUI");
+    check_str_eq(renderer_backend_name(RendererBackend::Direct2D), "Direct2D");
+  }
 
-        check(is_renderer_backend_available(RendererBackend::Custom));
-        check(renderer_backend_factory(RendererBackend::Custom) ==
-              null_renderer_factory);
+  it("registers backend factories without a window or GPU") {
+    const auto previous = register_renderer_backend(RendererBackend::Custom, null_renderer_factory);
 
-        register_renderer_backend(RendererBackend::Custom, previous);
-    }
+    check_true(is_renderer_backend_available(RendererBackend::Custom));
+    check_true(renderer_backend_factory(RendererBackend::Custom) == null_renderer_factory);
 
-    it("returns null when a backend is unavailable") {
-        const auto previous = register_renderer_backend(RendererBackend::Custom, nullptr);
+    register_renderer_backend(RendererBackend::Custom, previous);
+  }
 
-        check_false(is_renderer_backend_available(RendererBackend::Custom));
-        check(create_renderer(RendererBackend::Custom, nullptr) == nullptr);
+  it("returns null when a backend is unavailable") {
+    const auto previous = register_renderer_backend(RendererBackend::Custom, nullptr);
 
-        register_renderer_backend(RendererBackend::Custom, previous);
-    }
+    check_false(is_renderer_backend_available(RendererBackend::Custom));
+    check_null(create_renderer(RendererBackend::Custom, nullptr).get());
+
+    register_renderer_backend(RendererBackend::Custom, previous);
+  }
+
 }

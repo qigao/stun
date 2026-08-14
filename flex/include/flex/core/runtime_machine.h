@@ -344,8 +344,9 @@ inline bool RuntimeTransition::check_transition(const std::unordered_map<Symbol,
   if (condition_expr_.empty())
     return true;
 
-  float result = evaluate_exprtk_inputs(condition_expr_, compiled_, inputs);
-  return result != 0.0f;
+  float result = 0.0f;
+  return evaluate_mir_expression_inputs(condition_expr_, compiled_, inputs, result) &&
+         result != 0.0f;
 }
 
 } // namespace flex

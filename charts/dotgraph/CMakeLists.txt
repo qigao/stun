@@ -47,7 +47,7 @@ target_include_directories(dotgraph_parser
         src
 )
 
-target_link_libraries(dotgraph_parser PUBLIC TurboUtils::Parser)
+target_link_libraries(dotgraph_parser PUBLIC TurboParser::Parser)
 
 # ============================================================================
 # Backend-neutral layout + SVG export
@@ -66,7 +66,7 @@ target_include_directories(dotgraph
 
 target_link_libraries(dotgraph
     PUBLIC dotgraph_parser
-    PRIVATE flex_expression TurboUtils::Mustache avoid
+    PRIVATE flex_expression TurboParser::Mustache avoid
 )
 
 # ============================================================================

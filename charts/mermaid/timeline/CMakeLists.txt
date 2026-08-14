@@ -32,7 +32,7 @@ target_include_directories(timeline PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(timeline PUBLIC TurboUtils::Parser)
+target_link_libraries(timeline PUBLIC TurboParser::Parser)
 
 # Test executable
 add_executable(timeline_test tests/test_parser.c)

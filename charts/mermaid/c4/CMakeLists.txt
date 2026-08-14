@@ -25,7 +25,7 @@ add_library(mermaid_c4 STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/c4_lexer_gen.c"
 )
 
-target_link_libraries(mermaid_c4 PUBLIC TurboUtils::Parser)
+target_link_libraries(mermaid_c4 PUBLIC TurboParser::Parser)
 
 target_include_directories(mermaid_c4 PUBLIC
     include
@@ -38,7 +38,7 @@ add_executable(c4_test
     tests/test_parser.c
 )
 
-target_link_libraries(c4_test PRIVATE mermaid_c4 TurboUtils::TinyTest TurboUtils::Parser)
+target_link_libraries(c4_test PRIVATE mermaid_c4 TurboUtils::TinyTest TurboParser::Parser)
 target_compile_definitions(c4_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/c4")
 
 enable_testing()

@@ -2002,8 +2002,6 @@ class ShadcnIRDemo final : public ::flex::GlfwApp {
   void on_render() override {
     box_->invalidate();
     box_->update();
-    canvas()->draw();
-    canvas()->sync();
   }
 
   void on_resize(int w, int h) override {

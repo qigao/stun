@@ -65,6 +65,18 @@ JIT 管理。
 
 ## 决策
 
+### 0. TailwindCSS 是独立编译模块
+
+Tailwind-like catalog 编译位于 `flexUI/modules/tailwindcss/`，CMake 目标为
+`flexUI_tailwindcss`，新代码通过 `FlexUI::TailwindCSS` 和
+`<flexUI/tailwindcss.h>` 使用。模块不依赖 Element、Box、StyleEngine 或 shadcn widget
+实例化；它只产生完整 CSS snapshot。Core 扫描 Element 并原子替换 stylesheet，状态
+所有权因而保持不变。
+
+`<flexUI/utility_jit.h>` 和 `flexUI::shadcn_ir` 下的 utility emission API 暂时保留为
+兼容层。回滚时可以把 `utility_jit.cpp` 重新并入 Core target，但不得让独立模块反向依赖
+Core；否则会重新形成静态库循环依赖。
+
 ### 1. `Box` 是默认样式运行时外观
 
 `Box` 继续作为 Element、StyleEngine、layout 和 render pipeline 的外观，并通过

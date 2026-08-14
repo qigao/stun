@@ -50,7 +50,7 @@ target_include_directories(mermaid_flowchart
 )
  
 target_link_libraries(mermaid_flowchart 
-    PUBLIC TurboUtils::Parser flex_runtime TurboUtils::Mustache avoid
+    PUBLIC TurboParser::Parser flex_runtime TurboParser::Mustache avoid
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
@@ -63,7 +63,7 @@ endif()
 
 # 原有的 Parser 测试
 add_executable(flowchart_test tests/test_parser.c)
-target_link_libraries(flowchart_test PRIVATE mermaid_flowchart TurboUtils::TinyTest TurboUtils::Parser)
+target_link_libraries(flowchart_test PRIVATE mermaid_flowchart TurboUtils::TinyTest TurboParser::Parser)
 target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
 add_test(NAME flowchart_test COMMAND flowchart_test)
 set_target_properties(flowchart_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
@@ -81,19 +81,7 @@ target_link_libraries(flowchart_flex_test PRIVATE
 add_test(NAME flowchart_flex_test COMMAND flowchart_flex_test)
 set_target_properties(flowchart_flex_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
-# 终极 GUI 演示
-find_package(SDL2 CONFIG QUIET)
-if(SDL2_FOUND)
-    add_executable(flowchart_gui_demo tests/gui_demo.cpp)
-    target_link_libraries(flowchart_gui_demo PRIVATE
-        mermaid_flowchart
-        flex_runtime
-        flex
-        flex_backend_thorvg
-        SDL2::SDL2
-        thorvg
-    )
-    set_target_properties(flowchart_gui_demo PROPERTIES FOLDER "Modules/Mermaid/Tests")
-endif()
+# The former SDL GUI demo depended on the retired ThorVG software renderer.
+# Parser, renderer, and Flex integration tests above remain in the default build.
 
 set_target_properties(mermaid_flowchart PROPERTIES FOLDER "Modules/Mermaid")

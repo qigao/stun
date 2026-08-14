@@ -79,6 +79,12 @@ target_include_directories(test_utility_jit PRIVATE ../include)
 set_target_properties(test_utility_jit PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_utility_jit COMMAND test_utility_jit)
 
+add_executable(test_tailwindcss_module test_tailwindcss_module.cpp)
+target_link_libraries(test_tailwindcss_module PRIVATE FlexUI::TailwindCSS)
+flexui_configure_tinytest(test_tailwindcss_module)
+set_target_properties(test_tailwindcss_module PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_tailwindcss_module COMMAND test_tailwindcss_module)
+
 add_executable(utility_jit_benchmark utility_jit_benchmark.cpp)
 target_link_libraries(utility_jit_benchmark PRIVATE flexUI)
 target_include_directories(utility_jit_benchmark PRIVATE ../include)

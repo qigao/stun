@@ -384,7 +384,7 @@ class Node {
 
 **解决方案：** 递归查找，从上到下，找到最深的被点击节点。
 
-**算法流程：** `flex/src/flex.cpp:242-271`
+**算法流程：** `flex/modules/engine/flex.cpp:559`
 
 ```cpp
 static Node* hit_test_recursive(Node* node, float x, float y) {
@@ -429,7 +429,7 @@ static Node* hit_test_recursive(Node* node, float x, float y) {
 
 **解决方案：** 事件冒泡（Bubbling）- 从目标节点传播到根节点。
 
-**传播路径构建：** `flex/src/flex.cpp:274-282`
+**传播路径构建：** `flex/modules/engine/flex.cpp:600`
 
 ```cpp
 static void build_propagation_path(Node* target, std::vector<Node*>& path) {
@@ -443,7 +443,7 @@ static void build_propagation_path(Node* target, std::vector<Node*>& path) {
 }
 ```
 
-**事件分发：** `flex/src/flex.cpp:285-311`
+**事件分发：** `flex/modules/engine/flex.cpp:637`
 
 ```cpp
 static void dispatch_with_bubbling(PointerEvent& event,
@@ -475,7 +475,7 @@ static void dispatch_with_bubbling(PointerEvent& event,
 }
 ```
 
-**完整流程：** `flex/src/flex.cpp:313-413`
+**完整流程：** `flex/modules/engine/flex.cpp:685`
 
 ```
 用户点击 (x=250, y=75)
@@ -639,10 +639,10 @@ Per Event:
 |------|------|------|
 | **Node 基类** | `flex/include/flex/node.h` | 40-283 |
 | **Event 定义** | `flex/include/flex/event.h` | 19-159 |
-| **Hit Testing** | `flex/src/flex.cpp` | 242-271 |
-| **Path Building** | `flex/src/flex.cpp` | 274-282 |
-| **Event Dispatch** | `flex/src/flex.cpp` | 285-311 |
-| **Pointer Handling** | `flex/src/flex.cpp` | 313-413 |
+| **Hit Testing** | `flex/modules/engine/flex.cpp` | `hit_test_recursive` |
+| **Path Building** | `flex/modules/engine/flex.cpp` | `build_propagation_path` |
+| **Event Dispatch** | `flex/modules/engine/flex.cpp` | `dispatch_with_bubbling` |
+| **Pointer Handling** | `flex/modules/engine/flex.cpp` | `Instance::send_pointer_event` |
 | **Callback Firing** | `flex/src/node.cpp` | 51-105 |
 
 **阅读建议：**
