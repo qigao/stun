@@ -51,6 +51,11 @@ namespace parser {
 // Event-Driven AST Builder
 // ============================================================================
 
+static int token_start_column(const Token &token) {
+  const auto length = static_cast<int>(token.value.size());
+  return token.column > length ? token.column - length : 1;
+}
+
 class UiPropertySeparatorValidator {
 public:
   bool accept(const Token &token) {
@@ -152,8 +157,11 @@ public:
       break;
 
     case TOK_NODE_TYPE:
+      if (expecting_prop_key_suffix_) {
+        handle_identifier(tok, prev_tok);
+      }
       // In assets block, image/svg are asset types
-      if (in_assets_block_ && (tok.value == "image" || tok.value == "svg")) {
+      else if (in_assets_block_ && (tok.value == "image" || tok.value == "svg")) {
         pending_asset_type_ = tok.value;
         expecting_asset_id_ = true;
       } else {
@@ -222,6 +230,9 @@ public:
         // Revert: treat as property key
         expecting_play_string_ = false;
         pending_prop_key_ = "play";
+        pending_prop_line_ = prev_tok ? prev_tok->line : tok.line;
+        pending_prop_column_ =
+            prev_tok ? token_start_column(*prev_tok) : tok.column;
         expecting_value_ = true;
         break;
       }
@@ -246,6 +257,8 @@ public:
         }
 
         pending_prop_key_ = prev_tok->value;
+        pending_prop_line_ = prev_tok->line;
+        pending_prop_column_ = token_start_column(*prev_tok);
         expecting_value_ = true;
       }
       // Clear any pending component type/id since this is a property, not a node
@@ -579,6 +592,8 @@ public:
         expecting_set_prop_name_ = true;
       } else if (!expecting_value_ && prev_tok && prev_tok->type == TOK_IDENTIFIER) {
         pending_prop_key_prefix_ = prev_tok->value;
+        pending_prop_line_ = prev_tok->line;
+        pending_prop_column_ = token_start_column(*prev_tok);
         expecting_prop_key_suffix_ = true;
       } else if (prev_tok && prev_tok->type == TOK_IDENTIFIER) {
         pending_dot_object_ = prev_tok->value;
@@ -1760,6 +1775,10 @@ private:
       current_pseudo_props_[pending_prop_key_] = value;
     } else if (!node_stack_.empty()) {
       node_stack_.top()->properties[pending_prop_key_] = value;
+      if (pending_prop_line_ > 0 && pending_prop_column_ > 0) {
+        node_stack_.top()->property_spans[pending_prop_key_] =
+            AstSourceSpan{pending_prop_line_, pending_prop_column_, pending_prop_key_.size()};
+      }
     } else if (current_scene_) {
       if (pending_prop_key_ == "width") {
         if (auto *fval = std::get_if<float>(&value)) {
@@ -1828,6 +1847,8 @@ private:
     }
 
     pending_prop_key_.clear();
+    pending_prop_line_ = 0;
+    pending_prop_column_ = 0;
   }
 
   AstProgram *program_;
@@ -1884,6 +1905,8 @@ private:
   std::string pending_node_type_;
   std::string pending_node_id_;
   std::string pending_prop_key_;
+  int pending_prop_line_ = 0;
+  int pending_prop_column_ = 0;
 
   // Expectation flags
   bool expecting_scene_name_ = false;

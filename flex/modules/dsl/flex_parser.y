@@ -138,6 +138,7 @@ node_property ::= DATA COLON value_expr opt_comma.
 prop_key ::= IDENTIFIER.
 prop_key ::= NODE_TYPE.
 prop_key ::= IDENTIFIER DOT IDENTIFIER.
+prop_key ::= IDENTIFIER DOT NODE_TYPE.
 
 // ============================================================================
 // Value Expressions

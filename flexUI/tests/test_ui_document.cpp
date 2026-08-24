@@ -32,6 +32,131 @@ const char *valid_document() {
 } // namespace
 
 spec("Flex UI documents instantiate Box-owned Element trees") {
+  it("compiles an immutable program without replacing the parse API") {
+    const auto compiled = flexUI::compile_ui_document(valid_document());
+    check(static_cast<bool>(compiled));
+    check_not_null(compiled.program.get());
+    check_equal(compiled.program->name(), "MainWindow");
+    check_equal(compiled.program->definition().root.id, "root");
+
+    flexUI::Box box(nullptr);
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program);
+    check(static_cast<bool>(instantiated));
+    check_equal(instantiated.tree.root, box.get_by_id("root"));
+
+    const auto parsed = flexUI::parse_ui_document(valid_document());
+    check(static_cast<bool>(parsed));
+    check_equal(parsed.definition->name, compiled.program->name());
+  }
+
+  it("lowers supported event properties with source spans") {
+    const char *source =
+        "ui Main {\n"
+        "  button save {\n"
+        "    on.click: \"save_document\"\n"
+        "  }\n"
+        "}\n";
+
+    const auto compiled = flexUI::compile_ui_document(source);
+    check(static_cast<bool>(compiled));
+    check_equal(compiled.program->event_bindings().size(), 1);
+
+    const auto &binding = compiled.program->event_bindings().front();
+    check(binding.event == flexUI::UiEventKind::Click);
+    check_equal(binding.element_id, "save");
+    check_equal(binding.handler, "save_document");
+    check_equal(binding.source.line, 3);
+    check_equal(binding.source.column, 5);
+    check_equal(binding.source.length, 8);
+
+    flexUI::Box box(nullptr);
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program);
+    check(static_cast<bool>(instantiated));
+    check_equal(*box.get_by_id("save")->attribute("data-flexui-on-click"),
+                "save_document");
+  }
+
+  it("rejects unknown events and configured event limits during compilation") {
+    const char *unknown_source = R"(
+      ui Main { button save { on.explode: "save_document" } }
+    )";
+    const auto parsed = flexUI::parse_ui_document(unknown_source);
+    check(static_cast<bool>(parsed));
+
+    const auto unknown = flexUI::compile_ui_document(unknown_source);
+    check_false(static_cast<bool>(unknown));
+    check(unknown.error.code == UiDocumentErrorCode::UnknownEvent);
+
+    flexUI::UiDocumentLimits limits;
+    limits.max_event_bindings = 0;
+    const auto over_limit = flexUI::compile_ui_document(valid_document(), {}, limits);
+    check_false(static_cast<bool>(over_limit));
+    check(over_limit.error.code == UiDocumentErrorCode::EventBindingLimitExceeded);
+  }
+
+  it("lowers typed string and MIR class bindings") {
+    const char *source =
+        "ui Main {\n"
+        "  label status {\n"
+        "    bind.text: $status_text,\n"
+        "    bind.class_active: ${enabled}\n"
+        "  }\n"
+        "}\n";
+
+    const auto compiled = flexUI::compile_ui_document(source);
+    info("compile error: code=%d message=%s at %d:%d",
+         static_cast<int>(compiled.error.code), compiled.error.message.c_str(),
+         compiled.error.line, compiled.error.column);
+    check(static_cast<bool>(compiled));
+    check_equal(compiled.program->bindings().size(), 2);
+
+    const auto &text = compiled.program->bindings()[0];
+    check(text.target == flexUI::UiBindingTargetKind::Text);
+    check(text.source == flexUI::UiBindingSourceKind::StringInput);
+    check_equal(text.element_id, "status");
+    check_equal(text.expression, "status_text");
+    check_equal(text.dependencies.size(), 1);
+    check_equal(text.dependencies.front(), "status_text");
+    check_false(text.uses_jit);
+    check_equal(text.source_span.line, 3);
+
+    const auto &active = compiled.program->bindings()[1];
+    check(active.target == flexUI::UiBindingTargetKind::ClassToggle);
+    check(active.source == flexUI::UiBindingSourceKind::BoolExpression);
+    check_equal(active.target_name, "active");
+    check_equal(active.expression, "enabled");
+    check_equal(active.dependencies.size(), 1);
+    check_equal(active.dependencies.front(), "enabled");
+  }
+
+  it("rejects unknown binding targets, invalid MIR, and binding limits") {
+    const auto unknown = flexUI::compile_ui_document(R"(
+      ui Main { label status { bind.attribute: $status_text } }
+    )");
+    check_false(static_cast<bool>(unknown));
+    check(unknown.error.code == UiDocumentErrorCode::UnknownBindingTarget);
+
+    const auto invalid_expression = flexUI::compile_ui_document(R"(
+      ui Main { label status { bind.class_active: ${enabled + } } }
+    )");
+    check_false(static_cast<bool>(invalid_expression));
+    check(invalid_expression.error.code == UiDocumentErrorCode::InvalidBindingExpression);
+
+    flexUI::UiDocumentLimits limits;
+    limits.max_bindings = 0;
+    const auto over_limit = flexUI::compile_ui_document(R"(
+      ui Main { label status { bind.text: $status_text } }
+    )", {}, limits);
+    info("binding limit error: code=%d message=%s at %d:%d",
+         static_cast<int>(over_limit.error.code),
+         over_limit.error.message.c_str(), over_limit.error.line,
+         over_limit.error.column);
+    check_false(static_cast<bool>(over_limit));
+    check(over_limit.error.code == UiDocumentErrorCode::BindingLimitExceeded);
+  }
+
   it("parses and installs one immutable UI definition") {
     const auto parsed = flexUI::parse_ui_document(valid_document());
     check(static_cast<bool>(parsed));

@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +32,12 @@ using AstValue = std::variant<float, std::string, bool>;
 // Property map
 using AstProps = std::unordered_map<std::string, AstValue>;
 
+struct AstSourceSpan {
+  int line = 0;
+  int column = 0;
+  std::size_t length = 0;
+};
+
 // ============================================================================
 // Import Statement
 // ============================================================================
@@ -52,6 +59,7 @@ struct AstNode {
   std::string type;    // "rect", "circle", "group", etc.
   std::string id;      // Node ID
   AstProps properties; // x, y, width, color, etc.
+  std::unordered_map<std::string, AstSourceSpan> property_spans;
   std::vector<std::shared_ptr<AstNode>> children;
 
   // Pseudo-class styles
@@ -67,6 +75,7 @@ struct AstNode {
   std::shared_ptr<AstNode> clone() const {
     auto copy = std::make_shared<AstNode>(type, id);
     copy->properties = properties;
+    copy->property_spans = property_spans;
     copy->pseudo_classes = pseudo_classes;
     copy->repeat_count = repeat_count;
     for (const auto &child : children) {

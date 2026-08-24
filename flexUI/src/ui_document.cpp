@@ -4,9 +4,13 @@
 #include <flexUI/element.h>
 
 #include <flex/dsl/flex_parser.h>
+#include <flex/core/expr_mir.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -28,7 +32,8 @@ UiDocumentError make_error(UiDocumentErrorCode code, std::string message, int li
 
 bool is_string_property(const std::string &name) {
   return name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
-         name == "text" || name == "content" || name.rfind("on.", 0) == 0;
+         name == "text" || name == "content" || name.rfind("on.", 0) == 0 ||
+         name.rfind("bind.", 0) == 0;
 }
 
 bool has_alias_conflict(const flex::parser::AstProps &properties, const char *first,
@@ -145,11 +150,227 @@ UiNodeDefinition copy_node(const AstNode &source) {
   target.tag = source.type;
   target.id = source.id;
   target.properties = source.properties;
+  for (const auto &[name, span] : source.property_spans) {
+    target.property_spans.emplace(
+        name, SourceSpan{span.line, span.column, span.length});
+  }
   target.children.reserve(source.children.size());
   for (const auto &child : source.children) {
     target.children.push_back(copy_node(*child));
   }
   return target;
+}
+
+bool resolve_event_kind(std::string_view name, UiEventKind &kind) {
+  static constexpr std::pair<std::string_view, UiEventKind> events[] = {
+      {"click", UiEventKind::Click},
+      {"mouse_move", UiEventKind::MouseMove},
+      {"mouse_down", UiEventKind::MouseDown},
+      {"mouse_up", UiEventKind::MouseUp},
+      {"mouse_wheel", UiEventKind::MouseWheel},
+      {"key_down", UiEventKind::KeyDown},
+      {"key_up", UiEventKind::KeyUp},
+      {"text_input", UiEventKind::TextInput},
+      {"focus_in", UiEventKind::FocusIn},
+      {"focus_out", UiEventKind::FocusOut},
+      {"composition_start", UiEventKind::CompositionStart},
+      {"composition_update", UiEventKind::CompositionUpdate},
+      {"composition_end", UiEventKind::CompositionEnd},
+  };
+  const auto found = std::find_if(
+      std::begin(events), std::end(events),
+      [name](const auto &entry) { return entry.first == name; });
+  if (found == std::end(events)) {
+    return false;
+  }
+  kind = found->second;
+  return true;
+}
+
+UiDocumentError lower_event_bindings(const UiNodeDefinition &node,
+                                     const UiDocumentLimits &limits,
+                                     std::vector<EventBinding> &bindings) {
+  std::vector<EventBinding> node_bindings;
+  for (const auto &[name, value] : node.properties) {
+    if (name.rfind("on.", 0) != 0) {
+      continue;
+    }
+
+    const auto span_it = node.property_spans.find(name);
+    const SourceSpan span =
+        span_it == node.property_spans.end() ? SourceSpan{} : span_it->second;
+    UiEventKind kind;
+    if (!resolve_event_kind(std::string_view(name).substr(3), kind)) {
+      return make_error(UiDocumentErrorCode::UnknownEvent,
+                        "unknown UI event: " + name.substr(3), span.line,
+                        span.column);
+    }
+    if (bindings.size() + node_bindings.size() >= limits.max_event_bindings) {
+      return make_error(UiDocumentErrorCode::EventBindingLimitExceeded,
+                        "UI document exceeds maximum event binding count",
+                        span.line, span.column);
+    }
+    node_bindings.push_back(
+        EventBinding{kind, node.id, std::get<std::string>(value), span});
+  }
+
+  std::sort(node_bindings.begin(), node_bindings.end(),
+            [](const EventBinding &left, const EventBinding &right) {
+              if (left.source.line != right.source.line) {
+                return left.source.line < right.source.line;
+              }
+              if (left.source.column != right.source.column) {
+                return left.source.column < right.source.column;
+              }
+              return left.handler < right.handler;
+            });
+  bindings.insert(bindings.end(),
+                  std::make_move_iterator(node_bindings.begin()),
+                  std::make_move_iterator(node_bindings.end()));
+
+  for (const auto &child : node.children) {
+    auto error = lower_event_bindings(child, limits, bindings);
+    if (error) {
+      return error;
+    }
+  }
+  return {};
+}
+
+std::string unwrap_binding_expression(const std::string &value) {
+  std::string expression;
+  if (value.size() >= 3 && value[0] == '$' &&
+      ((value[1] == '{' && value.back() == '}') ||
+       (value[1] == '(' && value.back() == ')'))) {
+    expression = value.substr(2, value.size() - 3);
+  } else if (value.size() >= 2 && value[0] == '$') {
+    expression = value.substr(1);
+  } else {
+    return {};
+  }
+
+  const auto first = expression.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) {
+    return {};
+  }
+  const auto last = expression.find_last_not_of(" \t\r\n");
+  return expression.substr(first, last - first + 1);
+}
+
+bool is_binding_identifier(std::string_view value) {
+  if (value.empty() ||
+      (std::isalpha(static_cast<unsigned char>(value.front())) == 0 &&
+       value.front() != '_')) {
+    return false;
+  }
+  return std::all_of(value.begin() + 1, value.end(), [](char character) {
+    return std::isalnum(static_cast<unsigned char>(character)) != 0 ||
+           character == '_';
+  });
+}
+
+struct LoweredBinding {
+  BindingDefinition definition;
+  std::unique_ptr<flex::MirExpressionProgram> mir_program;
+};
+
+UiDocumentError lower_bindings(const UiNodeDefinition &node,
+                               const UiDocumentLimits &limits,
+                               std::vector<BindingDefinition> &definitions,
+                               std::vector<std::unique_ptr<flex::MirExpressionProgram>> &programs) {
+  std::vector<LoweredBinding> node_bindings;
+  for (const auto &[name, value] : node.properties) {
+    if (name.rfind("bind.", 0) != 0) {
+      continue;
+    }
+
+    const auto span_it = node.property_spans.find(name);
+    const SourceSpan span =
+        span_it == node.property_spans.end() ? SourceSpan{} : span_it->second;
+    if (definitions.size() + node_bindings.size() >= limits.max_bindings) {
+      return make_error(UiDocumentErrorCode::BindingLimitExceeded,
+                        "UI document exceeds maximum binding count", span.line,
+                        span.column);
+    }
+
+    const auto *source = std::get_if<std::string>(&value);
+    const std::string expression =
+        source ? unwrap_binding_expression(*source) : std::string{};
+    if (expression.empty()) {
+      return make_error(UiDocumentErrorCode::InvalidBindingExpression,
+                        "UI binding requires a $input or ${expression} value",
+                        span.line, span.column);
+    }
+
+    const std::string target_name = name.substr(5);
+    LoweredBinding lowered;
+    lowered.definition.element_id = node.id;
+    lowered.definition.expression = expression;
+    lowered.definition.source_span = span;
+
+    if (target_name == "text" || target_name == "value" ||
+        target_name == "classes" || target_name == "utilities") {
+      if (!is_binding_identifier(expression)) {
+        return make_error(UiDocumentErrorCode::InvalidBindingExpression,
+                          "string UI bindings require one input identifier",
+                          span.line, span.column);
+      }
+      if (target_name == "text") {
+        lowered.definition.target = UiBindingTargetKind::Text;
+      } else if (target_name == "value") {
+        lowered.definition.target = UiBindingTargetKind::Value;
+      } else if (target_name == "classes") {
+        lowered.definition.target = UiBindingTargetKind::Classes;
+      } else {
+        lowered.definition.target = UiBindingTargetKind::Utilities;
+      }
+      lowered.definition.source = UiBindingSourceKind::StringInput;
+      lowered.definition.dependencies = {expression};
+    } else if (target_name.rfind("class_", 0) == 0 &&
+               target_name.size() > 6) {
+      lowered.definition.target = UiBindingTargetKind::ClassToggle;
+      lowered.definition.source = UiBindingSourceKind::BoolExpression;
+      lowered.definition.target_name = target_name.substr(6);
+      lowered.definition.dependencies =
+          flex::MirExpressionProgram::collect_variables(expression);
+      lowered.mir_program = flex::MirExpressionProgram::compile(
+          expression, lowered.definition.dependencies);
+      if (!lowered.mir_program) {
+        return make_error(UiDocumentErrorCode::InvalidBindingExpression,
+                          "invalid MIR UI binding expression: " + expression,
+                          span.line, span.column);
+      }
+      lowered.definition.uses_jit = lowered.mir_program->uses_jit();
+    } else {
+      return make_error(UiDocumentErrorCode::UnknownBindingTarget,
+                        "unknown UI binding target: " + target_name, span.line,
+                        span.column);
+    }
+    node_bindings.push_back(std::move(lowered));
+  }
+
+  std::sort(node_bindings.begin(), node_bindings.end(),
+            [](const LoweredBinding &left, const LoweredBinding &right) {
+              if (left.definition.source_span.line !=
+                  right.definition.source_span.line) {
+                return left.definition.source_span.line <
+                       right.definition.source_span.line;
+              }
+              return left.definition.source_span.column <
+                     right.definition.source_span.column;
+            });
+  for (auto &binding : node_bindings) {
+    definitions.push_back(std::move(binding.definition));
+    programs.push_back(std::move(binding.mir_program));
+  }
+
+  for (const auto &child : node.children) {
+    auto error = lower_bindings(child, limits, definitions, programs);
+    if (error) {
+      return error;
+    }
+  }
+  return {};
 }
 
 std::vector<std::string> split_tokens(const std::string &value) {
@@ -257,6 +478,8 @@ void apply_properties(Element &element, const UiNodeDefinition &definition) {
       element.set_attribute(name.substr(5), value_to_string(value));
     } else if (name.rfind("on.", 0) == 0) {
       element.set_attribute("data-flexui-on-" + name.substr(3), std::get<std::string>(value));
+    } else if (name.rfind("bind.", 0) == 0) {
+      continue;
     } else if (const auto *boolean = std::get_if<bool>(&value)) {
       if (*boolean) {
         element.set_attribute(name);
@@ -380,6 +603,64 @@ UiDocumentParseResult parse_ui_document(std::string_view source, std::string_vie
   return result;
 }
 
+struct CompiledUiProgram::Impl {
+  std::shared_ptr<const UiDocumentDefinition> definition;
+  std::vector<EventBinding> event_bindings;
+  std::vector<BindingDefinition> bindings;
+  std::vector<std::unique_ptr<flex::MirExpressionProgram>> binding_programs;
+};
+
+CompiledUiProgram::CompiledUiProgram(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
+
+CompiledUiProgram::~CompiledUiProgram() = default;
+
+const std::string &CompiledUiProgram::name() const noexcept {
+  return impl_->definition->name;
+}
+
+const UiDocumentDefinition &CompiledUiProgram::definition() const noexcept {
+  return *impl_->definition;
+}
+
+const std::vector<EventBinding> &
+CompiledUiProgram::event_bindings() const noexcept {
+  return impl_->event_bindings;
+}
+
+const std::vector<BindingDefinition> &
+CompiledUiProgram::bindings() const noexcept {
+  return impl_->bindings;
+}
+
+UiDocumentCompileResult compile_ui_document(std::string_view source,
+                                            std::string_view document_name,
+                                            const UiDocumentLimits &limits) {
+  UiDocumentCompileResult result;
+  auto parsed = parse_ui_document(source, document_name, limits);
+  if (!parsed) {
+    result.error = std::move(parsed.error);
+    return result;
+  }
+
+  auto impl = std::make_unique<CompiledUiProgram::Impl>();
+  impl->definition = std::move(parsed.definition);
+  result.error = lower_event_bindings(impl->definition->root, limits,
+                                      impl->event_bindings);
+  if (result.error) {
+    return result;
+  }
+  result.error = lower_bindings(impl->definition->root, limits,
+                                impl->bindings, impl->binding_programs);
+  if (result.error) {
+    return result;
+  }
+
+  result.program = std::shared_ptr<const CompiledUiProgram>(
+      new CompiledUiProgram(std::move(impl)));
+  return result;
+}
+
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &definition) {
   UiDocumentInstantiateResult result;
@@ -443,6 +724,11 @@ UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &defini
   result.tree.root = detached.root;
   result.tree.elements_by_id = std::move(detached.elements_by_id);
   return result;
+}
+
+UiDocumentInstantiateResult
+UiDocumentInstantiator::instantiate(Box &box, const CompiledUiProgram &program) {
+  return instantiate(box, program.definition());
 }
 
 } // namespace flexUI
