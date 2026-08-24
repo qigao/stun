@@ -1827,7 +1827,7 @@ void RenderManager::render_frame(const RenderFrame& frame) {
 
   if (profile_enabled && elapsed_ms(profile.start) > 32.0) {
     const double total_ms = elapsed_ms(profile.start);
-    TLOG_INFO("[RenderManager] Frame | total: {:.1f}ms | begin: {:.1f}ms | tree: {:.1f}ms | overlays: {:.1f}ms | end: {:.1f}ms | replay({}): {:.1f}ms | element-self({}): {:.1f}ms | effects: {:.1f}ms | bg: {:.1f}ms | stroke: {:.1f}ms | content: {:.1f}ms | pseudo: {:.1f}ms | widgets({}): {:.1f}ms | text({}): {:.1f}ms | sort: {:.1f}ms",
+    TLOG_INFOF("[RenderManager] Frame | total: {:.1f}ms | begin: {:.1f}ms | tree: {:.1f}ms | overlays: {:.1f}ms | end: {:.1f}ms | replay({}): {:.1f}ms | element-self({}): {:.1f}ms | effects: {:.1f}ms | bg: {:.1f}ms | stroke: {:.1f}ms | content: {:.1f}ms | pseudo: {:.1f}ms | widgets({}): {:.1f}ms | text({}): {:.1f}ms | sort: {:.1f}ms",
               total_ms, profile.frame_start_ms, profile.tree_ms,
               profile.overlay_ms, profile.frame_end_ms, profile.command_count,
               profile.replay_ms, profile.elements, profile.element_ms,
@@ -1851,7 +1851,7 @@ void RenderManager::render_frame(const RenderFrame& frame) {
         out << detail[i].first << "(" << detail[i].second.first
             << "): " << detail[i].second.second << "ms";
       }
-      TLOG_INFO("[RenderManager]   widget detail | {}", out.str());
+      TLOG_INFOF("[RenderManager]   widget detail | {}", out.str());
     }
   }
   active_render_profile = nullptr;

@@ -1,6 +1,6 @@
 #include <flexUI.h>
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <string>
 
@@ -36,33 +36,33 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     const auto parsed = flexUI::parse_ui_document(valid_document());
     check(static_cast<bool>(parsed));
     check_not_null(parsed.definition.get());
-    check_string_eq(parsed.definition->name, "MainWindow");
-    check_string_eq(parsed.definition->root.tag, "div");
-    check_size_eq(parsed.definition->root.children.size(), 1);
+    check_equal(parsed.definition->name, "MainWindow");
+    check_equal(parsed.definition->root.tag, "div");
+    check_equal(parsed.definition->root.children.size(), 1);
 
     flexUI::Box box(nullptr);
     const auto instantiated = flexUI::UiDocumentInstantiator::instantiate(box, *parsed.definition);
     check(static_cast<bool>(instantiated));
-    check_ptr_eq(box.root(), instantiated.tree.root);
-    check_ptr_eq(box.get_by_id("root"), instantiated.tree.root);
-    check_size_eq(instantiated.tree.elements_by_id.size(), 2);
+    check_equal(box.root(), instantiated.tree.root);
+    check_equal(box.get_by_id("root"), instantiated.tree.root);
+    check_equal(instantiated.tree.elements_by_id.size(), 2);
 
     auto *root = box.get_by_id("root");
     auto *save = box.get_by_id("save");
     check_not_null(root);
     check_not_null(save);
-    check_string_eq(root->tag(), "div");
+    check_equal(root->tag(), "div");
     check(root->has_class("flex"));
     check(root->has_class("app-shell"));
     check(root->utility_names().count("flex") == 1);
-    check_string_eq(*root->attribute("role"), "application");
-    check_size_eq(root->child_count(), 1);
-    check_ptr_eq(root->child_at(0), save);
-    check_string_eq(save->text(), "Save");
+    check_equal(*root->attribute("role"), "application");
+    check_equal(root->child_count(), 1);
+    check_equal(root->child_at(0), save);
+    check_equal(save->text(), "Save");
     check_true(save->focusable);
-    check_int_eq(save->tab_index, 2);
-    check_string_eq(*save->attribute("label"), "Save document");
-    check_string_eq(*save->attribute("data-flexui-on-click"), "save_document");
+    check_equal(save->tab_index, 2);
+    check_equal(*save->attribute("label"), "Save document");
+    check_equal(*save->attribute("data-flexui-on-click"), "save_document");
     check_false(save->has_attribute("disabled"));
   }
 
@@ -78,8 +78,8 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
 
     const auto selected = flexUI::parse_ui_document(source, "Second");
     check(static_cast<bool>(selected));
-    check_string_eq(selected.definition->name, "Second");
-    check_string_eq(selected.definition->root.id, "second");
+    check_equal(selected.definition->name, "Second");
+    check_equal(selected.definition->root.id, "second");
   }
 
   it("rejects invalid root and identity contracts before touching a Box") {
@@ -152,7 +152,7 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
         flexUI::UiDocumentInstantiator::instantiate(occupied, *parsed.definition);
     check_false(static_cast<bool>(occupied_result));
     check(occupied_result.error.code == UiDocumentErrorCode::BoxAlreadyHasRoot);
-    check_ptr_eq(occupied.root(), existing);
+    check_equal(occupied.root(), existing);
     check_null(occupied.get_by_id("root"));
 
     const auto unknown_utility = flexUI::parse_ui_document(R"(

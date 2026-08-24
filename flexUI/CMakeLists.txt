@@ -235,6 +235,15 @@ target_include_directories(
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 
+if(WIN32)
+  add_custom_command(
+    TARGET flexUI POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:TurboUtils::Core>
+            $<TARGET_FILE_DIR:flexUI>
+    COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
+endif()
+
 
 # 安装头文件
 install(DIRECTORY include/flexUI DESTINATION include)
