@@ -70,6 +70,7 @@ enum class UiDocumentErrorCode {
   InvalidBindingExpression,
   BindingLimitExceeded,
   BuildFailed,
+  BindingInstallFailed,
 };
 
 struct UiDocumentError {
@@ -160,6 +161,7 @@ private:
 
   std::unique_ptr<Impl> impl_;
 
+  friend class UiDocumentInstantiator;
   friend UiDocumentCompileResult compile_ui_document(std::string_view source,
                                                       std::string_view document_name,
                                                       const UiDocumentLimits &limits);
@@ -216,6 +218,11 @@ public:
 
   /// Instantiates the validated definition owned by an immutable compiled program.
   static UiDocumentInstantiateResult instantiate(Box &box, const CompiledUiProgram &program);
+
+private:
+  static UiDocumentInstantiateResult instantiate_impl(
+      Box &box, const UiDocumentDefinition &definition,
+      const CompiledUiProgram *program);
 };
 
 } // namespace flexUI

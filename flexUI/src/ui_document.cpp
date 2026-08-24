@@ -13,6 +13,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -271,13 +272,13 @@ bool is_binding_identifier(std::string_view value) {
 
 struct LoweredBinding {
   BindingDefinition definition;
-  std::unique_ptr<flex::MirExpressionProgram> mir_program;
+  std::shared_ptr<const flex::MirExpressionProgram> mir_program;
 };
 
 UiDocumentError lower_bindings(const UiNodeDefinition &node,
                                const UiDocumentLimits &limits,
                                std::vector<BindingDefinition> &definitions,
-                               std::vector<std::unique_ptr<flex::MirExpressionProgram>> &programs) {
+                               std::vector<std::shared_ptr<const flex::MirExpressionProgram>> &programs) {
   std::vector<LoweredBinding> node_bindings;
   for (const auto &[name, value] : node.properties) {
     if (name.rfind("bind.", 0) != 0) {
@@ -308,8 +309,8 @@ UiDocumentError lower_bindings(const UiNodeDefinition &node,
     lowered.definition.expression = expression;
     lowered.definition.source_span = span;
 
-    if (target_name == "text" || target_name == "value" ||
-        target_name == "classes" || target_name == "utilities") {
+    if (target_name == "text" || target_name == "classes" ||
+        target_name == "utilities") {
       if (!is_binding_identifier(expression)) {
         return make_error(UiDocumentErrorCode::InvalidBindingExpression,
                           "string UI bindings require one input identifier",
@@ -317,8 +318,6 @@ UiDocumentError lower_bindings(const UiNodeDefinition &node,
       }
       if (target_name == "text") {
         lowered.definition.target = UiBindingTargetKind::Text;
-      } else if (target_name == "value") {
-        lowered.definition.target = UiBindingTargetKind::Value;
       } else if (target_name == "classes") {
         lowered.definition.target = UiBindingTargetKind::Classes;
       } else {
@@ -333,13 +332,15 @@ UiDocumentError lower_bindings(const UiNodeDefinition &node,
       lowered.definition.target_name = target_name.substr(6);
       lowered.definition.dependencies =
           flex::MirExpressionProgram::collect_variables(expression);
-      lowered.mir_program = flex::MirExpressionProgram::compile(
+      auto mir_program = flex::MirExpressionProgram::compile(
           expression, lowered.definition.dependencies);
-      if (!lowered.mir_program) {
+      if (!mir_program) {
         return make_error(UiDocumentErrorCode::InvalidBindingExpression,
                           "invalid MIR UI binding expression: " + expression,
                           span.line, span.column);
       }
+      lowered.mir_program =
+          std::shared_ptr<const flex::MirExpressionProgram>(std::move(mir_program));
       lowered.definition.uses_jit = lowered.mir_program->uses_jit();
     } else {
       return make_error(UiDocumentErrorCode::UnknownBindingTarget,
@@ -607,7 +608,7 @@ struct CompiledUiProgram::Impl {
   std::shared_ptr<const UiDocumentDefinition> definition;
   std::vector<EventBinding> event_bindings;
   std::vector<BindingDefinition> bindings;
-  std::vector<std::unique_ptr<flex::MirExpressionProgram>> binding_programs;
+  std::vector<std::shared_ptr<const flex::MirExpressionProgram>> binding_programs;
 };
 
 CompiledUiProgram::CompiledUiProgram(std::unique_ptr<Impl> impl)
@@ -663,6 +664,12 @@ UiDocumentCompileResult compile_ui_document(std::string_view source,
 
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &definition) {
+  return instantiate_impl(box, definition, nullptr);
+}
+
+UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
+    Box &box, const UiDocumentDefinition &definition,
+    const CompiledUiProgram *program) {
   UiDocumentInstantiateResult result;
   if (definition.name.empty()) {
     result.error =
@@ -688,6 +695,11 @@ UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &defini
   }
 
   DetachedTree detached;
+  std::optional<UiBindingRuntime::TransactionCheckpoint> binding_transaction;
+  std::optional<SourceSpan> active_binding_span;
+  const std::size_t original_element_count = box.elements_.size();
+  bool index_committed = false;
+  const auto *bindings = program ? &program->impl_->bindings : nullptr;
   try {
     detached.root = build_node(definition.root, detached);
     detached.root->set_attribute("data-flexui-theme-root");
@@ -709,15 +721,79 @@ UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &defini
     }
     box.elements_.reserve(box.elements_.size() + detached.elements.size());
 
+    if (bindings) {
+      binding_transaction.emplace(box.bindings_.begin_transaction());
+      for (std::size_t binding_index = 0;
+           binding_index < bindings->size(); ++binding_index) {
+        const auto &binding = (*bindings)[binding_index];
+        active_binding_span = binding.source_span;
+        auto element = detached.elements_by_id.find(binding.element_id);
+        if (element == detached.elements_by_id.end()) {
+          throw std::invalid_argument("UI binding references an unknown element: " +
+                                      binding.element_id);
+        }
+        switch (binding.target) {
+        case UiBindingTargetKind::Text:
+          box.bindings_.targets().bind_text(*element->second,
+                                            binding.expression);
+          break;
+        case UiBindingTargetKind::Value:
+          throw std::invalid_argument(
+              "compiled UI documents do not support widget value bindings");
+        case UiBindingTargetKind::Classes:
+          box.bindings_.targets().bind_classes(*element->second,
+                                               binding.expression);
+          break;
+        case UiBindingTargetKind::Utilities:
+          box.bindings_.targets().bind_utilities(*element->second,
+                                                 binding.expression);
+          break;
+        case UiBindingTargetKind::ClassToggle:
+          if (binding_index >= program->impl_->binding_programs.size()) {
+            throw std::logic_error("compiled UI binding program table is incomplete");
+          }
+          box.bindings_.bind_compiled_class(
+              *element->second, binding.target_name, binding.dependencies,
+              program->impl_->binding_programs[binding_index]);
+          break;
+        }
+      }
+      active_binding_span.reset();
+    }
+
     for (auto &element : detached.elements) {
       element->owner_box_ = &box;
       box.elements_.push_back(std::move(element));
     }
     box.elements_by_id_.swap(next_index);
+    index_committed = true;
     box.set_root(detached.root);
+    if (binding_transaction) {
+      box.bindings_.commit_transaction(*binding_transaction);
+    }
   } catch (const std::exception &exception) {
-    result.error = make_error(UiDocumentErrorCode::BuildFailed,
-                              std::string("failed to build UI document: ") + exception.what());
+    if (binding_transaction) {
+      box.bindings_.rollback_transaction(*binding_transaction);
+    }
+    box.root_ = nullptr;
+    if (index_committed) {
+      for (const auto &[id, element] : detached.elements_by_id) {
+        auto found = box.elements_by_id_.find(id);
+        if (found != box.elements_by_id_.end() && found->second == element) {
+          box.elements_by_id_.erase(found);
+        }
+      }
+    }
+    box.elements_.resize(original_element_count);
+    const auto code = active_binding_span
+                          ? UiDocumentErrorCode::BindingInstallFailed
+                          : UiDocumentErrorCode::BuildFailed;
+    const char *operation = active_binding_span ? "install UI binding" :
+                                                  "build UI document";
+    result.error = make_error(
+        code, std::string("failed to ") + operation + ": " + exception.what(),
+        active_binding_span ? active_binding_span->line : 0,
+        active_binding_span ? active_binding_span->column : 0);
     return result;
   }
 
@@ -728,7 +804,7 @@ UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &defini
 
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const CompiledUiProgram &program) {
-  return instantiate(box, program.definition());
+  return instantiate_impl(box, program.definition(), &program);
 }
 
 } // namespace flexUI

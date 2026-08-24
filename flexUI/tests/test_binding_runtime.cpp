@@ -6,7 +6,7 @@
 #include <flexUI/widgets/textarea_widget.h>
 
 #include <nlohmann/json.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <limits>
 #include <memory>
@@ -86,13 +86,13 @@ spec("Element exposes HTML-style class and custom property APIs") {
     check(element.has_class(flex::Symbol("flex")));
     check(element.has_class(flex::Symbol("items-center")));
     check(element.has_class(flex::Symbol("data-[state=open]:bg-accent")));
-    check_size_eq(element.class_names().size(), 4);
+    check_equal(element.class_names().size(), 4);
 
     element.set_attribute("class", "grid gap-4 grid-cols-2");
     check_false(element.has_class(flex::Symbol("flex")));
     check(element.has_class(flex::Symbol("grid")));
     check(element.has_attribute("class"));
-    check_string_eq(*element.attribute("class"), "gap-4 grid grid-cols-2");
+    check_equal(*element.attribute("class"), "gap-4 grid grid-cols-2");
 
     element.toggle_class("hidden", true);
     check(element.has_class(flex::Symbol("hidden")));
@@ -108,7 +108,7 @@ spec("Element exposes HTML-style class and custom property APIs") {
   it("keeps inline custom properties outside computed style state") {
     flexUI::Element element;
     element.set_custom_property("--progress", "42%");
-    check_string_eq(*element.custom_property("--progress"), "42%");
+    check_equal(*element.custom_property("--progress"), "42%");
     element.remove_custom_property("--progress");
     check_null(element.custom_property("--progress"));
 
@@ -149,14 +149,14 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     box.update();
     check(label->has_class(flex::Symbol("active")));
     check(label->has_class(flex::Symbol("has-progress")));
-    check_string_eq(*label->attribute("data-state"), "open");
-    check_string_eq(label->text(), "Ready");
-    check_string_eq(*label->custom_property("--progress"), "50px");
-    check_float_eq(label->computed_style->width, 50.0f, 0.001f);
-    check_float_eq(label->computed_style->height, 40.0f, 0.001f);
+    check_equal(*label->attribute("data-state"), "open");
+    check_equal(label->text(), "Ready");
+    check_equal(*label->custom_property("--progress"), "50px");
+    check_within(label->computed_style->width, 50.0f, 0.001f);
+    check_within(label->computed_style->height, 40.0f, 0.001f);
 
     const auto first_stats = runtime.stats();
-    check_size_eq(first_stats.binding_count, 5);
+    check_equal(first_stats.binding_count, 5);
     box.update();
     const auto unchanged_stats = runtime.stats();
     check(unchanged_stats.update_count == first_stats.update_count + 1);
@@ -168,18 +168,18 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     box.update();
     check_false(label->has_class(flex::Symbol("active")));
     check(label->has_class(flex::Symbol("has-progress")));
-    check_string_eq(*label->attribute("data-state"), "closed");
-    check_string_eq(label->text(), "Paused");
-    check_string_eq(*label->custom_property("--progress"), "100px");
-    check_float_eq(label->computed_style->width, 100.0f, 0.001f);
+    check_equal(*label->attribute("data-state"), "closed");
+    check_equal(label->text(), "Paused");
+    check_equal(*label->custom_property("--progress"), "100px");
+    check_within(label->computed_style->width, 100.0f, 0.001f);
     check(runtime.stats().evaluation_count > unchanged_stats.evaluation_count);
   }
 
   it("keeps prebound MIR inputs valid when the data map rehashes") {
     const auto result = run_prebound_rehash_scenario();
-    check_string_eq(result.initial_value, "6");
+    check_equal(result.initial_value, "6");
     check(result.unrelated_inputs_skipped);
-    check_string_eq(result.updated_value, "15");
+    check_equal(result.updated_value, "15");
     check(result.final_evaluations == result.initial_evaluations + 1);
   }
 
@@ -198,13 +198,13 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     const auto text_binding = runtime.targets().bind_text(*root, "text");
     box.update();
     check(root->has_class(flex::Symbol("visible")));
-    check_string_eq(root->text(), "bound");
+    check_equal(root->text(), "bound");
 
     check(runtime.targets().unbind(class_binding.id));
     check(runtime.targets().unbind(text_binding.id));
     check_false(root->has_class(flex::Symbol("visible")));
     check(root->has_class(flex::Symbol("base")));
-    check_string_eq(root->text(), "original");
+    check_equal(root->text(), "original");
   }
 
   it("binds a complete Tailwind class string with exclusive ownership") {
@@ -277,19 +277,19 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     const auto binding = runtime.targets().bind_custom_property(
         *root, "--bound-width", "width", "px");
     box.update();
-    check_float_eq(child->computed_style->width, 25.0f, 0.001f);
+    check_within(child->computed_style->width, 25.0f, 0.001f);
 
     runtime.inputs().set_number("width", 50.0);
     box.update();
-    check_float_eq(child->computed_style->width, 50.0f, 0.001f);
+    check_within(child->computed_style->width, 50.0f, 0.001f);
 
     check(runtime.targets().unbind(binding.id));
     box.update();
-    check_float_eq(child->computed_style->width, 12.0f, 0.001f);
+    check_within(child->computed_style->width, 12.0f, 0.001f);
 
     root->remove_custom_property("--bound-width");
     box.update();
-    check_float_eq(child->computed_style->width, 7.0f, 0.001f);
+    check_within(child->computed_style->width, 7.0f, 0.001f);
   }
 
   it("binds editable widget values in both directions") {
@@ -327,31 +327,31 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
         runtime.targets().bind_value(*textarea_element, "notes");
     box.update();
 
-    check_string_eq(input->text(), "Alice");
-    check_string_eq(textarea->text(), "First line");
-    check_size_eq(input_callback_count, 0);
+    check_equal(input->text(), "Alice");
+    check_equal(textarea->text(), "First line");
+    check_equal(input_callback_count, 0);
 
     check(input->handle_event(flexUI::Event::text_input("!"),
                               *input_element));
     check(textarea->handle_event(flexUI::Event::text_input("!"),
                                  *textarea_element));
-    check_string_eq(runtime.inputs().string("name"), input->text());
-    check_string_eq(runtime.inputs().string("notes"), textarea->text());
-    check_size_eq(input_callback_count, 1);
+    check_equal(runtime.inputs().string("name"), input->text());
+    check_equal(runtime.inputs().string("notes"), textarea->text());
+    check_equal(input_callback_count, 1);
 
     runtime.inputs().set_string("name", "External");
     box.update();
-    check_string_eq(input->text(), "External");
-    check_size_eq(input_callback_count, 1);
+    check_equal(input->text(), "External");
+    check_equal(input_callback_count, 1);
 
     check(runtime.targets().unbind(name_binding.id));
     check(runtime.targets().unbind(notes_binding.id));
-    check_string_eq(input->text(), "input-original");
-    check_string_eq(textarea->text(), "textarea-original");
+    check_equal(input->text(), "input-original");
+    check_equal(textarea->text(), "textarea-original");
 
     check(input->handle_event(flexUI::Event::text_input("?"),
                               *input_element));
-    check_string_eq(runtime.inputs().string("name"), "External");
+    check_equal(runtime.inputs().string("name"), "External");
   }
 
   it("rejects invalid input lifetimes values and binding definitions") {

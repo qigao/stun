@@ -73,37 +73,41 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### API 与数据结构
 
-- [ ] 设计 `CompiledUiProgram` 的公开/私有边界，保留现有 `UiDocumentDefinition` 契约。
-- [ ] 定义 `EventBinding`、`BindingDefinition`、`SourceSpan` 和 interned symbol ownership。
-- [ ] 定义支持的 `UiEventKind`，拒绝任意未知 `on.*` 名称。
-- [ ] 定义首批 `UiBindingTargetKind`，仅覆盖现有 runtime 可完整表达的 target。
-- [ ] 明确 compiled program 的不可变性、共享方式、线程约束和销毁顺序。
-- [ ] 为 event/binding/resource 数量增加可配置上限和结构化错误码。
+- [x] 设计 `CompiledUiProgram` 的公开/私有边界，保留现有 `UiDocumentDefinition` 契约。
+- [x] 定义 `EventBinding`、`BindingDefinition` 和 `SourceSpan`；interned symbol ownership 留待 load-path 优化。
+- [x] 定义支持的 `UiEventKind`，拒绝任意未知 `on.*` 名称。
+- [ ] 补齐首批 `UiBindingTargetKind` 的 DSL 命名；当前已安装 text/classes/utilities/class toggle，
+  runtime 的单 utility、attribute 与 custom property 尚未进入 compiled document。
+- [x] 明确 compiled program 的不可变性、共享方式、线程约束和销毁顺序。
+- [x] 为 event/binding 数量增加可配置上限和结构化错误码。
+- [ ] 为 resource 数量增加可配置上限和结构化错误码。
 
 ### Parser 与 semantic lowering
 
-- [ ] 扩展 `.flex ui` property semantic，识别并校验 `bind.*`。
-- [ ] 将 `on.*` lower 为类型化 `EventBinding`，保留 source location。
-- [ ] 将 `bind.*` 表达式编译为 MIR program，收集输入 dependency symbols。
+- [x] 扩展 `.flex ui` property semantic，识别并校验 `bind.*`。
+- [x] 将 `on.*` lower 为类型化 `EventBinding`，保留 source location。
+- [x] 将 bool `bind.*` 表达式编译为 MIR program，string binding 收集直接 input dependency。
 - [ ] 在 load 阶段拒绝 duplicate event binding、target ownership 冲突和非法表达式类型。
-- [ ] 保留 `data-flexui-on-*` 为 handler table 的只读兼容投影。
+- [x] 保留 `data-flexui-on-*` 为 compiled event table 的兼容投影。
 - [ ] 禁止通过 runtime attribute mutation 反向修改 handler table。
 - [ ] 保持 `scene`、component 和现有未知普通 property lowering 不变。
 
 ### Instantiation
 
-- [ ] 让 instantiator 接受 compiled program 或新增独立 program instantiator，不破坏旧入口。
-- [ ] detached build 阶段解析所有 element ID target。
-- [ ] binding 安装失败时销毁 candidate tree，Box 保持不变。
+- [x] 让 instantiator 接受 compiled program，不破坏旧 definition 入口。
+- [x] detached build 阶段解析所有 element ID target。
+- [x] binding 安装失败时销毁 candidate tree，Box root/index/bindings/handle sequence 保持不变。
 - [ ] handler resolution 失败时返回 element、event、handler 和 source span。
-- [ ] 成功后 Box 仍是 Element tree 唯一 owner，compiled program 仅为只读模板。
+- [x] 成功后 Box 仍是 Element tree 唯一 owner，compiled program 仅为只读模板。
 
 ### 测试
 
-- [ ] lexer/parser：`bind.*`、`on.*`、source span、逗号与嵌套语法。
+- [x] lexer/parser：`bind.*`、`on.*`、source span、逗号与嵌套语法。
 - [ ] semantic：未知 event、未知 target、重复 handler、类型错误和资源超限。
 - [ ] MIR：数字/布尔/string 输入、dependency version 和 invalid expression。
-- [ ] compatibility：旧 `on.*` attribute 查询结果不变。
+- [x] compatibility：旧 `on.*` attribute 查询结果不变。
+- [x] binding install：text/classes/utilities 与 MIR class toggle 随 input version 更新，且复用 compiled MIR。
+- [x] binding transaction：失败不安装 root/index/bindings，且不消耗 binding handle。
 - [ ] transaction：任一 binding/handler 失败时 Box root/index/bindings 均不变。
 - [ ] scene 与 ui 同文件回归。
 

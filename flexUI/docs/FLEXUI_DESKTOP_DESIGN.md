@@ -241,34 +241,35 @@ schema、路径、资源上限和 required capability 校验；非法配置直�
 
 ### 7.1 目标语法
 
-现有属性保持兼容，并建议新增 `bind.*`：
+现有属性保持兼容。P1 首批已实现的 `bind.*` 语法如下：
 
 ```flex
 ui MainWindow {
     div root {
         utility: "flex min-h-screen flex-col",
 
-        input document_title {
-            bind.value: "document.title",
-            on.change: "title_changed"
-        },
-
         button save {
             text: "Save",
             utility: "rounded-md px-4 py-2",
-            bind.enabled: "!document.saving && document.dirty",
+            bind.class_enabled: ${can_save},
             on.click: "save_document"
         },
 
         div status {
-            bind.text: "document.status"
+            bind.text: $document_status
         }
     }
 }
 ```
 
-这段代码是目标语法，不代表 `bind.*` 已实现。首批 target 限制为现有 binding runtime 能完整
-表达的 class、classes、utility、utilities、attribute、text、value 和 custom property。
+P1 当前刻意限定的首批 target 子集是 `text`、`classes`、`utilities` 和 `class_<token>`。
+binding runtime 已有的单 utility、attribute 与 custom property 尚未定义稳定的 DSL 命名，不能把
+这一首批子集理解为普通 `Element` 的能力上限。`bind.value` 需要 `TextValueWidget` 和双向 observer，而当前 document builder
+只创建普通 `Element`，因此编译阶段明确拒绝；后续只有在 widget factory 进入同一装载事务后才可开放。
+string target 使用单一 `$input`，class toggle 使用 `${boolean_expression}` 并在安装时校验其
+number/bool 输入已经声明。编译产物中的 immutable MIR JIT artifact 由 program 与已安装 binding
+共享，不在每次实例化时重新编译；不具备 JIT artifact 时安装直接失败，禁止跨 Box 共享 MIR
+interpreter 的可变 context。任一绑定安装失败都会回滚本批绑定、句柄序列和 candidate tree。
 
 ### 7.2 不修改现有 Definition 契约
 
@@ -288,15 +289,11 @@ CompiledUiProgram
 
 ```cpp
 enum class UiBindingTargetKind {
-  Class,
-  Classes,
-  Utility,
-  Utilities,
-  Attribute,
   Text,
-  Value,
-  CustomProperty,
-  Enabled
+  Value, // 为公开枚举的源兼容保留；document lowering 暂不生成
+  Classes,
+  Utilities,
+  ClassToggle
 };
 
 struct EventBinding {
@@ -315,7 +312,9 @@ struct BindingDefinition {
 };
 ```
 
-实际公开性和字段需要在实现阶段审核；这里定义的是数据职责。`on.*` 的旧
+当前实现使用 `std::string` 保存 element/input 名称，并把 MIR program 留在
+`CompiledUiProgram::Impl`；symbol interning 仍是后续 load-path 优化，不是 P1 正确性前提。
+`on.*` 的旧
 `data-flexui-on-*` attribute 在迁移期可继续由 `EventBinding` 派生，保证现有查询和测试不变，
 但 handler table 是唯一事实源，attribute 不能反向修改 handler。
 

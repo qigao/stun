@@ -131,6 +131,105 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check_equal(active.dependencies.front(), "enabled");
   }
 
+  it("installs compiled bindings without recompiling MIR") {
+    auto compiled = flexUI::compile_ui_document(R"(
+      ui Main {
+        div root {
+          label status {
+            bind.text: $status_text,
+            bind.class_active: ${enabled}
+          }
+          div class_list { bind.classes: $status_classes }
+          div utility_list { bind.utilities: $status_utilities }
+        }
+      }
+    )");
+    check(static_cast<bool>(compiled));
+
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("status_text", "Ready");
+    box.bindings().inputs().set_string("status_classes", "notice");
+    box.bindings().inputs().set_string("status_utilities", "flex");
+    box.bindings().inputs().set_bool("enabled", true);
+
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program);
+    check(static_cast<bool>(instantiated));
+    compiled.program.reset();
+    check_equal(box.bindings().stats().binding_count, 4);
+    check_equal(box.bindings().expression_compile_count(), 0);
+    check_true(box.bindings().update());
+
+    auto *status = box.get_by_id("status");
+    auto *class_list = box.get_by_id("class_list");
+    auto *utility_list = box.get_by_id("utility_list");
+    check_not_null(status);
+    check_not_null(class_list);
+    check_not_null(utility_list);
+    check_equal(status->text(), "Ready");
+    check_true(status->has_class("active"));
+    check_true(class_list->has_class("notice"));
+    check_true(utility_list->utility_names().count("flex") == 1);
+
+    box.bindings().inputs().set_string("status_text", "Running");
+    box.bindings().inputs().set_string("status_classes", "muted");
+    box.bindings().inputs().set_string("status_utilities", "");
+    box.bindings().inputs().set_bool("enabled", false);
+    check_true(box.bindings().update());
+    check_equal(status->text(), "Running");
+    check_false(status->has_class("active"));
+    check_false(class_list->has_class("notice"));
+    check_true(class_list->has_class("muted"));
+    check_true(utility_list->utility_names().empty());
+  }
+
+  it("rolls back a failed compiled binding installation") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      ui Main {
+        label status {
+          bind.classes: $status_classes,
+          bind.class_active: ${enabled}
+        }
+      }
+    )");
+    check(static_cast<bool>(compiled));
+
+    flexUI::Box box(nullptr);
+    auto *existing = box.create("label", "existing");
+    box.bindings().inputs().set_string("seed_text", "Seed");
+    box.bindings().inputs().set_string("status_classes", "notice");
+    box.bindings().inputs().set_bool("enabled", true);
+    const auto before =
+        box.bindings().targets().bind_text(*existing, "seed_text");
+    const auto count_before = box.bindings().stats().binding_count;
+
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program);
+    check_false(static_cast<bool>(instantiated));
+    check(instantiated.error.code ==
+          UiDocumentErrorCode::BindingInstallFailed);
+    check_equal(instantiated.error.line, 5);
+    check_null(box.root());
+    check_null(box.get_by_id("status"));
+    check_equal(box.get_by_id("existing"), existing);
+    check_equal(box.bindings().stats().binding_count, count_before);
+
+    auto *after_target = box.create("label", "after");
+    const auto after =
+        box.bindings().targets().bind_text(*after_target, "seed_text");
+    check_equal(after.id, before.id + 1);
+    check_true(box.bindings().update());
+    check_equal(existing->text(), "Seed");
+  }
+
+  it("rejects widget-only value bindings during document compilation") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      ui Main { input editor { bind.value: $editor_text } }
+    )");
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::UnknownBindingTarget);
+  }
+
   it("rejects unknown binding targets, invalid MIR, and binding limits") {
     const auto unknown = flexUI::compile_ui_document(R"(
       ui Main { label status { bind.attribute: $status_text } }
