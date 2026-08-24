@@ -176,30 +176,41 @@ UiNodeDefinition copy_node(const AstNode &source) {
   return target;
 }
 
+static constexpr std::pair<std::string_view, UiEventKind> kUiEvents[] = {
+    {"click", UiEventKind::Click},
+    {"mouse_move", UiEventKind::MouseMove},
+    {"mouse_down", UiEventKind::MouseDown},
+    {"mouse_up", UiEventKind::MouseUp},
+    {"mouse_wheel", UiEventKind::MouseWheel},
+    {"key_down", UiEventKind::KeyDown},
+    {"key_up", UiEventKind::KeyUp},
+    {"text_input", UiEventKind::TextInput},
+    {"focus_in", UiEventKind::FocusIn},
+    {"focus_out", UiEventKind::FocusOut},
+    {"composition_start", UiEventKind::CompositionStart},
+    {"composition_update", UiEventKind::CompositionUpdate},
+    {"composition_end", UiEventKind::CompositionEnd},
+};
+
 bool resolve_event_kind(std::string_view name, UiEventKind &kind) {
-  static constexpr std::pair<std::string_view, UiEventKind> events[] = {
-      {"click", UiEventKind::Click},
-      {"mouse_move", UiEventKind::MouseMove},
-      {"mouse_down", UiEventKind::MouseDown},
-      {"mouse_up", UiEventKind::MouseUp},
-      {"mouse_wheel", UiEventKind::MouseWheel},
-      {"key_down", UiEventKind::KeyDown},
-      {"key_up", UiEventKind::KeyUp},
-      {"text_input", UiEventKind::TextInput},
-      {"focus_in", UiEventKind::FocusIn},
-      {"focus_out", UiEventKind::FocusOut},
-      {"composition_start", UiEventKind::CompositionStart},
-      {"composition_update", UiEventKind::CompositionUpdate},
-      {"composition_end", UiEventKind::CompositionEnd},
-  };
   const auto found = std::find_if(
-      std::begin(events), std::end(events),
+      std::begin(kUiEvents), std::end(kUiEvents),
       [name](const auto &entry) { return entry.first == name; });
-  if (found == std::end(events)) {
+  if (found == std::end(kUiEvents)) {
     return false;
   }
   kind = found->second;
   return true;
+}
+
+std::string_view event_kind_name(UiEventKind kind) {
+  const auto found = std::find_if(
+      std::begin(kUiEvents), std::end(kUiEvents),
+      [kind](const auto &entry) { return entry.second == kind; });
+  if (found == std::end(kUiEvents)) {
+    throw std::logic_error("compiled UI program contains an invalid event kind");
+  }
+  return found->first;
 }
 
 UiDocumentError lower_event_bindings(const UiNodeDefinition &node,
@@ -496,7 +507,8 @@ struct DetachedTree {
   std::unordered_map<std::string, Element *> elements_by_id;
 };
 
-void apply_properties(Element &element, const UiNodeDefinition &definition) {
+void apply_properties(Element &element, const UiNodeDefinition &definition,
+                      bool include_event_attributes) {
   const auto find_property = [&](const char *first,
                                  const char *second = nullptr) -> const UiDocumentValue * {
     auto it = definition.properties.find(first);
@@ -535,8 +547,10 @@ void apply_properties(Element &element, const UiNodeDefinition &definition) {
     }
     if (name.rfind("attr.", 0) == 0) {
       element.set_attribute(name.substr(5), value_to_string(value));
-    } else if (name.rfind("on.", 0) == 0) {
+    } else if (include_event_attributes && name.rfind("on.", 0) == 0) {
       element.set_attribute("data-flexui-on-" + name.substr(3), std::get<std::string>(value));
+    } else if (name.rfind("on.", 0) == 0) {
+      continue;
     } else if (name.rfind("bind.", 0) == 0) {
       continue;
     } else if (const auto *boolean = std::get_if<bool>(&value)) {
@@ -549,18 +563,20 @@ void apply_properties(Element &element, const UiNodeDefinition &definition) {
   }
 }
 
-Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree) {
+Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree,
+                    bool include_event_attributes) {
   auto element = std::make_unique<Element>();
   element->set_tag(definition.tag);
   element->set_element_id(definition.id);
-  apply_properties(*element, definition);
+  apply_properties(*element, definition, include_event_attributes);
 
   Element *raw = element.get();
   tree.elements_by_id.emplace(definition.id, raw);
   tree.elements.push_back(std::move(element));
 
   for (const auto &child_definition : definition.children) {
-    Element *child = build_node(child_definition, tree);
+    Element *child =
+        build_node(child_definition, tree, include_event_attributes);
     if (!raw->append(child)) {
       throw std::logic_error("failed to attach detached UI element");
     }
@@ -665,6 +681,8 @@ UiDocumentParseResult parse_ui_document(std::string_view source, std::string_vie
 struct CompiledUiProgram::Impl {
   std::shared_ptr<const UiDocumentDefinition> definition;
   std::vector<EventBinding> event_bindings;
+  std::unordered_map<flex::Symbol, std::vector<std::size_t>, flex::SymbolHash>
+      event_binding_index;
   std::vector<BindingDefinition> bindings;
   std::vector<std::shared_ptr<const flex::MirExpressionProgram>> binding_programs;
 };
@@ -685,6 +703,22 @@ const UiDocumentDefinition &CompiledUiProgram::definition() const noexcept {
 const std::vector<EventBinding> &
 CompiledUiProgram::event_bindings() const noexcept {
   return impl_->event_bindings;
+}
+
+const EventBinding *CompiledUiProgram::find_event_binding(
+    std::string_view element_id, UiEventKind event) const noexcept {
+  const auto found = impl_->event_binding_index.find(flex::Symbol(element_id));
+  if (found == impl_->event_binding_index.end()) {
+    return nullptr;
+  }
+  for (const auto index : found->second) {
+    const auto &binding = impl_->event_bindings[index];
+    if (binding.event == event &&
+        std::string_view(binding.element_id) == element_id) {
+      return &binding;
+    }
+  }
+  return nullptr;
 }
 
 const std::vector<BindingDefinition> &
@@ -708,6 +742,11 @@ UiDocumentCompileResult compile_ui_document(std::string_view source,
                                       impl->event_bindings);
   if (result.error) {
     return result;
+  }
+  impl->event_binding_index.reserve(impl->event_bindings.size());
+  for (std::size_t index = 0; index < impl->event_bindings.size(); ++index) {
+    const auto &binding = impl->event_bindings[index];
+    impl->event_binding_index[flex::Symbol(binding.element_id)].push_back(index);
   }
   result.error = lower_bindings(impl->definition->root, limits,
                                 impl->bindings, impl->binding_programs);
@@ -759,7 +798,22 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
   bool index_committed = false;
   const auto *bindings = program ? &program->impl_->bindings : nullptr;
   try {
-    detached.root = build_node(definition.root, detached);
+    detached.root = build_node(definition.root, detached, program == nullptr);
+    if (program) {
+      for (const auto &event_binding : program->impl_->event_bindings) {
+        const auto element =
+            detached.elements_by_id.find(event_binding.element_id);
+        if (element == detached.elements_by_id.end()) {
+          throw std::logic_error(
+              "compiled UI event references an unknown element: " +
+              event_binding.element_id);
+        }
+        element->second->set_attribute(
+            "data-flexui-on-" +
+                std::string(event_kind_name(event_binding.event)),
+            event_binding.handler);
+      }
+    }
     detached.root->set_attribute("data-flexui-theme-root");
     switch (box.theme_mode()) {
     case ThemeMode::System:

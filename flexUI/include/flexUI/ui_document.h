@@ -156,6 +156,12 @@ public:
   const std::string &name() const noexcept;
   const UiDocumentDefinition &definition() const noexcept;
   const std::vector<EventBinding> &event_bindings() const noexcept;
+  /// Finds one immutable handler definition without consulting Element attributes.
+  ///
+  /// The returned pointer remains valid while this compiled program is alive.
+  /// Returns nullptr when the element/event pair has no declared handler.
+  const EventBinding *find_event_binding(
+      std::string_view element_id, UiEventKind event) const noexcept;
   const std::vector<BindingDefinition> &bindings() const noexcept;
 
 private:

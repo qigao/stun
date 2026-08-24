@@ -53,7 +53,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [x] 同步 CodeGraph 并审阅 UI Document、Box、EventDispatcher、binding runtime、TailwindCSS、
   TurboScript controller 文档和 gCanvas host protocol。
 - [x] 确认 `UiDocumentInstantiator` 已有 validate/build/commit 和失败不修改 Box 契约。
-- [x] 确认 `on.*` 当前仅生成 `data-flexui-on-*` metadata。
+- [x] 确认 P0 基线中的 `on.*` 仅生成 `data-flexui-on-*` metadata。
 - [x] 确认 binding 表达式已有 MIR compile-once 与 input version 跳过机制。
 - [x] 确认 gCanvas renderer 与可选 GLFW window helper 已分离，Context 为单线程。
 
@@ -92,7 +92,8 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
   继续保留同语义校验作为防线。
 - [x] 拒绝首批 string target 的非单 input 表达式和 class toggle 的非法 MIR 表达式。
 - [x] 保留 `data-flexui-on-*` 为 compiled event table 的兼容投影。
-- [ ] 禁止通过 runtime attribute mutation 反向修改 handler table。
+- [x] compiled event table 提供 element/event 的只读索引查询；runtime attribute mutation
+  不会反向修改 handler table。
 - [ ] 保持 `scene`、component 和现有未知普通 property lowering 不变。
 
 ### Instantiation

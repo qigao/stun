@@ -48,8 +48,9 @@ QObject 或浏览器 DOM：
 - `UiDocumentDefinition` 已是 parser-independent 值语义树，并带 source、node、depth、property
   和 string 资源上限；`UiDocumentInstantiator` 承诺失败时目标 Box 不变。证据：
   `flexUI/include/flexUI/ui_document.h`、`flexUI/src/ui_document.cpp`。
-- `.flex` UI 文档已经支持 `on.event`，但当前只映射为 `data-flexui-on-event` attribute，尚未
-  生成类型化 controller handler table。证据：`flexUI/docs/FLEX_UI_DOCUMENT_DESIGN.md`、
+- `.flex` UI 文档已经把 `on.event` 降级为不可变类型化事件表，并提供按 element/event 查询的
+  只读索引；实例化时从该表生成可变的 `data-flexui-on-event` 兼容 attribute。TurboScript export
+  resolution 与 controller dispatch 尚未实现。证据：`flexUI/include/flexUI/ui_document.h`、
   `flexUI/src/ui_document.cpp`。
 - `UiDataContext` 是单线程类型化输入事实源；数值和布尔表达式创建 binding 时编译为 MIR，
   输入版本不变时跳过求值。证据：`flexUI/include/flexUI/binding_runtime.h`、
@@ -323,7 +324,11 @@ struct BindingDefinition {
 `CompiledUiProgram::Impl`；symbol interning 仍是后续 load-path 优化，不是 P1 正确性前提。
 `on.*` 的旧
 `data-flexui-on-*` attribute 在迁移期可继续由 `EventBinding` 派生，保证现有查询和测试不变，
-但 handler table 是唯一事实源，attribute 不能反向修改 handler。
+但 handler table 是唯一事实源，attribute 不能反向修改 handler。`CompiledUiProgram` 通过
+`find_event_binding(element_id, event)` 提供只读索引查询；索引以 element `Symbol` 分桶并在命中后
+比较完整 element ID 和 event kind，因此不把 32 位 hash 相等误当成身份相等。compatibility
+attribute 的修改或删除只改变 Element metadata，不改变查询结果。controller 必须持有共享的
+compiled program，Box 和 Element 不维护第二份 handler 状态。
 
 ### 7.3 查找复杂度
 
@@ -739,7 +744,7 @@ FlexUI::Desktop
 ### 19.2 迁移路径
 
 1. 新增 `CompiledUiProgram`，保留 `parse_ui_document` 和 `UiDocumentInstantiator`。
-2. `on.*` 同时生成 handler table 与只读兼容 attribute；现有测试保持通过。
+2. `on.*` 生成唯一 handler table，并由该表投影可变兼容 attribute；attribute 修改不反写事件表。
 3. controller 先接 fake module，不改变默认 Box 事件路径。
 4. TurboScript adapter 由显式 feature 和 application builder 启用。
 5. DLL plugin host 先独立测试，再向 controller service bridge 注册 capability。
@@ -761,7 +766,7 @@ FlexUI::Desktop
 | HIGH | 推论 | DLL 可破坏宿主进程内存，无法在同进程可靠恢复 | 首版只加载可信插件；不可信插件以后进程隔离 |
 | HIGH | 事实 | 当前 Event 包含裸 `Element* target`，不能直接复制到脚本/DLL | 构造值语义 snapshot，只含 handle 和有限字段 |
 | HIGH | 推论 | mutation 与外部副作用混合会产生不可回滚状态 | 分离 UiMutation 与 ApplicationCommand，先 reserve 再发布 |
-| MED | 事实 | `on.*` 当前只是 attribute metadata | 新增类型化 handler table，并保留只读兼容投影 |
+| MED | 事实 | handler export 尚未在 TurboScript load 边界解析 | controller 接入时增加带 source span 的 export resolution；兼容 attribute 不参与解析 |
 | MED | 推论 | literal XML 双栈会扩大迁移和测试成本 | XML 仅作为同一 definition 的 adapter |
 | MED | 事实 | gCanvas Context 单线程且 host/window 有明确销毁顺序 | DesktopHost 固化 UI-thread 和 shutdown protocol |
 | MED | 推论 | 热重载 DLL 容易遗留函数指针和 worker | 首版不启用；后续需引用清零、状态迁移和原子路由 |

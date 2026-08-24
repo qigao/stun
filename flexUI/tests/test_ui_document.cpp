@@ -78,6 +78,89 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
                 "save_document");
   }
 
+  it("finds compiled handlers by element and event kind") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      ui Main {
+        button save {
+          on.click: "save_document",
+          on.key_down: "save_shortcut"
+        }
+      }
+    )");
+    check(static_cast<bool>(compiled));
+
+    const auto *click = compiled.program->find_event_binding(
+        "save", flexUI::UiEventKind::Click);
+    check_not_null(click);
+    check_equal(click->handler, "save_document");
+    const auto *key_down = compiled.program->find_event_binding(
+        "save", flexUI::UiEventKind::KeyDown);
+    check_not_null(key_down);
+    check_equal(key_down->handler, "save_shortcut");
+    check_null(compiled.program->find_event_binding(
+        "save", flexUI::UiEventKind::FocusIn));
+    check_null(compiled.program->find_event_binding(
+        "missing", flexUI::UiEventKind::Click));
+
+    flexUI::Box box(nullptr);
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program);
+    check(static_cast<bool>(instantiated));
+    check_equal(*box.get_by_id("save")->attribute(
+                    "data-flexui-on-key_down"),
+                "save_shortcut");
+  }
+
+  it("distinguishes element ids with colliding symbols") {
+    check(flex::Symbol("costarring") == flex::Symbol("liquid"));
+    const auto compiled = flexUI::compile_ui_document(R"(
+      ui Main {
+        div root {
+          button costarring { on.click: "first_handler" }
+          button liquid { on.click: "second_handler" }
+        }
+      }
+    )");
+    check(static_cast<bool>(compiled));
+
+    // These identifiers share the same 32-bit FNV-1a value. Full IDs remain
+    // authoritative after the symbol bucket lookup.
+    const auto *first = compiled.program->find_event_binding(
+        "costarring", flexUI::UiEventKind::Click);
+    const auto *second = compiled.program->find_event_binding(
+        "liquid", flexUI::UiEventKind::Click);
+    check_not_null(first);
+    check_not_null(second);
+    check_equal(first->handler, "first_handler");
+    check_equal(second->handler, "second_handler");
+  }
+
+  it("keeps compiled handlers independent from compatibility attributes") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      ui Main { button save { on.click: "save_document" } }
+    )");
+    check(static_cast<bool>(compiled));
+
+    flexUI::Box box(nullptr);
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program);
+    check(static_cast<bool>(instantiated));
+    auto *save = box.get_by_id("save");
+    check_not_null(save);
+
+    save->set_attribute("data-flexui-on-click", "mutated_handler");
+    const auto *after_set = compiled.program->find_event_binding(
+        "save", flexUI::UiEventKind::Click);
+    check_not_null(after_set);
+    check_equal(after_set->handler, "save_document");
+
+    save->remove_attribute("data-flexui-on-click");
+    const auto *after_remove = compiled.program->find_event_binding(
+        "save", flexUI::UiEventKind::Click);
+    check_not_null(after_remove);
+    check_equal(after_remove->handler, "save_document");
+  }
+
   it("rejects unknown events and configured event limits during compilation") {
     const char *unknown_source = R"(
       ui Main { button save { on.explode: "save_document" } }
