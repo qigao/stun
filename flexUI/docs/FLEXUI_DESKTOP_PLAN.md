@@ -87,7 +87,10 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [x] 扩展 `.flex ui` property semantic，识别并校验 `bind.*`。
 - [x] 将 `on.*` lower 为类型化 `EventBinding`，保留 source location。
 - [x] 将 bool `bind.*` 表达式编译为 MIR program，string binding 收集直接 input dependency。
-- [ ] 在 load 阶段拒绝 duplicate event binding、target ownership 冲突和非法表达式类型。
+- [x] 在 load 阶段拒绝重复 `on.*`/`bind.*` 属性，并报告后一处属性的 source span。
+- [x] 在 compiled lowering 阶段拒绝 class-list/class-token target ownership 冲突；runtime
+  继续保留同语义校验作为防线。
+- [x] 拒绝首批 string target 的非单 input 表达式和 class toggle 的非法 MIR 表达式。
 - [x] 保留 `data-flexui-on-*` 为 compiled event table 的兼容投影。
 - [ ] 禁止通过 runtime attribute mutation 反向修改 handler table。
 - [ ] 保持 `scene`、component 和现有未知普通 property lowering 不变。
@@ -103,7 +106,9 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 ### 测试
 
 - [x] lexer/parser：`bind.*`、`on.*`、source span、逗号与嵌套语法。
-- [ ] semantic：未知 event、未知 target、重复 handler、类型错误和资源超限。
+- [x] semantic：未知 event/target、重复 event/binding、binding ownership 冲突、类型错误和
+  event/binding 数量超限。
+- [ ] semantic：resource 超限与 controller export handler resolution。
 - [ ] MIR：数字/布尔/string 输入、dependency version 和 invalid expression。
 - [x] compatibility：旧 `on.*` attribute 查询结果不变。
 - [x] binding install：text/classes/utilities 与 MIR class toggle 随 input version 更新，且复用 compiled MIR。

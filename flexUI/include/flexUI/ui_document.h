@@ -71,6 +71,9 @@ enum class UiDocumentErrorCode {
   BindingLimitExceeded,
   BuildFailed,
   BindingInstallFailed,
+  DuplicateEventBinding,
+  DuplicateBindingTarget,
+  BindingTargetConflict,
 };
 
 struct UiDocumentError {

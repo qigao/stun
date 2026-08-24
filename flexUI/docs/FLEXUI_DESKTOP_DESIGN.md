@@ -271,6 +271,13 @@ number/bool 输入已经声明。编译产物中的 immutable MIR JIT artifact �
 共享，不在每次实例化时重新编译；不具备 JIT artifact 时安装直接失败，禁止跨 Box 共享 MIR
 interpreter 的可变 context。任一绑定安装失败都会回滚本批绑定、句柄序列和 candidate tree。
 
+解析器继续保持普通 node property 的既有 last-write-wins 行为，但会额外记录重复属性的后一处
+source span；FlexUI validation 对重复 `on.*` 和 `bind.*` 单独 fail fast，不让 handler 或 binding
+因 map 覆盖而静默改变。binding lowering 在同一 element 内按 source span 排序后检查 ownership：
+`bind.classes`/`bind.utilities` 独占完整 class list，不能与另一完整 list binding 或任意
+`bind.class_<token>` 共存；不同 token 的 class binding 可以共存。runtime 的 ownership 校验仍然
+保留，覆盖手工 API 调用并防止 compiled/load 边界被绕过。
+
 ### 7.2 不修改现有 Definition 契约
 
 不向 `UiNodeDefinition` 塞入 runtime handle。新增只读编译产物：

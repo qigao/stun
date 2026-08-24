@@ -6,7 +6,7 @@
 #include <string>
 #include <variant>
 
-#include "tinytest.h"
+#include <tinytest.hpp>
 #include "flex/dsl.h"
 
 using namespace flex;
@@ -15,7 +15,7 @@ using namespace flex::parser;
 namespace {
 
 inline void check_close(float actual, float expected, float eps = 0.001f) {
-  check_float_eq(actual, expected, eps);
+  check_within(actual, expected, eps);
 }
 
 #define REQUIRE(expr) check(expr)
@@ -562,7 +562,7 @@ TEST_CASE("Parser: MIR track expression and time units", "[parser][anim][mir]") 
         }
     )");
 
-  check_eq(std::string(get_error()), std::string());
+  check_equal(std::string(get_error()), std::string());
   REQUIRE(program != nullptr);
   REQUIRE(program->animations.size() == 1);
   check_close(program->animations[0]->duration, 1.5f);
@@ -588,13 +588,13 @@ TEST_CASE("Parser: vec2 motion path and timeline trigger", "[parser][anim][motio
         }
     )");
 
-  check_eq(std::string(get_error()), std::string());
+  check_equal(std::string(get_error()), std::string());
   REQUIRE(program != nullptr);
   REQUIRE(program->animations.size() == 1);
   const auto &anim = program->animations[0];
   REQUIRE(anim->triggers.size() == 1);
   check_close(anim->triggers[0].time, 0.75f);
-  check_eq(anim->triggers[0].event, std::string("passedGuide"));
+  check_equal(anim->triggers[0].event, std::string("passedGuide"));
   REQUIRE(anim->tracks.size() == 1);
 
   const auto &track = anim->tracks[0];
@@ -623,7 +623,7 @@ TEST_CASE("Parser: cubic Bezier motion keyframes preserve explicit tangents",
         }
     )");
 
-  check_eq(std::string(get_error()), std::string());
+  check_equal(std::string(get_error()), std::string());
   REQUIRE(program != nullptr);
   REQUIRE(program->animations.size() == 1);
   const auto &track = program->animations[0]->tracks[0];
@@ -919,7 +919,7 @@ TEST_CASE("Parser: Pseudo-class block preserves base style", "[parser][pseudo]")
         }
     )");
 
-  check_eq(std::string(get_error()), std::string());
+  check_equal(std::string(get_error()), std::string());
   REQUIRE(program != nullptr);
   REQUIRE(program->scene != nullptr);
   REQUIRE(program->scene->children.size() == 1);

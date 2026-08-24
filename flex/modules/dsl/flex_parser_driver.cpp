@@ -1774,10 +1774,16 @@ private:
     } else if (in_pseudo_block_) {
       current_pseudo_props_[pending_prop_key_] = value;
     } else if (!node_stack_.empty()) {
-      node_stack_.top()->properties[pending_prop_key_] = value;
+      auto &node = *node_stack_.top();
+      const AstSourceSpan source{pending_prop_line_, pending_prop_column_,
+                                 pending_prop_key_.size()};
+      if (node.properties.count(pending_prop_key_) != 0) {
+        node.duplicate_properties.push_back(
+            AstDuplicateProperty{pending_prop_key_, source});
+      }
+      node.properties[pending_prop_key_] = value;
       if (pending_prop_line_ > 0 && pending_prop_column_ > 0) {
-        node_stack_.top()->property_spans[pending_prop_key_] =
-            AstSourceSpan{pending_prop_line_, pending_prop_column_, pending_prop_key_.size()};
+        node.property_spans[pending_prop_key_] = source;
       }
     } else if (current_scene_) {
       if (pending_prop_key_ == "width") {

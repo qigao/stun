@@ -68,6 +68,20 @@ UiDocumentError validate_node(const AstNode &node, const UiDocumentLimits &limit
     return make_error(UiDocumentErrorCode::PropertyLimitExceeded,
                       "UI node exceeds maximum property count: " + node.id);
   }
+  for (const auto &duplicate : node.duplicate_properties) {
+    if (duplicate.name.rfind("on.", 0) == 0) {
+      return make_error(UiDocumentErrorCode::DuplicateEventBinding,
+                        "duplicate UI event binding on element '" + node.id +
+                            "': " + duplicate.name,
+                        duplicate.source.line, duplicate.source.column);
+    }
+    if (duplicate.name.rfind("bind.", 0) == 0) {
+      return make_error(UiDocumentErrorCode::DuplicateBindingTarget,
+                        "duplicate UI binding target on element '" + node.id +
+                            "': " + duplicate.name,
+                        duplicate.source.line, duplicate.source.column);
+    }
+  }
   if (has_alias_conflict(node.properties, "class", "classes") ||
       has_alias_conflict(node.properties, "utility", "utilities") ||
       has_alias_conflict(node.properties, "text", "content")) {
@@ -273,7 +287,46 @@ bool is_binding_identifier(std::string_view value) {
 struct LoweredBinding {
   BindingDefinition definition;
   std::shared_ptr<const flex::MirExpressionProgram> mir_program;
+  std::string source_property;
 };
+
+UiDocumentError validate_binding_ownership(
+    const std::vector<LoweredBinding> &bindings) {
+  bool owns_class_list = false;
+  std::unordered_set<std::string> owned_class_tokens;
+  for (const auto &binding : bindings) {
+    const auto target = binding.definition.target;
+    const bool owns_whole_class_list =
+        target == UiBindingTargetKind::Classes ||
+        target == UiBindingTargetKind::Utilities;
+    if (owns_whole_class_list) {
+      if (owns_class_list || !owned_class_tokens.empty()) {
+        return make_error(
+            UiDocumentErrorCode::BindingTargetConflict,
+            "UI binding target '" + binding.source_property +
+                "' on element '" + binding.definition.element_id +
+                "' conflicts with existing class-list ownership",
+            binding.definition.source_span.line,
+            binding.definition.source_span.column);
+      }
+      owns_class_list = true;
+      continue;
+    }
+    if (target == UiBindingTargetKind::ClassToggle) {
+      if (owns_class_list ||
+          !owned_class_tokens.insert(binding.definition.target_name).second) {
+        return make_error(
+            UiDocumentErrorCode::BindingTargetConflict,
+            "UI binding target '" + binding.source_property +
+                "' on element '" + binding.definition.element_id +
+                "' conflicts with existing class-list ownership",
+            binding.definition.source_span.line,
+            binding.definition.source_span.column);
+      }
+    }
+  }
+  return {};
+}
 
 UiDocumentError lower_bindings(const UiNodeDefinition &node,
                                const UiDocumentLimits &limits,
@@ -305,6 +358,7 @@ UiDocumentError lower_bindings(const UiNodeDefinition &node,
 
     const std::string target_name = name.substr(5);
     LoweredBinding lowered;
+    lowered.source_property = name;
     lowered.definition.element_id = node.id;
     lowered.definition.expression = expression;
     lowered.definition.source_span = span;
@@ -360,6 +414,10 @@ UiDocumentError lower_bindings(const UiNodeDefinition &node,
               return left.definition.source_span.column <
                      right.definition.source_span.column;
             });
+  auto ownership_error = validate_binding_ownership(node_bindings);
+  if (ownership_error) {
+    return ownership_error;
+  }
   for (auto &binding : node_bindings) {
     definitions.push_back(std::move(binding.definition));
     programs.push_back(std::move(binding.mir_program));

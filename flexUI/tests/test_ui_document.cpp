@@ -96,6 +96,74 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check(over_limit.error.code == UiDocumentErrorCode::EventBindingLimitExceeded);
   }
 
+  it("rejects a duplicate event binding at its later source location") {
+    const auto compiled = flexUI::compile_ui_document(
+        "ui Main {\n"
+        "  button save {\n"
+        "    on.click: \"save_document\",\n"
+        "    on.click: \"save_again\"\n"
+        "  }\n"
+        "}\n");
+
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::DuplicateEventBinding);
+    check_equal(compiled.error.line, 4);
+    check_equal(compiled.error.column, 5);
+    check_contains(compiled.error.message, "save");
+  }
+
+  it("preserves last-write-wins for duplicate ordinary properties") {
+    const auto parsed = flexUI::parse_ui_document(R"(
+      ui Main {
+        label status {
+          text: "Loading",
+          text: "Ready"
+        }
+      }
+    )");
+
+    check(static_cast<bool>(parsed));
+    const auto value = parsed.definition->root.properties.find("text");
+    check(value != parsed.definition->root.properties.end());
+    check_equal(std::get<std::string>(value->second), "Ready");
+  }
+
+  it("keeps duplicate binding diagnostics stable at the unique-property limit") {
+    flexUI::UiDocumentLimits limits;
+    limits.max_properties_per_node = 1;
+
+    const auto duplicate_event = flexUI::compile_ui_document(
+        "ui Main {\n"
+        "  button save {\n"
+        "    on.click: \"save_document\",\n"
+        "    on.click: \"save_again\"\n"
+        "  }\n"
+        "}\n",
+        {}, limits);
+    check_false(static_cast<bool>(duplicate_event));
+    check(duplicate_event.error.code ==
+          UiDocumentErrorCode::DuplicateEventBinding);
+    check_equal(duplicate_event.error.line, 4);
+
+    const auto duplicate_binding = flexUI::compile_ui_document(
+        "ui Main {\n"
+        "  label status {\n"
+        "    bind.text: $status_text,\n"
+        "    bind.text: $replacement_text\n"
+        "  }\n"
+        "}\n",
+        {}, limits);
+    check_false(static_cast<bool>(duplicate_binding));
+    check(duplicate_binding.error.code ==
+          UiDocumentErrorCode::DuplicateBindingTarget);
+    check_equal(duplicate_binding.error.line, 4);
+
+    const auto ordinary = flexUI::parse_ui_document(R"(
+      ui Main { label status { text: "Loading", text: "Ready" } }
+    )", {}, limits);
+    check(static_cast<bool>(ordinary));
+  }
+
   it("lowers typed string and MIR class bindings") {
     const char *source =
         "ui Main {\n"
@@ -187,8 +255,8 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     const auto compiled = flexUI::compile_ui_document(R"(
       ui Main {
         label status {
-          bind.classes: $status_classes,
-          bind.class_active: ${enabled}
+          bind.text: $status_text,
+          bind.class_active: ${missing_flag}
         }
       }
     )");
@@ -197,8 +265,7 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     flexUI::Box box(nullptr);
     auto *existing = box.create("label", "existing");
     box.bindings().inputs().set_string("seed_text", "Seed");
-    box.bindings().inputs().set_string("status_classes", "notice");
-    box.bindings().inputs().set_bool("enabled", true);
+    box.bindings().inputs().set_string("status_text", "Ready");
     const auto before =
         box.bindings().targets().bind_text(*existing, "seed_text");
     const auto count_before = box.bindings().stats().binding_count;
@@ -220,6 +287,75 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check_equal(after.id, before.id + 1);
     check_true(box.bindings().update());
     check_equal(existing->text(), "Seed");
+  }
+
+  it("rejects a duplicate binding target at its later source location") {
+    const auto compiled = flexUI::compile_ui_document(
+        "ui Main {\n"
+        "  label status {\n"
+        "    bind.text: $status_text,\n"
+        "    bind.text: $replacement_text\n"
+        "  }\n"
+        "}\n");
+
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::DuplicateBindingTarget);
+    check_equal(compiled.error.line, 4);
+    check_equal(compiled.error.column, 5);
+    check_contains(compiled.error.message, "status");
+  }
+
+  it("rejects conflicting class-list ownership during compilation") {
+    const auto compiled = flexUI::compile_ui_document(
+        "ui Main {\n"
+        "  div status {\n"
+        "    bind.classes: $status_classes,\n"
+        "    bind.class_active: ${enabled}\n"
+        "  }\n"
+        "}\n");
+
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::BindingTargetConflict);
+    check_equal(compiled.error.line, 4);
+    check_equal(compiled.error.column, 5);
+    check_contains(compiled.error.message, "status");
+    check_contains(compiled.error.message, "bind.class_active");
+
+    const auto reverse = flexUI::compile_ui_document(R"(
+      ui Main {
+        div status {
+          bind.class_active: ${enabled},
+          bind.utilities: $status_utilities
+        }
+      }
+    )");
+    check_false(static_cast<bool>(reverse));
+    check(reverse.error.code == UiDocumentErrorCode::BindingTargetConflict);
+
+    const auto two_lists = flexUI::compile_ui_document(R"(
+      ui Main {
+        div status {
+          bind.classes: $status_classes,
+          bind.utilities: $status_utilities
+        }
+      }
+    )");
+    check_false(static_cast<bool>(two_lists));
+    check(two_lists.error.code == UiDocumentErrorCode::BindingTargetConflict);
+  }
+
+  it("allows independent class-token bindings on one element") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      ui Main {
+        div status {
+          bind.class_active: ${enabled},
+          bind.class_selected: ${selected}
+        }
+      }
+    )");
+
+    check(static_cast<bool>(compiled));
+    check_equal(compiled.program->bindings().size(), 2);
   }
 
   it("rejects widget-only value bindings during document compilation") {
