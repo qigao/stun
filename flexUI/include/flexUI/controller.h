@@ -1,5 +1,6 @@
 #pragma once
 
+#include "flexUI/mutation.h"
 #include "flexUI/ui_document.h"
 
 #include <cstddef>
@@ -54,15 +55,6 @@ struct ScriptResolveResult {
   }
 };
 
-struct UiHandle {
-  std::string id;
-  std::uint64_t generation = 0;
-
-  explicit operator bool() const noexcept {
-    return !id.empty() && generation != 0;
-  }
-};
-
 /// Pointer-free, value-semantic event passed across the script boundary.
 struct ScriptEventSnapshot {
   UiEventKind event = UiEventKind::Click;
@@ -97,6 +89,7 @@ struct ScriptCallContext {
 
 struct ScriptCallResult {
   ScriptModuleError error;
+  UiMutationBatch mutations{};
 
   explicit operator bool() const noexcept {
     return !static_cast<bool>(error);
@@ -133,6 +126,7 @@ enum class ControllerErrorCode {
   ModuleCallFailed,
   ControllerFaulted,
   EventLimitExceeded,
+  MutationFailed,
   InternalInvariant,
 };
 
@@ -154,6 +148,7 @@ struct ControllerError {
   UiEventKind event = UiEventKind::Click;
   SourceSpan source;
   ScriptModuleError module_error;
+  MutationError mutation_error;
 
   explicit operator bool() const noexcept {
     return code != ControllerErrorCode::None;
@@ -175,6 +170,13 @@ public:
   ///
   /// @param limits Hard byte limits checked before script dispatch.
   explicit ScriptController(ControllerLimits limits = {});
+  /// Creates an empty controller using a non-owning mutation engine.
+  ///
+  /// @param mutation_engine Must outlive this controller and share its owner
+  ///        thread. Callback batches are normalized and committed through it.
+  /// @param limits Hard byte limits checked before script dispatch.
+  ScriptController(UiMutationEngine &mutation_engine,
+                   ControllerLimits limits = {});
   ~ScriptController();
 
   ScriptController(const ScriptController &) = delete;

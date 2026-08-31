@@ -166,7 +166,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [x] 定义 `ScriptController` 显式状态机：Empty/Compiled/Mounted/Dispatching/Faulted/Unmounting。
 - [x] 定义 bounded `ScriptEventSnapshot`，不复制 `Event::target` 裸指针。
 - [ ] 定义 `{id, generation}` `UiHandle` 和 generation 失效规则。
-- [ ] 定义 `UiMutation` `std::variant` 与 `UiMutationBatch` limits。
+- [x] 定义 `UiMutation` `std::variant` 与 `UiMutationBatch` limits。
 - [ ] 定义 `ApplicationCommand` 与 UI mutation 分离的 effect result。
 - [x] candidate mount 前解析 compiled handler table；失败返回 element、event、handler 和 source span。
 
@@ -182,9 +182,9 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 ### Mutation engine
 
 - [ ] 将 normalize、resolve、prepare、commit、rollback 拆成明确阶段。
-- [ ] 为每种 mutation 写明 target owner、前置条件、错误码和 rollback 数据。
+- [x] 为每种 mutation 写明 target owner、前置条件、错误码和 rollback 数据。
 - [ ] commit 前预留内存并准备新旧值 swap，rollback 必须 `noexcept`。
-- [ ] 当前 Element API 无法提供强保证的 mutation 暂不公开。
+- [x] 当前 Element API 无法提供强保证的 mutation 暂不通过真实 Box host 暴露给脚本。
 - [ ] stale handle、重复 target owner、错误类型、超额 batch 立即失败。
 - [ ] application command queue 先 reserve，再在 UI commit 成功后 publish。
 - [ ] 不可回滚外部副作用不能在 controller callback 栈内执行。

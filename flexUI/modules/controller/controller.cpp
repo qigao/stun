@@ -60,11 +60,14 @@ ScriptCallResult safe_call(IScriptModule &module, ScriptExportHandle handle,
 } // namespace
 
 struct ScriptController::Impl {
-  explicit Impl(ControllerLimits configured_limits)
-      : limits(configured_limits), owner_thread(std::this_thread::get_id()) {}
+  explicit Impl(ControllerLimits configured_limits,
+                UiMutationEngine *configured_mutation_engine = nullptr)
+      : limits(configured_limits), owner_thread(std::this_thread::get_id()),
+        mutation_engine(configured_mutation_engine) {}
 
   ControllerLimits limits;
   std::thread::id owner_thread;
+  UiMutationEngine *mutation_engine = nullptr;
   ControllerState state = ControllerState::Empty;
   std::unique_ptr<IScriptModule> module;
   std::shared_ptr<const CompiledUiProgram> program;
@@ -75,6 +78,31 @@ struct ScriptController::Impl {
 
   bool is_owner_thread() const noexcept {
     return owner_thread == std::this_thread::get_id();
+  }
+
+  ControllerResult apply_mutations(ScriptCallResult &called,
+                                   ControllerStage stage,
+                                   std::string_view handler) {
+    if (called.mutations.empty()) {
+      return {};
+    }
+    if (mutation_engine == nullptr) {
+      ControllerResult result =
+          fail(ControllerErrorCode::MutationFailed, stage,
+               "script emitted UI mutations without a mutation engine");
+      result.error.handler.assign(handler);
+      return result;
+    }
+    auto applied = mutation_engine->apply(called.mutations);
+    if (!applied) {
+      ControllerResult result =
+          fail(ControllerErrorCode::MutationFailed, stage,
+               applied.error.message);
+      result.error.handler.assign(handler);
+      result.error.mutation_error = std::move(applied.error);
+      return result;
+    }
+    return {};
   }
 
   void clear() noexcept {
@@ -90,6 +118,10 @@ struct ScriptController::Impl {
 
 ScriptController::ScriptController(ControllerLimits limits)
     : impl_(std::make_unique<Impl>(limits)) {}
+
+ScriptController::ScriptController(UiMutationEngine &mutation_engine,
+                                   ControllerLimits limits)
+    : impl_(std::make_unique<Impl>(limits, &mutation_engine)) {}
 
 ScriptController::~ScriptController() {
   if (impl_ != nullptr && impl_->is_owner_thread()) {
@@ -236,6 +268,13 @@ ControllerResult ScriptController::mount() {
       return fail_module(ControllerStage::Mount, std::string(kMountExport),
                          std::move(called.error));
     }
+    if (auto applied =
+            impl_->apply_mutations(called, ControllerStage::Mount,
+                                   kMountExport);
+        !applied) {
+      impl_->state = ControllerState::Faulted;
+      return applied;
+    }
   }
   impl_->state = ControllerState::Mounted;
   return {};
@@ -293,6 +332,15 @@ ScriptController::dispatch(const ScriptEventSnapshot &event) {
     result.error.source = binding->source;
     return result;
   }
+  if (auto applied = impl_->apply_mutations(
+          called, ControllerStage::Event, binding->handler);
+      !applied) {
+    impl_->state = ControllerState::Faulted;
+    applied.error.element_id = binding->element_id;
+    applied.error.event = binding->event;
+    applied.error.source = binding->source;
+    return applied;
+  }
   impl_->state = ControllerState::Mounted;
   return {};
 }
@@ -330,6 +378,13 @@ ControllerResult ScriptController::frame(double delta_seconds) {
     return fail_module(ControllerStage::Frame, std::string(kFrameExport),
                        std::move(called.error));
   }
+  if (auto applied =
+          impl_->apply_mutations(called, ControllerStage::Frame,
+                                 kFrameExport);
+      !applied) {
+    impl_->state = ControllerState::Faulted;
+    return applied;
+  }
   impl_->state = ControllerState::Mounted;
   return {};
 }
@@ -362,6 +417,11 @@ ControllerResult ScriptController::unmount() {
       result = fail_module(ControllerStage::Unmount,
                            std::string(kUnmountExport),
                            std::move(called.error));
+    } else if (!called.mutations.empty()) {
+      result = fail(ControllerErrorCode::MutationFailed,
+                    ControllerStage::Unmount,
+                    "on_unmount must not emit UI mutations");
+      result.error.handler = std::string(kUnmountExport);
     }
   }
   impl_->clear();

@@ -110,6 +110,12 @@ flexui_configure_tinytest(test_script_controller)
 set_target_properties(test_script_controller PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_script_controller COMMAND test_script_controller)
 
+add_executable(test_ui_mutation test_ui_mutation.cpp)
+target_link_libraries(test_ui_mutation PRIVATE FlexUI::Controller)
+flexui_configure_tinytest(test_ui_mutation)
+set_target_properties(test_ui_mutation PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_ui_mutation COMMAND test_ui_mutation)
+
 add_executable(test_keyed_repeater test_keyed_repeater.cpp)
 target_link_libraries(test_keyed_repeater PRIVATE flexUI)
 flexui_configure_tinytest(test_keyed_repeater)

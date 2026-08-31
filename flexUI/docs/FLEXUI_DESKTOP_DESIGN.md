@@ -626,13 +626,28 @@ Widget 已消费的事件默认不进入脚本；只有事件 binding 明确允�
 
 ### 13.1 UiMutationBatch
 
-首批 mutation 使用有限 `std::variant`：
+Controller core 当前使用有限 `std::variant`：
 
 - `SetBindingInputNumber/Bool/String`
-- `SetText` / `SetValue`
+- `SetText`
 - `SetAttribute` / `RemoveAttribute`
 - `SetClasses` / `SetUtilities`
-- `StartAnimation` / `StopAnimation` / `SendTrigger`
+
+`SetValue`、`StartAnimation`、`StopAnimation` 和 `SendTrigger` 要等对应 Box/animation adapter 能提供
+相同事务保证后再加入 variant；当前声明不等于真实 Box host 已开放这些脚本操作。
+
+默认 batch 上限为 256 个 mutation、单字符串 16 KiB、所有字符串合计 64 KiB。element ID、属性名、
+input 名和值都计入预算。adapter 创建 batch 时可以使用更严格的上限，但不能放宽 host：
+`UiMutationEngine` 会用自己的 limits 重新验证。append 或 apply 超限时立即返回明确错误，batch 和 host
+均保持不变。
+
+| Mutation | 事实源/target owner | prepare 前置条件 | 错误 | 真实 host rollback staging |
+|---|---|---|---|---|
+| `SetText` | Box-owned Element | handle 当前有效、text 有界 | `InvalidTarget` / string limit / host error | 旧 text 与已预留新 string |
+| `SetAttribute` / `RemoveAttribute` | Box-owned Element | handle 有效、name 非空且类型允许 | `InvalidTarget` / `InvalidName` / host error | 旧 attribute presence/value 与新 map staging |
+| `SetClasses` / `SetUtilities` | Box-owned Element | handle 有效、tokens 可由 style/utility 层完整验证 | target/string/host error | 旧 token set、selector/utility dirty staging |
+| `SetBindingInputNumber` | Box-owned `UiDataContext` | name 非空、number finite、kind 不冲突 | `InvalidName` / `InvalidNumber` / host error | 旧 typed value、version 与 invalidation staging |
+| `SetBindingInputBool/String` | Box-owned `UiDataContext` | name 非空、kind 不冲突、string 有界 | `InvalidName` / string/host error | 旧 typed value、version 与 invalidation staging |
 
 处理阶段：
 
@@ -643,6 +658,10 @@ Widget 已消费的事件默认不进入脚本；只有事件 binding 明确允�
 5. rollback：若 commit 边界仍出现错误，按反向 journal 恢复；rollback 本身必须 `noexcept`。
 
 在现有 Element setter 尚不能提供强异常保证前，对应 mutation 不得进入公开脚本 API。
+当前 `IUiMutationHost` 只定义真实 host 必须满足的事务边界，并由 fake host 验证：`prepare()` 不可改变
+可观察状态，返回的 `IPreparedUiMutation` 独占所有 staging 且不得保留 batch view；未 commit 的 staging
+随 RAII 析构丢弃，`commit()` 必须 `noexcept`、不分配且只调用一次。真实 Box host、generation
+失效通知与 stale-handle 验证尚未实现，因此 TurboScript adapter 不得提前暴露这些 mutation。
 
 ### 13.2 ApplicationCommand
 

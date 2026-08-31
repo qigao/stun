@@ -64,13 +64,24 @@ public:
     if (found->second == throwing_export) {
       throw std::runtime_error("injected script exception");
     }
-    return {};
+    flexUI::ScriptCallResult result;
+    if (found->second == mutation_export) {
+      const auto appended = result.mutations.append(
+          flexUI::SetTextMutation{{"save", 1}, mutation_text});
+      if (!appended) {
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded,
+                 appended.error.message}};
+      }
+    }
+    return result;
   }
 
   std::vector<std::string> calls;
   std::string failing_export;
   std::string throwing_export;
   std::string zero_handle_export;
+  std::string mutation_export;
+  std::string mutation_text;
 
 private:
   std::unordered_map<std::string, flexUI::ScriptExportHandle> handles_;
@@ -105,6 +116,49 @@ void check_calls(const std::vector<std::string> &actual,
     ++index;
   }
 }
+
+} // namespace
+
+namespace {
+
+class ControllerPreparedMutation final : public flexUI::IPreparedUiMutation {
+public:
+  ControllerPreparedMutation(int &commits, std::string &text,
+                             std::string next_text)
+      : commits_(commits), text_(text), next_text_(std::move(next_text)) {}
+
+  void commit() noexcept override {
+    text_.swap(next_text_);
+    ++commits_;
+  }
+
+private:
+  int &commits_;
+  std::string &text_;
+  std::string next_text_;
+};
+
+class ControllerMutationHost final : public flexUI::IUiMutationHost {
+public:
+  flexUI::MutationPrepareResult
+  prepare(const flexUI::UiMutationBatch &batch) override {
+    ++prepare_calls;
+    if (fail_prepare) {
+      return {{}, {flexUI::MutationErrorCode::HostPrepareFailed, 0,
+                   "injected controller prepare failure"}};
+    }
+    const auto &mutation =
+        std::get<flexUI::SetTextMutation>(batch.mutations().front());
+    return {std::make_unique<ControllerPreparedMutation>(
+                commits, text, mutation.text),
+            {}};
+  }
+
+  int prepare_calls = 0;
+  int commits = 0;
+  std::string text = "unchanged";
+  bool fail_prepare = false;
+};
 
 } // namespace
 
@@ -252,6 +306,85 @@ spec("FlexUI script controller lifecycle") {
     check(dispatched.error.module_error.code ==
           flexUI::ScriptModuleErrorCode::RuntimeFailure);
     check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("commits a callback mutation batch after module success") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "committed";
+    ControllerMutationHost host;
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check(controller.dispatch(click_event()));
+    check_equal(host.prepare_calls, 1);
+    check_equal(host.commits, 1);
+    check_equal(host.text, "committed");
+    check(controller.state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("faults without committing when callback mutation preparation fails") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "must not commit";
+    ControllerMutationHost host;
+    host.fail_prepare = true;
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(click_event());
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::MutationFailed);
+    check(dispatched.error.mutation_error.code ==
+          flexUI::MutationErrorCode::HostPrepareFailed);
+    check_equal(host.commits, 0);
+    check_equal(host.text, "unchanged");
+    check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("faults when a callback emits mutations without an installed engine") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "unroutable";
+    flexUI::ScriptController controller;
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(click_event());
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::MutationFailed);
+    check_equal(dispatched.error.message,
+                "script emitted UI mutations without a mutation engine");
+    check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("rejects unmount mutations while still releasing the module") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "on_unmount"});
+    module->mutation_export = "on_unmount";
+    module->mutation_text = "too late";
+    ControllerMutationHost host;
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto unmounted = controller.unmount();
+    check_false(static_cast<bool>(unmounted));
+    check(unmounted.error.code ==
+          flexUI::ControllerErrorCode::MutationFailed);
+    check_equal(host.prepare_calls, 0);
+    check_equal(host.commits, 0);
+    check(controller.state() == flexUI::ControllerState::Empty);
   }
 
   it("unmounts before destroying its owned module") {
