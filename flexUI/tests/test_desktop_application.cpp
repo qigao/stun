@@ -5,6 +5,7 @@
 
 #include <tinytest.hpp>
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -22,14 +23,19 @@ struct ModuleProbe {
   std::vector<std::string> calls;
   std::vector<std::string> destroyed;
   std::vector<flexUI::ScriptEventSnapshot> events;
+  std::vector<double> frame_deltas;
   std::vector<std::string> sequence;
+  flexUI::DesktopApplication *application = nullptr;
+  flexUI::DesktopApplicationResult reentrant_shutdown;
+  bool shutdown_during_event = false;
 };
 
 class FakeApplicationModule final : public flexUI::IScriptModule {
 public:
   FakeApplicationModule(std::vector<std::string> exports, std::shared_ptr<ModuleProbe> probe,
-                        bool fail_mount, bool fail_event)
-      : probe_(std::move(probe)), fail_mount_(fail_mount), fail_event_(fail_event) {
+                        bool fail_mount, bool fail_event, bool fail_frame, bool fail_unmount)
+      : probe_(std::move(probe)), fail_mount_(fail_mount), fail_event_(fail_event),
+        fail_frame_(fail_frame), fail_unmount_(fail_unmount) {
     std::uint64_t next_handle = 1;
     for (auto &name : exports) {
       const flexUI::ScriptExportHandle handle{next_handle++};
@@ -64,6 +70,20 @@ public:
     if (fail_event_ && context.callback == flexUI::ScriptCallbackKind::Event) {
       return {{flexUI::ScriptModuleErrorCode::RuntimeFailure, "injected event failure"}};
     }
+    if (context.callback == flexUI::ScriptCallbackKind::Frame) {
+      probe_->frame_deltas.push_back(context.delta_seconds);
+    }
+    if (fail_frame_ && context.callback == flexUI::ScriptCallbackKind::Frame) {
+      return {{flexUI::ScriptModuleErrorCode::RuntimeFailure, "injected frame failure"}};
+    }
+    if (fail_unmount_ && context.callback == flexUI::ScriptCallbackKind::Unmount) {
+      return {{flexUI::ScriptModuleErrorCode::RuntimeFailure, "injected unmount failure"}};
+    }
+    if (probe_->shutdown_during_event && context.callback == flexUI::ScriptCallbackKind::Event &&
+        probe_->application != nullptr) {
+      static_cast<void>(probe_->application->request_close());
+      probe_->reentrant_shutdown = probe_->application->shutdown();
+    }
     return {};
   }
 
@@ -71,6 +91,8 @@ private:
   std::shared_ptr<ModuleProbe> probe_;
   bool fail_mount_ = false;
   bool fail_event_ = false;
+  bool fail_frame_ = false;
+  bool fail_unmount_ = false;
   std::unordered_map<std::string, flexUI::ScriptExportHandle> handles_;
   std::unordered_map<std::uint64_t, std::string> names_;
 };
@@ -80,14 +102,15 @@ flexUI::ScriptModuleFactory fake_factory(const std::shared_ptr<ModuleProbe> &pro
     probe->created_sources.emplace_back(source);
     probe->created_names.emplace_back(module_name);
 
-    std::vector<std::string> exports{"on_mount", "on_unmount", "parent_handler",
+    std::vector<std::string> exports{"on_mount", "on_frame", "on_unmount", "parent_handler",
                                      "consumed_handler"};
     if (source != "missing-handler") {
       exports.emplace_back("save_document");
     }
     return flexUI::ScriptModuleFactoryResult{
         std::make_unique<FakeApplicationModule>(
-            std::move(exports), probe, source == "mount-failure", source == "event-failure"),
+            std::move(exports), probe, source == "mount-failure", source == "event-failure",
+            source == "frame-failure", source == "unmount-failure"),
         {}};
   };
 }
@@ -519,5 +542,190 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_true(built.application->uses_legacy_flex_compatibility());
     check_not_null(
         dynamic_cast<flexUI::ButtonWidget *>(built.application->box().get_by_id("old")->widget));
+  }
+}
+
+spec("FlexUI desktop application owns close and shutdown state") {
+  it("dispatches validated owner-thread frames and reports controller failures") {
+    auto probe = std::make_shared<ModuleProbe>();
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry()).script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    const auto frame = built.application->frame(0.016);
+    check(static_cast<bool>(frame));
+    check_equal(probe->frame_deltas.size(), std::size_t{1});
+    if (!probe->frame_deltas.empty()) {
+      check_within(probe->frame_deltas.front(), 0.016, 0.000001);
+    }
+
+    const auto invalid = built.application->frame(
+        std::numeric_limits<double>::quiet_NaN());
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == flexUI::DesktopApplicationErrorCode::InvalidArgument);
+    check(invalid.error.stage == flexUI::DesktopApplicationStage::ControllerFrame);
+
+    check(built.application->request_close());
+    const auto closed = built.application->frame(0.016);
+    check_false(static_cast<bool>(closed));
+    check(closed.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+  }
+
+  it("nests on_frame module errors and faults the controller") {
+    auto probe = std::make_shared<ModuleProbe>();
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry()).script("frame-failure", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    const auto frame = built.application->frame(0.016);
+    check_false(static_cast<bool>(frame));
+    check(frame.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerFrameFailed);
+    check(frame.error.controller_error.stage == flexUI::ControllerStage::Frame);
+    check(built.application->controller()->state() ==
+          flexUI::ControllerState::Faulted);
+  }
+
+  it("rejects frames from a non-owner thread") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    flexUI::DesktopApplicationResult frame_result;
+    std::thread worker([&] { frame_result = built.application->frame(0.016); });
+    worker.join();
+
+    check_false(static_cast<bool>(frame_result));
+    check(frame_result.error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check(frame_result.error.stage == flexUI::DesktopApplicationStage::ControllerFrame);
+  }
+
+  it("stops new work after close and unmounts exactly once during shutdown") {
+    auto probe = std::make_shared<ModuleProbe>();
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry()).script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    check(built.application->state() == flexUI::DesktopApplicationState::Ready);
+    const auto premature_shutdown = built.application->shutdown();
+    check_false(static_cast<bool>(premature_shutdown));
+    check(premature_shutdown.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check(premature_shutdown.error.stage == flexUI::DesktopApplicationStage::Lifecycle);
+    check(built.application->state() == flexUI::DesktopApplicationState::Ready);
+    check(built.application->request_close());
+    check(built.application->request_close());
+    check(built.application->state() == flexUI::DesktopApplicationState::CloseRequested);
+
+    auto event = flexUI::Event::mouse_move(1.0F, 2.0F);
+    const auto dispatch = built.application->dispatch_event(event);
+    const auto reload =
+        built.application->reload({"<ui name=\"Closed\"><div id=\"closed\"/></ui>", "", "", ""});
+    check_false(static_cast<bool>(dispatch));
+    check(dispatch.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_false(static_cast<bool>(reload));
+    check(reload.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+
+    check(built.application->shutdown());
+    check(built.application->state() == flexUI::DesktopApplicationState::Shutdown);
+    check_not_null(built.application->box().get_by_id("save"));
+    check(built.application->controller()->state() == flexUI::ControllerState::Empty);
+    check(built.application->shutdown());
+    check_equal(probe->calls.size(), std::size_t{2});
+    if (probe->calls.size() == 2) {
+      check_equal(probe->calls[0], "on_mount");
+      check_equal(probe->calls[1], "on_unmount");
+    }
+  }
+
+  it("retains shutdown state while reporting an on_unmount failure") {
+    auto probe = std::make_shared<ModuleProbe>();
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry()).script("unmount-failure", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    check(built.application->request_close());
+    const auto shutdown = built.application->shutdown();
+
+    check_false(static_cast<bool>(shutdown));
+    check(shutdown.error.code == flexUI::DesktopApplicationErrorCode::ControllerUnmountFailed);
+    check(shutdown.error.controller_error.stage == flexUI::ControllerStage::Unmount);
+    check(built.application->state() == flexUI::DesktopApplicationState::Shutdown);
+    check(built.application->controller()->state() == flexUI::ControllerState::Empty);
+    check_not_null(built.application->box().get_by_id("save"));
+  }
+
+  it("rejects reentrant shutdown without losing the later cleanup opportunity") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->shutdown_during_event = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("shutdown-during-event", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+    probe->application = built.application.get();
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+
+    check(dispatch_click(*built.application));
+    check_false(static_cast<bool>(probe->reentrant_shutdown));
+    check(probe->reentrant_shutdown.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidState);
+    check(built.application->state() == flexUI::DesktopApplicationState::CloseRequested);
+    check(built.application->controller()->state() == flexUI::ControllerState::Mounted);
+
+    probe->shutdown_during_event = false;
+    check(built.application->request_close());
+    check(built.application->shutdown());
+    check(built.application->state() == flexUI::DesktopApplicationState::Shutdown);
+  }
+
+  it("rejects lifecycle transitions from a non-owner thread") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    flexUI::DesktopApplicationResult close_result;
+    flexUI::DesktopApplicationResult shutdown_result;
+    std::thread worker([&] {
+      close_result = built.application->request_close();
+      shutdown_result = built.application->shutdown();
+    });
+    worker.join();
+
+    check_false(static_cast<bool>(close_result));
+    check(close_result.error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check(close_result.error.stage == flexUI::DesktopApplicationStage::Lifecycle);
+    check_false(static_cast<bool>(shutdown_result));
+    check(shutdown_result.error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check(shutdown_result.error.stage == flexUI::DesktopApplicationStage::Lifecycle);
+    check(built.application->state() == flexUI::DesktopApplicationState::Ready);
   }
 }

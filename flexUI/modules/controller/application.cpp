@@ -3,6 +3,7 @@
 #include "flexUI/box_mutation_host.h"
 #include "flexUI/ui_xml.h"
 
+#include <cmath>
 #include <exception>
 #include <optional>
 #include <thread>
@@ -323,6 +324,7 @@ struct DesktopApplication::Impl {
   ApplicationConfig config;
   std::unique_ptr<PublishedApplicationState> active;
   std::thread::id owner_thread;
+  DesktopApplicationState state = DesktopApplicationState::Ready;
 };
 
 struct DesktopApplicationBuilder::Impl {
@@ -363,14 +365,68 @@ bool DesktopApplication::uses_legacy_flex_compatibility() const noexcept {
   return impl_->config.entry_format == UiEntryFormat::LegacyFlexCompatibility;
 }
 
+DesktopApplicationState DesktopApplication::state() const noexcept { return impl_->state; }
+
 bool DesktopApplication::is_owner_thread() const noexcept {
   return std::this_thread::get_id() == impl_->owner_thread;
+}
+
+DesktopApplicationResult DesktopApplication::request_close() {
+  if (!is_owner_thread()) {
+    return {fail(DesktopApplicationErrorCode::WrongThread, DesktopApplicationStage::Lifecycle,
+                 "desktop application close request must run on its owner thread")};
+  }
+  if (impl_->state == DesktopApplicationState::Ready) {
+    impl_->state = DesktopApplicationState::CloseRequested;
+  }
+  return {};
+}
+
+DesktopApplicationResult DesktopApplication::shutdown() {
+  if (!is_owner_thread()) {
+    return {fail(DesktopApplicationErrorCode::WrongThread, DesktopApplicationStage::Lifecycle,
+                 "desktop application shutdown must run on its owner thread")};
+  }
+  if (impl_->state == DesktopApplicationState::Shutdown) {
+    return {};
+  }
+  if (impl_->state != DesktopApplicationState::CloseRequested) {
+    return {fail(DesktopApplicationErrorCode::InvalidState, DesktopApplicationStage::Lifecycle,
+                 "desktop application shutdown requires a close request")};
+  }
+
+  ScriptController *controller = impl_->active->controller.get();
+  if (controller == nullptr) {
+    impl_->state = DesktopApplicationState::Shutdown;
+    return {};
+  }
+
+  auto unmounted = controller->unmount();
+  if (unmounted) {
+    impl_->state = DesktopApplicationState::Shutdown;
+    return {};
+  }
+
+  const bool cleanup_completed = controller->state() == ControllerState::Empty;
+  if (cleanup_completed) {
+    impl_->state = DesktopApplicationState::Shutdown;
+  }
+  auto error = fail(cleanup_completed ? DesktopApplicationErrorCode::ControllerUnmountFailed
+                                      : DesktopApplicationErrorCode::InvalidState,
+                    DesktopApplicationStage::ControllerUnmount, unmounted.error.message);
+  error.controller_error = std::move(unmounted.error);
+  return {std::move(error)};
 }
 
 DesktopApplicationResult DesktopApplication::dispatch_event(Event &event) {
   if (!is_owner_thread()) {
     return {fail(DesktopApplicationErrorCode::WrongThread, DesktopApplicationStage::ControllerEvent,
                  "desktop application event dispatch must run on its owner thread")};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {fail(DesktopApplicationErrorCode::InvalidState,
+                 DesktopApplicationStage::ControllerEvent,
+                 "desktop application event dispatch requires the ready state")};
   }
 
   try {
@@ -397,10 +453,45 @@ DesktopApplicationResult DesktopApplication::dispatch_event(Event &event) {
   }
 }
 
+DesktopApplicationResult DesktopApplication::frame(double delta_seconds) {
+  if (!is_owner_thread()) {
+    return {fail(DesktopApplicationErrorCode::WrongThread,
+                 DesktopApplicationStage::ControllerFrame,
+                 "desktop application frame must run on its owner thread")};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {fail(DesktopApplicationErrorCode::InvalidState,
+                 DesktopApplicationStage::ControllerFrame,
+                 "desktop application frame requires the ready state")};
+  }
+  if (!std::isfinite(delta_seconds) || delta_seconds < 0.0) {
+    return {fail(DesktopApplicationErrorCode::InvalidArgument,
+                 DesktopApplicationStage::ControllerFrame,
+                 "desktop application frame delta must be finite and non-negative")};
+  }
+  if (impl_->active->controller == nullptr) {
+    return {};
+  }
+
+  auto framed = impl_->active->controller->frame(delta_seconds);
+  if (framed) {
+    return {};
+  }
+  auto error = fail(DesktopApplicationErrorCode::ControllerFrameFailed,
+                    DesktopApplicationStage::ControllerFrame,
+                    framed.error.message);
+  error.controller_error = std::move(framed.error);
+  return {std::move(error)};
+}
+
 DesktopApplicationResult DesktopApplication::reload(DesktopApplicationSources sources) {
   if (!is_owner_thread()) {
     return {fail(DesktopApplicationErrorCode::WrongThread, DesktopApplicationStage::Configuration,
                  "desktop application reload must run on its owner thread")};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {fail(DesktopApplicationErrorCode::InvalidState, DesktopApplicationStage::Configuration,
+                 "desktop application reload requires the ready state")};
   }
 
   auto candidate = build_candidate(impl_->config, std::move(sources));
@@ -447,6 +538,14 @@ DesktopApplicationBuilder &DesktopApplicationBuilder::script(std::string source,
   impl_->config.script_factory = std::move(factory);
   impl_->sources.script = std::move(source);
   impl_->sources.script_module_name = std::move(module_name);
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::renderer(flex::Renderer *renderer) noexcept {
+  if (impl_) {
+    impl_->config.renderer = renderer;
+  }
   return *this;
 }
 

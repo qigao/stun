@@ -63,6 +63,9 @@ public:
   /// @return Viewport update status, or a thread/normalization error.
   GCanvasApplicationInputResult resize(const gcanvas::resize_event &native);
 
+  /// Leaves focus gain inert and clears FlexUI focus/capture on focus loss.
+  GCanvasApplicationInputResult focus(const gcanvas::focus_event &native);
+
 private:
   GCanvasApplicationInputResult dispatch(GCanvasInputResult normalized);
   bool is_owner_thread() const noexcept;

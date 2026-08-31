@@ -161,3 +161,54 @@ spec("gCanvas application router applies validated logical viewport metrics") {
     check_true(built.application->box().is_dirty());
   }
 }
+
+spec("gCanvas application router clears interaction state on focus loss") {
+  it("keeps focus gain inert and clears focus and capture on loss") {
+    auto built = build_input_application();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+    auto *editor = built.application->box().get_by_id("editor");
+    check_not_null(editor);
+    if (editor == nullptr) {
+      return;
+    }
+    built.application->box().set_focus(editor);
+    built.application->box().set_mouse_capture(editor);
+    flexUI::GCanvasApplicationInputRouter router(*built.application);
+
+    const auto gained = router.focus({true});
+    check(static_cast<bool>(gained));
+    check_false(gained.processed);
+    check_equal(built.application->box().focused_element(), editor);
+    check_equal(built.application->box().capturing_element(), editor);
+
+    const auto lost = router.focus({false});
+    check(static_cast<bool>(lost));
+    check_true(lost.processed);
+    check_null(built.application->box().focused_element());
+    check_null(built.application->box().capturing_element());
+  }
+
+  it("rejects focus loss from a foreign thread without changing interaction state") {
+    auto built = build_input_application();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+    auto *editor = built.application->box().get_by_id("editor");
+    built.application->box().set_focus(editor);
+    built.application->box().set_mouse_capture(editor);
+    flexUI::GCanvasApplicationInputRouter router(*built.application);
+    flexUI::GCanvasApplicationInputResult result;
+
+    std::thread worker([&] { result = router.focus({false}); });
+    worker.join();
+
+    check_false(static_cast<bool>(result));
+    check(result.error.application_error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check_equal(built.application->box().focused_element(), editor);
+    check_equal(built.application->box().capturing_element(), editor);
+  }
+}

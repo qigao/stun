@@ -266,7 +266,8 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [x] 定义 gCanvas mouse、wheel、key、text 与 resize 到 FlexUI `Event`/viewport metrics 的
   strict normalization 契约；非法值不修改缓存的指针位置。
 - [ ] 定义 logical size、framebuffer size、DPI scale 和坐标转换唯一规则。
-- [ ] 定义 redraw-on-demand、animation timer 和 window close 调度。
+- [x] 定义 redraw-on-demand、continuous timed wait 和 window close 调度；event-driven 模式 idle 时
+  阻塞，Box/RenderManager 仍以 dirty state 决定是否提交绘制。
 - [x] 定义 text input 与 IME composition 的 application owner-thread gate；无合格焦点明确返回
   success/not-dispatched，实际派发保留完整 `DesktopApplicationError`。
 - [x] 实现 `GCanvasApplicationInputRouter`：owner-thread gate → strict normalization →
@@ -275,17 +276,21 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 ### Windows 首实现
 
-- [ ] 实现 `GCanvasWindowHost`，组合可选 `gCanvas::Window`，不让 Core 链接 GLFW。
+- [x] 实现 `GCanvasWindowHost`，组合可选 `gCanvas::Window`，不让 Core 链接 GLFW。
 - [ ] 创建 OpenGL context 并验证 backend capabilities，不自动切 Vulkan。
 - [x] 实现与真实窗口解耦的 mouse、wheel、key、text、resize 值转换。
 - [x] 以 headless application 测试验证 gCanvas 输入路由、focused text gate、key repeat、resize
   invalidation，以及跨线程拒绝不会污染 normalizer 指针缓存。
-- [ ] 接入 focus、close event 与真实 `gCanvas::Window` listener 生命周期。
-- [ ] 为 `gCanvas::Window` 增加 listener-scoped removal，避免 host 销毁后遗留 callback；不得使用
+- [x] 在 `GCanvasWindowHost` 接入已具备的 focus、close event 与 scoped listener 生命周期。
+- [x] 为 `gCanvas::Window` 增加 listener-scoped removal，避免 host 销毁后遗留 callback；不得使用
   清除其他 owner 监听器的全局 reset 作为生命周期协议。
-- [ ] 将 FlexUI pointer capture 与 native capture 同步，并覆盖窗口失焦时的 capture/focus 清理。
+- [x] 为 `gCanvas::Window` 增加 Windows native pointer capture 原语；不支持的平台明确拒绝，不以
+  cursor confinement 代替 GUI capture。
+- [x] `GCanvasApplicationInputRouter` 在 owner thread 处理 focus loss，清除 Box focus/internal capture；
+  gCanvas 在发布失焦前先释放 Windows native capture。
+- [x] `GCanvasWindowHost` 在 pointer event 与 frame 后将 FlexUI internal capture 与 native capture 同步。
 - [ ] 补齐 Windows IME、clipboard、DPI、多显示器和 native dialog service。
-- [ ] 主循环静态窗口使用 wait-events；动画/主动刷新使用 bounded poll/update。
+- [x] 主循环静态窗口使用 wait-events；动画/主动刷新使用 bounded timed-wait/update，避免 busy poll。
 - [ ] 正确处理 minimize、zero framebuffer、device/context error 和 shutdown。
 
 ### DesktopApplication Facade
@@ -296,19 +301,26 @@ UI 状态，默认 Box 路径仍未被隐式接管。
   与 Host 留待对应阶段。
 - [x] required export、`on_mount` 成功后才发布 ready application。
 - [x] build 任一失败按 RAII 销毁候选资源，调用方获得保留 nested error 的 structured error。
-- [x] 定义 application reload 的 owner-thread 与 atomic candidate swap；run、request_close 和
-  shutdown 状态机随 DesktopHost 实现。
+- [x] 定义 application reload 的 owner-thread 与 atomic candidate swap。
+- [x] 实现 `Ready -> CloseRequested -> Shutdown` 状态机；close 后拒绝 event/reload，shutdown 明确
+  unmount 且保留 published state，callback 内拒绝 unmount 时可在返回后重试。
+- [x] 由 DesktopHost 实现 run/main-loop 并驱动 request_close/shutdown；native callback 只请求 close，
+  controller unmount 在 callback 返回后的 host 边界执行。
 - [x] 不使用 global singleton/service locator；renderer、registry 和 script factory 显式注入。
 
 ### 测试
 
 - [x] 无 GPU headless 测 application build/reload transaction、strict CSS、typed widget、mount failure
   与跨线程 reload 拒绝。
-- [ ] hidden real window 测 OpenGL create/render/readback/resize/present。
+- [x] hidden real window 测 OpenGL/Vulkan create/render/readback/resize/present，并在 Windows 验证
+  native capture acquire/release。
+- [x] hidden `GCanvasWindowHost` 测 OpenGL/Vulkan application 首帧、pointer capture 同步、owner-thread
+  gate 和 `Ready -> CloseRequested -> Shutdown`。
 - [ ] DPI/resize 坐标与 hit-test 一致。
 - [x] keyboard、text、IME 与内部 pointer capture 回归。
 - [ ] native focus/capture 与 clipboard 回归。
-- [ ] close during controller callback/service completion 安全。
+- [x] close/shutdown during controller callback 保持可重试状态且不会重复 unmount。
+- [ ] close during service completion 安全。
 - [ ] required GPU capability 缺失时无半初始化 window/context。
 
 完成条件：Windows 示例可以从 app package 启动、按需绘制、输入文本、调用 native service 并安全

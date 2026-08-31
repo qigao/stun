@@ -174,6 +174,9 @@ if(GCANVAS_BUILD_WINDOW)
   target_link_libraries(gcanvas_window
     PUBLIC gCanvas::Core
     PRIVATE glfw)
+  if(WIN32)
+    target_link_libraries(gcanvas_window PRIVATE user32)
+  endif()
   if(GCANVAS_BUILD_OPENGL)
     target_link_libraries(gcanvas_window PUBLIC gCanvas::OpenGL)
     target_compile_definitions(gcanvas_window PRIVATE GCANVAS_HAS_OPENGL=1)
@@ -222,6 +225,12 @@ if(GCANVAS_BUILD_TESTS)
   endif()
 
   if(GCANVAS_BUILD_WINDOW)
+    add_executable(gcanvas_window_listener_test tests/window_listener_test.cpp)
+    target_include_directories(
+      gcanvas_window_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(gcanvas_window_listener_test PRIVATE gCanvas::Window)
+    add_test(NAME gcanvas_window_listener COMMAND gcanvas_window_listener_test)
+
     add_executable(gcanvas_backend_link_test tests/backend_link_test.cpp)
     target_link_libraries(gcanvas_backend_link_test PRIVATE gCanvas::Window)
     if(GCANVAS_BUILD_OPENGL)

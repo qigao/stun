@@ -52,6 +52,9 @@ enum class DesktopApplicationStage {
   ControllerMount,
   ControllerEvent,
   CandidateBuild,
+  Lifecycle,
+  ControllerUnmount,
+  ControllerFrame,
 };
 
 enum class DesktopApplicationErrorCode {
@@ -68,6 +71,10 @@ enum class DesktopApplicationErrorCode {
   ControllerDispatchFailed,
   EventDispatchFailed,
   CandidateBuildFailed,
+  InvalidState,
+  ControllerUnmountFailed,
+  InvalidArgument,
+  ControllerFrameFailed,
 };
 
 struct DesktopApplicationError {
@@ -97,6 +104,13 @@ struct DesktopApplicationBuildResult {
   }
 };
 
+/// Monotonic owner-thread lifecycle of one published desktop application.
+enum class DesktopApplicationState {
+  Ready,
+  CloseRequested,
+  Shutdown,
+};
+
 /// Published owner-thread application state for one UI/CSS/script bundle.
 ///
 /// The application owns Box, compiled program, mutation adapter and optional
@@ -120,15 +134,30 @@ public:
   const ScriptController *controller() const noexcept;
   const DesktopApplicationSources &sources() const noexcept;
   bool uses_legacy_flex_compatibility() const noexcept;
+  DesktopApplicationState state() const noexcept;
 
   /// Reports whether the caller may access owner-thread application state.
   /// This query does not read the active Box and is safe from any thread.
   bool is_owner_thread() const noexcept;
 
+  /// Stops future event dispatch and reload work without destroying the
+  /// published UI state. Repeated owner-thread calls are idempotent.
+  DesktopApplicationResult request_close();
+
+  /// Unmounts the optional controller after close was requested. Published
+  /// Box, program and source state remain readable until destruction.
+  /// Repeated calls after completed cleanup are idempotent.
+  DesktopApplicationResult shutdown();
+
   /// Routes one native event through widgets and the optional script
   /// controller. Script callbacks run only for unconsumed compiled bindings.
   /// This operation must run on the application owner thread.
   DesktopApplicationResult dispatch_event(Event &event);
+
+  /// Calls the optional script on_frame callback with a finite, non-negative
+  /// delta. This operation does not advance Box animation time or render; the
+  /// desktop host owns those frame stages.
+  DesktopApplicationResult frame(double delta_seconds);
 
   /// Builds and validates a replacement before changing active state. This
   /// operation must run on the application owner thread.
@@ -164,6 +193,8 @@ public:
   DesktopApplicationBuilder &stylesheet(std::string source);
   DesktopApplicationBuilder &script(std::string source, ScriptModuleFactory factory,
                                     std::string module_name = "flexui-application");
+  /// Replaces the borrowed renderer used by subsequently built candidates.
+  DesktopApplicationBuilder &renderer(flex::Renderer *renderer) noexcept;
   DesktopApplicationBuilder &box_options(BoxOptions options);
   DesktopApplicationBuilder &limits(DesktopApplicationLimits limits);
   DesktopApplicationBuilder &widget_registry(WidgetRegistry registry);

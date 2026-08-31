@@ -9,6 +9,27 @@ update metrics, create resources, record drawing operations, resize, read pixels
 destroy it. Host callbacks execute synchronously on that same thread. No callback may retain a
 pointer supplied by gCanvas.
 
+`Window` listener registration, delivery, removal, and destruction are confined to that same owner
+thread. Legacy `add_*_listener()` callbacks persist until `reset_listener()` or window destruction.
+The `subscribe_*_listener()` variants return a move-only `WindowListenerSubscription`; destroying
+or resetting it removes only its callback, and destroying it after the window is safe. During
+delivery, removing a callback that has not run prevents its delivery for the current event, while a
+new callback starts with the next event. `reset_listener()` clears every category and invalidates
+all scoped subscriptions.
+
+Window focus and native close-request callbacks are notifications. They cannot veto closing, and
+calling `Window::close()` directly only sets the close flag; it does not synthesize another close
+notification. On Windows, `Window` exposes native GUI pointer capture through
+`supports_pointer_capture()`, `has_pointer_capture()`, and `set_pointer_capture()`. Acquisition and
+release are idempotent for the owning window and fail explicitly if the requested native state was
+not reached. Other platforms report no capability and reject capture changes instead of replacing
+capture with cursor confinement.
+
+Before publishing a Windows focus-loss notification, `Window` releases any native pointer capture
+owned by that window. A host handles the notification by clearing its own UI focus and logical
+capture state. Focus gain does not restore either state automatically. Native capture is also
+released during window destruction; this cleanup does not change listener ownership.
+
 The frame state is:
 
 ```text
@@ -79,19 +100,22 @@ image and destroys them with the corresponding framebuffers.
 
 ## Shutdown order
 
-1. Stop recording and wait for submitted GPU work.
-2. Destroy context-owned fonts, atlases, images, and dummy resources.
-3. Destroy per-context pipelines, buffers, swapchain, and surface.
-4. Release the backend shared instance/device reference; the last context destroys shared state.
-5. Destroy the native window and terminate the window system after its last window.
+1. Stop native event delivery, release native pointer capture, and destroy owner-scoped listener
+   subscriptions.
+2. Stop recording and wait for submitted GPU work.
+3. Destroy context-owned fonts, atlases, images, and dummy resources.
+4. Destroy per-context pipelines, buffers, swapchain, and surface.
+5. Release the backend shared instance/device reference; the last context destroys shared state.
+6. Destroy the native window and terminate the window system after its last window.
 
 Construction failures unwind the successfully acquired prefix in reverse order through RAII.
 There is no partially usable public context.
 
 ## Validation
 
-Contract tests check non-copyability, unique ownership, callback requirements, default resource
-limits, and the absence of explicit destroy APIs. GPU tests create an invisible real GLFW window
-for each built backend, render and read back known pixels, resize, create and update a dynamic
-image, render again, and present. The OpenGL/Vulkan libraries are also inspected through their
-exported link interfaces to ensure GLFW is confined to `gCanvas::Window`.
+Contract tests check non-copyability, unique ownership, callback and pointer-capture signatures,
+default resource limits, and the absence of explicit destroy APIs. GPU tests create an invisible
+real GLFW window for each built backend, acquire and release native capture on Windows, render and
+read back known pixels, resize, create and update a dynamic image, render again, and present. The
+OpenGL/Vulkan libraries are also inspected through their exported link interfaces to ensure GLFW
+is confined to `gCanvas::Window`.

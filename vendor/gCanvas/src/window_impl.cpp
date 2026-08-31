@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 #include "gcanvas/context.hpp"
 #ifdef GCANVAS_HAS_OPENGL
@@ -15,9 +16,10 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-//#define GLFW_EXPOSE_NATIVE_WIN32
-//#include <GLFW/glfw3native.h>
-
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
 
 namespace gcanvas
 {
@@ -62,16 +64,16 @@ namespace gcanvas
                                        std::uint64_t* surface)
         {
             VkSurfaceKHR created_surface = VK_NULL_HANDLE;
-            const VkResult result = glfwCreateWindowSurface(
-                reinterpret_cast<VkInstance>(instance), static_cast<GLFWwindow*>(user_data),
-                nullptr, &created_surface);
+            const VkResult result = glfwCreateWindowSurface(reinterpret_cast<VkInstance>(instance),
+                                                            static_cast<GLFWwindow*>(user_data),
+                                                            nullptr, &created_surface);
             static_assert(sizeof(created_surface) <= sizeof(*surface));
             *surface = 0;
             std::memcpy(surface, &created_surface, sizeof(created_surface));
             return static_cast<int>(result);
         }
 #endif
-    }
+    } // namespace
 
     /* ------------------------ DOWNCAST ------------------------ */
 
@@ -84,6 +86,17 @@ namespace gcanvas
         return (const WindowImpl*)ptr;
     }
 
+    void release_pointer_capture_on_window_loss(WindowImpl* impl) noexcept
+    {
+#ifdef _WIN32
+        HWND native_window = glfwGetWin32Window(impl->_glfw_window);
+        if (GetCapture() == native_window)
+            ReleaseCapture();
+#else
+        (void)impl;
+#endif
+    }
+
     /* ------------------------ FUNCTION DECLARATION ------------------------ */
 
     void on_window_resize(GLFWwindow* window, int width, int height);
@@ -92,12 +105,61 @@ namespace gcanvas
     void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
     void char_callback(GLFWwindow* window, unsigned int codepoint);
     void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
+    void focus_callback(GLFWwindow* window, int focused);
+    void close_callback(GLFWwindow* window);
 
     /* ------------------------ PUBLIC IMPLEMENTATION ------------------------ */
 
     std::unique_ptr<Window> Window::create(WindowConfig config)
     {
         return std::make_unique<WindowImpl>(config);
+    }
+
+    WindowListenerSubscription::WindowListenerSubscription(
+        std::weak_ptr<detail::WindowListenerState> state, std::uint64_t id) noexcept
+        : _state(std::move(state)), _id(id)
+    {
+    }
+
+    WindowListenerSubscription::~WindowListenerSubscription()
+    {
+        reset();
+    }
+
+    WindowListenerSubscription::WindowListenerSubscription(
+        WindowListenerSubscription&& other) noexcept
+        : _state(std::move(other._state)), _id(std::exchange(other._id, 0))
+    {
+    }
+
+    WindowListenerSubscription& WindowListenerSubscription::operator=(
+        WindowListenerSubscription&& other) noexcept
+    {
+        if (this != &other)
+        {
+            reset();
+            _state = std::move(other._state);
+            _id = std::exchange(other._id, 0);
+        }
+        return *this;
+    }
+
+    void WindowListenerSubscription::reset() noexcept
+    {
+        const std::uint64_t id = std::exchange(_id, 0);
+        if (id == 0)
+            return;
+        if (const auto state = _state.lock())
+            state->remove(id);
+        _state.reset();
+    }
+
+    bool WindowListenerSubscription::active() const noexcept
+    {
+        if (_id == 0)
+            return false;
+        const auto state = _state.lock();
+        return state != nullptr && state->contains(_id);
     }
 
     void Window::set_title(const std::string& title)
@@ -189,47 +251,148 @@ namespace gcanvas
     void Window::add_resize_listener(std::function<void(resize_event)> callback)
     {
         WindowImpl* impl = getImpl(this);
-        impl->_resize_callbacks.push_back(callback);
+        impl->_listeners->add_resize(std::move(callback));
     }
 
     void Window::add_mouse_move_listener(std::function<void(mouse_move_event)> callback)
     {
         WindowImpl* impl = getImpl(this);
-        impl->_mouse_move_callbacks.push_back(callback);
+        impl->_listeners->add_mouse_move(std::move(callback));
     }
 
     void Window::add_mouse_click_listener(std::function<void(mouse_button_event)> callback)
     {
         WindowImpl* impl = getImpl(this);
-        impl->_mouse_button_callbacks.push_back(callback);
+        impl->_listeners->add_mouse_button(std::move(callback));
     }
 
     void Window::add_key_listener(std::function<void(key_event)> callback)
     {
         WindowImpl* impl = getImpl(this);
-        impl->_key_callbacks.push_back(callback);
+        impl->_listeners->add_key(std::move(callback));
     }
 
     void Window::add_char_listener(std::function<void(char_event)> callback)
     {
         WindowImpl* impl = getImpl(this);
-        impl->_char_callbacks.push_back(callback);
+        impl->_listeners->add_char(std::move(callback));
     }
 
     void Window::add_scroll_listener(std::function<void(scroll_event)> callback)
     {
         WindowImpl* impl = getImpl(this);
-        impl->_scroll_callbacks.push_back(callback);
+        impl->_listeners->add_scroll(std::move(callback));
+    }
+
+    bool Window::supports_pointer_capture() const noexcept
+    {
+#ifdef _WIN32
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    bool Window::has_pointer_capture() const noexcept
+    {
+#ifdef _WIN32
+        const WindowImpl* impl = getImpl(this);
+        return GetCapture() == glfwGetWin32Window(impl->_glfw_window);
+#else
+        return false;
+#endif
+    }
+
+    void Window::set_pointer_capture(bool captured)
+    {
+#ifdef _WIN32
+        WindowImpl* impl = getImpl(this);
+        HWND native_window = glfwGetWin32Window(impl->_glfw_window);
+        if (captured)
+        {
+            if (GetCapture() != native_window)
+                SetCapture(native_window);
+            if (GetCapture() != native_window)
+                throw std::runtime_error("failed to acquire Win32 pointer capture");
+            return;
+        }
+
+        if (GetCapture() == native_window)
+        {
+            ReleaseCapture();
+            if (GetCapture() == native_window)
+                throw std::runtime_error("failed to release Win32 pointer capture");
+        }
+#else
+        (void)captured;
+        throw std::logic_error("native pointer capture is not supported on this platform");
+#endif
+    }
+
+    void Window::add_focus_listener(std::function<void(focus_event)> callback)
+    {
+        WindowImpl* impl = getImpl(this);
+        impl->_listeners->add_focus(std::move(callback));
+    }
+
+    void Window::add_close_listener(std::function<void(close_event)> callback)
+    {
+        WindowImpl* impl = getImpl(this);
+        impl->_listeners->add_close(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_resize_listener(
+        std::function<void(resize_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_resize(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_mouse_move_listener(
+        std::function<void(mouse_move_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_mouse_move(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_mouse_click_listener(
+        std::function<void(mouse_button_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_mouse_button(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_key_listener(
+        std::function<void(key_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_key(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_char_listener(
+        std::function<void(char_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_char(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_scroll_listener(
+        std::function<void(scroll_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_scroll(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_focus_listener(
+        std::function<void(focus_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_focus(std::move(callback));
+    }
+
+    WindowListenerSubscription Window::subscribe_close_listener(
+        std::function<void(close_event)> callback)
+    {
+        return getImpl(this)->_listeners->subscribe_close(std::move(callback));
     }
 
     void Window::reset_listener()
     {
         WindowImpl* impl = getImpl(this);
-        impl->_resize_callbacks.clear();
-        impl->_mouse_move_callbacks.clear();
-        impl->_mouse_button_callbacks.clear();
-        impl->_key_callbacks.clear();
-        impl->_scroll_callbacks.clear();
+        impl->_listeners->reset();
     }
 
     void Window::set_cursor(CURSOR_TYPE cursor_type)
@@ -381,10 +544,11 @@ namespace gcanvas
         {
         case Backend::OpenGL:
 #ifdef GCANVAS_HAS_OPENGL
-            context = opengl::create_context({impl->canvas_metrics(), {},
-                                              {impl->_glfw_window, glfw_get_proc_address,
-                                               glfw_make_current, glfw_swap_buffers,
-                                               glfw_set_swap_interval, glfw_framebuffer_size}});
+            context = opengl::create_context(
+                {impl->canvas_metrics(),
+                 {},
+                 {impl->_glfw_window, glfw_get_proc_address, glfw_make_current, glfw_swap_buffers,
+                  glfw_set_swap_interval, glfw_framebuffer_size}});
             break;
 #else
             throw std::logic_error("gCanvas was built without the OpenGL backend");
@@ -392,9 +556,9 @@ namespace gcanvas
         case Backend::Vulkan:
 #ifdef GCANVAS_HAS_VULKAN
             context = vulkan::create_context(
-                {impl->canvas_metrics(), {},
-                 {impl->_glfw_window, glfw_required_vulkan_extensions,
-                  glfw_create_vulkan_surface},
+                {impl->canvas_metrics(),
+                 {},
+                 {impl->_glfw_window, glfw_required_vulkan_extensions, glfw_create_vulkan_surface},
                  _vsync});
             break;
 #else
@@ -410,6 +574,8 @@ namespace gcanvas
         glfwSetKeyCallback(impl->_glfw_window, key_callback);
         glfwSetCharCallback(impl->_glfw_window, char_callback);
         glfwSetScrollCallback(impl->_glfw_window, scroll_callback);
+        glfwSetWindowFocusCallback(impl->_glfw_window, focus_callback);
+        glfwSetWindowCloseCallback(impl->_glfw_window, close_callback);
 
         return *_context;
     }
@@ -479,6 +645,7 @@ namespace gcanvas
 
     WindowImpl::~WindowImpl()
     {
+        release_pointer_capture_on_window_loss(this);
         if (_context != nullptr)
         {
             if (_backend == Backend::OpenGL)
@@ -612,10 +779,8 @@ namespace gcanvas
                   << "width: " << width << " height: " << height << std::endl;
 #endif
 
-        for (auto& var : winImpl->_resize_callbacks)
-        {
-            var({(int)(width / winImpl->_dpi_scale), (int)(height / winImpl->_dpi_scale)});
-        }
+        winImpl->_listeners->publish(
+            resize_event{(int)(width / winImpl->_dpi_scale), (int)(height / winImpl->_dpi_scale)});
     }
 
     void mouse_position_callback(GLFWwindow* window, double x, double y)
@@ -633,10 +798,8 @@ namespace gcanvas
         std::cout << "event: mouse_position "
                   << "x: " << x << " y: " << y << std::endl;
 #endif
-        for (auto& var : winImpl->_mouse_move_callbacks)
-        {
-            var({x / winImpl->_dpi_scale, y / winImpl->_dpi_scale});
-        }
+        winImpl->_listeners->publish(
+            mouse_move_event{x / winImpl->_dpi_scale, y / winImpl->_dpi_scale});
     }
 
     void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
@@ -667,11 +830,9 @@ namespace gcanvas
         double x, y;
         glfwGetCursorPos(window, &x, &y);
 
-        for (auto& var : winImpl->_mouse_button_callbacks)
-        {
-            var({(mouse_button)button, (input_action)action, (mouse_mod)mods,
-                 x / winImpl->_dpi_scale, y / winImpl->_dpi_scale});
-        }
+        winImpl->_listeners->publish(mouse_button_event{(mouse_button)button, (input_action)action,
+                                                        (mouse_mod)mods, x / winImpl->_dpi_scale,
+                                                        y / winImpl->_dpi_scale});
     }
 
     void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
@@ -686,28 +847,23 @@ namespace gcanvas
                   << "key: " << key << " scancode: " << scancode << " action: " << action
                   << " mods: " << mods << " key name: " << key_name << std::endl;
 #endif
-            
-        for (auto& var : winImpl->_key_callbacks)
-        {
-            var({(keyboard_key)key, scancode, (input_action)action, (keyboard_mod)mods, key_code});
-        }
+
+        winImpl->_listeners->publish(key_event{(keyboard_key)key, scancode, (input_action)action,
+                                               (keyboard_mod)mods, key_code});
     }
 
     void char_callback(GLFWwindow* window, unsigned int codepoint)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
 
-        std::string utf8 = Font::UnicodeToUTF8(codepoint);             
+        std::string utf8 = Font::UnicodeToUTF8(codepoint);
 
 #ifdef DEBUG
         std::cout << "event: char "
                   << "char: " << codepoint << std::endl;
 #endif
 
-        for (auto& var : winImpl->_char_callbacks)
-        {
-            var({codepoint, utf8.c_str()});
-        }
+        winImpl->_listeners->publish(char_event{codepoint, utf8.c_str()});
     }
 
     void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
@@ -718,10 +874,21 @@ namespace gcanvas
         std::cout << "event: scroll "
                   << "xoffset: " << xoffset << " yoffset: " << yoffset << std::endl;
 #endif
-        for (auto& var : winImpl->_scroll_callbacks)
-        {
-            var({xoffset, yoffset});
-        }
+        winImpl->_listeners->publish(scroll_event{xoffset, yoffset});
+    }
+
+    void focus_callback(GLFWwindow* window, int focused)
+    {
+        WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
+        if (focused != GLFW_TRUE)
+            release_pointer_capture_on_window_loss(winImpl);
+        winImpl->_listeners->publish(focus_event{focused == GLFW_TRUE});
+    }
+
+    void close_callback(GLFWwindow* window)
+    {
+        WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
+        winImpl->_listeners->publish(close_event{});
     }
 
 } // namespace gcanvas

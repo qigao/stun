@@ -753,24 +753,68 @@ gCanvas 负责：
 `DesktopApplication`，在触碰 normalizer 或 Box 前检查 application owner thread，再把 mouse、wheel、
 key 和 text 路由到 `dispatch_event()`，或把正数 logical resize 写入 viewport 并 invalidate。转换失败
 保留 `GCanvasInputError`，应用失败保留完整 `DesktopApplicationError`；无可编辑焦点的合法字符输入
-返回 success/not-processed，而不是伪造派发。该边界只依赖 `gCanvas::Core` event contract，不创建窗口、
-context 或 frame。
+返回 success/not-processed，而不是伪造派发。focus gain 不改变 Box；focus loss 在 owner thread 清除
+focused element 与内部 mouse capture。该边界只依赖 `gCanvas::Core` event contract，不创建窗口、context
+或 frame。
 
-初始 `GCanvasWindowHost` 可以组合 `gCanvas::Window`，复用其 GLFW helper；IME、clipboard、dialog
-等不足能力由 DesktopHost 的平台 service 补齐。长期 native/SDL host 通过相同 Bridge 使用
+`FlexUI::GCanvasWindowHost` 现已组合可选 `gCanvas::Window`，复用其 GLFW helper；该 target 位于
+desktop adapter 层并公开依赖 `gCanvas::Window`，`FlexUI::Core` 不链接 GLFW。IME、clipboard、dialog
+等尚缺能力继续由 DesktopHost 的平台 service 补齐。长期 native/SDL host 可通过相同 Bridge 使用
 gCanvas HostManaged/External Context，不修改 FlexUI Core。
 
-在真实 `GCanvasWindowHost` 可以声明完成前，必须先补齐以下契约：listener-scoped callback removal；
-native focus、close 与 pointer capture 事件；失焦时 FlexUI focus/capture 清理；window/context/host 的
-确定销毁顺序；hidden-window OpenGL create/render/readback/resize/present smoke。当前
-`gCanvas::Window::reset_listener()` 是全局清理语义，不能作为多个 callback owner 的析构协议。
+Host 的所有权与销毁依赖固定为 `Window -> Context(borrowed) -> Flex renderer -> DesktopApplication ->
+input router -> listener subscriptions`，RAII 逆序先移除 scoped callback，再销毁 application/renderer，
+最后由 Window 销毁 GPU Context 与 native window。旧 `add_*` 和全局 `reset_listener()` 仅保留兼容
+用途，Host 只使用 move-only `WindowListenerSubscription`。Windows native pointer capture 仍由
+`gCanvas::Window` 独占平台实现；Host 在 pointer event 与 frame 后把 Box internal capture 同步到 native
+capture，close/focus loss 则清理 Box focus/capture 并释放 native capture。其他平台明确报告不支持，
+不以 cursor confinement 偷换语义。
 
-首版默认 OpenGL。Vulkan 是 gCanvas backend 的后续可选项，不改变 UI Document、Controller、
-binding 或 plugin contract。
+默认 backend 仍为 OpenGL；调用方也可显式选择 Vulkan。Window、Context、renderer、application 或
+listener 任一构建阶段失败都返回带 stage/cause 的错误并按 RAII 回收已构建候选，不自动在 OpenGL
+和 Vulkan 之间切换。
+
+```mermaid
+flowchart LR
+    Wait[wait event / timed wait] --> Native[scoped native callbacks]
+    Native --> Route[input router]
+    Route --> Frame[application on_frame]
+    Frame --> Time[Box update_time]
+    Time --> Update[bindings/layout/dirty paint]
+    Update --> Submit[gCanvas submit + present]
+    Submit --> Capture[sync pointer capture]
+    Capture --> Wait
+    Native -->|close/error| Close[CloseRequested]
+    Close --> Shutdown[controller unmount / Shutdown]
+```
+
+`EventDriven` 在无事件时使用 `wait_events()`，适合静态窗口；`Continuous` 使用有界 timed wait 驱动
+动画/主动刷新，避免 busy polling。`run()` 根据 steady clock 计算 delta 并上限裁剪；显式
+`pump_once(delta)` 对非有限、负数或超过配置上限的 delta fail fast。每轮都执行 binding/update，
+但 RenderManager 只在 dirty 时提交绘制；无 `on_frame` 时 controller 不产生脚本调用。
 
 ## 15. 线程与关闭协议
 
+`DesktopApplication` 是 application lifecycle 的唯一事实源：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ready
+    Ready --> CloseRequested: request_close
+    CloseRequested --> Shutdown: shutdown / controller unmount complete
+    CloseRequested --> CloseRequested: unmount rejected during callback
+    Shutdown --> Shutdown: repeated shutdown
+```
+
+只有 owner thread 可以推进状态。`CloseRequested` 起拒绝新的 event dispatch、frame 与 reload；Box、compiled
+program 和 source snapshot 仍可读取。`shutdown()` 只在 `CloseRequested` 执行 controller unmount：
+若 `on_unmount` 报错但 controller 已完成清理，application 进入 `Shutdown` 并向宿主保留 nested error；
+若 callback 正在执行而 unmount 被拒绝，则保持 `CloseRequested`，宿主可在 callback 返回后重试。
+`Shutdown` 不提前销毁 published state，实际对象销毁仍由 RAII 完成。
+
 - UI thread 独占 DesktopHost、Box、EventDispatcher、ScriptController 和 gCanvas Context。
+- `GCanvasWindowHost::run()` / `pump_once()` 是 frame 与 shutdown 的唯一推进边界；native close callback
+  只请求 close，不在 GLFW callback 栈内执行 controller unmount。
 - TurboScript callback 只在 UI thread 运行。
 - 插件 lifecycle callback 默认在 UI thread；耗时任务由插件提交到明确的 worker service。
 - worker 不能调用 UI API，只能向有界 completion queue 发布值语义消息。

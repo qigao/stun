@@ -217,6 +217,18 @@ namespace gcanvas
         const char* utf8;
     };
 
+    /// Reports whether the native window owns input focus.
+    struct GCANVAS_API focus_event
+    {
+        bool focused;
+    };
+
+    /// Reports a native user request to close the window.
+    /// Window::close() does not synthesize this notification.
+    struct GCANVAS_API close_event
+    {
+    };
+
 } // namespace gcanvas
 
 #endif // GCANVAS_EVENT_HPP

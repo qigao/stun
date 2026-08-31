@@ -1,10 +1,9 @@
 #ifndef GCANVAS_WINDOW_IMPL_HPP
 #define GCANVAS_WINDOW_IMPL_HPP
 
-#include <unordered_map>
-#include <vector>
-
 #include "gcanvas/window.hpp"
+#include "window_listener_state.hpp"
+#include <unordered_map>
 
 struct GLFWwindow;
 struct GLFWcursor;
@@ -28,12 +27,8 @@ namespace gcanvas
         int _last_x_scale = -1;
         int _last_y_scale = -1;
 
-        std::vector<std::function<void(resize_event)>> _resize_callbacks;
-        std::vector<std::function<void(mouse_move_event)>> _mouse_move_callbacks;
-        std::vector<std::function<void(mouse_button_event)>> _mouse_button_callbacks;
-        std::vector<std::function<void(key_event)>> _key_callbacks;
-        std::vector<std::function<void(char_event)>> _char_callbacks;
-        std::vector<std::function<void(scroll_event)>> _scroll_callbacks;
+        std::shared_ptr<detail::WindowListenerState> _listeners =
+            std::make_shared<detail::WindowListenerState>();
 
         std::unordered_map<Cursor*, GLFWcursor*> _cursors;
         std::unordered_map<CURSOR_TYPE, GLFWcursor*> _default_cursors;
