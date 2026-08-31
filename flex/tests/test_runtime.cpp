@@ -12,14 +12,14 @@
 #include "flex/core/expr.h"
 #include "flex/core/expr_mir.h"
 #include "flex/core/expr_value.h"
-#include "tinytest.h"
+#include <tinytest.hpp>
 
 using namespace flex;
 
 namespace {
 
 inline void check_close(float actual, float expected, float eps = 0.001f) {
-    check_float_eq(actual, expected, eps);
+    check_within(actual, expected, eps);
 }
 
 } // namespace
@@ -40,10 +40,10 @@ suite("flex::runtime") {
             values.push_back(std::make_unique<int>(20));
             values.push_back(std::make_unique<int>(30));
 
-            check_size_eq(values.size(), 3);
-            check_int_eq(*values[0], 10);
-            check_int_eq(*values[1], 20);
-            check_int_eq(*values[2], 30);
+            check_equal(values.size(), 3);
+            check_equal(*values[0], 10);
+            check_equal(*values[1], 20);
+            check_equal(*values[2], 30);
         }
     }
 
@@ -131,7 +131,7 @@ suite("flex::runtime") {
             check_false(lifetime.expired());
 
             group->remove_child_at(0);
-            check_size_eq(group->child_count(), 0);
+            check_equal(group->child_count(), 0);
             check_true(lifetime.expired());
         }
     }
@@ -177,26 +177,26 @@ suite("flex::runtime") {
 
     group("animated property metadata") {
         it("resolves canonical names and compatibility aliases") {
-            check_int_eq(static_cast<int>(get_property_id("x")),
+            check_equal(static_cast<int>(get_property_id("x")),
                          static_cast<int>(PropertyID::X));
-            check_int_eq(static_cast<int>(get_property_id("fontSize")),
+            check_equal(static_cast<int>(get_property_id("fontSize")),
                          static_cast<int>(PropertyID::FontSize));
-            check_int_eq(static_cast<int>(get_property_id("font_size")),
+            check_equal(static_cast<int>(get_property_id("font_size")),
                          static_cast<int>(PropertyID::FontSize));
-            check_int_eq(static_cast<int>(get_property_id("scaleX")),
+            check_equal(static_cast<int>(get_property_id("scaleX")),
                          static_cast<int>(PropertyID::ScaleX));
-            check_int_eq(static_cast<int>(get_property_id("scale_x")),
+            check_equal(static_cast<int>(get_property_id("scale_x")),
                          static_cast<int>(PropertyID::ScaleX));
-            check_int_eq(static_cast<int>(get_property_id("text.color")),
+            check_equal(static_cast<int>(get_property_id("text.color")),
                          static_cast<int>(PropertyID::TextColor));
         }
 
         it("rejects empty and unknown property names") {
-            check_int_eq(static_cast<int>(get_property_id(nullptr)),
+            check_equal(static_cast<int>(get_property_id(nullptr)),
                          static_cast<int>(PropertyID::Unknown));
-            check_int_eq(static_cast<int>(get_property_id("")),
+            check_equal(static_cast<int>(get_property_id("")),
                          static_cast<int>(PropertyID::Unknown));
-            check_int_eq(static_cast<int>(get_property_id("widht")),
+            check_equal(static_cast<int>(get_property_id("widht")),
                          static_cast<int>(PropertyID::Unknown));
         }
     }
@@ -560,21 +560,21 @@ suite("flex::runtime") {
             track->add_keyframe(1.0f, 10.0f);
 
             const AnimationProgram& program = timeline->program();
-            check_size_eq(program.track_count(), 1);
-            check_size_eq(program.operations().size(), 1);
+            check_equal(program.track_count(), 1);
+            check_equal(program.operations().size(), 1);
 
             const auto& operation = program.operations()[0];
-            check_size_eq(operation.keyframe_offset, 0);
-            check_size_eq(operation.keyframe_count, 2);
-            check_int_eq(static_cast<int>(operation.value_kind),
+            check_equal(operation.keyframe_offset, 0);
+            check_equal(operation.keyframe_count, 2);
+            check_equal(static_cast<int>(operation.value_kind),
                          static_cast<int>(AnimationProgram::ValueKind::Scalar));
-            check_int_eq(static_cast<int>(operation.property_id),
+            check_equal(static_cast<int>(operation.property_id),
                          static_cast<int>(PropertyID::X));
-            check_string_eq(operation.target_id, "animated");
+            check_equal(operation.target_id, "animated");
             check_true(operation.has_target_selector);
-            check_size_eq(program.keyframe_count(), 2);
+            check_equal(program.keyframe_count(), 2);
             check_close(std::get<float>(program.sample(0, 0.5f)), 5.0f);
-            check_ptr_eq(&timeline->program(), &program);
+            check_equal(&timeline->program(), &program);
         }
 
         it("keeps compiled keyframes isolated until recompilation") {
@@ -586,14 +586,14 @@ suite("flex::runtime") {
             const AnimationProgram& initial = timeline->program();
             const uint64_t initial_revision = initial.source_revision();
             track->add_keyframe(1.0f, 10.0f);
-            check_size_eq(initial.keyframe_count(), 1);
+            check_equal(initial.keyframe_count(), 1);
             check_close(std::get<float>(initial.sample(0, 1.0f)), 0.0f);
 
             const AnimationProgram& rebuilt = timeline->program();
             check_true(rebuilt.source_revision() > initial_revision);
-            check_size_eq(rebuilt.track_count(), 1);
-            check_size_eq(rebuilt.keyframe_count(), 2);
-            check_size_eq(rebuilt.operations()[0].keyframe_count, 2);
+            check_equal(rebuilt.track_count(), 1);
+            check_equal(rebuilt.keyframe_count(), 2);
+            check_equal(rebuilt.operations()[0].keyframe_count, 2);
             check_close(std::get<float>(rebuilt.sample(0, 1.0f)), 10.0f);
         }
 
@@ -620,16 +620,16 @@ suite("flex::runtime") {
             text->add_keyframe(2.0f, "second");
 
             const AnimationProgram& program = timeline->program();
-            check_size_eq(program.track_count(), 4);
-            check_size_eq(program.keyframe_count(), 8);
-            check_size_eq(program.scalar_keyframe_count(), 2);
-            check_size_eq(program.color_keyframe_count(), 2);
-            check_size_eq(program.vec2_keyframe_count(), 2);
-            check_size_eq(program.generic_keyframe_count(), 2);
+            check_equal(program.track_count(), 4);
+            check_equal(program.keyframe_count(), 8);
+            check_equal(program.scalar_keyframe_count(), 2);
+            check_equal(program.color_keyframe_count(), 2);
+            check_equal(program.vec2_keyframe_count(), 2);
+            check_equal(program.generic_keyframe_count(), 2);
             for (size_t index = 0; index < program.track_count(); ++index) {
-                check_size_eq(program.operations()[index].keyframe_offset,
+                check_equal(program.operations()[index].keyframe_offset,
                               index * 2);
-                check_size_eq(program.operations()[index].keyframe_count, 2);
+                check_equal(program.operations()[index].keyframe_count, 2);
             }
 
             check_close(std::get<float>(program.sample(0, 1.0f)),
@@ -649,8 +649,11 @@ suite("flex::runtime") {
             check_close(compiled_position.x, editable_position.x);
             check_close(compiled_position.y, editable_position.y);
 
-            check_string_eq(std::get<std::string>(program.sample(3, 1.0f)),
-                            std::get<std::string>(text->sample(1.0f)));
+            const auto compiled_text =
+                std::get<std::string>(program.sample(3, 1.0f));
+            const auto editable_text =
+                std::get<std::string>(text->sample(1.0f));
+            check_equal(compiled_text, editable_text);
         }
 
         it("preserves interpolation inside a heterogeneous generic track") {
@@ -662,13 +665,14 @@ suite("flex::runtime") {
             track->add_keyframe(2.0f, "done");
 
             const AnimationProgram& program = timeline->program();
-            check_int_eq(
+            check_equal(
                 static_cast<int>(program.operations()[0].value_kind),
                 static_cast<int>(AnimationProgram::ValueKind::Generic));
-            check_size_eq(program.generic_keyframe_count(), 3);
+            check_equal(program.generic_keyframe_count(), 3);
             check_close(std::get<float>(program.sample(0, 0.5f)), 5.0f);
-            check_string_eq(std::get<std::string>(program.sample(0, 1.5f)),
-                            "done");
+            const auto sampled_text =
+                std::get<std::string>(program.sample(0, 1.5f));
+            check_equal(sampled_text, "done");
         }
 
         it("samples all compiled tracks into caller-owned storage") {
@@ -694,7 +698,7 @@ suite("flex::runtime") {
                 std::get<Vec2>(program.sample(1, 0.5f));
             check_close(batch_position.x, single_position.x);
             check_close(batch_position.y, single_position.y);
-            check_string_eq(std::get<std::string>(outputs[2]), "second");
+            check_equal(std::get<std::string>(outputs[2]), "second");
         }
 
         it("validates caller-owned batch storage before writing") {
@@ -748,7 +752,7 @@ suite("flex::runtime") {
             timeline->add_track("x");
 
             const AnimationProgram& program = timeline->program();
-            check_size_eq(program.keyframe_count(), 0);
+            check_equal(program.keyframe_count(), 0);
             check_close(std::get<float>(program.sample(0, 0.5f)), 0.0f);
         }
 
@@ -963,9 +967,9 @@ suite("flex::runtime") {
 
             const auto players =
                 controller.get_players_for_target(requested.get());
-            check_size_eq(players.size(), 2);
-            check_ptr_eq(players[0], first_player);
-            check_ptr_eq(players[1], second_player);
+            check_equal(players.size(), 2);
+            check_equal(players[0], first_player);
+            check_equal(players[1], second_player);
         }
 
         it("plays through a default-constructed controller") {
@@ -984,7 +988,7 @@ suite("flex::runtime") {
 
             controller.advance(0.5f);
             check_close(target->x(), 5.0f);
-            check_size_eq(controller.get_players_for_target(target.get()).size(), 1);
+            check_equal(controller.get_players_for_target(target.get()).size(), 1);
         }
 
         it("excludes stopped players from a target query") {
@@ -1003,8 +1007,8 @@ suite("flex::runtime") {
             controller.stop(stopped->name());
 
             const auto players = controller.get_players_for_target(target.get());
-            check_size_eq(players.size(), 1);
-            check_ptr_eq(players[0], playing_player);
+            check_equal(players.size(), 1);
+            check_equal(players[0], playing_player);
         }
 
         it("returns no players for null or destroyed targets") {

@@ -281,7 +281,8 @@ struct UiBindingRuntime::Impl {
     std::vector<const double*> numeric_inputs;
     std::vector<double> numeric_slots;
     std::vector<std::uint64_t> observed_versions;
-    std::unique_ptr<flex::MirExpressionProgram> program;
+    std::shared_ptr<const flex::MirExpressionProgram> program;
+    std::string owned_target_key;
     bool applied = false;
   };
 
@@ -322,9 +323,14 @@ struct UiBindingRuntime::Impl {
     return it->second;
   }
 
-  void compile_expression(const std::string& expression,
-                          Binding& binding) const {
-    const auto names = flex::MirExpressionProgram::collect_variables(expression);
+  void attach_expression(
+      const std::vector<std::string>& names,
+      std::shared_ptr<const flex::MirExpressionProgram> program,
+      Binding& binding) const {
+    if (!program || program->names() != names) {
+      throw std::invalid_argument(
+          "compiled MIR UI binding inputs do not match its dependencies");
+    }
     binding.dependencies.reserve(names.size());
     binding.numeric_inputs.reserve(names.size());
     binding.numeric_slots.resize(names.size());
@@ -338,14 +344,24 @@ struct UiBindingRuntime::Impl {
       binding.dependencies.push_back(symbol);
       binding.numeric_inputs.push_back(&data.impl_->numeric_values.at(symbol));
     }
-    binding.program = flex::MirExpressionProgram::compile(expression, names);
-    if (!binding.program) {
+    binding.program = std::move(program);
+  }
+
+  void compile_expression(const std::string& expression, Binding& binding) {
+    const auto names = flex::MirExpressionProgram::collect_variables(expression);
+    ++expression_compile_count;
+    auto program = flex::MirExpressionProgram::compile(expression, names);
+    if (!program) {
       throw std::invalid_argument("invalid MIR UI binding expression: " + expression);
     }
+    attach_expression(
+        names,
+        std::shared_ptr<const flex::MirExpressionProgram>(std::move(program)),
+        binding);
   }
 
   UiBindingHandle add_binding(Binding binding) {
-    const std::string key = target_key(*binding.element, binding.target);
+    binding.owned_target_key = target_key(*binding.element, binding.target);
     const bool new_owns_class_list =
         std::holds_alternative<ClassListTarget>(binding.target) ||
         std::holds_alternative<UtilityListTarget>(binding.target);
@@ -381,7 +397,7 @@ struct UiBindingRuntime::Impl {
                   *class_token(binding.target) ==
                       *class_token(existing.target));
         });
-    if (class_conflict || owned_targets.count(key) != 0) {
+    if (class_conflict || owned_targets.count(binding.owned_target_key) != 0) {
       throw std::invalid_argument("UI binding target is already owned");
     }
     binding.id = next_id;
@@ -389,7 +405,7 @@ struct UiBindingRuntime::Impl {
                                  binding.program && binding.program->uses_jit()};
     bindings.push_back(std::move(binding));
     try {
-      if (!owned_targets.insert(key).second) {
+      if (!owned_targets.insert(bindings.back().owned_target_key).second) {
         bindings.pop_back();
         throw std::invalid_argument("UI binding target is already owned");
       }
@@ -400,7 +416,7 @@ struct UiBindingRuntime::Impl {
       throw;
     }
     ++next_id;
-    if (invalidated_callback) {
+    if (!transaction_active && invalidated_callback) {
       invalidated_callback();
     }
     return handle;
@@ -475,8 +491,10 @@ struct UiBindingRuntime::Impl {
   std::vector<Binding> bindings;
   std::unordered_set<std::string> owned_targets;
   UiBindingId next_id = 1;
+  bool transaction_active = false;
   std::uint64_t update_count = 0;
   std::uint64_t evaluation_count = 0;
+  std::uint64_t expression_compile_count = 0;
 };
 
 UiBindingRuntime::UiBindingRuntime(std::function<void()> invalidated)
@@ -492,6 +510,68 @@ UiBindingTargets::UiBindingTargets(UiBindingRuntime& runtime)
 
 UiBindingTargets& UiBindingRuntime::targets() { return targets_; }
 const UiBindingTargets& UiBindingRuntime::targets() const { return targets_; }
+
+UiBindingRuntime::TransactionCheckpoint
+UiBindingRuntime::begin_transaction() {
+  if (impl_->transaction_active) {
+    throw std::logic_error("nested UI binding transactions are not supported");
+  }
+  impl_->transaction_active = true;
+  return TransactionCheckpoint{impl_->bindings.size(), impl_->next_id, true};
+}
+
+void UiBindingRuntime::commit_transaction(TransactionCheckpoint& checkpoint) {
+  if (!checkpoint.active || !impl_->transaction_active) {
+    throw std::logic_error("UI binding transaction is not active");
+  }
+  const bool changed = impl_->bindings.size() != checkpoint.binding_count;
+  impl_->transaction_active = false;
+  checkpoint.active = false;
+  if (changed && impl_->invalidated_callback) {
+    impl_->invalidated_callback();
+  }
+}
+
+void UiBindingRuntime::rollback_transaction(
+    TransactionCheckpoint& checkpoint) noexcept {
+  if (!checkpoint.active || !impl_->transaction_active) {
+    return;
+  }
+  while (impl_->bindings.size() > checkpoint.binding_count) {
+    auto& binding = impl_->bindings.back();
+    if (auto* value = std::get_if<ValueTarget>(&binding.target)) {
+      if (value->observer_id != 0) {
+        value->widget->remove_edit_observer(value->observer_id);
+        value->observer_id = 0;
+      }
+    }
+    impl_->owned_targets.erase(binding.owned_target_key);
+    impl_->bindings.pop_back();
+  }
+  impl_->next_id = checkpoint.next_id;
+  impl_->transaction_active = false;
+  checkpoint.active = false;
+}
+
+UiBindingHandle UiBindingRuntime::bind_compiled_class(
+    Element& target, std::string class_name,
+    const std::vector<std::string>& dependencies,
+    std::shared_ptr<const flex::MirExpressionProgram> program) {
+  if (class_name.empty()) {
+    throw std::invalid_argument("bound class name must not be empty");
+  }
+  if (!program || !program->uses_jit()) {
+    throw std::invalid_argument(
+        "shared MIR UI bindings require an immutable JIT artifact");
+  }
+  Impl::Binding binding;
+  binding.element = &target;
+  binding.target =
+      ClassTarget{class_name, target.class_names().count(class_name) > 0};
+  binding.source = BindingSource::BoolExpression;
+  impl_->attach_expression(dependencies, std::move(program), binding);
+  return impl_->add_binding(std::move(binding));
+}
 
 UiBindingHandle UiBindingTargets::bind_class(Element& target,
                                              std::string class_name,
@@ -691,7 +771,7 @@ bool UiBindingTargets::unbind(UiBindingId id) {
     return false;
   }
   runtime_->impl_->restore(*it);
-  runtime_->impl_->owned_targets.erase(target_key(*it->element, it->target));
+  runtime_->impl_->owned_targets.erase(it->owned_target_key);
   runtime_->impl_->bindings.erase(it);
   if (runtime_->impl_->invalidated_callback) {
     runtime_->impl_->invalidated_callback();
@@ -779,6 +859,10 @@ bool UiBindingRuntime::update() {
 UiBindingStats UiBindingRuntime::stats() const {
   return {impl_->bindings.size(), impl_->update_count,
           impl_->evaluation_count};
+}
+
+std::uint64_t UiBindingRuntime::expression_compile_count() const {
+  return impl_->expression_compile_count;
 }
 
 }  // namespace flexUI

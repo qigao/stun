@@ -37,8 +37,12 @@ public:
     // Values are positional and must follow names() exactly.
     float evaluate_slots(const float* values, size_t count);
     double evaluate_slots(const double* values, size_t count);
+    // The const overload does not use the program's scratch slots. A non-JIT
+    // interpreter context still requires external synchronization.
+    double evaluate_slots(const double* values, size_t count) const;
     float evaluate_slots(const std::vector<float>& values);
     double evaluate_slots(const std::vector<double>& values);
+    double evaluate_slots(const std::vector<double>& values) const;
 
     const std::vector<std::string>& names() const;
     bool uses_jit() const;

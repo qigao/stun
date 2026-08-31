@@ -7,11 +7,17 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
+
+namespace flex {
+class MirExpressionProgram;
+}
 
 namespace flexUI {
 
 class Element;
 class UiBindingRuntime;
+class UiDocumentInstantiator;
 
 using UiBindingId = std::uint64_t;
 
@@ -112,9 +118,26 @@ class UiBindingRuntime {
 
   bool update();
   UiBindingStats stats() const;
+  std::uint64_t expression_compile_count() const;
 
  private:
   friend class UiBindingTargets;
+  friend class UiDocumentInstantiator;
+
+  struct TransactionCheckpoint {
+    std::size_t binding_count = 0;
+    UiBindingId next_id = 0;
+    bool active = false;
+  };
+
+  TransactionCheckpoint begin_transaction();
+  void commit_transaction(TransactionCheckpoint& checkpoint);
+  void rollback_transaction(TransactionCheckpoint& checkpoint) noexcept;
+  UiBindingHandle bind_compiled_class(
+      Element& target, std::string class_name,
+      const std::vector<std::string>& dependencies,
+      std::shared_ptr<const flex::MirExpressionProgram> program);
+
   struct Impl;
   std::unique_ptr<Impl> impl_;
   UiBindingTargets targets_;

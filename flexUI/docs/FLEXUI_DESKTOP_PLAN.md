@@ -53,7 +53,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [x] 同步 CodeGraph 并审阅 UI Document、Box、EventDispatcher、binding runtime、TailwindCSS、
   TurboScript controller 文档和 gCanvas host protocol。
 - [x] 确认 `UiDocumentInstantiator` 已有 validate/build/commit 和失败不修改 Box 契约。
-- [x] 确认 `on.*` 当前仅生成 `data-flexui-on-*` metadata。
+- [x] 确认 P0 基线中的 `on.*` 仅生成 `data-flexui-on-*` metadata。
 - [x] 确认 binding 表达式已有 MIR compile-once 与 input version 跳过机制。
 - [x] 确认 gCanvas renderer 与可选 GLFW window helper 已分离，Context 为单线程。
 
@@ -73,39 +73,47 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### API 与数据结构
 
-- [ ] 设计 `CompiledUiProgram` 的公开/私有边界，保留现有 `UiDocumentDefinition` 契约。
-- [ ] 定义 `EventBinding`、`BindingDefinition`、`SourceSpan` 和 interned symbol ownership。
-- [ ] 定义支持的 `UiEventKind`，拒绝任意未知 `on.*` 名称。
-- [ ] 定义首批 `UiBindingTargetKind`，仅覆盖现有 runtime 可完整表达的 target。
-- [ ] 明确 compiled program 的不可变性、共享方式、线程约束和销毁顺序。
-- [ ] 为 event/binding/resource 数量增加可配置上限和结构化错误码。
+- [x] 设计 `CompiledUiProgram` 的公开/私有边界，保留现有 `UiDocumentDefinition` 契约。
+- [x] 定义 `EventBinding`、`BindingDefinition` 和 `SourceSpan`；interned symbol ownership 留待 load-path 优化。
+- [x] 定义支持的 `UiEventKind`，拒绝任意未知 `on.*` 名称。
+- [x] 冻结 P1 首批 `UiBindingTargetKind` DSL 命名为 text/classes/utilities/class toggle；
+  runtime 的单 utility、attribute 与 custom property 不在 P1 compiled document 范围内。
+- [x] 明确 compiled program 的不可变性、共享方式、线程约束和销毁顺序。
+- [x] 为 event/binding 数量增加可配置上限和结构化错误码。
+- [x] 为 resource 数量增加可配置上限和结构化错误码。
 
 ### Parser 与 semantic lowering
 
-- [ ] 扩展 `.flex ui` property semantic，识别并校验 `bind.*`。
-- [ ] 将 `on.*` lower 为类型化 `EventBinding`，保留 source location。
-- [ ] 将 `bind.*` 表达式编译为 MIR program，收集输入 dependency symbols。
-- [ ] 在 load 阶段拒绝 duplicate event binding、target ownership 冲突和非法表达式类型。
-- [ ] 保留 `data-flexui-on-*` 为 handler table 的只读兼容投影。
-- [ ] 禁止通过 runtime attribute mutation 反向修改 handler table。
-- [ ] 保持 `scene`、component 和现有未知普通 property lowering 不变。
+- [x] 扩展 `.flex ui` property semantic，识别并校验 `bind.*`。
+- [x] 将 `on.*` lower 为类型化 `EventBinding`，保留 source location。
+- [x] 将 bool `bind.*` 表达式编译为 MIR program，string binding 收集直接 input dependency。
+- [x] 在 load 阶段拒绝重复 `on.*`/`bind.*` 属性，并报告后一处属性的 source span。
+- [x] 在 compiled lowering 阶段拒绝 class-list/class-token target ownership 冲突；runtime
+  继续保留同语义校验作为防线。
+- [x] 拒绝首批 string target 的非单 input 表达式和 class toggle 的非法 MIR 表达式。
+- [x] 保留 `data-flexui-on-*` 为 compiled event table 的兼容投影。
+- [x] compiled event table 提供 element/event 的只读索引查询；runtime attribute mutation
+  不会反向修改 handler table。
+- [x] 保持 `scene`、component 和现有未知普通 property lowering 不变。
 
 ### Instantiation
 
-- [ ] 让 instantiator 接受 compiled program 或新增独立 program instantiator，不破坏旧入口。
-- [ ] detached build 阶段解析所有 element ID target。
-- [ ] binding 安装失败时销毁 candidate tree，Box 保持不变。
-- [ ] handler resolution 失败时返回 element、event、handler 和 source span。
-- [ ] 成功后 Box 仍是 Element tree 唯一 owner，compiled program 仅为只读模板。
+- [x] 让 instantiator 接受 compiled program，不破坏旧 definition 入口。
+- [x] detached build 阶段解析所有 element ID target。
+- [x] binding 安装失败时销毁 candidate tree，Box root/index/bindings/handle sequence 保持不变。
+- [x] 成功后 Box 仍是 Element tree 唯一 owner，compiled program 仅为只读模板。
 
 ### 测试
 
-- [ ] lexer/parser：`bind.*`、`on.*`、source span、逗号与嵌套语法。
-- [ ] semantic：未知 event、未知 target、重复 handler、类型错误和资源超限。
-- [ ] MIR：数字/布尔/string 输入、dependency version 和 invalid expression。
-- [ ] compatibility：旧 `on.*` attribute 查询结果不变。
-- [ ] transaction：任一 binding/handler 失败时 Box root/index/bindings 均不变。
-- [ ] scene 与 ui 同文件回归。
+- [x] lexer/parser：`bind.*`、`on.*`、source span、逗号与嵌套语法。
+- [x] semantic：未知 event/target、重复 event/binding、binding ownership 冲突、类型错误和
+  event/binding 数量超限。
+- [x] semantic：resource 超限。
+- [x] MIR：数字/布尔/string 输入、dependency version 和 invalid expression。
+- [x] compatibility：旧 `on.*` attribute 查询结果不变。
+- [x] binding install：text/classes/utilities 与 MIR class toggle 随 input version 更新，且复用 compiled MIR。
+- [x] binding transaction：失败不安装 root/index/bindings，且不消耗 binding handle。
+- [x] assets、component、scene 与 ui 顶层结构互不吞噬的回归。
 
 完成条件：`.flex` 可生成不可变 compiled program；脚本尚未接管事件；现有 UiDocument API 和
 测试保持兼容。
@@ -160,6 +168,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [ ] 定义 `{id, generation}` `UiHandle` 和 generation 失效规则。
 - [ ] 定义 `UiMutation` `std::variant` 与 `UiMutationBatch` limits。
 - [ ] 定义 `ApplicationCommand` 与 UI mutation 分离的 effect result。
+- [ ] candidate mount 前解析 compiled handler table；失败返回 element、event、handler 和 source span。
 
 ### Fake module
 
@@ -168,6 +177,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [ ] 测无 `on_frame` 时帧路径零 script callback。
 - [ ] 测 fault 后拒绝新 callback，显式 reload 才恢复。
 - [ ] 测 module/controller/Box 析构顺序和 callback 中关闭窗口。
+- [ ] 测 handler resolution 或 callback 失败时 Box root/index/bindings 与 mutation state 均不变。
 
 ### Mutation engine
 

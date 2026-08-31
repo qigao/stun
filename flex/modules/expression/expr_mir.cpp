@@ -1072,6 +1072,10 @@ float MirExpressionProgram::evaluate_slots(const float* values, size_t count) {
 }
 
 double MirExpressionProgram::evaluate_slots(const double* values, size_t count) {
+    return static_cast<const MirExpressionProgram&>(*this).evaluate_slots(values, count);
+}
+
+double MirExpressionProgram::evaluate_slots(const double* values, size_t count) const {
     if (count != impl_->names.size()) {
         throw std::invalid_argument("MIR expression slot count does not match names()");
     }
@@ -1098,6 +1102,10 @@ float MirExpressionProgram::evaluate_slots(const std::vector<float>& values) {
 }
 
 double MirExpressionProgram::evaluate_slots(const std::vector<double>& values) {
+    return static_cast<const MirExpressionProgram&>(*this).evaluate_slots(values);
+}
+
+double MirExpressionProgram::evaluate_slots(const std::vector<double>& values) const {
     return evaluate_slots(values.data(), values.size());
 }
 

@@ -48,8 +48,9 @@ QObject 或浏览器 DOM：
 - `UiDocumentDefinition` 已是 parser-independent 值语义树，并带 source、node、depth、property
   和 string 资源上限；`UiDocumentInstantiator` 承诺失败时目标 Box 不变。证据：
   `flexUI/include/flexUI/ui_document.h`、`flexUI/src/ui_document.cpp`。
-- `.flex` UI 文档已经支持 `on.event`，但当前只映射为 `data-flexui-on-event` attribute，尚未
-  生成类型化 controller handler table。证据：`flexUI/docs/FLEX_UI_DOCUMENT_DESIGN.md`、
+- `.flex` UI 文档已经把 `on.event` 降级为不可变类型化事件表，并提供按 element/event 查询的
+  只读索引；实例化时从该表生成可变的 `data-flexui-on-event` 兼容 attribute。TurboScript export
+  resolution 与 controller dispatch 尚未实现。证据：`flexUI/include/flexUI/ui_document.h`、
   `flexUI/src/ui_document.cpp`。
 - `UiDataContext` 是单线程类型化输入事实源；数值和布尔表达式创建 binding 时编译为 MIR，
   输入版本不变时跳过求值。证据：`flexUI/include/flexUI/binding_runtime.h`、
@@ -241,34 +242,42 @@ schema、路径、资源上限和 required capability 校验；非法配置直�
 
 ### 7.1 目标语法
 
-现有属性保持兼容，并建议新增 `bind.*`：
+现有属性保持兼容。P1 首批已实现的 `bind.*` 语法如下：
 
 ```flex
 ui MainWindow {
     div root {
         utility: "flex min-h-screen flex-col",
 
-        input document_title {
-            bind.value: "document.title",
-            on.change: "title_changed"
-        },
-
         button save {
             text: "Save",
             utility: "rounded-md px-4 py-2",
-            bind.enabled: "!document.saving && document.dirty",
+            bind.class_enabled: ${can_save},
             on.click: "save_document"
         },
 
         div status {
-            bind.text: "document.status"
+            bind.text: $document_status
         }
     }
 }
 ```
 
-这段代码是目标语法，不代表 `bind.*` 已实现。首批 target 限制为现有 binding runtime 能完整
-表达的 class、classes、utility、utilities、attribute、text、value 和 custom property。
+P1 当前刻意限定的首批 target 子集是 `text`、`classes`、`utilities` 和 `class_<token>`。
+binding runtime 已有的单 utility、attribute 与 custom property 尚未定义稳定的 DSL 命名，不能把
+这一首批子集理解为普通 `Element` 的能力上限。`bind.value` 需要 `TextValueWidget` 和双向 observer，而当前 document builder
+只创建普通 `Element`，因此编译阶段明确拒绝；后续只有在 widget factory 进入同一装载事务后才可开放。
+string target 使用单一 `$input`，class toggle 使用 `${boolean_expression}` 并在安装时校验其
+number/bool 输入已经声明。编译产物中的 immutable MIR JIT artifact 由 program 与已安装 binding
+共享，不在每次实例化时重新编译；不具备 JIT artifact 时安装直接失败，禁止跨 Box 共享 MIR
+interpreter 的可变 context。任一绑定安装失败都会回滚本批绑定、句柄序列和 candidate tree。
+
+解析器继续保持普通 node property 的既有 last-write-wins 行为，但会额外记录重复属性的后一处
+source span；FlexUI validation 对重复 `on.*` 和 `bind.*` 单独 fail fast，不让 handler 或 binding
+因 map 覆盖而静默改变。binding lowering 在同一 element 内按 source span 排序后检查 ownership：
+`bind.classes`/`bind.utilities` 独占完整 class list，不能与另一完整 list binding 或任意
+`bind.class_<token>` 共存；不同 token 的 class binding 可以共存。runtime 的 ownership 校验仍然
+保留，覆盖手工 API 调用并防止 compiled/load 边界被绕过。
 
 ### 7.2 不修改现有 Definition 契约
 
@@ -279,24 +288,21 @@ CompiledUiProgram
 ├── shared_ptr<const UiDocumentDefinition>
 ├── EventBinding[]
 ├── BindingDefinition[]
+├── UiResourceDefinition[]
 ├── interned Symbol table
 ├── SourceMap
-└── declared resources/capabilities
+└── declared capabilities
 ```
 
 建议的概念类型：
 
 ```cpp
 enum class UiBindingTargetKind {
-  Class,
-  Classes,
-  Utility,
-  Utilities,
-  Attribute,
   Text,
-  Value,
-  CustomProperty,
-  Enabled
+  Value, // 为公开枚举的源兼容保留；document lowering 暂不生成
+  Classes,
+  Utilities,
+  ClassToggle
 };
 
 struct EventBinding {
@@ -315,9 +321,19 @@ struct BindingDefinition {
 };
 ```
 
-实际公开性和字段需要在实现阶段审核；这里定义的是数据职责。`on.*` 的旧
+当前实现使用 `std::string` 保存 element/input 名称，并把 MIR program 留在
+`CompiledUiProgram::Impl`；symbol interning 仍是后续 load-path 优化，不是 P1 正确性前提。
+现有顶层 `assets {}` 会在同一次 parse 中 lower 为 parser-independent、只读的
+`UiResourceDefinition[]`；`UiDocumentLimits::max_resources` 在发布 compiled program 前限制条目数，
+超限返回 `ResourceLimitExceeded`，不截断资源表。资源表只描述 type、id、path 和 literal options，
+不持有 gCanvas、文件或插件句柄。
+`on.*` 的旧
 `data-flexui-on-*` attribute 在迁移期可继续由 `EventBinding` 派生，保证现有查询和测试不变，
-但 handler table 是唯一事实源，attribute 不能反向修改 handler。
+但 handler table 是唯一事实源，attribute 不能反向修改 handler。`CompiledUiProgram` 通过
+`find_event_binding(element_id, event)` 提供只读索引查询；索引以 element `Symbol` 分桶并在命中后
+比较完整 element ID 和 event kind，因此不把 32 位 hash 相等误当成身份相等。compatibility
+attribute 的修改或删除只改变 Element metadata，不改变查询结果。controller 必须持有共享的
+compiled program，Box 和 Element 不维护第二份 handler 状态。
 
 ### 7.3 查找复杂度
 
@@ -680,7 +696,7 @@ binding 或 plugin contract。
 - event callback 使用 interned symbol、连续 snapshot 和有界 batch，不逐帧扫描 Element tree。
 - 无 `on_frame` export 时每帧脚本调用数为零。
 - DLL service 以 command/batch 粒度调用，不在每个 Element 或 draw command 上跨 ABI。
-- 可增长结构必须由 application limits 配置容量：plugin count、service count、event bindings、
+- 可增长结构必须由 application limits 配置容量：plugin count、service count、declared resources、event bindings、
   mutation commands、completion queue、script values、controller memory 和 GPU resources。
 - 渲染保持 RenderCommandList 路径；controller 和 plugin 不进入 paint replay。
 
@@ -733,7 +749,7 @@ FlexUI::Desktop
 ### 19.2 迁移路径
 
 1. 新增 `CompiledUiProgram`，保留 `parse_ui_document` 和 `UiDocumentInstantiator`。
-2. `on.*` 同时生成 handler table 与只读兼容 attribute；现有测试保持通过。
+2. `on.*` 生成唯一 handler table，并由该表投影可变兼容 attribute；attribute 修改不反写事件表。
 3. controller 先接 fake module，不改变默认 Box 事件路径。
 4. TurboScript adapter 由显式 feature 和 application builder 启用。
 5. DLL plugin host 先独立测试，再向 controller service bridge 注册 capability。
@@ -755,7 +771,7 @@ FlexUI::Desktop
 | HIGH | 推论 | DLL 可破坏宿主进程内存，无法在同进程可靠恢复 | 首版只加载可信插件；不可信插件以后进程隔离 |
 | HIGH | 事实 | 当前 Event 包含裸 `Element* target`，不能直接复制到脚本/DLL | 构造值语义 snapshot，只含 handle 和有限字段 |
 | HIGH | 推论 | mutation 与外部副作用混合会产生不可回滚状态 | 分离 UiMutation 与 ApplicationCommand，先 reserve 再发布 |
-| MED | 事实 | `on.*` 当前只是 attribute metadata | 新增类型化 handler table，并保留只读兼容投影 |
+| MED | 事实 | handler export 尚未在 TurboScript load 边界解析 | controller 接入时增加带 source span 的 export resolution；兼容 attribute 不参与解析 |
 | MED | 推论 | literal XML 双栈会扩大迁移和测试成本 | XML 仅作为同一 definition 的 adapter |
 | MED | 事实 | gCanvas Context 单线程且 host/window 有明确销毁顺序 | DesktopHost 固化 UI-thread 和 shutdown protocol |
 | MED | 推论 | 热重载 DLL 容易遗留函数指针和 worker | 首版不启用；后续需引用清零、状态迁移和原子路由 |
