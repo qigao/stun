@@ -181,12 +181,13 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### Mutation engine
 
-- [ ] 将 normalize、resolve、prepare、commit、rollback 拆成明确阶段。
+- [x] 将 normalize、resolve、prepare、commit/discard 拆成明确阶段；prepare 失败或丢弃 staging
+  即为 rollback，commit 边界无失败操作。
 - [x] 为每种 mutation 写明 target owner、前置条件、错误码和 rollback 数据。
-- [ ] commit 前预留内存并准备新旧值 swap，rollback 必须 `noexcept`。
-- [x] 当前 Element API 无法提供强保证的 mutation 暂不通过真实 Box host 暴露给脚本。
-- [ ] stale handle、重复 target owner、错误类型、超额 batch 立即失败（Box stale
-  resolution 与 batch/number/name limits 已完成；真实 host ownership/type validation 待完成）。
+- [x] commit 前完成所有分配并准备最终值 swap；丢弃 staging 为 `noexcept` RAII rollback。
+- [x] `BoxMutationHost` 不调用可能分配的 Element setter，按实际触及字段准备最终 state 并 swap。
+- [x] stale/detached/widget-owned handle、错误 input 类型、未知 utility、超额 batch 立即失败；
+  同一 target 的多条 mutation 在单一 staging 中按 batch 顺序合并。
 - [ ] application command queue 先 reserve，再在 UI commit 成功后 publish。
 - [ ] 不可回滚外部副作用不能在 controller callback 栈内执行。
 

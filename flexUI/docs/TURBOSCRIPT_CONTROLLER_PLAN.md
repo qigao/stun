@@ -115,15 +115,16 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
 
 - [ ] 新增 `IScriptModule` 小接口和 TurboScript 实现，使用 Pimpl/opaque handle。
 - [ ] 实现 source/module 生命周期、export 缓存、值转换和错误转换。
-- [ ] 断言 context 只由创建它的 UI 线程访问。
-- [ ] 增加 bounded `ScriptEventSnapshot` 与 `UiMutationBatch`。
-- [ ] mutation validation 与 commit 分离，失败时整批丢弃。
+- [x] 断言 controller/module context 只由创建它的 UI 线程访问。
+- [x] 增加 bounded `ScriptEventSnapshot` 与 `UiMutationBatch`。
+- [x] mutation validation 与 commit 分离，失败时整批丢弃。
 
 ### 测试
 
-- [ ] fake module 测 controller 调度，不依赖 TurboScript。
+- [x] fake module 测 controller 调度，不依赖 TurboScript。
 - [ ] adapter contract 测真实 TurboScript load/call/error/interrupt。
-- [ ] stale `UiHandle`、超额 batch、错误类型、删除 subtree 后调用均 fail fast。
+- [ ] stale `UiHandle`、超额 batch、错误类型、删除 subtree 后调用均 fail fast（前三项已完成；
+  Box 尚无通用 subtree destruction API）。
 - [ ] ASan/UBSan 可用配置下检查 reload/unmount 生命周期。
 
 完成条件：adapter 可独立验证，不修改 Box 默认事件、update 或 render 路径。

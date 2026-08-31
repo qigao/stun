@@ -657,7 +657,19 @@ input 名和值都计入预算。adapter 创建 batch 时可以使用更严格�
 4. commit：通过只允许无失败 swap/赋值的 mutation adapter 提交。
 5. rollback：若 commit 边界仍出现错误，按反向 journal 恢复；rollback 本身必须 `noexcept`。
 
-在现有 Element setter 尚不能提供强异常保证前，对应 mutation 不得进入公开脚本 API。
+`BoxMutationHost` 是 `FlexUI::Controller` 中依赖 `FlexUI::Core` 的薄适配层。它只接受从 Box root
+可达的 application-owned Element；stale、detached、widget-owned target 在 prepare 阶段返回
+`InvalidTarget`。同一 Element 的多条命令按 batch 顺序合并到一个 final-state staging。prepare 按需
+复制实际触及的字段：`SetText` 不复制 selector/attribute 状态，attribute mutation 不复制 class sets。
+classes/utilities 在 staging 中完成 token 解析、catalog 校验和 selector state 重建。commit 只 swap 已准备
+的 string/map/set，设置 dirty flags，不分配、不解析，也不调用可能分配的公开 setter。未 commit 的
+staging 由 RAII 丢弃；commit 为幂等 `noexcept` 操作。
+
+Binding input mutation 只更新调用方预先声明且类型固定的 input，不允许脚本隐式创建或改变 input
+schema。prepare 验证 name 存在、number/bool/string 类型吻合并检查 revision 不溢出；commit 仅更新
+现有 map entry。UI element staging 与 input staging 全部验证完成后才生成 prepared transaction，任一
+错误不会留下部分状态。
+
 `Box::elements_by_id_` 的索引条目同时持有 Element pointer 与 generation，是句柄状态的唯一事实源；
 Controller 不维护镜像 registry。创建带 ID 元素、ID 改名、重复 ID 覆盖、旧 owner 恢复和 ID 复用都会
 取得新的 Box-wide 单调 generation，因此旧句柄不会因相同字符串 ID 再次出现而复活。空 ID、被重复
@@ -671,10 +683,10 @@ counter。
 application ownership 和 target kind；未来 subtree destruction 必须在释放内存前删除索引条目，使句柄
 立即 stale。
 
-当前 `IUiMutationHost` 只定义真实 host 必须满足的事务边界，并由 fake host 验证：`prepare()` 不可改变
-可观察状态，返回的 `IPreparedUiMutation` 独占所有 staging 且不得保留 batch view；未 commit 的 staging
-随 RAII 析构丢弃，`commit()` 必须 `noexcept`、不分配且只调用一次。真实 Box host 与完整 target
-ownership/type 验证尚未实现，因此 TurboScript adapter 不得提前暴露这些 mutation。
+`IUiMutationHost` 定义 host 事务边界，并由 fake host 与真实 `BoxMutationHost` 共同验证：`prepare()`
+不可改变可观察状态，返回的 `IPreparedUiMutation` 独占所有 staging 且不得保留 batch view；未 commit
+的 staging 随 RAII 析构丢弃，`commit()` 必须幂等、`noexcept` 且不分配。TurboScript adapter 仍需
+完成自己的 value conversion 和 resource limits 后才可暴露这些 mutation。
 
 ### 13.2 ApplicationCommand
 

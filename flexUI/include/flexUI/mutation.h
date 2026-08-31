@@ -75,6 +75,8 @@ enum class MutationErrorCode {
   InvalidTarget,
   InvalidName,
   InvalidNumber,
+  InvalidType,
+  InvalidValue,
   HostPrepareFailed,
   InternalInvariant,
 };

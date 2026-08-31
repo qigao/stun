@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <iomanip>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -206,6 +208,61 @@ void UiDataContext::set_string(const std::string& name, std::string value) {
   }
   impl_->string_values[symbol] = std::move(value);
   impl_->commit(symbol, InputKind::String);
+}
+
+bool UiDataContext::commit_existing_number(const std::string& name,
+                                           double value) noexcept {
+  const flex::Symbol symbol(name);
+  auto record = impl_->records.find(symbol);
+  auto stored = impl_->numeric_values.find(symbol);
+  if (record == impl_->records.end() || stored == impl_->numeric_values.end() ||
+      record->second.kind != InputKind::Number || !std::isfinite(value) ||
+      impl_->global_revision == std::numeric_limits<std::uint64_t>::max()) {
+    std::terminate();
+  }
+  if (stored->second == value) {
+    return false;
+  }
+  stored->second = value;
+  record->second.version = ++impl_->global_revision;
+  return true;
+}
+
+bool UiDataContext::commit_existing_bool(const std::string& name,
+                                         bool value) noexcept {
+  const flex::Symbol symbol(name);
+  auto record = impl_->records.find(symbol);
+  auto stored = impl_->numeric_values.find(symbol);
+  if (record == impl_->records.end() || stored == impl_->numeric_values.end() ||
+      record->second.kind != InputKind::Bool ||
+      impl_->global_revision == std::numeric_limits<std::uint64_t>::max()) {
+    std::terminate();
+  }
+  const double numeric = value ? 1.0 : 0.0;
+  if (stored->second == numeric) {
+    return false;
+  }
+  stored->second = numeric;
+  record->second.version = ++impl_->global_revision;
+  return true;
+}
+
+bool UiDataContext::commit_existing_string(const std::string& name,
+                                           std::string& value) noexcept {
+  const flex::Symbol symbol(name);
+  auto record = impl_->records.find(symbol);
+  auto stored = impl_->string_values.find(symbol);
+  if (record == impl_->records.end() || stored == impl_->string_values.end() ||
+      record->second.kind != InputKind::String ||
+      impl_->global_revision == std::numeric_limits<std::uint64_t>::max()) {
+    std::terminate();
+  }
+  if (stored->second == value) {
+    return false;
+  }
+  stored->second.swap(value);
+  record->second.version = ++impl_->global_revision;
+  return true;
 }
 
 bool UiDataContext::erase(const std::string& name) {

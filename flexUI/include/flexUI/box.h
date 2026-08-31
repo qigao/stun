@@ -36,6 +36,7 @@ struct RenderFrame;
 class ViewPipeline;
 class UiKeyedRepeater;
 class UiDocumentInstantiator;
+class BoxPreparedMutation;
 
 enum class PointerPrecision {
   None,
@@ -157,6 +158,7 @@ public:
   std::vector<Element*> query_selector_all(const std::string& selector);
   void set_root(Element* elem);
   Element* root() { return root_; }
+  const Element* root() const { return root_; }
 
   // 视口
   void set_viewport(float width, float height);
@@ -220,6 +222,7 @@ private:
 
   friend class UiKeyedRepeater;
   friend class UiDocumentInstantiator;
+  friend class BoxPreparedMutation;
   friend class Element;
   friend class Widget;
 

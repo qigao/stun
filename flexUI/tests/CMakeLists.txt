@@ -123,6 +123,12 @@ target_include_directories(test_ui_handle PRIVATE ../include)
 set_target_properties(test_ui_handle PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_ui_handle COMMAND test_ui_handle)
 
+add_executable(test_box_mutation_host test_box_mutation_host.cpp)
+target_link_libraries(test_box_mutation_host PRIVATE FlexUI::Controller)
+flexui_configure_tinytest(test_box_mutation_host)
+set_target_properties(test_box_mutation_host PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_box_mutation_host COMMAND test_box_mutation_host)
+
 add_executable(test_keyed_repeater test_keyed_repeater.cpp)
 target_link_libraries(test_keyed_repeater PRIVATE flexUI)
 flexui_configure_tinytest(test_keyed_repeater)
