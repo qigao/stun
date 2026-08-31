@@ -63,6 +63,10 @@ public:
       return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
                "injected callback failure"}};
     }
+    if (found->second == timeout_export) {
+      return {{flexUI::ScriptModuleErrorCode::Timeout,
+               "injected callback timeout"}};
+    }
     if (found->second == throwing_export) {
       throw std::runtime_error("injected script exception");
     }
@@ -91,6 +95,7 @@ public:
 
   std::vector<std::string> calls;
   std::string failing_export;
+  std::string timeout_export;
   std::string throwing_export;
   std::string zero_handle_export;
   std::string mutation_export;
@@ -396,6 +401,61 @@ spec("FlexUI script controller lifecycle") {
     check(dispatched.error.module_error.code ==
           flexUI::ScriptModuleErrorCode::RuntimeFailure);
     check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("preserves real Box state when a callback times out") {
+    flexUI::Box box(nullptr);
+    auto *save = box.create("button", "save");
+    box.set_root(save);
+    save->set_text("before");
+    box.bindings().inputs().set_number("count", 3.0);
+    const auto handle = box.handle_for(*save);
+    const auto revision = box.bindings().inputs().revision();
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->timeout_export = "save_document";
+    flexUI::BoxMutationHost host(box);
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+    auto event = click_event();
+    event.target = handle;
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(event);
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::ModuleCallFailed);
+    check(dispatched.error.module_error.code ==
+          flexUI::ScriptModuleErrorCode::Timeout);
+    check(controller.state() == flexUI::ControllerState::Faulted);
+    check(box.root() == save);
+    check(box.resolve_handle(handle) == save);
+    check_equal(save->text(), std::string("before"));
+    check_equal(box.bindings().inputs().number("count"), 3.0);
+    check_equal(box.bindings().inputs().revision(), revision);
+  }
+
+  it("preserves real Box state when handler resolution fails") {
+    flexUI::Box box(nullptr);
+    auto *save = box.create("button", "save");
+    box.set_root(save);
+    save->set_text("before");
+    const auto handle = box.handle_for(*save);
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"on_mount"});
+    flexUI::BoxMutationHost host(box);
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+
+    const auto loaded = controller.load(std::move(module), controller_program());
+    check_false(static_cast<bool>(loaded));
+    check(loaded.error.code ==
+          flexUI::ControllerErrorCode::MissingHandlerExport);
+    check(controller.state() == flexUI::ControllerState::Empty);
+    check(box.root() == save);
+    check(box.resolve_handle(handle) == save);
+    check_equal(save->text(), std::string("before"));
   }
 
   it("commits a callback mutation batch after module success") {

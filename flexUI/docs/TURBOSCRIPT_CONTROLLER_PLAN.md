@@ -123,7 +123,8 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
 
 ### 测试
 
-- [x] fake module 测 controller 调度，不依赖 TurboScript。
+- [x] fake module 测 controller 调度、timeout、injected error 与真实 Box 状态不变性，不依赖
+  TurboScript。
 - [ ] adapter contract 测真实 TurboScript load/call/error/interrupt。
 - [ ] stale `UiHandle`、超额 batch、错误类型、删除 subtree 后调用均 fail fast（前三项已完成；
   Box 尚无通用 subtree destruction API）。

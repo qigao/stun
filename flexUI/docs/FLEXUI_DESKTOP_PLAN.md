@@ -172,12 +172,12 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### Fake module
 
-- [ ] 实现 test-only fake module，支持 export presence、call result、timeout 和 injected error。
+- [x] 实现 test-only fake module，支持 export presence、call result、timeout 和 injected error。
 - [x] 测 mount/event/optional-frame/unmount 调用顺序。
 - [x] 测无 `on_frame` 时帧路径零 script callback。
 - [x] 测 fault 后拒绝新 callback，显式 reload 才恢复。
 - [ ] 测 module/controller/Box 析构顺序和 callback 中关闭窗口。
-- [ ] 测 handler resolution 或 callback 失败时 Box root/index/bindings 与 mutation state 均不变。
+- [x] 测 handler resolution 或 callback timeout 时 Box root/index/bindings 与 mutation state 均不变。
 
 ### Mutation engine
 
