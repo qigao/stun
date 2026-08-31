@@ -42,24 +42,24 @@ struct ScriptModuleError {
   ScriptModuleErrorCode code = ScriptModuleErrorCode::None;
   std::string message;
 
-  explicit operator bool() const noexcept {
-    return code != ScriptModuleErrorCode::None;
-  }
+  explicit operator bool() const noexcept { return code != ScriptModuleErrorCode::None; }
 };
 
 struct ScriptResolveResult {
   std::optional<ScriptExportHandle> handle;
   ScriptModuleError error;
 
-  explicit operator bool() const noexcept {
-    return !static_cast<bool>(error);
-  }
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
 /// Pointer-free, value-semantic event passed across the script boundary.
 struct ScriptEventSnapshot {
   UiEventKind event = UiEventKind::Click;
+  /// Original routed event target.
   UiHandle target;
+  /// Element whose compiled handler is being invoked. Equals target for a
+  /// target handler and names each ancestor in turn during bubbling.
+  UiHandle current_target;
   double x = 0.0;
   double y = 0.0;
   double delta_x = 0.0;
@@ -93,9 +93,7 @@ struct ScriptCallResult {
   UiMutationBatch mutations{};
   ApplicationCommandBatch commands{};
 
-  explicit operator bool() const noexcept {
-    return !static_cast<bool>(error);
-  }
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
 /// Script runtime strategy used by ScriptController.
@@ -107,9 +105,9 @@ class IScriptModule {
 public:
   virtual ~IScriptModule() = default;
 
-  virtual ScriptResolveResult resolve_export(std::string_view name) = 0;
-  virtual ScriptCallResult call(ScriptExportHandle handle,
-                                const ScriptCallContext &context) = 0;
+  virtual ScriptResolveResult resolve_export(std::string_view name,
+                                             ScriptCallbackKind callback) = 0;
+  virtual ScriptCallResult call(ScriptExportHandle handle, const ScriptCallContext &context) = 0;
 };
 
 struct ControllerLimits {
@@ -154,23 +152,19 @@ struct ControllerError {
   MutationError mutation_error;
   ApplicationCommandError command_error;
 
-  explicit operator bool() const noexcept {
-    return code != ControllerErrorCode::None;
-  }
+  explicit operator bool() const noexcept { return code != ControllerErrorCode::None; }
 };
 
 struct ControllerResult {
   ControllerError error;
 
-  explicit operator bool() const noexcept {
-    return !static_cast<bool>(error);
-  }
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
 /// Non-owning effect engines used by callback result processing.
 struct ControllerEffects {
-  UiMutationEngine* mutations = nullptr;
-  ApplicationCommandEngine* commands = nullptr;
+  UiMutationEngine *mutations = nullptr;
+  ApplicationCommandEngine *commands = nullptr;
 };
 
 /// UI-thread-owned lifecycle coordinator for one compiled script module.
@@ -185,13 +179,11 @@ public:
   /// @param mutation_engine Must outlive this controller and share its owner
   ///        thread. Callback batches are normalized and committed through it.
   /// @param limits Hard byte limits checked before script dispatch.
-  ScriptController(UiMutationEngine &mutation_engine,
-                   ControllerLimits limits = {});
+  ScriptController(UiMutationEngine &mutation_engine, ControllerLimits limits = {});
   /// Creates an empty controller with independently optional UI and
   /// application-command effect engines. Every non-null engine must outlive
   /// the controller and share its owner thread.
-  ScriptController(ControllerEffects effects,
-                   ControllerLimits limits = {});
+  ScriptController(ControllerEffects effects, ControllerLimits limits = {});
   ~ScriptController();
 
   ScriptController(const ScriptController &) = delete;
@@ -205,9 +197,8 @@ public:
   /// @param program Immutable handler table retained on success.
   /// @return Success in Compiled state, or a source-located load error while
   ///         leaving the controller Empty. A failed call destroys module.
-  ControllerResult
-  load(std::unique_ptr<IScriptModule> module,
-       std::shared_ptr<const CompiledUiProgram> program);
+  ControllerResult load(std::unique_ptr<IScriptModule> module,
+                        std::shared_ptr<const CompiledUiProgram> program);
   /// Calls optional on_mount and transitions Compiled to Mounted.
   /// @return ModuleCallFailed and Faulted when the callback fails.
   ControllerResult mount();

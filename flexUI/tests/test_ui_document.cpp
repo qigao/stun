@@ -50,6 +50,64 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check_equal(parsed.definition->name, compiled.program->name());
   }
 
+  it("compiles parser-independent definitions into owned immutable programs") {
+    flexUI::UiDocumentDefinition definition;
+    definition.name = "Manual";
+    definition.root.tag = "div";
+    definition.root.id = "root";
+
+    flexUI::UiNodeDefinition button;
+    button.tag = "button";
+    button.id = "save";
+    button.properties["on.click"] = std::string("save_document");
+    button.property_spans["on.click"] = {7, 5, 8};
+    button.properties["bind.class_active"] = std::string("${enabled}");
+    button.property_spans["bind.class_active"] = {8, 5, 17};
+    definition.root.children.push_back(std::move(button));
+
+    std::vector<flexUI::UiResourceDefinition> resources{
+        {"image", "logo", "images/logo.png", {{"preload", true}}}};
+    const auto compiled =
+        flexUI::compile_ui_definition(definition, resources);
+    check(static_cast<bool>(compiled));
+
+    definition.name = "Changed";
+    definition.root.children.front().properties["on.click"] =
+        std::string("changed_handler");
+    resources.front().id = "changed";
+
+    check_equal(compiled.program->name(), "Manual");
+    check_equal(compiled.program->event_bindings().size(), 1);
+    check_equal(compiled.program->event_bindings().front().handler,
+                "save_document");
+    check_equal(compiled.program->bindings().size(), 1);
+    check_equal(compiled.program->bindings().front().dependencies.size(), 1);
+    check_equal(compiled.program->bindings().front().dependencies.front(),
+                "enabled");
+    check_equal(compiled.program->resources().size(), 1);
+    check_equal(compiled.program->resources().front().id, "logo");
+  }
+
+  it("validates parser-independent definitions before semantic lowering") {
+    flexUI::UiDocumentDefinition definition;
+    definition.name = "DuplicateIds";
+    definition.root.tag = "div";
+    definition.root.id = "same";
+    definition.root.children.push_back({"span", "same", {}, {}, {}});
+
+    const auto duplicate = flexUI::compile_ui_definition(definition);
+    check_false(static_cast<bool>(duplicate));
+    check(duplicate.error.code == UiDocumentErrorCode::DuplicateElementId);
+
+    flexUI::UiDocumentLimits limits;
+    limits.max_resources = 0;
+    definition.root.children.clear();
+    const auto over_limit = flexUI::compile_ui_definition(
+        definition, {{"image", "logo", "images/logo.png", {}}}, limits);
+    check_false(static_cast<bool>(over_limit));
+    check(over_limit.error.code == UiDocumentErrorCode::ResourceLimitExceeded);
+  }
+
   it("lowers supported event properties with source spans") {
     const char *source =
         "ui Main {\n"

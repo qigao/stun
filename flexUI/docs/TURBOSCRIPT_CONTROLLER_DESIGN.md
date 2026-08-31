@@ -144,8 +144,10 @@ unmount
   -> destroy module/context
 ```
 
-事件回调的准确插入点需要与现有 widget consumption 语义保持一致：默认只把未被 widget
-消费或明确允许继续传播的事件交给脚本，避免一次用户操作产生两套独立状态迁移。
+事件回调的插入点保持现有 widget consumption 语义：默认只把未被 widget 消费且仍在 route 中的
+事件交给脚本，避免一次用户操作产生两套独立状态迁移。快照分别保存原始 `target` 与当前 binding
+节点 `current_target`；脚本不持有 `Element*`。显式 consumed-event post-widget notification 尚未进入
+XML schema，因此当前不会隐式启用。
 
 ### 5.3 UI 句柄与变更批次
 

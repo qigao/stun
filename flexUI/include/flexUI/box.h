@@ -7,25 +7,25 @@
 #ifndef FLEXUI_BOX_H
 #define FLEXUI_BOX_H
 
-#include "element.h"
 #include "binding_runtime.h"
+#include "element.h"
 #include "event.h"
+#include "event_dispatcher.h"
 #include "style_engine.h"
 #include "tailwindcss.h"
 #include "transition.h"
 #include "ui_handle.h"
-#include "event_dispatcher.h"
 #include "view_pipeline.h"
-#include <flex/runtime/renderer.h>
 #include <cstdint>
+#include <flex/runtime/renderer.h>
 #include <functional>
 #include <map>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
-#include <memory>
 
 namespace flex {
-  class Renderer;
+class Renderer;
 }
 
 namespace flexUI {
@@ -90,82 +90,74 @@ struct BoxOptions {
  */
 class Box : private ViewPipelineHost {
 public:
-  explicit Box(flex::Renderer* renderer, BoxOptions options = {});
+  explicit Box(flex::Renderer *renderer, BoxOptions options = {});
   ~Box();
 
-  Box(const Box&) = delete;
-  Box& operator=(const Box&) = delete;
+  Box(const Box &) = delete;
+  Box &operator=(const Box &) = delete;
 
   // CSS
-  void load_css(const std::string& css);
-  CssLoadResult load_stylesheet(const std::string& css,
-                                const CssLoadOptions& options = {});
-  CssLoadResult replace_stylesheet(StylesheetId stylesheet_id,
-                                   const std::string& css,
-                                   const CssLoadOptions& options = {});
+  void load_css(const std::string &css);
+  CssLoadResult load_stylesheet(const std::string &css, const CssLoadOptions &options = {});
+  CssLoadResult replace_stylesheet(StylesheetId stylesheet_id, const std::string &css,
+                                   const CssLoadOptions &options = {});
   bool remove_stylesheet(StylesheetId stylesheet_id);
-  void enable_utility_jit(
-      nlohmann::json utility_whitelist,
-      tailwind::UtilityJitOptions options = {});
-  void enable_utility_jit(
-      std::shared_ptr<const tailwind::UtilityCatalog> utility_catalog,
-      tailwind::UtilityJitOptions options = {});
+  void enable_utility_jit(nlohmann::json utility_whitelist,
+                          tailwind::UtilityJitOptions options = {});
+  void enable_utility_jit(std::shared_ptr<const tailwind::UtilityCatalog> utility_catalog,
+                          tailwind::UtilityJitOptions options = {});
   void disable_utility_jit();
   bool utility_jit_enabled() const { return utility_jit_ != nullptr; }
   bool is_known_utility(std::string_view token) const {
     return utility_jit_ && utility_jit_->contains(token);
   }
-  std::uint64_t utility_jit_revision() const {
-    return utility_jit_ ? utility_jit_->revision() : 0;
-  }
+  std::uint64_t utility_jit_revision() const { return utility_jit_ ? utility_jit_->revision() : 0; }
   std::size_t active_utility_count() const {
     return utility_jit_ ? utility_jit_->active_token_count() : 0;
   }
   std::size_t utility_stylesheet_size() const {
     return utility_jit_ ? utility_jit_->stylesheet().size() : 0;
   }
-  const std::vector<std::string>& missing_utility_tokens() const {
-    return missing_utility_tokens_;
-  }
-  void set_variable(const std::string& name, const std::string& value);
-  bool register_font(const std::string& family, const std::string& path);
-  void unregister_font(const std::string& family);
+  const std::vector<std::string> &missing_utility_tokens() const { return missing_utility_tokens_; }
+  void set_variable(const std::string &name, const std::string &value);
+  bool register_font(const std::string &family, const std::string &path);
+  void unregister_font(const std::string &family);
 
   // 元素创建
-  Element* create(const std::string& tag, const std::string& id = "");
-  Element* create_with_widget(const std::string& tag, std::unique_ptr<Widget> widget, const std::string& id = "");
+  Element *create(const std::string &tag, const std::string &id = "");
+  Element *create_with_widget(const std::string &tag, std::unique_ptr<Widget> widget,
+                              const std::string &id = "");
   // Takes ownership of widget. Prefer the unique_ptr overload in new code.
-  Element* create_with_widget(const std::string& tag, Widget* widget, const std::string& id = "");
+  Element *create_with_widget(const std::string &tag, Widget *widget, const std::string &id = "");
 
-  template<typename WidgetT, typename... Args>
-  Element* create_widget(const std::string& tag, const std::string& id, Args&&... args) {
-    return create_with_widget(
-        tag, std::make_unique<WidgetT>(std::forward<Args>(args)...), id);
+  template <typename WidgetT, typename... Args>
+  Element *create_widget(const std::string &tag, const std::string &id, Args &&...args) {
+    return create_with_widget(tag, std::make_unique<WidgetT>(std::forward<Args>(args)...), id);
   }
 
-  Element* get_by_id(const std::string& id);
+  Element *get_by_id(const std::string &id);
   /// Returns the current Box-index incarnation for an element.
   /// @param element Element expected to be the current owner of its non-empty
   ///        id in this Box.
   /// @return A value handle, or an invalid handle for an id-less, shadowed, or
   ///         foreign element. Copying the id may throw std::bad_alloc.
-  UiHandle handle_for(const Element& element) const;
+  UiHandle handle_for(const Element &element) const;
   /// Resolves a handle only when both id and generation match the current
   /// index incarnation. The returned pointer is borrowed from this Box.
-  Element* resolve_handle(const UiHandle& handle) noexcept;
-  const Element* resolve_handle(const UiHandle& handle) const noexcept;
-  Element* query_selector(const std::string& selector);
-  std::vector<Element*> query_selector_all(const std::string& selector);
-  void set_root(Element* elem);
-  Element* root() { return root_; }
-  const Element* root() const { return root_; }
+  Element *resolve_handle(const UiHandle &handle) noexcept;
+  const Element *resolve_handle(const UiHandle &handle) const noexcept;
+  Element *query_selector(const std::string &selector);
+  std::vector<Element *> query_selector_all(const std::string &selector);
+  void set_root(Element *elem);
+  Element *root() { return root_; }
+  const Element *root() const { return root_; }
 
   // 视口
   void set_viewport(float width, float height);
   float viewport_width() const { return viewport_width_; }
   float viewport_height() const { return viewport_height_; }
-  void set_media_environment(const MediaEnvironment& env);
-  const MediaEnvironment& media_environment() const { return media_environment_; }
+  void set_media_environment(const MediaEnvironment &env);
+  const MediaEnvironment &media_environment() const { return media_environment_; }
   void set_theme_mode(ThemeMode mode);
   ThemeMode theme_mode() const { return theme_mode_; }
   flex::RendererCapabilities renderer_capabilities() const;
@@ -176,29 +168,35 @@ public:
   bool is_dirty() const { return dirty_style_ || dirty_layout_ || dirty_paint_; }
   ViewLifecycleState lifecycle_state() const;
 
-  UiBindingRuntime& bindings() { return bindings_; }
-  const UiBindingRuntime& bindings() const { return bindings_; }
+  UiBindingRuntime &bindings() { return bindings_; }
+  const UiBindingRuntime &bindings() const { return bindings_; }
 
   // 事件（委托给 EventDispatcher）
-  void dispatch_event(Event& event);
+  void dispatch_event(Event &event);
 
-  using EventCallback = std::function<void(Element&, const Event&)>;
+  using EventCallback = std::function<void(Element &, const Event &)>;
   void set_event_callback(EventCallback cb) { events_.set_event_callback(cb); }
 
-  void set_focus(Element* elem) { events_.set_focus(elem); }
-  Element* focused_element() { return events_.focused_element(); }
+  /// Framework integration hook kept separate from the application callback.
+  /// Application code should use set_event_callback().
+  void set_framework_event_callback(EventCallback cb) {
+    events_.set_framework_event_callback(std::move(cb));
+  }
+
+  void set_focus(Element *elem) { events_.set_focus(elem); }
+  Element *focused_element() { return events_.focused_element(); }
 
   // 鼠标捕获（委托给 EventDispatcher）
-  void set_mouse_capture(Element* elem) { events_.set_capture(elem); }
-  void release_mouse_capture(Element* elem) { events_.release_capture(elem); }
-  Element* capturing_element() const { return events_.capturing_element(); }
-  Element* hovered_element() const { return events_.hovered_element(); }
+  void set_mouse_capture(Element *elem) { events_.set_capture(elem); }
+  void release_mouse_capture(Element *elem) { events_.release_capture(elem); }
+  Element *capturing_element() const { return events_.capturing_element(); }
+  Element *hovered_element() const { return events_.hovered_element(); }
 
   // 时间/动画
   void update_time(float delta_ms);
   float time() const { return time_ms_; }
-  TransitionManager& transitions() { return transitions_; }
-  AnimationManager& animations() { return animations_; }
+  TransitionManager &transitions() { return transitions_; }
+  AnimationManager &animations() { return animations_; }
 
   // 脏标记通知
   void notify_dirty_style() { dirty_style_ = true; }
@@ -207,8 +205,8 @@ public:
   bool style_state_affects_selectors(Symbol state) const;
 
   // Widget 注册
-  void register_active_widget(Element* elem);
-  void unregister_active_widget(Element* elem);
+  void register_active_widget(Element *elem);
+  void unregister_active_widget(Element *elem);
 
   // Viewport API
   float get_viewport_width() const { return viewport_width_; }
@@ -216,7 +214,7 @@ public:
 
 private:
   struct IndexedElement {
-    Element* element = nullptr;
+    Element *element = nullptr;
     std::uint64_t generation = 0;
   };
 
@@ -226,16 +224,15 @@ private:
   friend class Element;
   friend class Widget;
 
-  void reindex_element_id(Element* elem, const std::string& old_id, const std::string& new_id);
+  void reindex_element_id(Element *elem, const std::string &old_id, const std::string &new_id);
   void notify_utility_tree_changed();
   void sync_utility_stylesheet();
   void validate_utility_token(std::string_view token) const;
   void apply_theme_to_root();
-  bool owns_element(const Element* element) const;
-  void deactivate_subtree(Element* root);
-  Element* create_widget_part(Element& host, const std::string& tag,
-                              const std::string& part_name);
-  void compute_styles(Element* elem, bool parent_recomputed = false);
+  bool owns_element(const Element *element) const;
+  void deactivate_subtree(Element *root);
+  Element *create_widget_part(Element &host, const std::string &tag, const std::string &part_name);
+  void compute_styles(Element *elem, bool parent_recomputed = false);
   bool has_view_root() const override;
   bool needs_style_stage() const override;
   bool needs_layout_stage() const override;
@@ -254,7 +251,7 @@ private:
   std::unique_ptr<ViewPipeline> pipeline_;
 
   // 元素树
-  Element* root_ = nullptr;
+  Element *root_ = nullptr;
   std::vector<std::unique_ptr<Element>> elements_;
   std::vector<std::unique_ptr<Widget>> widgets_;
   // The index entry is the single source of truth for handle generations.
@@ -275,10 +272,10 @@ private:
   bool dirty_layout_ = true;
   bool dirty_paint_ = true;
   std::unordered_set<std::uintptr_t> styled_elements_;
-  std::unordered_map<const Element*, float> container_widths_;
+  std::unordered_map<const Element *, float> container_widths_;
 
   // 活跃 Widget
-  std::vector<Element*> active_widgets_;
+  std::vector<Element *> active_widgets_;
 
   // 子系统
   EventDispatcher events_{this};

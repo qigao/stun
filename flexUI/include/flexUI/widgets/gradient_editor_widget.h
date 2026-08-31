@@ -10,7 +10,7 @@
 #include "../widget.h"
 #include "../render_command.h"
 #include "../types.h"
-#include <flex.h>
+#include <flex/core/types.h>
 #include <functional>
 #include <vector>
 

@@ -36,7 +36,8 @@ public:
   }
 
   flexUI::ScriptResolveResult
-  resolve_export(std::string_view name) override {
+  resolve_export(std::string_view name,
+                 flexUI::ScriptCallbackKind) override {
     if (name == zero_handle_export) {
       return {flexUI::ScriptExportHandle{}, {}};
     }

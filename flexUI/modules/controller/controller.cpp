@@ -13,8 +13,7 @@ constexpr std::string_view kMountExport = "on_mount";
 constexpr std::string_view kFrameExport = "on_frame";
 constexpr std::string_view kUnmountExport = "on_unmount";
 
-ControllerResult fail(ControllerErrorCode code, ControllerStage stage,
-                      std::string message) {
+ControllerResult fail(ControllerErrorCode code, ControllerStage stage, std::string message) {
   ControllerResult result;
   result.error.code = code;
   result.error.stage = stage;
@@ -22,8 +21,7 @@ ControllerResult fail(ControllerErrorCode code, ControllerStage stage,
   return result;
 }
 
-ControllerResult fail_module(ControllerStage stage, std::string handler,
-                             ScriptModuleError error) {
+ControllerResult fail_module(ControllerStage stage, std::string handler, ScriptModuleError error) {
   ControllerResult result;
   result.error.code = ControllerErrorCode::ModuleCallFailed;
   result.error.stage = stage;
@@ -33,15 +31,16 @@ ControllerResult fail_module(ControllerStage stage, std::string handler,
   return result;
 }
 
-ScriptResolveResult safe_resolve(IScriptModule &module,
-                                 std::string_view name) noexcept {
+ScriptResolveResult safe_resolve(IScriptModule &module, std::string_view name,
+                                 ScriptCallbackKind callback) noexcept {
   try {
-    return module.resolve_export(name);
+    return module.resolve_export(name, callback);
   } catch (const std::exception &error) {
     return {{}, {ScriptModuleErrorCode::RuntimeFailure, error.what()}};
   } catch (...) {
-    return {{}, {ScriptModuleErrorCode::RuntimeFailure,
-                 "script export resolution raised an unknown exception"}};
+    return {{},
+            {ScriptModuleErrorCode::RuntimeFailure,
+             "script export resolution raised an unknown exception"}};
   }
 }
 
@@ -52,19 +51,17 @@ ScriptCallResult safe_call(IScriptModule &module, ScriptExportHandle handle,
   } catch (const std::exception &error) {
     return {{ScriptModuleErrorCode::RuntimeFailure, error.what()}};
   } catch (...) {
-    return {{ScriptModuleErrorCode::RuntimeFailure,
-             "script callback raised an unknown exception"}};
+    return {{ScriptModuleErrorCode::RuntimeFailure, "script callback raised an unknown exception"}};
   }
 }
 
 } // namespace
 
 struct ScriptController::Impl {
-  explicit Impl(ControllerLimits configured_limits,
-                ControllerEffects configured_effects = {})
+  explicit Impl(ControllerLimits configured_limits, ControllerEffects configured_effects = {})
       : limits(configured_limits), owner_thread(std::this_thread::get_id()),
-        mutation_engine(configured_effects.mutations),
-        command_engine(configured_effects.commands) {}
+        mutation_engine(configured_effects.mutations), command_engine(configured_effects.commands) {
+  }
 
   ControllerLimits limits;
   std::thread::id owner_thread;
@@ -78,34 +75,30 @@ struct ScriptController::Impl {
   std::optional<ScriptExportHandle> unmount_export;
   std::unordered_map<const EventBinding *, ScriptExportHandle> event_exports;
 
-  bool is_owner_thread() const noexcept {
-    return owner_thread == std::this_thread::get_id();
-  }
+  bool is_owner_thread() const noexcept { return owner_thread == std::this_thread::get_id(); }
 
-  ControllerResult apply_effects(ScriptCallResult &called,
-                                 ControllerStage stage,
+  ControllerResult apply_effects(ScriptCallResult &called, ControllerStage stage,
                                  std::string_view handler) {
     std::unique_ptr<IPreparedApplicationCommands> commands;
     if (!called.commands.empty()) {
       if (stage == ControllerStage::Mount) {
-        ControllerResult result = fail(
-            ControllerErrorCode::CommandFailed, stage,
-            "on_mount cannot publish application commands before activation");
+        ControllerResult result =
+            fail(ControllerErrorCode::CommandFailed, stage,
+                 "on_mount cannot publish application commands before activation");
         result.error.handler.assign(handler);
         return result;
       }
       if (command_engine == nullptr) {
-        ControllerResult result = fail(
-            ControllerErrorCode::CommandFailed, stage,
-            "script emitted application commands without a command engine");
+        ControllerResult result =
+            fail(ControllerErrorCode::CommandFailed, stage,
+                 "script emitted application commands without a command engine");
         result.error.handler.assign(handler);
         return result;
       }
       auto reserved = command_engine->reserve(called.commands);
       if (!reserved) {
         ControllerResult result =
-            fail(ControllerErrorCode::CommandFailed, stage,
-                 reserved.error.message);
+            fail(ControllerErrorCode::CommandFailed, stage, reserved.error.message);
         result.error.handler.assign(handler);
         result.error.command_error = std::move(reserved.error);
         return result;
@@ -115,17 +108,15 @@ struct ScriptController::Impl {
 
     if (!called.mutations.empty()) {
       if (mutation_engine == nullptr) {
-        ControllerResult result =
-            fail(ControllerErrorCode::MutationFailed, stage,
-                 "script emitted UI mutations without a mutation engine");
+        ControllerResult result = fail(ControllerErrorCode::MutationFailed, stage,
+                                       "script emitted UI mutations without a mutation engine");
         result.error.handler.assign(handler);
         return result;
       }
       auto applied = mutation_engine->apply(called.mutations);
       if (!applied) {
         ControllerResult result =
-            fail(ControllerErrorCode::MutationFailed, stage,
-                 applied.error.message);
+            fail(ControllerErrorCode::MutationFailed, stage, applied.error.message);
         result.error.handler.assign(handler);
         result.error.mutation_error = std::move(applied.error);
         return result;
@@ -151,12 +142,10 @@ struct ScriptController::Impl {
 ScriptController::ScriptController(ControllerLimits limits)
     : impl_(std::make_unique<Impl>(limits)) {}
 
-ScriptController::ScriptController(UiMutationEngine &mutation_engine,
-                                   ControllerLimits limits)
+ScriptController::ScriptController(UiMutationEngine &mutation_engine, ControllerLimits limits)
     : ScriptController(ControllerEffects{&mutation_engine, nullptr}, limits) {}
 
-ScriptController::ScriptController(ControllerEffects effects,
-                                   ControllerLimits limits)
+ScriptController::ScriptController(ControllerEffects effects, ControllerLimits limits)
     : impl_(std::make_unique<Impl>(limits, effects)) {}
 
 ScriptController::~ScriptController() {
@@ -165,9 +154,8 @@ ScriptController::~ScriptController() {
   }
 }
 
-ControllerResult ScriptController::load(
-    std::unique_ptr<IScriptModule> module,
-    std::shared_ptr<const CompiledUiProgram> program) {
+ControllerResult ScriptController::load(std::unique_ptr<IScriptModule> module,
+                                        std::shared_ptr<const CompiledUiProgram> program) {
   if (!impl_->is_owner_thread()) {
     return fail(ControllerErrorCode::WrongThread, ControllerStage::Load,
                 "controller load must run on its owner thread");
@@ -187,40 +175,39 @@ ControllerResult ScriptController::load(
   std::unordered_map<const EventBinding *, ScriptExportHandle> event_exports;
   std::unordered_map<std::string, ScriptExportHandle> resolved_handlers;
 
-  const auto resolve_optional = [&](std::string_view name,
-                                    std::optional<ScriptExportHandle> &output)
-      -> ControllerResult {
-    auto resolved = safe_resolve(*module, name);
+  const auto resolve_optional = [&](std::string_view name, ScriptCallbackKind callback,
+                                    std::optional<ScriptExportHandle> &output) -> ControllerResult {
+    auto resolved = safe_resolve(*module, name, callback);
     if (resolved.error) {
-      ControllerResult result =
-          fail(ControllerErrorCode::ModuleResolutionFailed,
-               ControllerStage::Load, resolved.error.message);
+      ControllerResult result = fail(ControllerErrorCode::ModuleResolutionFailed,
+                                     ControllerStage::Load, resolved.error.message);
       result.error.handler.assign(name);
       result.error.module_error = std::move(resolved.error);
       return result;
     }
     if (resolved.handle.has_value() && !static_cast<bool>(*resolved.handle)) {
       ControllerResult result =
-          fail(ControllerErrorCode::ModuleResolutionFailed,
-               ControllerStage::Load,
+          fail(ControllerErrorCode::ModuleResolutionFailed, ControllerStage::Load,
                "script module returned an invalid export handle");
       result.error.handler.assign(name);
-      result.error.module_error = {
-          ScriptModuleErrorCode::InvalidExport,
-          "resolved script export handle must not be zero"};
+      result.error.module_error = {ScriptModuleErrorCode::InvalidExport,
+                                   "resolved script export handle must not be zero"};
       return result;
     }
     output = resolved.handle;
     return {};
   };
 
-  if (auto result = resolve_optional(kMountExport, mount_export); !result) {
+  if (auto result = resolve_optional(kMountExport, ScriptCallbackKind::Mount, mount_export);
+      !result) {
     return result;
   }
-  if (auto result = resolve_optional(kFrameExport, frame_export); !result) {
+  if (auto result = resolve_optional(kFrameExport, ScriptCallbackKind::Frame, frame_export);
+      !result) {
     return result;
   }
-  if (auto result = resolve_optional(kUnmountExport, unmount_export); !result) {
+  if (auto result = resolve_optional(kUnmountExport, ScriptCallbackKind::Unmount, unmount_export);
+      !result) {
     return result;
   }
 
@@ -232,11 +219,10 @@ ControllerResult ScriptController::load(
     if (cached != resolved_handlers.end()) {
       handle = cached->second;
     } else {
-      auto resolved = safe_resolve(*module, binding.handler);
+      auto resolved = safe_resolve(*module, binding.handler, ScriptCallbackKind::Event);
       if (resolved.error) {
-        ControllerResult result =
-            fail(ControllerErrorCode::ModuleResolutionFailed,
-                 ControllerStage::Load, resolved.error.message);
+        ControllerResult result = fail(ControllerErrorCode::ModuleResolutionFailed,
+                                       ControllerStage::Load, resolved.error.message);
         result.error.element_id = binding.element_id;
         result.error.handler = binding.handler;
         result.error.event = binding.event;
@@ -246,8 +232,7 @@ ControllerResult ScriptController::load(
       }
       if (!resolved.handle.has_value()) {
         ControllerResult result =
-            fail(ControllerErrorCode::MissingHandlerExport,
-                 ControllerStage::Load,
+            fail(ControllerErrorCode::MissingHandlerExport, ControllerStage::Load,
                  "compiled event handler is not exported by the script module");
         result.error.element_id = binding.element_id;
         result.error.handler = binding.handler;
@@ -257,16 +242,14 @@ ControllerResult ScriptController::load(
       }
       if (!static_cast<bool>(*resolved.handle)) {
         ControllerResult result =
-            fail(ControllerErrorCode::ModuleResolutionFailed,
-                 ControllerStage::Load,
+            fail(ControllerErrorCode::ModuleResolutionFailed, ControllerStage::Load,
                  "script module returned an invalid export handle");
         result.error.element_id = binding.element_id;
         result.error.handler = binding.handler;
         result.error.event = binding.event;
         result.error.source = binding.source;
-        result.error.module_error = {
-            ScriptModuleErrorCode::InvalidExport,
-            "resolved script export handle must not be zero"};
+        result.error.module_error = {ScriptModuleErrorCode::InvalidExport,
+                                     "resolved script export handle must not be zero"};
         return result;
       }
       handle = *resolved.handle;
@@ -304,9 +287,7 @@ ControllerResult ScriptController::mount() {
       return fail_module(ControllerStage::Mount, std::string(kMountExport),
                          std::move(called.error));
     }
-    if (auto applied =
-            impl_->apply_effects(called, ControllerStage::Mount,
-                                 kMountExport);
+    if (auto applied = impl_->apply_effects(called, ControllerStage::Mount, kMountExport);
         !applied) {
       impl_->state = ControllerState::Faulted;
       return applied;
@@ -316,41 +297,36 @@ ControllerResult ScriptController::mount() {
   return {};
 }
 
-ControllerResult
-ScriptController::dispatch(const ScriptEventSnapshot &event) {
+ControllerResult ScriptController::dispatch(const ScriptEventSnapshot &event) {
   if (!impl_->is_owner_thread()) {
     return fail(ControllerErrorCode::WrongThread, ControllerStage::Event,
                 "controller dispatch must run on its owner thread");
   }
   if (impl_->state == ControllerState::Faulted) {
-    return fail(ControllerErrorCode::ControllerFaulted,
-                ControllerStage::Event,
+    return fail(ControllerErrorCode::ControllerFaulted, ControllerStage::Event,
                 "faulted controller rejects callbacks until explicit reload");
   }
   if (impl_->state != ControllerState::Mounted) {
     return fail(ControllerErrorCode::InvalidState, ControllerStage::Event,
                 "controller must be mounted before event dispatch");
   }
-  if (!event.target ||
-      event.target.id.size() > impl_->limits.max_element_id_bytes ||
+  const UiHandle &handler_target = event.current_target ? event.current_target : event.target;
+  if (!handler_target || event.target.id.size() > impl_->limits.max_element_id_bytes ||
+      handler_target.id.size() > impl_->limits.max_element_id_bytes ||
       event.text.size() > impl_->limits.max_event_text_bytes ||
-      event.composition_text.size() >
-          impl_->limits.max_composition_text_bytes) {
-    return fail(ControllerErrorCode::EventLimitExceeded,
-                ControllerStage::Event,
+      event.composition_text.size() > impl_->limits.max_composition_text_bytes) {
+    return fail(ControllerErrorCode::EventLimitExceeded, ControllerStage::Event,
                 "script event snapshot violates configured bounds");
   }
 
-  const auto *binding =
-      impl_->program->find_event_binding(event.target.id, event.event);
+  const auto *binding = impl_->program->find_event_binding(handler_target.id, event.event);
   if (binding == nullptr) {
     return {};
   }
   const auto resolved = impl_->event_exports.find(binding);
   if (resolved == impl_->event_exports.end()) {
     impl_->state = ControllerState::Faulted;
-    return fail(ControllerErrorCode::InternalInvariant,
-                ControllerStage::Event,
+    return fail(ControllerErrorCode::InternalInvariant, ControllerStage::Event,
                 "resolved handler table does not match compiled UI program");
   }
 
@@ -361,15 +337,13 @@ ScriptController::dispatch(const ScriptEventSnapshot &event) {
   auto called = safe_call(*impl_->module, resolved->second, context);
   if (!called) {
     impl_->state = ControllerState::Faulted;
-    auto result = fail_module(ControllerStage::Event, binding->handler,
-                              std::move(called.error));
+    auto result = fail_module(ControllerStage::Event, binding->handler, std::move(called.error));
     result.error.element_id = binding->element_id;
     result.error.event = binding->event;
     result.error.source = binding->source;
     return result;
   }
-  if (auto applied = impl_->apply_effects(
-          called, ControllerStage::Event, binding->handler);
+  if (auto applied = impl_->apply_effects(called, ControllerStage::Event, binding->handler);
       !applied) {
     impl_->state = ControllerState::Faulted;
     applied.error.element_id = binding->element_id;
@@ -387,8 +361,7 @@ ControllerResult ScriptController::frame(double delta_seconds) {
                 "controller frame must run on its owner thread");
   }
   if (impl_->state == ControllerState::Faulted) {
-    return fail(ControllerErrorCode::ControllerFaulted,
-                ControllerStage::Frame,
+    return fail(ControllerErrorCode::ControllerFaulted, ControllerStage::Frame,
                 "faulted controller rejects callbacks until explicit reload");
   }
   if (impl_->state != ControllerState::Mounted) {
@@ -396,8 +369,7 @@ ControllerResult ScriptController::frame(double delta_seconds) {
                 "controller must be mounted before frame dispatch");
   }
   if (!std::isfinite(delta_seconds) || delta_seconds < 0.0) {
-    return fail(ControllerErrorCode::InvalidArgument,
-                ControllerStage::Frame,
+    return fail(ControllerErrorCode::InvalidArgument, ControllerStage::Frame,
                 "frame delta must be finite and non-negative");
   }
   if (!impl_->frame_export.has_value()) {
@@ -411,13 +383,9 @@ ControllerResult ScriptController::frame(double delta_seconds) {
   auto called = safe_call(*impl_->module, *impl_->frame_export, context);
   if (!called) {
     impl_->state = ControllerState::Faulted;
-    return fail_module(ControllerStage::Frame, std::string(kFrameExport),
-                       std::move(called.error));
+    return fail_module(ControllerStage::Frame, std::string(kFrameExport), std::move(called.error));
   }
-  if (auto applied =
-          impl_->apply_effects(called, ControllerStage::Frame,
-                               kFrameExport);
-      !applied) {
+  if (auto applied = impl_->apply_effects(called, ControllerStage::Frame, kFrameExport); !applied) {
     impl_->state = ControllerState::Faulted;
     return applied;
   }
@@ -433,8 +401,7 @@ ControllerResult ScriptController::unmount() {
   if (impl_->state == ControllerState::Empty) {
     return {};
   }
-  if (impl_->state == ControllerState::Dispatching ||
-      impl_->state == ControllerState::Unmounting) {
+  if (impl_->state == ControllerState::Dispatching || impl_->state == ControllerState::Unmounting) {
     return fail(ControllerErrorCode::InvalidState, ControllerStage::Unmount,
                 "controller cannot unmount during a callback");
   }
@@ -450,17 +417,14 @@ ControllerResult ScriptController::unmount() {
     context.callback = ScriptCallbackKind::Unmount;
     auto called = safe_call(*impl_->module, *impl_->unmount_export, context);
     if (!called) {
-      result = fail_module(ControllerStage::Unmount,
-                           std::string(kUnmountExport),
+      result = fail_module(ControllerStage::Unmount, std::string(kUnmountExport),
                            std::move(called.error));
     } else if (!called.mutations.empty()) {
-      result = fail(ControllerErrorCode::MutationFailed,
-                    ControllerStage::Unmount,
+      result = fail(ControllerErrorCode::MutationFailed, ControllerStage::Unmount,
                     "on_unmount must not emit UI mutations");
       result.error.handler = std::string(kUnmountExport);
     } else if (!called.commands.empty()) {
-      result = fail(ControllerErrorCode::CommandFailed,
-                    ControllerStage::Unmount,
+      result = fail(ControllerErrorCode::CommandFailed, ControllerStage::Unmount,
                     "on_unmount must not emit application commands");
       result.error.handler = std::string(kUnmountExport);
     }
@@ -469,12 +433,9 @@ ControllerResult ScriptController::unmount() {
   return result;
 }
 
-ControllerState ScriptController::state() const noexcept {
-  return impl_->state;
-}
+ControllerState ScriptController::state() const noexcept { return impl_->state; }
 
-std::shared_ptr<const CompiledUiProgram>
-ScriptController::program() const noexcept {
+std::shared_ptr<const CompiledUiProgram> ScriptController::program() const noexcept {
   return impl_->program;
 }
 
