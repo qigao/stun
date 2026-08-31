@@ -144,13 +144,17 @@ unmount
   -> destroy module/context
 ```
 
-事件回调的准确插入点需要与现有 widget consumption 语义保持一致：默认只把未被 widget
-消费或明确允许继续传播的事件交给脚本，避免一次用户操作产生两套独立状态迁移。
+事件回调的插入点保持现有 widget consumption 语义：默认只把未被 widget 消费且仍在 route 中的
+事件交给脚本，避免一次用户操作产生两套独立状态迁移。快照分别保存原始 `target` 与当前 binding
+节点 `current_target`；脚本不持有 `Element*`。显式 consumed-event post-widget notification 尚未进入
+XML schema，因此当前不会隐式启用。
 
 ### 5.3 UI 句柄与变更批次
 
-脚本使用 `{id, generation}` 形式的 `UiHandle`，不使用地址。Box 删除或替换 subtree 后
-generation 失效；旧句柄使用立即返回 `stale_handle`。
+脚本使用 `{id, generation}` 形式的 `UiHandle`，不使用地址。generation 由 Box ID index 单独拥有；
+ID 改名、重复 ID owner 切换或 ID 复用后，旧句柄立即 stale。retained/detached 节点仍由 Box 持有，
+句柄解析不替代 active-tree 与 target ownership 校验；未来删除 subtree 时必须先移除 index entry，
+再释放元素。
 
 首批 mutation 只开放稳定的高层动作：
 

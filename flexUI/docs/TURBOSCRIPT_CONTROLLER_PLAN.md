@@ -1,7 +1,7 @@
 # FlexUI TurboScript 行为控制器实施计划
 
-- 状态：P0 已落地；TurboScript ABI、FlexUI controller 与 DLL service 扩展已获确认，
-  retained-mode 公开契约变更仍需在实施前单独审查
+- 状态：P0、P2 与 P3 私有 adapter 已落地；P1 retained-mode 公开契约与 P4 Box
+  默认调度接入仍需单独审查
 - 日期：2026-07-15
 - 设计依据：[TURBOSCRIPT_CONTROLLER_DESIGN.md](TURBOSCRIPT_CONTROLLER_DESIGN.md)
 - 外部源码：`C:\projects\cpp\TurboScript`
@@ -77,27 +77,27 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
 
 ### Module 与调用
 
-- [ ] 将 source-backed compiled object 改为持有可重复执行的解析/lower 产物，或新增明确
+- [x] 将 source-backed compiled object 改为持有可重复执行的解析/lower 产物，或新增明确
   命名的 module API 并保留旧入口兼容。
-- [ ] 新增 export 查询与按名称调用入口。
-- [ ] 定义公开 tagged value、参数数组、返回值和所有权规则。
-- [ ] 定义结构化 status/error，禁止由 stdout 充当错误通道。
-- [ ] 跨 ABI 保持 opaque handle，不暴露 exprtk/MIR 内部结构。
+- [x] 新增 export 查询与按名称调用入口。
+- [x] 定义公开 tagged value、参数数组、返回值和所有权规则。
+- [x] 定义结构化 status/error，禁止由 stdout 充当错误通道。
+- [x] 跨 ABI 保持 opaque handle，不暴露 exprtk/MIR 内部结构。
 
 ### 资源限制
 
-- [ ] 增加 recursion、loop/step、stack、memory 和 interrupt 配置。
-- [ ] 测试 timeout/interrupt 后 context 是否仍可安全销毁或显式 reload。
-- [ ] 首版选择同步 callback；若保留 async，增加显式 job pump 和关闭语义。
-- [ ] 修复或移除未实现且 coroutine 类型不一致的 public declaration。
+- [x] 增加 recursion、loop/step、stack、memory 和 interrupt 配置。
+- [x] 测试 timeout/interrupt 后 context 是否仍可安全销毁或显式 reload。
+- [x] 首版选择同步 callback；若保留 async，增加显式 job pump 和关闭语义。
+- [x] 修复或移除未实现且 coroutine 类型不一致的 public declaration。
 
 ### 测试与文档
 
-- [ ] 覆盖 load/call/repeat/error/type/ownership/stale module/interrupt。
-- [ ] 修正文档中 runtime 默认 limits 与实现不一致的问题。
-- [ ] 修正文档把 direct-mapped cache 描述为 LRU 的问题，或实现并验证真正 LRU。
-- [ ] 运行 TurboScript 最小 API 测试、MIR interpreter/JIT 对照测试和 benchmark。
-- [ ] 安装并验证 `TurboScriptConfig.cmake`、Debug/Release imported target。
+- [x] 覆盖 load/call/repeat/error/type/ownership/stale module/interrupt。
+- [x] 修正文档中 runtime 默认 limits 与实现不一致的问题。
+- [x] 修正文档把 direct-mapped cache 描述为 LRU 的问题，或实现并验证真正 LRU。
+- [x] 运行 TurboScript 最小 API 测试、MIR interpreter/JIT 对照测试和 benchmark。
+- [x] 安装并验证 `TurboScriptConfig.cmake`、Debug/Release imported target。
 
 完成条件：独立 C/C++ host 不包含 internal header 即可安全加载模块、重复调用 export、限制
 资源并取得结构化错误。
@@ -106,45 +106,75 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
 
 ### 构建
 
-- [ ] 增加 `FLEXUI_ENABLE_TURBOSCRIPT`，未启用时不查找、不链接 TurboScript。
-- [ ] 使用 `find_package(TurboScript CONFIG REQUIRED HINTS ...)`，不使用源码
+- [x] 增加 `FLEXUI_ENABLE_TURBOSCRIPT`，未启用时不查找、不链接 TurboScript。
+- [x] 使用 `find_package(TurboScript CONFIG REQUIRED HINTS ...)`，不使用源码
   `add_subdirectory`。
-- [ ] TurboScript include/link 只对 adapter 私有可见。
+- [x] TurboScript include/link 只对 adapter 私有可见。
 
 ### Adapter
 
-- [ ] 新增 `IScriptModule` 小接口和 TurboScript 实现，使用 Pimpl/opaque handle。
-- [ ] 实现 source/module 生命周期、export 缓存、值转换和错误转换。
-- [ ] 断言 context 只由创建它的 UI 线程访问。
-- [ ] 增加 bounded `ScriptEventSnapshot` 与 `UiMutationBatch`。
-- [ ] mutation validation 与 commit 分离，失败时整批丢弃。
+- [x] 新增 `IScriptModule` 小接口和 TurboScript 实现，使用 Pimpl/opaque handle。
+- [x] 实现 source/module 生命周期、export 缓存、值转换和错误转换。
+- [x] 断言 controller/module context 只由创建它的 UI 线程访问。
+- [x] 增加 bounded `ScriptEventSnapshot` 与 `UiMutationBatch`。
+- [x] mutation validation 与 commit 分离，失败时整批丢弃。
+- [x] 将有界 `ApplicationCommandBatch` 与 UI mutation 分离，先 reserve queue、后 commit UI、
+  最后无失败 publish；adapter 只生成 envelope，不直接执行 service。
 
 ### 测试
 
-- [ ] fake module 测 controller 调度，不依赖 TurboScript。
-- [ ] adapter contract 测真实 TurboScript load/call/error/interrupt。
-- [ ] stale `UiHandle`、超额 batch、错误类型、删除 subtree 后调用均 fail fast。
-- [ ] ASan/UBSan 可用配置下检查 reload/unmount 生命周期。
+- [x] fake module 测 controller 调度、timeout、injected error 与真实 Box 状态不变性，不依赖
+  TurboScript。
+- [x] adapter contract 测真实 TurboScript load/call/error/interrupt。
+- [ ] stale `UiHandle`、超额 batch、错误类型、删除 subtree 后调用均 fail fast（前三项已完成；
+  Box 尚无通用 subtree destruction API）。
+- [x] ASan 可用配置下检查 load/mount/event/frame/unmount 生命周期；UBSan 留待
+  Linux preset。
 
 完成条件：adapter 可独立验证，不修改 Box 默认事件、update 或 render 路径。
+
+### P3 已实现契约
+
+- `FlexUI::ControllerTurboScript` 是独立可选 target；feature 关闭时不会执行
+  `find_package(TurboScript)`。
+- `create_turboscript_controller_module()` 复制 source/module name，固定选择 MIR interpreter
+  或 JIT，并在创建线程上拥有 context、result、immutable module 与 stateful instance。
+- `on_mount`/`on_unmount` 接收零参数，`on_frame` 接收秒单位 `number`，事件 handler 接收
+  一个只读 record。事件 record 包含 `kind`、原始 `target{id,generation}`、绑定节点
+  `current_target{id,generation}`、坐标、滚轮、按键、text/composition、timestamp、
+  handled/propagate 与两个 handle 的 validity 标志。
+- 每个 callback 必须显式返回 `null` 或一个 effect record。effect 只允许顶层
+  `mutations`/`commands` 数组；未知字段、错误类型、非 finite 数字、无效 target/request ID、
+  单条或整批字符串超限都会让本次 callback 整体失败，不返回部分 batch。
+- mutation record 支持 `set_text`、`set_attribute`、`remove_attribute`、`set_classes`、
+  `set_utilities`、`set_binding_number`、`set_binding_bool`、`set_binding_string`。command record
+  使用 `{request_id, capability, operation, payload}`；adapter 只复制为拥有所有权的 batch，
+  Controller 仍按“reserve command → prepare/commit UI → publish command”顺序提交。
+- export arity 在调用前由 metadata 校验；编译、资源限制、中断、无效 handle 和运行时错误
+  转换为 `ScriptModuleError`，controller 继续负责 Faulted 状态迁移。
+- adapter 默认拒绝 native plugin；interrupt callback 同步运行于 UI owner thread。所有输入
+  view 只借用到同步调用返回，TurboScript result 不越过 adapter 边界。
+- Windows 测试会复制 TurboScript 的直接 runtime DLL；CoroNet 当前安装包仍要求可发现配套
+  `ssl.dll`/`crypto.dll`，测试配置对此显式 fail fast。
 
 ## P4：Box 行为控制器集成（需确认 FlexUI API）
 
 ### 调度
 
-- [ ] 通过显式 `BoxOptions`/factory 安装 controller，不把脚本参数塞入 renderer。
-- [ ] 定义 mount/event/frame/unmount export 名称和 required/optional 规则。
-- [ ] 把脚本事件接在 widget consumption 语义之后，并锁定 bubbling 行为。
+- [x] 通过显式 `DesktopApplicationBuilder`/factory 安装 controller，不把脚本参数塞入 renderer。
+- [x] 定义 mount/event/unmount export 名称和 required/optional 规则；frame hook 尚未接入。
+- [x] 把脚本事件接在 widget consumption 语义之后，并锁定未消费事件的 target→ancestor bubbling。
 - [ ] 只有导出/注册 frame callback 时才执行脚本帧 hook。
-- [ ] callback 成功后一次提交 mutation，再推进 binding/animation/layout/paint。
-- [ ] controller fault 后停止 callback，显式 reload 才恢复。
+- [x] callback 成功后一次提交 mutation；frame pipeline 推进留给 DesktopHost。
+- [x] controller fault 后停止 callback，显式 reload 才恢复。
 
 ### Bridge 能力
 
-- [ ] 首批只开放 class/utility/attribute/text/value/binding input/animation trigger。
-- [ ] 不开放 renderer、paint cache、裸 Element 指针或任意 native function 注册。
-- [ ] 每个 API 写明参数范围、错误码、句柄生命周期和线程约束。
-- [ ] 示例提供完整 `.tbs` controller 与 C++ host，能够独立构建运行。
+- [x] 首批 mutation engine 开放 class/utility/attribute/text/value/binding input/animation trigger。
+- [x] 不开放 renderer、paint cache、裸 Element 指针或任意 native function 注册。
+- [x] event/controller API 写明参数范围、错误码、句柄生命周期和 owner-thread 约束。
+- [x] `desktop_xml_tbs_demo` 提供可独立构建运行的 XML/CSS/TBS + C++ composition 示例；
+  native window host 示例留待 DesktopHost 阶段。
 
 ### 测试
 

@@ -12,6 +12,7 @@ namespace flexUI {
 
 class Box;
 class Element;
+class WidgetRegistry;
 
 using UiDocumentValue = std::variant<float, std::string, bool>;
 
@@ -86,6 +87,8 @@ enum class UiDocumentErrorCode {
   DuplicateBindingTarget,
   BindingTargetConflict,
   ResourceLimitExceeded,
+  UnknownElementTag,
+  WidgetFactoryFailed,
 };
 
 struct UiDocumentError {
@@ -184,6 +187,10 @@ private:
   std::unique_ptr<Impl> impl_;
 
   friend class UiDocumentInstantiator;
+  friend UiDocumentCompileResult compile_ui_definition(
+      UiDocumentDefinition definition,
+      std::vector<UiResourceDefinition> resources,
+      const UiDocumentLimits &limits);
   friend UiDocumentCompileResult compile_ui_document(std::string_view source,
                                                       std::string_view document_name,
                                                       const UiDocumentLimits &limits);
@@ -227,6 +234,17 @@ UiDocumentCompileResult compile_ui_document(std::string_view source,
                                             std::string_view document_name = {},
                                             const UiDocumentLimits &limits = {});
 
+/// Semantically lowers a parser-independent definition into an immutable program.
+///
+/// The definition and resources are accepted by value so the resulting program
+/// cannot be changed through aliases retained by the caller. This is the shared
+/// semantic boundary for source-format adapters such as XML and the temporary
+/// legacy Flex DSL frontend.
+UiDocumentCompileResult compile_ui_definition(
+    UiDocumentDefinition definition,
+    std::vector<UiResourceDefinition> resources = {},
+    const UiDocumentLimits &limits = {});
+
 /// Builds a validated definition as a detached tree and commits ownership to `box`.
 ///
 /// `box` must not already have a root. On success, `box` owns every returned Element pointer.
@@ -241,10 +259,20 @@ public:
   /// Instantiates the validated definition owned by an immutable compiled program.
   static UiDocumentInstantiateResult instantiate(Box &box, const CompiledUiProgram &program);
 
+  /// Instantiates a definition using an explicit strict tag registry.
+  static UiDocumentInstantiateResult instantiate(
+      Box &box, const UiDocumentDefinition &definition,
+      const WidgetRegistry &registry);
+
+  /// Instantiates a compiled program using an explicit strict tag registry.
+  static UiDocumentInstantiateResult instantiate(
+      Box &box, const CompiledUiProgram &program,
+      const WidgetRegistry &registry);
+
 private:
   static UiDocumentInstantiateResult instantiate_impl(
       Box &box, const UiDocumentDefinition &definition,
-      const CompiledUiProgram *program);
+      const CompiledUiProgram *program, const WidgetRegistry *registry);
 };
 
 } // namespace flexUI

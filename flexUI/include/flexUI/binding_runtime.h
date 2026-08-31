@@ -16,6 +16,7 @@ class MirExpressionProgram;
 namespace flexUI {
 
 class Element;
+class BoxPreparedMutation;
 class UiBindingRuntime;
 class UiDocumentInstantiator;
 
@@ -53,7 +54,14 @@ class UiDataContext {
   std::uint64_t revision() const;
 
  private:
+  friend class BoxPreparedMutation;
   friend class UiBindingRuntime;
+  // BoxPreparedMutation validates schema and revision first. These helpers
+  // mutate existing storage without allocation or callback dispatch.
+  bool commit_existing_number(const std::string& name, double value) noexcept;
+  bool commit_existing_bool(const std::string& name, bool value) noexcept;
+  bool commit_existing_string(const std::string& name,
+                              std::string& value) noexcept;
   struct Impl;
   explicit UiDataContext(std::function<void()> invalidated);
   ~UiDataContext();

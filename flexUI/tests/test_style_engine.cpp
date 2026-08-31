@@ -749,10 +749,9 @@ spec("SliderWidget exposes stable semantic parts to CSS") {
           2);
     check(slider->track_element()->is_widget_owned());
     check(slider->track_element()->parent_elem() == slider_elem);
-    check_string_eq(*slider->track_element()->attribute("part"), "track");
-    check_string_eq(slider->fill_element()->computed_style->get_variable(
-                        Symbol("--track-fill")),
-                    "255, 51, 0, 255");
+    check(*slider->track_element()->attribute("part") == "track");
+    check(slider->fill_element()->computed_style->get_variable(
+              Symbol("--track-fill")) == "255, 51, 0, 255");
     require_color(slider->track_element()->computed_style->background_color,
                   0x11 / 255.0f, 0x22 / 255.0f, 0x33 / 255.0f);
     require_color(slider->fill_element()->computed_style->background_color,

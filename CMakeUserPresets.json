@@ -12,6 +12,7 @@
                 "TURBOPARSER_ROOT": "C:/projects/cpp/external/pkgs/turboparser",
                 "TURBONET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
+                "TURBOHTTP_ROOT": "c:/projects/cpp/external/pkgs/turbohttp",
                 "RulesForge_ROOT": "c:/projects/cpp/external/pkgs/rules_forge",
                 "CMAKE_MAKE_PROGRAM": "C:/Users/lockg/scoop/shims/ninja.exe",
                 "VCPKG_TARGET_TRIPLET": "x64-windows",
@@ -74,6 +75,15 @@
             ]
         },
         {
+            "name": "win-dev-turboscript-user",
+            "displayName": "Developer Build with TurboScript (Windows, User)",
+            "binaryDir": "${sourceDir}/build/Msvc-TurboScript",
+            "cacheVariables": {
+                "FLEXUI_ENABLE_TURBOSCRIPT": "ON"
+            },
+            "inherits": "win-dev-user"
+        },
+        {
             "name": "linux-dev-user",
             "displayName": "Developer Build (Linux, User)",
             "cacheVariables": {
@@ -109,6 +119,10 @@
             "configurePreset": "win-release-user"
         },
         {
+            "name": "win-dev-turboscript-user",
+            "configurePreset": "win-dev-turboscript-user"
+        },
+        {
             "name": "linux-dev-user",
             "configurePreset": "linux-dev-user"
         },
@@ -132,6 +146,17 @@
         {
             "name": "win-release-user",
             "configurePreset": "win-release-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "win-dev-turboscript-user",
+            "configurePreset": "win-dev-turboscript-user",
             "execution": {
                 "noTestsAction": "error",
                 "stopOnFailure": false

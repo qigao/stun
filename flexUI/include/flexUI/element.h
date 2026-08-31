@@ -29,6 +29,8 @@ namespace flexUI {
 
 // Forward declaration
 class Box;
+class BoxMutationHost;
+class BoxPreparedMutation;
 class RenderCommandList;
 
 enum class ElementOwnership {
@@ -508,6 +510,8 @@ public:
 
 private:
   friend class Box;
+  friend class BoxMutationHost;
+  friend class BoxPreparedMutation;
   friend class Widget;
 
   using flex::Group::add;

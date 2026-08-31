@@ -52,4 +52,11 @@ if(TARGET flex_backend_tui)
   target_include_directories(flexui_tui_demo PRIVATE ${CMAKE_SOURCE_DIR}/flex/include)
   set_target_properties(flexui_tui_demo PROPERTIES FOLDER flexUI/)
 endif()
+
+if(TARGET flexUI_controller_turboscript)
+  add_executable(desktop_xml_tbs_demo desktop_xml_tbs_demo.cpp)
+  target_link_libraries(desktop_xml_tbs_demo
+                        PRIVATE FlexUI::ControllerTurboScript)
+  set_target_properties(desktop_xml_tbs_demo PROPERTIES FOLDER flexUI/)
+endif()
  

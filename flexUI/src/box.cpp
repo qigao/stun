@@ -15,7 +15,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cctype>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -1614,7 +1616,36 @@ Element* Box::create_with_widget(const std::string& tag, Widget* widget, const s
 
 Element* Box::get_by_id(const std::string& id) {
   auto it = elements_by_id_.find(id);
-  return it != elements_by_id_.end() ? it->second : nullptr;
+  return it != elements_by_id_.end() ? it->second.element : nullptr;
+}
+
+UiHandle Box::handle_for(const Element& element) const {
+  if (element.id().empty()) {
+    return {};
+  }
+  const auto indexed = elements_by_id_.find(element.id());
+  if (indexed == elements_by_id_.end() ||
+      indexed->second.element != &element) {
+    return {};
+  }
+  return {indexed->first, indexed->second.generation};
+}
+
+Element* Box::resolve_handle(const UiHandle& handle) noexcept {
+  return const_cast<Element*>(
+      static_cast<const Box&>(*this).resolve_handle(handle));
+}
+
+const Element* Box::resolve_handle(const UiHandle& handle) const noexcept {
+  if (!handle) {
+    return nullptr;
+  }
+  const auto indexed = elements_by_id_.find(handle.id);
+  if (indexed == elements_by_id_.end() ||
+      indexed->second.generation != handle.generation) {
+    return nullptr;
+  }
+  return indexed->second.element;
 }
 
 Element* Box::query_selector(const std::string& selector) {
@@ -1658,21 +1689,50 @@ std::vector<Element*> Box::query_selector_all(const std::string& selector) {
 
 void Box::reindex_element_id(Element* elem, const std::string& old_id,
                              const std::string& new_id) {
+  auto old_entry = elements_by_id_.end();
+  Element* restored = nullptr;
   if (!old_id.empty()) {
-    auto it = elements_by_id_.find(old_id);
-    if (it != elements_by_id_.end() && it->second == elem) {
-      elements_by_id_.erase(it);
+    old_entry = elements_by_id_.find(old_id);
+    if (old_entry != elements_by_id_.end() &&
+        old_entry->second.element == elem) {
       for (const auto& candidate : elements_) {
         if (candidate.get() != elem && candidate->id() == old_id) {
-          elements_by_id_[old_id] = candidate.get();
+          restored = candidate.get();
           break;
         }
       }
     }
   }
 
+  const std::uint64_t required_generations =
+      (new_id.empty() ? 0u : 1u) + (restored ? 1u : 0u);
+  constexpr auto max_generation =
+      std::numeric_limits<std::uint64_t>::max();
+  if (required_generations > 0 &&
+      (next_element_generation_ == 0 ||
+       required_generations - 1 >
+           max_generation - next_element_generation_)) {
+    throw std::overflow_error("FlexUI element handle generation exhausted");
+  }
+
+  auto new_entry = elements_by_id_.end();
   if (!new_id.empty()) {
-    elements_by_id_[new_id] = elem;
+    new_entry = elements_by_id_.try_emplace(new_id, IndexedElement{}).first;
+  }
+
+  const auto next_generation = [this]() noexcept {
+    return next_element_generation_++;
+  };
+  if (old_entry != elements_by_id_.end() &&
+      old_entry->second.element == elem) {
+    if (restored) {
+      old_entry->second = {restored, next_generation()};
+    } else {
+      elements_by_id_.erase(old_entry);
+    }
+  }
+  if (new_entry != elements_by_id_.end()) {
+    new_entry->second = {elem, next_generation()};
   }
 }
 

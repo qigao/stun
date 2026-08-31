@@ -35,7 +35,7 @@ enum class EventType {
   // 焦点事件
   FocusIn,
   FocusOut,
-  
+
   // IME 事件
   CompositionStart,
   CompositionUpdate,
@@ -45,6 +45,10 @@ enum class EventType {
   TouchStart,
   TouchMove,
   TouchEnd,
+
+  /// Synthesized after an unconsumed matching MouseDown/MouseUp activation.
+  /// Appended to preserve the numeric values of existing native event kinds.
+  Click,
 };
 
 enum class MouseButton {
@@ -57,11 +61,44 @@ enum class KeyCode {
   Unknown = 0,
 
   // 字母
-  A = 65, B, C, D, E, F, G, H, I, J, K, L, M,
-  N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+  A = 65,
+  B,
+  C,
+  D,
+  E,
+  F,
+  G,
+  H,
+  I,
+  J,
+  K,
+  L,
+  M,
+  N,
+  O,
+  P,
+  Q,
+  R,
+  S,
+  T,
+  U,
+  V,
+  W,
+  X,
+  Y,
+  Z,
 
   // 数字
-  Num0 = 48, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+  Num0 = 48,
+  Num1,
+  Num2,
+  Num3,
+  Num4,
+  Num5,
+  Num6,
+  Num7,
+  Num8,
+  Num9,
 
   // 功能键
   Escape = 256,
@@ -113,20 +150,20 @@ struct Event {
   EventType type;
 
   // 鼠标事件数据
-  float x = 0;           // 鼠标 X 坐标（窗口坐标系）
-  float y = 0;           // 鼠标 Y 坐标
-  float delta_x = 0;     // 鼠标滚轮/移动增量
+  float x = 0;       // 鼠标 X 坐标（窗口坐标系）
+  float y = 0;       // 鼠标 Y 坐标
+  float delta_x = 0; // 鼠标滚轮/移动增量
   float delta_y = 0;
   MouseButton button = MouseButton::Left;
 
   // 键盘事件数据
   KeyCode key = KeyCode::Unknown;
-  int mods = 0;          // KeyMod 位标记
-  std::string text;      // TextInput 事件的文本（UTF-8）
+  int mods = 0;                 // KeyMod 位标记
+  std::string text;             // TextInput 事件的文本（UTF-8）
   std::string composition_text; // IME 构字文本
 
   // 目标元素（事件路由后填充）
-  Element* target = nullptr;
+  Element *target = nullptr;
 
   // 时间戳
   float timestamp_ms = 0;
@@ -189,7 +226,7 @@ struct Event {
     return e;
   }
 
-  static Event text_input(const std::string& text) {
+  static Event text_input(const std::string &text) {
     Event e;
     e.type = EventType::TextInput;
     e.text = text;
@@ -214,7 +251,7 @@ struct Event {
     return e;
   }
 
-  static Event composition_update(const std::string& text) {
+  static Event composition_update(const std::string &text) {
     Event e;
     e.type = EventType::CompositionUpdate;
     e.composition_text = text;

@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories(include)
 
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(pugixml CONFIG REQUIRED)
 
 set(FLEXUI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(FLEXUI_INCLUDE_DIR "${FLEXUI_ROOT}/include")
@@ -90,6 +91,8 @@ set(FLEXUI_SOURCES
   src/box.cpp
   src/binding_runtime.cpp
   src/ui_document.cpp
+  src/ui_xml.cpp
+  src/widget_registry.cpp
   src/keyed_repeater.cpp
   src/view_pipeline.cpp
   src/element.cpp
@@ -147,8 +150,11 @@ set(FLEXUI_SOURCES
 # 头文件
 set(FLEXUI_HEADERS
   include/flexUI/types.h
+  include/flexUI/ui_handle.h
   include/flexUI/binding_runtime.h
   include/flexUI/ui_document.h
+  include/flexUI/ui_xml.h
+  include/flexUI/widget_registry.h
   include/flexUI/keyed_repeater.h
   include/flexUI/text_value_widget.h
   include/flexUI/computed_style.h
@@ -220,7 +226,7 @@ endif()
 # 链接依赖
 target_link_libraries(flexUI 
     PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS TurboUtils::Core md_parser nlohmann_json::nlohmann_json
-    PRIVATE Flex::Compiler unofficial::tree-sitter::tree-sitter
+    PRIVATE Flex::Compiler unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
@@ -243,6 +249,9 @@ if(WIN32)
             $<TARGET_FILE_DIR:flexUI>
     COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
 endif()
+
+add_subdirectory(modules/controller)
+add_subdirectory(modules/desktop)
 
 
 # 安装头文件

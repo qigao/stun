@@ -4,6 +4,7 @@
 - 日期：2026-08-14
 - 设计依据：[FLEXUI_DESKTOP_DESIGN.md](FLEXUI_DESKTOP_DESIGN.md)
 - TurboScript 专项：[TURBOSCRIPT_CONTROLLER_PLAN.md](TURBOSCRIPT_CONTROLLER_PLAN.md)
+- 当前格式决策：[XML_CSS_TBS_ARCHITECTURE.md](XML_CSS_TBS_ARCHITECTURE.md)
 - 首要目标：Windows 桌面 + TurboScript + DLL application service + gCanvas/OpenGL
 
 ## 1. 使用规则
@@ -59,7 +60,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### 决策
 
-- [x] 确定 `.flex` 为核心 UI 文档，XML 仅为以后可选 adapter。
+- [x] 2026-08-31 更新：确定 XML 为目标 UI 文档；`.flex` 仅在迁移期输出同一 compiled IR。
 - [x] 确定 TurboScript 为 controller runtime，不接入 QuickJS/JavaScript/npm。
 - [x] 确定 DLL 只扩展 application service/TurboScript host module。
 - [x] 确定 DLL 采用版本化纯 C ABI、opaque handle 和 capability registry。
@@ -161,42 +162,46 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### 模块与接口
 
-- [ ] 新建 `FlexUI::Controller` target，不依赖 TurboScript headers。
-- [ ] 定义不超过 10 个方法的 `IScriptModule` 小接口。
-- [ ] 定义 `ScriptController` 显式状态机：Empty/Compiled/Mounted/Dispatching/Faulted/Unmounting。
-- [ ] 定义 bounded `ScriptEventSnapshot`，不复制 `Event::target` 裸指针。
-- [ ] 定义 `{id, generation}` `UiHandle` 和 generation 失效规则。
-- [ ] 定义 `UiMutation` `std::variant` 与 `UiMutationBatch` limits。
-- [ ] 定义 `ApplicationCommand` 与 UI mutation 分离的 effect result。
-- [ ] candidate mount 前解析 compiled handler table；失败返回 element、event、handler 和 source span。
+- [x] 新建 `FlexUI::Controller` target，不依赖 TurboScript headers。
+- [x] 定义不超过 10 个方法的 `IScriptModule` 小接口。
+- [x] 定义 `ScriptController` 显式状态机：Empty/Compiled/Mounted/Dispatching/Faulted/Unmounting。
+- [x] 定义 bounded `ScriptEventSnapshot`，不复制 `Event::target` 裸指针。
+- [x] 定义 `{id, generation}` `UiHandle` 和 generation 失效规则。
+- [x] 定义 `UiMutation` `std::variant` 与 `UiMutationBatch` limits。
+- [x] 定义有界 `ApplicationCommandBatch`，与 UI mutation 分离保存在 `ScriptCallResult`。
+- [x] candidate mount 前解析 compiled handler table；失败返回 element、event、handler 和 source span。
 
 ### Fake module
 
-- [ ] 实现 test-only fake module，支持 export presence、call result、timeout 和 injected error。
-- [ ] 测 mount/event/optional-frame/unmount 调用顺序。
-- [ ] 测无 `on_frame` 时帧路径零 script callback。
-- [ ] 测 fault 后拒绝新 callback，显式 reload 才恢复。
+- [x] 实现 test-only fake module，支持 export presence、call result、timeout 和 injected error。
+- [x] 测 mount/event/optional-frame/unmount 调用顺序。
+- [x] 测无 `on_frame` 时帧路径零 script callback。
+- [x] 测 fault 后拒绝新 callback，显式 reload 才恢复。
 - [ ] 测 module/controller/Box 析构顺序和 callback 中关闭窗口。
-- [ ] 测 handler resolution 或 callback 失败时 Box root/index/bindings 与 mutation state 均不变。
+- [x] 测 handler resolution 或 callback timeout 时 Box root/index/bindings 与 mutation state 均不变。
 
 ### Mutation engine
 
-- [ ] 将 normalize、resolve、prepare、commit、rollback 拆成明确阶段。
-- [ ] 为每种 mutation 写明 target owner、前置条件、错误码和 rollback 数据。
-- [ ] commit 前预留内存并准备新旧值 swap，rollback 必须 `noexcept`。
-- [ ] 当前 Element API 无法提供强保证的 mutation 暂不公开。
-- [ ] stale handle、重复 target owner、错误类型、超额 batch 立即失败。
-- [ ] application command queue 先 reserve，再在 UI commit 成功后 publish。
-- [ ] 不可回滚外部副作用不能在 controller callback 栈内执行。
+- [x] 将 normalize、resolve、prepare、commit/discard 拆成明确阶段；prepare 失败或丢弃 staging
+  即为 rollback，commit 边界无失败操作。
+- [x] 为每种 mutation 写明 target owner、前置条件、错误码和 rollback 数据。
+- [x] commit 前完成所有分配并准备最终值 swap；丢弃 staging 为 `noexcept` RAII rollback。
+- [x] `BoxMutationHost` 不调用可能分配的 Element setter，按实际触及字段准备最终 state 并 swap。
+- [x] stale/detached/widget-owned handle、错误 input 类型、未知 utility、超额 batch 立即失败；
+  同一 target 的多条 mutation 在单一 staging 中按 batch 顺序合并。
+- [x] controller 先通过 `IApplicationCommandQueue` reserve，再在 UI commit 成功后无失败 publish；
+  UI 失败时 reservation 自动取消。
+- [x] command publication 只入队、不执行；mount/unmount command fail fast，不可回滚副作用不在
+  controller callback 栈内执行。
 
 ### TurboScript adapter
 
-- [ ] 新建 `FlexUI::ControllerTurboScript` target 和 Pimpl adapter。
-- [ ] 使用 `find_package(TurboScript CONFIG REQUIRED)`，不 `add_subdirectory` 外部源码。
-- [ ] TurboScript types 只存在于 adapter `.cpp`/private headers。
-- [ ] 缓存 required/optional exports 和转换后的 handler table。
-- [ ] 将 TurboScript errors 转换为统一 controller error，不重复记录日志。
-- [ ] adapter contract tests 覆盖 real module load/call/error/interrupt。
+- [x] 新建 `FlexUI::ControllerTurboScript` target 和 opaque adapter。
+- [x] 使用 `find_package(TurboScript CONFIG REQUIRED)`，不 `add_subdirectory` 外部源码。
+- [x] TurboScript types 只存在于 adapter `.cpp`。
+- [x] 缓存 required/optional exports 和转换后的 handler table。
+- [x] 将 TurboScript errors 转换为统一 controller error，不重复记录日志。
+- [x] adapter contract tests 覆盖 real module load/call/error/interrupt 与 effect batch 解码。
 
 完成条件：fake 与真实 TurboScript module 都通过同一 controller contract；callback 失败不产生部分
 UI 状态，默认 Box 路径仍未被隐式接管。
@@ -258,35 +263,51 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 ### Host bridge
 
 - [ ] 定义最小 `IDesktopHost`，按 window、input、platform service 拆分超过 10 方法的接口。
-- [ ] 定义 native event 到 FlexUI `Event` 的 normalization 契约。
+- [x] 定义 gCanvas mouse、wheel、key、text 与 resize 到 FlexUI `Event`/viewport metrics 的
+  strict normalization 契约；非法值不修改缓存的指针位置。
 - [ ] 定义 logical size、framebuffer size、DPI scale 和坐标转换唯一规则。
 - [ ] 定义 redraw-on-demand、animation timer 和 window close 调度。
-- [ ] 定义 text input、IME composition、clipboard、cursor、drag/drop 和 dialog 边界。
+- [x] 定义 text input 与 IME composition 的 application owner-thread gate；无合格焦点明确返回
+  success/not-dispatched，实际派发保留完整 `DesktopApplicationError`。
+- [x] 实现 `GCanvasApplicationInputRouter`：owner-thread gate → strict normalization →
+  `DesktopApplication` dispatch/viewport update；normalization 与 application error 保持独立来源。
+- [ ] 定义 clipboard、cursor、drag/drop 和 dialog 边界。
 
 ### Windows 首实现
 
 - [ ] 实现 `GCanvasWindowHost`，组合可选 `gCanvas::Window`，不让 Core 链接 GLFW。
 - [ ] 创建 OpenGL context 并验证 backend capabilities，不自动切 Vulkan。
-- [ ] 转换 mouse、wheel、key、text、resize、focus 和 close event。
+- [x] 实现与真实窗口解耦的 mouse、wheel、key、text、resize 值转换。
+- [x] 以 headless application 测试验证 gCanvas 输入路由、focused text gate、key repeat、resize
+  invalidation，以及跨线程拒绝不会污染 normalizer 指针缓存。
+- [ ] 接入 focus、close event 与真实 `gCanvas::Window` listener 生命周期。
+- [ ] 为 `gCanvas::Window` 增加 listener-scoped removal，避免 host 销毁后遗留 callback；不得使用
+  清除其他 owner 监听器的全局 reset 作为生命周期协议。
+- [ ] 将 FlexUI pointer capture 与 native capture 同步，并覆盖窗口失焦时的 capture/focus 清理。
 - [ ] 补齐 Windows IME、clipboard、DPI、多显示器和 native dialog service。
 - [ ] 主循环静态窗口使用 wait-events；动画/主动刷新使用 bounded poll/update。
 - [ ] 正确处理 minimize、zero framebuffer、device/context error 和 shutdown。
 
 ### DesktopApplication Facade
 
-- [ ] 定义 `DesktopApplicationBuilder`，验证 manifest、limits、services 和 required resources。
-- [ ] Builder 构建 candidate PluginManager、compiled artifacts、Box、Controller 和 Host。
-- [ ] `on_mount` 和 initial mutation 成功后才发布 ready application。
-- [ ] build 任一失败按 RAII 销毁候选资源，调用方获得一个 structured error。
-- [ ] 定义 run、request_close、reload 和 shutdown 的状态机与线程约束。
-- [ ] 不使用 global singleton/service locator 传递 application dependencies。
+- [x] 定义 `DesktopApplicationBuilder` 的 XML/CSS/script factory/limits/registry 子集；manifest、
+  services 和 required resources 留待 package/plugin 阶段。
+- [x] Builder 构建 compiled artifacts、Box、mutation engine 和 Controller candidate；PluginManager
+  与 Host 留待对应阶段。
+- [x] required export、`on_mount` 成功后才发布 ready application。
+- [x] build 任一失败按 RAII 销毁候选资源，调用方获得保留 nested error 的 structured error。
+- [x] 定义 application reload 的 owner-thread 与 atomic candidate swap；run、request_close 和
+  shutdown 状态机随 DesktopHost 实现。
+- [x] 不使用 global singleton/service locator；renderer、registry 和 script factory 显式注入。
 
 ### 测试
 
-- [ ] 无 GPU host fake 测 application build transaction。
+- [x] 无 GPU headless 测 application build/reload transaction、strict CSS、typed widget、mount failure
+  与跨线程 reload 拒绝。
 - [ ] hidden real window 测 OpenGL create/render/readback/resize/present。
 - [ ] DPI/resize 坐标与 hit-test 一致。
-- [ ] keyboard、text、IME、focus/capture 和 clipboard 回归。
+- [x] keyboard、text、IME 与内部 pointer capture 回归。
+- [ ] native focus/capture 与 clipboard 回归。
 - [ ] close during controller callback/service completion 安全。
 - [ ] required GPU capability 缺失时无半初始化 window/context。
 
@@ -297,15 +318,17 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 ### 事件与 controller
 
-- [ ] 在 widget consumption/bubbling 后生成 script event snapshot。
-- [ ] 冻结 handled、propagate、capture、bubble 和 post-widget notification 语义。
-- [ ] load 时解析所有 required handler，未知 handler 给出 `.flex` source location。
-- [ ] callback 成功后一次提交 mutation，再推进 binding/animation/layout/paint。
-- [ ] controller fault 后 UI 保持最后一次有效状态，显式 reload 才恢复 callback。
+- [x] 在 widget consumption 与 target→ancestor bubbling 中生成 pointer-free script event snapshot。
+- [x] 冻结首阶段 handled/propagate/bubble 语义：consumed event 不进入脚本，click 在 native MouseUp
+  route 后合成；capture target 与 physical hover/click hit 分离，且 consuming MouseUp 后释放 capture。
+- [ ] 定义显式 post-widget consumed notification、native capture 同步与 window focus 组合。
+- [x] load 时解析所有 required handler，未知 handler 给出 XML source location。
+- [x] callback 成功后一次提交 mutation；DesktopHost 接入后再统一 frame pipeline 调度。
+- [x] controller fault 后 UI 保持最后一次有效状态，显式 reload 才恢复 callback。
 
 ### Service 调用
 
-- [ ] controller effect 同时包含 UI mutation 和 reserved application command。
+- [x] controller effect 同时包含 UI mutation 和 reserved application command。
 - [ ] required capability 在 application build 阶段验证。
 - [ ] command completion 转换为不可变 controller event。
 - [ ] completion 到达已关闭/reloaded controller 时安全丢弃并返回取消状态。
@@ -313,7 +336,7 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 ### 示例应用
 
-- [ ] 新增完整桌面 editor 示例：`.flex`、CSS、`.tbs`、C++ host、document service DLL。
+- [ ] 新增完整桌面 editor 示例：XML、CSS、`.tbs`、C++ host、document service DLL。
 - [ ] 示例支持编辑、dirty binding、save command、saving 状态和错误提示。
 - [ ] 示例不在生产代码嵌入测试数据或本机绝对路径。
 - [ ] 示例可从 build tree 和 install tree 独立运行。
@@ -321,12 +344,12 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 ### 回归
 
 - [ ] 无 controller Box 行为与 command snapshot 不变。
-- [ ] `FLEXUI_ENABLE_TURBOSCRIPT=OFF` configure/build/test 通过。
+- [x] `FLEXUI_ENABLE_TURBOSCRIPT=OFF` configure/build/test 通过。
 - [ ] `FLEXUI_ENABLE_PLUGINS=OFF` configure/build/test 通过。
 - [ ] 两 feature 同时关闭时不部署 TurboScript/plugin runtime。
 - [ ] 现有 hand-built examples 与 UiDocument tests 通过。
 
-完成条件：`.flex + CSS + .tbs + DLL` 构成完整桌面应用闭环，且每个 feature 可以独立关闭。
+完成条件：`XML + CSS + .tbs + DLL` 构成完整桌面应用闭环，且每个 feature 可以独立关闭。
 
 ## P7：性能、安全与稳定性收口
 
@@ -374,7 +397,7 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [ ] Linux host：X11/Wayland、IME、clipboard、DPI 和 OpenGL smoke。
 - [ ] 评估 macOS OpenGL 生命周期与长期 Metal/Vulkan 策略，不先承诺支持矩阵。
 - [ ] Vulkan backend 通过同一 DesktopHost/Renderer contract 接入，上层 snapshot 不变。
-- [ ] XML adapter 只有在 Qt Designer/import 需求明确时实施，并输出同一 compiled program。
+- [ ] XML frontend 输出同一 compiled program，并完成 Qt Designer/import 可行性验证。
 - [ ] 不可信插件只有在独立进程 IPC、权限和 crash recovery 完成后开放。
 - [ ] DLL hot reload 只有在 state schema、引用清零、worker join 和 rollback 全部验证后开放。
 

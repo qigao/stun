@@ -2,6 +2,7 @@
 
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/widget_registry.h>
 
 #include <flex/dsl/flex_parser.h>
 #include <flex/core/expr_mir.h>
@@ -37,62 +38,44 @@ bool is_string_property(const std::string &name) {
          name.rfind("bind.", 0) == 0;
 }
 
-bool has_alias_conflict(const flex::parser::AstProps &properties, const char *first,
+template <typename Properties>
+bool has_alias_conflict(const Properties &properties, const char *first,
                         const char *second) {
   return properties.count(first) != 0 && properties.count(second) != 0;
 }
 
-UiDocumentError validate_node(const AstNode &node, const UiDocumentLimits &limits,
-                              std::size_t depth, std::size_t &node_count,
-                              std::unordered_set<std::string> &ids) {
-  if (depth > limits.max_depth) {
-    return make_error(UiDocumentErrorCode::DepthLimitExceeded,
-                      "UI document exceeds maximum tree depth");
+template <typename Properties>
+UiDocumentError validate_node_fields(
+    const std::string &tag, const std::string &id,
+    const Properties &properties, const UiDocumentLimits &limits,
+    std::unordered_set<std::string> &ids) {
+  if (tag.empty() || id.empty()) {
+    return make_error(UiDocumentErrorCode::InvalidNode,
+                      "UI nodes require a non-empty tag and id");
   }
-  if (++node_count > limits.max_nodes) {
-    return make_error(UiDocumentErrorCode::NodeLimitExceeded,
-                      "UI document exceeds maximum node count");
-  }
-  if (node.type.empty() || node.id.empty()) {
-    return make_error(UiDocumentErrorCode::InvalidNode, "UI nodes require a non-empty tag and id");
-  }
-  if (node.type.size() > limits.max_string_bytes || node.id.size() > limits.max_string_bytes) {
+  if (tag.size() > limits.max_string_bytes || id.size() > limits.max_string_bytes) {
     return make_error(UiDocumentErrorCode::StringLimitExceeded,
                       "UI node tag or id exceeds the string limit");
   }
-  if (!ids.insert(node.id).second) {
+  if (!ids.insert(id).second) {
     return make_error(UiDocumentErrorCode::DuplicateElementId,
-                      "duplicate UI element id: " + node.id);
+                      "duplicate UI element id: " + id);
   }
-  if (node.properties.size() > limits.max_properties_per_node) {
+  if (properties.size() > limits.max_properties_per_node) {
     return make_error(UiDocumentErrorCode::PropertyLimitExceeded,
-                      "UI node exceeds maximum property count: " + node.id);
+                      "UI node exceeds maximum property count: " + id);
   }
-  for (const auto &duplicate : node.duplicate_properties) {
-    if (duplicate.name.rfind("on.", 0) == 0) {
-      return make_error(UiDocumentErrorCode::DuplicateEventBinding,
-                        "duplicate UI event binding on element '" + node.id +
-                            "': " + duplicate.name,
-                        duplicate.source.line, duplicate.source.column);
-    }
-    if (duplicate.name.rfind("bind.", 0) == 0) {
-      return make_error(UiDocumentErrorCode::DuplicateBindingTarget,
-                        "duplicate UI binding target on element '" + node.id +
-                            "': " + duplicate.name,
-                        duplicate.source.line, duplicate.source.column);
-    }
-  }
-  if (has_alias_conflict(node.properties, "class", "classes") ||
-      has_alias_conflict(node.properties, "utility", "utilities") ||
-      has_alias_conflict(node.properties, "text", "content")) {
+  if (has_alias_conflict(properties, "class", "classes") ||
+      has_alias_conflict(properties, "utility", "utilities") ||
+      has_alias_conflict(properties, "text", "content")) {
     return make_error(UiDocumentErrorCode::InvalidProperty,
-                      "UI node contains conflicting property aliases: " + node.id);
+                      "UI node contains conflicting property aliases: " + id);
   }
 
-  for (const auto &[name, value] : node.properties) {
+  for (const auto &[name, value] : properties) {
     if (name.empty() || name == "id") {
       return make_error(UiDocumentErrorCode::InvalidProperty,
-                        "invalid or reserved UI property on node: " + node.id);
+                        "invalid or reserved UI property on node: " + id);
     }
     if (name.size() > limits.max_string_bytes) {
       return make_error(UiDocumentErrorCode::StringLimitExceeded,
@@ -128,12 +111,44 @@ UiDocumentError validate_node(const AstNode &node, const UiDocumentLimits &limit
       return make_error(UiDocumentErrorCode::InvalidProperty, "on. requires an event name");
     }
   }
+  return {};
+}
 
+UiDocumentError validate_node(const AstNode &node, const UiDocumentLimits &limits,
+                              std::size_t depth, std::size_t &node_count,
+                              std::unordered_set<std::string> &ids) {
+  if (depth > limits.max_depth) {
+    return make_error(UiDocumentErrorCode::DepthLimitExceeded,
+                      "UI document exceeds maximum tree depth");
+  }
+  if (++node_count > limits.max_nodes) {
+    return make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                      "UI document exceeds maximum node count");
+  }
+  auto error =
+      validate_node_fields(node.type, node.id, node.properties, limits, ids);
+  if (error) {
+    return error;
+  }
+  for (const auto &duplicate : node.duplicate_properties) {
+    if (duplicate.name.rfind("on.", 0) == 0) {
+      return make_error(UiDocumentErrorCode::DuplicateEventBinding,
+                        "duplicate UI event binding on element '" + node.id +
+                            "': " + duplicate.name,
+                        duplicate.source.line, duplicate.source.column);
+    }
+    if (duplicate.name.rfind("bind.", 0) == 0) {
+      return make_error(UiDocumentErrorCode::DuplicateBindingTarget,
+                        "duplicate UI binding target on element '" + node.id +
+                            "': " + duplicate.name,
+                        duplicate.source.line, duplicate.source.column);
+    }
+  }
   for (const auto &child : node.children) {
     if (!child) {
       return make_error(UiDocumentErrorCode::InvalidNode, "UI document contains a null child");
     }
-    auto error = validate_node(*child, limits, depth + 1, node_count, ids);
+    error = validate_node(*child, limits, depth + 1, node_count, ids);
     if (error) {
       return error;
     }
@@ -145,9 +160,16 @@ UiDocumentError validate_definition_node(const UiNodeDefinition &node,
                                          const UiDocumentLimits &limits, std::size_t depth,
                                          std::size_t &node_count,
                                          std::unordered_set<std::string> &ids) {
-  AstNode facade(node.tag, node.id);
-  facade.properties = node.properties;
-  auto error = validate_node(facade, limits, depth, node_count, ids);
+  if (depth > limits.max_depth) {
+    return make_error(UiDocumentErrorCode::DepthLimitExceeded,
+                      "UI document exceeds maximum tree depth");
+  }
+  if (++node_count > limits.max_nodes) {
+    return make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                      "UI document exceeds maximum node count");
+  }
+  auto error =
+      validate_node_fields(node.tag, node.id, node.properties, limits, ids);
   if (error) {
     return error;
   }
@@ -505,6 +527,11 @@ struct DetachedTree {
   Element *root = nullptr;
   std::vector<std::unique_ptr<Element>> elements;
   std::unordered_map<std::string, Element *> elements_by_id;
+  struct DetachedWidget {
+    Element *host = nullptr;
+    std::unique_ptr<Widget> widget;
+  };
+  std::vector<DetachedWidget> widgets;
 };
 
 void apply_properties(Element &element, const UiNodeDefinition &definition,
@@ -564,19 +591,46 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
 }
 
 Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree,
-                    bool include_event_attributes) {
+                    bool include_event_attributes,
+                    const WidgetRegistry *registry,
+                    UiDocumentError &build_error) {
+  std::unique_ptr<Widget> widget;
+  if (registry) {
+    auto created = registry->create(definition);
+    if (!created) {
+      build_error = make_error(
+          created.error.code == WidgetRegistryErrorCode::UnknownTag
+              ? UiDocumentErrorCode::UnknownElementTag
+              : UiDocumentErrorCode::WidgetFactoryFailed,
+          created.error.message);
+      return nullptr;
+    }
+    widget = std::move(created.widget);
+  }
+
   auto element = std::make_unique<Element>();
   element->set_tag(definition.tag);
   element->set_element_id(definition.id);
+  if (widget) {
+    element->widget = widget.get();
+    element->focusable = true;
+  }
   apply_properties(*element, definition, include_event_attributes);
 
   Element *raw = element.get();
   tree.elements_by_id.emplace(definition.id, raw);
   tree.elements.push_back(std::move(element));
+  if (widget) {
+    tree.widgets.push_back({raw, std::move(widget)});
+  }
 
   for (const auto &child_definition : definition.children) {
-    Element *child =
-        build_node(child_definition, tree, include_event_attributes);
+    Element *child = build_node(child_definition, tree,
+                                include_event_attributes, registry,
+                                build_error);
+    if (build_error) {
+      return nullptr;
+    }
     if (!raw->append(child)) {
       throw std::logic_error("failed to attach detached UI element");
     }
@@ -772,17 +826,51 @@ CompiledUiProgram::resources() const noexcept {
 UiDocumentCompileResult compile_ui_document(std::string_view source,
                                             std::string_view document_name,
                                             const UiDocumentLimits &limits) {
-  UiDocumentCompileResult result;
   auto parsed = parse_ui_source(source, document_name, limits,
                                 ResourceLowering::Include);
   if (!parsed) {
+    UiDocumentCompileResult result;
     result.error = std::move(parsed.error);
     return result;
   }
 
+  return compile_ui_definition(*parsed.definition, std::move(parsed.resources),
+                               limits);
+}
+
+UiDocumentCompileResult compile_ui_definition(
+    UiDocumentDefinition definition,
+    std::vector<UiResourceDefinition> resources,
+    const UiDocumentLimits &limits) {
+  UiDocumentCompileResult result;
+  if (definition.name.empty()) {
+    result.error = make_error(UiDocumentErrorCode::InvalidNode,
+                              "UI document definition requires a name");
+    return result;
+  }
+  if (definition.name.size() > limits.max_string_bytes) {
+    result.error = make_error(UiDocumentErrorCode::StringLimitExceeded,
+                              "UI document name exceeds the string limit");
+    return result;
+  }
+  std::size_t node_count = 0;
+  std::unordered_set<std::string> ids;
+  result.error = validate_definition_node(definition.root, limits, 1,
+                                          node_count, ids);
+  if (result.error) {
+    return result;
+  }
+  if (resources.size() > limits.max_resources) {
+    result.error = make_error(
+        UiDocumentErrorCode::ResourceLimitExceeded,
+        "UI document exceeds maximum declared resource count");
+    return result;
+  }
+
   auto impl = std::make_unique<CompiledUiProgram::Impl>();
-  impl->definition = std::move(parsed.definition);
-  impl->resources = std::move(parsed.resources);
+  impl->definition =
+      std::make_shared<const UiDocumentDefinition>(std::move(definition));
+  impl->resources = std::move(resources);
   result.error = lower_event_bindings(impl->definition->root, limits,
                                       impl->event_bindings);
   if (result.error) {
@@ -806,12 +894,12 @@ UiDocumentCompileResult compile_ui_document(std::string_view source,
 
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &definition) {
-  return instantiate_impl(box, definition, nullptr);
+  return instantiate_impl(box, definition, nullptr, nullptr);
 }
 
 UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     Box &box, const UiDocumentDefinition &definition,
-    const CompiledUiProgram *program) {
+    const CompiledUiProgram *program, const WidgetRegistry *registry) {
   UiDocumentInstantiateResult result;
   if (definition.name.empty()) {
     result.error =
@@ -840,10 +928,20 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
   std::optional<UiBindingRuntime::TransactionCheckpoint> binding_transaction;
   std::optional<SourceSpan> active_binding_span;
   const std::size_t original_element_count = box.elements_.size();
+  const std::size_t original_widget_count = box.widgets_.size();
+  const std::size_t original_active_widget_count = box.active_widgets_.size();
+  const std::uint64_t original_element_generation =
+      box.next_element_generation_;
   bool index_committed = false;
   const auto *bindings = program ? &program->impl_->bindings : nullptr;
   try {
-    detached.root = build_node(definition.root, detached, program == nullptr);
+    UiDocumentError build_error;
+    detached.root = build_node(definition.root, detached, program == nullptr,
+                               registry, build_error);
+    if (build_error) {
+      result.error = std::move(build_error);
+      return result;
+    }
     if (program) {
       for (const auto &event_binding : program->impl_->event_bindings) {
         const auto element =
@@ -873,10 +971,18 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     }
 
     auto next_index = box.elements_by_id_;
+    std::uint64_t next_generation = box.next_element_generation_;
     for (const auto &[id, element] : detached.elements_by_id) {
-      next_index[id] = element;
+      if (next_generation == 0) {
+        throw std::overflow_error(
+            "FlexUI element handle generation exhausted");
+      }
+      next_index[id] = {element, next_generation++};
     }
     box.elements_.reserve(box.elements_.size() + detached.elements.size());
+    box.widgets_.reserve(box.widgets_.size() + detached.widgets.size());
+    box.active_widgets_.reserve(box.active_widgets_.size() +
+                                detached.widgets.size());
 
     if (bindings) {
       binding_transaction.emplace(box.bindings_.begin_transaction());
@@ -922,7 +1028,14 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
       element->owner_box_ = &box;
       box.elements_.push_back(std::move(element));
     }
+    for (auto &detached_widget : detached.widgets) {
+      Widget *widget = detached_widget.widget.get();
+      box.widgets_.push_back(std::move(detached_widget.widget));
+      widget->bind_host_element(detached_widget.host);
+      box.active_widgets_.push_back(detached_widget.host);
+    }
     box.elements_by_id_.swap(next_index);
+    box.next_element_generation_ = next_generation;
     index_committed = true;
     box.set_root(detached.root);
     if (binding_transaction) {
@@ -933,10 +1046,14 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
       box.bindings_.rollback_transaction(*binding_transaction);
     }
     box.root_ = nullptr;
+    box.next_element_generation_ = original_element_generation;
+    box.active_widgets_.resize(original_active_widget_count);
+    box.widgets_.resize(original_widget_count);
     if (index_committed) {
       for (const auto &[id, element] : detached.elements_by_id) {
         auto found = box.elements_by_id_.find(id);
-        if (found != box.elements_by_id_.end() && found->second == element) {
+        if (found != box.elements_by_id_.end() &&
+            found->second.element == element) {
           box.elements_by_id_.erase(found);
         }
       }
@@ -961,7 +1078,19 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
 
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const CompiledUiProgram &program) {
-  return instantiate_impl(box, program.definition(), &program);
+  return instantiate_impl(box, program.definition(), &program, nullptr);
+}
+
+UiDocumentInstantiateResult UiDocumentInstantiator::instantiate(
+    Box &box, const UiDocumentDefinition &definition,
+    const WidgetRegistry &registry) {
+  return instantiate_impl(box, definition, nullptr, &registry);
+}
+
+UiDocumentInstantiateResult UiDocumentInstantiator::instantiate(
+    Box &box, const CompiledUiProgram &program,
+    const WidgetRegistry &registry) {
+  return instantiate_impl(box, program.definition(), &program, &registry);
 }
 
 } // namespace flexUI

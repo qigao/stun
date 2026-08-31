@@ -1,6 +1,7 @@
 # FlexUI Desktop 应用运行时设计
 
-- 状态：提案，等待按阶段实施
+- 状态：分阶段实施中（XML/typed registry/controller/application candidate 已落地；desktop host、
+  自动事件桥与 plugin service 尚未完成）
 - 日期：2026-08-14
 - 首要平台：Windows 桌面，OpenGL 为默认渲染后端
 - 控制器语言：TurboScript
@@ -10,13 +11,17 @@
   [TURBOSCRIPT_CONTROLLER_DESIGN.md](TURBOSCRIPT_CONTROLLER_DESIGN.md)、
   [ARCHITECTURE.md](ARCHITECTURE.md)
 
+> **2026-08-31 决策更新：** 本文关于“`.flex` 是核心 UI 文档、XML 仅为可选 adapter”的结论已由
+> [XML_CSS_TBS_ARCHITECTURE.md](XML_CSS_TBS_ARCHITECTURE.md) 取代。当前目标是 XML 负责结构、
+> CSS/Tailwind-like 负责样式与声明式动画、TurboScript 负责交互；原生 Timeline/Physics/MIR
+> runtime 保留。本文的 controller ABI、状态所有权、事务和线程模型章节仍然有效。
+
 ## 1. 决策摘要
 
-FlexUI Desktop 采用类似 Qt Designer `.ui` + QtScript 的开发模型，但不复制 Qt XML、
-QObject 或浏览器 DOM：
+FlexUI Desktop 采用类似 Qt Designer `.ui` + QtScript 的开发模型，但不复制 QObject 或浏览器 DOM：
 
 ```text
-.flex UI Document + CSS/Tailwind Utility + TurboScript Controller
+XML UI Document + CSS/Tailwind Utility + TurboScript Controller
                               │
                               ▼
                    native FlexUI runtime
@@ -27,8 +32,8 @@ QObject 或浏览器 DOM：
 
 核心决策如下：
 
-1. 继续使用现有 `.flex` `ui` 块作为唯一核心 UI 文档格式；XML 以后只能作为产生相同
-   `UiDocumentDefinition` 的输入适配器。
+1. XML 是唯一目标 UI 文档格式；迁移期旧 `.flex` 与 XML 产生同一个
+   `UiDocumentDefinition`，消费者迁移和等价测试完成后删除旧 DSL。
 2. 新增编译后的 `CompiledUiProgram`，集中保存 UI definition、事件绑定、MIR binding、
    source map 和资源引用；不把脚本值或运行时指针放进 definition。
 3. TurboScript 是首选且可修改的控制器运行时，不再同时设计 QuickJS/JavaScript 路径。
@@ -48,10 +53,11 @@ QObject 或浏览器 DOM：
 - `UiDocumentDefinition` 已是 parser-independent 值语义树，并带 source、node、depth、property
   和 string 资源上限；`UiDocumentInstantiator` 承诺失败时目标 Box 不变。证据：
   `flexUI/include/flexUI/ui_document.h`、`flexUI/src/ui_document.cpp`。
-- `.flex` UI 文档已经把 `on.event` 降级为不可变类型化事件表，并提供按 element/event 查询的
-  只读索引；实例化时从该表生成可变的 `data-flexui-on-event` 兼容 attribute。TurboScript export
-  resolution 与 controller dispatch 尚未实现。证据：`flexUI/include/flexUI/ui_document.h`、
-  `flexUI/src/ui_document.cpp`。
+- XML 与 legacy `.flex` frontend 都会把事件降级为同一个不可变类型化事件表，并提供按
+  element/event 查询的只读索引。`ScriptController::load()` 在候选发布前解析 required export，
+  `dispatch()` 已能提交类型化 mutation；`EventDispatcher` 自动接入 controller 尚未实现。证据：
+  `flexUI/include/flexUI/ui_xml.h`、`flexUI/modules/controller/controller.cpp`、
+  `flexUI/modules/controller/application.cpp`。
 - `UiDataContext` 是单线程类型化输入事实源；数值和布尔表达式创建 binding 时编译为 MIR，
   输入版本不变时跳过求值。证据：`flexUI/include/flexUI/binding_runtime.h`、
   `flexUI/src/binding_runtime.cpp`。
@@ -63,16 +69,17 @@ QObject 或浏览器 DOM：
 - gCanvas 已把核心 renderer 与可选 GLFW window helper 分离；OpenGL/Vulkan Context 支持
   host-managed native window，Context 与 GPU 资源限定在创建线程。证据：
   `vendor/gCanvas/CMakeLists.txt`、`vendor/gCanvas/docs/host-and-resource-protocol.md`。
-- 当前 TurboScript 宿主 ABI 尚不满足重复调用已编译模块、按名称调用 export、结构化错误和
-  完整资源限制等 controller 要求。证据与所需能力记录在
-  `flexUI/docs/TURBOSCRIPT_CONTROLLER_DESIGN.md`。
+- TurboScript public host ABI 已能编译模块、按名称解析 export、重复调用并返回结构化错误；
+  FlexUI 通过可选 `FlexUI::ControllerTurboScript` adapter 使用它，feature 关闭时不查找该依赖。
+  证据：`flexUI/include/flexUI/controller_turboscript.h`、
+  `flexUI/modules/controller/controller_turboscript.cpp`。
 
 ### 2.2 推论
 
 - 类似 Qt 的生产力来自“声明式视图、类型化属性、signal/slot、脚本 controller 和原生服务”，
   并不依赖 XML 本身。
-- literal XML 与 `.flex` 同时作为核心格式会复制语义验证、source map、热重载和测试矩阵，
-  因而 XML 应保持为可选 adapter。
+- XML 与 `.flex` 若拥有各自 runtime 会复制语义验证、source map、热重载和测试矩阵；当前实现
+  因此只保留双 frontend，并统一输出 `CompiledUiProgram`，XML 是默认入口。
 - TurboScript 与 DLL 都必须经过窄宿主边界；把 native pointer 暴露给脚本或 DLL 会破坏
   Box ownership、线程约束和后续 backend 替换能力。
 
@@ -81,7 +88,7 @@ QObject 或浏览器 DOM：
 ### 3.1 目标
 
 - 首先交付可制作复杂桌面 GUI 的 Windows application runtime。
-- 使用 `.flex` 声明 UI、CSS/Tailwind 描述视觉、MIR binding 投影状态、TurboScript 编排行为。
+- 使用 XML 声明 UI、CSS/Tailwind 描述视觉、MIR binding 投影状态、TurboScript 编排行为。
 - 支持 C/C++ DLL 注册类型化业务服务，并由 TurboScript 通过 capability namespace 调用。
 - 保持 Element、binding input、controller、plugin private state 和 GPU resource 各有唯一 owner。
 - 无脚本页面不进入脚本 callback；无动画窗口按需重绘。
@@ -101,8 +108,9 @@ QObject 或浏览器 DOM：
 
 | 方案 | 优点 | 代价与风险 | 结论 |
 |---|---|---|---|
-| XML + JavaScript runtime | 接近传统 Qt `.ui`，外部工具容易生成 XML | 新增 XML 语义层；JS runtime、GC 和 Web 预期扩大范围 | 不选为核心 |
-| `.flex` + TurboScript + native runtime | 复用现有 parser、MIR、Box 和事件系统；部署闭环可控 | 必须完善 TurboScript ABI 和桌面 Facade | 采用 |
+| XML + JavaScript runtime | 接近传统 Qt `.ui`，外部工具容易生成 XML | JS runtime、GC 和 Web 预期扩大范围 | 不采用 JavaScript |
+| XML + TurboScript + native runtime | 结构可由工具生成；复用现有 IR、MIR、Box 和事件系统 | 需要 XML schema、typed widget factory 和迁移旧消费者 | 采用 |
+| `.flex` + TurboScript + native runtime | 复用现有 parser | UI、动画、状态机和表达式职责重叠 | 仅作迁移兼容 |
 | 纯 C++ UI + callback | 最小运行时、静态类型强 | 声明式生产力和快速迭代不足，无法满足 QtScript 类需求 | 保留兼容，不作为主路径 |
 | 脚本直接操作 Element/DOM | API 表面灵活 | 生命周期、线程、性能和状态一致性不可控 | 禁止 |
 
@@ -112,7 +120,7 @@ QObject 或浏览器 DOM：
 flowchart TB
     subgraph Package[Desktop application package]
         Manifest[app.toml]
-        Document[MainWindow.flex]
+        Document[MainWindow.xml]
         Styles[app.css]
         Script[MainWindow.tbs]
         Plugins[service DLLs]
@@ -206,7 +214,7 @@ flowchart LR
 ```text
 my_app/
 ├── app.toml
-├── ui/MainWindow.flex
+├── ui/MainWindow.xml
 ├── styles/app.css
 ├── controllers/MainWindow.tbs
 ├── plugins/document_service/plugin.toml
@@ -219,7 +227,7 @@ my_app/
 ```toml
 [application]
 id = "com.example.editor"
-entry_document = "ui/MainWindow.flex"
+entry_document = "ui/MainWindow.xml"
 entry_controller = "controllers/MainWindow.tbs"
 stylesheets = ["styles/app.css"]
 
@@ -386,7 +394,24 @@ stateDiagram-v2
 每个 Box 最多一个 controller，且 controller、Box、EventDispatcher 和 gCanvas Context 都由同一个
 UI 线程访问。`on_frame` 只有模块显式导出且宿主启用时才进入帧路径。
 
-### 8.4 脚本能力
+### 8.4 Controller core 数据协议
+
+- `ScriptController` 独占一个 `IScriptModule`，并以 `shared_ptr<const CompiledUiProgram>` 保持
+  handler table 的唯一事实源存活；load 失败时候选 module 在函数边界内销毁，活动 Controller
+  仍为 `Empty`。
+- `IScriptModule` 仅解析 export 并调用已解析的 opaque handle。生命周期 export 和所有
+  `EventBinding` 在 load 阶段解析，事件 dispatch 不重复解析 handler 名称。
+- `ScriptEventSnapshot` 是不含 `Element*` 的值类型。`ScriptCallContext::event` 是同步调用期间的
+  borrowed view，只在 `IScriptModule::call()` 返回前有效；module/adapter 不得保存该指针。
+- 该阶段是单生产者、单消费者、同一 UI 线程的直接调用，没有队列和跨线程发布。
+  `ControllerLimits` 分别限制 element ID、event text 和 composition text 字节数；超限返回
+  `EventLimitExceeded`，不调用 module、不截断输入，也不改变 `Mounted` 状态。
+- module 返回错误或抛异常时，Controller 将其转换为一个 `ModuleCallFailed`，丢弃当次结果并进入
+  `Faulted`；后续 callback 返回 `ControllerFaulted`。显式 unmount/load 是唯一恢复路径。
+- unmount 先进入 `Unmounting` 并调用可选 `on_unmount`，再释放 module 和 compiled program；
+  即使 `on_unmount` 失败也完成资源释放并返回结构化错误。
+
+### 8.5 脚本能力
 
 脚本可：
 
@@ -573,6 +598,15 @@ sequenceDiagram
 
 热重载以后复用同一候选构建协议：新文档、脚本或插件未完整通过验证前，活动窗口继续使用旧实例。
 
+当前已实现该协议的 UI application 子集：`DesktopApplicationBuilder` 默认从 `xml_entry()` 构建，
+按 XML semantic compile → strict CSS → typed widget instantiate → script module → required export
+resolution → controller mount 的顺序生成 detached candidate。成功后才发布；`reload()` 使用一次
+`unique_ptr` 交换替换 Box/program/controller，失败保持旧实例。应用及其所有访问限定在调用
+`build()` 的 owner thread，跨线程 reload/event dispatch 返回 `WrongThread`。renderer 由调用方借用
+并必须比应用存活更久。`dispatch_event()` 已通过独立 framework observer 连接 EventDispatcher 与
+controller，不会覆盖现有 C++ global callback。PluginManager 与 DesktopHost/native window 仍属于
+后续阶段。
+
 ## 12. 事件、service 与渲染顺序
 
 ```mermaid
@@ -581,6 +615,7 @@ sequenceDiagram
     participant Events as EventDispatcher
     participant Widget
     participant Controller
+    participant Commands as ApplicationCommandQueue
     participant Mutations as MutationEngine
     participant Binding as UiBindingRuntime
     participant Pipeline as ViewPipeline
@@ -591,10 +626,12 @@ sequenceDiagram
     Widget-->>Events: handled + propagate
     opt event eligible for script
         Events->>Controller: immutable ScriptEventSnapshot
-        Controller-->>Mutations: bounded effects batch
+        Controller-->>Commands: reserve bounded application commands
+        Controller-->>Mutations: bounded UI mutation batch
         Mutations->>Mutations: resolve, validate, reserve, prepare
         Mutations->>Binding: commit typed input changes
         Mutations->>Mutations: commit tree changes
+        Controller-->>Commands: publish reserved slots (no execution)
     end
     Binding->>Binding: evaluate changed dependencies
     Binding->>Pipeline: invalidate affected view stages
@@ -602,20 +639,38 @@ sequenceDiagram
     GPU-->>Host: present
 ```
 
-Widget 已消费的事件默认不进入脚本；只有事件 binding 明确允许 post-widget notification 时才产生
-只读通知，且通知不能再次触发相同默认动作。capture/bubble/handled 的准确语义必须由测试冻结。
+当前契约是 widget → 现有 C++ callback → controller；widget 消费会立即停止当前 route，脚本不接收
+该事件。未消费事件按 target→ancestor 冒泡，快照的 `target` 始终表示原始路由目标，
+`current_target` 表示当前 binding 所属节点。Click 只在同一 target 完成 MouseDown/MouseUp 且
+MouseUp 未被消费时合成，并在原生 MouseUp 冒泡完成后通知脚本。未来若增加 consumed-event 的
+post-widget 只读通知，必须先扩展 XML binding schema，不得隐式改变当前默认语义。
 
 ## 13. Mutation 与外部副作用
 
 ### 13.1 UiMutationBatch
 
-首批 mutation 使用有限 `std::variant`：
+Controller core 当前使用有限 `std::variant`：
 
 - `SetBindingInputNumber/Bool/String`
-- `SetText` / `SetValue`
+- `SetText`
 - `SetAttribute` / `RemoveAttribute`
 - `SetClasses` / `SetUtilities`
-- `StartAnimation` / `StopAnimation` / `SendTrigger`
+
+`SetValue`、`StartAnimation`、`StopAnimation` 和 `SendTrigger` 要等对应 Box/animation adapter 能提供
+相同事务保证后再加入 variant；当前声明不等于真实 Box host 已开放这些脚本操作。
+
+默认 batch 上限为 256 个 mutation、单字符串 16 KiB、所有字符串合计 64 KiB。element ID、属性名、
+input 名和值都计入预算。adapter 创建 batch 时可以使用更严格的上限，但不能放宽 host：
+`UiMutationEngine` 会用自己的 limits 重新验证。append 或 apply 超限时立即返回明确错误，batch 和 host
+均保持不变。
+
+| Mutation | 事实源/target owner | prepare 前置条件 | 错误 | 真实 host final-state staging |
+|---|---|---|---|---|
+| `SetText` | Box-owned Element | handle 当前有效、text 有界 | `InvalidTarget` / string limit / host error | 旧 text 与已预留新 string |
+| `SetAttribute` / `RemoveAttribute` | Box-owned Element | handle 有效、name 非空且类型允许 | `InvalidTarget` / `InvalidName` / host error | 旧 attribute presence/value 与新 map staging |
+| `SetClasses` / `SetUtilities` | Box-owned Element | handle 有效、tokens 可由 style/utility 层完整验证 | target/string/host error | 旧 token set、selector/utility dirty staging |
+| `SetBindingInputNumber` | Box-owned `UiDataContext` | name 非空、number finite、kind 不冲突 | `InvalidName` / `InvalidNumber` / host error | 旧 typed value、version 与 invalidation staging |
+| `SetBindingInputBool/String` | Box-owned `UiDataContext` | name 非空、kind 不冲突、string 有界 | `InvalidName` / string/host error | 旧 typed value、version 与 invalidation staging |
 
 处理阶段：
 
@@ -623,22 +678,60 @@ Widget 已消费的事件默认不进入脚本；只有事件 binding 明确允�
 2. resolve：把 `{id, generation}` handle 解析为当前节点，旧 generation 立即失败。
 3. prepare：验证类型和 target ownership，预留容器容量，准备新旧值交换记录。
 4. commit：通过只允许无失败 swap/赋值的 mutation adapter 提交。
-5. rollback：若 commit 边界仍出现错误，按反向 journal 恢复；rollback 本身必须 `noexcept`。
+5. discard：prepare 任一阶段失败即由 RAII 丢弃全部 staging；commit 边界只含无失败操作，因此不进入
+   需要补偿的半提交状态。
 
-在现有 Element setter 尚不能提供强异常保证前，对应 mutation 不得进入公开脚本 API。
+`BoxMutationHost` 是 `FlexUI::Controller` 中依赖 `FlexUI::Core` 的薄适配层。它只接受从 Box root
+可达的 application-owned Element；stale、detached、widget-owned target 在 prepare 阶段返回
+`InvalidTarget`。同一 Element 的多条命令按 batch 顺序合并到一个 final-state staging。prepare 按需
+复制实际触及的字段：`SetText` 不复制 selector/attribute 状态，attribute mutation 不复制 class sets。
+classes/utilities 在 staging 中完成 token 解析、catalog 校验和 selector state 重建。commit 只 swap 已准备
+的 string/map/set，设置 dirty flags，不分配、不解析，也不调用可能分配的公开 setter。未 commit 的
+staging 由 RAII 丢弃；commit 为幂等 `noexcept` 操作。
+
+Binding input mutation 只更新调用方预先声明且类型固定的 input，不允许脚本隐式创建或改变 input
+schema。prepare 验证 name 存在、number/bool/string 类型吻合并检查 revision 不溢出；commit 仅更新
+现有 map entry。UI element staging 与 input staging 全部验证完成后才生成 prepared transaction，任一
+错误不会留下部分状态。
+
+`Box::elements_by_id_` 的索引条目同时持有 Element pointer 与 generation，是句柄状态的唯一事实源；
+Controller 不维护镜像 registry。创建带 ID 元素、ID 改名、重复 ID 覆盖、旧 owner 恢复和 ID 复用都会
+取得新的 Box-wide 单调 generation，因此旧句柄不会因相同字符串 ID 再次出现而复活。空 ID、被重复
+ID 遮蔽的元素和其他 Box 的元素不能生成有效句柄。UI document 的 detached build 使用 candidate index
+和 candidate generation，只有完整安装成功才一起提交；binding 安装失败会同时恢复 index 与 generation
+counter。
+
+句柄有效只表示“该 ID 当前仍指向同一个 Box index incarnation”，不表示节点当前可从 root 到达。
+`UiKeyedRepeater` 的 retired 节点仍由 Box 保留，直到 Box 提供通用 subtree destruction 前不会仅因 detach
+自动失效。真实 mutation host 的 resolve/prepare 阶段仍必须按 mutation 类型验证 active-tree、widget/
+application ownership 和 target kind；未来 subtree destruction 必须在释放内存前删除索引条目，使句柄
+立即 stale。
+
+`IUiMutationHost` 定义 host 事务边界，并由 fake host 与真实 `BoxMutationHost` 共同验证：`prepare()`
+不可改变可观察状态，返回的 `IPreparedUiMutation` 独占所有 staging 且不得保留 batch view；未 commit
+的 staging 随 RAII 析构丢弃，`commit()` 必须幂等、`noexcept` 且不分配。TurboScript adapter 仍需
+完成自己的 value conversion 和 resource limits 后才可暴露这些 mutation。
 
 ### 13.2 ApplicationCommand
 
-文件、网络、数据库或设备操作不是 UiMutation。controller 输出独立的有界
-`ApplicationCommandBatch`：
+文件、网络、数据库或设备操作不是 UiMutation。`ScriptCallResult` 分别拥有 `UiMutationBatch` 和
+`ApplicationCommandBatch`。command 是 `{request_id, capability, operation, payload}` envelope；payload
+是 adapter 定义 schema 的自有序列化字节，不把 service/plugin 类型扩散到 controller core。默认上限为
+64 条、单字符串 16 KiB、全部字符串 64 KiB，controller 侧 `ApplicationCommandEngine` 会再次验证
+request ID、capability、operation 与 limits。
 
-1. host 先校验 capability、参数 schema 和 command queue 容量并保留 slot。
-2. UI mutation 成功后才发布已保留 command；发布不得再分配或失败。
-3. service 同步接受 command，耗时工作可进入其 worker。
-4. 完成结果通过有界 UI completion queue 返回，再生成新的 controller event。
+1. `IApplicationCommandQueue::reserve()` 校验 capability、参数 schema 和 queue 容量，将 batch 复制到
+   queue-owned slot，但不向 consumer 暴露。
+2. reserve 失败时不 prepare UI mutation；UI mutation 失败时 reservation 由 RAII 析构释放。
+3. UI mutation 成功后才调用 reservation 的 `publish()`；publish 必须幂等、`noexcept`、不分配、
+   不阻塞且不执行 command。
+4. service 在 controller 返回后同步接受已发布 command，耗时工作可进入其 worker。
+5. 完成结果通过有界 UI completion queue 返回，再生成新的 controller event。
 
 外部副作用无法与 UI 内存状态做通用回滚，因此不允许 DLL 在 controller callback 栈内直接执行
-不可回滚操作。
+不可回滚操作。`on_mount` 在 candidate application 发布前执行，因此当前 fail fast 拒绝 command；
+`on_unmount` 同样禁止 UI mutation 和 command。未来若 DesktopApplication 提供更外层 activation
+transaction，可通过另一个延迟 publication adapter 扩展 mount 语义，不能静默改变现有顺序。
 
 ## 14. DesktopHost 与 gCanvas
 
@@ -655,9 +748,22 @@ gCanvas 负责：
 - OpenGL/Vulkan backend 差异。
 - 严格的单线程 Context 和 GPU resource 生命周期。
 
+当前已经完成与真实窗口解耦的应用输入边界：`GCanvasInputNormalizer` 是 native value 转换和
+最后有效 pointer position 的唯一 owner；`GCanvasApplicationInputRouter` 借用一个
+`DesktopApplication`，在触碰 normalizer 或 Box 前检查 application owner thread，再把 mouse、wheel、
+key 和 text 路由到 `dispatch_event()`，或把正数 logical resize 写入 viewport 并 invalidate。转换失败
+保留 `GCanvasInputError`，应用失败保留完整 `DesktopApplicationError`；无可编辑焦点的合法字符输入
+返回 success/not-processed，而不是伪造派发。该边界只依赖 `gCanvas::Core` event contract，不创建窗口、
+context 或 frame。
+
 初始 `GCanvasWindowHost` 可以组合 `gCanvas::Window`，复用其 GLFW helper；IME、clipboard、dialog
 等不足能力由 DesktopHost 的平台 service 补齐。长期 native/SDL host 通过相同 Bridge 使用
 gCanvas HostManaged/External Context，不修改 FlexUI Core。
+
+在真实 `GCanvasWindowHost` 可以声明完成前，必须先补齐以下契约：listener-scoped callback removal；
+native focus、close 与 pointer capture 事件；失焦时 FlexUI focus/capture 清理；window/context/host 的
+确定销毁顺序；hidden-window OpenGL create/render/readback/resize/present smoke。当前
+`gCanvas::Window::reset_listener()` 是全局清理语义，不能作为多个 callback owner 的析构协议。
 
 首版默认 OpenGL。Vulkan 是 gCanvas backend 的后续可选项，不改变 UI Document、Controller、
 binding 或 plugin contract。
@@ -767,12 +873,12 @@ FlexUI::Desktop
 
 | 等级 | 证据类型 | 风险与影响 | 控制措施 |
 |---|---|---|---|
-| HIGH | 事实 | TurboScript 当前缺少所需稳定宿主 ABI，直接集成会依赖内部生命周期 | 先在 TurboScript 仓库完成 public C ABI、limits 和 package tests |
+| HIGH | 事实 | 多个仓库消费者仍加载 legacy `.flex`，现在删除 compiler 会破坏工具和示例 | 先迁移消费者并完成 install-tree 回归，再移除兼容 frontend |
 | HIGH | 推论 | DLL 可破坏宿主进程内存，无法在同进程可靠恢复 | 首版只加载可信插件；不可信插件以后进程隔离 |
 | HIGH | 事实 | 当前 Event 包含裸 `Element* target`，不能直接复制到脚本/DLL | 构造值语义 snapshot，只含 handle 和有限字段 |
 | HIGH | 推论 | mutation 与外部副作用混合会产生不可回滚状态 | 分离 UiMutation 与 ApplicationCommand，先 reserve 再发布 |
-| MED | 事实 | handler export 尚未在 TurboScript load 边界解析 | controller 接入时增加带 source span 的 export resolution；兼容 attribute 不参与解析 |
-| MED | 推论 | literal XML 双栈会扩大迁移和测试成本 | XML 仅作为同一 definition 的 adapter |
+| MED | 事实 | handler export 已在 load 时解析，但 EventDispatcher 尚未自动生成 script snapshot | P6 冻结 widget consumption/bubble 语义后接入单一事件桥 |
+| MED | 推论 | XML 与 legacy frontend 若形成两套 runtime 会扩大迁移和测试成本 | 两者只输出同一个 compiled program；legacy 设定移除门槛 |
 | MED | 事实 | gCanvas Context 单线程且 host/window 有明确销毁顺序 | DesktopHost 固化 UI-thread 和 shutdown protocol |
 | MED | 推论 | 热重载 DLL 容易遗留函数指针和 worker | 首版不启用；后续需引用清零、状态迁移和原子路由 |
 | LOW | 推论 | `.tbs` handler 字符串易产生拼写错误 | load-time export resolution 和 source-located error |
