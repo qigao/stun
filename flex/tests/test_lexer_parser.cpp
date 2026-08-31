@@ -318,7 +318,8 @@ TEST_CASE("Parser: UI and scene remain independent", "[parser][ui][scene]") {
   REQUIRE(program->scene->children.size() == 1);
 }
 
-TEST_CASE("Parser: Assets and UI remain independent", "[parser][assets][ui]") {
+TEST_CASE("Parser: Assets component scene and UI remain independent",
+          "[parser][assets][component][scene][ui]") {
   auto program = parse(R"(
     assets {
       image logo: "images/logo.png" {
@@ -328,12 +329,29 @@ TEST_CASE("Parser: Assets and UI remain independent", "[parser][assets][ui]") {
       font body: "fonts/body.ttf"
     }
 
+    component Badge {
+      width: 10
+      rect icon { width: $width }
+    }
+
+    scene Preview {
+      width: 320
+      height: 200
+      rect background { width: 320, height: 200 }
+    }
+
     ui Main { div root {} }
   )");
 
   REQUIRE(program != nullptr);
   REQUIRE(program->assets != nullptr);
   REQUIRE(program->assets->assets.size() == 2);
+  REQUIRE(program->components.size() == 1);
+  REQUIRE(program->components.front()->name == "Badge");
+  REQUIRE(program->components.front()->children.size() == 1);
+  REQUIRE(program->scene != nullptr);
+  REQUIRE(program->scene->name == "Preview");
+  REQUIRE(program->scene->children.size() == 1);
   REQUIRE(program->ui_documents.size() == 1);
   REQUIRE(program->ui_documents.front()->children.size() == 1);
   REQUIRE(program->ui_documents.front()->children.front()->id == "root");
