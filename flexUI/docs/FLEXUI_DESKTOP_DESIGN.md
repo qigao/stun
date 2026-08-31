@@ -658,10 +658,23 @@ input 名和值都计入预算。adapter 创建 batch 时可以使用更严格�
 5. rollback：若 commit 边界仍出现错误，按反向 journal 恢复；rollback 本身必须 `noexcept`。
 
 在现有 Element setter 尚不能提供强异常保证前，对应 mutation 不得进入公开脚本 API。
+`Box::elements_by_id_` 的索引条目同时持有 Element pointer 与 generation，是句柄状态的唯一事实源；
+Controller 不维护镜像 registry。创建带 ID 元素、ID 改名、重复 ID 覆盖、旧 owner 恢复和 ID 复用都会
+取得新的 Box-wide 单调 generation，因此旧句柄不会因相同字符串 ID 再次出现而复活。空 ID、被重复
+ID 遮蔽的元素和其他 Box 的元素不能生成有效句柄。UI document 的 detached build 使用 candidate index
+和 candidate generation，只有完整安装成功才一起提交；binding 安装失败会同时恢复 index 与 generation
+counter。
+
+句柄有效只表示“该 ID 当前仍指向同一个 Box index incarnation”，不表示节点当前可从 root 到达。
+`UiKeyedRepeater` 的 retired 节点仍由 Box 保留，直到 Box 提供通用 subtree destruction 前不会仅因 detach
+自动失效。真实 mutation host 的 resolve/prepare 阶段仍必须按 mutation 类型验证 active-tree、widget/
+application ownership 和 target kind；未来 subtree destruction 必须在释放内存前删除索引条目，使句柄
+立即 stale。
+
 当前 `IUiMutationHost` 只定义真实 host 必须满足的事务边界，并由 fake host 验证：`prepare()` 不可改变
 可观察状态，返回的 `IPreparedUiMutation` 独占所有 staging 且不得保留 batch view；未 commit 的 staging
-随 RAII 析构丢弃，`commit()` 必须 `noexcept`、不分配且只调用一次。真实 Box host、generation
-失效通知与 stale-handle 验证尚未实现，因此 TurboScript adapter 不得提前暴露这些 mutation。
+随 RAII 析构丢弃，`commit()` 必须 `noexcept`、不分配且只调用一次。真实 Box host 与完整 target
+ownership/type 验证尚未实现，因此 TurboScript adapter 不得提前暴露这些 mutation。
 
 ### 13.2 ApplicationCommand
 

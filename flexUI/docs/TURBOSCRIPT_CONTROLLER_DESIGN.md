@@ -149,8 +149,10 @@ unmount
 
 ### 5.3 UI 句柄与变更批次
 
-脚本使用 `{id, generation}` 形式的 `UiHandle`，不使用地址。Box 删除或替换 subtree 后
-generation 失效；旧句柄使用立即返回 `stale_handle`。
+脚本使用 `{id, generation}` 形式的 `UiHandle`，不使用地址。generation 由 Box ID index 单独拥有；
+ID 改名、重复 ID owner 切换或 ID 复用后，旧句柄立即 stale。retained/detached 节点仍由 Box 持有，
+句柄解析不替代 active-tree 与 target ownership 校验；未来删除 subtree 时必须先移除 index entry，
+再释放元素。
 
 首批 mutation 只开放稳定的高层动作：
 

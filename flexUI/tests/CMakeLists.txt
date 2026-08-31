@@ -116,6 +116,13 @@ flexui_configure_tinytest(test_ui_mutation)
 set_target_properties(test_ui_mutation PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_ui_mutation COMMAND test_ui_mutation)
 
+add_executable(test_ui_handle test_ui_handle.cpp)
+target_link_libraries(test_ui_handle PRIVATE flexUI)
+flexui_configure_tinytest(test_ui_handle)
+target_include_directories(test_ui_handle PRIVATE ../include)
+set_target_properties(test_ui_handle PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_ui_handle COMMAND test_ui_handle)
+
 add_executable(test_keyed_repeater test_keyed_repeater.cpp)
 target_link_libraries(test_keyed_repeater PRIVATE flexUI)
 flexui_configure_tinytest(test_keyed_repeater)

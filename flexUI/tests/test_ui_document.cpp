@@ -347,6 +347,7 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
 
     flexUI::Box box(nullptr);
     auto *existing = box.create("label", "existing");
+    const auto existing_handle = box.handle_for(*existing);
     box.bindings().inputs().set_string("seed_text", "Seed");
     box.bindings().inputs().set_string("status_text", "Ready");
     const auto before =
@@ -362,9 +363,12 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check_null(box.root());
     check_null(box.get_by_id("status"));
     check_equal(box.get_by_id("existing"), existing);
+    check_equal(box.resolve_handle(existing_handle), existing);
     check_equal(box.bindings().stats().binding_count, count_before);
 
     auto *after_target = box.create("label", "after");
+    const auto after_handle = box.handle_for(*after_target);
+    check_equal(after_handle.generation, existing_handle.generation + 1);
     const auto after =
         box.bindings().targets().bind_text(*after_target, "seed_text");
     check_equal(after.id, before.id + 1);

@@ -1,22 +1,14 @@
 #pragma once
 
+#include "flexUI/ui_handle.h"
+
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <variant>
 #include <vector>
 
 namespace flexUI {
-
-struct UiHandle {
-  std::string id;
-  std::uint64_t generation = 0;
-
-  explicit operator bool() const noexcept {
-    return !id.empty() && generation != 0;
-  }
-};
 
 struct SetTextMutation {
   UiHandle target;

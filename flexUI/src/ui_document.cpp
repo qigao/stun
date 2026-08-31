@@ -840,6 +840,8 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
   std::optional<UiBindingRuntime::TransactionCheckpoint> binding_transaction;
   std::optional<SourceSpan> active_binding_span;
   const std::size_t original_element_count = box.elements_.size();
+  const std::uint64_t original_element_generation =
+      box.next_element_generation_;
   bool index_committed = false;
   const auto *bindings = program ? &program->impl_->bindings : nullptr;
   try {
@@ -873,8 +875,13 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     }
 
     auto next_index = box.elements_by_id_;
+    std::uint64_t next_generation = box.next_element_generation_;
     for (const auto &[id, element] : detached.elements_by_id) {
-      next_index[id] = element;
+      if (next_generation == 0) {
+        throw std::overflow_error(
+            "FlexUI element handle generation exhausted");
+      }
+      next_index[id] = {element, next_generation++};
     }
     box.elements_.reserve(box.elements_.size() + detached.elements.size());
 
@@ -923,6 +930,7 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
       box.elements_.push_back(std::move(element));
     }
     box.elements_by_id_.swap(next_index);
+    box.next_element_generation_ = next_generation;
     index_committed = true;
     box.set_root(detached.root);
     if (binding_transaction) {
@@ -933,10 +941,12 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
       box.bindings_.rollback_transaction(*binding_transaction);
     }
     box.root_ = nullptr;
+    box.next_element_generation_ = original_element_generation;
     if (index_committed) {
       for (const auto &[id, element] : detached.elements_by_id) {
         auto found = box.elements_by_id_.find(id);
-        if (found != box.elements_by_id_.end() && found->second == element) {
+        if (found != box.elements_by_id_.end() &&
+            found->second.element == element) {
           box.elements_by_id_.erase(found);
         }
       }

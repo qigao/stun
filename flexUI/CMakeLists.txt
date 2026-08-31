@@ -147,6 +147,7 @@ set(FLEXUI_SOURCES
 # 头文件
 set(FLEXUI_HEADERS
   include/flexUI/types.h
+  include/flexUI/ui_handle.h
   include/flexUI/binding_runtime.h
   include/flexUI/ui_document.h
   include/flexUI/keyed_repeater.h

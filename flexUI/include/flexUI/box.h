@@ -13,11 +13,13 @@
 #include "style_engine.h"
 #include "tailwindcss.h"
 #include "transition.h"
+#include "ui_handle.h"
 #include "event_dispatcher.h"
 #include "view_pipeline.h"
 #include <flex/runtime/renderer.h>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -141,6 +143,16 @@ public:
   }
 
   Element* get_by_id(const std::string& id);
+  /// Returns the current Box-index incarnation for an element.
+  /// @param element Element expected to be the current owner of its non-empty
+  ///        id in this Box.
+  /// @return A value handle, or an invalid handle for an id-less, shadowed, or
+  ///         foreign element. Copying the id may throw std::bad_alloc.
+  UiHandle handle_for(const Element& element) const;
+  /// Resolves a handle only when both id and generation match the current
+  /// index incarnation. The returned pointer is borrowed from this Box.
+  Element* resolve_handle(const UiHandle& handle) noexcept;
+  const Element* resolve_handle(const UiHandle& handle) const noexcept;
   Element* query_selector(const std::string& selector);
   std::vector<Element*> query_selector_all(const std::string& selector);
   void set_root(Element* elem);
@@ -201,6 +213,11 @@ public:
   float get_viewport_height() const { return viewport_height_; }
 
 private:
+  struct IndexedElement {
+    Element* element = nullptr;
+    std::uint64_t generation = 0;
+  };
+
   friend class UiKeyedRepeater;
   friend class UiDocumentInstantiator;
   friend class Element;
@@ -237,7 +254,9 @@ private:
   Element* root_ = nullptr;
   std::vector<std::unique_ptr<Element>> elements_;
   std::vector<std::unique_ptr<Widget>> widgets_;
-  std::map<std::string, Element*> elements_by_id_;
+  // The index entry is the single source of truth for handle generations.
+  std::map<std::string, IndexedElement> elements_by_id_;
+  std::uint64_t next_element_generation_ = 1;
 
   // 视口
   float viewport_width_ = 800;
