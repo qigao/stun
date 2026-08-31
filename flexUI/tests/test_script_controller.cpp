@@ -1,3 +1,5 @@
+#include <flexUI/box.h>
+#include <flexUI/box_mutation_host.h>
 #include <flexUI/controller.h>
 
 #include <tinytest.hpp>
@@ -47,7 +49,7 @@ public:
 
   flexUI::ScriptCallResult
   call(flexUI::ScriptExportHandle handle,
-       const flexUI::ScriptCallContext &) override {
+       const flexUI::ScriptCallContext &context) override {
     const auto found = names_.find(handle.value);
     if (found == names_.end()) {
       return {{flexUI::ScriptModuleErrorCode::InvalidExport,
@@ -66,8 +68,11 @@ public:
     }
     flexUI::ScriptCallResult result;
     if (found->second == mutation_export) {
+      const flexUI::UiHandle target =
+          context.event != nullptr ? context.event->target
+                                   : flexUI::UiHandle{"save", 1};
       const auto appended = result.mutations.append(
-          flexUI::SetTextMutation{{"save", 1}, mutation_text});
+          flexUI::SetTextMutation{target, mutation_text});
       if (!appended) {
         return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded,
                  appended.error.message}};
@@ -324,6 +329,56 @@ spec("FlexUI script controller lifecycle") {
     check_equal(host.commits, 1);
     check_equal(host.text, "committed");
     check(controller.state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("commits an event mutation through the real Box host") {
+    flexUI::Box box(nullptr);
+    auto *save = box.create("button", "save");
+    box.set_root(save);
+    save->set_text("before");
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "committed by controller";
+    flexUI::BoxMutationHost host(box);
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+    auto event = click_event();
+    event.target = box.handle_for(*save);
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check(controller.dispatch(event));
+    check_equal(save->text(), std::string("committed by controller"));
+    check(controller.state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("faults without a partial commit when the event handle becomes stale") {
+    flexUI::Box box(nullptr);
+    auto *save = box.create("button", "save");
+    box.set_root(save);
+    save->set_text("before");
+    auto event = click_event();
+    event.target = box.handle_for(*save);
+    save->set_element_id("renamed");
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "must not commit";
+    flexUI::BoxMutationHost host(box);
+    flexUI::UiMutationEngine mutations(host);
+    flexUI::ScriptController controller(mutations);
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(event);
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::MutationFailed);
+    check(dispatched.error.mutation_error.code ==
+          flexUI::MutationErrorCode::InvalidTarget);
+    check_equal(save->text(), std::string("before"));
+    check(controller.state() == flexUI::ControllerState::Faulted);
   }
 
   it("faults without committing when callback mutation preparation fails") {
