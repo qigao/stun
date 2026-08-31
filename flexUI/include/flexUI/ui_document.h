@@ -51,6 +51,8 @@ struct UiDocumentLimits {
   std::size_t max_string_bytes = 64U * 1024U;
   std::size_t max_event_bindings = 10000;
   std::size_t max_bindings = 10000;
+  /// Applies when producing a CompiledUiProgram; legacy parse results do not
+  /// own resources.
   std::size_t max_resources = 4096;
 };
 
@@ -73,12 +75,12 @@ enum class UiDocumentErrorCode {
   ElementIdConflict,
   UtilityJitDisabled,
   UnknownUtility,
+  BuildFailed = 18, // Preserve the pre-CompiledUiProgram public value.
   UnknownEvent,
   EventBindingLimitExceeded,
   UnknownBindingTarget,
   InvalidBindingExpression,
   BindingLimitExceeded,
-  BuildFailed,
   BindingInstallFailed,
   DuplicateEventBinding,
   DuplicateBindingTarget,

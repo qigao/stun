@@ -616,15 +616,19 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
   it("rejects resource declarations above the configured limit") {
     flexUI::UiDocumentLimits limits;
     limits.max_resources = 1;
-    const auto compiled = flexUI::compile_ui_document(R"(
+    const char *source = R"(
       assets {
         image logo: "images/logo.png"
         font body: "fonts/body.ttf"
       }
 
       ui Main { div root {} }
-    )",
-                                                       {}, limits);
+    )";
+
+    const auto parsed = flexUI::parse_ui_document(source, {}, limits);
+    check(static_cast<bool>(parsed));
+
+    const auto compiled = flexUI::compile_ui_document(source, {}, limits);
     check_false(static_cast<bool>(compiled));
     check(compiled.error.code == UiDocumentErrorCode::ResourceLimitExceeded);
   }

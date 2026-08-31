@@ -594,9 +594,12 @@ struct ParsedUiSource {
   }
 };
 
+enum class ResourceLowering { Omit, Include };
+
 ParsedUiSource parse_ui_source(std::string_view source,
                                std::string_view document_name,
-                               const UiDocumentLimits &limits) {
+                               const UiDocumentLimits &limits,
+                               ResourceLowering resource_lowering) {
   ParsedUiSource result;
   if (source.size() > limits.max_source_bytes) {
     result.error = make_error(UiDocumentErrorCode::SourceTooLarge,
@@ -680,7 +683,7 @@ ParsedUiSource parse_ui_source(std::string_view source,
     return result;
   }
 
-  if (program->assets) {
+  if (resource_lowering == ResourceLowering::Include && program->assets) {
     if (program->assets->assets.size() > limits.max_resources) {
       result.error = make_error(
           UiDocumentErrorCode::ResourceLimitExceeded,
@@ -706,7 +709,8 @@ ParsedUiSource parse_ui_source(std::string_view source,
 UiDocumentParseResult parse_ui_document(std::string_view source,
                                         std::string_view document_name,
                                         const UiDocumentLimits &limits) {
-  auto parsed = parse_ui_source(source, document_name, limits);
+  auto parsed = parse_ui_source(source, document_name, limits,
+                                ResourceLowering::Omit);
   return UiDocumentParseResult{std::move(parsed.definition),
                                std::move(parsed.error)};
 }
@@ -769,7 +773,8 @@ UiDocumentCompileResult compile_ui_document(std::string_view source,
                                             std::string_view document_name,
                                             const UiDocumentLimits &limits) {
   UiDocumentCompileResult result;
-  auto parsed = parse_ui_source(source, document_name, limits);
+  auto parsed = parse_ui_source(source, document_name, limits,
+                                ResourceLowering::Include);
   if (!parsed) {
     result.error = std::move(parsed.error);
     return result;
