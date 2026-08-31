@@ -244,6 +244,8 @@ if(WIN32)
     COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
 endif()
 
+add_subdirectory(modules/controller)
+
 
 # 安装头文件
 install(DIRECTORY include/flexUI DESTINATION include)

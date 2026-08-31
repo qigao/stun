@@ -161,21 +161,21 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 
 ### 模块与接口
 
-- [ ] 新建 `FlexUI::Controller` target，不依赖 TurboScript headers。
-- [ ] 定义不超过 10 个方法的 `IScriptModule` 小接口。
-- [ ] 定义 `ScriptController` 显式状态机：Empty/Compiled/Mounted/Dispatching/Faulted/Unmounting。
-- [ ] 定义 bounded `ScriptEventSnapshot`，不复制 `Event::target` 裸指针。
+- [x] 新建 `FlexUI::Controller` target，不依赖 TurboScript headers。
+- [x] 定义不超过 10 个方法的 `IScriptModule` 小接口。
+- [x] 定义 `ScriptController` 显式状态机：Empty/Compiled/Mounted/Dispatching/Faulted/Unmounting。
+- [x] 定义 bounded `ScriptEventSnapshot`，不复制 `Event::target` 裸指针。
 - [ ] 定义 `{id, generation}` `UiHandle` 和 generation 失效规则。
 - [ ] 定义 `UiMutation` `std::variant` 与 `UiMutationBatch` limits。
 - [ ] 定义 `ApplicationCommand` 与 UI mutation 分离的 effect result。
-- [ ] candidate mount 前解析 compiled handler table；失败返回 element、event、handler 和 source span。
+- [x] candidate mount 前解析 compiled handler table；失败返回 element、event、handler 和 source span。
 
 ### Fake module
 
 - [ ] 实现 test-only fake module，支持 export presence、call result、timeout 和 injected error。
-- [ ] 测 mount/event/optional-frame/unmount 调用顺序。
-- [ ] 测无 `on_frame` 时帧路径零 script callback。
-- [ ] 测 fault 后拒绝新 callback，显式 reload 才恢复。
+- [x] 测 mount/event/optional-frame/unmount 调用顺序。
+- [x] 测无 `on_frame` 时帧路径零 script callback。
+- [x] 测 fault 后拒绝新 callback，显式 reload 才恢复。
 - [ ] 测 module/controller/Box 析构顺序和 callback 中关闭窗口。
 - [ ] 测 handler resolution 或 callback 失败时 Box root/index/bindings 与 mutation state 均不变。
 

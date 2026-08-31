@@ -386,7 +386,24 @@ stateDiagram-v2
 每个 Box 最多一个 controller，且 controller、Box、EventDispatcher 和 gCanvas Context 都由同一个
 UI 线程访问。`on_frame` 只有模块显式导出且宿主启用时才进入帧路径。
 
-### 8.4 脚本能力
+### 8.4 Controller core 数据协议
+
+- `ScriptController` 独占一个 `IScriptModule`，并以 `shared_ptr<const CompiledUiProgram>` 保持
+  handler table 的唯一事实源存活；load 失败时候选 module 在函数边界内销毁，活动 Controller
+  仍为 `Empty`。
+- `IScriptModule` 仅解析 export 并调用已解析的 opaque handle。生命周期 export 和所有
+  `EventBinding` 在 load 阶段解析，事件 dispatch 不重复解析 handler 名称。
+- `ScriptEventSnapshot` 是不含 `Element*` 的值类型。`ScriptCallContext::event` 是同步调用期间的
+  borrowed view，只在 `IScriptModule::call()` 返回前有效；module/adapter 不得保存该指针。
+- 该阶段是单生产者、单消费者、同一 UI 线程的直接调用，没有队列和跨线程发布。
+  `ControllerLimits` 分别限制 element ID、event text 和 composition text 字节数；超限返回
+  `EventLimitExceeded`，不调用 module、不截断输入，也不改变 `Mounted` 状态。
+- module 返回错误或抛异常时，Controller 将其转换为一个 `ModuleCallFailed`，丢弃当次结果并进入
+  `Faulted`；后续 callback 返回 `ControllerFaulted`。显式 unmount/load 是唯一恢复路径。
+- unmount 先进入 `Unmounting` 并调用可选 `on_unmount`，再释放 module 和 compiled program；
+  即使 `on_unmount` 失败也完成资源释放并返回结构化错误。
+
+### 8.5 脚本能力
 
 脚本可：
 
