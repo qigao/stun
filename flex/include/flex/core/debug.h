@@ -60,16 +60,16 @@ inline turbo_log_level_t get_log_level() {
 // ============================================================================
 
 #define FLEX_LOGD(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) TLOG_DEBUG("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_DEBUGF("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_LOGI(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) TLOG_INFO("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_INFOF("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_LOGW(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) TLOG_WARN("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_WARNF("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_LOGE(fmt, ...) \
-  do { if (::flex::debug::is_debug_enabled()) TLOG_ERROR("[flex] " fmt, ##__VA_ARGS__); } while(0)
+  do { if (::flex::debug::is_debug_enabled()) TLOG_ERRORF("[flex] " fmt, ##__VA_ARGS__); } while(0)
 
 #define FLEX_DEBUG_BLOCK(code) \
   do { if (::flex::debug::is_debug_enabled()) { code; } } while(0)

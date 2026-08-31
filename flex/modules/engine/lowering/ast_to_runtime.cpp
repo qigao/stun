@@ -755,7 +755,7 @@ ComponentNodePtr instantiate_template_node(
 AstToRuntimeConverter::AstToRuntimeConverter(void *definition_impl) : impl_(definition_impl) {}
 
 void AstToRuntimeConverter::convert(const parser::AstProgram &program) {
-  FLEX_LOGD("Converting AST to runtime objects...");
+  FLEX_LOGD("{}", "Converting AST to runtime objects...");
 
   const auto validation = lowering::validate_runtime_program(program);
   if (!validation.ok) {
@@ -839,7 +839,7 @@ void AstToRuntimeConverter::convert(const parser::AstProgram &program) {
     convert_assets(*program.assets);
   }
 
-  FLEX_LOGD("Conversion complete!");
+  FLEX_LOGD("{}", "Conversion complete!");
 }
 
 void AstToRuntimeConverter::convert_machines(
