@@ -318,6 +318,27 @@ TEST_CASE("Parser: UI and scene remain independent", "[parser][ui][scene]") {
   REQUIRE(program->scene->children.size() == 1);
 }
 
+TEST_CASE("Parser: Assets and UI remain independent", "[parser][assets][ui]") {
+  auto program = parse(R"(
+    assets {
+      image logo: "images/logo.png" {
+        preload: true
+        scale: 2
+      }
+      font body: "fonts/body.ttf"
+    }
+
+    ui Main { div root {} }
+  )");
+
+  REQUIRE(program != nullptr);
+  REQUIRE(program->assets != nullptr);
+  REQUIRE(program->assets->assets.size() == 2);
+  REQUIRE(program->ui_documents.size() == 1);
+  REQUIRE(program->ui_documents.front()->children.size() == 1);
+  REQUIRE(program->ui_documents.front()->children.front()->id == "root");
+}
+
 TEST_CASE("Parser: UI properties require explicit separators", "[parser][ui]") {
   auto program = parse(R"(
     ui Invalid {

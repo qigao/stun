@@ -80,7 +80,7 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
   runtime 的单 utility、attribute 与 custom property 尚未进入 compiled document。
 - [x] 明确 compiled program 的不可变性、共享方式、线程约束和销毁顺序。
 - [x] 为 event/binding 数量增加可配置上限和结构化错误码。
-- [ ] 为 resource 数量增加可配置上限和结构化错误码。
+- [x] 为 resource 数量增加可配置上限和结构化错误码。
 
 ### Parser 与 semantic lowering
 
@@ -109,13 +109,14 @@ P1、P2、P4、P5 可以独立推进；P6 前必须全部完成。不得为提�
 - [x] lexer/parser：`bind.*`、`on.*`、source span、逗号与嵌套语法。
 - [x] semantic：未知 event/target、重复 event/binding、binding ownership 冲突、类型错误和
   event/binding 数量超限。
-- [ ] semantic：resource 超限与 controller export handler resolution。
+- [x] semantic：resource 超限。
+- [ ] semantic：controller export handler resolution。
 - [ ] MIR：数字/布尔/string 输入、dependency version 和 invalid expression。
 - [x] compatibility：旧 `on.*` attribute 查询结果不变。
 - [x] binding install：text/classes/utilities 与 MIR class toggle 随 input version 更新，且复用 compiled MIR。
 - [x] binding transaction：失败不安装 root/index/bindings，且不消耗 binding handle。
 - [ ] transaction：任一 binding/handler 失败时 Box root/index/bindings 均不变。
-- [ ] scene 与 ui 同文件回归。
+- [x] assets、scene 与 ui 顶层结构互不吞噬的回归。
 
 完成条件：`.flex` 可生成不可变 compiled program；脚本尚未接管事件；现有 UiDocument API 和
 测试保持兼容。

@@ -195,6 +195,12 @@ public:
       break;
 
     case TOK_COLON:
+      // Asset paths and option values have dedicated parser state. Treating
+      // their separator as a node property colon leaks `expecting_value_`
+      // into the next top-level construct.
+      if (expecting_asset_path_ || expecting_asset_opt_value_) {
+        break;
+      }
       if (!pending_prop_key_.empty() && !expecting_value_) {
         expecting_value_ = true;
         break;

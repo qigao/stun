@@ -288,9 +288,10 @@ CompiledUiProgram
 ├── shared_ptr<const UiDocumentDefinition>
 ├── EventBinding[]
 ├── BindingDefinition[]
+├── UiResourceDefinition[]
 ├── interned Symbol table
 ├── SourceMap
-└── declared resources/capabilities
+└── declared capabilities
 ```
 
 建议的概念类型：
@@ -322,6 +323,10 @@ struct BindingDefinition {
 
 当前实现使用 `std::string` 保存 element/input 名称，并把 MIR program 留在
 `CompiledUiProgram::Impl`；symbol interning 仍是后续 load-path 优化，不是 P1 正确性前提。
+现有顶层 `assets {}` 会在同一次 parse 中 lower 为 parser-independent、只读的
+`UiResourceDefinition[]`；`UiDocumentLimits::max_resources` 在发布 compiled program 前限制条目数，
+超限返回 `ResourceLimitExceeded`，不截断资源表。资源表只描述 type、id、path 和 literal options，
+不持有 gCanvas、文件或插件句柄。
 `on.*` 的旧
 `data-flexui-on-*` attribute 在迁移期可继续由 `EventBinding` 派生，保证现有查询和测试不变，
 但 handler table 是唯一事实源，attribute 不能反向修改 handler。`CompiledUiProgram` 通过
@@ -691,7 +696,7 @@ binding 或 plugin contract。
 - event callback 使用 interned symbol、连续 snapshot 和有界 batch，不逐帧扫描 Element tree。
 - 无 `on_frame` export 时每帧脚本调用数为零。
 - DLL service 以 command/batch 粒度调用，不在每个 Element 或 draw command 上跨 ABI。
-- 可增长结构必须由 application limits 配置容量：plugin count、service count、event bindings、
+- 可增长结构必须由 application limits 配置容量：plugin count、service count、declared resources、event bindings、
   mutation commands、completion queue、script values、controller memory 和 GPU resources。
 - 渲染保持 RenderCommandList 路径；controller 和 plugin 不进入 paint replay。
 

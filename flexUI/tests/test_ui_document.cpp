@@ -584,6 +584,66 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check(truncated_source.error.code == UiDocumentErrorCode::ParseError);
   }
 
+  it("lowers declared resources into the immutable program") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      assets {
+        image logo: "images/logo.png" {
+          preload: true
+          scale: 2
+        }
+        font body: "fonts/body.ttf"
+      }
+
+      ui Main { div root {} }
+    )");
+    check(static_cast<bool>(compiled));
+    check_equal(compiled.program->resources().size(), 2);
+
+    const auto &logo = compiled.program->resources()[0];
+    check_equal(logo.type, "image");
+    check_equal(logo.id, "logo");
+    check_equal(logo.path, "images/logo.png");
+    check_equal(std::get<bool>(logo.options.at("preload")), true);
+    check_equal(std::get<float>(logo.options.at("scale")), 2.0f);
+
+    const auto &body = compiled.program->resources()[1];
+    check_equal(body.type, "font");
+    check_equal(body.id, "body");
+    check_equal(body.path, "fonts/body.ttf");
+    check(body.options.empty());
+  }
+
+  it("rejects resource declarations above the configured limit") {
+    flexUI::UiDocumentLimits limits;
+    limits.max_resources = 1;
+    const auto compiled = flexUI::compile_ui_document(R"(
+      assets {
+        image logo: "images/logo.png"
+        font body: "fonts/body.ttf"
+      }
+
+      ui Main { div root {} }
+    )",
+                                                       {}, limits);
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::ResourceLimitExceeded);
+  }
+
+  it("selects a ui document when a sibling scene is present") {
+    const auto compiled = flexUI::compile_ui_document(R"(
+      scene Preview {
+        width: 320
+        height: 200
+        rect background { width: 320, height: 200 }
+      }
+
+      ui Inspector { div root {} }
+    )");
+    check(static_cast<bool>(compiled));
+    check_equal(compiled.program->name(), "Inspector");
+    check_equal(compiled.program->definition().root.id, "root");
+  }
+
   it("validates the target before committing detached elements") {
     const auto parsed = flexUI::parse_ui_document(valid_document());
     check(static_cast<bool>(parsed));

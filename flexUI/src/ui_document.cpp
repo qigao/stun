@@ -584,11 +584,20 @@ Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree,
   return raw;
 }
 
-} // namespace
+struct ParsedUiSource {
+  std::shared_ptr<const UiDocumentDefinition> definition;
+  std::vector<UiResourceDefinition> resources;
+  UiDocumentError error;
 
-UiDocumentParseResult parse_ui_document(std::string_view source, std::string_view document_name,
-                                        const UiDocumentLimits &limits) {
-  UiDocumentParseResult result;
+  explicit operator bool() const {
+    return definition != nullptr && !static_cast<bool>(error);
+  }
+};
+
+ParsedUiSource parse_ui_source(std::string_view source,
+                               std::string_view document_name,
+                               const UiDocumentLimits &limits) {
+  ParsedUiSource result;
   if (source.size() > limits.max_source_bytes) {
     result.error = make_error(UiDocumentErrorCode::SourceTooLarge,
                               "UI document source exceeds configured limit");
@@ -671,11 +680,35 @@ UiDocumentParseResult parse_ui_document(std::string_view source, std::string_vie
     return result;
   }
 
+  if (program->assets) {
+    if (program->assets->assets.size() > limits.max_resources) {
+      result.error = make_error(
+          UiDocumentErrorCode::ResourceLimitExceeded,
+          "UI document exceeds maximum declared resource count");
+      return result;
+    }
+    result.resources.reserve(program->assets->assets.size());
+    for (const auto &asset : program->assets->assets) {
+      result.resources.push_back(
+          UiResourceDefinition{asset.type, asset.id, asset.path, asset.options});
+    }
+  }
+
   auto definition = std::make_shared<UiDocumentDefinition>();
   definition->name = selected->name;
   definition->root = copy_node(*selected->children.front());
   result.definition = std::move(definition);
   return result;
+}
+
+} // namespace
+
+UiDocumentParseResult parse_ui_document(std::string_view source,
+                                        std::string_view document_name,
+                                        const UiDocumentLimits &limits) {
+  auto parsed = parse_ui_source(source, document_name, limits);
+  return UiDocumentParseResult{std::move(parsed.definition),
+                               std::move(parsed.error)};
 }
 
 struct CompiledUiProgram::Impl {
@@ -685,6 +718,7 @@ struct CompiledUiProgram::Impl {
       event_binding_index;
   std::vector<BindingDefinition> bindings;
   std::vector<std::shared_ptr<const flex::MirExpressionProgram>> binding_programs;
+  std::vector<UiResourceDefinition> resources;
 };
 
 CompiledUiProgram::CompiledUiProgram(std::unique_ptr<Impl> impl)
@@ -726,11 +760,16 @@ CompiledUiProgram::bindings() const noexcept {
   return impl_->bindings;
 }
 
+const std::vector<UiResourceDefinition> &
+CompiledUiProgram::resources() const noexcept {
+  return impl_->resources;
+}
+
 UiDocumentCompileResult compile_ui_document(std::string_view source,
                                             std::string_view document_name,
                                             const UiDocumentLimits &limits) {
   UiDocumentCompileResult result;
-  auto parsed = parse_ui_document(source, document_name, limits);
+  auto parsed = parse_ui_source(source, document_name, limits);
   if (!parsed) {
     result.error = std::move(parsed.error);
     return result;
@@ -738,6 +777,7 @@ UiDocumentCompileResult compile_ui_document(std::string_view source,
 
   auto impl = std::make_unique<CompiledUiProgram::Impl>();
   impl->definition = std::move(parsed.definition);
+  impl->resources = std::move(parsed.resources);
   result.error = lower_event_bindings(impl->definition->root, limits,
                                       impl->event_bindings);
   if (result.error) {

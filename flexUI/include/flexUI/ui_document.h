@@ -35,6 +35,14 @@ struct UiDocumentDefinition {
   UiNodeDefinition root;
 };
 
+/// Parser-independent description of one resource declared by an `assets` block.
+struct UiResourceDefinition {
+  std::string type;
+  std::string id;
+  std::string path;
+  std::unordered_map<std::string, UiDocumentValue> options;
+};
+
 struct UiDocumentLimits {
   std::size_t max_source_bytes = 4U * 1024U * 1024U;
   std::size_t max_nodes = 10000;
@@ -43,6 +51,7 @@ struct UiDocumentLimits {
   std::size_t max_string_bytes = 64U * 1024U;
   std::size_t max_event_bindings = 10000;
   std::size_t max_bindings = 10000;
+  std::size_t max_resources = 4096;
 };
 
 enum class UiDocumentErrorCode {
@@ -74,6 +83,7 @@ enum class UiDocumentErrorCode {
   DuplicateEventBinding,
   DuplicateBindingTarget,
   BindingTargetConflict,
+  ResourceLimitExceeded,
 };
 
 struct UiDocumentError {
@@ -163,6 +173,7 @@ public:
   const EventBinding *find_event_binding(
       std::string_view element_id, UiEventKind event) const noexcept;
   const std::vector<BindingDefinition> &bindings() const noexcept;
+  const std::vector<UiResourceDefinition> &resources() const noexcept;
 
 private:
   struct Impl;
