@@ -61,13 +61,15 @@ ScriptCallResult safe_call(IScriptModule &module, ScriptExportHandle handle,
 
 struct ScriptController::Impl {
   explicit Impl(ControllerLimits configured_limits,
-                UiMutationEngine *configured_mutation_engine = nullptr)
+                ControllerEffects configured_effects = {})
       : limits(configured_limits), owner_thread(std::this_thread::get_id()),
-        mutation_engine(configured_mutation_engine) {}
+        mutation_engine(configured_effects.mutations),
+        command_engine(configured_effects.commands) {}
 
   ControllerLimits limits;
   std::thread::id owner_thread;
   UiMutationEngine *mutation_engine = nullptr;
+  ApplicationCommandEngine *command_engine = nullptr;
   ControllerState state = ControllerState::Empty;
   std::unique_ptr<IScriptModule> module;
   std::shared_ptr<const CompiledUiProgram> program;
@@ -80,27 +82,57 @@ struct ScriptController::Impl {
     return owner_thread == std::this_thread::get_id();
   }
 
-  ControllerResult apply_mutations(ScriptCallResult &called,
-                                   ControllerStage stage,
-                                   std::string_view handler) {
-    if (called.mutations.empty()) {
-      return {};
+  ControllerResult apply_effects(ScriptCallResult &called,
+                                 ControllerStage stage,
+                                 std::string_view handler) {
+    std::unique_ptr<IPreparedApplicationCommands> commands;
+    if (!called.commands.empty()) {
+      if (stage == ControllerStage::Mount) {
+        ControllerResult result = fail(
+            ControllerErrorCode::CommandFailed, stage,
+            "on_mount cannot publish application commands before activation");
+        result.error.handler.assign(handler);
+        return result;
+      }
+      if (command_engine == nullptr) {
+        ControllerResult result = fail(
+            ControllerErrorCode::CommandFailed, stage,
+            "script emitted application commands without a command engine");
+        result.error.handler.assign(handler);
+        return result;
+      }
+      auto reserved = command_engine->reserve(called.commands);
+      if (!reserved) {
+        ControllerResult result =
+            fail(ControllerErrorCode::CommandFailed, stage,
+                 reserved.error.message);
+        result.error.handler.assign(handler);
+        result.error.command_error = std::move(reserved.error);
+        return result;
+      }
+      commands = std::move(reserved.prepared);
     }
-    if (mutation_engine == nullptr) {
-      ControllerResult result =
-          fail(ControllerErrorCode::MutationFailed, stage,
-               "script emitted UI mutations without a mutation engine");
-      result.error.handler.assign(handler);
-      return result;
+
+    if (!called.mutations.empty()) {
+      if (mutation_engine == nullptr) {
+        ControllerResult result =
+            fail(ControllerErrorCode::MutationFailed, stage,
+                 "script emitted UI mutations without a mutation engine");
+        result.error.handler.assign(handler);
+        return result;
+      }
+      auto applied = mutation_engine->apply(called.mutations);
+      if (!applied) {
+        ControllerResult result =
+            fail(ControllerErrorCode::MutationFailed, stage,
+                 applied.error.message);
+        result.error.handler.assign(handler);
+        result.error.mutation_error = std::move(applied.error);
+        return result;
+      }
     }
-    auto applied = mutation_engine->apply(called.mutations);
-    if (!applied) {
-      ControllerResult result =
-          fail(ControllerErrorCode::MutationFailed, stage,
-               applied.error.message);
-      result.error.handler.assign(handler);
-      result.error.mutation_error = std::move(applied.error);
-      return result;
+    if (commands) {
+      commands->publish();
     }
     return {};
   }
@@ -121,7 +153,11 @@ ScriptController::ScriptController(ControllerLimits limits)
 
 ScriptController::ScriptController(UiMutationEngine &mutation_engine,
                                    ControllerLimits limits)
-    : impl_(std::make_unique<Impl>(limits, &mutation_engine)) {}
+    : ScriptController(ControllerEffects{&mutation_engine, nullptr}, limits) {}
+
+ScriptController::ScriptController(ControllerEffects effects,
+                                   ControllerLimits limits)
+    : impl_(std::make_unique<Impl>(limits, effects)) {}
 
 ScriptController::~ScriptController() {
   if (impl_ != nullptr && impl_->is_owner_thread()) {
@@ -269,8 +305,8 @@ ControllerResult ScriptController::mount() {
                          std::move(called.error));
     }
     if (auto applied =
-            impl_->apply_mutations(called, ControllerStage::Mount,
-                                   kMountExport);
+            impl_->apply_effects(called, ControllerStage::Mount,
+                                 kMountExport);
         !applied) {
       impl_->state = ControllerState::Faulted;
       return applied;
@@ -332,7 +368,7 @@ ScriptController::dispatch(const ScriptEventSnapshot &event) {
     result.error.source = binding->source;
     return result;
   }
-  if (auto applied = impl_->apply_mutations(
+  if (auto applied = impl_->apply_effects(
           called, ControllerStage::Event, binding->handler);
       !applied) {
     impl_->state = ControllerState::Faulted;
@@ -379,8 +415,8 @@ ControllerResult ScriptController::frame(double delta_seconds) {
                        std::move(called.error));
   }
   if (auto applied =
-          impl_->apply_mutations(called, ControllerStage::Frame,
-                                 kFrameExport);
+          impl_->apply_effects(called, ControllerStage::Frame,
+                               kFrameExport);
       !applied) {
     impl_->state = ControllerState::Faulted;
     return applied;
@@ -421,6 +457,11 @@ ControllerResult ScriptController::unmount() {
       result = fail(ControllerErrorCode::MutationFailed,
                     ControllerStage::Unmount,
                     "on_unmount must not emit UI mutations");
+      result.error.handler = std::string(kUnmountExport);
+    } else if (!called.commands.empty()) {
+      result = fail(ControllerErrorCode::CommandFailed,
+                    ControllerStage::Unmount,
+                    "on_unmount must not emit application commands");
       result.error.handler = std::string(kUnmountExport);
     }
   }

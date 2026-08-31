@@ -1,5 +1,6 @@
 #pragma once
 
+#include "flexUI/application_command.h"
 #include "flexUI/mutation.h"
 #include "flexUI/ui_document.h"
 
@@ -90,6 +91,7 @@ struct ScriptCallContext {
 struct ScriptCallResult {
   ScriptModuleError error;
   UiMutationBatch mutations{};
+  ApplicationCommandBatch commands{};
 
   explicit operator bool() const noexcept {
     return !static_cast<bool>(error);
@@ -127,6 +129,7 @@ enum class ControllerErrorCode {
   ControllerFaulted,
   EventLimitExceeded,
   MutationFailed,
+  CommandFailed,
   InternalInvariant,
 };
 
@@ -149,6 +152,7 @@ struct ControllerError {
   SourceSpan source;
   ScriptModuleError module_error;
   MutationError mutation_error;
+  ApplicationCommandError command_error;
 
   explicit operator bool() const noexcept {
     return code != ControllerErrorCode::None;
@@ -161,6 +165,12 @@ struct ControllerResult {
   explicit operator bool() const noexcept {
     return !static_cast<bool>(error);
   }
+};
+
+/// Non-owning effect engines used by callback result processing.
+struct ControllerEffects {
+  UiMutationEngine* mutations = nullptr;
+  ApplicationCommandEngine* commands = nullptr;
 };
 
 /// UI-thread-owned lifecycle coordinator for one compiled script module.
@@ -176,6 +186,11 @@ public:
   ///        thread. Callback batches are normalized and committed through it.
   /// @param limits Hard byte limits checked before script dispatch.
   ScriptController(UiMutationEngine &mutation_engine,
+                   ControllerLimits limits = {});
+  /// Creates an empty controller with independently optional UI and
+  /// application-command effect engines. Every non-null engine must outlive
+  /// the controller and share its owner thread.
+  ScriptController(ControllerEffects effects,
                    ControllerLimits limits = {});
   ~ScriptController();
 

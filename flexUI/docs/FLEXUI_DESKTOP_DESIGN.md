@@ -598,6 +598,7 @@ sequenceDiagram
     participant Events as EventDispatcher
     participant Widget
     participant Controller
+    participant Commands as ApplicationCommandQueue
     participant Mutations as MutationEngine
     participant Binding as UiBindingRuntime
     participant Pipeline as ViewPipeline
@@ -608,10 +609,12 @@ sequenceDiagram
     Widget-->>Events: handled + propagate
     opt event eligible for script
         Events->>Controller: immutable ScriptEventSnapshot
-        Controller-->>Mutations: bounded effects batch
+        Controller-->>Commands: reserve bounded application commands
+        Controller-->>Mutations: bounded UI mutation batch
         Mutations->>Mutations: resolve, validate, reserve, prepare
         Mutations->>Binding: commit typed input changes
         Mutations->>Mutations: commit tree changes
+        Controller-->>Commands: publish reserved slots (no execution)
     end
     Binding->>Binding: evaluate changed dependencies
     Binding->>Pipeline: invalidate affected view stages
@@ -641,7 +644,7 @@ input 名和值都计入预算。adapter 创建 batch 时可以使用更严格�
 `UiMutationEngine` 会用自己的 limits 重新验证。append 或 apply 超限时立即返回明确错误，batch 和 host
 均保持不变。
 
-| Mutation | 事实源/target owner | prepare 前置条件 | 错误 | 真实 host rollback staging |
+| Mutation | 事实源/target owner | prepare 前置条件 | 错误 | 真实 host final-state staging |
 |---|---|---|---|---|
 | `SetText` | Box-owned Element | handle 当前有效、text 有界 | `InvalidTarget` / string limit / host error | 旧 text 与已预留新 string |
 | `SetAttribute` / `RemoveAttribute` | Box-owned Element | handle 有效、name 非空且类型允许 | `InvalidTarget` / `InvalidName` / host error | 旧 attribute presence/value 与新 map staging |
@@ -655,7 +658,8 @@ input 名和值都计入预算。adapter 创建 batch 时可以使用更严格�
 2. resolve：把 `{id, generation}` handle 解析为当前节点，旧 generation 立即失败。
 3. prepare：验证类型和 target ownership，预留容器容量，准备新旧值交换记录。
 4. commit：通过只允许无失败 swap/赋值的 mutation adapter 提交。
-5. rollback：若 commit 边界仍出现错误，按反向 journal 恢复；rollback 本身必须 `noexcept`。
+5. discard：prepare 任一阶段失败即由 RAII 丢弃全部 staging；commit 边界只含无失败操作，因此不进入
+   需要补偿的半提交状态。
 
 `BoxMutationHost` 是 `FlexUI::Controller` 中依赖 `FlexUI::Core` 的薄适配层。它只接受从 Box root
 可达的 application-owned Element；stale、detached、widget-owned target 在 prepare 阶段返回
@@ -690,16 +694,24 @@ application ownership 和 target kind；未来 subtree destruction 必须在释�
 
 ### 13.2 ApplicationCommand
 
-文件、网络、数据库或设备操作不是 UiMutation。controller 输出独立的有界
-`ApplicationCommandBatch`：
+文件、网络、数据库或设备操作不是 UiMutation。`ScriptCallResult` 分别拥有 `UiMutationBatch` 和
+`ApplicationCommandBatch`。command 是 `{request_id, capability, operation, payload}` envelope；payload
+是 adapter 定义 schema 的自有序列化字节，不把 service/plugin 类型扩散到 controller core。默认上限为
+64 条、单字符串 16 KiB、全部字符串 64 KiB，controller 侧 `ApplicationCommandEngine` 会再次验证
+request ID、capability、operation 与 limits。
 
-1. host 先校验 capability、参数 schema 和 command queue 容量并保留 slot。
-2. UI mutation 成功后才发布已保留 command；发布不得再分配或失败。
-3. service 同步接受 command，耗时工作可进入其 worker。
-4. 完成结果通过有界 UI completion queue 返回，再生成新的 controller event。
+1. `IApplicationCommandQueue::reserve()` 校验 capability、参数 schema 和 queue 容量，将 batch 复制到
+   queue-owned slot，但不向 consumer 暴露。
+2. reserve 失败时不 prepare UI mutation；UI mutation 失败时 reservation 由 RAII 析构释放。
+3. UI mutation 成功后才调用 reservation 的 `publish()`；publish 必须幂等、`noexcept`、不分配、
+   不阻塞且不执行 command。
+4. service 在 controller 返回后同步接受已发布 command，耗时工作可进入其 worker。
+5. 完成结果通过有界 UI completion queue 返回，再生成新的 controller event。
 
 外部副作用无法与 UI 内存状态做通用回滚，因此不允许 DLL 在 controller callback 栈内直接执行
-不可回滚操作。
+不可回滚操作。`on_mount` 在 candidate application 发布前执行，因此当前 fail fast 拒绝 command；
+`on_unmount` 同样禁止 UI mutation 和 command。未来若 DesktopApplication 提供更外层 activation
+transaction，可通过另一个延迟 publication adapter 扩展 mount 语义，不能静默改变现有顺序。
 
 ## 14. DesktopHost 与 gCanvas
 

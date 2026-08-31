@@ -78,6 +78,14 @@ public:
                  appended.error.message}};
       }
     }
+    if (found->second == command_export) {
+      const auto appended = result.commands.append(
+          {41, "storage", "write", command_payload});
+      if (!appended) {
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded,
+                 appended.error.message}};
+      }
+    }
     return result;
   }
 
@@ -87,6 +95,8 @@ public:
   std::string zero_handle_export;
   std::string mutation_export;
   std::string mutation_text;
+  std::string command_export;
+  std::string command_payload;
 
 private:
   std::unordered_map<std::string, flexUI::ScriptExportHandle> handles_;
@@ -129,25 +139,38 @@ namespace {
 class ControllerPreparedMutation final : public flexUI::IPreparedUiMutation {
 public:
   ControllerPreparedMutation(int &commits, std::string &text,
-                             std::string next_text)
-      : commits_(commits), text_(text), next_text_(std::move(next_text)) {}
+                             std::string next_text,
+                             std::vector<std::string> *lifecycle)
+      : commits_(commits), text_(text), next_text_(std::move(next_text)),
+        lifecycle_(lifecycle) {}
 
   void commit() noexcept override {
     text_.swap(next_text_);
     ++commits_;
+    if (lifecycle_ != nullptr) {
+      lifecycle_->push_back("ui_commit");
+    }
   }
 
 private:
   int &commits_;
   std::string &text_;
   std::string next_text_;
+  std::vector<std::string> *lifecycle_ = nullptr;
 };
 
 class ControllerMutationHost final : public flexUI::IUiMutationHost {
 public:
+  explicit ControllerMutationHost(
+      std::vector<std::string> *lifecycle = nullptr)
+      : lifecycle(lifecycle) {}
+
   flexUI::MutationPrepareResult
   prepare(const flexUI::UiMutationBatch &batch) override {
     ++prepare_calls;
+    if (lifecycle != nullptr) {
+      lifecycle->push_back("ui_prepare");
+    }
     if (fail_prepare) {
       return {{}, {flexUI::MutationErrorCode::HostPrepareFailed, 0,
                    "injected controller prepare failure"}};
@@ -155,7 +178,7 @@ public:
     const auto &mutation =
         std::get<flexUI::SetTextMutation>(batch.mutations().front());
     return {std::make_unique<ControllerPreparedMutation>(
-                commits, text, mutation.text),
+                commits, text, mutation.text, lifecycle),
             {}};
   }
 
@@ -163,6 +186,68 @@ public:
   int commits = 0;
   std::string text = "unchanged";
   bool fail_prepare = false;
+  std::vector<std::string> *lifecycle = nullptr;
+};
+
+class ControllerPreparedCommands final
+    : public flexUI::IPreparedApplicationCommands {
+public:
+  ControllerPreparedCommands(int &reserved, int &published,
+                             std::vector<std::string> *lifecycle)
+      : reserved_(reserved), published_(published), lifecycle_(lifecycle) {}
+
+  ~ControllerPreparedCommands() override {
+    if (!published_once_) {
+      --reserved_;
+    }
+  }
+
+  void publish() noexcept override {
+    if (published_once_) {
+      return;
+    }
+    published_once_ = true;
+    --reserved_;
+    ++published_;
+    if (lifecycle_ != nullptr) {
+      lifecycle_->push_back("publish");
+    }
+  }
+
+private:
+  int &reserved_;
+  int &published_;
+  std::vector<std::string> *lifecycle_ = nullptr;
+  bool published_once_ = false;
+};
+
+class ControllerCommandQueue final : public flexUI::IApplicationCommandQueue {
+public:
+  explicit ControllerCommandQueue(
+      std::vector<std::string> *lifecycle = nullptr)
+      : lifecycle(lifecycle) {}
+
+  flexUI::ApplicationCommandReserveResult
+  reserve(const flexUI::ApplicationCommandBatch &) override {
+    ++reserve_calls;
+    if (lifecycle != nullptr) {
+      lifecycle->push_back("reserve");
+    }
+    if (fail_reserve) {
+      return {{}, {flexUI::ApplicationCommandErrorCode::QueueFull, 0,
+                   "injected full command queue"}};
+    }
+    auto prepared = std::make_unique<ControllerPreparedCommands>(
+        reserved, published, lifecycle);
+    ++reserved;
+    return {std::move(prepared), {}};
+  }
+
+  int reserve_calls = 0;
+  int reserved = 0;
+  int published = 0;
+  bool fail_reserve = false;
+  std::vector<std::string> *lifecycle = nullptr;
 };
 
 } // namespace
@@ -351,6 +436,126 @@ spec("FlexUI script controller lifecycle") {
     check(controller.dispatch(event));
     check_equal(save->text(), std::string("committed by controller"));
     check(controller.state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("reserves commands before UI commit and publishes them afterward") {
+    std::vector<std::string> lifecycle;
+    lifecycle.reserve(8);
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"}, &lifecycle);
+    module->mutation_export = "save_document";
+    module->mutation_text = "committed";
+    module->command_export = "save_document";
+    module->command_payload = "document";
+    ControllerMutationHost host(&lifecycle);
+    flexUI::UiMutationEngine mutations(host);
+    ControllerCommandQueue queue(&lifecycle);
+    flexUI::ApplicationCommandEngine commands(queue);
+    flexUI::ScriptController controller(
+        flexUI::ControllerEffects{&mutations, &commands});
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check(controller.dispatch(click_event()));
+    check_calls(lifecycle, {"save_document", "reserve", "ui_prepare",
+                            "ui_commit", "publish"});
+    check_equal(host.text, std::string("committed"));
+    check_equal(queue.reserved, 0);
+    check_equal(queue.published, 1);
+  }
+
+  it("does not prepare UI state when command reservation fails") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "must not commit";
+    module->command_export = "save_document";
+    ControllerMutationHost host;
+    flexUI::UiMutationEngine mutations(host);
+    ControllerCommandQueue queue;
+    queue.fail_reserve = true;
+    flexUI::ApplicationCommandEngine commands(queue);
+    flexUI::ScriptController controller(
+        flexUI::ControllerEffects{&mutations, &commands});
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(click_event());
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::CommandFailed);
+    check(dispatched.error.command_error.code ==
+          flexUI::ApplicationCommandErrorCode::QueueFull);
+    check_equal(host.prepare_calls, 0);
+    check_equal(host.commits, 0);
+    check_equal(host.text, std::string("unchanged"));
+    check_equal(queue.published, 0);
+    check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("cancels reserved commands when UI mutation preparation fails") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->mutation_export = "save_document";
+    module->mutation_text = "must not commit";
+    module->command_export = "save_document";
+    ControllerMutationHost host;
+    host.fail_prepare = true;
+    flexUI::UiMutationEngine mutations(host);
+    ControllerCommandQueue queue;
+    flexUI::ApplicationCommandEngine commands(queue);
+    flexUI::ScriptController controller(
+        flexUI::ControllerEffects{&mutations, &commands});
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(click_event());
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::MutationFailed);
+    check_equal(host.commits, 0);
+    check_equal(host.text, std::string("unchanged"));
+    check_equal(queue.reserve_calls, 1);
+    check_equal(queue.reserved, 0);
+    check_equal(queue.published, 0);
+    check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("faults when a callback emits commands without a command engine") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document"});
+    module->command_export = "save_document";
+    flexUI::ScriptController controller;
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch(click_event());
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code ==
+          flexUI::ControllerErrorCode::CommandFailed);
+    check_equal(
+        dispatched.error.message,
+        std::string(
+            "script emitted application commands without a command engine"));
+    check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("rejects mount commands before reserving service queue slots") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"on_mount", "save_document"});
+    module->command_export = "on_mount";
+    ControllerCommandQueue queue;
+    flexUI::ApplicationCommandEngine commands(queue);
+    flexUI::ScriptController controller(
+        flexUI::ControllerEffects{nullptr, &commands});
+
+    check(controller.load(std::move(module), controller_program()));
+    const auto mounted = controller.mount();
+    check_false(static_cast<bool>(mounted));
+    check(mounted.error.code == flexUI::ControllerErrorCode::CommandFailed);
+    check_equal(queue.reserve_calls, 0);
+    check_equal(queue.published, 0);
+    check(controller.state() == flexUI::ControllerState::Faulted);
   }
 
   it("faults without a partial commit when the event handle becomes stale") {

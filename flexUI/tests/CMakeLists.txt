@@ -129,6 +129,12 @@ flexui_configure_tinytest(test_box_mutation_host)
 set_target_properties(test_box_mutation_host PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_box_mutation_host COMMAND test_box_mutation_host)
 
+add_executable(test_application_command test_application_command.cpp)
+target_link_libraries(test_application_command PRIVATE FlexUI::Controller)
+flexui_configure_tinytest(test_application_command)
+set_target_properties(test_application_command PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_application_command COMMAND test_application_command)
+
 add_executable(test_keyed_repeater test_keyed_repeater.cpp)
 target_link_libraries(test_keyed_repeater PRIVATE flexUI)
 flexui_configure_tinytest(test_keyed_repeater)

@@ -118,6 +118,8 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
 - [x] 断言 controller/module context 只由创建它的 UI 线程访问。
 - [x] 增加 bounded `ScriptEventSnapshot` 与 `UiMutationBatch`。
 - [x] mutation validation 与 commit 分离，失败时整批丢弃。
+- [x] 将有界 `ApplicationCommandBatch` 与 UI mutation 分离，先 reserve queue、后 commit UI、
+  最后无失败 publish；adapter 只生成 envelope，不直接执行 service。
 
 ### 测试
 
