@@ -109,12 +109,15 @@ private:
 
 struct ApplicationCompletionMailbox::Impl {
   explicit Impl(disruptor_t *configured_queue, ApplicationCompletionLimits configured_limits,
-                std::uint64_t initial_generation)
+                std::uint64_t initial_generation,
+                ApplicationCompletionWakeup configured_wakeup)
       : queue(configured_queue), limits(configured_limits),
-        owner_thread(std::this_thread::get_id()), generation(initial_generation) {}
+        wakeup(configured_wakeup), owner_thread(std::this_thread::get_id()),
+        generation(initial_generation) {}
 
   disruptor_t *queue = nullptr;
   ApplicationCompletionLimits limits;
+  ApplicationCompletionWakeup wakeup;
   std::thread::id owner_thread;
   std::atomic<ApplicationCompletionMailboxState> state{
       ApplicationCompletionMailboxState::Accepting};
@@ -181,7 +184,8 @@ ApplicationCompletionMailbox::~ApplicationCompletionMailbox() {
 
 ApplicationCompletionMailboxCreateResult
 ApplicationCompletionMailbox::create(std::uint64_t initial_generation,
-                                     ApplicationCompletionLimits limits) {
+                                     ApplicationCompletionLimits limits,
+                                     ApplicationCompletionWakeup wakeup) {
   if (initial_generation == 0) {
     return {{},
             fail(ApplicationCompletionErrorCode::InvalidGeneration,
@@ -189,6 +193,11 @@ ApplicationCompletionMailbox::create(std::uint64_t initial_generation,
   }
   if (auto error = validate_limits(limits)) {
     return {{}, std::move(error)};
+  }
+  if (wakeup.callback == nullptr && wakeup.context != nullptr) {
+    return {{},
+            fail(ApplicationCompletionErrorCode::InvalidWakeup,
+                 "completion wakeup context requires a callback")};
   }
 
   const disruptor_config_t config = {sizeof(CompletionEntry), limits.capacity, 1,
@@ -201,7 +210,8 @@ ApplicationCompletionMailbox::create(std::uint64_t initial_generation,
   }
 
   try {
-    auto impl = std::make_unique<Impl>(queue, limits, initial_generation);
+    auto impl = std::make_unique<Impl>(queue, limits, initial_generation,
+                                      wakeup);
     return {std::unique_ptr<ApplicationCompletionMailbox>(
                 new ApplicationCompletionMailbox(std::move(impl))),
             {}};
@@ -273,6 +283,9 @@ ApplicationCompletionMailbox::try_post(const ApplicationCompletion &completion) 
   impl_->observe_depth(depth);
   if (disruptor_publisher_publish(impl_->queue, &cursor) == 0) {
     std::terminate();
+  }
+  if (impl_->wakeup) {
+    impl_->wakeup.callback(impl_->wakeup.context);
   }
   return {};
 }

@@ -59,4 +59,10 @@ if(TARGET flexUI_controller_turboscript)
                         PRIVATE FlexUI::ControllerTurboScript)
   set_target_properties(desktop_xml_tbs_demo PROPERTIES FOLDER flexUI/)
 endif()
+
+if(TARGET FlexUI::ControllerTurboScript
+   AND TARGET FlexUI::GCanvasPluginWindowHost
+   AND TARGET FlexUI::PluginSDK)
+  add_subdirectory(desktop_editor)
+endif()
  

@@ -236,6 +236,7 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [x] construction/start failure 按相反顺序 RAII unwind。
 - [x] stop 前拒绝新 service call，并等待活动 submit 调用归零。
 - [x] 插件 ABI 强制 stop/join，join 成功前不 destroy/unload；timeout 保持可重试 `Stopping` 状态。
+- [x] 暴露只读 owner-thread identity，使 desktop composition 可在接管生命周期前拒绝线程归属不一致。
 - [x] 首版不提供热重载 API；开发模式 reload 通过重启进程完成。
 
 ### Service registry
@@ -308,6 +309,13 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [x] `GCanvasWindowHost` 在 pointer event 与 frame 后将 FlexUI internal capture 与 native capture 同步。
 - [ ] 补齐 Windows IME、clipboard、DPI、多显示器和 native dialog service。
 - [x] 主循环静态窗口使用 wait-events；动画/主动刷新使用 bounded timed-wait/update，避免 busy poll。
+- [x] worker completion 成功 publish 后以无数据 empty event 唤醒 gCanvas wait；owner thread 在 frame 前
+  有界 drain，达到上限时安排下一轮，handler 缺失时不抢占 raw consumer。
+- [x] 在 Controller 层实现无 PluginHost/window 依赖的 owner-thread service dispatcher；gCanvas host 按
+  completion → bounded request dispatch → frame 顺序自动路由，拒绝/异常转为 failed completion，
+  mailbox 满时只保留一个 terminal completion 并显式重试。
+- [x] 新增可选 `FlexUI::GCanvasPluginWindowHost`，消费同一 PluginHost registry snapshot，并保证
+  application/mailbox 销毁前完成 plugin stop/join；独立 gCanvas host 不依赖 PluginHost。
 - [x] 分离 logical window resize 与 physical framebuffer resize；zero framebuffer 不提交 GPU frame，
   丢弃本帧 draw queue/transient path resource，恢复后不回放最小化期间的旧命令。
 - [ ] 完成 native minimize/restore、device/context error 和 shutdown stress 回归。
@@ -344,6 +352,8 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [x] close/shutdown during controller callback 保持可重试状态且不会重复 unmount。
 - [x] close during service completion mailbox 安全；并发 producer 在 close 前完成 publication 或得到
   `Closed`，close quiesce 后取消全部已发布 record；PluginHost stop/join 仍由 P4 lifecycle 完成。
+- [x] hidden OpenGL + echo DLL 组合测试覆盖 request/completion 自动路由、owner-thread gate、registry
+  不一致拒绝、join timeout 保留所有者及后续 shutdown retry。
 - [ ] required GPU capability 缺失时无半初始化 window/context。
 
 完成条件：Windows 示例可以从 app package 启动、按需绘制、输入文本、调用 native service 并安全
@@ -371,12 +381,21 @@ UI 状态，默认 Box 路径仍未被隐式接管。
   application dispatch 返回 `Closed`/`Empty` 且不调用脚本。
 - [x] service error 不自动 fallback；failed status 作为 immutable completion data 交给 controller，
   handler 缺失时返回 owning unhandled completion。
+- [x] gCanvas host 自动 dispatch scripted completion；handler error 保留 nested cause 并经统一 host
+  shutdown 边界收口，不重试或切换 raw fallback。
+- [x] gCanvas host 自动从 request table 取得 FIFO command、重复解析授权 endpoint 并有界提交；达到
+  request 上限或 completion 背压时安排下一轮 event，不 busy-spin。
+- [x] 可选 gCanvas/PluginHost composition 在 application `Shutdown` 后自动 stop，并在显式 shutdown
+  中保留完整 window/plugin nested error；无插件路径不生成该 target。
 
 ### 示例应用
 
-- [ ] 新增完整桌面 editor 示例：XML、CSS、`.tbs`、C++ host、document service DLL。
-- [ ] 示例支持编辑、dirty binding、save command、saving 状态和错误提示。
-- [ ] 示例不在生产代码嵌入测试数据或本机绝对路径。
+- [x] 新增完整桌面 editor 示例：XML、CSS、`.tbs`、C++ host、document service DLL。
+- [x] 示例支持 textarea 编辑、save command、saving 状态、重复点击 gate 和 completion 成功/失败提示。
+- [x] 真实 `editor.tbs` 的 JIT contract test 覆盖单 in-flight request identity、失败后恢复及
+  mismatched/duplicate completion 拒绝；测试不维护脚本副本。
+- [ ] 增加 dirty binding，并在可编辑控件的值变化能生成非 consumed change snapshot 后提交真实文档内容。
+- [x] 示例不在生产代码嵌入测试数据或本机绝对路径。
 - [ ] 示例可从 build tree 和 install tree 独立运行。
 
 ### 回归
@@ -387,6 +406,8 @@ UI 状态，默认 Box 路径仍未被隐式接管。
   `PluginSDK`/ABI test 保留。
 - [ ] 两 feature 同时关闭时不部署 TurboScript/plugin runtime。
 - [ ] 现有 hand-built examples 与 UiDocument tests 通过。
+- [x] hidden OpenGL editor smoke 覆盖 XML click、TurboScript JIT、DLL submit/completion、UI mutation
+  和 application-before-plugin shutdown。
 
 完成条件：`XML + CSS + .tbs + DLL` 构成完整桌面应用闭环，且每个 feature 可以独立关闭。
 
@@ -405,9 +426,15 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 - [ ] 脚本 infinite loop、deep recursion、memory exhaustion 和 timeout/interrupt。
 - [ ] plugin queue saturation、worker hang、stop timeout 和 lost completion。
+- [x] desktop composition 的 plugin worker join timeout 不释放 mailbox/DLL，owner thread 可用新 timeout
+  重试并完成关闭。
 - [ ] mutation stale handle、oversized string、invalid UTF-8、integer overflow 和 rollback。
 - [ ] GPU resize storm、minimize/restore、context loss/error 和 resource limit。
 - [ ] application reload 过程中 native event、completion 和 close 竞态。
+- [x] completion wakeup 配置边界、worker publish、单 pump drain 上限、raw-handler 缺失及 handler failure
+  已由 mailbox/application/hidden GPU host 测试覆盖。
+- [x] service dispatcher 的 FIFO/单 pump 上限、foreign-thread gate、endpoint reject/throw、terminal
+  completion 背压重试与 hidden GPU host 自动路由已覆盖。
 
 ### Sanitizer 与诊断
 

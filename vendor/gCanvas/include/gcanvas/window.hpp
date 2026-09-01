@@ -190,7 +190,7 @@ namespace gcanvas
         void wait_events();
         void wait_events(float time);
 
-        static void trigger_events();
+        static void trigger_events() noexcept;
         static double now();
 
     protected:

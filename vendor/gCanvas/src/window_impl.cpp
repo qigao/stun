@@ -565,7 +565,7 @@ namespace gcanvas
         impl->_native_callback_errors.rethrow_pending();
     }
 
-    void Window::trigger_events()
+    void Window::trigger_events() noexcept
     {
         glfwPostEmptyEvent();
     }

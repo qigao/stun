@@ -12,6 +12,19 @@
 
 namespace {
 
+struct WakeProbe {
+  std::atomic<std::uint64_t> calls{0};
+  std::atomic<bool> release{true};
+};
+
+void record_wakeup(void *context) noexcept {
+  auto &probe = *static_cast<WakeProbe *>(context);
+  probe.calls.fetch_add(1, std::memory_order_release);
+  while (!probe.release.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+
 flexUI::ApplicationCompletion completion(
     std::uint64_t id, std::uint64_t generation,
     flexUI::ApplicationCompletionStatus status = flexUI::ApplicationCompletionStatus::Succeeded,
@@ -47,6 +60,88 @@ spec("FlexUI application completion mailbox") {
     check_false(static_cast<bool>(overflowing_capacity));
     check(overflowing_capacity.error.code ==
           flexUI::ApplicationCompletionErrorCode::InvalidCapacity);
+
+    WakeProbe probe;
+    auto invalid_wakeup = flexUI::ApplicationCompletionMailbox::create(
+        1, {}, {nullptr, &probe});
+    check_false(static_cast<bool>(invalid_wakeup));
+    check(invalid_wakeup.error.code ==
+          flexUI::ApplicationCompletionErrorCode::InvalidWakeup);
+  }
+
+  it("notifies only after successful completion publication") {
+    WakeProbe probe;
+    flexUI::ApplicationCompletionLimits limits;
+    limits.capacity = 1;
+    auto created = flexUI::ApplicationCompletionMailbox::create(
+        4, limits, {record_wakeup, &probe});
+    check(created);
+
+    check(created.mailbox->try_post(completion(1, 4)));
+    check_equal(probe.calls.load(std::memory_order_acquire), std::uint64_t{1});
+
+    auto full = created.mailbox->try_post(completion(2, 4));
+    check_false(static_cast<bool>(full));
+    check(full.error.code == flexUI::ApplicationCompletionErrorCode::QueueFull);
+    auto invalid = created.mailbox->try_post(completion(0, 4));
+    check_false(static_cast<bool>(invalid));
+    check_equal(probe.calls.load(std::memory_order_acquire), std::uint64_t{1});
+
+    check(created.mailbox->try_receive());
+    auto advanced = created.mailbox->advance_generation(5);
+    check(advanced);
+    auto stale = created.mailbox->try_post(completion(3, 4));
+    check_false(static_cast<bool>(stale));
+    check_equal(probe.calls.load(std::memory_order_acquire), std::uint64_t{1});
+
+    check(created.mailbox->try_post(completion(4, 5)));
+    check_equal(probe.calls.load(std::memory_order_acquire), std::uint64_t{2});
+    check(created.mailbox->close());
+    auto closed = created.mailbox->try_post(completion(5, 5));
+    check_false(static_cast<bool>(closed));
+    check_equal(probe.calls.load(std::memory_order_acquire), std::uint64_t{2});
+  }
+
+  it("quiesces an active wakeup callback before close returns") {
+    WakeProbe probe;
+    probe.release.store(false, std::memory_order_release);
+    auto created = flexUI::ApplicationCompletionMailbox::create(
+        6, {}, {record_wakeup, &probe});
+    check(created);
+
+    flexUI::ApplicationCompletionPostResult posted;
+    std::thread publisher([&] {
+      posted = created.mailbox->try_post(completion(1, 6));
+    });
+    while (probe.calls.load(std::memory_order_acquire) == 0) {
+      std::this_thread::yield();
+    }
+
+    std::atomic<bool> close_returned{false};
+    std::atomic<bool> observed_closing{false};
+    std::atomic<bool> returned_before_release{false};
+    std::thread releaser([&] {
+      while (created.mailbox->state() !=
+             flexUI::ApplicationCompletionMailboxState::Closing) {
+        std::this_thread::yield();
+      }
+      observed_closing.store(true, std::memory_order_release);
+      returned_before_release.store(
+          close_returned.load(std::memory_order_acquire),
+          std::memory_order_release);
+      probe.release.store(true, std::memory_order_release);
+    });
+
+    auto closed = created.mailbox->close();
+    close_returned.store(true, std::memory_order_release);
+    publisher.join();
+    releaser.join();
+
+    check(posted);
+    check(closed);
+    check_true(observed_closing.load(std::memory_order_acquire));
+    check_false(returned_before_release.load(std::memory_order_acquire));
+    check_equal(closed.cancelled, std::uint64_t{1});
   }
 
   it("validates token status and owning string budgets before publication") {

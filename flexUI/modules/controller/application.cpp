@@ -26,6 +26,7 @@ struct ApplicationConfig {
   DesktopApplicationLimits limits;
   WidgetRegistry registry;
   ScriptModuleFactory script_factory;
+  ApplicationCompletionWakeup completion_wakeup;
   UiEntryFormat entry_format = UiEntryFormat::Xml;
   bool script_enabled = false;
 };
@@ -727,6 +728,14 @@ DesktopApplicationBuilder &DesktopApplicationBuilder::limits(DesktopApplicationL
   return *this;
 }
 
+DesktopApplicationBuilder &DesktopApplicationBuilder::completion_wakeup(
+    ApplicationCompletionWakeup wakeup) noexcept {
+  if (impl_) {
+    impl_->config.completion_wakeup = wakeup;
+  }
+  return *this;
+}
+
 DesktopApplicationBuilder &DesktopApplicationBuilder::widget_registry(WidgetRegistry registry) {
   impl_->config.registry = std::move(registry);
   return *this;
@@ -791,7 +800,8 @@ DesktopApplicationBuildResult DesktopApplicationBuilder::build() const {
   }
 
   auto completion_mailbox =
-      ApplicationCompletionMailbox::create(1, impl_->config.limits.completion);
+      ApplicationCompletionMailbox::create(1, impl_->config.limits.completion,
+                                           impl_->config.completion_wakeup);
   if (!completion_mailbox) {
     auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
                       DesktopApplicationStage::CompletionMailbox, completion_mailbox.error.message);

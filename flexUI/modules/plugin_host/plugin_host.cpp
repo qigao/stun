@@ -430,6 +430,10 @@ PluginHostResult PluginHost::stop(std::chrono::milliseconds timeout) {
   return {};
 }
 
+bool PluginHost::is_owner_thread() const noexcept {
+  return std::this_thread::get_id() == impl_->owner_thread;
+}
+
 PluginHostState PluginHost::state() const noexcept { return impl_->state.load(); }
 
 PluginHostStatistics PluginHost::statistics() const noexcept {

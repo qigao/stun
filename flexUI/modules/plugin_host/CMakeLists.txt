@@ -40,6 +40,15 @@ if(FLEXUI_ENABLE_PLUGINS)
   if(WIN32)
     target_compile_definitions(
       flexUI_plugin_host PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    add_custom_command(
+      TARGET flexUI_plugin_host POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:TurboUtils::Core>
+              $<TARGET_FILE_DIR:flexUI_plugin_host>
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:TurboParser::Parser>
+              $<TARGET_FILE_DIR:flexUI_plugin_host>
+      COMMENT "Copying PluginHost runtime dependencies beside FlexUI executables")
   endif()
   set_target_properties(
     flexUI_plugin_host PROPERTIES FOLDER "flexUI/plugin_host"

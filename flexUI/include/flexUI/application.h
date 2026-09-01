@@ -265,6 +265,11 @@ public:
   DesktopApplicationBuilder &renderer(flex::Renderer *renderer) noexcept;
   DesktopApplicationBuilder &box_options(BoxOptions options);
   DesktopApplicationBuilder &limits(DesktopApplicationLimits limits);
+  /// Installs a borrowed allocation-free callback invoked after successful
+  /// completion publication. Its context must outlive the built application
+  /// and all producers; request_close() quiesces callbacks before returning.
+  DesktopApplicationBuilder &
+  completion_wakeup(ApplicationCompletionWakeup wakeup) noexcept;
   DesktopApplicationBuilder &widget_registry(WidgetRegistry registry);
   DesktopApplicationBuilder &services(
       std::shared_ptr<const ApplicationServiceRegistry> registry,
