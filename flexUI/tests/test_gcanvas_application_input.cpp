@@ -1,8 +1,11 @@
 #include <flexUI/gcanvas_application_input.h>
 #include <flexUI/widgets/input_widget.h>
 
+#include "window_coordinates.hpp"
+
 #include <tinytest.hpp>
 
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -26,6 +29,44 @@ void prepare_layout(flexUI::DesktopApplication &application) {
 } // namespace
 
 spec("gCanvas application router dispatches validated native input") {
+  it("maps native window coordinates to logical hit-test coordinates") {
+    auto built = build_input_application();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+    prepare_layout(*built.application);
+
+    bool clicked = false;
+    auto *button = built.application->box().get_by_id("button");
+    check_not_null(button);
+    if (button == nullptr) {
+      return;
+    }
+    button->on_click([&] { clicked = true; });
+    flexUI::GCanvasApplicationInputRouter router(*built.application);
+    const auto logical = gcanvas::detail::map_window_position_to_logical(
+        24.0, 48.0, 320, 200, 640, 400);
+
+    const auto moved = router.mouse_move({logical.x, logical.y});
+    const auto pressed = router.mouse_button(
+        {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_PRESS,
+         static_cast<gcanvas::mouse_mod>(0), logical.x, logical.y});
+    const auto released = router.mouse_button(
+        {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_RELEASE,
+         static_cast<gcanvas::mouse_mod>(0), logical.x, logical.y});
+
+    check_within(logical.x, 12.0, 0.000001);
+    check_within(logical.y, 24.0, 0.000001);
+    check(static_cast<bool>(moved));
+    check(static_cast<bool>(pressed));
+    check(static_cast<bool>(released));
+    check_true(clicked);
+    check_throws_as(gcanvas::detail::map_window_position_to_logical(
+                        1.0, 1.0, 320, 200, 0, 400),
+                    std::runtime_error);
+  }
+
   it("routes pointer button wheel and repeated key events through the application") {
     auto built = build_input_application();
     check(static_cast<bool>(built));

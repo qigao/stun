@@ -767,12 +767,19 @@ namespace gcanvas
         int window_width = 0;
         int window_height = 0;
         glfwGetWindowSize(_glfw_window, &window_width, &window_height);
-        if (window_width <= 0 || window_height <= 0)
-        {
-            throw std::runtime_error("GLFW returned an empty window coordinate extent");
-        }
-        return gcanvas::vec2(static_cast<float>(_logical_width) / window_width,
-                             static_cast<float>(_logical_height) / window_height);
+        const detail::WindowCoordinateScale scale = detail::window_to_logical_scale(
+            _logical_width, _logical_height, window_width, window_height);
+        return gcanvas::vec2(static_cast<float>(scale.x), static_cast<float>(scale.y));
+    }
+
+    detail::LogicalPointerPosition WindowImpl::window_position_to_logical(double x,
+                                                                           double y) const
+    {
+        int window_width = 0;
+        int window_height = 0;
+        glfwGetWindowSize(_glfw_window, &window_width, &window_height);
+        return detail::map_window_position_to_logical(
+            x, y, _logical_width, _logical_height, window_width, window_height);
     }
 
     void WindowImpl::sync_context_metrics()
@@ -930,9 +937,9 @@ namespace gcanvas
         std::cout << "event: mouse_position "
                   << "x: " << x << " y: " << y << std::endl;
 #endif
-        const gcanvas::vec2 to_logical = winImpl->window_to_logical_scale();
-        winImpl->_listeners->publish(
-            mouse_move_event{x * to_logical.get_x(), y * to_logical.get_y()});
+        const detail::LogicalPointerPosition logical =
+            winImpl->window_position_to_logical(x, y);
+        winImpl->_listeners->publish(mouse_move_event{logical.x, logical.y});
     }
 
     void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
@@ -962,11 +969,11 @@ namespace gcanvas
 #endif
         double x, y;
         glfwGetCursorPos(window, &x, &y);
-        const gcanvas::vec2 to_logical = winImpl->window_to_logical_scale();
+        const detail::LogicalPointerPosition logical =
+            winImpl->window_position_to_logical(x, y);
 
         winImpl->_listeners->publish(mouse_button_event{(mouse_button)button, (input_action)action,
-                                                        (mouse_mod)mods, x * to_logical.get_x(),
-                                                        y * to_logical.get_y()});
+                                                        (mouse_mod)mods, logical.x, logical.y});
     }
 
     void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)

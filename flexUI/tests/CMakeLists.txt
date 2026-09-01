@@ -215,6 +215,8 @@ add_executable(test_gcanvas_application_input test_gcanvas_application_input.cpp
 target_link_libraries(
   test_gcanvas_application_input
   PRIVATE FlexUI::GCanvasApplicationInput)
+target_include_directories(
+  test_gcanvas_application_input PRIVATE "${gCanvas_SOURCE_DIR}/src")
 flexui_configure_tinytest(test_gcanvas_application_input)
 set_target_properties(
   test_gcanvas_application_input PROPERTIES FOLDER "flexUI/tests")

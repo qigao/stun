@@ -2,6 +2,7 @@
 #define GCANVAS_WINDOW_IMPL_HPP
 
 #include "gcanvas/window.hpp"
+#include "window_coordinates.hpp"
 #include "window_listener_state.hpp"
 #include <unordered_map>
 
@@ -46,6 +47,7 @@ namespace gcanvas
         CanvasMetrics canvas_metrics() const;
         bool refresh_window_metrics();
         gcanvas::vec2 window_to_logical_scale() const;
+        detail::LogicalPointerPosition window_position_to_logical(double x, double y) const;
         void sync_context_metrics();
         void sync_framebuffer_extent(int width, int height);
         void create_window(const WindowConfig& config);
