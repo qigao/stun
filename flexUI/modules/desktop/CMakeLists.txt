@@ -24,3 +24,22 @@ set_target_properties(
   flexUI_gcanvas_application_input PROPERTIES FOLDER "flexUI/desktop")
 
 install(TARGETS flexUI_gcanvas_application_input DESTINATION lib)
+
+if(TARGET gCanvas::Window AND TARGET flex_render_engine_gcanvas)
+  add_library(flexUI_gcanvas_window_host STATIC gcanvas_window_host.cpp)
+  add_library(FlexUI::GCanvasWindowHost ALIAS flexUI_gcanvas_window_host)
+
+  target_link_libraries(
+    flexUI_gcanvas_window_host
+    PUBLIC FlexUI::GCanvasApplicationInput gCanvas::Window
+    PRIVATE flex_render_engine_gcanvas)
+  target_include_directories(
+    flexUI_gcanvas_window_host
+    PUBLIC $<BUILD_INTERFACE:${FLEXUI_INCLUDE_DIR}>
+           $<INSTALL_INTERFACE:include>)
+  target_compile_features(flexUI_gcanvas_window_host PUBLIC cxx_std_17)
+  set_target_properties(
+    flexUI_gcanvas_window_host PROPERTIES FOLDER "flexUI/desktop")
+
+  install(TARGETS flexUI_gcanvas_window_host DESTINATION lib)
+endif()

@@ -320,12 +320,16 @@ namespace gcanvas
         virtual void present_frame() = 0;
         virtual std::vector<std::uint8_t> read_pixels() = 0;
 
+        /// Returns the current physical render-target width in pixels.
         int get_width();
+        /// Returns the current physical render-target height in pixels.
         int get_height();
+        /// Updates the physical render-target extent without changing logical canvas metrics.
         virtual void resize_context(int width, int height) = 0;
         virtual void set_vsync(bool enabled) = 0;
         Font& get_default_font();
         const CanvasMetrics& metrics() const noexcept;
+        /// Updates logical canvas coordinates without changing the physical target extent.
         void set_metrics(const CanvasMetrics& metrics);
 
         // Returned references are owned by this context and remain valid until context teardown.

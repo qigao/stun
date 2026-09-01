@@ -1,6 +1,7 @@
 #include "flexUI/gcanvas_application_input.h"
 
 #include "flexUI/application_host_bridge.h"
+#include "flexUI/host_bridge.h"
 
 #include <utility>
 
@@ -111,6 +112,17 @@ GCanvasApplicationInputRouter::resize(const gcanvas::resize_event &native) {
                                   static_cast<float>(normalized.metrics->height));
   application_.box().invalidate();
   return {true, {}};
+}
+
+GCanvasApplicationInputResult
+GCanvasApplicationInputRouter::focus(const gcanvas::focus_event &native) {
+  if (!is_owner_thread()) {
+    return wrong_thread_result();
+  }
+  if (native.focused) {
+    return {false, {}};
+  }
+  return {host::clear_focus_and_capture(&application_.box()), {}};
 }
 
 } // namespace flexUI

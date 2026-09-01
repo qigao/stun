@@ -1,7 +1,7 @@
 #include "flex/render/engines/gcanvas.h"
 
 #include <gcanvas/context.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <stdexcept>
 #include <string>
@@ -187,7 +187,13 @@ public:
   }
   void present_frame() override { ++presents; }
   std::vector<std::uint8_t> read_pixels() override { return {}; }
-  void resize_context(int, int) override {}
+  void resize_context(int width, int height) override {
+    if (width <= 0 || height <= 0) {
+      throw std::invalid_argument("recording context dimensions must be positive");
+    }
+    _width = width;
+    _height = height;
+  }
   void set_vsync(bool) override {}
 
   gcanvas::Image& create_image(const std::string&, gcanvas::ImageConfig) override {
@@ -310,14 +316,14 @@ suite("Flex gCanvas renderer") {
           &first_texture);
     check_throws_as(canvas.cache_gradient(second, {0.0f, 0.0f}, {1.0f, 1.0f}),
                     std::length_error);
-    check_int_eq(canvas.created_images, 1);
-    check_int_eq(canvas.updated_images, 0);
+    check_equal(canvas.created_images, 1);
+    check_equal(canvas.updated_images, 0);
 
     canvas.close_recording_frame();
     check(&canvas.cache_gradient(second, {0.0f, 0.0f}, {1.0f, 1.0f}) ==
           &first_texture);
-    check_int_eq(canvas.created_images, 1);
-    check_int_eq(canvas.updated_images, 1);
+    check_equal(canvas.created_images, 1);
+    check_equal(canvas.updated_images, 1);
   }
 
   it("routes axis-aligned solid ellipses through analytic GPU primitives") {
@@ -330,9 +336,9 @@ suite("Flex gCanvas renderer") {
                            flex::Paint::solid(flex::Color::White), 2.0f);
     renderer->end_frame();
 
-    check_int_eq(canvas.fill_ellipses, 1);
-    check_int_eq(canvas.stroke_ellipses, 1);
-    check_int_eq(canvas.paths, 0);
+    check_equal(canvas.fill_ellipses, 1);
+    check_equal(canvas.stroke_ellipses, 1);
+    check_equal(canvas.paths, 0);
   }
 
   it("reports the exact supported capability subset") {
@@ -349,6 +355,19 @@ suite("Flex gCanvas renderer") {
     check_true(caps.scaling);
     check_true(caps.shadow);
     check_true(caps.blur);
+  }
+
+  it("uses logical metrics without replacing a borrowed physical extent") {
+    RecordingContext canvas(120, 80);
+    canvas.set_metrics({96, 64, 1.0f, 1.0f, 0.0f, 0.0f, 1.25f});
+    auto renderer = flex::render::engines::gcanvas::create_renderer(canvas);
+
+    check_equal(canvas.get_width(), 120);
+    check_equal(canvas.get_height(), 80);
+    check_nothrow(renderer->begin_frame(96.0f, 64.0f, 1.25f));
+    renderer->end_frame();
+    check_throws_as(renderer->begin_frame(120.0f, 80.0f, 1.0f),
+                    std::invalid_argument);
   }
 
   it("maps bounded blur state to path text image and save restore") {
@@ -382,7 +401,7 @@ suite("Flex gCanvas renderer") {
     check_true(blurred_paths > 1);
     check_true(blurred_texts > 1);
     check_true(blurred_images > 1);
-    check_int_eq(canvas.rects.size(), 1);
+    check_equal(canvas.rects.size(), 1);
     check_true(canvas.path_blur_samples > blurred_paths);
   }
 
@@ -398,14 +417,14 @@ suite("Flex gCanvas renderer") {
     renderer->begin_frame(96.0f, 64.0f, 1.0f);
     renderer->draw_text("Bold", 0.0f, 0.0f, "ui", 14.0f, true,
                         flex::Color::White);
-    check_string_eq(canvas.last_font_source, "ui-bold.ttf");
+    check_equal(canvas.last_font_source, "ui-bold.ttf");
     renderer->unregister_font("ui-bold");
     renderer->draw_text("Fallback", 0.0f, 16.0f, "ui", 14.0f, true,
                         flex::Color::White);
-    check_string_eq(canvas.last_font_source, "ui-regular.ttf");
+    check_equal(canvas.last_font_source, "ui-regular.ttf");
     renderer->draw_text("Sans", 0.0f, 32.0f, "missing", 14.0f, true,
                         flex::Color::White);
-    check_string_eq(canvas.last_font_source, "sans-bold.ttf");
+    check_equal(canvas.last_font_source, "sans-bold.ttf");
     renderer->end_frame();
   }
 
@@ -425,7 +444,7 @@ suite("Flex gCanvas renderer") {
                         flex::Paint::solid(flex::Color::Red),
                         flex::Paint::none(), 0.0f),
                     std::length_error);
-    check_int_eq(canvas.path_blur_samples, 0);
+    check_equal(canvas.path_blur_samples, 0);
     renderer->clear_blur();
     renderer->end_frame();
   }
@@ -450,17 +469,17 @@ suite("Flex gCanvas renderer") {
     renderer->end_frame();
 
     check(canvas.rects.size() == std::size_t{1});
-    check_float_eq(canvas.rects[0].x, 14.0f, 0.001f);
-    check_float_eq(canvas.rects[0].y, 24.0f, 0.001f);
-    check_float_eq(canvas.rects[0].width, 20.0f, 0.001f);
-    check_float_eq(canvas.rects[0].height, 10.0f, 0.001f);
-    check_float_eq(canvas.rects[0].radius, 2.0f, 0.001f);
+    check_within(canvas.rects[0].x, 14.0f, 0.001f);
+    check_within(canvas.rects[0].y, 24.0f, 0.001f);
+    check_within(canvas.rects[0].width, 20.0f, 0.001f);
+    check_within(canvas.rects[0].height, 10.0f, 0.001f);
+    check_within(canvas.rects[0].radius, 2.0f, 0.001f);
     check_false(canvas.rects[0].stroke);
     check_true(canvas.masks.size() >= std::size_t{1});
-    check_float_eq(canvas.masks.front().x, 10.0f, 0.001f);
-    check_float_eq(canvas.masks.front().y, 20.0f, 0.001f);
-    check_float_eq(canvas.masks.front().width, 32.0f, 0.001f);
-    check_float_eq(canvas.masks.front().height, 16.0f, 0.001f);
+    check_within(canvas.masks.front().x, 10.0f, 0.001f);
+    check_within(canvas.masks.front().y, 20.0f, 0.001f);
+    check_within(canvas.masks.front().width, 32.0f, 0.001f);
+    check_within(canvas.masks.front().height, 16.0f, 0.001f);
     check(canvas.clear_colors == 1);
     check(canvas.frames == 1);
     check(canvas.presents == 0);
@@ -480,12 +499,12 @@ suite("Flex gCanvas renderer") {
     renderer->restore();
     renderer->end_frame();
 
-    check_size_eq(canvas.convex_masks.size(), std::size_t{3});
-    check_size_eq(canvas.convex_masks[0].size(), std::size_t{4});
+    check_equal(canvas.convex_masks.size(), std::size_t{3});
+    check_equal(canvas.convex_masks[0].size(), std::size_t{4});
     check_true(canvas.convex_masks[1].size() >= std::size_t{3});
-    check_size_eq(canvas.convex_masks[2].size(), std::size_t{4});
-    check_float_eq(canvas.convex_masks[0][0].get_x(), 80.0f, 0.001f);
-    check_float_eq(canvas.convex_masks[0][0].get_y(), 11.7157f, 0.001f);
+    check_equal(canvas.convex_masks[2].size(), std::size_t{4});
+    check_within(canvas.convex_masks[0][0].get_x(), 80.0f, 0.001f);
+    check_within(canvas.convex_masks[0][0].get_y(), 11.7157f, 0.001f);
   }
 
   it("maps paths gradients ellipses lines and affine transforms") {
@@ -507,8 +526,8 @@ suite("Flex gCanvas renderer") {
                                          flex::Paint::none(), 0.0f));
     renderer->end_frame();
 
-    check_int_eq(canvas.paths, 3);
-    check_int_eq(canvas.frames, 1);
+    check_equal(canvas.paths, 3);
+    check_equal(canvas.frames, 1);
   }
 
   it("maps drop shadow state, opacity, offset, spread, and save restore") {
@@ -534,24 +553,24 @@ suite("Flex gCanvas renderer") {
                           flex::Paint::solid(flex::Color::White), flex::Paint::none(), 0.0f);
     renderer->end_frame();
 
-    check_size_eq(canvas.shadows.size(), std::size_t{2});
+    check_equal(canvas.shadows.size(), std::size_t{2});
     const ShadowCall& rect = canvas.shadows[0];
     check_true(rect.type == ShadowCall::Type::RoundedRect);
-    check_float_eq(rect.x, 14.0f, 0.001f);
-    check_float_eq(rect.y, 28.0f, 0.001f);
-    check_float_eq(rect.width, 28.0f, 0.001f);
-    check_float_eq(rect.height, 20.0f, 0.001f);
-    check_float_eq(rect.radius, 6.0f, 0.001f);
-    check_float_eq(rect.blur, 10.0f, 0.001f);
-    check_float_eq(rect.alpha, 0.25f, 0.001f);
+    check_within(rect.x, 14.0f, 0.001f);
+    check_within(rect.y, 28.0f, 0.001f);
+    check_within(rect.width, 28.0f, 0.001f);
+    check_within(rect.height, 20.0f, 0.001f);
+    check_within(rect.radius, 6.0f, 0.001f);
+    check_within(rect.blur, 10.0f, 0.001f);
+    check_within(rect.alpha, 0.25f, 0.001f);
 
     const ShadowCall& circle = canvas.shadows[1];
     check_true(circle.type == ShadowCall::Type::Circle);
-    check_float_eq(circle.x, 56.0f, 0.001f);
-    check_float_eq(circle.y, 48.0f, 0.001f);
-    check_float_eq(circle.radius, 10.0f, 0.001f);
-    check_float_eq(circle.blur, 10.0f, 0.001f);
-    check_float_eq(circle.alpha, 0.25f, 0.001f);
+    check_within(circle.x, 56.0f, 0.001f);
+    check_within(circle.y, 48.0f, 0.001f);
+    check_within(circle.radius, 10.0f, 0.001f);
+    check_within(circle.blur, 10.0f, 0.001f);
+    check_within(circle.alpha, 0.25f, 0.001f);
   }
 
   it("supports signed-spread sampled shadows and transformed primitives") {
@@ -567,7 +586,7 @@ suite("Flex gCanvas renderer") {
     check_nothrow(renderer->draw_rect(0.0f, 0.0f, 8.0f, 8.0f, 2.0f,
                                       flex::Paint::solid(flex::Color::White),
                                       flex::Paint::none(), 0.0f));
-    check_int_eq(canvas.inset_shadows, 1);
+    check_equal(canvas.inset_shadows, 1);
     check_nothrow(renderer->fill_path("M0 0 L4 0 L0 4 Z",
                                       flex::Paint::solid(flex::Color::White)));
     check_nothrow(renderer->draw_text("inset", 0.0f, 0.0f, "sans-serif", 12.0f,
@@ -633,8 +652,8 @@ suite("Flex gCanvas renderer") {
     check(canvas.paths > 1);
     check(canvas.text_masks > 1);
     check(canvas.image_masks > 1);
-    check_int_eq(canvas.texts, 1);
-    check_int_eq(canvas.images, 1);
+    check_equal(canvas.texts, 1);
+    check_equal(canvas.images, 1);
   }
 
   it("preserves alpha and still fails fast for unsupported semantics") {
@@ -658,10 +677,10 @@ suite("Flex gCanvas renderer") {
                         flex::Paint::solid(flex::Color{1.0f, 0.0f, 0.0f, 0.5f}), 1.0f);
     renderer->end_frame();
 
-    check_int_eq(canvas.texts, 1);
-    check_int_eq(canvas.images, 1);
-    check_float_eq(canvas.last_text_alpha, 0.5f, 0.001f);
-    check_float_eq(canvas.last_image_alpha, 0.5f, 0.001f);
+    check_equal(canvas.texts, 1);
+    check_equal(canvas.images, 1);
+    check_within(canvas.last_text_alpha, 0.5f, 0.001f);
+    check_within(canvas.last_image_alpha, 0.5f, 0.001f);
     check_true(canvas.last_image_tint);
     check_true(canvas.rects.size() >= std::size_t{1});
     check_true(canvas.rects.back().stroke);
@@ -680,9 +699,9 @@ suite("Flex gCanvas renderer") {
     check_nothrow(renderer->draw_svg_data(svg, 20.0f, 3.0f, 16.0f, 8.0f));
     renderer->end_frame();
 
-    check_int_eq(canvas.images, 2);
-    check_int_eq(canvas.created_images, 1);
-    check_float_eq(canvas.last_image_alpha, 0.5f, 0.001f);
+    check_equal(canvas.images, 2);
+    check_equal(canvas.created_images, 1);
+    check_within(canvas.last_image_alpha, 0.5f, 0.001f);
     check_true(canvas.last_image_tint);
   }
 
@@ -696,13 +715,13 @@ suite("Flex gCanvas renderer") {
     check_nothrow(renderer->draw_image("image.png", 0.0f, 0.0f, 20.0f, 8.0f));
     renderer->end_frame();
 
-    check_int_eq(canvas.images, 1);
-    check_float_eq(canvas.last_image_transform.a, 0.0f, 0.001f);
-    check_float_eq(canvas.last_image_transform.b, 1.0f, 0.001f);
-    check_float_eq(canvas.last_image_transform.c, -1.0f, 0.001f);
-    check_float_eq(canvas.last_image_transform.d, 0.0f, 0.001f);
-    check_float_eq(canvas.last_image_transform.e, 12.0f, 0.001f);
-    check_float_eq(canvas.last_image_transform.f, 7.0f, 0.001f);
+    check_equal(canvas.images, 1);
+    check_within(canvas.last_image_transform.a, 0.0f, 0.001f);
+    check_within(canvas.last_image_transform.b, 1.0f, 0.001f);
+    check_within(canvas.last_image_transform.c, -1.0f, 0.001f);
+    check_within(canvas.last_image_transform.d, 0.0f, 0.001f);
+    check_within(canvas.last_image_transform.e, 12.0f, 0.001f);
+    check_within(canvas.last_image_transform.f, 7.0f, 0.001f);
   }
 
   it("forwards affine text transforms without pre-scaling the glyph size") {
@@ -717,13 +736,13 @@ suite("Flex gCanvas renderer") {
                                      false, flex::Color::White));
     renderer->end_frame();
 
-    check_int_eq(canvas.texts, 1);
-    check_int_eq(canvas.font_size(), 16);
-    check_float_eq(canvas.last_text_transform.a, 0.0f, 0.001f);
-    check_float_eq(canvas.last_text_transform.b, 2.0f, 0.001f);
-    check_float_eq(canvas.last_text_transform.c, -0.5f, 0.001f);
-    check_float_eq(canvas.last_text_transform.d, 0.0f, 0.001f);
-    check_float_eq(canvas.last_text_transform.e, 18.0f, 0.001f);
-    check_float_eq(canvas.last_text_transform.f, 9.0f, 0.001f);
+    check_equal(canvas.texts, 1);
+    check_equal(canvas.font_size(), 16);
+    check_within(canvas.last_text_transform.a, 0.0f, 0.001f);
+    check_within(canvas.last_text_transform.b, 2.0f, 0.001f);
+    check_within(canvas.last_text_transform.c, -0.5f, 0.001f);
+    check_within(canvas.last_text_transform.d, 0.0f, 0.001f);
+    check_within(canvas.last_text_transform.e, 18.0f, 0.001f);
+    check_within(canvas.last_text_transform.f, 9.0f, 0.001f);
   }
 }

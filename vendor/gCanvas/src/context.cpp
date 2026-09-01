@@ -110,6 +110,8 @@ namespace gcanvas
         _owned_fonts.reserve(_resource_limits.max_fonts);
         _cached_path_paints.reserve(_resource_limits.max_path_surfaces);
         set_metrics(metrics);
+        _width = metrics.width;
+        _height = metrics.height;
     }
 
     Context::~Context() = default;
@@ -929,8 +931,6 @@ namespace gcanvas
             throw std::invalid_argument("gCanvas canvas metrics must be positive");
         }
         _metrics = metrics;
-        _width = metrics.width;
-        _height = metrics.height;
     }
 
     Image& Context::own_image(std::unique_ptr<Image> image)

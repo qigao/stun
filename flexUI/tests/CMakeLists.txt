@@ -215,10 +215,22 @@ add_executable(test_gcanvas_application_input test_gcanvas_application_input.cpp
 target_link_libraries(
   test_gcanvas_application_input
   PRIVATE FlexUI::GCanvasApplicationInput)
+target_include_directories(
+  test_gcanvas_application_input PRIVATE "${gCanvas_SOURCE_DIR}/src")
 flexui_configure_tinytest(test_gcanvas_application_input)
 set_target_properties(
   test_gcanvas_application_input PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_gcanvas_application_input COMMAND test_gcanvas_application_input)
+
+if(FLEX_BUILD_GCANVAS_GPU_TESTS AND TARGET FlexUI::GCanvasWindowHost)
+  add_executable(test_gcanvas_window_host test_gcanvas_window_host.cpp)
+  target_link_libraries(
+    test_gcanvas_window_host PRIVATE FlexUI::GCanvasWindowHost)
+  flexui_configure_tinytest(test_gcanvas_window_host)
+  set_target_properties(
+    test_gcanvas_window_host PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_gcanvas_window_host COMMAND test_gcanvas_window_host)
+endif()
 
 if(FLEXUI_ENABLE_TURBOSCRIPT)
   add_executable(test_turboscript_application test_turboscript_application.cpp)

@@ -177,6 +177,7 @@ namespace gcanvas
 
     struct GCANVAS_API resize_event
     {
+        // Logical canvas dimensions, never framebuffer pixel dimensions.
         int width;
         int height;
     };
@@ -189,6 +190,7 @@ namespace gcanvas
 
     struct GCANVAS_API mouse_move_event
     {
+        // Logical coordinates relative to the window content origin.
         double x;
         double y;
     };
@@ -198,6 +200,7 @@ namespace gcanvas
         mouse_button button;
         input_action action;
         mouse_mod mods;
+        // Logical coordinates relative to the window content origin.
         double x;
         double y;
     };
@@ -215,6 +218,18 @@ namespace gcanvas
     {
         unsigned int unnicode;
         const char* utf8;
+    };
+
+    /// Reports whether the native window owns input focus.
+    struct GCANVAS_API focus_event
+    {
+        bool focused;
+    };
+
+    /// Reports a native user request to close the window.
+    /// Window::close() does not synthesize this notification.
+    struct GCANVAS_API close_event
+    {
     };
 
 } // namespace gcanvas

@@ -941,7 +941,15 @@ namespace gcanvas
             impl->record_external_frame();
             return;
         }
-        if (impl->rendering || impl->headless || impl->storage.empty())
+        if (impl->rendering)
+            return;
+        if (impl->headless)
+        {
+            impl->clear_draw_queue();
+            reset_transient_path_resources();
+            return;
+        }
+        if (impl->storage.empty())
             return;
 
         frame_resources& frame = impl->frameResources[impl->currentFrame];
@@ -1144,6 +1152,8 @@ namespace gcanvas
     {
         if (external_target_ != nullptr)
             throw std::logic_error("External Vulkan target extent is owned by the host");
+        if (width < 0 || height < 0)
+            throw std::invalid_argument("Vulkan framebuffer dimensions must be non-negative");
         ContextImplVulkan* impl = getImpl(this);
         impl->dirty = true;
         if (width == 0 || height == 0)

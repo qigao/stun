@@ -63,7 +63,8 @@ surface:
 - Vulkan receives required instance-extension and native-surface callbacks. The renderer owns the
   Vulkan instance, device, queue work, swapchain, readback, and presentation.
 - `CanvasMetrics` is copied state and is the sole renderer-visible source for logical size, scale,
-  offset, and DPI.
+  offset, and DPI. The backend render-target extent is separate physical state updated only by
+  `resize_context()` or the external target callback; changing logical metrics cannot overwrite it.
 
 The create-info and callback tables are thin platform adapters. They contain no Flex node, input,
 or layout types, so NanoGUI/ThorVG may remain integration helpers without becoming canvas

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -60,21 +61,57 @@ namespace
                                              int x, int y)
     {
         const int storage_y = backend == "opengl" ? height - 1 - y : y;
-        const std::size_t offset =
-            (static_cast<std::size_t>(storage_y) * width + x) * 4U;
+        const std::size_t offset = (static_cast<std::size_t>(storage_y) * width + x) * 4U;
         return {pixels[offset], pixels[offset + 1U], pixels[offset + 2U], pixels[offset + 3U]};
     }
 
-    std::array<std::uint8_t, 4> sample_logical_pixel(
-        const gcanvas::Context& canvas, const std::vector<std::uint8_t>& pixels,
-        const std::string& backend, int width, int height, float x, float y)
+    std::array<std::uint8_t, 4> sample_logical_pixel(const gcanvas::Context& canvas,
+                                                     const std::vector<std::uint8_t>& pixels,
+                                                     const std::string& backend, int width,
+                                                     int height, float x, float y)
     {
         const gcanvas::CanvasMetrics& metrics = canvas.metrics();
-        const int physical_x = static_cast<int>(std::lround(
-            (x + metrics.offset_x) * metrics.scale_x * metrics.dpi_scale));
-        const int physical_y = static_cast<int>(std::lround(
-            (y + metrics.offset_y) * metrics.scale_y * metrics.dpi_scale));
+        const int physical_x = static_cast<int>(
+            std::lround((x + metrics.offset_x) * metrics.scale_x * metrics.dpi_scale));
+        const int physical_y = static_cast<int>(
+            std::lround((y + metrics.offset_y) * metrics.scale_y * metrics.dpi_scale));
         return sample_pixel(pixels, backend, width, height, physical_x, physical_y);
+    }
+
+    bool verify_zero_framebuffer_discards_commands(gcanvas::Window& window,
+                                                   gcanvas::Context& canvas,
+                                                   const std::string& backend, int width,
+                                                   int height)
+    {
+        canvas.resize_context(0, 0);
+        canvas.set_fill_color(gcanvas::color(231, 76, 60, 255));
+        canvas.fill_rect(4.0f, 4.0f, 12.0f, 12.0f);
+        canvas.draw_frame();
+        canvas.present_frame();
+
+        window.set_size(width + 1, height + 1);
+        window.poll_events();
+        window.set_size(width, height);
+        window.poll_events();
+        canvas.set_clear_color(gcanvas::color(0, 0, 0, 255));
+        canvas.set_fill_color(gcanvas::color(46, 204, 113, 255));
+        canvas.fill_rect(40.0f, 20.0f, 12.0f, 12.0f);
+        canvas.draw_frame();
+        const auto pixels = canvas.read_pixels();
+        const std::size_t pixel_count = pixels.size() / 4U;
+        const int framebuffer_width = static_cast<int>(std::lround(std::sqrt(
+            static_cast<double>(pixel_count) * static_cast<double>(width) /
+            static_cast<double>(height))));
+        const int framebuffer_height = static_cast<int>(
+            pixel_count / static_cast<std::size_t>(framebuffer_width));
+        const auto discarded = sample_logical_pixel(
+            canvas, pixels, backend, framebuffer_width, framebuffer_height, 8.0f, 8.0f);
+        const auto current = sample_logical_pixel(
+            canvas, pixels, backend, framebuffer_width, framebuffer_height, 44.0f, 24.0f);
+        canvas.present_frame();
+
+        return discarded[0] < 20 && discarded[1] < 20 && discarded[2] < 20 &&
+               current[0] < 70 && current[1] > 180 && current[2] < 130;
     }
 
     bool render_affine_image_and_verify(gcanvas::Context& canvas, gcanvas::Image& image,
@@ -93,16 +130,16 @@ namespace
             sample_logical_pixel(canvas, pixels, backend, width, height, 20.0f, 20.0f);
         canvas.present_frame();
         const bool verified = inside[0] >= 40 && inside[0] <= 70 && inside[1] > 130 &&
-                              inside[2] > 200 &&
-                              outside[0] < 20 && outside[1] < 20 && outside[2] < 20;
+                              inside[2] > 200 && outside[0] < 20 && outside[1] < 20 &&
+                              outside[2] < 20;
         if (!verified)
         {
-            std::cerr << backend << " affine image samples: inside=("
-                      << static_cast<int>(inside[0]) << ',' << static_cast<int>(inside[1]) << ','
-                      << static_cast<int>(inside[2]) << ',' << static_cast<int>(inside[3])
-                      << ") outside=(" << static_cast<int>(outside[0]) << ','
-                      << static_cast<int>(outside[1]) << ',' << static_cast<int>(outside[2]) << ','
-                      << static_cast<int>(outside[3]) << ")\n";
+            std::cerr << backend << " affine image samples: inside=(" << static_cast<int>(inside[0])
+                      << ',' << static_cast<int>(inside[1]) << ',' << static_cast<int>(inside[2])
+                      << ',' << static_cast<int>(inside[3]) << ") outside=("
+                      << static_cast<int>(outside[0]) << ',' << static_cast<int>(outside[1]) << ','
+                      << static_cast<int>(outside[2]) << ',' << static_cast<int>(outside[3])
+                      << ")\n";
         }
         return verified;
     }
@@ -117,9 +154,9 @@ namespace
         {
             for (int x = minimum_x; x < maximum_x; ++x)
             {
-                const auto pixel = sample_logical_pixel(
-                    canvas, pixels, backend, width, height, static_cast<float>(x),
-                    static_cast<float>(y));
+                const auto pixel =
+                    sample_logical_pixel(canvas, pixels, backend, width, height,
+                                         static_cast<float>(x), static_cast<float>(y));
                 if (pixel[0] > 180 && pixel[1] > 180 && pixel[2] > 180)
                     ++count;
             }
@@ -161,8 +198,8 @@ namespace
         canvas.draw_image(4.0f, 4.0f, 24.0f, 16.0f, image, true);
         canvas.draw_frame();
         auto pixels = canvas.read_pixels();
-        const auto tinted_image = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 12.0f, 12.0f);
+        const auto tinted_image =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 12.0f, 12.0f);
         canvas.present_frame();
         const bool image_ok = tinted_image[0] >= 20 && tinted_image[0] <= 34 &&
                               tinted_image[1] >= 68 && tinted_image[1] <= 86 &&
@@ -179,17 +216,16 @@ namespace
         canvas.stroke_rect(36.0f, 4.0f, 24.0f, 16.0f);
         canvas.draw_frame();
         pixels = canvas.read_pixels();
-        const auto stroke = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 38.0f, 12.0f);
+        const auto stroke =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 38.0f, 12.0f);
         canvas.present_frame();
-        const bool stroke_ok = stroke[0] >= 110 && stroke[0] <= 145 &&
-                               stroke[1] < 16 && stroke[2] < 16;
+        const bool stroke_ok =
+            stroke[0] >= 110 && stroke[0] <= 145 && stroke[1] < 16 && stroke[2] < 16;
         if (!stroke_ok)
         {
             std::cerr << backend << " stroke alpha mismatch: sample=("
                       << static_cast<int>(stroke[0]) << ',' << static_cast<int>(stroke[1]) << ','
-                      << static_cast<int>(stroke[2]) << ',' << static_cast<int>(stroke[3])
-                      << ")\n";
+                      << static_cast<int>(stroke[2]) << ',' << static_cast<int>(stroke[3]) << ")\n";
             return false;
         }
 
@@ -213,14 +249,15 @@ namespace
         const bool text_ok = brightest_text >= 110 && brightest_text <= 145;
         if (!text_ok)
         {
-            std::cerr << backend << " text alpha mismatch: brightest="
-                      << static_cast<int>(brightest_text) << '\n';
+            std::cerr << backend
+                      << " text alpha mismatch: brightest=" << static_cast<int>(brightest_text)
+                      << '\n';
         }
         return text_ok;
     }
 
-    bool verify_shadow_features(gcanvas::Context& canvas, const std::string& backend,
-                                int width, int height)
+    bool verify_shadow_features(gcanvas::Context& canvas, const std::string& backend, int width,
+                                int height)
     {
         bool rejected_negative_blur = false;
         try
@@ -242,21 +279,21 @@ namespace
         canvas.draw_rect_shadow(24.0f, 14.0f, 24.0f, 16.0f, 6.0f);
         canvas.draw_frame();
         auto pixels = canvas.read_pixels();
-        const auto interior = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 30.0f, 22.0f);
-        const auto falloff = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 21.0f, 22.0f);
-        const auto exterior = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 16.0f, 22.0f);
+        const auto interior =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 30.0f, 22.0f);
+        const auto falloff =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 21.0f, 22.0f);
+        const auto exterior =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 16.0f, 22.0f);
         canvas.present_frame();
-        const bool rect_ok = interior[0] > 240 && falloff[0] > 45 && falloff[0] < 210 &&
-                             exterior[0] < 16;
+        const bool rect_ok =
+            interior[0] > 240 && falloff[0] > 45 && falloff[0] < 210 && exterior[0] < 16;
         if (!rect_ok)
         {
-            std::cerr << backend << " rect shadow samples: interior="
-                      << static_cast<int>(interior[0]) << " falloff="
-                      << static_cast<int>(falloff[0]) << " exterior="
-                      << static_cast<int>(exterior[0]) << '\n';
+            std::cerr << backend
+                      << " rect shadow samples: interior=" << static_cast<int>(interior[0])
+                      << " falloff=" << static_cast<int>(falloff[0])
+                      << " exterior=" << static_cast<int>(exterior[0]) << '\n';
             return false;
         }
 
@@ -265,12 +302,12 @@ namespace
         canvas.draw_circle_shadow(40.0f, 24.0f, 7.0f, 4.0f);
         canvas.draw_frame();
         pixels = canvas.read_pixels();
-        const auto rounded_center = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 68.0f, 22.0f);
-        const auto circle_center = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 40.0f, 24.0f);
-        const auto circle_falloff = sample_logical_pixel(
-            canvas, pixels, backend, width, height, 49.0f, 24.0f);
+        const auto rounded_center =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 68.0f, 22.0f);
+        const auto circle_center =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 40.0f, 24.0f);
+        const auto circle_falloff =
+            sample_logical_pixel(canvas, pixels, backend, width, height, 49.0f, 24.0f);
         canvas.present_frame();
         const bool primitive_ok = rounded_center[0] > 240 && circle_center[0] > 240 &&
                                   circle_falloff[0] > 20 && circle_falloff[0] < 235;
@@ -281,8 +318,8 @@ namespace
         return primitive_ok;
     }
 
-    bool verify_path_features(gcanvas::Context& canvas, const std::string& backend,
-                              int width, int height)
+    bool verify_path_features(gcanvas::Context& canvas, const std::string& backend, int width,
+                              int height)
     {
         const auto sample_logical = [&](const std::vector<std::uint8_t>& pixels, float x, float y) {
             return sample_logical_pixel(canvas, pixels, backend, width, height, x, y);
@@ -290,18 +327,18 @@ namespace
         canvas.set_clear_color(gcanvas::color(0, 0, 0, 255));
         gcanvas::Path gradient_rect;
         gradient_rect.rect(8.0f, 8.0f, 80.0f, 24.0f);
-        const gcanvas::Paint gradient = gcanvas::Paint::linear_gradient(
-            8.0f, 8.0f, 88.0f, 8.0f,
-            {{0.0f, gcanvas::color(255, 0, 0, 255)},
-             {0.5f, gcanvas::color(0, 255, 0, 255)},
-             {1.0f, gcanvas::color(0, 0, 255, 255)}});
+        const gcanvas::Paint gradient =
+            gcanvas::Paint::linear_gradient(8.0f, 8.0f, 88.0f, 8.0f,
+                                            {{0.0f, gcanvas::color(255, 0, 0, 255)},
+                                             {0.5f, gcanvas::color(0, 255, 0, 255)},
+                                             {1.0f, gcanvas::color(0, 0, 255, 255)}});
         canvas.fill_path(gradient_rect, gradient);
         canvas.draw_frame();
         auto pixels = canvas.read_pixels();
         const auto left = sample_logical(pixels, 16.0f, 20.0f);
         const auto right = sample_logical(pixels, 80.0f, 20.0f);
-        const bool gradient_ok = left[0] > left[2] && right[2] > right[0] &&
-                                 left[3] > 240 && right[3] > 240;
+        const bool gradient_ok =
+            left[0] > left[2] && right[2] > right[0] && left[3] > 240 && right[3] > 240;
         canvas.present_frame();
         if (!gradient_ok)
         {
@@ -323,13 +360,14 @@ namespace
                     }
                 }
             }
-            std::cerr << backend << " gradient samples: left=(" << static_cast<int>(left[0])
-                      << ',' << static_cast<int>(left[1]) << ',' << static_cast<int>(left[2])
-                      << ',' << static_cast<int>(left[3]) << ") right=("
-                      << static_cast<int>(right[0]) << ',' << static_cast<int>(right[1]) << ','
-                      << static_cast<int>(right[2]) << ',' << static_cast<int>(right[3])
-                      << ") bounds=(" << min_x << ',' << min_y << ")-(" << max_x << ','
-                      << max_y << ")\n";
+            std::cerr << backend << " gradient samples: left=(" << static_cast<int>(left[0]) << ','
+                      << static_cast<int>(left[1]) << ',' << static_cast<int>(left[2]) << ','
+                      << static_cast<int>(left[3]) << ") right=(" << static_cast<int>(right[0])
+                      << ',' << static_cast<int>(right[1]) << ',' << static_cast<int>(right[2])
+                      << ',' << static_cast<int>(right[3]) << ") bounds=(" << min_x << ',' << min_y
+                      << ")-(" << max_x << ',' << max_y << ") logical=(" << width << ','
+                      << height << ") dpi=" << canvas.metrics().dpi_scale
+                      << " pixel_bytes=" << pixels.size() << '\n';
             return false;
         }
 
@@ -345,8 +383,8 @@ namespace
         pixels = canvas.read_pixels();
         const auto inside = sample_logical(pixels, 46.0f, 20.0f);
         const auto outside = sample_logical(pixels, 20.0f, 20.0f);
-        const bool transform_ok = inside[1] > 220 && inside[0] < 20 &&
-                                  outside[0] < 20 && outside[1] < 20 && outside[2] < 20;
+        const bool transform_ok = inside[1] > 220 && inside[0] < 20 && outside[0] < 20 &&
+                                  outside[1] < 20 && outside[2] < 20;
         canvas.present_frame();
         if (!transform_ok)
         {
@@ -368,13 +406,13 @@ namespace
                     }
                 }
             }
-            std::cerr << backend << " transform samples: inside=("
-                      << static_cast<int>(inside[0]) << ',' << static_cast<int>(inside[1]) << ','
-                      << static_cast<int>(inside[2]) << ',' << static_cast<int>(inside[3])
-                      << ") outside=(" << static_cast<int>(outside[0]) << ','
-                      << static_cast<int>(outside[1]) << ',' << static_cast<int>(outside[2]) << ','
-                      << static_cast<int>(outside[3]) << ") bounds=(" << min_x << ',' << min_y
-                      << ")-(" << max_x << ',' << max_y << ")\n";
+            std::cerr << backend << " transform samples: inside=(" << static_cast<int>(inside[0])
+                      << ',' << static_cast<int>(inside[1]) << ',' << static_cast<int>(inside[2])
+                      << ',' << static_cast<int>(inside[3]) << ") outside=("
+                      << static_cast<int>(outside[0]) << ',' << static_cast<int>(outside[1]) << ','
+                      << static_cast<int>(outside[2]) << ',' << static_cast<int>(outside[3])
+                      << ") bounds=(" << min_x << ',' << min_y << ")-(" << max_x << ',' << max_y
+                      << ")\n";
         }
         if (!transform_ok)
             return false;
@@ -383,14 +421,13 @@ namespace
         gcanvas::Path even_odd;
         even_odd.rect(4.0f, 4.0f, 28.0f, 28.0f);
         even_odd.rect(11.0f, 11.0f, 14.0f, 14.0f);
-        canvas.fill_path(even_odd,
-                         gcanvas::Paint::solid(gcanvas::color(255, 0, 255, 255)));
+        canvas.fill_path(even_odd, gcanvas::Paint::solid(gcanvas::color(255, 0, 255, 255)));
         canvas.draw_frame();
         pixels = canvas.read_pixels();
         const auto ring = sample_logical(pixels, 7.0f, 18.0f);
         const auto hole = sample_logical(pixels, 18.0f, 18.0f);
-        const bool even_odd_ok = ring[0] > 220 && ring[2] > 220 && hole[0] < 20 &&
-                                 hole[1] < 20 && hole[2] < 20;
+        const bool even_odd_ok =
+            ring[0] > 220 && ring[2] > 220 && hole[0] < 20 && hole[1] < 20 && hole[2] < 20;
         canvas.present_frame();
         if (!even_odd_ok)
         {
@@ -401,31 +438,26 @@ namespace
         canvas.set_clear_color(gcanvas::color(0, 0, 0, 255));
         gcanvas::Path ellipse;
         ellipse.ellipse(20.0f, 18.0f, 8.0f, 5.0f);
-        canvas.fill_path(
-            ellipse,
-            gcanvas::Paint::radial_gradient(
-                20.0f, 18.0f, 0.0f, 8.0f,
-                {{0.0f, gcanvas::color(255, 0, 0, 255)},
-                 {1.0f, gcanvas::color(0, 0, 255, 255)}}));
+        canvas.fill_path(ellipse,
+                         gcanvas::Paint::radial_gradient(20.0f, 18.0f, 0.0f, 8.0f,
+                                                         {{0.0f, gcanvas::color(255, 0, 0, 255)},
+                                                          {1.0f, gcanvas::color(0, 0, 255, 255)}}));
         gcanvas::Path line;
         line.move_to(35.0f, 10.0f).line_to(55.0f, 30.0f);
-        canvas.stroke_path(line, gcanvas::Paint::solid(gcanvas::color(255, 255, 255, 255)),
-                           3.0f);
+        canvas.stroke_path(line, gcanvas::Paint::solid(gcanvas::color(255, 255, 255, 255)), 3.0f);
         gcanvas::Path cubic;
         cubic.move_to(60.0f, 30.0f).cubic_to(65.0f, 5.0f, 80.0f, 5.0f, 85.0f, 30.0f);
-        canvas.stroke_path(cubic, gcanvas::Paint::solid(gcanvas::color(255, 255, 0, 255)),
-                           2.0f);
+        canvas.stroke_path(cubic, gcanvas::Paint::solid(gcanvas::color(255, 255, 0, 255)), 2.0f);
         canvas.draw_frame();
         pixels = canvas.read_pixels();
         const auto ellipse_center = sample_logical(pixels, 20.0f, 18.0f);
         const auto ellipse_edge = sample_logical(pixels, 26.0f, 18.0f);
         const auto line_center = sample_logical(pixels, 45.0f, 20.0f);
         const auto cubic_center = sample_logical(pixels, 72.5f, 11.25f);
-        const bool shapes_ok = ellipse_center[0] > ellipse_center[2] &&
-                               ellipse_edge[2] > ellipse_edge[0] &&
-                               line_center[0] > 220 && line_center[1] > 220 &&
-                               line_center[2] > 220 && cubic_center[0] > 220 &&
-                               cubic_center[1] > 220 && cubic_center[2] < 32;
+        const bool shapes_ok =
+            ellipse_center[0] > ellipse_center[2] && ellipse_edge[2] > ellipse_edge[0] &&
+            line_center[0] > 220 && line_center[1] > 220 && line_center[2] > 220 &&
+            cubic_center[0] > 220 && cubic_center[1] > 220 && cubic_center[2] < 32;
         canvas.present_frame();
         if (!shapes_ok)
         {
@@ -433,7 +465,7 @@ namespace
         }
         return shapes_ok;
     }
-}
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -449,6 +481,7 @@ int main(int argc, char** argv)
         constexpr int initial_height = 64;
         gcanvas::WindowConfig config{"gCanvas GPU test", initial_width, initial_height};
         config.visible = false;
+        config.decorated = false;
         config.vsync = false;
         const std::string backend = argv[1];
         if (backend == "opengl")
@@ -467,6 +500,58 @@ int main(int argc, char** argv)
 
         auto window = gcanvas::Window::create(config);
         gcanvas::Context& canvas = window->create_context();
+        std::optional<gcanvas::resize_event> observed_resize;
+        auto resize_subscription = window->subscribe_resize_listener(
+            [&](gcanvas::resize_event event) { observed_resize = event; });
+        if (window->get_width() != initial_width || window->get_height() != initial_height ||
+            canvas.metrics().width != initial_width || canvas.metrics().height != initial_height)
+        {
+            std::cerr << backend << " initial logical viewport mismatch: window=("
+                      << window->get_width() << ',' << window->get_height() << ") canvas=("
+                      << canvas.metrics().width << ',' << canvas.metrics().height << ")\n";
+            return 23;
+        }
+#ifdef _WIN32
+        if (!window->supports_pointer_capture())
+        {
+            std::cerr << "Win32 window did not report native pointer capture support\n";
+            return 18;
+        }
+        window->set_pointer_capture(true);
+        window->set_pointer_capture(true);
+        if (!window->has_pointer_capture())
+        {
+            std::cerr << "Win32 window did not acquire native pointer capture\n";
+            return 19;
+        }
+        window->set_pointer_capture(false);
+        window->set_pointer_capture(false);
+        if (window->has_pointer_capture())
+        {
+            std::cerr << "Win32 window did not release native pointer capture\n";
+            return 20;
+        }
+#else
+        if (window->supports_pointer_capture())
+        {
+            std::cerr << "unsupported platform reported native pointer capture support\n";
+            return 18;
+        }
+        bool capture_rejected = false;
+        try
+        {
+            window->set_pointer_capture(true);
+        }
+        catch (const std::logic_error&)
+        {
+            capture_rejected = true;
+        }
+        if (!capture_rejected)
+        {
+            std::cerr << "unsupported platform accepted native pointer capture\n";
+            return 19;
+        }
+#endif
         if (!render_and_verify(canvas, canvas.get_width(), canvas.get_height(),
                                gcanvas::color(231, 76, 60, 255)))
         {
@@ -484,6 +569,28 @@ int main(int argc, char** argv)
         {
             std::cerr << backend << " did not recover from idle frame calls\n";
             return 10;
+        }
+
+        bool rejected_negative_framebuffer = false;
+        try
+        {
+            canvas.resize_context(-1, canvas.get_height());
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejected_negative_framebuffer = true;
+        }
+        if (!rejected_negative_framebuffer)
+        {
+            std::cerr << backend << " accepted a negative framebuffer extent\n";
+            return 22;
+        }
+
+        if (!verify_zero_framebuffer_discards_commands(
+                *window, canvas, backend, window->get_width(), window->get_height()))
+        {
+            std::cerr << backend << " retained commands while its framebuffer was empty\n";
+            return 21;
         }
 
         if (backend == "vulkan")
@@ -511,8 +618,21 @@ int main(int argc, char** argv)
 
         constexpr int resized_width = 96;
         constexpr int resized_height = 48;
+        observed_resize.reset();
         window->set_size(resized_width, resized_height);
         window->poll_events();
+        if (!observed_resize || observed_resize->width != resized_width ||
+            observed_resize->height != resized_height || window->get_width() != resized_width ||
+            window->get_height() != resized_height || canvas.metrics().width != resized_width ||
+            canvas.metrics().height != resized_height)
+        {
+            std::cerr << backend << " logical resize contract mismatch: event=("
+                      << (observed_resize ? observed_resize->width : -1) << ','
+                      << (observed_resize ? observed_resize->height : -1) << ") window=("
+                      << window->get_width() << ',' << window->get_height() << ") canvas=("
+                      << canvas.metrics().width << ',' << canvas.metrics().height << ")\n";
+            return 24;
+        }
         const int actual_width = canvas.get_width();
         const int actual_height = canvas.get_height();
         if (!render_and_verify(canvas, actual_width, actual_height,
@@ -531,9 +651,8 @@ int main(int argc, char** argv)
         if (!render_affine_text_and_verify(canvas, backend, actual_width, actual_height))
             return 15;
 
-        std::array<std::uint8_t, 16> image_pixels = {
-            231, 76, 60, 255, 52, 152, 219, 255,
-            231, 76, 60, 255, 52, 152, 219, 255};
+        std::array<std::uint8_t, 16> image_pixels = {231, 76, 60, 255, 52, 152, 219, 255,
+                                                     231, 76, 60, 255, 52, 152, 219, 255};
         bool rejected_short_span = false;
         try
         {
@@ -558,10 +677,10 @@ int main(int argc, char** argv)
                          gcanvas::Paint::image_pattern(image, 8.0f, 8.0f, 8.0f, 16.0f));
         canvas.draw_frame();
         const auto pattern_pixels = canvas.read_pixels();
-        const auto pattern_left = sample_logical_pixel(
-            canvas, pattern_pixels, backend, actual_width, actual_height, 10.0f, 16.0f);
-        const auto pattern_right = sample_logical_pixel(
-            canvas, pattern_pixels, backend, actual_width, actual_height, 14.0f, 16.0f);
+        const auto pattern_left = sample_logical_pixel(canvas, pattern_pixels, backend,
+                                                       actual_width, actual_height, 10.0f, 16.0f);
+        const auto pattern_right = sample_logical_pixel(canvas, pattern_pixels, backend,
+                                                        actual_width, actual_height, 14.0f, 16.0f);
         const auto pattern_repeated = sample_logical_pixel(
             canvas, pattern_pixels, backend, actual_width, actual_height, 18.0f, 16.0f);
         const auto pattern_outside = sample_logical_pixel(
@@ -576,8 +695,7 @@ int main(int argc, char** argv)
             std::cerr << backend << " image pattern pixel mismatch\n";
             return 7;
         }
-        image_pixels = {52, 152, 219, 255, 52, 152, 219, 255,
-                        52, 152, 219, 255, 52, 152, 219, 255};
+        image_pixels = {52, 152, 219, 255, 52, 152, 219, 255, 52, 152, 219, 255, 52, 152, 219, 255};
         image.update_data(image_pixels.data(), image_pixels.size());
         if (!render_image_and_verify(canvas, image, actual_width, actual_height,
                                      gcanvas::color(52, 152, 219, 255)))
@@ -586,8 +704,7 @@ int main(int argc, char** argv)
             return 8;
         }
 
-        if (!render_affine_image_and_verify(canvas, image, backend, actual_width,
-                                            actual_height))
+        if (!render_affine_image_and_verify(canvas, image, backend, actual_width, actual_height))
         {
             std::cerr << backend << " affine image pixel mismatch\n";
             return 14;
@@ -603,8 +720,7 @@ int main(int argc, char** argv)
             return 16;
         }
 
-        image_pixels = {241, 196, 15, 255, 241, 196, 15, 255,
-                        241, 196, 15, 255, 241, 196, 15, 255};
+        image_pixels = {241, 196, 15, 255, 241, 196, 15, 255, 241, 196, 15, 255, 241, 196, 15, 255};
         image.update_data(image_pixels.data(), image_pixels.size());
         if (!render_image_and_verify(canvas, image, actual_width, actual_height,
                                      gcanvas::color(241, 196, 15, 255)))
