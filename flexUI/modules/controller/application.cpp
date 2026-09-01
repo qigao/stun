@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <exception>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -322,6 +323,7 @@ CandidateResult build_candidate(const ApplicationConfig &config,
 
 struct DesktopApplication::Impl {
   ApplicationConfig config;
+  std::unique_ptr<ApplicationCompletionMailbox> completion_mailbox;
   std::unique_ptr<PublishedApplicationState> active;
   std::thread::id owner_thread;
   DesktopApplicationState state = DesktopApplicationState::Ready;
@@ -367,6 +369,18 @@ bool DesktopApplication::uses_legacy_flex_compatibility() const noexcept {
 
 DesktopApplicationState DesktopApplication::state() const noexcept { return impl_->state; }
 
+std::uint64_t DesktopApplication::generation() const noexcept {
+  return impl_->completion_mailbox->generation();
+}
+
+ApplicationCompletionMailbox &DesktopApplication::completion_mailbox() noexcept {
+  return *impl_->completion_mailbox;
+}
+
+const ApplicationCompletionMailbox &DesktopApplication::completion_mailbox() const noexcept {
+  return *impl_->completion_mailbox;
+}
+
 bool DesktopApplication::is_owner_thread() const noexcept {
   return std::this_thread::get_id() == impl_->owner_thread;
 }
@@ -377,6 +391,13 @@ DesktopApplicationResult DesktopApplication::request_close() {
                  "desktop application close request must run on its owner thread")};
   }
   if (impl_->state == DesktopApplicationState::Ready) {
+    auto closed = impl_->completion_mailbox->close();
+    if (!closed) {
+      auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
+                        DesktopApplicationStage::CompletionMailbox, closed.error.message);
+      error.completion_error = std::move(closed.error);
+      return {std::move(error)};
+    }
     impl_->state = DesktopApplicationState::CloseRequested;
   }
   return {};
@@ -455,8 +476,7 @@ DesktopApplicationResult DesktopApplication::dispatch_event(Event &event) {
 
 DesktopApplicationResult DesktopApplication::frame(double delta_seconds) {
   if (!is_owner_thread()) {
-    return {fail(DesktopApplicationErrorCode::WrongThread,
-                 DesktopApplicationStage::ControllerFrame,
+    return {fail(DesktopApplicationErrorCode::WrongThread, DesktopApplicationStage::ControllerFrame,
                  "desktop application frame must run on its owner thread")};
   }
   if (impl_->state != DesktopApplicationState::Ready) {
@@ -478,8 +498,7 @@ DesktopApplicationResult DesktopApplication::frame(double delta_seconds) {
     return {};
   }
   auto error = fail(DesktopApplicationErrorCode::ControllerFrameFailed,
-                    DesktopApplicationStage::ControllerFrame,
-                    framed.error.message);
+                    DesktopApplicationStage::ControllerFrame, framed.error.message);
   error.controller_error = std::move(framed.error);
   return {std::move(error)};
 }
@@ -494,9 +513,23 @@ DesktopApplicationResult DesktopApplication::reload(DesktopApplicationSources so
                  "desktop application reload requires the ready state")};
   }
 
+  const auto current_generation = generation();
+  if (current_generation == std::numeric_limits<std::uint64_t>::max()) {
+    return {fail(DesktopApplicationErrorCode::GenerationExhausted,
+                 DesktopApplicationStage::CompletionMailbox,
+                 "desktop application completion generation exhausted")};
+  }
+
   auto candidate = build_candidate(impl_->config, std::move(sources));
   if (!candidate) {
     return {std::move(candidate.error)};
+  }
+  auto advanced = impl_->completion_mailbox->advance_generation(current_generation + 1);
+  if (!advanced) {
+    auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
+                      DesktopApplicationStage::CompletionMailbox, advanced.error.message);
+    error.completion_error = std::move(advanced.error);
+    return {std::move(error)};
   }
   impl_->active.swap(candidate.state);
   return {};
@@ -541,8 +574,7 @@ DesktopApplicationBuilder &DesktopApplicationBuilder::script(std::string source,
   return *this;
 }
 
-DesktopApplicationBuilder &
-DesktopApplicationBuilder::renderer(flex::Renderer *renderer) noexcept {
+DesktopApplicationBuilder &DesktopApplicationBuilder::renderer(flex::Renderer *renderer) noexcept {
   if (impl_) {
     impl_->config.renderer = renderer;
   }
@@ -572,6 +604,15 @@ DesktopApplicationBuildResult DesktopApplicationBuilder::build() const {
                  "moved-from desktop application builder cannot build")};
   }
 
+  auto completion_mailbox =
+      ApplicationCompletionMailbox::create(1, impl_->config.limits.completion);
+  if (!completion_mailbox) {
+    auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
+                      DesktopApplicationStage::CompletionMailbox, completion_mailbox.error.message);
+    error.completion_error = std::move(completion_mailbox.error);
+    return {{}, std::move(error)};
+  }
+
   auto candidate = build_candidate(impl_->config, impl_->sources);
   if (!candidate) {
     return {{}, std::move(candidate.error)};
@@ -580,6 +621,7 @@ DesktopApplicationBuildResult DesktopApplicationBuilder::build() const {
   try {
     auto application_impl = std::make_unique<DesktopApplication::Impl>();
     application_impl->config = impl_->config;
+    application_impl->completion_mailbox = std::move(completion_mailbox.mailbox);
     application_impl->active = std::move(candidate.state);
     application_impl->owner_thread = std::this_thread::get_id();
     return {

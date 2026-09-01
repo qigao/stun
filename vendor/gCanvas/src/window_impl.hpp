@@ -2,6 +2,7 @@
 #define GCANVAS_WINDOW_IMPL_HPP
 
 #include "gcanvas/window.hpp"
+#include "native_callback_error_state.hpp"
 #include "window_coordinates.hpp"
 #include "window_listener_state.hpp"
 #include <unordered_map>
@@ -39,6 +40,7 @@ namespace gcanvas
 
         std::shared_ptr<detail::WindowListenerState> _listeners =
             std::make_shared<detail::WindowListenerState>();
+        detail::NativeCallbackErrorState _native_callback_errors;
 
         std::unordered_map<Cursor*, GLFWcursor*> _cursors;
         std::unordered_map<CURSOR_TYPE, GLFWcursor*> _default_cursors;

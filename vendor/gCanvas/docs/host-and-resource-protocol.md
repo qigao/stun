@@ -17,6 +17,13 @@ delivery, removing a callback that has not run prevents its delivery for the cur
 new callback starts with the next event. `reset_listener()` clears every category and invalidates
 all scoped subscriptions.
 
+GLFW invokes its callbacks through a C ABI, so listener and adapter exceptions never unwind through
+GLFW. `Window` retains the first callback exception, suppresses later callbacks for that window in
+the same native dispatch, and rethrows it after `poll_events()` or `wait_events()` returns. Window
+operations that synchronously trigger callbacks, including resize, fullscreen, minimize, maximize,
+and restore, perform the same boundary check before returning. Catching the error consumes it;
+subsequent event delivery may continue if the owner deliberately keeps the window alive.
+
 Window focus and native close-request callbacks are notifications. They cannot veto closing, and
 calling `Window::close()` directly only sets the close flag; it does not synthesize another close
 notification. On Windows, `Window` exposes native GUI pointer capture through

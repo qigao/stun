@@ -154,9 +154,10 @@ bool TextEdit::key(int key, bool shift, bool ctrl) {
 void TextEdit::insert_text(const std::string& text) {
   if (!state_ || !state_->initialized || text.empty()) return;
 
-  for (char c : text) {
-    stb_textedit_key(&state_->string, &state_->stb_state, c);
-  }
+  // A TextInput payload is one edit and may contain UTF-8 bytes that the
+  // printable-key filter intentionally rejects.
+  stb_textedit_paste(&state_->string, &state_->stb_state, text.data(),
+                     static_cast<int>(text.size()));
 }
 
 void TextEdit::click(float x, float y) {

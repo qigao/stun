@@ -199,6 +199,12 @@ flexui_configure_tinytest(test_application_command)
 set_target_properties(test_application_command PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_application_command COMMAND test_application_command)
 
+add_executable(test_application_completion test_application_completion.cpp)
+target_link_libraries(test_application_completion PRIVATE FlexUI::Controller)
+flexui_configure_tinytest(test_application_completion)
+set_target_properties(test_application_completion PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_application_completion COMMAND test_application_completion)
+
 add_executable(test_desktop_application test_desktop_application.cpp)
 target_link_libraries(test_desktop_application PRIVATE FlexUI::Controller)
 flexui_configure_tinytest(test_desktop_application)

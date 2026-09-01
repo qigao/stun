@@ -1,5 +1,6 @@
 #pragma once
 
+#include "flexUI/application_completion.h"
 #include "flexUI/box.h"
 #include "flexUI/controller.h"
 #include "flexUI/widget_registry.h"
@@ -39,6 +40,7 @@ struct DesktopApplicationLimits {
   UiDocumentLimits document;
   ControllerLimits controller;
   MutationLimits mutation;
+  ApplicationCompletionLimits completion;
 };
 
 enum class DesktopApplicationStage {
@@ -55,6 +57,7 @@ enum class DesktopApplicationStage {
   Lifecycle,
   ControllerUnmount,
   ControllerFrame,
+  CompletionMailbox,
 };
 
 enum class DesktopApplicationErrorCode {
@@ -75,6 +78,8 @@ enum class DesktopApplicationErrorCode {
   ControllerUnmountFailed,
   InvalidArgument,
   ControllerFrameFailed,
+  CompletionMailboxFailed,
+  GenerationExhausted,
 };
 
 struct DesktopApplicationError {
@@ -85,6 +90,7 @@ struct DesktopApplicationError {
   std::vector<CssDiagnostic> css_diagnostics;
   ScriptModuleError script_error;
   ControllerError controller_error;
+  ApplicationCompletionError completion_error;
 
   explicit operator bool() const noexcept { return code != DesktopApplicationErrorCode::None; }
 };
@@ -135,6 +141,13 @@ public:
   const DesktopApplicationSources &sources() const noexcept;
   bool uses_legacy_flex_compatibility() const noexcept;
   DesktopApplicationState state() const noexcept;
+  /// Current application incarnation used in host-issued service tokens. This
+  /// atomic query is safe from producer threads.
+  std::uint64_t generation() const noexcept;
+  /// The returned object is application-owned. Only try_post() may be called
+  /// outside the application owner thread.
+  ApplicationCompletionMailbox &completion_mailbox() noexcept;
+  const ApplicationCompletionMailbox &completion_mailbox() const noexcept;
 
   /// Reports whether the caller may access owner-thread application state.
   /// This query does not read the active Box and is safe from any thread.

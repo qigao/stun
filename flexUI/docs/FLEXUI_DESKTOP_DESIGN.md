@@ -733,6 +733,46 @@ request ID、capability、operation 与 limits。
 `on_unmount` 同样禁止 UI mutation 和 command。未来若 DesktopApplication 提供更外层 activation
 transaction，可通过另一个延迟 publication adapter 扩展 mount 语义，不能静默改变现有顺序。
 
+### 13.3 ApplicationCompletionMailbox
+
+当前 C++ host 边界已经提供 `ApplicationCompletionMailbox`，但尚未冻结 DLL C ABI，也尚未把 completion
+转换为 TurboScript event。其协议如下：
+
+| 项目 | 契约 |
+|---|---|
+| 数据单元 | Disruptor 固定槽位只保存一个 host-owned `ApplicationCompletion*`；实际 record 拥有 token、status、payload、error code/message |
+| 事实源 | publish 成功至 receive/cancel 之间，mailbox slot 指向的 record 是 completion 唯一事实源；statistics 只是原子派生计数 |
+| 所有权 | `try_post(const ApplicationCompletion&)` 在 host 内复制完整 record；成功后 queue 独占副本，失败时调用方对象不变；`try_receive()` 将独占值移交 UI owner |
+| 生命周期 | record 在 receive、close、generation advance 或 mailbox destruction 时释放；DLL 输入 buffer 只借用到未来 C adapter 的 `post_completion()` 返回 |
+| 拓扑 | 多个 service worker producer、一个 application owner-thread consumer；单 consumer 按全局 publish sequence FIFO 领取 |
+| 容量 | 默认 256 个 pointer slot，配置必须是非零 2 的幂；默认 payload 64 KiB、error code 256 B、error message 16 KiB、字符串总量 64 KiB |
+| 背压 | `try_post()` 不因容量阻塞；满时返回 `QueueFull`，不扩容、不覆盖、不丢弃、不 fallback |
+| 失败 | 区分 invalid capacity/generation/token/status、string limit、allocation、full、closed、stale generation、wrong thread 和 internal invariant |
+| 关闭 | owner 先停止接受新 post，等待已进入的非阻塞 producer 离开，再取消并释放所有已发布 record；重复 close 成功且取消数为零 |
+| 观测 | 暴露 current/peak depth、published、consumed、cancelled、queue-full、closed/stale/invalid rejection 计数 |
+
+`ApplicationRequestToken` 是 `{host_request_id, application_generation}`，两部分都必须非零。script 自己的
+`request_id` 不直接充当跨 reload 身份；未来 ServiceRegistry 在 command publication 时生成 host token，
+并保存 token 到 script request ID 的有界 pending 映射。mailbox 只验证 token 是否属于当前 generation，
+不维护第二份业务请求状态。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Accepting
+    Accepting --> AdvancingGeneration: reload candidate validated
+    AdvancingGeneration --> Accepting: quiesce producers / cancel old / install newer generation
+    Accepting --> Closing: request_close
+    Closing --> Closed: quiesce producers / cancel published records
+    Closed --> Closed: repeated close
+```
+
+`DesktopApplication` 在成功 build 时创建 generation 1 的 mailbox。reload 先构建完整 detached candidate，
+再检查 generation 溢出、淘汰旧 completion，最后以无失败 pointer swap 发布新 controller；candidate 失败时
+generation 与旧队列都不变。`request_close()` 在发布 `CloseRequested` 前同步完成 mailbox close，因此并发
+worker 最终只会得到 success、`QueueFull` 或 `Closed`，不会把 completion 投递给已关闭 controller。
+mailbox 析构本身会再次 quiesce/drain，但对象生命周期不能保护已悬空的调用方指针；PluginHost 仍必须在
+销毁 application/mailbox 前停止并 join 所有 worker。
+
 ## 14. DesktopHost 与 gCanvas
 
 `IDesktopHost` 负责：
@@ -793,6 +833,11 @@ flowchart LR
 `pump_once(delta)` 对非有限、负数或超过配置上限的 delta fail fast。每轮都执行 binding/update，
 但 RenderManager 只在 dirty 时提交绘制；无 `on_frame` 时 controller 不产生脚本调用。
 
+GLFW C callback 是严格的异常边界：坐标换算、metrics 同步或 listener 派发产生的首个异常由对应
+`Window` 保存，同一轮后续 native callback 不再推进状态，并在 `poll_events()`、`wait_events()` 或
+触发同步 callback 的 window 操作返回到 C++ 后重新抛出。这样异常不会跨越 GLFW C ABI，Host 仍在
+统一的 native-event 消费边界转换为结构化错误并进入关闭流程。
+
 窗口 logical size、GPU framebuffer extent 与平台 content scale 已在 gCanvas Window 内分流。对非空
 target，逻辑尺寸为 `round(framebuffer / effective content scale)`；GLFW cursor 通过
 `logical extent / window screen extent` 映射，因此既不假定 screen coordinates 就是像素，也不在所有
@@ -829,7 +874,8 @@ program 和 source snapshot 仍可读取。`shutdown()` 只在 `CloseRequested` 
   只请求 close，不在 GLFW callback 栈内执行 controller unmount。
 - TurboScript callback 只在 UI thread 运行。
 - 插件 lifecycle callback 默认在 UI thread；耗时任务由插件提交到明确的 worker service。
-- worker 不能调用 UI API，只能向有界 completion queue 发布值语义消息。
+- worker 不能调用 UI API，只能向 application-owned 有界 completion mailbox 发布值语义消息；只有
+  application owner thread 可以 receive、advance generation 或 close。
 - 窗口关闭顺序：停止新事件 → 取消/排空 command → controller unmount → plugin stop/join →
   destroy Box/controller → 等待 GPU idle 并销毁 Context → destroy native window → unload DLL。
 - DLL 在函数调用、callback、worker 或 borrowed buffer 尚存活时不得卸载。

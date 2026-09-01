@@ -29,7 +29,7 @@ void prepare_layout(flexUI::DesktopApplication &application) {
 } // namespace
 
 spec("gCanvas application router dispatches validated native input") {
-  it("maps native window coordinates to logical hit-test coordinates") {
+  it("keeps native coordinates aligned with logical hit testing after resize") {
     auto built = build_input_application();
     check(static_cast<bool>(built));
     if (!built) {
@@ -37,34 +37,61 @@ spec("gCanvas application router dispatches validated native input") {
     }
     prepare_layout(*built.application);
 
-    bool clicked = false;
+    int clicks = 0;
     auto *button = built.application->box().get_by_id("button");
     check_not_null(button);
     if (button == nullptr) {
       return;
     }
-    button->on_click([&] { clicked = true; });
+    button->on_click([&] { ++clicks; });
     flexUI::GCanvasApplicationInputRouter router(*built.application);
-    const auto logical = gcanvas::detail::map_window_position_to_logical(
+    const auto initial = gcanvas::detail::map_window_position_to_logical(
         24.0, 48.0, 320, 200, 640, 400);
 
-    const auto moved = router.mouse_move({logical.x, logical.y});
-    const auto pressed = router.mouse_button(
+    const auto initial_move = router.mouse_move({initial.x, initial.y});
+    const auto initial_press = router.mouse_button(
         {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_PRESS,
-         static_cast<gcanvas::mouse_mod>(0), logical.x, logical.y});
-    const auto released = router.mouse_button(
+         static_cast<gcanvas::mouse_mod>(0), initial.x, initial.y});
+    const auto initial_release = router.mouse_button(
         {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_RELEASE,
-         static_cast<gcanvas::mouse_mod>(0), logical.x, logical.y});
+         static_cast<gcanvas::mouse_mod>(0), initial.x, initial.y});
 
-    check_within(logical.x, 12.0, 0.000001);
-    check_within(logical.y, 24.0, 0.000001);
-    check(static_cast<bool>(moved));
-    check(static_cast<bool>(pressed));
-    check(static_cast<bool>(released));
-    check_true(clicked);
+    const auto resized = router.resize({480, 300});
+    built.application->box().update();
+    const auto after_resize = gcanvas::detail::map_window_position_to_logical(
+        30.0, 60.0, 480, 300, 1200, 750);
+    const auto resized_move =
+        router.mouse_move({after_resize.x, after_resize.y});
+    const auto resized_press = router.mouse_button(
+        {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_PRESS,
+         static_cast<gcanvas::mouse_mod>(0), after_resize.x, after_resize.y});
+    const auto resized_release = router.mouse_button(
+        {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_RELEASE,
+         static_cast<gcanvas::mouse_mod>(0), after_resize.x, after_resize.y});
+
+    check_within(initial.x, 12.0, 0.000001);
+    check_within(initial.y, 24.0, 0.000001);
+    check_within(after_resize.x, initial.x, 0.000001);
+    check_within(after_resize.y, initial.y, 0.000001);
+    check(static_cast<bool>(initial_move));
+    check(static_cast<bool>(initial_press));
+    check(static_cast<bool>(initial_release));
+    check(static_cast<bool>(resized));
+    check_equal(built.application->box().viewport_width(), 480.0F);
+    check_equal(built.application->box().viewport_height(), 300.0F);
+    check(static_cast<bool>(resized_move));
+    check(static_cast<bool>(resized_press));
+    check(static_cast<bool>(resized_release));
+    check_equal(clicks, 2);
+  }
+
+  it("rejects empty coordinate extents before producing pointer input") {
     check_throws_as(gcanvas::detail::map_window_position_to_logical(
                         1.0, 1.0, 320, 200, 0, 400),
                     std::runtime_error);
+    check_throws_as(gcanvas::detail::map_window_position_to_logical(
+                        1.0, 1.0, 0, 200, 640, 400),
+                    std::logic_error);
   }
 
   it("routes pointer button wheel and repeated key events through the application") {
