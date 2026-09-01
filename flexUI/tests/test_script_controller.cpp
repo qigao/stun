@@ -37,7 +37,8 @@ public:
 
   flexUI::ScriptResolveResult
   resolve_export(std::string_view name,
-                 flexUI::ScriptCallbackKind) override {
+                 flexUI::ScriptCallbackKind callback) override {
+    resolved.emplace_back(name, callback);
     if (name == zero_handle_export) {
       return {flexUI::ScriptExportHandle{}, {}};
     }
@@ -59,6 +60,9 @@ public:
     calls.push_back(found->second);
     if (lifecycle_ != nullptr) {
       lifecycle_->push_back(found->second);
+    }
+    if (context.service_completion != nullptr) {
+      service_completions.push_back(*context.service_completion);
     }
     if (found->second == failing_export) {
       return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
@@ -95,6 +99,8 @@ public:
   }
 
   std::vector<std::string> calls;
+  std::vector<std::pair<std::string, flexUI::ScriptCallbackKind>> resolved;
+  std::vector<flexUI::ApplicationServiceCompletion> service_completions;
   std::string failing_export;
   std::string timeout_export;
   std::string throwing_export;
@@ -290,6 +296,122 @@ spec("FlexUI script controller lifecycle") {
     check(controller.mount());
     check(controller.frame(1.0 / 60.0));
     check_empty(fake->calls);
+  }
+
+  it("resolves the optional service completion export once and no-ops when absent") {
+    auto module =
+        std::make_unique<FakeScriptModule>(std::vector<std::string>{"save_document"});
+    auto *fake = module.get();
+    flexUI::ScriptController controller;
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check_false(controller.has_service_completion_handler());
+    check(controller.dispatch_service_completion(
+        {11, flexUI::ApplicationCompletionStatus::Succeeded, "stored", {}, {}}));
+    check(fake->calls.empty());
+
+    std::size_t resolutions = 0;
+    for (const auto &[name, callback] : fake->resolved) {
+      if (name == "on_service_completion" &&
+          callback == flexUI::ScriptCallbackKind::ServiceCompletion) {
+        ++resolutions;
+      }
+    }
+    check_equal(resolutions, std::size_t{1});
+  }
+
+  it("dispatches an immutable service completion to the pre-resolved export") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "on_service_completion"});
+    auto *fake = module.get();
+    flexUI::ScriptController controller;
+    const flexUI::ApplicationServiceCompletion completion{
+        41, flexUI::ApplicationCompletionStatus::Failed, {}, "write-failed", "disk full"};
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check_true(controller.has_service_completion_handler());
+    check(controller.dispatch_service_completion(completion));
+    check_equal(fake->calls.size(), std::size_t{1});
+    check_equal(fake->calls.front(), std::string("on_service_completion"));
+    check_equal(fake->service_completions.size(), std::size_t{1});
+    if (!fake->service_completions.empty()) {
+      const auto &received = fake->service_completions.front();
+      check_equal(received.script_request_id, std::uint64_t{41});
+      check(received.status == flexUI::ApplicationCompletionStatus::Failed);
+      check_equal(received.error_code, std::string("write-failed"));
+      check_equal(received.error_message, std::string("disk full"));
+    }
+    check_equal(completion.error_message, std::string("disk full"));
+    check(controller.state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("rejects invalid or oversized service completions before invoking script") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "on_service_completion"});
+    auto *fake = module.get();
+    flexUI::ControllerLimits limits;
+    limits.max_service_payload_bytes = 3;
+    flexUI::ScriptController controller(limits);
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto invalid = controller.dispatch_service_completion(
+        {0, flexUI::ApplicationCompletionStatus::Succeeded, {}, {}, {}});
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == flexUI::ControllerErrorCode::InvalidArgument);
+    check(invalid.error.stage == flexUI::ControllerStage::ServiceCompletion);
+
+    const auto oversized = controller.dispatch_service_completion(
+        {12, flexUI::ApplicationCompletionStatus::Succeeded, "four", {}, {}});
+    check_false(static_cast<bool>(oversized));
+    check(oversized.error.code == flexUI::ControllerErrorCode::CompletionLimitExceeded);
+    check(oversized.error.stage == flexUI::ControllerStage::ServiceCompletion);
+    check(fake->calls.empty());
+    check(controller.state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("faults after a service completion callback failure") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "on_service_completion"});
+    module->failing_export = "on_service_completion";
+    flexUI::ScriptController controller;
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    const auto dispatched = controller.dispatch_service_completion(
+        {51, flexUI::ApplicationCompletionStatus::Cancelled, {}, {}, "window closed"});
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.code == flexUI::ControllerErrorCode::ModuleCallFailed);
+    check(dispatched.error.stage == flexUI::ControllerStage::ServiceCompletion);
+    check_equal(dispatched.error.handler, std::string("on_service_completion"));
+    check(controller.state() == flexUI::ControllerState::Faulted);
+  }
+
+  it("applies service completion effects through the existing transaction") {
+    std::vector<std::string> lifecycle;
+    lifecycle.reserve(8);
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "on_service_completion"}, &lifecycle);
+    module->mutation_export = "on_service_completion";
+    module->mutation_text = "completion committed";
+    module->command_export = "on_service_completion";
+    module->command_payload = "follow-up";
+    ControllerMutationHost host(&lifecycle);
+    flexUI::UiMutationEngine mutations(host);
+    ControllerCommandQueue queue(&lifecycle);
+    flexUI::ApplicationCommandEngine commands(queue);
+    flexUI::ScriptController controller(flexUI::ControllerEffects{&mutations, &commands});
+
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check(controller.dispatch_service_completion(
+        {61, flexUI::ApplicationCompletionStatus::Succeeded, "done", {}, {}}));
+    check_calls(lifecycle,
+                {"on_service_completion", "reserve", "ui_prepare", "ui_commit", "publish"});
+    check_equal(host.text, std::string("completion committed"));
+    check_equal(queue.published, 1);
   }
 
   it("does not call the module when the compiled program has no matching binding") {

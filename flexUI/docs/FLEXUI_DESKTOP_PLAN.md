@@ -364,10 +364,13 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 ### Service 调用
 
 - [x] controller effect 同时包含 UI mutation 和 reserved application command。
-- [ ] required capability 在 application build 阶段验证。
-- [ ] command completion 转换为不可变 controller event。
-- [ ] completion 到达已关闭/reloaded controller 时安全丢弃并返回取消状态。
-- [ ] service error 不自动 fallback，UI 由 controller 显式处理错误 completion。
+- [x] required capability 在 application build 阶段验证。
+- [x] command completion 转换为不可变 controller event；optional `on_service_completion` 在 load 时
+  解析一次，TurboScript interpreter/JIT 接收同一有界 record。
+- [x] completion 到达已关闭/reloaded controller 时由 mailbox close/generation 协议安全淘汰，
+  application dispatch 返回 `Closed`/`Empty` 且不调用脚本。
+- [x] service error 不自动 fallback；failed status 作为 immutable completion data 交给 controller，
+  handler 缺失时返回 owning unhandled completion。
 
 ### 示例应用
 

@@ -45,6 +45,7 @@ struct ModuleProbe {
   std::vector<std::string> calls;
   std::vector<std::string> destroyed;
   std::vector<flexUI::ScriptEventSnapshot> events;
+  std::vector<flexUI::ApplicationServiceCompletion> service_completions;
   std::vector<double> frame_deltas;
   std::vector<std::string> sequence;
   flexUI::DesktopApplication *application = nullptr;
@@ -59,9 +60,11 @@ struct ModuleProbe {
 class FakeApplicationModule final : public flexUI::IScriptModule {
 public:
   FakeApplicationModule(std::vector<std::string> exports, std::shared_ptr<ModuleProbe> probe,
-                        bool fail_mount, bool fail_event, bool fail_frame, bool fail_unmount)
+                        bool fail_mount, bool fail_event, bool fail_frame, bool fail_unmount,
+                        bool fail_service_completion)
       : probe_(std::move(probe)), fail_mount_(fail_mount), fail_event_(fail_event),
-        fail_frame_(fail_frame), fail_unmount_(fail_unmount) {
+        fail_frame_(fail_frame), fail_unmount_(fail_unmount),
+        fail_service_completion_(fail_service_completion) {
     std::uint64_t next_handle = 1;
     for (auto &name : exports) {
       const flexUI::ScriptExportHandle handle{next_handle++};
@@ -90,11 +93,19 @@ public:
     if (context.event != nullptr) {
       probe_->events.push_back(*context.event);
     }
+    if (context.service_completion != nullptr) {
+      probe_->service_completions.push_back(*context.service_completion);
+    }
     if (fail_mount_ && found->second == "on_mount") {
       return {{flexUI::ScriptModuleErrorCode::RuntimeFailure, "injected mount failure"}};
     }
     if (fail_event_ && context.callback == flexUI::ScriptCallbackKind::Event) {
       return {{flexUI::ScriptModuleErrorCode::RuntimeFailure, "injected event failure"}};
+    }
+    if (fail_service_completion_ &&
+        context.callback == flexUI::ScriptCallbackKind::ServiceCompletion) {
+      return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
+               "injected service completion failure"}};
     }
     if (context.callback == flexUI::ScriptCallbackKind::Frame) {
       probe_->frame_deltas.push_back(context.delta_seconds);
@@ -130,6 +141,14 @@ public:
         return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded, appended.error.message}};
       }
     }
+    if (context.callback == flexUI::ScriptCallbackKind::ServiceCompletion &&
+        probe_->emit_valid_mutation) {
+      const auto appended = result.mutations.append(
+          flexUI::SetTextMutation{{"save", 1}, "Completion applied"});
+      if (!appended) {
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded, appended.error.message}};
+      }
+    }
     return result;
   }
 
@@ -139,6 +158,7 @@ private:
   bool fail_event_ = false;
   bool fail_frame_ = false;
   bool fail_unmount_ = false;
+  bool fail_service_completion_ = false;
   std::unordered_map<std::string, flexUI::ScriptExportHandle> handles_;
   std::unordered_map<std::uint64_t, std::string> names_;
 };
@@ -153,10 +173,15 @@ flexUI::ScriptModuleFactory fake_factory(const std::shared_ptr<ModuleProbe> &pro
     if (source != "missing-handler") {
       exports.emplace_back("save_document");
     }
+    if (source == "service-completion-controller" ||
+        source == "service-completion-failure") {
+      exports.emplace_back("on_service_completion");
+    }
     return flexUI::ScriptModuleFactoryResult{
         std::make_unique<FakeApplicationModule>(
             std::move(exports), probe, source == "mount-failure", source == "event-failure",
-            source == "frame-failure", source == "unmount-failure"),
+            source == "frame-failure", source == "unmount-failure",
+            source == "service-completion-failure"),
         {}};
   };
 }
@@ -361,6 +386,168 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check(built.application->try_receive_service_completion().status ==
           flexUI::ApplicationServicePollStatus::Empty);
     check_equal(built.application->service_statistics().completed, std::uint64_t{1});
+  }
+
+  it("dispatches one service completion through the optional controller export") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-completion-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto request = built.application->try_receive_service_request();
+    check(request);
+    probe->emit_valid_mutation = true;
+
+    flexUI::ApplicationCompletion completion;
+    completion.token = request.request->token;
+    completion.payload = "stored";
+    check(built.application->completion_mailbox().try_post(completion));
+    auto dispatched = built.application->try_dispatch_service_completion();
+
+    check(static_cast<bool>(dispatched));
+    check(dispatched.status == flexUI::ApplicationServicePollStatus::Ready);
+    check_true(dispatched.dispatched);
+    check(dispatched.completion.has_value());
+    check_equal(probe->service_completions.size(), std::size_t{1});
+    if (!probe->service_completions.empty()) {
+      check_equal(probe->service_completions.front().script_request_id, std::uint64_t{71});
+      check_equal(probe->service_completions.front().payload, std::string("stored"));
+    }
+    check_equal(built.application->box().get_by_id("save")->text(),
+                std::string("Completion applied"));
+    check(built.application->try_dispatch_service_completion().status ==
+          flexUI::ApplicationServicePollStatus::Empty);
+  }
+
+  it("delivers failed service status as data without fallback") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-completion-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto request = built.application->try_receive_service_request();
+    check(request);
+    flexUI::ApplicationCompletion completion;
+    completion.token = request.request->token;
+    completion.status = flexUI::ApplicationCompletionStatus::Failed;
+    completion.error_code = "write-failed";
+    completion.error_message = "disk full";
+    check(built.application->completion_mailbox().try_post(completion));
+
+    auto dispatched = built.application->try_dispatch_service_completion();
+    check(static_cast<bool>(dispatched));
+    check_true(dispatched.dispatched);
+    check_equal(probe->service_completions.size(), std::size_t{1});
+    if (!probe->service_completions.empty()) {
+      const auto &received = probe->service_completions.front();
+      check(received.status == flexUI::ApplicationCompletionStatus::Failed);
+      check_equal(received.error_code, std::string("write-failed"));
+      check_equal(received.error_message, std::string("disk full"));
+    }
+    check(built.application->controller()->state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("returns an owning unhandled completion when the optional export is absent") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto request = built.application->try_receive_service_request();
+    check(request);
+    flexUI::ApplicationCompletion completion;
+    completion.token = request.request->token;
+    completion.payload = "unhandled";
+    check(built.application->completion_mailbox().try_post(completion));
+
+    auto dispatched = built.application->try_dispatch_service_completion();
+    check(static_cast<bool>(dispatched));
+    check_false(dispatched.dispatched);
+    check(dispatched.completion.has_value());
+    check_equal(dispatched.completion->payload, std::string("unhandled"));
+    check(probe->service_completions.empty());
+
+    check(dispatch_click(*built.application));
+    auto second_request = built.application->try_receive_service_request();
+    check(second_request);
+    check(built.application->controller()->unmount());
+    flexUI::ApplicationCompletion second_completion;
+    second_completion.token = second_request.request->token;
+    second_completion.payload = "after-unmount";
+    check(built.application->completion_mailbox().try_post(second_completion));
+    auto after_unmount = built.application->try_dispatch_service_completion();
+    check(static_cast<bool>(after_unmount));
+    check_false(after_unmount.dispatched);
+    check_equal(after_unmount.completion->payload, std::string("after-unmount"));
+  }
+
+  it("faults the application controller when the completion callback fails") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-completion-failure", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto request = built.application->try_receive_service_request();
+    check(request);
+    flexUI::ApplicationCompletion completion;
+    completion.token = request.request->token;
+    check(built.application->completion_mailbox().try_post(completion));
+
+    auto dispatched = built.application->try_dispatch_service_completion();
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.status == flexUI::ApplicationServicePollStatus::Ready);
+    check_true(dispatched.dispatched);
+    check(dispatched.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerServiceCompletionFailed);
+    check(dispatched.error.stage ==
+          flexUI::DesktopApplicationStage::ControllerServiceCompletion);
+    check(dispatched.error.controller_error.code ==
+          flexUI::ControllerErrorCode::ModuleCallFailed);
+    check(built.application->controller()->state() == flexUI::ControllerState::Faulted);
   }
 
   it("discards reserved service commands when UI mutation preparation fails") {
@@ -932,6 +1119,10 @@ spec("FlexUI desktop application owns close and shutdown state") {
     auto rejected = built.application->completion_mailbox().try_post(late);
     check_false(static_cast<bool>(rejected));
     check(rejected.error.code == flexUI::ApplicationCompletionErrorCode::Closed);
+    const auto dispatched = built.application->try_dispatch_service_completion();
+    check(dispatched.status == flexUI::ApplicationServicePollStatus::Closed);
+    check_false(dispatched.dispatched);
+    check_false(dispatched.completion.has_value());
   }
 
   it("advances completion generation atomically with application reload") {
@@ -953,6 +1144,9 @@ spec("FlexUI desktop application owns close and shutdown state") {
     check_equal(current_generation, old_generation + 1);
     check_not_null(built.application->box().get_by_id("after"));
     check_equal(built.application->completion_mailbox().statistics().cancelled, std::uint64_t{1});
+    const auto old_dispatch = built.application->try_dispatch_service_completion();
+    check(old_dispatch.status == flexUI::ApplicationServicePollStatus::Empty);
+    check_false(old_dispatch.dispatched);
 
     flexUI::ApplicationCompletion stale;
     stale.token = {2, old_generation};
@@ -1034,14 +1228,19 @@ spec("FlexUI desktop application owns close and shutdown state") {
 
     flexUI::ApplicationServiceRequestResult request;
     flexUI::ApplicationServiceCompletionResult completion;
+    flexUI::DesktopApplicationCompletionDispatchResult dispatch;
     std::thread worker([&] {
       request = built.application->try_receive_service_request();
       completion = built.application->try_receive_service_completion();
+      dispatch = built.application->try_dispatch_service_completion();
     });
     worker.join();
 
     check(request.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
     check(completion.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
+    check(dispatch.error.code == flexUI::DesktopApplicationErrorCode::ServiceRequestFailed);
+    check(dispatch.error.stage == flexUI::DesktopApplicationStage::ServiceRequests);
+    check(dispatch.error.service_error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
     check(built.application->state() == flexUI::DesktopApplicationState::Ready);
   }
 

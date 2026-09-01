@@ -11,6 +11,7 @@ namespace {
 
 constexpr std::string_view kMountExport = "on_mount";
 constexpr std::string_view kFrameExport = "on_frame";
+constexpr std::string_view kServiceCompletionExport = "on_service_completion";
 constexpr std::string_view kUnmountExport = "on_unmount";
 
 ControllerResult fail(ControllerErrorCode code, ControllerStage stage, std::string message) {
@@ -72,6 +73,7 @@ struct ScriptController::Impl {
   std::shared_ptr<const CompiledUiProgram> program;
   std::optional<ScriptExportHandle> mount_export;
   std::optional<ScriptExportHandle> frame_export;
+  std::optional<ScriptExportHandle> service_completion_export;
   std::optional<ScriptExportHandle> unmount_export;
   std::unordered_map<const EventBinding *, ScriptExportHandle> event_exports;
 
@@ -132,6 +134,7 @@ struct ScriptController::Impl {
     event_exports.clear();
     mount_export.reset();
     frame_export.reset();
+    service_completion_export.reset();
     unmount_export.reset();
     program.reset();
     module.reset();
@@ -171,6 +174,7 @@ ControllerResult ScriptController::load(std::unique_ptr<IScriptModule> module,
 
   std::optional<ScriptExportHandle> mount_export;
   std::optional<ScriptExportHandle> frame_export;
+  std::optional<ScriptExportHandle> service_completion_export;
   std::optional<ScriptExportHandle> unmount_export;
   std::unordered_map<const EventBinding *, ScriptExportHandle> event_exports;
   std::unordered_map<std::string, ScriptExportHandle> resolved_handlers;
@@ -203,6 +207,12 @@ ControllerResult ScriptController::load(std::unique_ptr<IScriptModule> module,
     return result;
   }
   if (auto result = resolve_optional(kFrameExport, ScriptCallbackKind::Frame, frame_export);
+      !result) {
+    return result;
+  }
+  if (auto result = resolve_optional(kServiceCompletionExport,
+                                     ScriptCallbackKind::ServiceCompletion,
+                                     service_completion_export);
       !result) {
     return result;
   }
@@ -262,6 +272,7 @@ ControllerResult ScriptController::load(std::unique_ptr<IScriptModule> module,
   impl_->program = std::move(program);
   impl_->mount_export = mount_export;
   impl_->frame_export = frame_export;
+  impl_->service_completion_export = service_completion_export;
   impl_->unmount_export = unmount_export;
   impl_->event_exports = std::move(event_exports);
   impl_->state = ControllerState::Compiled;
@@ -393,6 +404,94 @@ ControllerResult ScriptController::frame(double delta_seconds) {
   return {};
 }
 
+ControllerResult ScriptController::dispatch_service_completion(
+    const ApplicationServiceCompletion &completion) {
+  if (!impl_->is_owner_thread()) {
+    return fail(ControllerErrorCode::WrongThread, ControllerStage::ServiceCompletion,
+                "service completion dispatch must run on the controller owner thread");
+  }
+  if (impl_->state == ControllerState::Faulted) {
+    return fail(ControllerErrorCode::ControllerFaulted, ControllerStage::ServiceCompletion,
+                "faulted controller rejects callbacks until explicit reload");
+  }
+  if (impl_->state != ControllerState::Mounted) {
+    return fail(ControllerErrorCode::InvalidState, ControllerStage::ServiceCompletion,
+                "controller must be mounted before service completion dispatch");
+  }
+  if (completion.script_request_id == 0) {
+    return fail(ControllerErrorCode::InvalidArgument, ControllerStage::ServiceCompletion,
+                "service completion request ID must be non-zero");
+  }
+  switch (completion.status) {
+  case ApplicationCompletionStatus::Succeeded:
+    if (!completion.error_code.empty() || !completion.error_message.empty()) {
+      return fail(ControllerErrorCode::InvalidArgument, ControllerStage::ServiceCompletion,
+                  "successful service completion cannot carry error fields");
+    }
+    break;
+  case ApplicationCompletionStatus::Failed:
+    if (completion.error_code.empty()) {
+      return fail(ControllerErrorCode::InvalidArgument, ControllerStage::ServiceCompletion,
+                  "failed service completion requires an error code");
+    }
+    break;
+  case ApplicationCompletionStatus::Cancelled:
+    if (!completion.payload.empty() || !completion.error_code.empty()) {
+      return fail(ControllerErrorCode::InvalidArgument, ControllerStage::ServiceCompletion,
+                  "cancelled service completion cannot carry payload or an error code");
+    }
+    break;
+  default:
+    return fail(ControllerErrorCode::InvalidArgument, ControllerStage::ServiceCompletion,
+                "service completion status is invalid");
+  }
+
+  const auto &limits = impl_->limits;
+  if (completion.payload.size() > limits.max_service_payload_bytes ||
+      completion.error_code.size() > limits.max_service_error_code_bytes ||
+      completion.error_message.size() > limits.max_service_error_message_bytes) {
+    return fail(ControllerErrorCode::CompletionLimitExceeded,
+                ControllerStage::ServiceCompletion,
+                "service completion field exceeds configured bounds");
+  }
+  std::size_t total = completion.payload.size();
+  if (completion.error_code.size() > limits.max_service_total_string_bytes ||
+      total > limits.max_service_total_string_bytes - completion.error_code.size()) {
+    return fail(ControllerErrorCode::CompletionLimitExceeded,
+                ControllerStage::ServiceCompletion,
+                "service completion strings exceed the configured total bound");
+  }
+  total += completion.error_code.size();
+  if (completion.error_message.size() > limits.max_service_total_string_bytes ||
+      total > limits.max_service_total_string_bytes - completion.error_message.size()) {
+    return fail(ControllerErrorCode::CompletionLimitExceeded,
+                ControllerStage::ServiceCompletion,
+                "service completion strings exceed the configured total bound");
+  }
+  if (!impl_->service_completion_export.has_value()) {
+    return {};
+  }
+
+  ScriptCallContext context;
+  context.callback = ScriptCallbackKind::ServiceCompletion;
+  context.service_completion = &completion;
+  impl_->state = ControllerState::Dispatching;
+  auto called = safe_call(*impl_->module, *impl_->service_completion_export, context);
+  if (!called) {
+    impl_->state = ControllerState::Faulted;
+    return fail_module(ControllerStage::ServiceCompletion,
+                       std::string(kServiceCompletionExport), std::move(called.error));
+  }
+  if (auto applied = impl_->apply_effects(called, ControllerStage::ServiceCompletion,
+                                          kServiceCompletionExport);
+      !applied) {
+    impl_->state = ControllerState::Faulted;
+    return applied;
+  }
+  impl_->state = ControllerState::Mounted;
+  return {};
+}
+
 ControllerResult ScriptController::unmount() {
   if (!impl_->is_owner_thread()) {
     return fail(ControllerErrorCode::WrongThread, ControllerStage::Unmount,
@@ -437,6 +536,10 @@ ControllerState ScriptController::state() const noexcept { return impl_->state; 
 
 std::shared_ptr<const CompiledUiProgram> ScriptController::program() const noexcept {
   return impl_->program;
+}
+
+bool ScriptController::has_service_completion_handler() const noexcept {
+  return impl_->service_completion_export.has_value();
 }
 
 } // namespace flexUI

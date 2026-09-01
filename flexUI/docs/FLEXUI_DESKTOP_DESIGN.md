@@ -809,7 +809,8 @@ transaction，可通过另一个延迟 publication adapter 扩展 mount 语义�
 ### 13.3 ApplicationCompletionMailbox
 
 当前 C++ host 边界已经提供 `ApplicationCompletionMailbox`；DLL C ABI 已冻结并由 PluginHost 把 ABI
-completion 转为 owning `ApplicationCompletion`，但尚未转换为 TurboScript event。其协议如下：
+completion 转为 owning `ApplicationCompletion`，application owner 可再把恢复 script request ID 后的
+completion 转为 TurboScript controller event。其协议如下：
 
 | 项目 | 契约 |
 |---|---|
@@ -889,21 +890,55 @@ sequenceDiagram
         Host->>Mailbox: try_receive_service_completion()
         Mailbox-->>Requests: owning completion
         Requests-->>Host: completion + restored script ID
+        Host->>Script: try_dispatch_service_completion()
+        Script-->>UI: transactional completion effects
     else UI prepare/commit failed
         Script->>Requests: discard reservation by RAII
     end
 ```
 
-当前桥接完成到 host owner thread：host 可以取得 service request，通过不可变 registry 做 capability、
-operation 与 payload limit 校验并解析 C++ endpoint，再把 worker completion 恢复为原始 script request ID。
-DLL C ABI 与 PluginHost stop/join 已完成；typed schema、把 completion 转换为不可变 TurboScript
-controller event，以及把 PluginHost 生命周期纳入 DesktopApplication transaction 仍是后续边界。当前仅允许
-host 明确加载可信 DLL。
+当前桥接已完成到 controller：host 可以取得 service request，通过不可变 registry 做 capability、
+operation 与 payload limit 校验并解析 C++ endpoint，再把 worker completion 恢复为原始 script request ID；
+application owner 可选择 raw poll，或调用 `try_dispatch_service_completion()` 进入脚本事务。DLL C ABI 与
+PluginHost stop/join 已完成；typed payload schema、把 PluginHost 生命周期纳入 DesktopApplication
+transaction，以及 native event-loop wakeup 仍是后续边界。当前仅允许 host 明确加载可信 DLL。
 
 生命周期回归还覆盖独立 static-CRT test DLL：插件以 `/MTd`/`/MT` 构建，host 以 `/MDd`/`/MD`
 构建，只通过 borrowed byte views 和 caller-owned error buffer 通信。测试在 `submit()` 返回后修改 caller
 payload，异步 completion 仍取得插件已复制的原值；create/start/stop failure、retryable stop、重复 stop、
 host 释放后 cached endpoint 返回 `Closed`，共同约束 destroy/unload 只能发生一次且不得再调用 DLL 代码。
+
+### 13.5 Service completion controller event
+
+`ScriptController::load()` 与其他生命周期 export 一起解析可选的 `on_service_completion`，并缓存稳定
+handle；steady dispatch 不按名称查找。该 export 必须接收一个 record：
+
+```text
+{
+  request_id: int64 > 0,
+  status: "succeeded" | "failed" | "cancelled",
+  payload: string,
+  error_code: string,
+  error_message: string
+}
+```
+
+record 只在同步 `IScriptModule::call()` 期间借用 owning `ApplicationServiceCompletion` 的 explicit-length
+string view，adapter 不得保存。controller 重新检查 request ID、status invariant、单字段与字符串总量；
+TurboScript adapter 还拒绝超过 int64 的 request ID。successful completion 不带 error 字段，failed 必须
+带非空 error code，cancelled 不带 payload/error code；service failure 是业务数据，不会自动 fallback。
+
+`try_dispatch_service_completion()` 每次最多消费一个 completion，且必须由 application owner thread
+调用。若 controller 或 optional export 不存在，返回 owning completion 且 `dispatched=false`，由 host
+显式处理；若 handler 存在，则其 mutation/command result 仍遵循 command reserve → mutation prepare/
+commit → allocation-free publish。handler/adapter 失败会消费当前 completion、fault controller 并返回嵌套
+`DesktopApplicationError`，不得重试或重入另一种处理路径。
+
+raw `try_receive_service_completion()` 与 scripted dispatch 共享唯一 mailbox consumer，同一 application
+不得混用。reload 的 generation advance 会先淘汰旧 completion，close 会在状态发布前关闭 mailbox，因此
+旧/关闭 completion 不会到达替换或关闭后的 controller。`EventDriven` native host 还需要由 producer/host
+提供显式 wakeup；在 wakeup 接入前，只能在已有 pump 边界或 bounded continuous loop 调用 dispatch，不能
+通过 busy polling 补偿。
 
 ## 14. DesktopHost 与 gCanvas
 

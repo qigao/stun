@@ -90,6 +90,18 @@ const char *event_kind_name(UiEventKind event) noexcept {
   return nullptr;
 }
 
+const char *completion_status_name(ApplicationCompletionStatus status) noexcept {
+  switch (status) {
+  case ApplicationCompletionStatus::Succeeded:
+    return "succeeded";
+  case ApplicationCompletionStatus::Failed:
+    return "failed";
+  case ApplicationCompletionStatus::Cancelled:
+    return "cancelled";
+  }
+  return nullptr;
+}
+
 ScriptModuleErrorCode map_status(turbo_script_status_t status) noexcept {
   switch (status) {
   case TURBO_SCRIPT_STATUS_OK:
@@ -539,10 +551,11 @@ public:
     std::array<turbo_script_record_entry_view_t, 2> target_entries{};
     std::array<turbo_script_record_entry_view_t, 2> current_target_entries{};
     std::array<turbo_script_record_entry_view_t, 17> event_entries{};
+    std::array<turbo_script_record_entry_view_t, 5> completion_entries{};
     std::size_t argument_count = 0;
     ScriptModuleError argument_error;
     if (!make_arguments(context, arguments, argument_count, target_entries, current_target_entries,
-                        event_entries, argument_error)) {
+                        event_entries, completion_entries, argument_error)) {
       return {std::move(argument_error)};
     }
     if (argument_count < metadata->second.min_arity ||
@@ -584,7 +597,9 @@ private:
       const ScriptCallContext &context, std::array<turbo_script_value_view_t, 1> &arguments,
       std::size_t &argument_count, std::array<turbo_script_record_entry_view_t, 2> &target_entries,
       std::array<turbo_script_record_entry_view_t, 2> &current_target_entries,
-      std::array<turbo_script_record_entry_view_t, 17> &event_entries, ScriptModuleError &error) {
+      std::array<turbo_script_record_entry_view_t, 17> &event_entries,
+      std::array<turbo_script_record_entry_view_t, 5> &completion_entries,
+      ScriptModuleError &error) {
     switch (context.callback) {
     case ScriptCallbackKind::Mount:
     case ScriptCallbackKind::Unmount:
@@ -594,6 +609,36 @@ private:
       arguments[0] = number_value(context.delta_seconds);
       argument_count = 1;
       return true;
+    case ScriptCallbackKind::ServiceCompletion: {
+      if (context.service_completion == nullptr) {
+        error = {ScriptModuleErrorCode::RuntimeFailure,
+                 "FlexUI service completion callback is missing its snapshot"};
+        return false;
+      }
+      if (context.service_completion->script_request_id >
+          static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)())) {
+        error = {ScriptModuleErrorCode::ResourceLimitExceeded,
+                 "FlexUI service request ID exceeds TurboScript int64 range"};
+        return false;
+      }
+      const char *status = completion_status_name(context.service_completion->status);
+      if (status == nullptr) {
+        error = {ScriptModuleErrorCode::RuntimeFailure,
+                 "FlexUI service completion has an invalid status"};
+        return false;
+      }
+      completion_entries = {
+          record_entry("request_id", integer_value(static_cast<std::int64_t>(
+                                         context.service_completion->script_request_id))),
+          record_entry("status", text_value(status)),
+          record_entry("payload", text_value(context.service_completion->payload)),
+          record_entry("error_code", text_value(context.service_completion->error_code)),
+          record_entry("error_message", text_value(context.service_completion->error_message))};
+      arguments[0].kind = TURBO_SCRIPT_VALUE_RECORD;
+      arguments[0].as.record = {completion_entries.data(), completion_entries.size()};
+      argument_count = 1;
+      return true;
+    }
     case ScriptCallbackKind::Event:
       break;
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "flexUI/application_command.h"
+#include "flexUI/application_service.h"
 #include "flexUI/mutation.h"
 #include "flexUI/ui_document.h"
 
@@ -79,6 +80,7 @@ enum class ScriptCallbackKind {
   Event,
   Frame,
   Unmount,
+  ServiceCompletion,
 };
 
 struct ScriptCallContext {
@@ -86,6 +88,8 @@ struct ScriptCallContext {
   /// Borrowed only for the duration of IScriptModule::call().
   const ScriptEventSnapshot *event = nullptr;
   double delta_seconds = 0.0;
+  /// Borrowed only for a synchronous ServiceCompletion call.
+  const ApplicationServiceCompletion *service_completion = nullptr;
 };
 
 struct ScriptCallResult {
@@ -114,6 +118,14 @@ struct ControllerLimits {
   std::size_t max_element_id_bytes = 256;
   std::size_t max_event_text_bytes = 4096;
   std::size_t max_composition_text_bytes = 4096;
+  std::size_t max_service_payload_bytes =
+      ApplicationCompletionLimits::kDefaultMaxPayloadBytes;
+  std::size_t max_service_error_code_bytes =
+      ApplicationCompletionLimits::kDefaultMaxErrorCodeBytes;
+  std::size_t max_service_error_message_bytes =
+      ApplicationCompletionLimits::kDefaultMaxErrorMessageBytes;
+  std::size_t max_service_total_string_bytes =
+      ApplicationCompletionLimits::kDefaultMaxTotalStringBytes;
 };
 
 enum class ControllerErrorCode {
@@ -129,6 +141,7 @@ enum class ControllerErrorCode {
   MutationFailed,
   CommandFailed,
   InternalInvariant,
+  CompletionLimitExceeded,
 };
 
 enum class ControllerStage {
@@ -138,6 +151,7 @@ enum class ControllerStage {
   Event,
   Frame,
   Unmount,
+  ServiceCompletion,
 };
 
 struct ControllerError {
@@ -206,6 +220,11 @@ public:
   /// @return Success for an unbound event; otherwise a structured state,
   ///         limit, or module error. A module error transitions to Faulted.
   ControllerResult dispatch(const ScriptEventSnapshot &event);
+  /// Dispatches one resolved application-service completion to the optional
+  /// pre-resolved `on_service_completion` export.
+  /// @return Success without a module call when the export is absent.
+  ControllerResult
+  dispatch_service_completion(const ApplicationServiceCompletion &completion);
   /// Calls optional on_frame with a finite, non-negative delta.
   /// @return Success without a module call when on_frame is absent.
   ControllerResult frame(double delta_seconds);
@@ -217,6 +236,8 @@ public:
   ControllerState state() const noexcept;
   /// Retains the immutable program, or returns null while Empty.
   std::shared_ptr<const CompiledUiProgram> program() const noexcept;
+  /// Reports whether `on_service_completion` was resolved during load.
+  bool has_service_completion_handler() const noexcept;
 
 private:
   struct Impl;

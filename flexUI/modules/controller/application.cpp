@@ -453,6 +453,51 @@ ApplicationServiceCompletionResult DesktopApplication::try_receive_service_compl
   return impl_->service_requests->resolve_completion(std::move(*received.completion));
 }
 
+DesktopApplicationCompletionDispatchResult
+DesktopApplication::try_dispatch_service_completion() {
+  auto received = try_receive_service_completion();
+  DesktopApplicationCompletionDispatchResult result;
+  result.status = received.status;
+  if (received.error) {
+    result.error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                        DesktopApplicationStage::ServiceRequests,
+                        received.error.message);
+    result.error.service_error = std::move(received.error);
+    return result;
+  }
+  if (received.status != ApplicationServicePollStatus::Ready) {
+    return result;
+  }
+  if (!received.completion.has_value()) {
+    result.error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                        DesktopApplicationStage::ServiceRequests,
+                        "service completion receive returned Ready without a completion");
+    result.error.service_error = {
+        ApplicationServiceErrorCode::InternalInvariant,
+        result.error.message,
+        {}};
+    return result;
+  }
+
+  result.completion = std::move(received.completion);
+  ScriptController *active_controller = controller();
+  if (active_controller == nullptr ||
+      !active_controller->has_service_completion_handler()) {
+    return result;
+  }
+  result.dispatched = true;
+  auto dispatched =
+      active_controller->dispatch_service_completion(*result.completion);
+  if (!dispatched) {
+    result.error = fail(
+        DesktopApplicationErrorCode::ControllerServiceCompletionFailed,
+        DesktopApplicationStage::ControllerServiceCompletion,
+        dispatched.error.message);
+    result.error.controller_error = std::move(dispatched.error);
+  }
+  return result;
+}
+
 ApplicationServiceStatistics DesktopApplication::service_statistics() const noexcept {
   return impl_->service_requests->statistics();
 }
