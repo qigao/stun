@@ -72,6 +72,65 @@ void run_lifecycle(flexUI::TurboScriptExecutionMode mode) {
   check(controller.state() == flexUI::ControllerState::Empty);
 }
 
+void run_service_completion_values(flexUI::TurboScriptExecutionMode mode) {
+  static constexpr std::string_view source =
+      "func save_document(event){return null;};"
+      "func on_service_completion(value){"
+      "if(value.request_id==73){"
+      "if(value.status!=\"succeeded\"){throw \"success status\";};"
+      "if(value.payload!=\"stored\"){throw \"success payload\";};"
+      "if(value.error_code!=\"\"){throw \"success error code\";};"
+      "if(value.error_message!=\"\"){throw \"success error message\";};"
+      "return map {mutations:list(map {type:\"set_text\","
+      "target:map {id:\"save\",generation:7},text:value.payload})};"
+      "};"
+      "if(value.request_id!=74){throw \"failure request\";};"
+      "if(value.status!=\"failed\"){throw \"failure status\";};"
+      "if(value.payload!=\"\"){throw \"failure payload\";};"
+      "if(value.error_code!=\"write-failed\"){throw \"failure code\";};"
+      "if(value.error_message!=\"disk full\"){throw \"failure message\";};"
+      "return null;};"
+      "export(\"save_document\");export(\"on_service_completion\");";
+  auto created = create_module(source, mode);
+  check(static_cast<bool>(created));
+  if (!created) {
+    return;
+  }
+  const auto resolved = created.module->resolve_export(
+      "on_service_completion", flexUI::ScriptCallbackKind::ServiceCompletion);
+  check(static_cast<bool>(resolved));
+  check(resolved.handle.has_value());
+  if (!resolved || !resolved.handle.has_value()) {
+    return;
+  }
+
+  const flexUI::ApplicationServiceCompletion success{
+      73, flexUI::ApplicationCompletionStatus::Succeeded, "stored", {}, {}};
+  flexUI::ScriptCallContext success_context;
+  success_context.callback = flexUI::ScriptCallbackKind::ServiceCompletion;
+  success_context.service_completion = &success;
+  const auto succeeded = created.module->call(*resolved.handle, success_context);
+  check(static_cast<bool>(succeeded));
+  check_equal(succeeded.mutations.size(), std::size_t{1});
+  if (succeeded.mutations.size() == 1) {
+    const auto &mutation =
+        std::get<flexUI::SetTextMutation>(succeeded.mutations.mutations().front());
+    check_equal(mutation.target.id, std::string("save"));
+    check_equal(mutation.target.generation, std::uint64_t{7});
+    check_equal(mutation.text, std::string("stored"));
+  }
+
+  const flexUI::ApplicationServiceCompletion failure{
+      74, flexUI::ApplicationCompletionStatus::Failed, {}, "write-failed", "disk full"};
+  flexUI::ScriptCallContext failure_context;
+  failure_context.callback = flexUI::ScriptCallbackKind::ServiceCompletion;
+  failure_context.service_completion = &failure;
+  const auto failed = created.module->call(*resolved.handle, failure_context);
+  check(static_cast<bool>(failed));
+  check(failed.mutations.empty());
+  check(failed.commands.empty());
+}
+
 bool interrupt_immediately(void *user_data) {
   auto *checks = static_cast<std::uint32_t *>(user_data);
   ++*checks;
@@ -87,6 +146,60 @@ spec("FlexUI TurboScript controller adapter") {
 
   it("runs the controller lifecycle with the JIT") {
     run_lifecycle(flexUI::TurboScriptExecutionMode::Jit);
+  }
+
+  it("passes service completion records with the interpreter") {
+    run_service_completion_values(flexUI::TurboScriptExecutionMode::Interpreter);
+  }
+
+  it("passes service completion records with the JIT") {
+    run_service_completion_values(flexUI::TurboScriptExecutionMode::Jit);
+  }
+
+  it("rejects a service completion export with the wrong arity") {
+    auto created = create_module(
+        "func save_document(event){return null;};"
+        "func on_service_completion(){return null;};"
+        "export(\"save_document\");export(\"on_service_completion\");",
+        flexUI::TurboScriptExecutionMode::Interpreter);
+    check(static_cast<bool>(created));
+    if (!created) {
+      return;
+    }
+    flexUI::ScriptController controller;
+    const auto loaded = controller.load(std::move(created.module), controller_program());
+    check_false(static_cast<bool>(loaded));
+    check(loaded.error.code == flexUI::ControllerErrorCode::ModuleResolutionFailed);
+    check_equal(loaded.error.handler, std::string("on_service_completion"));
+    check(loaded.error.module_error.code == flexUI::ScriptModuleErrorCode::InvalidExport);
+  }
+
+  it("rejects a service request ID outside the TurboScript int64 range") {
+    auto created = create_module(
+        "func on_service_completion(value){return null;};"
+        "export(\"on_service_completion\");",
+        flexUI::TurboScriptExecutionMode::Interpreter);
+    check(static_cast<bool>(created));
+    if (!created) {
+      return;
+    }
+    const auto resolved = created.module->resolve_export(
+        "on_service_completion", flexUI::ScriptCallbackKind::ServiceCompletion);
+    check(static_cast<bool>(resolved));
+    check(resolved.handle.has_value());
+    if (!resolved || !resolved.handle.has_value()) {
+      return;
+    }
+    const flexUI::ApplicationServiceCompletion completion{
+        static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)()) + 1,
+        flexUI::ApplicationCompletionStatus::Succeeded, {}, {}, {}};
+    flexUI::ScriptCallContext context;
+    context.callback = flexUI::ScriptCallbackKind::ServiceCompletion;
+    context.service_completion = &completion;
+
+    const auto called = created.module->call(*resolved.handle, context);
+    check_false(static_cast<bool>(called));
+    check(called.error.code == flexUI::ScriptModuleErrorCode::ResourceLimitExceeded);
   }
 
   it("reports source compilation errors without exposing a partial module") {

@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -63,6 +64,7 @@ enum class DesktopApplicationStage {
   CompletionMailbox,
   ServiceRegistry,
   ServiceRequests,
+  ControllerServiceCompletion,
 };
 
 enum class DesktopApplicationErrorCode {
@@ -87,6 +89,7 @@ enum class DesktopApplicationErrorCode {
   ServiceRegistryFailed,
   ServiceRequestFailed,
   GenerationExhausted,
+  ControllerServiceCompletionFailed,
 };
 
 struct DesktopApplicationError {
@@ -116,6 +119,20 @@ struct DesktopApplicationBuildResult {
 
   explicit operator bool() const noexcept {
     return application != nullptr && !static_cast<bool>(error);
+  }
+};
+
+/// Result of consuming and optionally dispatching one resolved service
+/// completion to the active script controller.
+struct DesktopApplicationCompletionDispatchResult {
+  ApplicationServicePollStatus status = ApplicationServicePollStatus::Empty;
+  bool dispatched = false;
+  std::optional<ApplicationServiceCompletion> completion;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept {
+    return status == ApplicationServicePollStatus::Ready && completion.has_value() &&
+           !static_cast<bool>(error);
   }
 };
 
@@ -175,6 +192,14 @@ public:
   /// @return `WrongThread` outside the owner thread, `Closed` after close, or
   ///         a structured mailbox/token result without blocking.
   ApplicationServiceCompletionResult try_receive_service_completion();
+
+  /// Consumes at most one resolved completion and synchronously calls the
+  /// optional `on_service_completion` export. This and raw completion polling
+  /// share one authoritative mailbox consumer and must not be mixed.
+  /// @return `Ready` with an owning completion and `dispatched == false` when
+  ///         no script handler exists; `Empty`/`Closed` without a callback;
+  ///         or a nested service/controller error.
+  DesktopApplicationCompletionDispatchResult try_dispatch_service_completion();
 
   /// Owner-thread snapshot of bounded request-table counters.
   ApplicationServiceStatistics service_statistics() const noexcept;
