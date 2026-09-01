@@ -1,4 +1,6 @@
 #include "gcanvas/window.hpp"
+#include "native_window_callbacks.hpp"
+#include "window_impl.hpp"
 
 #include <algorithm>
 #include <array>
@@ -524,6 +526,27 @@ int main(int argc, char** argv)
             std::cerr << "Win32 window did not acquire native pointer capture\n";
             return 19;
         }
+
+        bool observed_focus_loss = false;
+        bool capture_released_before_focus_listener = false;
+        auto focus_subscription = window->subscribe_focus_listener(
+            [&](gcanvas::focus_event event) {
+                observed_focus_loss = !event.focused;
+                capture_released_before_focus_listener = !window->has_pointer_capture();
+            });
+        auto* window_impl = static_cast<gcanvas::WindowImpl*>(window.get());
+        gcanvas::focus_callback(window_impl->_glfw_window, 0);
+        if (!observed_focus_loss || !capture_released_before_focus_listener)
+        {
+            std::cerr << "Win32 focus loss did not release native capture before notification\n";
+            return 27;
+        }
+        if (window->has_pointer_capture())
+        {
+            std::cerr << "Win32 focus loss retained native pointer capture\n";
+            return 28;
+        }
+
         window->set_pointer_capture(false);
         window->set_pointer_capture(false);
         if (window->has_pointer_capture())
@@ -614,6 +637,37 @@ int main(int argc, char** argv)
                 std::cerr << "vulkan frame-ring reuse corrupted the next frame\n";
                 return 17;
             }
+        }
+
+        int callback_after_failure_calls = 0;
+        auto throwing_resize = window->subscribe_resize_listener(
+            [](gcanvas::resize_event) {
+                throw std::runtime_error("native resize listener failed");
+            });
+        auto callback_after_failure = window->subscribe_resize_listener(
+            [&](gcanvas::resize_event) { ++callback_after_failure_calls; });
+        bool deferred_resize_failure = false;
+        try
+        {
+            window->set_size(80, 56);
+            window->poll_events();
+        }
+        catch (const std::runtime_error& error)
+        {
+            deferred_resize_failure =
+                std::string(error.what()) == "native resize listener failed";
+        }
+        throwing_resize.reset();
+        callback_after_failure.reset();
+        if (!deferred_resize_failure)
+        {
+            std::cerr << backend << " did not defer a native callback failure\n";
+            return 25;
+        }
+        if (callback_after_failure_calls != 0)
+        {
+            std::cerr << backend << " dispatched callbacks after a native callback failure\n";
+            return 26;
         }
 
         constexpr int resized_width = 96;

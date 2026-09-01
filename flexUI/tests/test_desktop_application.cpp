@@ -563,8 +563,7 @@ spec("FlexUI desktop application owns close and shutdown state") {
       check_within(probe->frame_deltas.front(), 0.016, 0.000001);
     }
 
-    const auto invalid = built.application->frame(
-        std::numeric_limits<double>::quiet_NaN());
+    const auto invalid = built.application->frame(std::numeric_limits<double>::quiet_NaN());
     check_false(static_cast<bool>(invalid));
     check(invalid.error.code == flexUI::DesktopApplicationErrorCode::InvalidArgument);
     check(invalid.error.stage == flexUI::DesktopApplicationStage::ControllerFrame);
@@ -587,11 +586,9 @@ spec("FlexUI desktop application owns close and shutdown state") {
 
     const auto frame = built.application->frame(0.016);
     check_false(static_cast<bool>(frame));
-    check(frame.error.code ==
-          flexUI::DesktopApplicationErrorCode::ControllerFrameFailed);
+    check(frame.error.code == flexUI::DesktopApplicationErrorCode::ControllerFrameFailed);
     check(frame.error.controller_error.stage == flexUI::ControllerStage::Frame);
-    check(built.application->controller()->state() ==
-          flexUI::ControllerState::Faulted);
+    check(built.application->controller()->state() == flexUI::ControllerState::Faulted);
   }
 
   it("rejects frames from a non-owner thread") {
@@ -651,6 +648,82 @@ spec("FlexUI desktop application owns close and shutdown state") {
       check_equal(probe->calls[0], "on_mount");
       check_equal(probe->calls[1], "on_unmount");
     }
+  }
+
+  it("closes the completion mailbox before publishing CloseRequested") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    const auto generation = built.application->generation();
+    flexUI::ApplicationCompletion queued;
+    queued.token = {1, generation};
+    queued.payload = "finished";
+    check(built.application->completion_mailbox().try_post(queued));
+
+    check(built.application->request_close());
+    check(built.application->state() == flexUI::DesktopApplicationState::CloseRequested);
+    check(built.application->completion_mailbox().state() ==
+          flexUI::ApplicationCompletionMailboxState::Closed);
+    check_equal(built.application->completion_mailbox().statistics().cancelled, std::uint64_t{1});
+
+    flexUI::ApplicationCompletion late;
+    late.token = {2, generation};
+    auto rejected = built.application->completion_mailbox().try_post(late);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code == flexUI::ApplicationCompletionErrorCode::Closed);
+  }
+
+  it("advances completion generation atomically with application reload") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Before\"><div id=\"before\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    const auto old_generation = built.application->generation();
+    flexUI::ApplicationCompletion queued;
+    queued.token = {1, old_generation};
+    check(built.application->completion_mailbox().try_post(queued));
+
+    check(built.application->reload({"<ui name=\"After\"><div id=\"after\"/></ui>", "", "", ""}));
+    const auto current_generation = built.application->generation();
+    check_equal(current_generation, old_generation + 1);
+    check_not_null(built.application->box().get_by_id("after"));
+    check_equal(built.application->completion_mailbox().statistics().cancelled, std::uint64_t{1});
+
+    flexUI::ApplicationCompletion stale;
+    stale.token = {2, old_generation};
+    auto rejected = built.application->completion_mailbox().try_post(stale);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code == flexUI::ApplicationCompletionErrorCode::StaleGeneration);
+
+    flexUI::ApplicationCompletion current;
+    current.token = {3, current_generation};
+    check(built.application->completion_mailbox().try_post(current));
+    auto received = built.application->completion_mailbox().try_receive();
+    check(received.completion.has_value());
+    check_equal(received.completion->token.id, std::uint64_t{3});
+  }
+
+  it("fails application publication when completion limits are invalid") {
+    flexUI::DesktopApplicationLimits limits;
+    limits.completion.capacity = 3;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>").limits(limits);
+
+    auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::CompletionMailboxFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::CompletionMailbox);
+    check(built.error.completion_error.code ==
+          flexUI::ApplicationCompletionErrorCode::InvalidCapacity);
   }
 
   it("retains shutdown state while reporting an on_unmount failure") {

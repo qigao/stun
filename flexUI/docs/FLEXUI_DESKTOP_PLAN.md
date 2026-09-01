@@ -242,6 +242,8 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [ ] 插件只向 host 注册 service，不直接解析其他 DLL 的符号。
 - [ ] TurboScript 只能调用 application manifest 授权的 capability。
 - [ ] service 参数/返回值使用受限 tagged value/schema，不传 UI 或 GPU handle。
+- [x] 实现 application-owned bounded MPSC completion mailbox；copy ownership、固定容量、非阻塞
+  `QueueFull`、owner-thread consumer、generation 淘汰、close quiescence/cancel 和统计均有测试。
 - [ ] 长任务返回 request ID，结果通过 bounded completion queue 投递 UI thread。
 - [ ] queue 满、取消、窗口关闭和 plugin stop 都有明确错误语义。
 
@@ -319,11 +321,15 @@ UI 状态，默认 Box 路径仍未被隐式接管。
   native capture acquire/release。
 - [x] hidden `GCanvasWindowHost` 测 OpenGL/Vulkan application 首帧、pointer capture 同步、owner-thread
   gate 和 `Ready -> CloseRequested -> Shutdown`。
-- [ ] DPI/resize 坐标与 hit-test 一致。
+- [x] DPI/resize 坐标与 hit-test 一致；覆盖 native window extent 到 logical viewport 的比例变化，
+  resize 后同一 logical pointer 仍命中同一 Element。
 - [x] keyboard、text、IME 与内部 pointer capture 回归。
-- [ ] native focus/capture 与 clipboard 回归。
+- [x] native focus/capture 与 clipboard 回归；Windows GPU smoke 验证 focus loss 在通知
+  listener 前释放 native capture，application router 清理 Box focus/capture，widget 覆盖 UTF-8
+  clipboard copy/cut/paste round-trip。
 - [x] close/shutdown during controller callback 保持可重试状态且不会重复 unmount。
-- [ ] close during service completion 安全。
+- [x] close during service completion mailbox 安全；并发 producer 在 close 前完成 publication 或得到
+  `Closed`，close quiesce 后取消全部已发布 record；PluginHost stop/join 仍由 P4 lifecycle 完成。
 - [ ] required GPU capability 缺失时无半初始化 window/context。
 
 完成条件：Windows 示例可以从 app package 启动、按需绘制、输入文本、调用 native service 并安全

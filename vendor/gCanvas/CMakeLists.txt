@@ -243,6 +243,8 @@ if(GCANVAS_BUILD_TESTS)
 
     if(GCANVAS_BUILD_GPU_TESTS)
       add_executable(gcanvas_gpu_test tests/gpu_smoke_test.cpp)
+      target_include_directories(
+        gcanvas_gpu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
       target_link_libraries(gcanvas_gpu_test PRIVATE gCanvas::Window)
       if(GCANVAS_BUILD_OPENGL)
         add_test(NAME gcanvas_gpu_opengl

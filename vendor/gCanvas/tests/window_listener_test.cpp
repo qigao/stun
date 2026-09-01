@@ -1,7 +1,9 @@
+#include "native_callback_error_state.hpp"
 #include "window_listener_state.hpp"
 
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -125,6 +127,39 @@ int main()
     if (orphan.active())
         return 13;
     orphan.reset();
+
+    gcanvas::detail::NativeCallbackErrorState callback_errors;
+    try
+    {
+        throw std::runtime_error("first native callback failure");
+    }
+    catch (...)
+    {
+        callback_errors.capture_current();
+    }
+    try
+    {
+        throw std::logic_error("later native callback failure");
+    }
+    catch (...)
+    {
+        callback_errors.capture_current();
+    }
+    if (!callback_errors.pending())
+        return 14;
+    try
+    {
+        callback_errors.rethrow_pending();
+        return 15;
+    }
+    catch (const std::runtime_error& error)
+    {
+        if (std::string(error.what()) != "first native callback failure")
+            return 16;
+    }
+    if (callback_errors.pending())
+        return 17;
+    callback_errors.rethrow_pending();
 
     return 0;
 }

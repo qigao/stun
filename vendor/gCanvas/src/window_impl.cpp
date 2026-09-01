@@ -1,5 +1,7 @@
 #include "window_impl.hpp"
 
+#include "native_window_callbacks.hpp"
+
 #include "stb_image.h"
 #include <cmath>
 #include <cstring>
@@ -99,18 +101,21 @@ namespace gcanvas
 #endif
     }
 
-    /* ------------------------ FUNCTION DECLARATION ------------------------ */
-
-    void on_window_resize(GLFWwindow* window, int width, int height);
-    void on_framebuffer_resize(GLFWwindow* window, int width, int height);
-    void on_content_scale(GLFWwindow* window, float x_scale, float y_scale);
-    void mouse_position_callback(GLFWwindow* window, double x, double y);
-    void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
-    void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
-    void char_callback(GLFWwindow* window, unsigned int codepoint);
-    void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
-    void focus_callback(GLFWwindow* window, int focused);
-    void close_callback(GLFWwindow* window);
+    template <typename Callback>
+    void native_callback_boundary(GLFWwindow* window, Callback&& callback) noexcept
+    {
+        WindowImpl* impl = static_cast<WindowImpl*>(glfwGetWindowUserPointer(window));
+        if (impl->_native_callback_errors.pending())
+            return;
+        try
+        {
+            std::forward<Callback>(callback)();
+        }
+        catch (...)
+        {
+            impl->_native_callback_errors.capture_current();
+        }
+    }
 
     /* ------------------------ PUBLIC IMPLEMENTATION ------------------------ */
 
@@ -197,6 +202,7 @@ namespace gcanvas
         }
         glfwSetWindowSize(impl->_glfw_window, static_cast<int>(std::lround(window_width)),
                           static_cast<int>(std::lround(window_height)));
+        impl->_native_callback_errors.rethrow_pending();
         impl->refresh_window_metrics();
         impl->sync_context_metrics();
         if (_context != nullptr)
@@ -261,6 +267,7 @@ namespace gcanvas
             glfwSetWindowMonitor(impl->_glfw_window, nullptr, impl->_last_x_pos, impl->_last_y_pos,
                                  impl->_last_x_scale, impl->_last_y_scale, 0);
         }
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     bool Window::is_fullscreen()
@@ -454,18 +461,21 @@ namespace gcanvas
     {
         WindowImpl* impl = getImpl(this);
         glfwIconifyWindow(impl->_glfw_window);
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     void Window::maximize()
     {
         WindowImpl* impl = getImpl(this);
         glfwMaximizeWindow(impl->_glfw_window);
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     void Window::restore()
     {
         WindowImpl* impl = getImpl(this);
         glfwRestoreWindow(impl->_glfw_window);
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     void Window::close()
@@ -536,17 +546,23 @@ namespace gcanvas
 
     void Window::poll_events()
     {
+        WindowImpl* impl = getImpl(this);
         glfwPollEvents();
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     void Window::wait_events()
     {
+        WindowImpl* impl = getImpl(this);
         glfwWaitEvents();
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     void Window::wait_events(float time)
     {
+        WindowImpl* impl = getImpl(this);
         glfwWaitEventsTimeout(time);
+        impl->_native_callback_errors.rethrow_pending();
     }
 
     void Window::trigger_events()
@@ -871,7 +887,7 @@ namespace gcanvas
 
     /* ------------------------ EVENTS ------------------------ */
 
-    void on_window_resize(GLFWwindow* window, int width, int height)
+    void on_window_resize_impl(GLFWwindow* window, int width, int height)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
         winImpl->refresh_window_metrics();
@@ -891,7 +907,7 @@ namespace gcanvas
             resize_event{winImpl->_logical_width, winImpl->_logical_height});
     }
 
-    void on_framebuffer_resize(GLFWwindow* window, int, int)
+    void on_framebuffer_resize_impl(GLFWwindow* window, int, int)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
         const bool logical_size_changed = winImpl->refresh_window_metrics();
@@ -908,7 +924,7 @@ namespace gcanvas
         }
     }
 
-    void on_content_scale(GLFWwindow* window, float, float)
+    void on_content_scale_impl(GLFWwindow* window, float, float)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
         winImpl->refresh_window_metrics();
@@ -922,7 +938,7 @@ namespace gcanvas
             resize_event{winImpl->_logical_width, winImpl->_logical_height});
     }
 
-    void mouse_position_callback(GLFWwindow* window, double x, double y)
+    void mouse_position_callback_impl(GLFWwindow* window, double x, double y)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
 
@@ -942,7 +958,7 @@ namespace gcanvas
         winImpl->_listeners->publish(mouse_move_event{logical.x, logical.y});
     }
 
-    void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
+    void mouse_button_callback_impl(GLFWwindow* window, int button, int action, int mods)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
 
@@ -976,7 +992,7 @@ namespace gcanvas
                                                         (mouse_mod)mods, logical.x, logical.y});
     }
 
-    void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+    void key_callback_impl(GLFWwindow* window, int key, int scancode, int action, int mods)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
         const char* key_code = glfwGetKeyName(key, scancode);
@@ -993,7 +1009,7 @@ namespace gcanvas
                                                (keyboard_mod)mods, key_code});
     }
 
-    void char_callback(GLFWwindow* window, unsigned int codepoint)
+    void char_callback_impl(GLFWwindow* window, unsigned int codepoint)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
 
@@ -1007,7 +1023,7 @@ namespace gcanvas
         winImpl->_listeners->publish(char_event{codepoint, utf8.c_str()});
     }
 
-    void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+    void scroll_callback_impl(GLFWwindow* window, double xoffset, double yoffset)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
 
@@ -1018,7 +1034,7 @@ namespace gcanvas
         winImpl->_listeners->publish(scroll_event{xoffset, yoffset});
     }
 
-    void focus_callback(GLFWwindow* window, int focused)
+    void focus_callback_impl(GLFWwindow* window, int focused)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
         if (focused != GLFW_TRUE)
@@ -1026,10 +1042,68 @@ namespace gcanvas
         winImpl->_listeners->publish(focus_event{focused == GLFW_TRUE});
     }
 
-    void close_callback(GLFWwindow* window)
+    void close_callback_impl(GLFWwindow* window)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
         winImpl->_listeners->publish(close_event{});
+    }
+
+    void on_window_resize(GLFWwindow* window, int width, int height) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { on_window_resize_impl(window, width, height); });
+    }
+
+    void on_framebuffer_resize(GLFWwindow* window, int width, int height) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { on_framebuffer_resize_impl(window, width, height); });
+    }
+
+    void on_content_scale(GLFWwindow* window, float x_scale, float y_scale) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { on_content_scale_impl(window, x_scale, y_scale); });
+    }
+
+    void mouse_position_callback(GLFWwindow* window, double x, double y) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { mouse_position_callback_impl(window, x, y); });
+    }
+
+    void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { mouse_button_callback_impl(window, button, action, mods); });
+    }
+
+    void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { key_callback_impl(window, key, scancode, action, mods); });
+    }
+
+    void char_callback(GLFWwindow* window, unsigned int codepoint) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { char_callback_impl(window, codepoint); });
+    }
+
+    void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) noexcept
+    {
+        native_callback_boundary(
+            window, [&] { scroll_callback_impl(window, xoffset, yoffset); });
+    }
+
+    void focus_callback(GLFWwindow* window, int focused) noexcept
+    {
+        native_callback_boundary(window, [&] { focus_callback_impl(window, focused); });
+    }
+
+    void close_callback(GLFWwindow* window) noexcept
+    {
+        native_callback_boundary(window, [&] { close_callback_impl(window); });
     }
 
 } // namespace gcanvas

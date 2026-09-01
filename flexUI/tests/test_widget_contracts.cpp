@@ -646,7 +646,8 @@ spec("InputWidget and TextAreaWidget share the clipboard round-trip contract") {
   it("InputWidget") {
     WidgetHarness<InputWidget> harness("input", kInputCss);
     check(harness.widget->wants_text_input());
-    require_clipboard_roundtrip_contract(*harness.widget, *harness.elem, "hello");
+    require_clipboard_roundtrip_contract(*harness.widget, *harness.elem,
+                                         u8"héllo 世界");
   }
 
   it("TextAreaWidget") {
