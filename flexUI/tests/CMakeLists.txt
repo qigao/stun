@@ -362,6 +362,16 @@ set_target_properties(
 add_test(NAME test_application_service_requests
          COMMAND test_application_service_requests)
 
+add_executable(test_application_service_dispatcher
+               test_application_service_dispatcher.cpp)
+target_link_libraries(test_application_service_dispatcher
+                      PRIVATE FlexUI::Controller)
+flexui_configure_tinytest(test_application_service_dispatcher)
+set_target_properties(
+  test_application_service_dispatcher PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_application_service_dispatcher
+         COMMAND test_application_service_dispatcher)
+
 add_executable(test_service_registry test_service_registry.cpp)
 target_link_libraries(test_service_registry PRIVATE FlexUI::Services)
 flexui_configure_tinytest(test_service_registry)
@@ -399,6 +409,31 @@ if(FLEX_BUILD_GCANVAS_GPU_TESTS AND TARGET FlexUI::GCanvasWindowHost)
   set_target_properties(
     test_gcanvas_window_host PROPERTIES FOLDER "flexUI/tests")
   add_test(NAME test_gcanvas_window_host COMMAND test_gcanvas_window_host)
+
+  if(FLEXUI_ENABLE_PLUGINS)
+    add_executable(test_gcanvas_plugin_window_host
+                   test_gcanvas_plugin_window_host.cpp)
+    target_link_libraries(
+      test_gcanvas_plugin_window_host
+      PRIVATE FlexUI::GCanvasPluginWindowHost)
+    flexui_configure_tinytest(test_gcanvas_plugin_window_host)
+    target_compile_definitions(
+      test_gcanvas_plugin_window_host
+      PRIVATE FLEXUI_TEST_ECHO_PLUGIN="$<TARGET_FILE:flexui_test_plugin_echo>")
+    add_dependencies(test_gcanvas_plugin_window_host flexui_test_plugin_echo)
+    set_target_properties(
+      test_gcanvas_plugin_window_host PROPERTIES FOLDER "flexUI/tests")
+    add_test(NAME test_gcanvas_plugin_window_host
+             COMMAND test_gcanvas_plugin_window_host)
+
+    if(TARGET flexui_desktop_editor)
+      add_test(NAME test_flexui_desktop_editor_smoke
+               COMMAND flexui_desktop_editor --smoke)
+      set_tests_properties(
+        test_flexui_desktop_editor_smoke
+        PROPERTIES LABELS "flexui;integration;gpu;turboscript;plugin")
+    endif()
+  endif()
 endif()
 
 if(FLEXUI_ENABLE_TURBOSCRIPT)
@@ -409,9 +444,25 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
   set_target_properties(
     test_turboscript_application PROPERTIES FOLDER "flexUI/tests")
   add_test(NAME test_turboscript_application COMMAND test_turboscript_application)
+
+  add_executable(test_desktop_editor_controller
+                 test_desktop_editor_controller.cpp)
+  target_link_libraries(
+    test_desktop_editor_controller
+    PRIVATE FlexUI::ControllerTurboScript TurboUtils::Core)
+  target_compile_definitions(
+    test_desktop_editor_controller
+    PRIVATE
+      FLEXUI_EDITOR_CONTROLLER_PATH="${CMAKE_SOURCE_DIR}/flexUI/examples/desktop_editor/editor.tbs")
+  flexui_configure_tinytest(test_desktop_editor_controller)
+  set_target_properties(
+    test_desktop_editor_controller PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_desktop_editor_controller
+           COMMAND test_desktop_editor_controller)
   if(WIN32)
     set_property(
-      TEST test_turboscript_application PROPERTY ENVIRONMENT_MODIFICATION
+      TEST test_turboscript_application test_desktop_editor_controller
+      PROPERTY ENVIRONMENT_MODIFICATION
       "PATH=path_list_prepend:${_flexui_compiler_runtime_dir}"
       "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}")
   endif()
@@ -433,6 +484,9 @@ if(WIN32)
       test_service_registry)
   if(FLEXUI_ENABLE_PLUGINS)
     list(APPEND _flexui_runtime_tests test_plugin_host test_plugin_manifest)
+    if(TARGET test_gcanvas_plugin_window_host)
+      list(APPEND _flexui_runtime_tests test_gcanvas_plugin_window_host)
+    endif()
   endif()
   set_property(
     TEST ${_flexui_runtime_tests}
@@ -440,4 +494,14 @@ if(WIN32)
              "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
              "PATH=path_list_prepend:${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
              "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+
+  if(TEST test_flexui_desktop_editor_smoke)
+    set_property(
+      TEST test_flexui_desktop_editor_smoke
+      PROPERTY ENVIRONMENT_MODIFICATION
+               "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
+               "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}"
+               "PATH=path_list_prepend:${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
+               "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+  endif()
 endif()

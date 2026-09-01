@@ -19,6 +19,10 @@ namespace {
 constexpr double kMillisecondsPerSecond = 1000.0;
 constexpr std::size_t kNativeListenerCount = 8;
 
+void wake_gcanvas_event_loop(void *) noexcept {
+  gcanvas::Window::trigger_events();
+}
+
 GCanvasWindowHostError fail(GCanvasWindowHostErrorCode code,
                             GCanvasWindowHostStage stage,
                             std::string message) {
@@ -67,6 +71,20 @@ GCanvasWindowHostError validate_config(const GCanvasWindowHostConfig &config) {
                 GCanvasWindowHostStage::Configuration,
                 "maximum frame delta must be finite, positive, and convertible to milliseconds");
   }
+  if (config.max_service_completions_per_pump == 0 ||
+      config.max_service_completions_per_pump >
+          GCanvasWindowHostConfig::kMaximumServiceCompletionsPerPump) {
+    return fail(GCanvasWindowHostErrorCode::InvalidConfiguration,
+                GCanvasWindowHostStage::Configuration,
+                "service completions per pump must be within the supported range");
+  }
+  if (config.max_service_requests_per_pump == 0 ||
+      config.max_service_requests_per_pump >
+          GCanvasWindowHostConfig::kMaximumServiceRequestsPerPump) {
+    return fail(GCanvasWindowHostErrorCode::InvalidConfiguration,
+                GCanvasWindowHostStage::Configuration,
+                "service requests per pump must be within the supported range");
+  }
   return {};
 }
 
@@ -87,6 +105,15 @@ GCanvasWindowHostError input_failure(GCanvasApplicationInputError error) {
   return host_error;
 }
 
+GCanvasWindowHostError dispatcher_failure(
+    ApplicationServiceDispatcherError error) {
+  auto host_error = fail(GCanvasWindowHostErrorCode::ServiceDispatchFailed,
+                         GCanvasWindowHostStage::ServiceDispatch,
+                         "desktop application service request dispatch failed");
+  host_error.service_dispatcher_error = std::move(error);
+  return host_error;
+}
+
 } // namespace
 
 struct GCanvasWindowHost::Impl {
@@ -100,6 +127,7 @@ struct GCanvasWindowHost::Impl {
   gcanvas::Context *context = nullptr;
   std::unique_ptr<flex::Renderer> renderer;
   std::unique_ptr<DesktopApplication> application;
+  std::unique_ptr<ApplicationServiceDispatcher> service_dispatcher;
   std::unique_ptr<GCanvasApplicationInputRouter> input;
   std::vector<gcanvas::WindowListenerSubscription> subscriptions;
   std::optional<GCanvasWindowHostError> pending_error;
@@ -279,6 +307,69 @@ struct GCanvasWindowHost::Impl {
     return {std::move(primary)};
   }
 
+  GCanvasWindowHostResult drain_service_completions() {
+    ScriptController *active_controller = application->controller();
+    if (active_controller == nullptr ||
+        !active_controller->has_service_completion_handler()) {
+      return {};
+    }
+
+    std::size_t consumed = 0;
+    while (consumed < config.max_service_completions_per_pump) {
+      auto dispatched = application->try_dispatch_service_completion();
+      if (dispatched.error) {
+        return {application_failure(
+            GCanvasWindowHostErrorCode::ServiceCompletionFailed,
+            GCanvasWindowHostStage::ServiceCompletion,
+            std::move(dispatched.error),
+            "desktop application service completion dispatch failed")};
+      }
+      if (dispatched.status == ApplicationServicePollStatus::Empty) {
+        return {};
+      }
+      if (dispatched.status == ApplicationServicePollStatus::Closed) {
+        return {fail(GCanvasWindowHostErrorCode::InvalidState,
+                     GCanvasWindowHostStage::ServiceCompletion,
+                     "ready desktop application exposed a closed completion mailbox")};
+      }
+      if (!dispatched.completion.has_value() || !dispatched.dispatched) {
+        return {fail(GCanvasWindowHostErrorCode::InvalidState,
+                     GCanvasWindowHostStage::ServiceCompletion,
+                     "scripted completion dispatch violated its ready-state contract")};
+      }
+      ++consumed;
+      if (application->state() != DesktopApplicationState::Ready) {
+        return {};
+      }
+    }
+
+    // The mailbox may still contain records. A redundant empty event is safe
+    // and prevents the bounded owner-thread loop from sleeping indefinitely.
+    gcanvas::Window::trigger_events();
+    return {};
+  }
+
+  GCanvasWindowHostResult dispatch_service_requests() {
+    auto dispatched = service_dispatcher->pump();
+    if (!dispatched) {
+      return {dispatcher_failure(std::move(dispatched.error))};
+    }
+    if (dispatched.status == ApplicationServiceDispatchStatus::Closed &&
+        application->state() == DesktopApplicationState::Ready) {
+      return {fail(GCanvasWindowHostErrorCode::InvalidState,
+                   GCanvasWindowHostStage::ServiceDispatch,
+                   "ready desktop application exposed a closed service dispatcher")};
+    }
+    if (dispatched.status == ApplicationServiceDispatchStatus::Blocked ||
+        dispatched.submitted + dispatched.failed >=
+            config.max_service_requests_per_pump) {
+      // Retry bounded work on the next event-loop turn. An empty event is safe
+      // even when a synchronous endpoint already issued a completion wakeup.
+      gcanvas::Window::trigger_events();
+    }
+    return {};
+  }
+
   GCanvasWindowHostResult drive_frame(double delta_seconds) {
     if (pending_error.has_value()) {
       return finish_pending_error();
@@ -298,6 +389,24 @@ struct GCanvasWindowHost::Impl {
                                     "desktop application rejected window closure")};
       }
       return finish_shutdown();
+    }
+
+    auto drained = drain_service_completions();
+    if (!drained) {
+      record_failure(std::move(drained.error));
+      return finish_pending_error();
+    }
+    if (application->state() != DesktopApplicationState::Ready) {
+      return drive_frame(0.0);
+    }
+
+    auto dispatched = dispatch_service_requests();
+    if (!dispatched) {
+      record_failure(std::move(dispatched.error));
+      return finish_pending_error();
+    }
+    if (application->state() != DesktopApplicationState::Ready) {
+      return drive_frame(0.0);
     }
 
     auto frame = application->frame(delta_seconds);
@@ -420,7 +529,10 @@ GCanvasWindowHost::create(GCanvasWindowHostConfig config,
                      "Flex gCanvas renderer creation failed with an unknown exception")};
   }
 
-  auto built = builder.renderer(impl->renderer.get()).build();
+  auto built = builder.renderer(impl->renderer.get())
+                   .completion_wakeup(
+                       {&wake_gcanvas_event_loop, nullptr})
+                   .build();
   if (!built) {
     return {{}, application_failure(
                     GCanvasWindowHostErrorCode::ApplicationBuildFailed,
@@ -429,6 +541,14 @@ GCanvasWindowHost::create(GCanvasWindowHostConfig config,
                     "FlexUI desktop application build failed")};
   }
   impl->application = std::move(built.application);
+
+  auto dispatcher = ApplicationServiceDispatcher::create(
+      *impl->application,
+      {impl->config.max_service_requests_per_pump});
+  if (!dispatcher) {
+    return {{}, dispatcher_failure(std::move(dispatcher.error))};
+  }
+  impl->service_dispatcher = std::move(dispatcher.dispatcher);
 
   try {
     impl->input = std::make_unique<GCanvasApplicationInputRouter>(

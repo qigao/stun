@@ -1,0 +1,51 @@
+save_target = null;
+save_in_flight = false;
+
+func save_document(event) {
+  if (save_in_flight) {
+    return null;
+  };
+  save_in_flight = true;
+  save_target = event.target;
+  return map {
+    mutations: list(
+      map {type: "set_text", target: event.target, text: "Saving..."}
+    ),
+    commands: list(
+      map {
+        request_id: 1,
+        capability: "document.save/1",
+        operation: "save",
+        payload: "Saved by native document service"
+      }
+    )
+  };
+};
+
+func on_service_completion(value) {
+  if (save_target == null) {
+    throw "save completion without a target";
+  };
+  if (!save_in_flight) {
+    throw "save completion without an active request";
+  };
+  if (value.request_id != 1) {
+    throw "unexpected document request id";
+  };
+  save_in_flight = false;
+  if (value.status != "succeeded") {
+    return map {
+      mutations: list(
+        map {type: "set_text", target: save_target, text: value.error_message}
+      )
+    };
+  };
+  return map {
+    mutations: list(
+      map {type: "set_text", target: save_target, text: value.payload}
+    )
+  };
+};
+
+export("save_document");
+export("on_service_completion");

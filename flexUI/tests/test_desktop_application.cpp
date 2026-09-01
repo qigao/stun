@@ -5,6 +5,7 @@
 
 #include <tinytest.hpp>
 
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -16,6 +17,11 @@
 #include <vector>
 
 namespace {
+
+void count_completion_wakeup(void *context) noexcept {
+  static_cast<std::atomic<std::uint64_t> *>(context)->fetch_add(
+      1, std::memory_order_release);
+}
 
 class TestStorageEndpoint final : public flexUI::IApplicationServiceEndpoint {
 public:
@@ -386,6 +392,60 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check(built.application->try_receive_service_completion().status ==
           flexUI::ApplicationServicePollStatus::Empty);
     check_equal(built.application->service_statistics().completed, std::uint64_t{1});
+  }
+
+  it("forwards a borrowed completion wakeup without consuming the record") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    std::atomic<std::uint64_t> wakeups{0};
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-controller", fake_factory(probe))
+        .completion_wakeup({count_completion_wakeup, &wakeups});
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto request = built.application->try_receive_service_request();
+    check(request);
+
+    flexUI::ApplicationCompletion completion;
+    completion.token = request.request->token;
+    completion.payload = "worker-result";
+    flexUI::ApplicationCompletionPostResult posted;
+    std::thread worker([&] {
+      posted = built.application->completion_mailbox().try_post(completion);
+    });
+    worker.join();
+
+    check(posted);
+    check_equal(wakeups.load(std::memory_order_acquire), std::uint64_t{1});
+    auto resolved = built.application->try_receive_service_completion();
+    check(resolved);
+    check_equal(resolved.completion->payload, std::string("worker-result"));
+  }
+
+  it("accepts completion wakeup configuration on a moved-from builder") {
+    std::atomic<std::uint64_t> wakeups{0};
+    flexUI::DesktopApplicationBuilder source(nullptr);
+    auto destination = std::move(source);
+
+    auto &configured = source.completion_wakeup(
+        {count_completion_wakeup, &wakeups});
+    check_equal(&configured, &source);
+    auto rejected = source.build();
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    check_equal(wakeups.load(std::memory_order_acquire), std::uint64_t{0});
+    static_cast<void>(destination);
   }
 
   it("dispatches one service completion through the optional controller export") {

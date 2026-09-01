@@ -46,6 +46,20 @@ struct ApplicationCompletionLimits {
   std::size_t max_total_string_bytes = kDefaultMaxTotalStringBytes;
 };
 
+using ApplicationCompletionWakeupFn = void (*)(void *context) noexcept;
+
+/// Allocation-free notification invoked after a completion is published.
+///
+/// The callback and context are borrowed until close() has quiesced all
+/// producers. Notifications carry no data; consumers must still poll the
+/// mailbox on its owner thread.
+struct ApplicationCompletionWakeup {
+  ApplicationCompletionWakeupFn callback = nullptr;
+  void *context = nullptr;
+
+  explicit operator bool() const noexcept { return callback != nullptr; }
+};
+
 enum class ApplicationCompletionErrorCode {
   None,
   InvalidCapacity,
@@ -59,6 +73,7 @@ enum class ApplicationCompletionErrorCode {
   WrongThread,
   AllocationFailed,
   InternalInvariant,
+  InvalidWakeup,
 };
 
 struct ApplicationCompletionError {
@@ -138,7 +153,8 @@ class ApplicationCompletionMailbox final
     : public IApplicationServiceCompletionSink {
 public:
   static ApplicationCompletionMailboxCreateResult create(std::uint64_t initial_generation,
-                                                         ApplicationCompletionLimits limits = {});
+                                                         ApplicationCompletionLimits limits = {},
+                                                         ApplicationCompletionWakeup wakeup = {});
 
   ~ApplicationCompletionMailbox();
 

@@ -1,8 +1,8 @@
 # FlexUI Desktop 应用运行时设计
 
-- 状态：分阶段实施中（XML/typed registry/controller/application candidate 已落地；desktop host、
-  自动事件桥与 plugin service 尚未完成）
-- 日期：2026-08-14
+- 状态：分阶段实施中（XML/CSS/TurboScript/DLL/gCanvas editor 闭环已落地；dirty binding、
+  错误 UI 与完整 package discovery 尚未完成）
+- 日期：2026-09-01
 - 首要平台：Windows 桌面，OpenGL 为默认渲染后端
 - 控制器语言：TurboScript
 - 扩展方式：版本化纯 C ABI DLL 应用服务插件
@@ -138,6 +138,7 @@ flowchart TB
     subgraph Runtime[DesktopApplication candidate]
         Host[IDesktopHost]
         Controller[ScriptController]
+        Dispatcher[ApplicationServiceDispatcher]
         Services[Capability ServiceRegistry]
         Box[Box: UI single source]
         Pipeline[Event / Binding / Layout / Paint]
@@ -160,7 +161,8 @@ flowchart TB
     BindingCompiler --> Box
     ScriptCompiler --> Controller
     PluginLoader --> Services
-    Controller --> Services
+    Controller -->|bounded commands| Dispatcher
+    Dispatcher --> Services
     Controller -->|bounded UiMutationBatch| Box
     Host -->|normalized Event| Pipeline
     Box --> Pipeline
@@ -176,9 +178,13 @@ flowchart TB
 flowchart LR
     Desktop[FlexUI::Desktop] --> Document[FlexUI::Document]
     Desktop --> Controller[FlexUI::Controller]
-    Desktop --> PluginHost[FlexUI::PluginHost]
     Desktop --> Core[FlexUI::Core]
     Desktop --> GWindow[gCanvas::Window]
+
+    GPluginHost[FlexUI::GCanvasPluginWindowHost] --> WindowHost[FlexUI::GCanvasWindowHost]
+    GPluginHost --> PluginHost[FlexUI::PluginHost]
+    WindowHost --> Controller
+    WindowHost --> GWindow
 
     Document --> Core
     Document --> FlexRuntime[Flex::Runtime]
@@ -187,16 +193,21 @@ flowchart LR
     FlexRender --> GCanvas[gCanvas::Core / OpenGL]
 
     Controller --> Core
+    Controller --> Services[FlexUI::Services]
     TurboAdapter[FlexUI::ControllerTurboScript] --> Controller
     TurboAdapter --> TurboScript[TurboScript package]
     PluginHost --> TurboUtils[TurboUtils::Core]
     PluginHost --> TurboParser[TurboParser::Parser TOML facade]
 
     classDef optional stroke-dasharray: 5 5;
-    class TurboAdapter,TurboScript,PluginHost optional;
+    class TurboAdapter,TurboScript,PluginHost,GPluginHost optional;
 ```
 
-依赖必须单向。TurboScript、DLL loader、GLFW 和平台头不能出现在 `FlexUI::Core` 公共头中。
+依赖必须单向。`ApplicationServiceDispatcher` 位于 `FlexUI::Controller`，只依赖 application facade 与
+`FlexUI::Services`；它不依赖 PluginHost、动态库 loader 或平台窗口。PluginHost 只是可选的 registry
+生产者。`FlexUI::GCanvasPluginWindowHost` 只在 PluginHost 和 gCanvas window target 同时存在时生成，
+负责组合两者的所有权；独立的 `FlexUI::GCanvasWindowHost` 仍不依赖 PluginHost。TurboScript、DLL
+loader、GLFW 和平台头不能出现在 `FlexUI::Core` 公共头中。
 
 ### 5.2 设计模式边界
 
@@ -204,6 +215,7 @@ flowchart LR
 - `DesktopApplicationBuilder`：Builder，承载多项可选配置和严格 build validation。
 - `IDesktopHost` / `GCanvasWindowHost`：Bridge + Adapter，隔离平台窗口与 gCanvas helper。
 - `IScriptModule` / `TurboScriptModule`：Strategy + Adapter，隔离 controller 与脚本 ABI。
+- `ApplicationServiceDispatcher`：有界 owner-thread Mediator，隔离 application request 与具体 endpoint。
 - `UiMutation`：`std::variant` Command，已知有限操作集合，不建立深继承树。
 - `PluginManager`：生命周期 Facade；插件间只经过 service registry 或 event queue。
 - `ControllerState`：显式 State machine，禁止散落布尔状态控制 reload/fault。
@@ -579,9 +591,13 @@ facade 解析；不开插件时不应引入 PluginHost/TOML 运行路径。Plugi
   未完成 token、destroy 和 unload。
 - completion sink 是非拥有指针。因此调用方必须在销毁 `DesktopApplication`/mailbox 前成功 stop PluginHost；
   PluginHost 析构的无限 join 是防止 use-after-unload 的安全网，不替代正确销毁顺序。
+- 可选 `GCanvasPluginWindowHost::create()` 消费完整的 `PluginHostBuildResult`，要求 host 处于 `Started`、
+  与调用线程共享 owner thread，且 registry 必须与 `PluginHost::registry()` 是同一 snapshot。验证成功后，
+  它把该 snapshot 和显式 capability manifest 注入 `DesktopApplicationBuilder`，因此 application request
+  table 与插件 endpoint 不会维护两份 routing 状态。任何不一致都在创建窗口前失败。
 
 当前仍只承载受限 opaque payload 和长度契约，尚未实现 tagged value/schema、目录 discovery、权限
-API mediation/OS sandbox、签名验证、热重载、进程隔离和 TurboScript completion event。因此“可加载”
+API mediation/OS sandbox、签名验证、热重载和进程隔离。因此“可加载”
 只适用于调用方显式指定的可信 DLL，不表示可运行任意第三方 DLL。
 
 ### 9.6 Plugin SDK 安装与版本契约
@@ -607,6 +623,42 @@ minor/patch；改变调用约定、结构布局、ownership/lifetime 或错误�
 独立示例 `flexUI/examples/plugin_echo` 只消费安装头和归档：它构建纯 C DLL，再由 C++ host 完成
 load/start/echo completion/stop/join/unload。`test_plugin_install_consumer` 每次先安装 staging component，
 再配置这个外部工程，因而可检测缺失 archive、泄漏源码树 include、漏导依赖和不可运行 DLL。
+
+### 9.7 桌面编辑器端到端参考实现
+
+`flexUI/examples/desktop_editor` 是第一条完整应用闭环，不是第二套运行时：
+
+```mermaid
+sequenceDiagram
+    participant UI as editor.xml + editor.css
+    participant TBS as editor.tbs (JIT)
+    participant Host as GCanvasPluginWindowHost
+    participant DLL as document_service DLL
+    UI->>TBS: compiled click event snapshot
+    TBS->>UI: Save → Saving... mutation
+    TBS->>Host: document.save/1 command
+    Host->>DLL: bounded save request
+    DLL->>Host: owning completion copy
+    Host->>TBS: on_service_completion(record)
+    TBS->>UI: Saved... mutation
+    Host->>Host: application shutdown before plugin stop/join
+```
+
+C++ `main.cpp` 只负责读取同目录部署的有界资源、选择交互或 `--smoke` 窗口配置并组合既有 builder；
+它不手写 Element tree，不持有 DLL 函数指针，也不重复实现 request routing。`document_service.c` 只公开
+版本化纯 C ABI，插件内分配由插件内销毁，request/completion 的 byte view 只在调用期间借用。
+
+`editor.tbs` 是保存交互状态的唯一事实源，只保留 `save_target` 与 `save_in_flight`。脚本最多允许一个
+pending save，因此 script request ID 1 只在 terminal completion 释放 gate 后复用；跨请求及跨 reload
+身份由 application 生成的单调 `ApplicationRequestToken` 区分。completion 必须同时满足“存在 active
+save”与“script request ID 匹配”才能清除 gate，mismatched 或 duplicate completion 直接失败且不产生
+部分 mutation。`test_desktop_editor_controller` 直接加载发布的 `editor.tbs`，用 JIT adapter 覆盖重复点击、
+失败后恢复、成功、mismatched 和 duplicate completion，避免示例脚本与测试副本漂移。
+
+构建目录把 XML/CSS/TBS 部署到可执行文件旁的 `desktop_editor_assets/`，DLL 与可执行文件同目录；
+install 规则保持相同相对布局，二进制中不写入源码树或本机绝对路径。CTest 的 hidden OpenGL
+`--smoke` 模式执行真实 click → JIT → DLL → completion → UI mutation 链路，并以固定 pump 上限
+验证不会把缺失 completion 隐藏成无限等待。当前 install-tree 运行验证仍需独立发布 preset 覆盖。
 
 ## 10. 状态所有权
 
@@ -677,8 +729,8 @@ resolution → controller mount 的顺序生成 detached candidate。成功后�
 `unique_ptr` 交换替换 Box/program/controller，失败保持旧实例。应用及其所有访问限定在调用
 `build()` 的 owner thread，跨线程 reload/event dispatch 返回 `WrongThread`。renderer 由调用方借用
 并必须比应用存活更久。`dispatch_event()` 已通过独立 framework observer 连接 EventDispatcher 与
-controller，不会覆盖现有 C++ global callback。PluginManager 与 DesktopHost/native window 仍属于
-后续阶段。
+controller，不会覆盖现有 C++ global callback。PluginHost 纳入 application transaction 与其余平台
+service 仍属于后续阶段。
 
 ## 12. 事件、service 与渲染顺序
 
@@ -821,8 +873,9 @@ completion 转为 TurboScript controller event。其协议如下：
 | 拓扑 | 多个 service worker producer、一个 application owner-thread consumer；单 consumer 按全局 publish sequence FIFO 领取 |
 | 容量 | 默认 256 个 pointer slot，配置必须是非零 2 的幂；默认 payload 64 KiB、error code 256 B、error message 16 KiB、字符串总量 64 KiB |
 | 背压 | `try_post()` 不因容量阻塞；满时返回 `QueueFull`，不扩容、不覆盖、不丢弃、不 fallback |
+| 唤醒 | 可在构建时注入 borrowed `noexcept` 函数指针与 opaque context；只在 publish 成功后调用一次，不携带数据，拒绝路径不调用 |
 | 失败 | 区分 invalid capacity/generation/token/status、string limit、allocation、full、closed、stale generation、wrong thread 和 internal invariant |
-| 关闭 | owner 先停止接受新 post，等待已进入的非阻塞 producer 离开，再取消并释放所有已发布 record；重复 close 成功且取消数为零 |
+| 关闭 | owner 先停止接受新 post，等待已进入的非阻塞 producer（包含其 wakeup callback）离开，再取消并释放所有已发布 record；重复 close 成功且取消数为零 |
 | 观测 | 暴露 current/peak depth、published、consumed、cancelled、queue-full、closed/stale/invalid rejection 计数 |
 
 `ApplicationRequestToken` 是 `{host_request_id, application_generation}`，两部分都必须非零。script 自己的
@@ -900,8 +953,13 @@ sequenceDiagram
 当前桥接已完成到 controller：host 可以取得 service request，通过不可变 registry 做 capability、
 operation 与 payload limit 校验并解析 C++ endpoint，再把 worker completion 恢复为原始 script request ID；
 application owner 可选择 raw poll，或调用 `try_dispatch_service_completion()` 进入脚本事务。DLL C ABI 与
-PluginHost stop/join 已完成；typed payload schema、把 PluginHost 生命周期纳入 DesktopApplication
-transaction，以及 native event-loop wakeup 仍是后续边界。当前仅允许 host 明确加载可信 DLL。
+PluginHost stop/join 已完成。`ApplicationServiceDispatcher` 现提供不依赖 PluginHost/window 的 owner-thread
+自动路由：每次 pump 有界取得 FIFO request、重复解析 endpoint 并调用 `try_submit()`；endpoint 接受后拥有
+唯一 completion 尝试，拒绝或抛异常则转换成一个稳定错误码的 failed completion，不选择 fallback。若
+mailbox 已满，dispatcher 最多保留一个待投递 terminal completion，在投递成功前不再消费 request。
+gCanvas host 为每个 application 创建一个 dispatcher；直接使用 `DesktopApplication` 的调用方仍可选择
+raw request polling。typed payload schema、把 PluginHost 生命周期纳入 DesktopApplication transaction
+仍是后续边界；当前仍仅允许 host 明确加载可信 DLL。
 
 生命周期回归还覆盖独立 static-CRT test DLL：插件以 `/MTd`/`/MT` 构建，host 以 `/MDd`/`/MD`
 构建，只通过 borrowed byte views 和 caller-owned error buffer 通信。测试在 `submit()` 返回后修改 caller
@@ -936,9 +994,15 @@ commit → allocation-free publish。handler/adapter 失败会消费当前 compl
 
 raw `try_receive_service_completion()` 与 scripted dispatch 共享唯一 mailbox consumer，同一 application
 不得混用。reload 的 generation advance 会先淘汰旧 completion，close 会在状态发布前关闭 mailbox，因此
-旧/关闭 completion 不会到达替换或关闭后的 controller。`EventDriven` native host 还需要由 producer/host
-提供显式 wakeup；在 wakeup 接入前，只能在已有 pump 边界或 bounded continuous loop 调用 dispatch，不能
-通过 busy polling 补偿。
+旧/关闭 completion 不会到达替换或关闭后的 controller。`GCanvasWindowHost` 在 application build 时注入
+allocation-free wakeup：worker 成功 publish 后调用 `Window::trigger_events()`，使 `wait_events()` 返回；
+通知不携带 completion，也不替代 mailbox polling。通知允许冗余，因为 mailbox 仍是唯一事实源。
+
+每个 host pump 在 `on_frame` 前最多 dispatch `max_service_completions_per_pump` 条，默认 64、合法范围
+1..4096；达到上限后再次投递空事件，下一轮继续处理，不 busy-spin。controller 没有
+`on_service_completion` 时 host 不消费 record，raw polling 契约保持不变。handler 失败会消费该 record，
+映射为 `ServiceCompletionFailed`/`ServiceCompletion`，并沿 host 的 primary-error 路径请求关闭和 shutdown，
+不会重试或切换 raw fallback。
 
 ## 14. DesktopHost 与 gCanvas
 
@@ -969,8 +1033,28 @@ desktop adapter 层并公开依赖 `gCanvas::Window`，`FlexUI::Core` 不链接 
 等尚缺能力继续由 DesktopHost 的平台 service 补齐。长期 native/SDL host 可通过相同 Bridge 使用
 gCanvas HostManaged/External Context，不修改 FlexUI Core。
 
+当应用同时启用 DLL service 时，`FlexUI::GCanvasPluginWindowHost` 是额外的可选生命周期 Facade：
+
+```mermaid
+flowchart TB
+    Composition[GCanvasPluginWindowHost]
+    Composition -->|owns| WindowHost[GCanvasWindowHost]
+    Composition -->|owns| PluginHost[PluginHost]
+    PluginHost -->|immutable registry snapshot| Builder[DesktopApplicationBuilder]
+    Builder --> Application[DesktopApplication / mailbox]
+    WindowHost --> Application
+    Application --> Dispatcher[ApplicationServiceDispatcher]
+    Dispatcher -->|authorized request| PluginHost
+    PluginHost -->|completion while mailbox is alive| Application
+```
+
+该 target 不替代两个独立 target。只用 built-in service 的程序继续直接创建 `GCanvasWindowHost`；无窗口的
+服务程序继续独立持有 `PluginHost`。选择组合层的调用方把完整 plugin build result move 给 `create()`，
+之后不再手工注入另一份 registry 或自行决定相反的销毁顺序。
+
 Host 的所有权与销毁依赖固定为 `Window -> Context(borrowed) -> Flex renderer -> DesktopApplication ->
-input router -> listener subscriptions`，RAII 逆序先移除 scoped callback，再销毁 application/renderer，
+ApplicationServiceDispatcher -> input router -> listener subscriptions`，RAII 逆序先移除 scoped callback，
+再销毁 dispatcher/application/renderer，
 最后由 Window 销毁 GPU Context 与 native window。旧 `add_*` 和全局 `reset_listener()` 仅保留兼容
 用途，Host 只使用 move-only `WindowListenerSubscription`。Windows native pointer capture 仍由
 `gCanvas::Window` 独占平台实现；Host 在 pointer event 与 frame 后把 Box internal capture 同步到 native
@@ -983,9 +1067,20 @@ listener 任一构建阶段失败都返回带 stage/cause 的错误并按 RAII �
 
 ```mermaid
 flowchart LR
-    Wait[wait event / timed wait] --> Native[scoped native callbacks]
+    Worker[service worker publish] --> Mailbox[completion mailbox]
+    Mailbox -->|callback-only empty event| Wait[wait event / timed wait]
+    Wait --> Native[scoped native callbacks]
     Native --> Route[input router]
-    Route --> Frame[application on_frame]
+    Route --> Drain[bounded owner-thread completion drain]
+    Drain --> Controller[on_service_completion transaction]
+    Controller --> Dispatch[bounded service request dispatch]
+    Drain -->|no record / no handler| Dispatch
+    Dispatch --> Registry[resolve authorized endpoint]
+    Registry --> Endpoint[endpoint try_submit]
+    Endpoint -->|accepted async/sync| Mailbox
+    Endpoint -->|reject/throw| Terminal[failed completion]
+    Terminal --> Mailbox
+    Dispatch --> Frame[application on_frame]
     Frame --> Time[Box update_time]
     Time --> Update[bindings/layout/dirty paint]
     Update --> Submit[gCanvas submit + present]
@@ -998,7 +1093,13 @@ flowchart LR
 `EventDriven` 在无事件时使用 `wait_events()`，适合静态窗口；`Continuous` 使用有界 timed wait 驱动
 动画/主动刷新，避免 busy polling。`run()` 根据 steady clock 计算 delta 并上限裁剪；显式
 `pump_once(delta)` 对非有限、负数或超过配置上限的 delta fail fast。每轮都执行 binding/update，
-但 RenderManager 只在 dirty 时提交绘制；无 `on_frame` 时 controller 不产生脚本调用。
+但 RenderManager 只在 dirty 时提交绘制；无 `on_frame` 时 controller 不产生 frame 脚本调用。completion
+wakeup 可从任意 worker thread 触发，实际 mailbox consume、controller call 和 UI mutation 仍只发生在
+owner thread。达到 drain 上限时 host 再投递一个空事件，避免剩余 record 因重新进入 wait 而滞留。
+随后 host 通过 `ApplicationServiceDispatcher` 提交最多 `max_service_requests_per_pump` 条 request（默认
+64，合法范围 1..4096），再调用 `on_frame`。达到 request 上限或 terminal completion 因 mailbox 满而
+Blocked 时同样投递空事件。同步 endpoint 本轮产生的 completion 在下一轮 completion stage 消费，确保
+每轮固定遵循 completion → request → frame，且两个方向的 burst 都不能无限占用 UI thread。
 
 GLFW C callback 是严格的异常边界：坐标换算、metrics 同步或 listener 派发产生的首个异常由对应
 `Window` 保存，同一轮后续 native callback 不再推进状态，并在 `poll_events()`、`wait_events()` 或
@@ -1043,8 +1144,17 @@ program 和 source snapshot 仍可读取。`shutdown()` 只在 `CloseRequested` 
 - 插件 lifecycle callback 默认在 UI thread；耗时任务由插件提交到明确的 worker service。
 - worker 不能调用 UI API，只能向 application-owned 有界 completion mailbox 发布值语义消息；只有
   application owner thread 可以 receive、advance generation 或 close。
-- 窗口关闭顺序：停止新事件 → 取消/排空 command → controller unmount → plugin stop/join →
-  destroy Box/controller → 等待 GPU idle 并销毁 Context → destroy native window → unload DLL。
+- completion wakeup callback 与 context 由 builder 借用，必须比 application 和全部 producer 存活更久；
+  `request_close()` 通过 mailbox quiescence 保证返回前没有 callback 仍在执行。
+- 组合关闭顺序：停止新事件并关闭 request/mailbox → controller unmount，使 application 进入
+  `Shutdown` → PluginHost 逆序 stop/join → destroy PluginHost/卸载 DLL → destroy application/Box/
+  controller → 等待 GPU idle 并销毁 Context → destroy native window。
+- `GCanvasPluginWindowHost::shutdown(timeout)` 只接受非负 timeout。`JoinTimedOut`、`StopFailed` 或
+  `JoinFailed` 保留原始 `PluginHostError`，composition、application 和 PluginHost 都保持存活；owner
+  thread 可以再次调用 `shutdown()`。只有 plugin join 成功后才允许后续 RAII 释放 mailbox。
+- `request_close()` 只推进窗口/application close，不等待 worker；`pump_once()`/`run()` 观察到
+  application `Shutdown` 后才使用构造时 timeout 自动 stop。析构路径使用无限 join 安全网，避免强制
+  unload 仍在执行的插件代码。
 - DLL 在函数调用、callback、worker 或 borrowed buffer 尚存活时不得卸载。
 
 ## 16. 错误语义
@@ -1062,6 +1172,8 @@ program 和 source snapshot 仍可读取。`shutdown()` 只在 `CloseRequested` 
 - optional plugin 缺失：仅当 manifest 显式 optional 时允许继续，capability 查询明确返回 unavailable。
 - controller callback 错误或超时：丢弃未提交 batch，controller 进入 Faulted，显式 reload 才恢复。
 - service command 失败：产生类型化 completion error，不伪装成成功，也不自动改用其他 service。
+- service completion handler 失败：fault controller，host 保留嵌套 application/controller cause，随后
+  进入受控 shutdown；当前 record 不重试且不回退 raw consumer。
 - GPU/backend 不可用：构建失败，不自动从 OpenGL 切换 Vulkan 或反向切换。
 - 错误只在被宿主消费的边界记录一次，避免 parser、adapter、controller 重复打印同一原因。
 
@@ -1096,6 +1208,8 @@ FlexUI::TailwindCSS
 FlexUI::Controller
 FlexUI::ControllerTurboScript
 FlexUI::PluginHost
+FlexUI::GCanvasWindowHost
+FlexUI::GCanvasPluginWindowHost
 FlexUI::Desktop
 ```
 
@@ -1104,6 +1218,8 @@ FlexUI::Desktop
 - `FLEXUI_ENABLE_TURBOSCRIPT` 控制 adapter；启用时使用
   `find_package(TurboScript CONFIG REQUIRED)`。
 - `FLEXUI_ENABLE_PLUGINS` 控制 DLL host；关闭时不编译 loader，静态应用行为不变。
+- `FlexUI::GCanvasPluginWindowHost` 只在 `FlexUI::PluginHost` 与 `FlexUI::GCanvasWindowHost` 两个 target
+  都存在时生成；关闭插件不能改变独立 gCanvas host 的 target graph。
 - `FlexUI::Desktop` 私有链接平台 window adapter；FlexUI 公共文档/状态类型不包含 GLFW/Win32。
 - DLL 使用单独 SDK target，只导出稳定 C header 和 import definitions。
 - Debug/Release runtime、CRT、calling convention、visibility 和 struct packing 都进入 ABI compatibility test。
@@ -1128,7 +1244,9 @@ FlexUI::Desktop
 3. controller 先接 fake module，不改变默认 Box 事件路径。
 4. TurboScript adapter 由显式 feature 和 application builder 启用。
 5. DLL plugin host 先独立测试，再向 controller service bridge 注册 capability。
-6. DesktopApplication 示例与现有手写 Box 示例并存，稳定后再迁移主示例。
+6. 同时使用 gCanvas 与 DLL service 的 host 可迁移到 `GCanvasPluginWindowHost`，移除手工 registry 注入和
+   PluginHost 销毁排序；两个独立 target 保持兼容。
+7. DesktopApplication 示例与现有手写 Box 示例并存，稳定后再迁移主示例。
 
 ### 19.3 回滚
 

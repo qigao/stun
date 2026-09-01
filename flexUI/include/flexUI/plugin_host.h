@@ -215,6 +215,9 @@ public:
   /// JoinTimedOut leaves the host in Stopping and may be retried. A negative
   /// timeout is invalid; milliseconds::max() waits without a deadline.
   PluginHostResult stop(std::chrono::milliseconds timeout);
+  /// Reports whether the caller may perform owner-thread lifecycle work.
+  /// This query is safe from any thread and does not advance plugin state.
+  bool is_owner_thread() const noexcept;
   PluginHostState state() const noexcept;
   PluginHostStatistics statistics() const noexcept;
   std::shared_ptr<const ApplicationServiceRegistry> registry() const noexcept;

@@ -1,10 +1,12 @@
 #pragma once
 
 #include "flexUI/application.h"
+#include "flexUI/application_service_dispatcher.h"
 #include "flexUI/gcanvas_application_input.h"
 
 #include <gcanvas/window.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -16,10 +18,21 @@ enum class GCanvasWindowHostFrameMode {
 };
 
 struct GCanvasWindowHostConfig {
+  static constexpr std::size_t kDefaultMaxServiceCompletionsPerPump = 64;
+  static constexpr std::size_t kMaximumServiceCompletionsPerPump = 4096;
+  static constexpr std::size_t kDefaultMaxServiceRequestsPerPump =
+      ApplicationServiceDispatcherLimits::kDefaultRequestsPerPump;
+  static constexpr std::size_t kMaximumServiceRequestsPerPump =
+      ApplicationServiceDispatcherLimits::kMaximumRequestsPerPump;
+
   gcanvas::WindowConfig window;
   GCanvasWindowHostFrameMode frame_mode = GCanvasWindowHostFrameMode::EventDriven;
   double continuous_interval_seconds = 1.0 / 60.0;
   double max_frame_delta_seconds = 0.25;
+  std::size_t max_service_completions_per_pump =
+      kDefaultMaxServiceCompletionsPerPump;
+  std::size_t max_service_requests_per_pump =
+      kDefaultMaxServiceRequestsPerPump;
 };
 
 enum class GCanvasWindowHostStage {
@@ -34,6 +47,8 @@ enum class GCanvasWindowHostStage {
   Frame,
   PointerCapture,
   Shutdown,
+  ServiceCompletion,
+  ServiceDispatch,
 };
 
 enum class GCanvasWindowHostErrorCode {
@@ -51,6 +66,8 @@ enum class GCanvasWindowHostErrorCode {
   PointerCaptureFailed,
   ShutdownFailed,
   NativeEventFailed,
+  ServiceCompletionFailed,
+  ServiceDispatchFailed,
 };
 
 struct GCanvasWindowHostError {
@@ -59,6 +76,7 @@ struct GCanvasWindowHostError {
   std::string message;
   DesktopApplicationError application_error;
   GCanvasApplicationInputError input_error;
+  ApplicationServiceDispatcherError service_dispatcher_error;
 
   explicit operator bool() const noexcept {
     return code != GCanvasWindowHostErrorCode::None;
