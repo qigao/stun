@@ -69,6 +69,7 @@ namespace gcanvas
         bool resizeable = true;
         bool visible = true;
         bool vsync = false;
+        /// Uses framebuffer pixels as logical coordinates and disables automatic DPI scaling.
         bool native_pixel_size = false;
 
         Backend backend = Backend::OpenGL;
@@ -106,15 +107,23 @@ namespace gcanvas
         Backend get_backend() const noexcept;
         bool is_running();
         bool get_vsync();
+        /// Returns the current logical canvas width, not framebuffer pixels.
         int get_width();
+        /// Returns the current logical canvas height, not framebuffer pixels.
         int get_height();
+        /// Returns the platform content scale on each axis. Window dimensions
+        /// and pointer events remain in gCanvas logical coordinates.
+        gcanvas::vec2 get_content_scale();
         gcanvas::vec2 get_position();
         gcanvas::vec2 get_scale();
         gcanvas::vec2 get_offset();
+        /// Returns the effective uniform render scale. Pixel-native
+        /// windows return one even when the platform content scale is larger.
         float get_dpi_scale();
 
         void set_title(const std::string& title);
         void set_position(int x, int y);
+        /// Requests a positive logical canvas size. The platform may apply native size limits.
         void set_size(int width, int height);
         void set_vsync(bool vsync);
         void set_scale(float x, float y);

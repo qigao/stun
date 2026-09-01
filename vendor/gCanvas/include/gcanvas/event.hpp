@@ -177,6 +177,7 @@ namespace gcanvas
 
     struct GCANVAS_API resize_event
     {
+        // Logical canvas dimensions, never framebuffer pixel dimensions.
         int width;
         int height;
     };
@@ -189,6 +190,7 @@ namespace gcanvas
 
     struct GCANVAS_API mouse_move_event
     {
+        // Logical coordinates relative to the window content origin.
         double x;
         double y;
     };
@@ -198,6 +200,7 @@ namespace gcanvas
         mouse_button button;
         input_action action;
         mouse_mod mods;
+        // Logical coordinates relative to the window content origin.
         double x;
         double y;
     };

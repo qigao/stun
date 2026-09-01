@@ -50,7 +50,8 @@ private:
   std::shared_ptr<RunProbe> probe_;
 };
 
-flexUI::GCanvasWindowHostConfig host_config(gcanvas::Backend backend) {
+flexUI::GCanvasWindowHostConfig host_config(gcanvas::Backend backend,
+                                             bool native_pixel_size = true) {
   flexUI::GCanvasWindowHostConfig config;
   config.window.title = "FlexUI gCanvas host test";
   config.window.width = kTestWidth;
@@ -59,7 +60,7 @@ flexUI::GCanvasWindowHostConfig host_config(gcanvas::Backend backend) {
   config.window.decorated = false;
   config.window.resizeable = false;
   config.window.vsync = false;
-  config.window.native_pixel_size = true;
+  config.window.native_pixel_size = native_pixel_size;
   config.window.backend = backend;
   return config;
 }
@@ -116,6 +117,23 @@ spec("FlexUI gCanvas window host owns the GPU desktop lifecycle") {
 
   it("drives a hidden Vulkan application") {
     exercise_backend(gcanvas::Backend::Vulkan);
+  }
+
+  it("keeps a DPI-scaled OpenGL viewport in logical coordinates") {
+    auto built = flexUI::GCanvasWindowHost::create(
+        host_config(gcanvas::Backend::OpenGL, false), application_builder());
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    check_within(built.host->application().box().viewport_width(),
+                 static_cast<float>(kTestWidth), 0.001F);
+    check_within(built.host->application().box().viewport_height(),
+                 static_cast<float>(kTestHeight), 0.001F);
+    check(built.host->pump_once(0.0));
+    check(built.host->request_close());
+    check(built.host->pump_once(0.0));
   }
 
   it("rejects invalid configuration before native window creation") {

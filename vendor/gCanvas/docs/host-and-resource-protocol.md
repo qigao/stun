@@ -30,6 +30,31 @@ owned by that window. A host handles the notification by clearing its own UI foc
 capture state. Focus gain does not restore either state automatically. Native capture is also
 released during window destruction; this cleanup does not change listener ownership.
 
+## Window coordinate contract
+
+The GLFW adapter keeps three coordinate domains separate:
+
+- `Window::get_width/get_height`, `resize_event`, `mouse_move_event`, and the position in
+  `mouse_button_event` use logical canvas coordinates.
+- `Context::get_width/get_height` and `resize_context()` use physical framebuffer pixels.
+- `Window::get_content_scale()` reports the platform x/y content scale. The source-compatible
+  `CanvasMetrics::dpi_scale` and `Window::get_dpi_scale()` remain a uniform effective scale.
+
+This follows GLFW's distinction between [screen coordinates and pixels](https://www.glfw.org/docs/latest/intro)
+and its [window, framebuffer, and content-scale callbacks](https://www.glfw.org/docs/latest/window.html).
+
+For a non-empty target, the adapter derives the logical extent as
+`round(framebuffer_extent / effective_content_scale)`. It converts a GLFW cursor coordinate with
+`logical_extent / window_screen_extent`; it does not assume that GLFW screen coordinates are
+pixels or that every platform needs a direct DPI division. `set_size()` applies the inverse of the
+same observed ratio. This covers both Windows screen-pixel coordinates and platforms whose window
+coordinates are already points.
+
+`native_pixel_size=true` makes the effective render scale one and defines the logical extent as
+the framebuffer extent. A zero framebuffer retains the last non-empty logical viewport while
+presentation is suspended. Window-size, framebuffer-size, and content-scale callbacks refresh the
+same metric state; only the physical extent reaches the OpenGL viewport or Vulkan swapchain.
+
 The frame state is:
 
 ```text

@@ -104,6 +104,12 @@ no public `destroy()` operation. Input image/font buffers are copied during crea
 `Image::update_data()` updates the retained pixels and synchronously uploads them through the
 creating backend.
 
+Window sizes and pointer events use logical canvas coordinates. `Context::get_width/get_height`
+report the physical framebuffer extent, while `canvas.metrics()` carries the logical extent and
+effective DPI transform used by drawing commands. `Window::get_content_scale()` exposes the raw
+platform scale. Set `WindowConfig::native_pixel_size` only when the application intentionally
+wants one logical unit per framebuffer pixel.
+
 Memory-backed images require an explicit byte length so the canvas can reject truncated spans:
 
 ```cpp

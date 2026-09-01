@@ -434,7 +434,7 @@ GCanvasWindowHost::create(GCanvasWindowHostConfig config,
     impl->input = std::make_unique<GCanvasApplicationInputRouter>(
         *impl->application);
     auto resized = impl->input->resize(
-        {impl->context->get_width(), impl->context->get_height()});
+        {impl->window->get_width(), impl->window->get_height()});
     if (!resized) {
       return {{}, input_failure(std::move(resized.error))};
     }

@@ -221,10 +221,10 @@ public:
       context_.set_metrics({logical_width, logical_height, 1.0f, 1.0f,
                             0.0f, 0.0f, pixel_ratio});
       context_.resize_context(logical_width, logical_height);
-    } else if (!nearly_equal(width, static_cast<float>(context_.get_width())) ||
-               !nearly_equal(height, static_cast<float>(context_.get_height()))) {
+    } else if (!nearly_equal(width, static_cast<float>(context_.metrics().width)) ||
+               !nearly_equal(height, static_cast<float>(context_.metrics().height))) {
       throw std::invalid_argument(
-          "Flex frame dimensions must match the borrowed gCanvas context");
+          "Flex frame dimensions must match the borrowed gCanvas logical metrics");
     }
 
     width_ = width;

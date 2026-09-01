@@ -229,6 +229,7 @@ namespace gcanvas
         //void update_storage_buffer();
 
         void queue_color_call();
+        void clear_draw_queue() noexcept;
     protected:
         void register_image(Image* image) override;
         void register_font(Font* font) override;

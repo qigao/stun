@@ -793,6 +793,18 @@ flowchart LR
 `pump_once(delta)` 对非有限、负数或超过配置上限的 delta fail fast。每轮都执行 binding/update，
 但 RenderManager 只在 dirty 时提交绘制；无 `on_frame` 时 controller 不产生脚本调用。
 
+窗口 logical size、GPU framebuffer extent 与平台 content scale 已在 gCanvas Window 内分流。对非空
+target，逻辑尺寸为 `round(framebuffer / effective content scale)`；GLFW cursor 通过
+`logical extent / window screen extent` 映射，因此既不假定 screen coordinates 就是像素，也不在所有
+平台固定除以 DPI。`Window::set_size()` 使用同一已观测比例的逆变换。`native_pixel_size=true` 时 effective
+scale 为 1，逻辑尺寸直接等于 framebuffer 像素尺寸。Window size、framebuffer size 与 content-scale
+callback 更新同一 metrics 状态；FlexUI resize/pointer 只接收 logical coordinates，只有 physical extent
+进入 OpenGL viewport 或 Vulkan swapchain。`CanvasMetrics` 更新不再覆盖 Context physical extent。
+
+任一 framebuffer 维度为零表示暂时不可呈现：backend 保留最后一个非空 logical viewport，丢弃该帧的
+draw queue 与 transient path resource，不 present、不积累待恢复后回放的旧命令；负 framebuffer extent
+直接拒绝。平台原生最小窗口尺寸仍可钳制 `set_size()` 请求，回调发布的是实际 logical size。
+
 ## 15. 线程与关闭协议
 
 `DesktopApplication` 是 application lifecycle 的唯一事实源：

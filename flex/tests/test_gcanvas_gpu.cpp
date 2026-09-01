@@ -2,7 +2,7 @@
 #include "flex/render/engines/gcanvas.h"
 
 #include <gcanvas/window.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -232,6 +232,22 @@ void validate_backend(gcanvas::Backend backend) {
   auto window = gcanvas::Window::create(config);
   gcanvas::Context& context = window->create_context();
   auto renderer = flex::render::engines::gcanvas::create_renderer(context);
+
+  const int framebuffer_width = context.get_width();
+  const int framebuffer_height = context.get_height();
+  const gcanvas::CanvasMetrics window_metrics = context.metrics();
+  context.set_metrics({kCanvasWidth / 2, kCanvasHeight / 2, 1.0f, 1.0f,
+                       0.0f, 0.0f, 2.0f});
+  check_equal(context.get_width(), framebuffer_width);
+  check_equal(context.get_height(), framebuffer_height);
+  check_nothrow(renderer->begin_frame(static_cast<float>(kCanvasWidth / 2),
+                                      static_cast<float>(kCanvasHeight / 2), 1.0f));
+  renderer->end_frame();
+  context.present_frame();
+  check_throws_as(renderer->begin_frame(static_cast<float>(kCanvasWidth),
+                                        static_cast<float>(kCanvasHeight), 1.0f),
+                  std::invalid_argument);
+  context.set_metrics(window_metrics);
 
   auto definition = flex::Definition::load(standard_scene_source());
   check_true(definition != nullptr);
@@ -480,7 +496,8 @@ void validate_backend(gcanvas::Backend backend) {
   pixels = context.read_pixels();
   context.present_frame();
   check_true(count_bright_pixels(pixels, backend, 48, 6, 73, 30) >= 8U);
-  check_size_eq(count_bright_pixels(pixels, backend, 80, 6, 95, 32), 0U);
+  check_equal(count_bright_pixels(pixels, backend, 80, 6, 95, 32),
+              std::size_t{0});
 
   renderer->begin_frame(static_cast<float>(kCanvasWidth),
                         static_cast<float>(kCanvasHeight), 1.0f);

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -75,6 +76,42 @@ namespace
         const int physical_y = static_cast<int>(
             std::lround((y + metrics.offset_y) * metrics.scale_y * metrics.dpi_scale));
         return sample_pixel(pixels, backend, width, height, physical_x, physical_y);
+    }
+
+    bool verify_zero_framebuffer_discards_commands(gcanvas::Window& window,
+                                                   gcanvas::Context& canvas,
+                                                   const std::string& backend, int width,
+                                                   int height)
+    {
+        canvas.resize_context(0, 0);
+        canvas.set_fill_color(gcanvas::color(231, 76, 60, 255));
+        canvas.fill_rect(4.0f, 4.0f, 12.0f, 12.0f);
+        canvas.draw_frame();
+        canvas.present_frame();
+
+        window.set_size(width + 1, height + 1);
+        window.poll_events();
+        window.set_size(width, height);
+        window.poll_events();
+        canvas.set_clear_color(gcanvas::color(0, 0, 0, 255));
+        canvas.set_fill_color(gcanvas::color(46, 204, 113, 255));
+        canvas.fill_rect(40.0f, 20.0f, 12.0f, 12.0f);
+        canvas.draw_frame();
+        const auto pixels = canvas.read_pixels();
+        const std::size_t pixel_count = pixels.size() / 4U;
+        const int framebuffer_width = static_cast<int>(std::lround(std::sqrt(
+            static_cast<double>(pixel_count) * static_cast<double>(width) /
+            static_cast<double>(height))));
+        const int framebuffer_height = static_cast<int>(
+            pixel_count / static_cast<std::size_t>(framebuffer_width));
+        const auto discarded = sample_logical_pixel(
+            canvas, pixels, backend, framebuffer_width, framebuffer_height, 8.0f, 8.0f);
+        const auto current = sample_logical_pixel(
+            canvas, pixels, backend, framebuffer_width, framebuffer_height, 44.0f, 24.0f);
+        canvas.present_frame();
+
+        return discarded[0] < 20 && discarded[1] < 20 && discarded[2] < 20 &&
+               current[0] < 70 && current[1] > 180 && current[2] < 130;
     }
 
     bool render_affine_image_and_verify(gcanvas::Context& canvas, gcanvas::Image& image,
@@ -328,7 +365,9 @@ namespace
                       << static_cast<int>(left[3]) << ") right=(" << static_cast<int>(right[0])
                       << ',' << static_cast<int>(right[1]) << ',' << static_cast<int>(right[2])
                       << ',' << static_cast<int>(right[3]) << ") bounds=(" << min_x << ',' << min_y
-                      << ")-(" << max_x << ',' << max_y << ")\n";
+                      << ")-(" << max_x << ',' << max_y << ") logical=(" << width << ','
+                      << height << ") dpi=" << canvas.metrics().dpi_scale
+                      << " pixel_bytes=" << pixels.size() << '\n';
             return false;
         }
 
@@ -442,6 +481,7 @@ int main(int argc, char** argv)
         constexpr int initial_height = 64;
         gcanvas::WindowConfig config{"gCanvas GPU test", initial_width, initial_height};
         config.visible = false;
+        config.decorated = false;
         config.vsync = false;
         const std::string backend = argv[1];
         if (backend == "opengl")
@@ -460,6 +500,17 @@ int main(int argc, char** argv)
 
         auto window = gcanvas::Window::create(config);
         gcanvas::Context& canvas = window->create_context();
+        std::optional<gcanvas::resize_event> observed_resize;
+        auto resize_subscription = window->subscribe_resize_listener(
+            [&](gcanvas::resize_event event) { observed_resize = event; });
+        if (window->get_width() != initial_width || window->get_height() != initial_height ||
+            canvas.metrics().width != initial_width || canvas.metrics().height != initial_height)
+        {
+            std::cerr << backend << " initial logical viewport mismatch: window=("
+                      << window->get_width() << ',' << window->get_height() << ") canvas=("
+                      << canvas.metrics().width << ',' << canvas.metrics().height << ")\n";
+            return 23;
+        }
 #ifdef _WIN32
         if (!window->supports_pointer_capture())
         {
@@ -520,6 +571,28 @@ int main(int argc, char** argv)
             return 10;
         }
 
+        bool rejected_negative_framebuffer = false;
+        try
+        {
+            canvas.resize_context(-1, canvas.get_height());
+        }
+        catch (const std::invalid_argument&)
+        {
+            rejected_negative_framebuffer = true;
+        }
+        if (!rejected_negative_framebuffer)
+        {
+            std::cerr << backend << " accepted a negative framebuffer extent\n";
+            return 22;
+        }
+
+        if (!verify_zero_framebuffer_discards_commands(
+                *window, canvas, backend, window->get_width(), window->get_height()))
+        {
+            std::cerr << backend << " retained commands while its framebuffer was empty\n";
+            return 21;
+        }
+
         if (backend == "vulkan")
         {
             const std::array<gcanvas::color, 5> queued_colors = {
@@ -545,8 +618,21 @@ int main(int argc, char** argv)
 
         constexpr int resized_width = 96;
         constexpr int resized_height = 48;
+        observed_resize.reset();
         window->set_size(resized_width, resized_height);
         window->poll_events();
+        if (!observed_resize || observed_resize->width != resized_width ||
+            observed_resize->height != resized_height || window->get_width() != resized_width ||
+            window->get_height() != resized_height || canvas.metrics().width != resized_width ||
+            canvas.metrics().height != resized_height)
+        {
+            std::cerr << backend << " logical resize contract mismatch: event=("
+                      << (observed_resize ? observed_resize->width : -1) << ','
+                      << (observed_resize ? observed_resize->height : -1) << ") window=("
+                      << window->get_width() << ',' << window->get_height() << ") canvas=("
+                      << canvas.metrics().width << ',' << canvas.metrics().height << ")\n";
+            return 24;
+        }
         const int actual_width = canvas.get_width();
         const int actual_height = canvas.get_height();
         if (!render_and_verify(canvas, actual_width, actual_height,

@@ -1,8 +1,10 @@
 #include "window_impl.hpp"
 
 #include "stb_image.h"
+#include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -100,6 +102,8 @@ namespace gcanvas
     /* ------------------------ FUNCTION DECLARATION ------------------------ */
 
     void on_window_resize(GLFWwindow* window, int width, int height);
+    void on_framebuffer_resize(GLFWwindow* window, int width, int height);
+    void on_content_scale(GLFWwindow* window, float x_scale, float y_scale);
     void mouse_position_callback(GLFWwindow* window, double x, double y);
     void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
     void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
@@ -176,12 +180,29 @@ namespace gcanvas
 
     void Window::set_size(int width, int height)
     {
+        if (width <= 0 || height <= 0)
+        {
+            throw std::invalid_argument("gCanvas logical window dimensions must be positive");
+        }
         WindowImpl* impl = getImpl(this);
-        glfwSetWindowSize(impl->_glfw_window, width, height);
+        const gcanvas::vec2 to_logical = impl->window_to_logical_scale();
+        const double window_width = static_cast<double>(width) / to_logical.get_x();
+        const double window_height = static_cast<double>(height) / to_logical.get_y();
+        constexpr double maximum_window_dimension =
+            static_cast<double>((std::numeric_limits<int>::max)());
+        if (!std::isfinite(window_width) || !std::isfinite(window_height) ||
+            window_width > maximum_window_dimension || window_height > maximum_window_dimension)
+        {
+            throw std::overflow_error("gCanvas logical window dimensions exceed platform limits");
+        }
+        glfwSetWindowSize(impl->_glfw_window, static_cast<int>(std::lround(window_width)),
+                          static_cast<int>(std::lround(window_height)));
+        impl->refresh_window_metrics();
         impl->sync_context_metrics();
         if (_context != nullptr)
         {
-            _context->resize_context(width, height);
+            impl->sync_framebuffer_extent(impl->_framebuffer_width,
+                                          impl->_framebuffer_height);
         }
     }
 
@@ -461,17 +482,19 @@ namespace gcanvas
     int Window::get_width()
     {
         WindowImpl* impl = getImpl(this);
-        int w, h;
-        glfwGetWindowSize(impl->_glfw_window, &w, &h);
-        return w;
+        return impl->_logical_width;
     }
 
     int Window::get_height()
     {
         WindowImpl* impl = getImpl(this);
-        int w, h;
-        glfwGetWindowSize(impl->_glfw_window, &w, &h);
-        return h;
+        return impl->_logical_height;
+    }
+
+    gcanvas::vec2 Window::get_content_scale()
+    {
+        WindowImpl* impl = getImpl(this);
+        return gcanvas::vec2(impl->_content_scale_x, impl->_content_scale_y);
     }
 
     gcanvas::vec2 Window::get_position()
@@ -569,6 +592,8 @@ namespace gcanvas
 
         glfwSetWindowUserPointer(impl->_glfw_window, impl);
         glfwSetWindowSizeCallback(impl->_glfw_window, on_window_resize);
+        glfwSetFramebufferSizeCallback(impl->_glfw_window, on_framebuffer_resize);
+        glfwSetWindowContentScaleCallback(impl->_glfw_window, on_content_scale);
         glfwSetCursorPosCallback(impl->_glfw_window, mouse_position_callback);
         glfwSetMouseButtonCallback(impl->_glfw_window, mouse_button_callback);
         glfwSetKeyCallback(impl->_glfw_window, key_callback);
@@ -576,6 +601,11 @@ namespace gcanvas
         glfwSetScrollCallback(impl->_glfw_window, scroll_callback);
         glfwSetWindowFocusCallback(impl->_glfw_window, focus_callback);
         glfwSetWindowCloseCallback(impl->_glfw_window, close_callback);
+
+        int framebuffer_width = 0;
+        int framebuffer_height = 0;
+        glfwGetFramebufferSize(impl->_glfw_window, &framebuffer_width, &framebuffer_height);
+        impl->sync_framebuffer_extent(framebuffer_width, framebuffer_height);
 
         return *_context;
     }
@@ -598,6 +628,7 @@ namespace gcanvas
         {
             throw std::invalid_argument("gCanvas window dimensions must be positive");
         }
+        _native_pixel_size = config.native_pixel_size;
         _backend = config.backend;
 #ifndef GCANVAS_HAS_OPENGL
         if (_backend == Backend::OpenGL)
@@ -680,10 +711,68 @@ namespace gcanvas
 
     CanvasMetrics WindowImpl::canvas_metrics() const
     {
-        int width = 0;
-        int height = 0;
-        glfwGetWindowSize(_glfw_window, &width, &height);
-        return {width, height, _x_scale, _y_scale, _x_offset, _y_offset, _dpi_scale};
+        return {_logical_width, _logical_height, _x_scale, _y_scale,
+                _x_offset, _y_offset, _dpi_scale};
+    }
+
+    bool WindowImpl::refresh_window_metrics()
+    {
+        int framebuffer_width = 0;
+        int framebuffer_height = 0;
+        glfwGetFramebufferSize(_glfw_window, &framebuffer_width, &framebuffer_height);
+
+        float content_scale_x = 1.0f;
+        float content_scale_y = 1.0f;
+        glfwGetWindowContentScale(_glfw_window, &content_scale_x, &content_scale_y);
+        if (!std::isfinite(content_scale_x) || !std::isfinite(content_scale_y) ||
+            content_scale_x <= 0.0f || content_scale_y <= 0.0f)
+        {
+            throw std::runtime_error("GLFW returned an invalid window content scale");
+        }
+
+        _framebuffer_width = framebuffer_width;
+        _framebuffer_height = framebuffer_height;
+        _content_scale_x = content_scale_x;
+        _content_scale_y = content_scale_y;
+        // CanvasMetrics has a source-compatible uniform DPI scale. GLFW platforms used by
+        // gCanvas report equal axes in normal desktop configurations; retain the historical
+        // y-axis projection while exposing both raw values through get_content_scale().
+        _dpi_scale = _native_pixel_size ? 1.0f : content_scale_y;
+
+        if (framebuffer_width == 0 || framebuffer_height == 0)
+        {
+            return false;
+        }
+
+        const int logical_width = _native_pixel_size
+                                      ? framebuffer_width
+                                      : static_cast<int>(std::lround(
+                                            framebuffer_width / _dpi_scale));
+        const int logical_height = _native_pixel_size
+                                       ? framebuffer_height
+                                       : static_cast<int>(std::lround(
+                                             framebuffer_height / _dpi_scale));
+        if (logical_width <= 0 || logical_height <= 0)
+        {
+            throw std::runtime_error("GLFW window metrics produced an empty logical viewport");
+        }
+        const bool changed = logical_width != _logical_width || logical_height != _logical_height;
+        _logical_width = logical_width;
+        _logical_height = logical_height;
+        return changed;
+    }
+
+    gcanvas::vec2 WindowImpl::window_to_logical_scale() const
+    {
+        int window_width = 0;
+        int window_height = 0;
+        glfwGetWindowSize(_glfw_window, &window_width, &window_height);
+        if (window_width <= 0 || window_height <= 0)
+        {
+            throw std::runtime_error("GLFW returned an empty window coordinate extent");
+        }
+        return gcanvas::vec2(static_cast<float>(_logical_width) / window_width,
+                             static_cast<float>(_logical_height) / window_height);
     }
 
     void WindowImpl::sync_context_metrics()
@@ -692,6 +781,21 @@ namespace gcanvas
         {
             _context->set_metrics(canvas_metrics());
         }
+    }
+
+    void WindowImpl::sync_framebuffer_extent(int width, int height)
+    {
+        if (_context == nullptr)
+        {
+            return;
+        }
+        if (width == _synced_framebuffer_width && height == _synced_framebuffer_height)
+        {
+            return;
+        }
+        _context->resize_context(width, height);
+        _synced_framebuffer_width = width;
+        _synced_framebuffer_height = height;
     }
 
     void WindowImpl::create_window(const WindowConfig& config)
@@ -726,12 +830,7 @@ namespace gcanvas
         {
             glfwMakeContextCurrent(_glfw_window);
         }
-        glfwGetWindowContentScale(_glfw_window, &_dpi_scale, &_dpi_scale);
-
-        if (config.native_pixel_size)
-        {
-            _dpi_scale = 1;
-        }
+        refresh_window_metrics();
 
         _vsync = config.vsync;
         if (_backend == Backend::OpenGL)
@@ -768,10 +867,12 @@ namespace gcanvas
     void on_window_resize(GLFWwindow* window, int width, int height)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
+        winImpl->refresh_window_metrics();
         if (winImpl->get_context() != nullptr)
         {
             winImpl->sync_context_metrics();
-            winImpl->get_context()->resize_context(width, height);
+            winImpl->sync_framebuffer_extent(winImpl->_framebuffer_width,
+                                              winImpl->_framebuffer_height);
         }
 
 #ifdef DEBUG
@@ -780,7 +881,38 @@ namespace gcanvas
 #endif
 
         winImpl->_listeners->publish(
-            resize_event{(int)(width / winImpl->_dpi_scale), (int)(height / winImpl->_dpi_scale)});
+            resize_event{winImpl->_logical_width, winImpl->_logical_height});
+    }
+
+    void on_framebuffer_resize(GLFWwindow* window, int, int)
+    {
+        WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
+        const bool logical_size_changed = winImpl->refresh_window_metrics();
+        if (winImpl->get_context() != nullptr)
+        {
+            winImpl->sync_context_metrics();
+            winImpl->sync_framebuffer_extent(winImpl->_framebuffer_width,
+                                              winImpl->_framebuffer_height);
+        }
+        if (logical_size_changed)
+        {
+            winImpl->_listeners->publish(
+                resize_event{winImpl->_logical_width, winImpl->_logical_height});
+        }
+    }
+
+    void on_content_scale(GLFWwindow* window, float, float)
+    {
+        WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
+        winImpl->refresh_window_metrics();
+        if (winImpl->get_context() != nullptr)
+        {
+            winImpl->sync_context_metrics();
+            winImpl->sync_framebuffer_extent(winImpl->_framebuffer_width,
+                                              winImpl->_framebuffer_height);
+        }
+        winImpl->_listeners->publish(
+            resize_event{winImpl->_logical_width, winImpl->_logical_height});
     }
 
     void mouse_position_callback(GLFWwindow* window, double x, double y)
@@ -798,8 +930,9 @@ namespace gcanvas
         std::cout << "event: mouse_position "
                   << "x: " << x << " y: " << y << std::endl;
 #endif
+        const gcanvas::vec2 to_logical = winImpl->window_to_logical_scale();
         winImpl->_listeners->publish(
-            mouse_move_event{x / winImpl->_dpi_scale, y / winImpl->_dpi_scale});
+            mouse_move_event{x * to_logical.get_x(), y * to_logical.get_y()});
     }
 
     void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
@@ -829,10 +962,11 @@ namespace gcanvas
 #endif
         double x, y;
         glfwGetCursorPos(window, &x, &y);
+        const gcanvas::vec2 to_logical = winImpl->window_to_logical_scale();
 
         winImpl->_listeners->publish(mouse_button_event{(mouse_button)button, (input_action)action,
-                                                        (mouse_mod)mods, x / winImpl->_dpi_scale,
-                                                        y / winImpl->_dpi_scale});
+                                                        (mouse_mod)mods, x * to_logical.get_x(),
+                                                        y * to_logical.get_y()});
     }
 
     void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)

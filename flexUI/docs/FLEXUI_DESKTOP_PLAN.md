@@ -265,7 +265,8 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [ ] 定义最小 `IDesktopHost`，按 window、input、platform service 拆分超过 10 方法的接口。
 - [x] 定义 gCanvas mouse、wheel、key、text 与 resize 到 FlexUI `Event`/viewport metrics 的
   strict normalization 契约；非法值不修改缓存的指针位置。
-- [ ] 定义 logical size、framebuffer size、DPI scale 和坐标转换唯一规则。
+- [x] 定义 logical size、framebuffer size、content scale 和 pointer 坐标转换唯一规则；
+  `native_pixel_size` 使用同一 metrics 事实源的显式像素模式。
 - [x] 定义 redraw-on-demand、continuous timed wait 和 window close 调度；event-driven 模式 idle 时
   阻塞，Box/RenderManager 仍以 dirty state 决定是否提交绘制。
 - [x] 定义 text input 与 IME composition 的 application owner-thread gate；无合格焦点明确返回
@@ -291,7 +292,9 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 - [x] `GCanvasWindowHost` 在 pointer event 与 frame 后将 FlexUI internal capture 与 native capture 同步。
 - [ ] 补齐 Windows IME、clipboard、DPI、多显示器和 native dialog service。
 - [x] 主循环静态窗口使用 wait-events；动画/主动刷新使用 bounded timed-wait/update，避免 busy poll。
-- [ ] 正确处理 minimize、zero framebuffer、device/context error 和 shutdown。
+- [x] 分离 logical window resize 与 physical framebuffer resize；zero framebuffer 不提交 GPU frame，
+  丢弃本帧 draw queue/transient path resource，恢复后不回放最小化期间的旧命令。
+- [ ] 完成 native minimize/restore、device/context error 和 shutdown stress 回归。
 
 ### DesktopApplication Facade
 

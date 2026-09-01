@@ -977,7 +977,15 @@ namespace gcanvas
     void ContextImplOpengl::draw_frame()
     {
         ContextImplOpengl* impl = getImpl(this);
-        if (impl->rendering || impl->headless || impl->storage.empty())
+        if (impl->rendering)
+            return;
+        if (impl->headless)
+        {
+            impl->clear_draw_queue();
+            reset_transient_path_resources();
+            return;
+        }
+        if (impl->storage.empty())
             return;
         if (impl->storage.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
             throw std::length_error("OpenGL draw storage index limit reached");
@@ -1261,15 +1269,7 @@ namespace gcanvas
             }
         }
 
-        impl->storage.clear();
-        impl->draw_call_indices.clear();
-        impl->path_draws.clear();
-        impl->path_erode_draws.clear();
-        impl->path_inset_draws.clear();
-        impl->convex_mask_draws.clear();
-        impl->scissor_primitives.clear();
-        impl->current_color_call_cnt = 0;
-        impl->current_type = ContextImplOpengl::UNSET;
+        impl->clear_draw_queue();
 
         glFlush();
     }
@@ -1315,18 +1315,25 @@ namespace gcanvas
     void ContextImplOpengl::resize_context(int width, int height)
     {
         ContextImplOpengl* impl = getImpl(this);
+        if (width < 0 || height < 0)
+            throw std::invalid_argument("OpenGL framebuffer dimensions must be non-negative");
         impl->dirty = true;
-        int framebuffer_width = 0;
-        int framebuffer_height = 0;
-        _host.framebuffer_size(_host.user_data, &framebuffer_width, &framebuffer_height);
-        if (framebuffer_width == 0 || framebuffer_height == 0)
+        if (width == 0 || height == 0)
         {
             impl->headless = true;
         }
         else
         {
-            impl->headless = false;
-            glViewport(0, 0, framebuffer_width, framebuffer_height);
+            int framebuffer_width = 0;
+            int framebuffer_height = 0;
+            _host.framebuffer_size(_host.user_data, &framebuffer_width, &framebuffer_height);
+            impl->headless = framebuffer_width == 0 || framebuffer_height == 0;
+            if (!impl->headless)
+            {
+                impl->_width = framebuffer_width;
+                impl->_height = framebuffer_height;
+                glViewport(0, 0, framebuffer_width, framebuffer_height);
+            }
         }
     }
 
@@ -1870,6 +1877,19 @@ namespace gcanvas
         {
             current_color_call_cnt++;
         } 
+    }
+
+    void ContextImplOpengl::clear_draw_queue() noexcept
+    {
+        storage.clear();
+        draw_call_indices.clear();
+        path_draws.clear();
+        path_erode_draws.clear();
+        path_inset_draws.clear();
+        convex_mask_draws.clear();
+        scissor_primitives.clear();
+        current_color_call_cnt = 0;
+        current_type = ContextImplOpengl::UNSET;
     }
 
     /* ------------------------ PRIVATE IMPLEMENTATION ------------------------ */

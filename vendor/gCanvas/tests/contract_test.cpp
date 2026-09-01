@@ -41,6 +41,8 @@ static_assert(std::is_same_v<
               decltype(std::declval<const gcanvas::Window&>().supports_pointer_capture()), bool>);
 static_assert(
     std::is_same_v<decltype(std::declval<const gcanvas::Window&>().has_pointer_capture()), bool>);
+static_assert(std::is_same_v<decltype(std::declval<gcanvas::Window&>().get_content_scale()),
+                             gcanvas::vec2>);
 
 int main()
 {
