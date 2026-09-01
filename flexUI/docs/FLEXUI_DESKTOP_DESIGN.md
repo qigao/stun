@@ -190,6 +190,7 @@ flowchart LR
     TurboAdapter[FlexUI::ControllerTurboScript] --> Controller
     TurboAdapter --> TurboScript[TurboScript package]
     PluginHost --> TurboUtils[TurboUtils::Core]
+    PluginHost --> TurboParser[TurboParser::Parser TOML facade]
 
     classDef optional stroke-dasharray: 5 5;
     class TurboAdapter,TurboScript,PluginHost optional;
@@ -434,15 +435,16 @@ UI 线程访问。`on_frame` 只有模块显式导出且宿主启用时才进入
 
 DLL 插件用于扩展业务能力，例如文档读写、数据库、设备、系统集成或专用算法。它不是另一套
 UI component tree，也不是 renderer backend。插件向 host 注册版本化服务；TurboScript 通过
-`service.call("document.save", args)` 之类的受限 bridge 调用。
+`service.call("document.storage/1", "save", args)` 之类的受限 bridge 调用。
 
 ```mermaid
 flowchart LR
     Script[TurboScript Controller] --> Bridge[UiScriptBridge]
     Bridge --> Registry[Host ServiceRegistry]
-    Registry --> Builtin[Built-in services]
-    Registry --> PluginA[document_service.dll]
-    Registry --> PluginB[device_service.dll]
+    Registry --> Endpoint[Authorized C++ endpoint]
+    Endpoint --> Builtin[Built-in services]
+    Endpoint --> PluginA[document_service.dll adapter]
+    Endpoint --> PluginB[device_service.dll adapter]
     PluginA -. no direct calls .-> PluginB
     Registry --> Results[typed completion event]
     Results --> Script
@@ -450,47 +452,22 @@ flowchart LR
 
 ### 9.2 ABI 规则
 
-跨 DLL 边界只使用纯 C、定宽整数、显式长度 buffer、函数表和 opaque handle：
+冻结 ABI 的事实源是 `include/flexUI/plugin_abi.h`。跨 DLL 边界只使用纯 C、定宽整数、显式长度
+buffer、函数表和 opaque handle；固定入口为 `flexui_plugin_get_api_v1`，当前 ABI 为 `1.0`。
+可编译的完整实现与 host 测试分别见 `tests/plugin_test_echo.cpp` 和 `tests/test_plugin_host.cpp`。
 
-```c
-#define FLEXUI_PLUGIN_ABI_MAJOR 1u
-#define FLEXUI_PLUGIN_ABI_MINOR 0u
+ABI 契约：
 
-typedef struct flexui_plugin_instance flexui_plugin_instance;
-
-typedef struct flexui_host_api_v1 {
-    uint32_t struct_size;
-    uint32_t abi_major;
-    uint32_t abi_minor;
-    void *host_context;
-    flexui_status (*register_service)(void *host_context,
-                                      const flexui_service_descriptor *service);
-    flexui_status (*post_completion)(void *host_context,
-                                     const flexui_completion *completion);
-} flexui_host_api_v1;
-
-typedef struct flexui_plugin_api_v1 {
-    uint32_t struct_size;
-    uint32_t abi_major;
-    uint32_t abi_minor;
-    flexui_status (*create)(const flexui_host_api_v1 *host,
-                            flexui_plugin_instance **out_instance);
-    flexui_status (*start)(flexui_plugin_instance *instance);
-    flexui_status (*stop)(flexui_plugin_instance *instance);
-    void (*destroy)(flexui_plugin_instance *instance);
-} flexui_plugin_api_v1;
-
-FLEXUI_PLUGIN_EXPORT
-const flexui_plugin_api_v1 *flexui_plugin_get_api_v1(void);
-```
-
-这是 ABI 形状而非已冻结头文件。冻结前必须补齐：
-
-- 每个 struct 的 `struct_size`、major/minor 兼容规则和 reserved slots。
-- 输入/输出 buffer 的借用或所有权转移规则。
-- allocator 归属；禁止 host `free()` 插件分配的对象，反之亦然。
-- callback 线程、重入、取消、超时和 shutdown 规则。
-- status/error 的创建、读取和释放方式。
+- major 必须等于 1；插件 descriptor 的 `required_host_minor` 不得高于 host minor。函数表与可扩展
+  descriptor 用 `struct_size` 做 prefix 检查，并保留清零的 reserved slots。
+- 使用平台默认自然 packing；插件不得用不同的 `#pragma pack` 编译 ABI struct。Windows 调用约定固定
+  为 `__cdecl`，visibility 由 `FLEXUI_PLUGIN_EXPORT` 控制。
+- request、descriptor 和 completion 的 pointer + length view 都是 borrowed。插件在成功 `submit()`
+  返回前复制要保留的 request；host 在 `post_completion()` 返回前复制 completion。
+- error buffer 始终由调用方分配并由调用方释放；callee 只写 UTF-8 bytes 和 `message_size`。host 与
+  plugin 不释放对方内存，也不允许异常越过 C ABI。
+- `post_completion()` 可由多个插件 worker 并发调用；`QueueFull`/`ResourceLimit` 保留活动 token，
+  插件可重试。成功或 terminal error 消耗该 token，重复/未知 token 返回 `Stale`。
 
 ### 9.3 插件生命周期
 
@@ -501,8 +478,10 @@ stateDiagram-v2
     Validated --> Loaded: load DLL and resolve one entry symbol
     Loaded --> Created: create instance
     Created --> Started: register services and start
-    Started --> Stopping: application shutdown
-    Stopping --> Destroyed: stop and destroy
+    Started --> Stopping: reject submits / stop
+    Stopping --> Stopping: join timeout / retry
+    Stopping --> Joined: join succeeds / no callback or thread
+    Joined --> Destroyed: destroy instance
     Destroyed --> Unloaded: no active call/thread/resource
     Unloaded --> [*]
 
@@ -526,14 +505,108 @@ IPC service adapter 隔离，不能用 signal/SEH 后继续运行可能已损坏
 
 ### 9.4 插件依赖与权限
 
-- 插件 manifest 声明 name、semantic version、ABI version、library、required capabilities、
-  permissions 和可选依赖。
-- required plugin 或 required capability 缺失时应用加载失败。
-- optional plugin 只有在 manifest 明确标记 optional 时才可缺失；宿主记录一次诊断，不自动
-  切换到语义不同的实现。
-- 插件依赖由 host 拓扑排序并拒绝循环；插件不得直接链接另一个业务插件。
-- service namespace 全局唯一并版本化，例如 `document.storage/1`。
-- 文件、网络、进程和设备访问按 manifest capability 白名单授权。
+`PluginHostBuilder::load_manifest()` 显式接收绝对 `plugin.toml` 路径；首版不扫描目录。manifest
+在加载任何对应 DLL 前完成有界读取、TOML/schema、路径、权限和依赖图验证：
+
+```toml
+manifest_version = 1
+name = "document.storage"
+version = "1.2.0"
+library = "flexui_document_storage.dll"
+services = ["document.storage/1"]
+capabilities = ["settings.read/1"]
+permissions = ["file"]
+
+[abi]
+major = 1
+minor = 0
+
+[[dependencies]]
+name = "settings.core"
+version = "1.0.0"
+optional = false
+```
+
+- `name` 与 DLL `plugin_id` 使用同一 canonical lowercase 语法；`version` 使用 canonical SemVer
+  2.0.0。manifest v1 的依赖版本是精确匹配，`>=`、`<`、`^` 等 range 语法直接拒绝，后续可在不
+  改变精确匹配含义的前提下扩展 requirement grammar。
+- `library` 只能是相对路径；manifest 与 DLL 均 canonicalize，DLL 最终路径必须仍位于 manifest
+  package 目录内。symlink/traversal 不能逃逸目录。
+- `services` 必须与 DLL descriptor 的 capability 集合完全相等；`capabilities` 是 final immutable
+  registry 中必须存在的 required service。ABI 1.0 尚不向插件开放 service lookup，因此它当前是加载
+  契约，不是插件间直接调用通道。
+- required dependency 缺失或版本不符立即失败。只有显式 `optional = true` 才允许缺失；如果 optional
+  dependency 实际存在，其版本仍必须匹配，并参与拓扑顺序。循环依赖直接拒绝。
+- `PluginHostPolicy` 默认不授予任何 `file`、`network`、`process`、`device` 权限。权限检查是可信
+  in-process DLL 的加载准入策略，不是 OS sandbox；原生 DLL 仍可能绕过 host API 直接调用平台能力。
+  不可信插件必须使用后续独立进程/IPC host。
+- `load_plugin(absolute DLL)` 为既有可信嵌入兼容入口，不声明依赖与权限；应用可逐插件迁移到
+  `load_manifest()`，失败时不涉及数据迁移，可恢复原调用。
+
+### 9.5 当前 C++ ServiceRegistry 与 PluginHost 边界
+
+`FlexUI::Services` 已提供独立于 Controller、窗口、TurboScript 和动态库加载器的 C++ registry：
+
+- `ApplicationServiceRegistryBuilder` 只允许创建它的 owner thread 注册，并在 `build()` 时生成不可变
+  `shared_ptr` snapshot；snapshot 可由 request queue 和 host 安全共享。
+- capability 固定为 `<namespace>/<major>`，例如 `document.storage/1`；operation 使用受限小写 ASCII
+  标识符。默认最多 64 个 service、每个 service 64 个 operation、标识符 256 bytes，单 operation
+  payload 默认 16 KiB 且不得超过 registry 的 64 KiB 总上限。
+- application manifest 明确区分 `allowed` 和 `required`；required 必须属于 allowed，并且 build 时必须
+  已注册。未配置 registry 等价于空 snapshot，而不是隐式开放全部能力。
+- request queue 持有 registry snapshot 与 manifest 的唯一运行时副本。controller callback 的 command
+  batch 在申请 slot、提交同批 UI mutation 之前校验授权、service、operation 和 payload 长度；任一失败
+  整批不发布，UI 也不改变。
+- host 取得 owning request 后通过 `resolve_service_request()` 重复防御性校验并获得同一个
+  `shared_ptr<IApplicationServiceEndpoint>`。Registry 只解析，不调用 endpoint；`try_submit()` 的成功表示
+  endpoint 已复制需保留的数据并承担一次同 token completion 投递，失败则不得保留 request/sink。
+
+`FlexUI::PluginSDK` 始终提供纯 C header；`FLEXUI_ENABLE_PLUGINS=ON` 时才生成
+`FlexUI::PluginHost` 和平台 loader。manifest TOML 通过已安装 `TurboParser::Parser` 的 explicit-length
+facade 解析；不开插件时不应引入 PluginHost/TOML 运行路径。PluginHost 目前完成以下边界：
+
+- builder 可接收调用方给出的绝对 DLL 或 manifest 路径；Windows 使用受限 `LoadLibraryExW` 搜索 flags，
+  Unix 使用 `RTLD_NOW | RTLD_LOCAL`。manifest candidate 先完成全图解析，之后按 dependency-first 顺序
+  load/create；registry build、required capability validation 与 start 仍是一个 publication transaction。
+  失败不发布 registry，已 start 的 candidate 逆序 stop/join。
+- descriptor 在 DLL 卸载前复制到 host-owned C++ storage，再与 built-in endpoint 一起生成不可变 registry。
+  插件默认最多 16 个，每个插件最多 256 个 in-flight request；槽表构建时一次预分配，满时返回 Busy，
+  不扩容、不阻塞、不丢弃。
+- 请求槽状态为 `Free -> Active -> Posting -> Free`。mutex 只保护槽与统计，锁内不分配、不调用 plugin、
+  sink 或平台 API。同步 completion 和多 worker completion 使用同一协议。
+- stop 先一次性拒绝所有 endpoint 新调用，再等待正在执行的 submit 退出，调用 plugin stop/join。join
+  timeout 保持 DLL、instance、slot 和 `Stopping` 状态，可在 owner thread 重试；成功 join 后才 abandon
+  未完成 token、destroy 和 unload。
+- completion sink 是非拥有指针。因此调用方必须在销毁 `DesktopApplication`/mailbox 前成功 stop PluginHost；
+  PluginHost 析构的无限 join 是防止 use-after-unload 的安全网，不替代正确销毁顺序。
+
+当前仍只承载受限 opaque payload 和长度契约，尚未实现 tagged value/schema、目录 discovery、权限
+API mediation/OS sandbox、签名验证、热重载、进程隔离和 TurboScript completion event。因此“可加载”
+只适用于调用方显式指定的可信 DLL，不表示可运行任意第三方 DLL。
+
+### 9.6 Plugin SDK 安装与版本契约
+
+安装树以 `FlexUIConfig.cmake` 为唯一入口，并把插件边界拆成三个可检查组件：
+
+| CMake component | target | 依赖与用途 |
+|---|---|---|
+| `PluginSDK` | `FlexUI::PluginSDK` | 始终存在；纯 C ABI header，不引入 loader 或 parser |
+| `Services` | `FlexUI::Services` | C++ registry、descriptor、request/completion contract |
+| `PluginHost` | `FlexUI::PluginHost` | 仅 `FLEXUI_ENABLE_PLUGINS=ON`；依赖前两者及 TurboUtils/TurboParser |
+
+三者属于同一个 `FlexUIPluginTargets` export set，避免 export 文件引用未安装的源码树 target。安装命令可用
+`--component FlexUIPlugin` 只部署该闭包；外部工程通过
+`find_package(FlexUI 1.0 CONFIG REQUIRED COMPONENTS PluginSDK PluginHost)` fail fast 检查能力。
+`TurboUtils_DIR` 与 `TurboParser_DIR` 由消费方 profile 指向精确安装根，包配置不写入构建机绝对路径。
+仅请求 `PluginSDK` 时不会查找这两项 C++ 依赖；install-tree 测试会在不提供其 package root 的条件下
+单独配置并编译纯 C DLL。
+
+包版本当前为 `1.0.0`，major 与 `FLEXUI_PLUGIN_ABI_MAJOR` 同步；同 major package 使用 CMake
+`SameMajorVersion` 兼容规则。新增 reserved 字段解释、可选 target 或不改变既有字段含义的实现修复只增加
+minor/patch；改变调用约定、结构布局、ownership/lifetime 或错误语义必须提升 ABI 与 package major。
+独立示例 `flexUI/examples/plugin_echo` 只消费安装头和归档：它构建纯 C DLL，再由 C++ host 完成
+load/start/echo completion/stop/join/unload。`test_plugin_install_consumer` 每次先安装 staging component，
+再配置这个外部工程，因而可检测缺失 archive、泄漏源码树 include、漏导依赖和不可运行 DLL。
 
 ## 10. 状态所有权
 
@@ -735,8 +808,8 @@ transaction，可通过另一个延迟 publication adapter 扩展 mount 语义�
 
 ### 13.3 ApplicationCompletionMailbox
 
-当前 C++ host 边界已经提供 `ApplicationCompletionMailbox`，但尚未冻结 DLL C ABI，也尚未把 completion
-转换为 TurboScript event。其协议如下：
+当前 C++ host 边界已经提供 `ApplicationCompletionMailbox`；DLL C ABI 已冻结并由 PluginHost 把 ABI
+completion 转为 owning `ApplicationCompletion`，但尚未转换为 TurboScript event。其协议如下：
 
 | 项目 | 契约 |
 |---|---|
@@ -752,9 +825,9 @@ transaction，可通过另一个延迟 publication adapter 扩展 mount 语义�
 | 观测 | 暴露 current/peak depth、published、consumed、cancelled、queue-full、closed/stale/invalid rejection 计数 |
 
 `ApplicationRequestToken` 是 `{host_request_id, application_generation}`，两部分都必须非零。script 自己的
-`request_id` 不直接充当跨 reload 身份；未来 ServiceRegistry 在 command publication 时生成 host token，
-并保存 token 到 script request ID 的有界 pending 映射。mailbox 只验证 token 是否属于当前 generation，
-不维护第二份业务请求状态。
+`request_id` 不直接充当跨 reload 身份；`DesktopApplication` 在 command reservation 时生成 host token，
+并由 application-owned request table 保存 token 到 script request ID 的有界 pending 映射。mailbox 只验证
+token 是否属于当前 generation，不维护第二份业务请求状态。
 
 ```mermaid
 stateDiagram-v2
@@ -766,12 +839,71 @@ stateDiagram-v2
     Closed --> Closed: repeated close
 ```
 
-`DesktopApplication` 在成功 build 时创建 generation 1 的 mailbox。reload 先构建完整 detached candidate，
-再检查 generation 溢出、淘汰旧 completion，最后以无失败 pointer swap 发布新 controller；candidate 失败时
-generation 与旧队列都不变。`request_close()` 在发布 `CloseRequested` 前同步完成 mailbox close，因此并发
-worker 最终只会得到 success、`QueueFull` 或 `Closed`，不会把 completion 投递给已关闭 controller。
-mailbox 析构本身会再次 quiesce/drain，但对象生命周期不能保护已悬空的调用方指针；PluginHost 仍必须在
-销毁 application/mailbox 前停止并 join 所有 worker。
+`DesktopApplication` 在成功 build 时创建 generation 1 的 mailbox 和 request table。reload 先构建完整
+detached candidate，再检查 generation 溢出，依次淘汰旧 completion、取消旧 pending request，最后以无失败
+pointer swap 发布新 controller；candidate 失败时 generation 与旧队列都不变。`request_close()` 在发布
+`CloseRequested` 前先关闭并取消 request table，再同步完成 mailbox close，因此并发 worker 最终只会得到
+success、`QueueFull` 或 `Closed`，不会把 completion 投递给已关闭 controller。mailbox 析构本身会再次
+quiesce/drain，但对象生命周期不能保护已悬空的调用方指针；PluginHost 仍必须在销毁 application/mailbox
+前停止并 join 所有 worker。
+
+### 13.4 ApplicationServiceRequestTable
+
+`ApplicationServiceRequestQueue` 是 controller command 与 host service dispatcher 之间的私有桥接层；
+公开边界只暴露 owning value 和结构化 poll result，不把 slot、队列或 controller 指针交给 worker。
+
+| 项目 | 契约 |
+|---|---|
+| 数据单元 | host-facing request 拥有 token、script request ID、capability、operation 和 payload；pending slot 在 dispatch 后只保留 token/script identity |
+| 事实源 | 固定 slot table 是 `{host token -> script request ID}` 的唯一 pending 事实源；queue 持有的 immutable registry + manifest 是授权与 endpoint routing 的唯一事实源；mailbox、statistics 与 host request copy 都不独立推进状态 |
+| 所有权 | application owner thread 独占 table；`try_receive_service_request()` 把字符串所有权移交 host；worker 只能把同一 token 放入 owning completion 并调用 mailbox `try_post()` |
+| 生命周期 | `Free -> Reserved -> Published -> InFlight -> Free`；未 publish 的 RAII reservation 回到 Free，completion 只允许解析一次 |
+| 拓扑 | 单 owner producer/consumer 管理 request table；多个 worker 只生产 completion。request 按 command publication 全局 FIFO，completion 可乱序 |
+| 容量 | 默认 256；固定容量同时统计 Reserved、Published 和 InFlight，构建后不扩容 |
+| 校验与背压 | reserve 在 slot 分配和 UI mutation prepare/commit 前校验完整 batch 的 capability 授权、service、operation 与 payload limit；失败返回既有 command error。容量满时返回 `QueueFull`，不修改 UI、不发布部分 request、不阻塞或 fallback |
+| 身份 | script request ID 在 pending 期间唯一；host token ID 非零且进程内单调递增，generation 在成功 reload 时递增，discard 可留下不可复用的 token gap |
+| 失败 | 区分 invalid capacity/generation/request、duplicate ID、full、unknown token、premature/duplicate completion、closed、wrong thread、allocation 和 mailbox failure |
+| 关闭/reload | reload 取消旧 generation 的 Reserved/Published/InFlight slot；close 先拒绝并取消 request，再关闭 mailbox；两者都不向新 controller 传递旧 completion |
+| 观测 | 暴露 current/peak pending、published、dispatched、completed、cancelled、discarded、queue-full、duplicate/unknown rejection 计数 |
+
+```mermaid
+sequenceDiagram
+    participant Script as Controller callback
+    participant Requests as Request table
+    participant UI as Mutation engine
+    participant Host as Desktop host/service router
+    participant Worker as Service worker
+    participant Mailbox as Completion mailbox
+
+    Script->>Requests: validate policy/schema limits + reserve(command batch)
+    Requests-->>Script: RAII reserved slots + host tokens
+    Script->>UI: validate/prepare/commit mutation batch
+    alt UI commit succeeded
+        Script->>Requests: publish() (noexcept, allocation-free)
+        Host->>Requests: try_receive_service_request()
+        Requests-->>Host: owning request + token + script ID
+        Host->>Requests: resolve_service_request(request)
+        Requests-->>Host: shared endpoint
+        Host->>Worker: endpoint.try_submit(request, completion sink)
+        Worker->>Mailbox: try_post(completion with token)
+        Host->>Mailbox: try_receive_service_completion()
+        Mailbox-->>Requests: owning completion
+        Requests-->>Host: completion + restored script ID
+    else UI prepare/commit failed
+        Script->>Requests: discard reservation by RAII
+    end
+```
+
+当前桥接完成到 host owner thread：host 可以取得 service request，通过不可变 registry 做 capability、
+operation 与 payload limit 校验并解析 C++ endpoint，再把 worker completion 恢复为原始 script request ID。
+DLL C ABI 与 PluginHost stop/join 已完成；typed schema、把 completion 转换为不可变 TurboScript
+controller event，以及把 PluginHost 生命周期纳入 DesktopApplication transaction 仍是后续边界。当前仅允许
+host 明确加载可信 DLL。
+
+生命周期回归还覆盖独立 static-CRT test DLL：插件以 `/MTd`/`/MT` 构建，host 以 `/MDd`/`/MD`
+构建，只通过 borrowed byte views 和 caller-owned error buffer 通信。测试在 `submit()` 返回后修改 caller
+payload，异步 completion 仍取得插件已复制的原值；create/start/stop failure、retryable stop、重复 stop、
+host 释放后 cached endpoint 返回 `Closed`，共同约束 destroy/unload 只能发生一次且不得再调用 DLL 代码。
 
 ## 14. DesktopHost 与 gCanvas
 

@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.10)
 
 project(flexUI)
 
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
+
 # C++17
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -250,8 +253,48 @@ if(WIN32)
     COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
 endif()
 
+add_subdirectory(modules/services)
+add_subdirectory(modules/plugin_host)
 add_subdirectory(modules/controller)
 add_subdirectory(modules/desktop)
+
+set(FLEXUI_PLUGIN_PACKAGE_VERSION "1.0.0")
+set(FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES "")
+if(FLEXUI_ENABLE_PLUGINS)
+  string(
+    APPEND FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES
+    "find_dependency(TurboUtils CONFIG)\n"
+    "find_dependency(TurboParser CONFIG)\n")
+endif()
+configure_package_config_file(
+  cmake/FlexUIConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI")
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
+  VERSION "${FLEXUI_PLUGIN_PACKAGE_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+
+install(
+  EXPORT FlexUIPluginTargets
+  FILE FlexUIPluginTargets.cmake
+  NAMESPACE FlexUI::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUIPlugin)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUIPlugin)
+install(
+  FILES include/flexUI/application_command.h
+        include/flexUI/application_completion.h
+        include/flexUI/application_service.h
+        include/flexUI/plugin_abi.h
+        include/flexUI/plugin_host.h
+        include/flexUI/service_registry.h
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/flexUI"
+  COMPONENT FlexUIPlugin)
 
 
 # 安装头文件

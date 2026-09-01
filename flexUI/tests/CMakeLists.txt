@@ -6,6 +6,151 @@ function(flexui_configure_tinytest target_name)
   target_link_libraries(${target_name} PRIVATE TurboUtils::TinyTest)
 endfunction()
 
+add_executable(test_plugin_abi test_plugin_abi.c)
+target_link_libraries(test_plugin_abi PRIVATE FlexUI::PluginSDK)
+flexui_configure_tinytest(test_plugin_abi)
+set_target_properties(
+  test_plugin_abi PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
+                             FOLDER "flexUI/tests")
+add_test(NAME test_plugin_abi COMMAND test_plugin_abi)
+
+if(FLEXUI_ENABLE_PLUGINS)
+  add_library(flexui_test_plugin_missing_entry MODULE plugin_test_missing_entry.c)
+  add_library(flexui_test_plugin_bad_abi MODULE plugin_test_bad_abi.c)
+  add_library(flexui_test_plugin_echo MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_fail_start MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_fail_create MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_fail_stop MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_static_crt MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_provider MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_consumer MODULE plugin_test_echo.cpp)
+  target_link_libraries(
+    flexui_test_plugin_bad_abi PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_echo PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_fail_start PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_fail_create PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_fail_stop PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_static_crt PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_provider PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_consumer PRIVATE FlexUI::PluginSDK)
+  target_compile_definitions(
+    flexui_test_plugin_fail_start PRIVATE FLEXUI_TEST_FAIL_START=1)
+  target_compile_definitions(
+    flexui_test_plugin_fail_create
+    PRIVATE FLEXUI_TEST_FAIL_CREATE=1
+            FLEXUI_TEST_PLUGIN_ID="test.fail-create"
+            FLEXUI_TEST_PLUGIN_SERVICE="test.fail-create/1")
+  target_compile_definitions(
+    flexui_test_plugin_fail_stop
+    PRIVATE FLEXUI_TEST_FAIL_STOP_ONCE=1
+            FLEXUI_TEST_PLUGIN_ID="test.fail-stop"
+            FLEXUI_TEST_PLUGIN_SERVICE="test.fail-stop/1")
+  target_compile_definitions(
+    flexui_test_plugin_static_crt
+    PRIVATE FLEXUI_TEST_PLUGIN_ID="test.static-crt"
+            FLEXUI_TEST_PLUGIN_SERVICE="test.static-crt/1")
+  if(MSVC)
+    set_property(
+      TARGET flexui_test_plugin_static_crt
+      PROPERTY MSVC_RUNTIME_LIBRARY
+               "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
+  target_compile_definitions(
+    flexui_test_plugin_provider
+    PRIVATE FLEXUI_TEST_PLUGIN_ID="test.provider"
+            FLEXUI_TEST_PLUGIN_SERVICE="test.provider/1")
+  target_compile_definitions(
+    flexui_test_plugin_consumer
+    PRIVATE FLEXUI_TEST_PLUGIN_ID="test.consumer"
+            FLEXUI_TEST_PLUGIN_SERVICE="test.consumer/1")
+  set_target_properties(
+    flexui_test_plugin_missing_entry flexui_test_plugin_bad_abi
+    flexui_test_plugin_echo flexui_test_plugin_fail_start
+    flexui_test_plugin_fail_create flexui_test_plugin_fail_stop
+    flexui_test_plugin_static_crt
+    flexui_test_plugin_provider flexui_test_plugin_consumer
+    PROPERTIES FOLDER "flexUI/tests/plugins"
+               C_VISIBILITY_PRESET hidden
+               CXX_VISIBILITY_PRESET hidden
+               VISIBILITY_INLINES_HIDDEN ON)
+
+  add_executable(test_plugin_host test_plugin_host.cpp)
+  target_link_libraries(test_plugin_host PRIVATE FlexUI::PluginHost)
+  flexui_configure_tinytest(test_plugin_host)
+  target_compile_definitions(
+    test_plugin_host
+    PRIVATE FLEXUI_TEST_ECHO_PLUGIN="$<TARGET_FILE:flexui_test_plugin_echo>"
+            FLEXUI_TEST_BAD_ABI_PLUGIN="$<TARGET_FILE:flexui_test_plugin_bad_abi>"
+            FLEXUI_TEST_MISSING_ENTRY_PLUGIN="$<TARGET_FILE:flexui_test_plugin_missing_entry>"
+            FLEXUI_TEST_FAIL_START_PLUGIN="$<TARGET_FILE:flexui_test_plugin_fail_start>"
+            FLEXUI_TEST_FAIL_CREATE_PLUGIN="$<TARGET_FILE:flexui_test_plugin_fail_create>"
+            FLEXUI_TEST_FAIL_STOP_PLUGIN="$<TARGET_FILE:flexui_test_plugin_fail_stop>"
+            FLEXUI_TEST_STATIC_CRT_PLUGIN="$<TARGET_FILE:flexui_test_plugin_static_crt>")
+  add_dependencies(
+    test_plugin_host flexui_test_plugin_echo flexui_test_plugin_fail_start
+    flexui_test_plugin_fail_create flexui_test_plugin_fail_stop
+    flexui_test_plugin_static_crt
+    flexui_test_plugin_bad_abi
+    flexui_test_plugin_missing_entry)
+  set_target_properties(test_plugin_host PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_plugin_host COMMAND test_plugin_host)
+
+  add_executable(test_plugin_manifest test_plugin_manifest.cpp)
+  target_link_libraries(test_plugin_manifest PRIVATE FlexUI::PluginHost)
+  target_include_directories(
+    test_plugin_manifest PRIVATE ${CMAKE_SOURCE_DIR}/flexUI/modules/plugin_host)
+  flexui_configure_tinytest(test_plugin_manifest)
+  target_compile_definitions(
+    test_plugin_manifest
+    PRIVATE FLEXUI_TEST_ECHO_PLUGIN="$<TARGET_FILE:flexui_test_plugin_echo>"
+            FLEXUI_TEST_PROVIDER_PLUGIN="$<TARGET_FILE:flexui_test_plugin_provider>"
+            FLEXUI_TEST_CONSUMER_PLUGIN="$<TARGET_FILE:flexui_test_plugin_consumer>")
+  add_dependencies(
+    test_plugin_manifest flexui_test_plugin_echo flexui_test_plugin_provider
+    flexui_test_plugin_consumer)
+  set_target_properties(test_plugin_manifest PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_plugin_manifest COMMAND test_plugin_manifest)
+
+  get_filename_component(
+    _flexui_plugin_compiler_runtime_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+
+  add_test(
+    NAME test_plugin_install_consumer
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DPRODUCER_BINARY_DIR=${CMAKE_BINARY_DIR}"
+      "-DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugin_echo"
+      "-DCONSUMER_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/install_consumer/$<CONFIG>"
+      "-DSDK_ONLY_CONSUMER_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/install_sdk_consumer/$<CONFIG>"
+      "-DINSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/install_tree/$<CONFIG>"
+      "-DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
+      "-DBUILD_CONFIG=$<CONFIG>"
+      "-DCMAKE_GENERATOR_NAME=${CMAKE_GENERATOR}"
+      "-DC_COMPILER=${CMAKE_C_COMPILER}"
+      "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DCMAKE_GENERATOR_PLATFORM_NAME=${CMAKE_GENERATOR_PLATFORM}"
+      "-DCMAKE_GENERATOR_TOOLSET_NAME=${CMAKE_GENERATOR_TOOLSET}"
+      "-DCMAKE_MAKE_PROGRAM_PATH=${CMAKE_MAKE_PROGRAM}"
+      "-DTURBO_UTILS_PACKAGE_DIR=${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/TurboUtils"
+      "-DTURBO_PARSER_PACKAGE_DIR=${TURBOPARSER_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/TurboParser"
+      "-DTURBO_UTILS_RUNTIME_DIR=${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
+      "-DTURBO_PARSER_RUNTIME_DIR=${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}"
+      "-DCOMPILER_RUNTIME_DIR=${_flexui_plugin_compiler_runtime_dir}"
+      "-DADDRESS_SANITIZER_ENABLED=${ENABLE_SANITIZER_ADDRESS}"
+      "-DEXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_plugin_install_consumer.cmake")
+  set_tests_properties(
+    test_plugin_install_consumer
+    PROPERTIES LABELS "flexui;integration;install;plugin")
+endif()
+
 add_executable(test_markdown_widget test_markdown_widget.cpp)
 target_link_libraries(test_markdown_widget PRIVATE flexUI)
 flexui_configure_tinytest(test_markdown_widget)
@@ -205,6 +350,24 @@ flexui_configure_tinytest(test_application_completion)
 set_target_properties(test_application_completion PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_application_completion COMMAND test_application_completion)
 
+add_executable(test_application_service_requests
+               test_application_service_requests.cpp)
+target_link_libraries(test_application_service_requests PRIVATE FlexUI::Controller)
+target_include_directories(
+  test_application_service_requests
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../modules/controller")
+flexui_configure_tinytest(test_application_service_requests)
+set_target_properties(
+  test_application_service_requests PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_application_service_requests
+         COMMAND test_application_service_requests)
+
+add_executable(test_service_registry test_service_registry.cpp)
+target_link_libraries(test_service_registry PRIVATE FlexUI::Services)
+flexui_configure_tinytest(test_service_registry)
+set_target_properties(test_service_registry PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_service_registry COMMAND test_service_registry)
+
 add_executable(test_desktop_application test_desktop_application.cpp)
 target_link_libraries(test_desktop_application PRIVATE FlexUI::Controller)
 flexui_configure_tinytest(test_desktop_application)
@@ -260,3 +423,21 @@ flexui_configure_tinytest(test_keyed_repeater)
 target_include_directories(test_keyed_repeater PRIVATE ../include)
 set_target_properties(test_keyed_repeater PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_keyed_repeater COMMAND test_keyed_repeater)
+
+if(WIN32)
+  get_filename_component(
+    _flexui_test_compiler_runtime_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  set(_flexui_runtime_tests
+      test_plugin_abi
+      test_application_service_requests
+      test_service_registry)
+  if(FLEXUI_ENABLE_PLUGINS)
+    list(APPEND _flexui_runtime_tests test_plugin_host test_plugin_manifest)
+  endif()
+  set_property(
+    TEST ${_flexui_runtime_tests}
+    PROPERTY ENVIRONMENT_MODIFICATION
+             "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
+             "PATH=path_list_prepend:${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
+             "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+endif()

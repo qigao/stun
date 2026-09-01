@@ -74,6 +74,15 @@ struct ApplicationCompletionPostResult {
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
+/// Non-owning completion boundary supplied to an accepted service request.
+/// Implementations define their own thread-safety and lifetime contract.
+class IApplicationServiceCompletionSink {
+public:
+  virtual ~IApplicationServiceCompletionSink() = default;
+  virtual ApplicationCompletionPostResult
+  try_post(const ApplicationCompletion &completion) = 0;
+};
+
 enum class ApplicationCompletionReceiveStatus {
   Ready,
   Empty,
@@ -125,7 +134,8 @@ struct ApplicationCompletionMailboxCreateResult;
 /// try_receive(), close(), and advance_generation() belong to the thread that
 /// created the mailbox. The owner must stop and join all producers before
 /// destroying the mailbox object.
-class ApplicationCompletionMailbox final {
+class ApplicationCompletionMailbox final
+    : public IApplicationServiceCompletionSink {
 public:
   static ApplicationCompletionMailboxCreateResult create(std::uint64_t initial_generation,
                                                          ApplicationCompletionLimits limits = {});
@@ -140,7 +150,8 @@ public:
   /// Copies a complete record into queue ownership on success. Queue-full,
   /// closed, stale, allocation, and validation failures leave the source
   /// unchanged and retain no mailbox object.
-  ApplicationCompletionPostResult try_post(const ApplicationCompletion &completion);
+  ApplicationCompletionPostResult
+  try_post(const ApplicationCompletion &completion) override;
 
   /// Claims at most one completion on the owner thread.
   ApplicationCompletionReceiveResult try_receive();
