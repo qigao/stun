@@ -210,52 +210,66 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 ### ABI SDK
 
-- [ ] 新建稳定 C header，定义 ABI major/minor、`struct_size` 和 reserved slots。
-- [ ] 定义一个固定 entry symbol，例如 `flexui_plugin_get_api_v1`。
-- [ ] 所有 handle opaque；buffer 使用 pointer + length，不传 STL、异常或 C++ class。
-- [ ] 定义 calling convention、visibility、packing、UTF-8 和定宽整数规则。
-- [ ] 定义 allocator/ownership；跨 CRT 不允许对方释放本模块内存。
-- [ ] 定义 status/error object 的读取和释放规则。
+- [x] 新建稳定 C header，定义 ABI major/minor、`struct_size` 和 reserved slots。
+- [x] 定义固定 entry symbol `flexui_plugin_get_api_v1`。
+- [x] 所有 handle opaque；buffer 使用 pointer + length，不传 STL、异常或 C++ class。
+- [x] 定义 calling convention、visibility、packing、UTF-8 和定宽整数规则。
+- [x] 定义 allocator/ownership；跨 CRT 不允许对方释放本模块内存。
+- [x] 定义 caller-owned status/error buffer 的读取和释放规则。
 
 ### Manifest 与依赖
 
-- [ ] 定义 `plugin.toml` schema：name、version、ABI、library、required/optional dependencies、
+- [x] 定义 `plugin.toml` schema：name、version、ABI、library、required/optional dependencies、
   services、capabilities 和 permissions。
-- [ ] 使用 TurboParser/DataBind 或仓库既有 TOML 入口解析，不手写 parser。
-- [ ] 验证路径规范化、文件大小、name/version 长度和重复 plugin ID。
-- [ ] required dependency 缺失或版本不匹配 fail fast。
-- [ ] optional 仅在 manifest 显式声明时允许缺失，不静默替换实现。
-- [ ] 拓扑排序依赖并拒绝循环。
+- [x] 使用已安装 `TurboParser::Parser` explicit-length TOML facade 解析，不手写 parser。
+- [x] 验证路径规范化/包目录约束、文件大小、name/version 长度和重复 plugin ID。
+- [x] required dependency 缺失或精确 SemVer 不匹配 fail fast。
+- [x] optional 仅在 manifest 显式声明时允许缺失；存在时仍验证版本，不静默替换实现。
+- [x] 以稳定 staging order 为 tie-break 拓扑排序依赖并拒绝循环。
 
 ### Loader 与生命周期
 
-- [ ] 通过 TurboUtils 平台动态库封装加载/查符号/卸载，不直接散落 Win32 API。
-- [ ] 实现 Discovered/Validated/Loaded/Created/Started/Stopping/Destroyed/Unloaded 状态机。
-- [ ] construction failure 按相反顺序 RAII unwind。
-- [ ] stop 前拒绝新 service call，并等待活动调用归零。
-- [ ] 插件 worker 必须支持 stop/join，卸载前确认无 callback、thread 或 borrowed buffer。
-- [ ] 首版明确禁止热重载 API；开发模式 reload 通过重启进程完成。
+- [x] 仓库与已安装 TurboUtils 无动态库 API；以 `native_plugin_library` 私有 adapter 集中平台
+  load/symbol/unload，Win32/`dlopen` 不扩散到 PluginHost 或 service 层。
+- [x] 实现 Validated/Loaded/Created/Started/Stopping/Destroyed/Unloaded 状态机；支持显式 manifest
+  staging，目录 discovery 保留给后续子阶段。
+- [x] construction/start failure 按相反顺序 RAII unwind。
+- [x] stop 前拒绝新 service call，并等待活动 submit 调用归零。
+- [x] 插件 ABI 强制 stop/join，join 成功前不 destroy/unload；timeout 保持可重试 `Stopping` 状态。
+- [x] 首版不提供热重载 API；开发模式 reload 通过重启进程完成。
 
 ### Service registry
 
-- [ ] service namespace + major version 全局唯一。
-- [ ] 插件只向 host 注册 service，不直接解析其他 DLL 的符号。
-- [ ] TurboScript 只能调用 application manifest 授权的 capability。
+- [x] C++ registry 强制 service namespace + major version 全局唯一，并拒绝重复 capability/operation。
+- [x] 定义 host-owned `IApplicationServiceEndpoint` 路由边界；插件间仍不得直接解析其他 DLL 的符号。
+- [x] controller command 只能调用 application manifest 授权且已注册的 capability/operation；校验发生在
+  request reservation 与同 callback UI mutation commit 之前。
 - [ ] service 参数/返回值使用受限 tagged value/schema，不传 UI 或 GPU handle。
 - [x] 实现 application-owned bounded MPSC completion mailbox；copy ownership、固定容量、非阻塞
   `QueueFull`、owner-thread consumer、generation 淘汰、close quiescence/cancel 和统计均有测试。
-- [ ] 长任务返回 request ID，结果通过 bounded completion queue 投递 UI thread。
-- [ ] queue 满、取消、窗口关闭和 plugin stop 都有明确错误语义。
+- [x] 实现 application-owned bounded request table：command publication 生成 host token，host 取得 owning
+  request，worker 结果经 completion mailbox 回到 UI thread，并恢复原始 script request ID；转换为
+  TurboScript event 仍由 P6 完成。
+- [x] request table 的 queue 满、reservation 丢弃、reload 取消和窗口关闭已有明确错误语义与测试。
+- [x] request queue 持有 immutable registry + manifest 单一事实源；host 可对 owning request 做防御性解析并
+  取得 lifetime-safe shared endpoint，未配置 registry 时按空 registry fail fast。
+- [x] PluginHost stop/join 时拒绝新调用、等待活动 submit/worker，并区分 retryable timeout、
+  completion QueueFull retry 与 terminal completion error。
 
 ### 安全与测试
 
-- [ ] 首版文档明确“同进程、可信插件”，不宣称 crash isolation。
-- [ ] 权限默认拒绝；文件、网络、进程、设备分别授权。
-- [ ] 测错误 ABI、缺失 symbol、create/start/stop 失败和重复注册。
-- [ ] 测跨 CRT buffer、字符串生命周期、double unload 和 use-after-unload 防护。
-- [ ] 测依赖拓扑、循环、required/optional 和 capability denial。
-- [ ] 使用 ASan/UBSan 可用配置验证 repeated load/start/stop/unload。
-- [ ] 建立独立示例 DLL 和 install-tree consumer test。
+- [x] 首版文档明确“同进程、可信插件”，不宣称 crash isolation。
+- [x] manifest admission 权限默认拒绝；文件、网络、进程、设备分别授权，并明确同进程 DLL 不等于
+  OS sandbox。
+- [x] 测错误 ABI、缺失 symbol、create/start/stop 失败和重复注册；stop failure 保持 `Stopping`
+  并可重试成功。
+- [x] 测跨 CRT buffer、字符串生命周期、double unload 和 use-after-unload 防护；Windows test DLL
+  使用 `/MTd`/`/MT`，host 使用 `/MDd`/`/MD`，request/completion/error bytes 均由接收方复制。
+- [x] 测依赖拓扑、循环、required/optional、exact version、descriptor match 和 capability denial。
+- [x] 使用当前 Windows ASan 配置重复 25 次 host/manifest load/start/stop/unload；Release 重复
+  100 次，当前 MSVC profile 未启用 UBSan。
+- [x] 建立独立纯 C echo DLL 和 install-tree consumer test；外部 CMake 工程只通过已安装
+  `FlexUI::PluginSDK`/`Services`/`PluginHost` target 编译，并执行 load/start/echo/stop/unload。
 
 完成条件：可信 DLL 可注册一个类型化 service，TurboScript 经 host bridge 调用并收到 completion；
 插件不能访问 Element、Renderer 或 gCanvas Context。
@@ -366,7 +380,8 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 - [ ] 无 controller Box 行为与 command snapshot 不变。
 - [x] `FLEXUI_ENABLE_TURBOSCRIPT=OFF` configure/build/test 通过。
-- [ ] `FLEXUI_ENABLE_PLUGINS=OFF` configure/build/test 通过。
+- [x] `FLEXUI_ENABLE_PLUGINS=OFF` configure/build/test 通过；Host、manifest tests 和测试 DLL 不生成，
+  `PluginSDK`/ABI test 保留。
 - [ ] 两 feature 同时关闭时不部署 TurboScript/plugin runtime。
 - [ ] 现有 hand-built examples 与 UiDocument tests 通过。
 

@@ -64,6 +64,7 @@ option(NANOGUI_BUILD_GLAD                "Build GLAD OpenGL loader library? (nee
 option(NANOGUI_INSTALL                   "Install NanoGUI on `make install`?" OFF)
 option(BUILD_TESTS                       "Build unit tests?" ON)
 option(FLEXUI_ENABLE_TURBOSCRIPT         "Build the optional FlexUI TurboScript controller adapter?" OFF)
+option(FLEXUI_ENABLE_PLUGINS             "Build the optional FlexUI trusted DLL PluginHost?" OFF)
 
 # Backend selection (mutually exclusive)
 include(CMakeDependentOption)

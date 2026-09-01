@@ -1,6 +1,8 @@
 #pragma once
 
 #include "flexUI/application_completion.h"
+#include "flexUI/application_service.h"
+#include "flexUI/service_registry.h"
 #include "flexUI/box.h"
 #include "flexUI/controller.h"
 #include "flexUI/widget_registry.h"
@@ -41,6 +43,7 @@ struct DesktopApplicationLimits {
   ControllerLimits controller;
   MutationLimits mutation;
   ApplicationCompletionLimits completion;
+  ApplicationServiceRequestLimits service_requests;
 };
 
 enum class DesktopApplicationStage {
@@ -58,6 +61,8 @@ enum class DesktopApplicationStage {
   ControllerUnmount,
   ControllerFrame,
   CompletionMailbox,
+  ServiceRegistry,
+  ServiceRequests,
 };
 
 enum class DesktopApplicationErrorCode {
@@ -79,6 +84,8 @@ enum class DesktopApplicationErrorCode {
   InvalidArgument,
   ControllerFrameFailed,
   CompletionMailboxFailed,
+  ServiceRegistryFailed,
+  ServiceRequestFailed,
   GenerationExhausted,
 };
 
@@ -91,6 +98,8 @@ struct DesktopApplicationError {
   ScriptModuleError script_error;
   ControllerError controller_error;
   ApplicationCompletionError completion_error;
+  ApplicationServiceError service_error;
+  ApplicationServiceRegistryError registry_error;
 
   explicit operator bool() const noexcept { return code != DesktopApplicationErrorCode::None; }
 };
@@ -148,6 +157,27 @@ public:
   /// outside the application owner thread.
   ApplicationCompletionMailbox &completion_mailbox() noexcept;
   const ApplicationCompletionMailbox &completion_mailbox() const noexcept;
+
+  /// Transfers at most one published command to the owner-thread host. The
+  /// returned request owns its strings; its token remains pending until a
+  /// matching completion is consumed or the application reloads/closes.
+  /// @return `WrongThread` outside the owner thread, `Closed` after close, or
+  ///         `Ready`/`Empty` without blocking while the application is ready.
+  ApplicationServiceRequestResult try_receive_service_request();
+
+  /// Resolves a received owning request against this application's immutable
+  /// registry and capability policy without invoking the endpoint.
+  ApplicationServiceResolveResult resolve_service_request(
+      const ApplicationServiceRequest &request) const;
+
+  /// Consumes at most one worker completion and restores its script request
+  /// identity. Unknown or out-of-order tokens fail explicitly.
+  /// @return `WrongThread` outside the owner thread, `Closed` after close, or
+  ///         a structured mailbox/token result without blocking.
+  ApplicationServiceCompletionResult try_receive_service_completion();
+
+  /// Owner-thread snapshot of bounded request-table counters.
+  ApplicationServiceStatistics service_statistics() const noexcept;
 
   /// Reports whether the caller may access owner-thread application state.
   /// This query does not read the active Box and is safe from any thread.
@@ -211,6 +241,9 @@ public:
   DesktopApplicationBuilder &box_options(BoxOptions options);
   DesktopApplicationBuilder &limits(DesktopApplicationLimits limits);
   DesktopApplicationBuilder &widget_registry(WidgetRegistry registry);
+  DesktopApplicationBuilder &services(
+      std::shared_ptr<const ApplicationServiceRegistry> registry,
+      ApplicationCapabilityManifest manifest);
 
   /// Validates and mounts a detached candidate before returning ownership.
   DesktopApplicationBuildResult build() const;

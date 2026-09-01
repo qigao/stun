@@ -1,11 +1,13 @@
 #include "flexUI/application.h"
 
+#include "application_service_requests.hpp"
 #include "flexUI/box_mutation_host.h"
 #include "flexUI/ui_xml.h"
 
 #include <cmath>
 #include <exception>
 #include <limits>
+#include <new>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -175,8 +177,8 @@ DesktopApplicationError fail(DesktopApplicationErrorCode code, DesktopApplicatio
   return {code, stage, std::move(message)};
 }
 
-CandidateResult build_candidate(const ApplicationConfig &config,
-                                DesktopApplicationSources sources) {
+CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicationSources sources,
+                                ApplicationCommandEngine *command_engine) {
   if (sources.ui.empty()) {
     return {{},
             fail(DesktopApplicationErrorCode::InvalidConfiguration,
@@ -283,8 +285,9 @@ CandidateResult build_candidate(const ApplicationConfig &config,
       state->mutation_host = std::make_unique<BoxMutationHost>(*state->box);
       state->mutation_engine =
           std::make_unique<UiMutationEngine>(*state->mutation_host, config.limits.mutation);
-      state->controller =
-          std::make_unique<ScriptController>(*state->mutation_engine, config.limits.controller);
+      state->controller = std::make_unique<ScriptController>(
+          ControllerEffects{state->mutation_engine.get(), command_engine},
+          config.limits.controller);
 
       auto loaded = state->controller->load(std::move(created.module), state->program);
       if (!loaded) {
@@ -324,6 +327,8 @@ CandidateResult build_candidate(const ApplicationConfig &config,
 struct DesktopApplication::Impl {
   ApplicationConfig config;
   std::unique_ptr<ApplicationCompletionMailbox> completion_mailbox;
+  std::unique_ptr<ApplicationServiceRequestQueue> service_requests;
+  std::unique_ptr<ApplicationCommandEngine> command_engine;
   std::unique_ptr<PublishedApplicationState> active;
   std::thread::id owner_thread;
   DesktopApplicationState state = DesktopApplicationState::Ready;
@@ -337,6 +342,8 @@ struct DesktopApplicationBuilder::Impl {
 
   ApplicationConfig config;
   DesktopApplicationSources sources;
+  std::shared_ptr<const ApplicationServiceRegistry> service_registry;
+  ApplicationCapabilityManifest capability_manifest;
 };
 
 DesktopApplication::DesktopApplication(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
@@ -381,6 +388,75 @@ const ApplicationCompletionMailbox &DesktopApplication::completion_mailbox() con
   return *impl_->completion_mailbox;
 }
 
+ApplicationServiceRequestResult DesktopApplication::try_receive_service_request() {
+  if (!is_owner_thread()) {
+    return {ApplicationServicePollStatus::Empty,
+            {},
+            {ApplicationServiceErrorCode::WrongThread,
+             "service request receive must run on the application owner thread",
+             {}}};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {ApplicationServicePollStatus::Closed, {}, {}};
+  }
+  return impl_->service_requests->try_receive_request();
+}
+
+ApplicationServiceResolveResult DesktopApplication::resolve_service_request(
+    const ApplicationServiceRequest &request) const {
+  if (!is_owner_thread()) {
+    return {{},
+            {ApplicationServiceRegistryErrorCode::WrongThread,
+             request.capability, request.operation,
+             "service resolution must run on the application owner thread"}};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {{},
+            {ApplicationServiceRegistryErrorCode::InvalidState,
+             request.capability, request.operation,
+             "service resolution requires a ready application"}};
+  }
+  return impl_->service_requests->resolve_service(request);
+}
+
+ApplicationServiceCompletionResult DesktopApplication::try_receive_service_completion() {
+  if (!is_owner_thread()) {
+    return {ApplicationServicePollStatus::Empty,
+            {},
+            {ApplicationServiceErrorCode::WrongThread,
+             "service completion receive must run on the application owner thread",
+             {}}};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {ApplicationServicePollStatus::Closed, {}, {}};
+  }
+
+  auto received = impl_->completion_mailbox->try_receive();
+  if (received.error) {
+    ApplicationServiceError error{ApplicationServiceErrorCode::CompletionMailboxFailed,
+                                  received.error.message, std::move(received.error)};
+    return {ApplicationServicePollStatus::Empty, {}, std::move(error)};
+  }
+  if (received.status == ApplicationCompletionReceiveStatus::Empty) {
+    return {};
+  }
+  if (received.status == ApplicationCompletionReceiveStatus::Closed) {
+    return {ApplicationServicePollStatus::Closed, {}, {}};
+  }
+  if (!received.completion.has_value()) {
+    return {ApplicationServicePollStatus::Empty,
+            {},
+            {ApplicationServiceErrorCode::InternalInvariant,
+             "completion mailbox returned Ready without a completion",
+             {}}};
+  }
+  return impl_->service_requests->resolve_completion(std::move(*received.completion));
+}
+
+ApplicationServiceStatistics DesktopApplication::service_statistics() const noexcept {
+  return impl_->service_requests->statistics();
+}
+
 bool DesktopApplication::is_owner_thread() const noexcept {
   return std::this_thread::get_id() == impl_->owner_thread;
 }
@@ -391,6 +467,13 @@ DesktopApplicationResult DesktopApplication::request_close() {
                  "desktop application close request must run on its owner thread")};
   }
   if (impl_->state == DesktopApplicationState::Ready) {
+    auto service_closed = impl_->service_requests->close();
+    if (!service_closed) {
+      auto error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                        DesktopApplicationStage::ServiceRequests, service_closed.error.message);
+      error.service_error = std::move(service_closed.error);
+      return {std::move(error)};
+    }
     auto closed = impl_->completion_mailbox->close();
     if (!closed) {
       auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
@@ -520,9 +603,16 @@ DesktopApplicationResult DesktopApplication::reload(DesktopApplicationSources so
                  "desktop application completion generation exhausted")};
   }
 
-  auto candidate = build_candidate(impl_->config, std::move(sources));
+  auto candidate = build_candidate(impl_->config, std::move(sources), impl_->command_engine.get());
   if (!candidate) {
     return {std::move(candidate.error)};
+  }
+  auto service_reset = impl_->service_requests->validate_generation_reset(current_generation + 1);
+  if (!service_reset) {
+    auto error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                      DesktopApplicationStage::ServiceRequests, service_reset.error.message);
+    error.service_error = std::move(service_reset.error);
+    return {std::move(error)};
   }
   auto advanced = impl_->completion_mailbox->advance_generation(current_generation + 1);
   if (!advanced) {
@@ -531,6 +621,7 @@ DesktopApplicationResult DesktopApplication::reload(DesktopApplicationSources so
     error.completion_error = std::move(advanced.error);
     return {std::move(error)};
   }
+  impl_->service_requests->reset_generation(current_generation + 1);
   impl_->active.swap(candidate.state);
   return {};
 }
@@ -596,12 +687,62 @@ DesktopApplicationBuilder &DesktopApplicationBuilder::widget_registry(WidgetRegi
   return *this;
 }
 
+DesktopApplicationBuilder &DesktopApplicationBuilder::services(
+    std::shared_ptr<const ApplicationServiceRegistry> registry,
+    ApplicationCapabilityManifest manifest) {
+  impl_->service_registry = std::move(registry);
+  impl_->capability_manifest = std::move(manifest);
+  return *this;
+}
+
 DesktopApplicationBuildResult DesktopApplicationBuilder::build() const {
   if (!impl_) {
     return {{},
             fail(DesktopApplicationErrorCode::InvalidConfiguration,
                  DesktopApplicationStage::Configuration,
                  "moved-from desktop application builder cannot build")};
+  }
+
+  std::shared_ptr<const ApplicationServiceRegistry> service_registry =
+      impl_->service_registry;
+  if (!service_registry) {
+    try {
+      ApplicationServiceRegistryBuilder registry_builder;
+      auto empty_registry = registry_builder.build();
+      if (!empty_registry) {
+        auto error = fail(DesktopApplicationErrorCode::ServiceRegistryFailed,
+                          DesktopApplicationStage::ServiceRegistry,
+                          empty_registry.error.message);
+        error.registry_error = std::move(empty_registry.error);
+        return {{}, std::move(error)};
+      }
+      service_registry = std::move(empty_registry.registry);
+    } catch (const std::bad_alloc &) {
+      auto error = fail(DesktopApplicationErrorCode::ServiceRegistryFailed,
+                        DesktopApplicationStage::ServiceRegistry,
+                        "empty service registry allocation failed");
+      error.registry_error = {
+          ApplicationServiceRegistryErrorCode::AllocationFailed, {}, {},
+          error.message};
+      return {{}, std::move(error)};
+    } catch (...) {
+      auto error = fail(DesktopApplicationErrorCode::ServiceRegistryFailed,
+                        DesktopApplicationStage::ServiceRegistry,
+                        "empty service registry construction failed");
+      error.registry_error = {
+          ApplicationServiceRegistryErrorCode::InternalInvariant, {}, {},
+          error.message};
+      return {{}, std::move(error)};
+    }
+  }
+  auto manifest_validation =
+      service_registry->validate_manifest(impl_->capability_manifest);
+  if (!manifest_validation) {
+    auto error = fail(DesktopApplicationErrorCode::ServiceRegistryFailed,
+                      DesktopApplicationStage::ServiceRegistry,
+                      manifest_validation.error.message);
+    error.registry_error = std::move(manifest_validation.error);
+    return {{}, std::move(error)};
   }
 
   auto completion_mailbox =
@@ -613,7 +754,29 @@ DesktopApplicationBuildResult DesktopApplicationBuilder::build() const {
     return {{}, std::move(error)};
   }
 
-  auto candidate = build_candidate(impl_->config, impl_->sources);
+  auto service_requests =
+      ApplicationServiceRequestQueue::create(
+          1, impl_->config.limits.service_requests, std::move(service_registry),
+          impl_->capability_manifest);
+  if (!service_requests) {
+    auto error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                      DesktopApplicationStage::ServiceRequests, service_requests.error.message);
+    error.service_error = std::move(service_requests.error);
+    return {{}, std::move(error)};
+  }
+
+  std::unique_ptr<ApplicationCommandEngine> command_engine;
+  try {
+    command_engine = std::make_unique<ApplicationCommandEngine>(*service_requests.queue);
+  } catch (const std::bad_alloc &) {
+    auto error =
+        fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+             DesktopApplicationStage::ServiceRequests, "service command engine allocation failed");
+    error.service_error = {ApplicationServiceErrorCode::AllocationFailed, error.message, {}};
+    return {{}, std::move(error)};
+  }
+
+  auto candidate = build_candidate(impl_->config, impl_->sources, command_engine.get());
   if (!candidate) {
     return {{}, std::move(candidate.error)};
   }
@@ -622,6 +785,8 @@ DesktopApplicationBuildResult DesktopApplicationBuilder::build() const {
     auto application_impl = std::make_unique<DesktopApplication::Impl>();
     application_impl->config = impl_->config;
     application_impl->completion_mailbox = std::move(completion_mailbox.mailbox);
+    application_impl->service_requests = std::move(service_requests.queue);
+    application_impl->command_engine = std::move(command_engine);
     application_impl->active = std::move(candidate.state);
     application_impl->owner_thread = std::this_thread::get_id();
     return {

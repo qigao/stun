@@ -1,10 +1,11 @@
 add_library(flexUI_controller STATIC application.cpp application_command.cpp
                                       application_completion.cpp
+                                      application_service_requests.cpp
                                       application_host_bridge.cpp controller.cpp
                                       mutation.cpp box_mutation_host.cpp)
 add_library(FlexUI::Controller ALIAS flexUI_controller)
 
-target_link_libraries(flexUI_controller PUBLIC FlexUI::Core
+target_link_libraries(flexUI_controller PUBLIC FlexUI::Core FlexUI::Services
                                         PRIVATE TurboUtils::Core)
 target_include_directories(
   flexUI_controller

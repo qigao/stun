@@ -17,6 +17,28 @@
 
 namespace {
 
+class TestStorageEndpoint final : public flexUI::IApplicationServiceEndpoint {
+public:
+  flexUI::ApplicationServiceSubmitResult try_submit(
+      const flexUI::ApplicationServiceRequest &,
+      flexUI::IApplicationServiceCompletionSink &) override {
+    return {};
+  }
+};
+
+std::shared_ptr<TestStorageEndpoint> configure_storage_service(
+    flexUI::DesktopApplicationBuilder &application_builder) {
+  auto endpoint = std::make_shared<TestStorageEndpoint>();
+  flexUI::ApplicationServiceRegistryBuilder registry_builder;
+  check(registry_builder.register_service(
+      {"storage/1", {{"write", 1024}}}, endpoint));
+  auto registry = registry_builder.build();
+  check(registry);
+  application_builder.services(std::move(registry.registry),
+                               {{"storage/1"}, {"storage/1"}});
+  return endpoint;
+}
+
 struct ModuleProbe {
   std::vector<std::string> created_sources;
   std::vector<std::string> created_names;
@@ -28,6 +50,10 @@ struct ModuleProbe {
   flexUI::DesktopApplication *application = nullptr;
   flexUI::DesktopApplicationResult reentrant_shutdown;
   bool shutdown_during_event = false;
+  bool emit_service_command = false;
+  bool emit_valid_mutation = false;
+  bool emit_invalid_mutation = false;
+  std::uint64_t service_request_id = 71;
 };
 
 class FakeApplicationModule final : public flexUI::IScriptModule {
@@ -84,7 +110,27 @@ public:
       static_cast<void>(probe_->application->request_close());
       probe_->reentrant_shutdown = probe_->application->shutdown();
     }
-    return {};
+    flexUI::ScriptCallResult result;
+    if (context.callback == flexUI::ScriptCallbackKind::Event && probe_->emit_service_command) {
+      const auto appended =
+          result.commands.append(
+              {probe_->service_request_id, "storage/1", "write", "document"});
+      if (!appended) {
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded, appended.error.message}};
+      }
+    }
+    if (context.callback == flexUI::ScriptCallbackKind::Event &&
+        (probe_->emit_valid_mutation || probe_->emit_invalid_mutation)) {
+      const flexUI::UiHandle target =
+          probe_->emit_invalid_mutation
+              ? flexUI::UiHandle{"missing", context.event->current_target.generation}
+              : context.event->current_target;
+      const auto appended = result.mutations.append(flexUI::SetTextMutation{target, "Saved"});
+      if (!appended) {
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded, appended.error.message}};
+      }
+    }
+    return result;
   }
 
 private:
@@ -268,6 +314,216 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_not_null(dynamic_cast<flexUI::ButtonWidget *>(replacement->widget));
     check_equal(built.application->sources().script, "replacement-controller");
     check(built.application->controller()->state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("publishes service commands after UI mutation commit and resolves completions") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    probe->emit_valid_mutation = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-controller", fake_factory(probe));
+    auto endpoint = configure_storage_service(builder);
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    auto *save = built.application->box().get_by_id("save");
+    check(dispatch_click(*built.application));
+    check_equal(save->text(), std::string("Saved"));
+
+    auto request = built.application->try_receive_service_request();
+    check(request);
+    check_equal(request.request->script_request_id, std::uint64_t{71});
+    check_equal(request.request->capability, std::string("storage/1"));
+    check_equal(request.request->operation, std::string("write"));
+    check_equal(request.request->payload, std::string("document"));
+    check_equal(request.request->token.generation, built.application->generation());
+    auto resolved_endpoint =
+        built.application->resolve_service_request(*request.request);
+    check(resolved_endpoint);
+    check(resolved_endpoint.endpoint == endpoint);
+
+    flexUI::ApplicationCompletion completion;
+    completion.token = request.request->token;
+    completion.payload = "stored";
+    check(built.application->completion_mailbox().try_post(completion));
+
+    auto resolved = built.application->try_receive_service_completion();
+    check(resolved);
+    check_equal(resolved.completion->script_request_id, std::uint64_t{71});
+    check_equal(resolved.completion->payload, std::string("stored"));
+    check(built.application->try_receive_service_completion().status ==
+          flexUI::ApplicationServicePollStatus::Empty);
+    check_equal(built.application->service_statistics().completed, std::uint64_t{1});
+  }
+
+  it("discards reserved service commands when UI mutation preparation fails") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    probe->emit_invalid_mutation = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("invalid-mutation", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    const auto dispatched = dispatch_click(*built.application);
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.controller_error.code == flexUI::ControllerErrorCode::MutationFailed);
+    check(built.application->try_receive_service_request().status ==
+          flexUI::ApplicationServicePollStatus::Empty);
+    const auto stats = built.application->service_statistics();
+    check_equal(stats.current_pending, std::size_t{0});
+    check_equal(stats.discarded, std::uint64_t{1});
+    check_equal(stats.published, std::uint64_t{0});
+  }
+
+  it("rejects service saturation before applying same-callback UI mutations") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationLimits limits;
+    limits.service_requests.capacity = 1;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-controller", fake_factory(probe))
+        .limits(limits);
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto *save = built.application->box().get_by_id("save");
+    save->set_text("Before");
+    probe->service_request_id = 72;
+    probe->emit_valid_mutation = true;
+
+    const auto saturated = dispatch_click(*built.application);
+    check_false(static_cast<bool>(saturated));
+    check(saturated.error.controller_error.code == flexUI::ControllerErrorCode::CommandFailed);
+    check(saturated.error.controller_error.command_error.code ==
+          flexUI::ApplicationCommandErrorCode::QueueFull);
+    check_equal(save->text(), std::string("Before"));
+    check_equal(built.application->service_statistics().current_pending, std::size_t{1});
+  }
+
+  it("rejects unauthorized service commands before same-callback UI mutation") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    probe->emit_valid_mutation = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("unauthorized-service", fake_factory(probe));
+    auto built = builder.build();
+    check(built);
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    auto *save = built.application->box().get_by_id("save");
+    save->set_text("Before");
+    auto dispatched = dispatch_click(*built.application);
+    check_false(static_cast<bool>(dispatched));
+    check(dispatched.error.controller_error.code ==
+          flexUI::ControllerErrorCode::CommandFailed);
+    check(dispatched.error.controller_error.command_error.code ==
+          flexUI::ApplicationCommandErrorCode::UnknownCapability);
+    check_equal(save->text(), std::string("Before"));
+    check_equal(built.application->service_statistics().current_pending,
+                std::size_t{0});
+  }
+
+  it("rejects a missing required service while building the application") {
+    flexUI::ApplicationServiceRegistryBuilder registry_builder;
+    auto registry = registry_builder.build();
+    check(registry);
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry()).services(
+        std::move(registry.registry),
+        {{"document.storage/1"}, {"document.storage/1"}});
+
+    auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check(built.error.code ==
+          flexUI::DesktopApplicationErrorCode::ServiceRegistryFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::ServiceRegistry);
+    check(built.error.registry_error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::MissingRequiredCapability);
+  }
+
+  it("cancels pending service identities when reload publishes a new generation") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-controller", fake_factory(probe));
+    auto endpoint = configure_storage_service(builder);
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto old_request = built.application->try_receive_service_request();
+    check(old_request);
+    auto old_endpoint =
+        built.application->resolve_service_request(*old_request.request);
+    check(old_endpoint);
+    check(old_endpoint.endpoint == endpoint);
+    const auto old_generation = built.application->generation();
+
+    check(built.application->reload({xml_entry("replacement"),
+                                     "#replacement { width: 120px; height: 36px; }",
+                                     "replacement-controller", "replacement-module"}));
+    check_equal(built.application->generation(), old_generation + 1);
+    check_equal(built.application->service_statistics().cancelled, std::uint64_t{1});
+
+    auto stale_resolution =
+        built.application->resolve_service_request(*old_request.request);
+    check_false(static_cast<bool>(stale_resolution));
+    check(stale_resolution.error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::InvalidRequest);
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    auto current_request = built.application->try_receive_service_request();
+    check(current_request);
+    auto current_endpoint =
+        built.application->resolve_service_request(*current_request.request);
+    check(current_endpoint);
+    check(current_endpoint.endpoint == endpoint);
+
+    flexUI::ApplicationCompletion stale;
+    stale.token = old_request.request->token;
+    auto rejected = built.application->completion_mailbox().try_post(stale);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code == flexUI::ApplicationCompletionErrorCode::StaleGeneration);
   }
 
   it("routes a synthesized click through target and ancestor handlers after native bubbling") {
@@ -724,6 +980,69 @@ spec("FlexUI desktop application owns close and shutdown state") {
     check(built.error.stage == flexUI::DesktopApplicationStage::CompletionMailbox);
     check(built.error.completion_error.code ==
           flexUI::ApplicationCompletionErrorCode::InvalidCapacity);
+  }
+
+  it("fails application publication when service request limits are invalid") {
+    flexUI::DesktopApplicationLimits limits;
+    limits.service_requests.capacity = 0;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>").limits(limits);
+
+    auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::ServiceRequestFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::ServiceRequests);
+    check(built.error.service_error.code == flexUI::ApplicationServiceErrorCode::InvalidCapacity);
+  }
+
+  it("cancels pending service requests before publishing CloseRequested") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(xml_entry())
+        .stylesheet("#save { width: 120px; height: 36px; }")
+        .script("service-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    built.application->box().set_viewport(320.0F, 200.0F);
+    built.application->box().update();
+    check(dispatch_click(*built.application));
+    check_equal(built.application->service_statistics().current_pending, std::size_t{1});
+
+    check(built.application->request_close());
+    check(built.application->state() == flexUI::DesktopApplicationState::CloseRequested);
+    check_equal(built.application->service_statistics().cancelled, std::uint64_t{1});
+    check(built.application->try_receive_service_request().status ==
+          flexUI::ApplicationServicePollStatus::Closed);
+    check(built.application->try_receive_service_completion().status ==
+          flexUI::ApplicationServicePollStatus::Closed);
+  }
+
+  it("rejects service polling from a non-owner thread") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    flexUI::ApplicationServiceRequestResult request;
+    flexUI::ApplicationServiceCompletionResult completion;
+    std::thread worker([&] {
+      request = built.application->try_receive_service_request();
+      completion = built.application->try_receive_service_completion();
+    });
+    worker.join();
+
+    check(request.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
+    check(completion.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
+    check(built.application->state() == flexUI::DesktopApplicationState::Ready);
   }
 
   it("retains shutdown state while reporting an on_unmount failure") {

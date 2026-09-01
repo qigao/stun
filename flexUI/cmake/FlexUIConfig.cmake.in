@@ -1,0 +1,19 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+if(NOT FlexUI_FIND_COMPONENTS OR
+   "PluginHost" IN_LIST FlexUI_FIND_COMPONENTS)
+@FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES@
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/FlexUIPluginTargets.cmake")
+
+set(FlexUI_PluginSDK_FOUND TRUE)
+set(FlexUI_Services_FOUND TRUE)
+if(TARGET FlexUI::PluginHost)
+  set(FlexUI_PluginHost_FOUND TRUE)
+else()
+  set(FlexUI_PluginHost_FOUND FALSE)
+endif()
+
+check_required_components(FlexUI)
