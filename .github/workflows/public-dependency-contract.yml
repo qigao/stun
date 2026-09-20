@@ -85,7 +85,8 @@ jobs:
             return static_cast<int>(flex::debug::get_log_level());
           }
           EOF
-          c++ -std=c++17 -Wall -Wextra -Werror             -Iflex/include             -isystem .ci/salts/utils/include             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_debug_contract.cpp
+          c++ -std=c++17 -Wall -Wextra -Werror             -Iflex/include             -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_debug_contract.cpp
 
           cat > /tmp/flex_fs_contract.cpp <<'EOF'
           #include <salts_fs.h>
@@ -97,7 +98,8 @@ jobs:
             return 0;
           }
           EOF
-          c++ -std=c++17 -Wall -Wextra -Werror             -isystem .ci/salts/utils/include             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_fs_contract.cpp
+          c++ -std=c++17 -Wall -Wextra -Werror             -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_fs_contract.cpp
 
 
   pluginhost-canonical-packages:
@@ -152,6 +154,7 @@ jobs:
             -IflexUI/include
             -IflexUI/modules/plugin_host
             -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include
             -isystem .ci/salts/cmeta/include
             -isystem .ci/salts/concurrency/include
