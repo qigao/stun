@@ -1,5 +1,5 @@
 #include "c4_parser_wrapper.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -285,41 +285,41 @@ static const char* rel_type_str(C4RelType type) {
 static json_value_t* serialize_elements(C4Element* el);
 
 static json_value_t* serialize_element(C4Element* el) {
-    json_value_t* obj = turbo_json_create_object();
-    turbo_json_object_set_string(obj, "type", element_type_str(el->type));
-    turbo_json_object_set_string(obj, "alias", el->alias ? el->alias : "");
-    turbo_json_object_set_string(obj, "label", el->label ? el->label : "");
-    if (el->descr) turbo_json_object_set_string(obj, "descr", el->descr);
-    if (el->technology) turbo_json_object_set_string(obj, "technology", el->technology);
-    if (el->descr2) turbo_json_object_set_string(obj, "descr2", el->descr2);
-    if (el->sprite) turbo_json_object_set_string(obj, "sprite", el->sprite);
-    if (el->tags) turbo_json_object_set_string(obj, "tags", el->tags);
-    if (el->link) turbo_json_object_set_string(obj, "link", el->link);
+    json_value_t* obj = json_create_object();
+    json_object_set_string(obj, "type", element_type_str(el->type));
+    json_object_set_string(obj, "alias", el->alias ? el->alias : "");
+    json_object_set_string(obj, "label", el->label ? el->label : "");
+    if (el->descr) json_object_set_string(obj, "descr", el->descr);
+    if (el->technology) json_object_set_string(obj, "technology", el->technology);
+    if (el->descr2) json_object_set_string(obj, "descr2", el->descr2);
+    if (el->sprite) json_object_set_string(obj, "sprite", el->sprite);
+    if (el->tags) json_object_set_string(obj, "tags", el->tags);
+    if (el->link) json_object_set_string(obj, "link", el->link);
     if (el->children) {
-        turbo_json_object_add(obj, "children", serialize_elements(el->children));
+        json_object_add(obj, "children", serialize_elements(el->children));
     }
     return obj;
 }
 
 static json_value_t* serialize_elements(C4Element* el) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (el) {
-        turbo_json_array_add(arr, serialize_element(el));
+        json_array_add(arr, serialize_element(el));
         el = el->next;
     }
     return arr;
 }
 
 static json_value_t* serialize_relationships(C4Rel* rel) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (rel) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "type", rel_type_str(rel->type));
-        turbo_json_object_set_string(obj, "from", rel->from ? rel->from : "");
-        turbo_json_object_set_string(obj, "to", rel->to ? rel->to : "");
-        if (rel->label) turbo_json_object_set_string(obj, "label", rel->label);
-        if (rel->technology) turbo_json_object_set_string(obj, "technology", rel->technology);
-        turbo_json_array_add(arr, obj);
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "type", rel_type_str(rel->type));
+        json_object_set_string(obj, "from", rel->from ? rel->from : "");
+        json_object_set_string(obj, "to", rel->to ? rel->to : "");
+        if (rel->label) json_object_set_string(obj, "label", rel->label);
+        if (rel->technology) json_object_set_string(obj, "technology", rel->technology);
+        json_array_add(arr, obj);
         rel = rel->next;
     }
     return arr;
@@ -328,16 +328,16 @@ static json_value_t* serialize_relationships(C4Rel* rel) {
 char* c4_to_json(C4Diagram* diagram) {
     if (!diagram) return NULL;
 
-    json_value_t* root = turbo_json_create_object();
-    turbo_json_object_set_string(root, "type", diagram_type_str(diagram->type));
+    json_value_t* root = json_create_object();
+    json_object_set_string(root, "type", diagram_type_str(diagram->type));
     if (diagram->title) {
-        turbo_json_object_set_string(root, "title", diagram->title);
+        json_object_set_string(root, "title", diagram->title);
     }
-    turbo_json_object_add(root, "elements", serialize_elements(diagram->elements));
-    turbo_json_object_add(root, "relationships", serialize_relationships(diagram->relationships));
+    json_object_add(root, "elements", serialize_elements(diagram->elements));
+    json_object_add(root, "relationships", serialize_relationships(diagram->relationships));
 
     size_t len;
-    char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(&root);
+    char* str = json_serialize_pretty(root, &len);
+    json_free(&root);
     return str;
 }
