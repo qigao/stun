@@ -136,15 +136,15 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
 
   const auto id_attribute = xml_node.attribute("id");
   const std::string_view id(id_attribute.value());
-  if (!id_attribute || id.empty()) {
+  if (id_attribute && id.empty()) {
     return node_error(source, xml_node, UiDocumentErrorCode::InvalidNode,
-                      "XML widget requires a non-empty id attribute");
+                      "XML widget id must be non-empty when the attribute is present");
   }
   if (id.size() > limits.max_string_bytes) {
     return node_error(source, xml_node, UiDocumentErrorCode::StringLimitExceeded,
                       "XML widget id exceeds the string limit");
   }
-  if (!ids.emplace(id).second) {
+  if (!id.empty() && !ids.emplace(id).second) {
     return node_error(source, xml_node, UiDocumentErrorCode::DuplicateElementId,
                       "duplicate UI element id: " + std::string(id));
   }
