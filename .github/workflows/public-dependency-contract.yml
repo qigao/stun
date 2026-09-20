@@ -1,0 +1,45 @@
+name: Public dependency compile contract
+
+on:
+  pull_request:
+  push:
+    branches:
+      - refactor/controller-salts-concurrency
+
+permissions:
+  contents: read
+
+jobs:
+  controller-salts-concurrency:
+    name: Controller Salts::Concurrency contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+
+      - name: Checkout canonical Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          path: .ci/salts
+
+      - name: Verify canonical dependency surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#include <salts/disruptor.h>' flexUI/modules/controller/application_completion.cpp
+          grep -Fq 'PRIVATE Salts::Concurrency)' flexUI/modules/controller/CMakeLists.txt
+          if grep -Fq '#include <turbo/disruptor.h>' flexUI/modules/controller/application_completion.cpp; then
+            echo "legacy TurboUtils disruptor header remains" >&2
+            exit 1
+          fi
+          if grep -Fq 'PRIVATE TurboUtils::Core)' flexUI/modules/controller/CMakeLists.txt; then
+            echo "controller still links the legacy umbrella Core target" >&2
+            exit 1
+          fi
+
+      - name: Compile controller mailbox against public Salts headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -I.ci/salts/concurrency/include             -fsyntax-only             flexUI/modules/controller/application_completion.cpp

@@ -7,7 +7,7 @@ add_library(flexUI_controller STATIC application.cpp application_command.cpp
 add_library(FlexUI::Controller ALIAS flexUI_controller)
 
 target_link_libraries(flexUI_controller PUBLIC FlexUI::Core FlexUI::Services
-                                        PRIVATE TurboUtils::Core)
+                                        PRIVATE Salts::Concurrency)
 target_include_directories(
   flexUI_controller
   PUBLIC $<BUILD_INTERFACE:${FLEXUI_INCLUDE_DIR}>
