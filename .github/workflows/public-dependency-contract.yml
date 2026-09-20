@@ -205,7 +205,8 @@ jobs:
           grep -Fq 'Salts::Unicode' flexUI/CMakeLists.txt
           grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
           grep -Fq 'utf8_next_scalar' flexUI/include/flexUI/text_util.h
-          if grep -R -n -E 'uint32_t[[:space:]]+utf8_decode|utf8_char_length'               flexUI/include/flexUI/text_util.h flexUI/src/text_util.cpp flexUI/src/text_util.re; then
+          test ! -e flexUI/src/text_util.re
+          if grep -R -n -E 'utf8_decode|utf8_char_length' flexUI/include flexUI/src; then
             echo "private UTF-8 decoder surface remains" >&2
             exit 1
           fi
@@ -226,5 +227,7 @@ jobs:
             -isystem .ci/salts/platform/include
             -isystem .ci/salts/concurrency/include
             -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/tinytest/include
           )
           c++ "${common[@]}" -fsyntax-only flexUI/src/text_util.cpp
+          c++ "${common[@]}" -fsyntax-only flexUI/tests/test_text_util_unicode.cpp
