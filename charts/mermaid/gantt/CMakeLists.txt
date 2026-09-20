@@ -35,7 +35,7 @@ target_link_libraries(gantt PUBLIC TurboParser::Parser)
 
 # Test executable
 add_executable(gantt_test tests/test_parser.c)
-target_link_libraries(gantt_test gantt TurboUtils::TinyTest)
+target_link_libraries(gantt_test gantt Salts::TinyTest)
 target_compile_definitions(gantt_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/gantt")
 
 add_test(NAME gantt_test COMMAND gantt_test)
