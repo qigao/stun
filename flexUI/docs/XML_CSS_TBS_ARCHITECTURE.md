@@ -18,7 +18,8 @@ FlexUI 需要形成类似 Qt `.ui` + QtScript 的桌面应用开发模型，但�
 - Flex 的原生 Timeline、Track、Curve、显式三次贝塞尔、Physics/Box2D 和数值 MIR 保留为运行时
   能力；它们不属于要删除的 Flex DSL。
 - `.flex` parser、lexer、AST、binary DSL format 和 `Flex::Compiler` 在迁移完成后删除。
-- XML、CSS/Tailwind 和 TBS 都先编译为不可变程序，再在 UI owner thread 上实例化或执行。\n- 有效文本以严格 UTF-8 进入运行时；Unicode 标量、版本化属性和后续 grapheme/word/line/bidi 基础能力统一由 `Salts::Unicode` 提供。FlexUI 不维护第二套 UTF-8 decoder/property fact source。
+- XML、CSS/Tailwind 和 TBS 都先编译为不可变程序，再在 UI owner thread 上实例化或执行。
+- 有效文本以严格 UTF-8 进入运行时；Unicode 标量、版本化属性和后续 grapheme/word/line/bidi 基础能力统一由 `Salts::Unicode` 提供。FlexUI 不维护第二套 UTF-8 decoder/property fact source。
 
 ```mermaid
 flowchart LR
@@ -78,8 +79,7 @@ sequenceDiagram
 
 ## XML 契约
 
-XML adapter 只负责格式适配，不持有业务状态。元素名称通过 `WidgetRegistry` 映射到具体 widget
-factory；未知 tag、重复 ID、重复属性和不合法类型均为 load error。通用属性映射到
+XML adapter 只负责格式适配，不持有业务状态。元素名称通过 `WidgetRegistry` 映射到带 content/property/event/binding schema 的 node descriptor，再由 descriptor 区分 container、leaf/composite widget、text 与后续 component；具体 widget factory 只负责实例化。未知 tag、重复显式 ID、重复属性和不合法类型均为 load error。纯结构节点允许没有公开 `id`；编译器内部结构身份不得冒充可跨脚本/binding 边界使用的稳定 `UiHandle`。descriptor 同时决定节点是否允许 text、single child、children 或 text+children。通用属性映射到
 `UiNodeDefinition::properties`，事件使用 `on:*`，binding 使用 `bind:*`，命名空间在 adapter 边界
 转换为现有 canonical key（如 `on.click`、`bind.text`）。资源使用独立、受限的 `<resources>` 区域，
 最终产生 `UiResourceDefinition`。
@@ -107,7 +107,24 @@ XML 解析采用仓库 vcpkg manifest 已声明的 pugixml，并通过其 CMake 
 `checked`、`min/max/step`。类型不匹配返回 `WidgetFactoryFailed`。Registry 通过实例化入口显式注入；
 不带 Registry 的旧入口继续创建通用 `Element`，只用于迁移兼容。
 
-## Text 与 Unicode 契约\n\n- UI/XML/TurboScript/application 边界只接受有效 UTF-8；非法输入返回结构化错误，不静默替换为 U+FFFD。\n- `Salts::Unicode` 是 UTF-8 scalar/versioned Unicode property 的唯一事实源。FlexUI 现有手写 UTF-8 decoder、emoji range 和 broad bidi range 仅视为迁移遗留。\n- source/storage offset 明确以 byte 表示；caret、delete、selection 和用户可见 truncate 使用 grapheme boundary。\n- 不隐式执行 NFC/NFD normalization。需要 normalization 时必须是显式 API/authoring decision。\n- GUI text 在 scalar 之上还需要 UAX #29 grapheme/word、UAX #14 line break 和 UAX #9 bidi；这些能力应扩展到共享 Unicode 层而不是写入 FlexUI 私有表。\n- CSS typography/paragraph layout 属于 FlexUI；font/glyph/GPU resources 与最终 draw submission 属于 shaping/gCanvas 边界。生产 layout 最终不得依赖 byte/codepoint-count 的 approximate width。\n\n## Tailwind CSS compatibility 契约\n\nTailwind 不是第二套 style runtime。标准 `class=\"...\"` 同时承载普通 semantic class 和 Tailwind candidates；识别出的 utility 生成规则进入现有 `StyleEngine` cascade，普通 class 保留给应用 CSS。\n\n目标兼容固定的 Tailwind v4 profile，包括在 FlexUI CSS 能力可表达范围内的 utility、variant stacking、responsive breakpoint、dark mode、data/aria variant、container query、arbitrary value 和 theme variable。识别但运行时无法表达的浏览器专属行为必须显式 `Unsupported`，不得赋予 Stun 私有的不同语义。官方 Tailwind compiler 可以作为开发期 differential-test oracle，但不是安装后 runtime dependency。\n\n当前 `utility_whitelist.json` / exact-token catalog 是迁移实现与 coverage 数据，不再定义长期公开 Tailwind 语义。迁移期间仍通过生成 CSS 进入 `StyleEngine`，保持单一 cascade；只有 benchmark/profile 证明必要时才考虑直接 Style IR lowering。\n\n## 表达式策略
+## Text 与 Unicode 契约
+
+- UI/XML/TurboScript/application 边界只接受有效 UTF-8；非法输入返回结构化错误，不静默替换为 U+FFFD。
+- `Salts::Unicode` 是 UTF-8 scalar/versioned Unicode property 的唯一事实源。FlexUI 现有手写 UTF-8 decoder、emoji range 和 broad bidi range 仅视为迁移遗留。
+- source/storage offset 明确以 byte 表示；caret、delete、selection 和用户可见 truncate 使用 grapheme boundary。
+- 不隐式执行 NFC/NFD normalization。需要 normalization 时必须是显式 API/authoring decision。
+- GUI text 在 scalar 之上还需要 UAX #29 grapheme/word、UAX #14 line break 和 UAX #9 bidi；这些能力应扩展到共享 Unicode 层而不是写入 FlexUI 私有表。
+- CSS typography/paragraph layout 属于 FlexUI；font/glyph/GPU resources 与最终 draw submission 属于 shaping/gCanvas 边界。生产 layout 最终不得依赖 byte/codepoint-count 的 approximate width。
+
+## Tailwind CSS compatibility 契约
+
+Tailwind 不是第二套 style runtime。标准 `class="..."` 同时承载普通 semantic class 和 Tailwind candidates；识别出的 utility 生成规则进入现有 `StyleEngine` cascade，普通 class 保留给应用 CSS。
+
+目标兼容固定的 Tailwind v4 profile，包括在 FlexUI CSS 能力可表达范围内的 utility、variant stacking、responsive breakpoint、dark mode、data/aria variant、container query、arbitrary value 和 theme variable。识别但运行时无法表达的浏览器专属行为必须显式 `Unsupported`，不得赋予 Stun 私有的不同语义。官方 Tailwind compiler 可以作为开发期 differential-test oracle，但不是安装后 runtime dependency。
+
+当前 `utility_whitelist.json` / exact-token catalog 是迁移实现与 coverage 数据，不再定义长期公开 Tailwind 语义。迁移期间仍通过生成 CSS 进入 `StyleEngine`，保持单一 cascade；只有 benchmark/profile 证明必要时才考虑直接 Style IR lowering。
+
+## 表达式策略
 
 短期保留现有数值 MIR 作为 CSS animation、binding 与原生 runtime 的编译后执行后端。这不是保留
 Flex DSL：用户不再编写 `.flex` 文档，MIR 也不负责 UI 结构或事件编排。
