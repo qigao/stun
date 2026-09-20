@@ -1,7 +1,7 @@
 #include <flexUI/controller_turboscript.h>
 
 #include <tinytest.hpp>
-#include <turbo_fs.h>
+#include <salts_fs.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -25,8 +25,8 @@ struct LoadedController {
 };
 
 std::string load_controller_source() {
-  turbo_fs_stat_t metadata{};
-  check_equal(turbo_fs_stat(FLEXUI_EDITOR_CONTROLLER_PATH, &metadata), 0);
+  salts_fs_stat_t metadata{};
+  check_equal(salts_fs_stat(FLEXUI_EDITOR_CONTROLLER_PATH, &metadata), 0);
   check_true(metadata.is_file);
   check_greater(metadata.size, std::uint64_t{0});
   check_less(metadata.size, kMaximumControllerBytes);
@@ -34,14 +34,14 @@ std::string load_controller_source() {
     return {};
   }
 
-  turbo_fs_buf_t bytes{};
-  check_equal(turbo_fs_read_file(FLEXUI_EDITOR_CONTROLLER_PATH, &bytes), 0);
+  salts_fs_buf_t bytes{};
+  check_equal(salts_fs_read_file(FLEXUI_EDITOR_CONTROLLER_PATH, &bytes), 0);
   if (bytes.base == nullptr || bytes.len == 0 || bytes.len >= kMaximumControllerBytes) {
-    turbo_fs_buf_free(&bytes);
+    salts_fs_buf_free(&bytes);
     return {};
   }
   std::string source(bytes.base, bytes.len);
-  turbo_fs_buf_free(&bytes);
+  salts_fs_buf_free(&bytes);
   return source;
 }
 
