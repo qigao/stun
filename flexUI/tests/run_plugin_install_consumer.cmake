@@ -12,10 +12,9 @@ set(_required_variables
     C_COMPILER
     CXX_COMPILER
     ADDRESS_SANITIZER_ENABLED
-    TURBO_UTILS_PACKAGE_DIR
-    TURBO_PARSER_PACKAGE_DIR
-    TURBO_UTILS_RUNTIME_DIR
-    TURBO_PARSER_RUNTIME_DIR
+    SALTS_PACKAGE_DIR
+    SALTS_UTILS_PACKAGE_DIR
+    SALTS_RUNTIME_DIR
     COMPILER_RUNTIME_DIR
     EXECUTABLE_SUFFIX)
 foreach(_variable IN LISTS _required_variables)
@@ -57,8 +56,8 @@ set(_configure_command
     "-DCMAKE_C_COMPILER=${C_COMPILER}"
     "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
     "-DFlexUI_DIR=${INSTALL_PREFIX}/${INSTALL_LIBDIR}/cmake/FlexUI"
-    "-DTurboUtils_DIR=${TURBO_UTILS_PACKAGE_DIR}"
-    "-DTurboParser_DIR=${TURBO_PARSER_PACKAGE_DIR}"
+    "-DSalts_DIR=${SALTS_PACKAGE_DIR}"
+    "-DSaltsUtils_DIR=${SALTS_UTILS_PACKAGE_DIR}"
     "-DFLEXUI_EXAMPLE_ENABLE_ADDRESS_SANITIZER=${ADDRESS_SANITIZER_ENABLED}"
     -DFLEXUI_EXAMPLE_BUILD_HOST=ON)
 if(DEFINED CMAKE_MAKE_PROGRAM_PATH AND
@@ -125,13 +124,13 @@ if(NOT _build_result EQUAL 0)
 endif()
 
 if(WIN32)
-  set(_runtime_separator ";")
+  set(ENV{PATH}
+      "${COMPILER_RUNTIME_DIR};${SALTS_RUNTIME_DIR};$ENV{PATH}")
 else()
-  set(_runtime_separator ":")
+  get_filename_component(_salts_lib_dir "${SALTS_RUNTIME_DIR}/../lib" ABSOLUTE)
+  set(ENV{LD_LIBRARY_PATH}
+      "${_salts_lib_dir}:$ENV{LD_LIBRARY_PATH}")
 endif()
-set(
-  ENV{PATH}
-  "${COMPILER_RUNTIME_DIR}${_runtime_separator}${TURBO_UTILS_RUNTIME_DIR}${_runtime_separator}${TURBO_PARSER_RUNTIME_DIR}${_runtime_separator}$ENV{PATH}")
 set(_consumer_executable
     "${CONSUMER_BINARY_DIR}/bin/flexui_plugin_consumer${EXECUTABLE_SUFFIX}")
 execute_process(
