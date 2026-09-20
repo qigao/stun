@@ -2,7 +2,7 @@
 
 #include "plugin_validation.hpp"
 
-#include <turbo_vstr.h>
+#include <vstr.h>
 
 #include <algorithm>
 #include <array>
