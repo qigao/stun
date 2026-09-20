@@ -237,13 +237,7 @@ private:
 
     float segment_width(const TextSegment& segment) const {
         if (segment.type == TextSegmentType::Emoji) {
-            size_t count = 0;
-            size_t pos = 0;
-            while (pos < segment.text.size()) {
-                utf8_next_scalar(segment.text, pos).value;
-                count++;
-            }
-            return static_cast<float>(count) * font_size_;
+            return static_cast<float>(utf8_scalar_count(segment.text)) * font_size_;
         }
 
         ComputedStyle measure_style;
