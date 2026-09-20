@@ -402,17 +402,17 @@ inline void init(const char* log_file = nullptr) {
 
         tlog_t* logger = tlog_create(&config);
         if (logger) {
-            turbo_console_sink_opts_t copts = {};
+            salts_console_sink_opts_t copts = {};
             copts.output = stdout;
             copts.use_colors = 1;
-            tlog_add_sink(logger, turbo_sink_console_create(&copts));
+            tlog_add_sink(logger, salts_sink_console_create(&copts));
 
             if (log_file) {
-                turbo_file_sink_opts_t fopts = {};
+                salts_file_sink_opts_t fopts = {};
                 fopts.path = log_file;
                 fopts.max_size = 10 * 1024 * 1024;
                 fopts.max_files = 3;
-                tlog_add_sink(logger, turbo_sink_file_create(&fopts));
+                tlog_add_sink(logger, salts_sink_file_create(&fopts));
             }
             tlog_set_default(logger);
             initialized = true;
