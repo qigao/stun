@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 #include "statediagram/statediagram_ast.h"
 #include "statediagram_parser_gen.h"
@@ -114,43 +114,43 @@ static json_value_t* serialize_transitions(StateTransition* t);
 
 static json_value_t* serialize_doc(StateDoc* doc) {
     if (!doc) return NULL;
-    json_value_t* obj = turbo_json_create_object();
+    json_value_t* obj = json_create_object();
     if (doc->nodes) {
-        turbo_json_object_add(obj, "nodes", serialize_nodes(doc->nodes));
+        json_object_add(obj, "nodes", serialize_nodes(doc->nodes));
     }
     if (doc->transitions) {
-        turbo_json_object_add(obj, "transitions", serialize_transitions(doc->transitions));
+        json_object_add(obj, "transitions", serialize_transitions(doc->transitions));
     }
     return obj;
 }
 
 static json_value_t* serialize_nodes(StateNode* n) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (n) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "id", n->id ? n->id : "");
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "id", n->id ? n->id : "");
         if (n->description) {
-            turbo_json_object_set_string(obj, "description", n->description);
+            json_object_set_string(obj, "description", n->description);
         }
         if (n->doc) {
-            turbo_json_object_add(obj, "doc", serialize_doc(n->doc));
+            json_object_add(obj, "doc", serialize_doc(n->doc));
         }
-        turbo_json_array_add(arr, obj);
+        json_array_add(arr, obj);
         n = n->next;
     }
     return arr;
 }
 
 static json_value_t* serialize_transitions(StateTransition* t) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (t) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "id1", t->id1 ? t->id1 : "");
-        turbo_json_object_set_string(obj, "id2", t->id2 ? t->id2 : "");
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "id1", t->id1 ? t->id1 : "");
+        json_object_set_string(obj, "id2", t->id2 ? t->id2 : "");
         if (t->description) {
-            turbo_json_object_set_string(obj, "description", t->description);
+            json_object_set_string(obj, "description", t->description);
         }
-        turbo_json_array_add(arr, obj);
+        json_array_add(arr, obj);
         t = t->next;
     }
     return arr;
@@ -159,17 +159,17 @@ static json_value_t* serialize_transitions(StateTransition* t) {
 char* statediagram_to_json(StateDiagram* diagram) {
     if (!diagram) return NULL;
 
-    json_value_t* root = turbo_json_create_object();
-    turbo_json_object_set_string(root, "type", "stateDiagram");
+    json_value_t* root = json_create_object();
+    json_object_set_string(root, "type", "stateDiagram");
 
     if (diagram->title) {
-        turbo_json_object_set_string(root, "title", diagram->title);
+        json_object_set_string(root, "title", diagram->title);
     }
 
     if (diagram->root) {
-        turbo_json_object_add(root, "root", serialize_doc(diagram->root));
+        json_object_add(root, "root", serialize_doc(diagram->root));
     }
 
     size_t len;
-    return turbo_json_serialize_pretty_crlf(root, &len);
+    return json_serialize_pretty_crlf(root, &len);
 }
