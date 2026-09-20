@@ -3,6 +3,7 @@
 #include <flexUI/box.h>
 #include <flexUI/detail/css_render_transform.h>
 #include <flexUI/event.h>
+#include <flexUI/text_util.h>
 
 #include <string>
 #include <utility>
