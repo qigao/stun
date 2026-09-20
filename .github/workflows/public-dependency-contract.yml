@@ -1,0 +1,82 @@
+name: Public dependency compile contract
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  controller-salts-concurrency:
+    name: Controller Salts::Concurrency contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+      - name: Checkout canonical Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          path: .ci/salts
+      - name: Verify canonical dependency surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#include <salts/disruptor.h>' flexUI/modules/controller/application_completion.cpp
+          grep -Fq 'PRIVATE Salts::Concurrency)' flexUI/modules/controller/CMakeLists.txt
+          ! grep -Fq '#include <turbo/disruptor.h>' flexUI/modules/controller/application_completion.cpp
+      - name: Compile controller mailbox against public Salts headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -IflexUI/include \
+            -I.ci/salts/concurrency/include \
+            -fsyntax-only flexUI/modules/controller/application_completion.cpp
+
+  pluginhost-canonical-packages:
+    name: PluginHost canonical Salts contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+      - name: Checkout canonical Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          path: .ci/salts
+      - name: Checkout canonical SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          path: .ci/salts-utils
+      - name: Verify no retired PluginHost facade headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#include <toml.h>' flexUI/modules/plugin_host/plugin_manifest.cpp
+          grep -Fq 'Salts::TomlParser' flexUI/modules/plugin_host/CMakeLists.txt
+          if grep -R -n -E '#include <(turbo_parser_toml|turbo_fs|turbo_vstr)\.h>' flexUI/modules/plugin_host; then
+            echo "PluginHost still consumes retired Turbo* facade headers" >&2
+            exit 1
+          fi
+          if grep -Fq 'TurboParser::Parser' flexUI/modules/plugin_host/CMakeLists.txt; then
+            echo "PluginHost still links retired TurboParser::Parser" >&2
+            exit 1
+          fi
+      - name: Compile PluginHost sources against canonical public headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c++17 -Wall -Wextra -Wpedantic -Werror
+            -IflexUI/include
+            -IflexUI/modules/plugin_host
+            -I.ci/salts/utils/include
+            -I.ci/salts/platform/include
+            -I.ci/salts/concurrency/include
+            -I.ci/salts-utils/parser/toml/include
+          )
+          c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
+          c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp
