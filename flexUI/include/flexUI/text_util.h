@@ -8,6 +8,7 @@
 #ifndef FLEXUI_TEXT_UTIL_H
 #define FLEXUI_TEXT_UTIL_H
 
+#include <cstddef>
 #include <string>
 #include <vector>
 #include <cstdint>
