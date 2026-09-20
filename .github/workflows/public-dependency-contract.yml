@@ -26,6 +26,17 @@ jobs:
           grep -Fq '#include <salts/disruptor.h>' flexUI/modules/controller/application_completion.cpp
           grep -Fq 'PRIVATE Salts::Concurrency)' flexUI/modules/controller/CMakeLists.txt
           ! grep -Fq '#include <turbo/disruptor.h>' flexUI/modules/controller/application_completion.cpp
+      - name: Audit active CMake for retired TurboUtils targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -n -F 'TurboUtils::' \
+              --include='CMakeLists.txt' --include='*.cmake' \
+              --exclude-dir=.git --exclude-dir=.ci .; then
+            echo "active CMake still references retired TurboUtils targets" >&2
+            exit 1
+          fi
+
       - name: Compile controller mailbox against public Salts headers
         shell: bash
         run: |
