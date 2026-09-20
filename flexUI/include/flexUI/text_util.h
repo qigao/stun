@@ -35,17 +35,28 @@ struct TextSegment {
 // ============================================================================
 
 /**
- * Decode a single UTF-8 code point from string
- * @param str The UTF-8 string
- * @param pos Current position (updated to next character)
- * @return The Unicode code point
+ * One strictly decoded Unicode scalar and its original UTF-8 byte range.
  */
-uint32_t utf8_decode(const std::string& str, size_t& pos);
+struct Utf8Scalar {
+    uint32_t value = 0;
+    size_t byte_offset = 0;
+    size_t byte_length = 0;
+};
 
 /**
- * Get the byte length of a UTF-8 character starting at pos
+ * Decode exactly one Unicode scalar with Salts::Unicode.
+ *
+ * The caller must provide a cursor in [0, text.size()). Success advances the
+ * cursor and returns the scalar plus its original byte range. Invalid UTF-8
+ * throws std::invalid_argument and an invalid/end cursor throws
+ * std::out_of_range. The caller cursor is unchanged on every failure.
  */
-size_t utf8_char_length(const std::string& str, size_t pos);
+Utf8Scalar utf8_next_scalar(const std::string& text, size_t& cursor);
+
+/**
+ * Count Unicode scalars after strictly validating the complete UTF-8 string.
+ */
+size_t utf8_scalar_count(const std::string& text);
 
 /**
  * Check if a code point is an emoji
