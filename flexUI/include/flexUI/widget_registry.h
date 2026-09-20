@@ -11,6 +11,26 @@
 
 namespace flexUI {
 
+enum class UiNodeKind {
+  Container,
+  Widget,
+  Text,
+  Component,
+};
+
+enum class UiContentModel {
+  Empty,
+  Text,
+  SingleChild,
+  Children,
+  TextAndChildren,
+};
+
+struct UiNodeDescriptor {
+  UiNodeKind kind = UiNodeKind::Container;
+  UiContentModel content = UiContentModel::Children;
+};
+
 enum class WidgetRegistryErrorCode {
   None,
   InvalidTag,
@@ -48,17 +68,30 @@ public:
   /// @param tag Non-empty canonical XML tag.
   /// @return None on success; InvalidTag or DuplicateTag without changing an
   ///         existing registration.
-  WidgetRegistryError register_element(std::string tag);
+  WidgetRegistryError register_element(
+      std::string tag, UiContentModel content = UiContentModel::Children);
 
   /// Registers one Widget factory for a canonical XML tag.
   /// @param tag Non-empty canonical XML tag.
   /// @param factory Callable used during owner-thread instantiation.
   /// @return None on success; InvalidTag, InvalidFactory or DuplicateTag on
   ///         rejection. Existing registrations are never replaced.
-  WidgetRegistryError register_widget(std::string tag, Factory factory);
+  WidgetRegistryError register_widget(
+      std::string tag, Factory factory,
+      UiContentModel content = UiContentModel::Children);
 
   /// Returns whether a structural or widget tag is registered.
   bool contains(std::string_view tag) const;
+
+  /// Returns the immutable descriptor for a registered tag, or nullptr.
+  /// The returned pointer is registry-owned and must not be retained across
+  /// registry mutation.
+  const UiNodeDescriptor *descriptor(std::string_view tag) const;
+
+  /// Validates tag/content-model semantics without instantiating widgets.
+  /// Unknown tags and content-model violations retain the node source span.
+  UiDocumentError validate(const UiDocumentDefinition &definition) const;
+  UiDocumentError validate(const CompiledUiProgram &program) const;
 
   /// Creates the Widget associated with a definition.
   /// @return Success with a null widget for structural tags, success with an
@@ -76,6 +109,7 @@ public:
 
 private:
   struct Entry {
+    UiNodeDescriptor descriptor;
     Factory factory;
   };
 
