@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "sankey/sankey_ast.h"
 
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 static char* copy_string(const char* s) {
     if(!s) return NULL;
@@ -57,50 +57,50 @@ static void free_nodelist(NodeList* head) {
 
 char* sankey_to_json(SankeyDiagram* d) {
     if(!d) {
-        json_value_t *null_val = turbo_json_create_null();
+        json_value_t *null_val = json_create_null();
         size_t len;
-        char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(&null_val);
+        char *s = json_serialize_pretty_crlf(null_val, &len);
+        json_free(&null_val);
         return s;
     }
 
     NodeList* nodes_head = NULL;
-    json_value_t *root = turbo_json_create_object();
-    json_value_t *links = turbo_json_create_array();
+    json_value_t *root = json_create_object();
+    json_value_t *links = json_create_array();
 
     SankeyLink* l = d->links;
     while(l) {
-        json_value_t *link = turbo_json_create_object();
-        turbo_json_object_set_string(link, "source", l->source ? l->source : "");
-        turbo_json_object_set_string(link, "target", l->target ? l->target : "");
-        turbo_json_object_set_number(link, "value", l->value);
-        turbo_json_array_add(links, link);
+        json_value_t *link = json_create_object();
+        json_object_set_string(link, "source", l->source ? l->source : "");
+        json_object_set_string(link, "target", l->target ? l->target : "");
+        json_object_set_number(link, "value", l->value);
+        json_array_add(links, link);
 
         add_unique_node(&nodes_head, l->source);
         add_unique_node(&nodes_head, l->target);
 
         l = l->next;
     }
-    turbo_json_object_add(root, "links", links);
+    json_object_add(root, "links", links);
 
-    json_value_t *nodes_obj = turbo_json_create_object();
+    json_value_t *nodes_obj = json_create_object();
     NodeList* curr = nodes_head;
     while(curr) {
-        json_value_t *node = turbo_json_create_object();
-        turbo_json_object_set_string(node, "id", curr->id);
-        turbo_json_object_set_string(node, "label", curr->id);
+        json_value_t *node = json_create_object();
+        json_object_set_string(node, "id", curr->id);
+        json_object_set_string(node, "label", curr->id);
         // "title": curr->id ? title is optional, usually label is enough or same
         
-        turbo_json_object_add(nodes_obj, curr->id, node);
+        json_object_add(nodes_obj, curr->id, node);
         curr = curr->next;
     }
-    turbo_json_object_add(root, "nodes", nodes_obj);
-    turbo_json_object_set_string(root, "type", "sankey");
+    json_object_add(root, "nodes", nodes_obj);
+    json_object_set_string(root, "type", "sankey");
 
     size_t out_len;
-    char *json_str = turbo_json_serialize_pretty_crlf(root, &out_len);
+    char *json_str = json_serialize_pretty_crlf(root, &out_len);
     
-    turbo_free_json(&root);
+    json_free(&root);
     free_nodelist(nodes_head);
 
     return json_str;
