@@ -97,6 +97,6 @@ set_target_properties(flex_dotgraph_adapter PROPERTIES FOLDER "Modules/DotGraph"
 # ============================================================================
 
 add_executable(dotgraph_parser_test tests/dotgraph_parser_tests.cpp)
-target_link_libraries(dotgraph_parser_test PRIVATE dotgraph flex_dotgraph_adapter TurboUtils::TinyTest)
+target_link_libraries(dotgraph_parser_test PRIVATE dotgraph flex_dotgraph_adapter Salts::TinyTest)
 add_test(NAME DotGraphParserTest COMMAND dotgraph_parser_test)
 set_target_properties(dotgraph_parser_test PROPERTIES FOLDER "Modules/DotGraph/Tests")
