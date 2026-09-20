@@ -1,9 +1,8 @@
 /*
  * flexUI - Text Utilities
  *
- * Pure C++ implementation for emoji detection and text segmentation.
- * For better performance, regenerate from text_util.re using:
- *   re2c -8 -o text_util.cpp text_util.re
+ * UTF-8 scanning is owned by Salts::Unicode. Emoji grouping below remains
+ * a rendering heuristic until shared Unicode boundary work in salts-utils#101.
  */
 
 #include <flexUI/text_util.h>
@@ -231,11 +230,13 @@ std::vector<TextSegment> segment_text(const std::string& text) {
 
 bool has_emoji(const std::string& text) {
     size_t pos = 0;
+    bool found = false;
     while (pos < text.size()) {
-        uint32_t cp = utf8_next_scalar(text, pos).value;
-        if (is_emoji(cp)) return true;
+        const uint32_t cp = utf8_next_scalar(text, pos).value;
+        // A positive match must not hide malformed UTF-8 later in the input.
+        if (is_emoji(cp)) found = true;
     }
-    return false;
+    return found;
 }
 
 // ============================================================================

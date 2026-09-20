@@ -48,14 +48,17 @@ struct Utf8Scalar {
  * Decode exactly one Unicode scalar with Salts::Unicode.
  *
  * The caller must provide a cursor in [0, text.size()). Success advances the
- * cursor and returns the scalar plus its original byte range. Invalid UTF-8
- * throws std::invalid_argument and an invalid/end cursor throws
- * std::out_of_range. The caller cursor is unchanged on every failure.
+ * cursor and returns the scalar plus its original byte range. Malformed UTF-8,
+ * including a cursor on a continuation byte, throws std::invalid_argument.
+ * A cursor at or beyond text.size() throws std::out_of_range. The caller cursor
+ * is unchanged on every failure. Embedded NUL is an ordinary scalar; no
+ * normalization is performed. One call validates only the scalar at cursor.
  */
 Utf8Scalar utf8_next_scalar(const std::string& text, size_t& cursor);
 
 /**
  * Count Unicode scalars after strictly validating the complete UTF-8 string.
+ * This is not a grapheme count or a text measurement API.
  */
 size_t utf8_scalar_count(const std::string& text);
 
@@ -87,7 +90,9 @@ bool is_emoji_modifier(uint32_t codepoint);
 std::vector<TextSegment> segment_text(const std::string& text);
 
 /**
- * Check if text contains any emoji
+ * Check if text contains any emoji, validating the complete UTF-8 input first.
+ * Malformed input throws std::invalid_argument even after an earlier match.
+ * Embedded NUL does not end the input. No normalization is performed.
  */
 bool has_emoji(const std::string& text);
 
