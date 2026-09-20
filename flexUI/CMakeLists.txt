@@ -263,8 +263,7 @@ set(FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES "")
 if(FLEXUI_ENABLE_PLUGINS)
   string(
     APPEND FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES
-    "find_dependency(TurboUtils CONFIG)\n"
-    "find_dependency(TurboParser CONFIG)\n")
+    "find_dependency(SaltsUtils CONFIG REQUIRED)\n")
 endif()
 configure_package_config_file(
   cmake/FlexUIConfig.cmake.in
