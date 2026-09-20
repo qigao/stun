@@ -18,6 +18,21 @@ namespace flexUI {
 // UTF-8 Utilities
 // ============================================================================
 
+Utf8ValidationResult validate_utf8(std::string_view text) noexcept {
+    size_t cursor = 0;
+    salts_unicode_scalar scalar{};
+    const vstr input = vstr_from_buf(text.data(), text.size());
+    while (cursor < text.size()) {
+        const size_t before = cursor;
+        const auto status = salts_unicode_utf8_next(input, &cursor, &scalar);
+        if (status == SALTS_UNICODE_OK) {
+            continue;
+        }
+        return {false, before};
+    }
+    return {true, text.size()};
+}
+
 uint32_t utf8_decode(const std::string& str, size_t& pos) {
     if (pos >= str.size()) {
         return 0;
