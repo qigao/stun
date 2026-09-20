@@ -107,6 +107,21 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check(truncated.error.code == UiDocumentErrorCode::ParseError);
   }
 
+  it("rejects invalid UTF-8 before XML parsing with source location") {
+    std::string source =
+        "<ui name=\"Utf8\">\n  <div id=\"root\" text=\"";
+    const std::size_t invalid_offset = source.size();
+    source.append("\xF0\x28\x8C\x28", 4);
+    source += "\"/>\n</ui>";
+
+    const auto compiled = flexUI::compile_ui_xml(source);
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(compiled.error.line, 2);
+    check_equal(compiled.error.column,
+                static_cast<int>(invalid_offset - source.rfind('\n', invalid_offset) ));
+  }
+
   it("rejects invalid structure duplicate ids and text nodes") {
     const auto roots =
         flexUI::compile_ui_xml("<ui name=\"Two\"><div id=\"a\"/><div id=\"b\"/></ui>");
