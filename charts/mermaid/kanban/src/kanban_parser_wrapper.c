@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "kanban/kanban_ast.h"
 #include "kanban_parser_gen.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 void *KanbanParserAlloc(void *(*mallocProc)(size_t));
 void KanbanParser(void *yyp, int yymajor, void* yyminor, KanbanParserContext *ctx);
@@ -71,48 +71,48 @@ KanbanDiagram* kanban_parse(const char* input) {
 static json_value_t* kanban_node_to_json_recursive(KanbanNode* node) {
     if(!node) return NULL;
     
-    json_value_t* obj = turbo_json_create_object();
+    json_value_t* obj = json_create_object();
     
     // Add children first (alphabetically first)
-    json_value_t* children_arr = turbo_json_create_array();
+    json_value_t* children_arr = json_create_array();
     KanbanNode* child = node->children;
     while(child) {
         json_value_t* child_obj = kanban_node_to_json_recursive(child);
         if(child_obj) {
-            turbo_json_array_add(children_arr, child_obj);
+            json_array_add(children_arr, child_obj);
         }
         child = child->next;
     }
-    turbo_json_object_add(obj, "children", children_arr);
+    json_object_add(obj, "children", children_arr);
     
     // Then add other keys in alphabetical order: children, class, descr, icon, id, indent, type
     if(node->classes && node->classes[0]) {
-        turbo_json_object_set_string(obj, "class", node->classes);
+        json_object_set_string(obj, "class", node->classes);
     }
-    turbo_json_object_set_string(obj, "descr", node->label ? node->label : "");
+    json_object_set_string(obj, "descr", node->label ? node->label : "");
     if(node->icon && node->icon[0]) {
-        turbo_json_object_set_string(obj, "icon", node->icon);
+        json_object_set_string(obj, "icon", node->icon);
     }
-    turbo_json_object_set_string(obj, "id", node->id ? node->id : "");
-    turbo_json_object_set_number(obj, "indent", (double)node->depth);
-    turbo_json_object_set_number(obj, "type", (double)node->type);
+    json_object_set_string(obj, "id", node->id ? node->id : "");
+    json_object_set_number(obj, "indent", (double)node->depth);
+    json_object_set_number(obj, "type", (double)node->type);
     
     return obj;
 }
 
 char* kanban_to_json(KanbanDiagram* d) {
     if(!d) {
-        json_value_t *null_val = turbo_json_create_null();
+        json_value_t *null_val = json_create_null();
         size_t len;
-        char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(&null_val);
+        char *s = json_serialize_pretty_crlf(null_val, &len);
+        json_free(null_val);
         return s;
     }
     
-    json_value_t *root = turbo_json_create_object();
+    json_value_t *root = json_create_object();
     
     // Add keys in alphabetical order: nodes, type
-    json_value_t* nodes_arr = turbo_json_create_array();
+    json_value_t* nodes_arr = json_create_array();
     
     // Add all top-level nodes (children of root)
     if(d->root && d->root->children) {
@@ -120,17 +120,17 @@ char* kanban_to_json(KanbanDiagram* d) {
         while(node) {
             json_value_t* node_obj = kanban_node_to_json_recursive(node);
             if(node_obj) {
-                turbo_json_array_add(nodes_arr, node_obj);
+                json_array_add(nodes_arr, node_obj);
             }
             node = node->next;
         }
     }
     
-    turbo_json_object_add(root, "nodes", nodes_arr);
-    turbo_json_object_set_string(root, "type", "kanban");
+    json_object_add(root, "nodes", nodes_arr);
+    json_object_set_string(root, "type", "kanban");
     
     size_t len;
-    char *s = turbo_json_serialize_pretty_crlf(root, &len);
-    turbo_free_json(&root);
+    char *s = json_serialize_pretty_crlf(root, &len);
+    json_free(root);
     return s;
 }

@@ -1,6 +1,6 @@
 #include "tinytest.h"
 #include "kanban/kanban_ast.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -41,18 +41,18 @@ static char* golden_path(const char* filename) {
 // Compare two JSON strings by parsing and re-serializing to compact form
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if ((ja = json_parse(a, strlen(a))) == NULL) return 0;
+    if ((jb = json_parse(b, strlen(b))) == NULL) {
+        json_free(ja);
         return 0;
     }
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -146,7 +146,7 @@ spec("kanban_parser") {
 
             check(json_equal(actual, expected), "JSON mismatch");
 
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             kanban_free_diagram(diagram);
             free(expected);
             free(input);
@@ -170,7 +170,7 @@ spec("kanban_parser") {
 
             check(json_equal(actual, expected), "JSON mismatch");
 
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             kanban_free_diagram(diagram);
             free(expected);
             free(input);
@@ -194,7 +194,7 @@ spec("kanban_parser") {
 
             check(json_equal(actual, expected), "JSON mismatch");
 
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             kanban_free_diagram(diagram);
             free(expected);
             free(input);
@@ -218,7 +218,7 @@ spec("kanban_parser") {
 
             check(json_equal(actual, expected), "JSON mismatch");
 
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             kanban_free_diagram(diagram);
             free(expected);
             free(input);
