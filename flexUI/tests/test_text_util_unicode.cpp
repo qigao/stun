@@ -9,7 +9,7 @@ using namespace flexUI;
 
 spec("FlexUI Salts Unicode bridge") {
   it("decodes ASCII BMP non-BMP and combining scalars with byte-accurate lengths") {
-    const std::string text = std::string("A") + "Ã©" + "ð" + "eÌ";
+    const std::string text = std::string("A") + "\xC3\xA9" + "\xF0\x9F\x98\x80" + "e\xCC\x81";
     size_t pos = 0;
 
     check_equal(utf8_decode(text, pos), uint32_t{'A'});
