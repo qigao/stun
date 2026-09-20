@@ -30,9 +30,13 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${NANOGUI_OUTPUT_DIR}")
 find_package(base64 CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
-find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
 find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
-find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
+if(NOT DEFINED ENV{SALTS_UTILS_ROOT} OR "$ENV{SALTS_UTILS_ROOT}" STREQUAL "")
+  message(FATAL_ERROR "SALTS_UTILS_ROOT must name the installed SaltsUtils profile")
+endif()
+find_package(SaltsUtils CONFIG REQUIRED
+             PATHS "$ENV{SALTS_UTILS_ROOT}"
+             NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
 find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
 
 # Cmake modules
