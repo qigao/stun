@@ -95,11 +95,12 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
 
   it("accepts valid Unicode text attributes without rewriting bytes") {
     const auto compiled = flexUI::compile_ui_xml(
-        u8"<ui name=\"界面\"><label id=\"greeting\" text=\"保存😀é\"/></ui>");
+        u8"<ui name=\"\u754C\u9762\"><label id=\"greeting\" "
+        u8"text=\"\u4FDD\u5B58\U0001F600e\u0301\"/></ui>");
     check(static_cast<bool>(compiled));
     const auto &text =
         std::get<std::string>(compiled.program->definition().root.properties.at("text"));
-    check_equal(text, u8"保存😀é");
+    check_equal(text, u8"\u4FDD\u5B58\U0001F600e\u0301");
   }
 
   it("rejects malformed and truncated sources") {
