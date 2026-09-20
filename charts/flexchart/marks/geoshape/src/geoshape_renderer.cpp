@@ -1,7 +1,7 @@
 #include "flexchart/geoshape/geoshape_parser.h"
 #include "chart_component_internal.h"
 #include "flexchart/mark_renderer_registry.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -18,21 +18,21 @@ constexpr double kPi = 3.14159265358979323846;
 
 bool append_geojson_ring(json_value_t* ring, const std::string& projection,
                          float width, float height, std::string& path) {
-    if (!ring || turbo_json_type(ring) != TURBO_JSON_ARRAY ||
-        turbo_json_array_size(ring) < 3) return false;
+    if (!ring || json_type(ring) != JSON_ARRAY ||
+        json_array_size(ring) < 3) return false;
 
     char command[96];
-    for (size_t i = 0; i < turbo_json_array_size(ring); ++i) {
-        json_value_t* coordinate = turbo_json_array_get(ring, i);
-        if (!coordinate || turbo_json_type(coordinate) != TURBO_JSON_ARRAY ||
-            turbo_json_array_size(coordinate) < 2) return false;
-        json_value_t* longitude_value = turbo_json_array_get(coordinate, 0);
-        json_value_t* latitude_value = turbo_json_array_get(coordinate, 1);
-        if (turbo_json_type(longitude_value) != TURBO_JSON_NUMBER ||
-            turbo_json_type(latitude_value) != TURBO_JSON_NUMBER) return false;
+    for (size_t i = 0; i < json_array_size(ring); ++i) {
+        json_value_t* coordinate = json_array_get(ring, i);
+        if (!coordinate || json_type(coordinate) != JSON_ARRAY ||
+            json_array_size(coordinate) < 2) return false;
+        json_value_t* longitude_value = json_array_get(coordinate, 0);
+        json_value_t* latitude_value = json_array_get(coordinate, 1);
+        if (json_type(longitude_value) != JSON_NUMBER ||
+            json_type(latitude_value) != JSON_NUMBER) return false;
 
-        const double longitude = turbo_json_number(longitude_value);
-        const double latitude = std::clamp(turbo_json_number(latitude_value), -85.0, 85.0);
+        const double longitude = json_number(longitude_value);
+        const double latitude = std::clamp(json_number(latitude_value), -85.0, 85.0);
         const float x = static_cast<float>((longitude + 180.0) / 360.0 * width);
         float y;
         if (projection == "mercator") {
@@ -52,10 +52,10 @@ bool append_geojson_ring(json_value_t* ring, const std::string& projection,
 
 bool append_geojson_polygon(json_value_t* polygon, const std::string& projection,
                             float width, float height, std::string& path) {
-    if (!polygon || turbo_json_type(polygon) != TURBO_JSON_ARRAY) return false;
+    if (!polygon || json_type(polygon) != JSON_ARRAY) return false;
     bool appended = false;
-    for (size_t i = 0; i < turbo_json_array_size(polygon); ++i) {
-        appended = append_geojson_ring(turbo_json_array_get(polygon, i), projection,
+    for (size_t i = 0; i < json_array_size(polygon); ++i) {
+        appended = append_geojson_ring(json_array_get(polygon, i), projection,
                                        width, height, path) || appended;
     }
     return appended;
@@ -64,39 +64,39 @@ bool append_geojson_polygon(json_value_t* polygon, const std::string& projection
 bool geojson_to_path(const std::string& source, const std::string& projection,
                      float width, float height, std::string& path) {
     json_value_t* root = nullptr;
-    if (turbo_parse_json(reinterpret_cast<const uint8_t*>(source.data()),
+    if (json_parse(reinterpret_cast<const uint8_t*>(source.data()),
                          source.size(), &root) != 0 || !root) return false;
 
-    if (turbo_json_type(root) != TURBO_JSON_OBJECT) {
-        turbo_free_json(&root);
+    if (json_type(root) != JSON_OBJECT) {
+        json_free(&root);
         return false;
     }
 
     json_value_t* geometry = root;
-    json_value_t* root_type = turbo_json_object_get(root, "type");
-    if (root_type && turbo_json_type(root_type) == TURBO_JSON_STRING &&
-        std::strcmp(turbo_json_string(root_type), "Feature") == 0) {
-        geometry = turbo_json_object_get(root, "geometry");
+    json_value_t* root_type = json_object_get(root, "type");
+    if (root_type && json_type(root_type) == JSON_STRING &&
+        std::strcmp(json_string(root_type), "Feature") == 0) {
+        geometry = json_object_get(root, "geometry");
     }
 
     bool converted = false;
-    if (geometry && turbo_json_type(geometry) == TURBO_JSON_OBJECT) {
-        json_value_t* type = turbo_json_object_get(geometry, "type");
-        json_value_t* coordinates = turbo_json_object_get(geometry, "coordinates");
-        if (type && turbo_json_type(type) == TURBO_JSON_STRING) {
-            const char* type_name = turbo_json_string(type);
+    if (geometry && json_type(geometry) == JSON_OBJECT) {
+        json_value_t* type = json_object_get(geometry, "type");
+        json_value_t* coordinates = json_object_get(geometry, "coordinates");
+        if (type && json_type(type) == JSON_STRING) {
+            const char* type_name = json_string(type);
             if (std::strcmp(type_name, "Polygon") == 0) {
                 converted = append_geojson_polygon(coordinates, projection, width, height, path);
             } else if (std::strcmp(type_name, "MultiPolygon") == 0 && coordinates &&
-                       turbo_json_type(coordinates) == TURBO_JSON_ARRAY) {
-                for (size_t i = 0; i < turbo_json_array_size(coordinates); ++i) {
-                    converted = append_geojson_polygon(turbo_json_array_get(coordinates, i),
+                       json_type(coordinates) == JSON_ARRAY) {
+                for (size_t i = 0; i < json_array_size(coordinates); ++i) {
+                    converted = append_geojson_polygon(json_array_get(coordinates, i),
                                                        projection, width, height, path) || converted;
                 }
             }
         }
     }
-    turbo_free_json(&root);
+    json_free(&root);
     return converted;
 }
 
