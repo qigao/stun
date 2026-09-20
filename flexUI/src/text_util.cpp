@@ -7,17 +7,16 @@
  */
 
 #include <flexUI/text_util.h>
+#include <salts_unicode.h>
+#include <vstr.h>
 #include <cstring>
+#include <stdexcept>
 
 namespace flexUI {
 
 // ============================================================================
 // UTF-8 Utilities
 // ============================================================================
-
-#include <salts_unicode.h>
-#include <vstr.h>
-#include <stdexcept>
 
 uint32_t utf8_decode(const std::string& str, size_t& pos) {
     if (pos >= str.size()) {
