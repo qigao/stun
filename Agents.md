@@ -211,7 +211,7 @@
 
 #### 库优先级顺序（从高到低）
 
-1. **TurboUtils**（仓库 `utils/` 模块；构建时优先通过 CMake target `Salts::Core` 使用）— 最优先
+1. **Salts**（共享基础能力按 canonical `Salts::*` target 使用；Core 通过 `Salts::Core`）— 最优先
 2. **项目内模块**（`exprtk/`、`plugins/` 等）
 3. **vendor/ 库**（sds、croar、mir、monocypher、sha2、uuid、miniblas）
 4. **vcpkg 依赖**（xxhash、sqlite3、zstd、openssl、c-ares、aklomp-base64、simde）
