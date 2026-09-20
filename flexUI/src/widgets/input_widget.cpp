@@ -96,16 +96,6 @@ size_t count_word_spacing_gaps(const std::string& text) {
   return count;
 }
 
-size_t utf8_codepoint_count(const std::string& text) {
-  size_t count = 0;
-  size_t pos = 0;
-  while (pos < text.size()) {
-    utf8_next_scalar(text, pos).value;
-    ++count;
-  }
-  return count;
-}
-
 size_t visual_index_to_byte_offset(const std::string& text, size_t visual_index) {
   size_t byte_pos = 0;
   size_t codepoint_index = 0;
@@ -242,7 +232,7 @@ float measure_input_text_width(const std::string& text, const ComputedStyle* sty
   size_t word_gap_count = 0;
   for (const auto& segment : segment_text(display)) {
     if (segment.type == TextSegmentType::Emoji) {
-      const size_t count = utf8_codepoint_count(segment.text);
+      const size_t count = utf8_scalar_count(segment.text);
       width += static_cast<float>(count) * metrics.font_size;
       codepoint_count += count;
       continue;
@@ -251,8 +241,8 @@ float measure_input_text_width(const std::string& text, const ComputedStyle* sty
     const float segment_width = approximate_text_width(&measure_style, segment.text);
     width += segment_width > 0.0f
                  ? segment_width
-                 : metrics.char_width * static_cast<float>(utf8_codepoint_count(segment.text));
-    const size_t count = utf8_codepoint_count(segment.text);
+                 : metrics.char_width * static_cast<float>(utf8_scalar_count(segment.text));
+    const size_t count = utf8_scalar_count(segment.text);
     codepoint_count += count;
     word_gap_count += count_word_spacing_gaps(segment.text);
   }
@@ -335,7 +325,7 @@ float draw_input_segmented(RenderCommandList& commands, const std::string& text,
         current_x += run_width > 0.0f
                          ? run_width
                          : metrics.char_width *
-                               static_cast<float>(utf8_codepoint_count(run));
+                               static_cast<float>(utf8_scalar_count(run));
         current_x += word_spacing *
                      static_cast<float>(count_word_spacing_gaps(run));
       }
@@ -1350,7 +1340,7 @@ std::string InputWidget::display_text() const {
   if (!password_) return text_;
 
   // 密码模式：返回相同长度的 *
-  return std::string(utf8_codepoint_count(text_), '*');
+  return std::string(utf8_scalar_count(text_), '*');
 }
 
 } // namespace flexUI
