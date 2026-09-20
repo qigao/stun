@@ -12,10 +12,11 @@ set(_required_variables
     C_COMPILER
     CXX_COMPILER
     ADDRESS_SANITIZER_ENABLED
-    TURBO_UTILS_PACKAGE_DIR
-    TURBO_PARSER_PACKAGE_DIR
-    TURBO_UTILS_RUNTIME_DIR
-    TURBO_PARSER_RUNTIME_DIR
+    SALTS_ROOT_PATH
+    SALTS_UTILS_ROOT_PATH
+    SALTS_UTILS_PACKAGE_DIR
+    SALTS_RUNTIME_DIR
+    SALTS_UTILS_RUNTIME_DIR
     COMPILER_RUNTIME_DIR
     EXECUTABLE_SUFFIX)
 foreach(_variable IN LISTS _required_variables)
@@ -49,6 +50,9 @@ if(DEFINED CMAKE_GENERATOR_TOOLSET_NAME AND
 endif()
 
 set(_configure_command
+    "${CMAKE_COMMAND}" -E env
+    "SALTS_ROOT=${SALTS_ROOT_PATH}"
+    "SALTS_UTILS_ROOT=${SALTS_UTILS_ROOT_PATH}"
     "${CMAKE_COMMAND}" --fresh
     -S "${CONSUMER_SOURCE_DIR}"
     -B "${CONSUMER_BINARY_DIR}"
@@ -57,8 +61,7 @@ set(_configure_command
     "-DCMAKE_C_COMPILER=${C_COMPILER}"
     "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}"
     "-DFlexUI_DIR=${INSTALL_PREFIX}/${INSTALL_LIBDIR}/cmake/FlexUI"
-    "-DTurboUtils_DIR=${TURBO_UTILS_PACKAGE_DIR}"
-    "-DTurboParser_DIR=${TURBO_PARSER_PACKAGE_DIR}"
+    "-DSaltsUtils_DIR=${SALTS_UTILS_PACKAGE_DIR}"
     "-DFLEXUI_EXAMPLE_ENABLE_ADDRESS_SANITIZER=${ADDRESS_SANITIZER_ENABLED}"
     -DFLEXUI_EXAMPLE_BUILD_HOST=ON)
 if(DEFINED CMAKE_MAKE_PROGRAM_PATH AND
@@ -78,6 +81,9 @@ if(NOT _configure_result EQUAL 0)
 endif()
 
 set(_sdk_only_configure_command
+    "${CMAKE_COMMAND}" -E env
+    "SALTS_ROOT=${SALTS_ROOT_PATH}"
+    "SALTS_UTILS_ROOT=${SALTS_UTILS_ROOT_PATH}"
     "${CMAKE_COMMAND}" --fresh
     -S "${CONSUMER_SOURCE_DIR}"
     -B "${SDK_ONLY_CONSUMER_BINARY_DIR}"
@@ -131,7 +137,7 @@ else()
 endif()
 set(
   ENV{PATH}
-  "${COMPILER_RUNTIME_DIR}${_runtime_separator}${TURBO_UTILS_RUNTIME_DIR}${_runtime_separator}${TURBO_PARSER_RUNTIME_DIR}${_runtime_separator}$ENV{PATH}")
+  "${COMPILER_RUNTIME_DIR}${_runtime_separator}${SALTS_RUNTIME_DIR}${_runtime_separator}${SALTS_UTILS_RUNTIME_DIR}${_runtime_separator}$ENV{PATH}")
 set(_consumer_executable
     "${CONSUMER_BINARY_DIR}/bin/flexui_plugin_consumer${EXECUTABLE_SUFFIX}")
 execute_process(
