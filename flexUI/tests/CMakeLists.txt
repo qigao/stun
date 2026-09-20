@@ -3,7 +3,7 @@ enable_testing()
 find_package(nlohmann_json CONFIG REQUIRED)
 
 function(flexui_configure_tinytest target_name)
-  target_link_libraries(${target_name} PRIVATE TurboUtils::TinyTest)
+  target_link_libraries(${target_name} PRIVATE Salts::TinyTest)
 endfunction()
 
 add_executable(test_plugin_abi test_plugin_abi.c)
@@ -449,7 +449,7 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
                  test_desktop_editor_controller.cpp)
   target_link_libraries(
     test_desktop_editor_controller
-    PRIVATE FlexUI::ControllerTurboScript TurboUtils::Core)
+    PRIVATE FlexUI::ControllerTurboScript Salts::Core)
   target_compile_definitions(
     test_desktop_editor_controller
     PRIVATE
