@@ -7,7 +7,10 @@
  */
 
 #include <flexUI/text_util.h>
+#include <salts_unicode.h>
+
 #include <cstring>
+#include <stdexcept>
 
 namespace flexUI {
 
@@ -15,44 +18,39 @@ namespace flexUI {
 // UTF-8 Utilities
 // ============================================================================
 
-uint32_t utf8_decode(const std::string& str, size_t& pos) {
-    if (pos >= str.size()) return 0;
-
-    const unsigned char* s = reinterpret_cast<const unsigned char*>(str.data() + pos);
-    uint32_t cp;
-
-    if ((s[0] & 0x80) == 0) {
-        // 1-byte (ASCII)
-        cp = s[0];
-        pos += 1;
-    } else if ((s[0] & 0xE0) == 0xC0 && pos + 1 < str.size()) {
-        // 2-byte
-        cp = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
-        pos += 2;
-    } else if ((s[0] & 0xF0) == 0xE0 && pos + 2 < str.size()) {
-        // 3-byte
-        cp = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
-        pos += 3;
-    } else if ((s[0] & 0xF8) == 0xF0 && pos + 3 < str.size()) {
-        // 4-byte
-        cp = ((s[0] & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
-        pos += 4;
-    } else {
-        pos += 1;
-        cp = 0xFFFD; // Replacement character
+Utf8Scalar utf8_next_scalar(const std::string& text, size_t& cursor) {
+    if (cursor >= text.size()) {
+        throw std::out_of_range("UTF-8 cursor is at or beyond the end of the input");
     }
 
-    return cp;
+    const size_t original_cursor = cursor;
+    size_t next_cursor = cursor;
+    salts_unicode_scalar raw{};
+    const salts_unicode_status status = salts_unicode_utf8_next(
+        vstr_from_buf(text.data(), text.size()), &next_cursor, &raw);
+
+    if (status == SALTS_UNICODE_OK) {
+        cursor = next_cursor;
+        return Utf8Scalar{raw.value, raw.byte_offset, raw.byte_length};
+    }
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+        throw std::invalid_argument(
+            "invalid UTF-8 at byte offset " + std::to_string(original_cursor));
+    }
+    if (status == SALTS_UNICODE_END) {
+        throw std::out_of_range("UTF-8 cursor is at the end of the input");
+    }
+    throw std::invalid_argument("Salts::Unicode rejected the UTF-8 scan arguments");
 }
 
-size_t utf8_char_length(const std::string& str, size_t pos) {
-    if (pos >= str.size()) return 0;
-    unsigned char c = str[pos];
-    if ((c & 0x80) == 0) return 1;
-    if ((c & 0xE0) == 0xC0) return 2;
-    if ((c & 0xF0) == 0xE0) return 3;
-    if ((c & 0xF8) == 0xF0) return 4;
-    return 1;
+size_t utf8_scalar_count(const std::string& text) {
+    size_t cursor = 0;
+    size_t count = 0;
+    while (cursor < text.size()) {
+        (void)utf8_next_scalar(text, cursor);
+        ++count;
+    }
+    return count;
 }
 
 // ============================================================================
@@ -152,7 +150,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
     size_t pos = 0;
     while (pos < text.size()) {
         size_t char_start = pos;
-        uint32_t cp = utf8_decode(text, pos);
+        uint32_t cp = utf8_next_scalar(text, pos).value;
 
         // Check if this is an emoji
         if (is_emoji(cp)) {
@@ -168,7 +166,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
             // Consume any following modifiers (skin tone, ZWJ sequences)
             while (pos < text.size()) {
                 size_t next_start = pos;
-                uint32_t next_cp = utf8_decode(text, pos);
+                uint32_t next_cp = utf8_next_scalar(text, pos).value;
 
                 if (is_emoji_modifier(next_cp)) {
                     // Include modifier in emoji
@@ -177,7 +175,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
                     // If ZWJ, also include the next emoji
                     if (next_cp == 0x200D && pos < text.size()) {
                         size_t emoji_start = pos;
-                        uint32_t emoji_cp = utf8_decode(text, pos);
+                        uint32_t emoji_cp = utf8_next_scalar(text, pos).value;
                         if (is_emoji(emoji_cp) || is_emoji_modifier(emoji_cp)) {
                             emoji_str += text.substr(emoji_start, pos - emoji_start);
                         } else {
@@ -234,7 +232,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
 bool has_emoji(const std::string& text) {
     size_t pos = 0;
     while (pos < text.size()) {
-        uint32_t cp = utf8_decode(text, pos);
+        uint32_t cp = utf8_next_scalar(text, pos).value;
         if (is_emoji(cp)) return true;
     }
     return false;
