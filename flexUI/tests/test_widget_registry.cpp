@@ -75,6 +75,14 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
     check(error.line > 0);
     check(error.column > 0);
     check_equal(factory_calls, 0);
+
+    flexUI::Box box(nullptr);
+    const auto instantiated =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry);
+    check_false(static_cast<bool>(instantiated));
+    check(instantiated.error.code == flexUI::UiDocumentErrorCode::InvalidNode);
+    check_null(box.root());
+    check_equal(factory_calls, 0);
   }
 
   it("constructs concrete built-in widget types from XML tags") {
