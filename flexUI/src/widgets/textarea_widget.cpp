@@ -62,16 +62,6 @@ size_t count_word_spacing_gaps(const std::string& text) {
   return count;
 }
 
-size_t utf8_codepoint_count(const std::string& text) {
-  size_t count = 0;
-  size_t pos = 0;
-  while (pos < text.size()) {
-    utf8_next_scalar(text, pos).value;
-    ++count;
-  }
-  return count;
-}
-
 int next_utf8_offset(const std::string& text, int byte_offset) {
   size_t pos = static_cast<size_t>(
       std::max(0, std::min(byte_offset, static_cast<int>(text.size()))));
@@ -144,13 +134,13 @@ float textarea_line_width(const std::string& line, const ComputedStyle* style,
   size_t word_gap_count = 0;
   for (const auto& segment : segment_text(display)) {
     if (segment.type == TextSegmentType::Emoji) {
-      const size_t count = utf8_codepoint_count(segment.text);
+      const size_t count = utf8_scalar_count(segment.text);
       width += static_cast<float>(count) * metrics.font_size;
       codepoint_count += count;
       continue;
     }
     width += approximate_text_width(&measure_style, segment.text);
-    const size_t count = utf8_codepoint_count(segment.text);
+    const size_t count = utf8_scalar_count(segment.text);
     codepoint_count += count;
     word_gap_count += count_word_spacing_gaps(segment.text);
   }
@@ -279,7 +269,7 @@ float draw_textarea_segmented(RenderCommandList& commands, const std::string& te
         current_x += run_width > 0.0f
                          ? run_width
                          : metrics.font_size * 0.5f *
-                               static_cast<float>(utf8_codepoint_count(run));
+                               static_cast<float>(utf8_scalar_count(run));
         current_x += word_spacing *
                      static_cast<float>(count_word_spacing_gaps(run));
       }
