@@ -15,44 +15,52 @@ namespace flexUI {
 // UTF-8 Utilities
 // ============================================================================
 
+#include <salts_unicode.h>
+#include <vstr.h>
+#include <stdexcept>
+
 uint32_t utf8_decode(const std::string& str, size_t& pos) {
-    if (pos >= str.size()) return 0;
-
-    const unsigned char* s = reinterpret_cast<const unsigned char*>(str.data() + pos);
-    uint32_t cp;
-
-    if ((s[0] & 0x80) == 0) {
-        // 1-byte (ASCII)
-        cp = s[0];
-        pos += 1;
-    } else if ((s[0] & 0xE0) == 0xC0 && pos + 1 < str.size()) {
-        // 2-byte
-        cp = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
-        pos += 2;
-    } else if ((s[0] & 0xF0) == 0xE0 && pos + 2 < str.size()) {
-        // 3-byte
-        cp = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
-        pos += 3;
-    } else if ((s[0] & 0xF8) == 0xF0 && pos + 3 < str.size()) {
-        // 4-byte
-        cp = ((s[0] & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
-        pos += 4;
-    } else {
-        pos += 1;
-        cp = 0xFFFD; // Replacement character
+    if (pos >= str.size()) {
+        return 0;
     }
 
-    return cp;
+    size_t cursor = pos;
+    salts_unicode_scalar scalar{};
+    const auto status = salts_unicode_utf8_next(
+        vstr_from_buf(str.data(), str.size()), &cursor, &scalar);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+        throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status == SALTS_UNICODE_ERR_INVALID_ARGUMENT) {
+        throw std::out_of_range("FlexUI UTF-8 cursor is not a scalar boundary");
+    }
+    if (status != SALTS_UNICODE_OK) {
+        throw std::runtime_error("Salts::Unicode failed to decode FlexUI text");
+    }
+
+    pos = cursor;
+    return scalar.value;
 }
 
 size_t utf8_char_length(const std::string& str, size_t pos) {
-    if (pos >= str.size()) return 0;
-    unsigned char c = str[pos];
-    if ((c & 0x80) == 0) return 1;
-    if ((c & 0xE0) == 0xC0) return 2;
-    if ((c & 0xF0) == 0xE0) return 3;
-    if ((c & 0xF8) == 0xF0) return 4;
-    return 1;
+    if (pos >= str.size()) {
+        return 0;
+    }
+
+    size_t cursor = pos;
+    salts_unicode_scalar scalar{};
+    const auto status = salts_unicode_utf8_next(
+        vstr_from_buf(str.data(), str.size()), &cursor, &scalar);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+        throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status == SALTS_UNICODE_ERR_INVALID_ARGUMENT) {
+        throw std::out_of_range("FlexUI UTF-8 cursor is not a scalar boundary");
+    }
+    if (status != SALTS_UNICODE_OK) {
+        throw std::runtime_error("Salts::Unicode failed to decode FlexUI text");
+    }
+    return scalar.byte_length;
 }
 
 // ============================================================================
