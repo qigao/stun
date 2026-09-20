@@ -130,6 +130,21 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check(binding.error.code == UiDocumentErrorCode::RequiredElementId);
   }
 
+  it("lowers text-only XML content while preserving Unicode bytes") {
+    const auto compiled = flexUI::compile_ui_xml(
+        u8"<ui name=\"Natural\"><label>"
+        u8"  \u4FDD\u5B58\U0001F600e\u0301  "
+        u8"</label></ui>");
+    check(static_cast<bool>(compiled));
+    const auto &root = compiled.program->definition().root;
+    check(root.id.empty());
+    check_equal(std::get<std::string>(root.properties.at("text")),
+                u8"\u4FDD\u5B58\U0001F600e\u0301");
+    const auto span = root.property_spans.at("text");
+    check(span.line > 0);
+    check(span.column > 0);
+  }
+
   it("accepts valid Unicode text attributes without rewriting bytes") {
     const auto compiled = flexUI::compile_ui_xml(
         u8"<ui name=\"\u754C\u9762\"><label id=\"greeting\" "
@@ -165,7 +180,7 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check(invalid.error.column > 0);
   }
 
-  it("rejects invalid structure duplicate ids and text nodes") {
+  it("rejects invalid structure duplicate ids and ambiguous mixed text") {
     const auto roots =
         flexUI::compile_ui_xml("<ui name=\"Two\"><div id=\"a\"/><div id=\"b\"/></ui>");
     check_false(static_cast<bool>(roots));
@@ -176,10 +191,15 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check_false(static_cast<bool>(duplicate));
     check(duplicate.error.code == UiDocumentErrorCode::DuplicateElementId);
 
-    const auto text =
-        flexUI::compile_ui_xml("<ui name=\"Text\"><div id=\"root\">content</div></ui>");
-    check_false(static_cast<bool>(text));
-    check(text.error.code == UiDocumentErrorCode::InvalidNode);
+    const auto mixed = flexUI::compile_ui_xml(
+        "<ui name=\"Mixed\"><div id=\"root\">before<span id=\"child\"/>after</div></ui>");
+    check_false(static_cast<bool>(mixed));
+    check(mixed.error.code == UiDocumentErrorCode::InvalidNode);
+
+    const auto conflict = flexUI::compile_ui_xml(
+        "<ui name=\"Conflict\"><label text=\"Attribute\">Content</label></ui>");
+    check_false(static_cast<bool>(conflict));
+    check(conflict.error.code == UiDocumentErrorCode::InvalidProperty);
 
     const auto duplicate_attribute =
         flexUI::compile_ui_xml("<ui name=\"Attr\"><div id=\"root\" class=\"a\" class=\"b\"/></ui>");
