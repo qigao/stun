@@ -148,18 +148,23 @@ void register_default_widget(WidgetRegistry &registry, const char *tag) {
 
 } // namespace
 
-WidgetRegistryError WidgetRegistry::register_element(std::string tag) {
+WidgetRegistryError WidgetRegistry::register_element(std::string tag,
+                                                     UiContentModel content) {
   if (tag.empty()) {
     return make_error(WidgetRegistryErrorCode::InvalidTag, "WidgetRegistry tag must not be empty");
   }
-  if (!entries_.emplace(std::move(tag), Entry{}).second) {
+  if (!entries_
+           .emplace(std::move(tag),
+                    Entry{UiNodeDescriptor{UiNodeKind::Container, content}, {}})
+           .second) {
     return make_error(WidgetRegistryErrorCode::DuplicateTag,
                       "WidgetRegistry tag is already registered");
   }
   return {};
 }
 
-WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory factory) {
+WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory factory,
+                                                    UiContentModel content) {
   if (tag.empty()) {
     return make_error(WidgetRegistryErrorCode::InvalidTag, "WidgetRegistry tag must not be empty");
   }
@@ -167,7 +172,11 @@ WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory fac
     return make_error(WidgetRegistryErrorCode::InvalidFactory,
                       "WidgetRegistry factory must not be empty");
   }
-  if (!entries_.emplace(std::move(tag), Entry{std::move(factory)}).second) {
+  if (!entries_
+           .emplace(std::move(tag),
+                    Entry{UiNodeDescriptor{UiNodeKind::Widget, content},
+                          std::move(factory)})
+           .second) {
     return make_error(WidgetRegistryErrorCode::DuplicateTag,
                       "WidgetRegistry tag is already registered");
   }
@@ -176,6 +185,51 @@ WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory fac
 
 bool WidgetRegistry::contains(std::string_view tag) const {
   return entries_.find(std::string(tag)) != entries_.end();
+}
+
+const UiNodeDescriptor *WidgetRegistry::descriptor(std::string_view tag) const {
+  const auto found = entries_.find(std::string(tag));
+  return found == entries_.end() ? nullptr : &found->second.descriptor;
+}
+
+UiDocumentError WidgetRegistry::validate(
+    const UiDocumentDefinition &definition) const {
+  const auto validate_node =
+      [this](const auto &self, const UiNodeDefinition &node) -> UiDocumentError {
+    const auto found = entries_.find(node.tag);
+    if (found == entries_.end()) {
+      return {UiDocumentErrorCode::UnknownElementTag,
+              "unknown registered UI tag: " + node.tag,
+              node.source.line, node.source.column};
+    }
+
+    const auto content = found->second.descriptor.content;
+    if ((content == UiContentModel::Empty || content == UiContentModel::Text) &&
+        !node.children.empty()) {
+      return {UiDocumentErrorCode::InvalidNode,
+              "UI tag '" + node.tag + "' does not accept child elements",
+              node.source.line, node.source.column};
+    }
+    if (content == UiContentModel::SingleChild && node.children.size() != 1) {
+      return {UiDocumentErrorCode::InvalidNode,
+              "UI tag '" + node.tag + "' requires exactly one child element",
+              node.source.line, node.source.column};
+    }
+
+    for (const auto &child : node.children) {
+      auto error = self(self, child);
+      if (error) {
+        return error;
+      }
+    }
+    return {};
+  };
+
+  return validate_node(validate_node, definition.root);
+}
+
+UiDocumentError WidgetRegistry::validate(const CompiledUiProgram &program) const {
+  return validate(program.definition());
 }
 
 WidgetCreationResult WidgetRegistry::create(const UiNodeDefinition &definition) const {
