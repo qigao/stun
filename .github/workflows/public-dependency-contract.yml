@@ -175,3 +175,56 @@ jobs:
           )
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp
+
+
+  flexui-salts-unicode:
+    name: FlexUI Salts::Unicode contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          path: .ci/salts
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 62576265ac66b0000127a04936f108a3dbb3f004
+          path: .ci/salts-utils
+
+      - name: Verify Unicode ownership contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'Salts::Unicode' flexUI/CMakeLists.txt
+          grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
+          grep -Fq 'utf8_next_scalar' flexUI/include/flexUI/text_util.h
+          if grep -R -n -E 'uint32_t[[:space:]]+utf8_decode|utf8_char_length'               flexUI/include/flexUI/text_util.h flexUI/src/text_util.cpp flexUI/src/text_util.re; then
+            echo "private UTF-8 decoder surface remains" >&2
+            exit 1
+          fi
+
+      - name: Compile text utility against canonical Unicode headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c++17
+            -Wall
+            -Wextra
+            -Werror
+            -IflexUI/include
+            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts/cmeta/include
+          )
+          c++ "${common[@]}" -fsyntax-only flexUI/src/text_util.cpp
