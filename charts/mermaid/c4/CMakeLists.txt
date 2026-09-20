@@ -38,7 +38,7 @@ add_executable(c4_test
     tests/test_parser.c
 )
 
-target_link_libraries(c4_test PRIVATE mermaid_c4 TurboUtils::TinyTest TurboParser::Parser)
+target_link_libraries(c4_test PRIVATE mermaid_c4 Salts::TinyTest TurboParser::Parser)
 target_compile_definitions(c4_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/c4")
 
 enable_testing()
