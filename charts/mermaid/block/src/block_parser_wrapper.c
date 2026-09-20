@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "block/block_ast.h"
 #include "block_parser_gen.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 void *BlockParserAlloc(void *(*mallocProc)(size_t));
 void BlockParser(void *yyp, int yymajor, void* yyminor, BlockParserContext *ctx);
@@ -75,59 +75,59 @@ void block_free(BlockDiagram* diagram) {
 }
 
 static json_value_t* serialize_statements(BlockStatement* s) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (s) {
-        json_value_t* obj = turbo_json_create_object();
+        json_value_t* obj = json_create_object();
         switch (s->type) {
             case BLOCK_STMT_NODE:
-                turbo_json_object_set_string(obj, "type", "node");
-                turbo_json_object_set_string(obj, "id", s->data.node.id ? s->data.node.id : "");
-                turbo_json_object_set_string(obj, "label", s->data.node.label ? s->data.node.label : "");
-                turbo_json_object_set_string(obj, "shape", s->data.node.shape ? s->data.node.shape : "");
-                turbo_json_object_set_number(obj, "width", s->data.node.width);
+                json_object_set_string(obj, "type", "node");
+                json_object_set_string(obj, "id", s->data.node.id ? s->data.node.id : "");
+                json_object_set_string(obj, "label", s->data.node.label ? s->data.node.label : "");
+                json_object_set_string(obj, "shape", s->data.node.shape ? s->data.node.shape : "");
+                json_object_set_number(obj, "width", s->data.node.width);
                 if (s->data.node.children) {
-                    turbo_json_object_add(obj, "children", serialize_statements(s->data.node.children));
+                    json_object_add(obj, "children", serialize_statements(s->data.node.children));
                 }
                 if (s->data.node.direction_count > 0) {
-                    json_value_t* dir_arr = turbo_json_create_array();
+                    json_value_t* dir_arr = json_create_array();
                     for (int i = 0; i < s->data.node.direction_count; i++) {
-                        turbo_json_array_add(dir_arr, turbo_json_create_string(s->data.node.directions[i]));
+                        json_array_add(dir_arr, json_create_string(s->data.node.directions[i]));
                     }
-                    turbo_json_object_add(obj, "directions", dir_arr);
+                    json_object_add(obj, "directions", dir_arr);
                 }
                 break;
             case BLOCK_STMT_EDGE:
-                turbo_json_object_set_string(obj, "type", "edge");
-                turbo_json_object_set_string(obj, "id1", s->data.edge.id1 ? s->data.edge.id1 : "");
-                turbo_json_object_set_string(obj, "id2", s->data.edge.id2 ? s->data.edge.id2 : "");
-                turbo_json_object_set_string(obj, "label", s->data.edge.label ? s->data.edge.label : "");
-                turbo_json_object_set_string(obj, "edgeType", s->data.edge.edgeType ? s->data.edge.edgeType : "");
+                json_object_set_string(obj, "type", "edge");
+                json_object_set_string(obj, "id1", s->data.edge.id1 ? s->data.edge.id1 : "");
+                json_object_set_string(obj, "id2", s->data.edge.id2 ? s->data.edge.id2 : "");
+                json_object_set_string(obj, "label", s->data.edge.label ? s->data.edge.label : "");
+                json_object_set_string(obj, "edgeType", s->data.edge.edgeType ? s->data.edge.edgeType : "");
                 break;
             case BLOCK_STMT_COLUMNS:
-                turbo_json_object_set_string(obj, "type", "columns");
-                turbo_json_object_set_number(obj, "count", s->data.columns.count);
+                json_object_set_string(obj, "type", "columns");
+                json_object_set_number(obj, "count", s->data.columns.count);
                 break;
             case BLOCK_STMT_SPACE:
-                turbo_json_object_set_string(obj, "type", "space");
-                turbo_json_object_set_number(obj, "width", s->data.space.width);
+                json_object_set_string(obj, "type", "space");
+                json_object_set_number(obj, "width", s->data.space.width);
                 break;
             case BLOCK_STMT_CLASSDEF:
-                turbo_json_object_set_string(obj, "type", "classDef");
-                turbo_json_object_set_string(obj, "id", s->data.classDef.id ? s->data.classDef.id : "");
-                turbo_json_object_set_string(obj, "styles", s->data.classDef.styles ? s->data.classDef.styles : "");
+                json_object_set_string(obj, "type", "classDef");
+                json_object_set_string(obj, "id", s->data.classDef.id ? s->data.classDef.id : "");
+                json_object_set_string(obj, "styles", s->data.classDef.styles ? s->data.classDef.styles : "");
                 break;
             case BLOCK_STMT_APPLYCLASS:
-                turbo_json_object_set_string(obj, "type", "applyClass");
-                turbo_json_object_set_string(obj, "id", s->data.applyClass.id ? s->data.applyClass.id : "");
-                turbo_json_object_set_string(obj, "className", s->data.applyClass.className ? s->data.applyClass.className : "");
+                json_object_set_string(obj, "type", "applyClass");
+                json_object_set_string(obj, "id", s->data.applyClass.id ? s->data.applyClass.id : "");
+                json_object_set_string(obj, "className", s->data.applyClass.className ? s->data.applyClass.className : "");
                 break;
             case BLOCK_STMT_STYLE:
-                turbo_json_object_set_string(obj, "type", "style");
-                turbo_json_object_set_string(obj, "id", s->data.style.id ? s->data.style.id : "");
-                turbo_json_object_set_string(obj, "styles", s->data.style.styles ? s->data.style.styles : "");
+                json_object_set_string(obj, "type", "style");
+                json_object_set_string(obj, "id", s->data.style.id ? s->data.style.id : "");
+                json_object_set_string(obj, "styles", s->data.style.styles ? s->data.style.styles : "");
                 break;
         }
-        turbo_json_array_add(arr, obj);
+        json_array_add(arr, obj);
         s = s->next;
     }
     return arr;
@@ -135,13 +135,13 @@ static json_value_t* serialize_statements(BlockStatement* s) {
 
 char* block_to_json(BlockDiagram* diagram) {
     if (!diagram) return NULL;
-    json_value_t* root = turbo_json_create_object();
-    turbo_json_object_set_string(root, "hierarchy", diagram->hierarchy ? diagram->hierarchy : "block");
-    turbo_json_object_add(root, "statements", serialize_statements(diagram->statements));
+    json_value_t* root = json_create_object();
+    json_object_set_string(root, "hierarchy", diagram->hierarchy ? diagram->hierarchy : "block");
+    json_object_add(root, "statements", serialize_statements(diagram->statements));
 
     size_t len;
-    char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(&root);
+    char* str = json_serialize_pretty(root, &len);
+    json_free(&root);
     return str;
 }
 
