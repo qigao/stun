@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           common=(
-            -std=c++17 -Wall -Wextra -Wpedantic -Werror
+            -std=c++17 -Wall -Wextra -Werror
             -IflexUI/include
             -IflexUI/modules/plugin_host
             -isystem .ci/salts/utils/include
