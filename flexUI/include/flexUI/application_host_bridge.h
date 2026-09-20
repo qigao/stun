@@ -20,8 +20,8 @@ struct HostApplicationDispatchResult {
 
 /// Routes UTF-8 text when an editable, visible text widget owns focus.
 /// @param application Application whose owner thread must call this function.
-/// @param utf8 UTF-8 text copied into the event; empty input is ignored.
-/// @return Whether routing succeeded and whether an event was dispatched.
+/// @param utf8 Strict UTF-8 text copied into the event; empty input is ignored.
+/// @return InvalidArgument for malformed UTF-8, otherwise whether routing succeeded and whether an event was dispatched.
 HostApplicationDispatchResult dispatch_text_input_if_focused(DesktopApplication &application,
                                                              std::string_view utf8);
 
@@ -31,7 +31,7 @@ HostApplicationDispatchResult
 dispatch_composition_start_if_focused(DesktopApplication &application);
 
 /// Updates IME composition when an editable, visible text widget owns focus.
-/// @param text UTF-8 composition text copied into the event.
+/// @param text Strict UTF-8 composition text copied into the event.
 /// @return WrongThread or an application dispatch error on failure.
 HostApplicationDispatchResult
 dispatch_composition_update_if_focused(DesktopApplication &application, std::string_view text);
