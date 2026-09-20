@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "er/er_ast.h"
 #include "er_parser_gen.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 void *ERParserAlloc(void *(*mallocProc)(size_t));
 void ERParser(void *yyp, int yymajor, void* yyminor, ERParserContext *ctx);
@@ -115,62 +115,62 @@ static const char* map_rel_type(ERRelType t) {
 char* er_to_json(ERDiagram* diagram) {
     if (!diagram) return NULL;
 
-    json_value_t* root = turbo_json_create_object();
-    turbo_json_object_set_string(root, "direction", "TB"); // Default
-    turbo_json_object_set_string(root, "type", "erDiagram");
-    turbo_json_object_add(root, "classDefs", turbo_json_create_object());
-    turbo_json_object_add(root, "classes", turbo_json_create_object());
-    turbo_json_object_add(root, "styles", turbo_json_create_object());
+    json_value_t* root = json_create_object();
+    json_object_set_string(root, "direction", "TB"); // Default
+    json_object_set_string(root, "type", "erDiagram");
+    json_object_add(root, "classDefs", json_create_object());
+    json_object_add(root, "classes", json_create_object());
+    json_object_add(root, "styles", json_create_object());
 
     // Entities
-    json_value_t* entities_obj = turbo_json_create_object();
+    json_value_t* entities_obj = json_create_object();
     EREntity* e = diagram->entities;
     while(e) {
         if (e->name) {
-            json_value_t* e_obj = turbo_json_create_object();
-            turbo_json_object_set_string(e_obj, "name", e->name);
+            json_value_t* e_obj = json_create_object();
+            json_object_set_string(e_obj, "name", e->name);
             
-            json_value_t* attrs_arr = turbo_json_create_array();
+            json_value_t* attrs_arr = json_create_array();
             ERAttribute* a = e->attributes;
             while(a) {
-                json_value_t* a_obj = turbo_json_create_object();
-                if (a->name) turbo_json_object_set_string(a_obj, "name", a->name);
-                if (a->type) turbo_json_object_set_string(a_obj, "type", a->type);
-                if (a->keys) turbo_json_object_set_string(a_obj, "keys", a->keys);
-                if (a->comment) turbo_json_object_set_string(a_obj, "comment", a->comment);
-                turbo_json_array_add(attrs_arr, a_obj);
+                json_value_t* a_obj = json_create_object();
+                if (a->name) json_object_set_string(a_obj, "name", a->name);
+                if (a->type) json_object_set_string(a_obj, "type", a->type);
+                if (a->keys) json_object_set_string(a_obj, "keys", a->keys);
+                if (a->comment) json_object_set_string(a_obj, "comment", a->comment);
+                json_array_add(attrs_arr, a_obj);
                 a = a->next;
             }
-            turbo_json_object_add(e_obj, "attributes", attrs_arr);
-            turbo_json_object_add(entities_obj, e->name, e_obj);
+            json_object_add(e_obj, "attributes", attrs_arr);
+            json_object_add(entities_obj, e->name, e_obj);
             // Hint: In render-basic.json, entities is a map, keyed by name.
         }
         e = e->next;
     }
-    turbo_json_object_add(root, "entities", entities_obj);
+    json_object_add(root, "entities", entities_obj);
 
     // Relationships
-    json_value_t* rels_arr = turbo_json_create_array();
+    json_value_t* rels_arr = json_create_array();
     ERRelationship* r = diagram->relationships;
     while(r) {
-        json_value_t* r_obj = turbo_json_create_object();
-        turbo_json_object_set_string(r_obj, "entityA", r->entity1 ? r->entity1 : "");
-        turbo_json_object_set_string(r_obj, "entityB", r->entity2 ? r->entity2 : "");
-        turbo_json_object_set_string(r_obj, "role", r->role ? r->role : "");
+        json_value_t* r_obj = json_create_object();
+        json_object_set_string(r_obj, "entityA", r->entity1 ? r->entity1 : "");
+        json_object_set_string(r_obj, "entityB", r->entity2 ? r->entity2 : "");
+        json_object_set_string(r_obj, "role", r->role ? r->role : "");
         
-        json_value_t* spec = turbo_json_create_object();
-        turbo_json_object_set_string(spec, "cardA", map_cardinality(r->card1));
-        turbo_json_object_set_string(spec, "cardB", map_cardinality(r->card2));
-        turbo_json_object_set_string(spec, "relType", map_rel_type(r->type));
-        turbo_json_object_add(r_obj, "relSpec", spec);
+        json_value_t* spec = json_create_object();
+        json_object_set_string(spec, "cardA", map_cardinality(r->card1));
+        json_object_set_string(spec, "cardB", map_cardinality(r->card2));
+        json_object_set_string(spec, "relType", map_rel_type(r->type));
+        json_object_add(r_obj, "relSpec", spec);
 
-        turbo_json_array_add(rels_arr, r_obj);
+        json_array_add(rels_arr, r_obj);
         r = r->next;
     }
-    turbo_json_object_add(root, "relationships", rels_arr);
+    json_object_add(root, "relationships", rels_arr);
 
     size_t len;
-    char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(&root);
+    char* str = json_serialize_pretty(root, &len);
+    json_free(&root);
     return str;
 }
