@@ -179,6 +179,13 @@ target_include_directories(test_render_command PRIVATE ../include)
 set_target_properties(test_render_command PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_render_command COMMAND test_render_command)
 
+add_executable(test_text_util_unicode test_text_util_unicode.cpp)
+target_link_libraries(test_text_util_unicode PRIVATE flexUI)
+flexui_configure_tinytest(test_text_util_unicode)
+target_include_directories(test_text_util_unicode PRIVATE ../include)
+set_target_properties(test_text_util_unicode PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_text_util_unicode COMMAND test_text_util_unicode)
+
 add_executable(test_widget_contracts test_widget_contracts.cpp)
 target_link_libraries(test_widget_contracts PRIVATE flexUI)
 flexui_configure_tinytest(test_widget_contracts)
