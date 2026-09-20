@@ -9,8 +9,10 @@
 #define FLEXUI_TEXT_UTIL_H
 
 #include <string>
+#include <string_view>
 #include <vector>
 #include <cstdint>
+#include <cstddef>
 
 namespace flexUI {
 
@@ -33,6 +35,13 @@ struct TextSegment {
 // ============================================================================
 // Unicode Utilities
 // ============================================================================
+
+struct Utf8ValidationResult {
+    bool valid = true;
+    size_t invalid_offset = 0;
+};
+
+Utf8ValidationResult validate_utf8(std::string_view text) noexcept;
 
 /**
  * Decode a single UTF-8 code point from string
