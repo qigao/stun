@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "classdiagram/classdiagram_ast.h"
 #include "classdiagram_parser_gen.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 // Lexer and Parser functions (generated)
 void *ClassParserAlloc(void *(*mallocProc)(size_t));
@@ -131,47 +131,47 @@ static const char* rel_type_str(ClassRelationshipType type) {
 }
 
 static json_value_t* serialize_members(ClassMember* m) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (m) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "name", m->name ? m->name : "");
-        if (m->type) turbo_json_object_set_string(obj, "type", m->type);
-        if (m->return_type) turbo_json_object_set_string(obj, "returnType", m->return_type);
-        turbo_json_object_set_string(obj, "visibility", visibility_str(m->visibility));
-        turbo_json_object_set_bool(obj, "isStatic", m->is_static);
-        turbo_json_object_set_bool(obj, "isAbstract", m->is_abstract);
-        turbo_json_object_set_bool(obj, "isMethod", m->is_method);
-        turbo_json_array_add(arr, obj);
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "name", m->name ? m->name : "");
+        if (m->type) json_object_set_string(obj, "type", m->type);
+        if (m->return_type) json_object_set_string(obj, "returnType", m->return_type);
+        json_object_set_string(obj, "visibility", visibility_str(m->visibility));
+        json_object_set_bool(obj, "isStatic", m->is_static);
+        json_object_set_bool(obj, "isAbstract", m->is_abstract);
+        json_object_set_bool(obj, "isMethod", m->is_method);
+        json_array_add(arr, obj);
         m = m->next;
     }
     return arr;
 }
 
 static json_value_t* serialize_classes(ClassNode* n) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (n) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "name", n->name ? n->name : "");
-        if (n->annotation) turbo_json_object_set_string(obj, "annotation", n->annotation);
-        turbo_json_object_add(obj, "members", serialize_members(n->members));
-        turbo_json_array_add(arr, obj);
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "name", n->name ? n->name : "");
+        if (n->annotation) json_object_set_string(obj, "annotation", n->annotation);
+        json_object_add(obj, "members", serialize_members(n->members));
+        json_array_add(arr, obj);
         n = n->next;
     }
     return arr;
 }
 
 static json_value_t* serialize_relationships(ClassRelationship* r) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (r) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "from", r->from ? r->from : "");
-        turbo_json_object_set_string(obj, "to", r->to ? r->to : "");
-        turbo_json_object_set_string(obj, "type", rel_type_str(r->type));
-        if (r->label) turbo_json_object_set_string(obj, "label", r->label);
-        if (r->from_cardinality) turbo_json_object_set_string(obj, "fromCardinality", r->from_cardinality);
-        if (r->to_cardinality) turbo_json_object_set_string(obj, "toCardinality", r->to_cardinality);
-        turbo_json_object_set_bool(obj, "isDotted", r->is_dotted);
-        turbo_json_array_add(arr, obj);
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "from", r->from ? r->from : "");
+        json_object_set_string(obj, "to", r->to ? r->to : "");
+        json_object_set_string(obj, "type", rel_type_str(r->type));
+        if (r->label) json_object_set_string(obj, "label", r->label);
+        if (r->from_cardinality) json_object_set_string(obj, "fromCardinality", r->from_cardinality);
+        if (r->to_cardinality) json_object_set_string(obj, "toCardinality", r->to_cardinality);
+        json_object_set_bool(obj, "isDotted", r->is_dotted);
+        json_array_add(arr, obj);
         r = r->next;
     }
     return arr;
@@ -180,15 +180,15 @@ static json_value_t* serialize_relationships(ClassRelationship* r) {
 char* classdiagram_to_json(ClassDiagram* diagram) {
     if (!diagram) return NULL;
 
-    json_value_t* root = turbo_json_create_object();
+    json_value_t* root = json_create_object();
     if (diagram->title) {
-        turbo_json_object_set_string(root, "title", diagram->title);
+        json_object_set_string(root, "title", diagram->title);
     }
-    turbo_json_object_add(root, "classes", serialize_classes(diagram->classes));
-    turbo_json_object_add(root, "relationships", serialize_relationships(diagram->relationships));
+    json_object_add(root, "classes", serialize_classes(diagram->classes));
+    json_object_add(root, "relationships", serialize_relationships(diagram->relationships));
 
     size_t len;
-    char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(&root);
+    char* str = json_serialize_pretty(root, &len);
+    json_free(&root);
     return str;
 }
