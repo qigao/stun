@@ -53,13 +53,13 @@ set_target_properties(flexchart_radar PROPERTIES FOLDER "Modules/FlexChart/Marks
 
 # Parser test
 add_executable(flexchart_radar_parser_test tests/test_radar_parser.cpp)
-target_link_libraries(flexchart_radar_parser_test PRIVATE flexchart_radar TurboUtils::TinyTest)
+target_link_libraries(flexchart_radar_parser_test PRIVATE flexchart_radar Salts::TinyTest)
 add_test(NAME FlexChartRadarParserTest COMMAND flexchart_radar_parser_test)
 set_target_properties(flexchart_radar_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_radar_test tests/test_radar.cpp)
-target_link_libraries(flexchart_radar_test PRIVATE flexchart_radar TurboUtils::TinyTest)
+target_link_libraries(flexchart_radar_test PRIVATE flexchart_radar Salts::TinyTest)
 target_include_directories(flexchart_radar_test PRIVATE ../../src)
 add_test(NAME FlexChartRadarTest COMMAND flexchart_radar_test)
 set_target_properties(flexchart_radar_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
