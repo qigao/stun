@@ -5,7 +5,7 @@
 #include "flexUI/plugin_abi.h"
 
 #include <toml.h>
-#include <turbo_fs.h>
+#include <salts_fs.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -24,10 +24,10 @@ namespace {
 
 constexpr std::int64_t kManifestVersion = 1;
 struct FileHandle {
-  turbo_file_t value = TURBO_INVALID_FILE;
+  salts_file_t value = SALTS_INVALID_FILE;
   ~FileHandle() {
-    if (value != TURBO_INVALID_FILE) {
-      (void)turbo_fs_close(value);
+    if (value != SALTS_INVALID_FILE) {
+      (void)salts_fs_close(value);
     }
   }
 };
@@ -458,8 +458,8 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     }
 
     const std::string native_manifest_path = canonical_manifest.string();
-    turbo_fs_stat_t file_stat{};
-    if (turbo_fs_stat(native_manifest_path.c_str(), &file_stat) != 0 ||
+    salts_fs_stat_t file_stat{};
+    if (salts_fs_stat(native_manifest_path.c_str(), &file_stat) != 0 ||
         !file_stat.is_file) {
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
@@ -472,9 +472,9 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     }
 
     FileHandle file;
-    file.value = turbo_fs_open(native_manifest_path.c_str(),
-                               TURBO_FS_O_RDONLY, 0);
-    if (file.value == TURBO_INVALID_FILE) {
+    file.value = salts_fs_open(native_manifest_path.c_str(),
+                               SALTS_FS_O_RDONLY, 0);
+    if (file.value == SALTS_INVALID_FILE) {
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
                                  "failed to read plugin manifest")};
@@ -482,7 +482,7 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     std::vector<std::uint8_t> buffer(limits.max_manifest_bytes + 1);
     std::size_t bytes_read = 0;
     while (bytes_read < buffer.size()) {
-      const int current = turbo_fs_read(
+      const int current = salts_fs_read(
           file.value, reinterpret_cast<char *>(buffer.data() + bytes_read),
           buffer.size() - bytes_read);
       if (current < 0) {
@@ -500,13 +500,13 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
                                  "manifest_read", canonical_manifest,
                                  "plugin manifest grew beyond the configured byte limit")};
     }
-    if (turbo_fs_close(file.value) != 0) {
-      file.value = TURBO_INVALID_FILE;
+    if (salts_fs_close(file.value) != 0) {
+      file.value = SALTS_INVALID_FILE;
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
                                  "failed to close plugin manifest after reading")};
     }
-    file.value = TURBO_INVALID_FILE;
+    file.value = SALTS_INVALID_FILE;
 
     if (std::find(buffer.begin(), buffer.begin() + bytes_read,
                   static_cast<std::uint8_t>(0)) != buffer.begin() + bytes_read) {

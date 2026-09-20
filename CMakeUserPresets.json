@@ -8,7 +8,6 @@
             "name": "win-paths",
             "hidden": true,
             "cacheVariables": {
-                "TURBO_UTILS_ROOT": "C:/projects/cpp/external/pkgs/turboutils",
                 "TURBOPARSER_ROOT": "C:/projects/cpp/external/pkgs/turboparser",
                 "TURBONET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",

@@ -228,7 +228,7 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS TurboUtils::Core md_parser nlohmann_json::nlohmann_json
+    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core md_parser nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
@@ -248,9 +248,9 @@ if(WIN32)
   add_custom_command(
     TARGET flexUI POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:TurboUtils::Core>
+            $<TARGET_FILE:Salts::Core>
             $<TARGET_FILE_DIR:flexUI>
-    COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
+    COMMENT "Copying the Salts runtime beside FlexUI executables")
 endif()
 
 add_subdirectory(modules/services)
@@ -263,8 +263,7 @@ set(FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES "")
 if(FLEXUI_ENABLE_PLUGINS)
   string(
     APPEND FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES
-    "find_dependency(TurboUtils CONFIG)\n"
-    "find_dependency(TurboParser CONFIG)\n")
+    "find_dependency(SaltsUtils CONFIG REQUIRED)\n")
 endif()
 configure_package_config_file(
   cmake/FlexUIConfig.cmake.in

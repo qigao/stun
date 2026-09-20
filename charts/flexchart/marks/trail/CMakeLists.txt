@@ -53,13 +53,13 @@ set_target_properties(flexchart_trail PROPERTIES FOLDER "Modules/FlexChart/Marks
 
 # Parser test
 add_executable(flexchart_trail_parser_test tests/test_trail_parser.cpp)
-target_link_libraries(flexchart_trail_parser_test PRIVATE flexchart_trail TurboUtils::TinyTest)
+target_link_libraries(flexchart_trail_parser_test PRIVATE flexchart_trail Salts::TinyTest)
 add_test(NAME FlexChartTrailParserTest COMMAND flexchart_trail_parser_test)
 set_target_properties(flexchart_trail_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_trail_test tests/test_trail.cpp)
-target_link_libraries(flexchart_trail_test PRIVATE flexchart_trail TurboUtils::TinyTest)
+target_link_libraries(flexchart_trail_test PRIVATE flexchart_trail Salts::TinyTest)
 target_include_directories(flexchart_trail_test PRIVATE ../../src)
 add_test(NAME FlexChartTrailTest COMMAND flexchart_trail_test)
 set_target_properties(flexchart_trail_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")

@@ -40,14 +40,14 @@ inline bool is_profile_enabled() {
   return enabled;
 }
 
-inline turbo_log_level_t get_log_level() {
-  static turbo_log_level_t level = [] {
+inline salts_log_level_t get_log_level() {
+  static salts_log_level_t level = [] {
     const char* env = std::getenv("FLEX_LOG_LEVEL");
-    if (!env) return TURBO_LOG_LEVEL_DEBUG;
-    if (env[0] == 'E' || env[0] == 'e') return TURBO_LOG_LEVEL_ERROR;
-    if (env[0] == 'W' || env[0] == 'w') return TURBO_LOG_LEVEL_WARN;
-    if (env[0] == 'I' || env[0] == 'i') return TURBO_LOG_LEVEL_INFO;
-    return TURBO_LOG_LEVEL_DEBUG;
+    if (!env) return SALTS_LOG_LEVEL_DEBUG;
+    if (env[0] == 'E' || env[0] == 'e') return SALTS_LOG_LEVEL_ERROR;
+    if (env[0] == 'W' || env[0] == 'w') return SALTS_LOG_LEVEL_WARN;
+    if (env[0] == 'I' || env[0] == 'i') return SALTS_LOG_LEVEL_INFO;
+    return SALTS_LOG_LEVEL_DEBUG;
   }();
   return level;
 }
