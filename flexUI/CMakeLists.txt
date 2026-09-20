@@ -250,7 +250,7 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:Salts::Core>
             $<TARGET_FILE_DIR:flexUI>
-    COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
+    COMMENT "Copying the Salts runtime beside FlexUI executables")
 endif()
 
 add_subdirectory(modules/services)
