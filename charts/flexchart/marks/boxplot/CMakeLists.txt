@@ -53,13 +53,13 @@ set_target_properties(flexchart_boxplot PROPERTIES FOLDER "Modules/FlexChart/Mar
 
 # Parser test
 add_executable(flexchart_boxplot_parser_test tests/test_boxplot_parser.cpp)
-target_link_libraries(flexchart_boxplot_parser_test PRIVATE flexchart_boxplot TurboUtils::TinyTest)
+target_link_libraries(flexchart_boxplot_parser_test PRIVATE flexchart_boxplot Salts::TinyTest)
 add_test(NAME FlexChartBoxplotParserTest COMMAND flexchart_boxplot_parser_test)
 set_target_properties(flexchart_boxplot_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_boxplot_test tests/test_boxplot.cpp)
-target_link_libraries(flexchart_boxplot_test PRIVATE flexchart_boxplot TurboUtils::TinyTest)
+target_link_libraries(flexchart_boxplot_test PRIVATE flexchart_boxplot Salts::TinyTest)
 target_include_directories(flexchart_boxplot_test PRIVATE ../../src)
 add_test(NAME FlexChartBoxplotTest COMMAND flexchart_boxplot_test)
 set_target_properties(flexchart_boxplot_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
