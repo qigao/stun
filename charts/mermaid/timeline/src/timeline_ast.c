@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "timeline/timeline_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 static char* copy_string(const char* s) {
     if(!s) return NULL;
@@ -130,51 +130,51 @@ void timeline_add_event(TimelineParserContext* ctx, const char* text) {
 
 char* timeline_to_json(const TimelineDiagram* d) {
     if(!d) {
-        json_value_t *null_val = turbo_json_create_null();
+        json_value_t *null_val = json_create_null();
         size_t len;
-        char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(&null_val);
+        char *s = json_serialize_pretty_crlf(null_val, &len);
+        json_free(&null_val);
         return s;
     }
 
-    json_value_t *root = turbo_json_create_object();
+    json_value_t *root = json_create_object();
 
-    json_value_t *sections = turbo_json_create_array();
+    json_value_t *sections = json_create_array();
     for(const TimelineSection* s = d->sections; s; s = s->next) {
-        json_value_t *section = turbo_json_create_object();
-        turbo_json_object_set_string(section, "name", s->title ? s->title : "");
+        json_value_t *section = json_create_object();
+        json_object_set_string(section, "name", s->title ? s->title : "");
 
-        json_value_t *periods = turbo_json_create_array();
+        json_value_t *periods = json_create_array();
         for(const TimelinePeriod* p = s->periods; p; p = p->next) {
-            json_value_t *period = turbo_json_create_object();
+            json_value_t *period = json_create_object();
 
-            json_value_t *events = turbo_json_create_array();
+            json_value_t *events = json_create_array();
             for(const TimelineEvent* e = p->events; e; e = e->next) {
-                json_value_t *event = turbo_json_create_object();
-                turbo_json_object_set_string(event, "text", e->text ? e->text : "");
-                turbo_json_array_add(events, event);
+                json_value_t *event = json_create_object();
+                json_object_set_string(event, "text", e->text ? e->text : "");
+                json_array_add(events, event);
             }
-            turbo_json_object_add(period, "events", events);
-            turbo_json_object_set_string(period, "name", p->title ? p->title : "");
+            json_object_add(period, "events", events);
+            json_object_set_string(period, "name", p->title ? p->title : "");
 
-            turbo_json_array_add(periods, period);
+            json_array_add(periods, period);
         }
-        turbo_json_object_add(section, "periods", periods);
+        json_object_add(section, "periods", periods);
 
-        turbo_json_array_add(sections, section);
+        json_array_add(sections, section);
     }
-    turbo_json_object_add(root, "sections", sections);
+    json_object_add(root, "sections", sections);
 
     if(d->title)
-        turbo_json_object_set_string(root, "title", d->title);
+        json_object_set_string(root, "title", d->title);
     else
-        turbo_json_object_set_null(root, "title");
+        json_object_set_null(root, "title");
 
-    turbo_json_object_set_string(root, "type", "timeline");
+    json_object_set_string(root, "type", "timeline");
 
     size_t out_len;
-    char *json_str = turbo_json_serialize_pretty_crlf(root, &out_len);
-    turbo_free_json(&root);
+    char *json_str = json_serialize_pretty_crlf(root, &out_len);
+    json_free(&root);
 
     return json_str;
 }
