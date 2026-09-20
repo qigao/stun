@@ -21,7 +21,7 @@ target_compile_features(flex_runtime PUBLIC cxx_std_17)
 find_package(box2d CONFIG REQUIRED)
 target_link_libraries(
   flex_runtime
-  PUBLIC Flex::Render Flex::Animation Flex::Expression TurboUtils::Core
+  PUBLIC Flex::Render Flex::Animation Flex::Expression Salts::Core
   PRIVATE box2d::box2d miniblas_linalg)
 
 if(WIN32)

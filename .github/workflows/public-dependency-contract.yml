@@ -3,8 +3,6 @@ name: Public dependency compile contract
 on:
   pull_request:
   push:
-    branches:
-      - refactor/controller-salts-concurrency
 
 permissions:
   contents: read
@@ -21,6 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
+          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
           path: .ci/salts
 
       - name: Verify canonical dependency surface
@@ -33,13 +32,146 @@ jobs:
             echo "legacy TurboUtils disruptor header remains" >&2
             exit 1
           fi
-          if grep -Fq 'PRIVATE TurboUtils::Core)' flexUI/modules/controller/CMakeLists.txt; then
-            echo "controller still links the legacy umbrella Core target" >&2
-            exit 1
-          fi
 
       - name: Compile controller mailbox against public Salts headers
         shell: bash
         run: |
           set -euo pipefail
-          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -I.ci/salts/concurrency/include             -fsyntax-only             flexUI/modules/controller/application_completion.cpp
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -I.ci/salts/concurrency/include             -fsyntax-only flexUI/modules/controller/application_completion.cpp
+
+  flexui-salts-core-provider:
+    name: FlexUI Salts::Core provider contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+
+      - name: Checkout canonical Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          path: .ci/salts
+
+      - name: Verify FlexUI main runtime has one Core provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in             flex/modules/runtime/CMakeLists.txt             flex/modules/dsl/CMakeLists.txt             flexUI/CMakeLists.txt             tools/md/CMakeLists.txt             flexUI/examples/desktop_editor/CMakeLists.txt             flexUI/tests/CMakeLists.txt; do
+            if grep -n 'TurboUtils::Core' "$file"; then
+              echo "legacy Core provider remains in $file" >&2
+              exit 1
+            fi
+          done
+          grep -Fq 'Salts::Core' flex/modules/runtime/CMakeLists.txt
+          grep -Fq 'Salts::Core' flex/modules/dsl/CMakeLists.txt
+          grep -Fq 'Salts::Core' flexUI/CMakeLists.txt
+          grep -Fq 'Salts::Core' tools/md/CMakeLists.txt
+          if grep -n -E 'turbo_log_level_t|TURBO_LOG_LEVEL_' flex/include/flex/core/debug.h; then
+            echo "legacy log-level API remains" >&2
+            exit 1
+          fi
+          if grep -R -n -E '#include <turbo_fs\.h>'               flexUI/examples/desktop_editor               flexUI/tests/test_desktop_editor_controller.cpp; then
+            echo "legacy filesystem facade remains in FlexUI app/test path" >&2
+            exit 1
+          fi
+
+      - name: Compile public log and filesystem contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c++17
+            -Wall
+            -Wextra
+            -Werror
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts/cmeta/include
+          )
+
+          cat > /tmp/flex_debug_contract.cpp <<'EOF'
+          #include <flex/core/debug.h>
+          static_assert(SALTS_LOG_LEVEL_DEBUG == 0);
+          int main() {
+            return static_cast<int>(flex::debug::get_log_level());
+          }
+          EOF
+          c++ "${common[@]}" -Iflex/include -fsyntax-only /tmp/flex_debug_contract.cpp
+
+          cat > /tmp/flex_fs_contract.cpp <<'EOF'
+          #include <salts_fs.h>
+          int main() {
+            salts_fs_stat_t stat{};
+            salts_fs_buf_t buf{};
+            (void)stat;
+            (void)buf;
+            return 0;
+          }
+          EOF
+          c++ "${common[@]}" -fsyntax-only /tmp/flex_fs_contract.cpp
+
+  pluginhost-canonical-packages:
+    name: PluginHost canonical Salts contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+
+      - name: Checkout canonical Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          path: .ci/salts
+
+      - name: Checkout canonical SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 62576265ac66b0000127a04936f108a3dbb3f004
+          path: .ci/salts-utils
+
+      - name: Verify source and install package ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#include <toml.h>' flexUI/modules/plugin_host/plugin_manifest.cpp
+          grep -Fq 'Salts::TomlParser' flexUI/modules/plugin_host/CMakeLists.txt
+          grep -Fq 'Salts::Core' flexUI/modules/plugin_host/CMakeLists.txt
+          if grep -R -n -E '#include <(turbo_parser_toml|turbo_fs|turbo_vstr)\.h>' flexUI/modules/plugin_host; then
+            echo "PluginHost still consumes retired Turbo facade headers" >&2
+            exit 1
+          fi
+          if grep -n -E 'find_dependency\((TurboUtils|TurboParser)' flexUI/CMakeLists.txt; then
+            echo "installed FlexUI package still exports retired dependencies" >&2
+            exit 1
+          fi
+          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/run_plugin_install_consumer.cmake flexUI/tests/CMakeLists.txt; then
+            echo "install consumer still injects retired package roots" >&2
+            exit 1
+          fi
+          grep -Fq 'find_dependency(Salts CONFIG)' flexUI/CMakeLists.txt
+          grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/CMakeLists.txt
+          grep -Fq 'Salts_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
+          grep -Fq 'SaltsUtils_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
+
+      - name: Compile PluginHost sources against canonical public headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c++17 -Wall -Wextra -Wpedantic -Werror
+            -IflexUI/include
+            -IflexUI/modules/plugin_host
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts-utils/parser/toml/include
+          )
+          c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
+          c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp

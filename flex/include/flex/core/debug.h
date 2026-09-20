@@ -40,14 +40,14 @@ inline bool is_profile_enabled() {
   return enabled;
 }
 
-inline turbo_log_level_t get_log_level() {
-  static turbo_log_level_t level = [] {
+inline salts_log_level_t get_log_level() {
+  static salts_log_level_t level = [] {
     const char* env = std::getenv("FLEX_LOG_LEVEL");
-    if (!env) return TURBO_LOG_LEVEL_DEBUG;
-    if (env[0] == 'E' || env[0] == 'e') return TURBO_LOG_LEVEL_ERROR;
-    if (env[0] == 'W' || env[0] == 'w') return TURBO_LOG_LEVEL_WARN;
-    if (env[0] == 'I' || env[0] == 'i') return TURBO_LOG_LEVEL_INFO;
-    return TURBO_LOG_LEVEL_DEBUG;
+    if (!env) return SALTS_LOG_LEVEL_DEBUG;
+    if (env[0] == 'E' || env[0] == 'e') return SALTS_LOG_LEVEL_ERROR;
+    if (env[0] == 'W' || env[0] == 'w') return SALTS_LOG_LEVEL_WARN;
+    if (env[0] == 'I' || env[0] == 'i') return SALTS_LOG_LEVEL_INFO;
+    return SALTS_LOG_LEVEL_DEBUG;
   }();
   return level;
 }
@@ -402,17 +402,17 @@ inline void init(const char* log_file = nullptr) {
 
         tlog_t* logger = tlog_create(&config);
         if (logger) {
-            turbo_console_sink_opts_t copts = {};
+            salts_console_sink_opts_t copts = {};
             copts.output = stdout;
             copts.use_colors = 1;
-            tlog_add_sink(logger, turbo_sink_console_create(&copts));
+            tlog_add_sink(logger, salts_sink_console_create(&copts));
 
             if (log_file) {
-                turbo_file_sink_opts_t fopts = {};
+                salts_file_sink_opts_t fopts = {};
                 fopts.path = log_file;
                 fopts.max_size = 10 * 1024 * 1024;
                 fopts.max_files = 3;
-                tlog_add_sink(logger, turbo_sink_file_create(&fopts));
+                tlog_add_sink(logger, salts_sink_file_create(&fopts));
             }
             tlog_set_default(logger);
             initialized = true;

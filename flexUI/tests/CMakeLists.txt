@@ -3,7 +3,7 @@ enable_testing()
 find_package(nlohmann_json CONFIG REQUIRED)
 
 function(flexui_configure_tinytest target_name)
-  target_link_libraries(${target_name} PRIVATE TurboUtils::TinyTest)
+  target_link_libraries(${target_name} PRIVATE Salts::TinyTest)
 endfunction()
 
 add_executable(test_plugin_abi test_plugin_abi.c)
@@ -138,10 +138,9 @@ if(FLEXUI_ENABLE_PLUGINS)
       "-DCMAKE_GENERATOR_PLATFORM_NAME=${CMAKE_GENERATOR_PLATFORM}"
       "-DCMAKE_GENERATOR_TOOLSET_NAME=${CMAKE_GENERATOR_TOOLSET}"
       "-DCMAKE_MAKE_PROGRAM_PATH=${CMAKE_MAKE_PROGRAM}"
-      "-DTURBO_UTILS_PACKAGE_DIR=${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/TurboUtils"
-      "-DTURBO_PARSER_PACKAGE_DIR=${TURBOPARSER_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/TurboParser"
-      "-DTURBO_UTILS_RUNTIME_DIR=${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
-      "-DTURBO_PARSER_RUNTIME_DIR=${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}"
+      "-DSALTS_PACKAGE_DIR=${SALTS_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/Salts"
+      "-DSALTS_UTILS_PACKAGE_DIR=${SALTS_UTILS_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/SaltsUtils"
+      "-DSALTS_RUNTIME_DIR=${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
       "-DCOMPILER_RUNTIME_DIR=${_flexui_plugin_compiler_runtime_dir}"
       "-DADDRESS_SANITIZER_ENABLED=${ENABLE_SANITIZER_ADDRESS}"
       "-DEXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
@@ -449,7 +448,7 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
                  test_desktop_editor_controller.cpp)
   target_link_libraries(
     test_desktop_editor_controller
-    PRIVATE FlexUI::ControllerTurboScript TurboUtils::Core)
+    PRIVATE FlexUI::ControllerTurboScript Salts::Core)
   target_compile_definitions(
     test_desktop_editor_controller
     PRIVATE

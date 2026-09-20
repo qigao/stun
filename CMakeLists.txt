@@ -33,6 +33,7 @@ find_package(Threads REQUIRED)
 find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
 find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT}")
+find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
 find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
 
 # Cmake modules

@@ -36,17 +36,14 @@ if(FLEXUI_ENABLE_PLUGINS)
   target_link_libraries(
     flexUI_plugin_host
     PUBLIC FlexUI::PluginSDK FlexUI::Services
-    PRIVATE TurboUtils::Core TurboParser::Parser ${CMAKE_DL_LIBS})
+    PRIVATE Salts::Core Salts::TomlParser ${CMAKE_DL_LIBS})
   if(WIN32)
     target_compile_definitions(
       flexUI_plugin_host PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     add_custom_command(
       TARGET flexUI_plugin_host POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:TurboUtils::Core>
-              $<TARGET_FILE_DIR:flexUI_plugin_host>
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:TurboParser::Parser>
+              $<TARGET_FILE:Salts::Core>
               $<TARGET_FILE_DIR:flexUI_plugin_host>
       COMMENT "Copying PluginHost runtime dependencies beside FlexUI executables")
   endif()
