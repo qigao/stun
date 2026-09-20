@@ -211,7 +211,7 @@ float textarea_expected_width(const Element& elem, const std::string& text) {
   size_t byte_pos = 0;
   while (byte_pos < text.size()) {
     const size_t start = byte_pos;
-    const uint32_t cp = utf8_decode(text, byte_pos);
+    const uint32_t cp = utf8_next_scalar(text, byte_pos).value;
     if (has_previous_glyph) {
       width += std::max(style->letter_spacing, 0.0f);
     }
@@ -251,7 +251,7 @@ float input_expected_width(const Element& elem, const std::string& text) {
   size_t byte_pos = 0;
   while (byte_pos < text.size()) {
     const size_t start = byte_pos;
-    const uint32_t cp = utf8_decode(text, byte_pos);
+    const uint32_t cp = utf8_next_scalar(text, byte_pos).value;
     if (has_previous_glyph) {
       width += std::max(style->letter_spacing, 0.0f);
     }
