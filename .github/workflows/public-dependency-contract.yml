@@ -175,3 +175,41 @@ jobs:
           )
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp
+
+  flexui-salts-unicode:
+    name: FlexUI Salts::Unicode contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+
+      - name: Checkout canonical Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          path: .ci/salts
+
+      - name: Checkout canonical SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: 62576265ac66b0000127a04936f108a3dbb3f004
+          path: .ci/salts-utils
+
+      - name: Verify Unicode provider ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'Salts::Unicode' flexUI/CMakeLists.txt
+          grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
+          if grep -n -E 'cp = 0xFFFD|s\[0\].*0xE0|s\[0\].*0xF0|s\[0\].*0xF8' flexUI/src/text_util.cpp; then
+            echo "private UTF-8 decoder logic remains in FlexUI" >&2
+            exit 1
+          fi
+
+      - name: Compile strict Unicode bridge against public headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -isystem .ci/salts/utils/include             -isystem .ci/salts/utils/parser             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -isystem .ci/salts-utils/unicode/include             -fsyntax-only flexUI/src/text_util.cpp
