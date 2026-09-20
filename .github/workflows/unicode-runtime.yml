@@ -1,0 +1,130 @@
+name: Unicode runtime
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - refactor/flexui-salts-unicode
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+  SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
+
+jobs:
+  unicode-runtime:
+    name: Unicode source runtime ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: .ci/salts
+          persist-credentials: false
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: .ci/salts-utils
+          persist-credentials: false
+
+      - name: Record source provenance
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/salts rev-parse HEAD)" = "$SALTS_SHA"
+          test "$(git -C .ci/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA"
+          cc --version
+          c++ --version
+
+      - name: Install pinned re2c with upstream checksum verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build curl xz-utils
+          bash .ci/salts-utils/cmake/ci/install-re2c.sh
+
+      # This is an executable source-level bridge test, not an installed SDK
+      # or full FlexUI build. No mock decoder or replacement Salts target is used.
+      - name: Generate and compile the real Unicode scanner and TinyTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/unicode-runtime
+          test "$(re2c --version)" = 're2c 4.6'
+          re2c --lang c --utf8 --encoding-policy fail --no-generation-date -W -Werror \
+            -I "$RE2C_ROOT/share/re2c/stdlib" \
+            -o build/unicode-runtime/salts_unicode_gen.c \
+            .ci/salts-utils/unicode/src/salts_unicode.re
+          headers=(
+            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/tinytest/include
+          )
+          flags=(-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
+          c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
+            flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
+            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
+            build/unicode-runtime/tinymock.o -pthread -ldl -lm \
+            -o build/unicode-runtime/test_text_util_unicode
+
+      - name: Run strict Unicode behavior tests
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          timeout 120s build/unicode-runtime/test_text_util_unicode 2>&1 \
+            | tee build/unicode-runtime/test.log
+          {
+            echo '### Unicode runtime validation'
+            echo 'Executed the real pinned SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
+            echo 'Scope: source-level runtime; installed-package and full-GUI integration are separate gates.'
+            echo '```text'
+            cat build/unicode-runtime/test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify tracked source was not modified
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git -C .ci/salts diff --exit-code
+          git -C .ci/salts-utils diff --exit-code
