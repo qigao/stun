@@ -250,6 +250,34 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_within(save->style_.width, 123.0F, 0.001F);
   }
 
+  it("publishes anonymous structural nodes without public handles") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(R"(
+      <ui name="Anonymous">
+        <main class="page">
+          <div class="panel">
+            <label id="title" text="Settings"/>
+          </div>
+        </main>
+      </ui>
+    )");
+
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *root = built.application->box().root();
+    auto *title = built.application->box().get_by_id("title");
+    check_not_null(root);
+    check_not_null(title);
+    check(root->id().empty());
+    check_false(static_cast<bool>(built.application->box().handle_for(*root)));
+    check_null(built.application->box().get_by_id(""));
+    check(static_cast<bool>(built.application->box().handle_for(*title)));
+  }
+
   it("rejects strict CSS diagnostics before publishing an application") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
     builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>")

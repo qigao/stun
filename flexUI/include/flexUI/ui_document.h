@@ -90,6 +90,7 @@ enum class UiDocumentErrorCode {
   ResourceLimitExceeded,
   UnknownElementTag,
   WidgetFactoryFailed,
+  RequiredElementId,
 };
 
 struct UiDocumentError {

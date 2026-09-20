@@ -93,6 +93,43 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check_equal(parsed.definition->root.children.front().id, "save");
   }
 
+  it("accepts anonymous structural nodes but keeps explicit ids distinct") {
+    const auto compiled = flexUI::compile_ui_xml(R"(
+      <ui name="Anonymous">
+        <main class="page">
+          <div class="panel">
+            <label id="title" text="Settings"/>
+          </div>
+        </main>
+      </ui>
+    )");
+    check(static_cast<bool>(compiled));
+    check(compiled.program->definition().root.id.empty());
+    check(compiled.program->definition().root.children.front().id.empty());
+    check_equal(
+        compiled.program->definition().root.children.front().children.front().id,
+        "title");
+
+    const auto empty_id =
+        flexUI::compile_ui_xml("<ui name=\"Empty\"><div id=\"\"/></ui>");
+    check_false(static_cast<bool>(empty_id));
+    check(empty_id.error.code == UiDocumentErrorCode::InvalidNode);
+  }
+
+  it("requires explicit ids only for event and binding targets") {
+    const auto event = flexUI::compile_ui_xml(
+        "<ui name=\"Event\" xmlns:on=\"urn:flexui:event\">"
+        "<button on:click=\"save\"/></ui>");
+    check_false(static_cast<bool>(event));
+    check(event.error.code == UiDocumentErrorCode::RequiredElementId);
+
+    const auto binding = flexUI::compile_ui_xml(
+        "<ui name=\"Binding\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label bind:text=\"$title\"/></ui>");
+    check_false(static_cast<bool>(binding));
+    check(binding.error.code == UiDocumentErrorCode::RequiredElementId);
+  }
+
   it("accepts valid Unicode text attributes without rewriting bytes") {
     const auto compiled = flexUI::compile_ui_xml(
         u8"<ui name=\"\u754C\u9762\"><label id=\"greeting\" "
