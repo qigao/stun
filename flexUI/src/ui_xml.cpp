@@ -151,9 +151,10 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
 
   definition.tag.assign(tag);
   definition.id.assign(id);
+  const auto location = source_span(source, xml_node.offset_debug());
+  definition.source = SourceSpan{location.line, location.column, tag.size()};
   std::unordered_set<std::string> property_names;
   std::size_t id_attribute_count = 0;
-  const auto location = source_span(source, xml_node.offset_debug());
   for (const auto &attribute : xml_node.attributes()) {
     const std::string_view xml_name(attribute.name());
     if (xml_name == "id") {
