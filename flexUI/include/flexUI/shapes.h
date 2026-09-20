@@ -240,7 +240,7 @@ private:
             size_t count = 0;
             size_t pos = 0;
             while (pos < segment.text.size()) {
-                utf8_decode(segment.text, pos);
+                utf8_next_scalar(segment.text, pos).value;
                 count++;
             }
             return static_cast<float>(count) * font_size_;
