@@ -262,6 +262,25 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_false(built.error.css_diagnostics.empty());
   }
 
+  it("rejects unknown XML tags before CSS and instantiation") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(R"(
+      <ui name="Schema">
+        <custom id="subject"/>
+      </ui>
+    )").stylesheet("#subject { widht: 90px; }");
+
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+    check(built.error.ui_error.line > 0);
+    check(built.error.ui_error.column > 0);
+    check(built.error.css_diagnostics.empty());
+  }
+
   it("rejects missing controller exports before publication") {
     auto probe = std::make_shared<ModuleProbe>();
     flexUI::DesktopApplicationBuilder builder(nullptr);
