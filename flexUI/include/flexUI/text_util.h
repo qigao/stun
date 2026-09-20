@@ -36,11 +36,15 @@ struct TextSegment {
 // Unicode Utilities
 // ============================================================================
 
+/// Strict UTF-8 validation result using source byte offsets.
+/// On success invalid_offset equals text.size(); on failure it identifies the
+/// first rejected scalar start in the original byte view.
 struct Utf8ValidationResult {
     bool valid = true;
     size_t invalid_offset = 0;
 };
 
+/// Validates the complete borrowed byte view with Salts::Unicode.
 Utf8ValidationResult validate_utf8(std::string_view text) noexcept;
 
 /**
