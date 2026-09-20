@@ -36,7 +36,7 @@ target_link_libraries(journey PUBLIC TurboParser::Parser flex_runtime)
 
 # Test executable
 add_executable(journey_test tests/test_parser.c)
-target_link_libraries(journey_test journey TurboUtils::TinyTest)
+target_link_libraries(journey_test journey Salts::TinyTest)
 set_target_properties(journey_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(journey_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/journey")
 
