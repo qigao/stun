@@ -10,6 +10,55 @@ permissions:
   contents: read
 
 jobs:
+  canonical-salts-core:
+    name: Canonical Salts Core/TinyTest contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+      - name: Checkout canonical Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          path: .ci/salts
+      - name: Reject retired TurboUtils package targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -n -E 'TurboUtils::(Core|TinyTest)|find_package\(TurboUtils' \
+              --include='CMakeLists.txt' --include='*.cmake' \
+              --exclude-dir=.ci .; then
+            echo "active CMake still consumes retired TurboUtils package targets" >&2
+            exit 1
+          fi
+      - name: Verify Flex logging API uses canonical Salts names
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -n -E 'turbo_log_level_t|TURBO_LOG_LEVEL_' flex/include/flex/core/debug.h; then
+            echo "Flex debug header still exposes retired TurboUtils logging names" >&2
+            exit 1
+          fi
+          grep -Fq 'salts_log_level_t' flex/include/flex/core/debug.h
+          grep -Fq 'SALTS_LOG_LEVEL_DEBUG' flex/include/flex/core/debug.h
+      - name: Compile public Flex debug header against Salts Core headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/flex_debug_contract.cpp <<'EOF'
+          #include <flex/core/debug.h>
+          int main() {
+            return static_cast<int>(flex::debug::get_log_level());
+          }
+          EOF
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -Iflex/include \
+            -I.ci/salts/utils/include \
+            -I.ci/salts/platform/include \
+            -I.ci/salts/concurrency/include \
+            -I.ci/salts/cmeta/include \
+            -fsyntax-only /tmp/flex_debug_contract.cpp
+
   controller-salts-concurrency:
     name: Controller Salts::Concurrency contract
     runs-on: ubuntu-latest
