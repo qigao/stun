@@ -37,6 +37,16 @@ spec("FlexUI Salts Unicode bridge") {
     check_equal(pos, size_t{3});
   }
 
+  it("reports the first invalid byte without throwing at ingress") {
+    const std::string prefix = "ok";
+    const std::string malformed = prefix + std::string("\xF0\x28\x8C\x28", 4);
+    const auto valid = validate_utf8("日本🙂");
+    check_true(valid.valid);
+    const auto invalid = validate_utf8(malformed);
+    check_false(invalid.valid);
+    check_equal(invalid.invalid_offset, prefix.size());
+  }
+
   it("rejects malformed UTF-8 without advancing the caller cursor") {
     const std::string malformed("\xF0\x28\x8C\x28", 4);
     size_t pos = 0;
