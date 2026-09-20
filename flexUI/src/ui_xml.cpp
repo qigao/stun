@@ -61,6 +61,15 @@ bool has_non_whitespace(std::string_view text) {
   return text.find_first_not_of(" \t\r\n") != std::string_view::npos;
 }
 
+std::string_view trim_xml_text(std::string_view text) {
+  const auto first = text.find_first_not_of(" \t\r\n");
+  if (first == std::string_view::npos) {
+    return {};
+  }
+  const auto last = text.find_last_not_of(" \t\r\n");
+  return text.substr(first, last - first + 1);
+}
+
 bool is_string_property(std::string_view name) {
   return name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
          name == "text" || name == "content" || name.rfind("on.", 0) == 0 ||
@@ -194,8 +203,13 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
                                       SourceSpan{location.line, location.column, xml_name.size()});
   }
 
+  std::string text_content;
+  SourceSpan text_source;
+  bool has_text_content = false;
+  bool has_element_children = false;
   for (const auto &child : xml_node.children()) {
     if (child.type() == pugi::node_element) {
+      has_element_children = true;
       definition.children.emplace_back();
       auto error = parse_widget_node(source, child, limits, depth + 1, node_count, ids,
                                      definition.children.back());
@@ -204,11 +218,40 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
       }
     } else if (child.type() == pugi::node_pcdata || child.type() == pugi::node_cdata) {
       const std::string_view text(child.value());
-      if (has_non_whitespace(text)) {
-        return node_error(source, child, UiDocumentErrorCode::InvalidNode,
-                          "XML widget text nodes are not supported; use the text attribute");
+      if (has_non_whitespace(text) && !has_text_content) {
+        const auto text_location = source_span(source, child.offset_debug());
+        text_source = SourceSpan{text_location.line, text_location.column, text.size()};
+        has_text_content = true;
       }
+      text_content.append(text.data(), text.size());
     }
+  }
+
+  const auto normalized_text = trim_xml_text(text_content);
+  if (!normalized_text.empty()) {
+    if (has_element_children) {
+      return make_error(UiDocumentErrorCode::InvalidNode,
+                        "mixed XML text and child elements are not supported",
+                        text_source.line, text_source.column);
+    }
+    if (definition.properties.count("text") != 0 ||
+        definition.properties.count("content") != 0) {
+      return make_error(UiDocumentErrorCode::InvalidProperty,
+                        "XML text content conflicts with text/content attribute",
+                        text_source.line, text_source.column);
+    }
+    if (definition.properties.size() >= limits.max_properties_per_node) {
+      return make_error(UiDocumentErrorCode::PropertyLimitExceeded,
+                        "UI node exceeds maximum property count: " + definition.id,
+                        text_source.line, text_source.column);
+    }
+    if (normalized_text.size() > limits.max_string_bytes) {
+      return make_error(UiDocumentErrorCode::StringLimitExceeded,
+                        "XML text content exceeds the string limit",
+                        text_source.line, text_source.column);
+    }
+    definition.properties.emplace("text", std::string(normalized_text));
+    definition.property_spans.emplace("text", text_source);
   }
   return {};
 }
