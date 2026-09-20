@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "mindmap/mindmap_ast.h"
 #include "mindmap_parser_gen.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 void *MindmapParserAlloc(void *(*mallocProc)(size_t));
 void MindmapParser(void *yyp, int yymajor, void* yyminor, MindmapParserContext *ctx);
@@ -150,51 +150,51 @@ static const char* node_type_to_shape(MindmapNodeType type) {
 static json_value_t* mindmap_node_to_json_recursive(MindmapNode* node) {
     if(!node) return NULL;
     
-    json_value_t* obj = turbo_json_create_object();
+    json_value_t* obj = json_create_object();
     
     // Add children first (alphabetically first)
-    json_value_t* children_arr = turbo_json_create_array();
+    json_value_t* children_arr = json_create_array();
     MindmapNode* child = node->children;
     while(child) {
         json_value_t* child_obj = mindmap_node_to_json_recursive(child);
         if(child_obj) {
-            turbo_json_array_add(children_arr, child_obj);
+            json_array_add(children_arr, child_obj);
         }
         child = child->next;
     }
-    turbo_json_object_add(obj, "children", children_arr);
+    json_object_add(obj, "children", children_arr);
     
     // Then add other keys in alphabetical order
-    turbo_json_object_set_string(obj, "description", node->label ? node->label : "");
-    turbo_json_object_set_string(obj, "id", node->id ? node->id : "");
-    turbo_json_object_set_number(obj, "level", (double)node->depth);
-    turbo_json_object_set_string(obj, "shape", node_type_to_shape(node->type));
+    json_object_set_string(obj, "description", node->label ? node->label : "");
+    json_object_set_string(obj, "id", node->id ? node->id : "");
+    json_object_set_number(obj, "level", (double)node->depth);
+    json_object_set_string(obj, "shape", node_type_to_shape(node->type));
     
     return obj;
 }
 
 char* mindmap_to_json(MindmapDiagram* d) {
     if(!d) {
-        json_value_t *null_val = turbo_json_create_null();
+        json_value_t *null_val = json_create_null();
         size_t len;
-        char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(&null_val);
+        char *s = json_serialize_pretty_crlf(null_val, &len);
+        json_free(&null_val);
         return s;
     }
     
-    json_value_t *root = turbo_json_create_object();
+    json_value_t *root = json_create_object();
     
     // Add keys in alphabetical order: root, type
     if(d->root) {
         json_value_t* root_node = mindmap_node_to_json_recursive(d->root);
-        turbo_json_object_add(root, "root", root_node); 
+        json_object_add(root, "root", root_node); 
     }
     
-    turbo_json_object_set_string(root, "type", "mindmap");
+    json_object_set_string(root, "type", "mindmap");
     
     size_t len;
-    char *s = turbo_json_serialize_pretty_crlf(root, &len);
-    turbo_free_json(&root);
+    char *s = json_serialize_pretty_crlf(root, &len);
+    json_free(&root);
     return s;
 }
 
