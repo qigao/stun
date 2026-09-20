@@ -4,8 +4,8 @@
 
 #include "flexUI/plugin_abi.h"
 
-#include <turbo_parser_toml.h>
-#include <turbo_fs.h>
+#include <toml.h>
+#include <salts_fs.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -24,17 +24,17 @@ namespace {
 
 constexpr std::int64_t kManifestVersion = 1;
 struct FileHandle {
-  turbo_file_t value = TURBO_INVALID_FILE;
+  salts_file_t value = SALTS_INVALID_FILE;
   ~FileHandle() {
-    if (value != TURBO_INVALID_FILE) {
-      (void)turbo_fs_close(value);
+    if (value != SALTS_INVALID_FILE) {
+      (void)salts_fs_close(value);
     }
   }
 };
 
 struct TomlDocument {
-  turbo_toml_t *value = nullptr;
-  ~TomlDocument() { turbo_free_toml(&value); }
+  toml_table_t *value = nullptr;
+  ~TomlDocument() { toml_free(value); }
 };
 
 PluginHostError manifest_error(PluginHostErrorCode code, std::string stage,
@@ -50,11 +50,11 @@ PluginHostError manifest_error(PluginHostErrorCode code, std::string stage,
   return error;
 }
 
-bool table_has_key(const turbo_toml_t *table, std::string_view expected) {
-  const int count = turbo_toml_len(table);
+bool table_has_key(const toml_table_t *table, std::string_view expected) {
+  const int count = toml_table_len(table);
   for (int index = 0; index < count; ++index) {
     int length = 0;
-    const char *key = turbo_toml_key(table, index, &length);
+    const char *key = toml_table_key(table, index, &length);
     if (key != nullptr && length >= 0 &&
         std::string_view(key, static_cast<std::size_t>(length)) == expected) {
       return true;
@@ -63,13 +63,13 @@ bool table_has_key(const turbo_toml_t *table, std::string_view expected) {
   return false;
 }
 
-bool table_has_only(const turbo_toml_t *table,
+bool table_has_only(const toml_table_t *table,
                     std::initializer_list<std::string_view> allowed,
                     std::string &message) {
-  const int count = turbo_toml_len(table);
+  const int count = toml_table_len(table);
   for (int index = 0; index < count; ++index) {
     int length = 0;
-    const char *key = turbo_toml_key(table, index, &length);
+    const char *key = toml_table_key(table, index, &length);
     if (key == nullptr || length < 0) {
       message = "TOML table contains an invalid key";
       return false;
@@ -83,14 +83,14 @@ bool table_has_only(const turbo_toml_t *table,
   return true;
 }
 
-bool read_string(const turbo_toml_t *table, const char *key,
+bool read_string(const toml_table_t *table, const char *key,
                  std::size_t limit, bool require_nonempty, std::string &output,
                  std::string &message) {
   if (!table_has_key(table, key)) {
     message = std::string("missing required string: ") + key;
     return false;
   }
-  turbo_toml_value_t value = turbo_toml_string(table, key);
+  toml_value_t value = toml_table_string(table, key);
   std::unique_ptr<char, decltype(&std::free)> storage(value.ok ? value.u.s : nullptr,
                                                        &std::free);
   if (!value.ok || value.u.sl < 0 || value.u.s == nullptr) {
@@ -111,14 +111,14 @@ bool read_string(const turbo_toml_t *table, const char *key,
   return true;
 }
 
-bool read_integer(const turbo_toml_t *table, const char *key,
+bool read_integer(const toml_table_t *table, const char *key,
                   std::int64_t minimum, std::int64_t maximum,
                   std::int64_t &output, std::string &message) {
   if (!table_has_key(table, key)) {
     message = std::string("missing required integer: ") + key;
     return false;
   }
-  const turbo_toml_value_t value = turbo_toml_int(table, key);
+  const toml_value_t value = toml_table_int(table, key);
   if (!value.ok || value.u.i < minimum || value.u.i > maximum) {
     message = std::string("manifest integer has an invalid value: ") + key;
     return false;
@@ -127,13 +127,13 @@ bool read_integer(const turbo_toml_t *table, const char *key,
   return true;
 }
 
-bool read_boolean(const turbo_toml_t *table, const char *key, bool &output,
+bool read_boolean(const toml_table_t *table, const char *key, bool &output,
                   std::string &message) {
   if (!table_has_key(table, key)) {
     message = std::string("missing required boolean: ") + key;
     return false;
   }
-  const turbo_toml_value_t value = turbo_toml_bool(table, key);
+  const toml_value_t value = toml_table_bool(table, key);
   if (!value.ok) {
     message = std::string("manifest field must be a boolean: ") + key;
     return false;
@@ -187,7 +187,7 @@ bool valid_capability(std::string_view capability) noexcept {
   return parsed != 0;
 }
 
-bool read_string_array(const turbo_toml_t *table, const char *key,
+bool read_string_array(const toml_table_t *table, const char *key,
                        std::size_t count_limit, std::size_t string_limit,
                        bool require_nonempty, bool require_capability,
                        std::vector<std::string> &output,
@@ -196,12 +196,12 @@ bool read_string_array(const turbo_toml_t *table, const char *key,
     message = std::string("missing required array: ") + key;
     return false;
   }
-  turbo_toml_array_t *array = turbo_toml_array(table, key);
+  toml_array_t *array = toml_table_array(table, key);
   if (array == nullptr) {
     message = std::string("manifest field must be an array: ") + key;
     return false;
   }
-  const int length = turbo_toml_array_len(array);
+  const int length = toml_array_len(array);
   if (length < 0 || static_cast<std::size_t>(length) > count_limit ||
       (require_nonempty && length == 0)) {
     message = std::string("manifest array is empty or exceeds its limit: ") + key;
@@ -209,7 +209,7 @@ bool read_string_array(const turbo_toml_t *table, const char *key,
   }
   output.reserve(static_cast<std::size_t>(length));
   for (int index = 0; index < length; ++index) {
-    turbo_toml_value_t value = turbo_toml_array_string(array, index);
+    toml_value_t value = toml_array_string(array, index);
     std::unique_ptr<char, decltype(&std::free)> storage(
         value.ok ? value.u.s : nullptr, &std::free);
     if (!value.ok || value.u.s == nullptr || value.u.sl <= 0 ||
@@ -296,7 +296,7 @@ PluginPermissionMask permission_from_name(std::string_view name) noexcept {
   return 0;
 }
 
-bool parse_permissions(const turbo_toml_t *root,
+bool parse_permissions(const toml_table_t *root,
                        const PluginHostPolicy &policy,
                        PluginPermissionMask &permissions,
                        bool &permission_denied,
@@ -322,7 +322,7 @@ bool parse_permissions(const turbo_toml_t *root,
   return true;
 }
 
-bool parse_dependencies(const turbo_toml_t *root,
+bool parse_dependencies(const toml_table_t *root,
                         const PluginHostLimits &limits,
                         std::vector<PluginManifestDependency> &dependencies,
                         std::string &message) {
@@ -330,12 +330,12 @@ bool parse_dependencies(const turbo_toml_t *root,
     message = "missing required array: dependencies";
     return false;
   }
-  turbo_toml_array_t *array = turbo_toml_array(root, "dependencies");
+  toml_array_t *array = toml_table_array(root, "dependencies");
   if (array == nullptr) {
     message = "manifest field must be an array: dependencies";
     return false;
   }
-  const int length = turbo_toml_array_len(array);
+  const int length = toml_array_len(array);
   if (length < 0 || static_cast<std::size_t>(length) >
                         limits.max_dependencies_per_plugin) {
     message = "dependency array exceeds its configured limit";
@@ -343,7 +343,7 @@ bool parse_dependencies(const turbo_toml_t *root,
   }
   dependencies.reserve(static_cast<std::size_t>(length));
   for (int index = 0; index < length; ++index) {
-    turbo_toml_t *entry = turbo_toml_array_table(array, index);
+    toml_table_t *entry = toml_array_table(array, index);
     if (entry == nullptr ||
         !table_has_only(entry, {"name", "version", "optional"}, message)) {
       if (entry == nullptr) {
@@ -458,8 +458,8 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     }
 
     const std::string native_manifest_path = canonical_manifest.string();
-    turbo_fs_stat_t file_stat{};
-    if (turbo_fs_stat(native_manifest_path.c_str(), &file_stat) != 0 ||
+    salts_fs_stat_t file_stat{};
+    if (salts_fs_stat(native_manifest_path.c_str(), &file_stat) != 0 ||
         !file_stat.is_file) {
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
@@ -472,9 +472,9 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     }
 
     FileHandle file;
-    file.value = turbo_fs_open(native_manifest_path.c_str(),
-                               TURBO_FS_O_RDONLY, 0);
-    if (file.value == TURBO_INVALID_FILE) {
+    file.value = salts_fs_open(native_manifest_path.c_str(),
+                               SALTS_FS_O_RDONLY, 0);
+    if (file.value == SALTS_INVALID_FILE) {
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
                                  "failed to read plugin manifest")};
@@ -482,7 +482,7 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     std::vector<std::uint8_t> buffer(limits.max_manifest_bytes + 1);
     std::size_t bytes_read = 0;
     while (bytes_read < buffer.size()) {
-      const int current = turbo_fs_read(
+      const int current = salts_fs_read(
           file.value, reinterpret_cast<char *>(buffer.data() + bytes_read),
           buffer.size() - bytes_read);
       if (current < 0) {
@@ -500,17 +500,27 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
                                  "manifest_read", canonical_manifest,
                                  "plugin manifest grew beyond the configured byte limit")};
     }
-    if (turbo_fs_close(file.value) != 0) {
-      file.value = TURBO_INVALID_FILE;
+    if (salts_fs_close(file.value) != 0) {
+      file.value = SALTS_INVALID_FILE;
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
                                  "failed to close plugin manifest after reading")};
     }
-    file.value = TURBO_INVALID_FILE;
+    file.value = SALTS_INVALID_FILE;
+
+    if (std::find(buffer.begin(), buffer.begin() + bytes_read,
+                  static_cast<std::uint8_t>(0)) != buffer.begin() + bytes_read) {
+      return {{}, manifest_error(PluginHostErrorCode::InvalidManifest,
+                                 "manifest_parse", canonical_manifest,
+                                 "plugin manifest must not contain embedded NUL")};
+    }
+    buffer[bytes_read] = 0;
 
     TomlDocument document;
-    if (turbo_parse_toml(buffer.data(), bytes_read, &document.value) != 0 ||
-        document.value == nullptr) {
+    char toml_error[256] = {};
+    document.value = toml_parse(reinterpret_cast<char *>(buffer.data()),
+                                toml_error, static_cast<int>(sizeof(toml_error)));
+    if (document.value == nullptr) {
       return {{}, manifest_error(PluginHostErrorCode::InvalidManifest,
                                  "manifest_parse", canonical_manifest,
                                  "plugin manifest contains invalid TOML")};
@@ -579,7 +589,7 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
                                  std::move(message), manifest->name)};
     }
 
-    turbo_toml_t *abi = turbo_toml_table(document.value, "abi");
+    toml_table_t *abi = toml_table_table(document.value, "abi");
     std::int64_t abi_major = 0;
     std::int64_t abi_minor = 0;
     if (abi == nullptr) {
