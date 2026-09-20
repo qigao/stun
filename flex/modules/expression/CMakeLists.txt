@@ -3,7 +3,9 @@
 add_library(
   flex_expression STATIC
   expr_mir.cpp
-  ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/expr_mir.h)
+  expr_c.cpp
+  ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/expr_mir.h
+  ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/expr_c.h)
 
 target_include_directories(
   flex_expression
