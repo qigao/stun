@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "sequence/sequence_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 // Lexer and Parser functions (generated)
 void *SequenceParserAlloc(void *(*mallocProc)(size_t));
@@ -153,17 +153,17 @@ static const char* note_placement_str(SequenceNotePlacement placement) {
 }
 
 static json_value_t* serialize_participants(SequenceParticipant* p) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (p) {
-        json_value_t* obj = turbo_json_create_object();
-        turbo_json_object_set_string(obj, "id", p->id ? p->id : "");
+        json_value_t* obj = json_create_object();
+        json_object_set_string(obj, "id", p->id ? p->id : "");
         if (p->label && strcmp(p->label, p->id) != 0) {
-            turbo_json_object_set_string(obj, "label", p->label);
+            json_object_set_string(obj, "label", p->label);
         }
         if (p->type) {
-            turbo_json_object_set_string(obj, "type", p->type);
+            json_object_set_string(obj, "type", p->type);
         }
-        turbo_json_array_add(arr, obj);
+        json_array_add(arr, obj);
         p = p->next;
     }
     return arr;
@@ -172,61 +172,61 @@ static json_value_t* serialize_participants(SequenceParticipant* p) {
 static json_value_t* serialize_statements(SequenceStatement* s);
 
 static json_value_t* serialize_statement(SequenceStatement* s) {
-    json_value_t* obj = turbo_json_create_object();
+    json_value_t* obj = json_create_object();
 
     switch(s->type) {
         case SEQ_STMT_SIGNAL:
-            turbo_json_object_set_string(obj, "type", "signal");
-            turbo_json_object_set_string(obj, "from", s->data.signal.from ? s->data.signal.from : "");
-            turbo_json_object_set_string(obj, "to", s->data.signal.to ? s->data.signal.to : "");
-            if (s->data.signal.message) turbo_json_object_set_string(obj, "message", s->data.signal.message);
-            turbo_json_object_set_string(obj, "signalType", signal_type_str(s->data.signal.signal_type));
-            if (s->data.signal.activate) turbo_json_object_set_bool(obj, "activate", 1);
-            if (s->data.signal.deactivate) turbo_json_object_set_bool(obj, "deactivate", 1);
+            json_object_set_string(obj, "type", "signal");
+            json_object_set_string(obj, "from", s->data.signal.from ? s->data.signal.from : "");
+            json_object_set_string(obj, "to", s->data.signal.to ? s->data.signal.to : "");
+            if (s->data.signal.message) json_object_set_string(obj, "message", s->data.signal.message);
+            json_object_set_string(obj, "signalType", signal_type_str(s->data.signal.signal_type));
+            if (s->data.signal.activate) json_object_set_bool(obj, "activate", 1);
+            if (s->data.signal.deactivate) json_object_set_bool(obj, "deactivate", 1);
             break;
         case SEQ_STMT_NOTE:
-            turbo_json_object_set_string(obj, "type", "note");
-            turbo_json_object_set_string(obj, "actor", s->data.note.actor ? s->data.note.actor : "");
-            if (s->data.note.actor2) turbo_json_object_set_string(obj, "actor2", s->data.note.actor2);
-            if (s->data.note.text) turbo_json_object_set_string(obj, "text", s->data.note.text);
-            turbo_json_object_set_string(obj, "placement", note_placement_str(s->data.note.placement));
+            json_object_set_string(obj, "type", "note");
+            json_object_set_string(obj, "actor", s->data.note.actor ? s->data.note.actor : "");
+            if (s->data.note.actor2) json_object_set_string(obj, "actor2", s->data.note.actor2);
+            if (s->data.note.text) json_object_set_string(obj, "text", s->data.note.text);
+            json_object_set_string(obj, "placement", note_placement_str(s->data.note.placement));
             break;
         case SEQ_STMT_BLOCK:
-            turbo_json_object_set_string(obj, "type", "block");
-            turbo_json_object_set_string(obj, "blockType", block_type_str(s->data.block.type));
-            if (s->data.block.text) turbo_json_object_set_string(obj, "text", s->data.block.text);
+            json_object_set_string(obj, "type", "block");
+            json_object_set_string(obj, "blockType", block_type_str(s->data.block.type));
+            if (s->data.block.text) json_object_set_string(obj, "text", s->data.block.text);
             if (s->data.block.body) {
-                turbo_json_object_add(obj, "body", serialize_statements(s->data.block.body));
+                json_object_add(obj, "body", serialize_statements(s->data.block.body));
             }
             if (s->data.block.alternate_body) {
-                turbo_json_object_add(obj, "alternateBody", serialize_statements(s->data.block.alternate_body));
+                json_object_add(obj, "alternateBody", serialize_statements(s->data.block.alternate_body));
                 if (s->data.block.alternate_text) {
-                    turbo_json_object_set_string(obj, "alternateText", s->data.block.alternate_text);
+                    json_object_set_string(obj, "alternateText", s->data.block.alternate_text);
                 }
             }
             break;
         case SEQ_STMT_ACTIVATE:
-            turbo_json_object_set_string(obj, "type", "activate");
-            turbo_json_object_set_string(obj, "actor", s->data.activation.actor ? s->data.activation.actor : "");
+            json_object_set_string(obj, "type", "activate");
+            json_object_set_string(obj, "actor", s->data.activation.actor ? s->data.activation.actor : "");
             break;
         case SEQ_STMT_DEACTIVATE:
-            turbo_json_object_set_string(obj, "type", "deactivate");
-            turbo_json_object_set_string(obj, "actor", s->data.activation.actor ? s->data.activation.actor : "");
+            json_object_set_string(obj, "type", "deactivate");
+            json_object_set_string(obj, "actor", s->data.activation.actor ? s->data.activation.actor : "");
             break;
         case SEQ_STMT_AUTONUMBER:
-            turbo_json_object_set_string(obj, "type", "autonumber");
-            turbo_json_object_set_number(obj, "start", s->data.autonumber.start);
-            turbo_json_object_set_number(obj, "step", s->data.autonumber.step);
-            turbo_json_object_set_bool(obj, "visible", s->data.autonumber.visible);
+            json_object_set_string(obj, "type", "autonumber");
+            json_object_set_number(obj, "start", s->data.autonumber.start);
+            json_object_set_number(obj, "step", s->data.autonumber.step);
+            json_object_set_bool(obj, "visible", s->data.autonumber.visible);
             break;
     }
     return obj;
 }
 
 static json_value_t* serialize_statements(SequenceStatement* s) {
-    json_value_t* arr = turbo_json_create_array();
+    json_value_t* arr = json_create_array();
     while (s) {
-        turbo_json_array_add(arr, serialize_statement(s));
+        json_array_add(arr, serialize_statement(s));
         s = s->next;
     }
     return arr;
@@ -235,18 +235,18 @@ static json_value_t* serialize_statements(SequenceStatement* s) {
 char* sequence_to_json(SequenceDiagram* diagram) {
     if (!diagram) return NULL;
 
-    json_value_t* root = turbo_json_create_object();
-    turbo_json_object_set_string(root, "type", "sequenceDiagram");
+    json_value_t* root = json_create_object();
+    json_object_set_string(root, "type", "sequenceDiagram");
 
     if (diagram->title) {
-        turbo_json_object_set_string(root, "title", diagram->title);
+        json_object_set_string(root, "title", diagram->title);
     }
 
-    turbo_json_object_add(root, "participants", serialize_participants(diagram->participants));
-    turbo_json_object_add(root, "statements", serialize_statements(diagram->statements));
+    json_object_add(root, "participants", serialize_participants(diagram->participants));
+    json_object_add(root, "statements", serialize_statements(diagram->statements));
 
     size_t len;
-    char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(&root);
+    char* str = json_serialize_pretty(root, &len);
+    json_free(&root);
     return str;
 }
