@@ -43,3 +43,49 @@ jobs:
         run: |
           set -euo pipefail
           c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -I.ci/salts/concurrency/include             -fsyntax-only             flexUI/modules/controller/application_completion.cpp
+
+
+  flexui-salts-core-provider:
+    name: FlexUI Salts::Core provider contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+      - name: Checkout canonical Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          path: .ci/salts
+      - name: Verify FlexUI main runtime has no TurboUtils Core
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in             flex/modules/runtime/CMakeLists.txt             flex/modules/dsl/CMakeLists.txt             flexUI/CMakeLists.txt             tools/md/CMakeLists.txt             flexUI/examples/desktop_editor/CMakeLists.txt             flexUI/tests/CMakeLists.txt; do
+            if grep -n 'TurboUtils::Core' "$file"; then
+              echo "legacy Core provider remains in $file" >&2
+              exit 1
+            fi
+          done
+          grep -Fq 'Salts::Core' flex/modules/runtime/CMakeLists.txt
+          grep -Fq 'Salts::Core' flexUI/CMakeLists.txt
+          if grep -n -E 'turbo_log_level_t|TURBO_LOG_LEVEL_' flex/include/flex/core/debug.h; then
+            echo "legacy log-level API remains" >&2
+            exit 1
+          fi
+          if grep -R -n -E '#include <turbo_fs\.h>'               flexUI/examples/desktop_editor flexUI/tests/test_desktop_editor_controller.cpp; then
+            echo "legacy filesystem facade remains in FlexUI app/test path" >&2
+            exit 1
+          fi
+      - name: Compile Flex debug and filesystem consumers against Salts public headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/flex_debug_contract.cpp <<'EOF'
+          #include <flex/core/debug.h>
+          static_assert(SALTS_LOG_LEVEL_DEBUG == 0);
+          int main() {
+            return static_cast<int>(flex::debug::get_log_level());
+          }
+          EOF
+          c++ -std=c++17 -Wall -Wextra -Werror             -Iflex/include             -isystem .ci/salts/utils/include             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_debug_contract.cpp
+          c++ -std=c++17 -Wall -Wextra -Werror             -IflexUI/include             -isystem .ci/salts/utils/include             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only flexUI/examples/desktop_editor/main.cpp
