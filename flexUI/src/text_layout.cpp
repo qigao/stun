@@ -76,7 +76,7 @@ size_t utf8_codepoint_count(const std::string& text) {
   size_t count = 0;
   size_t pos = 0;
   while (pos < text.size()) {
-    utf8_decode(text, pos);
+    utf8_next_scalar(text, pos).value;
     ++count;
   }
   return count;
@@ -539,7 +539,7 @@ Direction resolve_text_direction_for_content(const ComputedStyle* style,
 
   size_t pos = 0;
   while (pos < text.size()) {
-    const uint32_t cp = utf8_decode(text, pos);
+    const uint32_t cp = utf8_next_scalar(text, pos).value;
     if (is_rtl_strong_codepoint(cp)) {
       return Direction::Rtl;
     }
@@ -1017,7 +1017,7 @@ void emit_text_block(RenderCommandList& commands, const TextLayoutBlock& block) 
         size_t count = 0;
         size_t pos = 0;
         while (pos < segment.text.size()) {
-          utf8_decode(segment.text, pos);
+          utf8_next_scalar(segment.text, pos).value;
           count++;
         }
         current_x += static_cast<float>(count) * block.font_size;
