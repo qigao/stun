@@ -9,7 +9,7 @@ int main() {
   constexpr auto ui = R"(
     <ui name="DesktopExample" xmlns:on="urn:flexui:event">
       <main id="content">
-        <button id="save" text="Save" on:click="save_document"/>
+        <button id="save" on:click="save_document">Save</button>
       </main>
     </ui>
   )";
