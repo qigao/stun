@@ -961,6 +961,47 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_true(composition_end.dispatched);
   }
 
+  it("rejects malformed host text and composition before widget dispatch") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Input\"><input id=\"editor\"/></ui>")
+        .stylesheet("#editor { width: 160px; height: 32px; }");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *editor = built.application->box().get_by_id("editor");
+    auto *input = dynamic_cast<flexUI::InputWidget *>(editor->widget);
+    check_not_null(input);
+    built.application->box().set_focus(editor);
+
+    const std::string malformed("\xF0\x28\x8C\x28", 4);
+    const auto text =
+        flexUI::host::dispatch_text_input_if_focused(*built.application, malformed);
+    check_false(static_cast<bool>(text));
+    check_false(text.dispatched);
+    check(text.error.code == flexUI::DesktopApplicationErrorCode::InvalidArgument);
+    check(text.error.stage == flexUI::DesktopApplicationStage::ControllerEvent);
+    check_not_equal(text.error.message.find("byte offset 0"), std::string::npos);
+    check(input->text().empty());
+
+    const auto composition =
+        flexUI::host::dispatch_composition_update_if_focused(*built.application,
+                                                             malformed);
+    check_false(static_cast<bool>(composition));
+    check_false(composition.dispatched);
+    check(composition.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidArgument);
+    check(input->text().empty());
+
+    const auto valid =
+        flexUI::host::dispatch_text_input_if_focused(*built.application, "🙂");
+    check(static_cast<bool>(valid));
+    check_true(valid.dispatched);
+    check_equal(input->text(), std::string("🙂"));
+  }
+
   it("rejects host text input on a non-owner thread before reading Box state") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
     builder.xml_entry("<ui name=\"Input\"><input id=\"editor\"/></ui>");
