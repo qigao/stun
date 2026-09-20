@@ -136,7 +136,7 @@ inline bool box_wants_text_input(Box* box) {
 }
 
 inline bool dispatch_text_input_if_focused(Box* box, const std::string& utf8) {
-  if (!box_wants_text_input(box) || utf8.empty()) return false;
+  if (!box_wants_text_input(box) || utf8.empty() || !validate_utf8(utf8).valid) return false;
   auto event = Event::text_input(utf8);
   box->dispatch_event(event);
   return true;
