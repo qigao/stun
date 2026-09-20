@@ -26,6 +26,7 @@ struct SourceSpan {
 struct UiNodeDefinition {
   std::string tag;
   std::string id;
+  SourceSpan source;
   std::unordered_map<std::string, UiDocumentValue> properties;
   std::unordered_map<std::string, SourceSpan> property_spans;
   std::vector<UiNodeDefinition> children;
