@@ -28,6 +28,55 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
           flexUI::WidgetRegistryErrorCode::InvalidFactory);
   }
 
+  it("exposes explicit container and widget descriptors") {
+    auto registry = flexUI::WidgetRegistry::builtins();
+    const auto *container = registry.descriptor("div");
+    const auto *widget = registry.descriptor("button");
+
+    check_not_null(container);
+    check_not_null(widget);
+    if (container && widget) {
+      check(container->kind == flexUI::UiNodeKind::Container);
+      check(container->content == flexUI::UiContentModel::Children);
+      check(widget->kind == flexUI::UiNodeKind::Widget);
+      check(widget->content == flexUI::UiContentModel::Children);
+    }
+  }
+
+  it("validates content models before invoking widget factories") {
+    int factory_calls = 0;
+    flexUI::WidgetRegistry registry;
+    check(registry.register_element("root").code ==
+          flexUI::WidgetRegistryErrorCode::None);
+    check(registry
+              .register_widget(
+                  "leaf",
+                  [&factory_calls](const flexUI::UiNodeDefinition &) {
+                    ++factory_calls;
+                    return std::make_unique<flexUI::ButtonWidget>();
+                  },
+                  flexUI::UiContentModel::Empty)
+              .code == flexUI::WidgetRegistryErrorCode::None);
+
+    const auto compiled = flexUI::compile_ui_xml(R"(
+      <ui name="Schema">
+        <root id="root">
+          <leaf id="parent">
+            <leaf id="child"/>
+          </leaf>
+        </root>
+      </ui>
+    )");
+    check(static_cast<bool>(compiled));
+
+    const auto error = registry.validate(*compiled.program);
+    check(static_cast<bool>(error));
+    check(error.code == flexUI::UiDocumentErrorCode::InvalidNode);
+    check(error.line > 0);
+    check(error.column > 0);
+    check_equal(factory_calls, 0);
+  }
+
   it("constructs concrete built-in widget types from XML tags") {
     const auto compiled = flexUI::compile_ui_xml(R"(
       <ui name="Controls">
@@ -82,6 +131,12 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
     check(static_cast<bool>(compiled));
 
     auto registry = flexUI::WidgetRegistry::builtins();
+    const auto schema_error = registry.validate(*compiled.program);
+    check(static_cast<bool>(schema_error));
+    check(schema_error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+    check(schema_error.line > 0);
+    check(schema_error.column > 0);
+
     flexUI::Box box(nullptr);
     const auto result =
         flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry);
