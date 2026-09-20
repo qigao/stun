@@ -72,16 +72,6 @@ float base_text_width_multiplier(const ComputedStyle* style) {
   return multiplier;
 }
 
-size_t utf8_codepoint_count(const std::string& text) {
-  size_t count = 0;
-  size_t pos = 0;
-  while (pos < text.size()) {
-    utf8_next_scalar(text, pos).value;
-    ++count;
-  }
-  return count;
-}
-
 bool is_rtl_strong_codepoint(uint32_t cp) {
   return (cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) ||
          (cp >= 0xFE70 && cp <= 0xFEFF);
@@ -626,7 +616,7 @@ float approximate_segmented_text_width(const ComputedStyle* style,
   float width = 0.0f;
   size_t codepoint_count = 0;
   for (const auto& segment : segment_text(transformed)) {
-    const size_t segment_codepoints = utf8_codepoint_count(segment.text);
+    const size_t segment_codepoints = utf8_scalar_count(segment.text);
     if (segment.type == TextSegmentType::Emoji) {
       width += static_cast<float>(segment_codepoints) * measure_style.font_size;
     } else {
@@ -663,7 +653,7 @@ float emit_segmented_text_line(RenderCommandList& commands, const ComputedStyle*
     const float word_spacing = resolve_word_spacing(style);
     bool has_previous_codepoint = false;
     for (const auto& segment : segment_text(transformed)) {
-      const size_t segment_codepoints = utf8_codepoint_count(segment.text);
+      const size_t segment_codepoints = utf8_scalar_count(segment.text);
       if (segment_codepoints == 0) {
         continue;
       }
