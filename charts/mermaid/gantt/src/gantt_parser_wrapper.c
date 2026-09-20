@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "gantt/gantt_ast.h"
 #include "gantt_parser_gen.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 // Lexer and Parser functions (generated)
 void *GanttParserAlloc(void *(*mallocProc)(size_t));
@@ -91,32 +91,32 @@ GanttDiagram* gantt_parse(const char* input) {
 char* gantt_to_json(GanttDiagram* diagram) {
     if (!diagram) return NULL;
 
-    json_value_t* root = turbo_json_create_object();
+    json_value_t* root = json_create_object();
     
     // Add keys in alphabetical order
     if (diagram->axis_format) {
-        turbo_json_object_set_string(root, "axisFormat", diagram->axis_format);
+        json_object_set_string(root, "axisFormat", diagram->axis_format);
     }
-    turbo_json_object_add(root, "clickEvents", turbo_json_create_array());
-    turbo_json_object_set_string(root, "dateFormat", diagram->date_format ? diagram->date_format : "");
+    json_object_add(root, "clickEvents", json_create_array());
+    json_object_set_string(root, "dateFormat", diagram->date_format ? diagram->date_format : "");
     if (diagram->excludes) {
-        turbo_json_object_set_string(root, "excludes", diagram->excludes);
+        json_object_set_string(root, "excludes", diagram->excludes);
     }
-    turbo_json_object_set_bool(root, "inclusiveEndDates", diagram->inclusive_end_dates ? true : false);
+    json_object_set_bool(root, "inclusiveEndDates", diagram->inclusive_end_dates ? true : false);
     
-    json_value_t* sections_arr = turbo_json_create_array();
+    json_value_t* sections_arr = json_create_array();
     GanttSection* s = diagram->sections;
     while (s) {
-        json_value_t* s_obj = turbo_json_create_object();
-        turbo_json_object_set_string(s_obj, "name", s->name ? s->name : "");
+        json_value_t* s_obj = json_create_object();
+        json_object_set_string(s_obj, "name", s->name ? s->name : "");
         
-        json_value_t* tasks_arr = turbo_json_create_array();
+        json_value_t* tasks_arr = json_create_array();
         GanttTask* t = s->tasks;
         while (t) {
-            json_value_t* t_obj = turbo_json_create_object();
-            turbo_json_object_set_string(t_obj, "end", t->end ? t->end : "");
-            turbo_json_object_set_string(t_obj, "id", t->id ? t->id : "");
-            turbo_json_object_set_string(t_obj, "name", t->name ? t->name : "");
+            json_value_t* t_obj = json_create_object();
+            json_object_set_string(t_obj, "end", t->end ? t->end : "");
+            json_object_set_string(t_obj, "id", t->id ? t->id : "");
+            json_object_set_string(t_obj, "name", t->name ? t->name : "");
             
             // Build status string and rawData
             const char* status_str = NULL;
@@ -131,31 +131,31 @@ char* gantt_to_json(GanttDiagram* diagram) {
             } else {
                 snprintf(raw, sizeof(raw), ": %s, %s, %s", t->id ? t->id : "", t->start ? t->start : "", t->end ? t->end : "");
             }
-            turbo_json_object_set_string(t_obj, "rawData", raw);
+            json_object_set_string(t_obj, "rawData", raw);
             
-            turbo_json_object_set_string(t_obj, "section", s->name ? s->name : "");
-            turbo_json_object_set_string(t_obj, "start", t->start ? t->start : "");
+            json_object_set_string(t_obj, "section", s->name ? s->name : "");
+            json_object_set_string(t_obj, "start", t->start ? t->start : "");
 
             if (status_str) {
-                turbo_json_object_set_string(t_obj, "status", status_str);
+                json_object_set_string(t_obj, "status", status_str);
             }
             
-            turbo_json_array_add(tasks_arr, t_obj);
+            json_array_add(tasks_arr, t_obj);
             t = t->next;
         }
-        turbo_json_object_add(s_obj, "tasks", tasks_arr);
-        turbo_json_array_add(sections_arr, s_obj);
+        json_object_add(s_obj, "tasks", tasks_arr);
+        json_array_add(sections_arr, s_obj);
         s = s->next;
     }
-    turbo_json_object_add(root, "sections", sections_arr);
+    json_object_add(root, "sections", sections_arr);
     
-    turbo_json_object_add(root, "tasks", turbo_json_create_array());
-    turbo_json_object_set_string(root, "title", diagram->title ? diagram->title : "");
-    turbo_json_object_set_bool(root, "topAxis", diagram->top_axis ? true : false);
-    turbo_json_object_set_string(root, "type", "gantt");
+    json_object_add(root, "tasks", json_create_array());
+    json_object_set_string(root, "title", diagram->title ? diagram->title : "");
+    json_object_set_bool(root, "topAxis", diagram->top_axis ? true : false);
+    json_object_set_string(root, "type", "gantt");
 
     size_t len;
-    char* str = turbo_json_serialize_pretty(root, &len);
-    turbo_free_json(&root);
+    char* str = json_serialize_pretty(root, &len);
+    json_free(&root);
     return str;
 }
