@@ -165,6 +165,12 @@ target_include_directories(test_style_engine PRIVATE ../include)
 set_target_properties(test_style_engine PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_style_engine COMMAND test_style_engine)
 
+add_executable(test_text_util_unicode test_text_util_unicode.cpp)
+target_link_libraries(test_text_util_unicode PRIVATE flexUI)
+flexui_configure_tinytest(test_text_util_unicode)
+set_target_properties(test_text_util_unicode PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_text_util_unicode COMMAND test_text_util_unicode)
+
 add_executable(test_render_semantics test_render_semantics.cpp)
 target_link_libraries(test_render_semantics PRIVATE flexUI)
 flexui_configure_tinytest(test_render_semantics)
