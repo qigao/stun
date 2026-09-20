@@ -53,13 +53,13 @@ set_target_properties(flexchart_errorband PROPERTIES FOLDER "Modules/FlexChart/M
 
 # Parser test
 add_executable(flexchart_errorband_parser_test tests/test_errorband_parser.cpp)
-target_link_libraries(flexchart_errorband_parser_test PRIVATE flexchart_errorband TurboUtils::TinyTest)
+target_link_libraries(flexchart_errorband_parser_test PRIVATE flexchart_errorband Salts::TinyTest)
 add_test(NAME FlexChartErrorbandParserTest COMMAND flexchart_errorband_parser_test)
 set_target_properties(flexchart_errorband_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_errorband_test tests/test_errorband.cpp)
-target_link_libraries(flexchart_errorband_test PRIVATE flexchart_errorband TurboUtils::TinyTest)
+target_link_libraries(flexchart_errorband_test PRIVATE flexchart_errorband Salts::TinyTest)
 target_include_directories(flexchart_errorband_test PRIVATE ../../src)
 add_test(NAME FlexChartErrorbandTest COMMAND flexchart_errorband_test)
 set_target_properties(flexchart_errorband_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
