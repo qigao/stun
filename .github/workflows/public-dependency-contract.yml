@@ -98,3 +98,64 @@ jobs:
           }
           EOF
           c++ -std=c++17 -Wall -Wextra -Werror             -isystem .ci/salts/utils/include             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_fs_contract.cpp
+
+
+  pluginhost-canonical-packages:
+    name: PluginHost canonical Salts contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Stun
+        uses: actions/checkout@v4
+
+      - name: Checkout canonical Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          path: .ci/salts
+
+      - name: Checkout canonical SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          path: .ci/salts-utils
+
+      - name: Verify source and install package ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#include <toml.h>' flexUI/modules/plugin_host/plugin_manifest.cpp
+          grep -Fq 'Salts::TomlParser' flexUI/modules/plugin_host/CMakeLists.txt
+          grep -Fq 'Salts::Core' flexUI/modules/plugin_host/CMakeLists.txt
+          if grep -R -n -E '#include <(turbo_parser_toml|turbo_fs|turbo_vstr)\.h>' flexUI/modules/plugin_host; then
+            echo "PluginHost still consumes retired Turbo facade headers" >&2
+            exit 1
+          fi
+          if grep -n -E 'find_dependency\((TurboUtils|TurboParser)' flexUI/CMakeLists.txt; then
+            echo "installed FlexUI package still exports retired dependencies" >&2
+            exit 1
+          fi
+          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/run_plugin_install_consumer.cmake flexUI/tests/CMakeLists.txt; then
+            echo "install consumer still injects retired package roots" >&2
+            exit 1
+          fi
+          grep -Fq 'find_dependency(Salts CONFIG)' flexUI/CMakeLists.txt
+          grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/CMakeLists.txt
+          grep -Fq 'Salts_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
+          grep -Fq 'SaltsUtils_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
+
+      - name: Compile PluginHost sources against canonical public headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c++17 -Wall -Wextra -Wpedantic -Werror
+            -IflexUI/include
+            -IflexUI/modules/plugin_host
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts-utils/parser/toml/include
+          )
+          c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
+          c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp
