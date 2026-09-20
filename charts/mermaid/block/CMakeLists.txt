@@ -26,7 +26,7 @@ add_library(block STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/block_parser_gen.c"
 )
 
-target_link_libraries(block PUBLIC TurboParser::Parser flex_runtime)
+target_link_libraries(block PUBLIC Salts::JsonParser Flex::Expression)
 target_include_directories(block PUBLIC 
     include 
     "${CMAKE_CURRENT_BINARY_DIR}"
@@ -34,7 +34,7 @@ target_include_directories(block PUBLIC
 
 # Test executable
 add_executable(block_test tests/test_parser.c)
-target_link_libraries(block_test block TurboUtils::TinyTest TurboParser::Parser)
+target_link_libraries(block_test block Salts::TinyTest Salts::JsonParser)
 set_target_properties(block_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(block_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/block")
 

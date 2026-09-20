@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "flex/core/expr_c.h"
 #include "journey/journey_ast.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 static char* copy_string(const char* s) {
     if(!s) return NULL;
@@ -161,45 +161,45 @@ void journey_add_task(JourneyParserContext* ctx, const char* title, const char* 
 
 char* journey_to_json(JourneyDiagram* d) {
     if(!d) {
-        json_value_t *null_val = turbo_json_create_null();
+        json_value_t *null_val = json_create_null();
         size_t len;
-        char *s = turbo_json_serialize_pretty_crlf(null_val, &len);
-        turbo_free_json(&null_val);
+        char *s = json_serialize_pretty_crlf(null_val, &len);
+        json_free(null_val);
         return s;
     }
 
-    json_value_t *root = turbo_json_create_object();
+    json_value_t *root = json_create_object();
 
-    json_value_t *sections = turbo_json_create_array();
+    json_value_t *sections = json_create_array();
     for(JourneySection* s = d->sections; s; s = s->next) {
-        json_value_t *section = turbo_json_create_object();
-        turbo_json_object_set_string(section, "name", s->title ? s->title : "");
+        json_value_t *section = json_create_object();
+        json_object_set_string(section, "name", s->title ? s->title : "");
 
-        json_value_t *tasks = turbo_json_create_array();
+        json_value_t *tasks = json_create_array();
         for(JourneyTask* t = s->tasks; t; t = t->next) {
-            json_value_t *task = turbo_json_create_object();
+            json_value_t *task = json_create_object();
 
-            json_value_t *actors = turbo_json_create_array();
+            json_value_t *actors = json_create_array();
             for(int i = 0; i < t->actor_count; i++) {
-                turbo_json_array_add(actors, turbo_json_create_string(t->actors[i]));
+                json_array_add(actors, json_create_string(t->actors[i]));
             }
-            turbo_json_object_add(task, "actors", actors);
-            turbo_json_object_set_string(task, "name", t->title ? t->title : "");
-            turbo_json_object_set_number(task, "score", t->score);
+            json_object_add(task, "actors", actors);
+            json_object_set_string(task, "name", t->title ? t->title : "");
+            json_object_set_number(task, "score", t->score);
 
-            turbo_json_array_add(tasks, task);
+            json_array_add(tasks, task);
         }
-        turbo_json_object_add(section, "tasks", tasks);
+        json_object_add(section, "tasks", tasks);
 
-        turbo_json_array_add(sections, section);
+        json_array_add(sections, section);
     }
-    turbo_json_object_add(root, "sections", sections);
-    turbo_json_object_set_string(root, "title", d->title ? d->title : "");
-    turbo_json_object_set_string(root, "type", "journey");
+    json_object_add(root, "sections", sections);
+    json_object_set_string(root, "title", d->title ? d->title : "");
+    json_object_set_string(root, "type", "journey");
 
     size_t out_len;
-    char *json_str = turbo_json_serialize_pretty_crlf(root, &out_len);
-    turbo_free_json(&root);
+    char *json_str = json_serialize_pretty_crlf(root, &out_len);
+    json_free(root);
 
     return json_str;
 }

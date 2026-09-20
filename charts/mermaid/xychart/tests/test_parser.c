@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "tinytest.h"
 #include "xychart/xychart_ast.h"
-#include "turbo_parser.h"
+#include <json_parser.h>
 
 #ifndef REQUIRE
 #define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
@@ -51,19 +51,19 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if ((ja = json_parse(a, strlen(a))) == NULL) return 0;
+    if ((jb = json_parse(b, strlen(b))) == NULL) {
+        json_free(ja);
         return 0;
     }
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -223,7 +223,7 @@ spec("xychart_parser") {
                             check(1, "Parse successful (no golden json)");
                         }
 
-                        turbo_json_serialize_free(actual);
+                        json_serialize_free(actual);
                         xychart_free_diagram(diagram);
                     }
                     if (input) free(input);

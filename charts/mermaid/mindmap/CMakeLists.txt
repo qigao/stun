@@ -31,11 +31,11 @@ target_include_directories(mindmap PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(mindmap PUBLIC TurboParser::Parser flex_runtime)
+target_link_libraries(mindmap PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(mindmap_test tests/test_parser.c)
-target_link_libraries(mindmap_test mindmap TurboUtils::TinyTest)
+target_link_libraries(mindmap_test mindmap Salts::TinyTest)
 set_target_properties(mindmap_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(mindmap_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/mindmap")
 
