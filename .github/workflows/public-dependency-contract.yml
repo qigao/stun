@@ -208,6 +208,19 @@ jobs:
             exit 1
           fi
 
+      - name: Verify strict UTF-8 ingress ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'InvalidUtf8' flexUI/include/flexUI/ui_document.h
+          grep -Fq 'validate_utf8(source)' flexUI/src/ui_xml.cpp
+          grep -Fq 'validate_utf8(utf8)' flexUI/modules/controller/application_host_bridge.cpp
+          grep -Fq 'validate_utf8(utf8).valid' flexUI/include/flexUI/host_bridge.h
+          if grep -n 'document.load_buffer' flexUI/src/ui_xml.cpp | head -1 | cut -d: -f1 > /tmp/xml_parse_line &&
+             grep -n 'validate_utf8(source)' flexUI/src/ui_xml.cpp | head -1 | cut -d: -f1 > /tmp/xml_utf8_line; then
+            test "$(cat /tmp/xml_utf8_line)" -lt "$(cat /tmp/xml_parse_line)"
+          fi
+
       - name: Compile strict Unicode bridge against public headers
         shell: bash
         run: |
