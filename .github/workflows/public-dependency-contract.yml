@@ -73,11 +73,11 @@ jobs:
             -std=c++17 -Wall -Wextra -Wpedantic -Werror
             -IflexUI/include
             -IflexUI/modules/plugin_host
-            -I.ci/salts/utils/include
-            -I.ci/salts/platform/include
-            -I.ci/salts/cmeta/include
-            -I.ci/salts/concurrency/include
-            -I.ci/salts-utils/parser/toml/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts-utils/parser/toml/include
           )
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp
