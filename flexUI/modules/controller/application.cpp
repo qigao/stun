@@ -217,6 +217,14 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
       return {{}, std::move(error)};
     }
 
+    const auto schema_error = config.registry.validate(*compiled.program);
+    if (schema_error) {
+      auto error = fail(DesktopApplicationErrorCode::UiCompileFailed,
+                        DesktopApplicationStage::UiCompile, schema_error.message);
+      error.ui_error = schema_error;
+      return {{}, std::move(error)};
+    }
+
     if (!config.script_enabled && !compiled.program->event_bindings().empty()) {
       auto error =
           fail(DesktopApplicationErrorCode::ScriptRequired, DesktopApplicationStage::ControllerLoad,
