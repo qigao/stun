@@ -75,6 +75,7 @@ jobs:
             -IflexUI/modules/plugin_host
             -I.ci/salts/utils/include
             -I.ci/salts/platform/include
+            -I.ci/salts/cmeta/include
             -I.ci/salts/concurrency/include
             -I.ci/salts-utils/parser/toml/include
           )
