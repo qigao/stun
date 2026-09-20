@@ -1,10 +1,10 @@
 <ui name="FlexUIDesktopEditor" xmlns:on="urn:flexui:event">
   <main id="editor-shell">
     <div id="toolbar">
-      <label id="title" text="FlexUI Desktop Editor"/>
-      <button id="save" text="Save" on:click="save_document"/>
+      <label id="title">FlexUI Desktop Editor</label>
+      <button id="save" on:click="save_document">Save</button>
     </div>
-    <textarea id="document" text="Build native desktop interfaces with XML, CSS, TurboScript, and gCanvas."/>
-    <label id="runtime" text="OpenGL · TurboScript JIT · native DLL service"/>
+    <textarea id="document">Build native desktop interfaces with XML, CSS, TurboScript, and gCanvas.</textarea>
+    <label id="runtime">OpenGL · TurboScript JIT · native DLL service</label>
   </main>
 </ui>
