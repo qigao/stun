@@ -250,6 +250,26 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_within(save->style_.width, 123.0F, 0.001F);
   }
 
+  it("instantiates widget text from natural XML content") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Natural\"><button id=\"save\">Save</button></ui>");
+
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *save = built.application->box().get_by_id("save");
+    auto *button = save ? dynamic_cast<flexUI::ButtonWidget *>(save->widget) : nullptr;
+    check_not_null(save);
+    check_not_null(button);
+    if (save && button) {
+      check_equal(save->text(), std::string("Save"));
+      check_equal(button->text(), std::string("Save"));
+    }
+  }
+
   it("publishes anonymous structural nodes without public handles") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
     builder.xml_entry(R"(
