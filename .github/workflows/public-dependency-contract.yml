@@ -78,6 +78,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          common=(
+            -std=c++17
+            -Wall
+            -Wextra
+            -Werror
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts/cmeta/include
+          )
+
           cat > /tmp/flex_debug_contract.cpp <<'EOF'
           #include <flex/core/debug.h>
           static_assert(SALTS_LOG_LEVEL_DEBUG == 0);
@@ -85,8 +97,7 @@ jobs:
             return static_cast<int>(flex::debug::get_log_level());
           }
           EOF
-          c++ -std=c++17 -Wall -Wextra -Werror             -Iflex/include             -isystem .ci/salts/utils/include
-            -isystem .ci/salts/utils/parser             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_debug_contract.cpp
+          c++ "${common[@]}" -Iflex/include -fsyntax-only /tmp/flex_debug_contract.cpp
 
           cat > /tmp/flex_fs_contract.cpp <<'EOF'
           #include <salts_fs.h>
@@ -98,9 +109,7 @@ jobs:
             return 0;
           }
           EOF
-          c++ -std=c++17 -Wall -Wextra -Werror             -isystem .ci/salts/utils/include
-            -isystem .ci/salts/utils/parser             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -fsyntax-only /tmp/flex_fs_contract.cpp
-
+          c++ "${common[@]}" -fsyntax-only /tmp/flex_fs_contract.cpp
 
   pluginhost-canonical-packages:
     name: PluginHost canonical Salts contracts
