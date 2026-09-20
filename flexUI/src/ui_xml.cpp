@@ -1,4 +1,5 @@
 #include <flexUI/ui_xml.h>
+#include <flexUI/text_util.h>
 
 #include <pugixml.hpp>
 
@@ -297,6 +298,14 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   if (source.size() > limits.max_source_bytes) {
     result.error =
         make_error(UiDocumentErrorCode::SourceTooLarge, "UI XML source exceeds configured limit");
+    return result;
+  }
+  const auto utf8 = validate_utf8(source);
+  if (!utf8.valid) {
+    const auto location = source_span(source, static_cast<std::ptrdiff_t>(utf8.invalid_offset));
+    result.error = make_error(UiDocumentErrorCode::InvalidUtf8,
+                              "UI XML source contains invalid UTF-8",
+                              location.line, location.column);
     return result;
   }
   if (source.find('\0') != std::string_view::npos) {
