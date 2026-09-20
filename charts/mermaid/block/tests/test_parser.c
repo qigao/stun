@@ -1,6 +1,6 @@
 #include "tinytest.h"
 #include "block/block_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -50,19 +50,19 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (json_parse((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
+    if (json_parse((const uint8_t*)b, strlen(b), &jb) != 0) {
+        json_free(&ja);
         return 0;
     }
     
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(&ja);
+    json_free(&jb);
     return eq;
 }
 
@@ -123,7 +123,7 @@ spec("block_parser") {
                         check(1, "Parse successful");
                     }
 
-                    turbo_json_serialize_free(actual);
+                    json_serialize_free(actual);
                     block_free(diagram);
                     free(input);
                 }
