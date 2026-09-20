@@ -160,7 +160,7 @@ set_target_properties(flexinfographic_e2e_test PROPERTIES FOLDER "Modules/FlexIn
 
 add_executable(flexinfographic_unified_parser_test tests/test_unified_parser.cpp)
 target_link_libraries(flexinfographic_unified_parser_test PRIVATE
-    flexinfographic TurboUtils::TinyTest)
+    flexinfographic Salts::TinyTest)
 add_test(NAME FlexInfographicUnifiedParserTest COMMAND flexinfographic_unified_parser_test)
 set_target_properties(flexinfographic_unified_parser_test PROPERTIES
     FOLDER "Modules/FlexInfographic/Tests")
