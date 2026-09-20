@@ -1,6 +1,6 @@
 #include "flowchart/flowchart_parser_wrapper.h"
 #include "flowchart_parser_gen.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -299,33 +299,33 @@ static void serialize_subgraph_recursive(json_value_t *parent_arr, FlowchartSubG
       break;
     }
     // printf("Serializing subgraph: %s\n", sg->id);
-    json_value_t *sg_det = turbo_json_create_object();
-    turbo_json_object_set_string(sg_det, "id", sg->id ? sg->id : "");
+    json_value_t *sg_det = json_create_object();
+    json_object_set_string(sg_det, "id", sg->id ? sg->id : "");
 
     // Nodes
-    json_value_t *nodes_arr = turbo_json_create_array();
+    json_value_t *nodes_arr = json_create_array();
     FlowchartNodeRef *nr = sg->node_refs;
     while (nr) {
       if (nr->id)
-        turbo_json_array_add(nodes_arr, turbo_json_create_string(nr->id));
+        json_array_add(nodes_arr, json_create_string(nr->id));
       nr = nr->next;
     }
-    turbo_json_object_add(sg_det, "nodes", nodes_arr);
+    json_object_add(sg_det, "nodes", nodes_arr);
 
     // Title
-    json_value_t *title_obj = turbo_json_create_object();
-    turbo_json_object_set_string(title_obj, "text", sg->label ? sg->label : (sg->id ? sg->id : ""));
-    turbo_json_object_set_string(title_obj, "type", "text");
-    turbo_json_object_add(sg_det, "title", title_obj);
+    json_value_t *title_obj = json_create_object();
+    json_object_set_string(title_obj, "text", sg->label ? sg->label : (sg->id ? sg->id : ""));
+    json_object_set_string(title_obj, "type", "text");
+    json_object_add(sg_det, "title", title_obj);
 
     // Only add subgraphs key if there are nested ones
     if (sg->children) {
-      json_value_t *children_arr = turbo_json_create_array();
+      json_value_t *children_arr = json_create_array();
       serialize_subgraph_recursive(children_arr, sg->children);
-      turbo_json_object_add(sg_det, "subgraphs", children_arr);
+      json_object_add(sg_det, "subgraphs", children_arr);
     }
 
-    turbo_json_array_add(parent_arr, sg_det);
+    json_array_add(parent_arr, sg_det);
     sg = sg->next;
   }
 }
@@ -334,33 +334,33 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
   if (!diagram)
     return NULL;
 
-  json_value_t *root = turbo_json_create_object();
-  turbo_json_object_set_string(root, "direction", diagram->direction ? diagram->direction : "TB");
+  json_value_t *root = json_create_object();
+  json_object_set_string(root, "direction", diagram->direction ? diagram->direction : "TB");
 
   // Nodes
-  json_value_t *nodes_obj = turbo_json_create_object();
+  json_value_t *nodes_obj = json_create_object();
   FlowchartNode *n = diagram->nodes;
   while (n) {
     if (n->id) {
-      json_value_t *n_det = turbo_json_create_object();
-      turbo_json_object_set_string(n_det, "id", n->id);
-      turbo_json_object_set_string(n_det, "shape", map_shape(n->shape));
+      json_value_t *n_det = json_create_object();
+      json_object_set_string(n_det, "id", n->id);
+      json_object_set_string(n_det, "shape", map_shape(n->shape));
 
       if (n->label && strcmp(n->label, n->id) != 0) {
-        json_value_t *text_obj = turbo_json_create_object();
-        turbo_json_object_set_string(text_obj, "text", n->label);
-        turbo_json_object_set_string(text_obj, "type", "text");
-        turbo_json_object_add(n_det, "text", text_obj);
+        json_value_t *text_obj = json_create_object();
+        json_object_set_string(text_obj, "text", n->label);
+        json_object_set_string(text_obj, "type", "text");
+        json_object_add(n_det, "text", text_obj);
       }
 
-      turbo_json_object_add(nodes_obj, n->id, n_det);
+      json_object_add(nodes_obj, n->id, n_det);
     }
     n = n->next;
   }
-  turbo_json_object_add(root, "nodes", nodes_obj);
+  json_object_add(root, "nodes", nodes_obj);
 
   // Edges
-  json_value_t *links_arr = turbo_json_create_array();
+  json_value_t *links_arr = json_create_array();
   for (int labelled_pass = 1; labelled_pass >= 0; --labelled_pass) {
     FlowchartEdge *e = diagram->edges;
     while (e) {
@@ -368,44 +368,44 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
         e = e->next;
         continue;
       }
-    json_value_t *e_det = turbo_json_create_object();
-    turbo_json_object_set_number(e_det, "length", 1);
-    turbo_json_object_set_string(e_det, "source", e->from ? e->from : "");
+    json_value_t *e_det = json_create_object();
+    json_object_set_number(e_det, "length", 1);
+    json_object_set_string(e_det, "source", e->from ? e->from : "");
     const char *stroke = "normal";
     if (e->arrow_type && strstr(e->arrow_type, "==="))
       stroke = "thick";
     if (e->arrow_type && strstr(e->arrow_type, "-.-"))
       stroke = "dotted";
-    turbo_json_object_set_string(e_det, "stroke", stroke);
-    turbo_json_object_set_string(e_det, "target", e->to ? e->to : "");
-    turbo_json_object_set_string(e_det, "type", map_arrow(e->arrow_type));
+    json_object_set_string(e_det, "stroke", stroke);
+    json_object_set_string(e_det, "target", e->to ? e->to : "");
+    json_object_set_string(e_det, "type", map_arrow(e->arrow_type));
 
     if (e->label) {
-      json_value_t *text_obj = turbo_json_create_object();
-      turbo_json_object_set_string(text_obj, "text", e->label);
-      turbo_json_object_set_string(text_obj, "type", "text");
-      turbo_json_object_add(e_det, "text", text_obj);
+      json_value_t *text_obj = json_create_object();
+      json_object_set_string(text_obj, "text", e->label);
+      json_object_set_string(text_obj, "type", "text");
+      json_object_add(e_det, "text", text_obj);
     }
-    turbo_json_array_add(links_arr, e_det);
+    json_array_add(links_arr, e_det);
     e = e->next;
     }
   }
-  turbo_json_object_add(root, "links", links_arr);
+  json_object_add(root, "links", links_arr);
 
   // Subgraphs
-  json_value_t *subgraphs_arr = turbo_json_create_array();
+  json_value_t *subgraphs_arr = json_create_array();
   serialize_subgraph_recursive(subgraphs_arr, diagram->subgraphs);
-  turbo_json_object_add(root, "subgraphs", subgraphs_arr);
+  json_object_add(root, "subgraphs", subgraphs_arr);
 
   // Meta / Styles
-  turbo_json_object_add(root, "classDefs", turbo_json_create_object());
-  turbo_json_object_add(root, "classes", turbo_json_create_object());
-  turbo_json_object_add(root, "clicks", turbo_json_create_array());
-  turbo_json_object_add(root, "linkStyles", turbo_json_create_array());
-  turbo_json_object_set_string(root, "type", "flowchart");
+  json_object_add(root, "classDefs", json_create_object());
+  json_object_add(root, "classes", json_create_object());
+  json_object_add(root, "clicks", json_create_array());
+  json_object_add(root, "linkStyles", json_create_array());
+  json_object_set_string(root, "type", "flowchart");
 
   size_t len;
-  char *str = turbo_json_serialize_pretty(root, &len);
-  turbo_free_json(&root);
+  char *str = json_serialize_pretty(root, &len);
+  json_free(&root);
   return str;
 }
