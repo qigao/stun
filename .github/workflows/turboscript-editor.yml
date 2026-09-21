@@ -292,6 +292,7 @@ jobs:
             2>&1 | tee "$EVIDENCE_DIR/host-installed-configure.log"
           cmake --build build/host-consumer --parallel 2 --verbose \
             2>&1 | tee "$EVIDENCE_DIR/host-installed-build.log"
+          ctest --test-dir build/host-consumer --show-only=json-v1 > "$EVIDENCE_DIR/host-installed-selected.json"
           ctest --test-dir build/host-consumer --no-tests=error --verbose --output-on-failure \
             --timeout 180 --output-junit "$EVIDENCE_DIR/host-installed-results.xml" \
             2>&1 | tee "$EVIDENCE_DIR/host-installed.log"
