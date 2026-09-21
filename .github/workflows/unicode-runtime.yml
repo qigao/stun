@@ -128,3 +128,333 @@ jobs:
           git diff --exit-code
           git -C .ci/salts diff --exit-code
           git -C .ci/salts-utils diff --exit-code
+
+  unicode-install-consumer:
+    name: Unicode installed packages ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      VCPKG_ROOT: ${{ github.workspace }}/.ci/install-vcpkg
+      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/stun-vcpkg-cache,readwrite
+      VCPKG_MAX_CONCURRENCY: 2
+      SALTS_ROOT: ${{ runner.temp }}/stun-unicode-sdk
+      PACKAGE_BUILD_ROOT: ${{ runner.temp }}/stun-unicode-package-build
+      EXTERNAL_PORTS_ROOT: ${{ runner.temp }}/stun-unicode-external-ports
+      EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
+      LD_LIBRARY_PATH: ${{ runner.temp }}/stun-unicode-sdk/lib
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: .ci/install-sources/salts
+          persist-credentials: false
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: .ci/install-sources/salts-utils
+          persist-credentials: false
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: .ci/install-vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up BoringSSL build prerequisite
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+          cache: false
+
+      - name: Cache pinned third-party packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/stun-vcpkg-cache
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
+
+      - name: Prepare isolated tools and evidence
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$EXTERNAL_PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/install-sources/salts rev-parse HEAD)" = "$SALTS_SHA"
+          test "$(git -C .ci/install-sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" | tee "$EVIDENCE_DIR/provenance.txt"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" \
+            cmake==3.31.6
+          printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Install checksum-verified re2c
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .ci/install-sources/salts-utils/cmake/ci/install-re2c.sh 2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
+
+      - name: Build and install the real dependency packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          ninja --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          gcc --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          g++ --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          re2c --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          go version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          "$VCPKG_ROOT/vcpkg" version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          test "$(re2c --version)" = "re2c 4.6"
+          cmake -S .ci/install-sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$EVIDENCE_DIR/lemon-configure.log"
+          cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/lemon-build.log"
+          for package in salts salts-utils; do
+            source="$GITHUB_WORKSPACE/.ci/install-sources/$package"
+            package_build="$PACKAGE_BUILD_ROOT/$package"
+            ports="$EXTERNAL_PORTS_ROOT/$package"
+            extra=()
+            if [ "$package" = salts-utils ]; then
+              extra+=(
+                -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
+                "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+                "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+              )
+            fi
+            cmake -S "$source" -B "$package_build" -G Ninja \
+              -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
+              "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+              -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
+              "-DCMAKE_INSTALL_PREFIX=$SALTS_ROOT" -DCMAKE_INSTALL_LIBDIR=lib \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
+              -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF \
+              -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+              "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
+            cmake --build "$package_build" --parallel 2 \
+              2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
+            install_component=()
+            if [ "$package" = salts-utils ]; then
+              install_component=(--component Unspecified)
+            fi
+            cmake --install "$package_build" "${install_component[@]}" \
+              2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
+            cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
+            cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
+            manifest=install_manifest.txt
+            if [ "$package" = salts-utils ]; then
+              manifest=install_manifest_Unspecified.txt
+            fi
+            cp "$package_build/$manifest" "$EVIDENCE_DIR/$package-install-manifest.txt"
+            git -C "$source" diff --exit-code
+          done
+
+      - name: Remove dependency source and build paths from consumer access
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-unicode-isolated"
+          mv .ci/install-sources "$RUNNER_TEMP/stun-unicode-isolated/sources"
+          mv "$PACKAGE_BUILD_ROOT" "$RUNNER_TEMP/stun-unicode-isolated/builds"
+          test ! -e .ci/install-sources
+          test ! -e "$PACKAGE_BUILD_ROOT"
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+
+      - name: Configure, link, and run the installed Unicode consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          consumer_build="$GITHUB_WORKSPACE/build/unicode-install-consumer"
+          mkdir -p "$consumer_build"
+          cmake -S flexUI/tests/unicode_install_consumer -B "$consumer_build" -G Ninja \
+            -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DFLEXUI_UNICODE_INSTALL_PREFIX=$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON -DFLEXUI_UNICODE_ENABLE_SANITIZERS=ON \
+            2>&1 | tee "$EVIDENCE_DIR/consumer-configure.log"
+          cmake --build "$consumer_build" --verbose --parallel 2 \
+            2>&1 | tee "$consumer_build/build.log"
+          ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure \
+            --output-junit "$EVIDENCE_DIR/consumer-results.xml" \
+            2>&1 | tee "$consumer_build/ctest.log"
+          git diff --exit-code
+
+      - name: Verify installed paths, Core ownership, and complete test totals
+        shell: bash
+        env:
+          FLEXUI_UNICODE_INSTALL_PREFIX: ${{ runner.temp }}/stun-unicode-sdk
+          CONSUMER_BINARY_DIR: ${{ github.workspace }}/build/unicode-install-consumer
+          CONSUMER_CONFIG: Debug
+          ORIGINAL_DEPENDENCY_ROOTS: |
+            ${{ github.workspace }}/.ci/install-sources
+            ${{ runner.temp }}/stun-unicode-package-build
+          DEPENDENCY_QUARANTINE_ROOT: ${{ runner.temp }}/stun-unicode-isolated
+        run: |
+          set -euo pipefail
+          : "${FLEXUI_UNICODE_INSTALL_PREFIX:?}"
+          : "${CONSUMER_BINARY_DIR:?}"
+          : "${CONSUMER_CONFIG:?}"
+          : "${ORIGINAL_DEPENDENCY_ROOTS:?}"
+
+          readelf -d "$CONSUMER_BINARY_DIR/test_text_util_unicode_install" \
+            | tee "$CONSUMER_BINARY_DIR/readelf-dynamic.txt"
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD \
+            ldd "$CONSUMER_BINARY_DIR/test_text_util_unicode_install" \
+            | tee "$CONSUMER_BINARY_DIR/ldd.txt"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+
+          prefix = Path(os.environ["FLEXUI_UNICODE_INSTALL_PREFIX"]).resolve(strict=True)
+          build = Path(os.environ["CONSUMER_BINARY_DIR"]).resolve(strict=True)
+          config = os.environ["CONSUMER_CONFIG"]
+          originals = [Path(p) for p in os.environ["ORIGINAL_DEPENDENCY_ROOTS"].splitlines() if p]
+          require(originals and all(p.is_absolute() for p in originals), "Dependency roots must be absolute")
+          require(all(not p.exists() for p in originals), "An original dependency source/build root is still present")
+          quarantine = os.environ.get("DEPENDENCY_QUARANTINE_ROOT", "")
+          forbidden = originals + ([Path(quarantine)] if quarantine else [])
+          require(all(p.is_absolute() for p in forbidden), "Quarantine root must be absolute")
+
+          manifest = build / f"installed-targets-{config}.txt"
+          pairs = [line.split("=", 1) for line in manifest.read_text().splitlines()]
+          expected_keys = {"SaltsConfig", "SaltsUtilsConfig", "Unicode", "Core", "TinyTest"}
+          require(len(pairs) == len(expected_keys) and {p[0] for p in pairs} == expected_keys,
+                  "Installed-target evidence is incomplete or duplicated")
+          resolved = {key: Path(value).resolve(strict=True) for key, value in pairs}
+          require(all(path.is_relative_to(prefix) for path in resolved.values()),
+                  "A package config or imported provider escaped the isolated prefix")
+
+          map_text = (build / f"unicode-install-{config}.map").read_text()
+          dynamic_text = (build / "readelf-dynamic.txt").read_text()
+          loader_text = (build / "ldd.txt").read_text()
+          compile_text = (build / "compile_commands.json").read_text()
+          command_text = "\n".join((compile_text, (build / "build.log").read_text(), map_text, dynamic_text, loader_text))
+          for path in forbidden:
+              for spelling in {str(path), str(path.resolve())}:
+                  require(spelling not in command_text, f"Dependency source/build input leaked: {spelling}")
+          require("TurboUtils::Core" not in command_text, "Legacy Core target appears in build evidence")
+          commands = json.loads(compile_text)
+          require(commands, "No compiler commands were recorded")
+
+          core_name = re.compile(r"libsalts(?:[_-]core)?\.so(?:\.\d+)*", re.I)
+          legacy_name = re.compile(r"libturbo[^/]*\.(?:so(?:\.\d+)*|a)", re.I)
+
+
+          def checked_library(raw):
+              path = Path(raw)
+              if not path.is_absolute():
+                  path = build / path
+              real = path.resolve(strict=True)
+              require(not legacy_name.fullmatch(path.name) and not legacy_name.fullmatch(real.name),
+                      f"Legacy Turbo provider found: {path}")
+              if path.name.startswith("libsalts") or real.name.startswith("libsalts"):
+                  require(real.is_relative_to(prefix), f"Loaded/linked Salts library escaped prefix: {real}")
+              return path, real
+
+
+          link_inputs = set()
+          core_link_inputs = set()
+          for raw in re.findall(r"^LOAD\s+(.+?)\s*$", map_text, re.M):
+              path, real = checked_library(raw)
+              link_inputs.add(real)
+              if core_name.fullmatch(path.name) or core_name.fullmatch(real.name) or real == resolved["Core"]:
+                  core_link_inputs.add(real)
+          require({resolved[k] for k in ("Unicode", "Core", "TinyTest")}.issubset(link_inputs),
+                  "Actual linker LOAD inputs do not contain every declared installed provider")
+          require(core_link_inputs == {resolved["Core"]}, "Linker must receive exactly one canonical Core provider")
+
+          require("not found" not in loader_text, "The runtime loader has an unresolved dependency")
+          runtime_core = set()
+          for line in loader_text.splitlines():
+              match = re.match(r"\s*(?:\S+\s+=>\s+)?(/.*?)\s+\(0x[0-9a-fA-F]+\)\s*$", line)
+              if not match:
+                  continue
+              path, real = checked_library(match.group(1))
+              if core_name.fullmatch(path.name) or core_name.fullmatch(real.name) or real == resolved["Core"]:
+                  runtime_core.add(real)
+          require(runtime_core <= {resolved["Core"]}, "Runtime loaded a noncanonical or additional Core provider")
+
+          test_text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", (build / "ctest.log").read_text())
+          totals = re.findall(r"Total tests \[(PASSED|FAILED|SKIPPED|FILTERED|TODO)\]:\s*(\d+)", test_text)
+          expected_totals = {"PASSED": 10, "FAILED": 0, "SKIPPED": 0, "FILTERED": 0, "TODO": 0}
+          require(len(totals) == 5 and {key: int(value) for key, value in totals} == expected_totals,
+                  "TinyTest totals changed or include failed/skipped/filtered/todo cases")
+          require(re.findall(r"Assertions:\s*(\d+) passed,\s*(\d+) failed", test_text) == [("162", "0")],
+                  "Expected all 162 TinyTest assertions to pass")
+          require(re.search(r"100% tests passed,\s*0 tests failed out of 1", test_text),
+                  "CTest did not report the one executable as successful")
+
+          evidence = {
+              "installed_paths": {key: str(value) for key, value in resolved.items()},
+              "core_link_inputs": sorted(map(str, core_link_inputs)),
+              "core_runtime_providers": sorted(map(str, runtime_core)),
+              "runtime_core_note": ("Canonical Core loaded" if runtime_core else
+                                    "Canonical Core was a link input; this executable needs no Core DSO after --as-needed"),
+              "elf_needed": re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic_text),
+              "tinytest": {**expected_totals, "assertions_passed": 162, "assertions_failed": 0},
+              "ctest_executables_passed": 1,
+          }
+          (build / "install-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          print(json.dumps(evidence, indent=2))
+          PY
+          {
+            echo '### Installed Unicode package validation'
+            echo 'Real Salts/SaltsUtils packages; dependency source/build paths absent during consumer configure/build/test.'
+            echo '```text'
+            cat "$EVIDENCE_DIR/provenance.txt" "$CONSUMER_BINARY_DIR/ctest.log"
+            echo '```'
+            echo '```json'
+            cat "$CONSUMER_BINARY_DIR/install-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload package and consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicode-install-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/unicode-install-evidence
+            build/unicode-install-consumer/*.log
+            build/unicode-install-consumer/*.json
+            build/unicode-install-consumer/*.map
+            build/unicode-install-consumer/*.txt
+            build/unicode-install-consumer/Testing/Temporary/LastTest.log
+          if-no-files-found: error
