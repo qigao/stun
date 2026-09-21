@@ -161,6 +161,19 @@ jobs:
           binary = Path('build/mesa-main-control/mesa_driver_control').resolve(strict=True)
           evidence = Path(os.environ['EVIDENCE_DIR'])
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          leak_block_re = re.compile(
+              r'(?:Direct|Indirect) leak of (?P<bytes>\d+) byte\(s\) in '
+              r'(?P<objects>\d+) object\(s\) allocated from:\n'
+              r'(?P<stack>(?:    #.*\n)+)')
+          def classify_leaks(log):
+              owners = {'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                        'non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0}}
+              for match in leak_block_re.finditer(log):
+                  owner = 'x11' if '/glfw/src/x11_init.c:' in match.group('stack') else 'non_x11'
+                  owners[owner]['bytes'] += int(match.group('bytes'))
+                  owners[owner]['objects'] += int(match.group('objects'))
+                  owners[owner]['blocks'] += 1
+              return owners
           rows = []
           for mode, expected_pixels in readbacks.items():
               for cycles in (1, 4):
@@ -169,12 +182,14 @@ jobs:
                                           timeout=180)
                   log = result.stdout
                   (evidence / f'system-{mode}-{cycles}.log').write_text(log)
+                  owners = classify_leaks(log)
                   row = {
                       'mode': mode,
                       'cycles': cycles,
                       'exit_code': result.returncode,
                       'pixel_checks': log.count('pixel-readback=passed'),
                       'completed': 'application-checks=passed;' in log,
+                      'owners': owners,
                       'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
                       'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
                       'ubsan_errors': len(re.findall(r'runtime error:', log)),
@@ -184,6 +199,9 @@ jobs:
                   assert log.count('teardown=completed') == cycles, row
                   assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
                   assert len(row['leaks']) == 1, row
+                  assert owners['x11']['blocks'] > 0, row
+                  assert owners['non_x11']['blocks'] == 0, (
+                      'System lifecycle control must contain only X11-owner leak stacks', row)
                   row['x11_baseline'] = tuple(map(int, row['leaks'][0]))
                   rows.append(row)
                   print(json.dumps(row), flush=True)
@@ -213,6 +231,19 @@ jobs:
           env['LIBGL_DRIVERS_PATH'] = str(driver.parent)
           env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          leak_block_re = re.compile(
+              r'(?:Direct|Indirect) leak of (?P<bytes>\d+) byte\(s\) in '
+              r'(?P<objects>\d+) object\(s\) allocated from:\n'
+              r'(?P<stack>(?:    #.*\n)+)')
+          def classify_leaks(log):
+              owners = {'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                        'non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0}}
+              for match in leak_block_re.finditer(log):
+                  owner = 'x11' if '/glfw/src/x11_init.c:' in match.group('stack') else 'non_x11'
+                  owners[owner]['bytes'] += int(match.group('bytes'))
+                  owners[owner]['objects'] += int(match.group('objects'))
+                  owners[owner]['blocks'] += 1
+              return owners
           system_rows = json.loads((evidence / 'system-baselines.json').read_text())
           x11_baselines = {(row['mode'], int(row['cycles'])): tuple(row['x11_baseline'])
                            for row in system_rows}
@@ -227,12 +258,14 @@ jobs:
                                           timeout=180, env=env)
                   log = result.stdout
                   (evidence / f'{mode}-{cycles}.log').write_text(log)
+                  owners = classify_leaks(log)
                   row = {
                       'mode': mode,
                       'cycles': cycles,
                       'exit_code': result.returncode,
                       'pixel_checks': log.count('pixel-readback=passed'),
                       'completed': 'application-checks=passed;' in log,
+                      'owners': owners,
                       'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
                       'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
                       'ubsan_errors': len(re.findall(r'runtime error:', log)),
@@ -247,9 +280,10 @@ jobs:
                   x11_baseline = x11_baselines[(mode, cycles)]
                   row['leak_tuple'] = leak_tuple
                   row['x11_baseline'] = x11_baseline
-                  row['mesa_incremental'] = leak_tuple != x11_baseline
+                  row['mesa_incremental'] = owners['non_x11']['blocks'] > 0
+                  assert owners['x11']['blocks'] > 0, row
                   if mode == 'init':
-                      assert leak_tuple == x11_baseline, (row, x11_baseline)
+                      assert owners['non_x11']['blocks'] == 0, row
                   assert result.returncode != 0 if row['leaks'] else result.returncode == 0
           assert len(rows) == 10
           (evidence / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
@@ -269,6 +303,8 @@ jobs:
           }
           (evidence / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
           print(json.dumps(summary, indent=2))
+          assert summary['mesa_incremental_processes'] == 0, (
+              'Mesa main still has non-X11 leak-owner stacks; inspect results.json', summary)
           PY
           cp "$MESA_BUILD/compile_commands.json" "$EVIDENCE_DIR/mesa-compile-commands.json"
           cp "$MESA_BUILD/meson-info/intro-buildoptions.json" "$EVIDENCE_DIR/mesa-build-options.json"
