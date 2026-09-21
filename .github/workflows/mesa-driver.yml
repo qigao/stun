@@ -184,9 +184,9 @@ jobs:
               system_env.pop(key, None)
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
           leak_block_re = re.compile(
-              r'(?:Direct|Indirect) leak of (?P<bytes>\\d+) byte\\(s\\) in '
-              r'(?P<objects>\\d+) object\\(s\\) allocated from:\\n'
-              r'(?P<stack>(?:    #.*\\n)+)')
+              r'(?:Direct|Indirect) leak of (?P<bytes>\d+) byte\(s\) in '
+              r'(?P<objects>\d+) object\(s\) allocated from:\n'
+              r'(?P<stack>(?:    #.*\n)+)')
           def classify_leaks(log):
               owners = {'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
                         'non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0}}
