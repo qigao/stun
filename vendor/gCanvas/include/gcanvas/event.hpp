@@ -29,7 +29,8 @@ namespace gcanvas
         ACTION_REPEAT = 2,
     } input_action;
 
-    typedef enum mouse_mod
+    // Preserve the native int bitmask, including bits rejected by consumers.
+    typedef enum mouse_mod : int
     {
         MOUSE_MOD_SHIFT = 0x0001,
         MOUSE_MOD_CONTROL = 0x0002,
@@ -165,7 +166,8 @@ namespace gcanvas
         KEY_LAST = KEY_MENU
     } keyboard_key;
 
-    typedef enum keyboard_mod
+    // Preserve the native int bitmask, including bits rejected by consumers.
+    typedef enum keyboard_mod : int
     {
         KEY_MOD_SHIFT = 0x0001,
         KEY_MOD_CONTROL = 0x0002,

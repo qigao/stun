@@ -603,14 +603,26 @@ jobs:
           assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
           totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
 
+          installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
+                             'Services': 'flexui_installed_services_consumer',
+                             'host': 'flexui_plugin_install_consumer'}
+          for component, expected in installed_tests.items():
+              results = ET.parse(evidence / f'{component}-consumer-results.xml').getroot()
+              cases = list(results.iter('testcase'))
+              assert len(cases) == 1 and cases[0].attrib['name'] == expected, component
+              assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+
           commands = json.loads((production / 'compile_commands.json').read_text())
           for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
+                         'flexUI/src/textedit.cpp', 'flex/modules/render/stb_sprintf.cpp',
                          'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp'):
               matches = [entry for entry in commands if entry['file'].endswith(suffix)]
               assert len(matches) == 1, suffix
               assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
 
           binaries = {name: production / 'bin' / name for name in tests}
+          binaries['installed_sdk'] = workspace / 'build/flexui-installed-PluginSDK/flexui_installed_sdk_consumer'
+          binaries['installed_services'] = workspace / 'build/flexui-installed-Services/flexui_installed_services_consumer'
           binaries['installed_host'] = workspace / 'build/flexui-installed-host/bin/flexui_plugin_consumer'
           core_pattern = re.compile(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', re.I)
           providers = {}
@@ -654,7 +666,8 @@ jobs:
                       assert path.is_relative_to(prefix), (component, key, path)
                       if key not in ('FlexUIConfig', 'Includes'):
                           assert value in command_text, (component, key, 'missing from actual link command')
-          result = {'production_ctest_passed': len(tests), 'tinytest': totals, 'core_runtime_providers': providers,
+          result = {'production_ctest_passed': len(tests), 'installed_ctest_passed': len(installed_tests),
+                    'tinytest': totals, 'core_runtime_providers': providers,
                     'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
           (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
           print(json.dumps(result, indent=2))

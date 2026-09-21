@@ -9,6 +9,7 @@
 #include <flexUI/renderer.h>
 #include <flexUI/text_layout.h>
 #include <flexUI/text_util.h>
+#include <flexUI/textedit.h>
 #include <flexUI/widget.h>
 #include <flexUI/widgets/input_widget.h>
 #include <flexUI/widgets/textarea_widget.h>
@@ -623,6 +624,76 @@ void require_textarea_navigation_clears_selection_before_text_input() {
 }
 
 } // namespace
+
+spec("TextEdit horizontal navigation preserves UTF-8 scalar boundaries") {
+  it("moves across two-byte and four-byte scalars in both directions") {
+    std::string text = "aé🙂b";
+    TextEdit edit;
+    edit.init(&text, 10.0f, 20.0f);
+
+    for (const int expected : {1, 3, 7, 8, 8}) {
+      check(edit.key(static_cast<int>(KeyCode::Right)));
+      check(edit.cursor() == expected);
+      check_false(edit.has_selection());
+    }
+    for (const int expected : {7, 3, 1, 0, 0}) {
+      check(edit.key(static_cast<int>(KeyCode::Left)));
+      check(edit.cursor() == expected);
+      check_false(edit.has_selection());
+    }
+    check(text == "aé🙂b");
+  }
+
+  it("keeps the shift anchor when reversing and collapses selections once") {
+    std::string text = "aé🙂b";
+    TextEdit edit;
+    edit.init(&text, 10.0f, 20.0f);
+    edit.set_cursor(1);
+
+    check(edit.key(static_cast<int>(KeyCode::Right), true));
+    check(edit.selected_text() == "é");
+    check(edit.key(static_cast<int>(KeyCode::Right), true));
+    check(edit.selected_text() == "é🙂");
+    check(edit.key(static_cast<int>(KeyCode::Left), true));
+    check(edit.selected_text() == "é");
+    check(edit.key(static_cast<int>(KeyCode::Left), true));
+    check_false(edit.has_selection());
+    check(edit.cursor() == 1);
+    check(edit.key(static_cast<int>(KeyCode::Left), true));
+    check(edit.selected_text() == "a");
+    check(edit.key(static_cast<int>(KeyCode::Right)));
+    check(edit.cursor() == 1);
+    check_false(edit.has_selection());
+
+    edit.set_cursor(7);
+    check(edit.key(static_cast<int>(KeyCode::Left), true));
+    check(edit.selected_text() == "🙂");
+    check(edit.key(static_cast<int>(KeyCode::Left), true));
+    check(edit.selected_text() == "é🙂");
+    check(edit.key(static_cast<int>(KeyCode::Right), true));
+    check(edit.selected_text() == "🙂");
+    check(edit.key(static_cast<int>(KeyCode::Left)));
+    check(edit.cursor() == 3);
+    check_false(edit.has_selection());
+    check(text == "aé🙂b");
+  }
+
+  it("clamps stale cursor and selection offsets after external text shortening") {
+    std::string text = "abc";
+    TextEdit edit;
+    edit.init(&text, 10.0f, 20.0f);
+    edit.set_cursor(3);
+    text = "a";
+
+    check(edit.key(static_cast<int>(KeyCode::Left), true));
+    check(edit.cursor() == 0);
+    check(edit.selected_text() == "a");
+    text.clear();
+    check(edit.key(static_cast<int>(KeyCode::Right), true));
+    check(edit.cursor() == 0);
+    check_false(edit.has_selection());
+  }
+}
 
 spec("Box exposes backend-neutral font registration") {
   it("forwards font lifecycle to the active renderer") {

@@ -14,8 +14,6 @@
 #include <variant>
 #include <cmath>
 #include <algorithm>
-// Use stb_sprintf for faster path generation (2-10x faster than standard snprintf)
-#define STB_SPRINTF_NOUNALIGNED  // Better performance on modern CPUs
 #include <stb_sprintf.h>
 
 namespace flex {

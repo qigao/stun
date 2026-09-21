@@ -62,6 +62,12 @@ spec("gCanvas input normalizer maps buttons keys and modifiers") {
         {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_REPEAT, mods, 8.0, 9.0});
     check_false(static_cast<bool>(unsupported_action));
     check(unsupported_action.error.code == flexUI::GCanvasInputErrorCode::UnsupportedAction);
+
+    const auto invalid_mods = normalizer.mouse_button(
+        {gcanvas::MOUSE_BUTTON_LEFT, gcanvas::ACTION_PRESS,
+         static_cast<gcanvas::mouse_mod>(gcanvas::MOUSE_MOD_SHIFT | 0x4000), 8.0, 9.0});
+    check_false(static_cast<bool>(invalid_mods));
+    check(invalid_mods.error.code == flexUI::GCanvasInputErrorCode::InvalidModifiers);
   }
 
   it("treats key repeat as key down and filters lock-state modifiers") {
