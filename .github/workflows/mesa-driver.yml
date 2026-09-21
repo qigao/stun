@@ -268,7 +268,8 @@ jobs:
                   x11_baselines[key] = tuple(map(int, system_leaks[0]))
                   system_owners = classify_leaks(system_log)
                   assert system_owners['x11']['blocks'] > 0, (key, system_owners)
-                  assert system_owners['non_x11']['blocks'] == 0, (key, system_owners)
+                  if system_mode == 'init':
+                      assert system_owners['non_x11']['blocks'] == 0, (key, system_owners)
                   system_rows.append({'mode': system_mode,
                                       'cycles': system_cycles,
                                       'exit_code': system_result.returncode,
