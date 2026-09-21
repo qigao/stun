@@ -40,6 +40,18 @@ jobs:
           ref: glad2
           path: .ci/glad
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pallets/jinja
+          ref: main
+          path: .ci/jinja
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pallets/markupsafe
+          ref: main
+          path: .ci/markupsafe
+          persist-credentials: false
       - name: Clone Mesa upstream development branch and record provenance
         shell: bash
         env:
@@ -53,6 +65,8 @@ jobs:
           mesa_commit="$(git -C "$RUNNER_TEMP/mesa-main" rev-parse HEAD)"
           glfw_commit="$(git -C .ci/glfw rev-parse HEAD)"
           glad_commit="$(git -C .ci/glad rev-parse HEAD)"
+          jinja_commit="$(git -C .ci/jinja rev-parse HEAD)"
+          markupsafe_commit="$(git -C .ci/markupsafe rev-parse HEAD)"
           {
             echo "Stun=$EXPECTED_HEAD"
             echo "MesaRef=main"
@@ -61,7 +75,12 @@ jobs:
             echo "GLFW=$glfw_commit"
             echo "GLADRef=glad2"
             echo "GLAD=$glad_commit"
+            echo "JinjaRef=main"
+            echo "Jinja=$jinja_commit"
+            echo "MarkupSafeRef=main"
+            echo "MarkupSafe=$markupsafe_commit"
           } | tee build/mesa-main-evidence/provenance.txt
+          echo "PYTHONPATH=$GITHUB_WORKSPACE/.ci/jinja/src:$GITHUB_WORKSPACE/.ci/markupsafe/src" >> "$GITHUB_ENV"
           {
             echo "MESA_SOURCE=$RUNNER_TEMP/mesa-main"
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-main-build"
