@@ -1,0 +1,189 @@
+name: Prepare master checkout cleanup
+
+on:
+  push:
+    branches: [feat/turboscript-desktop-runtime]
+    paths: [.github/workflows/prepare-master-checkouts.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.repository == 'qigao/stun'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Read the exact source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/qigao/stun.git
+          git fetch --no-tags --depth=2 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Prepare reviewed edits without updating any branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          def blob(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+
+          def post(endpoint, payload):
+              return json.loads(subprocess.check_output(
+                  ['gh', 'api', '--method', 'POST', endpoint, '--input', '-'],
+                  input=json.dumps(payload), text=True))
+
+          repo = 'qigao/stun'
+          publisher = '.github/workflows/prepare-master-checkouts.yml'
+          expected_parent = 'decda36395266d4b753522ca9b9ca5f663222eb6'
+          head = git('rev-parse', 'HEAD')
+          assert os.environ['GITHUB_REPOSITORY'] == repo
+          assert os.environ['GITHUB_REF'] == 'refs/heads/feat/turboscript-desktop-runtime'
+          assert head == os.environ['GITHUB_SHA']
+          assert git('rev-parse', 'HEAD^') == expected_parent
+          assert git('diff', '--name-only', 'HEAD^', 'HEAD').splitlines() == [publisher]
+          assert not git('status', '--porcelain')
+          expected = {
+              '.github/workflows/desktop-runtime.yml': ('40734cfd0ceaa504f77b79131c2c9387e55c95b0', 3),
+              '.github/workflows/unicode-runtime.yml': ('ec3093dd9811937522331b12f2da284b44819a0a', 5),
+              '.github/workflows/mesa-driver.yml': ('d7810738fc39a5be7480a8b1e25d832b395d413e', 1),
+          }
+          owners = {'qigao/salts': 'SALTS', 'qigao/salts-utils': 'SALTS_UTILS',
+                    'microsoft/vcpkg': 'VCPKG'}
+          edits = {}
+          for filename, (original_sha, checkout_count) in expected.items():
+              path = Path(filename)
+              original = path.read_bytes()
+              assert blob(original) == original_sha, filename
+              text = original.decode()
+              # Delete dependency version inputs, not Stun's own exact-head check.
+              text, removed = re.subn(r'^\s{2,6}(?:SALTS|SALTS_UTILS|VCPKG)_SHA: [0-9a-f]{40}\n',
+                                      '', text, flags=re.M)
+              assert removed == (1 if 'mesa-driver' in filename else 3), (filename, removed)
+              text, comparisons = re.subn(
+                  r'^          test "\$\(git -C .*? rev-parse HEAD\)" = "\$(?:SALTS|SALTS_UTILS|VCPKG)_SHA"\n',
+                  '', text, flags=re.M)
+              assert comparisons == checkout_count, (filename, comparisons)
+              parts = re.split(r'(?=^      - )', text, flags=re.M)
+              output = []
+              seen = 0
+              for part in parts:
+                  match = re.search(r'^          repository: (\S+)\s*$', part, re.M)
+                  if match is None:
+                      output.append(part)
+                      continue
+                  repository = match.group(1)
+                  assert repository in owners and 'uses: actions/checkout@' in part, repository
+                  var = owners[repository]
+                  path_match = re.search(r'^          path: ([\w./-]+)\s*$', part, re.M)
+                  assert path_match, part
+                  checkout = path_match.group(1)
+                  part, replaced = re.subn(r'^          ref: \$\{\{ env\.' + var + r'_SHA \}\}$',
+                                           '          ref: master', part, flags=re.M)
+                  assert replaced == 1, (filename, repository)
+                  part = part.replace('Checkout pinned ', 'Checkout master ')
+                  output.append(part.rstrip() + '\n')
+                  output.append(
+                      f'      - name: Record {repository} master checkout\n'
+                      '        shell: bash\n'
+                      '        run: |\n'
+                      '          set -euo pipefail\n'
+                      f'          printf "{var}_COMMIT=%s\\n" "$(git -C {checkout} rev-parse HEAD)" >> "$GITHUB_ENV"\n'
+                      f'          git -C {checkout} log -1 --format="Dependency={repository} Ref=master Commit=%H"\n')
+                  seen += 1
+              assert seen == checkout_count, (filename, seen)
+              text = ''.join(output)
+              for var in owners.values():
+                  text = text.replace(var + '_SHA', var + '_COMMIT')
+              text = re.sub(r'^env:\n\s*\n(?=jobs:)', '', text, flags=re.M)
+              if 'desktop-runtime' in filename:
+                  old = "          assert provenance['vcpkg'] == os.environ['VCPKG_COMMIT'], provenance\n"
+                  assert text.count(old) == 1
+                  text = text.replace(old,
+                      '          # Each job follows master independently; preserve the producer observation.\n'
+                      "          assert re.fullmatch(r'[0-9a-f]{40}', provenance['vcpkg'])\n")
+                  # This verifier otherwise has no re import.
+                  needle = '          import json\n          import os\n'
+                  assert text.count(needle) >= 1
+                  text = text.replace(needle, '          import json\n          import os\n          import re\n', 1)
+              text = text.replace('Restore pinned third-party packages', 'Restore packages for observed master commits')
+              text = text.replace('real pinned SaltsUtils scanner', 'real SaltsUtils master scanner')
+              assert not re.search(r'\b(?:SALTS|SALTS_UTILS|VCPKG)_SHA\b', text)
+              path.write_text(text)
+              edits[filename] = {'before': original_sha, 'after': blob(path.read_bytes()),
+                                 'master_checkouts': seen}
+
+          # Audit every direct external checkout in the five active workflows.
+          audit = []
+          for path in sorted(Path('.github/workflows').glob('*.yml')):
+              if str(path) == publisher:
+                  continue
+              text = path.read_text()
+              for part in re.split(r'(?=^      - )', text, flags=re.M):
+                  repository = re.search(r'^          repository: (\S+)\s*$', part, re.M)
+                  if repository is None:
+                      continue
+                  ref = re.search(r'^          ref: (.+)$', part, re.M)
+                  assert ref and ref.group(1).strip() == 'master', (str(path), repository.group(1))
+                  audit.append({'workflow': str(path), 'repository': repository.group(1), 'ref': 'master'})
+          assert len(audit) == 19, len(audit)
+
+          # Syntax-check every literal Bash block and its embedded Python bodies.
+          shell_blocks = 0
+          python_blocks = 0
+          for filename in expected:
+              lines = Path(filename).read_text().splitlines()
+              i = 0
+              while i < len(lines):
+                  if lines[i] != '        run: |':
+                      i += 1
+                      continue
+                  i += 1
+                  script = []
+                  while i < len(lines) and (not lines[i].strip() or lines[i].startswith('          ')):
+                      script.append(lines[i][10:] if lines[i].strip() else '')
+                      i += 1
+                  command = '\n'.join(script) + '\n'
+                  command = re.sub(r'\$\{\{.*?\}\}', 'ci_expression', command)
+                  subprocess.run(['bash', '-n'], input=command, text=True, check=True)
+                  shell_blocks += 1
+                  for embedded in re.findall(r"python3 - <<'PY'\n(.*?)\nPY(?:\n|$)", command, re.S):
+                      compile(embedded, filename, 'exec')
+                      python_blocks += 1
+          Path(publisher).unlink()
+          subprocess.run(['git', 'diff', '--check'], check=True)
+          assert set(git('diff', '--name-only').splitlines()) == set(expected) | {publisher}
+          print(subprocess.check_output(['git', 'diff', '--', *expected], text=True))
+          changes = []
+          for filename in expected:
+              data = Path(filename).read_bytes()
+              result = post(f'repos/{repo}/git/blobs', {
+                  'encoding': 'base64', 'content': base64.b64encode(data).decode()})
+              assert result['sha'] == edits[filename]['after']
+              changes.append({'path': filename, 'mode': '100644', 'type': 'blob', 'sha': result['sha']})
+          changes.append({'path': publisher, 'mode': '100644', 'type': 'blob', 'sha': None})
+          tree = post(f'repos/{repo}/git/trees', {'base_tree': git('rev-parse', 'HEAD^{tree}'), 'tree': changes})
+          commit = post(f'repos/{repo}/git/commits', {
+              'message': 'ci: follow master in all direct dependency checkouts\n\nReplace the remaining nine Salts/SaltsUtils/vcpkg SHA checkouts across Unicode, installed-package, desktop and Mesa CI. Record observed commits before cache use. Preserve own-source/artifact integrity and runtime assertions; independently checked master branches are not required to have the same vcpkg commit. Remove the one-shot preparer.\n\nThis does not yet migrate Mesa release-source, package-manager port refs, vendored code or build-tool/action versions. Those remain explicit open policy items under #31/#34.',
+              'tree': tree['sha'], 'parents': [head]})
+          result = {'commit': commit['sha'], 'parent': head, 'files': edits,
+                    'direct_master_checkouts': audit, 'bash_blocks_checked': shell_blocks,
+                    'python_blocks_checked': python_blocks, 'ref_updated': False}
+          print('PREPARED_RESULT=' + json.dumps(result, sort_keys=True))
+          PY
