@@ -19,13 +19,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: master
           path: .ci/salts
 
       - name: Verify canonical dependency surface
         shell: bash
         run: |
           set -euo pipefail
+          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
           grep -Fq '#include <salts/disruptor.h>' flexUI/modules/controller/application_completion.cpp
           grep -Fq 'PRIVATE Salts::Concurrency)' flexUI/modules/controller/CMakeLists.txt
           if grep -Fq '#include <turbo/disruptor.h>' flexUI/modules/controller/application_completion.cpp; then
@@ -50,13 +51,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: master
           path: .ci/salts
 
       - name: Verify FlexUI main runtime has one Core provider
         shell: bash
         run: |
           set -euo pipefail
+          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
           for file in             flex/modules/runtime/CMakeLists.txt             flex/modules/dsl/CMakeLists.txt             flexUI/CMakeLists.txt             tools/md/CMakeLists.txt             flexUI/examples/desktop_editor/CMakeLists.txt             flexUI/tests/CMakeLists.txt; do
             if grep -n 'TurboUtils::Core' "$file"; then
               echo "legacy Core provider remains in $file" >&2
@@ -124,20 +126,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: master
           path: .ci/salts
 
       - name: Checkout canonical SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 62576265ac66b0000127a04936f108a3dbb3f004
+          ref: master
           path: .ci/salts-utils
 
       - name: Verify source and install package ownership
         shell: bash
         run: |
           set -euo pipefail
+          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
+          git -C .ci/salts-utils log -1 --format='SaltsUtilsRef=master SaltsUtils=%H'
           grep -Fq '#include <toml.h>' flexUI/modules/plugin_host/plugin_manifest.cpp
           grep -Fq 'Salts::TomlParser' flexUI/modules/plugin_host/CMakeLists.txt
           grep -Fq 'Salts::Core' flexUI/modules/plugin_host/CMakeLists.txt
@@ -185,24 +189,26 @@ jobs:
       - name: Checkout Stun
         uses: actions/checkout@v4
 
-      - name: Checkout pinned Salts
+      - name: Checkout Salts master
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: master
           path: .ci/salts
 
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout SaltsUtils master
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 62576265ac66b0000127a04936f108a3dbb3f004
+          ref: master
           path: .ci/salts-utils
 
       - name: Verify Unicode ownership contract
         shell: bash
         run: |
           set -euo pipefail
+          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
+          git -C .ci/salts-utils log -1 --format='SaltsUtilsRef=master SaltsUtils=%H'
           grep -Fq 'Salts::Unicode' flexUI/CMakeLists.txt
           grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
           grep -Fq 'utf8_next_scalar' flexUI/include/flexUI/text_util.h
