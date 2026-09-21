@@ -114,6 +114,7 @@ jobs:
             | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool \
             xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
             libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
             vulkan-validationlayers xvfb xauth fonts-dejavu-core
@@ -215,14 +216,12 @@ jobs:
             package_build="$PACKAGE_BUILD_ROOT/$package"
             ports="$PORTS_ROOT/$package"
             extra=()
-            install_component=()
             if [ "$package" = salts-utils ]; then
               extra=(
                 -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
                 "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
                 "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
               )
-              install_component=(--component Unspecified)
             fi
             cmake -S "$source" -B "$package_build" -G Ninja \
               -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
@@ -239,10 +238,11 @@ jobs:
               -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
               "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
             cmake --build "$package_build" --parallel 2 2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
-            cmake --install "$package_build" "${install_component[@]}" \
+            cmake --install "$package_build" \
               2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
             cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
             cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
+            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
       - name: Quarantine dependency source and build trees
