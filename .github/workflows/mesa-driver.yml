@@ -55,7 +55,6 @@ jobs:
             echo "MESA_ROOT=$RUNNER_TEMP/stun-mesa-sdk"
             echo "MESA_SOURCE=$RUNNER_TEMP/mesa-$MESA_VERSION"
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
-            echo "LIBGL_DRIVERS_PATH=$RUNNER_TEMP/stun-mesa-sdk/lib/dri"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
           printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg=%s\n' \
@@ -114,9 +113,15 @@ jobs:
             2>&1 | tee "$EVIDENCE_DIR/mesa-configure.log"
           meson compile -C "$MESA_BUILD" -j 2 2>&1 | tee "$EVIDENCE_DIR/mesa-baseline-build.log"
           meson install -C "$MESA_BUILD" 2>&1 | tee "$EVIDENCE_DIR/mesa-baseline-install.log"
-          driver=$(readlink -f "$MESA_ROOT/lib/dri/swrast_dri.so")
-          test "$driver" = "$MESA_ROOT/lib/libgallium-$MESA_VERSION.so"
-          echo "MESA_EXPECTED_DRIVER=$driver" >> "$GITHUB_ENV"
+          driver="$MESA_ROOT/lib/libgallium-$MESA_VERSION.so"
+          test -f "$driver"
+          glx=$(readlink -e "$MESA_ROOT/lib/libGLX_mesa.so.0")
+          test "$glx" = "$MESA_ROOT/lib/libGLX_mesa.so.0.0.0"
+          {
+            echo "MESA_EXPECTED_DRIVER=$driver"
+            echo "MESA_EXPECTED_GLX=$glx"
+          } >> "$GITHUB_ENV"
+          readelf -d "$glx" > "$EVIDENCE_DIR/baseline-glx-dynamic.txt"
           sha256sum "$driver" > "$EVIDENCE_DIR/baseline-driver.sha256"
           readelf -d "$driver" > "$EVIDENCE_DIR/baseline-driver-dynamic.txt"
           cmake -S cmake/ci/mesa -B build/mesa-control -G Ninja \
@@ -142,6 +147,13 @@ jobs:
           patch = Path('cmake/ci/mesa/module-cleanup.patch').resolve(strict=True)
           binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
           rows = []
+          glx = Path(os.environ['MESA_EXPECTED_GLX']).resolve(strict=True)
+          control_env = os.environ.copy()
+          # Only the control selects this installed GLX/Gallium pair. Build tools
+          # and Xvfb keep their normal environment; no source-tree driver is used.
+          control_env['LD_LIBRARY_PATH'] = str(driver.parent)
+          control_env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
+          control_env.pop('LIBGL_DRIVERS_PATH', None)
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
           for variant in ('baseline', 'patched'):
               if variant == 'patched':
@@ -157,7 +169,7 @@ jobs:
               for mode in readbacks:
                   for cycles in (1, 4):
                       result = subprocess.run([str(binary), mode, str(cycles)], text=True,
-                                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+                                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180, env=control_env)
                       log = result.stdout
                       name = f'{variant}-{mode}-{cycles}.log'
                       (evidence / name).write_text(log)
@@ -177,6 +189,8 @@ jobs:
                           assert result.returncode != 0 and row['leaks'], 'Baseline must reproduce the lost caches'
               (evidence / f'{variant}-driver.sha256').write_text(
                   hashlib.sha256(driver.read_bytes()).hexdigest() + '  ' + str(driver) + '\n')
+              (evidence / f'{variant}-glx.sha256').write_text(
+                  hashlib.sha256(glx.read_bytes()).hexdigest() + '  ' + str(glx) + '\n')
           assert len(rows) == 20
           assert (evidence / 'baseline-driver.sha256').read_text() != (evidence / 'patched-driver.sha256').read_text()
           (evidence / 'control-binary.sha256').write_text(binary_hash + '\n')

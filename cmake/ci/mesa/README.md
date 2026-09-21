@@ -1,6 +1,6 @@
 # Mesa module-lifetime regression (#31)
 
-This fixture fixes and tests the Linux Mesa cache leaks isolated in Stun issue #31. It is not part of the Stun ABI or gCanvas implementation.
+This fixture contains a Linux-only downstream repair and regression control for the Mesa cache leaks isolated in Stun issue #31. It is not part of the Stun ABI or gCanvas implementation.
 
 ## Source and patch scope
 
@@ -14,23 +14,27 @@ This patch is scoped to Linux ELF/GCC-compatible compilers. It does not establis
 
 `mesa-driver.yml` builds the real upstream driver and uses the same ASan/UBSan-instrumented GLFW/GLAD-only executable before and after patching/rebuilding those two source files. Mesa itself uses its normal debugoptimized configuration, as the original distribution driver was not sanitizer-instrumented; the control's allocator interception and exit leak checks remain enabled throughout. No claim is made of sanitizer coverage of every Mesa instruction.
 
-Each variant executes ten independent processes: init, window, draw, overlapping shared contexts, and two rendering threads, with one and four full GLFW lifecycles each. Pixel counts, completed teardown, actual loaded driver paths, and complete module unload are mandatory. The baseline must reproduce drawing leaks; all patched processes must exit zero without leak/UB/memory errors. The overlapping-context case draws after each sibling is destroyed. Rendering workers join before their windows are destroyed. No check can pass by keeping Mesa mapped.
+Mesa 25.2.8's GLX vendor library links directly to its installed versioned Gallium library. This profile installs `lib/libGLX_mesa.so.0.0.0` and `lib/libgallium-25.2.8.so`, not `dri/swrast_dri.so`. The workflow selects the installed GLX/Gallium pair with a clean, control-process-only `LD_LIBRARY_PATH` and explicit GLVND vendor selection. It checks both full loaded paths and their complete unload through `/proc/self/maps`; neither a system library nor a source/build-tree substitute is accepted. It does not fabricate legacy DRI symlinks. Build tools and Xvfb retain their normal environment.
 
-The workflow retains raw exits, maps, pixel counts, source/patch/compiler provenance, build options, and binary hashes. It packages the installed patched driver only after the comparison succeeds. The full Stun desktop gate remains separate and is not made green by these driver-only tests.
+Each variant executes ten independent processes: init, window, draw, overlapping shared contexts, and two rendering threads, with one and four full GLFW lifecycles each. Pixel counts, completed teardown, actual loaded provider paths, and complete module unload are mandatory. The baseline must reproduce drawing leaks; all patched processes must exit zero without leak/UB/memory errors. The overlapping-context case draws after each sibling is destroyed. Rendering workers join before their windows are destroyed. No check can pass by keeping Mesa mapped.
 
-Local entry point after installing the pinned dependencies:
+The workflow retains raw exits, maps, pixel counts, source/patch/compiler provenance, build options, and both provider binary hashes. It packages the installed patched driver only after the comparison succeeds. The full Stun desktop gate remains separate and is not made green by these driver-only tests.
+
+Local entry point after installing the pinned dependencies and building/installing Mesa:
 
 ```sh
 cmake -S cmake/ci/mesa -B build/mesa-control -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
   -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_INSTALLED_DIR="$CONTROL_PORTS"
 cmake --build build/mesa-control
+unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS LIBGL_DRIVERS_PATH
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
-export LIBGL_DRIVERS_PATH="$MESA_ROOT/lib/dri"
-export MESA_EXPECTED_DRIVER="$(readlink -f "$LIBGL_DRIVERS_PATH/swrast_dri.so")"
+export MESA_EXPECTED_DRIVER="$MESA_ROOT/lib/libgallium-25.2.8.so"
+export MESA_EXPECTED_GLX="$(readlink -e "$MESA_ROOT/lib/libGLX_mesa.so.0")"
 export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
 export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-xvfb-run -a build/mesa-control/mesa_driver_control overlap 4
+xvfb-run -a env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+  build/mesa-control/mesa_driver_control overlap 4
 ```
 
-The explicit driver path follows Mesa's local-install model: https://docs.mesa3d.org/install.html. Tests fail on a missing or unintended driver instead of selecting another provider.
+The explicit selection follows Mesa's local-install model: https://docs.mesa3d.org/install.html and GLVND's documented vendor override: https://github.com/NVIDIA/libglvnd/issues/177. Tests fail on a missing or unintended provider instead of selecting another one.

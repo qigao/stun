@@ -111,18 +111,30 @@ void draw_and_verify() {
 }
 void verify_module(bool loaded) {
     const char* expected = std::getenv("MESA_EXPECTED_DRIVER");
-    require(expected && *expected, "MESA_EXPECTED_DRIVER must name the installed driver");
+    const char* expected_glx = std::getenv("MESA_EXPECTED_GLX");
+    require(expected && *expected && expected_glx && *expected_glx,
+            "Both installed Mesa provider paths are required");
     std::ifstream maps("/proc/self/maps");
     require(maps.is_open(), "Cannot inspect driver mappings");
     bool found = false;
+    bool found_glx = false;
     for (std::string line; std::getline(maps, line);) {
-        if (line.find("libgallium") == std::string::npos) continue;
-        require(line.find(expected) != std::string::npos, "Unexpected Mesa provider loaded");
-        found = true;
+        const auto path_start = line.find('/');
+        if (path_start == std::string::npos) continue;
+        const std::string mapped_path = line.substr(path_start);
+        if (line.find("libgallium") != std::string::npos) {
+            require(mapped_path == expected, "Unexpected Gallium provider loaded");
+            found = true;
+        } else if (line.find("libGLX_mesa") != std::string::npos) {
+            require(mapped_path == expected_glx, "Unexpected GLX provider loaded");
+            found_glx = true;
+        } else {
+            continue;
+        }
         std::printf("driver-map=%s\n", line.c_str());
     }
     require(!maps.bad(), "Cannot finish reading driver mappings");
-    require(found == loaded, "Driver load/unload contract failed");
+    require(found == loaded && found_glx == loaded, "GLX/Gallium load/unload contract failed");
     std::printf("driver-module=%s\n", loaded ? "loaded" : "unloaded");
 }
 void exercise(Session& session, const std::string& mode) {
