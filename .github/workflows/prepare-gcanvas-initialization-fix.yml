@@ -1,0 +1,119 @@
+name: Prepare gCanvas initialization fix
+
+on:
+  push:
+    branches: [refactor/flexui-salts-unicode]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.repository == 'qigao/stun'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Prepare exact-blob patch without moving any ref
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gcanvas-fix"
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          def blob_sha(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+
+          def post(endpoint, payload):
+              output = subprocess.check_output(
+                  ['gh', 'api', '--method', 'POST', endpoint, '--input', '-'],
+                  input=json.dumps(payload), text=True)
+              return json.loads(output)
+
+          repository = 'qigao/stun'
+          publisher = '.github/workflows/prepare-gcanvas-initialization-fix.yml'
+          expected_parent = '616e4e853d337a96be6a593b5d3ab8cfefa1955a'
+          head = git('rev-parse', 'HEAD')
+          assert os.environ['GITHUB_REPOSITORY'] == repository
+          assert os.environ['GITHUB_REF'] == 'refs/heads/refactor/flexui-salts-unicode'
+          assert head == os.environ['GITHUB_SHA']
+          assert git('rev-parse', 'HEAD^') == expected_parent
+          assert git('diff', '--name-only', 'HEAD^', 'HEAD').splitlines() == [publisher]
+          assert not git('status', '--porcelain')
+          expected = {
+              'vendor/gCanvas/src/backends/opengl/context_impl_opengl.cpp': '640667bce0d128064c70a46106cdde0601456a5b',
+              'vendor/gCanvas/src/backends/vulkan/context_impl_vulkan.cpp': '2085b04dbaa213a2e25c3d674d1e6091693b7f63',
+          }
+          changes = []
+          evidence = {}
+          for filename, original_sha in expected.items():
+              path = Path(filename)
+              original = path.read_bytes()
+              assert blob_sha(original) == original_sha, filename
+              text = original.decode('utf-8')
+              backend = 'Opengl' if '/opengl/' in filename else 'Vulkan'
+              replacements = [
+                  (f'    inline ContextImpl{backend}* getImpl(Context* ptr)',
+                   f'    static inline ContextImpl{backend}* getImpl(Context* ptr)'),
+                  (f'    inline const ContextImpl{backend}* getImpl(const Context* ptr)',
+                   f'    static inline const ContextImpl{backend}* getImpl(const Context* ptr)'),
+              ]
+              if backend == 'Opengl':
+                  replacements.extend([
+                      ('sizeof(rect_vertices) * rect_vertices.size()',
+                       'sizeof(rect_vertices[0]) * rect_vertices.size()'),
+                      ('sizeof(rect_indices) * rect_indices.size()',
+                       'sizeof(rect_indices[0]) * rect_indices.size()'),
+                  ])
+              for old, new in replacements:
+                  assert text.count(old) == 1, (filename, old)
+                  text = text.replace(old, new, 1)
+              data = text.encode('utf-8')
+              path.write_bytes(data)
+              evidence[filename] = {'before': original_sha, 'after': blob_sha(data),
+                                    'replaced_lines': len(replacements)}
+          Path(publisher).unlink()
+          subprocess.run(['git', 'diff', '--check'], check=True)
+          assert set(git('diff', '--name-only').splitlines()) == set(expected) | {publisher}
+          output_dir = Path(os.environ['RUNNER_TEMP']) / 'gcanvas-fix'
+          patch = subprocess.check_output(['git', 'diff', '--', *expected], text=True)
+          (output_dir / 'source.patch').write_text(patch)
+          print(patch)
+          for filename in expected:
+              data = Path(filename).read_bytes()
+              blob = post(f'repos/{repository}/git/blobs', {
+                  'encoding': 'base64', 'content': base64.b64encode(data).decode('ascii')})
+              assert blob['sha'] == evidence[filename]['after']
+              changes.append({'path': filename, 'mode': '100644', 'type': 'blob', 'sha': blob['sha']})
+          changes.append({'path': publisher, 'mode': '100644', 'type': 'blob', 'sha': None})
+          tree = post(f'repos/{repository}/git/trees', {
+              'base_tree': git('rev-parse', 'HEAD^{tree}'), 'tree': changes})
+          commit = post(f'repos/{repository}/git/commits', {
+              'message': 'fix(gcanvas): bound buffer uploads and isolate backend casts\n\nUse element byte sizes for OpenGL vertex and index uploads. Give both backend-local getImpl overloads internal linkage so a combined OpenGL/Vulkan binary cannot coalesce incompatible casts. Preserve the six existing desktop regressions and strict sanitizer/validation settings. Remove the one-shot patch preparer.\n\nFixes the ASan buffer overread and UBSan cross-backend downcast observed in run 35565361288 at 616e4e8. Tracks #31.',
+              'tree': tree['sha'], 'parents': [head]})
+          record = {'base': head, 'source_base': expected_parent, 'commit': commit['sha'],
+                    'tree': tree['sha'], 'files': evidence, 'removed_publisher': publisher,
+                    'ref_updated': False, 'validation': 'Source patch prepared only; runtime CI is still required.'}
+          (output_dir / 'commit.json').write_text(json.dumps(record, indent=2) + '\n')
+          print(json.dumps(record, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gcanvas-initialization-patch-${{ github.sha }}
+          path: ${{ runner.temp }}/gcanvas-fix
+          if-no-files-found: error
