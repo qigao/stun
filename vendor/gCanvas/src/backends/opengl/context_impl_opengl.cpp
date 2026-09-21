@@ -144,11 +144,11 @@ namespace gcanvas
 
     /* ------------------------ DOWNCAST ------------------------ */
 
-    inline ContextImplOpengl* getImpl(Context* ptr)
+    static inline ContextImplOpengl* getImpl(Context* ptr)
     {
         return (ContextImplOpengl*)ptr;
     }
-    inline const ContextImplOpengl* getImpl(const Context* ptr)
+    static inline const ContextImplOpengl* getImpl(const Context* ptr)
     {
         return (const ContextImplOpengl*)ptr;
     }
@@ -2034,12 +2034,12 @@ namespace gcanvas
         glBindVertexArray(vertex_array_object);
 
         glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertices) * rect_vertices.size(),
+        glBufferData(GL_ARRAY_BUFFER, sizeof(rect_vertices[0]) * rect_vertices.size(),
                      rect_vertices.data(),
                      GL_STATIC_DRAW);
 
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(rect_indices) * rect_indices.size(),
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(rect_indices[0]) * rect_indices.size(),
                      rect_indices.data(), GL_STATIC_DRAW);
 
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vec2), (void*)0);
