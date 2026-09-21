@@ -1380,3 +1380,34 @@ spec("FlexUI desktop application owns close and shutdown state") {
     check(built.application->state() == flexUI::DesktopApplicationState::Ready);
   }
 }
+
+
+spec("FlexUI desktop content preflight runs before stylesheet admission") {
+  it("reports an unknown tag before an invalid stylesheet") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Schema\">\n  <unknown id=\"root\"/>\n</ui>")
+           .stylesheet("#root { widht: 90px; }");
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+    check_equal(built.error.ui_error.line, 2);
+    check_equal(built.error.ui_error.column, 4);
+    check_true(built.error.css_diagnostics.empty());
+  }
+
+  it("reports forbidden leaf children before an invalid stylesheet") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Schema\"><input id=\"root\"><label id=\"child\"/></input></ui>")
+           .stylesheet("#root { widht: 90px; }");
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidNode);
+    check_true(built.error.css_diagnostics.empty());
+  }
+}

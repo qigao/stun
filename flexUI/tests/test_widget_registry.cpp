@@ -163,3 +163,109 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
     check_equal(box.get_by_id("plain")->text(), "Plain");
   }
 }
+
+
+spec("FlexUI registry preflight rejects invalid content before construction") {
+  it("classifies built-in leaves text widgets composites and structural containers") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    for (const auto *tag : {"input", "image", "slider", "progress", "select", "spinner", "divider"}) {
+      const auto *schema = registry.descriptor(tag);
+      check_not_null(schema);
+      if (schema) {
+        check(schema->kind == flexUI::UiNodeKind::Widget);
+        check(schema->content == flexUI::UiContentModel::Empty);
+      }
+    }
+    for (const auto *tag : {"label", "textarea", "badge", "checkbox", "radio", "switch", "markdown"}) {
+      const auto *schema = registry.descriptor(tag);
+      check_not_null(schema);
+      if (schema) check(schema->content == flexUI::UiContentModel::Text);
+    }
+    check(registry.descriptor("button")->content == flexUI::UiContentModel::TextAndChildren);
+    check(registry.descriptor("div")->kind == flexUI::UiNodeKind::Container);
+    check(registry.descriptor("div")->content == flexUI::UiContentModel::TextAndChildren);
+    check_null(registry.descriptor("unregistered"));
+  }
+
+  it("rejects an unknown later sibling before calling an earlier factory") {
+    int calls = 0;
+    flexUI::WidgetRegistry registry;
+    check_false(static_cast<bool>(registry.register_element("root")));
+    check_false(static_cast<bool>(registry.register_widget("probe", [&](const flexUI::UiNodeDefinition &) {
+      ++calls;
+      return std::make_unique<flexUI::ButtonWidget>();
+    }, flexUI::UiContentModel::Empty)));
+    auto parsed = flexUI::compile_ui_xml("<ui name=\"Order\"><root id=\"root\"><probe id=\"first\"/><missing id=\"last\"/></root></ui>");
+    check(static_cast<bool>(parsed));
+    if (!parsed) return;
+    flexUI::Box box(nullptr);
+    for (const bool compiled : {false, true}) {
+      const auto result = compiled
+          ? flexUI::UiDocumentInstantiator::instantiate(box, *parsed.program, registry)
+          : flexUI::UiDocumentInstantiator::instantiate(box, parsed.program->definition(), registry);
+      check_false(static_cast<bool>(result));
+      check(result.error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+      check_equal(calls, 0);
+      check_null(box.root());
+      check_null(box.get_by_id("first"));
+      check_null(box.get_by_id("last"));
+    }
+  }
+
+  it("rejects leaf children and text before allocating a typed tree") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    for (const auto *xml : {
+        "<ui name=\"Leaf\"><input id=\"root\"><label id=\"child\"/></input></ui>",
+        "<ui name=\"Leaf\"><image id=\"root\" text=\"\"/></ui>",
+        "<ui name=\"Leaf\"><label id=\"root\"><button id=\"child\"/></label></ui>"}) {
+      const auto parsed = flexUI::compile_ui_xml(xml);
+      check(static_cast<bool>(parsed));
+      if (!parsed) continue;
+      flexUI::Box box(nullptr);
+      const auto result = flexUI::UiDocumentInstantiator::instantiate(box, *parsed.program, registry);
+      check_false(static_cast<bool>(result));
+      check_null(box.root());
+      check_null(box.get_by_id("root"));
+    }
+  }
+
+  it("reports exact node positions and bounded traversal errors") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto parsed = flexUI::compile_ui_xml("<ui name=\"Position\">\n  <div id=\"root\">\n    <unknown id=\"bad\"/>\n  </div>\n</ui>");
+    check(static_cast<bool>(parsed));
+    if (!parsed) return;
+    auto error = registry.validate(*parsed.program);
+    check(error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+    check_equal(error.line, 3);
+    check_equal(error.column, 6);
+    flexUI::UiDocumentLimits limits;
+    limits.max_nodes = 1;
+    error = registry.validate(*parsed.program, limits);
+    check(error.code == flexUI::UiDocumentErrorCode::NodeLimitExceeded);
+    limits.max_nodes = 2;
+    limits.max_depth = 1;
+    error = registry.validate(*parsed.program, limits);
+    check(error.code == flexUI::UiDocumentErrorCode::DepthLimitExceeded);
+  }
+
+  it("checks direct factory content and preserves duplicate descriptors") {
+    int calls = 0;
+    flexUI::WidgetRegistry registry;
+    const auto factory = [&](const flexUI::UiNodeDefinition &) {
+      ++calls;
+      return std::make_unique<flexUI::ButtonWidget>();
+    };
+    check_false(static_cast<bool>(registry.register_widget("leaf", factory, flexUI::UiContentModel::Empty)));
+    check(registry.register_widget("leaf", factory, flexUI::UiContentModel::Text).code == flexUI::WidgetRegistryErrorCode::DuplicateTag);
+    check(registry.descriptor("leaf")->content == flexUI::UiContentModel::Empty);
+    flexUI::UiNodeDefinition invalid;
+    invalid.tag = "leaf";
+    invalid.id = "subject";
+    invalid.properties["text"] = std::string("invalid");
+    const auto result = registry.create(invalid);
+    check(result.error.code == flexUI::WidgetRegistryErrorCode::InvalidContent);
+    check_equal(calls, 0);
+    check(registry.register_element("bad", static_cast<flexUI::UiContentModel>(99)).code == flexUI::WidgetRegistryErrorCode::InvalidDescriptor);
+    check_false(registry.contains("bad"));
+  }
+}
