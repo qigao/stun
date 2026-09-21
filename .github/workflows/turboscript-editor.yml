@@ -15,7 +15,6 @@ concurrency:
 
 env:
   SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
-  SALTS_UTILS_SHA: 3d93bdc680297b76440ab16a2e19531f7810b9a6
   TURBOSCRIPT_SHA: eaca75c797acd595c4d72c7fea2ab76b04a950c6
   VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
@@ -44,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
+          ref: master
           path: .ci/sources/salts-utils
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -75,11 +74,13 @@ jobs:
           cp .github/workflows/turboscript-editor.yml build/editor-evidence/workflow.yml
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
-          test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          # Follow master; record the checked-out commit without a version gate.
+          salts_utils_commit="$(git -C .ci/sources/salts-utils rev-parse HEAD)"
+          echo "SALTS_UTILS_COMMIT=$salts_utils_commit" >> "$GITHUB_ENV"
           test "$(git -C .ci/sources/turboscript rev-parse HEAD)" = "$TURBOSCRIPT_SHA"
           test "$(git -C .ci/vcpkg rev-parse HEAD)" = "$VCPKG_SHA"
-          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nTurboScript=%s\nvcpkg=%s\n' \
-            "$EXPECTED_HEAD" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$TURBOSCRIPT_SHA" "$VCPKG_SHA" \
+          printf 'Stun=%s\nSalts=%s\nSaltsUtilsRef=master\nSaltsUtils=%s\nTurboScript=%s\nvcpkg=%s\n' \
+            "$EXPECTED_HEAD" "$SALTS_SHA" "$salts_utils_commit" "$TURBOSCRIPT_SHA" "$VCPKG_SHA" \
             > build/editor-evidence/provenance.txt
           {
             echo "SALTS_ROOT=$RUNNER_TEMP/stun-editor-sdk"
@@ -97,7 +98,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/stun-editor-cache
-          key: stun-editor-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-v1
+          key: stun-editor-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_COMMIT }}-v1
       - name: Prepare build and graphics prerequisites
         shell: bash
         run: |
