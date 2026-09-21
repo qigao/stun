@@ -71,6 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/editor-evidence
+          cp .github/workflows/turboscript-editor.yml build/editor-evidence/workflow.yml
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
           test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
@@ -162,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(re2c --version)" = 're2c 4.6'
-          { cmake --version; gcc --version; g++ --version; re2c --version; } >> "$EVIDENCE_DIR/provenance.txt"
+          { cmake --version; ninja --version; gcc --version; g++ --version; re2c --version; go version; } >> "$EVIDENCE_DIR/provenance.txt"
           cmake -S .ci/sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
             -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2
@@ -171,9 +172,9 @@ jobs:
             package_build="$PACKAGE_BUILD_ROOT/$package"
             ports="$PORTS_ROOT/$package"
             prefix="$SALTS_ROOT"
-            extra=()
+            extra=("-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports")
             if [ "$package" = salts-utils ]; then
-              extra=(-DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
+              extra+=(-DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
                 "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
                 "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon")
             elif [ "$package" = turboscript ]; then
@@ -185,7 +186,7 @@ jobs:
               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_INSTALL_LIBDIR=lib \
               "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DVCPKG_INSTALLED_DIR=$ports" \
               "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
               "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
               "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
@@ -227,7 +228,7 @@ jobs:
             -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
             "-DVCPKG_INSTALLED_DIR=$ports" \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$TURBOSCRIPT_ROOT;$ports/x64-linux/debug" \
-            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT}" \
             "-DTURBOSCRIPT_ROOT=$TURBOSCRIPT_ROOT" \
             "-DCMAKE_BUILD_RPATH=$SALTS_ROOT/lib;$TURBOSCRIPT_ROOT/lib" \
             "-DCMAKE_INSTALL_RPATH=$SALTS_ROOT/lib;$TURBOSCRIPT_ROOT/lib" \
@@ -358,7 +359,8 @@ jobs:
           assert 'not found' not in loader
           forbidden = ('.ci/sources', 'stun-editor-producers', 'editor-source-quarantine', 'editor-build-quarantine', 'editor-consumer-quarantine')
           assert not any(p in dynamic + loader for p in forbidden)
-          receipt = {'source_head': os.environ['GITHUB_SHA'], 'ctest': 4, 'installed_smoke': 1,
+          receipt = {'source_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                     'workflow_commit': os.environ['GITHUB_SHA'], 'ctest': 4, 'installed_smoke': 1,
                      'tinytest': totals, 'processes': records,
                      'scope': 'Linux OpenGL software-rendered real JIT editor; explicit installed SDKs, not a relocatable standalone distribution or Windows/macOS claim.'}
           (e / 'editor-evidence.json').write_text(json.dumps(receipt, indent=2) + '\n')
