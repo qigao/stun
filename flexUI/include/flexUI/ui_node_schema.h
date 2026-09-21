@@ -2,6 +2,9 @@
 
 #include <flexUI/ui_document.h>
 
+#include <initializer_list>
+#include <utility>
+
 namespace flexUI {
 
 /// Kinds currently instantiated by WidgetRegistry. Components and standalone
