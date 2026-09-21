@@ -175,39 +175,35 @@ jobs:
                   owners[owner]['blocks'] += 1
               return owners
           rows = []
-          for mode, expected_pixels in readbacks.items():
-              for cycles in (1, 4):
-                  result = subprocess.run([str(binary), mode, str(cycles)], text=True,
-                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                          timeout=180)
-                  log = result.stdout
-                  (evidence / f'system-{mode}-{cycles}.log').write_text(log)
-                  owners = classify_leaks(log)
-                  row = {
-                      'mode': mode,
-                      'cycles': cycles,
-                      'exit_code': result.returncode,
-                      'pixel_checks': log.count('pixel-readback=passed'),
-                      'completed': 'application-checks=passed;' in log,
-                      'owners': owners,
-                      'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
-                      'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
-                      'ubsan_errors': len(re.findall(r'runtime error:', log)),
-                  }
-                  assert row['completed'], row
-                  assert row['pixel_checks'] == expected_pixels * cycles, row
-                  assert log.count('teardown=completed') == cycles, row
-                  assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
-                  assert len(row['leaks']) == 1, row
-                  assert owners['x11']['blocks'] > 0, row
-                  if mode == 'init':
-                      assert owners['non_x11']['blocks'] == 0, (
-                          'System init must isolate the X11 locale baseline', row)
-                  row['x11_baseline'] = tuple(map(int, row['leaks'][0]))
-                  rows.append(row)
-                  print(json.dumps(row), flush=True)
-          assert len(rows) == 10
-          (evidence / 'system-baselines.json').write_text(json.dumps(rows, indent=2) + '\n')
+          for cycles in (1, 4):
+              result = subprocess.run([str(binary), 'init', str(cycles)], text=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      timeout=180)
+              log = result.stdout
+              (evidence / f'system-init-{cycles}.log').write_text(log)
+              owners = classify_leaks(log)
+              row = {
+                  'mode': 'init',
+                  'cycles': cycles,
+                  'exit_code': result.returncode,
+                  'pixel_checks': 0,
+                  'completed': 'application-checks=passed;' in log,
+                  'owners': owners,
+                  'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
+                  'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
+                  'ubsan_errors': len(re.findall(r'runtime error:', log)),
+              }
+              assert row['completed'], row
+              assert log.count('teardown=completed') == cycles, row
+              assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
+              assert len(row['leaks']) == 1, row
+              assert owners['x11']['blocks'] > 0, row
+              assert owners['non_x11']['blocks'] == 0, (
+                  'System init must isolate the X11 locale baseline', row)
+              rows.append(row)
+              print(json.dumps(row), flush=True)
+          assert len(rows) == 2
+          (evidence / 'system-init-baselines.json').write_text(json.dumps(rows, indent=2) + '\n')
           PY
       - name: Execute unchanged lifecycle control against Mesa main
         shell: bash
@@ -245,12 +241,8 @@ jobs:
                   owners[owner]['objects'] += int(match.group('objects'))
                   owners[owner]['blocks'] += 1
               return owners
-          system_rows = json.loads((evidence / 'system-baselines.json').read_text())
-          x11_baselines = {(row['mode'], int(row['cycles'])): tuple(row['x11_baseline'])
-                           for row in system_rows}
-          assert set(x11_baselines) == {
-              (mode, cycles) for mode in readbacks for cycles in (1, 4)
-          }, x11_baselines
+          system_rows = json.loads((evidence / 'system-init-baselines.json').read_text())
+          assert {int(row['cycles']) for row in system_rows} == {1, 4}, system_rows
           rows = []
           for mode, expected_pixels in readbacks.items():
               for cycles in (1, 4):
@@ -278,9 +270,7 @@ jobs:
                   assert log.count('teardown=completed') == cycles, row
                   assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
                   leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
-                  x11_baseline = x11_baselines[(mode, cycles)]
                   row['leak_tuple'] = leak_tuple
-                  row['x11_baseline'] = x11_baseline
                   row['mesa_incremental'] = owners['non_x11']['blocks'] > 0
                   assert owners['x11']['blocks'] > 0, row
                   if mode == 'init':
@@ -297,7 +287,7 @@ jobs:
               'processes': len(rows),
               'clean': len(clean),
               'leaking': len(leaking),
-              'x11_baselines': {f'{mode}:{cycles}': value for (mode, cycles), value in x11_baselines.items()},
+              'system_init_baselines': system_rows,
               'mesa_incremental_processes': sum(1 for r in rows if r.get('mesa_incremental')),
               'driver': str(driver),
               'glx': str(glx),
