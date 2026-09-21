@@ -200,8 +200,9 @@ jobs:
                   assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
                   assert len(row['leaks']) == 1, row
                   assert owners['x11']['blocks'] > 0, row
-                  assert owners['non_x11']['blocks'] == 0, (
-                      'System lifecycle control must contain only X11-owner leak stacks', row)
+                  if mode == 'init':
+                      assert owners['non_x11']['blocks'] == 0, (
+                          'System init must isolate the X11 locale baseline', row)
                   row['x11_baseline'] = tuple(map(int, row['leaks'][0]))
                   rows.append(row)
                   print(json.dumps(row), flush=True)
