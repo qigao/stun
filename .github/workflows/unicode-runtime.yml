@@ -229,7 +229,8 @@ jobs:
           printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
             "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$VCPKG_COMMIT" | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool
           python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" \
             cmake==3.31.6
           printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
@@ -286,19 +287,11 @@ jobs:
               "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
             cmake --build "$package_build" --parallel 2 \
               2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
-            install_component=()
-            if [ "$package" = salts-utils ]; then
-              install_component=(--component Unspecified)
-            fi
-            cmake --install "$package_build" "${install_component[@]}" \
+            cmake --install "$package_build" \
               2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
             cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
             cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
-            manifest=install_manifest.txt
-            if [ "$package" = salts-utils ]; then
-              manifest=install_manifest_Unspecified.txt
-            fi
-            cp "$package_build/$manifest" "$EVIDENCE_DIR/$package-install-manifest.txt"
+            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
 
