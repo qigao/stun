@@ -30,9 +30,15 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          repository: microsoft/vcpkg
+          repository: glfw/glfw
           ref: master
-          path: .ci/vcpkg
+          path: .ci/glfw
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Dav1dde/glad
+          ref: glad2
+          path: .ci/glad
           persist-credentials: false
       - name: Clone Mesa upstream development branch and record provenance
         shell: bash
@@ -45,13 +51,16 @@ jobs:
           chmod 700 "$RUNNER_TEMP/mesa-main-xdg"
           git clone --depth=1 --branch main https://gitlab.freedesktop.org/mesa/mesa.git "$RUNNER_TEMP/mesa-main"
           mesa_commit="$(git -C "$RUNNER_TEMP/mesa-main" rev-parse HEAD)"
-          vcpkg_commit="$(git -C .ci/vcpkg rev-parse HEAD)"
+          glfw_commit="$(git -C .ci/glfw rev-parse HEAD)"
+          glad_commit="$(git -C .ci/glad rev-parse HEAD)"
           {
             echo "Stun=$EXPECTED_HEAD"
             echo "MesaRef=main"
             echo "Mesa=$mesa_commit"
-            echo "vcpkgRef=master"
-            echo "vcpkg=$vcpkg_commit"
+            echo "GLFWRef=master"
+            echo "GLFW=$glfw_commit"
+            echo "GLADRef=glad2"
+            echo "GLAD=$glad_commit"
           } | tee build/mesa-main-evidence/provenance.txt
           {
             echo "MESA_SOURCE=$RUNNER_TEMP/mesa-main"
@@ -77,10 +86,10 @@ jobs:
           "$RUNNER_TEMP/mesa-main-tools/bin/pip" install meson Mako PyYAML packaging
           echo "$RUNNER_TEMP/mesa-main-tools/bin" >> "$GITHUB_PATH"
           dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
-          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
-            "--x-install-root=$RUNNER_TEMP/mesa-main-control-ports" glfw3 glad \
-            2>&1 | tee "$EVIDENCE_DIR/control-dependencies.log"
+          {
+            echo "GLFWSource=$GITHUB_WORKSPACE/.ci/glfw"
+            echo "GLADSource=$GITHUB_WORKSPACE/.ci/glad"
+          } > "$EVIDENCE_DIR/control-dependencies.log"
       - name: Configure and build unmodified Mesa main
         shell: bash
         run: |
@@ -115,9 +124,8 @@ jobs:
           sha256sum "$driver" "$glx" > "$EVIDENCE_DIR/provider-sha256.txt"
           cmake -S cmake/ci/mesa -B build/mesa-main-control -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
-            "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-main-control-ports"
+            "-DSTUN_MESA_GLFW_SOURCE=$GITHUB_WORKSPACE/.ci/glfw" \
+            "-DSTUN_MESA_GLAD_SOURCE=$GITHUB_WORKSPACE/.ci/glad"
           cmake --build build/mesa-main-control --parallel 2 --verbose
       - name: Establish current runner GLFW/X11 init control
         shell: bash
