@@ -40,18 +40,37 @@ jobs:
           ref: glad2
           path: .ci/glad
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pallets/jinja
+          ref: main
+          path: .ci/jinja
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pallets/markupsafe
+          ref: main
+          path: .ci/markupsafe
+          persist-credentials: false
       - name: Record graphics upstream development checkouts
         shell: bash
         run: |
           set -euo pipefail
           glfw_commit="$(git -C .ci/glfw rev-parse HEAD)"
           glad_commit="$(git -C .ci/glad rev-parse HEAD)"
+          jinja_commit="$(git -C .ci/jinja rev-parse HEAD)"
+          markupsafe_commit="$(git -C .ci/markupsafe rev-parse HEAD)"
           {
             echo "GLFW_COMMIT=$glfw_commit"
             echo "GLAD_COMMIT=$glad_commit"
+            echo "JINJA_COMMIT=$jinja_commit"
+            echo "MARKUPSAFE_COMMIT=$markupsafe_commit"
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/.ci/jinja/src:$GITHUB_WORKSPACE/.ci/markupsafe/src"
           } >> "$GITHUB_ENV"
           git -C .ci/glfw log -1 --format="Dependency=glfw/glfw Ref=master Commit=%H"
           git -C .ci/glad log -1 --format="Dependency=Dav1dde/glad Ref=glad2 Commit=%H"
+          git -C .ci/jinja log -1 --format="Dependency=pallets/jinja Ref=main Commit=%H"
+          git -C .ci/markupsafe log -1 --format="Dependency=pallets/markupsafe Ref=main Commit=%H"
       - name: Prepare explicit build tools and driver paths
         shell: bash
         env:
@@ -68,8 +87,8 @@ jobs:
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
-          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\n' \
-            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" \
+          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\nJinjaRef=main\nJinja=%s\nMarkupSafeRef=main\nMarkupSafe=%s\n' \
+            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" "$JINJA_COMMIT" "$MARKUPSAFE_COMMIT" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
