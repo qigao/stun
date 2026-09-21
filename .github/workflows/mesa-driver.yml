@@ -178,6 +178,27 @@ jobs:
           binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
           rows = []
           glx = Path(os.environ['MESA_EXPECTED_GLX']).resolve(strict=True)
+          system_env = os.environ.copy()
+          for key in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LSAN_OPTIONS',
+                      'LIBGL_DRIVERS_PATH', '__GLX_VENDOR_LIBRARY_NAME'):
+              system_env.pop(key, None)
+          system_result = subprocess.run(
+              [str(binary), 'init', '1'], text=True,
+              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              timeout=180, env=system_env)
+          system_log = system_result.stdout
+          (evidence / 'system-init-1.log').write_text(system_log)
+          system_leaks = re.findall(
+              r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)',
+              system_log)
+          assert 'application-checks=passed;' in system_log
+          assert 'runtime error:' not in system_log and 'ERROR: AddressSanitizer:' not in system_log
+          assert len(system_leaks) == 1, system_leaks
+          x11_baseline = tuple(map(int, system_leaks[0]))
+          (evidence / 'system-init.json').write_text(
+              json.dumps({'exit_code': system_result.returncode,
+                          'leaks': system_leaks,
+                          'x11_baseline': x11_baseline}, indent=2) + '\n')
           control_env = os.environ.copy()
           # Only the control selects this installed GLX/Gallium pair. Build tools
           # and Xvfb keep their normal environment; no source-tree driver is used.
@@ -213,10 +234,17 @@ jobs:
                       assert row['completed'] and row['pixel_checks'] == readbacks[mode] * cycles, row
                       assert log.count('teardown=completed') == cycles, row
                       assert 'runtime error:' not in log and 'ERROR: AddressSanitizer:' not in log, row
-                      if variant == 'patched' or mode == 'init':
-                          assert result.returncode == 0 and not row['leaks'], row
+                      leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
+                      row['leak_tuple'] = leak_tuple
+                      row['mesa_incremental'] = leak_tuple != x11_baseline
+                      assert result.returncode != 0 if row['leaks'] else result.returncode == 0
+                      if mode == 'init':
+                          assert leak_tuple == x11_baseline, (row, x11_baseline)
+                      if variant == 'patched':
+                          assert leak_tuple == x11_baseline, (row, x11_baseline)
                       elif mode in ('draw', 'overlap', 'threads'):
-                          assert result.returncode != 0 and row['leaks'], 'Baseline must reproduce the lost caches'
+                          assert leak_tuple[0] > x11_baseline[0] and leak_tuple[1] > x11_baseline[1], (
+                              'Baseline must reproduce Mesa-specific lost caches', row, x11_baseline)
               (evidence / f'{variant}-driver.sha256').write_text(
                   hashlib.sha256(driver.read_bytes()).hexdigest() + '  ' + str(driver) + '\n')
               (evidence / f'{variant}-glx.sha256').write_text(
@@ -224,7 +252,7 @@ jobs:
           assert len(rows) == 20
           assert (evidence / 'baseline-driver.sha256').read_text() != (evidence / 'patched-driver.sha256').read_text()
           (evidence / 'control-binary.sha256').write_text(binary_hash + '\n')
-          print('Unchanged control binary; baseline leaks reproduced; all ten patched processes passed.')
+          print('Unchanged control binary; X11 baseline isolated; Mesa baseline deltas reproduced; patched processes add no Mesa leaks.')
           PY
           cp "$MESA_BUILD/compile_commands.json" "$EVIDENCE_DIR/mesa-compile-commands.json"
           cp "$MESA_BUILD/meson-info/intro-buildoptions.json" "$EVIDENCE_DIR/mesa-build-options.json"
