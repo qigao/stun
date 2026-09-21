@@ -13,9 +13,6 @@ jobs:
   mesa-allocation-sites:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      DEBUGINFOD_URLS: https://debuginfod.ubuntu.com
-      DEBUGINFOD_TIMEOUT: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,14 +29,31 @@ jobs:
           printf 'Stun=%s\nControlHead=1d1bc23dd396d619159208b569ad6c83206c2b4f\nControlRun=35568486976\n' \
             "$EXPECTED_HEAD" > build/driver-symbols/provenance.txt
           sudo apt-get update
-          sudo apt-get install -y debuginfod elfutils \
+          sudo apt-get install -y ubuntu-dbgsym-keyring \
             mesa-libgallium=25.2.8-0ubuntu0.24.04.2
           library=/usr/lib/x86_64-linux-gnu/libgallium-25.2.8-0ubuntu0.24.04.2.so
           test -f "$library"
+          printf 'e37486422ecafdad74fb05bbcdcfc35300241a5f46e72b63ca442d4e0c0cca8b  %s\n' \
+            "$library" | sha256sum --check
           dpkg-query -W mesa-libgallium >> build/driver-symbols/provenance.txt
           readelf -n "$library" > build/driver-symbols/elf-notes.txt
           sha256sum "$library" > build/driver-symbols/binary.sha256
-          debug=$(debuginfod-find debuginfo "$library")
+          objdump -d --start-address=0x568b80 --stop-address=0x569180 "$library" \
+            > build/driver-symbols/window-allocation-assembly.txt
+          objdump -d --start-address=0xe1c800 --stop-address=0xe1ca00 "$library" \
+            > build/driver-symbols/draw-allocation-assembly.txt
+          cat <<'SOURCES' | sudo tee /etc/apt/sources.list.d/stun-debug.sources
+          Types: deb
+          URIs: http://ddebs.ubuntu.com/
+          Suites: noble noble-updates
+          Components: main
+          Signed-By: /usr/share/keyrings/ubuntu-dbgsym-keyring.gpg
+          SOURCES
+          sudo apt-get update 2>&1 | tee build/driver-symbols/debug-index.log
+          apt-cache policy mesa-libgallium-dbgsym | tee build/driver-symbols/debug-package-policy.txt
+          sudo apt-get install -y mesa-libgallium-dbgsym=25.2.8-0ubuntu0.24.04.2 \
+            2>&1 | tee build/driver-symbols/debug-package-install.log
+          debug=/usr/lib/debug/.build-id/6c/cf17f6a28dda1c4c6e147c8d7503b974a501ba.debug
           test -s "$debug"
           readelf -n "$debug" > build/driver-symbols/debug-notes.txt
           sha256sum "$debug" > build/driver-symbols/debug.sha256
@@ -55,7 +69,7 @@ jobs:
           root = Path('build/driver-symbols')
           build_ids = [re.search(r'Build ID:\s*(\w+)', (root / name).read_text()).group(1)
                        for name in ('elf-notes.txt', 'debug-notes.txt')]
-          assert build_ids[0] == build_ids[1], build_ids
+          assert build_ids == ['6ccf17f6a28dda1c4c6e147c8d7503b974a501ba'] * 2, build_ids
           sites = (root / 'allocation-sites.txt').read_text()
           assert '??' not in sites, 'Exact debug information did not resolve all allocation PCs'
           print('Matched Build-ID:', build_ids[0])
