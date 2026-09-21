@@ -136,13 +136,8 @@ jobs:
     env:
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_ROOT: ${{ github.workspace }}/.ci/install-vcpkg
-      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}/stun-vcpkg-cache,readwrite
       VCPKG_MAX_CONCURRENCY: 2
-      SALTS_ROOT: ${{ runner.temp }}/stun-unicode-sdk
-      PACKAGE_BUILD_ROOT: ${{ runner.temp }}/stun-unicode-package-build
-      EXTERNAL_PORTS_ROOT: ${{ runner.temp }}/stun-unicode-external-ports
       EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
-      LD_LIBRARY_PATH: ${{ runner.temp }}/stun-unicode-sdk/lib
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
@@ -182,6 +177,18 @@ jobs:
         with:
           go-version: 1.24.x
           cache: false
+
+      - name: Define isolated paths on the runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'VCPKG_BINARY_SOURCES=clear;files,%s/stun-vcpkg-cache,readwrite\n' "$RUNNER_TEMP"
+            printf 'SALTS_ROOT=%s/stun-unicode-sdk\n' "$RUNNER_TEMP"
+            printf 'PACKAGE_BUILD_ROOT=%s/stun-unicode-package-build\n' "$RUNNER_TEMP"
+            printf 'EXTERNAL_PORTS_ROOT=%s/stun-unicode-external-ports\n' "$RUNNER_TEMP"
+            printf 'LD_LIBRARY_PATH=%s/stun-unicode-sdk/lib\n' "$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
 
       - name: Cache pinned third-party packages
         uses: actions/cache@v4
