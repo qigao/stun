@@ -3,7 +3,7 @@
 #include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/render_command.h>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cmath>
 #include <variant>
@@ -62,7 +62,7 @@ suite("TextEdit flexUI adapter") {
     harness.editor->SetSelection({0, 1}, {1, 2});
 
     check(harness.editor->HasSelection());
-    check_string_eq(harness.editor->GetSelectedText(), "lpha\nbe");
+    check_equal(harness.editor->GetSelectedText(), "lpha\nbe");
     check(harness.editor->GetSelectionStart() == TextEditor::Coordinates(0, 1));
     check(harness.editor->GetSelectionEnd() == TextEditor::Coordinates(1, 2));
   }
@@ -74,7 +74,7 @@ suite("TextEdit flexUI adapter") {
 
     check(editor.GetSelectionStart() == TextEditor::Coordinates(0, 1));
     check(editor.GetSelectionEnd() == TextEditor::Coordinates(0, 4));
-    check_string_eq(editor.GetSelectedText(), "\xE4\xB8\xAD");
+    check_equal(editor.GetSelectedText(), "\xE4\xB8\xAD");
   }
 
   it("reports a themed caret rectangle from flexUI layout metrics") {
@@ -89,8 +89,8 @@ suite("TextEdit flexUI adapter") {
 
     check(x > 12.0f);
     check(y >= 38.0f);
-    check_float_eq(width, 2.0f, 0.001f);
-    check_float_eq(height, 30.0f, 0.001f);
+    check_within(width, 2.0f, 0.001f);
+    check_within(height, 30.0f, 0.001f);
   }
 
   it("measures intrinsic size from text font line height and padding") {
@@ -103,7 +103,7 @@ suite("TextEdit flexUI adapter") {
 
     check(measured);
     check(width >= 200.0f);
-    check_float_eq(height, 76.0f, 0.001f);
+    check_within(height, 76.0f, 0.001f);
   }
 
   it("emits selection and caret rectangles through render commands") {
@@ -128,7 +128,7 @@ suite("TextEdit flexUI adapter") {
                                          40.0f / 255.0f, 1.0f});
       }
     }
-    check_size_ge(rect_count, 3);
+    check_greater_equal(rect_count, size_t{3});
     check(found_selection);
     check(found_caret);
   }

@@ -192,7 +192,8 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Cache pinned third-party packages
-        uses: actions/cache@v4
+        id: vcpkg_cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
           key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
@@ -467,6 +468,13 @@ jobs:
             freetype stb box2d nlohmann-json pugixml lexbor \
             tree-sitter tree-sitter-c catch2 pkgconf zstd \
             2>&1 | tee "$EVIDENCE_DIR/flexui-ports-install.log"
+
+      - name: Save the complete dependency cache before production validation
+        if: steps.vcpkg_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-vcpkg-cache
+          key: ${{ steps.vcpkg_cache.outputs.cache-primary-key }}
 
       - name: Build and test the production FlexUI targets
         shell: bash
