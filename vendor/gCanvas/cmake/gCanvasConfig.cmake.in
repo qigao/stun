@@ -1,6 +1,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+find_dependency(ZLIB MODULE)
 find_dependency(Freetype)
 @GCANVAS_CONFIG_FIND_PLUTOSVG@
 @GCANVAS_CONFIG_FIND_GLFW@
