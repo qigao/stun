@@ -1,11 +1,6 @@
 name: Mesa driver lifecycle
 
 on:
-  pull_request:
-    paths: ['cmake/ci/mesa/**', '.github/workflows/mesa-driver.yml']
-  push:
-    branches: [refactor/flexui-salts-unicode]
-    paths: ['cmake/ci/mesa/**', '.github/workflows/mesa-driver.yml']
   workflow_dispatch:
   workflow_call:
 
@@ -13,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: stun-mesa-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: stun-mesa-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -204,12 +199,18 @@ jobs:
           tar -C "$MESA_ROOT" -cJf "$EVIDENCE_DIR/mesa-sdk.tar.xz" .
           sha256sum "$EVIDENCE_DIR/mesa-sdk.tar.xz" > "$EVIDENCE_DIR/mesa-sdk.sha256"
           git diff --exit-code
+      - name: Collect available configure diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$MESA_BUILD/meson-logs/meson-log.txt" ]; then
+            cp "$MESA_BUILD/meson-logs/meson-log.txt" "$EVIDENCE_DIR/meson-log.txt"
+          fi
       - name: Preserve exact-head evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
-          path: |
-            build/mesa-evidence
-            ${{ runner.temp }}/mesa-build/meson-logs/meson-log.txt
+          path: build/mesa-evidence
           if-no-files-found: error
