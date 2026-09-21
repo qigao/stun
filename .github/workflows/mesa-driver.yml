@@ -14,7 +14,6 @@ concurrency:
 env:
   MESA_VERSION: 25.2.8
   MESA_ARCHIVE_SHA256: 097842f3e49d996868b38688db87b006f7d4541e93ce86d2f341d8b3e7be7c93
-  VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:fast_unwind_on_malloc=0:malloc_context_size=64
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   LIBGL_ALWAYS_SOFTWARE: '1'
@@ -32,9 +31,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
+          ref: master
           path: .ci/vcpkg
           persist-credentials: false
+      - name: Record microsoft/vcpkg master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "VCPKG_COMMIT=%s\n" "$(git -C .ci/vcpkg rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/vcpkg log -1 --format="Dependency=microsoft/vcpkg Ref=master Commit=%H"
       - name: Prepare explicit build tools and driver paths
         shell: bash
         env:
@@ -42,7 +47,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git -C .ci/vcpkg rev-parse HEAD)" = "$VCPKG_SHA"
           mkdir -p build/mesa-evidence "$RUNNER_TEMP/mesa-xdg"
           chmod 700 "$RUNNER_TEMP/mesa-xdg"
           {
@@ -53,10 +57,11 @@ jobs:
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
           printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg=%s\n' \
-            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$VCPKG_SHA" \
+            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$VCPKG_COMMIT" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
+            autoconf autoconf-archive automake libtool \
             libdrm-dev libexpat1-dev libelf-dev zlib1g-dev libzstd-dev \
             xorg-dev libwayland-dev libxkbcommon-dev libglvnd-dev libx11-xcb-dev \
             libxcb-glx0-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev \

@@ -15,10 +15,6 @@ concurrency:
   group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
-env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
-
 jobs:
   unicode-runtime:
     name: Unicode source runtime ASan and UBSan
@@ -31,22 +27,32 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout pinned Salts
+      - name: Checkout master Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ${{ env.SALTS_SHA }}
+          ref: master
           path: .ci/salts
           persist-credentials: false
-
-      - name: Checkout pinned SaltsUtils
+      - name: Record qigao/salts master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "SALTS_COMMIT=%s\n" "$(git -C .ci/salts rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/salts log -1 --format="Dependency=qigao/salts Ref=master Commit=%H"
+      - name: Checkout master SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
+          ref: master
           path: .ci/salts-utils
           persist-credentials: false
-
+      - name: Record qigao/salts-utils master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "SALTS_UTILS_COMMIT=%s\n" "$(git -C .ci/salts-utils rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/salts-utils log -1 --format="Dependency=qigao/salts-utils Ref=master Commit=%H"
       - name: Record source provenance
         shell: bash
         env:
@@ -54,9 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          test "$(git -C .ci/salts rev-parse HEAD)" = "$SALTS_SHA"
-          test "$(git -C .ci/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA"
+          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT"
           cc --version
           c++ --version
 
@@ -113,7 +117,7 @@ jobs:
             | tee build/unicode-runtime/test.log
           {
             echo '### Unicode runtime validation'
-            echo 'Executed the real pinned SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
+            echo 'Executed the real SaltsUtils master scanner and FlexUI text utility tests with ASan/UBSan.'
             echo 'Scope: source-level runtime; installed-package and full-GUI integration are separate gates.'
             echo '```text'
             cat build/unicode-runtime/test.log
@@ -134,7 +138,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_ROOT: ${{ github.workspace }}/.ci/install-vcpkg
       VCPKG_MAX_CONCURRENCY: 2
       EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
@@ -147,31 +150,46 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout pinned Salts
+      - name: Checkout master Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ${{ env.SALTS_SHA }}
+          ref: master
           path: .ci/install-sources/salts
           persist-credentials: false
-
-      - name: Checkout pinned SaltsUtils
+      - name: Record qigao/salts master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "SALTS_COMMIT=%s\n" "$(git -C .ci/install-sources/salts rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/install-sources/salts log -1 --format="Dependency=qigao/salts Ref=master Commit=%H"
+      - name: Checkout master SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
+          ref: master
           path: .ci/install-sources/salts-utils
           persist-credentials: false
-
-      - name: Checkout pinned vcpkg
+      - name: Record qigao/salts-utils master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "SALTS_UTILS_COMMIT=%s\n" "$(git -C .ci/install-sources/salts-utils rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/install-sources/salts-utils log -1 --format="Dependency=qigao/salts-utils Ref=master Commit=%H"
+      - name: Checkout master vcpkg
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
+          ref: master
           path: .ci/install-vcpkg
           fetch-depth: 0
           persist-credentials: false
-
+      - name: Record microsoft/vcpkg master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "VCPKG_COMMIT=%s\n" "$(git -C .ci/install-vcpkg rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/install-vcpkg log -1 --format="Dependency=microsoft/vcpkg Ref=master Commit=%H"
       - name: Set up BoringSSL build prerequisite
         uses: actions/setup-go@v5
         with:
@@ -196,9 +214,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
-          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_COMMIT }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-flexui-v1
           restore-keys: |
-            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_COMMIT }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}
 
       - name: Prepare isolated tools and evidence
         shell: bash
@@ -208,13 +226,11 @@ jobs:
           set -euo pipefail
           mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$EXTERNAL_PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          test "$(git -C .ci/install-sources/salts rev-parse HEAD)" = "$SALTS_SHA"
-          test "$(git -C .ci/install-sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
           printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
-            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" | tee "$EVIDENCE_DIR/provenance.txt"
+            "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$VCPKG_COMMIT" | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool
           python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" \
             cmake==3.31.6
           printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
@@ -271,19 +287,11 @@ jobs:
               "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
             cmake --build "$package_build" --parallel 2 \
               2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
-            install_component=()
-            if [ "$package" = salts-utils ]; then
-              install_component=(--component Unspecified)
-            fi
-            cmake --install "$package_build" "${install_component[@]}" \
+            cmake --install "$package_build" \
               2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
             cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
             cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
-            manifest=install_manifest.txt
-            if [ "$package" = salts-utils ]; then
-              manifest=install_manifest_Unspecified.txt
-            fi
-            cp "$package_build/$manifest" "$EVIDENCE_DIR/$package-install-manifest.txt"
+            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
 
@@ -485,6 +493,7 @@ jobs:
           ports="$EXTERNAL_PORTS_ROOT/flexui"
           tests=(
             test_text_util_unicode test_render_semantics test_widget_contracts
+            test_ui_content_models test_ui_xml test_ui_document test_widget_registry
             test_textedit_flexui test_plugin_abi test_service_registry
             test_plugin_host test_plugin_manifest test_desktop_application
             test_gcanvas_input test_gcanvas_application_input

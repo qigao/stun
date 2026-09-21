@@ -14,9 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
-  VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
   VCPKG_MAX_CONCURRENCY: 2
   ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
@@ -36,28 +33,46 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Checkout pinned Salts
+      - name: Checkout master Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ${{ env.SALTS_SHA }}
+          ref: master
           path: .ci/sources/salts
           persist-credentials: false
-      - name: Checkout pinned SaltsUtils
+      - name: Record qigao/salts master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "SALTS_COMMIT=%s\n" "$(git -C .ci/sources/salts rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/sources/salts log -1 --format="Dependency=qigao/salts Ref=master Commit=%H"
+      - name: Checkout master SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
+          ref: master
           path: .ci/sources/salts-utils
           persist-credentials: false
-      - name: Checkout pinned vcpkg
+      - name: Record qigao/salts-utils master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "SALTS_UTILS_COMMIT=%s\n" "$(git -C .ci/sources/salts-utils rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/sources/salts-utils log -1 --format="Dependency=qigao/salts-utils Ref=master Commit=%H"
+      - name: Checkout master vcpkg
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
+          ref: master
           path: .ci/vcpkg
           fetch-depth: 0
           persist-credentials: false
+      - name: Record microsoft/vcpkg master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf "VCPKG_COMMIT=%s\n" "$(git -C .ci/vcpkg rev-parse HEAD)" >> "$GITHUB_ENV"
+          git -C .ci/vcpkg log -1 --format="Dependency=microsoft/vcpkg Ref=master Commit=%H"
       - name: Set up BoringSSL build prerequisite
         uses: actions/setup-go@v5
         with:
@@ -78,14 +93,14 @@ jobs:
             echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/stun-vcpkg-cache,readwrite"
             echo "LD_LIBRARY_PATH=$RUNNER_TEMP/stun-desktop-sdk/lib"
           } >> "$GITHUB_ENV"
-      - name: Restore pinned third-party packages
+      - name: Restore packages for observed master commits
         id: ports_cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
-          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_COMMIT }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-desktop-v1
           restore-keys: |
-            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_COMMIT }}-${{ env.SALTS_COMMIT }}-${{ env.SALTS_UTILS_COMMIT }}-flexui-v1
       - name: Prepare tools and record exact provenance
         shell: bash
         env:
@@ -94,14 +109,12 @@ jobs:
           set -euo pipefail
           mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
-          test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
           printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
-            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" \
+            "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$VCPKG_COMMIT" \
             | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool \
             xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
             libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
             vulkan-validationlayers xvfb xauth fonts-dejavu-core
@@ -124,6 +137,7 @@ jobs:
           import hashlib
           import json
           import os
+          import re
           from pathlib import Path
           import shutil
           import tarfile
@@ -133,7 +147,8 @@ jobs:
           evidence = Path(os.environ['EVIDENCE_DIR'])
           provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
           assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
-          assert provenance['vcpkg'] == os.environ['VCPKG_SHA'], provenance
+          # Each job follows master independently; preserve the producer observation.
+          assert re.fullmatch(r'[0-9a-f]{40}', provenance['vcpkg'])
           patch = Path('cmake/ci/mesa/module-cleanup.patch')
           assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
           rows = json.loads((source / 'results.json').read_text())
@@ -201,14 +216,12 @@ jobs:
             package_build="$PACKAGE_BUILD_ROOT/$package"
             ports="$PORTS_ROOT/$package"
             extra=()
-            install_component=()
             if [ "$package" = salts-utils ]; then
               extra=(
                 -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
                 "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
                 "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
               )
-              install_component=(--component Unspecified)
             fi
             cmake -S "$source" -B "$package_build" -G Ninja \
               -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
@@ -225,10 +238,11 @@ jobs:
               -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
               "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
             cmake --build "$package_build" --parallel 2 2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
-            cmake --install "$package_build" "${install_component[@]}" \
+            cmake --install "$package_build" \
               2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
             cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
             cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
+            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
       - name: Quarantine dependency source and build trees

@@ -134,6 +134,12 @@ target_include_directories(test_style_engine PRIVATE ../include)
 set_target_properties(test_style_engine PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_style_engine COMMAND test_style_engine)
 
+add_executable(test_ui_content_models test_ui_content_models.cpp)
+target_include_directories(test_ui_content_models PRIVATE ../include)
+flexui_configure_tinytest(test_ui_content_models)
+set_target_properties(test_ui_content_models PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_ui_content_models COMMAND test_ui_content_models)
+
 add_executable(test_text_util_unicode test_text_util_unicode.cpp)
 target_link_libraries(test_text_util_unicode PRIVATE flexUI)
 flexui_configure_tinytest(test_text_util_unicode)
