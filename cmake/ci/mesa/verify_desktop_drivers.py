@@ -34,9 +34,9 @@ def verify(evidence: Path, mesa_root: Path, salts_root: Path, vulkan: Path) -> d
             continue  # CTest itself and its non-test subprocesses also have loader logs.
         name = Path(programs[0]).name
         initialized = Counter(Path(p).resolve(strict=True) for p in
-                              re.findall(r"calling init:\s+(\S+)", text))
+                              re.findall(r"calling init:[ \t]+(\S+)", text))
         finalized = Counter(Path(p).resolve(strict=True) for p in
-                            re.findall(r"calling fini:\s+(\S+)", text))
+                            re.findall(r"calling fini:[ \t]+(?!\[)(\S+)", text))
         mesa = {p for p in initialized if p.name.startswith(("libGLX_mesa", "libgallium"))}
         assert not mesa or mesa == set(expected_mesa.values()), (trace, mesa)
         vk = {p for p in initialized if p.name.startswith("libvulkan_lvp")}
