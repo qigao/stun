@@ -1,4 +1,4 @@
-# Temporary #31 ownership probe. Remove after the driver-only evidence is recorded.
+# Temporary #31 ownership probe. Remove after the symbolized evidence is recorded.
 name: Graphics driver lifecycle diagnostic
 
 on:
@@ -10,239 +10,60 @@ permissions:
   contents: read
 
 jobs:
-  driver-lifecycle:
+  mesa-allocation-sites:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:fast_unwind_on_malloc=0:malloc_context_size=64
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-      LIBGL_ALWAYS_SOFTWARE: 1
-      GALLIUM_DRIVER: llvmpipe
+      DEBUGINFOD_URLS: https://debuginfod.ubuntu.com
+      DEBUGINFOD_TIMEOUT: 120
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
-          path: .ci/vcpkg
-          persist-credentials: false
-      - name: Prepare the same graphics stack
+      - name: Resolve exact Mesa allocation sites
         shell: bash
         env:
           EXPECTED_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git -C .ci/vcpkg rev-parse HEAD)" = "$VCPKG_SHA"
-          mkdir -p build/driver-evidence "$RUNNER_TEMP/driver-control" "$RUNNER_TEMP/driver-xdg"
-          chmod 700 "$RUNNER_TEMP/driver-xdg"
-          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/driver-xdg" >> "$GITHUB_ENV"
-          printf 'Stun=%s\nvcpkg=%s\n' "$EXPECTED_HEAD" "$VCPKG_SHA" > build/driver-evidence/provenance.txt
+          mkdir -p build/driver-symbols
+          printf 'Stun=%s\nControlHead=1d1bc23dd396d619159208b569ad6c83206c2b4f\nControlRun=35568486976\n' \
+            "$EXPECTED_HEAD" > build/driver-symbols/provenance.txt
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config xorg-dev libwayland-dev \
-            libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev mesa-vulkan-drivers \
-            mesa-utils xvfb xauth
-          dpkg-query -W > build/driver-evidence/system-packages.txt
-          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/driver-tools" cmake==3.31.6
-          echo "$RUNNER_TEMP/driver-tools/cmake/data/bin" >> "$GITHUB_PATH"
-          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
-            "--x-install-root=$RUNNER_TEMP/driver-ports" glfw3 glad \
-            2>&1 | tee build/driver-evidence/dependencies.log
-      - name: Build an upstream-only lifecycle control
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > "$RUNNER_TEMP/driver-control/CMakeLists.txt" <<'CMAKE'
-          cmake_minimum_required(VERSION 3.20)
-          project(graphics_driver_control LANGUAGES CXX)
-          find_package(glfw3 CONFIG REQUIRED)
-          find_package(glad CONFIG REQUIRED)
-          add_executable(driver_control driver_control.cpp)
-          target_link_libraries(driver_control PRIVATE glfw glad::glad)
-          target_compile_features(driver_control PRIVATE cxx_std_17)
-          target_compile_options(driver_control PRIVATE -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined)
-          target_link_options(driver_control PRIVATE -fsanitize=address,undefined)
-          CMAKE
-          cat > "$RUNNER_TEMP/driver-control/driver_control.cpp" <<'CPP'
-          #include <glad/glad.h>
-          #define GLFW_INCLUDE_NONE
-          #include <GLFW/glfw3.h>
-          #include <cstdio>
-          #include <cstring>
-          #include <stdexcept>
-
-          namespace {
-          constexpr int extent = 64;
-          void require(bool condition, const char* message) {
-              if (!condition) throw std::runtime_error(message);
-          }
-          void glfw_error(int code, const char* message) {
-              std::fprintf(stderr, "GLFW error %d: %s\n", code, message);
-          }
-          struct Session {
-              GLFWwindow* window = nullptr;
-              Session() { require(glfwInit() == GLFW_TRUE, "GLFW initialization failed"); }
-              ~Session() {
-                  if (window != nullptr) {
-                      glfwMakeContextCurrent(nullptr);
-                      glfwDestroyWindow(window);
-                  }
-                  glfwTerminate();
-              }
-              Session(const Session&) = delete;
-              Session& operator=(const Session&) = delete;
-          };
-          struct Objects {
-              GLuint vertex = 0, fragment = 0, program = 0, vao = 0;
-              ~Objects() {
-                  glUseProgram(0);
-                  glBindVertexArray(0);
-                  if (vao != 0) glDeleteVertexArrays(1, &vao);
-                  if (program != 0) glDeleteProgram(program);
-                  if (vertex != 0) glDeleteShader(vertex);
-                  if (fragment != 0) glDeleteShader(fragment);
-              }
-          };
-          void compile(GLuint shader, const char* source) {
-              require(shader != 0, "Shader allocation failed");
-              glShaderSource(shader, 1, &source, nullptr);
-              glCompileShader(shader);
-              GLint success = GL_FALSE;
-              glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-              require(success == GL_TRUE, "Shader compilation failed");
-          }
-          void draw_and_verify() {
-              require(gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) != 0,
-                      "OpenGL loader failed");
-              std::printf("renderer=%s\nversion=%s\n", glGetString(GL_RENDERER), glGetString(GL_VERSION));
-              Objects objects;
-              objects.vertex = glCreateShader(GL_VERTEX_SHADER);
-              objects.fragment = glCreateShader(GL_FRAGMENT_SHADER);
-              compile(objects.vertex,
-                  "#version 410 core\n"
-                  "const vec2 p[3]=vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3));\n"
-                  "void main(){gl_Position=vec4(p[gl_VertexID],0,1);}\n");
-              compile(objects.fragment,
-                  "#version 410 core\nout vec4 color;\n"
-                  "void main(){color=vec4(1,0,0,1);}\n");
-              objects.program = glCreateProgram();
-              require(objects.program != 0, "Program allocation failed");
-              glAttachShader(objects.program, objects.vertex);
-              glAttachShader(objects.program, objects.fragment);
-              glLinkProgram(objects.program);
-              GLint linked = GL_FALSE;
-              glGetProgramiv(objects.program, GL_LINK_STATUS, &linked);
-              require(linked == GL_TRUE, "Program link failed");
-              glGenVertexArrays(1, &objects.vao);
-              glBindVertexArray(objects.vao);
-              glUseProgram(objects.program);
-              glViewport(0, 0, extent, extent);
-              glDrawArrays(GL_TRIANGLES, 0, 3);
-              unsigned char pixel[4] = {};
-              glReadPixels(extent / 2, extent / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-              require(glGetError() == GL_NO_ERROR, "OpenGL command failed");
-              require(pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255,
-                      "Control pixel readback failed");
-              glFinish();
-              std::puts("pixel-readback=passed");
-          }
-          void record_loaded_modules() {
-              FILE* file = std::fopen("/proc/self/maps", "r");
-              require(file != nullptr, "Cannot record loaded driver addresses");
-              char line[4096];
-              std::puts("loaded-modules-before-teardown:");
-              while (std::fgets(line, sizeof(line), file) != nullptr) std::fputs(line, stdout);
-              const bool read_error = std::ferror(file) != 0;
-              const int close_result = std::fclose(file);
-              require(!read_error && close_result == 0, "Cannot finish driver address record");
-          }
-          }
-          int main(int argc, char** argv) {
-              std::setvbuf(stdout, nullptr, _IONBF, 0);
-              if (argc != 3 || (std::strcmp(argv[1], "init") != 0 &&
-                  std::strcmp(argv[1], "window") != 0 && std::strcmp(argv[1], "draw") != 0) ||
-                  (std::strcmp(argv[2], "1") != 0 && std::strcmp(argv[2], "4") != 0)) {
-                  std::fputs("usage: driver_control init|window|draw 1|4\n", stderr);
-                  return 2;
-              }
-              glfwSetErrorCallback(glfw_error);
-              const int cycles = argv[2][0] - '0';
-              try {
-                  for (int cycle = 0; cycle < cycles; ++cycle) {
-                      {
-                          Session session;
-                          std::printf("cycle=%d init=passed\n", cycle);
-                          if (std::strcmp(argv[1], "init") != 0) {
-                              glfwDefaultWindowHints();
-                              glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-                              glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-                              glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-                              glfwWindowHint(GLFW_STENCIL_BITS, 8);
-                              glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-                              session.window = glfwCreateWindow(extent, extent, "driver-control", nullptr, nullptr);
-                              require(session.window != nullptr, "Control window creation failed");
-                              glfwMakeContextCurrent(session.window);
-                              glfwSwapInterval(0);
-                              std::printf("cycle=%d window=passed\n", cycle);
-                              if (std::strcmp(argv[1], "draw") == 0) draw_and_verify();
-                          }
-                          if (cycle + 1 == cycles) record_loaded_modules();
-                      }
-                      std::printf("cycle=%d destroy-window-and-terminate=completed\n", cycle);
-                  }
-              } catch (const std::exception& error) {
-                  std::fprintf(stderr, "Control failure: %s\n", error.what());
-                  return 1;
-              }
-              std::puts("application-checks=passed; process-exit-leak-check-still-required");
-              return 0;
-          }
-          CPP
-          cmake -S "$RUNNER_TEMP/driver-control" -B "$RUNNER_TEMP/driver-control/build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
-            "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/driver-ports"
-          cmake --build "$RUNNER_TEMP/driver-control/build" --parallel 2 --verbose
-          cp "$RUNNER_TEMP/driver-control/driver_control.cpp" build/driver-evidence/
-          cp "$RUNNER_TEMP/driver-control/build/compile_commands.json" build/driver-evidence/
-          ldd "$RUNNER_TEMP/driver-control/build/driver_control" > build/driver-evidence/loader.txt
-      - name: Run all isolated controls without suppressing failures
-        shell: bash
-        run: |
-          set -euo pipefail
-          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS
-          xvfb-run -a glxinfo -B | tee build/driver-evidence/driver.txt
-          grep -q 'OpenGL renderer string: llvmpipe' build/driver-evidence/driver.txt
-          xvfb-run -a python3 - <<'PY'
-          import json
-          import os
+          sudo apt-get install -y debuginfod elfutils \
+            mesa-libgallium=25.2.8-0ubuntu0.24.04.2
+          library=/usr/lib/x86_64-linux-gnu/libgallium-25.2.8-0ubuntu0.24.04.2.so
+          test -f "$library"
+          dpkg-query -W mesa-libgallium >> build/driver-symbols/provenance.txt
+          readelf -n "$library" > build/driver-symbols/elf-notes.txt
+          sha256sum "$library" > build/driver-symbols/binary.sha256
+          debug=$(debuginfod-find debuginfo "$library")
+          test -s "$debug"
+          readelf -n "$debug" > build/driver-symbols/debug-notes.txt
+          sha256sum "$debug" > build/driver-symbols/debug.sha256
+          addr2line -a -f -C -i -e "$debug" \
+            0x568c13 0x5690e6 0x85ef32 0xf0f0f 0x83a68c 0x83a5bf 0xf4db4 \
+            0xe1c8d1 0xe1c8ad 0x82679b 0x8185f0 0x8187c9 0x7bac5e \
+            0x7bda11 0x7b8514 0x75e29f 0x7a1b7b 0x79e167 0x72da42 \
+            0x726a24 0x726ebf 0x72738c 0x862c4c 0x314ca7 \
+            | tee build/driver-symbols/allocation-sites.txt
+          python3 - <<'PY'
           from pathlib import Path
-          import subprocess
-          output = Path('build/driver-evidence')
-          binary = Path(os.environ['RUNNER_TEMP']) / 'driver-control/build/driver_control'
-          results = []
-          for mode in ('init', 'window', 'draw'):
-              for cycles in (1, 4):
-                  name = f'{mode}-{cycles}'
-                  result = subprocess.run([str(binary), mode, str(cycles)],
-                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                  (output / f'{name}.log').write_text(result.stdout)
-                  record = {'mode': mode, 'cycles': cycles, 'exit_code': result.returncode}
-                  results.append(record)
-                  print(json.dumps(record), flush=True)
-          (output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
-          assert all(r['exit_code'] == 0 for r in results), 'Driver-only lifecycle is not leak-clean; see preserved raw logs'
+          import re
+          root = Path('build/driver-symbols')
+          build_ids = [re.search(r'Build ID:\s*(\w+)', (root / name).read_text()).group(1)
+                       for name in ('elf-notes.txt', 'debug-notes.txt')]
+          assert build_ids[0] == build_ids[1], build_ids
+          sites = (root / 'allocation-sites.txt').read_text()
+          assert '??' not in sites, 'Exact debug information did not resolve all allocation PCs'
+          print('Matched Build-ID:', build_ids[0])
           PY
-      - name: Preserve all control evidence
+      - name: Preserve allocation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: graphics-driver-lifecycle-${{ github.sha }}
-          path: build/driver-evidence
+          name: mesa-allocation-sites-${{ github.sha }}
+          path: build/driver-symbols
           if-no-files-found: error
