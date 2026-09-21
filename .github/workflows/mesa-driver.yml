@@ -232,28 +232,50 @@ jobs:
           for key in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LSAN_OPTIONS',
                       'LIBGL_DRIVERS_PATH', '__GLX_VENDOR_LIBRARY_NAME'):
               system_env.pop(key, None)
+          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          leak_block_re = re.compile(
+              r'(?:Direct|Indirect) leak of (?P<bytes>\\d+) byte\\(s\\) in '
+              r'(?P<objects>\\d+) object\\(s\\) allocated from:\\n'
+              r'(?P<stack>(?:    #.*\\n)+)')
+          def classify_leaks(log):
+              owners = {'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                        'non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0}}
+              for match in leak_block_re.finditer(log):
+                  owner = 'x11' if '/glfw/src/x11_init.c:' in match.group('stack') else 'non_x11'
+                  owners[owner]['bytes'] += int(match.group('bytes'))
+                  owners[owner]['objects'] += int(match.group('objects'))
+                  owners[owner]['blocks'] += 1
+              return owners
           x11_baselines = {}
           system_rows = []
-          for system_cycles in (1, 4):
-              system_result = subprocess.run(
-                  [str(binary), 'init', str(system_cycles)], text=True,
-                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                  timeout=180, env=system_env)
-              system_log = system_result.stdout
-              (evidence / f'system-init-{system_cycles}.log').write_text(system_log)
-              system_leaks = re.findall(
-                  r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)',
-                  system_log)
-              assert 'application-checks=passed;' in system_log
-              assert system_log.count('teardown=completed') == system_cycles
-              assert 'runtime error:' not in system_log and 'ERROR: AddressSanitizer:' not in system_log
-              assert len(system_leaks) == 1, system_leaks
-              x11_baselines[system_cycles] = tuple(map(int, system_leaks[0]))
-              system_rows.append({'cycles': system_cycles,
-                                  'exit_code': system_result.returncode,
-                                  'leaks': system_leaks,
-                                  'x11_baseline': x11_baselines[system_cycles]})
-          (evidence / 'system-init.json').write_text(
+          for system_mode, expected_pixels in readbacks.items():
+              for system_cycles in (1, 4):
+                  system_result = subprocess.run(
+                      [str(binary), system_mode, str(system_cycles)], text=True,
+                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                      timeout=180, env=system_env)
+                  system_log = system_result.stdout
+                  (evidence / f'system-{system_mode}-{system_cycles}.log').write_text(system_log)
+                  system_leaks = re.findall(
+                      r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)',
+                      system_log)
+                  assert 'application-checks=passed;' in system_log
+                  assert system_log.count('pixel-readback=passed') == expected_pixels * system_cycles
+                  assert system_log.count('teardown=completed') == system_cycles
+                  assert 'runtime error:' not in system_log and 'ERROR: AddressSanitizer:' not in system_log
+                  assert len(system_leaks) == 1, (system_mode, system_cycles, system_leaks)
+                  key = (system_mode, system_cycles)
+                  x11_baselines[key] = tuple(map(int, system_leaks[0]))
+                  system_owners = classify_leaks(system_log)
+                  assert system_owners['x11']['blocks'] > 0, (key, system_owners)
+                  assert system_owners['non_x11']['blocks'] == 0, (key, system_owners)
+                  system_rows.append({'mode': system_mode,
+                                      'cycles': system_cycles,
+                                      'exit_code': system_result.returncode,
+                                      'leaks': system_leaks,
+                                      'x11_baseline': x11_baselines[key],
+                                      'owners': system_owners})
+          (evidence / 'system-baselines.json').write_text(
               json.dumps(system_rows, indent=2) + '\n')
           control_env = os.environ.copy()
           # Only the control selects this installed GLX/Gallium pair. Build tools
@@ -261,7 +283,6 @@ jobs:
           control_env['LD_LIBRARY_PATH'] = str(driver.parent)
           control_env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
           control_env.pop('LIBGL_DRIVERS_PATH', None)
-          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
           for variant in ('baseline', 'patched'):
               if variant == 'patched':
                   subprocess.run(['git', 'apply', '--check', str(patch)], cwd=source, check=True)
@@ -280,9 +301,11 @@ jobs:
                       log = result.stdout
                       name = f'{variant}-{mode}-{cycles}.log'
                       (evidence / name).write_text(log)
+                      owners = classify_leaks(log)
                       row = {'variant': variant, 'mode': mode, 'cycles': cycles,
                              'exit_code': result.returncode, 'pixel_checks': log.count('pixel-readback=passed'),
                              'completed': 'application-checks=passed;' in log,
+                             'owners': owners,
                              'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)}
                       rows.append(row)
                       (evidence / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
@@ -292,17 +315,18 @@ jobs:
                       assert 'runtime error:' not in log and 'ERROR: AddressSanitizer:' not in log, row
                       leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
                       row['leak_tuple'] = leak_tuple
-                      x11_baseline = x11_baselines[cycles]
-                      row['x11_baseline'] = x11_baseline
-                      row['mesa_incremental'] = leak_tuple != x11_baseline
+                      row['x11_baseline'] = x11_baselines[(mode, cycles)]
+                      row['mesa_incremental'] = owners['non_x11']['blocks'] > 0
                       assert result.returncode != 0 if row['leaks'] else result.returncode == 0
-                      if mode == 'init':
-                          assert leak_tuple == x11_baseline, (row, x11_baseline)
+                      assert owners['x11']['blocks'] > 0, row
                       if variant == 'patched':
-                          assert leak_tuple == x11_baseline, (row, x11_baseline)
-                      elif mode in ('draw', 'overlap', 'threads'):
-                          assert leak_tuple[0] > x11_baseline[0] and leak_tuple[1] > x11_baseline[1], (
-                              'Baseline must reproduce Mesa-specific lost caches', row, x11_baseline)
+                          assert owners['non_x11']['blocks'] == 0, (
+                              'Patched Mesa must add no non-X11 LSan allocation stacks', row)
+                      elif mode == 'init':
+                          assert owners['non_x11']['blocks'] == 0, row
+                      else:
+                          assert owners['non_x11']['blocks'] > 0, (
+                              'Unpatched Mesa must reproduce non-X11 owner leak stacks', row)
               (evidence / f'{variant}-driver.sha256').write_text(
                   hashlib.sha256(driver.read_bytes()).hexdigest() + '  ' + str(driver) + '\n')
               (evidence / f'{variant}-glx.sha256').write_text(
