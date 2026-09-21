@@ -16,7 +16,7 @@ concurrency:
 env:
   SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
   SALTS_UTILS_SHA: 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
-  TURBOSCRIPT_SHA: 3d954a59677be04e5b5206cbbbcbf4ba92ca2438
+  TURBOSCRIPT_SHA: eaca75c797acd595c4d72c7fea2ab76b04a950c6
   VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
   VCPKG_MAX_CONCURRENCY: 2
@@ -180,7 +180,8 @@ jobs:
                 "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon")
             elif [ "$package" = turboscript ]; then
               prefix="$TURBOSCRIPT_ROOT"
-              extra=(-DTURBOSCRIPT_BUILD_MODULES=OFF -DTURBOSCRIPT_BUILD_CLI=OFF)
+              extra=(-DTURBOSCRIPT_BUILD_MODULES=OFF -DTURBOSCRIPT_BUILD_CLI=OFF
+                -DTURBOSCRIPT_BUILD_HOST_TESTS=ON)
             fi
             cmake -S "$source" -B "$package_build" -G Ninja \
               -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
@@ -203,6 +204,19 @@ jobs:
             cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
+      - name: Run the seven existing producer Host ABI contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS
+          pattern='^test_turbo_script_host_(result|registry|module|instance|call|state|limits)$'
+          ctest --test-dir "$PACKAGE_BUILD_ROOT/turboscript" -R "$pattern" --show-only=json-v1 \
+            > "$EVIDENCE_DIR/host-internal-selected.json"
+          ctest --test-dir "$PACKAGE_BUILD_ROOT/turboscript" -R "$pattern" --no-tests=error --verbose \
+            --output-on-failure --timeout 180 --output-junit "$EVIDENCE_DIR/host-internal-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/host-internal.log"
+          python3 cmake/ci/verify_host_abi_tests.py internal
+          cp -R .ci/sources/turboscript/cmake/ci/host-abi "$RUNNER_TEMP/editor-host-consumer"
       - name: Quarantine producer trees and install frontend dependencies
         shell: bash
         run: |
@@ -216,6 +230,28 @@ jobs:
             freetype stb box2d nlohmann-json pugixml lexbor tree-sitter tree-sitter-c \
             catch2 pkgconf zstd glfw3 glad plutosvg vulkan-headers vulkan-loader \
             vulkan-memory-allocator 2>&1 | tee "$EVIDENCE_DIR/frontend-dependencies.log"
+      - name: Link and execute installed public C11 and C++17 Host ABI consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS
+          cmake -S "$RUNNER_TEMP/editor-host-consumer" -B build/host-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$PORTS_ROOT/flexui" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$TURBOSCRIPT_ROOT;$PORTS_ROOT/flexui/x64-linux/debug" \
+            "-DCMAKE_BUILD_RPATH=$SALTS_ROOT/lib;$TURBOSCRIPT_ROOT/lib" \
+            "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            2>&1 | tee "$EVIDENCE_DIR/host-installed-configure.log"
+          cmake --build build/host-consumer --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/host-installed-build.log"
+          ctest --test-dir build/host-consumer --show-only=json-v1 > "$EVIDENCE_DIR/host-installed-selected.json"
+          ctest --test-dir build/host-consumer --no-tests=error --verbose --output-on-failure \
+            --timeout 180 --output-junit "$EVIDENCE_DIR/host-installed-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/host-installed.log"
+          python3 cmake/ci/verify_host_abi_tests.py installed
       - name: Build real TurboScript controllers and desktop editor
         shell: bash
         run: |
