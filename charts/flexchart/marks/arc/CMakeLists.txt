@@ -53,13 +53,13 @@ set_target_properties(flexchart_arc PROPERTIES FOLDER "Modules/FlexChart/Marks")
 
 # Parser test
 add_executable(flexchart_arc_parser_test tests/test_arc_parser.cpp)
-target_link_libraries(flexchart_arc_parser_test PRIVATE flexchart_arc TurboUtils::TinyTest)
+target_link_libraries(flexchart_arc_parser_test PRIVATE flexchart_arc Salts::TinyTest)
 add_test(NAME FlexChartArcParserTest COMMAND flexchart_arc_parser_test)
 set_target_properties(flexchart_arc_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_arc_test tests/test_arc.cpp)
-target_link_libraries(flexchart_arc_test PRIVATE flexchart_arc TurboUtils::TinyTest)
+target_link_libraries(flexchart_arc_test PRIVATE flexchart_arc Salts::TinyTest)
 target_include_directories(flexchart_arc_test PRIVATE ../../src)
 add_test(NAME FlexChartArcTest COMMAND flexchart_arc_test)
 set_target_properties(flexchart_arc_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")

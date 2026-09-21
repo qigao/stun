@@ -8,7 +8,8 @@
             "name": "win-paths",
             "hidden": true,
             "cacheVariables": {
-                "TURBO_UTILS_ROOT": "C:/projects/cpp/external/pkgs/turboutils",
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
                 "TURBOPARSER_ROOT": "C:/projects/cpp/external/pkgs/turboparser",
                 "TURBONET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
@@ -34,6 +35,8 @@
             "name": "linux-paths",
             "hidden": true,
             "cacheVariables": {
+                "SALTS_ROOT": "$penv{SALTS_ROOT}",
+                "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
                 "TURBOPARSER_ROOT": "/opt/turboparser",
                 "TURBONET_ROOT": "/opt/turbonet",
                 "TURBOSCRIPT_ROOT": "/opt/turboscript",

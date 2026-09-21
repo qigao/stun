@@ -35,7 +35,7 @@ target_link_libraries(kanban PUBLIC TurboParser::Parser flex_runtime)
 
 # Test executable
 add_executable(kanban_test tests/test_parser.c)
-target_link_libraries(kanban_test kanban TurboUtils::TinyTest)
+target_link_libraries(kanban_test kanban Salts::TinyTest)
 set_target_properties(kanban_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(kanban_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/kanban")
 

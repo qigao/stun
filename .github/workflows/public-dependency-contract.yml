@@ -145,18 +145,19 @@ jobs:
             echo "PluginHost still consumes retired Turbo facade headers" >&2
             exit 1
           fi
-          if grep -n -E 'find_dependency\((TurboUtils|TurboParser)' flexUI/CMakeLists.txt; then
+          if grep -n -E 'find_dependency\((TurboUtils|TurboParser)' flexUI/cmake/FlexUIConfig.cmake.in; then
             echo "installed FlexUI package still exports retired dependencies" >&2
             exit 1
           fi
-          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/run_plugin_install_consumer.cmake flexUI/tests/CMakeLists.txt; then
+          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/plugin_install_consumer flexUI/tests/CMakeLists.txt; then
             echo "install consumer still injects retired package roots" >&2
             exit 1
           fi
-          grep -Fq 'find_dependency(Salts CONFIG)' flexUI/CMakeLists.txt
-          grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/CMakeLists.txt
-          grep -Fq 'Salts_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
-          grep -Fq 'SaltsUtils_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
+          grep -Fq 'find_dependency(Salts CONFIG)' flexUI/cmake/FlexUIConfig.cmake.in
+          grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/cmake/FlexUIConfig.cmake.in
+          grep -Fq 'FlexUI::PluginSDK' flexUI/tests/plugin_install_consumer/CMakeLists.txt
+          grep -Fq 'FlexUI::Services' flexUI/tests/plugin_install_consumer/CMakeLists.txt
+          grep -Fq 'FlexUI::PluginHost' flexUI/examples/plugin_echo/CMakeLists.txt
 
       - name: Compile PluginHost sources against canonical public headers
         shell: bash

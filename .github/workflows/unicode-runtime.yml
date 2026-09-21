@@ -130,9 +130,9 @@ jobs:
           git -C .ci/salts-utils diff --exit-code
 
   unicode-install-consumer:
-    name: Unicode installed packages ASan and UBSan
+    name: FlexUI production and installed packages ASan and UBSan
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_ROOT: ${{ github.workspace }}/.ci/install-vcpkg
@@ -187,6 +187,7 @@ jobs:
             printf 'SALTS_ROOT=%s/stun-unicode-sdk\n' "$RUNNER_TEMP"
             printf 'PACKAGE_BUILD_ROOT=%s/stun-unicode-package-build\n' "$RUNNER_TEMP"
             printf 'EXTERNAL_PORTS_ROOT=%s/stun-unicode-external-ports\n' "$RUNNER_TEMP"
+            printf 'FLEXUI_INSTALL_ROOT=%s/stun-flexui-sdk\n' "$RUNNER_TEMP"
             printf 'LD_LIBRARY_PATH=%s/stun-unicode-sdk/lib\n' "$RUNNER_TEMP"
           } >> "$GITHUB_ENV"
 
@@ -194,7 +195,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
-          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+          restore-keys: |
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
 
       - name: Prepare isolated tools and evidence
         shell: bash
@@ -452,6 +455,211 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Install pinned production FlexUI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Classic mode uses ports from the exact vcpkg checkout. The complete
+          # application manifest includes dependencies of disabled editors/charts.
+          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
+            "--x-install-root=$EXTERNAL_PORTS_ROOT/flexui" \
+            freetype stb box2d nlohmann-json pugixml lexbor \
+            tree-sitter tree-sitter-c catch2 pkgconf zstd \
+            2>&1 | tee "$EVIDENCE_DIR/flexui-ports-install.log"
+
+      - name: Build and test the production FlexUI targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          production_build="$GITHUB_WORKSPACE/build/flexui-production"
+          ports="$EXTERNAL_PORTS_ROOT/flexui"
+          tests=(
+            test_text_util_unicode test_render_semantics test_widget_contracts
+            test_textedit_flexui test_plugin_abi test_service_registry
+            test_plugin_host test_plugin_manifest test_desktop_application
+            test_gcanvas_input test_gcanvas_application_input
+          )
+          printf '%s\n' "${tests[@]}" > "$EVIDENCE_DIR/production-tests.txt"
+          cmake -S . -B "$production_build" -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DSTUN_BUILD_CHARTS=OFF \
+            -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=OFF \
+            -DGCANVAS_BUILD_OPENGL=OFF -DGCANVAS_BUILD_VULKAN=OFF \
+            -DGCANVAS_BUILD_SVG=OFF -DGCANVAS_BUILD_WINDOW=OFF \
+            -DGCANVAS_BUILD_TESTS=OFF -DGCANVAS_BUILD_EXAMPLES=OFF \
+            -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=OFF -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF \
+            -DFLEX_BUILD_BACKEND_OPENGL=OFF -DFLEX_BUILD_BACKEND_VULKAN=OFF \
+            -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+            "-DCMAKE_INSTALL_PREFIX=$FLEXUI_INSTALL_ROOT" -DCMAKE_INSTALL_LIBDIR=lib \
+            2>&1 | tee "$EVIDENCE_DIR/production-configure.log"
+          cmake --build "$production_build" --target "${tests[@]}" --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/production-build.log"
+          test_pattern="^($(IFS='|'; echo "${tests[*]}"))$"
+          ctest --test-dir "$production_build" -R "$test_pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/production-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/production-ctest.log"
+          cmake --install "$production_build" --component FlexUIPlugin \
+            2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
+          cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
+
+      - name: Consume installed PluginSDK and Services without host dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD SALTS_ROOT SALTS_UTILS_ROOT
+          for component in PluginSDK Services; do
+            consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-$component"
+            cmake -S flexUI/tests/plugin_install_consumer -B "$consumer_build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DFLEXUI_CONSUMER_COMPONENT=$component" \
+              "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT" \
+              -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+              -DCMAKE_DISABLE_FIND_PACKAGE_Salts=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_SaltsUtils=TRUE \
+              '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-configure.log"
+            cmake --build "$consumer_build" --verbose --parallel 2 \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-build.log"
+            ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+              --output-junit "$EVIDENCE_DIR/$component-consumer-results.xml" \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-ctest.log"
+          done
+
+      - name: Run the installed C plugin and C++ host round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-host"
+          cmake -S flexUI/examples/plugin_echo -B "$consumer_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT;$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+            -DFLEXUI_EXAMPLE_BUILD_HOST=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_ADDRESS_SANITIZER=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_UNDEFINED_SANITIZER=ON \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-configure.log"
+          cmake --build "$consumer_build" --verbose --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-build.log"
+          ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/host-consumer-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-ctest.log"
+
+      - name: Verify production results and installed consumer paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          flexui_sdk = Path(os.environ['FLEXUI_INSTALL_ROOT']).resolve(strict=True)
+          production = workspace / 'build/flexui-production'
+          tests = (evidence / 'production-tests.txt').read_text().splitlines()
+          results = ET.parse(evidence / 'production-results.xml').getroot()
+          cases = list(results.iter('testcase'))
+          assert {c.attrib['name'] for c in cases} == set(tests) and len(cases) == len(tests)
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'production-ctest.log').read_text())
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == len(tests), (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
+          totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
+
+          commands = json.loads((production / 'compile_commands.json').read_text())
+          for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
+                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
+
+          binaries = {name: production / 'bin' / name for name in tests}
+          binaries['installed_host'] = workspace / 'build/flexui-installed-host/bin/flexui_plugin_consumer'
+          core_pattern = re.compile(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', re.I)
+          providers = {}
+          env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'LD_PRELOAD')}
+          for name, binary in binaries.items():
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True, env=env)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True, env=env)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              paths = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if core_pattern.fullmatch(path.name):
+                      paths.add(str(path))
+              assert len(paths) <= 1, (name, paths)
+              if name in ('test_render_semantics', 'test_widget_contracts', 'installed_host'):
+                  assert len(paths) == 1, name
+              providers[name] = sorted(paths)
+
+          forbidden = [str(production), str(workspace / '.ci/install-sources'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-package-build'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-isolated')]
+          for component in ('PluginSDK', 'Services', 'host'):
+              build = workspace / f'build/flexui-installed-{component}'
+              command_text = (build / 'compile_commands.json').read_text()
+              command_text += (evidence / f'{component}-consumer-build.log').read_text()
+              assert all(path not in command_text for path in forbidden), component
+              pairs = [line.split('=', 1) for line in (build / 'installed-component-Debug.txt').read_text().splitlines()]
+              expected = {'FlexUIConfig', 'Includes'}
+              if component == 'Services':
+                  expected.add('Library')
+              elif component == 'host':
+                  expected.update(('Services', 'Host', 'Core', 'Toml'))
+              assert len(pairs) == len(expected) and {key for key, _ in pairs} == expected
+              for key, raw in pairs:
+                  prefix = sdk if key in ('Core', 'Toml') else flexui_sdk
+                  for value in raw.split(';'):
+                      path = Path(value).resolve(strict=True)
+                      assert path.is_relative_to(prefix), (component, key, path)
+                      if key not in ('FlexUIConfig', 'Includes'):
+                          assert value in command_text, (component, key, 'missing from actual link command')
+          result = {'production_ctest_passed': len(tests), 'tinytest': totals, 'core_runtime_providers': providers,
+                    'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
+          (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Production FlexUI and exported components'
+            echo 'Actual repository targets with ASan/UBSan; Linux without a window/GPU backend.'
+            echo 'Installed C PluginSDK, C++ Services, and C plugin/host round trip executed separately.'
+            echo '```json'
+            cat "$EVIDENCE_DIR/production-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload package and consumer evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -464,4 +672,11 @@ jobs:
             build/unicode-install-consumer/*.map
             build/unicode-install-consumer/*.txt
             build/unicode-install-consumer/Testing/Temporary/LastTest.log
+            build/flexui-production/CMakeCache.txt
+            build/flexui-production/compile_commands.json
+            build/flexui-production/Testing/Temporary/LastTest.log
+            build/flexui-installed-*/CMakeCache.txt
+            build/flexui-installed-*/compile_commands.json
+            build/flexui-installed-*/installed-component-*.txt
+            build/flexui-installed-*/Testing/Temporary/LastTest.log
           if-no-files-found: error

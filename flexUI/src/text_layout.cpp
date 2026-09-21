@@ -205,19 +205,22 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
 
     size_t fit = 0;
     size_t last_boundary = std::string::npos;
-    for (size_t i = 0; i < remaining.size(); ++i) {
-      const std::string candidate = remaining.substr(0, i + 1);
+    for (size_t cursor = 0; cursor < remaining.size();) {
+      const auto scalar = utf8_next_scalar(remaining, cursor);
+      const std::string candidate = remaining.substr(0, cursor);
       if (approximate_text_width(style, candidate) > max_width) {
         break;
       }
-      fit = i + 1;
-      if (is_wrap_boundary(remaining[i])) {
-        last_boundary = i + 1;
+      fit = cursor;
+      if (scalar.byte_length == 1 &&
+          is_wrap_boundary(remaining[scalar.byte_offset])) {
+        last_boundary = cursor;
       }
     }
 
     if (fit == 0) {
-      fit = 1;
+      // Even a scalar wider than the line must remain valid UTF-8.
+      (void)utf8_next_scalar(remaining, fit);
     }
 
     size_t break_pos = fit;
@@ -242,8 +245,10 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
       if (remaining.empty()) {
         break;
       }
-      segment = remaining.substr(0, 1);
-      remaining.erase(0, 1);
+      size_t cursor = 0;
+      (void)utf8_next_scalar(remaining, cursor);
+      segment = remaining.substr(0, cursor);
+      remaining.erase(0, cursor);
     }
 
     wrapped.push_back(segment);
@@ -253,6 +258,28 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
     wrapped.push_back("");
   }
   return wrapped;
+}
+
+std::string truncate_scalar_prefix_to_width(const ComputedStyle* style,
+                                            const std::string& text,
+                                            float max_width,
+                                            float suffix_width) {
+  // Decode once so clipping never creates input rejected by segment_text.
+  // Grapheme boundaries and text measurement remain separate work in #15.
+  std::vector<size_t> scalar_ends{0};
+  size_t cursor = 0;
+  while (cursor < text.size()) {
+    (void)utf8_next_scalar(text, cursor);
+    scalar_ends.push_back(cursor);
+  }
+
+  std::string truncated = text;
+  while (!truncated.empty() &&
+         approximate_text_width(style, truncated) + suffix_width > max_width) {
+    scalar_ends.pop_back();
+    truncated.resize(scalar_ends.back());
+  }
+  return truncated;
 }
 
 std::string truncate_text_with_ellipsis(const ComputedStyle* style,
@@ -272,12 +299,8 @@ std::string truncate_text_with_ellipsis(const ComputedStyle* style,
     return "";
   }
 
-  std::string truncated = text;
-  while (!truncated.empty() &&
-         approximate_text_width(style, truncated) + ellipsis_width > max_width) {
-    truncated.pop_back();
-  }
-  return truncated + ellipsis;
+  return truncate_scalar_prefix_to_width(style, text, max_width, ellipsis_width) +
+         ellipsis;
 }
 
 std::string truncate_text_to_width(const ComputedStyle* style,
@@ -291,12 +314,7 @@ std::string truncate_text_to_width(const ComputedStyle* style,
     return text;
   }
 
-  std::string truncated = text;
-  while (!truncated.empty() &&
-         approximate_text_width(style, truncated) > max_width) {
-    truncated.pop_back();
-  }
-  return truncated;
+  return truncate_scalar_prefix_to_width(style, text, max_width, 0.0f);
 }
 
 int parse_line_clamp(const ComputedStyle* style) {

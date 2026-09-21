@@ -259,13 +259,7 @@ add_subdirectory(modules/controller)
 add_subdirectory(modules/desktop)
 
 set(FLEXUI_PLUGIN_PACKAGE_VERSION "1.0.0")
-set(FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES "")
-if(FLEXUI_ENABLE_PLUGINS)
-  string(
-    APPEND FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES
-    "find_dependency(Salts CONFIG)\n"
-    "find_dependency(SaltsUtils CONFIG)\n")
-endif()
+set(FLEXUI_CONFIG_HAS_PLUGIN_HOST "${FLEXUI_ENABLE_PLUGINS}")
 configure_package_config_file(
   cmake/FlexUIConfig.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
@@ -276,11 +270,25 @@ write_basic_package_version_file(
   COMPATIBILITY SameMajorVersion)
 
 install(
-  EXPORT FlexUIPluginTargets
-  FILE FlexUIPluginTargets.cmake
+  EXPORT FlexUIPluginSDKTargets
+  FILE FlexUIPluginSDKTargets.cmake
   NAMESPACE FlexUI::
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
   COMPONENT FlexUIPlugin)
+install(
+  EXPORT FlexUIServicesTargets
+  FILE FlexUIServicesTargets.cmake
+  NAMESPACE FlexUI::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUIPlugin)
+if(FLEXUI_ENABLE_PLUGINS)
+  install(
+    EXPORT FlexUIPluginHostTargets
+    FILE FlexUIPluginHostTargets.cmake
+    NAMESPACE FlexUI::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+    COMPONENT FlexUIPlugin)
+endif()
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
@@ -304,5 +312,9 @@ install(FILES include/flexUI.h DESTINATION include)
 # 安装库
 install(TARGETS flexUI flexUI_tailwindcss DESTINATION lib)
 
-add_subdirectory(examples)
-add_subdirectory(tests)
+if(NANOGUI_BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()

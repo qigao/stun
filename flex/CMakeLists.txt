@@ -95,8 +95,12 @@ endif()
 # Examples & Tests
 # ============================================================================
 
-add_subdirectory(examples)
-add_subdirectory(tests)
+if(NANOGUI_BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
 
 # ============================================================================
 # Install

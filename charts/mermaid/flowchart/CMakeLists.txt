@@ -63,7 +63,7 @@ endif()
 
 # 原有的 Parser 测试
 add_executable(flowchart_test tests/test_parser.c)
-target_link_libraries(flowchart_test PRIVATE mermaid_flowchart TurboUtils::TinyTest TurboParser::Parser)
+target_link_libraries(flowchart_test PRIVATE mermaid_flowchart Salts::TinyTest TurboParser::Parser)
 target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
 add_test(NAME flowchart_test COMMAND flowchart_test)
 set_target_properties(flowchart_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
@@ -77,7 +77,7 @@ set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid
 # 新的 Flex 集成测试
 add_executable(flowchart_flex_test tests/test_flex.cpp)
 target_link_libraries(flowchart_flex_test PRIVATE
-    mermaid_flowchart flex_runtime TurboUtils::TinyTest)
+    mermaid_flowchart flex_runtime Salts::TinyTest)
 add_test(NAME flowchart_flex_test COMMAND flowchart_flex_test)
 set_target_properties(flowchart_flex_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 

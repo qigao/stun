@@ -36,7 +36,7 @@ target_link_libraries(sankey PUBLIC TurboParser::Parser flex_runtime)
 
 # Test executable
 add_executable(sankey_test tests/test_parser.c)
-target_link_libraries(sankey_test sankey TurboUtils::TinyTest)
+target_link_libraries(sankey_test sankey Salts::TinyTest)
 set_target_properties(sankey_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(sankey_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/sankey")
 
