@@ -493,6 +493,7 @@ jobs:
           ports="$EXTERNAL_PORTS_ROOT/flexui"
           tests=(
             test_text_util_unicode test_render_semantics test_widget_contracts
+            test_ui_content_models test_ui_xml test_ui_document test_widget_registry
             test_textedit_flexui test_plugin_abi test_service_registry
             test_plugin_host test_plugin_manifest test_desktop_application
             test_gcanvas_input test_gcanvas_application_input
