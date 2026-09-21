@@ -30,16 +30,28 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          repository: microsoft/vcpkg
+          repository: glfw/glfw
           ref: master
-          path: .ci/vcpkg
+          path: .ci/glfw
           persist-credentials: false
-      - name: Record microsoft/vcpkg master checkout
+      - uses: actions/checkout@v4
+        with:
+          repository: Dav1dde/glad
+          ref: glad2
+          path: .ci/glad
+          persist-credentials: false
+      - name: Record graphics upstream development checkouts
         shell: bash
         run: |
           set -euo pipefail
-          printf "VCPKG_COMMIT=%s\n" "$(git -C .ci/vcpkg rev-parse HEAD)" >> "$GITHUB_ENV"
-          git -C .ci/vcpkg log -1 --format="Dependency=microsoft/vcpkg Ref=master Commit=%H"
+          glfw_commit="$(git -C .ci/glfw rev-parse HEAD)"
+          glad_commit="$(git -C .ci/glad rev-parse HEAD)"
+          {
+            echo "GLFW_COMMIT=$glfw_commit"
+            echo "GLAD_COMMIT=$glad_commit"
+          } >> "$GITHUB_ENV"
+          git -C .ci/glfw log -1 --format="Dependency=glfw/glfw Ref=master Commit=%H"
+          git -C .ci/glad log -1 --format="Dependency=Dav1dde/glad Ref=glad2 Commit=%H"
       - name: Prepare explicit build tools and driver paths
         shell: bash
         env:
@@ -56,8 +68,8 @@ jobs:
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
-          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg=%s\n' \
-            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$VCPKG_COMMIT" \
+          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\n' \
+            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
@@ -71,10 +83,10 @@ jobs:
           "$RUNNER_TEMP/mesa-tools/bin/pip" install meson==1.5.2 Mako==1.3.10 PyYAML==6.0.2 packaging==24.2
           echo "$RUNNER_TEMP/mesa-tools/bin" >> "$GITHUB_PATH"
           dpkg-query -W > build/mesa-evidence/system-packages.txt
-          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
-            "--x-install-root=$RUNNER_TEMP/mesa-control-ports" glfw3 glad \
-            2>&1 | tee build/mesa-evidence/control-dependencies.log
+          {
+            echo "GLFWSource=$GITHUB_WORKSPACE/.ci/glfw"
+            echo "GLADSource=$GITHUB_WORKSPACE/.ci/glad"
+          } > build/mesa-evidence/control-dependencies.log
       - name: Verify and build the unchanged upstream driver
         shell: bash
         run: |
@@ -126,9 +138,8 @@ jobs:
           readelf -d "$driver" > "$EVIDENCE_DIR/baseline-driver-dynamic.txt"
           cmake -S cmake/ci/mesa -B build/mesa-control -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
-            "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-control-ports"
+            "-DSTUN_MESA_GLFW_SOURCE=$GITHUB_WORKSPACE/.ci/glfw" \
+            "-DSTUN_MESA_GLAD_SOURCE=$GITHUB_WORKSPACE/.ci/glad"
           cmake --build build/mesa-control --parallel 2 --verbose
           cp build/mesa-control/compile_commands.json "$EVIDENCE_DIR/control-compile-commands.json"
       - name: Compare identical controls before and after the owner fix
