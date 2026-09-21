@@ -593,9 +593,15 @@ public:
   LexborCSSParser(const LexborCSSParser &) = delete;
   LexborCSSParser &operator=(const LexborCSSParser &) = delete;
   lxb_css_stylesheet_t *parse(const char *css, size_t len) {
-    auto *sheet = lxb_css_stylesheet_parse(parser_, reinterpret_cast<const lxb_char_t *>(css), len);
+    auto *sheet = lxb_css_stylesheet_create(nullptr);
     if (!sheet)
+      throw std::runtime_error("Failed to create CSS stylesheet");
+    const auto status = lxb_css_stylesheet_parse(
+        sheet, parser_, reinterpret_cast<const lxb_char_t *>(css), len);
+    if (status != LXB_STATUS_OK) {
+      lxb_css_stylesheet_destroy(sheet, true);
       throw std::runtime_error("Failed to parse CSS");
+    }
     return sheet;
   }
   lxb_css_log_t* log() const { return lxb_css_parser_log(parser_); }
@@ -1952,12 +1958,10 @@ static bool extract_media_prelude_and_block(const lxb_css_rule_at_t* at_rule,
   std::string serialized;
   const char* source_begin = source_css.data();
   const char* source_end = source_begin + source_css.size();
-  const char* rule_begin =
-      reinterpret_cast<const char*>(at_rule ? at_rule->rule.begin : nullptr);
+  const size_t start_offset =
+      at_rule != nullptr ? at_rule->name_begin : source_css.size();
 
-  if (rule_begin != nullptr && rule_begin >= source_begin &&
-      rule_begin < source_end) {
-    const size_t start_offset = static_cast<size_t>(rule_begin - source_begin);
+  if (start_offset < source_css.size()) {
     size_t media_pos = source_css.find("@media", start_offset);
     if (media_pos != std::string::npos) {
       size_t brace_pos = source_css.find('{', media_pos + 6);
@@ -4165,7 +4169,7 @@ private:
     while (rule) {
       if (rule->type == LXB_CSS_RULE_STYLE) {
         extract_style_rule(lxb_css_rule_style(rule), media_conditions,
-                           container_conditions);
+                           container_conditions, source_css);
       } else if (rule->type == LXB_CSS_RULE_AT_RULE) {
         extract_at_rule(lxb_css_rule_at(rule), media_conditions,
                         container_conditions, source_css);
@@ -4177,7 +4181,8 @@ private:
   void extract_style_rule(
       lxb_css_rule_style_t *style_rule,
       const std::vector<MediaQueryList>& media_conditions,
-      const std::vector<ContainerQueryList>& container_conditions) {
+      const std::vector<ContainerQueryList>& container_conditions,
+      const std::string& source_css) {
     if (!style_rule)
       return;
     std::string selector_text = get_selector_text(style_rule);
@@ -4192,7 +4197,10 @@ private:
         add_diagnostic(CssDiagnosticSeverity::Warning, selector_text,
                        declaration.property, declaration.value,
                        "unsupported CSS property",
-                       style_rule->rule.begin);
+                       style_rule->prelude_begin < source_css.size()
+                           ? reinterpret_cast<const lxb_char_t*>(
+                                 source_css.data() + style_rule->prelude_begin)
+                           : nullptr);
       }
       const std::string property = to_lower_copy(declaration.property);
       const std::string value = to_lower_copy(trim_copy(declaration.value));
@@ -4202,7 +4210,11 @@ private:
           std::isnan(detail::parse_css_length(value))) {
         add_diagnostic(CssDiagnosticSeverity::Warning, selector_text,
                        declaration.property, declaration.value,
-                       "invalid CSS size value", style_rule->rule.begin);
+                       "invalid CSS size value",
+                       style_rule->prelude_begin < source_css.size()
+                           ? reinterpret_cast<const lxb_char_t*>(
+                                 source_css.data() + style_rule->prelude_begin)
+                           : nullptr);
         return true;
       }
       return false;
