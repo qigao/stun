@@ -1,0 +1,74 @@
+name: XML content model runtime
+
+on:
+  pull_request:
+  push:
+    branches: [master, feat/xml-content-preflight]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stun-xml-content-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  content-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Read the exact Stun source and Salts master test framework
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/$SOURCE_REPOSITORY.git"
+          git fetch --no-tags --depth=1 origin "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          git clone --depth=1 --branch master https://github.com/qigao/salts.git .ci/xml-salts
+          printf 'Stun=%s\nSaltsRef=master\nSalts=%s\n' "$SOURCE_HEAD" "$(git -C .ci/xml-salts rev-parse HEAD)"
+      - name: Compile and execute the real content-model tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/xml-content
+          headers=(
+            -isystem .ci/xml-salts/utils/include
+            -isystem .ci/xml-salts/utils/parser
+            -isystem .ci/xml-salts/platform/include
+            -isystem .ci/xml-salts/concurrency/include
+            -isystem .ci/xml-salts/cmeta/include
+            -isystem .ci/xml-salts/tinytest/include
+          )
+          flags=(-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+          for unit in tinytest tinymock; do
+            cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+              -c ".ci/xml-salts/tinytest/src/$unit.c" -o "build/xml-content/$unit.o"
+          done
+          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror "${flags[@]}" "${headers[@]}" \
+            -IflexUI/include flexUI/tests/test_ui_content_models.cpp \
+            build/xml-content/tinytest.o build/xml-content/tinymock.o \
+            -pthread -ldl -lm -o build/xml-content/test_ui_content_models
+          timeout 120s build/xml-content/test_ui_content_models 2>&1 | tee build/xml-content/results.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', Path('build/xml-content/results.log').read_text())
+          totals = re.findall(r'Total tests \[(PASSED|FAILED|SKIPPED|FILTERED|TODO)\]:\s*(\d+)', log)
+          assert len(totals) == 5
+          assert {k: int(v) for k, v in totals} == {'PASSED': 10, 'FAILED': 0, 'SKIPPED': 0, 'FILTERED': 0, 'TODO': 0}
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == 1 and int(assertions[0][0]) > 0 and assertions[0][1] == '0'
+          assert not re.search(r'ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:', log)
+          print('Ten content-model cases passed without filters; registry/XML/application integration remains a separate gate.')
+          PY
+          git diff --exit-code
+          git -C .ci/xml-salts diff --exit-code
