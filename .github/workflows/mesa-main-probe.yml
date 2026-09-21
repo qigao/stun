@@ -1,0 +1,200 @@
+name: Mesa main lifecycle probe
+
+on:
+  pull_request:
+  push:
+    branches: [deps/mesa-main-lifecycle]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stun-mesa-main-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:fast_unwind_on_malloc=0:malloc_context_size=64
+  UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+  LIBGL_ALWAYS_SOFTWARE: '1'
+  GALLIUM_DRIVER: llvmpipe
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: master
+          path: .ci/vcpkg
+          persist-credentials: false
+      - name: Clone Mesa upstream development branch and record provenance
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p build/mesa-main-evidence "$RUNNER_TEMP/mesa-main-xdg"
+          chmod 700 "$RUNNER_TEMP/mesa-main-xdg"
+          git clone --depth=1 --branch main https://gitlab.freedesktop.org/mesa/mesa.git "$RUNNER_TEMP/mesa-main"
+          mesa_commit="$(git -C "$RUNNER_TEMP/mesa-main" rev-parse HEAD)"
+          vcpkg_commit="$(git -C .ci/vcpkg rev-parse HEAD)"
+          {
+            echo "Stun=$EXPECTED_HEAD"
+            echo "MesaRef=main"
+            echo "Mesa=$mesa_commit"
+            echo "vcpkgRef=master"
+            echo "vcpkg=$vcpkg_commit"
+          } | tee build/mesa-main-evidence/provenance.txt
+          {
+            echo "MESA_SOURCE=$RUNNER_TEMP/mesa-main"
+            echo "MESA_BUILD=$RUNNER_TEMP/mesa-main-build"
+            echo "MESA_ROOT=$RUNNER_TEMP/mesa-main-sdk"
+            echo "EVIDENCE_DIR=$GITHUB_WORKSPACE/build/mesa-main-evidence"
+            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-main-xdg"
+            echo "MESA_COMMIT=$mesa_commit"
+          } >> "$GITHUB_ENV"
+      - name: Prepare existing lifecycle-control toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
+            autoconf autoconf-archive automake libtool \
+            libdrm-dev libexpat1-dev libelf-dev zlib1g-dev libzstd-dev \
+            xorg-dev libwayland-dev libxkbcommon-dev libglvnd-dev libx11-xcb-dev \
+            libxcb-glx0-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev \
+            libxcb-randr0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shm0-dev libxshmfence-dev \
+            xvfb xauth mesa-utils
+          python3 -m venv "$RUNNER_TEMP/mesa-main-tools"
+          "$RUNNER_TEMP/mesa-main-tools/bin/pip" install meson Mako PyYAML packaging
+          echo "$RUNNER_TEMP/mesa-main-tools/bin" >> "$GITHUB_PATH"
+          dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
+          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
+            "--x-install-root=$RUNNER_TEMP/mesa-main-control-ports" glfw3 glad \
+            2>&1 | tee "$EVIDENCE_DIR/control-dependencies.log"
+      - name: Configure and build unmodified Mesa main
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS
+          cat > "$RUNNER_TEMP/mesa-main-native.ini" <<'NATIVE'
+          [binaries]
+          c = 'gcc'
+          cpp = 'g++'
+          llvm-config = '/usr/bin/llvm-config-20'
+          NATIVE
+          meson setup "$MESA_BUILD" "$MESA_SOURCE" \
+            --native-file "$RUNNER_TEMP/mesa-main-native.ini" \
+            --prefix "$MESA_ROOT" --libdir lib --buildtype debugoptimized \
+            -Dplatforms=x11 -Dgallium-drivers=llvmpipe -Dvulkan-drivers=[] \
+            -Dglx=dri -Dglvnd=enabled -Degl=disabled -Dgbm=disabled \
+            -Dgles1=disabled -Dgles2=disabled -Dllvm=enabled \
+            -Dgallium-vdpau=disabled -Dgallium-va=disabled -Dgallium-rusticl=false \
+            -Dbuild-tests=false -Dc_args=-fno-omit-frame-pointer -Dcpp_args=-fno-omit-frame-pointer \
+            2>&1 | tee "$EVIDENCE_DIR/mesa-configure.log"
+          meson compile -C "$MESA_BUILD" -j 2 2>&1 | tee "$EVIDENCE_DIR/mesa-build.log"
+          meson install -C "$MESA_BUILD" 2>&1 | tee "$EVIDENCE_DIR/mesa-install.log"
+          driver="$(readlink -e "$MESA_ROOT/lib/dri/swrast_dri.so")"
+          glx="$(readlink -e "$MESA_ROOT/lib/libGLX_mesa.so.0")"
+          test -f "$driver"
+          test -f "$glx"
+          {
+            echo "MESA_EXPECTED_DRIVER=$driver"
+            echo "MESA_EXPECTED_GLX=$glx"
+          } >> "$GITHUB_ENV"
+          printf 'driver=%s\nglx=%s\n' "$driver" "$glx" | tee "$EVIDENCE_DIR/providers.txt"
+          sha256sum "$driver" "$glx" > "$EVIDENCE_DIR/provider-sha256.txt"
+          cmake -S cmake/ci/mesa -B build/mesa-main-control -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-main-control-ports"
+          cmake --build build/mesa-main-control --parallel 2 --verbose
+      - name: Execute unchanged lifecycle control against Mesa main
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS LIBGL_DRIVERS_PATH
+          xvfb-run -a python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          binary = Path('build/mesa-main-control/mesa_driver_control').resolve(strict=True)
+          driver = Path(os.environ['MESA_EXPECTED_DRIVER']).resolve(strict=True)
+          glx = Path(os.environ['MESA_EXPECTED_GLX']).resolve(strict=True)
+          env = os.environ.copy()
+          env['LD_LIBRARY_PATH'] = str(driver.parent)
+          env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
+          env.pop('LIBGL_DRIVERS_PATH', None)
+          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          rows = []
+          for mode, expected_pixels in readbacks.items():
+              for cycles in (1, 4):
+                  result = subprocess.run([str(binary), mode, str(cycles)], text=True,
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                          timeout=180, env=env)
+                  log = result.stdout
+                  (evidence / f'{mode}-{cycles}.log').write_text(log)
+                  row = {
+                      'mode': mode,
+                      'cycles': cycles,
+                      'exit_code': result.returncode,
+                      'pixel_checks': log.count('pixel-readback=passed'),
+                      'completed': 'application-checks=passed;' in log,
+                      'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
+                      'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
+                      'ubsan_errors': len(re.findall(r'runtime error:', log)),
+                  }
+                  rows.append(row)
+                  print(json.dumps(row), flush=True)
+                  assert row['completed'], row
+                  assert row['pixel_checks'] == expected_pixels * cycles, row
+                  assert log.count('teardown=completed') == cycles, row
+                  assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
+                  if mode == 'init':
+                      assert result.returncode == 0 and not row['leaks'], row
+                  else:
+                      assert result.returncode == 0 or row['leaks'], row
+          assert len(rows) == 10
+          (evidence / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
+          clean = [r for r in rows if r['exit_code'] == 0 and not r['leaks']]
+          leaking = [r for r in rows if r['leaks']]
+          summary = {
+              'stun': os.environ['GITHUB_SHA'],
+              'mesa_ref': 'main',
+              'mesa_commit': os.environ['MESA_COMMIT'],
+              'processes': len(rows),
+              'clean': len(clean),
+              'leaking': len(leaking),
+              'driver': str(driver),
+              'glx': str(glx),
+          }
+          (evidence / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          PY
+          cp "$MESA_BUILD/compile_commands.json" "$EVIDENCE_DIR/mesa-compile-commands.json"
+          cp "$MESA_BUILD/meson-info/intro-buildoptions.json" "$EVIDENCE_DIR/mesa-build-options.json"
+          git -C "$MESA_SOURCE" diff --exit-code
+          git diff --exit-code
+      - name: Preserve mainline probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa-main-probe-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/mesa-main-evidence
+            ${{ runner.temp }}/mesa-main-build/meson-logs/meson-log.txt
+          if-no-files-found: error
