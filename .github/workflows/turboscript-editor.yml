@@ -15,7 +15,7 @@ concurrency:
 
 env:
   SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
-  SALTS_UTILS_SHA: fe3e0a5f98e9b353fb0c1ad300e6ade7ed0815d0
+  SALTS_UTILS_SHA: 3d93bdc680297b76440ab16a2e19531f7810b9a6
   TURBOSCRIPT_SHA: eaca75c797acd595c4d72c7fea2ab76b04a950c6
   VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
