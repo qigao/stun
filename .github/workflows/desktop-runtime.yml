@@ -1,0 +1,354 @@
+name: Desktop runtime
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stun-desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+  SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
+  VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
+  VCPKG_MAX_CONCURRENCY: 2
+  ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+  UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+jobs:
+  desktop-runtime:
+    name: Linux gCanvas windows and pixels ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: .ci/sources/salts
+          persist-credentials: false
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: .ci/sources/salts-utils
+          persist-credentials: false
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: .ci/vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up BoringSSL build prerequisite
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+          cache: false
+      - name: Define isolated paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "SALTS_ROOT=$RUNNER_TEMP/stun-desktop-sdk"
+            echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-desktop-sdk"
+            echo "PACKAGE_BUILD_ROOT=$RUNNER_TEMP/stun-desktop-dependencies"
+            echo "PORTS_ROOT=$RUNNER_TEMP/stun-desktop-ports"
+            echo "EVIDENCE_DIR=$GITHUB_WORKSPACE/build/desktop-evidence"
+            echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/stun-vcpkg-cache,readwrite"
+            echo "LD_LIBRARY_PATH=$RUNNER_TEMP/stun-desktop-sdk/lib"
+          } >> "$GITHUB_ENV"
+      - name: Restore pinned third-party packages
+        id: ports_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/stun-vcpkg-cache
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
+          restore-keys: |
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+      - name: Prepare tools and record exact provenance
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
+          test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" \
+            | tee "$EVIDENCE_DIR/provenance.txt"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools \
+            vulkan-validationlayers xvfb xauth fonts-dejavu-core
+          dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" cmake==3.31.6
+          echo "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+      - name: Install checksum-verified scanner generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .ci/sources/salts-utils/cmake/ci/install-re2c.sh \
+            2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
+      - name: Build and install real Salts packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            cmake --version
+            ninja --version
+            gcc --version
+            g++ --version
+            re2c --version
+            go version
+          } >> "$EVIDENCE_DIR/provenance.txt"
+          test "$(re2c --version)" = 're2c 4.6'
+          cmake -S .ci/sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$EVIDENCE_DIR/lemon-configure.log"
+          cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/lemon-build.log"
+          for package in salts salts-utils; do
+            source="$GITHUB_WORKSPACE/.ci/sources/$package"
+            package_build="$PACKAGE_BUILD_ROOT/$package"
+            ports="$PORTS_ROOT/$package"
+            extra=()
+            install_component=()
+            if [ "$package" = salts-utils ]; then
+              extra=(
+                -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
+                "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+                "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+              )
+              install_component=(--component Unspecified)
+            fi
+            cmake -S "$source" -B "$package_build" -G Ninja \
+              -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
+              "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+              -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
+              "-DCMAKE_INSTALL_PREFIX=$SALTS_ROOT" -DCMAKE_INSTALL_LIBDIR=lib \
+              -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
+              -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF \
+              -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+              "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
+            cmake --build "$package_build" --parallel 2 2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
+            cmake --install "$package_build" "${install_component[@]}" \
+              2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
+            cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
+            cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
+            git -C "$source" diff --exit-code
+          done
+      - name: Quarantine dependency source and build trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-desktop-quarantine"
+          mv .ci/sources "$RUNNER_TEMP/stun-desktop-quarantine/sources"
+          mv "$PACKAGE_BUILD_ROOT" "$RUNNER_TEMP/stun-desktop-quarantine/builds"
+          test ! -e .ci/sources
+          test ! -e "$PACKAGE_BUILD_ROOT"
+      - name: Install pinned graphics and FlexUI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
+            "--x-install-root=$PORTS_ROOT/flexui" \
+            freetype stb box2d nlohmann-json pugixml lexbor tree-sitter tree-sitter-c \
+            catch2 pkgconf zstd glfw3 glad plutosvg vulkan-headers vulkan-loader \
+            vulkan-memory-allocator 2>&1 | tee "$EVIDENCE_DIR/graphics-install.log"
+          cp "$PORTS_ROOT/flexui/vcpkg/status" "$EVIDENCE_DIR/graphics-packages.txt"
+      - name: Save complete dependency cache
+        if: steps.ports_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-vcpkg-cache
+          key: ${{ steps.ports_cache.outputs.cache-primary-key }}
+      - name: Configure and build real window and renderer targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          ports="$PORTS_ROOT/flexui"
+          cmake -S . -B build/desktop-runtime -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT" \
+            "-DOpenSSL_DIR=$PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DSTUN_BUILD_CHARTS=OFF -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=OFF \
+            -DGCANVAS_BUILD_OPENGL=ON -DGCANVAS_BUILD_VULKAN=ON -DGCANVAS_BUILD_SVG=ON \
+            -DGCANVAS_BUILD_WINDOW=ON -DGCANVAS_BUILD_TESTS=ON \
+            -DGCANVAS_BUILD_GPU_TESTS=ON -DGCANVAS_BUILD_EXAMPLES=ON \
+            -DGCANVAS_ENABLE_VULKAN_VALIDATION=ON \
+            -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=ON -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF \
+            -DFLEX_BUILD_BACKEND_OPENGL=OFF -DFLEX_BUILD_BACKEND_VULKAN=OFF \
+            -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-configure.log"
+          cmake --build build/desktop-runtime --parallel 2 --verbose --target \
+            test_gcanvas_window_host test_gcanvas_plugin_window_host gcanvas_gpu_test gcanvas_showcase \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-build.log"
+      - name: Select and verify software graphics drivers
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD VK_ICD_FILENAMES VK_ADD_DRIVER_FILES
+          # Select exactly one installed Lavapipe manifest, never a fallback GPU.
+          mapfile -t drivers < <(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd[^/]*\.json$')
+          test "${#drivers[@]}" -eq 1
+          export VK_DRIVER_FILES="${drivers[0]}"
+          export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/stun-desktop-xdg"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          cat "$VK_DRIVER_FILES" > "$EVIDENCE_DIR/vulkan-driver.json"
+          sha256sum "$VK_DRIVER_FILES" > "$EVIDENCE_DIR/vulkan-driver.sha256"
+          xvfb-run -a glxinfo -B 2>&1 | tee "$EVIDENCE_DIR/opengl-driver.log"
+          xvfb-run -a vulkaninfo --summary 2>&1 | tee "$EVIDENCE_DIR/vulkan-driver.log"
+          grep -q 'OpenGL renderer string: llvmpipe' "$EVIDENCE_DIR/opengl-driver.log"
+          grep -q 'PHYSICAL_DEVICE_TYPE_CPU' "$EVIDENCE_DIR/vulkan-driver.log"
+          grep -q 'VK_LAYER_KHRONOS_validation' "$EVIDENCE_DIR/vulkan-driver.log"
+          {
+            echo "VK_DRIVER_FILES=$VK_DRIVER_FILES"
+            echo "LIBGL_ALWAYS_SOFTWARE=$LIBGL_ALWAYS_SOFTWARE"
+            echo "GALLIUM_DRIVER=$GALLIUM_DRIVER"
+            echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+          } >> "$GITHUB_ENV"
+      - name: Execute both backends and real FlexUI window lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS VK_ICD_FILENAMES VK_ADD_DRIVER_FILES
+          pattern='^(test_gcanvas_window_host|test_gcanvas_plugin_window_host|gcanvas_gpu_opengl|gcanvas_gpu_vulkan|gcanvas_showcase_opengl|gcanvas_showcase_vulkan)$'
+          ctest --test-dir build/desktop-runtime -R "$pattern" --show-only=json-v1 \
+            > "$EVIDENCE_DIR/selected-tests.json"
+          xvfb-run -a -s '-screen 0 1280x720x24 -nolisten tcp' \
+            ctest --test-dir build/desktop-runtime -R "$pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 180 \
+            --output-junit "$EVIDENCE_DIR/desktop-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-ctest.log"
+      - name: Verify execution, instrumentation, and runtime ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          build = Path('build/desktop-runtime').resolve(strict=True)
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          expected = {'test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
+                      'gcanvas_gpu_opengl', 'gcanvas_gpu_vulkan',
+                      'gcanvas_showcase_opengl', 'gcanvas_showcase_vulkan'}
+          selected = json.loads((evidence / 'selected-tests.json').read_text())['tests']
+          assert len(selected) == len(expected) and {t['name'] for t in selected} == expected
+          cases = list(ET.parse(evidence / 'desktop-results.xml').getroot().iter('testcase'))
+          assert len(cases) == len(expected) and {c.attrib['name'] for c in cases} == expected
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'desktop-ctest.log').read_text())
+          assert not re.search(r'VULKAN VALIDATION \[(ERROR|WARNING)\]|ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:', log)
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == 2, (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == 2 and all(int(f) == 0 for _, f in assertions)
+          totals['assertions_passed'] = sum(int(p) for p, _ in assertions)
+          commands_text = (build / 'compile_commands.json').read_text()
+          commands = json.loads(commands_text)
+          for suffix in ('flexUI/modules/desktop/gcanvas_window_host.cpp',
+                         'flexUI/modules/desktop/gcanvas_plugin_window_host.cpp',
+                         'flex/render/engines/gcanvas/renderer.cpp',
+                         'vendor/gCanvas/src/window_impl.cpp',
+                         'vendor/gCanvas/src/backends/opengl/context_impl_opengl.cpp',
+                         'vendor/gCanvas/src/backends/vulkan/context_impl_vulkan.cpp'):
+              matching = [c for c in commands if c['file'].endswith(suffix)]
+              assert len(matching) == 1, suffix
+              assert all(flag in matching[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined')), suffix
+          forbidden = [str(Path(os.environ['GITHUB_WORKSPACE']) / '.ci/sources'),
+                       os.environ['PACKAGE_BUILD_ROOT'],
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-desktop-quarantine')]
+          assert all(not Path(p).exists() for p in forbidden[:2])
+          link_text = (evidence / 'desktop-build.log').read_text()
+          assert all(p not in commands_text + link_text for p in forbidden)
+          providers = {}
+          for name in ('test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
+                       'gcanvas_gpu_test', 'gcanvas_showcase'):
+              binary = build / 'bin' / name
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              assert all(p not in dynamic + loader for p in forbidden)
+              core = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if re.fullmatch(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', path.name, re.I):
+                      core.add(str(path))
+              assert len(core) == (1 if name.startswith('test_') else 0), (name, core)
+              providers[name] = sorted(core)
+          result = {'ctest_passed': len(cases), 'tinytest': totals,
+                    'core_runtime_providers': providers,
+                    'scope': 'Linux Xvfb, Mesa llvmpipe/Lavapipe; real FlexUI window/plugin lifecycle and gCanvas pixel/showcase tests. No physical GPU, TurboScript editor, installed desktop, or Windows/macOS claim.'}
+          (evidence / 'desktop-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Real gCanvas window and renderer validation'
+            echo '```json'
+            cat "$EVIDENCE_DIR/desktop-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve exact-head evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/desktop-evidence
+            build/desktop-runtime/CMakeCache.txt
+            build/desktop-runtime/compile_commands.json
+            build/desktop-runtime/Testing/Temporary/LastTest.log
+          if-no-files-found: error
