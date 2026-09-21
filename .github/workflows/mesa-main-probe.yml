@@ -168,7 +168,7 @@ jobs:
           row = {
               'exit_code': result.returncode,
               'completed': 'application-checks=passed;' in log,
-              'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\\d+) byte\\(s\\) leaked in (\\d+) allocation\\(s\\)', log),
+              'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
               'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
               'ubsan_errors': len(re.findall(r'runtime error:', log)),
           }
@@ -202,6 +202,9 @@ jobs:
           env['LIBGL_DRIVERS_PATH'] = str(driver.parent)
           env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          system = json.loads((evidence / 'system-init.json').read_text())
+          assert len(system['leaks']) == 1, system
+          x11_baseline = tuple(map(int, system['leaks'][0]))
           rows = []
           for mode, expected_pixels in readbacks.items():
               for cycles in (1, 4):
@@ -226,10 +229,12 @@ jobs:
                   assert row['pixel_checks'] == expected_pixels * cycles, row
                   assert log.count('teardown=completed') == cycles, row
                   assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
+                  leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
+                  row['leak_tuple'] = leak_tuple
+                  row['mesa_incremental'] = leak_tuple != x11_baseline
                   if mode == 'init':
-                      assert result.returncode == 0 and not row['leaks'], row
-                  else:
-                      assert result.returncode == 0 or row['leaks'], row
+                      assert leak_tuple == x11_baseline, (row, x11_baseline)
+                  assert result.returncode != 0 if row['leaks'] else result.returncode == 0
           assert len(rows) == 10
           (evidence / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
           clean = [r for r in rows if r['exit_code'] == 0 and not r['leaks']]
@@ -241,6 +246,8 @@ jobs:
               'processes': len(rows),
               'clean': len(clean),
               'leaking': len(leaking),
+              'x11_baseline': x11_baseline,
+              'mesa_incremental_processes': sum(1 for r in rows if r.get('mesa_incremental')),
               'driver': str(driver),
               'glx': str(glx),
           }
