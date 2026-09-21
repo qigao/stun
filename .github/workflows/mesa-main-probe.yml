@@ -160,22 +160,29 @@ jobs:
 
           binary = Path('build/mesa-main-control/mesa_driver_control').resolve(strict=True)
           evidence = Path(os.environ['EVIDENCE_DIR'])
-          result = subprocess.run([str(binary), 'init', '1'], text=True,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  timeout=180)
-          log = result.stdout
-          (evidence / 'system-init-1.log').write_text(log)
-          row = {
-              'exit_code': result.returncode,
-              'completed': 'application-checks=passed;' in log,
-              'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
-              'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
-              'ubsan_errors': len(re.findall(r'runtime error:', log)),
-          }
-          (evidence / 'system-init.json').write_text(json.dumps(row, indent=2) + '\\n')
-          print(json.dumps(row))
-          assert row['completed']
-          assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0
+          rows = []
+          for cycles in (1, 4):
+              result = subprocess.run([str(binary), 'init', str(cycles)], text=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      timeout=180)
+              log = result.stdout
+              (evidence / f'system-init-{cycles}.log').write_text(log)
+              row = {
+                  'cycles': cycles,
+                  'exit_code': result.returncode,
+                  'completed': 'application-checks=passed;' in log,
+                  'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log),
+                  'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
+                  'ubsan_errors': len(re.findall(r'runtime error:', log)),
+              }
+              assert row['completed']
+              assert log.count('teardown=completed') == cycles
+              assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0
+              assert len(row['leaks']) == 1, row
+              row['x11_baseline'] = tuple(map(int, row['leaks'][0]))
+              rows.append(row)
+              print(json.dumps(row))
+          (evidence / 'system-init.json').write_text(json.dumps(rows, indent=2) + '\\n')
           # This control is diagnostic: if the runner's GLFW/X11 stack itself
           # leaks, record it instead of falsely assigning that baseline to Mesa.
           PY
@@ -202,9 +209,10 @@ jobs:
           env['LIBGL_DRIVERS_PATH'] = str(driver.parent)
           env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
-          system = json.loads((evidence / 'system-init.json').read_text())
-          assert len(system['leaks']) == 1, system
-          x11_baseline = tuple(map(int, system['leaks'][0]))
+          system_rows = json.loads((evidence / 'system-init.json').read_text())
+          x11_baselines = {int(row['cycles']): tuple(row['x11_baseline'])
+                           for row in system_rows}
+          assert set(x11_baselines) == {1, 4}, x11_baselines
           rows = []
           for mode, expected_pixels in readbacks.items():
               for cycles in (1, 4):
@@ -230,7 +238,9 @@ jobs:
                   assert log.count('teardown=completed') == cycles, row
                   assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0, row
                   leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
+                  x11_baseline = x11_baselines[cycles]
                   row['leak_tuple'] = leak_tuple
+                  row['x11_baseline'] = x11_baseline
                   row['mesa_incremental'] = leak_tuple != x11_baseline
                   if mode == 'init':
                       assert leak_tuple == x11_baseline, (row, x11_baseline)
@@ -246,7 +256,7 @@ jobs:
               'processes': len(rows),
               'clean': len(clean),
               'leaking': len(leaking),
-              'x11_baseline': x11_baseline,
+              'x11_baselines': x11_baselines,
               'mesa_incremental_processes': sum(1 for r in rows if r.get('mesa_incremental')),
               'driver': str(driver),
               'glx': str(glx),
