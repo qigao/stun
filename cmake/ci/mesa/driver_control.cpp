@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+#include <glad/gl.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -71,7 +71,7 @@ void compile(GLuint shader, const char* source) {
     require(success == GL_TRUE, "Shader compilation failed");
 }
 void load_gl() {
-    require(gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) != 0,
+    require(gladLoadGL(glfwGetProcAddress) != 0,
             "OpenGL loader failed");
     const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     require(renderer && std::strstr(renderer, "llvmpipe"), "Expected explicit llvmpipe driver");
