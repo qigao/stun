@@ -1,0 +1,84 @@
+name: Prepare XML preflight integration
+
+on:
+  push:
+    branches: [feat/xml-content-preflight]
+    paths: [.github/workflows/prepare-xml-preflight.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.repository == 'qigao/stun'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Read and transform only the reviewed Stun source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/qigao/stun.git
+          git fetch --no-tags --depth=2 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = dc8c343270c5dfac1414ca0f15f4848f7f2c4578
+          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/prepare-xml-preflight.yml
+          python3 cmake/ci/prepare_xml_preflight.py
+          git diff --check
+      - name: Execute transformed content rules with the real Salts master framework
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch master https://github.com/qigao/salts.git .ci/xml-salts
+          git -C .ci/xml-salts log -1 --format='SaltsRef=master Salts=%H'
+          # Reuse exactly the maintained compile/test block, not a mock schema.
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import textwrap
+          source = Path('.github/workflows/xml-content-runtime.yml').read_text()
+          marker = '      - name: Compile and execute the real content-model tests\n        shell: bash\n        run: |\n'
+          assert source.count(marker) == 1
+          script = textwrap.dedent(source.split(marker, 1)[1])
+          # Tracked production edits are intentional in this preparation step.
+          assert script.count('git diff --exit-code\n') == 1
+          script = script.replace('git diff --exit-code\n', 'git diff --check\n', 1)
+          subprocess.run(['bash', '-n'], input=script, text=True, check=True)
+          subprocess.run(['bash', '-euo', 'pipefail', '-c', script], check=True)
+          PY
+      - name: Record source blobs without changing any branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          assert os.environ['GITHUB_REPOSITORY'] == 'qigao/stun'
+          assert os.environ['GITHUB_REF'] == 'refs/heads/feat/xml-content-preflight'
+          paths = subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines()
+          assert len(paths) == 11, paths
+          records = []
+          for name in paths:
+              data = Path(name).read_bytes()
+              expected = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+              payload = {'encoding': 'base64', 'content': base64.b64encode(data).decode()}
+              result = json.loads(subprocess.check_output(
+                  ['gh', 'api', '--method', 'POST', 'repos/qigao/stun/git/blobs', '--input', '-'],
+                  input=json.dumps(payload), text=True))
+              assert result['sha'] == expected
+              records.append({'path': name, 'mode': '100644', 'type': 'blob', 'sha': expected})
+          print('XML_SOURCE_BLOBS=' + json.dumps(records))
+          print('PREPARED_PARENT=' + os.environ['GITHUB_SHA'])
+          print('No branch was updated; full registry/XML/application CI is still required.')
+          PY
