@@ -98,7 +98,7 @@ jobs:
             -Dplatforms=x11 -Dgallium-drivers=llvmpipe -Dvulkan-drivers=[] \
             -Dglx=dri -Dglvnd=enabled -Degl=disabled -Dgbm=disabled \
             -Dgles1=disabled -Dgles2=disabled -Dllvm=enabled \
-            -Dgallium-vdpau=disabled -Dgallium-va=disabled -Dgallium-rusticl=false \
+            -Dgallium-va=disabled -Dgallium-rusticl=false \
             -Dbuild-tests=false -Dc_args=-fno-omit-frame-pointer -Dcpp_args=-fno-omit-frame-pointer \
             2>&1 | tee "$EVIDENCE_DIR/mesa-configure.log"
           meson compile -C "$MESA_BUILD" -j 2 2>&1 | tee "$EVIDENCE_DIR/mesa-build.log"
