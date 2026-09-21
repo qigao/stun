@@ -1,0 +1,385 @@
+name: TurboScript editor runtime
+
+on:
+  pull_request:
+  push:
+    branches: [feat/turboscript-desktop-runtime]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stun-editor-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
+  SALTS_UTILS_SHA: 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
+  TURBOSCRIPT_SHA: 3458e06eb33e028c928c23cb7f63f796689a491e
+  VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
+  VCPKG_MAX_CONCURRENCY: 2
+  ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+  UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+
+jobs:
+  mesa-driver:
+    uses: ./.github/workflows/mesa-driver.yml
+  editor:
+    needs: mesa-driver
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: .ci/sources/salts
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: .ci/sources/salts-utils
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: qigao/TurboScript
+          ref: ${{ env.TURBOSCRIPT_SHA }}
+          path: .ci/sources/turboscript
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: .ci/vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+          cache: false
+      - name: Define explicit package paths and source provenance
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/editor-evidence
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
+          test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          test "$(git -C .ci/sources/turboscript rev-parse HEAD)" = "$TURBOSCRIPT_SHA"
+          test "$(git -C .ci/vcpkg rev-parse HEAD)" = "$VCPKG_SHA"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nTurboScript=%s\nvcpkg=%s\n' \
+            "$EXPECTED_HEAD" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$TURBOSCRIPT_SHA" "$VCPKG_SHA" \
+            > build/editor-evidence/provenance.txt
+          {
+            echo "SALTS_ROOT=$RUNNER_TEMP/stun-editor-sdk"
+            echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-editor-sdk"
+            echo "TURBOSCRIPT_ROOT=$RUNNER_TEMP/stun-editor-tbs-sdk"
+            echo "PACKAGE_BUILD_ROOT=$RUNNER_TEMP/stun-editor-producers"
+            echo "PORTS_ROOT=$RUNNER_TEMP/stun-editor-ports"
+            echo "APP_ROOT=$RUNNER_TEMP/stun-editor-app"
+            echo "MESA_ROOT=$RUNNER_TEMP/stun-mesa-sdk"
+            echo "EVIDENCE_DIR=$GITHUB_WORKSPACE/build/editor-evidence"
+            echo "LD_LIBRARY_PATH=$RUNNER_TEMP/stun-editor-sdk/lib"
+            echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/stun-editor-cache,readwrite"
+          } >> "$GITHUB_ENV"
+          tar --exclude=.git -C .ci/sources/turboscript -cJf build/editor-evidence/turboscript-source.tar.xz .
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/stun-editor-cache
+          key: stun-editor-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-v1
+      - name: Prepare build and graphics prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SALTS_ROOT" "$TURBOSCRIPT_ROOT" "$PORTS_ROOT"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers \
+            libllvm20 xvfb xauth fonts-dejavu-core
+          dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/editor-tools" cmake==3.31.6
+          echo "$RUNNER_TEMP/editor-tools/cmake/data/bin" >> "$GITHUB_PATH"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+          bash .ci/sources/salts-utils/cmake/ci/install-re2c.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/editor-mesa-input
+      - name: Verify and unpack the same-head Mesa package
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, tarfile
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP']) / 'editor-mesa-input'
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
+          assert provenance['Stun'] == os.environ['EXPECTED_HEAD']
+          assert provenance['vcpkg'] == os.environ['VCPKG_SHA']
+          assert (source / 'module-cleanup.patch').read_bytes() == Path('cmake/ci/mesa/module-cleanup.patch').read_bytes()
+          rows = json.loads((source / 'results.json').read_text())
+          modes = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          assert len(rows) == 20 and {(r['variant'], r['mode'], r['cycles']) for r in rows} == {
+              (v, m, n) for v in ('baseline', 'patched') for m in modes for n in (1, 4)}
+          for r in rows:
+              assert r['completed'] and r['pixel_checks'] == modes[r['mode']] * r['cycles'], r
+              if r['variant'] == 'patched' or r['mode'] == 'init':
+                  assert r['exit_code'] == 0 and not r['leaks'], r
+              elif r['mode'] in ('draw', 'overlap', 'threads'):
+                  assert r['exit_code'] != 0 and r['leaks'], r
+          archive = source / 'mesa-sdk.tar.xz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == (source / 'mesa-sdk.sha256').read_text().split()[0]
+          root = Path(os.environ['MESA_ROOT'])
+          assert not root.exists()
+          root.mkdir()
+          with tarfile.open(archive) as tar:
+              tar.extractall(root, filter='data')
+          libraries = {}
+          for filename, report in ((f"libgallium-{provenance['Mesa']}.so", 'patched-driver.sha256'),
+                                   ('libGLX_mesa.so.0.0.0', 'patched-glx.sha256')):
+              path = (root / 'lib' / filename).resolve(strict=True)
+              assert path.parent == (root / 'lib').resolve(strict=True)
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert digest == (source / report).read_text().split()[0]
+              libraries[str(path)] = digest
+          (evidence / 'mesa-providers.json').write_text(json.dumps(libraries, indent=2) + '\n')
+          PY
+      - name: Build and install the real canonical packages and JIT runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(re2c --version)" = 're2c 4.6'
+          { cmake --version; gcc --version; g++ --version; re2c --version; } >> "$EVIDENCE_DIR/provenance.txt"
+          cmake -S .ci/sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2
+          for package in salts salts-utils turboscript; do
+            source="$GITHUB_WORKSPACE/.ci/sources/$package"
+            package_build="$PACKAGE_BUILD_ROOT/$package"
+            ports="$PORTS_ROOT/$package"
+            prefix="$SALTS_ROOT"
+            extra=()
+            if [ "$package" = salts-utils ]; then
+              extra=(-DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
+                "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+                "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon")
+            elif [ "$package" = turboscript ]; then
+              prefix="$TURBOSCRIPT_ROOT"
+              extra=(-DTURBOSCRIPT_BUILD_MODULES=OFF -DTURBOSCRIPT_BUILD_CLI=OFF)
+            fi
+            cmake -S "$source" -B "$package_build" -G Ninja \
+              -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_INSTALL_LIBDIR=lib \
+              "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
+              "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+              "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+              "-DCMAKE_INSTALL_PREFIX=$prefix" "-DCMAKE_INSTALL_RPATH=$SALTS_ROOT/lib;$TURBOSCRIPT_ROOT/lib" \
+              -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
+              -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF \
+              -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+              "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
+            cmake --build "$package_build" --parallel 2 2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
+            cmake --install "$package_build" 2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
+            cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
+            cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
+            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
+            git -C "$source" diff --exit-code
+          done
+      - name: Quarantine producer trees and install frontend dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mv .ci/sources "$RUNNER_TEMP/editor-source-quarantine"
+          mv "$PACKAGE_BUILD_ROOT" "$RUNNER_TEMP/editor-build-quarantine"
+          test ! -e .ci/sources
+          test ! -e "$PACKAGE_BUILD_ROOT"
+          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
+            "--x-install-root=$PORTS_ROOT/flexui" \
+            freetype stb box2d nlohmann-json pugixml lexbor tree-sitter tree-sitter-c \
+            catch2 pkgconf zstd glfw3 glad plutosvg vulkan-headers vulkan-loader \
+            vulkan-memory-allocator 2>&1 | tee "$EVIDENCE_DIR/frontend-dependencies.log"
+      - name: Build real TurboScript controllers and desktop editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          ports="$PORTS_ROOT/flexui"
+          cmake -S . -B build/editor -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$TURBOSCRIPT_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT" \
+            "-DTURBOSCRIPT_ROOT=$TURBOSCRIPT_ROOT" \
+            "-DCMAKE_BUILD_RPATH=$SALTS_ROOT/lib;$TURBOSCRIPT_ROOT/lib" \
+            "-DCMAKE_INSTALL_RPATH=$SALTS_ROOT/lib;$TURBOSCRIPT_ROOT/lib" \
+            "-DOpenSSL_DIR=$PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=ON \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DSTUN_BUILD_CHARTS=OFF -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=ON \
+            -DGCANVAS_BUILD_OPENGL=ON -DGCANVAS_BUILD_VULKAN=ON -DGCANVAS_BUILD_SVG=ON \
+            -DGCANVAS_BUILD_WINDOW=ON -DGCANVAS_ENABLE_VULKAN_VALIDATION=ON \
+            -DFLEX_BUILD_GCANVAS_GPU_TESTS=ON -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=ON \
+            -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF -DFLEX_BUILD_BACKEND_OPENGL=OFF \
+            -DFLEX_BUILD_BACKEND_VULKAN=OFF -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+            2>&1 | tee "$EVIDENCE_DIR/editor-configure.log"
+          cmake --build build/editor --parallel 2 --verbose --target \
+            test_turboscript_controller test_turboscript_application \
+            test_desktop_editor_controller flexui_desktop_editor \
+            2>&1 | tee "$EVIDENCE_DIR/editor-build.log"
+      - name: Run real JIT and editor regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS LIBGL_DRIVERS_PATH
+          mkdir -p "$RUNNER_TEMP/editor-xdg"
+          chmod 700 "$RUNNER_TEMP/editor-xdg"
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/editor-xdg"
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          pattern='^(test_turboscript_controller|test_turboscript_application|test_desktop_editor_controller|test_flexui_desktop_editor_smoke)$'
+          ctest --test-dir build/editor -R "$pattern" --show-only=json-v1 > "$EVIDENCE_DIR/selected-tests.json"
+          xvfb-run -a env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+            LD_DEBUG=files LD_DEBUG_OUTPUT="$EVIDENCE_DIR/loader" \
+            ctest --test-dir build/editor -R "$pattern" --no-tests=error --verbose \
+            --output-on-failure --timeout 180 --output-junit "$EVIDENCE_DIR/editor-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/editor-ctest.log"
+      - name: Install the application and run outside its build tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS LIBGL_DRIVERS_PATH
+          cmake --install build/editor --component DesktopEditor --prefix "$APP_ROOT" \
+            2>&1 | tee "$EVIDENCE_DIR/editor-install.log"
+          cp build/editor/install_manifest_DesktopEditor.txt "$EVIDENCE_DIR/editor-install-manifest.txt"
+          cp build/editor/CMakeCache.txt "$EVIDENCE_DIR/editor-CMakeCache.txt"
+          cp build/editor/compile_commands.json "$EVIDENCE_DIR/editor-compile-commands.json"
+          test -x "$APP_ROOT/bin/flexui_desktop_editor"
+          test -f "$APP_ROOT/bin/libflexui_document_service.so"
+          for asset in editor.xml editor.css editor.tbs; do
+            cmp "flexUI/examples/desktop_editor/$asset" "$APP_ROOT/bin/desktop_editor_assets/$asset"
+          done
+          mv build/editor "$RUNNER_TEMP/editor-consumer-quarantine"
+          mkdir -p "$RUNNER_TEMP/editor-empty-cwd"
+          cd "$RUNNER_TEMP/editor-empty-cwd"
+          xvfb-run -a env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+            LD_DEBUG=files LD_DEBUG_OUTPUT="$EVIDENCE_DIR/loader" \
+            "$APP_ROOT/bin/flexui_desktop_editor" --smoke \
+            2>&1 | tee "$EVIDENCE_DIR/installed-smoke.log"
+      - name: Audit real process results and installed ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          python3 - <<'PY'
+          from collections import Counter
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          e = Path(os.environ['EVIDENCE_DIR'])
+          expected = {'test_turboscript_controller', 'test_turboscript_application',
+                      'test_desktop_editor_controller', 'test_flexui_desktop_editor_smoke'}
+          selected = json.loads((e / 'selected-tests.json').read_text())['tests']
+          cases = list(ET.parse(e / 'editor-results.xml').getroot().iter('testcase'))
+          assert len(selected) == 4 and {t['name'] for t in selected} == expected
+          assert len(cases) == 4 and {t.attrib['name'] for t in cases} == expected
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (e / 'editor-ctest.log').read_text())
+          installed_log = (e / 'installed-smoke.log').read_text()
+          assert not re.search(r'ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:|VULKAN VALIDATION \[(ERROR|WARNING)\]', log + installed_log)
+          assert 'FlexUI desktop editor smoke test passed:' in log and 'FlexUI desktop editor smoke test passed:' in installed_log
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              values = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(values) == 3 and all(n > 0 if status == 'PASSED' else n == 0 for n in values), (status, values)
+              totals[status] = sum(values)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == 3 and all(int(f) == 0 for _, f in assertions)
+          totals['assertions'] = sum(int(p) for p, _ in assertions)
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          tbs = Path(os.environ['TURBOSCRIPT_ROOT']).resolve(strict=True)
+          mesa = {Path(p): h for p, h in json.loads((e / 'mesa-providers.json').read_text()).items()}
+          for p, h in mesa.items():
+              assert hashlib.sha256(p.read_bytes()).hexdigest() == h
+          expected_programs = Counter({'test_turboscript_controller': 1, 'test_turboscript_application': 1,
+                                       'test_desktop_editor_controller': 1, 'flexui_desktop_editor': 2})
+          observed = Counter()
+          records = []
+          for trace in sorted(e.glob('loader.*')):
+              text = trace.read_text()
+              programs = re.findall(r'transferring control:[ \t]+(\S+)', text)
+              if len(programs) != 1 or Path(programs[0]).name not in expected_programs:
+                  continue
+              name = Path(programs[0]).name
+              paths = set(re.findall(r'calling init:[ \t]+([^\s\[]+)', text))
+              # Build-tree executables have moved; shared providers remain installed.
+              libs = {Path(p).resolve(strict=True) for p in paths}
+              core = {p for p in libs if re.fullmatch(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', p.name, re.I)}
+              runtime = {p for p in libs if p.name.startswith('libturbo_script.so')}
+              databind = {p for p in libs if p.name.startswith('libdata_bind.so')}
+              assert len(core) == len(runtime) == len(databind) == 1, (name, core, runtime, databind)
+              assert all(p.is_relative_to(sdk) for p in core | databind)
+              assert all(p.is_relative_to(tbs) for p in runtime)
+              graphics = {p for p in libs if p.name.startswith(('libgallium', 'libGLX_mesa'))}
+              assert graphics == (set(mesa) if name == 'flexui_desktop_editor' else set()), (name, graphics)
+              assert not any(re.search(r'libturbo[_-]?(utils|parser|net)', p.name, re.I) for p in libs)
+              observed[name] += 1
+              records.append({'program': programs[0], 'core': list(map(str, core)),
+                              'turboscript': list(map(str, runtime)), 'databind': list(map(str, databind)),
+                              'graphics': list(map(str, graphics))})
+          assert observed == expected_programs, observed
+          installed = Path(os.environ['APP_ROOT']) / 'bin/flexui_desktop_editor'
+          assert sum(r['program'] == str(installed) for r in records) == 1
+          dynamic = subprocess.check_output(['readelf', '-d', str(installed)], text=True)
+          loader = subprocess.check_output(['ldd', str(installed)], text=True)
+          (e / 'installed-editor-dynamic.txt').write_text(dynamic + '\n' + loader)
+          assert 'not found' not in loader
+          forbidden = ('.ci/sources', 'stun-editor-producers', 'editor-source-quarantine', 'editor-build-quarantine', 'editor-consumer-quarantine')
+          assert not any(p in dynamic + loader for p in forbidden)
+          receipt = {'source_head': os.environ['GITHUB_SHA'], 'ctest': 4, 'installed_smoke': 1,
+                     'tinytest': totals, 'processes': records,
+                     'scope': 'Linux OpenGL software-rendered real JIT editor; explicit installed SDKs, not a relocatable standalone distribution or Windows/macOS claim.'}
+          (e / 'editor-evidence.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt, indent=2))
+          PY
+          git diff --exit-code
+      - name: Preserve installed SDKs on failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "$SALTS_ROOT" ] && [ -d "$TURBOSCRIPT_ROOT" ]; then
+            tar -C "$RUNNER_TEMP" -cJf "$EVIDENCE_DIR/installed-producers.tar.xz" \
+              stun-editor-sdk stun-editor-tbs-sdk
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: turboscript-editor-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/editor-evidence
+            build/editor/CMakeCache.txt
+            build/editor/Testing/Temporary/LastTest.log
+          if-no-files-found: error
