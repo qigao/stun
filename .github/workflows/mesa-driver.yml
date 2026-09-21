@@ -64,7 +64,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
             libdrm-dev libexpat1-dev libelf-dev zlib1g-dev libzstd-dev \
-            xorg-dev libwayland-dev libxkbcommon-dev libglvnd-dev \
+            xorg-dev libwayland-dev libxkbcommon-dev libglvnd-dev libx11-xcb-dev \
             libxcb-glx0-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev \
             libxcb-randr0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shm0-dev libxshmfence-dev \
             xvfb xauth mesa-utils
