@@ -136,9 +136,11 @@ jobs:
           driver = Path(os.environ['MESA_EXPECTED_DRIVER']).resolve(strict=True)
           glx = Path(os.environ['MESA_EXPECTED_GLX']).resolve(strict=True)
           env = os.environ.copy()
-          env['LD_LIBRARY_PATH'] = str(driver.parent)
+          # Select the exact main-built GLX vendor and DRI module; do not mix
+          # the probe with the runner's distribution Mesa.
+          env['LD_LIBRARY_PATH'] = str(glx.parent)
+          env['LIBGL_DRIVERS_PATH'] = str(driver.parent)
           env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
-          env.pop('LIBGL_DRIVERS_PATH', None)
           readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
           rows = []
           for mode, expected_pixels in readbacks.items():
