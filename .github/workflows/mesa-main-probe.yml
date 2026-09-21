@@ -119,6 +119,39 @@ jobs:
             -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
             "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-main-control-ports"
           cmake --build build/mesa-main-control --parallel 2 --verbose
+      - name: Establish current runner GLFW/X11 init control
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS LIBGL_DRIVERS_PATH __GLX_VENDOR_LIBRARY_NAME
+          xvfb-run -a python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          binary = Path('build/mesa-main-control/mesa_driver_control').resolve(strict=True)
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          result = subprocess.run([str(binary), 'init', '1'], text=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  timeout=180)
+          log = result.stdout
+          (evidence / 'system-init-1.log').write_text(log)
+          row = {
+              'exit_code': result.returncode,
+              'completed': 'application-checks=passed;' in log,
+              'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\\d+) byte\\(s\\) leaked in (\\d+) allocation\\(s\\)', log),
+              'asan_errors': len(re.findall(r'ERROR: AddressSanitizer:(?!.*LeakSanitizer)', log)),
+              'ubsan_errors': len(re.findall(r'runtime error:', log)),
+          }
+          (evidence / 'system-init.json').write_text(json.dumps(row, indent=2) + '\\n')
+          print(json.dumps(row))
+          assert row['completed']
+          assert row['asan_errors'] == 0 and row['ubsan_errors'] == 0
+          # This control is diagnostic: if the runner's GLFW/X11 stack itself
+          # leaks, record it instead of falsely assigning that baseline to Mesa.
+          PY
       - name: Execute unchanged lifecycle control against Mesa main
         shell: bash
         run: |
