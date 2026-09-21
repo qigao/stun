@@ -15,7 +15,7 @@ concurrency:
 
 env:
   SALTS_SHA: c4197712261a563ed7e238152b34cb50a2ef98a9
-  SALTS_UTILS_SHA: 1faaf21cb3b66ef359892d1d67117cabc00ea4ed
+  SALTS_UTILS_SHA: fe3e0a5f98e9b353fb0c1ad300e6ade7ed0815d0
   TURBOSCRIPT_SHA: eaca75c797acd595c4d72c7fea2ab76b04a950c6
   VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
@@ -204,6 +204,48 @@ jobs:
             cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
+      - name: Verify installed XML engine isolation across real libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS
+          ports="$PORTS_ROOT/salts-utils"
+          cmake -S .ci/sources/salts-utils/cmake/ci/xml-private-symbols -B build/xml-private -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            "-DCMAKE_BUILD_RPATH=$SALTS_ROOT/lib" \
+            2>&1 | tee "$EVIDENCE_DIR/xml-private-configure.log"
+          cmake --build build/xml-private --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/xml-private-build.log"
+          ctest --test-dir build/xml-private --show-only=json-v1 > "$EVIDENCE_DIR/xml-private-selected.json"
+          ctest --test-dir build/xml-private --no-tests=error --verbose --output-on-failure \
+            --timeout 180 --output-junit "$EVIDENCE_DIR/xml-private-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/xml-private.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          e = Path(os.environ['EVIDENCE_DIR'])
+          expected = {'xml_private_databind_first', 'xml_private_mustache_first', 'xml_private_export_table'}
+          selected = json.loads((e / 'xml-private-selected.json').read_text())['tests']
+          cases = list(ET.parse(e / 'xml-private-results.xml').getroot().iter('testcase'))
+          assert len(selected) == 3 and {t['name'] for t in selected} == expected
+          assert len(cases) == 3 and {c.attrib['name'] for c in cases} == expected
+          assert all(c.attrib.get('status', 'run') == 'run' for c in cases)
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          commands = json.loads((e / 'salts-utils-compile_commands.json').read_text())
+          vendor = [c for c in commands if '/parser/xml_parser/vendor/cxml/' in c['file']]
+          assert vendor and all('-fvisibility=hidden' in c['command'] for c in vendor)
+          assert all('-fsanitize=address' in c['command'] and '-fsanitize=undefined' in c['command'] for c in vendor)
+          print('Three installed XML isolation tests passed; private engine visibility and sanitizers verified.')
+          PY
+          cp build/xml-private/compile_commands.json "$EVIDENCE_DIR/xml-private-compile-commands.json"
       - name: Run the seven existing producer Host ABI contracts
         shell: bash
         run: |
