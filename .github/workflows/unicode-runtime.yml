@@ -226,6 +226,7 @@ jobs:
           bash .ci/install-sources/salts-utils/cmake/ci/install-re2c.sh 2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
 
       - name: Build and install the real dependency packages
+        id: dependency_packages
         shell: bash
         run: |
           set -euo pipefail
@@ -679,4 +680,21 @@ jobs:
             build/flexui-installed-*/compile_commands.json
             build/flexui-installed-*/installed-component-*.txt
             build/flexui-installed-*/Testing/Temporary/LastTest.log
+          if-no-files-found: error
+
+      - name: Preserve the actual SDK for integration failure diagnosis
+        if: failure() && steps.dependency_packages.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/stun-salts-sdk.tar.gz" \
+            -C "$SALTS_ROOT" . -C "$EVIDENCE_DIR" provenance.txt
+
+      - name: Upload the SDK from the failed integration run
+        if: failure() && steps.dependency_packages.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: salts-sdk-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
+          retention-days: 3
           if-no-files-found: error

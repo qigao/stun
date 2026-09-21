@@ -23,7 +23,7 @@ add_subdirectory(modules/tailwindcss)
 
 # Find lexbor for CSS parsing
 find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
-find_library(LEXBOR_LIBRARY NAMES lexbor)
+find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR)
 
 # Find tree-sitter for syntax highlighting (core only, languages via plugins)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
@@ -220,6 +220,11 @@ set(FLEXUI_HEADERS
 # 创建库
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
 add_library(FlexUI::Core ALIAS flexUI)
+
+get_filename_component(_flexui_lexbor_library_name "${LEXBOR_LIBRARY}" NAME_WE)
+if(_flexui_lexbor_library_name MATCHES "^(lib)?lexbor_static$")
+  target_compile_definitions(flexUI PRIVATE LEXBOR_STATIC)
+endif()
 
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
