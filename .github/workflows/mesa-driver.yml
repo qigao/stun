@@ -294,6 +294,7 @@ jobs:
           def classify_leaks(log):
               owners = {
                   'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                  'glfw': {'bytes': 0, 'objects': 0, 'blocks': 0},
                   'patch_owner': {'bytes': 0, 'objects': 0, 'blocks': 0,
                                   'sources': []},
                   'other_non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
@@ -303,6 +304,8 @@ jobs:
                   stack = match.group('stack')
                   if '/glfw/src/x11_init.c:' in stack:
                       owner = 'x11'
+                  elif '/glfw/src/' in stack:
+                      owner = 'glfw'
                   else:
                       resolved = resolve_patch_sources(log, stack)
                       if resolved:
@@ -332,6 +335,7 @@ jobs:
               assert len(system_leaks) == 1, (system_cycles, system_leaks)
               system_owners = classify_leaks(system_log)
               assert system_owners['x11']['blocks'] > 0, (system_cycles, system_owners)
+              assert system_owners['glfw']['blocks'] == 0, (system_cycles, system_owners)
               assert system_owners['patch_owner']['blocks'] == 0, (system_cycles, system_owners)
               assert system_owners['other_non_x11']['blocks'] == 0, (system_cycles, system_owners)
               system_rows.append({'mode': 'init',
