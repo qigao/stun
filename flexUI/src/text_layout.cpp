@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <sstream>
+#include <stdexcept>
 
 namespace flexUI {
 
