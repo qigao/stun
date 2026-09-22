@@ -625,7 +625,7 @@ void require_textarea_navigation_clears_selection_before_text_input() {
 
 } // namespace
 
-spec("TextEdit horizontal navigation preserves UTF-8 scalar boundaries") {
+spec("TextEdit navigation and deletion preserve Unicode boundaries") {
   it("moves across two-byte and four-byte scalars in both directions") {
     std::string text = "aé🙂b";
     TextEdit edit;
@@ -692,6 +692,75 @@ spec("TextEdit horizontal navigation preserves UTF-8 scalar boundaries") {
     check(edit.key(static_cast<int>(KeyCode::Right), true));
     check(edit.cursor() == 0);
     check_false(edit.has_selection());
+  }
+
+
+  it("moves and deletes complete extended grapheme clusters") {
+    const std::string combining = std::string("e") + "\xCC\x81";
+    std::string text = std::string("A") + combining + "B";
+    TextEdit edit;
+    edit.init(&text, 10.0f, 20.0f);
+    edit.set_cursor(1);
+
+    check(edit.key(static_cast<int>(KeyCode::Right)));
+    check(edit.cursor() == 4);
+    check(edit.key(static_cast<int>(KeyCode::Left)));
+    check(edit.cursor() == 1);
+
+    check(edit.key(static_cast<int>(KeyCode::Delete)));
+    check(text == "AB");
+    check(edit.cursor() == 1);
+    edit.undo();
+    check(text == std::string("A") + combining + "B");
+    check(edit.cursor() == 4);
+
+    edit.set_cursor(4);
+    check(edit.key(static_cast<int>(KeyCode::Backspace)));
+    check(text == "AB");
+    check(edit.cursor() == 1);
+    edit.undo();
+    check(text == std::string("A") + combining + "B");
+    check(edit.cursor() == 4);
+  }
+
+  it("treats emoji ZWJ and regional-indicator pairs as one edit unit") {
+    const std::string woman_technologist =
+        "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB";
+    const std::string flag_us =
+        "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8";
+
+    for (const auto& cluster : {woman_technologist, flag_us}) {
+      std::string text = std::string("A") + cluster + "B";
+      TextEdit edit;
+      edit.init(&text, 10.0f, 20.0f);
+      edit.set_cursor(1);
+
+      check(edit.key(static_cast<int>(KeyCode::Right)));
+      check(edit.cursor() == static_cast<int>(1 + cluster.size()));
+      check(edit.key(static_cast<int>(KeyCode::Backspace)));
+      check(text == "AB");
+      check(edit.cursor() == 1);
+    }
+  }
+
+  it("uses Unicode default word-boundary segments for Ctrl navigation") {
+    std::string text = std::string("\xC3\xA9") + "clair world";
+    TextEdit edit;
+    edit.init(&text, 10.0f, 20.0f);
+
+    check(edit.key(static_cast<int>(KeyCode::Right), false, true));
+    check(edit.cursor() == 7);  // éclair
+    check(edit.key(static_cast<int>(KeyCode::Right), false, true));
+    check(edit.cursor() == 8);  // space segment
+    check(edit.key(static_cast<int>(KeyCode::Right), false, true));
+    check(edit.cursor() == 13); // world
+
+    check(edit.key(static_cast<int>(KeyCode::Left), false, true));
+    check(edit.cursor() == 8);
+    check(edit.key(static_cast<int>(KeyCode::Left), false, true));
+    check(edit.cursor() == 7);
+    check(edit.key(static_cast<int>(KeyCode::Left), false, true));
+    check(edit.cursor() == 0);
   }
 }
 
