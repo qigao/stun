@@ -1,6 +1,6 @@
 #include "gcanvas/backends/opengl.hpp"
 
-#include "../gl/context_impl_opengl.hpp"
+#include "../gl/context_impl_gl.hpp"
 #include "../../resources.hpp"
 
 namespace gcanvas::opengl
@@ -22,6 +22,6 @@ namespace gcanvas::opengl
         shared.backend = Backend::OpenGL;
         shared.vertex_shader_source = ogl_vertex_code;
         shared.fragment_shader_source = ogl_fragment_code;
-        return std::make_unique<ContextImplOpengl>(shared);
+        return std::make_unique<ContextImplGl>(shared);
     }
 }

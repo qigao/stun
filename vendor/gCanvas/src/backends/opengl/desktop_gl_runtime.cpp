@@ -26,7 +26,7 @@ namespace gcanvas
 
     GlSharedInfo::GlSharedInfo(detail::GlProcLoader loader, void* user_data)
     {
-        load_opengl(loader, user_data);
+        load_api(loader, user_data);
     }
 
     GlSharedInfo::~GlSharedInfo()
@@ -57,7 +57,7 @@ namespace gcanvas
         }
     }
 
-    void GlSharedInfo::load_opengl(detail::GlProcLoader loader, void* user_data)
+    void GlSharedInfo::load_api(detail::GlProcLoader loader, void* user_data)
     {
         // --------------- Load Opengl ---------------
 

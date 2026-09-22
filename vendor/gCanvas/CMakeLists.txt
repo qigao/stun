@@ -81,9 +81,9 @@ endif()
 if(GCANVAS_BUILD_OPENGL)
   find_package(glad CONFIG REQUIRED)
   add_library(gcanvas_opengl STATIC
-    src/backends/gl/context_impl_opengl.cpp
-    src/backends/gl/font_impl_opengl.cpp
-    src/backends/gl/image_impl_opengl.cpp
+    src/backends/gl/context_impl_gl.cpp
+    src/backends/gl/font_impl_gl.cpp
+    src/backends/gl/image_impl_gl.cpp
     src/backends/opengl/context_opengl.cpp
     src/backends/opengl/desktop_gl_runtime.cpp)
   add_library(gCanvas::OpenGL ALIAS gcanvas_opengl)

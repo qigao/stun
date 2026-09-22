@@ -1,5 +1,5 @@
-#ifndef GCANVAS_IMAGE_IMPL_OPENGL_HPP
-#define GCANVAS_IMAGE_IMPL_OPENGL_HPP
+#ifndef GCANVAS_IMAGE_IMPL_GL_HPP
+#define GCANVAS_IMAGE_IMPL_GL_HPP
 
 #include "gcanvas/image.hpp"
 
@@ -10,13 +10,13 @@
 
 namespace gcanvas
 {
-    class ImageImplOpengl : public Image
+    class ImageImplGl : public Image
     {
     public:
-        ImageImplOpengl(std::string file_path, ImageConfig imageConfig);
-        ImageImplOpengl(int width, int height, int components, const unsigned char* data,
+        ImageImplGl(std::string file_path, ImageConfig imageConfig);
+        ImageImplGl(int width, int height, int components, const unsigned char* data,
                         std::size_t size, ImageConfig imageConfig);
-        ~ImageImplOpengl();
+        ~ImageImplGl();
 
         GLuint _image;
         int _sampler_index = -1;
@@ -37,4 +37,4 @@ namespace gcanvas
 
 } // namespace gcanvas
 
-#endif // GCANVAS_IMAGE_IMPL_OPENGL_HPP
+#endif // GCANVAS_IMAGE_IMPL_GL_HPP

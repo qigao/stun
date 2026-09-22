@@ -26,7 +26,7 @@ namespace gcanvas
         {}
         ~GlSharedInfo();
 
-        void load_opengl(detail::GlProcLoader loader, void* user_data);
+        void load_api(detail::GlProcLoader loader, void* user_data);
     };
 
 } // namespace gcanvas

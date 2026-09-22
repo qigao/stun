@@ -1,5 +1,5 @@
-#ifndef GCANVAS_FONT_IMPL_OPENGL_HPP
-#define GCANVAS_FONT_IMPL_OPENGL_HPP
+#ifndef GCANVAS_FONT_IMPL_GL_HPP
+#define GCANVAS_FONT_IMPL_GL_HPP
 
 #include "gcanvas/font.hpp"
 
@@ -8,12 +8,12 @@
 
 namespace gcanvas
 {
-    class FontImplOpengl : public Font
+    class FontImplGl : public Font
     {
     public:
-        FontImplOpengl(std::string file_path);
-        FontImplOpengl(const unsigned char* buffer, size_t size);
-        ~FontImplOpengl() override = default;
+        FontImplGl(std::string file_path);
+        FontImplGl(const unsigned char* buffer, size_t size);
+        ~FontImplGl() override = default;
 
         bool _loaded = false;
         bool _uploaded = false;
@@ -27,4 +27,4 @@ namespace gcanvas
 
 } // namespace gcanvas
 
-#endif // GCANVAS_FONT_IMPL_OPENGL_HPP
+#endif // GCANVAS_FONT_IMPL_GL_HPP
