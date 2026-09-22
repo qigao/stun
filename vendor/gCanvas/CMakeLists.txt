@@ -13,6 +13,7 @@ endif()
 
 option(GCANVAS_BUILD_OPENGL "Build the OpenGL canvas backend" ON)
 option(GCANVAS_BUILD_GLES "Build the OpenGL ES 3 canvas backend" OFF)
+option(GCANVAS_BUILD_ANDROID_EGL "Build the Android EGL presentation adapter" OFF)
 option(GCANVAS_BUILD_VULKAN "Build the Vulkan canvas backend" ON)
 option(GCANVAS_BUILD_SVG "Build the optional PlutoSVG resource adapter" ON)
 option(GCANVAS_BUILD_WINDOW "Build the optional GLFW presentation helper" ON)
@@ -137,6 +138,35 @@ if(GCANVAS_BUILD_GLES)
   set_target_properties(gcanvas_opengles PROPERTIES
     EXPORT_NAME OpenGLES
     OUTPUT_NAME gcanvas_opengles
+    POSITION_INDEPENDENT_CODE ON)
+endif()
+
+if(GCANVAS_BUILD_ANDROID_EGL)
+  if(NOT ANDROID)
+    message(FATAL_ERROR "GCANVAS_BUILD_ANDROID_EGL is only supported for Android targets")
+  endif()
+  if(NOT TARGET gcanvas_opengles)
+    message(FATAL_ERROR "GCANVAS_BUILD_ANDROID_EGL requires GCANVAS_BUILD_GLES=ON")
+  endif()
+
+  find_library(GCANVAS_EGL_LIBRARY NAMES EGL REQUIRED)
+  find_library(GCANVAS_ANDROID_LIBRARY NAMES android REQUIRED)
+
+  add_library(gcanvas_android_egl STATIC
+    src/platform/android/egl_host.cpp)
+  add_library(gCanvas::AndroidEGL ALIAS gcanvas_android_egl)
+
+  target_compile_features(gcanvas_android_egl PUBLIC cxx_std_17)
+  target_include_directories(gcanvas_android_egl
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>)
+  target_link_libraries(gcanvas_android_egl
+    PUBLIC gCanvas::OpenGLES
+    PRIVATE ${GCANVAS_EGL_LIBRARY} ${GCANVAS_ANDROID_LIBRARY})
+  set_target_properties(gcanvas_android_egl PROPERTIES
+    EXPORT_NAME AndroidEGL
+    OUTPUT_NAME gcanvas_android_egl
     POSITION_INDEPENDENT_CODE ON)
 endif()
 
@@ -266,6 +296,15 @@ if(GCANVAS_BUILD_TESTS)
       PRIVATE gCanvas::OpenGLES ${GCANVAS_EGL_LIBRARY})
     add_test(NAME gcanvas_gles_smoke COMMAND gcanvas_gles_smoke_test)
     set_tests_properties(gcanvas_gles_smoke PROPERTIES LABELS "gpu;opengles")
+  endif()
+
+  if(GCANVAS_BUILD_ANDROID_EGL)
+    add_executable(gcanvas_android_egl_contract_test
+      tests/android_egl_contract_test.cpp)
+    target_link_libraries(gcanvas_android_egl_contract_test
+      PRIVATE gCanvas::AndroidEGL)
+    add_test(NAME gcanvas_android_egl_contract
+      COMMAND gcanvas_android_egl_contract_test)
   endif()
 
   if(GCANVAS_BUILD_WINDOW)
