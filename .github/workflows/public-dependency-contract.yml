@@ -131,7 +131,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+          ref: 851d135ce950529c342a5aea18bea03245c76033
           path: .ci/salts-utils
 
       - name: Verify source and install package ownership
@@ -196,7 +196,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+          ref: 851d135ce950529c342a5aea18bea03245c76033
           path: .ci/salts-utils
 
       - name: Verify Unicode ownership contract

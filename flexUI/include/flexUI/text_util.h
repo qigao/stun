@@ -67,11 +67,6 @@ size_t utf8_scalar_count(const std::string& text);
  */
 bool is_emoji(uint32_t codepoint);
 
-/**
- * Check if a code point is an emoji modifier or ZWJ
- */
-bool is_emoji_modifier(uint32_t codepoint);
-
 // ============================================================================
 // Text Segmentation
 // ============================================================================

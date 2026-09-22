@@ -18,7 +18,7 @@ concurrency:
 
 env:
   SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+  SALTS_UTILS_SHA: 851d135ce950529c342a5aea18bea03245c76033
 
 jobs:
   unicode-runtime:
@@ -90,13 +90,18 @@ jobs:
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -I.ci/salts-utils/unicode/src \
+            -c .ci/salts-utils/unicode/src/salts_unicode_grapheme.c \
+            -o build/unicode-runtime/unicode_grapheme.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
           c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
             flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
-            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
-            build/unicode-runtime/tinymock.o -pthread -ldl -lm \
+            build/unicode-runtime/unicode.o build/unicode-runtime/unicode_grapheme.o \
+            build/unicode-runtime/tinytest.o build/unicode-runtime/tinymock.o \
+            -pthread -ldl -lm \
             -o build/unicode-runtime/test_text_util_unicode
 
       - name: Run strict Unicode behavior tests
@@ -410,11 +415,11 @@ jobs:
 
           test_text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", (build / "ctest.log").read_text())
           totals = re.findall(r"Total tests \[(PASSED|FAILED|SKIPPED|FILTERED|TODO)\]:\s*(\d+)", test_text)
-          expected_totals = {"PASSED": 10, "FAILED": 0, "SKIPPED": 0, "FILTERED": 0, "TODO": 0}
+          expected_totals = {"PASSED": 11, "FAILED": 0, "SKIPPED": 0, "FILTERED": 0, "TODO": 0}
           require(len(totals) == 5 and {key: int(value) for key, value in totals} == expected_totals,
                   "TinyTest totals changed or include failed/skipped/filtered/todo cases")
-          require(re.findall(r"Assertions:\s*(\d+) passed,\s*(\d+) failed", test_text) == [("162", "0")],
-                  "Expected all 162 TinyTest assertions to pass")
+          require(re.findall(r"Assertions:\s*(\d+) passed,\s*(\d+) failed", test_text) == [("179", "0")],
+                  "Expected all 179 TinyTest assertions to pass")
           require(re.search(r"100% tests passed,\s*0 tests failed out of 2", test_text),
                   "CTest did not report both installed Unicode executables as successful")
 
@@ -425,7 +430,7 @@ jobs:
               "runtime_core_note": ("Canonical Core loaded" if runtime_core else
                                     "Canonical Core was a link input; this executable needs no Core DSO after --as-needed"),
               "elf_needed": re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic_text),
-              "tinytest": {**expected_totals, "assertions_passed": 162, "assertions_failed": 0},
+              "tinytest": {**expected_totals, "assertions_passed": 179, "assertions_failed": 0},
               "ctest_executables_passed": 2,
           }
           (build / "install-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
