@@ -422,8 +422,8 @@ jobs:
                   "TinyTest totals changed or include failed/skipped/filtered/todo cases")
           require(re.findall(r"Assertions:\s*(\d+) passed,\s*(\d+) failed", test_text) == [("162", "0")],
                   "Expected all 162 TinyTest assertions to pass")
-          require(re.search(r"100% tests passed,\s*0 tests failed out of 1", test_text),
-                  "CTest did not report the one executable as successful")
+          require(re.search(r"100% tests passed,\s*0 tests failed out of 2", test_text),
+                  "CTest did not report both installed Unicode executables as successful")
 
           evidence = {
               "installed_paths": {key: str(value) for key, value in resolved.items()},
@@ -433,7 +433,7 @@ jobs:
                                     "Canonical Core was a link input; this executable needs no Core DSO after --as-needed"),
               "elf_needed": re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic_text),
               "tinytest": {**expected_totals, "assertions_passed": 162, "assertions_failed": 0},
-              "ctest_executables_passed": 1,
+              "ctest_executables_passed": 2,
           }
           (build / "install-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
           print(json.dumps(evidence, indent=2))
