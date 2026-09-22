@@ -167,9 +167,80 @@ std::string collapse_whitespace_runs(const std::string& text) {
   return trim_copy(collapsed);
 }
 
-bool is_wrap_boundary(char ch) {
-  return std::isspace(static_cast<unsigned char>(ch)) || ch == '-' || ch == '/' ||
-         ch == '_' || ch == '.';
+std::vector<size_t> grapheme_boundaries(const std::string& text) {
+  std::vector<size_t> boundaries{0u};
+  size_t cursor = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error("Salts::Unicode failed grapheme segmentation");
+    }
+    boundaries.push_back(cursor);
+  }
+
+  return boundaries;
+}
+
+size_t fitting_grapheme_boundary(const ComputedStyle* style,
+                                 const std::string& text, float max_width,
+                                 const std::vector<size_t>& boundaries) {
+  size_t fit = 0u;
+  for (size_t i = 1u; i < boundaries.size(); ++i) {
+    const size_t boundary = boundaries[i];
+    if (approximate_text_width(style, text.substr(0, boundary)) > max_width) {
+      break;
+    }
+    fit = boundary;
+  }
+
+  // CSS overflow-wrap/break-all may still need to place one oversized cluster.
+  // Never split that cluster merely to satisfy the approximate width model.
+  if (fit == 0u && boundaries.size() > 1u) {
+    fit = boundaries[1u];
+  }
+  return fit;
+}
+
+size_t last_uax14_break_at_or_before(
+    const std::string& text, size_t fit,
+    const std::vector<size_t>& grapheme_ends) {
+  size_t cursor = 0u;
+  size_t break_offset = 0u;
+  size_t result = std::string::npos;
+  salts_unicode_line_break_opportunity opportunity =
+      SALTS_UNICODE_LINE_BREAK_ALLOWED;
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status = salts_unicode_line_break_next(
+        input, &cursor, &break_offset, &opportunity);
+    if (status == SALTS_UNICODE_END) {
+      break;
+    }
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error("Salts::Unicode failed line-break resolution");
+    }
+    if (break_offset > fit) {
+      break;
+    }
+    if (break_offset != 0u &&
+        std::binary_search(grapheme_ends.begin(), grapheme_ends.end(),
+                           break_offset)) {
+      result = break_offset;
+    }
+  }
+
+  return result;
 }
 
 std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
@@ -195,32 +266,22 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
       break;
     }
 
-    size_t fit = 0;
-    size_t last_boundary = std::string::npos;
-    for (size_t cursor = 0; cursor < remaining.size();) {
-      const auto scalar = utf8_next_scalar(remaining, cursor);
-      const std::string candidate = remaining.substr(0, cursor);
-      if (approximate_text_width(style, candidate) > max_width) {
-        break;
-      }
-      fit = cursor;
-      if (scalar.byte_length == 1 &&
-          is_wrap_boundary(remaining[scalar.byte_offset])) {
-        last_boundary = cursor;
-      }
+    const auto boundaries = grapheme_boundaries(remaining);
+    const size_t fit =
+        fitting_grapheme_boundary(style, remaining, max_width, boundaries);
+    const size_t uax14_break =
+        last_uax14_break_at_or_before(remaining, fit, boundaries);
+
+    size_t break_pos = std::string::npos;
+    if (break_all) {
+      break_pos = fit;
+    } else if (uax14_break != std::string::npos) {
+      break_pos = uax14_break;
+    } else if (break_word) {
+      break_pos = fit;
     }
 
-    if (fit == 0) {
-      // Even a scalar wider than the line must remain valid UTF-8.
-      (void)utf8_next_scalar(remaining, fit);
-    }
-
-    size_t break_pos = fit;
-    if (!break_all && last_boundary != std::string::npos) {
-      break_pos = last_boundary;
-    } else if (!break_all && !break_word &&
-               last_boundary == std::string::npos &&
-               approximate_text_width(style, remaining) > max_width) {
+    if (break_pos == std::string::npos) {
       wrapped.push_back(remaining);
       break;
     }
@@ -237,10 +298,12 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
       if (remaining.empty()) {
         break;
       }
-      size_t cursor = 0;
-      (void)utf8_next_scalar(remaining, cursor);
-      segment = remaining.substr(0, cursor);
-      remaining.erase(0, cursor);
+      const auto fallback_boundaries = grapheme_boundaries(remaining);
+      const size_t next = fallback_boundaries.size() > 1u
+                              ? fallback_boundaries[1u]
+                              : remaining.size();
+      segment = remaining.substr(0, next);
+      remaining.erase(0, next);
     }
 
     wrapped.push_back(segment);

@@ -2639,6 +2639,49 @@ spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
   }
 }
 
+spec("RenderManager consumes Unicode 17 line-break opportunities") {
+  it("wraps CJK at default UAX 14 opportunities") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string first = "\xE4\xB8\xAD";
+    const std::string second = "\xE6\x96\x87";
+    const auto calls = render_plain_text(style, first + second, 22.0f);
+
+    check(calls.size() == 2);
+    if (calls.size() == 2) {
+      check(calls[0].text == first);
+      check(calls[1].text == second);
+      check(calls[1].y > calls[0].y);
+    }
+  }
+
+  it("does not invent a break around non-breaking space") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string text = std::string("A") + "\xC2\xA0" + "B";
+    const auto calls = render_plain_text(style, text, 21.0f);
+
+    check(calls.size() == 1);
+    if (calls.size() == 1) {
+      check(calls[0].text == text);
+    }
+  }
+
+  it("intersects break-all fallback with grapheme boundaries") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    style.variables[Symbol("--word-break")] = "break-all";
+    const std::string combining = std::string("e") + "\xCC\x81";
+    const auto calls = render_plain_text(style, combining + "X", 10.0f);
+
+    check(calls.size() == 2);
+    if (calls.size() == 2) {
+      check(calls[0].text == combining);
+      check(calls[1].text == "X");
+    }
+  }
+}
+
 spec("RenderManager applies parsed CSS text-overflow modes") {
   it("runs") {
     Box ellipsis_box(nullptr);
