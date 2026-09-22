@@ -167,9 +167,80 @@ std::string collapse_whitespace_runs(const std::string& text) {
   return trim_copy(collapsed);
 }
 
-bool is_wrap_boundary(char ch) {
-  return std::isspace(static_cast<unsigned char>(ch)) || ch == '-' || ch == '/' ||
-         ch == '_' || ch == '.';
+size_t grapheme_fit_to_width(const ComputedStyle* style,
+                             const std::string& text,
+                             float max_width) {
+  size_t cursor = 0u;
+  size_t fit = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to segment grapheme clusters");
+    }
+
+    const std::string candidate = text.substr(0, cursor);
+    if (approximate_text_width(style, candidate) > max_width) {
+      break;
+    }
+    fit = cursor;
+  }
+
+  if (fit == 0u && !text.empty()) {
+    cursor = 0u;
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to segment grapheme clusters");
+    }
+    fit = cursor;
+  }
+
+  return fit;
+}
+
+size_t last_line_break_at_or_before(const std::string& text, size_t limit) {
+  size_t cursor = 0u;
+  size_t break_offset = 0u;
+  size_t last = std::string::npos;
+  salts_unicode_line_break_opportunity opportunity =
+      SALTS_UNICODE_LINE_BREAK_ALLOWED;
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status = salts_unicode_line_break_next(
+        input, &cursor, &break_offset, &opportunity);
+    if (status == SALTS_UNICODE_END) {
+      break;
+    }
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to resolve line-break opportunities");
+    }
+    if (break_offset > limit) {
+      break;
+    }
+    last = break_offset;
+    if (opportunity == SALTS_UNICODE_LINE_BREAK_MANDATORY) {
+      break;
+    }
+  }
+
+  return last;
 }
 
 std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
@@ -195,34 +266,18 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
       break;
     }
 
-    size_t fit = 0;
-    size_t last_boundary = std::string::npos;
-    for (size_t cursor = 0; cursor < remaining.size();) {
-      const auto scalar = utf8_next_scalar(remaining, cursor);
-      const std::string candidate = remaining.substr(0, cursor);
-      if (approximate_text_width(style, candidate) > max_width) {
+    const size_t fit = grapheme_fit_to_width(style, remaining, max_width);
+    size_t break_pos = fit;
+
+    if (!break_all) {
+      const size_t unicode_break =
+          last_line_break_at_or_before(remaining, fit);
+      if (unicode_break != std::string::npos) {
+        break_pos = unicode_break;
+      } else if (!break_word) {
+        wrapped.push_back(remaining);
         break;
       }
-      fit = cursor;
-      if (scalar.byte_length == 1 &&
-          is_wrap_boundary(remaining[scalar.byte_offset])) {
-        last_boundary = cursor;
-      }
-    }
-
-    if (fit == 0) {
-      // Even a scalar wider than the line must remain valid UTF-8.
-      (void)utf8_next_scalar(remaining, fit);
-    }
-
-    size_t break_pos = fit;
-    if (!break_all && last_boundary != std::string::npos) {
-      break_pos = last_boundary;
-    } else if (!break_all && !break_word &&
-               last_boundary == std::string::npos &&
-               approximate_text_width(style, remaining) > max_width) {
-      wrapped.push_back(remaining);
-      break;
     }
 
     std::string segment = remaining.substr(0, break_pos);
@@ -237,10 +292,10 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
       if (remaining.empty()) {
         break;
       }
-      size_t cursor = 0;
-      (void)utf8_next_scalar(remaining, cursor);
-      segment = remaining.substr(0, cursor);
-      remaining.erase(0, cursor);
+      const size_t cluster_end =
+          grapheme_fit_to_width(style, remaining, 0.0f);
+      segment = remaining.substr(0, cluster_end);
+      remaining.erase(0, cluster_end);
     }
 
     wrapped.push_back(segment);
