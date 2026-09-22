@@ -1,77 +1,70 @@
-#include "../gl/gl_shared_info.hpp"
+#include "desktop_gl_runtime.hpp"
 
-#include <utility>
+#include "../gl/gl_api.hpp"
+
+#include <cstddef>
 #include <stdexcept>
 
-#include <glad/glad.h>
-
-#include "gcanvas/gcanvas.hpp"
-namespace gcanvas
+namespace gcanvas::detail
 {
     namespace
     {
-        thread_local detail::GlProcLoader active_loader = nullptr;
+        thread_local GlProcLoader active_loader = nullptr;
         thread_local void* active_loader_user_data = nullptr;
+        std::size_t reference_count = 0;
+        int max_uniform_block_size_value = -1;
 
         void* load_gl_proc(const char* name)
         {
             return reinterpret_cast<void*>(
                 active_loader(active_loader_user_data, name));
         }
-    }
 
-    int GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE = -1;
-    GlSharedInfo* GlSharedInfo::_instance = nullptr;
-    std::size_t GlSharedInfo::_reference_count = 0;
-
-    GlSharedInfo::GlSharedInfo(detail::GlProcLoader loader, void* user_data)
-    {
-        load_api(loader, user_data);
-    }
-
-    GlSharedInfo::~GlSharedInfo()
-    {
-        
-    }
-
-    void GlSharedInfo::retain(detail::GlProcLoader loader, void* user_data)
-    {
-        if (_instance == nullptr)
+        void retain_desktop_gl(GlProcLoader loader, void* user_data)
         {
-            _instance = new GlSharedInfo(loader, user_data);
-        }
-        ++_reference_count;
-    }
+            if (reference_count == 0)
+            {
+                if (loader == nullptr)
+                    throw std::invalid_argument("desktop OpenGL requires a procedure loader");
 
-    void GlSharedInfo::release() noexcept
-    {
-        if (_reference_count == 0)
-        {
-            return;
-        }
-        --_reference_count;
-        if (_reference_count == 0)
-        {
-            delete _instance;
-            _instance = nullptr;
-        }
-    }
+                active_loader = loader;
+                active_loader_user_data = user_data;
+                const int loaded = gladLoadGLLoader(load_gl_proc);
+                active_loader = nullptr;
+                active_loader_user_data = nullptr;
+                if (loaded == 0)
+                    throw std::runtime_error("Could not load the OpenGL context");
 
-    void GlSharedInfo::load_api(detail::GlProcLoader loader, void* user_data)
-    {
-        // --------------- Load Opengl ---------------
-
-        active_loader = loader;
-        active_loader_user_data = user_data;
-        const int loaded = gladLoadGLLoader(load_gl_proc);
-        active_loader = nullptr;
-        active_loader_user_data = nullptr;
-        if (loaded == 0)
-        {
-            throw std::runtime_error("Could not load the OpenGL context");
+                glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &max_uniform_block_size_value);
+                if (max_uniform_block_size_value <= 0)
+                    throw std::runtime_error("OpenGL uniform block capacity is unavailable");
+            }
+            ++reference_count;
         }
 
-        glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &MAX_UNIFORM_BLOCK_SIZE);
+        void release_desktop_gl() noexcept
+        {
+            if (reference_count == 0)
+                return;
+            --reference_count;
+            if (reference_count == 0)
+                max_uniform_block_size_value = -1;
+        }
 
+        int desktop_gl_max_uniform_block_size()
+        {
+            return max_uniform_block_size_value;
+        }
     }
-} // namespace gcanvas
+
+    const GlRuntime& desktop_gl_runtime()
+    {
+        static const GlRuntime runtime{
+            true,
+            retain_desktop_gl,
+            release_desktop_gl,
+            desktop_gl_max_uniform_block_size,
+        };
+        return runtime;
+    }
+}
