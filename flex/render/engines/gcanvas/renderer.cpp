@@ -644,6 +644,30 @@ public:
     }
   }
 
+  bool measure_text(const std::string& text,
+                    const std::string& font_family, float font_size, bool bold,
+                    TextMetrics& out_metrics) override {
+    if (!std::isfinite(font_size) || font_size <= 0.0f) {
+      throw std::invalid_argument("gCanvas font size must be positive");
+    }
+    if (font_size > static_cast<float>((std::numeric_limits<int>::max)())) {
+      throw std::length_error("gCanvas font size exceeds the context limit");
+    }
+
+    ::gcanvas::Font* font = resolve_font(font_family, bold);
+    if (font != nullptr) {
+      context_.set_font(*font);
+    } else {
+      context_.use_default_font();
+    }
+    context_.set_font_size((std::max)(1, static_cast<int>(std::lround(font_size))));
+
+    const ::gcanvas::vec2 dimensions = context_.measure_text(text);
+    const TextMetrics measured{dimensions.get_x(), dimensions.get_y()};
+    out_metrics = measured;
+    return true;
+  }
+
   bool register_font(const std::string& family, const std::string& path) override {
     if (family.empty() || path.empty()) {
       return false;
