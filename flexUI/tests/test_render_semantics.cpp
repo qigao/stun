@@ -2637,6 +2637,101 @@ spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
       check(emitted == text);
     }
   }
+
+
+  it("uses Unicode line-break opportunities between CJK ideographs") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string first = "\xE4\xB8\xAD";
+    const std::string second = "\xE6\x96\x87";
+    const std::string text = first + second;
+    const float width = approximate_text_width(&style, first) + 0.01f;
+
+    const auto block =
+        layout_text_block(&style, text, 0.0f, 0.0f, width, 80.0f, Color{});
+    check(block.lines.size() == 2);
+    if (block.lines.size() == 2) {
+      check(block.lines[0].text == first);
+      check(block.lines[1].text == second);
+    }
+  }
+
+
+  it("does not invent a break around non-breaking space") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string text = std::string("A") + "\xC2\xA0" + "B";
+    const float width = approximate_text_width(&style, "A") + 0.01f;
+
+    const auto block =
+        layout_text_block(&style, text, 0.0f, 0.0f, width, 80.0f, Color{});
+    check(block.lines.size() == 1);
+    if (block.lines.size() == 1) {
+      check(block.lines[0].text == text);
+    }
+  }
+
+
+  it("does not break across Unicode word joiner") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string text =
+        std::string("A") + "\xE2\x81\xA0" + "B";  // U+2060 WORD JOINER
+    const float width = approximate_text_width(&style, "A") + 0.01f;
+
+    const auto block =
+        layout_text_block(&style, text, 0.0f, 0.0f, width, 80.0f, Color{});
+    check(block.lines.size() == 1);
+    if (block.lines.size() == 1) {
+      check(block.lines[0].text == text);
+    }
+  }
+
+
+  it("continues after an oversized unbreakable word at the next Unicode break") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string first = "SuperLongToken";
+    const std::string second = "next";
+    const std::string text = first + " " + second;
+    const float width = approximate_text_width(&style, "Super") + 0.01f;
+
+    const auto block =
+        layout_text_block(&style, text, 0.0f, 0.0f, width, 80.0f, Color{});
+    check(block.lines.size() == 2);
+    if (block.lines.size() == 2) {
+      check(block.lines[0].text == first);
+      check(block.lines[1].text == second);
+    }
+  }
+
+  it("keeps combining and ZWJ graphemes intact for break-all and anywhere") {
+    const std::string combining = std::string("e") + "\xCC\x81";
+    const std::string woman_technologist =
+        "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB";
+    const struct {
+      const char* property;
+      const char* value;
+    } modes[] = {{"--overflow-wrap", "anywhere"}, {"--word-break", "break-all"}};
+
+    for (const auto& cluster : {combining, woman_technologist}) {
+      for (const auto& mode : modes) {
+        ComputedStyle style;
+        style.font_size = 10.0f;
+        style.variables[Symbol(mode.property)] = mode.value;
+        const std::string text = cluster + "B";
+        const float width = approximate_text_width(&style, cluster) + 0.01f;
+
+        const auto block =
+            layout_text_block(&style, text, 0.0f, 0.0f, width, 80.0f, Color{});
+        check(block.lines.size() == 2);
+        if (block.lines.size() == 2) {
+          check(block.lines[0].text == cluster);
+          check(block.lines[1].text == "B");
+        }
+      }
+    }
+  }
 }
 
 spec("RenderManager applies parsed CSS text-overflow modes") {
