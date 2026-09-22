@@ -2672,6 +2672,22 @@ spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
   }
 
 
+  it("does not break across Unicode word joiner") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string text =
+        std::string("A") + "\xE2\x81\xA0" + "B";  // U+2060 WORD JOINER
+    const float width = approximate_text_width(&style, "A") + 0.01f;
+
+    const auto block =
+        layout_text_block(&style, text, 0.0f, 0.0f, width, 80.0f, Color{});
+    check(block.lines.size() == 1);
+    if (block.lines.size() == 1) {
+      check(block.lines[0].text == text);
+    }
+  }
+
+
   it("continues after an oversized unbreakable word at the next Unicode break") {
     ComputedStyle style;
     style.font_size = 10.0f;
