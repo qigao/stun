@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: stun-mesa-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -24,9 +25,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -110,7 +123,7 @@ jobs:
       - name: Prepare explicit build tools and driver paths
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
@@ -123,8 +136,8 @@ jobs:
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
-          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\nJinjaRef=main\nJinja=%s\nMarkupSafeRef=main\nMarkupSafe=%s\nMesonRef=master\nMeson=%s\nMakoRef=main\nMako=%s\nPyYAMLRef=main\nPyYAML=%s\nPackagingRef=main\nPackaging=%s\n' \
-            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" "$JINJA_COMMIT" "$MARKUPSAFE_COMMIT" "$MESON_COMMIT" "$MAKO_COMMIT" "$PYYAML_COMMIT" "$PACKAGING_COMMIT" \
+          printf 'RunHead=%s\nStun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\nJinjaRef=main\nJinja=%s\nMarkupSafeRef=main\nMarkupSafe=%s\nMesonRef=master\nMeson=%s\nMakoRef=main\nMako=%s\nPyYAMLRef=main\nPyYAML=%s\nPackagingRef=main\nPackaging=%s\n' \
+            "$EXPECTED_HEAD" "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" "$JINJA_COMMIT" "$MARKUPSAFE_COMMIT" "$MESON_COMMIT" "$MAKO_COMMIT" "$PYYAML_COMMIT" "$PACKAGING_COMMIT" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
@@ -408,6 +421,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
+          name: mesa-driver-${{ steps.run_head.outputs.sha }}
           path: build/mesa-evidence
           if-no-files-found: error
