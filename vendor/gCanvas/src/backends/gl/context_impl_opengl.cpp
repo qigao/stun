@@ -1,5 +1,4 @@
 #include "context_impl_opengl.hpp"
-#include "gcanvas/backends/opengl.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,7 +11,7 @@
 #include "../../resources.hpp"
 #include "../../utf8.hpp"
 
-#include "opengl_shared_info.hpp"
+#include "gl_shared_info.hpp"
 
 namespace gcanvas
 {
@@ -154,11 +153,6 @@ namespace gcanvas
     }
 
     /* ------------------------ PUBLIC IMPLEMENTATION ------------------------ */
-
-    std::unique_ptr<Context> opengl::create_context(const CreateInfo& create_info)
-    {
-        return std::make_unique<ContextImplOpengl>(create_info);
-    }
 
     void ContextImplOpengl::stroke_rect(float x, float y, float width, float height)
     {
@@ -1282,7 +1276,7 @@ namespace gcanvas
 
         //std::cout << " TOTAL COLOR UNITS: " << impl->storage.size() << "\n";
 
-        if (impl->_presentation == opengl::PresentationMode::HostManaged)
+        if (impl->_presentation == detail::GlPresentationMode::HostManaged)
             impl->_host.swap_buffers(impl->_host.user_data);
 
         reset_transient_path_resources();
@@ -1339,7 +1333,7 @@ namespace gcanvas
 
     void ContextImplOpengl::set_vsync(bool enabled)
     {
-        if (_presentation == opengl::PresentationMode::External)
+        if (_presentation == detail::GlPresentationMode::External)
             throw std::logic_error("external OpenGL presentation owns swap interval state");
         _host.make_current(_host.user_data);
         _host.set_swap_interval(_host.user_data, enabled ? 1 : 0);
@@ -1920,7 +1914,7 @@ namespace gcanvas
     {
         glGenBuffers(1, &storageBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
-        glBufferData(GL_UNIFORM_BUFFER, OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE, storage.data(),
+        glBufferData(GL_UNIFORM_BUFFER, GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE, storage.data(),
                      GL_DYNAMIC_COPY);
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, storageBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -1961,14 +1955,18 @@ namespace gcanvas
     }
 
 
-    ContextImplOpengl::ContextImplOpengl(const opengl::CreateInfo& create_info)
+    ContextImplOpengl::ContextImplOpengl(const detail::GlCreateInfo& create_info)
         : Context(create_info.metrics, create_info.resource_limits), _host(create_info.host),
-          _presentation(create_info.presentation)
+          _presentation(create_info.presentation), _backend(create_info.backend),
+          _vertex_shader_source(create_info.vertex_shader_source),
+          _fragment_shader_source(create_info.fragment_shader_source)
     {
+        if (_vertex_shader_source == nullptr || _fragment_shader_source == nullptr)
+            throw std::invalid_argument("GL shader profile is incomplete");
         const bool common_callbacks_missing =
             _host.get_proc_address == nullptr || _host.framebuffer_size == nullptr;
         const bool managed_callbacks_missing =
-            _presentation == opengl::PresentationMode::HostManaged &&
+            _presentation == detail::GlPresentationMode::HostManaged &&
             (_host.make_current == nullptr || _host.swap_buffers == nullptr ||
              _host.set_swap_interval == nullptr);
         if (common_callbacks_missing || managed_callbacks_missing)
@@ -1978,12 +1976,12 @@ namespace gcanvas
         }
         if (_host.make_current != nullptr)
             _host.make_current(_host.user_data);
-        OpenglSharedInfo::retain(_host.get_proc_address, _host.user_data);
+        GlSharedInfo::retain(_host.get_proc_address, _host.user_data);
         shared_retained_ = true;
         try
         {
             MAX_UNIFORM_RECT_PER_BLOCK_COUNT =
-                OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE / sizeof(uniform_rect);
+                GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE / sizeof(uniform_rect);
             create_shader_programm();
             initialize_resources();
             prepare();
@@ -2021,7 +2019,7 @@ namespace gcanvas
         if (shaderProgram != 0)
             glDeleteProgram(shaderProgram);
         shared_retained_ = false;
-        OpenglSharedInfo::release();
+        GlSharedInfo::release();
     }
 
 
@@ -2053,7 +2051,7 @@ namespace gcanvas
     void ContextImplOpengl::create_shader_programm()
     {
         int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vertexShader, 1, &ogl_vertex_code, NULL);
+        glShaderSource(vertexShader, 1, &_vertex_shader_source, NULL);
         glCompileShader(vertexShader);
         // check for shader compile errors
         int success;
@@ -2068,7 +2066,7 @@ namespace gcanvas
         }
         // fragment shader
         int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fragmentShader, 1, &ogl_fragment_code, NULL);
+        glShaderSource(fragmentShader, 1, &_fragment_shader_source, NULL);
         glCompileShader(fragmentShader);
         // check for shader compile errors
         glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
@@ -2132,12 +2130,12 @@ namespace gcanvas
         VkDeviceSize bufferSize = sizeof(uniform_rect) * uniforms.size();
 
         void* rawData;
-        vkMapMemory(OpenglSharedInfo::getInstance()->device, uniformBufferDeviceMemory, 0,
+        vkMapMemory(GlSharedInfo::getInstance()->device, uniformBufferDeviceMemory, 0,
                     bufferSize, 0, &rawData);
 
 
         std::memcpy(rawData, uniforms.data(), bufferSize);
-        vkUnmapMemory(OpenglSharedInfo::getInstance()->device, uniformBufferDeviceMemory);
+        vkUnmapMemory(GlSharedInfo::getInstance()->device, uniformBufferDeviceMemory);
     }
     */
 
@@ -2145,7 +2143,7 @@ namespace gcanvas
     {
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
         GLsizei size = (GLsizei)std::min(storage.size() * sizeof(uniform_rect),
-                                         (size_t)OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE);
+                                         (size_t)GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE);
                                          
         //GLsizei size = (GLsizei)(storage.size() * sizeof(uniform_rect));
 
