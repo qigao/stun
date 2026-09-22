@@ -24,6 +24,6 @@ namespace gcanvas::opengl
         shared.runtime = &detail::desktop_gl_runtime();
         shared.vertex_shader_source = ogl_vertex_code;
         shared.fragment_shader_source = ogl_fragment_code;
-        return std::make_unique<ContextImplGl>(shared);
+        return std::make_unique<desktop_gl::ContextImplGl>(shared);
     }
 }
