@@ -5,7 +5,7 @@
 
 #include <map>
 #include <string>
-#include "opengl_shared_info.hpp"
+#include "gl_shared_info.hpp"
 
 
 namespace gcanvas
