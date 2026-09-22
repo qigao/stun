@@ -3,6 +3,7 @@
 
 #include "gcanvas/context.hpp"
 #include "gl_backend.hpp"
+#include "gl_api.hpp"
 
 #include <string>
 #include <vector>
@@ -17,6 +18,8 @@
 //#define UNIFORM_RECT_BUFFER_ARRAY_MAX_SIZE UNIFORM_BUFFER_ARRAY_MAX_COUNT * sizeof(uniform_rect)
 
 namespace gcanvas
+{
+namespace GCANVAS_GL_PROFILE_NAMESPACE
 {
     class ContextImplGl : public Context
     {
@@ -272,6 +275,7 @@ namespace gcanvas
                             float morphology_radius = 0.0f);
     };
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
 
 #endif // GCANVAS_GL_CONTEXT_HPP
