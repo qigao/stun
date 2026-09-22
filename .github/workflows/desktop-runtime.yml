@@ -147,8 +147,22 @@ jobs:
           evidence = Path(os.environ['EVIDENCE_DIR'])
           provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
           assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
-          # Each job follows master independently; preserve the producer observation.
-          assert re.fullmatch(r'[0-9a-f]{40}', provenance['vcpkg'])
+          # Producer source refs are development branches; resolved commits are provenance only.
+          required_refs = {
+              'GLFWRef': 'master',
+              'GLADRef': 'glad2',
+              'JinjaRef': 'main',
+              'MarkupSafeRef': 'main',
+          }
+          for ref_key, expected_ref in required_refs.items():
+              assert provenance[ref_key] == expected_ref, (ref_key, provenance)
+              commit_key = ref_key.removesuffix('Ref')
+              assert re.fullmatch(r'[0-9a-f]{40}', provenance[commit_key]), (commit_key, provenance)
+          for ref_key in ('MesonRef', 'MakoRef', 'PyYAMLRef', 'PackagingRef'):
+              if ref_key in provenance:
+                  expected = 'master' if ref_key == 'MesonRef' else 'main'
+                  assert provenance[ref_key] == expected, (ref_key, provenance)
+                  assert re.fullmatch(r'[0-9a-f]{40}', provenance[ref_key.removesuffix('Ref')])
           patch = Path('cmake/ci/mesa/module-cleanup.patch')
           assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
           rows = json.loads((source / 'results.json').read_text())
@@ -158,10 +172,15 @@ jobs:
               (v, m, n) for v in ('baseline', 'patched') for m in readbacks for n in (1, 4)}
           for row in rows:
               assert row['completed'] and row['pixel_checks'] == readbacks[row['mode']] * row['cycles'], row
-              if row['variant'] == 'patched' or row['mode'] == 'init':
-                  assert row['exit_code'] == 0 and not row['leaks'], row
-              elif row['mode'] in ('draw', 'overlap', 'threads'):
-                  assert row['exit_code'] != 0 and row['leaks'], row
+              owners = row['owners']
+              assert owners['x11']['blocks'] > 0, row
+              assert row['exit_code'] != 0 and row['leaks'], row
+              if row['variant'] == 'patched':
+                  assert owners['non_x11']['blocks'] == 0, row
+              elif row['mode'] in ('init', 'window'):
+                  assert owners['non_x11']['blocks'] == 0, row
+              else:
+                  assert owners['non_x11']['blocks'] > 0, row
           archive = source / 'mesa-sdk.tar.xz'
           archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
           assert archive_hash == (source / 'mesa-sdk.sha256').read_text().split()[0]
