@@ -65,6 +65,30 @@ jobs:
           ref: main
           path: .ci/markupsafe
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mesonbuild/meson
+          ref: master
+          path: .ci/meson
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: sqlalchemy/mako
+          ref: main
+          path: .ci/mako
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: yaml/pyyaml
+          ref: main
+          path: .ci/pyyaml
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pypa/packaging
+          ref: main
+          path: .ci/packaging
+          persist-credentials: false
       - name: Record graphics upstream development checkouts
         shell: bash
         run: |
@@ -73,17 +97,29 @@ jobs:
           glad_commit="$(git -C .ci/glad rev-parse HEAD)"
           jinja_commit="$(git -C .ci/jinja rev-parse HEAD)"
           markupsafe_commit="$(git -C .ci/markupsafe rev-parse HEAD)"
+          meson_commit="$(git -C .ci/meson rev-parse HEAD)"
+          mako_commit="$(git -C .ci/mako rev-parse HEAD)"
+          pyyaml_commit="$(git -C .ci/pyyaml rev-parse HEAD)"
+          packaging_commit="$(git -C .ci/packaging rev-parse HEAD)"
           {
             echo "GLFW_COMMIT=$glfw_commit"
             echo "GLAD_COMMIT=$glad_commit"
             echo "JINJA_COMMIT=$jinja_commit"
             echo "MARKUPSAFE_COMMIT=$markupsafe_commit"
-            echo "PYTHONPATH=$GITHUB_WORKSPACE/.ci/jinja/src:$GITHUB_WORKSPACE/.ci/markupsafe/src"
+            echo "MESON_COMMIT=$meson_commit"
+            echo "MAKO_COMMIT=$mako_commit"
+            echo "PYYAML_COMMIT=$pyyaml_commit"
+            echo "PACKAGING_COMMIT=$packaging_commit"
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/.ci/mako:$GITHUB_WORKSPACE/.ci/pyyaml/lib:$GITHUB_WORKSPACE/.ci/packaging/src:$GITHUB_WORKSPACE/.ci/jinja/src:$GITHUB_WORKSPACE/.ci/markupsafe/src"
           } >> "$GITHUB_ENV"
           git -C .ci/glfw log -1 --format="Dependency=glfw/glfw Ref=master Commit=%H"
           git -C .ci/glad log -1 --format="Dependency=Dav1dde/glad Ref=glad2 Commit=%H"
           git -C .ci/jinja log -1 --format="Dependency=pallets/jinja Ref=main Commit=%H"
           git -C .ci/markupsafe log -1 --format="Dependency=pallets/markupsafe Ref=main Commit=%H"
+          git -C .ci/meson log -1 --format="Dependency=mesonbuild/meson Ref=master Commit=%H"
+          git -C .ci/mako log -1 --format="Dependency=sqlalchemy/mako Ref=main Commit=%H"
+          git -C .ci/pyyaml log -1 --format="Dependency=yaml/pyyaml Ref=main Commit=%H"
+          git -C .ci/packaging log -1 --format="Dependency=pypa/packaging Ref=main Commit=%H"
       - name: Prepare explicit build tools and driver paths
         shell: bash
         env:
@@ -100,8 +136,8 @@ jobs:
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
-          printf 'RunHead=%s\nStun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\nJinjaRef=main\nJinja=%s\nMarkupSafeRef=main\nMarkupSafe=%s\n' \
-            "$EXPECTED_HEAD" "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" "$JINJA_COMMIT" "$MARKUPSAFE_COMMIT" \
+          printf 'RunHead=%s\nStun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\nJinjaRef=main\nJinja=%s\nMarkupSafeRef=main\nMarkupSafe=%s\nMesonRef=master\nMeson=%s\nMakoRef=main\nMako=%s\nPyYAMLRef=main\nPyYAML=%s\nPackagingRef=main\nPackaging=%s\n' \
+            "$EXPECTED_HEAD" "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" "$JINJA_COMMIT" "$MARKUPSAFE_COMMIT" "$MESON_COMMIT" "$MAKO_COMMIT" "$PYYAML_COMMIT" "$PACKAGING_COMMIT" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
@@ -111,9 +147,23 @@ jobs:
             libxcb-glx0-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev \
             libxcb-randr0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shm0-dev libxshmfence-dev \
             xvfb xauth mesa-utils
-          python3 -m venv "$RUNNER_TEMP/mesa-tools"
-          "$RUNNER_TEMP/mesa-tools/bin/pip" install meson==1.5.2 Mako==1.3.10 PyYAML==6.0.2 packaging==24.2
+          mkdir -p "$RUNNER_TEMP/mesa-tools/bin"
+          cat > "$RUNNER_TEMP/mesa-tools/bin/meson" <<'MESON_WRAPPER'
+          #!/usr/bin/env bash
+          exec python3 "$GITHUB_WORKSPACE/.ci/meson/meson.py" "$@"
+          MESON_WRAPPER
+          chmod +x "$RUNNER_TEMP/mesa-tools/bin/meson"
           echo "$RUNNER_TEMP/mesa-tools/bin" >> "$GITHUB_PATH"
+          PYTHONPATH="$GITHUB_WORKSPACE/.ci/mako:$GITHUB_WORKSPACE/.ci/pyyaml/lib:$GITHUB_WORKSPACE/.ci/packaging/src:$GITHUB_WORKSPACE/.ci/jinja/src:$GITHUB_WORKSPACE/.ci/markupsafe/src" \
+            python3 - <<'PY'
+          import mako
+          import packaging
+          import yaml
+          from jinja2 import Environment
+          from markupsafe import Markup
+          print("Mesa source tools import successfully")
+          PY
+          "$RUNNER_TEMP/mesa-tools/bin/meson" --version | tee build/mesa-evidence/meson-version.txt
           dpkg-query -W > build/mesa-evidence/system-packages.txt
           {
             echo "GLFWSource=$GITHUB_WORKSPACE/.ci/glfw"
