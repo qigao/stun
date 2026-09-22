@@ -46,7 +46,13 @@ public:
 
 class RecordingFont final : public gcanvas::Font {
 public:
-  explicit RecordingFont(std::string source) : source_(std::move(source)) {}
+  explicit RecordingFont(std::string source) : source_(std::move(source)) {
+    _line_height = 64.0f;
+    gcanvas::character glyph{};
+    glyph.advance = source_.find("bold") != std::string::npos ? 20 : 10;
+    _characters[0] = glyph;
+    _characters[U'H'] = glyph;
+  }
   const std::string& source() const noexcept { return source_; }
 
 protected:
@@ -67,6 +73,9 @@ public:
 
   gcanvas::Backend backend() const noexcept override { return gcanvas::Backend::OpenGL; }
   int font_size() const noexcept { return _font_size; }
+  std::string selected_font_source() const {
+    return _font ? static_cast<RecordingFont*>(_font)->source() : std::string{};
+  }
   gcanvas::Image& cache_gradient(const gcanvas::Paint& paint,
                                  gcanvas::vec2 minimum, gcanvas::vec2 maximum) {
     return acquire_cached_path_paint_texture(paint, minimum, maximum);
@@ -403,6 +412,38 @@ suite("Flex gCanvas renderer") {
     check_true(blurred_images > 1);
     check_equal(canvas.rects.size(), 1);
     check_true(canvas.path_blur_samples > blurred_paths);
+  }
+
+  it("measures strict UTF-8 with the same registered font resolution") {
+    RecordingContext canvas(96, 64);
+    auto renderer = flex::render::engines::gcanvas::create_renderer(canvas);
+
+    check_true(renderer->register_font("ui", "ui-regular.ttf"));
+    check_true(renderer->register_font("ui-bold", "ui-bold.ttf"));
+
+    flex::TextMetrics regular{};
+    check_true(renderer->measure_text("H", "ui", 64.0f, false, regular));
+    check_within(regular.width, 10.0f, 0.001f);
+    check_within(regular.height, 64.0f, 0.001f);
+
+    flex::TextMetrics bold{};
+    check_true(renderer->measure_text("H", "ui", 64.0f, true, bold));
+    check_within(bold.width, 20.0f, 0.001f);
+    check_within(bold.height, 64.0f, 0.001f);
+
+    // Measurement is a query: it must not alter the context's active font state.
+    check_true(canvas.selected_font_source().empty());
+    check_equal(canvas.font_size(), 10);
+
+    flex::TextMetrics unchanged{123.0f, 456.0f};
+    check_throws_as(renderer->measure_text(
+                        std::string("\xF0\x28\x8C\x28", 4), "ui", 14.0f,
+                        false, unchanged),
+                    std::range_error);
+    check_within(unchanged.width, 123.0f, 0.001f);
+    check_within(unchanged.height, 456.0f, 0.001f);
+    check_true(canvas.selected_font_source().empty());
+    check_equal(canvas.font_size(), 10);
   }
 
   it("resolves registered bold faces before regular and sans-serif fallbacks") {
