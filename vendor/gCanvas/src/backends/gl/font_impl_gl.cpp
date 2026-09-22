@@ -8,6 +8,8 @@
 
 namespace gcanvas
 {
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
     FontImplGl::FontImplGl(std::string file_path)
     {
         load_from_file(file_path);
@@ -42,4 +44,5 @@ namespace gcanvas
                                                  ImageConfig{});
     }
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
