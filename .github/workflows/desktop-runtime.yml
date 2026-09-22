@@ -86,6 +86,12 @@ jobs:
           key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
           restore-keys: |
             stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+      - name: Cache pinned Python build-tool downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: stun-pip-ubuntu24-cmake-3.31.6-v1
+
       - name: Prepare tools and record exact provenance
         shell: bash
         env:
