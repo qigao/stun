@@ -1,6 +1,7 @@
 #include <flexUI/ui_xml.h>
 
 #include <pugixml.hpp>
+#include <salts_unicode.h>
 
 #include <charconv>
 #include <cmath>
@@ -44,6 +45,32 @@ SourceSpan source_span(std::string_view source, std::ptrdiff_t offset) {
     }
   }
   return span;
+}
+
+
+UiDocumentError validate_utf8_source(std::string_view source) {
+  const vstr input = vstr_from_buf(source.data(), source.size());
+  size_t cursor = 0u;
+  salts_unicode_scalar scalar{};
+
+  while (cursor < source.size()) {
+    const salts_unicode_status status =
+        salts_unicode_utf8_next(input, &cursor, &scalar);
+    if (status == SALTS_UNICODE_OK) {
+      continue;
+    }
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      const auto location =
+          source_span(source, static_cast<std::ptrdiff_t>(cursor));
+      return make_error(UiDocumentErrorCode::InvalidUtf8,
+                        "UI XML source contains invalid UTF-8",
+                        location.line, location.column);
+    }
+    return make_error(UiDocumentErrorCode::InvalidUtf8,
+                      "UI XML source could not be validated as UTF-8");
+  }
+
+  return {};
 }
 
 UiDocumentError node_error(std::string_view source, const pugi::xml_node &node,
@@ -302,6 +329,11 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   if (source.find('\0') != std::string_view::npos) {
     result.error = make_error(UiDocumentErrorCode::ParseError,
                               "UI XML source must not contain embedded NUL bytes");
+    return result;
+  }
+
+  result.error = validate_utf8_source(source);
+  if (result.error) {
     return result;
   }
 
