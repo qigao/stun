@@ -144,12 +144,18 @@ jobs:
               owners = r['owners']
               assert owners['x11']['blocks'] > 0, r
               assert r['exit_code'] != 0 and r['leaks'], r
+              assert owners['other_non_x11']['blocks'] == 0, r
               if r['variant'] == 'patched':
-                  assert owners['non_x11']['blocks'] == 0, r
-              elif r['mode'] in ('init', 'window'):
-                  assert owners['non_x11']['blocks'] == 0, r
-              else:
-                  assert owners['non_x11']['blocks'] > 0, r
+                  assert owners['patch_owner']['blocks'] == 0, r
+          patch_sources = {
+              source_name
+              for item in rows if item['variant'] == 'baseline'
+              for source_name in item['owners']['patch_owner']['sources']
+          }
+          assert patch_sources == {
+              'src/util/u_cpu_detect.c',
+              'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
+          }, patch_sources
           archive = source / 'mesa-sdk.tar.xz'
           assert hashlib.sha256(archive.read_bytes()).hexdigest() == (source / 'mesa-sdk.sha256').read_text().split()[0]
           root = Path(os.environ['MESA_ROOT'])
