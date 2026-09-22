@@ -24,6 +24,14 @@ namespace gcanvas::detail
         void (*framebuffer_size)(void* user_data, int* width, int* height) = nullptr;
     };
 
+    struct GlRuntime
+    {
+        bool requires_proc_loader = false;
+        void (*retain)(GlProcLoader loader, void* user_data) = nullptr;
+        void (*release)() noexcept = nullptr;
+        int (*max_uniform_block_size)() = nullptr;
+    };
+
     struct GlCreateInfo
     {
         CanvasMetrics metrics;
@@ -31,6 +39,7 @@ namespace gcanvas::detail
         GlHost host;
         GlPresentationMode presentation = GlPresentationMode::HostManaged;
         Backend backend = Backend::OpenGL;
+        const GlRuntime* runtime = nullptr;
         const char* vertex_shader_source = nullptr;
         const char* fragment_shader_source = nullptr;
     };
