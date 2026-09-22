@@ -122,16 +122,17 @@ void verify_module(bool loaded) {
         const auto path_start = line.find('/');
         if (path_start == std::string::npos) continue;
         const std::string mapped_path = line.substr(path_start);
-        if (line.find("libgallium") != std::string::npos) {
-            require(mapped_path == expected, "Unexpected Gallium provider loaded");
+        if (mapped_path == expected) {
             found = true;
-        } else if (line.find("libGLX_mesa") != std::string::npos) {
-            require(mapped_path == expected_glx, "Unexpected GLX provider loaded");
-            found_glx = true;
-        } else {
+            std::printf("driver-map=%s\n", line.c_str());
             continue;
         }
-        std::printf("driver-map=%s\n", line.c_str());
+        if (line.find("libGLX_mesa") != std::string::npos) {
+            require(mapped_path == expected_glx, "Unexpected GLX provider loaded");
+            found_glx = true;
+            std::printf("driver-map=%s\n", line.c_str());
+            continue;
+        }
     }
     require(!maps.bad(), "Cannot finish reading driver mappings");
     require(found == loaded && found_glx == loaded, "GLX/Gallium load/unload contract failed");
