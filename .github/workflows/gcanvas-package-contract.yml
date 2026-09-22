@@ -1,0 +1,104 @@
+name: gCanvas package contract
+
+on:
+  pull_request:
+    paths:
+      - "vendor/gCanvas/**"
+      - ".github/workflows/gcanvas-package-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gles-installed-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install package dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ libfreetype-dev libstb-dev libgles2-mesa-dev
+
+      - name: Build and install GLES-only package
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/gcanvas-prefix"
+          cmake -S vendor/gCanvas -B build/gcanvas-package -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$prefix" \
+            -DSTB_INCLUDE_DIRS=/usr/include/stb \
+            -DGCANVAS_BUILD_OPENGL=OFF \
+            -DGCANVAS_BUILD_GLES=ON \
+            -DGCANVAS_BUILD_ANDROID_EGL=OFF \
+            -DGCANVAS_BUILD_VULKAN=OFF \
+            -DGCANVAS_BUILD_SVG=OFF \
+            -DGCANVAS_BUILD_WINDOW=OFF \
+            -DGCANVAS_BUILD_TESTS=OFF \
+            -DGCANVAS_BUILD_EXAMPLES=OFF
+          cmake --build build/gcanvas-package --parallel 2
+          cmake --install build/gcanvas-package
+          echo "GCANVAS_PREFIX=$prefix" >> "$GITHUB_ENV"
+
+      - name: Verify installed target metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          targets="$(find "$GCANVAS_PREFIX" -name 'gCanvasTargets*.cmake' -print)"
+          test -n "$targets"
+          grep -R -q 'gCanvas::OpenGLES' "$GCANVAS_PREFIX"
+          ! grep -R -i -E 'glad|glfw' "$GCANVAS_PREFIX/lib" "$GCANVAS_PREFIX/include"
+          ! grep -R -E '/(usr|opt)/[^"; ]*libGLES(v2|v3)?[^"; ]*' "$GCANVAS_PREFIX/lib/cmake"
+
+      - name: Build external find_package consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/consumer
+          cat > build/consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.20)
+          project(gcanvas_installed_consumer LANGUAGES CXX)
+          find_package(gCanvas CONFIG REQUIRED)
+          add_executable(gcanvas_installed_consumer main.cpp)
+          target_compile_features(gcanvas_installed_consumer PRIVATE cxx_std_17)
+          target_link_libraries(gcanvas_installed_consumer PRIVATE gCanvas::gCanvas)
+          CMAKE
+          cat > build/consumer/main.cpp <<'CPP'
+          #include <gcanvas/backends/opengles.hpp>
+          int main()
+          {
+              auto* factory = &gcanvas::opengles::create_context;
+              return factory == nullptr ? 1 : 0;
+          }
+          CPP
+          cmake -S build/consumer -B build/consumer-build -G Ninja \
+            -DCMAKE_PREFIX_PATH="$GCANVAS_PREFIX"
+          cmake --build build/consumer-build --verbose
+          build/consumer-build/gcanvas_installed_consumer
+          readelf -d build/consumer-build/gcanvas_installed_consumer \
+            > build/consumer-build/dynamic.txt
+          ! grep -qi -E 'glad|glfw' build/consumer-build/dynamic.txt
+
+      - name: Verify Android default contract is dependency-light
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake_file=vendor/gCanvas/CMakeLists.txt
+          grep -q 'set(_GCANVAS_BUILD_OPENGL_DEFAULT OFF)' "$cmake_file"
+          grep -q 'set(_GCANVAS_BUILD_GLES_DEFAULT ON)' "$cmake_file"
+          grep -q 'set(_GCANVAS_BUILD_ANDROID_EGL_DEFAULT ON)' "$cmake_file"
+          grep -q 'set(_GCANVAS_BUILD_VULKAN_DEFAULT OFF)' "$cmake_file"
+          grep -q 'set(_GCANVAS_BUILD_SVG_DEFAULT OFF)' "$cmake_file"
+          grep -q 'set(_GCANVAS_BUILD_WINDOW_DEFAULT OFF)' "$cmake_file"
+          grep -q 'set(_GCANVAS_GLES_LINK_LIBRARY GLESv3)' "$cmake_file"
+          grep -q 'PRIVATE EGL android' "$cmake_file"
