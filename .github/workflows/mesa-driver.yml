@@ -265,7 +265,7 @@ jobs:
                       if variant == 'patched':
                           assert owners['non_x11']['blocks'] == 0, (
                               'Patched Mesa must add no non-X11 LSan allocation stacks', row)
-                      elif mode == 'init':
+                      elif mode in ('init', 'window'):
                           assert owners['non_x11']['blocks'] == 0, row
                       else:
                           assert owners['non_x11']['blocks'] > 0, (
