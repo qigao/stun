@@ -1990,7 +1990,8 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             if (uniform_block_size < static_cast<int>(sizeof(uniform_rect)))
                 throw std::runtime_error("GL uniform block capacity is too small");
             MAX_UNIFORM_RECT_PER_BLOCK_COUNT =
-                uniform_block_size / static_cast<int>(sizeof(uniform_rect));
+                std::min(shader_batch_capacity,
+                         uniform_block_size / static_cast<int>(sizeof(uniform_rect)));
             create_shader_programm();
             initialize_resources();
             prepare();
