@@ -10,6 +10,8 @@
 
 namespace gcanvas
 {
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
     class ImageImplGl : public Image
     {
     public:
@@ -35,6 +37,7 @@ namespace gcanvas
         void init_format();
     };
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
 
 #endif // GCANVAS_IMAGE_IMPL_GL_HPP
