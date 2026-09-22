@@ -11,7 +11,7 @@ else()
   set(GCANVAS_STANDALONE OFF)
 endif()
 
-option(GCANVAS_BUILD_OPENGL "Build the OpenGL canvas backend" ON)
+option(GCANVAS_BUILD_OPENGL "Build the OpenGL canvas backend" ON)\noption(GCANVAS_BUILD_GLES "Build the OpenGL ES 3 canvas backend" OFF)
 option(GCANVAS_BUILD_VULKAN "Build the Vulkan canvas backend" ON)
 option(GCANVAS_BUILD_SVG "Build the optional PlutoSVG resource adapter" ON)
 option(GCANVAS_BUILD_WINDOW "Build the optional GLFW presentation helper" ON)
@@ -108,6 +108,37 @@ if(GCANVAS_BUILD_OPENGL)
     POSITION_INDEPENDENT_CODE ON)
 endif()
 
+if(GCANVAS_BUILD_GLES)
+  find_library(GCANVAS_GLES_LIBRARY NAMES GLESv3 GLESv2 REQUIRED)
+  add_library(gcanvas_opengles STATIC
+    src/backends/gl/context_impl_gl.cpp
+    src/backends/gl/font_impl_gl.cpp
+    src/backends/gl/image_impl_gl.cpp
+    src/backends/opengles/context_opengles.cpp
+    src/backends/opengles/gles_runtime.cpp
+    src/backends/opengles/gles_shader_source.cpp)
+  add_library(gCanvas::OpenGLES ALIAS gcanvas_opengles)
+
+  target_compile_features(gcanvas_opengles PUBLIC cxx_std_17)
+  target_compile_definitions(gcanvas_opengles PRIVATE GCANVAS_GL_GLES=1)
+  target_include_directories(gcanvas_opengles
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/gl
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/opengles
+      ${STB_INCLUDE_DIRS})
+  target_link_libraries(gcanvas_opengles
+    PUBLIC gCanvas::Core
+    PRIVATE Freetype::Freetype ${GCANVAS_GLES_LIBRARY})
+  set_target_properties(gcanvas_opengles PROPERTIES
+    EXPORT_NAME OpenGLES
+    OUTPUT_NAME gcanvas_opengles
+    POSITION_INDEPENDENT_CODE ON)
+endif()
+
 if(GCANVAS_BUILD_VULKAN)
   find_package(VulkanHeaders CONFIG REQUIRED)
   find_package(Vulkan REQUIRED)
@@ -150,7 +181,7 @@ if(GCANVAS_BUILD_VULKAN)
     POSITION_INDEPENDENT_CODE ON)
 endif()
 
-foreach(_gcanvas_renderer_target IN ITEMS gcanvas_opengl gcanvas_vulkan)
+foreach(_gcanvas_renderer_target IN ITEMS gcanvas_opengl gcanvas_opengles gcanvas_vulkan)
   if(TARGET ${_gcanvas_renderer_target})
     get_target_property(_gcanvas_renderer_links ${_gcanvas_renderer_target} LINK_LIBRARIES)
     if("${_gcanvas_renderer_links}" MATCHES "(^|;)glfw($|;)|glfw3")
@@ -225,6 +256,15 @@ if(GCANVAS_BUILD_TESTS)
     add_executable(gcanvas_svg_test tests/svg_test.cpp)
     target_link_libraries(gcanvas_svg_test PRIVATE gCanvas::Svg)
     add_test(NAME gcanvas_svg COMMAND gcanvas_svg_test)
+  endif()
+
+  if(GCANVAS_BUILD_GLES)
+    find_library(GCANVAS_EGL_LIBRARY NAMES EGL REQUIRED)
+    add_executable(gcanvas_gles_smoke_test tests/gles_smoke_test.cpp)
+    target_link_libraries(gcanvas_gles_smoke_test
+      PRIVATE gCanvas::OpenGLES ${GCANVAS_EGL_LIBRARY})
+    add_test(NAME gcanvas_gles_smoke COMMAND gcanvas_gles_smoke_test)
+    set_tests_properties(gcanvas_gles_smoke PROPERTIES LABELS "gpu;opengles")
   endif()
 
   if(GCANVAS_BUILD_WINDOW)
