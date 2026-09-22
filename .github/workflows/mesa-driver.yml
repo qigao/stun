@@ -243,7 +243,6 @@ jobs:
               if line.startswith('+++ b/')
           }
           assert patch_owner_paths == {
-              'src/util/u_cpu_detect.c',
               'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
           }, patch_owner_paths
 
@@ -392,7 +391,6 @@ jobs:
           PY
           cp "$MESA_BUILD/compile_commands.json" "$EVIDENCE_DIR/mesa-compile-commands.json"
           cp "$MESA_BUILD/meson-info/intro-buildoptions.json" "$EVIDENCE_DIR/mesa-build-options.json"
-          cp "$MESA_SOURCE/src/util/u_cpu_detect.c" "$EVIDENCE_DIR/patched-u_cpu_detect.c"
           cp "$MESA_SOURCE/src/gallium/auxiliary/rtasm/rtasm_execmem.c" "$EVIDENCE_DIR/patched-rtasm_execmem.c"
           readelf -d "$MESA_EXPECTED_DRIVER" > "$EVIDENCE_DIR/patched-driver-dynamic.txt"
           tar -C "$MESA_ROOT" -cJf "$EVIDENCE_DIR/mesa-sdk.tar.xz" .
