@@ -62,7 +62,7 @@ jobs:
           clone_default_master xorgproto https://gitlab.freedesktop.org/xorg/proto/xorgproto.git
           clone_default_master xtrans https://gitlab.freedesktop.org/xorg/lib/libxtrans.git
           clone_default_master libXau https://gitlab.freedesktop.org/xorg/lib/libxau.git
-          clone_default_master libXdmcp https://gitlab.freedesktop.org/xorg/lib/libxdmcp.git
+          clone_default_master libXdmcp https://gitlab.freedesktop.org/xorg/lib/libXdmcp.git
           clone_default_master pthread_stubs https://gitlab.freedesktop.org/xcb/pthread-stubs.git
           clone_default_master xcb_proto https://gitlab.freedesktop.org/xcb/proto.git
           clone_default_master libxcb https://gitlab.freedesktop.org/xcb/libxcb.git
