@@ -141,10 +141,15 @@ jobs:
               (v, m, n) for v in ('baseline', 'patched') for m in modes for n in (1, 4)}
           for r in rows:
               assert r['completed'] and r['pixel_checks'] == modes[r['mode']] * r['cycles'], r
-              if r['variant'] == 'patched' or r['mode'] == 'init':
-                  assert r['exit_code'] == 0 and not r['leaks'], r
-              elif r['mode'] in ('draw', 'overlap', 'threads'):
-                  assert r['exit_code'] != 0 and r['leaks'], r
+              owners = r['owners']
+              assert owners['x11']['blocks'] > 0, r
+              assert r['exit_code'] != 0 and r['leaks'], r
+              if r['variant'] == 'patched':
+                  assert owners['non_x11']['blocks'] == 0, r
+              elif r['mode'] in ('init', 'window'):
+                  assert owners['non_x11']['blocks'] == 0, r
+              else:
+                  assert owners['non_x11']['blocks'] > 0, r
           archive = source / 'mesa-sdk.tar.xz'
           assert hashlib.sha256(archive.read_bytes()).hexdigest() == (source / 'mesa-sdk.sha256').read_text().split()[0]
           root = Path(os.environ['MESA_ROOT'])
