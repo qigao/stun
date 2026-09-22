@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: stun-desktop-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -28,10 +29,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
       - name: Checkout master Salts
         uses: actions/checkout@v4
@@ -104,12 +117,12 @@ jobs:
       - name: Prepare tools and record exact provenance
         shell: bash
         env:
-          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
+          printf 'RunHead=%s\nStun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
             "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$VCPKG_COMMIT" \
             | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
@@ -125,12 +138,12 @@ jobs:
       - name: Download verified Mesa from this run
         uses: actions/download-artifact@v4
         with:
-          name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
+          name: mesa-driver-${{ steps.run_head.outputs.sha }}
           path: ${{ runner.temp }}/stun-mesa-input
       - name: Verify driver package and exact-head lifecycle receipt
         shell: bash
         env:
-          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -465,7 +478,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          name: desktop-runtime-${{ steps.run_head.outputs.sha }}
           path: |
             build/desktop-evidence
             build/desktop-runtime/CMakeCache.txt
