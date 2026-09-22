@@ -106,10 +106,8 @@ jobs:
           cmake --install "$RUNNER_TEMP/re2c-build"
           test -x "$re2c_root/bin/re2c"
           test -d "$re2c_root/share/re2c/stdlib"
-          {
-            echo "RE2C_ROOT=$re2c_root"
-            echo "$re2c_root/bin"
-          } >> "$GITHUB_ENV"
+          echo "RE2C_ROOT=$re2c_root" >> "$GITHUB_ENV"
+          echo "$re2c_root/bin" >> "$GITHUB_PATH"
           "$re2c_root/bin/re2c" --version
 
       # This is an executable source-level bridge test, not an installed SDK
@@ -317,10 +315,8 @@ jobs:
             2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
           test -x "$re2c_root/bin/re2c"
           test -d "$re2c_root/share/re2c/stdlib"
-          {
-            echo "RE2C_ROOT=$re2c_root"
-            echo "$re2c_root/bin"
-          } >> "$GITHUB_ENV"
+          echo "RE2C_ROOT=$re2c_root" >> "$GITHUB_ENV"
+          echo "$re2c_root/bin" >> "$GITHUB_PATH"
           "$re2c_root/bin/re2c" --version | tee -a "$EVIDENCE_DIR/provenance.txt"
 
       - name: Build and install the real dependency packages
