@@ -1,5 +1,4 @@
-#include "context_impl_opengl.hpp"
-#include "gcanvas/backends/opengl.hpp"
+#include "context_impl_gl.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,14 +6,15 @@
 #include <limits>
 #include <stdexcept>
 
-#include "font_impl_opengl.hpp"
+#include "font_impl_gl.hpp"
 #include "../../path_tessellator.hpp"
 #include "../../resources.hpp"
 #include "../../utf8.hpp"
 
-#include "opengl_shared_info.hpp"
 
 namespace gcanvas
+{
+namespace GCANVAS_GL_PROFILE_NAMESPACE
 {
     namespace
     {
@@ -60,14 +60,14 @@ namespace gcanvas
                         local_y * (uv_maximum.get_y() - uv_minimum.get_y()));
         }
 
-        ContextImplOpengl::uniform_rect path_uniform(
+        ContextImplGl::uniform_rect path_uniform(
             const detail::MeshQuad& quad, int width, int height, color value,
             int sampler_index = -1, detail::MeshPoint uv_min = {0.0f, 0.0f},
             detail::MeshPoint uv_max = {1.0f, 1.0f})
         {
             if (width <= 0 || height <= 0)
                 throw std::logic_error("OpenGL path draw requires a non-empty canvas");
-            ContextImplOpengl::uniform_rect result{};
+            ContextImplGl::uniform_rect result{};
             result.color = value;
             for (std::size_t index = 0; index < quad.vertices.size(); ++index)
             {
@@ -85,7 +85,7 @@ namespace gcanvas
             return result;
         }
 
-        void shift_uniform_vertices(ContextImplOpengl::uniform_rect& value, float x, float y)
+        void shift_uniform_vertices(ContextImplGl::uniform_rect& value, float x, float y)
         {
             for (vec2& vertex : value.vertices)
             {
@@ -94,7 +94,7 @@ namespace gcanvas
             }
         }
 
-        ContextImplOpengl::uniform_rect mask_triangle_uniform(
+        ContextImplGl::uniform_rect mask_triangle_uniform(
             const vec2& origin, const vec2& second, const vec2& third,
             const Transform& transform, int width, int height)
         {
@@ -111,16 +111,16 @@ namespace gcanvas
             return path_uniform(quad, width, height, color(255, 255, 255, 255));
         }
 
-        void upload_uniform_range(ContextImplOpengl& context, int first, int count)
+        void upload_uniform_range(ContextImplGl& context, int first, int count)
         {
             glBindBuffer(GL_UNIFORM_BUFFER, context.storageBuffer);
             glBufferSubData(
                 GL_UNIFORM_BUFFER, 0,
-                static_cast<GLsizei>(count * sizeof(ContextImplOpengl::uniform_rect)),
+                static_cast<GLsizei>(count * sizeof(ContextImplGl::uniform_rect)),
                 &context.storage[static_cast<std::size_t>(first)]);
         }
 
-        void draw_uploaded_uniform_range(ContextImplOpengl& context, int first, int count)
+        void draw_uploaded_uniform_range(ContextImplGl& context, int first, int count)
         {
             glUniform1i(context.instance_offset_location, first);
             glBindVertexArray(context.vertex_array_object);
@@ -129,7 +129,7 @@ namespace gcanvas
                                     GL_UNSIGNED_INT, nullptr, count);
         }
 
-        void draw_uniform_range(ContextImplOpengl& context, int first, int count)
+        void draw_uniform_range(ContextImplGl& context, int first, int count)
         {
             while (count > 0)
             {
@@ -144,25 +144,20 @@ namespace gcanvas
 
     /* ------------------------ DOWNCAST ------------------------ */
 
-    static inline ContextImplOpengl* getImpl(Context* ptr)
+    static inline ContextImplGl* getImpl(Context* ptr)
     {
-        return (ContextImplOpengl*)ptr;
+        return (ContextImplGl*)ptr;
     }
-    static inline const ContextImplOpengl* getImpl(const Context* ptr)
+    static inline const ContextImplGl* getImpl(const Context* ptr)
     {
-        return (const ContextImplOpengl*)ptr;
+        return (const ContextImplGl*)ptr;
     }
 
     /* ------------------------ PUBLIC IMPLEMENTATION ------------------------ */
 
-    std::unique_ptr<Context> opengl::create_context(const CreateInfo& create_info)
+    void ContextImplGl::stroke_rect(float x, float y, float width, float height)
     {
-        return std::make_unique<ContextImplOpengl>(create_info);
-    }
-
-    void ContextImplOpengl::stroke_rect(float x, float y, float width, float height)
-    {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
 
         float lw = _line_width * impl->_metrics.scale_x * impl->_metrics.dpi_scale;
         x += impl->_metrics.offset_x;
@@ -194,17 +189,17 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::stroke_rounded_rect(float x, float y, float width, float height,
+    void ContextImplGl::stroke_rounded_rect(float x, float y, float width, float height,
                                       float border_radius)
     {
         stroke_rounded_rect(x, y, width, height, border_radius, border_radius, border_radius,
                             border_radius);
     }
 
-    void ContextImplOpengl::stroke_rounded_rect(float x, float y, float width, float height, float radius_nw,
+    void ContextImplGl::stroke_rounded_rect(float x, float y, float width, float height, float radius_nw,
                                       float radius_ne, float radius_se, float radius_sw)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         
         float lw = _line_width * impl->_metrics.scale_x * impl->_metrics.dpi_scale;
 
@@ -242,9 +237,9 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::stroke_circle(float x, float y, float radius)
+    void ContextImplGl::stroke_circle(float x, float y, float radius)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
 
         float lw = _line_width * impl->_metrics.scale_x * impl->_metrics.dpi_scale;
 
@@ -281,9 +276,9 @@ namespace gcanvas
     }
 
 
-    void ContextImplOpengl::stroke_ellipse(float x, float y, float radius_x, float radius_y)
+    void ContextImplGl::stroke_ellipse(float x, float y, float radius_x, float radius_y)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const float metric_x = impl->_metrics.scale_x * impl->_metrics.dpi_scale;
         const float metric_y = impl->_metrics.scale_y * impl->_metrics.dpi_scale;
         const float line_width = _line_width * (std::max)(metric_x, metric_y);
@@ -308,9 +303,9 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::fill_rect(float x, float y, float width, float height)
+    void ContextImplGl::fill_rect(float x, float y, float width, float height)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         
         x += impl->_metrics.offset_x;
         y += impl->_metrics.offset_y;
@@ -341,17 +336,17 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::fill_rounded_rect(float x, float y, float width, float height,
+    void ContextImplGl::fill_rounded_rect(float x, float y, float width, float height,
                                     float border_radius)
     {
         fill_rounded_rect(x, y, width, height, border_radius, border_radius, border_radius,
                           border_radius);
     }
 
-    void ContextImplOpengl::fill_rounded_rect(float x, float y, float width, float height, float radius_nw,
+    void ContextImplGl::fill_rounded_rect(float x, float y, float width, float height, float radius_nw,
                                     float radius_ne, float radius_se, float radius_sw)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
 
         x += impl->_metrics.offset_x;
         y += impl->_metrics.offset_y;
@@ -387,9 +382,9 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::fill_circle(float x, float y, float radius)
+    void ContextImplGl::fill_circle(float x, float y, float radius)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
 
         x += impl->_metrics.offset_x;
         y += impl->_metrics.offset_y;
@@ -424,9 +419,9 @@ namespace gcanvas
     }
 
     
-    void ContextImplOpengl::fill_ellipse(float x, float y, float radius_x, float radius_y)
+    void ContextImplGl::fill_ellipse(float x, float y, float radius_x, float radius_y)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const float metric_x = impl->_metrics.scale_x * impl->_metrics.dpi_scale;
         const float metric_y = impl->_metrics.scale_y * impl->_metrics.dpi_scale;
         x = (x + impl->_metrics.offset_x) * metric_x;
@@ -449,38 +444,38 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_text(float x, float y, std::string text)
+    void ContextImplGl::draw_text(float x, float y, std::string text)
     {
         std::u32string unicode_codepoints = detail::decode_utf8(text);
         draw_text(x, y, unicode_codepoints, Transform{});
     }
 
-    void ContextImplOpengl::draw_text(float x, float y, std::string text,
+    void ContextImplGl::draw_text(float x, float y, std::string text,
                                       const Transform& transform)
     {
         std::u32string unicode_codepoints = detail::decode_utf8(text);
         draw_text(x, y, unicode_codepoints, transform);
     }
 
-    void ContextImplOpengl::draw_text(float x, float y, std::u32string text)
+    void ContextImplGl::draw_text(float x, float y, std::u32string text)
     {
         draw_text(x, y, text, Transform{});
     }
 
-    void ContextImplOpengl::draw_text(float x, float y, std::u32string text,
+    void ContextImplGl::draw_text(float x, float y, std::u32string text,
                                       const Transform& transform)
     {
         draw_text_impl(x, y, text, transform, false, nullptr);
     }
 
-    void ContextImplOpengl::draw_text_alpha_mask(float x, float y, std::u32string text,
+    void ContextImplGl::draw_text_alpha_mask(float x, float y, std::u32string text,
                                                  float erosion_radius,
                                                  const Transform& transform)
     {
         draw_text_impl(x, y, text, transform, true, nullptr, erosion_radius);
     }
 
-    void ContextImplOpengl::draw_text_inset_alpha_mask(float x, float y,
+    void ContextImplGl::draw_text_inset_alpha_mask(float x, float y,
                                                         std::u32string text,
                                                         float sample_offset_x,
                                                         float sample_offset_y,
@@ -491,12 +486,12 @@ namespace gcanvas
         draw_text_impl(x, y, text, transform, true, &offset, dilation_radius);
     }
 
-    void ContextImplOpengl::draw_text_impl(float x, float y, const std::u32string& text,
+    void ContextImplGl::draw_text_impl(float x, float y, const std::u32string& text,
                                            const Transform& transform, bool alpha_mask,
                                            const vec2* inset_sample_offset,
                                            float morphology_radius)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         if (!std::isfinite(x) || !std::isfinite(y))
             throw std::invalid_argument("gCanvas affine text position must be finite");
         validate_transform(transform);
@@ -509,7 +504,7 @@ namespace gcanvas
         float initialX = x;
         float scale = (float)_font_size / LOADED_HEIGHT;
         const std::map<char32_t, character>& characters = _font->get_characters();
-        auto* img = static_cast<ImageImplOpengl*>(&_font->get_image());
+        auto* img = static_cast<ImageImplGl*>(&_font->get_image());
         character fallback_character{};
         const auto fallback = characters.find(0);
         if (fallback != characters.end())
@@ -596,21 +591,21 @@ namespace gcanvas
     }
 
 
-    void ContextImplOpengl::draw_image(float x, float y, float width, float height, Image& image,
+    void ContextImplGl::draw_image(float x, float y, float width, float height, Image& image,
                                        bool tint)
     {
         draw_rounded_image(x, y, width, height, image, 0, 0, 0, 0, tint);
     }
 
-    void ContextImplOpengl::draw_image(float x, float y, float width, float height, Image& image,
+    void ContextImplGl::draw_image(float x, float y, float width, float height, Image& image,
                                        const Transform& transform, bool tint)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         validate_resource(image);
         const ImageQuad quad = make_image_quad(x, y, width, height, transform);
         if (width == 0.0f || height == 0.0f)
             return;
-        auto* img = static_cast<ImageImplOpengl*>(&image);
+        auto* img = static_cast<ImageImplGl*>(&image);
 
         impl->storage.push_back({
             _fill_color,
@@ -627,16 +622,16 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_image_alpha_mask(float x, float y, float width, float height,
+    void ContextImplGl::draw_image_alpha_mask(float x, float y, float width, float height,
                                                    Image& image, float erosion_radius,
                                                    const Transform& transform)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         validate_resource(image);
         const ImageQuad quad = make_image_quad(x, y, width, height, transform);
         if (width == 0.0f || height == 0.0f)
             return;
-        auto* img = static_cast<ImageImplOpengl*>(&image);
+        auto* img = static_cast<ImageImplGl*>(&image);
         const vec2 uv_minimum(0.0f);
         const vec2 uv_maximum(1.0f);
         vec2 morphology_x{};
@@ -668,16 +663,16 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_image_inset_alpha_mask(
+    void ContextImplGl::draw_image_inset_alpha_mask(
         float x, float y, float width, float height, Image& image, float sample_offset_x,
         float sample_offset_y, float dilation_radius, const Transform& transform)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         validate_resource(image);
         const ImageQuad quad = make_image_quad(x, y, width, height, transform);
         if (width == 0.0f || height == 0.0f)
             return;
-        auto* img = static_cast<ImageImplOpengl*>(&image);
+        auto* img = static_cast<ImageImplGl*>(&image);
         const vec2 uv_minimum(0.0f);
         const vec2 uv_maximum(1.0f);
         const vec2 inset_delta = inset_uv_delta(
@@ -714,35 +709,35 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_image(float x, float y, float width, float height, Image& image, float src_x,
+    void ContextImplGl::draw_image(float x, float y, float width, float height, Image& image, float src_x,
                              float src_y, float src_width, float src_height, bool tint)
     {
         draw_rounded_image(x, y, width, height, image, 0, 0, 0, 0, src_x, src_y, src_width,
                            src_height, tint);
     }
 
-    void ContextImplOpengl::draw_rounded_image(float x, float y, float width, float height, Image& image,
+    void ContextImplGl::draw_rounded_image(float x, float y, float width, float height, Image& image,
                                      float border_radius, bool tint)
     {
         draw_rounded_image(x, y, width, height, image, border_radius, border_radius, border_radius,
                            border_radius, tint);
     }
 
-    void ContextImplOpengl::draw_rounded_image(float x, float y, float width, float height, Image& image, float radius_nw, float radius_ne, float radius_se,
+    void ContextImplGl::draw_rounded_image(float x, float y, float width, float height, Image& image, float radius_nw, float radius_ne, float radius_se,
                                      float radius_sw, bool tint)
     {
         draw_rounded_image(x, y, width, height, image, radius_nw, radius_ne, radius_se, radius_sw,
                            0, 0, (float)image.get_width(), (float)image.get_height(), tint);
     }
 
-    void ContextImplOpengl::draw_rounded_image(float x, float y, float width, float height, Image& image,
+    void ContextImplGl::draw_rounded_image(float x, float y, float width, float height, Image& image,
                                      float radius_nw, float radius_ne, float radius_se,
                                      float radius_sw, float src_x, float src_y, float src_width,
                                      float src_height, bool tint)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         validate_resource(image);
-        auto* img = static_cast<ImageImplOpengl*>(&image);
+        auto* img = static_cast<ImageImplGl*>(&image);
 
         x += impl->_metrics.offset_x;
         y += impl->_metrics.offset_y;
@@ -783,10 +778,10 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_rect_shadow(float x, float y, float width, float height,
+    void ContextImplGl::draw_rect_shadow(float x, float y, float width, float height,
                                               float blur_radius)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const ShadowQuad shadow = make_shadow_quad(x, y, width, height, blur_radius);
         if (width == 0.0f || height == 0.0f)
             return;
@@ -807,19 +802,19 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_rounded_rect_shadow(float x, float y, float width, float height,
+    void ContextImplGl::draw_rounded_rect_shadow(float x, float y, float width, float height,
                                                        float border_radius, float blur_radius)
     {
         draw_rounded_rect_shadow(x, y, width, height, border_radius, border_radius, border_radius,
                                  border_radius, blur_radius);
     }
 
-    void ContextImplOpengl::draw_rounded_rect_shadow(float x, float y, float width, float height,
+    void ContextImplGl::draw_rounded_rect_shadow(float x, float y, float width, float height,
                                                        float radius_nw, float radius_ne,
                                                        float radius_se, float radius_sw,
                                                        float blur_radius)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         validate_shadow_radii(radius_nw, radius_ne, radius_se, radius_sw);
         const ShadowQuad shadow = make_shadow_quad(x, y, width, height, blur_radius);
         if (width == 0.0f || height == 0.0f)
@@ -846,10 +841,10 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::draw_circle_shadow(float x, float y, float radius,
+    void ContextImplGl::draw_circle_shadow(float x, float y, float radius,
                                                 float blur_radius)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const ShadowQuad shadow =
             make_shadow_quad(x - radius, y - radius, radius * 2.0f, radius * 2.0f,
                              blur_radius);
@@ -875,9 +870,9 @@ namespace gcanvas
     }
 
    
-    void ContextImplOpengl::draw_inset_shadow(const InsetShadow& shadow)
+    void ContextImplGl::draw_inset_shadow(const InsetShadow& shadow)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const ImageQuad quad = make_image_quad(shadow.x, shadow.y, shadow.width, shadow.height,
                                                Transform{});
         const float metric_x = impl->_metrics.scale_x * impl->_metrics.dpi_scale;
@@ -900,17 +895,17 @@ namespace gcanvas
         impl->queue_color_call();
     }
 
-    void ContextImplOpengl::set_clear_color(color color)
+    void ContextImplGl::set_clear_color(color color)
     {
         _clear_color = color;
         glClearColor(_clear_color.rf(), _clear_color.gf(), _clear_color.bf(), _clear_color.af());
 
     }
 
-    void ContextImplOpengl::set_rect_mask(float x, float y, float width, float height)
+    void ContextImplGl::set_rect_mask(float x, float y, float width, float height)
     {
         validate_rect_mask(x, y, width, height);
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const float scale_x = impl->_metrics.scale_x * impl->_metrics.dpi_scale;
         const float scale_y = impl->_metrics.scale_y * impl->_metrics.dpi_scale;
         const auto clamp_x = [&](float value) {
@@ -927,19 +922,19 @@ namespace gcanvas
         const GLint device_y = static_cast<GLint>(std::floor(bottom));
         const GLint device_right = static_cast<GLint>(std::ceil((std::max)(left, right)));
         const GLint device_top = static_cast<GLint>(std::ceil((std::max)(bottom, top)));
-        impl->current_type = ContextImplOpengl::SCISSOR;
+        impl->current_type = ContextImplGl::SCISSOR;
         impl->scissor_primitives.push_back(
             {device_x, device_y, device_right - device_x, device_top - device_y});
         impl->draw_call_indices.push_back({(int)impl->storage.size(),
                                            (int)impl->scissor_primitives.size() - 1,
-                                             ContextImplOpengl::SCISSOR});
+                                             ContextImplGl::SCISSOR});
 
     }
 
-    void ContextImplOpengl::set_convex_mask(const std::vector<vec2>& vertices)
+    void ContextImplGl::set_convex_mask(const std::vector<vec2>& vertices)
     {
         validate_convex_mask(vertices);
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const std::size_t triangle_count = vertices.size() >= 3U ? vertices.size() - 2U : 0U;
         if (triangle_count > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
             impl->storage.size() >
@@ -959,24 +954,24 @@ namespace gcanvas
         const int mask_index = static_cast<int>(impl->convex_mask_draws.size());
         impl->convex_mask_draws.push_back({first, static_cast<int>(triangle_count)});
         impl->draw_call_indices.push_back(
-            {first, -1, ContextImplOpengl::CONVEX_MASK, mask_index});
-        impl->current_type = ContextImplOpengl::CONVEX_MASK;
+            {first, -1, ContextImplGl::CONVEX_MASK, mask_index});
+        impl->current_type = ContextImplGl::CONVEX_MASK;
         impl->current_color_call_cnt = 0;
     }
 
-    void ContextImplOpengl::remove_rect_mask()
+    void ContextImplGl::remove_rect_mask()
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
 
-        impl->current_type = ContextImplOpengl::SCISSOR_CLEAR;
+        impl->current_type = ContextImplGl::SCISSOR_CLEAR;
         impl->draw_call_indices.push_back({(int)impl->storage.size(),
                                            (int)impl->scissor_primitives.size() - 1,
-                                           ContextImplOpengl::SCISSOR_CLEAR});
+                                           ContextImplGl::SCISSOR_CLEAR});
     }
 
-    void ContextImplOpengl::draw_frame()
+    void ContextImplGl::draw_frame()
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         if (impl->rendering)
             return;
         if (impl->headless)
@@ -1021,7 +1016,7 @@ namespace gcanvas
         int uploaded_path_last_call = -1;
         for (int i = 0; i < impl->draw_call_indices.size(); ++i)
         {
-            if (impl->draw_call_indices[i].type == ContextImplOpengl::draw_call_type::COLOR)
+            if (impl->draw_call_indices[i].type == ContextImplGl::draw_call_type::COLOR)
             {
                 // std::cout << i + 1 << " CALL TYPE: COLOR\n";
                 int batch_length = static_cast<int>(impl->storage.size()) -
@@ -1039,9 +1034,9 @@ namespace gcanvas
                 draw_uniform_range(*impl, impl->draw_call_indices[i].instance_index,
                                    batch_length);
             }
-            else if (impl->draw_call_indices[i].type == ContextImplOpengl::draw_call_type::PATH)
+            else if (impl->draw_call_indices[i].type == ContextImplGl::draw_call_type::PATH)
             {
-                const ContextImplOpengl::path_draw& path =
+                const ContextImplGl::path_draw& path =
                     impl->path_draws[impl->draw_call_indices[i].path_index];
                 const int path_uniform_count = path.mask_count + 1;
                 const bool path_fits_upload =
@@ -1055,11 +1050,11 @@ namespace gcanvas
                          next_call < static_cast<int>(impl->draw_call_indices.size());
                          ++next_call)
                     {
-                        const ContextImplOpengl::draw_call_chain& next_chain =
+                        const ContextImplGl::draw_call_chain& next_chain =
                             impl->draw_call_indices[static_cast<std::size_t>(next_call)];
-                        if (next_chain.type != ContextImplOpengl::draw_call_type::PATH)
+                        if (next_chain.type != ContextImplGl::draw_call_type::PATH)
                             break;
-                        const ContextImplOpengl::path_draw& next_path =
+                        const ContextImplGl::path_draw& next_path =
                             impl->path_draws[static_cast<std::size_t>(next_chain.path_index)];
                         const int next_count = next_path.mask_count + 1;
                         if (next_path.instance_index != uploaded_path_first + upload_count ||
@@ -1111,9 +1106,9 @@ namespace gcanvas
                 }
             }
             else if (impl->draw_call_indices[i].type ==
-                     ContextImplOpengl::draw_call_type::PATH_ERODE)
+                     ContextImplGl::draw_call_type::PATH_ERODE)
             {
-                const ContextImplOpengl::path_erode_draw& path =
+                const ContextImplGl::path_erode_draw& path =
                     impl->path_erode_draws[impl->draw_call_indices[i].path_index];
                 glEnable(GL_STENCIL_TEST);
                 int sample_instance = path.instance_index;
@@ -1163,9 +1158,9 @@ namespace gcanvas
                 }
             }
             else if (impl->draw_call_indices[i].type ==
-                     ContextImplOpengl::draw_call_type::PATH_INSET)
+                     ContextImplGl::draw_call_type::PATH_INSET)
             {
-                const ContextImplOpengl::path_inset_draw& path =
+                const ContextImplGl::path_inset_draw& path =
                     impl->path_inset_draws[impl->draw_call_indices[i].path_index];
                 glEnable(GL_STENCIL_TEST);
                 glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
@@ -1228,10 +1223,10 @@ namespace gcanvas
                     glDisable(GL_STENCIL_TEST);
                 }
             }
-            else if (impl->draw_call_indices[i].type == ContextImplOpengl::draw_call_type::SCISSOR)
+            else if (impl->draw_call_indices[i].type == ContextImplGl::draw_call_type::SCISSOR)
             {
                 // std::cout << i + 1 << " CALL TYPE: SCISSOR\n";
-                ContextImplOpengl::scissor_primitive sp =
+                ContextImplGl::scissor_primitive sp =
                     impl->scissor_primitives[impl->draw_call_indices[i].scissor_index];
                 glDisable(GL_STENCIL_TEST);
                 glEnable(GL_SCISSOR_TEST);
@@ -1239,9 +1234,9 @@ namespace gcanvas
                 convex_mask_active = false;
             }
             else if (impl->draw_call_indices[i].type ==
-                     ContextImplOpengl::draw_call_type::CONVEX_MASK)
+                     ContextImplGl::draw_call_type::CONVEX_MASK)
             {
-                const ContextImplOpengl::convex_mask_draw& mask =
+                const ContextImplGl::convex_mask_draw& mask =
                     impl->convex_mask_draws[impl->draw_call_indices[i].path_index];
                 glDisable(GL_SCISSOR_TEST);
                 glEnable(GL_STENCIL_TEST);
@@ -1260,7 +1255,7 @@ namespace gcanvas
                 convex_mask_active = true;
             }
             else if (impl->draw_call_indices[i].type ==
-                     ContextImplOpengl::draw_call_type::SCISSOR_CLEAR)
+                     ContextImplGl::draw_call_type::SCISSOR_CLEAR)
             {
                 // std::cout << i + 1 << " CALL TYPE: SCISSOR_CLEAR\n";
                 glDisable(GL_SCISSOR_TEST);
@@ -1274,22 +1269,22 @@ namespace gcanvas
         glFlush();
     }
 
-    void ContextImplOpengl::present_frame()
+    void ContextImplGl::present_frame()
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         if (!impl->rendering || impl->headless)
             return;
 
         //std::cout << " TOTAL COLOR UNITS: " << impl->storage.size() << "\n";
 
-        if (impl->_presentation == opengl::PresentationMode::HostManaged)
+        if (impl->_presentation == detail::GlPresentationMode::HostManaged)
             impl->_host.swap_buffers(impl->_host.user_data);
 
         reset_transient_path_resources();
         impl->rendering = false;
     }
 
-    std::vector<std::uint8_t> ContextImplOpengl::read_pixels()
+    std::vector<std::uint8_t> ContextImplGl::read_pixels()
     {
         int width = 0;
         int height = 0;
@@ -1312,9 +1307,9 @@ namespace gcanvas
         return pixels;
     }
 
-    void ContextImplOpengl::resize_context(int width, int height)
+    void ContextImplGl::resize_context(int width, int height)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         if (width < 0 || height < 0)
             throw std::invalid_argument("OpenGL framebuffer dimensions must be non-negative");
         impl->dirty = true;
@@ -1337,27 +1332,27 @@ namespace gcanvas
         }
     }
 
-    void ContextImplOpengl::set_vsync(bool enabled)
+    void ContextImplGl::set_vsync(bool enabled)
     {
-        if (_presentation == opengl::PresentationMode::External)
+        if (_presentation == detail::GlPresentationMode::External)
             throw std::logic_error("external OpenGL presentation owns swap interval state");
         _host.make_current(_host.user_data);
         _host.set_swap_interval(_host.user_data, enabled ? 1 : 0);
     }
 
-    Image& ContextImplOpengl::create_image(const std::string& file_path, ImageConfig config)
+    Image& ContextImplGl::create_image(const std::string& file_path, ImageConfig config)
     {
         if (_owned_images.size() >= _resource_limits.max_images)
         {
             throw std::length_error("gCanvas image limit reached");
         }
-        auto owned = std::make_unique<ImageImplOpengl>(file_path, config);
+        auto owned = std::make_unique<ImageImplGl>(file_path, config);
         Image& image = *owned;
         register_image(&image);
         return own_image(std::move(owned));
     }
 
-    Image& ContextImplOpengl::create_image(int width, int height, int components,
+    Image& ContextImplGl::create_image(int width, int height, int components,
                                            const unsigned char* data, std::size_t size,
                                            ImageConfig config)
     {
@@ -1366,40 +1361,40 @@ namespace gcanvas
             throw std::length_error("gCanvas image limit reached");
         }
         auto owned =
-            std::make_unique<ImageImplOpengl>(width, height, components, data, size, config);
+            std::make_unique<ImageImplGl>(width, height, components, data, size, config);
         Image& image = *owned;
         register_image(&image);
         return own_image(std::move(owned));
     }
 
-    Font& ContextImplOpengl::create_font(const std::string& file_path)
+    Font& ContextImplGl::create_font(const std::string& file_path)
     {
         if (_owned_fonts.size() >= _resource_limits.max_fonts)
         {
             throw std::length_error("gCanvas font limit reached");
         }
-        auto owned = std::make_unique<FontImplOpengl>(file_path);
+        auto owned = std::make_unique<FontImplGl>(file_path);
         Font& font = *owned;
         register_font(&font);
         return own_font(std::move(owned));
     }
 
-    Font& ContextImplOpengl::create_font(const unsigned char* buffer, std::size_t size)
+    Font& ContextImplGl::create_font(const unsigned char* buffer, std::size_t size)
     {
         if (_owned_fonts.size() >= _resource_limits.max_fonts)
         {
             throw std::length_error("gCanvas font limit reached");
         }
-        auto owned = std::make_unique<FontImplOpengl>(buffer, size);
+        auto owned = std::make_unique<FontImplGl>(buffer, size);
         Font& font = *owned;
         register_font(&font);
         return own_font(std::move(owned));
     }
 
-    void ContextImplOpengl::register_image(Image* image)
+    void ContextImplGl::register_image(Image* image)
     {
-        ContextImplOpengl* impl = getImpl(this);
-        ImageImplOpengl* img = (ImageImplOpengl*)image;
+        ContextImplGl* impl = getImpl(this);
+        ImageImplGl* img = (ImageImplGl*)image;
         if (!img->_uploaded)
         {
             if (impl->images.size() >= static_cast<std::size_t>(impl->texture_array_size))
@@ -1420,13 +1415,13 @@ namespace gcanvas
         }
     }
 
-    void ContextImplOpengl::register_font(Font* font)
+    void ContextImplGl::register_font(Font* font)
     {
-        ContextImplOpengl* impl = getImpl(this);
-        FontImplOpengl* fiv = (FontImplOpengl*)font;
+        ContextImplGl* impl = getImpl(this);
+        FontImplGl* fiv = (FontImplGl*)font;
         if (!fiv->_uploaded)
         {
-            auto* img = static_cast<ImageImplOpengl*>(&font->get_image());
+            auto* img = static_cast<ImageImplGl*>(&font->get_image());
             if (impl->images.size() >= static_cast<std::size_t>(impl->texture_array_size))
             {
                 throw std::length_error("OpenGL font sampler limit reached");
@@ -1445,13 +1440,13 @@ namespace gcanvas
         }
     }
 
-    void ContextImplOpengl::update_image(Image* image)
+    void ContextImplGl::update_image(Image* image)
     {
-        ImageImplOpengl* img = (ImageImplOpengl*)image;   
+        ImageImplGl* img = (ImageImplGl*)image;   
         img->upload_update();
     }
 
-    void ContextImplOpengl::prepare()
+    void ContextImplGl::prepare()
     {
         
         _default_font = &create_font(default_font.data(), default_font.size());
@@ -1460,7 +1455,7 @@ namespace gcanvas
             set_font(*_default_font);
         }
         
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         
         impl->configure_surface();
         impl->create_vertex_array();
@@ -1477,11 +1472,11 @@ namespace gcanvas
         }
     }
 
-    void ContextImplOpengl::draw_tessellated_path(const Path& path, const Paint& paint,
+    void ContextImplGl::draw_tessellated_path(const Path& path, const Paint& paint,
                                                    float line_width,
                                                    const Transform& transform)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const Transform device_transform =
             Transform::scaling(impl->_metrics.scale_x * impl->_metrics.dpi_scale,
                                impl->_metrics.scale_y * impl->_metrics.dpi_scale) *
@@ -1501,19 +1496,19 @@ namespace gcanvas
 
         int sampler_index = -1;
         if (geometry.paint_image != nullptr)
-            sampler_index = static_cast<ImageImplOpengl&>(*geometry.paint_image)._sampler_index;
+            sampler_index = static_cast<ImageImplGl&>(*geometry.paint_image)._sampler_index;
         else if (geometry.raster_paint.type() != Paint::Type::None)
         {
             Image& texture = acquire_cached_path_paint_texture(
                 geometry.raster_paint,
                 vec2(geometry.raster_minimum.x, geometry.raster_minimum.y),
                 vec2(geometry.raster_maximum.x, geometry.raster_maximum.y));
-            sampler_index = static_cast<ImageImplOpengl&>(texture)._sampler_index;
+            sampler_index = static_cast<ImageImplGl&>(texture)._sampler_index;
         }
         else if (!geometry.paint_pixels.empty())
         {
             Image& texture = acquire_path_paint_texture(geometry.paint_pixels);
-            sampler_index = static_cast<ImageImplOpengl&>(texture)._sampler_index;
+            sampler_index = static_cast<ImageImplGl&>(texture)._sampler_index;
         }
         const int first = static_cast<int>(impl->storage.size());
         for (const detail::MeshQuad& quad : geometry.mask_quads)
@@ -1526,16 +1521,16 @@ namespace gcanvas
         impl->path_draws.push_back(
             {first, static_cast<int>(geometry.mask_quads.size()),
              geometry.mask_mode == detail::PathMaskMode::EvenOdd});
-        impl->draw_call_indices.push_back({first, -1, ContextImplOpengl::PATH, path_index});
-        impl->current_type = ContextImplOpengl::PATH;
+        impl->draw_call_indices.push_back({first, -1, ContextImplGl::PATH, path_index});
+        impl->current_type = ContextImplGl::PATH;
         impl->current_color_call_cnt = 0;
     }
 
-    void ContextImplOpengl::draw_tessellated_path_blur(
+    void ContextImplGl::draw_tessellated_path_blur(
         const Path& path, const Paint& paint, float line_width,
         const ShadowKernel& kernel, float source_alpha, const Transform& transform)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const Transform device_transform =
             Transform::scaling(impl->_metrics.scale_x * impl->_metrics.dpi_scale,
                                impl->_metrics.scale_y * impl->_metrics.dpi_scale) *
@@ -1568,19 +1563,19 @@ namespace gcanvas
 
         int sampler_index = -1;
         if (geometry.paint_image != nullptr)
-            sampler_index = static_cast<ImageImplOpengl&>(*geometry.paint_image)._sampler_index;
+            sampler_index = static_cast<ImageImplGl&>(*geometry.paint_image)._sampler_index;
         else if (geometry.raster_paint.type() != Paint::Type::None)
         {
             Image& texture = acquire_cached_path_paint_texture(
                 geometry.raster_paint,
                 vec2(geometry.raster_minimum.x, geometry.raster_minimum.y),
                 vec2(geometry.raster_maximum.x, geometry.raster_maximum.y));
-            sampler_index = static_cast<ImageImplOpengl&>(texture)._sampler_index;
+            sampler_index = static_cast<ImageImplGl&>(texture)._sampler_index;
         }
         else if (!geometry.paint_pixels.empty())
         {
             Image& texture = acquire_path_paint_texture(geometry.paint_pixels);
-            sampler_index = static_cast<ImageImplOpengl&>(texture)._sampler_index;
+            sampler_index = static_cast<ImageImplGl&>(texture)._sampler_index;
         }
 
         const bool solid = sampler_index < 0;
@@ -1651,17 +1646,17 @@ namespace gcanvas
                 {first, static_cast<int>(geometry.mask_quads.size()),
                  geometry.mask_mode == detail::PathMaskMode::EvenOdd});
             impl->draw_call_indices.push_back(
-                {first, -1, ContextImplOpengl::PATH, path_index});
+                {first, -1, ContextImplGl::PATH, path_index});
         }
-        impl->current_type = ContextImplOpengl::PATH;
+        impl->current_type = ContextImplGl::PATH;
         impl->current_color_call_cnt = 0;
     }
 
-    void ContextImplOpengl::draw_tessellated_path_inset_shadow(
+    void ContextImplGl::draw_tessellated_path_inset_shadow(
         const Path& path, float line_width, float offset_x, float offset_y,
         const ShadowKernel& kernel, float dilation_radius, const Transform& transform)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const Transform device_transform =
             Transform::scaling(impl->_metrics.scale_x * impl->_metrics.dpi_scale,
                                impl->_metrics.scale_y * impl->_metrics.dpi_scale) *
@@ -1758,16 +1753,16 @@ namespace gcanvas
              geometry.mask_mode == detail::PathMaskMode::EvenOdd,
              !replace_shifted_base && geometry.mask_mode == detail::PathMaskMode::EvenOdd});
         impl->draw_call_indices.push_back(
-            {first, -1, ContextImplOpengl::PATH_INSET, inset_index});
-        impl->current_type = ContextImplOpengl::PATH_INSET;
+            {first, -1, ContextImplGl::PATH_INSET, inset_index});
+        impl->current_type = ContextImplGl::PATH_INSET;
         impl->current_color_call_cnt = 0;
     }
 
-    void ContextImplOpengl::draw_tessellated_path_eroded_shadow(
+    void ContextImplGl::draw_tessellated_path_eroded_shadow(
         const Path& path, float erosion_radius, const ShadowKernel& kernel,
         const Transform& transform)
     {
-        ContextImplOpengl* impl = getImpl(this);
+        ContextImplGl* impl = getImpl(this);
         const Transform device_transform =
             Transform::scaling(impl->_metrics.scale_x * impl->_metrics.dpi_scale,
                                impl->_metrics.scale_y * impl->_metrics.dpi_scale) *
@@ -1859,17 +1854,17 @@ namespace gcanvas
              static_cast<int>(boundary.mask_quads.size()), static_cast<int>(kernel.count),
              base.mask_mode == detail::PathMaskMode::EvenOdd});
         impl->draw_call_indices.push_back(
-            {first, -1, ContextImplOpengl::PATH_ERODE, path_index});
-        impl->current_type = ContextImplOpengl::PATH_ERODE;
+            {first, -1, ContextImplGl::PATH_ERODE, path_index});
+        impl->current_type = ContextImplGl::PATH_ERODE;
         impl->current_color_call_cnt = 0;
     }
 
-    void ContextImplOpengl::queue_color_call()
+    void ContextImplGl::queue_color_call()
     {
         // Start new color sequence
         if (current_type != COLOR || current_color_call_cnt >= MAX_UNIFORM_RECT_PER_BLOCK_COUNT)
         {
-            draw_call_indices.push_back({(int)storage.size() - 1, -1, ContextImplOpengl::COLOR});
+            draw_call_indices.push_back({(int)storage.size() - 1, -1, ContextImplGl::COLOR});
             current_color_call_cnt = 1;
             current_type = COLOR;
         }
@@ -1879,7 +1874,7 @@ namespace gcanvas
         } 
     }
 
-    void ContextImplOpengl::clear_draw_queue() noexcept
+    void ContextImplGl::clear_draw_queue() noexcept
     {
         storage.clear();
         draw_call_indices.clear();
@@ -1889,14 +1884,14 @@ namespace gcanvas
         convex_mask_draws.clear();
         scissor_primitives.clear();
         current_color_call_cnt = 0;
-        current_type = ContextImplOpengl::UNSET;
+        current_type = ContextImplGl::UNSET;
     }
 
     /* ------------------------ PRIVATE IMPLEMENTATION ------------------------ */
 
     
 
-    void ContextImplOpengl::configure_surface()
+    void ContextImplGl::configure_surface()
     {
         int width, height;
         _host.framebuffer_size(_host.user_data, &width, &height);
@@ -1916,18 +1911,19 @@ namespace gcanvas
         glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     }
 
-    void ContextImplOpengl::create_uniform_buffer()
+    void ContextImplGl::create_uniform_buffer()
     {
         glGenBuffers(1, &storageBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
-        glBufferData(GL_UNIFORM_BUFFER, OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE, storage.data(),
+        glBufferData(GL_UNIFORM_BUFFER,
+                     MAX_UNIFORM_RECT_PER_BLOCK_COUNT * sizeof(uniform_rect), storage.data(),
                      GL_DYNAMIC_COPY);
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, storageBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
     }
 
     /*
-    void ContextImplOpengl::create_storage_buffer()
+    void ContextImplGl::create_storage_buffer()
     {
         glGenBuffers(1, &storageBuffer);
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, storageBuffer);
@@ -1938,15 +1934,15 @@ namespace gcanvas
     }
     */
 
-    void ContextImplOpengl::initialize_resources()
+    void ContextImplGl::initialize_resources()
     {
         const std::uint8_t buffer[4] = {0, 0, 0, 0};
         dummy =
-            std::make_unique<ImageImplOpengl>(1, 1, 4, buffer, sizeof(buffer), ImageConfig{});
+            std::make_unique<ImageImplGl>(1, 1, 4, buffer, sizeof(buffer), ImageConfig{});
         dummy->upload();
     }
 
-    void ContextImplOpengl::update_viewport(uint32_t width, uint32_t height)
+    void ContextImplGl::update_viewport(uint32_t width, uint32_t height)
     {
         if (resizing)
             return;
@@ -1961,14 +1957,22 @@ namespace gcanvas
     }
 
 
-    ContextImplOpengl::ContextImplOpengl(const opengl::CreateInfo& create_info)
+    ContextImplGl::ContextImplGl(const detail::GlCreateInfo& create_info)
         : Context(create_info.metrics, create_info.resource_limits), _host(create_info.host),
-          _presentation(create_info.presentation)
+          _presentation(create_info.presentation), _backend(create_info.backend),
+          _runtime(create_info.runtime), _vertex_shader_source(create_info.vertex_shader_source),
+          _fragment_shader_source(create_info.fragment_shader_source)
     {
+        if (_runtime == nullptr || _runtime->retain == nullptr || _runtime->release == nullptr ||
+            _runtime->max_uniform_block_size == nullptr)
+            throw std::invalid_argument("GL runtime profile is incomplete");
+        if (_vertex_shader_source == nullptr || _fragment_shader_source == nullptr)
+            throw std::invalid_argument("GL shader profile is incomplete");
         const bool common_callbacks_missing =
-            _host.get_proc_address == nullptr || _host.framebuffer_size == nullptr;
+            _host.framebuffer_size == nullptr ||
+            (_runtime->requires_proc_loader && _host.get_proc_address == nullptr);
         const bool managed_callbacks_missing =
-            _presentation == opengl::PresentationMode::HostManaged &&
+            _presentation == detail::GlPresentationMode::HostManaged &&
             (_host.make_current == nullptr || _host.swap_buffers == nullptr ||
              _host.set_swap_interval == nullptr);
         if (common_callbacks_missing || managed_callbacks_missing)
@@ -1978,12 +1982,15 @@ namespace gcanvas
         }
         if (_host.make_current != nullptr)
             _host.make_current(_host.user_data);
-        OpenglSharedInfo::retain(_host.get_proc_address, _host.user_data);
+        _runtime->retain(_host.get_proc_address, _host.user_data);
         shared_retained_ = true;
         try
         {
+            const int uniform_block_size = _runtime->max_uniform_block_size();
+            if (uniform_block_size < static_cast<int>(sizeof(uniform_rect)))
+                throw std::runtime_error("GL uniform block capacity is too small");
             MAX_UNIFORM_RECT_PER_BLOCK_COUNT =
-                OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE / sizeof(uniform_rect);
+                uniform_block_size / static_cast<int>(sizeof(uniform_rect));
             create_shader_programm();
             initialize_resources();
             prepare();
@@ -1995,12 +2002,12 @@ namespace gcanvas
         }
     }
 
-    ContextImplOpengl::~ContextImplOpengl()
+    ContextImplGl::~ContextImplGl()
     {
         cleanup();
     }
 
-    void ContextImplOpengl::cleanup() noexcept
+    void ContextImplGl::cleanup() noexcept
     {
         if (!shared_retained_)
         {
@@ -2021,11 +2028,11 @@ namespace gcanvas
         if (shaderProgram != 0)
             glDeleteProgram(shaderProgram);
         shared_retained_ = false;
-        OpenglSharedInfo::release();
+        _runtime->release();
     }
 
 
-    void ContextImplOpengl::create_vertex_array()
+    void ContextImplGl::create_vertex_array()
     {
         glGenVertexArrays(1, &vertex_array_object);
         glGenBuffers(1, &vertex_buffer);
@@ -2050,10 +2057,10 @@ namespace gcanvas
         glBindVertexArray(0); 
     }
 
-    void ContextImplOpengl::create_shader_programm()
+    void ContextImplGl::create_shader_programm()
     {
         int vertexShader = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vertexShader, 1, &ogl_vertex_code, NULL);
+        glShaderSource(vertexShader, 1, &_vertex_shader_source, NULL);
         glCompileShader(vertexShader);
         // check for shader compile errors
         int success;
@@ -2068,7 +2075,7 @@ namespace gcanvas
         }
         // fragment shader
         int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fragmentShader, 1, &ogl_fragment_code, NULL);
+        glShaderSource(fragmentShader, 1, &_fragment_shader_source, NULL);
         glCompileShader(fragmentShader);
         // check for shader compile errors
         glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
@@ -2126,26 +2133,12 @@ namespace gcanvas
         glDeleteShader(fragmentShader);
     }
 
-    /*
-    void ContextImplOpengl::update_uniforms()
-    {
-        VkDeviceSize bufferSize = sizeof(uniform_rect) * uniforms.size();
-
-        void* rawData;
-        vkMapMemory(OpenglSharedInfo::getInstance()->device, uniformBufferDeviceMemory, 0,
-                    bufferSize, 0, &rawData);
-
-
-        std::memcpy(rawData, uniforms.data(), bufferSize);
-        vkUnmapMemory(OpenglSharedInfo::getInstance()->device, uniformBufferDeviceMemory);
-    }
-    */
-
-    void ContextImplOpengl::update_uniform_buffer()
+    void ContextImplGl::update_uniform_buffer()
     {
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
         GLsizei size = (GLsizei)std::min(storage.size() * sizeof(uniform_rect),
-                                         (size_t)OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE);
+                                         static_cast<size_t>(MAX_UNIFORM_RECT_PER_BLOCK_COUNT) *
+                                             sizeof(uniform_rect));
                                          
         //GLsizei size = (GLsizei)(storage.size() * sizeof(uniform_rect));
 
@@ -2153,7 +2146,7 @@ namespace gcanvas
     }
 
     /*
-    void ContextImplOpengl::update_storage_buffer()
+    void ContextImplGl::update_storage_buffer()
     {
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, storageBuffer);
         GLsizei size = (GLsizei)std::min(storage.size() * sizeof(uniform_rect),
@@ -2162,4 +2155,5 @@ namespace gcanvas
     }
     */
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas 

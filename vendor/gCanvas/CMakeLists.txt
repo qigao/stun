@@ -81,19 +81,22 @@ endif()
 if(GCANVAS_BUILD_OPENGL)
   find_package(glad CONFIG REQUIRED)
   add_library(gcanvas_opengl STATIC
-    src/backends/opengl/context_impl_opengl.cpp
-    src/backends/opengl/font_impl_opengl.cpp
-    src/backends/opengl/image_impl_opengl.cpp
-    src/backends/opengl/opengl_shared_info.cpp)
+    src/backends/gl/context_impl_gl.cpp
+    src/backends/gl/font_impl_gl.cpp
+    src/backends/gl/image_impl_gl.cpp
+    src/backends/opengl/context_opengl.cpp
+    src/backends/opengl/desktop_gl_runtime.cpp)
   add_library(gCanvas::OpenGL ALIAS gcanvas_opengl)
 
   target_compile_features(gcanvas_opengl PUBLIC cxx_std_17)
+  target_compile_definitions(gcanvas_opengl PRIVATE GCANVAS_GL_DESKTOP=1)
   target_include_directories(gcanvas_opengl
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
       $<INSTALL_INTERFACE:include>
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/gl
       ${CMAKE_CURRENT_SOURCE_DIR}/src/backends/opengl
       ${STB_INCLUDE_DIRS})
   target_link_libraries(gcanvas_opengl

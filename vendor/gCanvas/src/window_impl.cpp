@@ -646,6 +646,11 @@ namespace gcanvas
         }
         _native_pixel_size = config.native_pixel_size;
         _backend = config.backend;
+        if (_backend == Backend::OpenGLES)
+        {
+            throw std::invalid_argument(
+                "OpenGLES requires an external platform host; gCanvas::Window uses GLFW");
+        }
 #ifndef GCANVAS_HAS_OPENGL
         if (_backend == Backend::OpenGL)
         {

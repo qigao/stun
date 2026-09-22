@@ -1,22 +1,24 @@
-#ifndef GCANVAS_IMAGE_IMPL_OPENGL_HPP
-#define GCANVAS_IMAGE_IMPL_OPENGL_HPP
+#ifndef GCANVAS_IMAGE_IMPL_GL_HPP
+#define GCANVAS_IMAGE_IMPL_GL_HPP
 
 #include "gcanvas/image.hpp"
 
 #include <map>
 #include <string>
-#include "opengl_shared_info.hpp"
+#include "gl_api.hpp"
 
 
 namespace gcanvas
 {
-    class ImageImplOpengl : public Image
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
+    class ImageImplGl : public Image
     {
     public:
-        ImageImplOpengl(std::string file_path, ImageConfig imageConfig);
-        ImageImplOpengl(int width, int height, int components, const unsigned char* data,
+        ImageImplGl(std::string file_path, ImageConfig imageConfig);
+        ImageImplGl(int width, int height, int components, const unsigned char* data,
                         std::size_t size, ImageConfig imageConfig);
-        ~ImageImplOpengl();
+        ~ImageImplGl();
 
         GLuint _image;
         int _sampler_index = -1;
@@ -35,6 +37,7 @@ namespace gcanvas
         void init_format();
     };
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
 
-#endif // GCANVAS_IMAGE_IMPL_OPENGL_HPP
+#endif // GCANVAS_IMAGE_IMPL_GL_HPP

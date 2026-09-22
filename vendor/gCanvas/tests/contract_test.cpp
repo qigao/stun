@@ -52,7 +52,9 @@ int main()
     {
         return 1;
     }
-    if (gcanvas::Backend::OpenGL == gcanvas::Backend::Vulkan)
+    if (gcanvas::Backend::OpenGL == gcanvas::Backend::OpenGLES ||
+        gcanvas::Backend::OpenGL == gcanvas::Backend::Vulkan ||
+        gcanvas::Backend::OpenGLES == gcanvas::Backend::Vulkan)
     {
         return 2;
     }

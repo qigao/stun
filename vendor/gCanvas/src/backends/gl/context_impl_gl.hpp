@@ -1,8 +1,9 @@
-#ifndef GCANVAS_OPENGL_CONTEXT_HPP
-#define GCANVAS_OPENGL_CONTEXT_HPP
+#ifndef GCANVAS_GL_CONTEXT_HPP
+#define GCANVAS_GL_CONTEXT_HPP
 
 #include "gcanvas/context.hpp"
-#include "gcanvas/backends/opengl.hpp"
+#include "gl_backend.hpp"
+#include "gl_api.hpp"
 
 #include <string>
 #include <vector>
@@ -11,14 +12,16 @@
 
 #include "gcanvas/vec2.hpp"
 #include "gcanvas/color.hpp"
-#include "image_impl_opengl.hpp"
+#include "image_impl_gl.hpp"
 
 //#define UNIFORM_BUFFER_ARRAY_MAX_COUNT 65536*2
 //#define UNIFORM_RECT_BUFFER_ARRAY_MAX_SIZE UNIFORM_BUFFER_ARRAY_MAX_COUNT * sizeof(uniform_rect)
 
 namespace gcanvas
 {
-    class ContextImplOpengl : public Context
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
+    class ContextImplGl : public Context
     {
     public:
         static constexpr int shader_texture_array_size = 10;
@@ -108,8 +111,8 @@ namespace gcanvas
         };
 
        
-        std::unique_ptr<ImageImplOpengl> dummy;
-        std::vector<ImageImplOpengl*> images;
+        std::unique_ptr<ImageImplGl> dummy;
+        std::vector<ImageImplGl*> images;
 
         //std::vector<vertex> rect_vertices = {{vec2(0)}, {vec2(1, 0)}, {vec2(0, 1)}, {vec2(1)}};
         std::vector<uint32_t> rect_indices = {0, 1, 2, 1, 3, 2};
@@ -133,8 +136,12 @@ namespace gcanvas
 
         int texture_array_size = shader_texture_array_size;
 
-        opengl::Host _host;
-        opengl::PresentationMode _presentation;
+        detail::GlHost _host;
+        detail::GlPresentationMode _presentation;
+        Backend _backend = Backend::OpenGL;
+        const detail::GlRuntime* _runtime = nullptr;
+        const char* _vertex_shader_source = nullptr;
+        const char* _fragment_shader_source = nullptr;
 
         std::atomic<bool> resizing = false;
         std::atomic<bool> rendering = false;
@@ -151,10 +158,10 @@ namespace gcanvas
 
         GLuint storageBuffer{};
 
-        explicit ContextImplOpengl(const opengl::CreateInfo& create_info);
-        ~ContextImplOpengl() override;
+        explicit ContextImplGl(const detail::GlCreateInfo& create_info);
+        ~ContextImplGl() override;
 
-        Backend backend() const noexcept override { return Backend::OpenGL; }
+        Backend backend() const noexcept override { return _backend; }
         void stroke_rect(float x, float y, float width, float height) override;
         void stroke_rounded_rect(float x, float y, float width, float height,
                                  float border_radius) override;
@@ -268,6 +275,7 @@ namespace gcanvas
                             float morphology_radius = 0.0f);
     };
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
 
-#endif // GCANVAS_OPENGL_CONTEXT_HPP
+#endif // GCANVAS_GL_CONTEXT_HPP

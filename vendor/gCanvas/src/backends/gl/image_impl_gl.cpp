@@ -1,4 +1,4 @@
-#include "image_impl_opengl.hpp"
+#include "image_impl_gl.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -10,7 +10,9 @@
 
 namespace gcanvas
 {
-    ImageImplOpengl::ImageImplOpengl(std::string file_path, ImageConfig imageConfig)
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
+    ImageImplGl::ImageImplGl(std::string file_path, ImageConfig imageConfig)
     {
         _imageConfig = imageConfig;
         stbi_uc* data =
@@ -46,7 +48,7 @@ namespace gcanvas
         init_format();
     }
 
-    ImageImplOpengl::ImageImplOpengl(int width, int height, int components,
+    ImageImplGl::ImageImplGl(int width, int height, int components,
                                      const unsigned char* data,
                                      std::size_t size, ImageConfig imageConfig)
     {
@@ -65,7 +67,7 @@ namespace gcanvas
         init_format();
     }
 
-    ImageImplOpengl::~ImageImplOpengl()
+    ImageImplGl::~ImageImplGl()
     {        
         if (_uploaded)
         {               
@@ -74,7 +76,7 @@ namespace gcanvas
         }
     }
 
-    void ImageImplOpengl::upload()
+    void ImageImplGl::upload()
     {
         if (_data == nullptr)
             return;
@@ -125,19 +127,19 @@ namespace gcanvas
         _uploaded = true;
     }
 
-    void ImageImplOpengl::upload_update()
+    void ImageImplGl::upload_update()
     {
         glBindTexture(GL_TEXTURE_2D, _image);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _width, _height, _type, GL_UNSIGNED_BYTE, _data);
     }
 
-    void ImageImplOpengl::bind(GLuint texture_unit)
+    void ImageImplGl::bind(GLuint texture_unit)
     {
         glActiveTexture(GL_TEXTURE0 + texture_unit);
         glBindTexture(GL_TEXTURE_2D, _image);
     }
 
-    void ImageImplOpengl::init_format()
+    void ImageImplGl::init_format()
     {
         switch (_components)
         {
@@ -161,4 +163,5 @@ namespace gcanvas
         }
     }    
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
