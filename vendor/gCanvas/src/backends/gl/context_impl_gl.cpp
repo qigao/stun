@@ -2133,21 +2133,6 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         glDeleteShader(fragmentShader);
     }
 
-    /*
-    void ContextImplGl::update_uniforms()
-    {
-        VkDeviceSize bufferSize = sizeof(uniform_rect) * uniforms.size();
-
-        void* rawData;
-        vkMapMemory(_runtime /* legacy commented Vulkan path */, uniformBufferDeviceMemory, 0,
-                    bufferSize, 0, &rawData);
-
-
-        std::memcpy(rawData, uniforms.data(), bufferSize);
-        vkUnmapMemory(_runtime /* legacy commented Vulkan path */, uniformBufferDeviceMemory);
-    }
-    */
-
     void ContextImplGl::update_uniform_buffer()
     {
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
