@@ -178,5 +178,5 @@ jobs:
           grep -q 'GCANVAS_BUILD_WINDOW:BOOL=OFF' "$cache"
 
           commands=build/gcanvas-android/compile_commands.json
-          grep -q -- '--target=aarch64-linux-android' "$commands"
+          grep -Eq -- '--target=aarch64(-none)?-linux-android[0-9]*' "$commands"
           ! grep -qi -E 'glad|glfw' "$commands"
