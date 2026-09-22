@@ -58,7 +58,7 @@ jobs:
       - name: Configure shared vcpkg cache and canonical tool
         uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
-          mode: readwrite
+          mode: read
 
       - name: Restore shared re2c binary
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
