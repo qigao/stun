@@ -1,4 +1,4 @@
-#include <glad/glad.h>
+#include <glad/gl.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -71,7 +71,7 @@ void compile(GLuint shader, const char* source) {
     require(success == GL_TRUE, "Shader compilation failed");
 }
 void load_gl() {
-    require(gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) != 0,
+    require(gladLoadGL(glfwGetProcAddress) != 0,
             "OpenGL loader failed");
     const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     require(renderer && std::strstr(renderer, "llvmpipe"), "Expected explicit llvmpipe driver");
@@ -109,7 +109,9 @@ void draw_and_verify() {
     glFinish();
     std::puts("pixel-readback=passed");
 }
-void verify_module(bool loaded) {
+enum class MappingExpectation { Absent, Optional, Present };
+void verify_module(MappingExpectation driver_expectation,
+                   MappingExpectation glx_expectation) {
     const char* expected = std::getenv("MESA_EXPECTED_DRIVER");
     const char* expected_glx = std::getenv("MESA_EXPECTED_GLX");
     require(expected && *expected && expected_glx && *expected_glx,
@@ -122,20 +124,31 @@ void verify_module(bool loaded) {
         const auto path_start = line.find('/');
         if (path_start == std::string::npos) continue;
         const std::string mapped_path = line.substr(path_start);
-        if (line.find("libgallium") != std::string::npos) {
-            require(mapped_path == expected, "Unexpected Gallium provider loaded");
+        if (mapped_path == expected) {
             found = true;
-        } else if (line.find("libGLX_mesa") != std::string::npos) {
-            require(mapped_path == expected_glx, "Unexpected GLX provider loaded");
-            found_glx = true;
-        } else {
+            std::printf("driver-map=%s\n", line.c_str());
             continue;
         }
-        std::printf("driver-map=%s\n", line.c_str());
+        if (line.find("libGLX_mesa") != std::string::npos) {
+            require(mapped_path == expected_glx, "Unexpected GLX provider loaded");
+            found_glx = true;
+            std::printf("driver-map=%s\n", line.c_str());
+            continue;
+        }
     }
     require(!maps.bad(), "Cannot finish reading driver mappings");
-    require(found == loaded && found_glx == loaded, "GLX/Gallium load/unload contract failed");
-    std::printf("driver-module=%s\n", loaded ? "loaded" : "unloaded");
+    const auto check = [](bool found_value, MappingExpectation expectation,
+                          const char* message) {
+        if (expectation == MappingExpectation::Present)
+            require(found_value, message);
+        else if (expectation == MappingExpectation::Absent)
+            require(!found_value, message);
+    };
+    check(found, driver_expectation, "Gallium/DRI load contract failed");
+    check(found_glx, glx_expectation, "GLX load contract failed");
+    std::printf("driver-module=%s glx-module=%s\n",
+                found ? "loaded" : "unloaded",
+                found_glx ? "loaded" : "unloaded");
 }
 void exercise(Session& session, const std::string& mode) {
     if (mode == "init") return;
@@ -153,7 +166,7 @@ void exercise(Session& session, const std::string& mode) {
         session.close(0);
         glfwMakeContextCurrent(second);
         draw_and_verify(); // The shared module must survive the first context's destruction.
-        verify_module(true);
+        verify_module(MappingExpectation::Present, MappingExpectation::Present);
         first = session.create(0, second);
         session.close(1);
         glfwMakeContextCurrent(first);
@@ -193,9 +206,14 @@ int main(int argc, char** argv) {
             {
                 Session session;
                 exercise(session, mode);
-                verify_module(mode != "init");
+                if (mode == "init")
+                    verify_module(MappingExpectation::Absent, MappingExpectation::Absent);
+                else if (mode == "window")
+                    verify_module(MappingExpectation::Optional, MappingExpectation::Present);
+                else
+                    verify_module(MappingExpectation::Present, MappingExpectation::Present);
             }
-            verify_module(false);
+            verify_module(MappingExpectation::Absent, MappingExpectation::Absent);
             std::printf("cycle=%d teardown=completed\n", cycle);
         }
     } catch (const std::exception& error) {
