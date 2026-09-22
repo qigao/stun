@@ -88,20 +88,10 @@ size_t count_word_spacing_gaps(const std::string& text) {
   size_t count = 0;
   size_t pos = 0;
   while (pos < text.size()) {
-    const uint32_t cp = utf8_decode(text, pos);
+    const uint32_t cp = utf8_next_scalar(text, pos).value;
     if (is_word_spacing_gap(cp)) {
       ++count;
     }
-  }
-  return count;
-}
-
-size_t utf8_codepoint_count(const std::string& text) {
-  size_t count = 0;
-  size_t pos = 0;
-  while (pos < text.size()) {
-    utf8_decode(text, pos);
-    ++count;
   }
   return count;
 }
@@ -110,7 +100,7 @@ size_t visual_index_to_byte_offset(const std::string& text, size_t visual_index)
   size_t byte_pos = 0;
   size_t codepoint_index = 0;
   while (byte_pos < text.size() && codepoint_index < visual_index) {
-    utf8_decode(text, byte_pos);
+    utf8_next_scalar(text, byte_pos).value;
     ++codepoint_index;
   }
   return byte_pos;
@@ -121,7 +111,7 @@ size_t byte_offset_to_visual_index(const std::string& text, size_t byte_offset) 
   size_t byte_pos = 0;
   size_t codepoint_index = 0;
   while (byte_pos < clamped) {
-    utf8_decode(text, byte_pos);
+    utf8_next_scalar(text, byte_pos).value;
     ++codepoint_index;
   }
   return codepoint_index;
@@ -242,7 +232,7 @@ float measure_input_text_width(const std::string& text, const ComputedStyle* sty
   size_t word_gap_count = 0;
   for (const auto& segment : segment_text(display)) {
     if (segment.type == TextSegmentType::Emoji) {
-      const size_t count = utf8_codepoint_count(segment.text);
+      const size_t count = utf8_scalar_count(segment.text);
       width += static_cast<float>(count) * metrics.font_size;
       codepoint_count += count;
       continue;
@@ -251,8 +241,8 @@ float measure_input_text_width(const std::string& text, const ComputedStyle* sty
     const float segment_width = approximate_text_width(&measure_style, segment.text);
     width += segment_width > 0.0f
                  ? segment_width
-                 : metrics.char_width * static_cast<float>(utf8_codepoint_count(segment.text));
-    const size_t count = utf8_codepoint_count(segment.text);
+                 : metrics.char_width * static_cast<float>(utf8_scalar_count(segment.text));
+    const size_t count = utf8_scalar_count(segment.text);
     codepoint_count += count;
     word_gap_count += count_word_spacing_gaps(segment.text);
   }
@@ -283,7 +273,7 @@ float input_segment_width(const TextSegment& segment, const ComputedStyle* style
     size_t count = 0;
     size_t pos = 0;
     while (pos < segment.text.size()) {
-      utf8_decode(segment.text, pos);
+      utf8_next_scalar(segment.text, pos).value;
       count++;
     }
     return static_cast<float>(count) * metrics.font_size;
@@ -316,11 +306,11 @@ float draw_input_segmented(RenderCommandList& commands, const std::string& text,
       size_t byte_pos = 0;
       while (byte_pos < seg.text.size()) {
         const size_t run_start = byte_pos;
-        const uint32_t first_cp = utf8_decode(seg.text, byte_pos);
+        const uint32_t first_cp = utf8_next_scalar(seg.text, byte_pos).value;
         const bool gap_run = is_word_spacing_gap(first_cp);
         while (byte_pos < seg.text.size()) {
           const size_t before = byte_pos;
-          const uint32_t cp = utf8_decode(seg.text, byte_pos);
+          const uint32_t cp = utf8_next_scalar(seg.text, byte_pos).value;
           if (is_word_spacing_gap(cp) != gap_run) {
             byte_pos = before;
             break;
@@ -335,7 +325,7 @@ float draw_input_segmented(RenderCommandList& commands, const std::string& text,
         current_x += run_width > 0.0f
                          ? run_width
                          : metrics.char_width *
-                               static_cast<float>(utf8_codepoint_count(run));
+                               static_cast<float>(utf8_scalar_count(run));
         current_x += word_spacing *
                      static_cast<float>(count_word_spacing_gaps(run));
       }
@@ -343,7 +333,7 @@ float draw_input_segmented(RenderCommandList& commands, const std::string& text,
       size_t byte_pos = 0;
       while (byte_pos < seg.text.size()) {
         const size_t start = byte_pos;
-        const uint32_t cp = utf8_decode(seg.text, byte_pos);
+        const uint32_t cp = utf8_next_scalar(seg.text, byte_pos).value;
         const std::string glyph = seg.text.substr(start, byte_pos - start);
         const float glyph_width = approximate_text_width(&measure_style, glyph);
         if (!is_word_spacing_gap(cp)) {
@@ -1292,7 +1282,7 @@ size_t InputWidget::x_to_index(float x, const Element& elem) const {
   bool first_glyph = true;
   while (byte_pos < display.size()) {
     const size_t start = byte_pos;
-    const uint32_t cp = utf8_decode(display, byte_pos);
+    const uint32_t cp = utf8_next_scalar(display, byte_pos).value;
     const float spacing_before = first_glyph ? 0.0f : letter_spacing;
     const float glyph_width = measure_input_codepoint_width(
         display.substr(start, byte_pos - start), cp, style, metrics);
@@ -1332,7 +1322,7 @@ float InputWidget::index_to_x(size_t index, const Element& elem) const {
 
   while (byte_pos < display.size() && byte_pos < clamped_index) {
     const size_t start = byte_pos;
-    const uint32_t cp = utf8_decode(display, byte_pos);
+    const uint32_t cp = utf8_next_scalar(display, byte_pos).value;
     advance += measure_input_codepoint_width(display.substr(start, byte_pos - start), cp,
                                              style, metrics);
     if (is_word_spacing_gap(cp)) {
@@ -1350,7 +1340,7 @@ std::string InputWidget::display_text() const {
   if (!password_) return text_;
 
   // 密码模式：返回相同长度的 *
-  return std::string(utf8_codepoint_count(text_), '*');
+  return std::string(utf8_scalar_count(text_), '*');
 }
 
 } // namespace flexUI

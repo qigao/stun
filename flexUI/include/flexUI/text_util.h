@@ -8,6 +8,7 @@
 #ifndef FLEXUI_TEXT_UTIL_H
 #define FLEXUI_TEXT_UTIL_H
 
+#include <cstddef>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -35,17 +36,31 @@ struct TextSegment {
 // ============================================================================
 
 /**
- * Decode a single UTF-8 code point from string
- * @param str The UTF-8 string
- * @param pos Current position (updated to next character)
- * @return The Unicode code point
+ * One strictly decoded Unicode scalar and its original UTF-8 byte range.
  */
-uint32_t utf8_decode(const std::string& str, size_t& pos);
+struct Utf8Scalar {
+    uint32_t value = 0;
+    size_t byte_offset = 0;
+    size_t byte_length = 0;
+};
 
 /**
- * Get the byte length of a UTF-8 character starting at pos
+ * Decode exactly one Unicode scalar with Salts::Unicode.
+ *
+ * The caller must provide a cursor in [0, text.size()). Success advances the
+ * cursor and returns the scalar plus its original byte range. Malformed UTF-8,
+ * including a cursor on a continuation byte, throws std::invalid_argument.
+ * A cursor at or beyond text.size() throws std::out_of_range. The caller cursor
+ * is unchanged on every failure. Embedded NUL is an ordinary scalar; no
+ * normalization is performed. One call validates only the scalar at cursor.
  */
-size_t utf8_char_length(const std::string& str, size_t pos);
+Utf8Scalar utf8_next_scalar(const std::string& text, size_t& cursor);
+
+/**
+ * Count Unicode scalars after strictly validating the complete UTF-8 string.
+ * This is not a grapheme count or a text measurement API.
+ */
+size_t utf8_scalar_count(const std::string& text);
 
 /**
  * Check if a code point is an emoji
@@ -75,7 +90,9 @@ bool is_emoji_modifier(uint32_t codepoint);
 std::vector<TextSegment> segment_text(const std::string& text);
 
 /**
- * Check if text contains any emoji
+ * Check if text contains any emoji, validating the complete UTF-8 input first.
+ * Malformed input throws std::invalid_argument even after an earlier match.
+ * Embedded NUL does not end the input. No normalization is performed.
  */
 bool has_emoji(const std::string& text);
 

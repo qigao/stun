@@ -1,0 +1,721 @@
+name: Unicode runtime
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - refactor/flexui-salts-unicode
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+  SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
+
+jobs:
+  unicode-runtime:
+    name: Unicode source runtime ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: .ci/salts
+          persist-credentials: false
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: .ci/salts-utils
+          persist-credentials: false
+
+      - name: Record source provenance
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/salts rev-parse HEAD)" = "$SALTS_SHA"
+          test "$(git -C .ci/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA"
+          cc --version
+          c++ --version
+
+      - name: Install pinned re2c with upstream checksum verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ninja-build curl xz-utils
+          bash .ci/salts-utils/cmake/ci/install-re2c.sh
+
+      # This is an executable source-level bridge test, not an installed SDK
+      # or full FlexUI build. No mock decoder or replacement Salts target is used.
+      - name: Generate and compile the real Unicode scanner and TinyTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/unicode-runtime
+          test "$(re2c --version)" = 're2c 4.6'
+          re2c --lang c --utf8 --encoding-policy fail --no-generation-date -W -Werror \
+            -I "$RE2C_ROOT/share/re2c/stdlib" \
+            -o build/unicode-runtime/salts_unicode_gen.c \
+            .ci/salts-utils/unicode/src/salts_unicode.re
+          headers=(
+            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/tinytest/include
+          )
+          flags=(-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer)
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
+          c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
+            flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
+            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
+            build/unicode-runtime/tinymock.o -pthread -ldl -lm \
+            -o build/unicode-runtime/test_text_util_unicode
+
+      - name: Run strict Unicode behavior tests
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          timeout 120s build/unicode-runtime/test_text_util_unicode 2>&1 \
+            | tee build/unicode-runtime/test.log
+          {
+            echo '### Unicode runtime validation'
+            echo 'Executed the real pinned SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
+            echo 'Scope: source-level runtime; installed-package and full-GUI integration are separate gates.'
+            echo '```text'
+            cat build/unicode-runtime/test.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify tracked source was not modified
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git -C .ci/salts diff --exit-code
+          git -C .ci/salts-utils diff --exit-code
+
+  unicode-install-consumer:
+    name: FlexUI production and installed packages ASan and UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      VCPKG_ROOT: ${{ github.workspace }}/.ci/install-vcpkg
+      VCPKG_MAX_CONCURRENCY: 2
+      EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout pinned Salts
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ env.SALTS_SHA }}
+          path: .ci/install-sources/salts
+          persist-credentials: false
+
+      - name: Checkout pinned SaltsUtils
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-utils
+          ref: ${{ env.SALTS_UTILS_SHA }}
+          path: .ci/install-sources/salts-utils
+          persist-credentials: false
+
+      - name: Checkout pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_SHA }}
+          path: .ci/install-vcpkg
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up BoringSSL build prerequisite
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+          cache: false
+
+      - name: Define isolated paths on the runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'VCPKG_BINARY_SOURCES=clear;files,%s/stun-vcpkg-cache,readwrite\n' "$RUNNER_TEMP"
+            printf 'SALTS_ROOT=%s/stun-unicode-sdk\n' "$RUNNER_TEMP"
+            printf 'PACKAGE_BUILD_ROOT=%s/stun-unicode-package-build\n' "$RUNNER_TEMP"
+            printf 'EXTERNAL_PORTS_ROOT=%s/stun-unicode-external-ports\n' "$RUNNER_TEMP"
+            printf 'FLEXUI_INSTALL_ROOT=%s/stun-flexui-sdk\n' "$RUNNER_TEMP"
+            printf 'LD_LIBRARY_PATH=%s/stun-unicode-sdk/lib\n' "$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
+
+      - name: Cache pinned third-party packages
+        id: vcpkg_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/stun-vcpkg-cache
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+          restore-keys: |
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
+
+      - name: Prepare isolated tools and evidence
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$EXTERNAL_PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/install-sources/salts rev-parse HEAD)" = "$SALTS_SHA"
+          test "$(git -C .ci/install-sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" | tee "$EVIDENCE_DIR/provenance.txt"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" \
+            cmake==3.31.6
+          printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Install checksum-verified re2c
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .ci/install-sources/salts-utils/cmake/ci/install-re2c.sh 2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
+
+      - name: Build and install the real dependency packages
+        id: dependency_packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          ninja --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          gcc --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          g++ --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          re2c --version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          go version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          "$VCPKG_ROOT/vcpkg" version | tee -a "$EVIDENCE_DIR/provenance.txt"
+          test "$(re2c --version)" = "re2c 4.6"
+          cmake -S .ci/install-sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$EVIDENCE_DIR/lemon-configure.log"
+          cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/lemon-build.log"
+          for package in salts salts-utils; do
+            source="$GITHUB_WORKSPACE/.ci/install-sources/$package"
+            package_build="$PACKAGE_BUILD_ROOT/$package"
+            ports="$EXTERNAL_PORTS_ROOT/$package"
+            extra=()
+            if [ "$package" = salts-utils ]; then
+              extra+=(
+                -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
+                "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+                "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
+              )
+            fi
+            cmake -S "$source" -B "$package_build" -G Ninja \
+              -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+              -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
+              "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+              -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
+              "-DCMAKE_INSTALL_PREFIX=$SALTS_ROOT" -DCMAKE_INSTALL_LIBDIR=lib \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
+              -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF \
+              -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+              "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
+            cmake --build "$package_build" --parallel 2 \
+              2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
+            install_component=()
+            if [ "$package" = salts-utils ]; then
+              install_component=(--component Unspecified)
+            fi
+            cmake --install "$package_build" "${install_component[@]}" \
+              2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
+            cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
+            cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
+            manifest=install_manifest.txt
+            if [ "$package" = salts-utils ]; then
+              manifest=install_manifest_Unspecified.txt
+            fi
+            cp "$package_build/$manifest" "$EVIDENCE_DIR/$package-install-manifest.txt"
+            git -C "$source" diff --exit-code
+          done
+
+      - name: Remove dependency source and build paths from consumer access
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-unicode-isolated"
+          mv .ci/install-sources "$RUNNER_TEMP/stun-unicode-isolated/sources"
+          mv "$PACKAGE_BUILD_ROOT" "$RUNNER_TEMP/stun-unicode-isolated/builds"
+          test ! -e .ci/install-sources
+          test ! -e "$PACKAGE_BUILD_ROOT"
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+
+      - name: Configure, link, and run the installed Unicode consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          consumer_build="$GITHUB_WORKSPACE/build/unicode-install-consumer"
+          mkdir -p "$consumer_build"
+          cmake -S flexUI/tests/unicode_install_consumer -B "$consumer_build" -G Ninja \
+            -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DFLEXUI_UNICODE_INSTALL_PREFIX=$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON -DFLEXUI_UNICODE_ENABLE_SANITIZERS=ON \
+            2>&1 | tee "$EVIDENCE_DIR/consumer-configure.log"
+          cmake --build "$consumer_build" --verbose --parallel 2 \
+            2>&1 | tee "$consumer_build/build.log"
+          ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure \
+            --output-junit "$EVIDENCE_DIR/consumer-results.xml" \
+            2>&1 | tee "$consumer_build/ctest.log"
+          git diff --exit-code
+
+      - name: Verify installed paths, Core ownership, and complete test totals
+        shell: bash
+        env:
+          FLEXUI_UNICODE_INSTALL_PREFIX: ${{ runner.temp }}/stun-unicode-sdk
+          CONSUMER_BINARY_DIR: ${{ github.workspace }}/build/unicode-install-consumer
+          CONSUMER_CONFIG: Debug
+          ORIGINAL_DEPENDENCY_ROOTS: |
+            ${{ github.workspace }}/.ci/install-sources
+            ${{ runner.temp }}/stun-unicode-package-build
+          DEPENDENCY_QUARANTINE_ROOT: ${{ runner.temp }}/stun-unicode-isolated
+        run: |
+          set -euo pipefail
+          : "${FLEXUI_UNICODE_INSTALL_PREFIX:?}"
+          : "${CONSUMER_BINARY_DIR:?}"
+          : "${CONSUMER_CONFIG:?}"
+          : "${ORIGINAL_DEPENDENCY_ROOTS:?}"
+
+          readelf -d "$CONSUMER_BINARY_DIR/test_text_util_unicode_install" \
+            | tee "$CONSUMER_BINARY_DIR/readelf-dynamic.txt"
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD \
+            ldd "$CONSUMER_BINARY_DIR/test_text_util_unicode_install" \
+            | tee "$CONSUMER_BINARY_DIR/ldd.txt"
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+
+          prefix = Path(os.environ["FLEXUI_UNICODE_INSTALL_PREFIX"]).resolve(strict=True)
+          build = Path(os.environ["CONSUMER_BINARY_DIR"]).resolve(strict=True)
+          config = os.environ["CONSUMER_CONFIG"]
+          originals = [Path(p) for p in os.environ["ORIGINAL_DEPENDENCY_ROOTS"].splitlines() if p]
+          require(originals and all(p.is_absolute() for p in originals), "Dependency roots must be absolute")
+          require(all(not p.exists() for p in originals), "An original dependency source/build root is still present")
+          quarantine = os.environ.get("DEPENDENCY_QUARANTINE_ROOT", "")
+          forbidden = originals + ([Path(quarantine)] if quarantine else [])
+          require(all(p.is_absolute() for p in forbidden), "Quarantine root must be absolute")
+
+          manifest = build / f"installed-targets-{config}.txt"
+          pairs = [line.split("=", 1) for line in manifest.read_text().splitlines()]
+          expected_keys = {"SaltsConfig", "SaltsUtilsConfig", "Unicode", "Core", "TinyTest"}
+          require(len(pairs) == len(expected_keys) and {p[0] for p in pairs} == expected_keys,
+                  "Installed-target evidence is incomplete or duplicated")
+          resolved = {key: Path(value).resolve(strict=True) for key, value in pairs}
+          require(all(path.is_relative_to(prefix) for path in resolved.values()),
+                  "A package config or imported provider escaped the isolated prefix")
+
+          map_text = (build / f"unicode-install-{config}.map").read_text()
+          dynamic_text = (build / "readelf-dynamic.txt").read_text()
+          loader_text = (build / "ldd.txt").read_text()
+          compile_text = (build / "compile_commands.json").read_text()
+          command_text = "\n".join((compile_text, (build / "build.log").read_text(), map_text, dynamic_text, loader_text))
+          for path in forbidden:
+              for spelling in {str(path), str(path.resolve())}:
+                  require(spelling not in command_text, f"Dependency source/build input leaked: {spelling}")
+          require("TurboUtils::Core" not in command_text, "Legacy Core target appears in build evidence")
+          commands = json.loads(compile_text)
+          require(commands, "No compiler commands were recorded")
+
+          core_name = re.compile(r"libsalts(?:[_-]core)?\.so(?:\.\d+)*", re.I)
+          legacy_name = re.compile(r"libturbo[^/]*\.(?:so(?:\.\d+)*|a)", re.I)
+
+
+          def checked_library(raw):
+              path = Path(raw)
+              if not path.is_absolute():
+                  path = build / path
+              real = path.resolve(strict=True)
+              require(not legacy_name.fullmatch(path.name) and not legacy_name.fullmatch(real.name),
+                      f"Legacy Turbo provider found: {path}")
+              if path.name.startswith("libsalts") or real.name.startswith("libsalts"):
+                  require(real.is_relative_to(prefix), f"Loaded/linked Salts library escaped prefix: {real}")
+              return path, real
+
+
+          link_inputs = set()
+          core_link_inputs = set()
+          for raw in re.findall(r"^LOAD\s+(.+?)\s*$", map_text, re.M):
+              path, real = checked_library(raw)
+              link_inputs.add(real)
+              if core_name.fullmatch(path.name) or core_name.fullmatch(real.name) or real == resolved["Core"]:
+                  core_link_inputs.add(real)
+          require({resolved[k] for k in ("Unicode", "Core", "TinyTest")}.issubset(link_inputs),
+                  "Actual linker LOAD inputs do not contain every declared installed provider")
+          require(core_link_inputs == {resolved["Core"]}, "Linker must receive exactly one canonical Core provider")
+
+          require("not found" not in loader_text, "The runtime loader has an unresolved dependency")
+          runtime_core = set()
+          for line in loader_text.splitlines():
+              match = re.match(r"\s*(?:\S+\s+=>\s+)?(/.*?)\s+\(0x[0-9a-fA-F]+\)\s*$", line)
+              if not match:
+                  continue
+              path, real = checked_library(match.group(1))
+              if core_name.fullmatch(path.name) or core_name.fullmatch(real.name) or real == resolved["Core"]:
+                  runtime_core.add(real)
+          require(runtime_core <= {resolved["Core"]}, "Runtime loaded a noncanonical or additional Core provider")
+
+          test_text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", (build / "ctest.log").read_text())
+          totals = re.findall(r"Total tests \[(PASSED|FAILED|SKIPPED|FILTERED|TODO)\]:\s*(\d+)", test_text)
+          expected_totals = {"PASSED": 10, "FAILED": 0, "SKIPPED": 0, "FILTERED": 0, "TODO": 0}
+          require(len(totals) == 5 and {key: int(value) for key, value in totals} == expected_totals,
+                  "TinyTest totals changed or include failed/skipped/filtered/todo cases")
+          require(re.findall(r"Assertions:\s*(\d+) passed,\s*(\d+) failed", test_text) == [("162", "0")],
+                  "Expected all 162 TinyTest assertions to pass")
+          require(re.search(r"100% tests passed,\s*0 tests failed out of 1", test_text),
+                  "CTest did not report the one executable as successful")
+
+          evidence = {
+              "installed_paths": {key: str(value) for key, value in resolved.items()},
+              "core_link_inputs": sorted(map(str, core_link_inputs)),
+              "core_runtime_providers": sorted(map(str, runtime_core)),
+              "runtime_core_note": ("Canonical Core loaded" if runtime_core else
+                                    "Canonical Core was a link input; this executable needs no Core DSO after --as-needed"),
+              "elf_needed": re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic_text),
+              "tinytest": {**expected_totals, "assertions_passed": 162, "assertions_failed": 0},
+              "ctest_executables_passed": 1,
+          }
+          (build / "install-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
+          print(json.dumps(evidence, indent=2))
+          PY
+          {
+            echo '### Installed Unicode package validation'
+            echo 'Real Salts/SaltsUtils packages; dependency source/build paths absent during consumer configure/build/test.'
+            echo '```text'
+            cat "$EVIDENCE_DIR/provenance.txt" "$CONSUMER_BINARY_DIR/ctest.log"
+            echo '```'
+            echo '```json'
+            cat "$CONSUMER_BINARY_DIR/install-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install pinned production FlexUI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Classic mode uses ports from the exact vcpkg checkout. The complete
+          # application manifest includes dependencies of disabled editors/charts.
+          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
+            "--x-install-root=$EXTERNAL_PORTS_ROOT/flexui" \
+            freetype stb box2d nlohmann-json pugixml lexbor \
+            tree-sitter tree-sitter-c catch2 pkgconf zstd \
+            2>&1 | tee "$EVIDENCE_DIR/flexui-ports-install.log"
+
+      - name: Save the complete dependency cache before production validation
+        if: steps.vcpkg_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-vcpkg-cache
+          key: ${{ steps.vcpkg_cache.outputs.cache-primary-key }}
+
+      - name: Build and test the production FlexUI targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          production_build="$GITHUB_WORKSPACE/build/flexui-production"
+          ports="$EXTERNAL_PORTS_ROOT/flexui"
+          tests=(
+            test_text_util_unicode test_render_semantics test_widget_contracts
+            test_textedit_flexui test_plugin_abi test_service_registry
+            test_plugin_host test_plugin_manifest test_desktop_application
+            test_gcanvas_input test_gcanvas_application_input
+          )
+          printf '%s\n' "${tests[@]}" > "$EVIDENCE_DIR/production-tests.txt"
+          cmake -S . -B "$production_build" -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DSTUN_BUILD_CHARTS=OFF \
+            -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=OFF \
+            -DGCANVAS_BUILD_OPENGL=OFF -DGCANVAS_BUILD_VULKAN=OFF \
+            -DGCANVAS_BUILD_SVG=OFF -DGCANVAS_BUILD_WINDOW=OFF \
+            -DGCANVAS_BUILD_TESTS=OFF -DGCANVAS_BUILD_EXAMPLES=OFF \
+            -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=OFF -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF \
+            -DFLEX_BUILD_BACKEND_OPENGL=OFF -DFLEX_BUILD_BACKEND_VULKAN=OFF \
+            -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+            "-DCMAKE_INSTALL_PREFIX=$FLEXUI_INSTALL_ROOT" -DCMAKE_INSTALL_LIBDIR=lib \
+            2>&1 | tee "$EVIDENCE_DIR/production-configure.log"
+          cmake --build "$production_build" --target "${tests[@]}" --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/production-build.log"
+          test_pattern="^($(IFS='|'; echo "${tests[*]}"))$"
+          ctest --test-dir "$production_build" -R "$test_pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/production-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/production-ctest.log"
+          cmake --install "$production_build" --component FlexUIPlugin \
+            2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
+          cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
+
+      - name: Consume installed PluginSDK and Services without host dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD SALTS_ROOT SALTS_UTILS_ROOT
+          for component in PluginSDK Services; do
+            consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-$component"
+            cmake -S flexUI/tests/plugin_install_consumer -B "$consumer_build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DFLEXUI_CONSUMER_COMPONENT=$component" \
+              "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT" \
+              -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+              -DCMAKE_DISABLE_FIND_PACKAGE_Salts=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_SaltsUtils=TRUE \
+              '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-configure.log"
+            cmake --build "$consumer_build" --verbose --parallel 2 \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-build.log"
+            ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+              --output-junit "$EVIDENCE_DIR/$component-consumer-results.xml" \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-ctest.log"
+          done
+
+      - name: Run the installed C plugin and C++ host round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-host"
+          cmake -S flexUI/examples/plugin_echo -B "$consumer_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT;$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+            -DFLEXUI_EXAMPLE_BUILD_HOST=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_ADDRESS_SANITIZER=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_UNDEFINED_SANITIZER=ON \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-configure.log"
+          cmake --build "$consumer_build" --verbose --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-build.log"
+          ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/host-consumer-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-ctest.log"
+
+      - name: Verify production results and installed consumer paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          flexui_sdk = Path(os.environ['FLEXUI_INSTALL_ROOT']).resolve(strict=True)
+          production = workspace / 'build/flexui-production'
+          tests = (evidence / 'production-tests.txt').read_text().splitlines()
+          results = ET.parse(evidence / 'production-results.xml').getroot()
+          cases = list(results.iter('testcase'))
+          assert {c.attrib['name'] for c in cases} == set(tests) and len(cases) == len(tests)
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'production-ctest.log').read_text())
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == len(tests), (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
+          totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
+
+          installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
+                             'Services': 'flexui_installed_services_consumer',
+                             'host': 'flexui_plugin_install_consumer'}
+          for component, expected in installed_tests.items():
+              results = ET.parse(evidence / f'{component}-consumer-results.xml').getroot()
+              cases = list(results.iter('testcase'))
+              assert len(cases) == 1 and cases[0].attrib['name'] == expected, component
+              assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+
+          commands = json.loads((production / 'compile_commands.json').read_text())
+          for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
+                         'flexUI/src/textedit.cpp', 'flex/modules/render/stb_sprintf.cpp',
+                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
+
+          binaries = {name: production / 'bin' / name for name in tests}
+          binaries['installed_sdk'] = workspace / 'build/flexui-installed-PluginSDK/flexui_installed_sdk_consumer'
+          binaries['installed_services'] = workspace / 'build/flexui-installed-Services/flexui_installed_services_consumer'
+          binaries['installed_host'] = workspace / 'build/flexui-installed-host/bin/flexui_plugin_consumer'
+          core_pattern = re.compile(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', re.I)
+          providers = {}
+          env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'LD_PRELOAD')}
+          for name, binary in binaries.items():
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True, env=env)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True, env=env)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              paths = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if core_pattern.fullmatch(path.name):
+                      paths.add(str(path))
+              assert len(paths) <= 1, (name, paths)
+              if name in ('test_render_semantics', 'test_widget_contracts', 'installed_host'):
+                  assert len(paths) == 1, name
+              providers[name] = sorted(paths)
+
+          forbidden = [str(production), str(workspace / '.ci/install-sources'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-package-build'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-isolated')]
+          for component in ('PluginSDK', 'Services', 'host'):
+              build = workspace / f'build/flexui-installed-{component}'
+              command_text = (build / 'compile_commands.json').read_text()
+              command_text += (evidence / f'{component}-consumer-build.log').read_text()
+              assert all(path not in command_text for path in forbidden), component
+              pairs = [line.split('=', 1) for line in (build / 'installed-component-Debug.txt').read_text().splitlines()]
+              expected = {'FlexUIConfig', 'Includes'}
+              if component == 'Services':
+                  expected.add('Library')
+              elif component == 'host':
+                  expected.update(('Services', 'Host', 'Core', 'Toml'))
+              assert len(pairs) == len(expected) and {key for key, _ in pairs} == expected
+              for key, raw in pairs:
+                  prefix = sdk if key in ('Core', 'Toml') else flexui_sdk
+                  for value in raw.split(';'):
+                      path = Path(value).resolve(strict=True)
+                      assert path.is_relative_to(prefix), (component, key, path)
+                      if key not in ('FlexUIConfig', 'Includes'):
+                          assert value in command_text, (component, key, 'missing from actual link command')
+          result = {'production_ctest_passed': len(tests), 'installed_ctest_passed': len(installed_tests),
+                    'tinytest': totals, 'core_runtime_providers': providers,
+                    'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
+          (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Production FlexUI and exported components'
+            echo 'Actual repository targets with ASan/UBSan; Linux without a window/GPU backend.'
+            echo 'Installed C PluginSDK, C++ Services, and C plugin/host round trip executed separately.'
+            echo '```json'
+            cat "$EVIDENCE_DIR/production-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload package and consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicode-install-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/unicode-install-evidence
+            build/unicode-install-consumer/*.log
+            build/unicode-install-consumer/*.json
+            build/unicode-install-consumer/*.map
+            build/unicode-install-consumer/*.txt
+            build/unicode-install-consumer/Testing/Temporary/LastTest.log
+            build/flexui-production/CMakeCache.txt
+            build/flexui-production/compile_commands.json
+            build/flexui-production/Testing/Temporary/LastTest.log
+            build/flexui-installed-*/CMakeCache.txt
+            build/flexui-installed-*/compile_commands.json
+            build/flexui-installed-*/installed-component-*.txt
+            build/flexui-installed-*/Testing/Temporary/LastTest.log
+          if-no-files-found: error
+
+      - name: Preserve the actual SDK for integration failure diagnosis
+        if: failure() && steps.dependency_packages.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/stun-salts-sdk.tar.gz" \
+            -C "$SALTS_ROOT" . -C "$EVIDENCE_DIR" provenance.txt
+
+      - name: Upload the SDK from the failed integration run
+        if: failure() && steps.dependency_packages.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: salts-sdk-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
+          retention-days: 3
+          if-no-files-found: error

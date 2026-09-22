@@ -359,6 +359,21 @@ private:
   std::vector<SavedOffset> save_stack_;
 };
 
+std::vector<TextCall> render_plain_text(const ComputedStyle& style,
+                                      const std::string& text, float width) {
+  RecordingRenderer backend;
+  backend.begin_frame(800.0f, 600.0f, 1.0f);
+  Renderer renderer(&backend);
+  RenderManager render_manager(&renderer);
+
+  Element elem;
+  elem.set_layout_bounds(20.0f, 30.0f, width, 120.0f);
+  elem.set_text(text);
+  *elem.computed_style = style;
+  render_manager.render_tree(&elem);
+  return backend.texts;
+}
+
 void require_color(const flex::Color& color, float r, float g, float b,
                    float a = 1.0f) {
   check(approx_eq(color.r, r, 0.001f));
@@ -2543,6 +2558,84 @@ spec("RenderManager clips plain text for explicit nowrap text-overflow clip") {
     check(backend.texts.front().text.find("...") == std::string::npos);
     check(approximate_text_width(elem.computed_style,
                                  backend.texts.front().text) <= 30.0f);
+  }
+}
+
+spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
+  it("clips CJK to a whole scalar or an empty line") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    style.variables[Symbol("--white-space")] = "nowrap";
+    style.variables[Symbol("--text-overflow")] = "clip";
+    const std::string text = "\xE4\xB8\xAD\xE6\x96\x87";
+    const struct {
+      float width;
+      const char* expected;
+    } cases[] = {{30.0f, "\xE4\xB8\xAD"}, {14.0f, ""}};
+
+    for (const auto& item : cases) {
+      const auto calls = render_plain_text(style, text, item.width);
+      const std::string expected = item.expected;
+      check(calls.size() == (expected.empty() ? 0u : 1u));
+      std::string emitted;
+      for (const auto& call : calls) {
+        emitted += call.text;
+      }
+      check(emitted == expected);
+    }
+  }
+
+  it("retains only whole CJK scalars before the ellipsis") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    style.variables[Symbol("--white-space")] = "nowrap";
+    style.variables[Symbol("--text-overflow")] = "ellipsis";
+    const std::string text = "\xE4\xB8\xAD\xE6\x96\x87";
+    const struct {
+      float width;
+      const char* expected;
+    } cases[] = {{36.0f, "\xE4\xB8\xAD..."}, {20.0f, "..."}};
+
+    for (const auto& item : cases) {
+      const auto calls = render_plain_text(style, text, item.width);
+      check(calls.size() == 1);
+      if (calls.size() == 1) {
+        check(calls.front().text == item.expected);
+        check(approximate_text_width(&style, calls.front().text) <= item.width);
+      }
+    }
+  }
+
+  it("keeps emoji intact when anywhere and break-all wrap narrower than a scalar") {
+    const std::vector<std::string> expected = {
+        "A", "\xF0\x9F\x98\x80", "\xF0\x9F\x9A\x80", "B"};
+    std::string text;
+    for (const auto& scalar : expected) {
+      text += scalar;
+    }
+    const struct {
+      const char* property;
+      const char* value;
+    } modes[] = {{"--overflow-wrap", "anywhere"}, {"--word-break", "break-all"}};
+
+    for (const auto& mode : modes) {
+      ComputedStyle style;
+      style.font_size = 10.0f;
+      style.variables[Symbol(mode.property)] = mode.value;
+      const auto calls = render_plain_text(style, text, 20.0f);
+      check(calls.size() == expected.size());
+      std::string emitted;
+      for (size_t i = 0; i < calls.size(); ++i) {
+        emitted += calls[i].text;
+        if (i < expected.size()) {
+          check(calls[i].text == expected[i]);
+        }
+        if (i > 0) {
+          check(calls[i].y > calls[i - 1].y);
+        }
+      }
+      check(emitted == text);
+    }
   }
 }
 

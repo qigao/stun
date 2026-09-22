@@ -121,11 +121,11 @@ namespace gcanvas
 
     /* ------------------------ DOWNCAST ------------------------ */
 
-    inline ContextImplVulkan* getImpl(Context* ptr)
+    static inline ContextImplVulkan* getImpl(Context* ptr)
     {
         return (ContextImplVulkan*)ptr;
     }
-    inline const ContextImplVulkan* getImpl(const Context* ptr)
+    static inline const ContextImplVulkan* getImpl(const Context* ptr)
     {
         return (const ContextImplVulkan*)ptr;
     }

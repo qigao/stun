@@ -1,19 +1,53 @@
 @PACKAGE_INIT@
 
-include(CMakeFindDependencyMacro)
-if(NOT FlexUI_FIND_COMPONENTS OR
-   "PluginHost" IN_LIST FlexUI_FIND_COMPONENTS)
-@FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES@
+set(FlexUI_PluginSDK_FOUND FALSE)
+set(FlexUI_Services_FOUND FALSE)
+set(FlexUI_PluginHost_FOUND FALSE)
+unset(FlexUI_NOT_FOUND_MESSAGE)
+
+set(_FlexUI_supported_components PluginSDK Services PluginHost)
+set(_FlexUI_components "${FlexUI_FIND_COMPONENTS}")
+if(NOT _FlexUI_components)
+  set(_FlexUI_components PluginSDK Services)
+  if(@FLEXUI_CONFIG_HAS_PLUGIN_HOST@)
+    list(APPEND _FlexUI_components PluginHost)
+  endif()
 endif()
 
-include("${CMAKE_CURRENT_LIST_DIR}/FlexUIPluginTargets.cmake")
+foreach(_FlexUI_component IN LISTS _FlexUI_components)
+  if(NOT _FlexUI_component IN_LIST _FlexUI_supported_components)
+    set(FlexUI_${_FlexUI_component}_FOUND FALSE)
+    string(APPEND FlexUI_NOT_FOUND_MESSAGE
+           "Unsupported FlexUI component: ${_FlexUI_component}. ")
+  endif()
+endforeach()
 
-set(FlexUI_PluginSDK_FOUND TRUE)
-set(FlexUI_Services_FOUND TRUE)
-if(TARGET FlexUI::PluginHost)
+if("PluginHost" IN_LIST _FlexUI_components)
+  if(@FLEXUI_CONFIG_HAS_PLUGIN_HOST@)
+    list(APPEND _FlexUI_components PluginSDK Services)
+  else()
+    string(APPEND FlexUI_NOT_FOUND_MESSAGE
+           "PluginHost was not enabled in this FlexUI installation. ")
+  endif()
+endif()
+
+if("PluginSDK" IN_LIST _FlexUI_components)
+  include("${CMAKE_CURRENT_LIST_DIR}/FlexUIPluginSDKTargets.cmake")
+  set(FlexUI_PluginSDK_FOUND TRUE)
+endif()
+if("Services" IN_LIST _FlexUI_components)
+  include("${CMAKE_CURRENT_LIST_DIR}/FlexUIServicesTargets.cmake")
+  set(FlexUI_Services_FOUND TRUE)
+endif()
+if("PluginHost" IN_LIST _FlexUI_components AND @FLEXUI_CONFIG_HAS_PLUGIN_HOST@)
+  include(CMakeFindDependencyMacro)
+  find_dependency(Salts CONFIG)
+  find_dependency(SaltsUtils CONFIG)
+  include("${CMAKE_CURRENT_LIST_DIR}/FlexUIPluginHostTargets.cmake")
   set(FlexUI_PluginHost_FOUND TRUE)
-else()
-  set(FlexUI_PluginHost_FOUND FALSE)
 endif()
 
 check_required_components(FlexUI)
+unset(_FlexUI_supported_components)
+unset(_FlexUI_components)
+unset(_FlexUI_component)

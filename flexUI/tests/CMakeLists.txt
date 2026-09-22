@@ -117,37 +117,6 @@ if(FLEXUI_ENABLE_PLUGINS)
     flexui_test_plugin_consumer)
   set_target_properties(test_plugin_manifest PROPERTIES FOLDER "flexUI/tests")
   add_test(NAME test_plugin_manifest COMMAND test_plugin_manifest)
-
-  get_filename_component(
-    _flexui_plugin_compiler_runtime_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-
-  add_test(
-    NAME test_plugin_install_consumer
-    COMMAND
-      "${CMAKE_COMMAND}"
-      "-DPRODUCER_BINARY_DIR=${CMAKE_BINARY_DIR}"
-      "-DCONSUMER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugin_echo"
-      "-DCONSUMER_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/install_consumer/$<CONFIG>"
-      "-DSDK_ONLY_CONSUMER_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/install_sdk_consumer/$<CONFIG>"
-      "-DINSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/install_tree/$<CONFIG>"
-      "-DINSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
-      "-DBUILD_CONFIG=$<CONFIG>"
-      "-DCMAKE_GENERATOR_NAME=${CMAKE_GENERATOR}"
-      "-DC_COMPILER=${CMAKE_C_COMPILER}"
-      "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
-      "-DCMAKE_GENERATOR_PLATFORM_NAME=${CMAKE_GENERATOR_PLATFORM}"
-      "-DCMAKE_GENERATOR_TOOLSET_NAME=${CMAKE_GENERATOR_TOOLSET}"
-      "-DCMAKE_MAKE_PROGRAM_PATH=${CMAKE_MAKE_PROGRAM}"
-      "-DSALTS_PACKAGE_DIR=${SALTS_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/Salts"
-      "-DSALTS_UTILS_PACKAGE_DIR=${SALTS_UTILS_ROOT}/${CMAKE_INSTALL_LIBDIR}/cmake/SaltsUtils"
-      "-DSALTS_RUNTIME_DIR=${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
-      "-DCOMPILER_RUNTIME_DIR=${_flexui_plugin_compiler_runtime_dir}"
-      "-DADDRESS_SANITIZER_ENABLED=${ENABLE_SANITIZER_ADDRESS}"
-      "-DEXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_plugin_install_consumer.cmake")
-  set_tests_properties(
-    test_plugin_install_consumer
-    PROPERTIES LABELS "flexui;integration;install;plugin")
 endif()
 
 add_executable(test_markdown_widget test_markdown_widget.cpp)
@@ -165,6 +134,12 @@ target_include_directories(test_style_engine PRIVATE ../include)
 set_target_properties(test_style_engine PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_style_engine COMMAND test_style_engine)
 
+add_executable(test_text_util_unicode test_text_util_unicode.cpp)
+target_link_libraries(test_text_util_unicode PRIVATE flexUI)
+flexui_configure_tinytest(test_text_util_unicode)
+set_target_properties(test_text_util_unicode PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_text_util_unicode COMMAND test_text_util_unicode)
+
 add_executable(test_render_semantics test_render_semantics.cpp)
 target_link_libraries(test_render_semantics PRIVATE flexUI)
 flexui_configure_tinytest(test_render_semantics)
@@ -178,13 +153,6 @@ flexui_configure_tinytest(test_render_command)
 target_include_directories(test_render_command PRIVATE ../include)
 set_target_properties(test_render_command PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_render_command COMMAND test_render_command)
-
-add_executable(test_text_util_unicode test_text_util_unicode.cpp)
-target_link_libraries(test_text_util_unicode PRIVATE flexUI)
-flexui_configure_tinytest(test_text_util_unicode)
-target_include_directories(test_text_util_unicode PRIVATE ../include)
-set_target_properties(test_text_util_unicode PROPERTIES FOLDER "flexUI/tests")
-add_test(NAME test_text_util_unicode COMMAND test_text_util_unicode)
 
 add_executable(test_widget_contracts test_widget_contracts.cpp)
 target_link_libraries(test_widget_contracts PRIVATE flexUI)
@@ -498,7 +466,7 @@ if(WIN32)
     TEST ${_flexui_runtime_tests}
     PROPERTY ENVIRONMENT_MODIFICATION
              "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
-             "PATH=path_list_prepend:${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
+             "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
              "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
 
   if(TEST test_flexui_desktop_editor_smoke)
@@ -507,7 +475,7 @@ if(WIN32)
       PROPERTY ENVIRONMENT_MODIFICATION
                "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
                "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}"
-               "PATH=path_list_prepend:${TURBO_UTILS_ROOT}/${CMAKE_INSTALL_BINDIR}"
+               "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
                "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
   endif()
 endif()

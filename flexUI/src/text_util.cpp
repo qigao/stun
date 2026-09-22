@@ -1,14 +1,13 @@
 /*
  * flexUI - Text Utilities
  *
- * Pure C++ implementation for emoji detection and text segmentation.
- * For better performance, regenerate from text_util.re using:
- *   re2c -8 -o text_util.cpp text_util.re
+ * UTF-8 scanning is owned by Salts::Unicode. Emoji grouping below remains
+ * a rendering heuristic until shared Unicode boundary work in salts-utils#101.
  */
 
 #include <flexUI/text_util.h>
 #include <salts_unicode.h>
-#include <vstr.h>
+
 #include <cstring>
 #include <stdexcept>
 
@@ -18,48 +17,39 @@ namespace flexUI {
 // UTF-8 Utilities
 // ============================================================================
 
-uint32_t utf8_decode(const std::string& str, size_t& pos) {
-    if (pos >= str.size()) {
-        return 0;
+Utf8Scalar utf8_next_scalar(const std::string& text, size_t& cursor) {
+    if (cursor >= text.size()) {
+        throw std::out_of_range("UTF-8 cursor is at or beyond the end of the input");
     }
 
-    size_t cursor = pos;
-    salts_unicode_scalar scalar{};
-    const auto status = salts_unicode_utf8_next(
-        vstr_from_buf(str.data(), str.size()), &cursor, &scalar);
+    const size_t original_cursor = cursor;
+    size_t next_cursor = cursor;
+    salts_unicode_scalar raw{};
+    const salts_unicode_status status = salts_unicode_utf8_next(
+        vstr_from_buf(text.data(), text.size()), &next_cursor, &raw);
+
+    if (status == SALTS_UNICODE_OK) {
+        cursor = next_cursor;
+        return Utf8Scalar{raw.value, raw.byte_offset, raw.byte_length};
+    }
     if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
-        throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+        throw std::invalid_argument(
+            "invalid UTF-8 at byte offset " + std::to_string(original_cursor));
     }
-    if (status == SALTS_UNICODE_ERR_INVALID_ARGUMENT) {
-        throw std::out_of_range("FlexUI UTF-8 cursor is not a scalar boundary");
+    if (status == SALTS_UNICODE_END) {
+        throw std::out_of_range("UTF-8 cursor is at the end of the input");
     }
-    if (status != SALTS_UNICODE_OK) {
-        throw std::runtime_error("Salts::Unicode failed to decode FlexUI text");
-    }
-
-    pos = cursor;
-    return scalar.value;
+    throw std::invalid_argument("Salts::Unicode rejected the UTF-8 scan arguments");
 }
 
-size_t utf8_char_length(const std::string& str, size_t pos) {
-    if (pos >= str.size()) {
-        return 0;
+size_t utf8_scalar_count(const std::string& text) {
+    size_t cursor = 0;
+    size_t count = 0;
+    while (cursor < text.size()) {
+        (void)utf8_next_scalar(text, cursor);
+        ++count;
     }
-
-    size_t cursor = pos;
-    salts_unicode_scalar scalar{};
-    const auto status = salts_unicode_utf8_next(
-        vstr_from_buf(str.data(), str.size()), &cursor, &scalar);
-    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
-        throw std::invalid_argument("FlexUI text contains invalid UTF-8");
-    }
-    if (status == SALTS_UNICODE_ERR_INVALID_ARGUMENT) {
-        throw std::out_of_range("FlexUI UTF-8 cursor is not a scalar boundary");
-    }
-    if (status != SALTS_UNICODE_OK) {
-        throw std::runtime_error("Salts::Unicode failed to decode FlexUI text");
-    }
-    return scalar.byte_length;
+    return count;
 }
 
 // ============================================================================
@@ -159,7 +149,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
     size_t pos = 0;
     while (pos < text.size()) {
         size_t char_start = pos;
-        uint32_t cp = utf8_decode(text, pos);
+        uint32_t cp = utf8_next_scalar(text, pos).value;
 
         // Check if this is an emoji
         if (is_emoji(cp)) {
@@ -175,7 +165,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
             // Consume any following modifiers (skin tone, ZWJ sequences)
             while (pos < text.size()) {
                 size_t next_start = pos;
-                uint32_t next_cp = utf8_decode(text, pos);
+                uint32_t next_cp = utf8_next_scalar(text, pos).value;
 
                 if (is_emoji_modifier(next_cp)) {
                     // Include modifier in emoji
@@ -184,7 +174,7 @@ std::vector<TextSegment> segment_text(const std::string& text) {
                     // If ZWJ, also include the next emoji
                     if (next_cp == 0x200D && pos < text.size()) {
                         size_t emoji_start = pos;
-                        uint32_t emoji_cp = utf8_decode(text, pos);
+                        uint32_t emoji_cp = utf8_next_scalar(text, pos).value;
                         if (is_emoji(emoji_cp) || is_emoji_modifier(emoji_cp)) {
                             emoji_str += text.substr(emoji_start, pos - emoji_start);
                         } else {
@@ -240,11 +230,13 @@ std::vector<TextSegment> segment_text(const std::string& text) {
 
 bool has_emoji(const std::string& text) {
     size_t pos = 0;
+    bool found = false;
     while (pos < text.size()) {
-        uint32_t cp = utf8_decode(text, pos);
-        if (is_emoji(cp)) return true;
+        const uint32_t cp = utf8_next_scalar(text, pos).value;
+        // A positive match must not hide malformed UTF-8 later in the input.
+        if (is_emoji(cp)) found = true;
     }
-    return false;
+    return found;
 }
 
 // ============================================================================

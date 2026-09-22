@@ -25,6 +25,8 @@ target_include_directories(${TARGET_NAME} PUBLIC
  
  
 # Examples
-add_subdirectory(examples)
+if(NANOGUI_BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
 
 set_target_properties(${TARGET_NAME}  PROPERTIES FOLDER "tango")

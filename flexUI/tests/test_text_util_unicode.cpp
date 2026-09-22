@@ -2,77 +2,172 @@
 
 #include <tinytest.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
 using namespace flexUI;
 
-spec("FlexUI Salts Unicode bridge") {
-  it("decodes ASCII BMP non-BMP and combining scalars with byte-accurate lengths") {
-    const std::string text = std::string("A") + "\xC3\xA9" + "\xF0\x9F\x98\x80" + "e\xCC\x81";
-    size_t pos = 0;
+spec("FlexUI strict Unicode scalar scanning") {
+  it("preserves scalar values and original UTF-8 byte ranges") {
+    std::string text = std::string("A") + "\xC3\xA9" + "\xF0\x9F\x98\x80";
+    text.push_back('\0');
+    text.push_back('B');
+    size_t cursor = 0;
 
-    check_equal(utf8_decode(text, pos), uint32_t{'A'});
-    check_equal(pos, size_t{1});
+    const auto ascii = utf8_next_scalar(text, cursor);
+    check_equal(ascii.value, std::uint32_t{'A'});
+    check_equal(ascii.byte_offset, std::size_t{0});
+    check_equal(ascii.byte_length, std::size_t{1});
+    check_equal(cursor, std::size_t{1});
 
-    check_equal(utf8_char_length(text, pos), size_t{2});
-    check_equal(utf8_decode(text, pos), uint32_t{0x00E9});
-    check_equal(pos, size_t{3});
+    const auto latin = utf8_next_scalar(text, cursor);
+    check_equal(latin.value, std::uint32_t{0x00E9});
+    check_equal(latin.byte_offset, std::size_t{1});
+    check_equal(latin.byte_length, std::size_t{2});
+    check_equal(cursor, std::size_t{3});
 
-    check_equal(utf8_char_length(text, pos), size_t{4});
-    check_equal(utf8_decode(text, pos), uint32_t{0x1F600});
-    check_equal(pos, size_t{7});
+    const auto emoji = utf8_next_scalar(text, cursor);
+    check_equal(emoji.value, std::uint32_t{0x1F600});
+    check_equal(emoji.byte_offset, std::size_t{3});
+    check_equal(emoji.byte_length, std::size_t{4});
+    check_equal(cursor, std::size_t{7});
 
-    check_equal(utf8_decode(text, pos), uint32_t{'e'});
-    check_equal(utf8_decode(text, pos), uint32_t{0x0301});
-    check_equal(pos, text.size());
+    const auto nul = utf8_next_scalar(text, cursor);
+    check_equal(nul.value, std::uint32_t{0});
+    check_equal(nul.byte_offset, std::size_t{7});
+    check_equal(nul.byte_length, std::size_t{1});
+    check_equal(cursor, std::size_t{8});
+
+    const auto final_ascii = utf8_next_scalar(text, cursor);
+    check_equal(final_ascii.value, std::uint32_t{'B'});
+    check_equal(cursor, text.size());
+    check_equal(utf8_scalar_count(text), std::size_t{5});
   }
 
-  it("preserves embedded NUL as a scalar instead of treating it as end of input") {
-    const std::string text("A\0B", 3);
-    size_t pos = 1;
-    check_equal(utf8_decode(text, pos), uint32_t{0});
-    check_equal(pos, size_t{2});
-    check_equal(utf8_decode(text, pos), uint32_t{'B'});
-    check_equal(pos, size_t{3});
-  }
-
-  it("rejects malformed UTF-8 without advancing the caller cursor") {
-    const std::string malformed("\xF0\x28\x8C\x28", 4);
-    size_t pos = 0;
-    bool threw = false;
-    try {
-      static_cast<void>(utf8_decode(malformed, pos));
-    } catch (const std::invalid_argument &) {
-      threw = true;
+  it("preserves combining sequences and CJK without implicit normalization") {
+    const std::string text = std::string("e") + "\xCC\x81" + "\xE4\xB8\xAD";
+    size_t cursor = 0;
+    check_equal(utf8_next_scalar(text, cursor).value, std::uint32_t{'e'});
+    const auto combining = utf8_next_scalar(text, cursor);
+    check_equal(combining.value, std::uint32_t{0x0301});
+    check_equal(combining.byte_offset, std::size_t{1});
+    check_equal(combining.byte_length, std::size_t{2});
+    check_equal(utf8_next_scalar(text, cursor).value, std::uint32_t{0x4E2D});
+    check_equal(cursor, text.size());
+    check_equal(utf8_scalar_count(text), std::size_t{3});
+    std::string joined;
+    for (const auto &segment : segment_text(text)) {
+      joined += segment.text;
     }
-    check_true(threw);
-    check_equal(pos, size_t{0});
+    check_equal(joined, text);
   }
 
-  it("rejects truncated and overlong UTF-8 without replacement fallback") {
-    for (const std::string malformed :
-         {std::string("\xE2\x82", 2), std::string("\xC0\xAF", 2)}) {
-      size_t pos = 0;
-      bool threw = false;
-      try {
-        static_cast<void>(utf8_decode(malformed, pos));
-      } catch (const std::invalid_argument &) {
-        threw = true;
-      }
-      check_true(threw);
-      check_equal(pos, size_t{0});
+  it("accepts valid scalar encoding boundaries without altering bytes") {
+    struct Case {
+      const char *bytes;
+      std::size_t length;
+      std::uint32_t value;
+    };
+    const Case cases[] = {
+        {"\x7F", 1, 0x7F}, {"\xC2\x80", 2, 0x80},
+        {"\xDF\xBF", 2, 0x7FF}, {"\xE0\xA0\x80", 3, 0x800},
+        {"\xED\x9F\xBF", 3, 0xD7FF}, {"\xEE\x80\x80", 3, 0xE000},
+        {"\xEF\xBF\xBF", 3, 0xFFFF}, {"\xF0\x90\x80\x80", 4, 0x10000},
+        {"\xF4\x8F\xBF\xBF", 4, 0x10FFFF}};
+    for (const auto &item : cases) {
+      const std::string text(item.bytes, item.length);
+      size_t cursor = 0;
+      const auto scalar = utf8_next_scalar(text, cursor);
+      check_equal(scalar.value, item.value);
+      check_equal(scalar.byte_offset, std::size_t{0});
+      check_equal(scalar.byte_length, item.length);
+      check_equal(cursor, item.length);
+      check_equal(utf8_scalar_count(text), std::size_t{1});
     }
   }
 
-  it("propagates strict UTF-8 rejection through text segmentation") {
-    const std::string malformed("\xED\xA0\x80", 3);
-    bool threw = false;
-    try {
-      static_cast<void>(segment_text(malformed));
-    } catch (const std::invalid_argument &) {
-      threw = true;
+  it("rejects malformed UTF-8 without advancing the byte cursor") {
+    const std::string malformed[] = {
+        std::string("\xC0\xAF", 2), std::string("\xE0\x80\xAF", 3),
+        std::string("\xF0\x80\x80\xAF", 4), std::string("\xED\xA0\x80", 3),
+        std::string("\xED\xBF\xBF", 3), std::string("\xF4\x90\x80\x80", 4),
+        std::string("\x80", 1), std::string("\xBF", 1),
+        std::string("\xF5\x80\x80\x80", 4), std::string("\xFF", 1),
+        std::string("\xC2", 1), std::string("\xE2\x82", 2),
+        std::string("\xF0\x9F\x98", 3), std::string("\xE2\x28\xA1", 3),
+        std::string("\xF0\x28\x8C\x28", 4)};
+    for (const auto &text : malformed) {
+      size_t cursor = 0;
+      check_throws_as(utf8_next_scalar(text, cursor), std::invalid_argument);
+      check_equal(cursor, std::size_t{0});
+      check_throws_as(utf8_scalar_count(text), std::invalid_argument);
+      check_throws_as(segment_text(text), std::invalid_argument);
     }
-    check_true(threw);
+  }
+
+  it("keeps cursor and assigned output unchanged after a valid prefix including NUL") {
+    const std::string text = std::string("A\0", 2) + "\xED\xA0\x80";
+    size_t cursor = 2;
+    Utf8Scalar output{0x1234, 42, 43};
+    check_throws_as(output = utf8_next_scalar(text, cursor), std::invalid_argument);
+    check_equal(cursor, std::size_t{2});
+    check_equal(output.value, std::uint32_t{0x1234});
+    check_equal(output.byte_offset, std::size_t{42});
+    check_equal(output.byte_length, std::size_t{43});
+    check_throws_as(utf8_scalar_count(text), std::invalid_argument);
+  }
+
+  it("rejects end and out-of-range cursors without inventing a scalar") {
+    const std::string text = "A";
+    for (const std::size_t initial :
+         {text.size(), text.size() + 1, std::numeric_limits<std::size_t>::max()}) {
+      size_t cursor = initial;
+      check_throws_as(utf8_next_scalar(text, cursor), std::out_of_range);
+      check_equal(cursor, initial);
+    }
+    size_t cursor = 0;
+    check_throws_as(utf8_next_scalar(std::string{}, cursor), std::out_of_range);
+    check_equal(cursor, std::size_t{0});
+    check_equal(utf8_scalar_count(std::string{}), std::size_t{0});
+  }
+
+  it("rejects a cursor inside a multibyte scalar transactionally") {
+    const std::string text("\xF0\x9F\x98\x80", 4);
+    for (size_t initial = 1; initial < text.size(); ++initial) {
+      size_t cursor = initial;
+      check_throws_as(utf8_next_scalar(text, cursor), std::invalid_argument);
+      check_equal(cursor, initial);
+    }
+  }
+
+  it("accepts an explicitly encoded replacement character as valid user text") {
+    const std::string text("\xEF\xBF\xBD", 3);
+    size_t cursor = 0;
+    check_equal(utf8_next_scalar(text, cursor).value, std::uint32_t{0xFFFD});
+    check_equal(cursor, text.size());
+    check_equal(utf8_scalar_count(text), std::size_t{1});
+  }
+
+  it("validates malformed suffixes even after finding an emoji") {
+    const std::string emoji("\xF0\x9F\x98\x80", 4);
+    const std::string text = emoji + std::string("\0", 1) + "\xC0\xAF";
+    check_throws_as(has_emoji(text), std::invalid_argument);
+    check_throws_as(segment_text(text), std::invalid_argument);
+  }
+
+  it("preserves valid predicate and segmentation results across embedded NUL") {
+    const std::string emoji("\xF0\x9F\x98\x80", 4);
+    const std::string text = std::string("A\0", 2) + emoji + "B";
+    check_false(has_emoji(std::string{}));
+    check_false(has_emoji(std::string("A\0B", 3)));
+    check_true(has_emoji(text));
+    std::string joined;
+    for (const auto &segment : segment_text(text)) {
+      joined += segment.text;
+    }
+    check_equal(joined, text);
   }
 }

@@ -10,7 +10,7 @@ set_target_properties(flexUI_plugin_sdk PROPERTIES EXPORT_NAME PluginSDK)
 
 install(
   TARGETS flexUI_plugin_sdk
-  EXPORT FlexUIPluginTargets
+  EXPORT FlexUIPluginSDKTargets
   COMPONENT FlexUIPlugin)
 
 if(FLEXUI_ENABLE_PLUGINS)
@@ -52,7 +52,7 @@ if(FLEXUI_ENABLE_PLUGINS)
                                   EXPORT_NAME PluginHost)
   install(
     TARGETS flexUI_plugin_host
-    EXPORT FlexUIPluginTargets
+    EXPORT FlexUIPluginHostTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUIPlugin
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUIPlugin
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT FlexUIPlugin)

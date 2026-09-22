@@ -17,7 +17,7 @@ if(BUILD_TESTING)
   add_executable(test_flex_backend_vulkan tests/test_vulkan_backend.cpp)
   target_link_libraries(
     test_flex_backend_vulkan
-    PRIVATE flex_backend_vulkan TurboUtils::TinyTest)
+    PRIVATE flex_backend_vulkan Salts::TinyTest)
   set_target_properties(
     test_flex_backend_vulkan PROPERTIES FOLDER "flex/backends/tests")
   add_test(NAME test_flex_backend_vulkan COMMAND test_flex_backend_vulkan)
@@ -25,7 +25,7 @@ if(BUILD_TESTING)
   add_executable(test_flex_backend_vulkan_roundtrip tests/test_vulkan_roundtrip.cpp)
   target_link_libraries(
     test_flex_backend_vulkan_roundtrip
-    PRIVATE flex_backend_vulkan TurboUtils::TinyTest)
+    PRIVATE flex_backend_vulkan Salts::TinyTest)
   set_target_properties(
     test_flex_backend_vulkan_roundtrip PROPERTIES FOLDER "flex/backends/tests")
   add_test(

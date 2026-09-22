@@ -145,18 +145,19 @@ jobs:
             echo "PluginHost still consumes retired Turbo facade headers" >&2
             exit 1
           fi
-          if grep -n -E 'find_dependency\((TurboUtils|TurboParser)' flexUI/CMakeLists.txt; then
+          if grep -n -E 'find_dependency\((TurboUtils|TurboParser)' flexUI/cmake/FlexUIConfig.cmake.in; then
             echo "installed FlexUI package still exports retired dependencies" >&2
             exit 1
           fi
-          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/run_plugin_install_consumer.cmake flexUI/tests/CMakeLists.txt; then
+          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/plugin_install_consumer flexUI/tests/CMakeLists.txt; then
             echo "install consumer still injects retired package roots" >&2
             exit 1
           fi
-          grep -Fq 'find_dependency(Salts CONFIG)' flexUI/CMakeLists.txt
-          grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/CMakeLists.txt
-          grep -Fq 'Salts_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
-          grep -Fq 'SaltsUtils_DIR=' flexUI/tests/run_plugin_install_consumer.cmake
+          grep -Fq 'find_dependency(Salts CONFIG)' flexUI/cmake/FlexUIConfig.cmake.in
+          grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/cmake/FlexUIConfig.cmake.in
+          grep -Fq 'FlexUI::PluginSDK' flexUI/tests/plugin_install_consumer/CMakeLists.txt
+          grep -Fq 'FlexUI::Services' flexUI/tests/plugin_install_consumer/CMakeLists.txt
+          grep -Fq 'FlexUI::PluginHost' flexUI/examples/plugin_echo/CMakeLists.txt
 
       - name: Compile PluginHost sources against canonical public headers
         shell: bash
@@ -176,6 +177,7 @@ jobs:
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_manifest.cpp
           c++ "${common[@]}" -fsyntax-only flexUI/modules/plugin_host/plugin_module.cpp
 
+
   flexui-salts-unicode:
     name: FlexUI Salts::Unicode contract
     runs-on: ubuntu-latest
@@ -183,33 +185,50 @@ jobs:
       - name: Checkout Stun
         uses: actions/checkout@v4
 
-      - name: Checkout canonical Salts
+      - name: Checkout pinned Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
           ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
           path: .ci/salts
 
-      - name: Checkout canonical SaltsUtils
+      - name: Checkout pinned SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
           ref: 62576265ac66b0000127a04936f108a3dbb3f004
           path: .ci/salts-utils
 
-      - name: Verify Unicode provider ownership
+      - name: Verify Unicode ownership contract
         shell: bash
         run: |
           set -euo pipefail
           grep -Fq 'Salts::Unicode' flexUI/CMakeLists.txt
           grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
-          if grep -n -E 'cp = 0xFFFD|s\[0\].*0xE0|s\[0\].*0xF0|s\[0\].*0xF8' flexUI/src/text_util.cpp; then
-            echo "private UTF-8 decoder logic remains in FlexUI" >&2
+          grep -Fq 'utf8_next_scalar' flexUI/include/flexUI/text_util.h
+          test ! -e flexUI/src/text_util.re
+          if grep -R -n -E 'utf8_decode|utf8_char_length' flexUI/include flexUI/src; then
+            echo "private UTF-8 decoder surface remains" >&2
             exit 1
           fi
 
-      - name: Compile strict Unicode bridge against public headers
+      - name: Compile text utility against canonical Unicode headers
         shell: bash
         run: |
           set -euo pipefail
-          c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -isystem .ci/salts/utils/include             -isystem .ci/salts/utils/parser             -isystem .ci/salts/platform/include             -isystem .ci/salts/concurrency/include             -isystem .ci/salts/cmeta/include             -isystem .ci/salts-utils/unicode/include             -fsyntax-only flexUI/src/text_util.cpp
+          common=(
+            -std=c++17
+            -Wall
+            -Wextra
+            -Werror
+            -IflexUI/include
+            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/tinytest/include
+          )
+          c++ "${common[@]}" -fsyntax-only flexUI/src/text_util.cpp
+          c++ "${common[@]}" -fsyntax-only flexUI/tests/test_text_util_unicode.cpp

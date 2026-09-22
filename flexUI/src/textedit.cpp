@@ -6,6 +6,7 @@
  */
 
 #include <flexUI/textedit.h>
+#include <flexUI/text_util.h>
 #include <string>
 #include <cstring>
 #include <algorithm>
@@ -147,7 +148,33 @@ bool TextEdit::key(int key, bool shift, bool ctrl) {
   int stb_key = map_key_to_stb(key, shift, ctrl);
   if (stb_key == 0) return false;
 
-  stb_textedit_key(&state_->string, &state_->stb_state, stb_key);
+  // stb stores byte offsets. Move by one decoded scalar while retaining its
+  // selection-anchor and selection-collapse behavior for each arrow key.
+  size_t key_steps = 1;
+  const int navigation_key = stb_key & ~STB_TEXTEDIT_K_SHIFT;
+  const bool scalar_navigation = navigation_key == STB_TEXTEDIT_K_LEFT ||
+                                 navigation_key == STB_TEXTEDIT_K_RIGHT;
+  if (scalar_navigation) {
+    stb_textedit_clamp(&state_->string, &state_->stb_state);
+  }
+  if (scalar_navigation && (shift || !has_selection())) {
+    const size_t cursor = static_cast<size_t>(state_->stb_state.cursor);
+    if (navigation_key == STB_TEXTEDIT_K_RIGHT && cursor < text_->size()) {
+      size_t next = cursor;
+      (void)utf8_next_scalar(*text_, next);
+      key_steps = next - cursor;
+    } else if (navigation_key == STB_TEXTEDIT_K_LEFT && cursor > 0) {
+      size_t previous = 0;
+      for (size_t next = 0; next < cursor;) {
+        previous = next;
+        (void)utf8_next_scalar(*text_, next);
+      }
+      key_steps = cursor - previous;
+    }
+  }
+  for (size_t step = 0; step < key_steps; ++step) {
+    stb_textedit_key(&state_->string, &state_->stb_state, stb_key);
+  }
   return true;
 }
 
