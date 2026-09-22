@@ -156,6 +156,7 @@ jobs:
               assert r['completed'] and r['pixel_checks'] == modes[r['mode']] * r['cycles'], r
               owners = r['owners']
               assert owners['x11']['blocks'] > 0, r
+              assert 'glfw' in owners, r
               assert r['exit_code'] != 0 and r['leaks'], r
               assert owners['other_non_x11']['blocks'] == 0, r
               if r['variant'] == 'patched':
@@ -166,7 +167,6 @@ jobs:
               for source_name in item['owners']['patch_owner']['sources']
           }
           assert patch_sources == {
-              'src/util/u_cpu_detect.c',
               'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
           }, patch_sources
           archive = source / 'mesa-sdk.tar.xz'
