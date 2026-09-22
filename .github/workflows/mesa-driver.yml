@@ -159,12 +159,6 @@ jobs:
           readelf -d "$glx" > "$EVIDENCE_DIR/baseline-glx-dynamic.txt"
           sha256sum "$driver" > "$EVIDENCE_DIR/baseline-driver.sha256"
           readelf -d "$driver" > "$EVIDENCE_DIR/baseline-driver-dynamic.txt"
-      - name: Save pinned Mesa source archive
-        if: steps.mesa_source_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/mesa-download-cache
-          key: ${{ steps.mesa_source_cache.outputs.cache-primary-key }}
           cmake -S cmake/ci/mesa -B build/mesa-control -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
@@ -172,6 +166,13 @@ jobs:
             "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-control-ports"
           cmake --build build/mesa-control --parallel 2 --verbose
           cp build/mesa-control/compile_commands.json "$EVIDENCE_DIR/control-compile-commands.json"
+
+      - name: Save pinned Mesa source archive
+        if: steps.mesa_source_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/mesa-download-cache
+          key: ${{ steps.mesa_source_cache.outputs.cache-primary-key }}
       - name: Compare identical controls before and after the owner fix
         shell: bash
         run: |
