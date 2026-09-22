@@ -59,6 +59,11 @@ if(FLEXUI_UNICODE_ENABLE_SANITIZERS)
                          -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(test_text_util_unicode_install PRIVATE
                       -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_compile_options(unicode_boundaries_install_smoke PRIVATE
+                         -g -O1 -Wall -Wextra -Werror
+                         -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(unicode_boundaries_install_smoke PRIVATE
+                      -fsanitize=address,undefined -fno-omit-frame-pointer)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
