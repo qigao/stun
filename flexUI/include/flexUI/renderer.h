@@ -41,6 +41,12 @@ public:
   bool supports_svg_images() const { return capabilities().svg_images; }
   bool supports_shadow() const { return capabilities().shadow; }
 
+  bool measure_text(const std::string& text, const std::string& font,
+                    float size, bool bold, flex::TextMetrics& out_metrics) {
+    return flex_renderer_->measure_text(
+        text, font.empty() ? "Arial" : font, size, bold, out_metrics);
+  }
+
   bool register_font(const std::string& family, const std::string& path) {
     return flex_renderer_->register_font(family, path);
   }
