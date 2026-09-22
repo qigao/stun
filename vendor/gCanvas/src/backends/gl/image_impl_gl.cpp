@@ -10,6 +10,8 @@
 
 namespace gcanvas
 {
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
     ImageImplGl::ImageImplGl(std::string file_path, ImageConfig imageConfig)
     {
         _imageConfig = imageConfig;
@@ -161,4 +163,5 @@ namespace gcanvas
         }
     }    
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas
