@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: stun-desktop-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -17,7 +18,6 @@ env:
   SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
   SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
   VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
-  VCPKG_ROOT: ${{ github.workspace }}/.ci/vcpkg
   VCPKG_MAX_CONCURRENCY: 2
   ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
@@ -50,14 +50,19 @@ jobs:
           ref: ${{ env.SALTS_UTILS_SHA }}
           path: .ci/sources/salts-utils
           persist-credentials: false
-      - name: Checkout pinned vcpkg
-        uses: actions/checkout@v4
+
+      - name: Select STUN vcpkg L1 cache
+        shell: bash
+        run: echo "VCPKG_BINARY_CACHE=$RUNNER_TEMP/stun-vcpkg-cache" >> "$GITHUB_ENV"
+
+      - name: Configure shared vcpkg cache and canonical tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
-          path: .ci/vcpkg
-          fetch-depth: 0
-          persist-credentials: false
+          mode: read
+
+      - name: Restore shared re2c binary
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
       - name: Set up BoringSSL build prerequisite
         uses: actions/setup-go@v5
         with:
@@ -75,7 +80,6 @@ jobs:
             echo "EVIDENCE_DIR=$GITHUB_WORKSPACE/build/desktop-evidence"
             echo "MESA_ROOT=$RUNNER_TEMP/stun-mesa-sdk"
             echo "MESA_INPUT=$RUNNER_TEMP/stun-mesa-input"
-            echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/stun-vcpkg-cache,readwrite"
             echo "LD_LIBRARY_PATH=$RUNNER_TEMP/stun-desktop-sdk/lib"
           } >> "$GITHUB_ENV"
       - name: Restore pinned third-party packages
@@ -96,7 +100,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
           test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
           test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
+          test "$VCPKG_TOOL_REVISION" = "$VCPKG_SHA"
           printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
             "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" \
             | tee "$EVIDENCE_DIR/provenance.txt"
@@ -108,7 +112,6 @@ jobs:
           dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
           python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" cmake==3.31.6
           echo "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
-          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
       - name: Download verified Mesa from this run
         uses: actions/download-artifact@v4
         with:
@@ -173,12 +176,7 @@ jobs:
           shutil.copyfile(source / 'results.json', evidence / 'mesa-lifecycle-results.json')
           print(json.dumps(receipt, indent=2))
           PY
-      - name: Install checksum-verified scanner generator
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash .ci/sources/salts-utils/cmake/ci/install-re2c.sh \
-            2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
+
       - name: Build and install real Salts packages
         shell: bash
         run: |

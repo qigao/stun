@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: stun-mesa-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -29,12 +30,16 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - uses: actions/checkout@v4
+
+      - name: Select Mesa vcpkg L1 cache
+        shell: bash
+        run: echo "VCPKG_BINARY_CACHE=$RUNNER_TEMP/mesa-vcpkg-cache" >> "$GITHUB_ENV"
+
+      - name: Configure shared vcpkg cache and canonical tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
-          path: .ci/vcpkg
-          persist-credentials: false
+          mode: read
+
       - name: Restore Mesa control dependency cache
         id: mesa_vcpkg_cache
         uses: actions/cache/restore@v4
@@ -63,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git -C .ci/vcpkg rev-parse HEAD)" = "$VCPKG_SHA"
+          test "$VCPKG_TOOL_REVISION" = "$VCPKG_SHA"
           mkdir -p build/mesa-evidence "$RUNNER_TEMP/mesa-xdg" \
             "$RUNNER_TEMP/mesa-vcpkg-cache" "$RUNNER_TEMP/mesa-download-cache"
           chmod 700 "$RUNNER_TEMP/mesa-xdg"
@@ -73,7 +78,6 @@ jobs:
             echo "MESA_SOURCE=$RUNNER_TEMP/mesa-$MESA_VERSION"
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
-            echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/mesa-vcpkg-cache,readwrite"
           } >> "$GITHUB_ENV"
           printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg=%s\n' \
             "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$VCPKG_SHA" \
@@ -89,8 +93,7 @@ jobs:
           "$RUNNER_TEMP/mesa-tools/bin/pip" install meson==1.5.2 Mako==1.3.10 PyYAML==6.0.2 packaging==24.2
           echo "$RUNNER_TEMP/mesa-tools/bin" >> "$GITHUB_PATH"
           dpkg-query -W > build/mesa-evidence/system-packages.txt
-          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
+          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
             "--x-install-root=$RUNNER_TEMP/mesa-control-ports" glfw3 glad \
             2>&1 | tee build/mesa-evidence/control-dependencies.log
       - name: Save Mesa control dependency cache
@@ -161,7 +164,7 @@ jobs:
           readelf -d "$driver" > "$EVIDENCE_DIR/baseline-driver-dynamic.txt"
           cmake -S cmake/ci/mesa -B build/mesa-control -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
             "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-control-ports"
           cmake --build build/mesa-control --parallel 2 --verbose

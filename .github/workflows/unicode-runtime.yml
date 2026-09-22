@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -47,6 +48,9 @@ jobs:
           path: .ci/salts-utils
           persist-credentials: false
 
+      - name: Restore shared re2c binary
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
+
       - name: Record source provenance
         shell: bash
         env:
@@ -60,13 +64,6 @@ jobs:
           cc --version
           c++ --version
 
-      - name: Install pinned re2c with upstream checksum verification
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y ninja-build curl xz-utils
-          bash .ci/salts-utils/cmake/ci/install-re2c.sh
 
       # This is an executable source-level bridge test, not an installed SDK
       # or full FlexUI build. No mock decoder or replacement Salts target is used.
@@ -135,7 +132,6 @@ jobs:
     timeout-minutes: 90
     env:
       VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
-      VCPKG_ROOT: ${{ github.workspace }}/.ci/install-vcpkg
       VCPKG_MAX_CONCURRENCY: 2
       EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
@@ -163,14 +159,18 @@ jobs:
           path: .ci/install-sources/salts-utils
           persist-credentials: false
 
-      - name: Checkout pinned vcpkg
-        uses: actions/checkout@v4
+
+      - name: Select Unicode vcpkg L1 cache
+        shell: bash
+        run: echo "VCPKG_BINARY_CACHE=$RUNNER_TEMP/stun-vcpkg-cache" >> "$GITHUB_ENV"
+
+      - name: Configure shared vcpkg cache and canonical tool
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
-          repository: microsoft/vcpkg
-          ref: ${{ env.VCPKG_SHA }}
-          path: .ci/install-vcpkg
-          fetch-depth: 0
-          persist-credentials: false
+          mode: read
+
+      - name: Restore shared re2c binary for installed packages
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
       - name: Set up BoringSSL build prerequisite
         uses: actions/setup-go@v5
@@ -183,7 +183,6 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf 'VCPKG_BINARY_SOURCES=clear;files,%s/stun-vcpkg-cache,readwrite\n' "$RUNNER_TEMP"
             printf 'SALTS_ROOT=%s/stun-unicode-sdk\n' "$RUNNER_TEMP"
             printf 'PACKAGE_BUILD_ROOT=%s/stun-unicode-package-build\n' "$RUNNER_TEMP"
             printf 'EXTERNAL_PORTS_ROOT=%s/stun-unicode-external-ports\n' "$RUNNER_TEMP"
@@ -210,7 +209,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
           test "$(git -C .ci/install-sources/salts rev-parse HEAD)" = "$SALTS_SHA"
           test "$(git -C .ci/install-sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SHA"
+          test "$VCPKG_TOOL_REVISION" = "$VCPKG_SHA"
           printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
             "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
@@ -218,13 +217,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" \
             cmake==3.31.6
           printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
-          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
-      - name: Install checksum-verified re2c
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash .ci/install-sources/salts-utils/cmake/ci/install-re2c.sh 2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
 
       - name: Build and install the real dependency packages
         id: dependency_packages
