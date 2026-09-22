@@ -1,7 +1,7 @@
 #ifndef GCANVAS_OPENGL_SHARED_INFO_HPP
 #define GCANVAS_OPENGL_SHARED_INFO_HPP
 
-#include <glad/glad.h>
+#include "gl_api.hpp"
 #include "gcanvas/backends/opengl.hpp"
 
 #include <string>

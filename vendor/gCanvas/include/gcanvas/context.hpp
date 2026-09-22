@@ -22,6 +22,7 @@ namespace gcanvas
     enum class Backend
     {
         OpenGL,
+        OpenGLES,
         Vulkan
     };
 

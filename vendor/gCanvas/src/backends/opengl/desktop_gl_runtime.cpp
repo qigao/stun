@@ -1,4 +1,4 @@
-#include "opengl_shared_info.hpp"
+#include "../gl/opengl_shared_info.hpp"
 
 #include <utility>
 #include <stdexcept>
