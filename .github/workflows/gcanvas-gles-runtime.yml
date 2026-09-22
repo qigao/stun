@@ -1,0 +1,75 @@
+name: gCanvas OpenGLES runtime
+
+on:
+  pull_request:
+    paths:
+      - "vendor/gCanvas/**"
+      - ".github/workflows/gcanvas-gles-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gles-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install GLES build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ libfreetype-dev libstb-dev \
+            libegl1-mesa-dev libgles2-mesa-dev xvfb xauth
+
+      - name: Verify portable shader contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c 'RoundedRectData payload\[128\]' vendor/gCanvas/src/resources.hpp)" -eq 2
+          ! grep -q 'texture(textures\[index\]' vendor/gCanvas/src/resources.hpp
+          grep -q 'case 9: return texture(textures\[9\], uv);' vendor/gCanvas/src/resources.hpp
+
+      - name: Configure GLES-only gCanvas
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S vendor/gCanvas -B build/gcanvas-gles -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DSTB_INCLUDE_DIRS=/usr/include/stb \
+            -DGCANVAS_BUILD_OPENGL=OFF \
+            -DGCANVAS_BUILD_GLES=ON \
+            -DGCANVAS_BUILD_VULKAN=OFF \
+            -DGCANVAS_BUILD_SVG=OFF \
+            -DGCANVAS_BUILD_WINDOW=OFF \
+            -DGCANVAS_BUILD_TESTS=ON \
+            -DGCANVAS_BUILD_GPU_TESTS=OFF \
+            -DGCANVAS_BUILD_EXAMPLES=OFF
+
+      - name: Build GLES runtime and smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/gcanvas-gles --parallel 2 --verbose \
+            --target gcanvas_opengles gcanvas_contract_test gcanvas_gles_smoke_test
+          ! grep -q '/glad/' build/gcanvas-gles/compile_commands.json
+          ! grep -qi 'glfw' build/gcanvas-gles/compile_commands.json
+
+      - name: Run real GLES3 shader and pixel smoke
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          set -euo pipefail
+          xvfb-run -a -s '-screen 0 640x480x24 -nolisten tcp' \
+            ctest --test-dir build/gcanvas-gles \
+              -R '^(gcanvas_contract|gcanvas_gles_smoke)$' \
+              --no-tests=error --verbose --output-on-failure

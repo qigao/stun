@@ -145,20 +145,20 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         {
         case 1:
             _type = GL_RED;
-            _internal_format = GL_R16F;
+            _internal_format = GL_R8;
             break;
         case 2:
             _type = GL_RG;
-            _internal_format = GL_RG16F;
+            _internal_format = GL_RG8;
             break;
         case 3:
             _type = GL_RGB;
-            _internal_format = GL_RGB16F;
+            _internal_format = GL_RGB8;
             break;
         case 4:
         default:
             _type = GL_RGBA;
-            _internal_format = GL_RGBA16F;
+            _internal_format = GL_RGBA8;
             break;
         }
     }    

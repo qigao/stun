@@ -1987,10 +1987,21 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         try
         {
             const int uniform_block_size = _runtime->max_uniform_block_size();
-            if (uniform_block_size < static_cast<int>(sizeof(uniform_rect)))
-                throw std::runtime_error("GL uniform block capacity is too small");
+            const int required_uniform_block_size =
+                shader_batch_capacity * static_cast<int>(sizeof(uniform_rect));
+            if (uniform_block_size < required_uniform_block_size)
+                throw std::runtime_error(
+                    "GL uniform block capacity is below the 128-record shader contract");
+
+            GLint texture_units = 0;
+            glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_units);
+            if (texture_units < shader_texture_array_size)
+                throw std::runtime_error(
+                    "GL fragment texture-unit capacity is below the 10-sampler contract");
+
             MAX_UNIFORM_RECT_PER_BLOCK_COUNT =
-                uniform_block_size / static_cast<int>(sizeof(uniform_rect));
+                std::min(shader_batch_capacity,
+                         uniform_block_size / static_cast<int>(sizeof(uniform_rect)));
             create_shader_programm();
             initialize_resources();
             prepare();

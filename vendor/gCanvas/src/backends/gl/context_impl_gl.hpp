@@ -25,6 +25,7 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     {
     public:
         static constexpr int shader_texture_array_size = 10;
+        static constexpr int shader_batch_capacity = 128;
         int MAX_UNIFORM_RECT_PER_BLOCK_COUNT = -1;
 
         struct uniform_rect
@@ -46,8 +47,9 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             float line_width[4];    // 32   1
             float shadow_blur_x;    //
             effect_values effects;  // is_msdf, shadow_blur_y, reserved
-        };                          // 256
-
+        };
+        static_assert(sizeof(uniform_rect) == 128,
+                      "GL uniform_rect must match eight std140 vec4 slots");
 
         struct point_vertex
         {
