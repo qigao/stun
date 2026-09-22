@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -21,10 +22,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
 
       - name: Checkout master Salts
@@ -47,6 +60,20 @@ jobs:
           ref: master
           path: .ci/salts-utils
           persist-credentials: false
+      - name: Checkout re2c master
+        uses: actions/checkout@v4
+        with:
+          repository: skvadrik/re2c
+          ref: master
+          path: .ci/re2c
+          persist-credentials: false
+      - name: Record re2c master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          re2c_commit="$(git -C .ci/re2c rev-parse HEAD)"
+          printf 'RE2C_COMMIT=%s\n' "$re2c_commit" >> "$GITHUB_ENV"
+          git -C .ci/re2c log -1 --format='Dependency=skvadrik/re2c Ref=master Commit=%H'
       - name: Record qigao/salts-utils master checkout
         shell: bash
         run: |
@@ -56,21 +83,32 @@ jobs:
       - name: Record source provenance
         shell: bash
         env:
-          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT"
+          printf 'RunHead: %s\nStun: %s\nSalts: %s\nSaltsUtils: %s\nre2cRef: master\nre2c: %s\n' \
+            "$EXPECTED_STUN_SHA" "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$RE2C_COMMIT"
           cc --version
           c++ --version
 
-      - name: Install pinned re2c with upstream checksum verification
+      - name: Build re2c from upstream master
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y ninja-build curl xz-utils
-          bash .ci/salts-utils/cmake/ci/install-re2c.sh
+          sudo apt-get install -y ninja-build
+          re2c_root="$RUNNER_TEMP/re2c-sdk"
+          cmake -S .ci/re2c -B "$RUNNER_TEMP/re2c-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$re2c_root" \
+            -DRE2C_BUILD_TESTS=OFF -DRE2C_BUILD_BENCHMARKS=OFF
+          cmake --build "$RUNNER_TEMP/re2c-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/re2c-build"
+          test -x "$re2c_root/bin/re2c"
+          test -d "$re2c_root/share/re2c/stdlib"
+          echo "RE2C_ROOT=$re2c_root" >> "$GITHUB_ENV"
+          echo "$re2c_root/bin" >> "$GITHUB_PATH"
+          "$re2c_root/bin/re2c" --version
 
       # This is an executable source-level bridge test, not an installed SDK
       # or full FlexUI build. No mock decoder or replacement Salts target is used.
@@ -79,7 +117,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/unicode-runtime
-          test "$(re2c --version)" = 're2c 4.6'
           re2c --lang c --utf8 --encoding-policy fail --no-generation-date -W -Werror \
             -I "$RE2C_ROOT/share/re2c/stdlib" \
             -o build/unicode-runtime/salts_unicode_gen.c \
@@ -132,6 +169,7 @@ jobs:
           git diff --exit-code
           git -C .ci/salts diff --exit-code
           git -C .ci/salts-utils diff --exit-code
+          git -C .ci/re2c diff --exit-code
 
   unicode-install-consumer:
     name: FlexUI production and installed packages ASan and UBSan
@@ -144,10 +182,22 @@ jobs:
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
 
       - name: Checkout master Salts
@@ -170,6 +220,20 @@ jobs:
           ref: master
           path: .ci/install-sources/salts-utils
           persist-credentials: false
+      - name: Checkout re2c master
+        uses: actions/checkout@v4
+        with:
+          repository: skvadrik/re2c
+          ref: master
+          path: .ci/install-re2c
+          persist-credentials: false
+      - name: Record re2c master checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          re2c_commit="$(git -C .ci/install-re2c rev-parse HEAD)"
+          printf 'RE2C_COMMIT=%s\n' "$re2c_commit" >> "$GITHUB_ENV"
+          git -C .ci/install-re2c log -1 --format='Dependency=skvadrik/re2c Ref=master Commit=%H'
       - name: Record qigao/salts-utils master checkout
         shell: bash
         run: |
@@ -221,13 +285,13 @@ jobs:
       - name: Prepare isolated tools and evidence
         shell: bash
         env:
-          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$EXTERNAL_PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
-            "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$VCPKG_COMMIT" | tee "$EVIDENCE_DIR/provenance.txt"
+          printf 'RunHead=%s\nStun=%s\nSalts=%s\nSaltsUtils=%s\nre2cRef=master\nre2c=%s\nvcpkg=%s\n' \
+            "$EXPECTED_STUN_SHA" "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$RE2C_COMMIT" "$VCPKG_COMMIT" | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
             autoconf autoconf-archive automake libtool
@@ -236,11 +300,24 @@ jobs:
           printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
-      - name: Install checksum-verified re2c
+      - name: Build re2c from upstream master
         shell: bash
         run: |
           set -euo pipefail
-          bash .ci/install-sources/salts-utils/cmake/ci/install-re2c.sh 2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
+          re2c_root="$RUNNER_TEMP/re2c-sdk"
+          cmake -S .ci/install-re2c -B "$RUNNER_TEMP/re2c-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$re2c_root" \
+            -DRE2C_BUILD_TESTS=OFF -DRE2C_BUILD_BENCHMARKS=OFF \
+            2>&1 | tee "$EVIDENCE_DIR/re2c-configure.log"
+          cmake --build "$RUNNER_TEMP/re2c-build" --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/re2c-build.log"
+          cmake --install "$RUNNER_TEMP/re2c-build" \
+            2>&1 | tee "$EVIDENCE_DIR/re2c-install.log"
+          test -x "$re2c_root/bin/re2c"
+          test -d "$re2c_root/share/re2c/stdlib"
+          echo "RE2C_ROOT=$re2c_root" >> "$GITHUB_ENV"
+          echo "$re2c_root/bin" >> "$GITHUB_PATH"
+          "$re2c_root/bin/re2c" --version | tee -a "$EVIDENCE_DIR/provenance.txt"
 
       - name: Build and install the real dependency packages
         id: dependency_packages
@@ -254,7 +331,6 @@ jobs:
           re2c --version | tee -a "$EVIDENCE_DIR/provenance.txt"
           go version | tee -a "$EVIDENCE_DIR/provenance.txt"
           "$VCPKG_ROOT/vcpkg" version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          test "$(re2c --version)" = "re2c 4.6"
           cmake -S .ci/install-sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
             -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$EVIDENCE_DIR/lemon-configure.log"
           cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2 \
@@ -294,6 +370,7 @@ jobs:
             cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
+          git -C .ci/install-re2c diff --exit-code
 
       - name: Remove dependency source and build paths from consumer access
         shell: bash
@@ -695,7 +772,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unicode-install-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          name: unicode-install-consumer-${{ steps.run_head.outputs.sha }}
           path: |
             build/unicode-install-evidence
             build/unicode-install-consumer/*.log
@@ -724,7 +801,7 @@ jobs:
         if: failure() && steps.dependency_packages.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: salts-sdk-${{ github.event.pull_request.head.sha || github.sha }}
+          name: salts-sdk-${{ steps.run_head.outputs.sha }}
           path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
           retention-days: 3
           if-no-files-found: error
