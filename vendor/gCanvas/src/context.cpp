@@ -901,14 +901,20 @@ namespace gcanvas
 
     vec2 Context::measure_text(const std::string& text)
     {
-        if (text.empty())
-            return vec2(0.0f, 0.0f);
         Font* font = _font != nullptr ? _font : _default_font;
         if (font == nullptr)
             throw std::logic_error("gCanvas text measurement requires an initialized font");
-        if (_font_size <= 0)
-            throw std::logic_error("gCanvas text measurement requires a positive font size");
-        return font->measure_dimensions(detail::decode_utf8(text), _font_size);
+        return measure_text(text, *font, _font_size);
+    }
+
+    vec2 Context::measure_text(const std::string& text, Font& font, int font_size)
+    {
+        validate_resource(font);
+        if (font_size <= 0)
+            throw std::invalid_argument("gCanvas text measurement requires a positive font size");
+        if (text.empty())
+            return vec2(0.0f, 0.0f);
+        return font.measure_dimensions(detail::decode_utf8(text), font_size);
     }
 
     int Context::get_width()
