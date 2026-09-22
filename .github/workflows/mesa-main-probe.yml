@@ -292,6 +292,7 @@ jobs:
           def classify_leaks(log):
               owners = {
                   'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                  'glfw': {'bytes': 0, 'objects': 0, 'blocks': 0},
                   'historical_patch_owner': {'bytes': 0, 'objects': 0, 'blocks': 0,
                                              'sources': []},
                   'other_non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
@@ -301,6 +302,8 @@ jobs:
                   stack = match.group('stack')
                   if '/glfw/src/x11_init.c:' in stack:
                       owner = 'x11'
+                  elif '/glfw/src/' in stack:
+                      owner = 'glfw'
                   else:
                       resolved = resolve_historical_sources(log, stack)
                       if resolved:
@@ -346,6 +349,7 @@ jobs:
                   row['mesa_incremental'] = (
                       owners['historical_patch_owner']['blocks'] > 0
                       or owners['other_non_x11']['blocks'] > 0)
+                  row['glfw_incremental'] = owners['glfw']['blocks'] > 0
                   assert owners['x11']['blocks'] > 0, row
                   if mode == 'init':
                       assert owners['historical_patch_owner']['blocks'] == 0, row
@@ -356,7 +360,7 @@ jobs:
           clean = [r for r in rows if r['exit_code'] == 0 and not r['leaks']]
           leaking = [r for r in rows if r['leaks']]
           summary = {
-              'stun': os.environ['GITHUB_SHA'],
+              'stun': os.environ['RUN_HEAD'],
               'mesa_ref': 'main',
               'mesa_commit': os.environ['MESA_COMMIT'],
               'processes': len(rows),
@@ -372,6 +376,8 @@ jobs:
                   for r in rows
                   for source_name in r['owners']['historical_patch_owner']['sources']
               }),
+              'glfw_processes': sum(
+                  1 for r in rows if r['owners']['glfw']['blocks'] > 0),
               'other_non_x11_processes': sum(
                   1 for r in rows if r['owners']['other_non_x11']['blocks'] > 0),
               'driver': str(driver),
