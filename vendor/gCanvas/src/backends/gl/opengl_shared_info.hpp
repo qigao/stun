@@ -1,34 +1,34 @@
-#ifndef GCANVAS_OPENGL_SHARED_INFO_HPP
-#define GCANVAS_OPENGL_SHARED_INFO_HPP
+#ifndef GCANVAS_GL_SHARED_INFO_HPP
+#define GCANVAS_GL_SHARED_INFO_HPP
 
 #include "gl_api.hpp"
-#include "gcanvas/backends/opengl.hpp"
+#include "gl_backend.hpp"
 
 #include <string>
 
 
 namespace gcanvas
 {
-    class OpenglSharedInfo
+    class GlSharedInfo
     {
     public:
         static int MAX_UNIFORM_BLOCK_SIZE;
 
-        static void retain(opengl::ProcLoader loader, void* user_data);
+        static void retain(detail::GlProcLoader loader, void* user_data);
         static void release() noexcept;
 
     private:
-        static OpenglSharedInfo* _instance;
+        static GlSharedInfo* _instance;
         static std::size_t _reference_count;
 
-        OpenglSharedInfo(opengl::ProcLoader loader, void* user_data);
-        OpenglSharedInfo(const OpenglSharedInfo&)
+        GlSharedInfo(detail::GlProcLoader loader, void* user_data);
+        GlSharedInfo(const GlSharedInfo&)
         {}
-        ~OpenglSharedInfo();
+        ~GlSharedInfo();
 
-        void load_opengl(opengl::ProcLoader loader, void* user_data);
+        void load_opengl(detail::GlProcLoader loader, void* user_data);
     };
 
 } // namespace gcanvas
 
-#endif // GCANVAS_VULKAN_SHARED_INFO_HPP
+#endif // GCANVAS_GL_SHARED_INFO_HPP
