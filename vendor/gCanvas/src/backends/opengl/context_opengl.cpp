@@ -2,6 +2,7 @@
 
 #include "../gl/context_impl_gl.hpp"
 #include "../../resources.hpp"
+#include "desktop_gl_runtime.hpp"
 
 namespace gcanvas::opengl
 {
@@ -20,6 +21,7 @@ namespace gcanvas::opengl
             ? detail::GlPresentationMode::External
             : detail::GlPresentationMode::HostManaged;
         shared.backend = Backend::OpenGL;
+        shared.runtime = &detail::desktop_gl_runtime();
         shared.vertex_shader_source = ogl_vertex_code;
         shared.fragment_shader_source = ogl_fragment_code;
         return std::make_unique<ContextImplGl>(shared);
