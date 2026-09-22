@@ -14,6 +14,8 @@
 
 namespace gcanvas
 {
+namespace GCANVAS_GL_PROFILE_NAMESPACE
+{
     namespace
     {
         constexpr GLuint path_stencil_bit = 0x01U;
@@ -2168,4 +2170,5 @@ namespace gcanvas
     }
     */
 
+} // namespace GCANVAS_GL_PROFILE_NAMESPACE
 } // namespace gcanvas 
