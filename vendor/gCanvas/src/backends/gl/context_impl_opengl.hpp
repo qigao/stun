@@ -2,7 +2,7 @@
 #define GCANVAS_OPENGL_CONTEXT_HPP
 
 #include "gcanvas/context.hpp"
-#include "gcanvas/backends/opengl.hpp"
+#include "gl_backend.hpp"
 
 #include <string>
 #include <vector>
@@ -133,8 +133,11 @@ namespace gcanvas
 
         int texture_array_size = shader_texture_array_size;
 
-        opengl::Host _host;
-        opengl::PresentationMode _presentation;
+        detail::GlHost _host;
+        detail::GlPresentationMode _presentation;
+        Backend _backend = Backend::OpenGL;
+        const char* _vertex_shader_source = nullptr;
+        const char* _fragment_shader_source = nullptr;
 
         std::atomic<bool> resizing = false;
         std::atomic<bool> rendering = false;
@@ -151,10 +154,10 @@ namespace gcanvas
 
         GLuint storageBuffer{};
 
-        explicit ContextImplOpengl(const opengl::CreateInfo& create_info);
+        explicit ContextImplOpengl(const detail::GlCreateInfo& create_info);
         ~ContextImplOpengl() override;
 
-        Backend backend() const noexcept override { return Backend::OpenGL; }
+        Backend backend() const noexcept override { return _backend; }
         void stroke_rect(float x, float y, float width, float height) override;
         void stroke_rounded_rect(float x, float y, float width, float height,
                                  float border_radius) override;
