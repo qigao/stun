@@ -1,0 +1,68 @@
+name: gCanvas Android EGL compile
+
+on:
+  pull_request:
+    paths:
+      - "vendor/gCanvas/**"
+      - ".github/workflows/gcanvas-android-egl.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-egl-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Resolve installed Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+          if [[ -z "$ndk" || ! -d "$ndk" ]]; then
+            ndk="$(find "$ANDROID_SDK_ROOT/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+          fi
+          test -d "$ndk"
+          echo "GCANVAS_ANDROID_NDK=$ndk" >> "$GITHUB_ENV"
+
+      - name: Compile and link Android EGL adapter against NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$GCANVAS_ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cxx="$toolchain/aarch64-linux-android24-clang++"
+          readelf="$toolchain/llvm-readelf"
+          test -x "$cxx"
+          test -x "$readelf"
+          mkdir -p build/android-egl
+
+          "$cxx" -std=c++17 -Wall -Wextra -Werror -fPIC -shared \
+            -Wl,--no-undefined \
+            -Ivendor/gCanvas/include \
+            vendor/gCanvas/src/platform/android/egl_host.cpp \
+            -lEGL -landroid \
+            -o build/android-egl/libgcanvas_android_egl.so
+
+          "$cxx" -std=c++17 -Wall -Wextra -Werror \
+            -Ivendor/gCanvas/include \
+            -fsyntax-only vendor/gCanvas/tests/android_egl_contract_test.cpp
+
+          "$readelf" -d build/android-egl/libgcanvas_android_egl.so \
+            > build/android-egl/dynamic.txt
+          grep -q 'libEGL.so' build/android-egl/dynamic.txt
+          grep -q 'libandroid.so' build/android-egl/dynamic.txt
+
+      - name: Verify platform boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -nE 'glad|glfw|jni\.h|Activity|SurfaceView' \
+            vendor/gCanvas/include/gcanvas/platform/android_egl.hpp \
+            vendor/gCanvas/src/platform/android/egl_host.cpp
