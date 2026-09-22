@@ -151,6 +151,46 @@ spec("FlexUI strict Unicode scalar scanning") {
     check_equal(utf8_scalar_count(text), std::size_t{1});
   }
 
+  it("classifies emoji from shared Unicode facts and grapheme clusters") {
+    check_true(is_emoji(0x1F469u));  // woman
+    check_true(is_emoji(0x00A9u));   // copyright, Extended_Pictographic
+    check_true(is_emoji(0x1F1FAu));  // regional indicator
+    check_false(is_emoji('A'));
+
+    const std::string woman_technologist =
+        "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB";
+    const std::string flag_us =
+        "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8";
+    const std::string keycap_one =
+        "1\xEF\xB8\x8F\xE2\x83\xA3";
+    const std::string combining = std::string("e") + "\xCC\x81";
+    const std::string text =
+        std::string("A") + woman_technologist + flag_us + keycap_one +
+        combining + "B";
+
+    const auto segments = segment_text(text);
+    check_equal(segments.size(), std::size_t{5});
+    if (segments.size() == 5) {
+      check_true(segments[0].type == TextSegmentType::Regular);
+      check_equal(segments[0].text, std::string("A"));
+
+      check_true(segments[1].type == TextSegmentType::Emoji);
+      check_equal(segments[1].text, woman_technologist);
+
+      check_true(segments[2].type == TextSegmentType::Emoji);
+      check_equal(segments[2].text, flag_us);
+
+      check_true(segments[3].type == TextSegmentType::Emoji);
+      check_equal(segments[3].text, keycap_one);
+
+      check_true(segments[4].type == TextSegmentType::Regular);
+      check_equal(segments[4].text, combining + "B");
+    }
+
+    check_true(has_emoji(text));
+    check_false(has_emoji(combining + "B"));
+  }
+
   it("validates malformed suffixes even after finding an emoji") {
     const std::string emoji("\xF0\x9F\x98\x80", 4);
     const std::string text = emoji + std::string("\0", 1) + "\xC0\xAF";
