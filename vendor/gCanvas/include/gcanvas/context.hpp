@@ -304,6 +304,8 @@ namespace gcanvas
         void set_font(Font& font);
         void use_default_font();
         void set_font_size(int size);
+        /** Measure strict UTF-8 text using the current font and font size. */
+        vec2 measure_text(const std::string& text);
 
         virtual void set_clear_color(color color) = 0;
         virtual void set_rect_mask(float x, float y, float width, float height) = 0;
