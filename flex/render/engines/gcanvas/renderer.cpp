@@ -655,14 +655,13 @@ public:
     }
 
     ::gcanvas::Font* font = resolve_font(font_family, bold);
-    if (font != nullptr) {
-      context_.set_font(*font);
-    } else {
-      context_.use_default_font();
-    }
-    context_.set_font_size((std::max)(1, static_cast<int>(std::lround(font_size))));
+    ::gcanvas::Font& selected_font =
+        font != nullptr ? *font : context_.get_default_font();
+    const int selected_size =
+        (std::max)(1, static_cast<int>(std::lround(font_size)));
 
-    const ::gcanvas::vec2 dimensions = context_.measure_text(text);
+    const ::gcanvas::vec2 dimensions =
+        context_.measure_text(text, selected_font, selected_size);
     const TextMetrics measured{dimensions.get_x(), dimensions.get_y()};
     out_metrics = measured;
     return true;
