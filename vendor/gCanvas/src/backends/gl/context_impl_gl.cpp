@@ -11,7 +11,6 @@
 #include "../../resources.hpp"
 #include "../../utf8.hpp"
 
-#include "gl_shared_info.hpp"
 
 namespace gcanvas
 {
@@ -1914,7 +1913,8 @@ namespace gcanvas
     {
         glGenBuffers(1, &storageBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
-        glBufferData(GL_UNIFORM_BUFFER, GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE, storage.data(),
+        glBufferData(GL_UNIFORM_BUFFER,
+                     MAX_UNIFORM_RECT_PER_BLOCK_COUNT * sizeof(uniform_rect), storage.data(),
                      GL_DYNAMIC_COPY);
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, storageBuffer);
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -1958,13 +1958,17 @@ namespace gcanvas
     ContextImplGl::ContextImplGl(const detail::GlCreateInfo& create_info)
         : Context(create_info.metrics, create_info.resource_limits), _host(create_info.host),
           _presentation(create_info.presentation), _backend(create_info.backend),
-          _vertex_shader_source(create_info.vertex_shader_source),
+          _runtime(create_info.runtime), _vertex_shader_source(create_info.vertex_shader_source),
           _fragment_shader_source(create_info.fragment_shader_source)
     {
+        if (_runtime == nullptr || _runtime->retain == nullptr || _runtime->release == nullptr ||
+            _runtime->max_uniform_block_size == nullptr)
+            throw std::invalid_argument("GL runtime profile is incomplete");
         if (_vertex_shader_source == nullptr || _fragment_shader_source == nullptr)
             throw std::invalid_argument("GL shader profile is incomplete");
         const bool common_callbacks_missing =
-            _host.get_proc_address == nullptr || _host.framebuffer_size == nullptr;
+            _host.framebuffer_size == nullptr ||
+            (_runtime->requires_proc_loader && _host.get_proc_address == nullptr);
         const bool managed_callbacks_missing =
             _presentation == detail::GlPresentationMode::HostManaged &&
             (_host.make_current == nullptr || _host.swap_buffers == nullptr ||
@@ -1976,12 +1980,15 @@ namespace gcanvas
         }
         if (_host.make_current != nullptr)
             _host.make_current(_host.user_data);
-        GlSharedInfo::retain(_host.get_proc_address, _host.user_data);
+        _runtime->retain(_host.get_proc_address, _host.user_data);
         shared_retained_ = true;
         try
         {
+            const int uniform_block_size = _runtime->max_uniform_block_size();
+            if (uniform_block_size < static_cast<int>(sizeof(uniform_rect)))
+                throw std::runtime_error("GL uniform block capacity is too small");
             MAX_UNIFORM_RECT_PER_BLOCK_COUNT =
-                GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE / sizeof(uniform_rect);
+                uniform_block_size / static_cast<int>(sizeof(uniform_rect));
             create_shader_programm();
             initialize_resources();
             prepare();
@@ -2019,7 +2026,7 @@ namespace gcanvas
         if (shaderProgram != 0)
             glDeleteProgram(shaderProgram);
         shared_retained_ = false;
-        GlSharedInfo::release();
+        _runtime->release();
     }
 
 
@@ -2130,12 +2137,12 @@ namespace gcanvas
         VkDeviceSize bufferSize = sizeof(uniform_rect) * uniforms.size();
 
         void* rawData;
-        vkMapMemory(GlSharedInfo::getInstance()->device, uniformBufferDeviceMemory, 0,
+        vkMapMemory(_runtime /* legacy commented Vulkan path */, uniformBufferDeviceMemory, 0,
                     bufferSize, 0, &rawData);
 
 
         std::memcpy(rawData, uniforms.data(), bufferSize);
-        vkUnmapMemory(GlSharedInfo::getInstance()->device, uniformBufferDeviceMemory);
+        vkUnmapMemory(_runtime /* legacy commented Vulkan path */, uniformBufferDeviceMemory);
     }
     */
 
@@ -2143,7 +2150,8 @@ namespace gcanvas
     {
         glBindBuffer(GL_UNIFORM_BUFFER, storageBuffer);
         GLsizei size = (GLsizei)std::min(storage.size() * sizeof(uniform_rect),
-                                         (size_t)GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE);
+                                         static_cast<size_t>(MAX_UNIFORM_RECT_PER_BLOCK_COUNT) *
+                                             sizeof(uniform_rect));
                                          
         //GLsizei size = (GLsizei)(storage.size() * sizeof(uniform_rect));
 
