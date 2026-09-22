@@ -136,6 +136,7 @@ namespace gcanvas
         detail::GlHost _host;
         detail::GlPresentationMode _presentation;
         Backend _backend = Backend::OpenGL;
+        const detail::GlRuntime* _runtime = nullptr;
         const char* _vertex_shader_source = nullptr;
         const char* _fragment_shader_source = nullptr;
 
