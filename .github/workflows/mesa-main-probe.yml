@@ -81,6 +81,7 @@ jobs:
           jinja_commit="$(git -C .ci/jinja rev-parse HEAD)"
           markupsafe_commit="$(git -C .ci/markupsafe rev-parse HEAD)"
           {
+            echo "RunHead=$EXPECTED_HEAD"
             echo "Stun=$EXPECTED_HEAD"
             echo "MesaRef=main"
             echo "Mesa=$mesa_commit"
