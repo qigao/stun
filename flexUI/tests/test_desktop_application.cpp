@@ -262,6 +262,57 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_false(built.error.css_diagnostics.empty());
   }
 
+
+  it("rejects invalid UTF-8 before publishing an application") {
+    std::string invalid =
+        "<ui name=\"Bad\">\n"
+        "  <div id=\"root\" text=\"";
+    invalid.push_back(static_cast<char>(0xFF));
+    invalid += "\"/>\n</ui>";
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(invalid);
+
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidUtf8);
+    check_equal(built.error.ui_error.line, 2);
+    check_equal(built.error.ui_error.column, 24);
+  }
+
+  it("keeps the active candidate unchanged when reload XML is invalid UTF-8") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Stable\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *active_box = &built.application->box();
+    const std::string active_ui = built.application->sources().ui;
+
+    std::string invalid =
+        "<ui name=\"Replacement\">\n"
+        "  <div id=\"replacement\" text=\"";
+    invalid.push_back(static_cast<char>(0xFF));
+    invalid += "\"/>\n</ui>";
+
+    const auto failed =
+        built.application->reload({invalid, "", "", "reload-invalid-utf8"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(failed.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidUtf8);
+    check_equal(&built.application->box(), active_box);
+    check_not_null(built.application->box().get_by_id("root"));
+    check_null(built.application->box().get_by_id("replacement"));
+    check_equal(built.application->sources().ui, active_ui);
+  }
+
   it("rejects missing controller exports before publication") {
     auto probe = std::make_shared<ModuleProbe>();
     flexUI::DesktopApplicationBuilder builder(nullptr);
