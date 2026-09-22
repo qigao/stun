@@ -187,14 +187,71 @@ jobs:
               r'(?:Direct|Indirect) leak of (?P<bytes>\d+) byte\(s\) in '
               r'(?P<objects>\d+) object\(s\) allocated from:\n'
               r'(?P<stack>(?:    #.*\n)+)')
+          patch_owner_paths = {
+              line.removeprefix('+++ b/').strip()
+              for line in patch.read_text().splitlines()
+              if line.startswith('+++ b/')
+          }
+          assert patch_owner_paths == {
+              'src/util/u_cpu_detect.c',
+              'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
+          }, patch_owner_paths
+
+          def driver_mappings(log):
+              mappings = []
+              expected = str(driver.resolve(strict=True))
+              for line in log.splitlines():
+                  if not line.startswith('driver-map='):
+                      continue
+                  fields = line.split()
+                  if len(fields) < 6 or fields[-1] != expected:
+                      continue
+                  start_text, end_text = fields[0].removeprefix('driver-map=').split('-', 1)
+                  mappings.append((int(start_text, 16), int(end_text, 16),
+                                   int(fields[2], 16)))
+              return mappings
+
+          def resolve_patch_sources(log, stack):
+              mappings = driver_mappings(log)
+              resolved = set()
+              for address_text in re.findall(r'#\d+\s+0x([0-9a-fA-F]+)', stack):
+                  address = int(address_text, 16)
+                  for start, end, file_offset in mappings:
+                      if not start <= address < end:
+                          continue
+                      vma = address - start + file_offset
+                      decoded = subprocess.check_output(
+                          ['addr2line', '-f', '-C', '-e', str(driver), hex(vma)],
+                          text=True, errors='replace')
+                      for owner_path in patch_owner_paths:
+                          if owner_path in decoded:
+                              resolved.add(owner_path)
+                      break
+              return resolved
+
           def classify_leaks(log):
-              owners = {'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
-                        'non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0}}
+              owners = {
+                  'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                  'patch_owner': {'bytes': 0, 'objects': 0, 'blocks': 0,
+                                  'sources': []},
+                  'other_non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+              }
+              patch_sources = set()
               for match in leak_block_re.finditer(log):
-                  owner = 'x11' if '/glfw/src/x11_init.c:' in match.group('stack') else 'non_x11'
+                  stack = match.group('stack')
+                  if '/glfw/src/x11_init.c:' in stack:
+                      owner = 'x11'
+                  else:
+                      resolved = resolve_patch_sources(log, stack)
+                      if resolved:
+                          owner = 'patch_owner'
+                          patch_sources.update(resolved)
+                      else:
+                          owner = 'other_non_x11'
                   owners[owner]['bytes'] += int(match.group('bytes'))
                   owners[owner]['objects'] += int(match.group('objects'))
                   owners[owner]['blocks'] += 1
+              owners['patch_owner']['sources'] = sorted(patch_sources)
               return owners
           system_rows = []
           for system_cycles in (1, 4):
@@ -213,7 +270,8 @@ jobs:
               assert len(system_leaks) == 1, (system_cycles, system_leaks)
               system_owners = classify_leaks(system_log)
               assert system_owners['x11']['blocks'] > 0, (system_cycles, system_owners)
-              assert system_owners['non_x11']['blocks'] == 0, (system_cycles, system_owners)
+              assert system_owners['patch_owner']['blocks'] == 0, (system_cycles, system_owners)
+              assert system_owners['other_non_x11']['blocks'] == 0, (system_cycles, system_owners)
               system_rows.append({'mode': 'init',
                                   'cycles': system_cycles,
                                   'exit_code': system_result.returncode,
@@ -227,6 +285,7 @@ jobs:
           control_env['LD_LIBRARY_PATH'] = str(driver.parent)
           control_env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
           control_env.pop('LIBGL_DRIVERS_PATH', None)
+          baseline_patch_sources = set()
           for variant in ('baseline', 'patched'):
               if variant == 'patched':
                   subprocess.run(['git', 'apply', '--check', str(patch)], cwd=source, check=True)
@@ -259,22 +318,24 @@ jobs:
                       assert 'runtime error:' not in log and 'ERROR: AddressSanitizer:' not in log, row
                       leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
                       row['leak_tuple'] = leak_tuple
-                      row['mesa_incremental'] = owners['non_x11']['blocks'] > 0
+                      row['mesa_incremental'] = owners['patch_owner']['blocks'] > 0
                       assert result.returncode != 0 if row['leaks'] else result.returncode == 0
                       assert owners['x11']['blocks'] > 0, row
-                      if variant == 'patched':
-                          assert owners['non_x11']['blocks'] == 0, (
-                              'Patched Mesa must add no non-X11 LSan allocation stacks', row)
-                      elif mode in ('init', 'window'):
-                          assert owners['non_x11']['blocks'] == 0, row
+                      assert owners['other_non_x11']['blocks'] == 0, (
+                          'Unexpected non-X11 leak owner outside the cleanup patch', row)
+                      if variant == 'baseline':
+                          baseline_patch_sources.update(owners['patch_owner']['sources'])
                       else:
-                          assert owners['non_x11']['blocks'] > 0, (
-                              'Unpatched Mesa must reproduce non-X11 owner leak stacks', row)
+                          assert owners['patch_owner']['blocks'] == 0, (
+                              'Patched Mesa must remove every cleanup-patch owner stack', row)
               (evidence / f'{variant}-driver.sha256').write_text(
                   hashlib.sha256(driver.read_bytes()).hexdigest() + '  ' + str(driver) + '\n')
               (evidence / f'{variant}-glx.sha256').write_text(
                   hashlib.sha256(glx.read_bytes()).hexdigest() + '  ' + str(glx) + '\n')
           assert len(rows) == 20
+          assert baseline_patch_sources == patch_owner_paths, (
+              'Unpatched Mesa must reproduce every cleanup-patch owner', baseline_patch_sources,
+              patch_owner_paths)
           assert (evidence / 'baseline-driver.sha256').read_text() != (evidence / 'patched-driver.sha256').read_text()
           (evidence / 'control-binary.sha256').write_text(binary_hash + '\n')
           print('Unchanged control binary; X11 baseline isolated; Mesa baseline deltas reproduced; patched processes add no Mesa leaks.')
