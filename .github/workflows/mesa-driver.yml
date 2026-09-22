@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: stun-mesa-${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -24,26 +25,69 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          repository: microsoft/vcpkg
+          repository: glfw/glfw
           ref: master
-          path: .ci/vcpkg
+          path: .ci/glfw
           persist-credentials: false
-      - name: Record microsoft/vcpkg master checkout
+      - uses: actions/checkout@v4
+        with:
+          repository: Dav1dde/glad
+          ref: glad2
+          path: .ci/glad
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pallets/jinja
+          ref: main
+          path: .ci/jinja
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: pallets/markupsafe
+          ref: main
+          path: .ci/markupsafe
+          persist-credentials: false
+      - name: Record graphics upstream development checkouts
         shell: bash
         run: |
           set -euo pipefail
-          printf "VCPKG_COMMIT=%s\n" "$(git -C .ci/vcpkg rev-parse HEAD)" >> "$GITHUB_ENV"
-          git -C .ci/vcpkg log -1 --format="Dependency=microsoft/vcpkg Ref=master Commit=%H"
+          glfw_commit="$(git -C .ci/glfw rev-parse HEAD)"
+          glad_commit="$(git -C .ci/glad rev-parse HEAD)"
+          jinja_commit="$(git -C .ci/jinja rev-parse HEAD)"
+          markupsafe_commit="$(git -C .ci/markupsafe rev-parse HEAD)"
+          {
+            echo "GLFW_COMMIT=$glfw_commit"
+            echo "GLAD_COMMIT=$glad_commit"
+            echo "JINJA_COMMIT=$jinja_commit"
+            echo "MARKUPSAFE_COMMIT=$markupsafe_commit"
+            echo "PYTHONPATH=$GITHUB_WORKSPACE/.ci/jinja/src:$GITHUB_WORKSPACE/.ci/markupsafe/src"
+          } >> "$GITHUB_ENV"
+          git -C .ci/glfw log -1 --format="Dependency=glfw/glfw Ref=master Commit=%H"
+          git -C .ci/glad log -1 --format="Dependency=Dav1dde/glad Ref=glad2 Commit=%H"
+          git -C .ci/jinja log -1 --format="Dependency=pallets/jinja Ref=main Commit=%H"
+          git -C .ci/markupsafe log -1 --format="Dependency=pallets/markupsafe Ref=main Commit=%H"
       - name: Prepare explicit build tools and driver paths
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
@@ -56,8 +100,8 @@ jobs:
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
-          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg=%s\n' \
-            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$VCPKG_COMMIT" \
+          printf 'RunHead=%s\nStun=%s\nMesa=%s\nArchiveSHA256=%s\nGLFWRef=master\nGLFW=%s\nGLADRef=glad2\nGLAD=%s\nJinjaRef=main\nJinja=%s\nMarkupSafeRef=main\nMarkupSafe=%s\n' \
+            "$EXPECTED_HEAD" "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$GLFW_COMMIT" "$GLAD_COMMIT" "$JINJA_COMMIT" "$MARKUPSAFE_COMMIT" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
@@ -71,10 +115,10 @@ jobs:
           "$RUNNER_TEMP/mesa-tools/bin/pip" install meson==1.5.2 Mako==1.3.10 PyYAML==6.0.2 packaging==24.2
           echo "$RUNNER_TEMP/mesa-tools/bin" >> "$GITHUB_PATH"
           dpkg-query -W > build/mesa-evidence/system-packages.txt
-          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
-            "--x-install-root=$RUNNER_TEMP/mesa-control-ports" glfw3 glad \
-            2>&1 | tee build/mesa-evidence/control-dependencies.log
+          {
+            echo "GLFWSource=$GITHUB_WORKSPACE/.ci/glfw"
+            echo "GLADSource=$GITHUB_WORKSPACE/.ci/glad"
+          } > build/mesa-evidence/control-dependencies.log
       - name: Verify and build the unchanged upstream driver
         shell: bash
         run: |
@@ -126,9 +170,8 @@ jobs:
           readelf -d "$driver" > "$EVIDENCE_DIR/baseline-driver-dynamic.txt"
           cmake -S cmake/ci/mesa -B build/mesa-control -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            "-DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
-            "-DVCPKG_INSTALLED_DIR=$RUNNER_TEMP/mesa-control-ports"
+            "-DSTUN_MESA_GLFW_SOURCE=$GITHUB_WORKSPACE/.ci/glfw" \
+            "-DSTUN_MESA_GLAD_SOURCE=$GITHUB_WORKSPACE/.ci/glad"
           cmake --build build/mesa-control --parallel 2 --verbose
           cp build/mesa-control/compile_commands.json "$EVIDENCE_DIR/control-compile-commands.json"
       - name: Compare identical controls before and after the owner fix
@@ -148,13 +191,117 @@ jobs:
           binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
           rows = []
           glx = Path(os.environ['MESA_EXPECTED_GLX']).resolve(strict=True)
+          system_env = os.environ.copy()
+          for key in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LSAN_OPTIONS',
+                      'LIBGL_DRIVERS_PATH', '__GLX_VENDOR_LIBRARY_NAME'):
+              system_env.pop(key, None)
+          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          leak_block_re = re.compile(
+              r'(?:Direct|Indirect) leak of (?P<bytes>\d+) byte\(s\) in '
+              r'(?P<objects>\d+) object\(s\) allocated from:\n'
+              r'(?P<stack>(?:    #.*\n)+)')
+          patch_owner_paths = {
+              line.removeprefix('+++ b/').strip()
+              for line in patch.read_text().splitlines()
+              if line.startswith('+++ b/')
+          }
+          assert patch_owner_paths == {
+              'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
+          }, patch_owner_paths
+
+          def driver_mappings(log):
+              mappings = []
+              expected = str(driver.resolve(strict=True))
+              for line in log.splitlines():
+                  if not line.startswith('driver-map='):
+                      continue
+                  fields = line.split()
+                  if len(fields) < 6 or fields[-1] != expected:
+                      continue
+                  start_text, end_text = fields[0].removeprefix('driver-map=').split('-', 1)
+                  mappings.append((int(start_text, 16), int(end_text, 16),
+                                   int(fields[2], 16)))
+              return mappings
+
+          def resolve_patch_sources(log, stack):
+              mappings = driver_mappings(log)
+              resolved = set()
+              for address_text in re.findall(r'#\d+\s+0x([0-9a-fA-F]+)', stack):
+                  address = int(address_text, 16)
+                  for start, end, file_offset in mappings:
+                      if not start <= address < end:
+                          continue
+                      vma = address - start + file_offset
+                      decoded = subprocess.check_output(
+                          ['addr2line', '-f', '-C', '-e', str(driver), hex(vma)],
+                          text=True, errors='replace')
+                      for owner_path in patch_owner_paths:
+                          if owner_path in decoded:
+                              resolved.add(owner_path)
+                      break
+              return resolved
+
+          def classify_leaks(log):
+              owners = {
+                  'x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                  'glfw': {'bytes': 0, 'objects': 0, 'blocks': 0},
+                  'patch_owner': {'bytes': 0, 'objects': 0, 'blocks': 0,
+                                  'sources': []},
+                  'other_non_x11': {'bytes': 0, 'objects': 0, 'blocks': 0},
+              }
+              patch_sources = set()
+              for match in leak_block_re.finditer(log):
+                  stack = match.group('stack')
+                  if '/glfw/src/x11_init.c:' in stack:
+                      owner = 'x11'
+                  elif '/glfw/src/' in stack:
+                      owner = 'glfw'
+                  else:
+                      resolved = resolve_patch_sources(log, stack)
+                      if resolved:
+                          owner = 'patch_owner'
+                          patch_sources.update(resolved)
+                      else:
+                          owner = 'other_non_x11'
+                  owners[owner]['bytes'] += int(match.group('bytes'))
+                  owners[owner]['objects'] += int(match.group('objects'))
+                  owners[owner]['blocks'] += 1
+              owners['patch_owner']['sources'] = sorted(patch_sources)
+              return owners
+          system_rows = []
+          for system_cycles in (1, 4):
+              system_result = subprocess.run(
+                  [str(binary), 'init', str(system_cycles)], text=True,
+                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                  timeout=180, env=system_env)
+              system_log = system_result.stdout
+              (evidence / f'system-init-{system_cycles}.log').write_text(system_log)
+              system_leaks = re.findall(
+                  r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)',
+                  system_log)
+              assert 'application-checks=passed;' in system_log
+              assert system_log.count('teardown=completed') == system_cycles
+              assert 'runtime error:' not in system_log and 'ERROR: AddressSanitizer:' not in system_log
+              assert len(system_leaks) == 1, (system_cycles, system_leaks)
+              system_owners = classify_leaks(system_log)
+              assert system_owners['x11']['blocks'] > 0, (system_cycles, system_owners)
+              assert system_owners['glfw']['blocks'] == 0, (system_cycles, system_owners)
+              assert system_owners['patch_owner']['blocks'] == 0, (system_cycles, system_owners)
+              assert system_owners['other_non_x11']['blocks'] == 0, (system_cycles, system_owners)
+              system_rows.append({'mode': 'init',
+                                  'cycles': system_cycles,
+                                  'exit_code': system_result.returncode,
+                                  'leaks': system_leaks,
+                                  'owners': system_owners})
+          (evidence / 'system-init-baselines.json').write_text(
+              json.dumps(system_rows, indent=2) + '\n')
           control_env = os.environ.copy()
           # Only the control selects this installed GLX/Gallium pair. Build tools
           # and Xvfb keep their normal environment; no source-tree driver is used.
           control_env['LD_LIBRARY_PATH'] = str(driver.parent)
           control_env['__GLX_VENDOR_LIBRARY_NAME'] = 'mesa'
           control_env.pop('LIBGL_DRIVERS_PATH', None)
-          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          baseline_patch_sources = set()
           for variant in ('baseline', 'patched'):
               if variant == 'patched':
                   subprocess.run(['git', 'apply', '--check', str(patch)], cwd=source, check=True)
@@ -173,9 +320,11 @@ jobs:
                       log = result.stdout
                       name = f'{variant}-{mode}-{cycles}.log'
                       (evidence / name).write_text(log)
+                      owners = classify_leaks(log)
                       row = {'variant': variant, 'mode': mode, 'cycles': cycles,
                              'exit_code': result.returncode, 'pixel_checks': log.count('pixel-readback=passed'),
                              'completed': 'application-checks=passed;' in log,
+                             'owners': owners,
                              'leaks': re.findall(r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)}
                       rows.append(row)
                       (evidence / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
@@ -183,22 +332,32 @@ jobs:
                       assert row['completed'] and row['pixel_checks'] == readbacks[mode] * cycles, row
                       assert log.count('teardown=completed') == cycles, row
                       assert 'runtime error:' not in log and 'ERROR: AddressSanitizer:' not in log, row
-                      if variant == 'patched' or mode == 'init':
-                          assert result.returncode == 0 and not row['leaks'], row
-                      elif mode in ('draw', 'overlap', 'threads'):
-                          assert result.returncode != 0 and row['leaks'], 'Baseline must reproduce the lost caches'
+                      leak_tuple = tuple(map(int, row['leaks'][0])) if row['leaks'] else (0, 0)
+                      row['leak_tuple'] = leak_tuple
+                      row['mesa_incremental'] = owners['patch_owner']['blocks'] > 0
+                      assert result.returncode != 0 if row['leaks'] else result.returncode == 0
+                      assert owners['x11']['blocks'] > 0, row
+                      assert owners['other_non_x11']['blocks'] == 0, (
+                          'Unexpected non-X11 leak owner outside the cleanup patch', row)
+                      if variant == 'baseline':
+                          baseline_patch_sources.update(owners['patch_owner']['sources'])
+                      else:
+                          assert owners['patch_owner']['blocks'] == 0, (
+                              'Patched Mesa must remove every cleanup-patch owner stack', row)
               (evidence / f'{variant}-driver.sha256').write_text(
                   hashlib.sha256(driver.read_bytes()).hexdigest() + '  ' + str(driver) + '\n')
               (evidence / f'{variant}-glx.sha256').write_text(
                   hashlib.sha256(glx.read_bytes()).hexdigest() + '  ' + str(glx) + '\n')
           assert len(rows) == 20
+          assert baseline_patch_sources == patch_owner_paths, (
+              'Unpatched Mesa must reproduce every cleanup-patch owner', baseline_patch_sources,
+              patch_owner_paths)
           assert (evidence / 'baseline-driver.sha256').read_text() != (evidence / 'patched-driver.sha256').read_text()
           (evidence / 'control-binary.sha256').write_text(binary_hash + '\n')
-          print('Unchanged control binary; baseline leaks reproduced; all ten patched processes passed.')
+          print('Unchanged control binary; X11 baseline isolated; Mesa baseline deltas reproduced; patched processes add no Mesa leaks.')
           PY
           cp "$MESA_BUILD/compile_commands.json" "$EVIDENCE_DIR/mesa-compile-commands.json"
           cp "$MESA_BUILD/meson-info/intro-buildoptions.json" "$EVIDENCE_DIR/mesa-build-options.json"
-          cp "$MESA_SOURCE/src/util/u_cpu_detect.c" "$EVIDENCE_DIR/patched-u_cpu_detect.c"
           cp "$MESA_SOURCE/src/gallium/auxiliary/rtasm/rtasm_execmem.c" "$EVIDENCE_DIR/patched-rtasm_execmem.c"
           readelf -d "$MESA_EXPECTED_DRIVER" > "$EVIDENCE_DIR/patched-driver-dynamic.txt"
           tar -C "$MESA_ROOT" -cJf "$EVIDENCE_DIR/mesa-sdk.tar.xz" .
@@ -216,6 +375,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
+          name: mesa-driver-${{ steps.run_head.outputs.sha }}
           path: build/mesa-evidence
           if-no-files-found: error

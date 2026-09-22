@@ -1,44 +1,12 @@
 From: Stun maintainers
-Subject: [PATCH] util,rtasm: release Linux module-owned caches at unload
+Subject: [PATCH] rtasm: release Linux module-owned executable arena at unload
 
-Downstream patch for Mesa 25.2.8; tracks qigao/stun#31.
-Keep the caches shared while any context can use the module. On Linux ELF,
-run after ordinary finalizers (including the util_queue atexit handler),
-then release both the affinity-mask allocation and executable arena.
-No public cleanup entry point, suppression, or CPU-feature change is added.
+Downstream patch for Mesa 25.2.8; tracks qigao/stun#31 and #42.
+Exact lifecycle evidence attributes the remaining Mesa-owned leak only to the
+rtasm executable arena. Keep it shared while contexts can use the module, then
+release it at module unload after ordinary finalizers. No public cleanup entry
+point, suppression, CPU-topology mutation, or per-context teardown is added.
 
-diff --git a/src/util/u_cpu_detect.c b/src/util/u_cpu_detect.c
---- a/src/util/u_cpu_detect.c
-+++ b/src/util/u_cpu_detect.c
-@@ -43,6 +43,7 @@
- #include "c11/threads.h"
- 
- #include <stdio.h>
-+#include <stdlib.h>
- #include <inttypes.h>
- 
- #if DETECT_ARCH_PPC
-@@ -110,6 +111,20 @@ struct _util_cpu_caps_state_t _util_cpu_caps_state = {
-    .detect_done = 0,
- };
- 
-+#if DETECT_OS_LINUX
-+/* ELF runs lower-priority finalizers last. Keep the immutable topology alive
-+ * until normal finalizers and Mesa's worker-queue exit handlers have run.
-+ * The published caps snapshot aliases this allocation; it does not own a copy.
-+ */
-+static void __attribute__((destructor(101)))
-+util_cpu_detect_module_cleanup(void)
-+{
-+   free(util_cpu_caps.L3_affinity_mask);
-+   util_cpu_caps.L3_affinity_mask = NULL;
-+   _util_cpu_caps_state.caps.L3_affinity_mask = NULL;
-+}
-+#endif
-+
- #if DETECT_ARCH_X86 || DETECT_ARCH_X86_64
- static int has_cpuid(void);
- #endif
 diff --git a/src/gallium/auxiliary/rtasm/rtasm_execmem.c b/src/gallium/auxiliary/rtasm/rtasm_execmem.c
 --- a/src/gallium/auxiliary/rtasm/rtasm_execmem.c
 +++ b/src/gallium/auxiliary/rtasm/rtasm_execmem.c

@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: stun-editor-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -27,9 +28,21 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
@@ -63,7 +76,7 @@ jobs:
       - name: Define explicit package paths and source provenance
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p build/editor-evidence
@@ -79,8 +92,8 @@ jobs:
           echo "TURBOSCRIPT_COMMIT=$turboscript_commit" >> "$GITHUB_ENV"
           vcpkg_commit="$(git -C .ci/vcpkg rev-parse HEAD)"
           echo "VCPKG_COMMIT=$vcpkg_commit" >> "$GITHUB_ENV"
-          printf 'Stun=%s\nSaltsRef=master\nSalts=%s\nSaltsUtilsRef=master\nSaltsUtils=%s\nTurboScriptRef=master\nTurboScript=%s\nvcpkgRef=master\nvcpkg=%s\n' \
-            "$EXPECTED_HEAD" "$salts_commit" "$salts_utils_commit" "$turboscript_commit" "$vcpkg_commit" \
+          printf 'RunHead=%s\nStun=%s\nSaltsRef=master\nSalts=%s\nSaltsUtilsRef=master\nSaltsUtils=%s\nTurboScriptRef=master\nTurboScript=%s\nvcpkgRef=master\nvcpkg=%s\n' \
+            "$EXPECTED_HEAD" "$EXPECTED_HEAD" "$salts_commit" "$salts_utils_commit" "$turboscript_commit" "$vcpkg_commit" \
             > build/editor-evidence/provenance.txt
           {
             echo "SALTS_ROOT=$RUNNER_TEMP/stun-editor-sdk"
@@ -117,12 +130,12 @@ jobs:
           bash .ci/sources/salts-utils/cmake/ci/install-re2c.sh
       - uses: actions/download-artifact@v4
         with:
-          name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
+          name: mesa-driver-${{ steps.run_head.outputs.sha }}
           path: ${{ runner.temp }}/editor-mesa-input
       - name: Verify and unpack the same-head Mesa package
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_HEAD: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -141,10 +154,21 @@ jobs:
               (v, m, n) for v in ('baseline', 'patched') for m in modes for n in (1, 4)}
           for r in rows:
               assert r['completed'] and r['pixel_checks'] == modes[r['mode']] * r['cycles'], r
-              if r['variant'] == 'patched' or r['mode'] == 'init':
-                  assert r['exit_code'] == 0 and not r['leaks'], r
-              elif r['mode'] in ('draw', 'overlap', 'threads'):
-                  assert r['exit_code'] != 0 and r['leaks'], r
+              owners = r['owners']
+              assert owners['x11']['blocks'] > 0, r
+              assert 'glfw' in owners, r
+              assert r['exit_code'] != 0 and r['leaks'], r
+              assert owners['other_non_x11']['blocks'] == 0, r
+              if r['variant'] == 'patched':
+                  assert owners['patch_owner']['blocks'] == 0, r
+          patch_sources = {
+              source_name
+              for item in rows if item['variant'] == 'baseline'
+              for source_name in item['owners']['patch_owner']['sources']
+          }
+          assert patch_sources == {
+              'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
+          }, patch_sources
           archive = source / 'mesa-sdk.tar.xz'
           assert hashlib.sha256(archive.read_bytes()).hexdigest() == (source / 'mesa-sdk.sha256').read_text().split()[0]
           root = Path(os.environ['MESA_ROOT'])
@@ -391,7 +415,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: turboscript-editor-${{ github.event.pull_request.head.sha || github.sha }}
+          name: turboscript-editor-${{ steps.run_head.outputs.sha }}
           path: |
             build/editor-evidence
             build/editor/CMakeCache.txt

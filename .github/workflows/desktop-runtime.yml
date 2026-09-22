@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: stun-desktop-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -28,10 +29,22 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_head="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .head_sha)"
+          [[ "$run_head" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$run_head" >> "$GITHUB_OUTPUT"
+          printf 'RUN_HEAD=%s\n' "$run_head" >> "$GITHUB_ENV"
+          printf 'RunHead=%s\n' "$run_head"
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           persist-credentials: false
       - name: Checkout master Salts
         uses: actions/checkout@v4
@@ -104,12 +117,12 @@ jobs:
       - name: Prepare tools and record exact provenance
         shell: bash
         env:
-          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
+          printf 'RunHead=%s\nStun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
             "$EXPECTED_STUN_SHA" "$SALTS_COMMIT" "$SALTS_UTILS_COMMIT" "$VCPKG_COMMIT" \
             | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
@@ -125,12 +138,12 @@ jobs:
       - name: Download verified Mesa from this run
         uses: actions/download-artifact@v4
         with:
-          name: mesa-driver-${{ github.event.pull_request.head.sha || github.sha }}
+          name: mesa-driver-${{ steps.run_head.outputs.sha }}
           path: ${{ runner.temp }}/stun-mesa-input
       - name: Verify driver package and exact-head lifecycle receipt
         shell: bash
         env:
-          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -147,8 +160,22 @@ jobs:
           evidence = Path(os.environ['EVIDENCE_DIR'])
           provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
           assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
-          # Each job follows master independently; preserve the producer observation.
-          assert re.fullmatch(r'[0-9a-f]{40}', provenance['vcpkg'])
+          # Producer source refs are development branches; resolved commits are provenance only.
+          required_refs = {
+              'GLFWRef': 'master',
+              'GLADRef': 'glad2',
+              'JinjaRef': 'main',
+              'MarkupSafeRef': 'main',
+          }
+          for ref_key, expected_ref in required_refs.items():
+              assert provenance[ref_key] == expected_ref, (ref_key, provenance)
+              commit_key = ref_key.removesuffix('Ref')
+              assert re.fullmatch(r'[0-9a-f]{40}', provenance[commit_key]), (commit_key, provenance)
+          for ref_key in ('MesonRef', 'MakoRef', 'PyYAMLRef', 'PackagingRef'):
+              if ref_key in provenance:
+                  expected = 'master' if ref_key == 'MesonRef' else 'main'
+                  assert provenance[ref_key] == expected, (ref_key, provenance)
+                  assert re.fullmatch(r'[0-9a-f]{40}', provenance[ref_key.removesuffix('Ref')])
           patch = Path('cmake/ci/mesa/module-cleanup.patch')
           assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
           rows = json.loads((source / 'results.json').read_text())
@@ -158,10 +185,21 @@ jobs:
               (v, m, n) for v in ('baseline', 'patched') for m in readbacks for n in (1, 4)}
           for row in rows:
               assert row['completed'] and row['pixel_checks'] == readbacks[row['mode']] * row['cycles'], row
-              if row['variant'] == 'patched' or row['mode'] == 'init':
-                  assert row['exit_code'] == 0 and not row['leaks'], row
-              elif row['mode'] in ('draw', 'overlap', 'threads'):
-                  assert row['exit_code'] != 0 and row['leaks'], row
+              owners = row['owners']
+              assert owners['x11']['blocks'] > 0, row
+              assert 'glfw' in owners, row
+              assert row['exit_code'] != 0 and row['leaks'], row
+              assert owners['other_non_x11']['blocks'] == 0, row
+              if row['variant'] == 'patched':
+                  assert owners['patch_owner']['blocks'] == 0, row
+          patch_sources = {
+              source_name
+              for item in rows if item['variant'] == 'baseline'
+              for source_name in item['owners']['patch_owner']['sources']
+          }
+          assert patch_sources == {
+              'src/gallium/auxiliary/rtasm/rtasm_execmem.c',
+          }, patch_sources
           archive = source / 'mesa-sdk.tar.xz'
           archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
           assert archive_hash == (source / 'mesa-sdk.sha256').read_text().split()[0]
@@ -440,7 +478,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          name: desktop-runtime-${{ steps.run_head.outputs.sha }}
           path: |
             build/desktop-evidence
             build/desktop-runtime/CMakeCache.txt
