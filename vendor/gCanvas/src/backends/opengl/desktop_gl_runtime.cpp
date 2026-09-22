@@ -1,4 +1,4 @@
-#include "../gl/opengl_shared_info.hpp"
+#include "../gl/gl_shared_info.hpp"
 
 #include <utility>
 #include <stdexcept>
@@ -10,7 +10,7 @@ namespace gcanvas
 {
     namespace
     {
-        thread_local opengl::ProcLoader active_loader = nullptr;
+        thread_local detail::GlProcLoader active_loader = nullptr;
         thread_local void* active_loader_user_data = nullptr;
 
         void* load_gl_proc(const char* name)
@@ -20,30 +20,30 @@ namespace gcanvas
         }
     }
 
-    int OpenglSharedInfo::MAX_UNIFORM_BLOCK_SIZE = -1;
-    OpenglSharedInfo* OpenglSharedInfo::_instance = nullptr;
-    std::size_t OpenglSharedInfo::_reference_count = 0;
+    int GlSharedInfo::MAX_UNIFORM_BLOCK_SIZE = -1;
+    GlSharedInfo* GlSharedInfo::_instance = nullptr;
+    std::size_t GlSharedInfo::_reference_count = 0;
 
-    OpenglSharedInfo::OpenglSharedInfo(opengl::ProcLoader loader, void* user_data)
+    GlSharedInfo::GlSharedInfo(detail::GlProcLoader loader, void* user_data)
     {
         load_opengl(loader, user_data);
     }
 
-    OpenglSharedInfo::~OpenglSharedInfo()
+    GlSharedInfo::~GlSharedInfo()
     {
         
     }
 
-    void OpenglSharedInfo::retain(opengl::ProcLoader loader, void* user_data)
+    void GlSharedInfo::retain(detail::GlProcLoader loader, void* user_data)
     {
         if (_instance == nullptr)
         {
-            _instance = new OpenglSharedInfo(loader, user_data);
+            _instance = new GlSharedInfo(loader, user_data);
         }
         ++_reference_count;
     }
 
-    void OpenglSharedInfo::release() noexcept
+    void GlSharedInfo::release() noexcept
     {
         if (_reference_count == 0)
         {
@@ -57,7 +57,7 @@ namespace gcanvas
         }
     }
 
-    void OpenglSharedInfo::load_opengl(opengl::ProcLoader loader, void* user_data)
+    void GlSharedInfo::load_opengl(detail::GlProcLoader loader, void* user_data)
     {
         // --------------- Load Opengl ---------------
 
