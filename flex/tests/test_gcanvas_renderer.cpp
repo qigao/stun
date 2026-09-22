@@ -67,6 +67,9 @@ public:
 
   gcanvas::Backend backend() const noexcept override { return gcanvas::Backend::OpenGL; }
   int font_size() const noexcept { return _font_size; }
+  std::string selected_font_source() const {
+    return _font ? static_cast<RecordingFont*>(_font)->source() : std::string{};
+  }
   gcanvas::Image& cache_gradient(const gcanvas::Paint& paint,
                                  gcanvas::vec2 minimum, gcanvas::vec2 maximum) {
     return acquire_cached_path_paint_texture(paint, minimum, maximum);
@@ -403,6 +406,29 @@ suite("Flex gCanvas renderer") {
     check_true(blurred_images > 1);
     check_equal(canvas.rects.size(), 1);
     check_true(canvas.path_blur_samples > blurred_paths);
+  }
+
+  it("measures strict UTF-8 with the same registered font resolution") {
+    RecordingContext canvas(96, 64);
+    auto renderer = flex::render::engines::gcanvas::create_renderer(canvas);
+
+    check_true(renderer->register_font("ui", "ui-regular.ttf"));
+    check_true(renderer->register_font("ui-bold", "ui-bold.ttf"));
+
+    flex::TextMetrics metrics{123.0f, 456.0f};
+    check_true(renderer->measure_text("Hello", "ui", 14.0f, true, metrics));
+    check_equal(canvas.selected_font_source(), "ui-bold.ttf");
+    check_equal(canvas.font_size(), 14);
+    check_true(metrics.width >= 0.0f);
+    check_true(metrics.height >= 0.0f);
+
+    flex::TextMetrics unchanged{123.0f, 456.0f};
+    check_throws_as(renderer->measure_text(
+                        std::string("\xF0\x28\x8C\x28", 4), "ui", 14.0f,
+                        false, unchanged),
+                    std::range_error);
+    check_within(unchanged.width, 123.0f, 0.001f);
+    check_within(unchanged.height, 456.0f, 0.001f);
   }
 
   it("resolves registered bold faces before regular and sans-serif fallbacks") {
