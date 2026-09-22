@@ -200,6 +200,12 @@ jobs:
           restore-keys: |
             stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
 
+      - name: Cache pinned Python build-tool downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: stun-pip-ubuntu24-cmake-3.31.6-v1
+
       - name: Prepare isolated tools and evidence
         shell: bash
         env:
