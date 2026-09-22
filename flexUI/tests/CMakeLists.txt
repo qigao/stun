@@ -140,6 +140,13 @@ flexui_configure_tinytest(test_text_util_unicode)
 set_target_properties(test_text_util_unicode PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_text_util_unicode COMMAND test_text_util_unicode)
 
+
+add_executable(test_unicode_boundaries test_unicode_boundaries.cpp)
+target_link_libraries(test_unicode_boundaries PRIVATE flexUI)
+flexui_configure_tinytest(test_unicode_boundaries)
+set_target_properties(test_unicode_boundaries PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_unicode_boundaries COMMAND test_unicode_boundaries)
+
 add_executable(test_render_semantics test_render_semantics.cpp)
 target_link_libraries(test_render_semantics PRIVATE flexUI)
 flexui_configure_tinytest(test_render_semantics)

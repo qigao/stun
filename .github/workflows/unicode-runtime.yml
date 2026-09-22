@@ -17,7 +17,7 @@ concurrency:
 
 env:
   SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 62576265ac66b0000127a04936f108a3dbb3f004
+  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
 
 jobs:
   unicode-runtime:
@@ -271,19 +271,11 @@ jobs:
               "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
             cmake --build "$package_build" --parallel 2 \
               2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
-            install_component=()
-            if [ "$package" = salts-utils ]; then
-              install_component=(--component Unspecified)
-            fi
-            cmake --install "$package_build" "${install_component[@]}" \
+            cmake --install "$package_build" \
               2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
             cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
             cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
-            manifest=install_manifest.txt
-            if [ "$package" = salts-utils ]; then
-              manifest=install_manifest_Unspecified.txt
-            fi
-            cp "$package_build/$manifest" "$EVIDENCE_DIR/$package-install-manifest.txt"
+            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
             git -C "$source" diff --exit-code
           done
 
@@ -430,8 +422,8 @@ jobs:
                   "TinyTest totals changed or include failed/skipped/filtered/todo cases")
           require(re.findall(r"Assertions:\s*(\d+) passed,\s*(\d+) failed", test_text) == [("162", "0")],
                   "Expected all 162 TinyTest assertions to pass")
-          require(re.search(r"100% tests passed,\s*0 tests failed out of 1", test_text),
-                  "CTest did not report the one executable as successful")
+          require(re.search(r"100% tests passed,\s*0 tests failed out of 2", test_text),
+                  "CTest did not report both installed Unicode executables as successful")
 
           evidence = {
               "installed_paths": {key: str(value) for key, value in resolved.items()},
@@ -441,7 +433,7 @@ jobs:
                                     "Canonical Core was a link input; this executable needs no Core DSO after --as-needed"),
               "elf_needed": re.findall(r"\(NEEDED\).*?\[([^\]]+)\]", dynamic_text),
               "tinytest": {**expected_totals, "assertions_passed": 162, "assertions_failed": 0},
-              "ctest_executables_passed": 1,
+              "ctest_executables_passed": 2,
           }
           (build / "install-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
           print(json.dumps(evidence, indent=2))

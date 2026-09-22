@@ -41,6 +41,13 @@ set_target_properties(test_text_util_unicode_install PROPERTIES CXX_EXTENSIONS O
 target_link_libraries(test_text_util_unicode_install
                       PRIVATE Salts::Unicode Salts::TinyTest)
 
+
+add_executable(unicode_boundaries_install_smoke
+               unicode_boundaries_install_smoke.cpp)
+target_compile_features(unicode_boundaries_install_smoke PRIVATE cxx_std_17)
+set_target_properties(unicode_boundaries_install_smoke PROPERTIES CXX_EXTENSIONS OFF)
+target_link_libraries(unicode_boundaries_install_smoke PRIVATE Salts::Unicode)
+
 option(FLEXUI_UNICODE_ENABLE_SANITIZERS "Enable the Linux ASan/UBSan contract" ON)
 if(FLEXUI_UNICODE_ENABLE_SANITIZERS)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
@@ -51,6 +58,11 @@ if(FLEXUI_UNICODE_ENABLE_SANITIZERS)
                          -g -O1 -Wall -Wextra -Werror
                          -fsanitize=address,undefined -fno-omit-frame-pointer)
   target_link_options(test_text_util_unicode_install PRIVATE
+                      -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_compile_options(unicode_boundaries_install_smoke PRIVATE
+                         -g -O1 -Wall -Wextra -Werror
+                         -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(unicode_boundaries_install_smoke PRIVATE
                       -fsanitize=address,undefined -fno-omit-frame-pointer)
 endif()
 
@@ -66,3 +78,6 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/installed-targets-$<CONFIG>.tx
 enable_testing()
 add_test(NAME test_text_util_unicode_install COMMAND test_text_util_unicode_install)
 set_tests_properties(test_text_util_unicode_install PROPERTIES TIMEOUT 120)
+add_test(NAME unicode_boundaries_install_smoke
+         COMMAND unicode_boundaries_install_smoke)
+set_tests_properties(unicode_boundaries_install_smoke PROPERTIES TIMEOUT 120)

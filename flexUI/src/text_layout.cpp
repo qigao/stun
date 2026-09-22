@@ -1,11 +1,13 @@
 #include <flexUI/text_layout.h>
 #include <flexUI/render_command.h>
 #include <flexUI/text_util.h>
+#include <salts_unicode.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <sstream>
+#include <stdexcept>
 
 namespace flexUI {
 
@@ -70,16 +72,6 @@ float base_text_width_multiplier(const ComputedStyle* style) {
     multiplier = 0.65f;
   }
   return multiplier;
-}
-
-bool is_rtl_strong_codepoint(uint32_t cp) {
-  return (cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) ||
-         (cp >= 0xFE70 && cp <= 0xFEFF);
-}
-
-bool is_ltr_strong_codepoint(uint32_t cp) {
-  return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
-         (cp >= 0x00C0 && cp <= 0x02AF) || (cp >= 0x0370 && cp <= 0x052F);
 }
 
 float approximate_ascii_advance(const ComputedStyle* style, char ch,
@@ -260,24 +252,32 @@ std::vector<std::string> wrap_line_to_width(const ComputedStyle* style,
   return wrapped;
 }
 
-std::string truncate_scalar_prefix_to_width(const ComputedStyle* style,
-                                            const std::string& text,
-                                            float max_width,
-                                            float suffix_width) {
-  // Decode once so clipping never creates input rejected by segment_text.
-  // Grapheme boundaries and text measurement remain separate work in #15.
-  std::vector<size_t> scalar_ends{0};
+std::string truncate_grapheme_prefix_to_width(const ComputedStyle* style,
+                                              const std::string& text,
+                                              float max_width,
+                                              float suffix_width) {
+  std::vector<size_t> grapheme_ends{0};
   size_t cursor = 0;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
   while (cursor < text.size()) {
-    (void)utf8_next_scalar(text, cursor);
-    scalar_ends.push_back(cursor);
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error("Salts::Unicode failed to segment grapheme clusters");
+    }
+    grapheme_ends.push_back(cursor);
   }
 
   std::string truncated = text;
   while (!truncated.empty() &&
          approximate_text_width(style, truncated) + suffix_width > max_width) {
-    scalar_ends.pop_back();
-    truncated.resize(scalar_ends.back());
+    grapheme_ends.pop_back();
+    truncated.resize(grapheme_ends.back());
   }
   return truncated;
 }
@@ -299,7 +299,7 @@ std::string truncate_text_with_ellipsis(const ComputedStyle* style,
     return "";
   }
 
-  return truncate_scalar_prefix_to_width(style, text, max_width, ellipsis_width) +
+  return truncate_grapheme_prefix_to_width(style, text, max_width, ellipsis_width) +
          ellipsis;
 }
 
@@ -314,7 +314,7 @@ std::string truncate_text_to_width(const ComputedStyle* style,
     return text;
   }
 
-  return truncate_scalar_prefix_to_width(style, text, max_width, 0.0f);
+  return truncate_grapheme_prefix_to_width(style, text, max_width, 0.0f);
 }
 
 int parse_line_clamp(const ComputedStyle* style) {
@@ -545,17 +545,16 @@ Direction resolve_text_direction_for_content(const ComputedStyle* style,
     return fallback;
   }
 
-  size_t pos = 0;
-  while (pos < text.size()) {
-    const uint32_t cp = utf8_next_scalar(text, pos).value;
-    if (is_rtl_strong_codepoint(cp)) {
-      return Direction::Rtl;
-    }
-    if (is_ltr_strong_codepoint(cp)) {
-      return Direction::Ltr;
-    }
+  uint8_t paragraph_level = 0u;
+  const salts_unicode_status status = salts_unicode_bidi_paragraph_level(
+      vstr_from_buf(text.data(), text.size()), &paragraph_level);
+  if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+    throw std::invalid_argument("FlexUI text contains invalid UTF-8");
   }
-  return fallback;
+  if (status != SALTS_UNICODE_OK) {
+    throw std::runtime_error("Salts::Unicode failed to resolve paragraph direction");
+  }
+  return paragraph_level == 0u ? Direction::Ltr : Direction::Rtl;
 }
 
 std::string transform_text_for_layout(const ComputedStyle* style,
