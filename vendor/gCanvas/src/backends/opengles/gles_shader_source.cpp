@@ -1,6 +1,7 @@
 #include "gles_shader_source.hpp"
 
 #include "../../resources.hpp"
+#include "../gl/gl_api.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -28,6 +29,13 @@ namespace gcanvas::detail
 
             replace_once(result.vertex, "#version 410 core\n", preamble);
             replace_once(result.fragment, "#version 410 core\n", preamble);
+
+            const std::string desktop_payload = "RoundedRectData payload[128];";
+            const std::string gles_payload =
+                "RoundedRectData payload[" +
+                std::to_string(GCANVAS_GL_SHADER_BATCH_CAPACITY) + "];";
+            replace_once(result.vertex, desktop_payload, gles_payload);
+            replace_once(result.fragment, desktop_payload, gles_payload);
 
             replace_once(result.vertex,
                          "out gl_PerVertex{\n"

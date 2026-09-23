@@ -33,6 +33,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$(grep -c 'RoundedRectData payload\[128\]' vendor/gCanvas/src/resources.hpp)" -eq 2
+          grep -q '#define GCANVAS_GL_SHADER_BATCH_CAPACITY 16' vendor/gCanvas/src/backends/gl/gl_api.hpp
+          grep -q 'std::to_string(GCANVAS_GL_SHADER_BATCH_CAPACITY)' vendor/gCanvas/src/backends/opengles/gles_shader_source.cpp
+          ! grep -q 'gl_VertexID' vendor/gCanvas/src/resources.hpp
+          grep -q 'layout(location = 0) in vec2 corner;' vendor/gCanvas/src/resources.hpp
+          grep -q 'float shape = 1.0;' vendor/gCanvas/src/resources.hpp
+          grep -q 'line_width > 0. || any(greaterThan(border_radius, vec4(0.)))' vendor/gCanvas/src/resources.hpp
           ! grep -q 'texture(textures\[index\]' vendor/gCanvas/src/resources.hpp
           grep -q 'case 9: return texture(textures\[9\], uv);' vendor/gCanvas/src/resources.hpp
 

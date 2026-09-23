@@ -1,15 +1,17 @@
 # gCanvas
 
 This fork refactors elementalDraw into one responsibility: a 2D canvas API with interchangeable
-OpenGL and Vulkan renderers. It is a rendering dependency for Flex, not a second widget, layout,
+OpenGL, OpenGL ES, and Vulkan renderers. It is a rendering dependency for Flex, not a second widget, layout,
 or application framework.
 
 The current `0.8` boundary contains:
 
 - `gCanvas::Core`: backend-neutral canvas, color, font, image, and geometry contracts.
-- `gCanvas::OpenGL`: the OpenGL renderer.
+- `gCanvas::OpenGL`: the desktop OpenGL renderer.
+- `gCanvas::OpenGLES`: the OpenGL ES 3 renderer.
 - `gCanvas::Vulkan`: the Vulkan renderer.
-- `gCanvas::Window`: an optional GLFW presentation helper with runtime backend selection.
+- `gCanvas::AndroidEGL`: the Android `ANativeWindow`/EGL presentation adapter for OpenGLES.
+- `gCanvas::Window`: an optional GLFW presentation helper for desktop OpenGL/Vulkan.
 - `gCanvas::gCanvas`: a convenience aggregate of the enabled targets.
 
 The UI, audio, video, ThorVG, and experimental Metal branches from upstream were removed from the
@@ -56,15 +58,29 @@ cmake -DGLSLANG_VALIDATOR=C:/path/to/glslangValidator.exe `
   -P cmake/GenerateSpirvInclude.cmake
 ```
 
-Each renderer can be selected independently with `GCANVAS_BUILD_OPENGL` and
-`GCANVAS_BUILD_VULKAN`. `GCANVAS_BUILD_WINDOW` links the enabled renderer set. Requesting a backend
-that was not built is an explicit initialization error; gCanvas never substitutes another
-renderer.
+Each renderer can be selected independently with `GCANVAS_BUILD_OPENGL`, `GCANVAS_BUILD_GLES`, and
+`GCANVAS_BUILD_VULKAN`. `GCANVAS_BUILD_ANDROID_EGL` adds Android EGL presentation, while
+`GCANVAS_BUILD_WINDOW` remains the GLFW desktop presentation helper. On Android, the defaults are
+OpenGLES + AndroidEGL with desktop OpenGL, Vulkan, SVG, and GLFW Window disabled unless explicitly
+enabled. Requesting a backend that was not built is an explicit initialization error; gCanvas never
+substitutes another renderer.
 
 OpenGL also supports an external presentation mode for embedding into an existing renderer. The
 host keeps its context current and swaps buffers; gCanvas owns only its draw resources and requires
 procedure-loading plus framebuffer-size callbacks. `present_frame()` remains mandatory because it
 releases per-frame command pins even though it does not swap in this mode.
+
+OpenGLES uses the same shared GL-family renderer with a GLES 3 / GLSL ES 3.00 profile and no
+GLAD dependency. The Android adapter owns its EGL display/config/context plus a persistent 1x1
+pbuffer. After a completed frame, `AndroidEglHost::suspend(context)` switches to the pbuffer,
+resizes the canvas to zero, destroys only the window surface, and keeps images/fonts/shaders alive.
+When a replacement `ANativeWindow*` is available, `resume(context, window)` attaches a new EGL
+window surface to that same context. A true `EGL_CONTEXT_LOST` is different from ordinary Surface
+loss and requires recreating both the gCanvas context and Android EGL host.
+
+The runnable Android qualification app under `tests/android` keeps one uploaded texture and one
+gCanvas context alive across `SurfaceView` replacement, then verifies the replacement surface by
+GLES pixel readback.
 
 ## Runtime selection
 
@@ -116,10 +132,11 @@ Memory-backed images require an explicit byte length so the canvas can reject tr
 gcanvas::Image& icon = canvas.create_image(width, height, 4, rgba.data(), rgba.size());
 ```
 
-For direct construction, include `<gcanvas/backends/opengl.hpp>` or
-`<gcanvas/backends/vulkan.hpp>`. Those typed factories return `std::unique_ptr<gcanvas::Context>` and
-take copied create-info records containing canvas metrics, resource limits, and borrowed host
-callbacks. Renderer targets do not include or link GLFW; the optional `Window` target adapts GLFW
+For direct construction, include `<gcanvas/backends/opengl.hpp>`,
+`<gcanvas/backends/opengles.hpp>`, or `<gcanvas/backends/vulkan.hpp>`. Android presentation is
+available through `<gcanvas/platform/android_egl.hpp>`. Those typed factories return
+`std::unique_ptr<gcanvas::Context>` and take copied create-info records containing canvas metrics,
+resource limits, and borrowed host callbacks. Renderer targets do not include or link GLFW; the optional `Window` target adapts GLFW
 to those callbacks. The exact lifetime and frame rules are normative in
 [docs/host-and-resource-protocol.md](docs/host-and-resource-protocol.md).
 
