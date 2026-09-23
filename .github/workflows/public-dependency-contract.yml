@@ -131,7 +131,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+          ref: 4d38c29abf12f69786e7eb0712262e751ff4bf8e
           path: .ci/salts-utils
 
       - name: Verify source and install package ownership
@@ -196,7 +196,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+          ref: 4d38c29abf12f69786e7eb0712262e751ff4bf8e
           path: .ci/salts-utils
 
       - name: Verify Unicode ownership contract
@@ -207,8 +207,14 @@ jobs:
           grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
           grep -Fq 'utf8_next_scalar' flexUI/include/flexUI/text_util.h
           test ! -e flexUI/src/text_util.re
+          grep -Fq 'SALTS_UNICODE_PROPERTY_EMOJI_PRESENTATION' flexUI/src/text_util.cpp
+          grep -Fq 'salts_unicode_grapheme_next' flexUI/src/text_util.cpp
           if grep -R -n -E 'utf8_decode|utf8_char_length' flexUI/include flexUI/src; then
             echo "private UTF-8 decoder surface remains" >&2
+            exit 1
+          fi
+          if grep -n -E '0x1F300|0x1F600|0x1F680|0x1F900|0x1FA00|0x1F1E0|0x1F3FB' flexUI/src/text_util.cpp; then
+            echo "private emoji range truth remains" >&2
             exit 1
           fi
 
