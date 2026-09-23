@@ -56,6 +56,12 @@ target_include_directories(test_runtime PRIVATE ../include)
 set_target_properties(test_runtime PROPERTIES FOLDER "flex/tests")
 add_test(NAME test_runtime COMMAND test_runtime)
 
+add_executable(test_property_cmeta test_property_cmeta.cpp)
+target_link_libraries(test_property_cmeta PRIVATE flex_runtime Salts::TinyTest)
+target_include_directories(test_property_cmeta PRIVATE ../include)
+set_target_properties(test_property_cmeta PROPERTIES FOLDER "flex/tests")
+add_test(NAME test_property_cmeta COMMAND test_property_cmeta)
+
 add_executable(test_cubic_bezier test_cubic_bezier.cpp)
 target_link_libraries(test_cubic_bezier PRIVATE flex_runtime Salts::TinyTest)
 target_include_directories(test_cubic_bezier PRIVATE ../include)
