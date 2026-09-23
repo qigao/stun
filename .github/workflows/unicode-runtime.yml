@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+  SALTS_SHA: 5cbaa899b9c097efaa72ed7bad793b04291800c4
   SALTS_UTILS_SHA: 4d38c29abf12f69786e7eb0712262e751ff4bf8e
 
 jobs:
