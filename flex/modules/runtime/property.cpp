@@ -9,7 +9,6 @@ namespace flex {
 namespace {
 
 using detail::AnimatedPropertyDescriptor;
-using detail::AnimatedPropertyValueKind;
 using detail::PropertyTargetKind;
 
 constexpr uint8_t target_bit(PropertyTargetKind target) {
@@ -28,29 +27,29 @@ constexpr uint8_t kShapeTarget = target_bit(PropertyTargetKind::Shape);
 constexpr uint8_t kTextTarget = target_bit(PropertyTargetKind::Text);
 
 constexpr std::array<AnimatedPropertyDescriptor, 22> kAnimatedProperties = {{
-    {PropertyID::Unknown, AnimatedPropertyValueKind::Scalar, 0},
-    {PropertyID::X, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::Y, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::Rotation, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::Scale, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::ScaleX, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::ScaleY, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::Width, AnimatedPropertyValueKind::Scalar, kShapeTarget},
-    {PropertyID::Height, AnimatedPropertyValueKind::Scalar, kShapeTarget},
-    {PropertyID::Radius, AnimatedPropertyValueKind::Scalar, kShapeTarget},
-    {PropertyID::Opacity, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::Visible, AnimatedPropertyValueKind::Scalar, kAllTargets},
-    {PropertyID::Fill, AnimatedPropertyValueKind::Color, kShapeTarget},
-    {PropertyID::FillOpacity, AnimatedPropertyValueKind::Scalar, kShapeTarget},
-    {PropertyID::Stroke, AnimatedPropertyValueKind::Color, kShapeTarget},
-    {PropertyID::StrokeWidth, AnimatedPropertyValueKind::Scalar, kShapeTarget},
-    {PropertyID::Text, AnimatedPropertyValueKind::String, kTextTarget},
-    {PropertyID::Content, AnimatedPropertyValueKind::String, kTextTarget},
-    {PropertyID::FontSize, AnimatedPropertyValueKind::Scalar, kTextTarget},
-    {PropertyID::TextColor, AnimatedPropertyValueKind::Color, kTextTarget},
-    {PropertyID::Color, AnimatedPropertyValueKind::Color,
+    {PropertyID::Unknown, nullptr, 0},
+    {PropertyID::X, &cmeta_type_float, kAllTargets},
+    {PropertyID::Y, &cmeta_type_float, kAllTargets},
+    {PropertyID::Rotation, &cmeta_type_float, kAllTargets},
+    {PropertyID::Scale, &cmeta_type_float, kAllTargets},
+    {PropertyID::ScaleX, &cmeta_type_float, kAllTargets},
+    {PropertyID::ScaleY, &cmeta_type_float, kAllTargets},
+    {PropertyID::Width, &cmeta_type_float, kShapeTarget},
+    {PropertyID::Height, &cmeta_type_float, kShapeTarget},
+    {PropertyID::Radius, &cmeta_type_float, kShapeTarget},
+    {PropertyID::Opacity, &cmeta_type_float, kAllTargets},
+    {PropertyID::Visible, &cmeta_type_float, kAllTargets},
+    {PropertyID::Fill, &cmeta_type_color, kShapeTarget},
+    {PropertyID::FillOpacity, &cmeta_type_float, kShapeTarget},
+    {PropertyID::Stroke, &cmeta_type_color, kShapeTarget},
+    {PropertyID::StrokeWidth, &cmeta_type_float, kShapeTarget},
+    {PropertyID::Text, &cmeta_type_string, kTextTarget},
+    {PropertyID::Content, &cmeta_type_string, kTextTarget},
+    {PropertyID::FontSize, &cmeta_type_float, kTextTarget},
+    {PropertyID::TextColor, &cmeta_type_color, kTextTarget},
+    {PropertyID::Color, &cmeta_type_color,
      static_cast<uint8_t>(kShapeTarget | kTextTarget)},
-    {PropertyID::Position, AnimatedPropertyValueKind::Vec2, kAllTargets},
+    {PropertyID::Position, &cmeta_type_vec2, kAllTargets},
 }};
 
 struct PropertyName {
@@ -127,6 +126,32 @@ const AnimatedPropertyDescriptor* animated_property_descriptor(PropertyID id) no
     }
     const auto& descriptor = kAnimatedProperties[static_cast<size_t>(index)];
     return descriptor.id == id ? &descriptor : nullptr;
+}
+
+const cmeta_type_desc* anim_value_type(const AnimValue& value) noexcept {
+    return std::visit(
+        [](const auto& current) -> const cmeta_type_desc* {
+            using T = std::decay_t<decltype(current)>;
+            if constexpr (std::is_same_v<T, float>) {
+                return &cmeta_type_float;
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                return &cmeta_type_string;
+            } else if constexpr (std::is_same_v<T, Color>) {
+                return &cmeta_type_color;
+            } else if constexpr (std::is_same_v<T, Vec2>) {
+                return &cmeta_type_vec2;
+            } else {
+                return nullptr;
+            }
+        },
+        value);
+}
+
+bool animated_property_accepts(PropertyID id, const AnimValue& value) noexcept {
+    const auto* descriptor = animated_property_descriptor(id);
+    const auto* value_type = anim_value_type(value);
+    return descriptor && descriptor->type && value_type &&
+           cmeta_type_equal(descriptor->type, value_type);
 }
 
 bool animated_property_supports(PropertyID id, PropertyTargetKind target) noexcept {
