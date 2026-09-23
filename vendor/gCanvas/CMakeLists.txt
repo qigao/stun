@@ -33,6 +33,7 @@ option(GCANVAS_BUILD_ANDROID_EGL "Build the Android EGL presentation adapter" ${
 option(GCANVAS_BUILD_VULKAN "Build the Vulkan canvas backend" ${_GCANVAS_BUILD_VULKAN_DEFAULT})
 option(GCANVAS_BUILD_SVG "Build the optional PlutoSVG resource adapter" ${_GCANVAS_BUILD_SVG_DEFAULT})
 option(GCANVAS_BUILD_WINDOW "Build the optional GLFW presentation helper" ${_GCANVAS_BUILD_WINDOW_DEFAULT})
+option(GCANVAS_BUILD_SHADER_MODEL "Build the CMeta-backed programmable shader semantic model" OFF)
 
 unset(_GCANVAS_BUILD_OPENGL_DEFAULT)
 unset(_GCANVAS_BUILD_GLES_DEFAULT)
@@ -85,6 +86,28 @@ set_target_properties(gcanvas_core PROPERTIES
   EXPORT_NAME Core
   OUTPUT_NAME gcanvas_core
   POSITION_INDEPENDENT_CODE ON)
+
+if(GCANVAS_BUILD_SHADER_MODEL)
+  if(NOT TARGET Salts::CMeta)
+    find_package(Salts CONFIG REQUIRED)
+  endif()
+
+  add_library(gcanvas_shader_model STATIC
+    src/shader_binding.cpp)
+  add_library(gCanvas::ShaderModel ALIAS gcanvas_shader_model)
+
+  target_compile_features(gcanvas_shader_model PUBLIC cxx_std_17)
+  target_include_directories(gcanvas_shader_model
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>)
+  target_link_libraries(gcanvas_shader_model
+    PUBLIC gCanvas::Core Salts::CMeta)
+  set_target_properties(gcanvas_shader_model PROPERTIES
+    EXPORT_NAME ShaderModel
+    OUTPUT_NAME gcanvas_shader_model
+    POSITION_INDEPENDENT_CODE ON)
+endif()
 
 if(GCANVAS_BUILD_SVG)
   find_package(plutosvg CONFIG REQUIRED)
@@ -290,6 +313,9 @@ add_library(gcanvas INTERFACE)
 add_library(gCanvas::gCanvas ALIAS gcanvas)
 set_target_properties(gcanvas PROPERTIES EXPORT_NAME gCanvas)
 target_link_libraries(gcanvas INTERFACE gCanvas::Core)
+if(GCANVAS_BUILD_SHADER_MODEL)
+  target_link_libraries(gcanvas INTERFACE gCanvas::ShaderModel)
+endif()
 if(GCANVAS_BUILD_SVG)
   target_link_libraries(gcanvas INTERFACE gCanvas::Svg)
 endif()
@@ -318,6 +344,12 @@ if(GCANVAS_BUILD_TESTS)
   add_executable(gcanvas_utf8_test tests/utf8_test.cpp)
   target_compile_features(gcanvas_utf8_test PRIVATE cxx_std_17)
   add_test(NAME gcanvas_utf8 COMMAND gcanvas_utf8_test)
+
+  if(GCANVAS_BUILD_SHADER_MODEL)
+    add_executable(gcanvas_shader_binding_test tests/shader_binding_test.cpp)
+    target_link_libraries(gcanvas_shader_binding_test PRIVATE gCanvas::ShaderModel)
+    add_test(NAME gcanvas_shader_binding COMMAND gcanvas_shader_binding_test)
+  endif()
 
   if(GCANVAS_BUILD_SVG)
     add_executable(gcanvas_svg_test tests/svg_test.cpp)
@@ -403,6 +435,9 @@ if(GCANVAS_BUILD_EXAMPLES)
 endif()
 
 set(_gcanvas_install_targets gcanvas_core gcanvas)
+if(GCANVAS_BUILD_SHADER_MODEL)
+  list(APPEND _gcanvas_install_targets gcanvas_shader_model)
+endif()
 if(GCANVAS_BUILD_SVG)
   list(APPEND _gcanvas_install_targets gcanvas_svg)
 endif()
@@ -433,6 +468,10 @@ install(EXPORT gCanvasTargets
   NAMESPACE gCanvas::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gCanvas)
 
+set(GCANVAS_CONFIG_FIND_SALTS "")
+if(GCANVAS_BUILD_SHADER_MODEL)
+  set(GCANVAS_CONFIG_FIND_SALTS "find_dependency(Salts CONFIG)")
+endif()
 set(GCANVAS_CONFIG_FIND_GLFW "")
 if(GCANVAS_BUILD_WINDOW)
   set(GCANVAS_CONFIG_FIND_GLFW "find_dependency(glfw3 CONFIG)")
