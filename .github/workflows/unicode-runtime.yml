@@ -17,8 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+  SALTS_SHA: 5cbaa899b9c097efaa72ed7bad793b04291800c4
+  SALTS_UTILS_SHA: 4d38c29abf12f69786e7eb0712262e751ff4bf8e
 
 jobs:
   unicode-runtime:
@@ -79,6 +79,7 @@ jobs:
             .ci/salts-utils/unicode/src/salts_unicode.re
           headers=(
             -isystem .ci/salts-utils/unicode/include
+            -I .ci/salts-utils/unicode/src
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include
@@ -90,12 +91,17 @@ jobs:
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts-utils/unicode/src/salts_unicode_emoji.c -o build/unicode-runtime/unicode_emoji.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts-utils/unicode/src/salts_unicode_grapheme.c -o build/unicode-runtime/unicode_grapheme.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
           c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
             flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
-            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
+            build/unicode-runtime/unicode.o build/unicode-runtime/unicode_emoji.o \
+            build/unicode-runtime/unicode_grapheme.o build/unicode-runtime/tinytest.o \
             build/unicode-runtime/tinymock.o -pthread -ldl -lm \
             -o build/unicode-runtime/test_text_util_unicode
 
@@ -241,6 +247,10 @@ jobs:
             package_build="$PACKAGE_BUILD_ROOT/$package"
             ports="$EXTERNAL_PORTS_ROOT/$package"
             extra=()
+            overlay=()
+            if [ -d "$source/vcpkg-ports" ]; then
+              overlay+=("-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports")
+            fi
             if [ "$package" = salts-utils ]; then
               extra+=(
                 -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
@@ -252,7 +262,7 @@ jobs:
               -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
               "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DVCPKG_INSTALLED_DIR=$ports" "${overlay[@]}" \
               "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
               "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
               -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \

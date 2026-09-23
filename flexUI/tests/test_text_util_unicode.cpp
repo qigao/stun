@@ -151,6 +151,66 @@ spec("FlexUI strict Unicode scalar scanning") {
     check_equal(utf8_scalar_count(text), std::size_t{1});
   }
 
+
+  it("uses Unicode 17 emoji properties without treating every Emoji scalar as presentation") {
+    check_true(is_emoji(0x1F600u));
+    check_true(is_emoji(static_cast<uint32_t>('1')));
+    check_false(is_emoji(static_cast<uint32_t>('A')));
+    check_true(is_emoji_modifier(0x1F3FBu));
+    check_true(is_emoji_modifier(0xFE0Fu));
+    check_true(is_emoji_modifier(0x200Du));
+
+    const auto plain_digit = segment_text("1");
+    check_equal(plain_digit.size(), std::size_t{1});
+    check(plain_digit.front().type == TextSegmentType::Regular);
+
+    const std::string keycap = std::string("1") + "\xEF\xB8\x8F\xE2\x83\xA3";
+    const auto keycap_segments = segment_text(keycap);
+    check_equal(keycap_segments.size(), std::size_t{1});
+    check(keycap_segments.front().type == TextSegmentType::Emoji);
+    check_equal(keycap_segments.front().text, keycap);
+  }
+
+  it("classifies complete grapheme clusters for emoji font policy") {
+    const std::string woman_technologist =
+        "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB";
+    const std::string flag_us =
+        "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8";
+    const std::string heart_emoji =
+        "\xE2\x9D\xA4\xEF\xB8\x8F";
+    const std::string heart_text =
+        "\xE2\x9D\xA4\xEF\xB8\x8E";
+
+    for (const auto& emoji_cluster :
+         {woman_technologist, flag_us, heart_emoji}) {
+      const auto segments = segment_text(emoji_cluster);
+      check_equal(segments.size(), std::size_t{1});
+      check(segments.front().type == TextSegmentType::Emoji);
+      check_equal(segments.front().text, emoji_cluster);
+      check_true(has_emoji(emoji_cluster));
+    }
+
+    const auto text_segments = segment_text(heart_text);
+    check_equal(text_segments.size(), std::size_t{1});
+    check(text_segments.front().type == TextSegmentType::Regular);
+    check_false(has_emoji(heart_text));
+  }
+
+  it("coalesces adjacent grapheme clusters with the same rendering policy") {
+    const std::string grin = "\xF0\x9F\x98\x80";
+    const std::string wave = "\xF0\x9F\x91\x8B";
+    const std::string input = std::string("AB") + grin + wave + "CD";
+    const auto segments = segment_text(input);
+
+    check_equal(segments.size(), std::size_t{3});
+    check(segments[0].type == TextSegmentType::Regular);
+    check_equal(segments[0].text, "AB");
+    check(segments[1].type == TextSegmentType::Emoji);
+    check_equal(segments[1].text, grin + wave);
+    check(segments[2].type == TextSegmentType::Regular);
+    check_equal(segments[2].text, "CD");
+  }
+
   it("validates malformed suffixes even after finding an emoji") {
     const std::string emoji("\xF0\x9F\x98\x80", 4);
     const std::string text = emoji + std::string("\0", 1) + "\xC0\xAF";
