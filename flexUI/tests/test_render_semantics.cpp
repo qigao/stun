@@ -2220,6 +2220,61 @@ spec("RenderManager applies parsed CSS text-transform to plain text") {
   }
 }
 
+spec("Text fallback measurement uses Unicode grapheme spacing units") {
+  it("counts combining sequences as one letter-spacing unit") {
+    ComputedStyle base;
+    base.font_size = 10.0f;
+
+    ComputedStyle spaced = base;
+    spaced.letter_spacing = 4.0f;
+
+    const std::string text = std::string("e") + "\xCC\x81" + "X";
+    const float natural = approximate_text_width(&base, text);
+    const float with_spacing = approximate_text_width(&spaced, text);
+
+    check(approx_eq(with_spacing - natural, 4.0f, 0.001f));
+  }
+
+  it("does not scale non-ASCII fallback width by UTF-8 byte length") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+
+    const float ascii = approximate_text_width(&style, "A");
+    const float cjk =
+        approximate_text_width(&style, "\xE4\xB8\xAD");
+    const float combining =
+        approximate_text_width(&style, std::string("e") + "\xCC\x81");
+
+    check(approx_eq(cjk, ascii, 0.001f));
+    check(approx_eq(combining, ascii, 0.001f));
+  }
+
+  it("measures an emoji ZWJ sequence as one grapheme fallback unit") {
+    ComputedStyle style;
+    style.font_size = 10.0f;
+    const std::string woman_technologist =
+        "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB";
+
+    check(approx_eq(
+        approximate_segmented_text_width(&style, woman_technologist),
+        10.0f, 0.001f));
+  }
+
+  it("applies word spacing to Unicode White_Space graphemes") {
+    ComputedStyle base;
+    base.font_size = 10.0f;
+
+    ComputedStyle spaced = base;
+    spaced.word_spacing = 8.0f;
+
+    const std::string text = std::string("A") + "\xC2\xA0" + "B";
+    const float natural = approximate_text_width(&base, text);
+    const float with_spacing = approximate_text_width(&spaced, text);
+
+    check(approx_eq(with_spacing - natural, 8.0f, 0.001f));
+  }
+}
+
 spec("RenderManager applies parsed CSS letter spacing to plain text") {
   it("runs") {
     Box base_box(nullptr);
