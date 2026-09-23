@@ -79,6 +79,7 @@ jobs:
             .ci/salts-utils/unicode/src/salts_unicode.re
           headers=(
             -isystem .ci/salts-utils/unicode/include
+            -I .ci/salts-utils/unicode/src
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include
