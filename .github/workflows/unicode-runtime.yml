@@ -247,6 +247,10 @@ jobs:
             package_build="$PACKAGE_BUILD_ROOT/$package"
             ports="$EXTERNAL_PORTS_ROOT/$package"
             extra=()
+            overlay=()
+            if [ -d "$source/vcpkg-ports" ]; then
+              overlay+=("-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports")
+            fi
             if [ "$package" = salts-utils ]; then
               extra+=(
                 -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
@@ -258,7 +262,7 @@ jobs:
               -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
               "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DVCPKG_INSTALLED_DIR=$ports" "${overlay[@]}" \
               "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
               "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
               -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
