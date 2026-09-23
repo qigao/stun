@@ -91,12 +91,17 @@ jobs:
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts-utils/unicode/src/salts_unicode_emoji.c -o build/unicode-runtime/unicode_emoji.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
+            -c .ci/salts-utils/unicode/src/salts_unicode_grapheme.c -o build/unicode-runtime/unicode_grapheme.o
+          cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
           c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
             flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
-            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
+            build/unicode-runtime/unicode.o build/unicode-runtime/unicode_emoji.o \
+            build/unicode-runtime/unicode_grapheme.o build/unicode-runtime/tinytest.o \
             build/unicode-runtime/tinymock.o -pthread -ldl -lm \
             -o build/unicode-runtime/test_text_util_unicode
 
