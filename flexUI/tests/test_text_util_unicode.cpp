@@ -162,12 +162,12 @@ spec("FlexUI strict Unicode scalar scanning") {
 
     const auto plain_digit = segment_text("1");
     check_equal(plain_digit.size(), std::size_t{1});
-    check_equal(plain_digit.front().type, TextSegmentType::Regular);
+    check(plain_digit.front().type == TextSegmentType::Regular);
 
     const std::string keycap = std::string("1") + "\xEF\xB8\x8F\xE2\x83\xA3";
     const auto keycap_segments = segment_text(keycap);
     check_equal(keycap_segments.size(), std::size_t{1});
-    check_equal(keycap_segments.front().type, TextSegmentType::Emoji);
+    check(keycap_segments.front().type == TextSegmentType::Emoji);
     check_equal(keycap_segments.front().text, keycap);
   }
 
@@ -185,14 +185,14 @@ spec("FlexUI strict Unicode scalar scanning") {
          {woman_technologist, flag_us, heart_emoji}) {
       const auto segments = segment_text(emoji_cluster);
       check_equal(segments.size(), std::size_t{1});
-      check_equal(segments.front().type, TextSegmentType::Emoji);
+      check(segments.front().type == TextSegmentType::Emoji);
       check_equal(segments.front().text, emoji_cluster);
       check_true(has_emoji(emoji_cluster));
     }
 
     const auto text_segments = segment_text(heart_text);
     check_equal(text_segments.size(), std::size_t{1});
-    check_equal(text_segments.front().type, TextSegmentType::Regular);
+    check(text_segments.front().type == TextSegmentType::Regular);
     check_false(has_emoji(heart_text));
   }
 
@@ -203,11 +203,11 @@ spec("FlexUI strict Unicode scalar scanning") {
     const auto segments = segment_text(input);
 
     check_equal(segments.size(), std::size_t{3});
-    check_equal(segments[0].type, TextSegmentType::Regular);
+    check(segments[0].type == TextSegmentType::Regular);
     check_equal(segments[0].text, "AB");
-    check_equal(segments[1].type, TextSegmentType::Emoji);
+    check(segments[1].type == TextSegmentType::Emoji);
     check_equal(segments[1].text, grin + wave);
-    check_equal(segments[2].type, TextSegmentType::Regular);
+    check(segments[2].type == TextSegmentType::Regular);
     check_equal(segments[2].text, "CD");
   }
 
