@@ -18,7 +18,7 @@ concurrency:
 
 env:
   SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+  SALTS_UTILS_SHA: 4d38c29abf12f69786e7eb0712262e751ff4bf8e
 
 jobs:
   unicode-runtime:
