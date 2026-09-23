@@ -25,7 +25,7 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     {
     public:
         static constexpr int shader_texture_array_size = 10;
-        static constexpr int shader_batch_capacity = 128;
+        static constexpr int shader_batch_capacity = GCANVAS_GL_SHADER_BATCH_CAPACITY;
         int MAX_UNIFORM_RECT_PER_BLOCK_COUNT = -1;
 
         struct uniform_rect

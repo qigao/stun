@@ -1991,7 +1991,7 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
                 shader_batch_capacity * static_cast<int>(sizeof(uniform_rect));
             if (uniform_block_size < required_uniform_block_size)
                 throw std::runtime_error(
-                    "GL uniform block capacity is below the 128-record shader contract");
+                    "GL uniform block capacity is below the selected shader batch contract");
 
             GLint texture_units = 0;
             glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &texture_units);
@@ -2115,6 +2115,17 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             shaderProgram = 0;
             throw std::runtime_error(std::string("OpenGL shader link failed: ") + infoLog);
         }
+
+        const GLuint uniform_block_index = glGetUniformBlockIndex(shaderProgram, "UBO");
+        if (uniform_block_index == GL_INVALID_INDEX)
+        {
+            glDeleteShader(vertexShader);
+            glDeleteShader(fragmentShader);
+            glDeleteProgram(shaderProgram);
+            shaderProgram = 0;
+            throw std::runtime_error("OpenGL UBO uniform block is unavailable");
+        }
+        glUniformBlockBinding(shaderProgram, uniform_block_index, 0);
 
         glValidateProgram(shaderProgram);
 

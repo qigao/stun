@@ -85,7 +85,7 @@ slot because synchronization and command-buffer lifetime belong to its host.
 
 ## Host ownership
 
-An OpenGL or Vulkan create-info is copied into the context. Its `user_data` is borrowed: the host
+An OpenGL, OpenGLES, or Vulkan create-info is copied into the context. Its `user_data` is borrowed: the host
 owns the pointed-to object and keeps it alive until the context destructor returns. Callback
 function pointers remain valid for the same interval. Vulkan extension names are copied before the
 factory returns and need only remain valid during that callback.
@@ -94,6 +94,21 @@ OpenGL `HostManaged` callbacks provide procedure loading, make-current, framebuf
 buffer swap. `External` presentation requires only procedure loading and framebuffer extent: the
 caller keeps the context current and owns buffer swapping, while `present_frame()` still closes
 the submitted frame and releases its transient command references.
+
+OpenGLES uses native GLES 3 entry points and does not depend on GLAD. `HostManaged` requires
+make-current, framebuffer extent, swap, and swap-interval callbacks. `External` requires
+framebuffer extent while the caller owns current-context and presentation state.
+
+On Android, `AndroidEglHost` owns the EGL display/config/context, a persistent fallback pbuffer,
+the current window EGLSurface, and one acquired reference to the attached `ANativeWindow`.
+`suspend(context)` is called between completed frames, resizes the gCanvas context to zero,
+switches the GLES context to the fallback pbuffer, destroys the window EGLSurface, and releases its
+ANativeWindow reference. `resume(context, window)` acquires the replacement ANativeWindow,
+creates and makes current a new window EGLSurface, queries its framebuffer extent, and resizes the
+same gCanvas context. These operations and callbacks are confined to the creating thread. A true
+`EGL_CONTEXT_LOST` is not ordinary surface loss: the v1 contract reports it as a hard failure and
+requires full recreation of the gCanvas context and AndroidEglHost.
+
 Vulkan callbacks provide required instance extensions and surface creation. gCanvas owns the
 Vulkan instance, device, swapchain, queue submission, and presentation; the host owns the native
 window and destroys it only after the context.
@@ -126,9 +141,25 @@ default geometry limit is 262,144 mask quads per path. Non-solid paint lookup te
 256 RGBA pixels. Gradient entries use a Context-owned cache bounded by `max_path_surfaces`; an
 entry referenced by the current frame is pinned until `present_frame()`, cache hits reuse the same
 GPU image, and a miss fails explicitly if every slot is pinned. Opaque image patterns reuse their
-existing context-owned sampler. OpenGL borrows the host default framebuffer stencil attachment and
-requires at least one bit. Vulkan owns one stencil image, memory allocation, and view per swapchain
+existing context-owned sampler. The GL-family renderers borrow the host default framebuffer stencil attachment and require at least
+three stencil bits for path coverage, shifted-path coverage, and convex clipping. Vulkan owns one stencil image, memory allocation, and view per swapchain
 image and destroys them with the corresponding framebuffers.
+
+## Android surface lifecycle
+
+Ordinary Android Surface loss does not destroy renderer resources. The required order is:
+
+1. Complete the current frame with `present_frame()`.
+2. Call `AndroidEglHost::suspend(context)`.
+3. Allow the Java/Android Surface and its ANativeWindow wrapper to disappear.
+4. Keep the same `Context`, images, fonts, shader program, and EGLContext alive on the fallback
+   pbuffer.
+5. When a replacement Surface is created, obtain a new `ANativeWindow*` and call
+   `AndroidEglHost::resume(context, window)`.
+6. Continue rendering through the same context/resources.
+
+Do not call suspend/resume with a desktop OpenGL or Vulkan context. Do not treat
+`EGL_CONTEXT_LOST` as surface recreation; destroy and recreate the renderer/host in that case.
 
 ## Shutdown order
 
@@ -146,8 +177,16 @@ There is no partially usable public context.
 ## Validation
 
 Contract tests check non-copyability, unique ownership, callback and pointer-capture signatures,
-default resource limits, and the absence of explicit destroy APIs. GPU tests create an invisible
-real GLFW window for each built backend, acquire and release native capture on Windows, render and
-read back known pixels, resize, create and update a dynamic image, render again, and present. The
+default resource limits, and the absence of explicit destroy APIs. GPU tests create an invisible real GLFW window for each desktop backend, acquire and release native
+capture on Windows, render and read back known pixels, resize, create and update a dynamic image,
+render again, and present. A separate Mesa EGL pbuffer gate creates a real GLES 3 context, compiles
+and links the GLSL ES 3.00 profile, renders, reads pixels back, and verifies that the GLES-only
+target has no GLAD/GLFW dependency. Android NDK gates compile/link the AndroidEGL adapter and the
+default Android OpenGLES + AndroidEGL CMake targets.
+
+The Android runtime qualification app runs on an emulator/device and replaces its SurfaceView while
+retaining the same gCanvas context and uploaded image. It verifies a first red frame, suspends on
+surface destruction, resumes on a replacement ANativeWindow, then verifies a second green frame
+using the pre-existing texture while also exercising text and analytic primitives. The
 OpenGL/Vulkan libraries are also inspected through their exported link interfaces to ensure GLFW
 is confined to `gCanvas::Window`.
