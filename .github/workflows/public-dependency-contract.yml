@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: 5cbaa899b9c097efaa72ed7bad793b04291800c4
           path: .ci/salts
 
       - name: Verify canonical dependency surface
@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: 5cbaa899b9c097efaa72ed7bad793b04291800c4
           path: .ci/salts
 
       - name: Verify FlexUI main runtime has one Core provider
@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: 5cbaa899b9c097efaa72ed7bad793b04291800c4
           path: .ci/salts
 
       - name: Checkout canonical SaltsUtils
@@ -189,7 +189,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: 5cbaa899b9c097efaa72ed7bad793b04291800c4
           path: .ci/salts
 
       - name: Checkout pinned SaltsUtils
