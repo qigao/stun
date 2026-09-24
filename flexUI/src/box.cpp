@@ -346,24 +346,20 @@ void start_transition_if_changed(TransitionManager& transitions,
 
 void start_color_transition_if_changed(TransitionManager& transitions,
                                        std::uintptr_t element_id,
-                                       const std::string& property_prefix,
+                                       const std::string& property_name,
                                        const Color& previous_value,
                                        const Color& target_value,
                                        const TransitionDef& def,
                                        float current_time_ms,
                                        bool& started_any) {
-  start_transition_if_changed(transitions, element_id, property_prefix + "-r",
-                              previous_value.r, target_value.r, def,
-                              current_time_ms, started_any);
-  start_transition_if_changed(transitions, element_id, property_prefix + "-g",
-                              previous_value.g, target_value.g, def,
-                              current_time_ms, started_any);
-  start_transition_if_changed(transitions, element_id, property_prefix + "-b",
-                              previous_value.b, target_value.b, def,
-                              current_time_ms, started_any);
-  start_transition_if_changed(transitions, element_id, property_prefix + "-a",
-                              previous_value.a, target_value.a, def,
-                              current_time_ms, started_any);
+  const auto* property = detail::style_property_find(property_name);
+  if (!property) {
+    return;
+  }
+  if (transitions.start_color(element_id, *property, previous_value,
+                              target_value, def, current_time_ms)) {
+    started_any = true;
+  }
 }
 
 bool animation_spec_changed(const ComputedStyle& previous_style,

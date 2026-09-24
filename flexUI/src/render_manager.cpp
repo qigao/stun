@@ -3,6 +3,7 @@
  */
 
 #include <flexUI/render_manager.h>
+#include <flexUI/detail/style_property_registry.h>
 #include <flexUI/element.h>
 #include <flexUI/box.h>
 #include <flexUI/renderer.h>
@@ -123,6 +124,18 @@ RenderCommandList make_render_commands(
     const flex::RendererCapabilities& capabilities,
     const Transform& transform_prefix) {
   return RenderCommandList(capabilities, transform_prefix);
+}
+
+Color get_transition_color(TransitionManager& transitions,
+                           std::uintptr_t element_id,
+                           detail::StylePropertyId property_id,
+                           const Color& fallback,
+                           float current_time_ms) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  return property
+             ? transitions.get_color(element_id, *property, fallback,
+                                     current_time_ms)
+             : fallback;
 }
 
 struct RenderProfile {
@@ -1948,20 +1961,16 @@ void RenderManager::render_element(Element* elem,
                                           transform_scale_y, current_time);
       transform_rotate = transitions.get(element_id, "transform-rotate",
                                          transform_rotate, current_time);
-      opacity = transitions.get(element_id, "opacity", opacity, current_time);
+      if (const auto* opacity_property =
+              detail::style_property_descriptor(
+                  detail::StylePropertyId::Opacity)) {
+        opacity = transitions.get_float(
+            element_id, *opacity_property, opacity, current_time);
+      }
       const Color before_border_color = border_color;
-      border_color.r =
-          transitions.get(element_id, "border-color-r", border_color.r,
-                          current_time);
-      border_color.g =
-          transitions.get(element_id, "border-color-g", border_color.g,
-                          current_time);
-      border_color.b =
-          transitions.get(element_id, "border-color-b", border_color.b,
-                          current_time);
-      border_color.a =
-          transitions.get(element_id, "border-color-a", border_color.a,
-                          current_time);
+      border_color = get_transition_color(
+          transitions, element_id, detail::StylePropertyId::BorderColor,
+          border_color, current_time);
       border_color_effect_active =
           border_color_effect_active ||
           std::fabs(border_color.r - before_border_color.r) > 0.001f ||
@@ -1973,38 +1982,19 @@ void RenderManager::render_element(Element* elem,
       outline_offset =
           transitions.get(element_id, "outline-offset", outline_offset,
                           current_time);
-      outline_color.r =
-          transitions.get(element_id, "outline-color-r", outline_color.r,
-                          current_time);
-      outline_color.g =
-          transitions.get(element_id, "outline-color-g", outline_color.g,
-                          current_time);
-      outline_color.b =
-          transitions.get(element_id, "outline-color-b", outline_color.b,
-                          current_time);
-      outline_color.a =
-          transitions.get(element_id, "outline-color-a", outline_color.a,
-                          current_time);
+      outline_color = get_transition_color(
+          transitions, element_id, detail::StylePropertyId::OutlineColor,
+          outline_color, current_time);
       ring_width = transitions.get(element_id, "ring-width", ring_width,
                                    current_time);
       ring_offset = transitions.get(element_id, "ring-offset", ring_offset,
                                     current_time);
-      ring_color.r =
-          transitions.get(element_id, "ring-color-r", ring_color.r, current_time);
-      ring_color.g =
-          transitions.get(element_id, "ring-color-g", ring_color.g, current_time);
-      ring_color.b =
-          transitions.get(element_id, "ring-color-b", ring_color.b, current_time);
-      ring_color.a =
-          transitions.get(element_id, "ring-color-a", ring_color.a, current_time);
-      ring_offset_color.r = transitions.get(element_id, "ring-offset-color-r",
-                                            ring_offset_color.r, current_time);
-      ring_offset_color.g = transitions.get(element_id, "ring-offset-color-g",
-                                            ring_offset_color.g, current_time);
-      ring_offset_color.b = transitions.get(element_id, "ring-offset-color-b",
-                                            ring_offset_color.b, current_time);
-      ring_offset_color.a = transitions.get(element_id, "ring-offset-color-a",
-                                            ring_offset_color.a, current_time);
+      ring_color = get_transition_color(
+          transitions, element_id, detail::StylePropertyId::RingColor,
+          ring_color, current_time);
+      ring_offset_color = get_transition_color(
+          transitions, element_id, detail::StylePropertyId::RingOffsetColor,
+          ring_offset_color, current_time);
       primary_shadow.offset_x =
           transitions.get(element_id, "box-shadow-offset-x",
                           primary_shadow.offset_x, current_time);
@@ -2017,18 +2007,9 @@ void RenderManager::render_element(Element* elem,
       primary_shadow.spread_radius =
           transitions.get(element_id, "box-shadow-spread",
                           primary_shadow.spread_radius, current_time);
-      primary_shadow.color.r =
-          transitions.get(element_id, "box-shadow-color-r",
-                          primary_shadow.color.r, current_time);
-      primary_shadow.color.g =
-          transitions.get(element_id, "box-shadow-color-g",
-                          primary_shadow.color.g, current_time);
-      primary_shadow.color.b =
-          transitions.get(element_id, "box-shadow-color-b",
-                          primary_shadow.color.b, current_time);
-      primary_shadow.color.a =
-          transitions.get(element_id, "box-shadow-color-a",
-                          primary_shadow.color.a, current_time);
+      primary_shadow.color = get_transition_color(
+          transitions, element_id, detail::StylePropertyId::BoxShadowColor,
+          primary_shadow.color, current_time);
     }
     if (animations.has_any_effects() &&
         animations.has_effect(element_id, current_time)) {
@@ -2310,14 +2291,9 @@ void RenderManager::render_element(Element* elem,
     const float current_time = elem->owner_box_->time();
     if (transitions.has_any_active() &&
         transitions.has_active(element_id, current_time)) {
-      bg_color.r = transitions.get(element_id, "background-color-r", bg_color.r,
-                                   current_time);
-      bg_color.g = transitions.get(element_id, "background-color-g", bg_color.g,
-                                   current_time);
-      bg_color.b = transitions.get(element_id, "background-color-b", bg_color.b,
-                                   current_time);
-      bg_color.a = transitions.get(element_id, "background-color-a", bg_color.a,
-                                   current_time);
+      bg_color = get_transition_color(
+          transitions, element_id, detail::StylePropertyId::BackgroundColor,
+          bg_color, current_time);
     }
     if (animations.has_any_effects() &&
         animations.has_effect(element_id, current_time)) {

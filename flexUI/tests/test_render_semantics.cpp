@@ -5553,14 +5553,12 @@ spec("RenderManager uses active background-color transitions during rendering") 
     def.duration_ms = 200.0f;
     def.delay_ms = 0.0f;
     def.easing = EasingType::Linear;
-    box.transitions().start(element_id, "background-color-r", 0.2f, 0.6f, def,
-                            0.0f);
-    box.transitions().start(element_id, "background-color-g", 0.4f, 0.8f, def,
-                            0.0f);
-    box.transitions().start(element_id, "background-color-b", 0.6f, 0.2f, def,
-                            0.0f);
-    box.transitions().start(element_id, "background-color-a", 1.0f, 1.0f, def,
-                            0.0f);
+    const auto* background_property = detail::style_property_descriptor(
+        detail::StylePropertyId::BackgroundColor);
+    check_not_null(background_property);
+    check_true(box.transitions().start_color(
+        element_id, *background_property, Color{0.2f, 0.4f, 0.6f, 1.0f},
+        child.computed_style->background_color, def, 0.0f));
     box.update_time(100.0f);
     render_manager.render_tree(&root);
 
@@ -7038,22 +7036,28 @@ spec("RenderManager uses active border outline and ring transitions during rende
     def.delay_ms = 0.0f;
     def.easing = EasingType::Linear;
 
-    box.transitions().start(element_id, "border-color-r", 0.2f, 0.6f, def, 0.0f);
-    box.transitions().start(element_id, "border-color-g", 0.4f, 0.2f, def, 0.0f);
-    box.transitions().start(element_id, "border-color-b", 0.6f, 0.4f, def, 0.0f);
-    box.transitions().start(element_id, "border-color-a", 1.0f, 0.5f, def, 0.0f);
+    const auto* border_color_property = detail::style_property_descriptor(
+        detail::StylePropertyId::BorderColor);
+    const auto* outline_color_property = detail::style_property_descriptor(
+        detail::StylePropertyId::OutlineColor);
+    const auto* ring_color_property = detail::style_property_descriptor(
+        detail::StylePropertyId::RingColor);
+    check_not_null(border_color_property);
+    check_not_null(outline_color_property);
+    check_not_null(ring_color_property);
+    check_true(box.transitions().start_color(
+        element_id, *border_color_property, Color{0.2f, 0.4f, 0.6f, 1.0f},
+        child->computed_style->border_color, def, 0.0f));
     box.transitions().start(element_id, "outline-width", 0.0f, 2.0f, def, 0.0f);
     box.transitions().start(element_id, "outline-offset", 0.0f, 3.0f, def, 0.0f);
-    box.transitions().start(element_id, "outline-color-r", 0.0f, 0.2f, def, 0.0f);
-    box.transitions().start(element_id, "outline-color-g", 0.0f, 0.4f, def, 0.0f);
-    box.transitions().start(element_id, "outline-color-b", 0.0f, 0.6f, def, 0.0f);
-    box.transitions().start(element_id, "outline-color-a", 0.0f, 1.0f, def, 0.0f);
+    check_true(box.transitions().start_color(
+        element_id, *outline_color_property, Color{0.0f, 0.0f, 0.0f, 0.0f},
+        child->computed_style->outline_color, def, 0.0f));
     box.transitions().start(element_id, "ring-width", 2.0f, 6.0f, def, 0.0f);
     box.transitions().start(element_id, "ring-offset", 0.0f, 2.0f, def, 0.0f);
-    box.transitions().start(element_id, "ring-color-r", 0.1f, 0.5f, def, 0.0f);
-    box.transitions().start(element_id, "ring-color-g", 0.2f, 0.6f, def, 0.0f);
-    box.transitions().start(element_id, "ring-color-b", 0.3f, 0.7f, def, 0.0f);
-    box.transitions().start(element_id, "ring-color-a", 0.2f, 0.8f, def, 0.0f);
+    check_true(box.transitions().start_color(
+        element_id, *ring_color_property, Color{0.1f, 0.2f, 0.3f, 0.2f},
+        child->computed_style->ring_color, def, 0.0f));
 
     box.update_time(100.0f);
     render_manager.render_tree(root);
@@ -7160,13 +7164,13 @@ spec("RenderManager uses active box-shadow transitions during rendering") {
     box.transitions().start(element_id, "box-shadow-offset-y", 1.0f, 5.0f, def, 0.0f);
     box.transitions().start(element_id, "box-shadow-blur", 2.0f, 10.0f, def, 0.0f);
     box.transitions().start(element_id, "box-shadow-spread", 0.0f, 2.0f, def, 0.0f);
-    box.transitions().start(element_id, "box-shadow-color-r", 10.0f / 255.0f,
-                            110.0f / 255.0f, def, 0.0f);
-    box.transitions().start(element_id, "box-shadow-color-g", 20.0f / 255.0f,
-                            120.0f / 255.0f, def, 0.0f);
-    box.transitions().start(element_id, "box-shadow-color-b", 30.0f / 255.0f,
-                            130.0f / 255.0f, def, 0.0f);
-    box.transitions().start(element_id, "box-shadow-color-a", 0.2f, 0.8f, def, 0.0f);
+    const auto* shadow_color_property = detail::style_property_descriptor(
+        detail::StylePropertyId::BoxShadowColor);
+    check_not_null(shadow_color_property);
+    check_true(box.transitions().start_color(
+        element_id, *shadow_color_property,
+        Color{10.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 0.2f},
+        card->computed_style->shadow.color, def, 0.0f));
 
     box.update_time(100.0f);
     render_manager.render_tree(root);
