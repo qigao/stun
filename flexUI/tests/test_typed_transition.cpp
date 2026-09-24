@@ -130,6 +130,51 @@ suite("FlexUI typed TransitionManager core") {
         check_float_eq(mid.a, 0.75f, 0.0001f);
     }
 
+    it("unions reflected impacts for active transitions") {
+        TransitionManager manager;
+        const auto* opacity = style_property_find("opacity");
+        const auto* transform = style_property_find("transform-x");
+        check_not_null(opacity);
+        check_not_null(transform);
+
+        TransitionDef def;
+        def.duration_ms = 100.0f;
+        def.easing = EasingType::Linear;
+
+        check_true(manager.start_float(
+            42, *opacity, 0.0f, 1.0f, def, 0.0f));
+        check_true(manager.start_float(
+            42, *transform, 0.0f, 10.0f, def, 0.0f));
+
+        const std::uint32_t impact = manager.active_impact(42, 25.0f);
+        check_true((impact & STYLE_IMPACT_PAINT) != 0u);
+        check_true((impact & STYLE_IMPACT_COMPOSITE) != 0u);
+        check_true((impact & STYLE_IMPACT_HIT_TEST) != 0u);
+        check( manager.active_impact(7, 25.0f) == STYLE_IMPACT_NONE );
+    }
+
+    it("exposes typed keyframe property impact without changing legacy storage") {
+        AnimationManager manager;
+        const auto* opacity = style_property_find("opacity");
+        check_not_null(opacity);
+
+        AnimationDef def;
+        def.duration_ms = 100.0f;
+        def.easing = EasingType::Linear;
+
+        std::vector<AnimationValuePoint> points = {
+            {0.0f, 0.0f},
+            {1.0f, 1.0f},
+        };
+        check_true(manager.start_float(
+            77, *opacity, points, def, 0.0f));
+
+        const std::uint32_t impact = manager.active_impact(77, 50.0f);
+        check_true((impact & STYLE_IMPACT_PAINT) != 0u);
+        check_true((impact & STYLE_IMPACT_COMPOSITE) != 0u);
+        check(manager.active_impact(78, 50.0f) == STYLE_IMPACT_NONE);
+    }
+
     it("clears typed transitions by element without touching other elements") {
         TransitionManager manager;
         const auto* opacity = style_property_find("opacity");

@@ -1,4 +1,5 @@
 #include <flexUI/detail/style_property_registry.h>
+#include <flexUI/element.h>
 
 #include <flex/core/cmeta_types.h>
 #include <tinytest.hpp>
@@ -100,6 +101,36 @@ suite("FlexUI CMeta style property registry") {
 
         check_false(style_property_write(
             *visibility, style, &cmeta_type_int, &hidden));
+    }
+
+    it("maps style impact metadata onto element dirty stages") {
+        Element element;
+        element.clear_dirty();
+
+        const auto* opacity = style_property_find("opacity");
+        const auto* transform = style_property_find("transform-x");
+        const auto* font_size = style_property_find("font-size");
+        check_not_null(opacity);
+        check_not_null(transform);
+        check_not_null(font_size);
+
+        mark_style_property_dirty(element, *opacity);
+        check_true(element.is_dirty(flex::DirtyFlags::Visual));
+        check_false(element.is_dirty(flex::DirtyFlags::Layout));
+
+        element.clear_dirty();
+        mark_style_property_dirty(element, *transform);
+        check_true(element.is_dirty(flex::DirtyFlags::Visual));
+        check_true(element.is_dirty(flex::DirtyFlags::Bounds));
+        check_true(element.is_dirty(flex::DirtyFlags::WorldBounds));
+        check_false(element.is_dirty(flex::DirtyFlags::Layout));
+
+        element.clear_dirty();
+        mark_style_property_dirty(element, *font_size);
+        check_true(element.is_dirty(flex::DirtyFlags::Content));
+        check_true(element.is_dirty(flex::DirtyFlags::Bounds));
+        check_true(element.is_dirty(flex::DirtyFlags::Layout));
+        check_true(element.is_dirty(flex::DirtyFlags::Visual));
     }
 
     it("covers the current stable transition property subset") {

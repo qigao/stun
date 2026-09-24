@@ -115,8 +115,26 @@ void mark_visible_active_effects_dirty(Element* elem,
   }
 
   const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
-  if (transitions.has_active(element_id, time_ms) ||
-      animations.has_active(element_id, time_ms)) {
+  const bool transition_active =
+      transitions.has_active(element_id, time_ms);
+  const bool animation_active =
+      animations.has_active(element_id, time_ms);
+  const std::uint32_t transition_impact =
+      transitions.active_impact(element_id, time_ms);
+  const std::uint32_t animation_impact =
+      animations.active_impact(element_id, time_ms);
+  const std::uint32_t typed_impact =
+      transition_impact | animation_impact;
+
+  if (typed_impact != detail::STYLE_IMPACT_NONE) {
+    detail::mark_style_impact(*elem, typed_impact);
+  }
+
+  // Legacy string-keyed keyframes are still paint-only until #94 completes.
+  // Keep their old behavior while typed tracks use reflected impact metadata.
+  if (animation_active ||
+      (transition_active &&
+       transition_impact == detail::STYLE_IMPACT_NONE)) {
     elem->mark_paint_dirty();
   }
 
