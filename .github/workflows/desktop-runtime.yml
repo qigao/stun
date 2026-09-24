@@ -118,7 +118,18 @@ jobs:
             libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
             vulkan-validationlayers xvfb xauth fonts-dejavu-core
           dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
-          mapfile -t vulkan_system_libs < <(dpkg -L libvulkan-dev | grep -E '/libvulkan\.so
+          mapfile -t vulkan_system_libs < <(dpkg -L libvulkan-dev | grep -E '/libvulkan\.so$')
+          test "${#vulkan_system_libs[@]}" -eq 1
+          test -f /usr/include/vulkan/vulkan.h
+          vulkan_system_library="$(readlink -e "${vulkan_system_libs[0]}")"
+          test -n "$vulkan_system_library"
+          {
+            echo "VULKAN_SYSTEM_LIBRARY=$vulkan_system_library"
+            echo "VULKAN_SYSTEM_INCLUDE=/usr/include"
+            echo "VULKAN_EXPECTED_LOADER=$vulkan_system_library"
+          } >> "$GITHUB_ENV"
+          sha256sum "$vulkan_system_library" > "$EVIDENCE_DIR/vulkan-loader.sha256"
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" cmake==3.31.6
           echo "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
       - name: Download verified Mesa from this run
         uses: actions/download-artifact@v4
