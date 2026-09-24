@@ -3,6 +3,7 @@
  */
 
 #include <flexUI/render_manager.h>
+#include <flexUI/detail/style_property_registry.h>
 #include <flexUI/element.h>
 #include <flexUI/box.h>
 #include <flexUI/renderer.h>
@@ -1948,7 +1949,12 @@ void RenderManager::render_element(Element* elem,
                                           transform_scale_y, current_time);
       transform_rotate = transitions.get(element_id, "transform-rotate",
                                          transform_rotate, current_time);
-      opacity = transitions.get(element_id, "opacity", opacity, current_time);
+      if (const auto* opacity_property =
+              detail::style_property_descriptor(
+                  detail::StylePropertyId::Opacity)) {
+        opacity = transitions.get_float(
+            element_id, *opacity_property, opacity, current_time);
+      }
       const Color before_border_color = border_color;
       border_color.r =
           transitions.get(element_id, "border-color-r", border_color.r,
