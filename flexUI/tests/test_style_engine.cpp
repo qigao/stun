@@ -73,11 +73,12 @@ private:
   int* destructions_ = nullptr;
 };
 
-void require_color(const Color& color, float r, float g, float b, float a = 1.0f) {
-  check(approx_eq(color.r, r, 0.001f));
-  check(approx_eq(color.g, g, 0.001f));
-  check(approx_eq(color.b, b, 0.001f));
-  check(approx_eq(color.a, a, 0.001f));
+void require_color(const Color& color, float r, float g, float b,
+                   float a = 1.0f, float tolerance = 0.001f) {
+  check(approx_eq(color.r, r, tolerance));
+  check(approx_eq(color.g, g, tolerance));
+  check(approx_eq(color.b, b, tolerance));
+  check(approx_eq(color.a, a, tolerance));
 }
 
 const DrawRectCommand* first_rect_at(const RenderCommandList& commands, float x, float y) {
@@ -7164,7 +7165,7 @@ spec("Box starts background-color transitions on pseudo state changes") {
     root->append(button);
     box.set_root(root);
     box.set_viewport(320.0f, 200.0f);
-  
+
     box.load_css(R"(
       .btn {
         background-color: #336699;
@@ -7175,28 +7176,37 @@ spec("Box starts background-color transitions on pseudo state changes") {
       }
     )");
     box.update();
-  
+
     const auto element_id = reinterpret_cast<std::uintptr_t>(button);
+    const auto* property = detail::style_property_descriptor(
+        detail::StylePropertyId::BackgroundColor);
+    check_not_null(property);
+    if (!property) return;
+
     button->set_hover(true);
     box.update();
-  
+
     check(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "background-color-r", button->computed_style->background_color.r, box.time()), 0x33 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-g", button->computed_style->background_color.g, box.time()), 0x66 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-b", button->computed_style->background_color.b, box.time()), 0x99 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-a", button->computed_style->background_color.a, box.time()), 1.0f, 0.001f));
-  
+    require_color(
+        box.transitions().get_color(
+            element_id, *property, button->computed_style->background_color,
+            box.time()),
+        0x33 / 255.0f, 0x66 / 255.0f, 0x99 / 255.0f);
+
     box.update_time(100.0f);
-    check(approx_eq(box.transitions().get(element_id, "background-color-r", button->computed_style->background_color.r, box.time()), 0.4f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-g", button->computed_style->background_color.g, box.time()), 0.6f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-b", button->computed_style->background_color.b, box.time()), 0.4f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-a", button->computed_style->background_color.a, box.time()), 1.0f, 0.001f));
-  
+    require_color(
+        box.transitions().get_color(
+            element_id, *property, button->computed_style->background_color,
+            box.time()),
+        0.4f, 0.6f, 0.4f, 1.0f, 0.02f);
+
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "background-color-r", button->computed_style->background_color.r, box.time()), 0x99 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-g", button->computed_style->background_color.g, box.time()), 0xcc / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "background-color-b", button->computed_style->background_color.b, box.time()), 0x33 / 255.0f, 0.001f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *property, button->computed_style->background_color,
+            box.time()),
+        0x99 / 255.0f, 0xcc / 255.0f, 0x33 / 255.0f);
   }
 }
 
@@ -7209,7 +7219,7 @@ spec("Box starts border-color transitions on pseudo state changes") {
     root->append(button);
     box.set_root(root);
     box.set_viewport(320.0f, 200.0f);
-  
+
     box.load_css(R"(
       .btn {
         border-width: 1px;
@@ -7221,26 +7231,38 @@ spec("Box starts border-color transitions on pseudo state changes") {
       }
     )");
     box.update();
-  
+
     const auto element_id = reinterpret_cast<std::uintptr_t>(button);
+    const auto* property = detail::style_property_descriptor(
+        detail::StylePropertyId::BorderColor);
+    check_not_null(property);
+    if (!property) return;
+
     button->set_hover(true);
     box.update();
-  
+
     check(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "border-color-r", button->computed_style->border_color.r, box.time()), 0x22 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "border-color-g", button->computed_style->border_color.g, box.time()), 0x44 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "border-color-b", button->computed_style->border_color.b, box.time()), 0x66 / 255.0f, 0.001f));
-  
+    require_color(
+        box.transitions().get_color(
+            element_id, *property, button->computed_style->border_color,
+            box.time()),
+        0x22 / 255.0f, 0x44 / 255.0f, 0x66 / 255.0f);
+
     box.update_time(100.0f);
-    check(approx_eq(box.transitions().get(element_id, "border-color-r", button->computed_style->border_color.r, box.time()), 85.0f / 255.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "border-color-g", button->computed_style->border_color.g, box.time()), 119.0f / 255.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "border-color-b", button->computed_style->border_color.b, box.time()), 68.0f / 255.0f, 0.02f));
-  
+    require_color(
+        box.transitions().get_color(
+            element_id, *property, button->computed_style->border_color,
+            box.time()),
+        85.0f / 255.0f, 119.0f / 255.0f, 68.0f / 255.0f, 1.0f,
+        0.02f);
+
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "border-color-r", button->computed_style->border_color.r, box.time()), 0x88 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "border-color-g", button->computed_style->border_color.g, box.time()), 0xaa / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "border-color-b", button->computed_style->border_color.b, box.time()), 0x22 / 255.0f, 0.001f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *property, button->computed_style->border_color,
+            box.time()),
+        0x88 / 255.0f, 0xaa / 255.0f, 0x22 / 255.0f);
   }
 }
 
@@ -7253,7 +7275,7 @@ spec("Box starts outline and ring transitions on focus-visible changes") {
     root->append(field);
     box.set_root(root);
     box.set_viewport(320.0f, 200.0f);
-  
+
     box.load_css(R"(
       .field {
         outline: none;
@@ -7275,42 +7297,101 @@ spec("Box starts outline and ring transitions on focus-visible changes") {
       }
     )");
     box.update();
-  
+
     const auto element_id = reinterpret_cast<std::uintptr_t>(field);
+    const auto* outline_color = detail::style_property_descriptor(
+        detail::StylePropertyId::OutlineColor);
+    const auto* ring_color = detail::style_property_descriptor(
+        detail::StylePropertyId::RingColor);
+    const auto* ring_offset_color = detail::style_property_descriptor(
+        detail::StylePropertyId::RingOffsetColor);
+    check_not_null(outline_color);
+    check_not_null(ring_color);
+    check_not_null(ring_offset_color);
+    if (!outline_color || !ring_color || !ring_offset_color) return;
+
     field->set_focus_visible(true);
     box.update();
-  
+
     check(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "outline-width", field->computed_style->outline_width, box.time()), 0.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "ring-width", field->computed_style->ring_width, box.time()), 0.0f, 0.001f));
-  
+    check(approx_eq(box.transitions().get(
+                        element_id, "outline-width",
+                        field->computed_style->outline_width, box.time()),
+                    0.0f, 0.001f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "ring-width",
+                        field->computed_style->ring_width, box.time()),
+                    0.0f, 0.001f));
+
     box.update_time(100.0f);
-    check(approx_eq(box.transitions().get(element_id, "outline-width", field->computed_style->outline_width, box.time()), 1.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "outline-offset", field->computed_style->outline_offset, box.time()), 2.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "outline-color-r", field->computed_style->outline_color.r, box.time()), (0x33 / 255.0f) * 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "outline-color-g", field->computed_style->outline_color.g, box.time()), (0x66 / 255.0f) * 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "outline-color-b", field->computed_style->outline_color.b, box.time()), 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "outline-color-a", field->computed_style->outline_color.a, box.time()), 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-width", field->computed_style->ring_width, box.time()), 3.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset", field->computed_style->ring_offset, box.time()), 1.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-color-r", field->computed_style->ring_color.r, box.time()), 8.0f / 255.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-color-g", field->computed_style->ring_color.g, box.time()), 16.0f / 255.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-color-b", field->computed_style->ring_color.b, box.time()), 24.0f / 255.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-color-a", field->computed_style->ring_color.a, box.time()), 0.25f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset-color-r", field->computed_style->ring_offset_color.r, box.time()), (0xf8 / 255.0f) * 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset-color-g", field->computed_style->ring_offset_color.g, box.time()), (0xfa / 255.0f) * 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset-color-b", field->computed_style->ring_offset_color.b, box.time()), (0xfc / 255.0f) * 0.5f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset-color-a", field->computed_style->ring_offset_color.a, box.time()), 0.5f, 0.02f));
-  
+    check(approx_eq(box.transitions().get(
+                        element_id, "outline-width",
+                        field->computed_style->outline_width, box.time()),
+                    1.0f, 0.02f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "outline-offset",
+                        field->computed_style->outline_offset, box.time()),
+                    2.0f, 0.02f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *outline_color, field->computed_style->outline_color,
+            box.time()),
+        (0x33 / 255.0f) * 0.5f, (0x66 / 255.0f) * 0.5f, 0.5f, 0.5f,
+        0.02f);
+    check(approx_eq(box.transitions().get(
+                        element_id, "ring-width",
+                        field->computed_style->ring_width, box.time()),
+                    3.0f, 0.02f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "ring-offset",
+                        field->computed_style->ring_offset, box.time()),
+                    1.0f, 0.02f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *ring_color, field->computed_style->ring_color,
+            box.time()),
+        8.0f / 255.0f, 16.0f / 255.0f, 24.0f / 255.0f, 0.25f,
+        0.02f);
+    require_color(
+        box.transitions().get_color(
+            element_id, *ring_offset_color,
+            field->computed_style->ring_offset_color, box.time()),
+        (0xf8 / 255.0f) * 0.5f, (0xfa / 255.0f) * 0.5f,
+        (0xfc / 255.0f) * 0.5f, 0.5f, 0.02f);
+
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "outline-width", field->computed_style->outline_width, box.time()), 2.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "outline-offset", field->computed_style->outline_offset, box.time()), 4.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "outline-color-r", field->computed_style->outline_color.r, box.time()), 0x33 / 255.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "ring-width", field->computed_style->ring_width, box.time()), 6.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset", field->computed_style->ring_offset, box.time()), 2.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "ring-color-a", field->computed_style->ring_color.a, box.time()), 0.5f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "ring-offset-color-r", field->computed_style->ring_offset_color.r, box.time()), 0xf8 / 255.0f, 0.001f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "outline-width",
+                        field->computed_style->outline_width, box.time()),
+                    2.0f, 0.001f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "outline-offset",
+                        field->computed_style->outline_offset, box.time()),
+                    4.0f, 0.001f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *outline_color, field->computed_style->outline_color,
+            box.time()),
+        0x33 / 255.0f, 0x66 / 255.0f, 1.0f, 1.0f);
+    check(approx_eq(box.transitions().get(
+                        element_id, "ring-width",
+                        field->computed_style->ring_width, box.time()),
+                    6.0f, 0.001f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "ring-offset",
+                        field->computed_style->ring_offset, box.time()),
+                    2.0f, 0.001f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *ring_color, field->computed_style->ring_color,
+            box.time()),
+        16.0f / 255.0f, 32.0f / 255.0f, 48.0f / 255.0f, 0.5f);
+    require_color(
+        box.transitions().get_color(
+            element_id, *ring_offset_color,
+            field->computed_style->ring_offset_color, box.time()),
+        0xf8 / 255.0f, 0xfa / 255.0f, 0xfc / 255.0f, 1.0f);
   }
 }
 
@@ -7387,55 +7468,68 @@ spec("Box starts box-shadow transitions on pseudo state changes") {
     box.update();
 
     const auto element_id = reinterpret_cast<std::uintptr_t>(card);
+    const auto* shadow_color = detail::style_property_descriptor(
+        detail::StylePropertyId::BoxShadowColor);
+    check_not_null(shadow_color);
+    if (!shadow_color) return;
+
     card->set_hover(true);
     box.update();
 
     check(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-offset-y",
-                                          card->computed_style->shadow.offset_y,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-offset-y",
+                        card->computed_style->shadow.offset_y, box.time()),
                     1.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-blur",
-                                          card->computed_style->shadow.blur_radius,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-blur",
+                        card->computed_style->shadow.blur_radius, box.time()),
                     2.0f, 0.001f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *shadow_color, card->computed_style->shadow.color,
+            box.time()),
+        10.0f / 255.0f, 20.0f / 255.0f, 30.0f / 255.0f, 0.2f);
 
     box.update_time(100.0f);
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-offset-y",
-                                          card->computed_style->shadow.offset_y,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-offset-y",
+                        card->computed_style->shadow.offset_y, box.time()),
                     3.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-blur",
-                                          card->computed_style->shadow.blur_radius,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-blur",
+                        card->computed_style->shadow.blur_radius, box.time()),
                     6.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-spread",
-                                          card->computed_style->shadow.spread_radius,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-spread",
+                        card->computed_style->shadow.spread_radius, box.time()),
                     1.0f, 0.02f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-color-a",
-                                          card->computed_style->shadow.color.a,
-                                          box.time()),
-                    0.5f, 0.02f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *shadow_color, card->computed_style->shadow.color,
+            box.time()),
+        60.0f / 255.0f, 70.0f / 255.0f, 80.0f / 255.0f, 0.5f,
+        0.02f);
 
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-offset-y",
-                                          card->computed_style->shadow.offset_y,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-offset-y",
+                        card->computed_style->shadow.offset_y, box.time()),
                     5.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-blur",
-                                          card->computed_style->shadow.blur_radius,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-blur",
+                        card->computed_style->shadow.blur_radius, box.time()),
                     10.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-spread",
-                                          card->computed_style->shadow.spread_radius,
-                                          box.time()),
+    check(approx_eq(box.transitions().get(
+                        element_id, "box-shadow-spread",
+                        card->computed_style->shadow.spread_radius, box.time()),
                     2.0f, 0.001f));
-    check(approx_eq(box.transitions().get(element_id, "box-shadow-color-a",
-                                          card->computed_style->shadow.color.a,
-                                          box.time()),
-                    0.8f, 0.001f));
+    require_color(
+        box.transitions().get_color(
+            element_id, *shadow_color, card->computed_style->shadow.color,
+            box.time()),
+        110.0f / 255.0f, 120.0f / 255.0f, 130.0f / 255.0f, 0.8f);
   }
 }
 
