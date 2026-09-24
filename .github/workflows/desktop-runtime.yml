@@ -380,10 +380,16 @@ jobs:
           # Only the independently tracked GLFW/X11 init owner (#45/#47) is
           # accepted here; any new owner remains a hard Desktop qualification failure.
           leak_blocks = re.findall(
-              r'((?:Direct|Indirect) leak of \d+ byte\(s\).*?)(?=(?:\n(?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\))|(?:\n(?:\d+: )?SUMMARY: AddressSanitizer:)|\Z)',
+              r'((?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\).*?)(?=(?:\n(?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\))|(?:\n(?:\d+: )?SUMMARY: AddressSanitizer:)|\Z)',
               log, re.S)
+          leak_owners = {'x11_init': 0, 'glfw_glx': 0}
           for block in leak_blocks:
-              assert re.search(r'_glfw(?:Connect|Init)X11.*?src/x11_init\.c', block, re.S), block
+              if re.search(r'_glfw(?:Connect|Init)X11.*?src/x11_init\.c', block, re.S):
+                  leak_owners['x11_init'] += 1
+              elif re.search(r'(?:extensionSupportedGLX|_glfwInitGLX).*?(?:glx_context\.c|src/glx_context\.c)', block, re.S):
+                  leak_owners['glfw_glx'] += 1
+              else:
+                  raise AssertionError(block)
               assert 'module-cleanup.patch' not in block, block
           leak_summaries = re.findall(
               r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)
@@ -440,8 +446,9 @@ jobs:
                                  'vulkan_loader': sorted(map(str, vulkan_loaders))}
           result = {'ctest_passed': len(cases), 'tinytest': totals,
                     'runtime_providers': providers,
-                    'known_x11_leak_blocks': len(leak_blocks),
-                    'known_x11_leak_summaries': leak_summaries,
+                    'known_upstream_leak_blocks': len(leak_blocks),
+                    'known_upstream_leak_owners': leak_owners,
+                    'known_upstream_leak_summaries': leak_summaries,
                     'driver_runtime_providers': json.loads((evidence / 'desktop-driver-providers.json').read_text()),
                     'scope': 'Linux Xvfb, patched Mesa llvmpipe and distribution Lavapipe; real FlexUI window/plugin lifecycle and gCanvas pixel/showcase tests. No physical GPU, TurboScript editor, installed desktop, or Windows/macOS claim.'}
           (evidence / 'desktop-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
