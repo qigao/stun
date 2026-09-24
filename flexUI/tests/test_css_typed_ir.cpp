@@ -92,6 +92,56 @@ suite("FlexUI typed CSS declaration literals") {
             compile_css_literal(ring, "var(--ring-width)").has_value());
     }
 
+    it("compiles individual transforms into bounded typed writes") {
+        const auto translate =
+            compile_css_property_writes("translate", "12px -4px");
+        check(translate.size() == static_cast<std::size_t>(2));
+        check(translate[0].property->id == StylePropertyId::TransformX);
+        check(translate[1].property->id == StylePropertyId::TransformY);
+        check_float_eq(std::get<float>(translate[0].value.value),
+                       12.0f, 0.0001f);
+        check_float_eq(std::get<float>(translate[1].value.value),
+                       -4.0f, 0.0001f);
+
+        const auto uniform = compile_css_property_writes("scale", "2");
+        check(uniform.size() == static_cast<std::size_t>(3));
+        check(uniform[0].property->id == StylePropertyId::TransformScale);
+        check_float_eq(std::get<float>(uniform[0].value.value),
+                       2.0f, 0.0001f);
+
+        const auto non_uniform =
+            compile_css_property_writes("scale", "2 3");
+        check(non_uniform.size() == static_cast<std::size_t>(3));
+        check_float_eq(std::get<float>(non_uniform[0].value.value),
+                       1.0f, 0.0001f);
+        check_float_eq(std::get<float>(non_uniform[1].value.value),
+                       2.0f, 0.0001f);
+        check_float_eq(std::get<float>(non_uniform[2].value.value),
+                       3.0f, 0.0001f);
+
+        const auto rotate =
+            compile_css_property_writes("rotate", ".25turn");
+        check(rotate.size() == static_cast<std::size_t>(1));
+        check(rotate[0].property->id == StylePropertyId::TransformRotate);
+        check_float_eq(std::get<float>(rotate[0].value.value),
+                       90.0f, 0.0001f);
+    }
+
+    it("keeps dependent and compound transforms on fallback") {
+        check_true(
+            compile_css_property_writes("translate", "50% 2px").empty());
+        check_true(
+            compile_css_property_writes("translate", "var(--x) 2px").empty());
+        check_true(
+            compile_css_property_writes("scale", "calc(1 + .5)").empty());
+        check_true(
+            compile_css_property_writes("rotate", "var(--angle)").empty());
+        check_true(
+            compile_css_property_writes(
+                "transform", "translate(1px, 2px) scale(2)")
+                .empty());
+    }
+
     it("keeps dependent and unsafe color properties on the fallback path") {
         const auto* background = style_property_find("background-color");
         const auto* border = style_property_find("border-color");

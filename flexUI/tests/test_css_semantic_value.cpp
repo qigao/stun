@@ -62,6 +62,30 @@ suite("FlexUI shared CSS semantic values") {
         check_float_eq(light.value.r, 0x11 / 255.0f, 0.001f);
     }
 
+    it("parses shared context-independent CSS angles") {
+        const auto deg = parse_css_angle_literal("90deg");
+        const auto rad =
+            parse_css_angle_literal("3.14159265358979323846rad");
+        const auto turn = parse_css_angle_literal(".25turn");
+        const auto grad = parse_css_angle_literal("100grad");
+        const auto unitless = parse_css_angle_literal("-45");
+
+        check_true(deg.is_concrete());
+        check_float_eq(deg.value, 90.0f, 0.0001f);
+        check_true(rad.is_concrete());
+        check_float_eq(rad.value, 180.0f, 0.001f);
+        check_true(turn.is_concrete());
+        check_float_eq(turn.value, 90.0f, 0.0001f);
+        check_true(grad.is_concrete());
+        check_float_eq(grad.value, 90.0f, 0.0001f);
+        check_true(unitless.is_concrete());
+        check_float_eq(unitless.value, -45.0f, 0.0001f);
+
+        check_true(parse_css_angle_literal("var(--angle)").is_deferred());
+        check_true(parse_css_angle_literal("calc(90deg)").is_deferred());
+        check_false(parse_css_angle_literal("12px").is_concrete());
+    }
+
     it("classifies declaration-time context-independent lengths") {
         const auto px = parse_css_context_independent_length_literal(" 2px ");
         const auto unitless =

@@ -737,6 +737,7 @@ struct CSSDeclaration {
   uint64_t source_order = 0;
   const detail::StylePropertyDesc* resolved_property = nullptr;
   detail::CompiledCssLiteral compiled_value{};
+  detail::CompiledPropertyWriteList compiled_writes{};
 
   CSSDeclaration(std::string property_value, std::string value_value,
                  bool important_value, uint64_t source_order_value)
@@ -745,12 +746,63 @@ struct CSSDeclaration {
         important(important_value),
         source_order(source_order_value),
         resolved_property(detail::style_property_find(property)),
-        compiled_value(detail::compile_css_literal(resolved_property, value)) {}
+        compiled_value(detail::compile_css_literal(resolved_property, value)),
+        compiled_writes(detail::compile_css_property_writes(property, value)) {}
 };
+
+static const void* compiled_literal_data(
+    const detail::CompiledCssLiteral& literal) {
+  if (!literal.has_value()) {
+    return nullptr;
+  }
+  if (const auto* value = std::get_if<float>(&literal.value)) {
+    return value;
+  }
+  if (const auto* value = std::get_if<Color>(&literal.value)) {
+    return value;
+  }
+  return nullptr;
+}
+
+static bool apply_compiled_writes(
+    const detail::CompiledPropertyWriteList& writes,
+    ComputedStyle* style) {
+  if (!style || writes.empty()) {
+    return false;
+  }
+
+  // Preflight the complete write set before mutating ComputedStyle. Compound
+  // declarations never partially enter the typed path.
+  for (std::size_t i = 0; i < writes.size(); ++i) {
+    const auto& write = writes[i];
+    if (!write.property || !write.property->write ||
+        !write.value.has_value() ||
+        !cmeta_type_equal(write.value.type, write.property->type) ||
+        !compiled_literal_data(write.value)) {
+      return false;
+    }
+  }
+
+  for (std::size_t i = 0; i < writes.size(); ++i) {
+    const auto& write = writes[i];
+    if (!detail::style_property_write(*write.property, *style,
+                                      write.value.type,
+                                      compiled_literal_data(write.value))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 static bool apply_compiled_declaration(const CSSDeclaration& declaration,
                                        ComputedStyle* style) {
-  if (!style || !declaration.resolved_property ||
+  if (!style) {
+    return false;
+  }
+  if (!declaration.compiled_writes.empty()) {
+    return apply_compiled_writes(declaration.compiled_writes, style);
+  }
+  if (!declaration.resolved_property ||
       !declaration.compiled_value.has_value() ||
       !cmeta_type_equal(declaration.compiled_value.type,
                         declaration.resolved_property->type)) {
@@ -7551,23 +7603,11 @@ private:
   }
 
   float parse_angle_degrees(std::string token) {
-    token = to_lower_copy(trim_copy(token));
-    if (token.size() >= 3 && token.compare(token.size() - 3, 3, "deg") == 0) {
-      return std::stof(token.substr(0, token.size() - 3));
+    const auto parsed = detail::parse_css_angle_literal(token);
+    if (!parsed.is_concrete()) {
+      throw std::invalid_argument("invalid CSS angle");
     }
-    if (token.size() >= 3 && token.compare(token.size() - 3, 3, "rad") == 0) {
-      return std::stof(token.substr(0, token.size() - 3)) *
-             180.0f / 3.14159265f;
-    }
-    if (token.size() >= 4 &&
-        token.compare(token.size() - 4, 4, "turn") == 0) {
-      return std::stof(token.substr(0, token.size() - 4)) * 360.0f;
-    }
-    if (token.size() >= 4 &&
-        token.compare(token.size() - 4, 4, "grad") == 0) {
-      return std::stof(token.substr(0, token.size() - 4)) * 0.9f;
-    }
-    return std::stof(token);
+    return parsed.value;
   }
 
   void sync_uniform_transform_scale(ComputedStyle* style) {
