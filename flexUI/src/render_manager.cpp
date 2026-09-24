@@ -2064,10 +2064,12 @@ void RenderManager::render_element(Element* elem,
           std::fabs(border_color.g - before_border_color.g) > 0.001f ||
           std::fabs(border_color.b - before_border_color.b) > 0.001f ||
           std::fabs(border_color.a - before_border_color.a) > 0.001f;
-      outline_width =
-          animations.get(element_id, "outline-width", outline_width, current_time);
-      outline_offset =
-          animations.get(element_id, "outline-offset", outline_offset, current_time);
+      outline_width = get_animation_float(
+          animations, element_id, detail::StylePropertyId::OutlineWidth,
+          outline_width, current_time);
+      outline_offset = get_animation_float(
+          animations, element_id, detail::StylePropertyId::OutlineOffset,
+          outline_offset, current_time);
       outline_color.r =
           animations.get(element_id, "outline-color-r", outline_color.r, current_time);
       outline_color.g =
@@ -2076,10 +2078,12 @@ void RenderManager::render_element(Element* elem,
           animations.get(element_id, "outline-color-b", outline_color.b, current_time);
       outline_color.a =
           animations.get(element_id, "outline-color-a", outline_color.a, current_time);
-      ring_width =
-          animations.get(element_id, "ring-width", ring_width, current_time);
-      ring_offset =
-          animations.get(element_id, "ring-offset", ring_offset, current_time);
+      ring_width = get_animation_float(
+          animations, element_id, detail::StylePropertyId::RingWidth,
+          ring_width, current_time);
+      ring_offset = get_animation_float(
+          animations, element_id, detail::StylePropertyId::RingOffset,
+          ring_offset, current_time);
       ring_color.r =
           animations.get(element_id, "ring-color-r", ring_color.r, current_time);
       ring_color.g =
@@ -2096,15 +2100,18 @@ void RenderManager::render_element(Element* elem,
           element_id, "ring-offset-color-b", ring_offset_color.b, current_time);
       ring_offset_color.a = animations.get(
           element_id, "ring-offset-color-a", ring_offset_color.a, current_time);
-      primary_shadow.offset_x = animations.get(
-          element_id, "box-shadow-offset-x", primary_shadow.offset_x, current_time);
-      primary_shadow.offset_y = animations.get(
-          element_id, "box-shadow-offset-y", primary_shadow.offset_y, current_time);
-      primary_shadow.blur_radius = animations.get(
-          element_id, "box-shadow-blur", primary_shadow.blur_radius, current_time);
-      primary_shadow.spread_radius = animations.get(
-          element_id, "box-shadow-spread", primary_shadow.spread_radius,
-          current_time);
+      primary_shadow.offset_x = get_animation_float(
+          animations, element_id, detail::StylePropertyId::BoxShadowOffsetX,
+          primary_shadow.offset_x, current_time);
+      primary_shadow.offset_y = get_animation_float(
+          animations, element_id, detail::StylePropertyId::BoxShadowOffsetY,
+          primary_shadow.offset_y, current_time);
+      primary_shadow.blur_radius = get_animation_float(
+          animations, element_id, detail::StylePropertyId::BoxShadowBlur,
+          primary_shadow.blur_radius, current_time);
+      primary_shadow.spread_radius = get_animation_float(
+          animations, element_id, detail::StylePropertyId::BoxShadowSpread,
+          primary_shadow.spread_radius, current_time);
       primary_shadow.color.r = animations.get(
           element_id, "box-shadow-color-r", primary_shadow.color.r, current_time);
       primary_shadow.color.g = animations.get(
