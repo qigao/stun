@@ -748,6 +748,27 @@ struct CSSDeclaration {
         compiled_value(detail::compile_css_literal(resolved_property, value)) {}
 };
 
+static bool apply_compiled_declaration(const CSSDeclaration& declaration,
+                                ComputedStyle* style) {
+  if (!style || !declaration.resolved_property ||
+      !declaration.compiled_value.has_value()) {
+    return false;
+  }
+
+  // #118 proves the typed runtime path with opacity only. Other properties
+  // remain on the existing string/computed-value path until separately
+  // qualified.
+  if (declaration.resolved_property->id != detail::StylePropertyId::Opacity ||
+      !cmeta_type_equal(declaration.compiled_value.type, &cmeta_type_float)) {
+    return false;
+  }
+
+  const auto* value = std::get_if<float>(&declaration.compiled_value.value);
+  return value &&
+         detail::style_property_write(*declaration.resolved_property, *style,
+                                      declaration.compiled_value.type, value);
+}
+
 using DeclarationList = std::vector<CSSDeclaration>;
 
 struct CSSRule {
@@ -3353,7 +3374,9 @@ public:
       const auto& prop = declaration.property;
       if (!(prop.size() > 2 && prop[0] == '-' && prop[1] == '-') &&
           prop != "color" && prop != "direction") {
-        apply_property(prop, declaration.value, elem->computed_style);
+        if (!apply_compiled_declaration(declaration, elem->computed_style)) {
+          apply_property(prop, declaration.value, elem->computed_style);
+        }
       }
     }
 
