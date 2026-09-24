@@ -253,6 +253,49 @@ bool style_property_read(const StylePropertyDesc& property,
            property.read(style, out_value);
 }
 
+bool style_property_read_transition(const StylePropertyDesc& property,
+                                    const Element& element,
+                                    const ComputedStyle& style,
+                                    const cmeta_type_desc* expected_type,
+                                    void* out_value) noexcept {
+    if (!property.type || !expected_type || !out_value ||
+        !cmeta_type_equal(property.type, expected_type)) {
+        return false;
+    }
+
+    if (property.id == StylePropertyId::BackgroundColor) {
+        if (!cmeta_type_equal(property.type, &flex::cmeta_type_color)) {
+            return false;
+        }
+        *static_cast<Color*>(out_value) =
+            element.is_widget_owned()
+                ? style.background_color
+                : style.get_variable_color("--bg", style.background_color);
+        return true;
+    }
+
+    return style_property_read(property, style, expected_type, out_value);
+}
+
+bool style_property_matches_transition(
+    const StylePropertyDesc& property,
+    std::string_view transition_name) noexcept {
+    if ((property.flags & STYLE_PROPERTY_TRANSITIONABLE) == 0u ||
+        transition_name.empty()) {
+        return false;
+    }
+
+    if (transition_name == "all") {
+        return true;
+    }
+
+    if (property.transition_group && property.transition_group[0] != '\0') {
+        return transition_name == property.transition_group;
+    }
+
+    return property.css_name && transition_name == property.css_name;
+}
+
 bool style_property_write(const StylePropertyDesc& property,
                           ComputedStyle& style,
                           const cmeta_type_desc* supplied_type,
