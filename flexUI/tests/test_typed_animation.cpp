@@ -106,6 +106,33 @@ suite("FlexUI typed AnimationManager core") {
         check_false(manager.has_any_effects());
     }
 
+    it("keeps reflected transform component tracks independent") {
+        AnimationManager manager;
+        const auto* tx =
+            style_property_descriptor(StylePropertyId::TransformX);
+        const auto* rotate =
+            style_property_descriptor(StylePropertyId::TransformRotate);
+        check_not_null(tx);
+        check_not_null(rotate);
+        if (!tx || !rotate) return;
+
+        const std::vector<AnimationValuePoint> x_points = {
+            {0.0f, 0.0f}, {1.0f, 20.0f}};
+        const std::vector<AnimationValuePoint> rotate_points = {
+            {0.0f, 0.0f}, {1.0f, 90.0f}};
+        check_true(manager.start_float(
+            6, *tx, x_points, linear_animation(), 0.0f));
+        check_true(manager.start_float(
+            6, *rotate, rotate_points, linear_animation(), 0.0f));
+
+        check_float_eq(manager.get_float(6, *tx, -1.0f, 50.0f),
+                       10.0f, 0.0001f);
+        check_float_eq(manager.get_float(6, *rotate, -1.0f, 50.0f),
+                       45.0f, 0.0001f);
+        check_float_eq(manager.get(6, "transform-x", -1.0f, 50.0f),
+                       10.0f, 0.0001f);
+    }
+
     it("coexists with legacy non migrated animation tracks") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
@@ -113,18 +140,18 @@ suite("FlexUI typed AnimationManager core") {
         if (!opacity) return;
 
         check_true(manager.start_float(
-            5, *opacity, opacity_points(), linear_animation(), 0.0f));
+            7, *opacity, opacity_points(), linear_animation(), 0.0f));
 
         std::vector<AnimationValuePoint> legacy = {
             {0.0f, 10.0f}, {1.0f, 20.0f}};
-        manager.start(5, "transform-x", legacy, linear_animation(), 0.0f);
+        manager.start(7, "transform-x", legacy, linear_animation(), 0.0f);
 
-        check_float_eq(manager.get_float(5, *opacity, -1.0f, 50.0f),
+        check_float_eq(manager.get_float(7, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_float_eq(manager.get(5, "transform-x", -1.0f, 50.0f),
+        check_float_eq(manager.get(7, "transform-x", -1.0f, 50.0f),
                        15.0f, 0.0001f);
 
-        manager.clear_element(5);
+        manager.clear_element(7);
         check_false(manager.has_any_effects());
     }
 };
