@@ -593,9 +593,16 @@ public:
   LexborCSSParser(const LexborCSSParser &) = delete;
   LexborCSSParser &operator=(const LexborCSSParser &) = delete;
   lxb_css_stylesheet_t *parse(const char *css, size_t len) {
-    auto *sheet = lxb_css_stylesheet_parse(parser_, reinterpret_cast<const lxb_char_t *>(css), len);
+    auto *sheet = lxb_css_stylesheet_create(nullptr);
     if (!sheet)
+      throw std::runtime_error("Failed to create CSS stylesheet");
+    const auto status =
+        lxb_css_stylesheet_parse(sheet, parser_,
+                                 reinterpret_cast<const lxb_char_t *>(css), len);
+    if (status != LXB_STATUS_OK) {
+      lxb_css_stylesheet_destroy(sheet, true);
       throw std::runtime_error("Failed to parse CSS");
+    }
     return sheet;
   }
   lxb_css_log_t* log() const { return lxb_css_parser_log(parser_); }
@@ -1950,36 +1957,8 @@ static bool extract_media_prelude_and_block(const lxb_css_rule_at_t* at_rule,
                                             std::string& prelude,
                                             std::string& block) {
   std::string serialized;
-  const char* source_begin = source_css.data();
-  const char* source_end = source_begin + source_css.size();
-  const char* rule_begin =
-      reinterpret_cast<const char*>(at_rule ? at_rule->rule.begin : nullptr);
-
-  if (rule_begin != nullptr && rule_begin >= source_begin &&
-      rule_begin < source_end) {
-    const size_t start_offset = static_cast<size_t>(rule_begin - source_begin);
-    size_t media_pos = source_css.find("@media", start_offset);
-    if (media_pos != std::string::npos) {
-      size_t brace_pos = source_css.find('{', media_pos + 6);
-      if (brace_pos != std::string::npos) {
-        int brace_depth = 1;
-        size_t i = brace_pos + 1;
-        for (; i < source_css.size(); ++i) {
-          if (source_css[i] == '{') {
-            ++brace_depth;
-          } else if (source_css[i] == '}') {
-            --brace_depth;
-            if (brace_depth == 0) {
-              serialized = source_css.substr(media_pos, i - media_pos + 1);
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if (serialized.empty() && !serialize_rule_to_string(&at_rule->rule, serialized)) {
+  (void) source_css;
+  if (!serialize_rule_to_string(&at_rule->rule, serialized)) {
     return false;
   }
 
@@ -4191,8 +4170,7 @@ private:
       if (!supports_property_name(declaration.property)) {
         add_diagnostic(CssDiagnosticSeverity::Warning, selector_text,
                        declaration.property, declaration.value,
-                       "unsupported CSS property",
-                       style_rule->rule.begin);
+                       "unsupported CSS property");
       }
       const std::string property = to_lower_copy(declaration.property);
       const std::string value = to_lower_copy(trim_copy(declaration.value));
@@ -4202,7 +4180,7 @@ private:
           std::isnan(detail::parse_css_length(value))) {
         add_diagnostic(CssDiagnosticSeverity::Warning, selector_text,
                        declaration.property, declaration.value,
-                       "invalid CSS size value", style_rule->rule.begin);
+                       "invalid CSS size value");
         return true;
       }
       return false;
