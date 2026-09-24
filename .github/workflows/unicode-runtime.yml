@@ -195,8 +195,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
-          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v2
           restore-keys: |
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
             stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
 
       - name: Prepare isolated tools and evidence
