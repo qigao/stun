@@ -133,6 +133,31 @@ suite("FlexUI typed AnimationManager core") {
                        10.0f, 0.0001f);
     }
 
+    it("keeps reflected effect scalar tracks independent") {
+        AnimationManager manager;
+        const auto* outline =
+            style_property_descriptor(StylePropertyId::OutlineWidth);
+        const auto* blur =
+            style_property_descriptor(StylePropertyId::BoxShadowBlur);
+        check_not_null(outline);
+        check_not_null(blur);
+        if (!outline || !blur) return;
+
+        const std::vector<AnimationValuePoint> outline_points = {
+            {0.0f, 1.0f}, {1.0f, 5.0f}};
+        const std::vector<AnimationValuePoint> blur_points = {
+            {0.0f, 2.0f}, {1.0f, 10.0f}};
+        check_true(manager.start_float(
+            8, *outline, outline_points, linear_animation(), 0.0f));
+        check_true(manager.start_float(
+            8, *blur, blur_points, linear_animation(), 0.0f));
+
+        check_float_eq(manager.get_float(8, *outline, -1.0f, 50.0f),
+                       3.0f, 0.0001f);
+        check_float_eq(manager.get_float(8, *blur, -1.0f, 50.0f),
+                       6.0f, 0.0001f);
+    }
+
     it("coexists with legacy non migrated animation tracks") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
