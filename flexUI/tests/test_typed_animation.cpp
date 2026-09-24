@@ -136,6 +136,40 @@ suite("FlexUI typed AnimationManager core") {
             0.125f, 0.0001f);
     }
 
+    it("samples transform-family tracks by reflected descriptor") {
+        AnimationManager manager;
+        const auto* tx =
+            style_property_descriptor(StylePropertyId::TransformX);
+        const auto* rotate =
+            style_property_descriptor(StylePropertyId::TransformRotate);
+        check_not_null(tx);
+        check_not_null(rotate);
+        if (!tx || !rotate) return;
+
+        const std::vector<AnimationValuePoint> x_points = {
+            {0.0f, 0.0f}, {1.0f, 20.0f}};
+        const std::vector<AnimationValuePoint> rotate_points = {
+            {0.0f, 0.0f}, {1.0f, 90.0f}};
+
+        check_true(manager.start_float(
+            51, *tx, x_points, linear_animation(), 0.0f));
+        check_true(manager.start_float(
+            51, *rotate, rotate_points, linear_animation(), 0.0f));
+
+        check_float_eq(
+            manager.get_float(51, *tx, -1.0f, 50.0f),
+            10.0f, 0.0001f);
+        check_float_eq(
+            manager.get_float(51, *rotate, -1.0f, 50.0f),
+            45.0f, 0.0001f);
+
+        // Compatibility lookup may still resolve through the registry, but the
+        // stored typed track identity is StylePropertyId rather than a string.
+        check_float_eq(
+            manager.get(51, "transform-x", -1.0f, 50.0f),
+            10.0f, 0.0001f);
+    }
+
     it("coexists with legacy non migrated animation tracks") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
