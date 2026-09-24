@@ -106,6 +106,34 @@ suite("FlexUI typed AnimationManager core") {
         check_false(manager.has_any_effects());
     }
 
+    it("interpolates whole Color values including alpha") {
+        AnimationManager manager;
+        const auto* background =
+            style_property_descriptor(StylePropertyId::BackgroundColor);
+        check_not_null(background);
+        if (!background) return;
+
+        std::vector<TypedAnimationPoint> colors = {
+            {0.0f, {&flex::cmeta_type_color,
+                    flex::AnimValue{Color{1.0f, 0.0f, 0.0f, 0.25f}}}},
+            {1.0f, {&flex::cmeta_type_color,
+                    flex::AnimValue{Color{0.0f, 0.0f, 1.0f, 0.75f}}}},
+        };
+        check_true(manager.start_typed(
+            5, *background, colors, linear_animation(), 0.0f));
+
+        const Color midpoint = manager.get_color(
+            5, *background, Color{}, 50.0f);
+        check_float_eq(midpoint.r, 0.5f, 0.0001f);
+        check_float_eq(midpoint.g, 0.0f, 0.0001f);
+        check_float_eq(midpoint.b, 0.5f, 0.0001f);
+        check_float_eq(midpoint.a, 0.5f, 0.0001f);
+
+        check_float_eq(
+            manager.get_float(5, *background, 0.375f, 50.0f),
+            0.375f, 0.0001f);
+    }
+
     it("coexists with legacy non migrated animation tracks") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
@@ -113,18 +141,18 @@ suite("FlexUI typed AnimationManager core") {
         if (!opacity) return;
 
         check_true(manager.start_float(
-            5, *opacity, opacity_points(), linear_animation(), 0.0f));
+            6, *opacity, opacity_points(), linear_animation(), 0.0f));
 
         std::vector<AnimationValuePoint> legacy = {
             {0.0f, 10.0f}, {1.0f, 20.0f}};
-        manager.start(5, "transform-x", legacy, linear_animation(), 0.0f);
+        manager.start(6, "transform-x", legacy, linear_animation(), 0.0f);
 
-        check_float_eq(manager.get_float(5, *opacity, -1.0f, 50.0f),
+        check_float_eq(manager.get_float(6, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_float_eq(manager.get(5, "transform-x", -1.0f, 50.0f),
+        check_float_eq(manager.get(6, "transform-x", -1.0f, 50.0f),
                        15.0f, 0.0001f);
 
-        manager.clear_element(5);
+        manager.clear_element(6);
         check_false(manager.has_any_effects());
     }
 };
