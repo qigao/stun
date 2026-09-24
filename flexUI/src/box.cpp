@@ -8,6 +8,7 @@
 #include <flexUI/render_manager.h>
 #include <flexUI/view_pipeline.h>
 #include <flexUI/tailwindcss.h>
+#include <flexUI/detail/css_typed_value.h>
 #include "default_style_assets.h"
 #include <flex/bridge/renderer.h>
 #include <nlohmann/json.hpp>
@@ -738,6 +739,27 @@ void register_float_animation_track(
   }
 }
 
+void register_typed_float_animation_track(
+    AnimationManager& animations, std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property, float base_value,
+    const std::vector<AnimationKeyframeStep>& keyframes,
+    const AnimationDef& def, float current_time_ms,
+    const std::function<bool(const std::map<std::string, std::string>&,
+                             float&)>& extractor) {
+  std::map<float, float> values;
+  for (const auto& frame : keyframes) {
+    float sampled = 0.0f;
+    if (extractor(frame.properties, sampled)) {
+      values[frame.offset] = sampled;
+    }
+  }
+  std::vector<AnimationValuePoint> points;
+  finalize_animation_points(values, base_value, points);
+  if (!points.empty()) {
+    animations.start_float(element_id, property, points, def, current_time_ms);
+  }
+}
+
 void register_color_animation_track(AnimationManager& animations,
                                     std::uintptr_t element_id,
                                     const std::string& property_prefix,
@@ -836,17 +858,29 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
     def.direction = entry.direction;
     def.play_state = entry.play_state;
 
-    register_float_animation_track(
-        box.animations(), element_id, "opacity", style.opacity, *keyframes, def,
-        current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("opacity");
-          if (it == props.end()) {
+    if (const auto* opacity_property =
+            detail::style_property_descriptor(detail::StylePropertyId::Opacity)) {
+      register_typed_float_animation_track(
+          box.animations(), element_id, *opacity_property, style.opacity,
+          *keyframes, def, current_time_ms,
+          [opacity_property](const auto& props, float& out) {
+            const auto it = props.find("opacity");
+            if (it == props.end()) {
+              return false;
+            }
+            const auto value =
+                detail::compile_css_literal(opacity_property, it->second);
+            if (!value.type ||
+                !cmeta_type_equal(value.type, &cmeta_type_float)) {
+              return false;
+            }
+            if (const auto* scalar = std::get_if<float>(&value.value)) {
+              out = *scalar;
+              return true;
+            }
             return false;
-          }
-          out = std::stof(it->second);
-          return true;
-        });
+          });
+    }
 
     register_color_animation_track(
         box.animations(), element_id, "background-color",
