@@ -287,6 +287,14 @@ public:
     bool has_active(std::uintptr_t element_id, float current_time_ms);
 
     /**
+     * Union StylePropertyImpact metadata for active typed transitions on one
+     * element. The manager remains UI-object agnostic; Box/Element consume the
+     * returned impact.
+     */
+    std::uint32_t active_impact(std::uintptr_t element_id,
+                                float current_time_ms) const noexcept;
+
+    /**
      * Update and remove completed transitions
      */
     void update(float current_time_ms);
@@ -392,6 +400,8 @@ public:
               float default_value, float current_time_ms) const;
 
     bool has_active(std::uintptr_t element_id, float current_time_ms) const;
+    std::uint32_t active_impact(std::uintptr_t element_id,
+                                float current_time_ms) const noexcept;
     bool has_effect(std::uintptr_t element_id, float current_time_ms) const;
     bool has_any_effects() const {
         return !animations_.empty() || !typed_animations_.empty();
