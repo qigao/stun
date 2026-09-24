@@ -681,6 +681,29 @@ CssLiteralResult<Color> parse_css_color_literal(
             parse_color_legacy(std::string(trimmed))};
 }
 
+CssLiteralResult<Visibility> parse_css_visibility_literal(
+    std::string_view raw_value) noexcept {
+    const std::string_view trimmed = trim_ascii(raw_value);
+    if (trimmed.empty()) {
+        return {};
+    }
+
+    const std::string lowered = ascii_lower_copy(trimmed);
+    if (is_css_wide_keyword(lowered) || contains_deferred_function(lowered)) {
+        return {CssLiteralState::Deferred, Visibility::Visible};
+    }
+    if (lowered == "visible") {
+        return {CssLiteralState::Concrete, Visibility::Visible};
+    }
+    if (lowered == "hidden") {
+        return {CssLiteralState::Concrete, Visibility::Hidden};
+    }
+    if (lowered == "collapse") {
+        return {CssLiteralState::Concrete, Visibility::Collapse};
+    }
+    return {};
+}
+
 CssLiteralResult<float> parse_css_context_independent_length_literal(
     std::string_view raw_value) noexcept {
     const std::string_view trimmed = trim_ascii(raw_value);

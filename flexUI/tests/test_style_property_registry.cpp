@@ -9,12 +9,23 @@ using namespace flexUI::detail;
 suite("FlexUI CMeta style property registry") {
     it("resolves canonical names and migration aliases") {
         const auto* opacity = style_property_find("opacity");
+        const auto* visibility = style_property_find("visibility");
         const auto* color = style_property_find("color");
         const auto* text_color = style_property_find("text-color");
         const auto* font_size = style_property_find("font-size");
         const auto* font_size_alias = style_property_find("fontSize");
 
         check_not_null(opacity);
+        check_not_null(visibility);
+        check_true(cmeta_type_desc_valid(visibility->type));
+        check(visibility->type->kind == CMETA_T_INTEGER);
+        check_false(cmeta_type_equal(visibility->type, &cmeta_type_int));
+        check_true((visibility->flags & STYLE_PROPERTY_INHERITED) != 0u);
+        check_true((visibility->flags & STYLE_PROPERTY_DISCRETE) != 0u);
+        check_false(
+            (visibility->flags & STYLE_PROPERTY_TRANSITIONABLE) != 0u);
+        check_true((visibility->impact & STYLE_IMPACT_PAINT) != 0u);
+        check_true((visibility->impact & STYLE_IMPACT_HIT_TEST) != 0u);
         check_not_null(color);
         check(color == text_color);
         check(font_size == font_size_alias);
@@ -75,10 +86,24 @@ suite("FlexUI CMeta style property registry") {
 
         check_false(style_property_write(
             *background, style, &cmeta_type_float, &new_opacity));
+
+        const auto* visibility = style_property_find("visibility");
+        const Visibility hidden = Visibility::Hidden;
+        check_true(style_property_write(
+            *visibility, style, visibility->type, &hidden));
+        check(style.visibility == Visibility::Hidden);
+
+        Visibility read_visibility = Visibility::Visible;
+        check_true(style_property_read(
+            *visibility, style, visibility->type, &read_visibility));
+        check(read_visibility == Visibility::Hidden);
+
+        check_false(style_property_write(
+            *visibility, style, &cmeta_type_int, &hidden));
     }
 
     it("covers the current stable transition property subset") {
-        check(style_property_count() >= static_cast<std::size_t>(23));
+        check(style_property_count() >= static_cast<std::size_t>(24));
         check_not_null(style_property_find("border-color"));
         check_not_null(style_property_find("outline-width"));
         check_not_null(style_property_find("ring-offset-color"));

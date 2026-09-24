@@ -33,6 +33,9 @@ CssLiteralResult<float> parse_css_number_literal(
 CssLiteralResult<Color> parse_css_color_literal(
     std::string_view raw_value) noexcept;
 
+CssLiteralResult<Visibility> parse_css_visibility_literal(
+    std::string_view raw_value) noexcept;
+
 CssLiteralResult<float> parse_css_angle_literal(
     std::string_view raw_value) noexcept;
 

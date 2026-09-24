@@ -77,6 +77,13 @@ CompiledCssLiteral compile_css_literal(
         }
     }
 
+    if (property->id == StylePropertyId::Visibility) {
+        const auto parsed = parse_css_visibility_literal(raw_value);
+        if (parsed.is_concrete()) {
+            return {property->type, parsed.value};
+        }
+    }
+
     const bool safe_color_property =
         property->id == StylePropertyId::BackgroundColor ||
         property->id == StylePropertyId::OutlineColor ||

@@ -35,6 +35,7 @@ enum class StylePropertyId : std::uint16_t {
     BoxShadowBlur,
     BoxShadowSpread,
     BoxShadowColor,
+    Visibility,
 };
 
 enum StylePropertyFlags : std::uint32_t {
@@ -42,6 +43,7 @@ enum StylePropertyFlags : std::uint32_t {
     STYLE_PROPERTY_INHERITED = 1u << 0,
     STYLE_PROPERTY_ANIMATABLE = 1u << 1,
     STYLE_PROPERTY_TRANSITIONABLE = 1u << 2,
+    STYLE_PROPERTY_DISCRETE = 1u << 3,
 };
 
 enum StylePropertyImpact : std::uint32_t {
