@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+      VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_MAX_CONCURRENCY: 2
       EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
@@ -195,9 +195,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
-          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
           restore-keys: |
-            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}
 
       - name: Prepare isolated tools and evidence
         shell: bash
@@ -209,9 +209,15 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
           test "$(git -C .ci/install-sources/salts rev-parse HEAD)" = "$SALTS_SHA"
           test "$(git -C .ci/install-sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          test "$VCPKG_TOOL_REVISION" = "$VCPKG_SHA"
-          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
-            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" | tee "$EVIDENCE_DIR/provenance.txt"
+          test -n "$VCPKG_TOOL_REVISION"
+          test -n "$VCPKG_SCRIPTS_REVISION"
+          test -n "$VCPKG_CACHE_REVISION"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SCRIPTS_REVISION"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg_port_baseline=%s\nvcpkg_tool=%s\nvcpkg_scripts=%s\nvcpkg_cache_revision=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" \
+            "$VCPKG_PORT_BASELINE" "$VCPKG_TOOL_REVISION" \
+            "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
+            | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils
           python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" \
