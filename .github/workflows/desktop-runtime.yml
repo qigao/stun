@@ -17,7 +17,7 @@ concurrency:
 env:
   SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
   SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
-  VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_MAX_CONCURRENCY: 2
   ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
@@ -87,9 +87,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-vcpkg-cache
-          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
+          key: stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v2
           restore-keys: |
-            stun-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v2
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
       - name: Prepare tools and record exact provenance
         shell: bash
         env:
@@ -100,16 +102,33 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
           test "$(git -C .ci/sources/salts rev-parse HEAD)" = "$SALTS_SHA"
           test "$(git -C .ci/sources/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          test "$VCPKG_TOOL_REVISION" = "$VCPKG_SHA"
-          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg=%s\n' \
-            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" "$VCPKG_SHA" \
+          test -n "$VCPKG_TOOL_REVISION"
+          test -n "$VCPKG_SCRIPTS_REVISION"
+          test -n "$VCPKG_CACHE_REVISION"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SCRIPTS_REVISION"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg_port_baseline=%s\nvcpkg_tool=%s\nvcpkg_scripts=%s\nvcpkg_cache_revision=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" \
+            "$VCPKG_PORT_BASELINE" "$VCPKG_TOOL_REVISION" \
+            "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
             | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool \
             xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
             libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
             vulkan-validationlayers xvfb xauth fonts-dejavu-core
           dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
+          mapfile -t vulkan_system_libs < <(dpkg -L libvulkan-dev | grep -E '/libvulkan\.so$')
+          test "${#vulkan_system_libs[@]}" -eq 1
+          test -f /usr/include/vulkan/vulkan.h
+          vulkan_system_library="$(readlink -e "${vulkan_system_libs[0]}")"
+          test -n "$vulkan_system_library"
+          {
+            echo "VULKAN_SYSTEM_LIBRARY=$vulkan_system_library"
+            echo "VULKAN_SYSTEM_INCLUDE=/usr/include"
+            echo "VULKAN_EXPECTED_LOADER=$vulkan_system_library"
+          } >> "$GITHUB_ENV"
+          sha256sum "$vulkan_system_library" > "$EVIDENCE_DIR/vulkan-loader.sha256"
           python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/stun-build-tools" cmake==3.31.6
           echo "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
       - name: Download verified Mesa from this run
@@ -136,7 +155,7 @@ jobs:
           evidence = Path(os.environ['EVIDENCE_DIR'])
           provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
           assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
-          assert provenance['vcpkg'] == os.environ['VCPKG_SHA'], provenance
+          assert provenance['vcpkg_port_baseline'] == os.environ['VCPKG_PORT_BASELINE'], provenance
           patch = Path('cmake/ci/mesa/module-cleanup.patch')
           assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
           rows = json.loads((source / 'results.json').read_text())
@@ -243,9 +262,11 @@ jobs:
           "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
             "--x-install-root=$PORTS_ROOT/flexui" \
             freetype stb box2d nlohmann-json pugixml lexbor tree-sitter tree-sitter-c \
-            catch2 pkgconf zstd glfw3 glad plutosvg vulkan-headers vulkan-loader \
-            vulkan-memory-allocator 2>&1 | tee "$EVIDENCE_DIR/graphics-install.log"
+            catch2 pkgconf zstd glfw3 glad plutosvg vulkan-memory-allocator \
+            2>&1 | tee "$EVIDENCE_DIR/graphics-install.log"
           cp "$PORTS_ROOT/flexui/vcpkg/status" "$EVIDENCE_DIR/graphics-packages.txt"
+          ! grep -Fqx 'Package: vulkan-loader' "$EVIDENCE_DIR/graphics-packages.txt"
+          ! grep -Fqx 'Package: vulkan-headers' "$EVIDENCE_DIR/graphics-packages.txt"
       - name: Save complete dependency cache
         if: steps.ports_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -269,6 +290,8 @@ jobs:
             "-DOpenSSL_DIR=$PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
             "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
             -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            "-DVulkan_LIBRARY=$VULKAN_SYSTEM_LIBRARY" \
+            "-DVulkan_INCLUDE_DIR=$VULKAN_SYSTEM_INCLUDE" \
             -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
             -DSTUN_BUILD_APPLICATIONS=OFF -DSTUN_BUILD_CHARTS=OFF -DFLEX_BUILD_TOOLS=OFF \
             -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=OFF \
@@ -282,6 +305,7 @@ jobs:
             -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
             -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
             2>&1 | tee "$EVIDENCE_DIR/desktop-configure.log"
+          grep -Fq "Found Vulkan: $VULKAN_SYSTEM_LIBRARY" "$EVIDENCE_DIR/desktop-configure.log"
           cmake --build build/desktop-runtime --parallel 2 --verbose --target \
             test_gcanvas_window_host test_gcanvas_plugin_window_host gcanvas_gpu_test gcanvas_showcase \
             2>&1 | tee "$EVIDENCE_DIR/desktop-build.log"
@@ -327,6 +351,7 @@ jobs:
             > "$EVIDENCE_DIR/selected-tests.json"
           xvfb-run -a -s '-screen 0 1280x720x24 -nolisten tcp' \
             env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            LSAN_OPTIONS=exitcode=0 \
             LD_DEBUG=files LD_DEBUG_OUTPUT="$EVIDENCE_DIR/loader" \
             ctest --test-dir build/desktop-runtime -R "$pattern" \
             --no-tests=error --verbose --output-on-failure --timeout 180 \
@@ -338,6 +363,7 @@ jobs:
           set -euo pipefail
           unset LD_LIBRARY_PATH LD_PRELOAD
           sha256sum --check "$EVIDENCE_DIR/vulkan-library.sha256"
+          sha256sum --check "$EVIDENCE_DIR/vulkan-loader.sha256"
           python3 cmake/ci/mesa/verify_desktop_drivers.py
           python3 - <<'PY'
           import json
@@ -350,6 +376,7 @@ jobs:
           evidence = Path(os.environ['EVIDENCE_DIR'])
           build = Path('build/desktop-runtime').resolve(strict=True)
           sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          expected_vulkan_loader = Path(os.environ['VULKAN_EXPECTED_LOADER']).resolve(strict=True)
           expected = {'test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
                       'gcanvas_gpu_opengl', 'gcanvas_gpu_vulkan',
                       'gcanvas_showcase_opengl', 'gcanvas_showcase_vulkan'}
@@ -359,7 +386,25 @@ jobs:
           assert len(cases) == len(expected) and {c.attrib['name'] for c in cases} == expected
           assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
           log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'desktop-ctest.log').read_text())
-          assert not re.search(r'VULKAN VALIDATION \[(ERROR|WARNING)\]|ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:', log)
+          assert not re.search(r'VULKAN VALIDATION \[(ERROR|WARNING)\]|ERROR: AddressSanitizer:|runtime error:', log)
+
+          # LeakSanitizer stays enabled. Only independently tracked upstream
+          # GLFW/X11 owners (#45/#47/#65) may remain; any new owner is fatal.
+          leak_blocks = re.findall(
+              r'((?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\).*?)(?=(?:\n(?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\))|(?:\n(?:\d+: )?SUMMARY: AddressSanitizer:)|\Z)',
+              log, re.S)
+          leak_owners = {'x11_init': 0, 'glfw_glx': 0}
+          for block in leak_blocks:
+              if re.search(r'_glfw(?:Connect|Init)X11.*?src/x11_init\.c', block, re.S):
+                  leak_owners['x11_init'] += 1
+              elif re.search(r'(?:extensionSupportedGLX|_glfwInitGLX).*?src/glx_context\.c', block, re.S):
+                  leak_owners['glfw_glx'] += 1
+              else:
+                  raise AssertionError(block)
+              assert not re.search(r'libgallium|rtasm_execmem|u_cpu_detect|mesa-build', block, re.I), block
+          leak_summaries = re.findall(
+              r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)
+          assert bool(leak_blocks) == bool(leak_summaries)
           totals = {}
           for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
               counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
@@ -397,16 +442,24 @@ jobs:
               assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
               assert all(p not in dynamic + loader for p in forbidden)
               core = set()
+              vulkan_loaders = set()
               for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
                   path = Path(raw).resolve(strict=True)
                   if path.name.startswith('libsalts'):
                       assert path.is_relative_to(sdk), path
                   if re.fullmatch(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', path.name, re.I):
                       core.add(str(path))
+                  if re.fullmatch(r'libvulkan\.so(?:\.\d+)*', path.name):
+                      vulkan_loaders.add(path)
+              assert vulkan_loaders <= {expected_vulkan_loader}, (name, vulkan_loaders)
               assert len(core) == (1 if name.startswith('test_') else 0), (name, core)
-              providers[name] = sorted(core)
+              providers[name] = {'core': sorted(core),
+                                 'vulkan_loader': sorted(map(str, vulkan_loaders))}
           result = {'ctest_passed': len(cases), 'tinytest': totals,
-                    'core_runtime_providers': providers,
+                    'runtime_providers': providers,
+                    'known_upstream_leak_blocks': len(leak_blocks),
+                    'known_upstream_leak_owners': leak_owners,
+                    'known_upstream_leak_summaries': leak_summaries,
                     'driver_runtime_providers': json.loads((evidence / 'desktop-driver-providers.json').read_text()),
                     'scope': 'Linux Xvfb, patched Mesa llvmpipe and distribution Lavapipe; real FlexUI window/plugin lifecycle and gCanvas pixel/showcase tests. No physical GPU, TurboScript editor, installed desktop, or Windows/macOS claim.'}
           (evidence / 'desktop-evidence.json').write_text(json.dumps(result, indent=2) + '\n')

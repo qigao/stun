@@ -1,0 +1,15 @@
+{
+  "name": "stun-mesa-control",
+  "version-string": "1",
+  "dependencies": [
+    {
+      "name": "glfw3",
+      "version>=": "3.4#1"
+    },
+    {
+      "name": "glad",
+      "version>=": "0.1.36"
+    }
+  ],
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}
