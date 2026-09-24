@@ -89,8 +89,8 @@ jobs:
           path: ${{ runner.temp }}/stun-vcpkg-cache
           key: stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v2
           restore-keys: |
-            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
             stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v2
+            stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-desktop-v1
             stun-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-${{ env.SALTS_SHA }}-${{ env.SALTS_UTILS_SHA }}-flexui-v1
       - name: Prepare tools and record exact provenance
         shell: bash
@@ -113,6 +113,7 @@ jobs:
             | tee "$EVIDENCE_DIR/provenance.txt"
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool \
             xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
             libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
             vulkan-validationlayers xvfb xauth fonts-dejavu-core
