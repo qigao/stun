@@ -133,6 +133,29 @@ suite("FlexUI CMeta style property registry") {
         check_true(element.is_dirty(flex::DirtyFlags::Visual));
     }
 
+    it("keeps resolved background transition projection separate from storage") {
+        Element element;
+        ComputedStyle style;
+        style.background_color = Color{0.0f, 0.0f, 1.0f, 1.0f};
+        style.variables[Symbol("--bg")] = "#ff0000";
+
+        const auto* background = style_property_find("background-color");
+        check_not_null(background);
+
+        Color stored{};
+        check_true(style_property_read(
+            *background, style, &flex::cmeta_type_color, &stored));
+        check_float_eq(stored.b, 1.0f, 0.0001f);
+
+        Color transition_value{};
+        check_true(style_property_read_transition(
+            *background, element, style, &flex::cmeta_type_color,
+            &transition_value));
+        check_float_eq(transition_value.r, 1.0f, 0.0001f);
+        check_float_eq(transition_value.g, 0.0f, 0.0001f);
+        check_float_eq(transition_value.b, 0.0f, 0.0001f);
+    }
+
     it("matches the legacy transition selector surface through registry metadata") {
         const auto* opacity = style_property_find("opacity");
         const auto* background = style_property_find("background-color");
