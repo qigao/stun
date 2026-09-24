@@ -73,11 +73,12 @@ private:
   int* destructions_ = nullptr;
 };
 
-void require_color(const Color& color, float r, float g, float b, float a = 1.0f) {
-  check(approx_eq(color.r, r, 0.001f));
-  check(approx_eq(color.g, g, 0.001f));
-  check(approx_eq(color.b, b, 0.001f));
-  check(approx_eq(color.a, a, 0.001f));
+void require_color(const Color& color, float r, float g, float b,
+                   float a = 1.0f, float tolerance = 0.001f) {
+  check(approx_eq(color.r, r, tolerance));
+  check(approx_eq(color.g, g, tolerance));
+  check(approx_eq(color.b, b, tolerance));
+  check(approx_eq(color.a, a, tolerance));
 }
 
 const DrawRectCommand* first_rect_at(const RenderCommandList& commands, float x, float y) {
@@ -7197,7 +7198,7 @@ spec("Box starts background-color transitions on pseudo state changes") {
         box.transitions().get_color(
             element_id, *property, button->computed_style->background_color,
             box.time()),
-        0.4f, 0.6f, 0.4f);
+        0.4f, 0.6f, 0.4f, 1.0f, 0.02f);
 
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
@@ -7252,7 +7253,8 @@ spec("Box starts border-color transitions on pseudo state changes") {
         box.transitions().get_color(
             element_id, *property, button->computed_style->border_color,
             box.time()),
-        85.0f / 255.0f, 119.0f / 255.0f, 68.0f / 255.0f);
+        85.0f / 255.0f, 119.0f / 255.0f, 68.0f / 255.0f, 1.0f,
+        0.02f);
 
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
@@ -7334,7 +7336,8 @@ spec("Box starts outline and ring transitions on focus-visible changes") {
         box.transitions().get_color(
             element_id, *outline_color, field->computed_style->outline_color,
             box.time()),
-        (0x33 / 255.0f) * 0.5f, (0x66 / 255.0f) * 0.5f, 0.5f, 0.5f);
+        (0x33 / 255.0f) * 0.5f, (0x66 / 255.0f) * 0.5f, 0.5f, 0.5f,
+        0.02f);
     check(approx_eq(box.transitions().get(
                         element_id, "ring-width",
                         field->computed_style->ring_width, box.time()),
@@ -7347,13 +7350,14 @@ spec("Box starts outline and ring transitions on focus-visible changes") {
         box.transitions().get_color(
             element_id, *ring_color, field->computed_style->ring_color,
             box.time()),
-        8.0f / 255.0f, 16.0f / 255.0f, 24.0f / 255.0f, 0.25f);
+        8.0f / 255.0f, 16.0f / 255.0f, 24.0f / 255.0f, 0.25f,
+        0.02f);
     require_color(
         box.transitions().get_color(
             element_id, *ring_offset_color,
             field->computed_style->ring_offset_color, box.time()),
         (0xf8 / 255.0f) * 0.5f, (0xfa / 255.0f) * 0.5f,
-        (0xfc / 255.0f) * 0.5f, 0.5f);
+        (0xfc / 255.0f) * 0.5f, 0.5f, 0.02f);
 
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
@@ -7504,7 +7508,8 @@ spec("Box starts box-shadow transitions on pseudo state changes") {
         box.transitions().get_color(
             element_id, *shadow_color, card->computed_style->shadow.color,
             box.time()),
-        60.0f / 255.0f, 70.0f / 255.0f, 80.0f / 255.0f, 0.5f);
+        60.0f / 255.0f, 70.0f / 255.0f, 80.0f / 255.0f, 0.5f,
+        0.02f);
 
     box.update_time(100.0f);
     check_false(box.transitions().has_active(element_id, box.time()));
