@@ -102,6 +102,7 @@ set(FLEXUI_SOURCES
   src/widget.cpp
   src/computed_style.cpp
   src/style_engine.cpp
+  src/style_property_registry.cpp
   src/clipboard.cpp
   src/textedit.cpp
   src/transition.cpp
