@@ -38,4 +38,39 @@ suite("FlexUI shared CSS semantic values") {
         check_true(parse_css_number_literal("initial").is_deferred());
         check_true(parse_css_number_literal("unset").is_deferred());
     }
+
+    it("parses context-independent color literals through the shared parser") {
+        const auto hex = parse_css_color_literal("#336699");
+        const auto rgb = parse_css_color_literal("rgb(255 0 128 / 50%)");
+        const auto mixed =
+            parse_css_color_literal("color-mix(in srgb, #000000 25%, #ffffff)");
+        const auto light =
+            parse_css_color_literal("light-dark(#112233, #ffffff)");
+
+        check_true(hex.is_concrete());
+        check_float_eq(hex.value.r, 0.2f, 0.001f);
+        check_float_eq(hex.value.g, 0.4f, 0.001f);
+        check_float_eq(hex.value.b, 0.6f, 0.001f);
+
+        check_true(rgb.is_concrete());
+        check_float_eq(rgb.value.r, 1.0f, 0.001f);
+        check_float_eq(rgb.value.b, 128.0f / 255.0f, 0.001f);
+        check_float_eq(rgb.value.a, 0.5f, 0.001f);
+
+        check_true(mixed.is_concrete());
+        check_true(light.is_concrete());
+        check_float_eq(light.value.r, 0x11 / 255.0f, 0.001f);
+    }
+
+    it("defers context-dependent color spellings") {
+        check_true(parse_css_color_literal("currentColor").is_deferred());
+        check_true(parse_css_color_literal("hsl(var(--primary) / .5)").is_deferred());
+        check_true(parse_css_color_literal(
+            "color-mix(in srgb, var(--muted) 50%, transparent)").is_deferred());
+        check_true(parse_css_color_literal("inherit").is_deferred());
+
+        const auto invalid = parse_css_color_literal("not-a-color");
+        check_false(invalid.is_concrete());
+        check_false(invalid.is_deferred());
+    }
 };

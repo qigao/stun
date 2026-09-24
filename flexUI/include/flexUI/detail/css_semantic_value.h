@@ -30,4 +30,7 @@ struct CssLiteralResult {
 CssLiteralResult<float> parse_css_number_literal(
     std::string_view raw_value) noexcept;
 
+CssLiteralResult<Color> parse_css_color_literal(
+    std::string_view raw_value) noexcept;
+
 } // namespace flexUI::detail
