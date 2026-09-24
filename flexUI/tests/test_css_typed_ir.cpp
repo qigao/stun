@@ -59,6 +59,39 @@ suite("FlexUI typed CSS declaration literals") {
         check_float_eq(color.b, 0.6f, 0.001f);
     }
 
+    it("compiles context-independent effect lengths") {
+        const auto* outline_width = style_property_find("outline-width");
+        const auto* outline_offset = style_property_find("outline-offset");
+        const auto* ring_width = style_property_find("ring-width");
+        const auto* ring_offset = style_property_find("ring-offset");
+
+        const auto thin = compile_css_literal(outline_width, "thin");
+        const auto px = compile_css_literal(outline_offset, "2px");
+        const auto ring = compile_css_literal(ring_width, "3.5");
+        const auto offset = compile_css_literal(ring_offset, "-1px");
+
+        for (const auto* compiled : {&thin, &px, &ring, &offset}) {
+            check_true(compiled->has_value());
+            check_true(cmeta_type_equal(compiled->type, &cmeta_type_float));
+            check_true(std::holds_alternative<float>(compiled->value));
+        }
+        check_float_eq(std::get<float>(thin.value), 1.0f, 0.0001f);
+        check_float_eq(std::get<float>(px.value), 2.0f, 0.0001f);
+    }
+
+    it("defers context-dependent effect lengths") {
+        const auto* outline = style_property_find("outline-offset");
+        const auto* ring = style_property_find("ring-width");
+
+        check_false(compile_css_literal(outline, "10%").has_value());
+        check_false(compile_css_literal(outline, "2rem").has_value());
+        check_false(compile_css_literal(ring, "10vw").has_value());
+        check_false(
+            compile_css_literal(ring, "calc(1px + 2px)").has_value());
+        check_false(
+            compile_css_literal(ring, "var(--ring-width)").has_value());
+    }
+
     it("keeps dependent and unsafe color properties on the fallback path") {
         const auto* background = style_property_find("background-color");
         const auto* border = style_property_find("border-color");

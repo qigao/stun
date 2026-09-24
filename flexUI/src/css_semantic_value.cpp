@@ -1,4 +1,5 @@
 #include <flexUI/detail/css_semantic_value.h>
+#include <flexUI/detail/css_length.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -628,6 +629,87 @@ CssLiteralResult<Color> parse_css_color_literal(
 
     return {CssLiteralState::Concrete,
             parse_color_legacy(std::string(trimmed))};
+}
+
+CssLiteralResult<float> parse_css_context_independent_length_literal(
+    std::string_view raw_value) noexcept {
+    const std::string_view trimmed = trim_ascii(raw_value);
+    if (trimmed.empty()) {
+        return {};
+    }
+
+    const std::string lowered = ascii_lower_copy(trimmed);
+    if (is_css_wide_keyword(lowered) ||
+        contains_deferred_function(lowered) ||
+        lowered.rfind("min(", 0) == 0 ||
+        lowered.rfind("max(", 0) == 0 ||
+        lowered.rfind("clamp(", 0) == 0) {
+        return {CssLiteralState::Deferred, 0.0f};
+    }
+
+    const auto parse_known_unit = [&](std::string_view unit,
+                                      bool deferred)
+        -> CssLiteralResult<float> {
+        if (lowered.size() <= unit.size() ||
+            lowered.compare(lowered.size() - unit.size(), unit.size(), unit) != 0) {
+            return {};
+        }
+        const auto number = parse_css_number_literal(
+            std::string_view(lowered).substr(0, lowered.size() - unit.size()));
+        if (!number.is_concrete()) {
+            return {};
+        }
+        if (deferred) {
+            return {CssLiteralState::Deferred, 0.0f};
+        }
+        const float parsed = parse_css_length(lowered);
+        return std::isfinite(parsed)
+                   ? CssLiteralResult<float>{CssLiteralState::Concrete, parsed}
+                   : CssLiteralResult<float>{};
+    };
+
+    if (const auto px = parse_known_unit("px", false);
+        px.is_concrete()) {
+        return px;
+    }
+
+    static constexpr std::string_view kDeferredUnits[] = {
+        "rem", "em", "%", "vmin", "vmax",
+        "svw", "svh", "svi", "svb",
+        "lvw", "lvh", "lvi", "lvb",
+        "dvw", "dvh", "dvi", "dvb",
+        "vw", "vh", "vi", "vb",
+    };
+    for (const auto unit : kDeferredUnits) {
+        const auto result = parse_known_unit(unit, true);
+        if (result.is_deferred()) {
+            return result;
+        }
+    }
+
+    const auto number = parse_css_number_literal(lowered);
+    if (!number.is_concrete()) {
+        return {};
+    }
+    const float parsed = parse_css_length(lowered);
+    return std::isfinite(parsed)
+               ? CssLiteralResult<float>{CssLiteralState::Concrete, parsed}
+               : CssLiteralResult<float>{};
+}
+
+CssLiteralResult<float> parse_css_border_width_literal(
+    std::string_view raw_value) noexcept {
+    const std::string lowered = ascii_lower_copy(trim_ascii(raw_value));
+    if (lowered == "thin") {
+        return {CssLiteralState::Concrete, 1.0f};
+    }
+    if (lowered == "medium") {
+        return {CssLiteralState::Concrete, 3.0f};
+    }
+    if (lowered == "thick") {
+        return {CssLiteralState::Concrete, 5.0f};
+    }
+    return parse_css_context_independent_length_literal(raw_value);
 }
 
 } // namespace flexUI::detail

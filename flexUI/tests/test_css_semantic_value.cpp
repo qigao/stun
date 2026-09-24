@@ -62,6 +62,60 @@ suite("FlexUI shared CSS semantic values") {
         check_float_eq(light.value.r, 0x11 / 255.0f, 0.001f);
     }
 
+    it("classifies declaration-time context-independent lengths") {
+        const auto px = parse_css_context_independent_length_literal(" 2px ");
+        const auto unitless =
+            parse_css_context_independent_length_literal("3.5");
+
+        check_true(px.is_concrete());
+        check_float_eq(px.value, 2.0f, 0.0001f);
+        check_true(unitless.is_concrete());
+        check_float_eq(unitless.value, 3.5f, 0.0001f);
+
+        check_true(
+            parse_css_context_independent_length_literal("50%").is_deferred());
+        check_true(
+            parse_css_context_independent_length_literal("2rem").is_deferred());
+        check_true(
+            parse_css_context_independent_length_literal("2em").is_deferred());
+        check_true(
+            parse_css_context_independent_length_literal("10vw").is_deferred());
+        check_true(parse_css_context_independent_length_literal(
+                       "calc(1px + 2px)")
+                       .is_deferred());
+        check_true(parse_css_context_independent_length_literal(
+                       "var(--effect-width)")
+                       .is_deferred());
+        check_true(parse_css_context_independent_length_literal(
+                       "env(safe-area-inset-top)")
+                       .is_deferred());
+        check_true(parse_css_context_independent_length_literal(
+                       "min(1px, 2px)")
+                       .is_deferred());
+        check_true(parse_css_context_independent_length_literal(
+                       "max(1px, 2px)")
+                       .is_deferred());
+        check_true(parse_css_context_independent_length_literal(
+                       "clamp(1px, 2px, 3px)")
+                       .is_deferred());
+
+        const auto invalid =
+            parse_css_context_independent_length_literal("2pt");
+        check_false(invalid.is_concrete());
+        check_false(invalid.is_deferred());
+    }
+
+    it("maps fixed border-width keywords without layout context") {
+        check_float_eq(parse_css_border_width_literal("thin").value,
+                       1.0f, 0.0001f);
+        check_float_eq(parse_css_border_width_literal("medium").value,
+                       3.0f, 0.0001f);
+        check_float_eq(parse_css_border_width_literal("thick").value,
+                       5.0f, 0.0001f);
+        check_true(parse_css_border_width_literal("2px").is_concrete());
+        check_true(parse_css_border_width_literal("1rem").is_deferred());
+    }
+
     it("defers context-dependent color spellings") {
         check_true(parse_css_color_literal("currentColor").is_deferred());
         check_true(parse_css_color_literal("hsl(var(--primary) / .5)").is_deferred());

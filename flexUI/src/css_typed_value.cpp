@@ -31,6 +31,22 @@ CompiledCssLiteral compile_css_literal(
         }
     }
 
+    const bool safe_effect_length =
+        property->id == StylePropertyId::OutlineWidth ||
+        property->id == StylePropertyId::OutlineOffset ||
+        property->id == StylePropertyId::RingWidth ||
+        property->id == StylePropertyId::RingOffset;
+    if (safe_effect_length &&
+        cmeta_type_equal(property->type, &cmeta_type_float)) {
+        const auto parsed =
+            property->id == StylePropertyId::OutlineWidth
+                ? parse_css_border_width_literal(raw_value)
+                : parse_css_context_independent_length_literal(raw_value);
+        if (parsed.is_concrete()) {
+            return {&cmeta_type_float, parsed.value};
+        }
+    }
+
     return {};
 }
 

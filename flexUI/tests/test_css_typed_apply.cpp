@@ -146,6 +146,84 @@ suite("FlexUI typed CSS opacity apply") {
                     target->computed_style->text_color);
     }
 
+    it("applies safe effect lengths through the typed path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            outline-width: thin;
+            outline-offset: 2px;
+            ring-width: 3.5;
+            ring-offset: -1px;
+          }
+        )");
+        box.update();
+
+        check_float_eq(target->computed_style->outline_width,
+                       1.0f, 0.0001f);
+        check_float_eq(target->computed_style->outline_offset,
+                       2.0f, 0.0001f);
+        check_float_eq(target->computed_style->ring_width,
+                       3.5f, 0.0001f);
+        check_float_eq(target->computed_style->ring_offset,
+                       -1.0f, 0.0001f);
+    }
+
+    it("preserves effect length source order and important semantics") {
+        Box box(nullptr);
+        auto* target = make_target(box, "item");
+
+        box.load_css(R"(
+          #target {
+            ring-offset: 1px;
+            outline-offset: 1px;
+          }
+          #target { ring-offset: 5px; }
+          .item { outline-offset: 3px !important; }
+          #target { outline-offset: 2px; }
+        )");
+        box.update();
+
+        check_float_eq(target->computed_style->ring_offset,
+                       5.0f, 0.0001f);
+        check_float_eq(target->computed_style->outline_offset,
+                       3.0f, 0.0001f);
+    }
+
+    it("keeps dependent effect lengths on the computed-value path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            --ring-gap: 4px;
+            outline-offset: var(--ring-gap);
+            ring-width: 10vw;
+          }
+        )");
+        box.update();
+
+        check_float_eq(target->computed_style->outline_offset,
+                       4.0f, 0.0001f);
+        check_float_eq(target->computed_style->ring_width,
+                       32.0f, 0.001f);
+    }
+
+    it("keeps outline shorthand on the legacy path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css("#target { outline: 2px solid #112233; }");
+        box.update();
+
+        check_float_eq(target->computed_style->outline_width,
+                       2.0f, 0.0001f);
+        check_color(target->computed_style->outline_color,
+                    Color{0x11 / 255.0f, 0x22 / 255.0f,
+                          0x33 / 255.0f, 1.0f});
+    }
+
     it("keeps border-color on the legacy side-projection path") {
         Box box(nullptr);
         auto* target = make_target(box);
