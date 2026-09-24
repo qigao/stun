@@ -15,7 +15,7 @@ concurrency:
 env:
   MESA_VERSION: 25.2.8
   MESA_ARCHIVE_SHA256: 097842f3e49d996868b38688db87b006f7d4541e93ce86d2f341d8b3e7be7c93
-  VCPKG_SHA: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+  VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:fast_unwind_on_malloc=0:malloc_context_size=64
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   LIBGL_ALWAYS_SOFTWARE: '1'
@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/mesa-vcpkg-cache
-          key: stun-mesa-vcpkg-ubuntu24-${{ env.VCPKG_SHA }}-glfw3-glad-v1
+          key: stun-mesa-vcpkg-ubuntu24-${{ env.VCPKG_PORT_BASELINE }}-glfw3-glad-v1
 
       - name: Restore Mesa Python download cache
         id: mesa_pip_cache
@@ -68,7 +68,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$VCPKG_TOOL_REVISION" = "$VCPKG_SHA"
+          test -n "$VCPKG_TOOL_REVISION"
+          test -n "$VCPKG_SCRIPTS_REVISION"
+          test -n "$VCPKG_CACHE_REVISION"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SCRIPTS_REVISION"
           mkdir -p build/mesa-evidence "$RUNNER_TEMP/mesa-xdg" \
             "$RUNNER_TEMP/mesa-vcpkg-cache" "$RUNNER_TEMP/mesa-download-cache"
           chmod 700 "$RUNNER_TEMP/mesa-xdg"
@@ -79,11 +82,14 @@ jobs:
             echo "MESA_BUILD=$RUNNER_TEMP/mesa-build"
             echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/mesa-xdg"
           } >> "$GITHUB_ENV"
-          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg=%s\n' \
-            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" "$VCPKG_SHA" \
+          printf 'Stun=%s\nMesa=%s\nArchiveSHA256=%s\nvcpkg_port_baseline=%s\nvcpkg_tool=%s\nvcpkg_scripts=%s\nvcpkg_cache_revision=%s\n' \
+            "$EXPECTED_HEAD" "$MESA_VERSION" "$MESA_ARCHIVE_SHA256" \
+            "$VCPKG_PORT_BASELINE" "$VCPKG_TOOL_REVISION" \
+            "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
           sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
+            autoconf autoconf-archive automake libtool \
             libdrm-dev libexpat1-dev libelf-dev zlib1g-dev libzstd-dev \
             xorg-dev libwayland-dev libxkbcommon-dev libglvnd-dev libx11-xcb-dev \
             libxcb-glx0-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev \
