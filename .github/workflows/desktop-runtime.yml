@@ -363,6 +363,7 @@ jobs:
           set -euo pipefail
           unset LD_LIBRARY_PATH LD_PRELOAD
           sha256sum --check "$EVIDENCE_DIR/vulkan-library.sha256"
+          sha256sum --check "$EVIDENCE_DIR/vulkan-loader.sha256"
           python3 cmake/ci/mesa/verify_desktop_drivers.py
           python3 - <<'PY'
           import json
@@ -387,9 +388,8 @@ jobs:
           log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'desktop-ctest.log').read_text())
           assert not re.search(r'VULKAN VALIDATION \[(ERROR|WARNING)\]|ERROR: AddressSanitizer:|runtime error:', log)
 
-          # Keep LeakSanitizer fully enabled and preserve every allocation stack.
-          # Only the independently tracked GLFW/X11 init owner (#45/#47) is
-          # accepted here; any new owner remains a hard Desktop qualification failure.
+          # LeakSanitizer stays enabled. Only independently tracked upstream
+          # GLFW/X11 owners (#45/#47/#65) may remain; any new owner is fatal.
           leak_blocks = re.findall(
               r'((?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\).*?)(?=(?:\n(?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\))|(?:\n(?:\d+: )?SUMMARY: AddressSanitizer:)|\Z)',
               log, re.S)
@@ -397,11 +397,11 @@ jobs:
           for block in leak_blocks:
               if re.search(r'_glfw(?:Connect|Init)X11.*?src/x11_init\.c', block, re.S):
                   leak_owners['x11_init'] += 1
-              elif re.search(r'(?:extensionSupportedGLX|_glfwInitGLX).*?(?:glx_context\.c|src/glx_context\.c)', block, re.S):
+              elif re.search(r'(?:extensionSupportedGLX|_glfwInitGLX).*?src/glx_context\.c', block, re.S):
                   leak_owners['glfw_glx'] += 1
               else:
                   raise AssertionError(block)
-              assert 'module-cleanup.patch' not in block, block
+              assert not re.search(r'libgallium|rtasm_execmem|u_cpu_detect|mesa-build', block, re.I), block
           leak_summaries = re.findall(
               r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)
           assert bool(leak_blocks) == bool(leak_summaries)
