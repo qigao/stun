@@ -1,7 +1,48 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+function(_gcanvas_ensure_zlib_target)
+  if(TARGET ZLIB::ZLIB)
+    return()
+  endif()
+  if(NOT ZLIB_FOUND)
+    message(FATAL_ERROR "gCanvas: ZLIB was reported unavailable")
+  endif()
+
+  add_library(ZLIB::ZLIB INTERFACE IMPORTED)
+
+  set(_gcanvas_zlib_links "")
+  if(ZLIB_LIBRARY_DEBUG AND ZLIB_LIBRARY_RELEASE)
+    list(APPEND _gcanvas_zlib_links
+      "$<$<CONFIG:Debug>:${ZLIB_LIBRARY_DEBUG}>"
+      "$<$<NOT:$<CONFIG:Debug>>:${ZLIB_LIBRARY_RELEASE}>")
+  elseif(ZLIB_LIBRARY_RELEASE)
+    list(APPEND _gcanvas_zlib_links "${ZLIB_LIBRARY_RELEASE}")
+  elseif(ZLIB_LIBRARY_DEBUG)
+    list(APPEND _gcanvas_zlib_links "${ZLIB_LIBRARY_DEBUG}")
+  elseif(ZLIB_LIBRARY)
+    list(APPEND _gcanvas_zlib_links "${ZLIB_LIBRARY}")
+  elseif(ZLIB_LIBRARIES)
+    list(APPEND _gcanvas_zlib_links ${ZLIB_LIBRARIES})
+  else()
+    message(FATAL_ERROR
+      "gCanvas: ZLIB was found but no link library is available")
+  endif()
+
+  set_property(TARGET ZLIB::ZLIB PROPERTY
+    INTERFACE_LINK_LIBRARIES "${_gcanvas_zlib_links}")
+
+  if(ZLIB_INCLUDE_DIRS)
+    set_property(TARGET ZLIB::ZLIB PROPERTY
+      INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIRS}")
+  elseif(ZLIB_INCLUDE_DIR)
+    set_property(TARGET ZLIB::ZLIB PROPERTY
+      INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INCLUDE_DIR}")
+  endif()
+endfunction()
+
 find_dependency(ZLIB)
+_gcanvas_ensure_zlib_target()
 find_dependency(Freetype)
 @GCANVAS_CONFIG_FIND_PLUTOSVG@
 @GCANVAS_CONFIG_FIND_GLFW@
