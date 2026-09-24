@@ -99,8 +99,10 @@ jobs:
           "$RUNNER_TEMP/mesa-tools/bin/pip" install meson==1.5.2 Mako==1.3.10 PyYAML==6.0.2 packaging==24.2
           echo "$RUNNER_TEMP/mesa-tools/bin" >> "$GITHUB_PATH"
           dpkg-query -W > build/mesa-evidence/system-packages.txt
-          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
-            "--x-install-root=$RUNNER_TEMP/mesa-control-ports" glfw3 glad \
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root=cmake/ci/mesa \
+            "--x-install-root=$RUNNER_TEMP/mesa-control-ports" \
+            --triplet x64-linux \
             2>&1 | tee build/mesa-evidence/control-dependencies.log
       - name: Save Mesa control dependency cache
         if: steps.mesa_vcpkg_cache.outputs.cache-hit != 'true'
