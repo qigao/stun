@@ -6,6 +6,7 @@
 #include <flexUI/widgets/textarea_widget.h>
 #include <flexUI/transition.h>
 #include <flexUI/detail/css_length.h>
+#include <flexUI/detail/css_typed_value.h>
 #include <lexbor/css/css.h>
 #include <lexbor/css/rule.h>
 #include <lexbor/css/selectors/selectors.h>
@@ -733,6 +734,17 @@ struct CSSDeclaration {
   std::string value;
   bool important = false;
   uint64_t source_order = 0;
+  const detail::StylePropertyDesc* resolved_property = nullptr;
+  detail::CompiledCssLiteral compiled_value{};
+
+  CSSDeclaration(std::string property_value, std::string value_value,
+                 bool important_value, uint64_t source_order_value)
+      : property(std::move(property_value)),
+        value(std::move(value_value)),
+        important(important_value),
+        source_order(source_order_value),
+        resolved_property(detail::style_property_find(property)),
+        compiled_value(detail::compile_css_literal(resolved_property, value)) {}
 };
 
 using DeclarationList = std::vector<CSSDeclaration>;

@@ -141,6 +141,13 @@ target_include_directories(test_style_property_registry PRIVATE ../include)
 set_target_properties(test_style_property_registry PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_style_property_registry COMMAND test_style_property_registry)
 
+add_executable(test_css_typed_ir test_css_typed_ir.cpp)
+target_link_libraries(test_css_typed_ir PRIVATE flexUI)
+flexui_configure_tinytest(test_css_typed_ir)
+target_include_directories(test_css_typed_ir PRIVATE ../include)
+set_target_properties(test_css_typed_ir PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_css_typed_ir COMMAND test_css_typed_ir)
+
 add_executable(test_text_util_unicode test_text_util_unicode.cpp)
 target_link_libraries(test_text_util_unicode PRIVATE flexUI)
 flexui_configure_tinytest(test_text_util_unicode)
