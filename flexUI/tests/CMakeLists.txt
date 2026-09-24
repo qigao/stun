@@ -169,6 +169,13 @@ target_include_directories(test_typed_transition PRIVATE ../include)
 set_target_properties(test_typed_transition PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_typed_transition COMMAND test_typed_transition)
 
+add_executable(test_typed_animation test_typed_animation.cpp)
+target_link_libraries(test_typed_animation PRIVATE flexUI)
+flexui_configure_tinytest(test_typed_animation)
+target_include_directories(test_typed_animation PRIVATE ../include)
+set_target_properties(test_typed_animation PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_typed_animation COMMAND test_typed_animation)
+
 add_executable(test_text_util_unicode test_text_util_unicode.cpp)
 target_link_libraries(test_text_util_unicode PRIVATE flexUI)
 flexui_configure_tinytest(test_text_util_unicode)
