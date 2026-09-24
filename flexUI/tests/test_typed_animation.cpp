@@ -106,6 +106,36 @@ suite("FlexUI typed AnimationManager core") {
         check_false(manager.has_any_effects());
     }
 
+    it("interpolates a whole Color keyframe track including alpha") {
+        AnimationManager manager;
+        const auto* background =
+            style_property_descriptor(StylePropertyId::BackgroundColor);
+        check_not_null(background);
+        if (!background) return;
+
+        const std::vector<TypedAnimationPoint> points = {
+            {0.0f, {&flex::cmeta_type_color,
+                    flex::AnimValue{Color{0.2f, 0.4f, 0.6f, 1.0f}}}},
+            {1.0f, {&flex::cmeta_type_color,
+                    flex::AnimValue{Color{0.6f, 0.8f, 0.2f, 0.5f}}}},
+        };
+        check_true(manager.start_typed(
+            41, *background, points, linear_animation(), 0.0f));
+
+        const Color mid = manager.get_color(
+            41, *background, Color{}, 50.0f);
+        check_float_eq(mid.r, 0.4f, 0.0001f);
+        check_float_eq(mid.g, 0.6f, 0.0001f);
+        check_float_eq(mid.b, 0.4f, 0.0001f);
+        check_float_eq(mid.a, 0.75f, 0.0001f);
+
+        // Historical component pseudo-keys are not runtime identities for
+        // typed Color tracks.
+        check_float_eq(
+            manager.get(41, "background-color-r", 0.125f, 50.0f),
+            0.125f, 0.0001f);
+    }
+
     it("coexists with legacy non migrated animation tracks") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
