@@ -148,6 +148,13 @@ target_include_directories(test_css_typed_ir PRIVATE ../include)
 set_target_properties(test_css_typed_ir PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_css_typed_ir COMMAND test_css_typed_ir)
 
+add_executable(test_css_semantic_value test_css_semantic_value.cpp)
+target_link_libraries(test_css_semantic_value PRIVATE flexUI)
+flexui_configure_tinytest(test_css_semantic_value)
+target_include_directories(test_css_semantic_value PRIVATE ../include)
+set_target_properties(test_css_semantic_value PROPERTIES FOLDER "flexUI/tests")
+add_test(NAME test_css_semantic_value COMMAND test_css_semantic_value)
+
 add_executable(test_text_util_unicode test_text_util_unicode.cpp)
 target_link_libraries(test_text_util_unicode PRIVATE flexUI)
 flexui_configure_tinytest(test_text_util_unicode)

@@ -6,6 +6,7 @@
 #include <flexUI/widgets/textarea_widget.h>
 #include <flexUI/transition.h>
 #include <flexUI/detail/css_length.h>
+#include <flexUI/detail/css_semantic_value.h>
 #include <flexUI/detail/css_typed_value.h>
 #include <lexbor/css/css.h>
 #include <lexbor/css/rule.h>
@@ -5743,9 +5744,12 @@ private:
           parse_style_color(value, style, style->ring_offset_color);
 
     // Visibility & Overflow
-    if (prop_sym == PROP_OPACITY)
-      style->opacity = std::stof(value);
-    else if (prop_sym == PROP_VISIBILITY) {
+    if (prop_sym == PROP_OPACITY) {
+      const auto parsed = detail::parse_css_number_literal(value);
+      if (parsed.is_concrete()) {
+        style->opacity = parsed.value;
+      }
+    } else if (prop_sym == PROP_VISIBILITY) {
       if (value == "visible")
         style->visibility = Visibility::Visible;
       else if (value == "hidden")
