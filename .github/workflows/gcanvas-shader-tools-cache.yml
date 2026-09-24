@@ -1,0 +1,95 @@
+name: gCanvas shader toolchain cache contract
+
+on:
+  pull_request:
+    paths:
+      - "vendor/gCanvas/**"
+      - "tools/gcanvas-shaderc/**"
+      - ".github/workflows/gcanvas-shader-tools-cache.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  linux-cache-only:
+    name: Linux shared shader-tool cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Use empty repository-local L1
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache="$RUNNER_TEMP/stun-gcanvas-shader-tools-empty-l1"
+          rm -rf "$cache"
+          mkdir -p "$cache"
+          echo "VCPKG_BINARY_CACHE=$cache" >> "$GITHUB_ENV"
+
+      - name: Configure shared vcpkg cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+        with:
+          mode: read
+
+      - name: Prepare host build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config
+
+      - name: Restore canonical gCanvas shader tools from GitHub Packages only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VCPKG_CACHE_REPOSITORY_ROOT"
+          manifest="$VCPKG_CACHE_REPOSITORY_ROOT/manifests/gcanvas-shader-tools"
+          test -f "$manifest/vcpkg.json"
+
+          case "$VCPKG_CACHE_REPOSITORY_ROOT" in
+            "$GITHUB_WORKSPACE"*)
+              echo "shader-tool profile must come from qigao/vcpkg-cache, not a copied Stun manifest" >&2
+              exit 1
+              ;;
+          esac
+
+          log="$RUNNER_TEMP/stun-gcanvas-shader-tools-cache.log"
+          install_root="$RUNNER_TEMP/stun-gcanvas-shader-tools-installed"
+          rm -rf "$install_root"
+
+          "$VCPKG_ROOT/vcpkg" install \
+            --x-manifest-root="$manifest" \
+            --x-install-root="$install_root" \
+            --triplet x64-linux \
+            --only-binarycaching 2>&1 | tee "$log"
+
+          ! grep -Eq '^Building [^:]+:x64-linux' "$log"
+          grep -Eq 'Restored [1-9][0-9]* package\(s\) from NuGet' "$log"
+
+          status="$install_root/vcpkg/status"
+          test -f "$status"
+          for package in \
+            shaderc glslang spirv-cross spirv-headers spirv-tools \
+            vcpkg-cmake vcpkg-cmake-config
+          do
+            grep -Fqx "Package: $package" "$status"
+          done
+
+      - name: Verify Stun remains a read-only shared-cache consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$VCPKG_BINARY_SOURCES" in
+            *,read) ;;
+            *)
+              echo "shared NuGet cache source is not read-only: $VCPKG_BINARY_SOURCES" >&2
+              exit 1
+              ;;
+          esac
