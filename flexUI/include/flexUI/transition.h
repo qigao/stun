@@ -388,6 +388,11 @@ public:
                     float default_value,
                     float current_time_ms) const;
 
+    Color get_color(std::uintptr_t element_id,
+                    const detail::StylePropertyDesc& property,
+                    const Color& default_value,
+                    float current_time_ms) const;
+
     float get(std::uintptr_t element_id, const std::string& property,
               float default_value, float current_time_ms) const;
 
