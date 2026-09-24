@@ -133,6 +133,46 @@ suite("FlexUI CMeta style property registry") {
         check_true(element.is_dirty(flex::DirtyFlags::Visual));
     }
 
+    it("matches the legacy transition selector surface through registry metadata") {
+        const auto* opacity = style_property_find("opacity");
+        const auto* background = style_property_find("background-color");
+        const auto* transform_x = style_property_find("transform-x");
+        const auto* shadow_blur = style_property_find("box-shadow-blur");
+        const auto* font_size = style_property_find("font-size");
+        const auto* color = style_property_find("color");
+        const auto* visibility = style_property_find("visibility");
+
+        check_not_null(opacity);
+        check_not_null(background);
+        check_not_null(transform_x);
+        check_not_null(shadow_blur);
+        check_not_null(font_size);
+        check_not_null(color);
+        check_not_null(visibility);
+
+        check_true(style_property_matches_transition(*opacity, "opacity"));
+        check_true(style_property_matches_transition(*opacity, "all"));
+        check_true(style_property_matches_transition(*background, "background-color"));
+
+        check_true(style_property_matches_transition(*transform_x, "transform"));
+        check_true(style_property_matches_transition(*transform_x, "all"));
+        check_false(style_property_matches_transition(*transform_x, "transform-x"));
+
+        check_true(style_property_matches_transition(*shadow_blur, "box-shadow"));
+        check_true(style_property_matches_transition(*shadow_blur, "all"));
+        check_false(style_property_matches_transition(*shadow_blur, "box-shadow-blur"));
+
+        check_true((font_size->flags & STYLE_PROPERTY_ANIMATABLE) != 0u);
+        check_false((font_size->flags & STYLE_PROPERTY_TRANSITIONABLE) != 0u);
+        check_false(style_property_matches_transition(*font_size, "all"));
+
+        check_true((color->flags & STYLE_PROPERTY_ANIMATABLE) != 0u);
+        check_false((color->flags & STYLE_PROPERTY_TRANSITIONABLE) != 0u);
+        check_false(style_property_matches_transition(*color, "all"));
+
+        check_false(style_property_matches_transition(*visibility, "all"));
+    }
+
     it("covers the current stable transition property subset") {
         check(style_property_count() >= static_cast<std::size_t>(24));
         check_not_null(style_property_find("border-color"));
