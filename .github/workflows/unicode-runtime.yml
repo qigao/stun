@@ -449,17 +449,35 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install pinned production FlexUI dependencies
+      - name: Restore canonical production FlexUI dependencies
         shell: bash
         run: |
           set -euo pipefail
-          # Classic mode uses ports from the exact vcpkg checkout. The complete
-          # application manifest includes dependencies of disabled editors/charts.
-          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
+          manifest="$VCPKG_CACHE_REPOSITORY_ROOT/manifests/stun-linux"
+          test -f "$manifest/vcpkg.json"
+          ! grep -Eq '"vulkan-(loader|headers)"' "$manifest/vcpkg.json"
+          "$VCPKG_ROOT/vcpkg" install \
+            "--x-manifest-root=$manifest" \
             "--x-install-root=$EXTERNAL_PORTS_ROOT/flexui" \
-            freetype stb box2d nlohmann-json pugixml lexbor \
-            tree-sitter tree-sitter-c catch2 pkgconf zstd \
+            --triplet x64-linux \
+            --only-binarycaching \
             2>&1 | tee "$EVIDENCE_DIR/flexui-ports-install.log"
+          status="$EXTERNAL_PORTS_ROOT/flexui/vcpkg/status"
+          test -f "$status"
+          ! grep -Fqx 'Package: vulkan-loader' "$status"
+          ! grep -Fqx 'Package: vulkan-headers' "$status"
+          awk '
+            $0 == "Package: lexbor" { found=1; next }
+            found && /^Version: / {
+              version=$2
+              if (version !~ /^3\./) exit 2
+              ok=1
+              exit
+            }
+            END { if (!ok) exit 1 }
+          ' "$status"
+          ! grep -Eq '^Building [^:]+:x64-linux' "$EVIDENCE_DIR/flexui-ports-install.log"
+          grep -Eq 'Restored [1-9][0-9]* package\(s\) from NuGet' "$EVIDENCE_DIR/flexui-ports-install.log"
 
       - name: Save the complete dependency cache before production validation
         if: steps.vcpkg_cache.outputs.cache-hit != 'true'
