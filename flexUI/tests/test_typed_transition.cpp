@@ -108,6 +108,28 @@ suite("FlexUI typed TransitionManager core") {
             0.5f, 0.0001f);
     }
 
+    it("interpolates a whole Color including alpha") {
+        TransitionManager manager;
+        const auto* background = style_property_find("background-color");
+        check_not_null(background);
+
+        TransitionDef def;
+        def.duration_ms = 100.0f;
+        def.easing = EasingType::Linear;
+
+        const Color from{0.2f, 0.4f, 0.6f, 1.0f};
+        const Color to{0.6f, 0.8f, 0.2f, 0.5f};
+        check_true(manager.start_color(
+            9, *background, from, to, def, 0.0f));
+
+        const Color mid =
+            manager.get_color(9, *background, Color{}, 50.0f);
+        check_float_eq(mid.r, 0.4f, 0.0001f);
+        check_float_eq(mid.g, 0.6f, 0.0001f);
+        check_float_eq(mid.b, 0.4f, 0.0001f);
+        check_float_eq(mid.a, 0.75f, 0.0001f);
+    }
+
     it("clears typed transitions by element without touching other elements") {
         TransitionManager manager;
         const auto* opacity = style_property_find("opacity");
