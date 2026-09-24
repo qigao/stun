@@ -758,7 +758,11 @@ static bool apply_compiled_declaration(const CSSDeclaration& declaration,
   }
 
   switch (declaration.resolved_property->id) {
-  case detail::StylePropertyId::Opacity: {
+  case detail::StylePropertyId::Opacity:
+  case detail::StylePropertyId::OutlineWidth:
+  case detail::StylePropertyId::OutlineOffset:
+  case detail::StylePropertyId::RingWidth:
+  case detail::StylePropertyId::RingOffset: {
     const auto* value = std::get_if<float>(&declaration.compiled_value.value);
     return value &&
            detail::style_property_write(*declaration.resolved_property, *style,

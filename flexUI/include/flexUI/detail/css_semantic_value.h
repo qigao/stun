@@ -33,4 +33,10 @@ CssLiteralResult<float> parse_css_number_literal(
 CssLiteralResult<Color> parse_css_color_literal(
     std::string_view raw_value) noexcept;
 
+CssLiteralResult<float> parse_css_context_independent_length_literal(
+    std::string_view raw_value) noexcept;
+
+CssLiteralResult<float> parse_css_border_width_literal(
+    std::string_view raw_value) noexcept;
+
 } // namespace flexUI::detail
