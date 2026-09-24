@@ -346,39 +346,56 @@ void adjust_positioned_layout(Element* elem, float viewport_width,
   adjust_sticky_layout(elem);
 }
 
-void start_transition_if_changed(TransitionManager& transitions,
-                                 std::uintptr_t element_id,
-                                 const std::string& property,
-                                 float previous_value,
-                                 float target_value,
-                                 const TransitionDef& def,
-                                 float current_time_ms,
-                                 bool& started_any) {
-  const float current_value =
-      transitions.get(element_id, property, previous_value, current_time_ms);
-  if (std::fabs(current_value - target_value) > 0.0001f) {
-    transitions.start(element_id, property, current_value, target_value, def,
-                      current_time_ms);
-    started_any = true;
+bool read_transition_value(
+    const detail::StylePropertyDesc& property,
+    const Element& element,
+    const ComputedStyle& style,
+    TransitionValue& out) {
+  if (property.type &&
+      cmeta_type_equal(property.type, &cmeta_type_float)) {
+    float value = 0.0f;
+    if (!detail::style_property_read_transition(
+            property, element, style, property.type, &value)) {
+      return false;
+    }
+    out = {property.type, flex::AnimValue{value}};
+    return true;
   }
+
+  if (property.type &&
+      cmeta_type_equal(property.type, &flex::cmeta_type_color)) {
+    Color value{};
+    if (!detail::style_property_read_transition(
+            property, element, style, property.type, &value)) {
+      return false;
+    }
+    out = {property.type, flex::AnimValue{value}};
+    return true;
+  }
+
+  return false;
 }
 
-void start_color_transition_if_changed(TransitionManager& transitions,
-                                       std::uintptr_t element_id,
-                                       const std::string& property_name,
-                                       const Color& previous_value,
-                                       const Color& target_value,
-                                       const TransitionDef& def,
-                                       float current_time_ms,
-                                       bool& started_any) {
-  const auto* property = detail::style_property_find(property_name);
-  if (!property) {
-    return;
+bool start_registered_transition_if_changed(
+    TransitionManager& transitions,
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const Element& element,
+    const ComputedStyle& previous_style,
+    const ComputedStyle& target_style,
+    const TransitionDef& def,
+    float current_time_ms) {
+  TransitionValue previous;
+  TransitionValue target;
+  if (!read_transition_value(property, element, previous_style, previous) ||
+      !read_transition_value(property, element, target_style, target)) {
+    return false;
   }
-  if (transitions.start_color(element_id, *property, previous_value,
-                              target_value, def, current_time_ms)) {
-    started_any = true;
-  }
+
+  const TransitionValue current =
+      transitions.get_typed(element_id, property, previous, current_time_ms);
+  return transitions.start_typed(element_id, property, current, target, def,
+                                 current_time_ms);
 }
 
 bool animation_spec_changed(const ComputedStyle& previous_style,
