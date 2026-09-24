@@ -83,6 +83,28 @@ bool style_property_read(const StylePropertyDesc& property,
                          const cmeta_type_desc* expected_type,
                          void* out_value) noexcept;
 
+/**
+ * Read the value used by transition interpolation. Most properties use their
+ * normal storage accessor; properties with computed presentation projections
+ * (currently application-owned background-color via --bg) resolve them here.
+ */
+bool style_property_read_transition(const StylePropertyDesc& property,
+                                    const Element& element,
+                                    const ComputedStyle& style,
+                                    const cmeta_type_desc* expected_type,
+                                    void* out_value) noexcept;
+
+/**
+ * Match a CSS transition selector against registry metadata without a
+ * property-name dispatch table.
+ *
+ * Group members (transform/box-shadow) match only their group name or "all";
+ * direct component names remain unsupported to preserve the pre-registry
+ * behavior.
+ */
+bool style_property_matches_transition(const StylePropertyDesc& property,
+                                       std::string_view transition_name) noexcept;
+
 bool style_property_write(const StylePropertyDesc& property,
                           ComputedStyle& style,
                           const cmeta_type_desc* supplied_type,
