@@ -255,18 +255,36 @@ jobs:
           mv "$PACKAGE_BUILD_ROOT" "$RUNNER_TEMP/stun-desktop-quarantine/builds"
           test ! -e .ci/sources
           test ! -e "$PACKAGE_BUILD_ROOT"
-      - name: Install pinned graphics and FlexUI dependencies
+      - name: Restore canonical STUN graphics and FlexUI dependencies
         shell: bash
         run: |
           set -euo pipefail
-          "$VCPKG_ROOT/vcpkg" install --classic --triplet x64-linux \
+          manifest="$VCPKG_CACHE_REPOSITORY_ROOT/manifests/stun-linux"
+          test -f "$manifest/vcpkg.json"
+          ! grep -Eq '"vulkan-(loader|headers)"' "$manifest/vcpkg.json"
+          "$VCPKG_ROOT/vcpkg" install \
+            "--x-manifest-root=$manifest" \
             "--x-install-root=$PORTS_ROOT/flexui" \
-            freetype stb box2d nlohmann-json pugixml lexbor tree-sitter tree-sitter-c \
-            catch2 pkgconf zstd glfw3 glad plutosvg vulkan-memory-allocator \
+            --triplet x64-linux \
+            --only-binarycaching \
             2>&1 | tee "$EVIDENCE_DIR/graphics-install.log"
           cp "$PORTS_ROOT/flexui/vcpkg/status" "$EVIDENCE_DIR/graphics-packages.txt"
-          ! grep -Fqx 'Package: vulkan-loader' "$EVIDENCE_DIR/graphics-packages.txt"
-          ! grep -Fqx 'Package: vulkan-headers' "$EVIDENCE_DIR/graphics-packages.txt"
+          status="$PORTS_ROOT/flexui/vcpkg/status"
+          test -f "$status"
+          ! grep -Fqx 'Package: vulkan-loader' "$status"
+          ! grep -Fqx 'Package: vulkan-headers' "$status"
+          awk '
+            $0 == "Package: lexbor" { found=1; next }
+            found && /^Version: / {
+              version=$2
+              if (version !~ /^3\./) exit 2
+              ok=1
+              exit
+            }
+            END { if (!ok) exit 1 }
+          ' "$status"
+          ! grep -Eq '^Building [^:]+:x64-linux' "$EVIDENCE_DIR/graphics-install.log"
+          grep -Eq 'Restored [1-9][0-9]* package\(s\) from NuGet' "$EVIDENCE_DIR/graphics-install.log"
       - name: Save complete dependency cache
         if: steps.ports_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
