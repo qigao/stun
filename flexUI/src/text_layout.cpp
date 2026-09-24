@@ -107,29 +107,93 @@ float approximate_ascii_advance(const ComputedStyle* style, char ch,
   return font_size * base_multiplier;
 }
 
-size_t count_letter_spacing_gaps(const std::string& text) {
-  size_t gaps = 0;
-  size_t run_length = 0;
-  for (char ch : text) {
-    if (ch == '\n') {
-      if (run_length > 1) {
-        gaps += run_length - 1;
-      }
-      run_length = 0;
-      continue;
+bool grapheme_has_hard_line_break(vstr cluster) {
+  size_t cursor = 0u;
+  salts_unicode_scalar scalar{};
+  while (cursor < cluster.len) {
+    const salts_unicode_status status =
+        salts_unicode_utf8_next(cluster, &cursor, &scalar);
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error("Salts::Unicode failed to scan a grapheme");
     }
-    ++run_length;
+    if (scalar.value == '\n' || scalar.value == '\r') {
+      return true;
+    }
   }
-  if (run_length > 1) {
-    gaps += run_length - 1;
+  return false;
+}
+
+bool grapheme_is_unicode_whitespace(vstr cluster) {
+  size_t cursor = 0u;
+  salts_unicode_scalar scalar{};
+  bool saw_scalar = false;
+  while (cursor < cluster.len) {
+    const salts_unicode_status status =
+        salts_unicode_utf8_next(cluster, &cursor, &scalar);
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error("Salts::Unicode failed to scan a grapheme");
+    }
+    saw_scalar = true;
+    if ((scalar.properties & SALTS_UNICODE_PROPERTY_WHITE_SPACE) == 0u) {
+      return false;
+    }
+  }
+  return saw_scalar;
+}
+
+size_t count_letter_spacing_gaps(const std::string& text) {
+  size_t gaps = 0u;
+  size_t run_length = 0u;
+  size_t cursor = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to enumerate letter-spacing graphemes");
+    }
+
+    if (grapheme_has_hard_line_break(cluster)) {
+      if (run_length > 1u) {
+        gaps += run_length - 1u;
+      }
+      run_length = 0u;
+    } else {
+      ++run_length;
+    }
+  }
+
+  if (run_length > 1u) {
+    gaps += run_length - 1u;
   }
   return gaps;
 }
 
 size_t count_word_spacing_gaps(const std::string& text) {
-  size_t gaps = 0;
-  for (char ch : text) {
-    if (ch != '\n' && std::isspace(static_cast<unsigned char>(ch))) {
+  size_t gaps = 0u;
+  size_t cursor = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to enumerate word-spacing graphemes");
+    }
+
+    if (!grapheme_has_hard_line_break(cluster) &&
+        grapheme_is_unicode_whitespace(cluster)) {
       ++gaps;
     }
   }
@@ -689,13 +753,46 @@ float approximate_text_width(const ComputedStyle* style, const std::string& text
   const float font_size = style->font_size > 0.0f ? style->font_size : 14.0f;
   const float multiplier = base_text_width_multiplier(style);
   float base_width = 0.0f;
-  for (char ch : transformed) {
-    if (ch == '\n') {
+
+  size_t cursor = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(transformed.data(), transformed.size());
+  while (cursor < transformed.size()) {
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+      throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+    }
+    if (status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to enumerate approximate-width graphemes");
+    }
+    if (grapheme_has_hard_line_break(cluster)) {
       continue;
     }
-    base_width +=
-        approximate_ascii_advance(style, ch, font_size, multiplier);
+
+    size_t scalar_cursor = 0u;
+    salts_unicode_scalar first{};
+    const salts_unicode_status scalar_status =
+        salts_unicode_utf8_next(cluster, &scalar_cursor, &first);
+    if (scalar_status != SALTS_UNICODE_OK) {
+      throw std::runtime_error(
+          "Salts::Unicode failed to inspect approximate-width grapheme");
+    }
+
+    if (cluster.len == 1u && first.value <= 0x7fu) {
+      base_width += approximate_ascii_advance(
+          style, static_cast<char>(first.value), font_size, multiplier);
+    } else if ((first.properties & SALTS_UNICODE_PROPERTY_WHITE_SPACE) != 0u) {
+      base_width += font_size * 0.35f;
+    } else {
+      // This remains a fallback estimate, not shaping. A complete extended
+      // grapheme cluster contributes one typographic unit regardless of its
+      // UTF-8 byte length or number of combining/ZWJ scalars.
+      base_width += font_size * multiplier;
+    }
   }
+
   const float spacing_width =
       static_cast<float>(count_letter_spacing_gaps(transformed)) *
       std::max(style->letter_spacing, 0.0f);
@@ -717,20 +814,21 @@ float approximate_segmented_text_width(const ComputedStyle* style,
   measure_style.word_spacing = 0.0f;
 
   float width = 0.0f;
-  size_t codepoint_count = 0;
+  size_t grapheme_count = 0u;
   for (const auto& segment : segment_text(transformed)) {
-    const size_t segment_codepoints = utf8_scalar_count(segment.text);
+    const size_t segment_graphemes =
+        unicode_grapheme_boundaries(segment.text).size();
     if (segment.type == TextSegmentType::Emoji) {
-      width += static_cast<float>(segment_codepoints) * measure_style.font_size;
+      width += static_cast<float>(segment_graphemes) * measure_style.font_size;
     } else {
       width += approximate_text_width(&measure_style, segment.text);
     }
-    codepoint_count += segment_codepoints;
+    grapheme_count += segment_graphemes;
   }
 
-  if (codepoint_count > 1) {
+  if (grapheme_count > 1u) {
     width += std::max(style->letter_spacing, 0.0f) *
-             static_cast<float>(codepoint_count - 1);
+             static_cast<float>(grapheme_count - 1u);
   }
   width += static_cast<float>(count_word_spacing_gaps(transformed)) *
            resolve_word_spacing(style);
@@ -754,14 +852,15 @@ float emit_segmented_text_line(RenderCommandList& commands, const ComputedStyle*
     float current_x = origin_x;
     const float letter_spacing = std::max(style->letter_spacing, 0.0f);
     const float word_spacing = resolve_word_spacing(style);
-    bool has_previous_codepoint = false;
+    bool has_previous_grapheme = false;
     for (const auto& segment : segment_text(transformed)) {
-      const size_t segment_codepoints = utf8_scalar_count(segment.text);
-      if (segment_codepoints == 0) {
+      const size_t segment_graphemes =
+          unicode_grapheme_boundaries(segment.text).size();
+      if (segment_graphemes == 0u) {
         continue;
       }
 
-      if (has_previous_codepoint) {
+      if (has_previous_grapheme) {
         current_x += letter_spacing;
       }
 
@@ -769,46 +868,64 @@ float emit_segmented_text_line(RenderCommandList& commands, const ComputedStyle*
         commands.draw_text(segment.text, current_x, origin_y,
                            get_emoji_font_name(), style->font_size, bold,
                            draw_color);
-        current_x += static_cast<float>(segment_codepoints) * style->font_size;
+        current_x += static_cast<float>(segment_graphemes) * style->font_size;
       } else {
         const std::string font_name =
             style->font_family.empty() ? "Arial" : style->font_family;
-        const bool has_tab = segment.text.find('\t') != std::string::npos;
-        if (word_spacing <= 0.0f && !has_tab) {
+        if (word_spacing <= 0.0f && segment.text.find('\t') == std::string::npos) {
           commands.draw_text(segment.text, current_x, origin_y, font_name,
                              style->font_size, bold, draw_color);
           current_x += approximate_text_width(&measure_style, segment.text);
         } else {
-        size_t run_start = 0;
-        for (size_t i = 0; i <= segment.text.size(); ++i) {
-          const bool at_end = i == segment.text.size();
-          const bool at_space =
-              !at_end &&
-              std::isspace(static_cast<unsigned char>(segment.text[i]));
-          if (!at_end && !at_space) {
-            continue;
+          size_t cluster_cursor = 0u;
+          size_t run_start = 0u;
+          vstr cluster{};
+          const vstr segment_view =
+              vstr_from_buf(segment.text.data(), segment.text.size());
+
+          while (cluster_cursor < segment.text.size()) {
+            const size_t cluster_start = cluster_cursor;
+            const salts_unicode_status status =
+                salts_unicode_grapheme_next(segment_view, &cluster_cursor, &cluster);
+            if (status != SALTS_UNICODE_OK) {
+              throw std::runtime_error(
+                  "Salts::Unicode failed to segment emitted text");
+            }
+
+            const bool whitespace = grapheme_is_unicode_whitespace(cluster);
+            if (!whitespace) {
+              continue;
+            }
+
+            if (cluster_start > run_start) {
+              const std::string run =
+                  segment.text.substr(run_start, cluster_start - run_start);
+              commands.draw_text(run, current_x, origin_y, font_name,
+                                 style->font_size, bold, draw_color);
+              current_x += approximate_text_width(&measure_style, run);
+            }
+
+            const std::string whitespace_text =
+                segment.text.substr(cluster_start, cluster_cursor - cluster_start);
+            current_x += approximate_text_width(&measure_style, whitespace_text) +
+                         word_spacing;
+            run_start = cluster_cursor;
           }
-          if (i > run_start) {
-            const std::string run = segment.text.substr(run_start, i - run_start);
+
+          if (run_start < segment.text.size()) {
+            const std::string run = segment.text.substr(run_start);
             commands.draw_text(run, current_x, origin_y, font_name,
                                style->font_size, bold, draw_color);
             current_x += approximate_text_width(&measure_style, run);
           }
-          if (at_space) {
-            current_x += approximate_text_width(
-                             &measure_style,
-                             std::string(1, segment.text[i])) +
-                         word_spacing;
-            run_start = i + 1;
-          }
-        }
         }
       }
 
-      if (segment_codepoints > 1) {
-        current_x += letter_spacing * static_cast<float>(segment_codepoints - 1);
+      if (segment_graphemes > 1u) {
+        current_x += letter_spacing *
+                     static_cast<float>(segment_graphemes - 1u);
       }
-      has_previous_codepoint = true;
+      has_previous_grapheme = true;
     }
     return current_x - origin_x;
   };
