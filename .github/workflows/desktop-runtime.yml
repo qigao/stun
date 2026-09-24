@@ -141,7 +141,7 @@ jobs:
           evidence = Path(os.environ['EVIDENCE_DIR'])
           provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
           assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
-          assert provenance['vcpkg'] == os.environ['VCPKG_PORT_BASELINE'], provenance
+          assert provenance['vcpkg_port_baseline'] == os.environ['VCPKG_PORT_BASELINE'], provenance
           patch = Path('cmake/ci/mesa/module-cleanup.patch')
           assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
           rows = json.loads((source / 'results.json').read_text())
