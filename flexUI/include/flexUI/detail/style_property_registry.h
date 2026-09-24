@@ -8,6 +8,10 @@
 #include <cstdint>
 #include <string_view>
 
+namespace flexUI {
+class Element;
+}
+
 namespace flexUI::detail {
 
 enum class StylePropertyId : std::uint16_t {
@@ -83,5 +87,17 @@ bool style_property_write(const StylePropertyDesc& property,
                           ComputedStyle& style,
                           const cmeta_type_desc* supplied_type,
                           const void* value) noexcept;
+
+/**
+ * Apply FlexUI-owned invalidation semantics for a union of StylePropertyImpact
+ * flags. CMeta remains the semantic type source; dirty behavior stays in
+ * FlexUI.
+ */
+void mark_style_impact(Element& element, std::uint32_t impact) noexcept;
+
+inline void mark_style_property_dirty(
+    Element& element, const StylePropertyDesc& property) noexcept {
+    mark_style_impact(element, property.impact);
+}
 
 } // namespace flexUI::detail
