@@ -519,29 +519,6 @@ float TransitionManager::get(std::uintptr_t element_id,
         return get_float(element_id, *descriptor, default_value, current_time_ms);
     }
 
-    // Compatibility read adapter for historical color-component callers.
-    if (property.size() > 2 && property[property.size() - 2] == '-') {
-        const char component = property.back();
-        if (component == 'r' || component == 'g' ||
-            component == 'b' || component == 'a') {
-            const std::string base = property.substr(0, property.size() - 2);
-            if (const auto* descriptor = detail::style_property_find(base);
-                descriptor && descriptor->type &&
-                cmeta_type_equal(descriptor->type, &flex::cmeta_type_color)) {
-                Color fallback{};
-                if (component == 'r') fallback.r = default_value;
-                if (component == 'g') fallback.g = default_value;
-                if (component == 'b') fallback.b = default_value;
-                if (component == 'a') fallback.a = default_value;
-                const Color current =
-                    get_color(element_id, *descriptor, fallback, current_time_ms);
-                if (component == 'r') return current.r;
-                if (component == 'g') return current.g;
-                if (component == 'b') return current.b;
-                return current.a;
-            }
-        }
-    }
     return default_value;
 }
 
