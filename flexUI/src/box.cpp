@@ -9,6 +9,7 @@
 #include <flexUI/view_pipeline.h>
 #include <flexUI/tailwindcss.h>
 #include <flexUI/detail/css_typed_value.h>
+#include <flex/core/cmeta_types.h>
 #include "default_style_assets.h"
 #include <flex/bridge/renderer.h>
 #include <nlohmann/json.hpp>
@@ -760,51 +761,44 @@ void register_typed_float_animation_track(
   }
 }
 
-void register_color_animation_track(AnimationManager& animations,
-                                    std::uintptr_t element_id,
-                                    const std::string& property_prefix,
-                                    const Color& base_color,
-                                    const std::vector<AnimationKeyframeStep>& keyframes,
-                                    const AnimationDef& def,
-                                    float current_time_ms,
-                                    const std::function<bool(
-                                        const std::map<std::string, std::string>&,
-                                        Color&)>& extractor) {
-  std::map<float, float> r_values;
-  std::map<float, float> g_values;
-  std::map<float, float> b_values;
-  std::map<float, float> a_values;
+void register_typed_color_animation_track(
+    AnimationManager& animations, std::uintptr_t element_id,
+    detail::StylePropertyId property_id, const Color& base_color,
+    const std::vector<AnimationKeyframeStep>& keyframes,
+    const AnimationDef& def, float current_time_ms,
+    const std::function<bool(const std::map<std::string, std::string>&,
+                             Color&)>& extractor) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  if (!property || !property->type ||
+      !cmeta_type_equal(property->type, &flex::cmeta_type_color)) {
+    return;
+  }
+
+  std::map<float, Color> values;
   for (const auto& frame : keyframes) {
     Color color;
     if (extractor(frame.properties, color)) {
-      r_values[frame.offset] = color.r;
-      g_values[frame.offset] = color.g;
-      b_values[frame.offset] = color.b;
-      a_values[frame.offset] = color.a;
+      values[frame.offset] = color;
     }
   }
+  if (values.empty()) {
+    return;
+  }
+  if (values.begin()->first > 0.0f) {
+    values.emplace(0.0f, base_color);
+  }
+  if (values.rbegin()->first < 1.0f) {
+    values.emplace(1.0f, base_color);
+  }
 
-  std::vector<AnimationValuePoint> points;
-  finalize_animation_points(r_values, base_color.r, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-r", points, def,
-                     current_time_ms);
+  std::vector<TypedAnimationPoint> points;
+  points.reserve(values.size());
+  for (const auto& [offset, value] : values) {
+    points.push_back(
+        {offset, TransitionValue{&flex::cmeta_type_color,
+                                 flex::AnimValue{value}}});
   }
-  finalize_animation_points(g_values, base_color.g, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-g", points, def,
-                     current_time_ms);
-  }
-  finalize_animation_points(b_values, base_color.b, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-b", points, def,
-                     current_time_ms);
-  }
-  finalize_animation_points(a_values, base_color.a, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-a", points, def,
-                     current_time_ms);
-  }
+  animations.start_typed(element_id, *property, points, def, current_time_ms);
 }
 
 void register_element_animations(Box& box, Element* elem, StyleEngine& style_engine,
@@ -882,8 +876,8 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           });
     }
 
-    register_color_animation_track(
-        box.animations(), element_id, "background-color",
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BackgroundColor,
         resolved_element_background(*elem, style), *keyframes, def,
         current_time_ms,
         [](const auto& props, Color& out) {
@@ -965,9 +959,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           return true;
         });
 
-    register_color_animation_track(
-        box.animations(), element_id, "border-color", style.border_color,
-        *keyframes, def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BorderColor,
+        style.border_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("border-color");
           if (it == props.end()) {
@@ -999,9 +993,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_length(it->second);
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "outline-color", style.outline_color,
-        *keyframes, def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::OutlineColor,
+        style.outline_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("outline-color");
           if (it == props.end()) {
@@ -1033,9 +1027,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_length(it->second);
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "ring-color", style.ring_color, *keyframes,
-        def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::RingColor,
+        style.ring_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("ring-color");
           if (it == props.end()) {
@@ -1044,8 +1038,8 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_color(it->second);
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "ring-offset-color",
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::RingOffsetColor,
         style.ring_offset_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("ring-offset-color");
@@ -1120,9 +1114,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = shadow.spread_radius;
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "box-shadow-color", style.shadow.color,
-        *keyframes, def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BoxShadowColor,
+        style.shadow.color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("box-shadow");
           if (it == props.end()) {
