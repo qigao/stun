@@ -224,6 +224,93 @@ suite("FlexUI typed CSS opacity apply") {
                           0x33 / 255.0f, 1.0f});
     }
 
+    it("applies individual transform writes through the registry") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            translate: 12px -4px;
+            scale: 2 3;
+            rotate: .25turn;
+          }
+        )");
+        box.update();
+
+        check_float_eq(target->computed_style->transform_x,
+                       12.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_y,
+                       -4.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale,
+                       1.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale_x,
+                       2.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale_y,
+                       3.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_rotate,
+                       90.0f, 0.0001f);
+    }
+
+    it("preserves transform source order and important semantics") {
+        Box box(nullptr);
+        auto* target = make_target(box, "item");
+
+        box.load_css(R"(
+          #target {
+            translate: 1px 2px;
+            scale: 1;
+          }
+          #target { translate: 5px 6px; }
+          .item { scale: 2 !important; }
+          #target { scale: 3; }
+        )");
+        box.update();
+
+        check_float_eq(target->computed_style->transform_x,
+                       5.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_y,
+                       6.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale,
+                       2.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale_x,
+                       2.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale_y,
+                       2.0f, 0.0001f);
+    }
+
+    it("preserves legacy near-uniform scale projection") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css("#target { scale: 1.00001 1.00002; }");
+        box.update();
+
+        check_float_eq(target->computed_style->transform_scale,
+                       1.00001f, 0.000001f);
+        check_float_eq(target->computed_style->transform_scale_x,
+                       1.00001f, 0.000001f);
+        check_float_eq(target->computed_style->transform_scale_y,
+                       1.00002f, 0.000001f);
+    }
+
+    it("keeps transform shorthand on the legacy path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(
+            "#target { transform: translate(9px, 10px) scale(2) rotate(90deg); }");
+        box.update();
+
+        check_float_eq(target->computed_style->transform_x,
+                       9.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_y,
+                       10.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_scale,
+                       2.0f, 0.0001f);
+        check_float_eq(target->computed_style->transform_rotate,
+                       90.0f, 0.0001f);
+    }
+
     it("keeps border-color on the legacy side-projection path") {
         Box box(nullptr);
         auto* target = make_target(box);

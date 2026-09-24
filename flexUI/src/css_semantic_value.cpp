@@ -609,6 +609,56 @@ CssLiteralResult<float> parse_css_number_literal(
     return {CssLiteralState::Concrete, parsed};
 }
 
+CssLiteralResult<float> parse_css_angle_literal(
+    std::string_view raw_value) noexcept {
+    const std::string_view trimmed = trim_ascii(raw_value);
+    if (trimmed.empty()) {
+        return {};
+    }
+
+    const std::string lowered = ascii_lower_copy(trimmed);
+    if (is_css_wide_keyword(lowered) ||
+        contains_deferred_function(lowered) ||
+        lowered.rfind("min(", 0) == 0 ||
+        lowered.rfind("max(", 0) == 0 ||
+        lowered.rfind("clamp(", 0) == 0) {
+        return {CssLiteralState::Deferred, 0.0f};
+    }
+
+    const auto parse_unit = [&](std::string_view unit, float scale)
+        -> CssLiteralResult<float> {
+        if (lowered.size() <= unit.size() ||
+            lowered.compare(lowered.size() - unit.size(), unit.size(), unit) != 0) {
+            return {};
+        }
+        const auto number = parse_css_number_literal(
+            std::string_view(lowered).substr(0, lowered.size() - unit.size()));
+        if (!number.is_concrete()) {
+            return number.is_deferred()
+                       ? CssLiteralResult<float>{CssLiteralState::Deferred, 0.0f}
+                       : CssLiteralResult<float>{};
+        }
+        return {CssLiteralState::Concrete, number.value * scale};
+    };
+
+    if (const auto turn = parse_unit("turn", 360.0f); turn.is_concrete()) {
+        return turn;
+    }
+    if (const auto grad = parse_unit("grad", 0.9f); grad.is_concrete()) {
+        return grad;
+    }
+    if (const auto deg = parse_unit("deg", 1.0f); deg.is_concrete()) {
+        return deg;
+    }
+    if (const auto rad =
+            parse_unit("rad", 180.0f / 3.14159265358979323846f);
+        rad.is_concrete()) {
+        return rad;
+    }
+
+    return parse_css_number_literal(lowered);
+}
+
 CssLiteralResult<Color> parse_css_color_literal(
     std::string_view raw_value) noexcept {
     const std::string_view trimmed = trim_ascii(raw_value);
