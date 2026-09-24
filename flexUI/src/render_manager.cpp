@@ -150,6 +150,18 @@ Color get_animation_color(AnimationManager& animations,
              : fallback;
 }
 
+float get_animation_float(AnimationManager& animations,
+                          std::uintptr_t element_id,
+                          detail::StylePropertyId property_id,
+                          float fallback,
+                          float current_time_ms) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  return property
+             ? animations.get_float(element_id, *property, fallback,
+                                    current_time_ms)
+             : fallback;
+}
+
 struct RenderProfile {
   std::chrono::high_resolution_clock::time_point start{};
   double frame_start_ms = 0.0;
@@ -2025,18 +2037,24 @@ void RenderManager::render_element(Element* elem,
     }
     if (animations.has_any_effects() &&
         animations.has_effect(element_id, current_time)) {
-      transform_x =
-          animations.get(element_id, "transform-x", transform_x, current_time);
-      transform_y =
-          animations.get(element_id, "transform-y", transform_y, current_time);
-      transform_scale = animations.get(element_id, "transform-scale",
-                                       transform_scale, current_time);
-      transform_scale_x = animations.get(element_id, "transform-scale-x",
-                                         transform_scale_x, current_time);
-      transform_scale_y = animations.get(element_id, "transform-scale-y",
-                                         transform_scale_y, current_time);
-      transform_rotate = animations.get(element_id, "transform-rotate",
-                                        transform_rotate, current_time);
+      transform_x = get_animation_float(
+          animations, element_id, detail::StylePropertyId::TransformX,
+          transform_x, current_time);
+      transform_y = get_animation_float(
+          animations, element_id, detail::StylePropertyId::TransformY,
+          transform_y, current_time);
+      transform_scale = get_animation_float(
+          animations, element_id, detail::StylePropertyId::TransformScale,
+          transform_scale, current_time);
+      transform_scale_x = get_animation_float(
+          animations, element_id, detail::StylePropertyId::TransformScaleX,
+          transform_scale_x, current_time);
+      transform_scale_y = get_animation_float(
+          animations, element_id, detail::StylePropertyId::TransformScaleY,
+          transform_scale_y, current_time);
+      transform_rotate = get_animation_float(
+          animations, element_id, detail::StylePropertyId::TransformRotate,
+          transform_rotate, current_time);
       if (const auto* opacity_property =
               detail::style_property_descriptor(
                   detail::StylePropertyId::Opacity)) {
