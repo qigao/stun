@@ -573,6 +573,19 @@ bool TransitionManager::has_active(std::uintptr_t element_id,
     return false;
 }
 
+std::uint32_t TransitionManager::active_impact(
+    std::uintptr_t element_id, float current_time_ms) const noexcept {
+    std::uint32_t impact = detail::STYLE_IMPACT_NONE;
+    for (const auto& [key, transition] : transitions_) {
+        if (key.first != element_id || transition.is_complete(current_time_ms) ||
+            !transition.property) {
+            continue;
+        }
+        impact |= transition.property->impact;
+    }
+    return impact;
+}
+
 void TransitionManager::clear_element(std::uintptr_t element_id) {
     for (auto it = transitions_.begin(); it != transitions_.end();) {
         if (it->first.first == element_id) {
@@ -922,6 +935,19 @@ bool AnimationManager::has_active(std::uintptr_t element_id,
         }
     }
     return false;
+}
+
+std::uint32_t AnimationManager::active_impact(
+    std::uintptr_t element_id, float current_time_ms) const noexcept {
+    std::uint32_t impact = detail::STYLE_IMPACT_NONE;
+    for (const auto& [key, animation] : typed_animations_) {
+        if (key.first != element_id || !animation.is_active(current_time_ms) ||
+            !animation.property) {
+            continue;
+        }
+        impact |= animation.property->impact;
+    }
+    return impact;
 }
 
 bool AnimationManager::has_effect(std::uintptr_t element_id,
