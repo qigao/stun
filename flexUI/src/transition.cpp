@@ -902,6 +902,23 @@ float AnimationManager::get_float(
     return value ? *value : default_value;
 }
 
+Color AnimationManager::get_color(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const Color& default_value,
+    float current_time_ms) const {
+    if (!property.type ||
+        !cmeta_type_equal(property.type, &flex::cmeta_type_color)) {
+        return default_value;
+    }
+    const TransitionValue baseline{
+        &flex::cmeta_type_color, flex::AnimValue{default_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const auto* value = std::get_if<Color>(&current.value);
+    return value ? *value : default_value;
+}
+
 float AnimationManager::get(std::uintptr_t element_id, const std::string& property,
                             float default_value, float current_time_ms) const {
     if (const auto* descriptor = detail::style_property_find(property)) {
