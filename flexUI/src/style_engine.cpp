@@ -820,6 +820,13 @@ static bool apply_compiled_declaration(const CSSDeclaration& declaration,
            detail::style_property_write(*declaration.resolved_property, *style,
                                         declaration.compiled_value.type, value);
   }
+  case detail::StylePropertyId::Visibility: {
+    const auto* value =
+        std::get_if<Visibility>(&declaration.compiled_value.value);
+    return value &&
+           detail::style_property_write(*declaration.resolved_property, *style,
+                                        declaration.compiled_value.type, value);
+  }
   case detail::StylePropertyId::BackgroundColor:
   case detail::StylePropertyId::OutlineColor:
   case detail::StylePropertyId::RingColor:

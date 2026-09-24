@@ -39,6 +39,29 @@ suite("FlexUI shared CSS semantic values") {
         check_true(parse_css_number_literal("unset").is_deferred());
     }
 
+    it("parses context-independent visibility keywords") {
+        const auto visible = parse_css_visibility_literal(" visible ");
+        const auto hidden = parse_css_visibility_literal("HIDDEN");
+        const auto collapse = parse_css_visibility_literal("collapse");
+
+        check_true(visible.is_concrete());
+        check(visible.value == Visibility::Visible);
+        check_true(hidden.is_concrete());
+        check(hidden.value == Visibility::Hidden);
+        check_true(collapse.is_concrete());
+        check(collapse.value == Visibility::Collapse);
+
+        check_true(parse_css_visibility_literal("inherit").is_deferred());
+        check_true(parse_css_visibility_literal("initial").is_deferred());
+        check_true(parse_css_visibility_literal("unset").is_deferred());
+        check_true(parse_css_visibility_literal("revert").is_deferred());
+        check_true(
+            parse_css_visibility_literal("var(--visibility)").is_deferred());
+        const auto invalid = parse_css_visibility_literal("opaque");
+        check_false(invalid.is_concrete());
+        check_false(invalid.is_deferred());
+    }
+
     it("parses context-independent color literals through the shared parser") {
         const auto hex = parse_css_color_literal("#336699");
         const auto rgb = parse_css_color_literal("rgb(255 0 128 / 50%)");

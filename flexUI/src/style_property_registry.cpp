@@ -80,14 +80,27 @@ constexpr std::uint32_t kTransformImpact =
     STYLE_IMPACT_PAINT | STYLE_IMPACT_HIT_TEST;
 constexpr std::uint32_t kOpacityImpact =
     STYLE_IMPACT_PAINT | STYLE_IMPACT_COMPOSITE;
+constexpr std::uint32_t kVisibilityImpact =
+    STYLE_IMPACT_PAINT | STYLE_IMPACT_HIT_TEST;
+
+const cmeta_type_identity kVisibilityIdentity =
+    CMETA_TYPE_ID_ATOM_INIT("flexUI.Visibility");
+const cmeta_type_desc kVisibilityType = {
+    "flexUI::Visibility", sizeof(Visibility), alignof(Visibility),
+    CMETA_T_INTEGER, nullptr, nullptr, &kVisibilityIdentity};
 constexpr std::uint32_t kFontImpact =
     STYLE_IMPACT_TEXT_LAYOUT | STYLE_IMPACT_LAYOUT | STYLE_IMPACT_PAINT;
 
-const std::array<StylePropertyDesc, 23> kProperties = {{
+const std::array<StylePropertyDesc, 24> kProperties = {{
     {StylePropertyId::Opacity, "opacity", &cmeta_type_float, kAnim,
      kOpacityImpact, nullptr,
      read_member<float, &ComputedStyle::opacity>,
      write_member<float, &ComputedStyle::opacity>},
+    {StylePropertyId::Visibility, "visibility", &kVisibilityType,
+     STYLE_PROPERTY_INHERITED | STYLE_PROPERTY_DISCRETE,
+     kVisibilityImpact, nullptr,
+     read_member<Visibility, &ComputedStyle::visibility>,
+     write_member<Visibility, &ComputedStyle::visibility>},
     {StylePropertyId::BackgroundColor, "background-color", &flex::cmeta_type_color,
      kAnim, kPaint, nullptr,
      read_member<Color, &ComputedStyle::background_color>,
@@ -173,7 +186,7 @@ struct PropertyName {
     StylePropertyId id;
 };
 
-constexpr std::array<PropertyName, 27> kNames = {{
+constexpr std::array<PropertyName, 28> kNames = {{
     {"background-color", StylePropertyId::BackgroundColor},
     {"border-color", StylePropertyId::BorderColor},
     {"box-shadow-blur", StylePropertyId::BoxShadowBlur},
@@ -201,6 +214,7 @@ constexpr std::array<PropertyName, 27> kNames = {{
     {"transform-y", StylePropertyId::TransformY},
     {"transformX", StylePropertyId::TransformX},
     {"transformY", StylePropertyId::TransformY},
+    {"visibility", StylePropertyId::Visibility},
 }};
 
 } // namespace

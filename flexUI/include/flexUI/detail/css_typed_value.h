@@ -9,7 +9,8 @@
 
 namespace flexUI::detail {
 
-using CompiledCssStorage = std::variant<std::monostate, float, Color>;
+using CompiledCssStorage =
+    std::variant<std::monostate, float, Color, Visibility>;
 
 struct CompiledCssLiteral {
     const cmeta_type_desc* type = nullptr;

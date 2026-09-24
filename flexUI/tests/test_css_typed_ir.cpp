@@ -28,6 +28,22 @@ suite("FlexUI typed CSS declaration literals") {
         check_false(compile_css_literal(opacity, "0.5junk").has_value());
     }
 
+    it("compiles the visibility discrete enum with CMeta identity") {
+        const auto* visibility = style_property_find("visibility");
+        check_not_null(visibility);
+        check_true(cmeta_type_desc_valid(visibility->type));
+
+        const auto compiled = compile_css_literal(visibility, "hidden");
+        check_true(compiled.has_value());
+        check_true(cmeta_type_equal(compiled.type, visibility->type));
+        check_true(std::holds_alternative<Visibility>(compiled.value));
+        check(std::get<Visibility>(compiled.value) == Visibility::Hidden);
+
+        check_false(compile_css_literal(visibility, "inherit").has_value());
+        check_false(
+            compile_css_literal(visibility, "var(--visibility)").has_value());
+    }
+
     it("compiles safe context-independent color literals") {
         const auto* background = style_property_find("background-color");
         const auto* outline = style_property_find("outline-color");

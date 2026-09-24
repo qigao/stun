@@ -87,6 +87,44 @@ suite("FlexUI typed CSS opacity apply") {
             detail::compile_css_literal(property, "calc(1 - 0.25)").has_value());
     }
 
+    it("applies typed visibility and preserves inherited/fallback semantics") {
+        Box box(nullptr);
+        auto* root = box.create("div", "root");
+        auto* target = box.create("div", "target");
+        root->append(target);
+        box.set_root(root);
+        box.set_viewport(320.0f, 200.0f);
+
+        box.load_css(R"(
+          #root { visibility: hidden; }
+          #target { visibility: visible; }
+        )");
+        box.update();
+        check(root->computed_style->visibility == Visibility::Hidden);
+        check(target->computed_style->visibility == Visibility::Visible);
+
+        Box inherited_box(nullptr);
+        auto* inherited_root = inherited_box.create("div", "root2");
+        auto* inherited_child = inherited_box.create("div", "child");
+        inherited_root->append(inherited_child);
+        inherited_box.set_root(inherited_root);
+        inherited_box.load_css("#root2 { visibility: collapse; }");
+        inherited_box.update();
+        check(inherited_root->computed_style->visibility == Visibility::Collapse);
+        check(inherited_child->computed_style->visibility == Visibility::Collapse);
+
+        Box variable_box(nullptr);
+        auto* variable_target = make_target(variable_box);
+        variable_box.load_css(R"(
+          #target {
+            --state: hidden;
+            visibility: var(--state);
+          }
+        )");
+        variable_box.update();
+        check(variable_target->computed_style->visibility == Visibility::Hidden);
+    }
+
     it("applies safe literal Color properties through the registry") {
         Box box(nullptr);
         auto* target = make_target(box);
