@@ -172,11 +172,6 @@ jobs:
       - name: Restore shared re2c binary for installed packages
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
-      - name: Set up BoringSSL build prerequisite
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.24.x
-          cache: false
 
       - name: Define isolated paths on the runner
         shell: bash
@@ -236,7 +231,7 @@ jobs:
           gcc --version | tee -a "$EVIDENCE_DIR/provenance.txt"
           g++ --version | tee -a "$EVIDENCE_DIR/provenance.txt"
           re2c --version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          go version | tee -a "$EVIDENCE_DIR/provenance.txt"
+
           "$VCPKG_ROOT/vcpkg" version | tee -a "$EVIDENCE_DIR/provenance.txt"
           test "$(re2c --version)" = "re2c 4.6"
           cmake -S .ci/install-sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
