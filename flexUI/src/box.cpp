@@ -779,6 +779,23 @@ void register_typed_float_animation_track(
   }
 }
 
+void register_typed_float_animation_track(
+    AnimationManager& animations, std::uintptr_t element_id,
+    detail::StylePropertyId property_id, float base_value,
+    const std::vector<AnimationKeyframeStep>& keyframes,
+    const AnimationDef& def, float current_time_ms,
+    const std::function<bool(const std::map<std::string, std::string>&,
+                             float&)>& extractor) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  if (!property || !property->type ||
+      !cmeta_type_equal(property->type, &cmeta_type_float)) {
+    return;
+  }
+  register_typed_float_animation_track(
+      animations, element_id, *property, base_value, keyframes, def,
+      current_time_ms, extractor);
+}
+
 void register_typed_color_animation_track(
     AnimationManager& animations, std::uintptr_t element_id,
     detail::StylePropertyId property_id, const Color& base_color,
@@ -910,9 +927,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           return true;
         });
 
-    register_float_animation_track(
-        box.animations(), element_id, "transform-x", style.transform_x, *keyframes,
-        def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::TransformX,
+        style.transform_x, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("transform");
           if (it == props.end()) {
@@ -921,9 +938,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_transform(it->second).x;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "transform-y", style.transform_y, *keyframes,
-        def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::TransformY,
+        style.transform_y, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("transform");
           if (it == props.end()) {
@@ -932,9 +949,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_transform(it->second).y;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "transform-scale", style.transform_scale,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::TransformScale,
+        style.transform_scale, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("transform");
           if (it == props.end()) {
@@ -943,9 +960,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_transform(it->second).scale;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "transform-scale-x", style.transform_scale_x,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::TransformScaleX,
+        style.transform_scale_x, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("transform");
           if (it == props.end()) {
@@ -954,9 +971,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_transform(it->second).scale_x;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "transform-scale-y", style.transform_scale_y,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::TransformScaleY,
+        style.transform_scale_y, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("transform");
           if (it == props.end()) {
@@ -965,9 +982,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_transform(it->second).scale_y;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "transform-rotate", style.transform_rotate,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::TransformRotate,
+        style.transform_rotate, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("transform");
           if (it == props.end()) {
