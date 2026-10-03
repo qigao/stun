@@ -1,0 +1,29 @@
+{
+  "name": "stun-linux-ci",
+  "version-string": "1",
+  "description": "Linux dependency profile for Stun FlexUI production and TurboScript consumer qualification; Vulkan loader/headers remain system-owned.",
+  "dependencies": [
+    "freetype",
+    "stb",
+    "box2d",
+    "nlohmann-json",
+    "pugixml",
+    {
+      "name": "lexbor",
+      "version>=": "3.0.0"
+    },
+    "tree-sitter",
+    "tree-sitter-c",
+    "catch2",
+    {
+      "name": "pkgconf",
+      "host": true
+    },
+    "zstd",
+    "glfw3",
+    "glad",
+    "plutosvg",
+    "vulkan-memory-allocator"
+  ],
+  "builtin-baseline": "b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01"
+}
