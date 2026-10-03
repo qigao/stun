@@ -481,6 +481,121 @@ jobs:
           path: ${{ runner.temp }}/stun-vcpkg-cache
           key: ${{ steps.vcpkg_cache.outputs.cache-primary-key }}
 
+      - name: Restore latest released TurboScript SDK graph
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/stun-latest-turboscript-sdks"
+          rm -rf "$sdk_root"
+          mkdir -p "$sdk_root"
+
+          restore_sdk() {
+            local repo="$1"
+            local pattern="$2"
+            local name="$3"
+            local config_rel="$4"
+            local dir="$sdk_root/$name"
+            local tag
+            local nupkg
+
+            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
+            test -n "$tag"
+            mkdir -p "$dir/download" "$dir/package"
+            gh release download "$tag" --repo "$repo" --pattern "$pattern" \
+              --dir "$dir/download" --clobber
+            nupkg="$(find "$dir/download" -maxdepth 1 -type f -name '*.nupkg' -print -quit)"
+            test -n "$nupkg"
+            unzip -q "$nupkg" -d "$dir/package"
+            local root="$dir/package/sdk/linux-x64"
+            test -f "$root/$config_rel"
+            printf '%s|%s\n' "$root" "$tag"
+          }
+
+          IFS='|' read -r latest_salts_root latest_salts_release < <(
+            restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts \
+              'lib/cmake/Salts/SaltsConfig.cmake')
+          IFS='|' read -r latest_utils_root latest_utils_release < <(
+            restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils \
+              'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')
+          IFS='|' read -r latest_turboscript_root latest_turboscript_release < <(
+            restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript \
+              'lib/cmake/TurboScript/TurboScriptConfig.cmake')
+
+          header="$latest_turboscript_root/include/turbo_script.h"
+          test -f "$header"
+          header_version="$(awk '/^#define TURBO_SCRIPT_VERSION_STRING / {gsub(/"/, "", $3); print $3; exit}' "$header")"
+          test -n "$header_version"
+          test "v$header_version" = "$latest_turboscript_release"
+
+          {
+            echo "LATEST_SALTS_ROOT=$latest_salts_root"
+            echo "LATEST_SALTS_UTILS_ROOT=$latest_utils_root"
+            echo "LATEST_TURBOSCRIPT_ROOT=$latest_turboscript_root"
+            echo "LATEST_SALTS_RELEASE=$latest_salts_release"
+            echo "LATEST_SALTS_UTILS_RELEASE=$latest_utils_release"
+            echo "LATEST_TURBOSCRIPT_RELEASE=$latest_turboscript_release"
+          } >> "$GITHUB_ENV"
+
+          printf 'latest_salts=%s\nlatest_salts_utils=%s\nlatest_turboscript=%s\n' \
+            "$latest_salts_release" "$latest_utils_release" "$latest_turboscript_release" \
+            | tee "$EVIDENCE_DIR/turboscript-latest-releases.txt"
+
+      - name: Build and run latest TurboScript FlexUI contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SALTS_ROOT="$LATEST_SALTS_ROOT"
+          export SALTS_UTILS_ROOT="$LATEST_SALTS_UTILS_ROOT"
+          export TURBOSCRIPT_ROOT="$LATEST_TURBOSCRIPT_ROOT"
+          build="$GITHUB_WORKSPACE/build/flexui-turboscript-latest"
+          ports="$EXTERNAL_PORTS_ROOT/flexui"
+          tests=(test_turboscript_controller test_turboscript_application)
+
+          unset LD_PRELOAD
+          cmake -S . -B "$build" -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$TURBOSCRIPT_ROOT;$SALTS_UTILS_ROOT;$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT" \
+            "-DTURBOSCRIPT_ROOT=$TURBOSCRIPT_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DSTUN_BUILD_CHARTS=OFF \
+            -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=OFF -DFLEXUI_ENABLE_TURBOSCRIPT=ON \
+            -DGCANVAS_BUILD_OPENGL=OFF -DGCANVAS_BUILD_VULKAN=OFF \
+            -DGCANVAS_BUILD_SVG=OFF -DGCANVAS_BUILD_WINDOW=OFF \
+            -DGCANVAS_BUILD_TESTS=OFF -DGCANVAS_BUILD_EXAMPLES=OFF \
+            -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=OFF -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF \
+            -DFLEX_BUILD_BACKEND_OPENGL=OFF -DFLEX_BUILD_BACKEND_VULKAN=OFF \
+            -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            2>&1 | tee "$EVIDENCE_DIR/turboscript-configure.log"
+
+          cmake --build "$build" --target "${tests[@]}" --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/turboscript-build.log"
+
+          export LD_LIBRARY_PATH="$TURBOSCRIPT_ROOT/lib:$SALTS_UTILS_ROOT/lib:$SALTS_ROOT/lib:$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/debug/lib:$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/lib:$ports/x64-linux/debug/lib:$ports/x64-linux/lib:${LD_LIBRARY_PATH:-}"
+          test_pattern="^($(IFS='|'; echo "${tests[*]}"))$"
+          ctest --test-dir "$build" -R "$test_pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/turboscript-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/turboscript-ctest.log"
+
+          {
+            echo '### Latest released TurboScript FlexUI qualification'
+            echo "TurboScript: $LATEST_TURBOSCRIPT_RELEASE"
+            echo "Salts: $LATEST_SALTS_RELEASE"
+            echo "SaltsUtils: $LATEST_SALTS_UTILS_RELEASE"
+            echo 'Executed test_turboscript_controller and test_turboscript_application with FLEXUI_ENABLE_TURBOSCRIPT=ON.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build and test the production FlexUI targets
         shell: bash
         run: |
