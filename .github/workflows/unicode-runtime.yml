@@ -448,7 +448,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          manifest="$VCPKG_CACHE_REPOSITORY_ROOT/manifests/stun-linux"
+          manifest="$GITHUB_WORKSPACE/.ci/vcpkg/stun-linux"
           test -f "$manifest/vcpkg.json"
           ! grep -Eq '"vulkan-(loader|headers)"' "$manifest/vcpkg.json"
           "$VCPKG_ROOT/vcpkg" install \
