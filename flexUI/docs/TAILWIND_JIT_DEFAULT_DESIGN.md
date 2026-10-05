@@ -8,6 +8,22 @@
 > 实施记录：P1-P8 的核心代码和相邻测试已落地；P9 已加入确定性离屏渲染快照与
 > 典型/大树性能基线。原生窗口人工 smoke 和仓库既有失败项仍保留在实施计划中。
 
+## 2026-09-20 兼容目标更新
+
+本文主要记录当前 whitelist/JIT 实现及其已有不变量；它不再定义长期对外 Tailwind 语义。
+
+长期 authoring contract 改为：
+
+- 使用标准 `class="..."`；
+- 固定一个上游 Tailwind 版本/compatibility profile；
+- native parser/compiler 解析 utility、variant、theme、responsive、dark、data/aria、container 与明确支持的 arbitrary syntax；
+- 普通 semantic class 与 Tailwind candidate 共存；
+- 所有生成结果继续进入现有 StyleEngine cascade；
+- official Tailwind toolchain 只作为 differential-test oracle，不成为安装运行时依赖；
+- 识别但未实现的 Tailwind 语义明确报 Unsupported，不做本地 fallback/reinterpretation。
+
+因此 `utility_whitelist.json`、`UtilityCatalog` 和 exact-token lookup 在迁移期间继续可用并保持测试，但它们是 current implementation/coverage data，不再是永久公开语义事实源。迁移跟踪：`stun#10`。
+
 ## 背景
 
 `flexUI` 已具备基于显式白名单的 Tailwind-like Utility JIT。`Box` 会扫描
