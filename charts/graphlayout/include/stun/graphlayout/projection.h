@@ -1,6 +1,6 @@
 #pragma once
 
-#include "stun/graphlayout/layered.h"
+#include "stun/graphlayout/graph.h"
 #include "stun/graphlayout/vpsc.h"
 
 #include <cstddef>

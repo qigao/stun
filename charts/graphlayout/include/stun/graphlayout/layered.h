@@ -1,29 +1,14 @@
 #pragma once
 
+#include "stun/graphlayout/graph.h"
+
 #include <cstddef>
 #include <string>
-#include <vector>
 
 namespace stun::graphlayout {
 
 // This is a graph-placement API, independent of UI, rendering and routing.
 // Node identity is stable across calls; edge endpoints are indices into nodes.
-struct Node {
-    std::string id;
-    double width = 0.0;
-    double height = 0.0;
-};
-
-struct Edge {
-    std::size_t source = 0;
-    std::size_t target = 0;
-};
-
-struct Graph {
-    std::vector<Node> nodes;
-    std::vector<Edge> edges;
-};
-
 enum class Direction { TopToBottom, BottomToTop, LeftToRight, RightToLeft };
 
 struct Options {
@@ -34,22 +19,6 @@ struct Options {
     std::size_t crossing_sweeps = 4;
     std::size_t max_nodes = 4096;
     std::size_t max_edges = 65536;
-};
-
-struct PlacedNode {
-    double x = 0.0;
-    double y = 0.0;
-    double width = 0.0;
-    double height = 0.0;
-    std::size_t rank = 0;
-    std::size_t scc = 0;
-};
-
-struct Layout {
-    // Index is the input node index. Never reordered by the solver.
-    std::vector<PlacedNode> nodes;
-    double width = 0.0;
-    double height = 0.0;
 };
 
 enum class Error {

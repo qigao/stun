@@ -1,4 +1,4 @@
-#include <stun/graphlayout/layered.h>
+#include "flowchart_layout.h"
 #include <stun/graphlayout/orthogonal.h>
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_ast.h"
@@ -161,32 +161,9 @@ private:
             if (nodes[i]->layout_height > 0) heights[i] = nodes[i]->layout_height;
         }
 
-        // Shared native graph placement. Cycles are condensed before ranking.
-        stun::graphlayout::Graph graph;
-        graph.nodes.reserve(ncount);
-        for (size_t i = 0; i < ncount; ++i)
-            graph.nodes.push_back({nodes[i]->id, widths[i], heights[i]});
-        for (auto* edge = diagram->edges; edge; edge = edge->next) {
-            auto src = index_of.find(edge->from ? edge->from : "");
-            auto dst = index_of.find(edge->to ? edge->to : "");
-            if (src == index_of.end() || dst == index_of.end())
-                throw std::invalid_argument("graphlayout: Mermaid edge references missing node");
-            graph.edges.push_back({src->second, dst->second});
-        }
-
-        stun::graphlayout::Options placement_options;
-        placement_options.node_gap = H_GAP;
-        placement_options.layer_gap = V_GAP;
-        const std::string rank_direction = diagram->direction ? diagram->direction : "";
-        if (rank_direction == "LR") placement_options.direction = stun::graphlayout::Direction::LeftToRight;
-        else if (rank_direction == "RL") placement_options.direction = stun::graphlayout::Direction::RightToLeft;
-        else if (rank_direction == "BT") placement_options.direction = stun::graphlayout::Direction::BottomToTop;
-        else placement_options.direction = stun::graphlayout::Direction::TopToBottom;
-        stun::graphlayout::Layout placement;
-        const auto placement_status = stun::graphlayout::layout_layered(graph, placement, placement_options);
-        if (!placement_status)
-            throw std::invalid_argument("graphlayout: " + placement_status.message);
-
+        // Per-chart AST and direction policy are isolated in this adapter.
+        const auto placement =
+            place_flowchart_nodes(diagram, nodes, index_of, widths, heights, H_GAP, V_GAP);
         std::vector<std::pair<double, double>> coords(ncount);
         for (size_t i = 0; i < ncount; ++i)
             coords[i] = {placement.nodes[i].x, placement.nodes[i].y};

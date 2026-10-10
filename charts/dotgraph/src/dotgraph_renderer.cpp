@@ -1,4 +1,4 @@
-#include <stun/graphlayout/layered.h>
+#include "dotgraph_layout.h"
 #include <stun/graphlayout/orthogonal.h>
 #include "dotgraph_renderer.h"
 #include "dotgraph/dotgraph_ast.h"
@@ -220,34 +220,12 @@ public:
             if (evaluated_height) heights[i] = *evaluated_height;
         }
 
-        // Graph placement is owned by Stun's independent SCC/layered solver.
-        stun::graphlayout::Graph graph;
-        graph.nodes.reserve(ncount);
-        for (size_t i = 0; i < ncount; ++i)
-            graph.nodes.push_back({nodes[i]->id, widths[i], heights[i]});
-        for (auto* e = diagram->edges; e; e = e->next) {
-            auto fi = index_of.find(e->from ? e->from : "");
-            auto ti = index_of.find(e->to ? e->to : "");
-            if (fi == index_of.end() || ti == index_of.end())
-                throw std::invalid_argument("graphlayout: DOT edge references missing node");
-            graph.edges.push_back({fi->second, ti->second});
-        }
-
-        stun::graphlayout::Options placement_options;
-        placement_options.node_gap = H_GAP;
-        placement_options.layer_gap = V_GAP;
-        switch (diagram->rankdir) {
-        case DG_RANKDIR_BT: placement_options.direction = stun::graphlayout::Direction::BottomToTop; break;
-        case DG_RANKDIR_LR: placement_options.direction = stun::graphlayout::Direction::LeftToRight; break;
-        case DG_RANKDIR_RL: placement_options.direction = stun::graphlayout::Direction::RightToLeft; break;
-        default: placement_options.direction = stun::graphlayout::Direction::TopToBottom; break;
-        }
-        stun::graphlayout::Layout placement;
-        const auto placement_status = stun::graphlayout::layout_layered(graph, placement, placement_options);
-        if (!placement_status)
-            throw std::invalid_argument("graphlayout: " + placement_status.message);
-
-        const bool horizontal = diagram->rankdir == DG_RANKDIR_LR || diagram->rankdir == DG_RANKDIR_RL;
+        // This Chart owns only its AST->IR adapter and layout policy.
+        // GraphLayered itself is an independently linked algorithm module.
+        const auto placement =
+            place_dot_nodes(diagram, nodes, index_of, widths, heights, H_GAP, V_GAP);
+        const bool horizontal =
+            diagram->rankdir == DG_RANKDIR_LR || diagram->rankdir == DG_RANKDIR_RL;
         std::vector<std::pair<double, double>> coords(ncount);
         for (size_t i = 0; i < ncount; ++i)
             coords[i] = {placement.nodes[i].x, placement.nodes[i].y};

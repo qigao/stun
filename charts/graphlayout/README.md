@@ -4,6 +4,44 @@
 is not a widget, docking, rendering or UI layout system. It is built independently
 of Salts, FlexUI, Cairo, OpenGL and the current Adaptagrams vendor library.
 
+## Independent algorithm modules
+
+The project deliberately builds algorithms as **separate targets**, not as
+copies of algorithms under individual chart frontends. Each chart owns its
+AST-to-Graph IR adapter, its layout-policy selection and its output mapping;
+shared solvers have no knowledge of DOT, Mermaid, Infographic or rendering.
+
+| Target | Provides | Requires |
+| --- | --- | --- |
+| `Stun::GraphCore` | Stable Graph/Node/Edge/Layout IR (`graph.h`) | C++17 only |
+| `Stun::GraphLayered` | SCC/DAG ranks and placement | GraphCore |
+| `Stun::GraphOrthogonal` | Orthogonal obstacle-aware A* | GraphCore |
+| `Stun::GraphVPSC` | 1D separation constraints | GraphCore |
+| `Stun::GraphProjection` | 2D pins, alignments, non-overlap | GraphVPSC |
+| `Stun::GraphStress` | Gradient and SMACOF optimizers | GraphProjection |
+| `Stun::GraphForce` | Spring plus softened repulsion | GraphProjection |
+
+The **algorithm code and CMake targets** above are independently built and
+linked. `Stun::GraphStress` currently houses two selectable optimizers that
+share the same stress objective and pair data; splitting their implementation
+would require extracting that common kernel, not duplicating its source.
+
+Chart adapter dependencies remain explicit: DOT and Mermaid flowcharts
+consume Layered and Orthogonal; Infographic's collision projection consumes
+GraphProjection. The former explicit Polyline/libavoid option is still a
+separately selected provider, **not an automatic fallback**. Chart-specific
+tree, Sankey, lane/timeline and route policy code should live with its chart
+until there is a second real consumer for a shared algorithm.
+
+To qualify an individual algorithm without any UI/chart dependencies:
+
+```sh
+cmake -S charts/graphlayout -B build/graphlayout -DBUILD_TESTING=ON
+cmake --build build/graphlayout --target stun_graph_vpsc
+cmake --build build/graphlayout --target stun_graph_force
+ctest --test-dir build/graphlayout --output-on-failure
+```
+
 ## Algorithm v1: layered graph placement
 
 1. Validate bounded graph input, stable node IDs, finite positive sizes and options.

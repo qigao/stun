@@ -1,4 +1,5 @@
 #include "stun/graphlayout/orthogonal.h"
+#include "stun/graphlayout/layered.h"
 
 #include <algorithm>
 #include <cmath>
