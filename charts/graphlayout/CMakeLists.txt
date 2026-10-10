@@ -172,5 +172,6 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/tree/src
     target_include_directories(stun_graphlayout_tree_renderer_tests PRIVATE
         tests/stubs
     )
+    target_compile_features(stun_graphlayout_tree_renderer_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphTreeRendererTests COMMAND stun_graphlayout_tree_renderer_tests)
 endif()
