@@ -13,6 +13,10 @@ struct VpscVariable {
     std::string id;
     double desired = 0.0;
     double weight = 1.0;
+    // If true, desired is an exact, non-movable absolute coordinate.
+    // It is eliminated from the free-variable objective and dual Hessian.
+    // This is a hard constraint, not a large-weight approximation.
+    bool fixed = false;
 };
 
 struct VpscConstraint {
@@ -65,6 +69,9 @@ struct VpscResult {
 struct VpscWitnessArc {
     std::size_t constraint_index = 0;
     bool reversed = false;
+    // True indicates a fixed-position equality arc; constraint_index then
+    // names an input variable instead of an input separation constraint.
+    bool fixed_variable = false;
 };
 
 enum class VpscError {
@@ -89,7 +96,8 @@ struct VpscStatus {
 };
 
 // Deterministic, bounded, dual coordinate ascent for convex weighted VPSC.
-// Feasibility is prechecked using difference constraints. A successful result
+// Fixed variables are exact, without artificial weights. Feasibility is
+// prechecked using difference constraints. A successful result
 // passes an independently recomputed numerical KKT + duality-gap certificate.
 // If the budget is exhausted, output is empty; there is no approximate-success
 // or alternative-solver fallback.

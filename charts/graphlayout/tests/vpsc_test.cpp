@@ -251,6 +251,56 @@ int main() {
                     require(std::isfinite(v), "random feasible witness result finite");
             }
         }
+        {
+            // Hard pin is an exact coordinate, not an enormous soft weight.
+            VpscProblem p{{{"anchor", 0, 1, true}, {"free", 0, 1}}, {{0, 1, 10}}};
+            const auto r = solve_checked(p);
+            close(r.positions[0], 0.0, 0.0, "hard pin exact");
+            close(r.positions[1], 10.0, 1e-7, "hard pin one-sided projection");
+            close(r.multipliers[0], 10.0, 1e-7, "pin KKT multiplier");
+            close(r.certificate.objective, 50.0, 1e-6, "pinned objective excludes anchor");
+            auto corrupted = r;
+            corrupted.positions[0] += 1e-12;
+            VpscCertificate audit;
+            require(verify_vpsc(p, corrupted, audit).error == VpscError::CertificateFailed,
+                    "pinned coordinate never moves, even within a tolerance");
+        }
+        {
+            // An unconstrained free variable is not translated when another
+            // component contains a pinned constraint.
+            VpscProblem p{{{"anchor", 0, 1, true}, {"free", 0, 1},
+                           {"isolated", -70, 1}}, {{0, 1, 10}}};
+            const auto r = solve_checked(p);
+            close(r.positions[1], 10.0, 1e-7, "anchored constrained value");
+            close(r.positions[2], -70.0, 0, "isolated free variable stays at its desire");
+        }
+        {
+            VpscProblem p{{{"anchor", 2, 1, true}, {"free", 0, 1},
+                           {"other", 12, 1, true}},
+                          {{0, 1, 5}, {1, 2, 5}}};
+            const auto r = solve_checked(p);
+            close(r.positions[0], 2, 0, "first fixed value");
+            close(r.positions[1], 7, 1e-7, "exact free equality between fixed bounds");
+            close(r.positions[2], 12, 0, "second fixed value");
+        }
+        {
+            VpscProblem p{{{"anchor", 0, 1, true}, {"other", 5, 1, true}},
+                          {{0, 1, 10}}};
+            VpscResult result;
+            const auto status = solve_vpsc(p, result);
+            require(status.error == VpscError::Infeasible, "conflicting pins give Infeasible");
+            require(result.positions.empty(), "infeasible pinned output transactional");
+            bool found_pin_arc = false;
+            for (const auto& arc : status.infeasible_cycle) {
+                if (arc.fixed_variable) {
+                    require(arc.constraint_index < p.variables.size(), "pin witness names original variable");
+                    found_pin_arc = true;
+                } else {
+                    require(arc.constraint_index < p.constraints.size(), "separation witness names constraint");
+                }
+            }
+            require(found_pin_arc, "infeasible pin cycle contains hard-coordinate witness");
+        }
         std::cout << "vpsc: all checks passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& e) {

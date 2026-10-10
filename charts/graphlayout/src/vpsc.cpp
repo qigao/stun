@@ -96,20 +96,43 @@ struct Arc {
     Real gap = 0.0;
     std::size_t original = 0;
     bool reversed = false;
+    bool fixed_variable = false;
 };
 
 // For each inequality x_to >= x_from + gap, a strictly positive cycle
 // is a certificate of infeasibility. Equalities contribute two arcs.
-VpscStatus check_feasibility(std::size_t n, const Canonical& c,
+VpscStatus check_feasibility(const VpscProblem& p, const Canonical& c,
                              std::size_t max_checks, double tolerance) {
+    const std::size_t n = c.order.size();
     if (n == 0) return {};
     std::vector<Arc> arcs;
-    if (c.constraints.size() > max_checks) // also protects doubling overflow
+    // Every hard-fixed coordinate is connected to one algebraic reference
+    // vertex with an equality. The reference is translation-invariant:
+    // a positive difference-constraint cycle detects inconsistent pins.
+    // The reference is not a VPSC optimization variable.
+    const std::size_t fixed_count = static_cast<std::size_t>(std::count_if(
+        p.variables.begin(), p.variables.end(),
+        [](const VpscVariable& v) { return v.fixed; }));
+    std::size_t required_arcs = 0;
+    for (const auto& v : c.constraints) {
+        const std::size_t count = v.equality ? 2 : 1;
+        if (required_arcs > max_checks - std::min(max_checks, count))
+            return failure(VpscError::CapacityExceeded, "feasibility arc budget exceeded");
+        required_arcs += count;
+    }
+    if (fixed_count > (max_checks - required_arcs) / 2)
         return failure(VpscError::CapacityExceeded, "feasibility arc budget exceeded");
-    arcs.reserve(c.constraints.size() * 2);
+    required_arcs += fixed_count * 2;
+    arcs.reserve(required_arcs);
     for (const auto& v : c.constraints) {
         arcs.push_back({v.left, v.right, v.gap, v.original, false});
         if (v.equality) arcs.push_back({v.right, v.left, -v.gap, v.original, true});
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& v = p.variables[c.order[i]];
+        if (!v.fixed) continue;
+        arcs.push_back({n, i, static_cast<Real>(v.desired), c.order[i], false, true});
+        arcs.push_back({i, n, -static_cast<Real>(v.desired), c.order[i], true, true});
     }
     if (arcs.empty()) return {};
     if (arcs.size() > max_checks)
@@ -119,15 +142,17 @@ VpscStatus check_feasibility(std::size_t n, const Canonical& c,
         if (a.to != b.to) return a.to < b.to;
         if (a.gap != b.gap) return a.gap < b.gap;
         if (a.original != b.original) return a.original < b.original;
+        if (a.fixed_variable != b.fixed_variable) return a.fixed_variable < b.fixed_variable;
         return a.reversed < b.reversed;
     });
 
-    std::vector<Real> dist(n, 0.0);
-    std::vector<std::size_t> predecessor(n, arcs.size());
+    const std::size_t vertex_count = n + (fixed_count > 0 ? 1 : 0);
+    std::vector<Real> dist(vertex_count, 0.0);
+    std::vector<std::size_t> predecessor(vertex_count, arcs.size());
     std::size_t checks = 0;
-    std::size_t changed_vertex = n;
-    for (std::size_t round = 0; round < n; ++round) {
-        changed_vertex = n;
+    std::size_t changed_vertex = vertex_count;
+    for (std::size_t round = 0; round < vertex_count; ++round) {
+        changed_vertex = vertex_count;
         for (std::size_t i = 0; i < arcs.size(); ++i) {
             if (++checks > max_checks)
                 return failure(VpscError::CapacityExceeded, "feasibility relaxation budget exceeded");
@@ -141,14 +166,14 @@ VpscStatus check_feasibility(std::size_t n, const Canonical& c,
                 changed_vertex = a.to;
             }
         }
-        if (changed_vertex == n) return {};
+        if (changed_vertex == vertex_count) return {};
     }
 
     // Follow predecessor edges into a directed cycle and retain the original
     // constraint indices and equality orientations as a checkable witness.
     std::size_t vertex = changed_vertex;
-    for (std::size_t i = 0; i < n; ++i) {
-        if (vertex >= n || predecessor[vertex] >= arcs.size())
+    for (std::size_t i = 0; i < vertex_count; ++i) {
+        if (vertex >= vertex_count || predecessor[vertex] >= arcs.size())
             return failure(VpscError::InternalInvariant, "broken infeasibility predecessor chain");
         vertex = arcs[predecessor[vertex]].from;
     }
@@ -157,10 +182,10 @@ VpscStatus check_feasibility(std::size_t n, const Canonical& c,
     Real sum = 0.0;
     Real gap_magnitude = 0.0;
     do {
-        if (vertex >= n || predecessor[vertex] >= arcs.size() || witness.size() > n)
+        if (vertex >= vertex_count || predecessor[vertex] >= arcs.size() || witness.size() > vertex_count)
             return failure(VpscError::InternalInvariant, "invalid positive-cycle witness");
         const Arc& a = arcs[predecessor[vertex]];
-        witness.push_back({a.original, a.reversed});
+        witness.push_back({a.original, a.reversed, a.fixed_variable});
         sum += a.gap;
         gap_magnitude += std::abs(a.gap);
         vertex = a.from;
@@ -196,8 +221,14 @@ VpscStatus certificate_for(const VpscProblem& problem,
     for (std::size_t i = 0; i < n; ++i) {
         if (!std::isfinite(candidate.positions[i]))
             return failure(VpscError::InvalidNumerics, "nonfinite primal candidate");
-        const Real dx = static_cast<Real>(candidate.positions[i]) - problem.variables[i].desired;
-        const Real weighted = static_cast<Real>(problem.variables[i].weight) * dx;
+        const auto& variable = problem.variables[i];
+        if (variable.fixed) {
+            if (candidate.positions[i] != variable.desired)
+                return failure(VpscError::CertificateFailed, "a hard-fixed VPSC variable moved");
+            continue; // The pin is a hard equality, not a weighted penalty.
+        }
+        const Real dx = static_cast<Real>(candidate.positions[i]) - variable.desired;
+        const Real weighted = static_cast<Real>(variable.weight) * dx;
         grad[i] = weighted;
         scale[i] += std::abs(weighted);
         objective += 0.5L * weighted * dx;
@@ -233,8 +264,10 @@ VpscStatus certificate_for(const VpscProblem& problem,
     Real stationarity = 0.0;
     Real correction = 0.0;
     for (std::size_t i = 0; i < n; ++i) {
-        stationarity = std::max(stationarity, std::abs(grad[i]) / scale[i]);
-        correction += 0.5L * grad[i] * grad[i] / problem.variables[i].weight;
+        if (!problem.variables[i].fixed) {
+            stationarity = std::max(stationarity, std::abs(grad[i]) / scale[i]);
+            correction += 0.5L * grad[i] * grad[i] / problem.variables[i].weight;
+        }
     }
     const Real dual_bound = lagrangian - correction;
     const Real dual_gap = (objective - dual_bound) / (1.0L + objective);
@@ -275,7 +308,7 @@ VpscStatus solve_vpsc(const VpscProblem& problem, VpscResult& out,
     const auto c = canonicalize(problem);
     const std::size_t n = c.order.size();
     const std::size_t m = c.constraints.size();
-    const auto feasible = check_feasibility(n, c, options.max_feasibility_checks,
+    const auto feasible = check_feasibility(problem, c, options.max_feasibility_checks,
                                              options.tolerance);
     if (!feasible) return feasible;
 
@@ -284,7 +317,7 @@ VpscStatus solve_vpsc(const VpscProblem& problem, VpscResult& out,
     for (std::size_t i = 0; i < n; ++i) {
         const auto& v = problem.variables[c.order[i]];
         x[i] = v.desired;
-        inverse_weight[i] = 1.0L / v.weight;
+        inverse_weight[i] = v.fixed ? 0.0L : 1.0L / v.weight;
     }
     VpscResult trial;
     trial.positions.resize(n);
@@ -320,6 +353,12 @@ VpscStatus solve_vpsc(const VpscProblem& problem, VpscResult& out,
             if (q.left == q.right) continue; // already checked feasible above
             const Real norm = inverse_weight[q.left] + inverse_weight[q.right];
             const Real residual = q.gap - (x[q.right] - x[q.left]);
+            if (norm == 0.0L) {
+                // Infeasible all-fixed constraints are checked above.
+                if ((q.equality && residual != 0.0L) || (!q.equality && residual > 0.0L))
+                    return failure(VpscError::InvalidNumerics, "fixed VPSC residual is not exactly feasible");
+                continue;
+            }
             const Real candidate = dual[j] + residual / norm;
             const Real new_multiplier = q.equality ? candidate : std::max(0.0L, candidate);
             const Real delta = new_multiplier - dual[j];

@@ -83,16 +83,16 @@ third-party graph layout source or runtime dependency.
 `stun/graphlayout/vpsc.h` implements Stun-owned, renderer-independent
 **Variable Placement with Separation Constraints**. It solves
 
-`min 0.5 * sum_i weight[i] * (x[i] - desired[i])^2`
+`min 0.5 * sum_{i not fixed} weight[i] * (x[i] - desired[i])^2`
 
 subject to `x[right] - x[left] >= gap`, or equality when explicitly selected.
-Every weight must be finite and strictly positive. Negative gaps are valid.
+Every weight must be finite and strictly positive. A variable with `fixed=true` has exactly `x[i] = desired[i]`; its weight is not used in the movable objective. Negative gaps are valid.
 Input/output indices are preserved and stable IDs establish a deterministic
 processing order independent of node insertion order.
 
 - Difference-constraint Bellman-Ford feasibility checking detects strictly
   positive separation cycles, returning a checkable ordered set of directed
-  witness arcs (including the reversed orientation for equality constraints).
+  witness arcs (including the reversed orientation for equality and fixed-variable constraints).
   Cycles indistinguishable from numerical roundoff return `InvalidNumerics`,
   **not** an unsupported assertion of mathematical infeasibility.
 - Bounded dual coordinate ascent performs exact coordinate updates for the
@@ -115,3 +115,40 @@ full Cola stress minimization, geometry-dependent overlap-disjunction search,
 cluster hierarchy, topology preservation and joint-edge nudging remain separate
 future graph algorithms. Lean formalization of the convex KKT sufficiency
 theorem, positive-cycle witness and composition contracts is pending.
+
+## Algorithm v4: constraint-aware 2D graph projection
+
+`stun/graphlayout/projection.h` composes **two independently certified VPSC
+axis solves** into a deterministic graph geometry stage. It acts on a previously
+placed `Graph` plus `Layout`; this is not a UI layout, force-directed stress
+minimizer, or an implicit alternative to the Layered algorithm.
+
+- **Hard node pins:** exact absolute top-left `(x,y)` constraints. Pinned
+  variables are excluded from the movable-variable quadratic objective and
+  cannot drift; the 1D KKT checker verifies each pin exactly, rather than
+  simulating pins with very high weights. An infeasibility witness may refer
+  to a fixed variable (`fixed_variable=true`) as well as original constraints.
+- **Axis alignment:** exact signed difference between the centers of any
+  two nodes. Explicit horizontal or vertical rectangle separation uses
+  an edge-to-edge minimum gap, correctly accounting for variable dimensions.
+- **Automatic non-overlap:** detect pairs whose axis-aligned rectangles
+  intersect at configured `clearance`, choose the cheaper X or Y separation
+  direction, and monotonically add inequalities. Transitive equality groups
+  and pins are inspected to avoid selecting an obviously impossible axis.
+  A numerical guard protects the geometric postcondition at the VPSC
+  solver's floating-point tolerance. Newly created overlaps trigger another
+  pass; all pairwise geometry is checked again before returning success.
+- **Limits and error semantics:** `max_passes`,
+  `max_generated_separations`, `max_pair_checks` and both axis solvers'
+  VPSC budgets are explicit. Failure clears the output and report without
+  returning partial coordinates or silently relaxing constraints.
+  Output preserves node order/IDs, dimensions, ranks and SCC metadata, and
+  may legitimately contain negative coordinates when a pin requires it.
+
+The axis choice is a bounded **disjunctive heuristic**, not a complete search
+of all feasible non-overlap axis assignments. A viable graph may still be
+reported as incomplete or infeasible when the chosen constraints conflict.
+Unlike geometric validity, globally minimal displacement is proved only for
+**each fixed set of VPSC axis constraints** to numerical tolerance, and does
+not imply globally optimal joint 2D compaction. Exact Lean proof and native
+routing/placement composition are future acceptance tasks.
