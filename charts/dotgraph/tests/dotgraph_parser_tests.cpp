@@ -189,6 +189,37 @@ spec("dotgraph") {
                   find_rendered_node(right_left, "B")->x);
         }
 
+
+        it("native orthogonal routes are axis-aligned and preserve self loops") {
+            auto snapshot = layout("digraph { rankdir=LR; A -> B; B -> C; C -> C; }");
+            check_size_eq(snapshot.edges.size(), 3);
+            bool saw_loop = false;
+            for (const auto& edge : snapshot.edges) {
+                check(edge.points.size() >= 2);
+                for (std::size_t i = 1; i < edge.points.size(); ++i) {
+                    const auto& prev = edge.points[i - 1];
+                    const auto& curr = edge.points[i];
+                    check((prev.x == curr.x) != (prev.y == curr.y));
+                }
+                if (edge.from == "C" && edge.to == "C") {
+                    saw_loop = true;
+                    check(edge.points.size() >= 4);
+                }
+            }
+            check(saw_loop);
+        }
+
+        it("native orthogonal mode refuses unsupported route options") {
+            auto diagram = parse("digraph { A -> B; }");
+            check_not_null(diagram.get());
+            diagram->routing_crossing_penalty = 5.0;
+            DotGraphRenderer renderer;
+            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+            diagram->routing_crossing_penalty = -1.0;
+            diagram->edges->from_compass = DG_COMPASS_C;
+            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+        }
+
         it("renders nested clusters") {
             auto snapshot = layout(
                 "digraph { subgraph cluster_outer { subgraph cluster_inner { A; B; } } }");
