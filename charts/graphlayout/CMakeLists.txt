@@ -40,3 +40,20 @@ if(BUILD_TESTING)
     target_compile_features(stun_graphlayout_projection_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphProjectionTests COMMAND stun_graphlayout_projection_tests)
 endif()
+
+# Headless consumer qualification without the full parser/UI/render graph.
+# Infographic's geometry adapter must compile and execute on the same native
+# toolchain matrix as GraphLayout; full STUN_BUILD_CHARTS=ON is a later gate.
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/src/layout/layout_engine.cpp")
+    add_executable(stun_graphlayout_infographic_tests
+        tests/infographic_adapter_test.cpp
+        ../infographic/src/layout/layout_engine.cpp
+        ../infographic/src/ir/unified_infographic.cpp
+    )
+    target_include_directories(stun_graphlayout_infographic_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../infographic/include/infographic
+    )
+    target_link_libraries(stun_graphlayout_infographic_tests PRIVATE Stun::GraphLayout)
+    target_compile_features(stun_graphlayout_infographic_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphInfographicAdapterTests COMMAND stun_graphlayout_infographic_tests)
+endif()

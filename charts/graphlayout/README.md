@@ -152,3 +152,16 @@ Unlike geometric validity, globally minimal displacement is proved only for
 **each fixed set of VPSC axis constraints** to numerical tolerance, and does
 not imply globally optimal joint 2D compaction. Exact Lean proof and native
 routing/placement composition are future acceptance tasks.
+
+## First consumer: Infographic collision projection
+
+`charts/infographic/src/layout/layout_engine.cpp` previously constructed an
+empty-edge `cola::ConstrainedFDLayout` solely for rectangle collision relief.
+It now delegates this narrow geometry-only purpose to `project_graph()` with
+an explicit one-unit clearance. The rest of Infographic's layouts, renderer,
+SVG and FlexUI remain separately owned. There is no hidden Cola fallback.
+Headless `StunGraphInfographicAdapterTests` compile real Infographic layout
+sources and check node containment, non-overlap and multi-level parent-index
+mapping in the GraphLayout CMake/CTest matrix. This is **not** a complete
+charts-enabled build/link/runtime qualification, nor a replacement for
+Adaptagrams' force-directed or topology-preserving algorithms.

@@ -1,10 +1,11 @@
 #include <layout/layout_engine.h>
 #include <ir/unified_infographic.h>
-#include <libcola/cola.h>
-#include <libvpsc/rectangle.h>
+#include <stun/graphlayout/projection.h>
 #include <cmath>
 #include <algorithm>
 #include <memory>
+#include <limits>
+#include <stdexcept>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -14,57 +15,62 @@ namespace flex::modules::infographic {
 
 namespace {
 
-void apply_cola_relax(LayoutResult& result, double ideal_length) {
-    const size_t count = result.nodes.size();
+// Graph-layout geometry is owned by Stun, not by the rendering module.
+void apply_graph_projection(LayoutResult& result) {
+    const std::size_t count = result.nodes.size();
     if (count < 2) return;
-
-    std::vector<std::unique_ptr<vpsc::Rectangle>> storage;
-    storage.reserve(count);
-    vpsc::Rectangles rects;
-    rects.reserve(count);
-
-    cola::DesiredPositions desired;
-    desired.reserve(count);
-
-    for (size_t i = 0; i < count; ++i) {
-        const auto& node = result.nodes[i];
-        double x = node.bounds.x;
-        double y = node.bounds.y;
-        double w = std::max(1.0f, node.bounds.width);
-        double h = std::max(1.0f, node.bounds.height);
-
-        storage.push_back(std::make_unique<vpsc::Rectangle>(x, x + w, y, y + h));
-        rects.push_back(storage.back().get());
-        desired.push_back(cola::DesiredPosition{
-            static_cast<unsigned>(i),
-            x + w * 0.5,
-            y + h * 0.5,
-            1000.0
-        });
+    stun::graphlayout::Graph graph;
+    stun::graphlayout::Layout desired;
+    graph.nodes.reserve(count);
+    desired.nodes.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& b = result.nodes[i].bounds;
+        if (!std::isfinite(b.x) || !std::isfinite(b.y) ||
+            !std::isfinite(b.width) || !std::isfinite(b.height) ||
+            b.width <= 0 || b.height <= 0)
+            throw std::invalid_argument("invalid infographic rectangle geometry");
+        graph.nodes.push_back({"infographic:" + std::to_string(i), b.width, b.height});
+        desired.nodes.push_back({b.x, b.y, b.width, b.height, 0, 0});
     }
-
-    std::vector<cola::Edge> edges;
-    cola::ConstrainedFDLayout layout(rects, edges, ideal_length);
-    layout.setAvoidNodeOverlaps(true);
-    layout.setDesiredPositions(&desired);
-    layout.run();
-
-    double min_x = rects[0]->getMinX();
-    double min_y = rects[0]->getMinY();
-    for (size_t i = 1; i < count; ++i) {
-        min_x = std::min(min_x, rects[i]->getMinX());
-        min_y = std::min(min_y, rects[i]->getMinY());
+    stun::graphlayout::ProjectionOptions options;
+    options.clearance = 1.0; // Keep a visible gap after float conversion.
+    stun::graphlayout::Layout projected;
+    const auto status = stun::graphlayout::project_graph(
+        graph, desired, {}, projected, options);
+    if (!status)
+        throw std::invalid_argument("infographic graph projection: " + status.message);
+    double min_x = projected.nodes.front().x;
+    double min_y = projected.nodes.front().y;
+    for (const auto& node : projected.nodes) {
+        min_x = std::min(min_x, node.x);
+        min_y = std::min(min_y, node.y);
     }
-
     const double offset_x = min_x < 0 ? -min_x : 0;
     const double offset_y = min_y < 0 ? -min_y : 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        auto& b = result.nodes[i].bounds;
+        const double x = projected.nodes[i].x + offset_x;
+        const double y = projected.nodes[i].y + offset_y;
+        if (!std::isfinite(x) || !std::isfinite(y) ||
+            x > std::numeric_limits<float>::max() ||
+            y > std::numeric_limits<float>::max())
+            throw std::overflow_error("infographic projected coordinates exceed float range");
+        b.x = static_cast<float>(x);
+        b.y = static_cast<float>(y);
+    }
+}
 
-    for (size_t i = 0; i < count; ++i) {
-        auto& node = result.nodes[i];
-        node.bounds.x = static_cast<float>(rects[i]->getMinX() + offset_x);
-        node.bounds.y = static_cast<float>(rects[i]->getMinY() + offset_y);
-        node.bounds.width = static_cast<float>(rects[i]->width());
-        node.bounds.height = static_cast<float>(rects[i]->height());
+void ensure_canvas_contains_nodes(LayoutResult& result) {
+    for (const auto& node : result.nodes) {
+        const auto& b = node.bounds;
+        const double right = static_cast<double>(b.x) + b.width + 50.0;
+        const double bottom = static_cast<double>(b.y) + b.height + 50.0;
+        if (!std::isfinite(right) || !std::isfinite(bottom) ||
+            right >= std::numeric_limits<int>::max() ||
+            bottom >= std::numeric_limits<int>::max())
+            throw std::overflow_error("infographic layout exceeds canvas capacity");
+        result.canvas_width = std::max(result.canvas_width, static_cast<int>(std::ceil(right)));
+        result.canvas_height = std::max(result.canvas_height, static_cast<int>(std::ceil(bottom)));
     }
 }
 
@@ -105,8 +111,9 @@ LayoutResult GridLayoutEngine::compute(const UnifiedInfographic& ast, int width,
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, style.card_width);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + rows * (style.card_height + style.item_spacing) + 50;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -135,8 +142,9 @@ LayoutResult RowLayoutEngine::compute(const UnifiedInfographic& ast, int width, 
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, row_height);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + item_count * (row_height + style.item_spacing) + 50;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -165,8 +173,9 @@ LayoutResult ColumnLayoutEngine::compute(const UnifiedInfographic& ast, int widt
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, item_height);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + item_count * (item_height + 5) + 50;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -199,8 +208,9 @@ LayoutResult ZigzagLayoutEngine::compute(const UnifiedInfographic& ast, int widt
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, card_width);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + item_count * step_height + 50;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -232,8 +242,9 @@ LayoutResult TimelineLayoutEngine::compute(const UnifiedInfographic& ast, int wi
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, step_width);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + 150;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -270,8 +281,9 @@ LayoutResult FunnelLayoutEngine::compute(const UnifiedInfographic& ast, int widt
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, funnel_width_top);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + item_count * step_height + 50;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -306,8 +318,9 @@ LayoutResult CircularLayoutEngine::compute(const UnifiedInfographic& ast, int wi
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, radius);
+    apply_graph_projection(result);
     result.canvas_height = center_y + radius + 100;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -367,6 +380,7 @@ LayoutResult TreeLayoutEngine::compute(const UnifiedInfographic& ast, int width,
 
     result.nodes.reserve(nodes.size());
     result.parent_index.reserve(nodes.size());
+    std::vector<int> parent_order_index(nodes.size(), -1);
 
     for (int depth = 0; depth <= max_depth; ++depth) {
         const auto& level_nodes = levels[depth];
@@ -385,14 +399,28 @@ LayoutResult TreeLayoutEngine::compute(const UnifiedInfographic& ast, int width,
             node.bounds.y = static_cast<float>(y);
             node.bounds.width = static_cast<float>(node_width);
             node.bounds.height = static_cast<float>(node_height);
+            if (result.nodes.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+                throw std::overflow_error("infographic tree exceeds indexed node capacity");
+            parent_order_index[idx] = static_cast<int>(result.nodes.size());
             result.nodes.push_back(node);
             result.parent_index.push_back(nodes[idx].parent);
         }
     }
 
-    apply_cola_relax(result, node_width);
+    for (int& parent : result.parent_index) {
+        if (parent == -1) continue;
+        if (parent < 0 || static_cast<std::size_t>(parent) >= parent_order_index.size() ||
+            parent_order_index[parent] < 0)
+            throw std::invalid_argument("invalid infographic tree parent index");
+        parent = parent_order_index[parent];
+    }
+
+    apply_graph_projection(result);
     for (size_t i = 0; i < nodes.size() && i < result.nodes.size(); ++i) {
-        int depth = nodes[i].depth;
+        const int index = result.nodes[i].index;
+        if (index < 0 || static_cast<std::size_t>(index) >= nodes.size())
+            throw std::invalid_argument("invalid infographic tree node index");
+        int depth = nodes[index].depth;
         result.nodes[i].bounds.y = static_cast<float>(result.content_start_y + depth * level_height);
         result.nodes[i].bounds.height = static_cast<float>(node_height);
     }
@@ -426,6 +454,7 @@ LayoutResult TreeLayoutEngine::compute(const UnifiedInfographic& ast, int width,
     }
 
     result.canvas_height = height;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -458,8 +487,9 @@ LayoutResult QuadrantLayoutEngine::compute(const UnifiedInfographic& ast, int wi
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, quadrant_width);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + 2 * quadrant_height + 70;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -507,6 +537,7 @@ LayoutResult PieLayoutEngine::compute(const UnifiedInfographic& ast, int width, 
     }
     
     result.canvas_height = center_y + radius + 100;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
@@ -550,8 +581,9 @@ LayoutResult BarLayoutEngine::compute(const UnifiedInfographic& ast, int width, 
         result.nodes.push_back(node);
     }
     
-    apply_cola_relax(result, bar_height);
+    apply_graph_projection(result);
     result.canvas_height = result.content_start_y + item_count * (bar_height + bar_spacing) + 50;
+    ensure_canvas_contains_nodes(result);
     return result;
 }
 
