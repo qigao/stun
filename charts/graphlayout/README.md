@@ -165,3 +165,52 @@ sources and check node containment, non-overlap and multi-level parent-index
 mapping in the GraphLayout CMake/CTest matrix. This is **not** a complete
 charts-enabled build/link/runtime qualification, nor a replacement for
 Adaptagrams' force-directed or topology-preserving algorithms.
+
+## Algorithm v5: graph-distance stress descent with optional VPSC projection
+
+`stun/graphlayout/stress.h` provides an entirely Stun-owned **nonconvex
+stress** optimizer on node centers. For each pair reachable in the *undirected*
+interpretation of the graph, let `h(i,j)` be the unweighted shortest-path hop
+count and `L` the configured ideal edge length. The objective is:
+
+`F = 0.5 * sum_{reachable i<j} (||center_i-center_j|| - L*h(i,j))^2 / h(i,j)^2`
+
+Disconnected node pairs have zero stress weight. Self-loops and duplicate
+edges do not introduce duplicate terms. The solver is **not** claiming SMACOF,
+all-pairs optimality or a general spring-electric force model. It starts from a
+caller-supplied finite `Layout`, accumulates gradients in lexical stable-ID
+order, and uses a bounded backtracking line search on the objective. The
+objective is recomputed after each candidate's constraint projection; **only
+strictly decreasing candidates** are accepted. `accepted_objectives` contains
+the post-projection initial energy and every accepted energy, allowing an
+independent monotonicity audit. `evaluate_stress` re-evaluates the exposed
+result from the original graph and positions.
+
+- **Hard geometry:** if the caller requests pins, center alignments, minimum
+  separation or non-overlap, every trial goes through `project_graph()`, i.e.
+  the already certified VPSC axis solvers. The initial seed is projected before
+  its baseline energy is measured. The projection's non-overlap axis selection
+  remains heuristic, so projected line search is **not** proof of constrained
+  stationarity or globally minimum stress. Metadata, node dimensions and
+  original indices are preserved.
+- **Deterministic failure:** coincident connected node centers without
+  sufficient projection are an explicit `InvalidGeometry` error. No pseudo-
+  random displacement, Cola fallback or partial-result success is allowed.
+  Failed initial projection returns `ProjectionFailed` and the exact
+  `ProjectionError` subtype.
+- **Bounded work:** configurable limits on nodes, edges, shortest-path BFS
+  operations, reachable pairs, optimization iterations and line-search trials.
+  Exhausted line searches return the best feasible accepted iterate with
+  `LineSearchStalled`; an exhausted outer limit returns `IterationBudget`.
+  Neither termination code is mislabeled as global optimality. The finite
+  nonincreasing energy trace is a numerical postcondition, not a Lean proof.
+- **Scope:** node-center stress only. It does not yet solve joint edge routing,
+  component packing, force-directed Coulomb repulsion, compound constraints,
+  or full Cola/Adaptagrams feature equivalence. Incremental/large-graph
+  acceleration, SMACOF majorization, energy benchmark data and Lean
+  termination/correctness modeling are future work.
+
+The dedicated `StunGraphStressTests` cover analytic two-node equilibrium,
+multi-hop chains, cycles, disconnected graphs, constrained pins and
+non-overlap, permutation stability, invalid geometry, infeasibility,
+resource caps, and forty deterministic graph families.

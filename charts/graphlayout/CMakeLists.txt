@@ -5,7 +5,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(CTest)
 endif()
 
-add_library(stun_graphlayout STATIC src/layered.cpp src/orthogonal.cpp src/vpsc.cpp src/projection.cpp)
+add_library(stun_graphlayout STATIC src/layered.cpp src/orthogonal.cpp src/vpsc.cpp src/projection.cpp src/stress.cpp)
 add_library(Stun::GraphLayout ALIAS stun_graphlayout)
 target_compile_features(stun_graphlayout PUBLIC cxx_std_17)
 target_include_directories(stun_graphlayout PUBLIC
@@ -56,4 +56,12 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/src/layo
     target_link_libraries(stun_graphlayout_infographic_tests PRIVATE Stun::GraphLayout)
     target_compile_features(stun_graphlayout_infographic_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphInfographicAdapterTests COMMAND stun_graphlayout_infographic_tests)
+endif()
+
+# Nonconvex shortest-path stress optimizer and VPSC projection integration.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_stress_tests tests/stress_test.cpp)
+    target_link_libraries(stun_graphlayout_stress_tests PRIVATE Stun::GraphLayout)
+    target_compile_features(stun_graphlayout_stress_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphStressTests COMMAND stun_graphlayout_stress_tests)
 endif()
