@@ -44,3 +44,26 @@ cmake -S charts/graphlayout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON
 cmake --build build/graphlayout --parallel
 ctest --test-dir build/graphlayout --output-on-failure
 ```
+
+## Algorithm v2: orthogonal obstacle-aware routing
+
+`stun/graphlayout/orthogonal.h` provides a self-owned orthogonal edge router,
+independent of C++ UI/render APIs or third-party graph layout implementations.
+
+1. Check bounded, finite rectangles and exact node-side port anchors. Invalid,
+   overlapping or over-capacity obstacles fail with a typed status.
+2. Expand node rectangles by `clearance` and construct a compressed visibility
+   grid using rectangle boundary axes plus port stub axes. No grid segment is
+   allowed through an expanded rectangle interior; each port's own initial
+   stub is exempt from its node's clearance envelope.
+3. Apply direction-aware A* with Manhattan heuristic, nonnegative path length
+   and bend cost. Stable grid/state order breaks ties deterministically.
+4. Reconstruct and simplify paths. An independent postcondition checker tests
+   orthogonality, endpoint direction, obstacle non-penetration and clearance.
+5. On *any* error the entire batch is empty. No arbitrary straight fallback
+   or partial-result success. Error includes failing edge index.
+
+The initial scope is **single-edge orthogonal shortest paths on the chosen
+visibility grid**, not a proof of globally optimal multi-edge crossing/nudging.
+No Lean theorem or native SDK integration claim is made by these C++ tests.
+Finite input, hard resource budgets and deterministic operation are required.
