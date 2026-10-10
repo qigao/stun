@@ -35,6 +35,14 @@ struct TopologyOptions {
     std::size_t max_segment_checks = 2500000; // Across baseline and ALL trials.
     std::size_t max_trials = 16; // Candidate distance fractions: 1, 1/2, ...
     std::size_t samples_per_trial = 8; // Inspect the entire interpolation prefix.
+    // Analytically cap the candidate motion at local node-segment and bend
+    // orientation events before the sampled full-topology continuation.
+    bool analytic_guards = true;
+    std::size_t max_guard_constraints = 32768;
+    std::size_t max_guard_evaluations = 2500000;
+    double guard_clearance = 0.0;
+    double min_bend_area_ratio = 1e-8;
+    double guard_backoff = 1e-5;
 };
 
 enum class TopologyError {
@@ -61,6 +69,10 @@ struct TopologyReport {
     std::size_t trials = 0;
     std::size_t sampled_frames = 0;
     std::size_t segment_checks = 0;
+    double analytic_guard_fraction = 1.0;
+    std::size_t straight_constraints = 0;
+    std::size_t bend_constraints = 0;
+    std::size_t guard_evaluations = 0;
 };
 
 // Renderer-neutral audit of a straight-segment *polyline embedding*.
@@ -79,6 +91,7 @@ TopologyStatus audit_topology(const Graph& graph, const Layout& layout,
 // Conservative bounded continuation: linearly interpolate node rectangles
 // toward 'desired'. Each original route waypoint is moved by a deterministic,
 // arclength-weighted blend of its source/target-node displacements. Each trial
+// first analytically caps motion at local node/segment and bend events, then
 // checks intermediate sampled frames against the exact baseline crossing
 // signature, segment contacts and node collisions. An accepted result need
 // not reach the requested target; report.accepted_fraction states its extent.

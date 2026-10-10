@@ -28,6 +28,7 @@ stun_graph_algorithm(stun_graph_orthogonal GraphOrthogonal src/orthogonal.cpp)
 stun_graph_algorithm(stun_graph_polyline GraphPolyline src/polyline.cpp)
 # Geometry-certified named port binding, independent of route algorithm.
 stun_graph_algorithm(stun_graph_port_bindings GraphPortBindings src/port_bindings.cpp)
+stun_graph_algorithm(stun_graph_topology_constraints GraphTopologyConstraints src/topology_constraints.cpp)
 stun_graph_algorithm(stun_graph_topology GraphTopology src/topology.cpp)
 stun_graph_algorithm(stun_graph_polyline_nudging GraphPolylineNudging src/polyline_nudging.cpp)
 # Bounded multi-edge coordination; consumes the independently validated orthogonal routes.
@@ -43,6 +44,7 @@ stun_graph_algorithm(stun_graph_force GraphForce src/force.cpp)
 # projection consumes VPSC, and nonconvex optimizers consume projection.
 target_link_libraries(stun_graph_nudging PUBLIC Stun::GraphOrthogonal)
 target_link_libraries(stun_graph_polyline_nudging PUBLIC Stun::GraphPolyline)
+target_link_libraries(stun_graph_topology PUBLIC Stun::GraphTopologyConstraints)
 target_link_libraries(stun_graph_projection PUBLIC Stun::GraphVPSC)
 target_link_libraries(stun_graph_stress_core PUBLIC Stun::GraphProjection)
 target_link_libraries(stun_graph_stress_gradient PUBLIC Stun::GraphStressCore)
@@ -109,6 +111,14 @@ if(BUILD_TESTING)
     target_link_libraries(stun_graphlayout_topology_tests PRIVATE Stun::GraphTopology)
     target_compile_features(stun_graphlayout_topology_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphTopologyTests COMMAND stun_graphlayout_topology_tests)
+endif()
+
+# Analytic Tri / Straight / Bend events before the sampled topology audit.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_topology_constraints_tests tests/topology_constraints_test.cpp)
+    target_link_libraries(stun_graphlayout_topology_constraints_tests PRIVATE Stun::GraphTopology)
+    target_compile_features(stun_graphlayout_topology_constraints_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphTopologyConstraintsTests COMMAND stun_graphlayout_topology_constraints_tests)
 endif()
 
 if(BUILD_TESTING)

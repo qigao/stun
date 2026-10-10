@@ -566,3 +566,44 @@ isotopy. Future acceptance requires more general segment intersection events,
 actual routed-connector integration, larger adversarial corpora and upstream
 Adaptagrams differential tests. No Lean proofs are in scope.
 
+## Algorithm v14: topology Tri / Straight / Bend analytic motion guards
+
+`Stun::GraphTopologyConstraints` is an independent C++17 algorithm target
+that bounds how far a node/connector arrangement can move toward its requested
+position. Unlike the first sampled-only `GraphTopology` implementation, it
+calculates conservative **analytic event fractions** before sampled auditing:
+
+- **TriConstraint:** three affine scalar positions obey
+  `(1-p)*u + p*v - w >= gap` (or the reversed inequality). The first
+  separation-boundary event is computed by solving the exact linear slack in
+  the displacement parameter, not by discretely sampling positions.
+- **StraightConstraint:** for each nonincident node whose center scan lies
+  strictly inside a baseline segment, retain its existing side of a material
+  segment point with a node-face separation TriConstraint. Scan fraction is
+  fixed at baseline; additional moving-rectangle collisions are checked by
+  the independent full topology auditor.
+- **BendConstraint:** every genuine noncollinear three-point connector bend
+  has quadratic signed area under affine vertex motion. All analytic roots in
+  `[0,1]` are considered, including two interior roots when initial and final
+  bend signs agree; the earliest event caps the safe movement fraction.
+- **Combination:** `move_topology_preserving` now optionally (default on)
+  computes those analytic guards and only then runs its bounded multi-frame,
+  complete graph collision and signed crossing-order audits. Reports include
+  analytic fraction, number of generated Straight/Bend guards, and consumed
+  guard operations. A goal that cannot be reached without an event may be
+  accepted only as a smaller movement; no rerouting, implicit fallback, or
+  silently relaxed constraint is performed.
+
+Strict finite-coordinate and resource budgets, typed infeasible/numeric
+failure and atomic outputs are required. The new regression suite includes
+96 deterministic affine separation cases, a bend whose sign reverses twice
+within one step, node/segment penetration, port-position composition,
+exactly bounded work and previous GraphTopology movement cases.
+
+**Limitations:** this is a conservative *local guard*, not a complete
+`libtopology` implementation. Fixed baseline scan fractions may differ from
+actual moving scan intersection positions. The subsequent sampled topology
+audit can still miss a contact between samples, and the current implementation
+does not split/merge edge segments at an activated constraint, recompute route
+homotopy, or guarantee a continuous ambient-isotopy certificate. These remain
+algorithmic follow-ups, not Lean/formal-proof tasks.

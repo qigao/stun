@@ -1,4 +1,5 @@
 #include "stun/graphlayout/topology.h"
+#include "stun/graphlayout/topology_constraints.h"
 
 #include <algorithm>
 #include <cmath>
@@ -31,7 +32,14 @@ bool valid_options(const TopologyOptions& o) {
            o.max_points_per_route >= 2 && o.max_total_points > 0 &&
            o.max_segment_checks > 0 && o.max_trials > 0 &&
            o.max_trials <= 64 && o.samples_per_trial > 0 &&
-           o.samples_per_trial <= 64;
+           o.samples_per_trial <= 64 && o.max_guard_constraints > 0 &&
+           o.max_guard_evaluations > 0 &&
+           std::isfinite(o.guard_clearance) && o.guard_clearance >= 0.0 &&
+           o.guard_clearance <= o.coordinate_limit &&
+           std::isfinite(o.min_bend_area_ratio) &&
+           o.min_bend_area_ratio >= 0.0 && o.min_bend_area_ratio <= 0.1 &&
+           std::isfinite(o.guard_backoff) &&
+           o.guard_backoff >= 0.0 && o.guard_backoff <= 0.1;
 }
 
 bool valid_placement(const Graph& g, const Layout& l,
@@ -435,6 +443,36 @@ TopologyStatus move_topology_preserving(
     double fraction=1.0;
     TopologyReport candidate;
     candidate.baseline_crossings=initial.crossing_count;
+    if(options.analytic_guards) {
+        TopologyGuardOptions gopt;
+        gopt.coordinate_limit=options.coordinate_limit;
+        gopt.node_segment_clearance=options.guard_clearance;
+        gopt.min_bend_area_ratio=options.min_bend_area_ratio;
+        gopt.event_backoff=options.guard_backoff;
+        gopt.max_constraints=options.max_guard_constraints;
+        gopt.max_evaluations=options.max_guard_evaluations;
+        gopt.max_nodes=options.max_nodes;
+        gopt.max_routes=options.max_edges;
+        gopt.max_route_points=options.max_points_per_route;
+        TopologyGuardReport safe;
+        const auto gs=limit_topology_movement(graph,baseline,desired,original_routes,safe,gopt);
+        if(!gs){
+            if(gs.error==TopologyGuardError::CapacityExceeded)
+                return fail(TopologyError::CapacityExceeded,"analytic topology guard budget exceeded");
+            if(gs.error==TopologyGuardError::InvalidOptions)
+                return fail(TopologyError::InvalidOptions,"invalid analytic topology guard options");
+            if(gs.error==TopologyGuardError::InfeasibleBaseline)
+                return fail(TopologyError::AmbiguousTopology,"baseline has ambiguous analytic node-segment guard");
+            return fail(TopologyError::InvalidGeometry,"invalid analytic topology guard geometry");
+        }
+        candidate.analytic_guard_fraction=safe.max_safe_fraction;
+        candidate.straight_constraints=safe.straight_constraints;
+        candidate.bend_constraints=safe.bend_constraints;
+        candidate.guard_evaluations=safe.evaluations;
+        fraction=std::min(fraction,safe.max_safe_fraction);
+        if(fraction<=0.0)
+            return fail(TopologyError::NoAdmissibleStep,"analytic topology guard permits no positive movement");
+    }
     for(std::size_t trial=0;trial<options.max_trials;++trial,fraction*=0.5){
         ++candidate.trials;
         Layout next;
