@@ -1,6 +1,7 @@
 #include "dotgraph_layout.h"
 #include "stun/graphlayout/layered.h"
 #include "stun/graphlayout/polyline.h"
+#include "stun/graphlayout/polyline_nudging.h"
 #include "stun/graphlayout/nudging.h"
 
 #include <stdexcept>
@@ -86,9 +87,8 @@ stun::graphlayout::Routes route_dot_edges(
         diagram->routing_nudge_orthogonal_ends >= 0 ||
         diagram->routing_nudge_shared_paths >= 0 ||
         (diagram->routing_mode == DG_ROUTE_POLYLINE &&
-         (diagram->routing_segment_penalty >= 0.0 ||
-          diagram->routing_nudging_distance >= 0.0)))
-        throw std::invalid_argument("graphlayout: DOT native routing does not implement crossing/angle/terminal nudging or polyline segment/nudging penalties");
+         diagram->routing_segment_penalty >= 0.0))
+        throw std::invalid_argument("graphlayout: DOT native routing does not implement crossing/angle/terminal nudging or polyline segment penalty");
 
     const bool horizontal = diagram->rankdir == DG_RANKDIR_LR ||
                             diagram->rankdir == DG_RANKDIR_RL;
@@ -137,7 +137,15 @@ stun::graphlayout::Routes route_dot_edges(
         PolylineOptions options;
         if (diagram->routing_shape_buffer >= 0.0)
             options.clearance = diagram->routing_shape_buffer;
-        status = route_polyline(placement, requests, paths, options);
+        if (diagram->routing_nudging_distance > 0.0) {
+            PolylineNudgingOptions joint;
+            joint.routing = options;
+            joint.lane_spacing = diagram->routing_nudging_distance;
+            status = route_polyline_nudged(placement, requests, paths, joint);
+        } else {
+            // Missing/zero nudging requests only the shortest individual paths.
+            status = route_polyline(placement, requests, paths, options);
+        }
     }
     if (!status)
         throw std::invalid_argument("graphlayout: DOT edge " +

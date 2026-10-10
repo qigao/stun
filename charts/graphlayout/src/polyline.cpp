@@ -146,31 +146,27 @@ bool finite_point(Point p) {
     return finite_coordinate(p.x) && finite_coordinate(p.y);
 }
 
-RouteStatus one_route(const Layout& layout, const std::vector<Rectangle>& obstacles,
-                      const RouteRequest& request, const PolylineOptions& opt,
-                      std::size_t route_index, Route& out) {
-    const Terminal a = endpoint(layout, request.source, request.target.node,
-                                true, opt.clearance);
-    const Terminal b = endpoint(layout, request.target, request.source.node,
-                                false, opt.clearance);
-    if (!finite_point(a.anchor) || !finite_point(a.stub) ||
-        !finite_point(b.anchor) || !finite_point(b.stub))
-        return error(RouteError::InvalidInput, "polyline endpoint overflows coordinate range", route_index);
-    if (!clear_segment(a.anchor, a.stub, obstacles, request.source.node) ||
-        !clear_segment(b.stub, b.anchor, obstacles, request.target.node) ||
-        !clear_point(a.stub, obstacles) || !clear_point(b.stub, obstacles))
-        return error(RouteError::NoPath, "polyline terminal clearance obstructed", route_index);
-    if (request.source.node == request.target.node && same(a.stub, b.stub))
-        return error(RouteError::NoPath, "coincident self-loop ports have no nondegenerate route", route_index);
+struct SearchBudget {
+    std::size_t expansions = 0;
+    std::size_t candidates = 0;
+    std::size_t obstacle_tests = 0;
+};
 
+// Solve one exact checkpoint-to-checkpoint leg. The endpoints are visibility
+// vertices, not terminals; exact boundary anchors and port stubs are owned
+// by one_route(). All legs of an edge share the same search budget.
+RouteStatus visibility_leg(const std::vector<Rectangle>& obstacles,
+                           Point start, Point finish, const PolylineOptions& opt,
+                           std::size_t route_index, SearchBudget& budget,
+                           std::vector<Point>& out) {
     // Stable geometry-order vertices give identical decisions when input nodes
     // are permuted but their IDs, rectangles and endpoint references stay fixed.
     std::vector<Point> vertices;
     if (obstacles.size() > (opt.max_visibility_vertices - 2) / 4)
         return error(RouteError::CapacityExceeded, "polyline visibility vertex budget exceeded", route_index);
     vertices.reserve(obstacles.size() * 4 + 2);
-    vertices.push_back(a.stub);
-    vertices.push_back(b.stub);
+    vertices.push_back(start);
+    vertices.push_back(finish);
     for (const auto& rect : obstacles) {
         vertices.push_back({rect.left, rect.top});
         vertices.push_back({rect.left, rect.bottom});
@@ -191,10 +187,13 @@ RouteStatus one_route(const Layout& layout, const std::vector<Rectangle>& obstac
             });
         return static_cast<std::size_t>(it - vertices.begin());
     };
-    const std::size_t source = find(a.stub), target = find(b.stub);
+    const std::size_t source = find(start), target = find(finish);
     const std::size_t n = vertices.size();
     std::vector<unsigned char> allowed(n, 0), visited(n, 0);
-    for (std::size_t i = 0; i < n; ++i) allowed[i] = clear_point(vertices[i], obstacles) ? 1 : 0;
+    for (std::size_t i = 0; i < n; ++i)
+        allowed[i] = clear_point(vertices[i], obstacles) ? 1 : 0;
+    if (!allowed[source] || !allowed[target])
+        return error(RouteError::InvalidInput, "checkpoint/stub lies in obstacle", route_index);
     const double infinity = std::numeric_limits<double>::infinity();
     std::vector<double> distance(n, infinity);
     std::vector<std::size_t> parent(n, kMissing);
@@ -204,22 +203,21 @@ RouteStatus one_route(const Layout& layout, const std::vector<Rectangle>& obstac
         vertices[i].y - vertices[target].y); };
     distance[source] = 0;
     open.push({heuristic(source), 0, source});
-    std::size_t expansions = 0, candidates = 0, obstacle_tests = 0;
     while (!open.empty()) {
-        auto current = open.top(); open.pop();
+        const auto current = open.top(); open.pop();
         if (visited[current.vertex] || current.cost != distance[current.vertex]) continue;
-        if (++expansions > opt.max_expansions)
+        if (++budget.expansions > opt.max_expansions)
             return error(RouteError::CapacityExceeded, "polyline A* expansion budget exceeded", route_index);
         visited[current.vertex] = 1;
         if (current.vertex == target) break;
         const Point p = vertices[current.vertex];
         for (std::size_t i = 0; i < n; ++i) {
             if (i == current.vertex || !allowed[i] || visited[i]) continue;
-            if (++candidates > opt.max_segment_candidates)
+            if (++budget.candidates > opt.max_segment_candidates)
                 return error(RouteError::CapacityExceeded, "polyline visibility candidate budget exceeded", route_index);
             bool clear = true;
             for (const Rectangle& rect : obstacles) {
-                if (++obstacle_tests > opt.max_obstacle_tests)
+                if (++budget.obstacle_tests > opt.max_obstacle_tests)
                     return error(RouteError::CapacityExceeded, "polyline obstacle test budget exceeded", route_index);
                 if (penetrates(p, vertices[i], rect)) { clear = false; break; }
             }
@@ -239,19 +237,64 @@ RouteStatus one_route(const Layout& layout, const std::vector<Rectangle>& obstac
     }
     if (!visited[target])
         return error(RouteError::NoPath, "no polyline path in visibility graph", route_index);
-    std::vector<Point> interior;
+    std::vector<Point> reversed;
     for (std::size_t p = target; p != kMissing; p = parent[p]) {
-        if (interior.size() == n)
+        if (reversed.size() == n)
             return error(RouteError::InternalInvariant, "polyline predecessor cycle", route_index);
-        interior.push_back(vertices[p]);
+        reversed.push_back(vertices[p]);
     }
-    std::reverse(interior.begin(), interior.end());
-    out.points.reserve(interior.size() + 2);
+    out.assign(reversed.rbegin(), reversed.rend());
+    return {};
+}
+
+RouteStatus one_route(const Layout& layout, const std::vector<Rectangle>& obstacles,
+                      const PolylineCheckpointRequest& request, const PolylineOptions& opt,
+                      std::size_t route_index, Route& out) {
+    const auto& ports = request.terminals;
+    const Terminal a = endpoint(layout, ports.source, ports.target.node,
+                                true, opt.clearance);
+    const Terminal b = endpoint(layout, ports.target, ports.source.node,
+                                false, opt.clearance);
+    if (!finite_point(a.anchor) || !finite_point(a.stub) ||
+        !finite_point(b.anchor) || !finite_point(b.stub))
+        return error(RouteError::InvalidInput, "polyline endpoint overflows coordinate range", route_index);
+    if (!clear_segment(a.anchor, a.stub, obstacles, ports.source.node) ||
+        !clear_segment(b.stub, b.anchor, obstacles, ports.target.node) ||
+        !clear_point(a.stub, obstacles) || !clear_point(b.stub, obstacles))
+        return error(RouteError::NoPath, "polyline terminal clearance obstructed", route_index);
+    if (ports.source.node == ports.target.node && same(a.stub, b.stub))
+        return error(RouteError::NoPath, "coincident self-loop ports have no nondegenerate route", route_index);
+
+    if (request.checkpoints.size() > opt.max_checkpoints_per_route)
+        return error(RouteError::CapacityExceeded, "polyline per-edge checkpoint capacity exceeded", route_index);
+    Point previous = a.stub;
+    for (const auto& p : request.checkpoints) {
+        if (!finite_point(p) || !clear_point(p, obstacles) || same(p, previous) ||
+            same(p, a.stub) || same(p, b.stub))
+            return error(RouteError::InvalidInput, "invalid or obstructed polyline checkpoint", route_index);
+        previous = p;
+    }
+    if (same(previous, b.stub))
+        return error(RouteError::InvalidInput, "duplicate terminal/checkpoint position", route_index);
+
+    // Exact ordered checkpoints split the shortest-route problem into legs.
+    // Cumulative per-edge work limits remain valid regardless of leg count.
+    SearchBudget budget;
     out.points.push_back(a.anchor);
-    out.points.insert(out.points.end(), interior.begin(), interior.end());
+    Point from = a.stub;
+    for (std::size_t leg = 0; leg <= request.checkpoints.size(); ++leg) {
+        const Point to = leg == request.checkpoints.size() ? b.stub : request.checkpoints[leg];
+        if (same(from, to))
+            return error(RouteError::InvalidInput, "zero-length polyline checkpoint leg", route_index);
+        std::vector<Point> path;
+        auto status = visibility_leg(obstacles, from, to, opt, route_index, budget, path);
+        if (!status) return status;
+        out.points.insert(out.points.end(), path.begin() + (leg == 0 ? 0 : 1), path.end());
+        if (out.points.size() > opt.max_total_points)
+            return error(RouteError::CapacityExceeded, "polyline route waypoint budget exceeded", route_index);
+        from = to;
+    }
     out.points.push_back(b.anchor);
-    // Stubs are preserved even if a route is collinear. This lets the validator
-    // verify exact exit/entry direction without reverse-engineering tangents.
     return {};
 }
 
@@ -279,10 +322,11 @@ RouteStatus inflate(const Layout& l, const PolylineOptions& opt,
 
 } // namespace
 
-RouteStatus validate_polyline_routes(const Layout& layout,
-                                      const std::vector<RouteRequest>& requests,
-                                      const Routes& routes,
-                                      const PolylineOptions& options) {
+RouteStatus validate_polyline_checkpoint_routes(
+    const Layout& layout,
+    const std::vector<PolylineCheckpointRequest>& requests,
+    const Routes& routes,
+    const PolylineOptions& options) {
     auto status = validate_layout_and_options(layout, requests.size(), options);
     if (!status) return status;
     if (requests.size() != routes.edges.size())
@@ -290,42 +334,58 @@ RouteStatus validate_polyline_routes(const Layout& layout,
     std::vector<Rectangle> inflated;
     status = inflate(layout, options, inflated);
     if (!status) return status;
-    std::size_t total_points = 0;
+    std::size_t total_points = 0, total_checkpoints = 0;
     for (std::size_t i = 0; i < requests.size(); ++i) {
         const auto& request = requests[i];
-        if (!request_ok(layout, request))
+        const auto& terminals = request.terminals;
+        if (!request_ok(layout, terminals))
             return error(RouteError::InvalidInput, "invalid polyline port", i);
-        const auto a = endpoint(layout, request.source, request.target.node, true, options.clearance);
-        const auto b = endpoint(layout, request.target, request.source.node, false, options.clearance);
+        if (request.checkpoints.size() > options.max_checkpoints_per_route ||
+            request.checkpoints.size() > options.max_total_checkpoints - total_checkpoints)
+            return error(RouteError::CapacityExceeded, "polyline checkpoint budget exceeded", i);
+        total_checkpoints += request.checkpoints.size();
+        const auto a = endpoint(layout, terminals.source, terminals.target.node, true, options.clearance);
+        const auto b = endpoint(layout, terminals.target, terminals.source.node, false, options.clearance);
         const auto& pts = routes.edges[i].points;
         if (pts.size() > options.max_total_points - total_points)
             return error(RouteError::CapacityExceeded, "polyline batch waypoint budget exceeded", i);
         total_points += pts.size();
-        if (pts.size() < 3 ||
+        if (pts.size() < 4 ||
             !same(pts.front(), a.anchor) || !same(pts.back(), b.anchor) ||
             !same(pts[1], a.stub) || !same(pts[pts.size()-2], b.stub) ||
-            (request.source.node == request.target.node && pts.size() < 5))
+            (terminals.source.node == terminals.target.node && pts.size() < 5))
             return error(RouteError::InternalInvariant, "polyline anchors, stubs or self-loop invalid", i);
+        std::size_t cursor = 2;
+        for (const Point checkpoint : request.checkpoints) {
+            if (!finite_point(checkpoint) || !clear_point(checkpoint, inflated) ||
+                same(checkpoint, a.stub) || same(checkpoint, b.stub))
+                return error(RouteError::InvalidInput, "invalid or obstructed polyline checkpoint", i);
+            while (cursor < pts.size()-2 && !same(pts[cursor], checkpoint)) ++cursor;
+            if (cursor >= pts.size()-2)
+                return error(RouteError::InternalInvariant, "required polyline checkpoint missing or out of order", i);
+            ++cursor;
+        }
         for (std::size_t j = 1; j < pts.size(); ++j) {
             const Point prev = pts[j-1], next = pts[j];
             if (!finite_point(prev) || !finite_point(next) || same(prev, next))
                 return error(RouteError::InternalInvariant, "degenerate or nonfinite polyline segment", i);
-            const std::size_t terminal_exemption = j == 1 ? request.source.node :
-                (j + 1 == pts.size() ? request.target.node : kMissing);
+            const std::size_t terminal_exemption = j == 1 ? terminals.source.node :
+                (j + 1 == pts.size() ? terminals.target.node : kMissing);
             if (!clear_segment(prev, next, inflated, terminal_exemption))
                 return error(RouteError::InternalInvariant, "polyline enters inflated obstacle interior", i);
-            if (penetrates(prev, next, rectangle(layout.nodes[request.source.node], 0)) ||
-                penetrates(prev, next, rectangle(layout.nodes[request.target.node], 0)))
+            if (penetrates(prev, next, rectangle(layout.nodes[terminals.source.node], 0)) ||
+                penetrates(prev, next, rectangle(layout.nodes[terminals.target.node], 0)))
                 return error(RouteError::InternalInvariant, "polyline penetrates terminal rectangle", i);
         }
     }
     return {};
 }
 
-RouteStatus route_polyline(const Layout& layout,
-                           const std::vector<RouteRequest>& requests,
-                           Routes& out,
-                           const PolylineOptions& options) {
+RouteStatus route_polyline_checkpoints(
+    const Layout& layout,
+    const std::vector<PolylineCheckpointRequest>& requests,
+    Routes& out,
+    const PolylineOptions& options) {
     out = {};
     auto status = validate_layout_and_options(layout, requests.size(), options);
     if (!status) return status;
@@ -334,10 +394,14 @@ RouteStatus route_polyline(const Layout& layout,
     if (!status) return status;
     Routes candidate;
     candidate.edges.reserve(requests.size());
-    std::size_t point_count = 0;
+    std::size_t point_count = 0, checkpoint_count = 0;
     for (std::size_t i = 0; i < requests.size(); ++i) {
-        if (!request_ok(layout, requests[i]))
+        if (!request_ok(layout, requests[i].terminals))
             return error(RouteError::InvalidInput, "invalid polyline port", i);
+        if (requests[i].checkpoints.size() > options.max_checkpoints_per_route ||
+            requests[i].checkpoints.size() > options.max_total_checkpoints - checkpoint_count)
+            return error(RouteError::CapacityExceeded, "polyline checkpoint budget exceeded", i);
+        checkpoint_count += requests[i].checkpoints.size();
         candidate.edges.emplace_back();
         status = one_route(layout, inflated, requests[i], options, i, candidate.edges.back());
         if (!status) return status;
@@ -346,10 +410,30 @@ RouteStatus route_polyline(const Layout& layout,
             return error(RouteError::CapacityExceeded, "polyline total waypoint budget exceeded", i);
         point_count += next_points;
     }
-    status = validate_polyline_routes(layout, requests, candidate, options);
+    status = validate_polyline_checkpoint_routes(layout, requests, candidate, options);
     if (!status) return status;
     out = std::move(candidate);
     return {};
+}
+
+RouteStatus validate_polyline_routes(const Layout& layout,
+                                      const std::vector<RouteRequest>& requests,
+                                      const Routes& routes,
+                                      const PolylineOptions& options) {
+    std::vector<PolylineCheckpointRequest> detailed;
+    detailed.reserve(requests.size());
+    for (const auto& r : requests) detailed.push_back({r, {}});
+    return validate_polyline_checkpoint_routes(layout, detailed, routes, options);
+}
+
+RouteStatus route_polyline(const Layout& layout,
+                           const std::vector<RouteRequest>& requests,
+                           Routes& out,
+                           const PolylineOptions& options) {
+    std::vector<PolylineCheckpointRequest> detailed;
+    detailed.reserve(requests.size());
+    for (const auto& r : requests) detailed.push_back({r, {}});
+    return route_polyline_checkpoints(layout, detailed, out, options);
 }
 
 } // namespace stun::graphlayout

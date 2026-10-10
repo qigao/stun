@@ -26,6 +26,7 @@ stun_graph_algorithm(stun_graph_layered GraphLayered src/layered.cpp)
 stun_graph_algorithm(stun_graph_tidy_tree GraphTidyTree src/tidy_tree.cpp)
 stun_graph_algorithm(stun_graph_orthogonal GraphOrthogonal src/orthogonal.cpp)
 stun_graph_algorithm(stun_graph_polyline GraphPolyline src/polyline.cpp)
+stun_graph_algorithm(stun_graph_polyline_nudging GraphPolylineNudging src/polyline_nudging.cpp)
 # Bounded multi-edge coordination; consumes the independently validated orthogonal routes.
 stun_graph_algorithm(stun_graph_nudging GraphNudging src/nudging.cpp)
 stun_graph_algorithm(stun_graph_vpsc GraphVPSC src/vpsc.cpp)
@@ -38,6 +39,7 @@ stun_graph_algorithm(stun_graph_force GraphForce src/force.cpp)
 # Explicit algorithm prerequisites. Orthogonal/Layered are independent;
 # projection consumes VPSC, and nonconvex optimizers consume projection.
 target_link_libraries(stun_graph_nudging PUBLIC Stun::GraphOrthogonal)
+target_link_libraries(stun_graph_polyline_nudging PUBLIC Stun::GraphPolyline)
 target_link_libraries(stun_graph_projection PUBLIC Stun::GraphVPSC)
 target_link_libraries(stun_graph_stress_core PUBLIC Stun::GraphProjection)
 target_link_libraries(stun_graph_stress_gradient PUBLIC Stun::GraphStressCore)
@@ -73,6 +75,22 @@ if(BUILD_TESTING)
     target_link_libraries(stun_graphlayout_polyline_tests PRIVATE Stun::GraphPolyline)
     target_compile_features(stun_graphlayout_polyline_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphPolylineTests COMMAND stun_graphlayout_polyline_tests)
+endif()
+
+# Explicit ordered polyline waypoints; independent of Chart AST and libavoid.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_polyline_checkpoint_tests tests/polyline_checkpoint_test.cpp)
+    target_link_libraries(stun_graphlayout_polyline_checkpoint_tests PRIVATE Stun::GraphPolyline)
+    target_compile_features(stun_graphlayout_polyline_checkpoint_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphPolylineCheckpointTests COMMAND stun_graphlayout_polyline_checkpoint_tests)
+endif()
+
+# Independent multi-edge Polyline checkpoint-rerouting optimizer.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_polyline_nudging_tests tests/polyline_nudging_test.cpp)
+    target_link_libraries(stun_graphlayout_polyline_nudging_tests PRIVATE Stun::GraphPolylineNudging)
+    target_compile_features(stun_graphlayout_polyline_nudging_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphPolylineNudgingTests COMMAND stun_graphlayout_polyline_nudging_tests)
 endif()
 
 if(BUILD_TESTING)
@@ -159,7 +177,7 @@ if(BUILD_TESTING AND
         ../dotgraph/include ../dotgraph/src
         ../mermaid/flowchart/include ../mermaid/flowchart/src
     )
-    target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging)
+    target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging Stun::GraphPolylineNudging)
     add_test(NAME StunGraphChartAdaptersTests COMMAND stun_graphlayout_chart_adapter_tests)
 endif()
 

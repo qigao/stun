@@ -475,3 +475,35 @@ obstacles and dense graph scaling. Visibility searches are independently
 budgeted per edge. Qualification is based on C++ geometry, sanitizers,
 cross-platform tests and future Adaptagrams differential benchmarks.
 \n## Algorithm v10: bounded orthogonal multi-edge Nudging\n\n`Stun::GraphNudging` is independently linkable and depends only on\n`Stun::GraphOrthogonal`. `route_orthogonal_nudged` first constructs a\nvalidated batch of native orthogonal paths, then performs a bounded greedy\ncoordinate search over candidate **lane doglegs**. Each candidate retains\nits boundary anchors and outward terminal segment directions and is\nindependently checked for obstacle/clearance collisions **before acceptance**.\n\nA pairwise audit separately measures (1) proper horizontal/vertical crossings\nand (2) summed collinear overlap length. Candidates are accepted only if\nthey lexicographically reduce `(crossings, overlap_length)`; shorter total\nlength breaks ties. The final audit must not increase crossing count or,\nwhen crossings tie, shared overlap. Shared terminal portions may be\nunavoidable because ports are fixed. The optimizer cannot guarantee a\nglobally optimal crossing/nudging solution, minimum lane spacing for every\npair, complete routing around arbitrary shapes, or a strictly better result\non every graph. No external `libavoid` provider is called.\n\nThe new `NudgingOptions` impose explicit input-route, pass, lane, candidate,\nsegment-pair-check and route-point budgets. Exhaustion, invalid options or\nany invalid geometry **clears the entire result** and fails explicitly.\n`audit_orthogonal_interactions` can independently verify a caller-provided\nbatch and its geometric interaction metrics.\n\nDOT/Mermaid Flowchart select the new module only with a *positive* explicit\n`routing_nudging_distance` in Orthogonal mode. Unspecified or zero nudging\nretains independently selected native single-edge Orthogonal A*; Polyline\nnudging is not implemented and is explicitly rejected. The per-chart AST\nadapters own that selection; the mathematical solver never knows about DOT,\nMermaid, SVG or any UI/rendering state.\n\nRegression tests cover duplicate and triple shared edges, distinct disjoint\nroutes, obstacle detours, unavoidable crossings, deterministic reruns,\nedge-request permutation, exact anchors, independent route validation,\ninvalid route rejection and resource failures. This is **partial libavoid-like\nNudging**; named port geometry, checkpoints, crossing-minimal global paths\nand joint polyline optimization remain separate algorithm tasks.\n
+
+## Algorithm v11: mandatory Polyline checkpoints and joint Polyline nudging
+
+The independently linked `Stun::GraphPolyline` now has
+`route_polyline_checkpoints` and `validate_polyline_checkpoint_routes`.
+Every route may specify ordered **exact checkpoint vertices** in addition to
+its precise boundary anchors and outward stubs. Euclidean visibility A* runs
+from stub through each mandatory point to the target stub; per-edge candidate,
+expansion and obstacle-check budgets are **cumulative over all legs**.
+Per-request and batch checkpoint limits also apply. Invalid, duplicate,
+nonfinite, or inflated-obstacle-interior checkpoints fail explicitly, as does
+any other no-path or capacity condition. The old `route_polyline` API is
+unchanged and delegates to the same implementation with no checkpoints.
+
+`Stun::GraphPolylineNudging` is another independent CMake target, depending
+only on `Stun::GraphPolyline`. It generates bounded candidate reroutes via
+one mandatory checkpoint offset per interior segment. An independent audit
+counts **proper Polyline crossings** and exact collinear segment overlap;
+accepted candidates must lexicographically reduce crossing count and then
+shared overlap length, and each candidate is validated against node obstacle
+clearance and outward port geometry. Shared terminal stubs may remain.
+DOT and Mermaid Flowchart explicitly invoke the new module when a positive
+Polyline nudging distance is specified; zero/unset requests continue using
+ordinary Polyline routing. Unsupported angle/crossing penalties and named DOT
+ports without measured geometry still return explicit errors.
+
+**Important limits:** This is a bounded deterministic **local improvement**,
+not globally optimal multi-edge routing or full libavoid nudging parity.
+Compound obstacles, topology-preserving routing, true named-port geometry,
+checkpoint syntax in Chart ASTs, and differential Adaptagrams benchmarks
+are not yet implemented. This work does not use Lean or introduce UI layout.
+

@@ -1,6 +1,7 @@
 #include "dotgraph_layout.h"
 #include "flowchart_layout.h"
 #include "stun/graphlayout/polyline.h"
+#include "stun/graphlayout/polyline_nudging.h"
 #include "stun/graphlayout/nudging.h"
 
 #include <cmath>
@@ -99,10 +100,8 @@ int main() {
             check(ortho.edges.size()==1,"DOT native orthogonal still callable");
             diagram.routing_mode=DG_ROUTE_POLYLINE;
             diagram.routing_nudging_distance=4;
-            bool rejected=false;
-            try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout); }
-            catch(const std::invalid_argument&) { rejected=true; }
-            check(rejected,"DOT unsupported nudging rejected, never silently ignored");
+            auto single=dotgraph::route_dot_edges(&diagram,lookup,layout);
+            check(single.edges.size()==1,"DOT single-edge nudging leaves a valid route");
             diagram.routing_nudging_distance=-1;
             DotGraphEdge duplicate{};
             duplicate.from=aid; duplicate.to=bid; edge.next=&duplicate;
@@ -119,10 +118,19 @@ int main() {
                         {{0,stun::graphlayout::Side::East},{1,stun::graphlayout::Side::West}}},
                 nudged,dot_audit,dot_options)),"DOT nudging geometry audited");
             check(dot_audit.shared_length<140,"DOT native nudging reduces duplicate overlap");
+            // The independent Polyline nudger also separates duplicate routes.
+            diagram.routing_mode=DG_ROUTE_POLYLINE;
+            auto nudged_poly=dotgraph::route_dot_edges(&diagram,lookup,layout);
+            stun::graphlayout::PolylineInteractions poly_audit;
+            check(static_cast<bool>(stun::graphlayout::audit_polyline_interactions(
+                layout,{{{0,stun::graphlayout::Side::East},{1,stun::graphlayout::Side::West}},
+                        {{0,stun::graphlayout::Side::East},{1,stun::graphlayout::Side::West}}},
+                nudged_poly,poly_audit)),"DOT polyline nudging independently audited");
+            check(poly_audit.shared_length<140,"DOT native Polyline reduces duplicate overlap");
             diagram.routing_nudging_distance=-1;
             edge.next=nullptr;
             edge.from_port=label;
-            rejected=false;
+            bool rejected=false;
             try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout); }
             catch(const std::invalid_argument&) { rejected=true; }
             check(rejected,"DOT named ports require actual measured port geometry");
@@ -172,6 +180,14 @@ int main() {
                 layout,{{{0},{1}},{{0},{1}}},nudged,mermaid_audit,joint)),
                 "Mermaid nudging geometry audited");
             check(mermaid_audit.shared_length<140,"Mermaid native nudging reduces shared overlap");
+            diagram.routing_mode=FC_ROUTE_POLYLINE;
+            auto nudged_poly=mermaid::flowchart::route_flowchart_edges(&diagram,lookup,layout);
+            stun::graphlayout::PolylineInteractions poly_audit;
+            check(static_cast<bool>(stun::graphlayout::audit_polyline_interactions(
+                layout,{{{0},{1}},{{0},{1}}},nudged_poly,poly_audit)),
+                "Mermaid native Polyline nudging geometry audited");
+            check(poly_audit.shared_length<140,
+                "Mermaid native Polyline nudging reduces shared segment length");
         }
         std::cout<<"chart adapters: all checks passed\n";
         return 0;
