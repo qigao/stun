@@ -1,6 +1,7 @@
 #include "dotgraph_layout.h"
 #include "flowchart_layout.h"
 #include "stun/graphlayout/polyline.h"
+#include "stun/graphlayout/nudging.h"
 
 #include <cmath>
 #include <iostream>
@@ -103,6 +104,23 @@ int main() {
             catch(const std::invalid_argument&) { rejected=true; }
             check(rejected,"DOT unsupported nudging rejected, never silently ignored");
             diagram.routing_nudging_distance=-1;
+            DotGraphEdge duplicate{};
+            duplicate.from=aid; duplicate.to=bid; edge.next=&duplicate;
+            diagram.rankdir=DG_RANKDIR_LR;
+            layout.nodes={{0,0,30,30},{170,0,30,30}};
+            diagram.routing_mode=DG_ROUTE_ORTHOGONAL;
+            diagram.routing_nudging_distance=12;
+            auto nudged=dotgraph::route_dot_edges(&diagram,lookup,layout);
+            check(nudged.edges.size()==2,"DOT paired nudging routes emitted");
+            stun::graphlayout::RouteInteractions dot_audit;
+            stun::graphlayout::NudgingOptions dot_options;
+            check(static_cast<bool>(stun::graphlayout::audit_orthogonal_interactions(
+                layout,{{{0,stun::graphlayout::Side::East},{1,stun::graphlayout::Side::West}},
+                        {{0,stun::graphlayout::Side::East},{1,stun::graphlayout::Side::West}}},
+                nudged,dot_audit,dot_options)),"DOT nudging geometry audited");
+            check(dot_audit.shared_length<140,"DOT native nudging reduces duplicate overlap");
+            diagram.routing_nudging_distance=-1;
+            edge.next=nullptr;
             edge.from_port=label;
             rejected=false;
             try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout); }
@@ -140,6 +158,20 @@ int main() {
             try { (void)mermaid::flowchart::route_flowchart_edges(&diagram,lookup,layout); }
             catch(const std::invalid_argument&) { rejected=true; }
             check(rejected,"Mermaid polyline unsupported bend penalty rejected");
+            diagram.routing_segment_penalty=-1;
+            FlowchartEdge duplicate{}; duplicate.from=aid; duplicate.to=bid;
+            edge.next=&duplicate;
+            layout.nodes={{0,0,30,30},{170,0,30,30}};
+            diagram.routing_mode=FC_ROUTE_ORTHOGONAL;
+            diagram.routing_nudging_distance=12;
+            auto nudged=mermaid::flowchart::route_flowchart_edges(&diagram,lookup,layout);
+            check(nudged.edges.size()==2,"Mermaid paired nudging routes emitted");
+            stun::graphlayout::NudgingOptions joint;
+            stun::graphlayout::RouteInteractions mermaid_audit;
+            check(static_cast<bool>(stun::graphlayout::audit_orthogonal_interactions(
+                layout,{{{0},{1}},{{0},{1}}},nudged,mermaid_audit,joint)),
+                "Mermaid nudging geometry audited");
+            check(mermaid_audit.shared_length<140,"Mermaid native nudging reduces shared overlap");
         }
         std::cout<<"chart adapters: all checks passed\n";
         return 0;

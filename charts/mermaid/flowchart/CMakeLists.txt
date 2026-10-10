@@ -41,7 +41,7 @@ target_include_directories(stun_mermaid_flowchart_layout PRIVATE
 )
 target_link_libraries(stun_mermaid_flowchart_layout
     PUBLIC Stun::GraphCore
-    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline
+    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging
 )
 target_compile_features(stun_mermaid_flowchart_layout PUBLIC cxx_std_17)
 set_target_properties(stun_mermaid_flowchart_layout PROPERTIES FOLDER "Modules/Mermaid/FlowchartLayout")

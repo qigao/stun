@@ -26,6 +26,8 @@ stun_graph_algorithm(stun_graph_layered GraphLayered src/layered.cpp)
 stun_graph_algorithm(stun_graph_tidy_tree GraphTidyTree src/tidy_tree.cpp)
 stun_graph_algorithm(stun_graph_orthogonal GraphOrthogonal src/orthogonal.cpp)
 stun_graph_algorithm(stun_graph_polyline GraphPolyline src/polyline.cpp)
+# Bounded multi-edge coordination; consumes the independently validated orthogonal routes.
+stun_graph_algorithm(stun_graph_nudging GraphNudging src/nudging.cpp)
 stun_graph_algorithm(stun_graph_vpsc GraphVPSC src/vpsc.cpp)
 stun_graph_algorithm(stun_graph_projection GraphProjection src/projection.cpp)
 stun_graph_algorithm(stun_graph_stress_core GraphStressCore src/stress_common.cpp)
@@ -35,6 +37,7 @@ stun_graph_algorithm(stun_graph_force GraphForce src/force.cpp)
 
 # Explicit algorithm prerequisites. Orthogonal/Layered are independent;
 # projection consumes VPSC, and nonconvex optimizers consume projection.
+target_link_libraries(stun_graph_nudging PUBLIC Stun::GraphOrthogonal)
 target_link_libraries(stun_graph_projection PUBLIC Stun::GraphVPSC)
 target_link_libraries(stun_graph_stress_core PUBLIC Stun::GraphProjection)
 target_link_libraries(stun_graph_stress_gradient PUBLIC Stun::GraphStressCore)
@@ -53,6 +56,15 @@ if(BUILD_TESTING)
     target_link_libraries(stun_graphlayout_routing_tests PRIVATE Stun::GraphOrthogonal Stun::GraphLayered)
     target_compile_features(stun_graphlayout_routing_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphRoutingTests COMMAND stun_graphlayout_routing_tests)
+endif()
+
+# Cross-route nudging is separate from single-route pathfinding and independently
+# audits proper crossings / collinear overlap after each accepted move.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_nudging_tests tests/nudging_test.cpp)
+    target_link_libraries(stun_graphlayout_nudging_tests PRIVATE Stun::GraphNudging)
+    target_compile_features(stun_graphlayout_nudging_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphNudgingTests COMMAND stun_graphlayout_nudging_tests)
 endif()
 
 # Visibility-corner polyline router links only GraphCore; never libavoid.
@@ -147,7 +159,7 @@ if(BUILD_TESTING AND
         ../dotgraph/include ../dotgraph/src
         ../mermaid/flowchart/include ../mermaid/flowchart/src
     )
-    target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline)
+    target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging)
     add_test(NAME StunGraphChartAdaptersTests COMMAND stun_graphlayout_chart_adapter_tests)
 endif()
 

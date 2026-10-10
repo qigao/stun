@@ -18,7 +18,7 @@ are in scope only when needed to support Cola-style constrained placement.
 | --- | --- | --- |
 | `libvpsc` | Weighted VPSC and pinned/2D projection exist | Coupled-constraint performance, richer separation/cluster cases |
 | `libcola` | Gradient Stress, SMACOF, spring/repulsion exist | Quality/scale and constrained graph-layout parity |
-| `libavoid` | Orthogonal visibility/A* and native Polyline A* exist | Joint nudging/crossing optimization, ports/checkpoints |
+| `libavoid` | Orthogonal and Polyline A*; bounded orthogonal joint Nudging exists | Global crossing/nudging, ports/checkpoints |
 | `libtopology` | Not implemented | Topology-preserving node movement and connector invariants |
 | `libdialect` | Tidy Tree is a partial building block | Decompose, Arrange, Expand/Emend, Transform pipeline |
 
@@ -41,6 +41,7 @@ shared solvers have no knowledge of DOT, Mermaid, Infographic or rendering.
 | `Stun::GraphLayered` | SCC/DAG ranks and placement | GraphCore |
 | `Stun::GraphTidyTree` | Bounded ordered-forest contours, variable-size nodes | GraphCore |
 | `Stun::GraphOrthogonal` | Orthogonal obstacle-aware A* | GraphCore |
+| `Stun::GraphNudging` | Bounded multi-edge orthogonal lane offsets & pairwise interaction audit | GraphOrthogonal |
 | `Stun::GraphVPSC` | 1D separation constraints | GraphCore |
 | `Stun::GraphProjection` | 2D pins, alignments, non-overlap | GraphVPSC |
 | `Stun::GraphStressCore` | Shared shortest-path pair construction, objective evaluation and projected backtracking | GraphProjection |
@@ -464,11 +465,13 @@ not the Orthogonal binary solver.
   through their own renderer-independent AST adapters. Both adapters compile
   and run as headless GraphLayout tests. No libavoid, arbitrary straight-edge,
   or orthogonal fallback survives in those professional-mode route paths.
-- Unsupported crossing/nudging/angle/Polyline-segment options and named DOT
-  ports lacking measured geometry are rejected, never silently ignored.
+- Positive orthogonal nudging distance explicitly selects `Stun::GraphNudging`;
+  unsupported crossing/angle/polyline-nudging options and named DOT ports
+  lacking measured geometry are rejected, never silently ignored.
 
-**Not yet complete libavoid parity:** joint crossing reduction/nudging,
+**Not yet complete libavoid parity:** global crossing reduction/nudging,
 bundling, checkpoints, named port geometry, compound/arbitrary-shape
 obstacles and dense graph scaling. Visibility searches are independently
 budgeted per edge. Qualification is based on C++ geometry, sanitizers,
 cross-platform tests and future Adaptagrams differential benchmarks.
+\n## Algorithm v10: bounded orthogonal multi-edge Nudging\n\n`Stun::GraphNudging` is independently linkable and depends only on\n`Stun::GraphOrthogonal`. `route_orthogonal_nudged` first constructs a\nvalidated batch of native orthogonal paths, then performs a bounded greedy\ncoordinate search over candidate **lane doglegs**. Each candidate retains\nits boundary anchors and outward terminal segment directions and is\nindependently checked for obstacle/clearance collisions **before acceptance**.\n\nA pairwise audit separately measures (1) proper horizontal/vertical crossings\nand (2) summed collinear overlap length. Candidates are accepted only if\nthey lexicographically reduce `(crossings, overlap_length)`; shorter total\nlength breaks ties. The final audit must not increase crossing count or,\nwhen crossings tie, shared overlap. Shared terminal portions may be\nunavoidable because ports are fixed. The optimizer cannot guarantee a\nglobally optimal crossing/nudging solution, minimum lane spacing for every\npair, complete routing around arbitrary shapes, or a strictly better result\non every graph. No external `libavoid` provider is called.\n\nThe new `NudgingOptions` impose explicit input-route, pass, lane, candidate,\nsegment-pair-check and route-point budgets. Exhaustion, invalid options or\nany invalid geometry **clears the entire result** and fails explicitly.\n`audit_orthogonal_interactions` can independently verify a caller-provided\nbatch and its geometric interaction metrics.\n\nDOT/Mermaid Flowchart select the new module only with a *positive* explicit\n`routing_nudging_distance` in Orthogonal mode. Unspecified or zero nudging\nretains independently selected native single-edge Orthogonal A*; Polyline\nnudging is not implemented and is explicitly rejected. The per-chart AST\nadapters own that selection; the mathematical solver never knows about DOT,\nMermaid, SVG or any UI/rendering state.\n\nRegression tests cover duplicate and triple shared edges, distinct disjoint\nroutes, obstacle detours, unavoidable crossings, deterministic reruns,\nedge-request permutation, exact anchors, independent route validation,\ninvalid route rejection and resource failures. This is **partial libavoid-like\nNudging**; named port geometry, checkpoints, crossing-minimal global paths\nand joint polyline optimization remain separate algorithm tasks.\n
