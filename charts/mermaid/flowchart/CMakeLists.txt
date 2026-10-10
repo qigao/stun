@@ -51,6 +51,7 @@ target_include_directories(mermaid_flowchart
  
 target_link_libraries(mermaid_flowchart 
     PUBLIC TurboParser::Parser flex_runtime TurboParser::Mustache avoid
+    PRIVATE Stun::GraphLayout
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)

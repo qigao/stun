@@ -1,3 +1,4 @@
+#include <stun/graphlayout/layered.h>
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_ast.h"
 #include <map>
@@ -159,139 +160,35 @@ private:
             if (nodes[i]->layout_height > 0) heights[i] = nodes[i]->layout_height;
         }
 
-        std::vector<std::vector<size_t>> out(ncount);
-        std::vector<std::vector<size_t>> in(ncount);
-        std::vector<int> indeg(ncount, 0);
-
-        for (auto* e = diagram->edges; e; e = e->next) {
-            auto it_from = index_of.find(e->from ? e->from : "");
-            auto it_to = index_of.find(e->to ? e->to : "");
-            if (it_from == index_of.end() || it_to == index_of.end()) continue;
-            size_t u = it_from->second;
-            size_t v = it_to->second;
-            out[u].push_back(v);
-            in[v].push_back(u);
-            indeg[v]++;
+        // Shared native graph placement. Cycles are condensed before ranking.
+        stun::graphlayout::Graph graph;
+        graph.nodes.reserve(ncount);
+        for (size_t i = 0; i < ncount; ++i)
+            graph.nodes.push_back({nodes[i]->id, widths[i], heights[i]});
+        for (auto* edge = diagram->edges; edge; edge = edge->next) {
+            auto src = index_of.find(edge->from ? edge->from : "");
+            auto dst = index_of.find(edge->to ? edge->to : "");
+            if (src == index_of.end() || dst == index_of.end())
+                throw std::invalid_argument("graphlayout: Mermaid edge references missing node");
+            graph.edges.push_back({src->second, dst->second});
         }
 
-        std::vector<size_t> topo;
-        topo.reserve(ncount);
-        std::deque<size_t> q;
-        std::vector<int> indeg_work = indeg;
-        std::vector<bool> processed(ncount, false);
+        stun::graphlayout::Options placement_options;
+        placement_options.node_gap = H_GAP;
+        placement_options.layer_gap = V_GAP;
+        const std::string rank_direction = diagram->direction ? diagram->direction : "";
+        if (rank_direction == "LR") placement_options.direction = stun::graphlayout::Direction::LeftToRight;
+        else if (rank_direction == "RL") placement_options.direction = stun::graphlayout::Direction::RightToLeft;
+        else if (rank_direction == "BT") placement_options.direction = stun::graphlayout::Direction::BottomToTop;
+        else placement_options.direction = stun::graphlayout::Direction::TopToBottom;
+        stun::graphlayout::Layout placement;
+        const auto placement_status = stun::graphlayout::layout_layered(graph, placement, placement_options);
+        if (!placement_status)
+            throw std::invalid_argument("graphlayout: " + placement_status.message);
 
-        for (size_t i = 0; i < ncount; ++i) {
-            if (indeg_work[i] == 0) q.push_back(i);
-        }
-
-        while (topo.size() < ncount) {
-            if (q.empty()) {
-                for (size_t i = 0; i < ncount; ++i) {
-                    if (!processed[i]) {
-                        indeg_work[i] = 0;
-                        q.push_back(i);
-                        break;
-                    }
-                }
-            }
-            size_t u = q.front();
-            q.pop_front();
-            if (processed[u]) continue;
-            processed[u] = true;
-            topo.push_back(u);
-            for (size_t v : out[u]) {
-                indeg_work[v]--;
-                if (indeg_work[v] == 0) q.push_back(v);
-            }
-        }
-
-        std::vector<int> level(ncount, 0);
-        int max_level = 0;
-        for (size_t u : topo) {
-            for (size_t v : out[u]) {
-                if (level[v] < level[u] + 1) {
-                    level[v] = level[u] + 1;
-                    if (level[v] > max_level) max_level = level[v];
-                }
-            }
-        }
-
-        std::vector<std::vector<size_t>> layers(max_level + 1);
-        for (size_t i = 0; i < ncount; ++i) {
-            layers[level[i]].push_back(i);
-        }
-
-        auto order_by_barycenter = [&](int layer_index, bool use_in_neighbors) {
-            if (layer_index < 0 || layer_index >= (int)layers.size()) return;
-            const std::vector<size_t>& prev = use_in_neighbors ? layers[layer_index - 1] : layers[layer_index + 1];
-            std::vector<int> pos(ncount, -1);
-            for (size_t i = 0; i < prev.size(); ++i) pos[prev[i]] = (int)i;
-
-            struct Item {
-                size_t node;
-                double bary;
-                bool has;
-                size_t orig;
-            };
-            std::vector<Item> items;
-            items.reserve(layers[layer_index].size());
-            for (size_t i = 0; i < layers[layer_index].size(); ++i) {
-                size_t u = layers[layer_index][i];
-                const std::vector<size_t>& neigh = use_in_neighbors ? in[u] : out[u];
-                double sum = 0.0;
-                int count = 0;
-                for (size_t v : neigh) {
-                    if (pos[v] >= 0) {
-                        sum += pos[v];
-                        count++;
-                    }
-                }
-                Item it;
-                it.node = u;
-                it.has = count > 0;
-                it.bary = it.has ? (sum / count) : 0.0;
-                it.orig = i;
-                items.push_back(it);
-            }
-
-            std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
-                if (a.has != b.has) return a.has > b.has;
-                if (!a.has) return a.orig < b.orig;
-                if (a.bary == b.bary) return a.orig < b.orig;
-                return a.bary < b.bary;
-            });
-
-            for (size_t i = 0; i < items.size(); ++i) layers[layer_index][i] = items[i].node;
-        };
-
-        for (int iter = 0; iter < 2; ++iter) {
-            for (int l = 1; l <= max_level; ++l) order_by_barycenter(l, true);
-            for (int l = max_level - 1; l >= 0; --l) order_by_barycenter(l, false);
-        }
-
-        std::vector<double> layer_heights(max_level + 1, 0.0);
-        for (int l = 0; l <= max_level; ++l) {
-            double h = 0.0;
-            for (size_t idx : layers[l]) h = std::max(h, heights[idx]);
-            layer_heights[l] = h;
-        }
-
-        std::vector<std::pair<double, double>> coords(ncount, {0.0, 0.0});
-        double y_cursor = 0.0;
-        for (int l = 0; l <= max_level; ++l) {
-            double total_w = 0.0;
-            for (size_t i = 0; i < layers[l].size(); ++i) {
-                total_w += widths[layers[l][i]];
-                if (i + 1 < layers[l].size()) total_w += H_GAP;
-            }
-            double x_cursor = -total_w / 2.0;
-            for (size_t i = 0; i < layers[l].size(); ++i) {
-                size_t idx = layers[l][i];
-                coords[idx] = {x_cursor, y_cursor};
-                x_cursor += widths[idx] + H_GAP;
-            }
-            y_cursor += layer_heights[l] + V_GAP;
-        }
+        std::vector<std::pair<double, double>> coords(ncount);
+        for (size_t i = 0; i < ncount; ++i)
+            coords[i] = {placement.nodes[i].x, placement.nodes[i].y};
 
         for (size_t i = 0; i < ncount; ++i) {
             RenderedNode rn;

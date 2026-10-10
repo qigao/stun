@@ -66,7 +66,7 @@ target_include_directories(dotgraph
 
 target_link_libraries(dotgraph
     PUBLIC dotgraph_parser
-    PRIVATE flex_expression TurboParser::Mustache avoid
+    PRIVATE flex_expression TurboParser::Mustache avoid Stun::GraphLayout
 )
 
 # ============================================================================

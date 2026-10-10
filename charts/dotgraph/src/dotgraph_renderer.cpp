@@ -1,3 +1,4 @@
+#include <stun/graphlayout/layered.h>
 #include "dotgraph_renderer.h"
 #include "dotgraph/dotgraph_ast.h"
 #include <map>
@@ -218,141 +219,37 @@ public:
             if (evaluated_height) heights[i] = *evaluated_height;
         }
 
-        // Build adjacency
-        std::vector<std::vector<size_t>> out(ncount), in(ncount);
-        std::vector<int> indeg(ncount, 0);
+        // Graph placement is owned by Stun's independent SCC/layered solver.
+        stun::graphlayout::Graph graph;
+        graph.nodes.reserve(ncount);
+        for (size_t i = 0; i < ncount; ++i)
+            graph.nodes.push_back({nodes[i]->id, widths[i], heights[i]});
         for (auto* e = diagram->edges; e; e = e->next) {
             auto fi = index_of.find(e->from ? e->from : "");
             auto ti = index_of.find(e->to ? e->to : "");
-            if (fi == index_of.end() || ti == index_of.end()) continue;
-            out[fi->second].push_back(ti->second);
-            in[ti->second].push_back(fi->second);
-            indeg[ti->second]++;
+            if (fi == index_of.end() || ti == index_of.end())
+                throw std::invalid_argument("graphlayout: DOT edge references missing node");
+            graph.edges.push_back({fi->second, ti->second});
         }
 
-        // Topological sort
-        std::vector<size_t> topo;
-        topo.reserve(ncount);
-        std::deque<size_t> q;
-        std::vector<int> indeg_work = indeg;
-        std::vector<bool> processed(ncount, false);
+        stun::graphlayout::Options placement_options;
+        placement_options.node_gap = H_GAP;
+        placement_options.layer_gap = V_GAP;
+        switch (diagram->rankdir) {
+        case DG_RANKDIR_BT: placement_options.direction = stun::graphlayout::Direction::BottomToTop; break;
+        case DG_RANKDIR_LR: placement_options.direction = stun::graphlayout::Direction::LeftToRight; break;
+        case DG_RANKDIR_RL: placement_options.direction = stun::graphlayout::Direction::RightToLeft; break;
+        default: placement_options.direction = stun::graphlayout::Direction::TopToBottom; break;
+        }
+        stun::graphlayout::Layout placement;
+        const auto placement_status = stun::graphlayout::layout_layered(graph, placement, placement_options);
+        if (!placement_status)
+            throw std::invalid_argument("graphlayout: " + placement_status.message);
+
+        const bool horizontal = diagram->rankdir == DG_RANKDIR_LR || diagram->rankdir == DG_RANKDIR_RL;
+        std::vector<std::pair<double, double>> coords(ncount);
         for (size_t i = 0; i < ncount; ++i)
-            if (indeg_work[i] == 0) q.push_back(i);
-        while (topo.size() < ncount) {
-            if (q.empty()) {
-                for (size_t i = 0; i < ncount; ++i)
-                    if (!processed[i]) { q.push_back(i); break; }
-            }
-            size_t u = q.front(); q.pop_front();
-            if (processed[u]) continue;
-            processed[u] = true;
-            topo.push_back(u);
-            for (size_t v : out[u]) {
-                indeg_work[v]--;
-                if (indeg_work[v] == 0) q.push_back(v);
-            }
-        }
-
-        // Level assignment
-        std::vector<int> level(ncount, 0);
-        int max_level = 0;
-        for (size_t u : topo) {
-            for (size_t v : out[u]) {
-                if (level[v] < level[u] + 1) {
-                    level[v] = level[u] + 1;
-                    if (level[v] > max_level) max_level = level[v];
-                }
-            }
-        }
-
-        std::vector<std::vector<size_t>> layers(max_level + 1);
-        for (size_t i = 0; i < ncount; ++i)
-            layers[level[i]].push_back(i);
-
-        // Barycenter ordering
-        auto order_layer = [&](int li, bool use_in) {
-            if (li < 0 || li >= (int)layers.size()) return;
-            const auto& prev = use_in ? layers[li - 1] : layers[li + 1];
-            std::vector<int> pos(ncount, -1);
-            for (size_t i = 0; i < prev.size(); ++i) pos[prev[i]] = (int)i;
-            struct Item { size_t node; double bary; bool has; size_t orig; };
-            std::vector<Item> items;
-            for (size_t i = 0; i < layers[li].size(); ++i) {
-                size_t u = layers[li][i];
-                const auto& neigh = use_in ? in[u] : out[u];
-                double sum = 0; int cnt = 0;
-                for (size_t v : neigh) if (pos[v] >= 0) { sum += pos[v]; cnt++; }
-                items.push_back({u, cnt > 0 ? sum / cnt : 0.0, cnt > 0, i});
-            }
-            std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
-                if (a.has != b.has) return a.has > b.has;
-                if (!a.has) return a.orig < b.orig;
-                return a.bary < b.bary;
-            });
-            for (size_t i = 0; i < items.size(); ++i) layers[li][i] = items[i].node;
-        };
-        for (int iter = 0; iter < 2; ++iter) {
-            for (int l = 1; l <= max_level; ++l) order_layer(l, true);
-            for (int l = max_level - 1; l >= 0; --l) order_layer(l, false);
-        }
-
-        // Coordinate assignment
-        const bool horizontal = (diagram->rankdir == DG_RANKDIR_LR || diagram->rankdir == DG_RANKDIR_RL);
-        std::vector<std::pair<double,double>> coords(ncount);
-        double cursor = 0.0;
-        for (int l = 0; l <= max_level; ++l) {
-            double max_primary = 0;
-            for (size_t idx : layers[l])
-                max_primary = std::max(max_primary, horizontal ? widths[idx] : heights[idx]);
-            double cross_cursor = 0.0;
-            for (size_t i = 0; i < layers[l].size(); ++i) {
-                size_t idx = layers[l][i];
-                if (horizontal) {
-                    coords[idx] = {cursor, cross_cursor};
-                } else {
-                    coords[idx] = {cross_cursor, cursor};
-                }
-                cross_cursor += (horizontal ? heights[idx] : widths[idx]) + H_GAP;
-            }
-            cursor += max_primary + V_GAP;
-        }
-
-        if (diagram->rankdir == DG_RANKDIR_BT) {
-            double extent = 0.0;
-            for (size_t i = 0; i < ncount; ++i)
-                extent = std::max(extent, coords[i].second + heights[i]);
-            for (size_t i = 0; i < ncount; ++i)
-                coords[i].second = extent - coords[i].second - heights[i];
-        } else if (diagram->rankdir == DG_RANKDIR_RL) {
-            double extent = 0.0;
-            for (size_t i = 0; i < ncount; ++i)
-                extent = std::max(extent, coords[i].first + widths[i]);
-            for (size_t i = 0; i < ncount; ++i)
-                coords[i].first = extent - coords[i].first - widths[i];
-        }
-
-        // Center layers
-        double total_cross = 0;
-        for (int l = 0; l <= max_level; ++l) {
-            if (layers[l].empty()) continue;
-            size_t last = layers[l].back();
-            double end_val = horizontal
-                ? coords[last].second + heights[last]
-                : coords[last].first + widths[last];
-            total_cross = std::max(total_cross, end_val);
-        }
-        for (int l = 0; l <= max_level; ++l) {
-            if (layers[l].empty()) continue;
-            size_t last = layers[l].back();
-            double layer_end = horizontal
-                ? coords[last].second + heights[last]
-                : coords[last].first + widths[last];
-            double offset = (total_cross - layer_end) / 2.0;
-            for (size_t idx : layers[l]) {
-                if (horizontal) coords[idx].second += offset;
-                else coords[idx].first += offset;
-            }
-        }
+            coords[i] = {placement.nodes[i].x, placement.nodes[i].y};
 
         // Build rendered nodes
         for (size_t i = 0; i < ncount; ++i) {
