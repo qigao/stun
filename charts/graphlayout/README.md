@@ -19,7 +19,7 @@ are in scope only when needed to support Cola-style constrained placement.
 | `libvpsc` | Weighted VPSC and pinned/2D projection exist | Coupled-constraint performance, richer separation/cluster cases |
 | `libcola` | Gradient Stress, SMACOF, spring/repulsion exist | Quality/scale and constrained graph-layout parity |
 | `libavoid` | Orthogonal and Polyline A*; bounded orthogonal joint Nudging exists | Global crossing/nudging, ports/checkpoints |
-| `libtopology` | Not implemented | Topology-preserving node movement and connector invariants |
+| `libtopology` | Baseline signed-crossing audit and sampled bounded displacement | Continuous topology guarantees, arbitrary connector routing and compound constraints |
 | `libdialect` | Tidy Tree is a partial building block | Decompose, Arrange, Expand/Emend, Transform pipeline |
 
 **Not in scope:** Lean/mathlib/formal proofs, UI/layout widgets, OpenGL
@@ -530,3 +530,39 @@ measurement. Real Chart geometry providers must supply such measurements.
 Qualification covers exact world anchors, both native route modes, bad
 geometry, missing/duplicate names, direction conflicts, strict budgets,
 GCC/Clang sanitizers and cross-platform C++ tests.
+
+## Algorithm v13: bounded topology-preserving polyline displacement
+
+`Stun::GraphTopology` is a separately linkable C++17, renderer-neutral
+**initial libtopology-like algorithm**. It is independent of Cola, libavoid,
+UI and rendering. The input is a graph, nonoverlapping node rectangles,
+explicit measured N/E/S/W boundary ports, and baseline polyline connectors.
+
+- `audit_topology` validates routes against nodes, checks nonadjacent
+  self-contact and ambiguous edge contacts, then records the **ordered,
+  signed crossing partner sequence along every edge**, not merely a crossing
+  count. Unmeasured Auto ports, self-loop edges, duplicate IDs and ambiguous
+  collinear/shared routing are explicitly unsupported in this first stage.
+- `move_topology_preserving` computes a bounded displacement toward a desired
+  placement. It interpolates node positions and arclength-weighted waypoints,
+  and validates multiple sampled intermediate geometries for node overlap,
+  edge/node penetration, segment contact, ordered crossings and signs.
+  Successful output reports its exact accepted fraction (possibly below 1.0).
+  Requested full movement is not silently assumed feasible.
+- Hard caps cover input nodes/edges, per-edge and batch waypoints, cumulative
+  segment/obstacle tests, trial count, and interpolation frames. Failure
+  returns a typed status and **empty output**; it never invokes a different
+  layout engine or rerouting provider.
+- The independent suite includes analytic 0/1/2-crossing embeddings, attempted
+  reversal of crossing order, intermediate route contacts, impossible moves,
+  bad ports, degenerate geometry, exhaustion and 48 deterministic graph moves.
+
+**Limit:** sampled continuation does **not** certify *every instant* of a
+continuous movement; this is a conservative numerical topology gate, **not
+complete libtopology parity**. In particular, it does not yet preserve
+arbitrary nonrectangular connector obstacles, overlapping/shared port stubs,
+self-loop embeddings, cluster containment or every possible topological
+isotopy. Future acceptance requires more general segment intersection events,
+actual routed-connector integration, larger adversarial corpora and upstream
+Adaptagrams differential tests. No Lean proofs are in scope.
+

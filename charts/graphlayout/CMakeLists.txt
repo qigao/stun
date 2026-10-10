@@ -28,6 +28,7 @@ stun_graph_algorithm(stun_graph_orthogonal GraphOrthogonal src/orthogonal.cpp)
 stun_graph_algorithm(stun_graph_polyline GraphPolyline src/polyline.cpp)
 # Geometry-certified named port binding, independent of route algorithm.
 stun_graph_algorithm(stun_graph_port_bindings GraphPortBindings src/port_bindings.cpp)
+stun_graph_algorithm(stun_graph_topology GraphTopology src/topology.cpp)
 stun_graph_algorithm(stun_graph_polyline_nudging GraphPolylineNudging src/polyline_nudging.cpp)
 # Bounded multi-edge coordination; consumes the independently validated orthogonal routes.
 stun_graph_algorithm(stun_graph_nudging GraphNudging src/nudging.cpp)
@@ -100,6 +101,14 @@ if(BUILD_TESTING)
     target_link_libraries(stun_graphlayout_port_bindings_tests PRIVATE Stun::GraphPortBindings)
     target_compile_features(stun_graphlayout_port_bindings_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphPortBindingsTests COMMAND stun_graphlayout_port_bindings_tests)
+endif()
+
+# Independent topology-preserving polyline movement and crossing-order gate.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_topology_tests tests/topology_test.cpp)
+    target_link_libraries(stun_graphlayout_topology_tests PRIVATE Stun::GraphTopology)
+    target_compile_features(stun_graphlayout_topology_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphTopologyTests COMMAND stun_graphlayout_topology_tests)
 endif()
 
 if(BUILD_TESTING)
