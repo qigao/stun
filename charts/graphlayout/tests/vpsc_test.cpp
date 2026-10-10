@@ -214,10 +214,21 @@ int main() {
                            {2, 0, -0.30000000000000004, true}}};
             VpscResult r;
             const auto status = solve_vpsc(p, r);
-            require(status.error == VpscError::InvalidNumerics,
-                    "near-zero positive cycle reported as numerical ambiguity");
-            require(status.infeasible_cycle.empty(), "ambiguous cycle is not a verified witness");
-            require(r.positions.empty(), "ambiguous result returns no partial positions");
+            // long double is 64-bit on MSVC/AppleClang, extended on
+            // typical Linux x86. Sub-resolution inconsistency may disappear
+            // under arithmetic rounding, then the numeric KKT audit can pass.
+            // Neither outcome may claim a definitive infeasibility witness.
+            require(status.error == VpscError::None ||
+                    status.error == VpscError::InvalidNumerics,
+                    "sub-resolution cycle is certified numerically or indeterminate");
+            require(status.infeasible_cycle.empty(), "no spurious infeasibility witness");
+            if (status) {
+                VpscCertificate audit;
+                require(static_cast<bool>(verify_vpsc(p, r, audit)),
+                        "a numerically accepted near-zero cycle has a checked KKT certificate");
+            } else {
+                require(r.positions.empty(), "indeterminate result returns no partial positions");
+            }
         }
         {
             // Deterministic property exercise: all constraints are generated
