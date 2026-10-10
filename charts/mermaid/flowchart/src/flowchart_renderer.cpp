@@ -1,4 +1,5 @@
 #include <stun/graphlayout/layered.h>
+#include <stun/graphlayout/orthogonal.h>
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_ast.h"
 #include <map>
@@ -200,6 +201,50 @@ private:
             rn.height = heights[i];
             rn.shape = nodes[i]->shape;
             snapshot.nodes.push_back(rn);
+        }
+
+        // The native orthogonal solver owns node-obstacle routing. Polyline
+        // mode is a separately selected algorithm; it is not a fallback.
+        if (diagram->routing_mode == FC_ROUTE_ORTHOGONAL) {
+            using namespace stun::graphlayout;
+            if (diagram->routing_nudging_distance >= 0.0 ||
+                diagram->routing_crossing_penalty >= 0.0 ||
+                diagram->routing_angle_penalty >= 0.0 ||
+                diagram->routing_nudge_orthogonal_ends >= 0 ||
+                diagram->routing_nudge_shared_paths >= 0) {
+                throw std::invalid_argument(
+                    "graphlayout: native orthogonal router does not support nudging/crossing/angle options");
+            }
+            std::vector<RouteRequest> requests;
+            std::vector<FlowchartEdge*> edge_list;
+            for (auto* e = diagram->edges; e; e = e->next) {
+                const auto fi = index_of.find(e->from ? e->from : "");
+                const auto ti = index_of.find(e->to ? e->to : "");
+                if (fi == index_of.end() || ti == index_of.end())
+                    throw std::invalid_argument("graphlayout: Mermaid edge references missing node");
+                requests.push_back({{fi->second}, {ti->second}});
+                edge_list.push_back(e);
+            }
+            RouteOptions route_options;
+            if (diagram->routing_shape_buffer >= 0.0)
+                route_options.clearance = diagram->routing_shape_buffer;
+            if (diagram->routing_segment_penalty >= 0.0)
+                route_options.bend_penalty = diagram->routing_segment_penalty;
+            Routes paths;
+            const auto routing_status = route_orthogonal(placement, requests, paths, route_options);
+            if (!routing_status)
+                throw std::invalid_argument("graphlayout: Mermaid edge " +
+                    std::to_string(routing_status.route_index) + ": " + routing_status.message);
+            for (size_t i = 0; i < edge_list.size(); ++i) {
+                RenderedEdge re;
+                re.source_id = edge_list[i]->from;
+                re.target_id = edge_list[i]->to;
+                re.label = edge_list[i]->label ? edge_list[i]->label : "";
+                for (const auto& p : paths.edges[i].points)
+                    re.points.push_back({p.x, p.y});
+                snapshot.edges.push_back(std::move(re));
+            }
+            return snapshot;
         }
 
         const bool horizontal = is_horizontal_direction(diagram);
@@ -520,6 +565,15 @@ std::string FlowchartRenderer::to_svg(const LayoutSnapshot& snapshot) {
             max_y = std::max(max_y, node.y + node.height);
         }
     }
+
+    // Routed edges (especially self-loops) may exceed node bounds.
+    for (const auto& edge : snapshot.edges)
+        for (const auto& p : edge.points) {
+            min_x = std::min(min_x, p.x);
+            min_y = std::min(min_y, p.y);
+            max_x = std::max(max_x, p.x);
+            max_y = std::max(max_y, p.y);
+        }
 
     LayoutSnapshot mutable_snapshot = snapshot;
     if (mutable_snapshot.total_width <= 0) {

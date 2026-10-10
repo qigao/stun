@@ -1,4 +1,5 @@
 #include <stun/graphlayout/layered.h>
+#include <stun/graphlayout/orthogonal.h>
 #include "dotgraph_renderer.h"
 #include "dotgraph/dotgraph_ast.h"
 #include <map>
@@ -309,6 +310,114 @@ public:
     }
 
 private:
+    // Stun-owned orthogonal graph routing. This intentionally does not invoke
+    // libavoid or turn a route failure into a straight edge.
+    static stun::graphlayout::Port native_port(
+        std::size_t node, DotGraphCompass compass, DotGraphCompass fallback) {
+        using stun::graphlayout::Side;
+        const DotGraphCompass selected = compass == DG_COMPASS_NONE ? fallback : compass;
+        Side side = Side::Auto;
+        double offset = 0.5;
+        switch (selected) {
+        case DG_COMPASS_N:  side = Side::North; break;
+        case DG_COMPASS_NE: side = Side::North; offset = 1.0; break;
+        case DG_COMPASS_E:  side = Side::East; break;
+        case DG_COMPASS_SE: side = Side::South; offset = 1.0; break;
+        case DG_COMPASS_S:  side = Side::South; break;
+        case DG_COMPASS_SW: side = Side::South; offset = 0.0; break;
+        case DG_COMPASS_W:  side = Side::West; break;
+        case DG_COMPASS_NW: side = Side::North; offset = 0.0; break;
+        case DG_COMPASS_C:
+            throw std::invalid_argument("graphlayout: central DOT compass is not a boundary port");
+        default:
+            throw std::invalid_argument("graphlayout: unsupported DOT compass");
+        }
+        return {node, side, offset};
+    }
+
+    void route_edges_native(
+        const DotGraphDiagram* diagram, LayoutSnapshot& snapshot,
+        const std::unordered_map<std::string, size_t>& index_of,
+        const std::vector<std::pair<double,double>>& coords,
+        const std::vector<double>& widths, const std::vector<double>& heights,
+        size_t ncount, bool horizontal) {
+        using namespace stun::graphlayout;
+        if (diagram->routing_nudging_distance >= 0.0 ||
+            diagram->routing_crossing_penalty >= 0.0 ||
+            diagram->routing_angle_penalty >= 0.0 ||
+            diagram->routing_nudge_orthogonal_ends >= 0 ||
+            diagram->routing_nudge_shared_paths >= 0) {
+            throw std::invalid_argument(
+                "graphlayout: edge nudging/crossing/angle options are not implemented by native orthogonal routing");
+        }
+        Layout placement;
+        placement.nodes.reserve(ncount);
+        for (size_t i = 0; i < ncount; ++i)
+            placement.nodes.push_back({coords[i].first, coords[i].second,
+                                       widths[i], heights[i]});
+
+        std::vector<RouteRequest> requests;
+        std::vector<DotGraphEdge*> edges;
+        for (auto* edge = diagram->edges; edge; edge = edge->next) {
+            const auto fi = index_of.find(edge->from ? edge->from : "");
+            const auto ti = index_of.find(edge->to ? edge->to : "");
+            if (fi == index_of.end() || ti == index_of.end())
+                throw std::invalid_argument("graphlayout: DOT edge references missing node");
+            const size_t u = fi->second, v = ti->second;
+            const bool forward = horizontal ? coords[v].first >= coords[u].first
+                                            : coords[v].second >= coords[u].second;
+            const DotGraphCompass source_default = u == v ? DG_COMPASS_E :
+                (horizontal ? (forward ? DG_COMPASS_E : DG_COMPASS_W)
+                            : (forward ? DG_COMPASS_S : DG_COMPASS_N));
+            const DotGraphCompass target_default = u == v ? DG_COMPASS_N :
+                (horizontal ? (forward ? DG_COMPASS_W : DG_COMPASS_E)
+                            : (forward ? DG_COMPASS_N : DG_COMPASS_S));
+            requests.push_back({native_port(u, edge->from_compass, source_default),
+                                native_port(v, edge->to_compass, target_default)});
+            edges.push_back(edge);
+        }
+
+        RouteOptions route_options;
+        if (diagram->routing_shape_buffer >= 0.0)
+            route_options.clearance = diagram->routing_shape_buffer;
+        if (diagram->routing_segment_penalty >= 0.0)
+            route_options.bend_penalty = diagram->routing_segment_penalty;
+        Routes routes;
+        const auto status = route_orthogonal(placement, requests, routes, route_options);
+        if (!status)
+            throw std::invalid_argument("graphlayout: DOT edge " +
+                std::to_string(status.route_index) + ": " + status.message);
+
+        GeometryEval edge_geo;
+        for (size_t i = 0; i < edges.size(); ++i) {
+            auto* e = edges[i];
+            RenderedEdge re;
+            re.from = e->from;
+            re.to = e->to;
+            const char* label = cascaded_attr(e->attrs, diagram->edge_defaults, "label");
+            const char* color = cascaded_attr(e->attrs, diagram->edge_defaults, "color");
+            const char* style = cascaded_attr(e->attrs, diagram->edge_defaults, "style");
+            re.label = label ? label : "";
+            re.color = color ? color : "#4b5563";
+            re.style = style ? style : "";
+            re.directed = diagram->is_directed;
+            re.extra = {
+                {"penwidth", "1.5"}, {"stroke_opacity", "0.6"},
+                {"label_fontcolor", "#4b5563"}, {"label_rect_rx", "4"},
+                {"label_rect_h", "20"}
+            };
+            attrs_to_map(re.extra, diagram->edge_defaults, kSkipEdgeAttrs);
+            attrs_to_map(re.extra, e->attrs, kSkipEdgeAttrs);
+            for (const auto& point : routes.edges[i].points)
+                re.points.push_back({point.x, point.y});
+            edge_geo.bind_edge(re.points.front().x, re.points.front().y,
+                               re.points.back().x, re.points.back().y,
+                               0, 0, static_cast<double>(re.label.size()));
+            eval_numeric_attrs(re.extra, edge_geo);
+            snapshot.edges.push_back(std::move(re));
+        }
+    }
+
     struct RoutedEndpoint {
         Avoid::Point point;
         Avoid::ConnDirFlags directions = Avoid::ConnDirAll;
@@ -348,14 +457,18 @@ private:
                      const std::vector<double>& widths, const std::vector<double>& heights,
                      size_t ncount, bool horizontal) {
         if (!diagram->edges) return;
+        if (diagram->routing_mode == DG_ROUTE_ORTHOGONAL) {
+            route_edges_native(diagram, snapshot, index_of, coords, widths, heights,
+                               ncount, horizontal);
+            return;
+        }
+        if (diagram->routing_mode != DG_ROUTE_POLYLINE)
+            throw std::invalid_argument("graphlayout: unsupported DOT routing mode");
         const double pad = 1.0;
-        const bool use_ortho = (diagram->routing_mode == DG_ROUTE_ORTHOGONAL);
-        Avoid::Router router(use_ortho ? Avoid::OrthogonalRouting : Avoid::PolyLineRouting);
-
-        if (use_ortho)
-            router.setRoutingParameter(Avoid::segmentPenalty, Avoid::chooseSensibleParamValue);
-        else
-            router.setRoutingParameter(Avoid::anglePenalty, Avoid::chooseSensibleParamValue);
+        // Explicitly selected polyline mode still uses the existing provider;
+        // it is not used as a fallback from the native orthogonal solver.
+        Avoid::Router router(Avoid::PolyLineRouting);
+        router.setRoutingParameter(Avoid::anglePenalty, Avoid::chooseSensibleParamValue);
 
         if (diagram->routing_shape_buffer >= 0.0)
             router.setRoutingParameter(Avoid::shapeBufferDistance, diagram->routing_shape_buffer);
@@ -830,6 +943,15 @@ std::string DotGraphRenderer::to_svg(const LayoutSnapshot& snapshot) {
         max_x = std::max(max_x, c.x + c.width);
         max_y = std::max(max_y, c.y + c.height);
     }
+
+    // Self-loops and obstacle detours may extend beyond node/cluster boxes.
+    for (const auto& edge : snapshot.edges)
+        for (const auto& p : edge.points) {
+            min_x = std::min(min_x, p.x);
+            min_y = std::min(min_y, p.y);
+            max_x = std::max(max_x, p.x);
+            max_y = std::max(max_y, p.y);
+        }
 
     LayoutSnapshot ms = snapshot;
     bool has = !snapshot.nodes.empty();
