@@ -65,3 +65,20 @@ if(BUILD_TESTING)
     target_compile_features(stun_graphlayout_stress_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphStressTests COMMAND stun_graphlayout_stress_tests)
 endif()
+
+# The SMACOF majorization implementation is a second optimizer for the exact
+# same shortest-path Stress objective, qualified independently from descent.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_smacof_tests tests/smacof_test.cpp)
+    target_link_libraries(stun_graphlayout_smacof_tests PRIVATE Stun::GraphLayout)
+    target_compile_features(stun_graphlayout_smacof_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphSmacofTests COMMAND stun_graphlayout_smacof_tests)
+endif()
+
+# Optional microbenchmark, not part of the native CI qualification matrix.
+option(STUN_GRAPHLAYOUT_BUILD_BENCHMARKS "Build native graph Stress comparison" OFF)
+if(STUN_GRAPHLAYOUT_BUILD_BENCHMARKS)
+    add_executable(stun_graphlayout_stress_compare benchmarks/stress_compare.cpp)
+    target_link_libraries(stun_graphlayout_stress_compare PRIVATE Stun::GraphLayout)
+    target_compile_features(stun_graphlayout_stress_compare PRIVATE cxx_std_17)
+endif()

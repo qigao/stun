@@ -13,7 +13,13 @@ namespace stun::graphlayout {
 //     0.5 / h^2 * (Euclidean(center_i, center_j) - h * ideal_length)^2.
 // Disconnected pairs do not contribute. This is a NONCONVEX objective and the
 // implementation claims neither global optimality nor SMACOF majorization.
+// Both optimizers minimize the same weighted shortest-path Stress objective.
+// SMACOF builds a global quadratic majorizer and solves its graph-Laplacian
+// normal equations (without adopting any vendor implementation).
+enum class StressOptimizer { GradientDescent, SmacofMajorization };
+
 struct StressOptions {
+    StressOptimizer optimizer = StressOptimizer::GradientDescent;
     double ideal_length = 80.0;
     double initial_step = 0.5;
     double relative_tolerance = 1e-8;
@@ -23,6 +29,11 @@ struct StressOptions {
     std::size_t max_bfs_scans = 3000000;
     std::size_t max_iterations = 96;
     std::size_t max_backtracks = 16;
+    // For SMACOF, at most this many preconditioned conjugate-gradient
+    // iterations PER AXIS and majorization step. Exceeding this limit is a
+    // typed failure, never a silently accepted inexact majorizer solve.
+    std::size_t max_linear_iterations = 384;
+    double linear_relative_tolerance = 1e-11;
     ProjectionOptions projection;
 };
 
@@ -34,6 +45,7 @@ enum class StressError {
     CapacityExceeded,
     ProjectionFailed,
     InternalInvariant,
+    LinearSolveLimit,
 };
 
 enum class StressTermination {
@@ -41,6 +53,8 @@ enum class StressTermination {
     GradientTolerance,
     LineSearchStalled,
     IterationBudget,
+    MajorizationTolerance,
+    MajorizationStalled,
 };
 
 struct StressStatus {
@@ -63,6 +77,11 @@ struct StressResult {
     std::size_t iterations = 0;
     std::size_t accepted_steps = 0;
     std::size_t line_search_trials = 0;
+    std::size_t linear_solves = 0; // Number of SMACOF X/Y Laplacian solve pairs.
+    std::size_t linear_iterations = 0; // Sum of CG iterations over both axes.
+    // Q(current|current) - Q(majorized|current), prior to any geometric
+    // projection. Values are auditable *numerical* majorizer improvements.
+    std::vector<double> majorizer_improvements;
     // Includes the post-projection initial objective, then ONLY accepted
     // monotone energies. This is an auditable descent record, not a proof of
     // optimality in the nonconvex objective or of optimal projection.
@@ -75,7 +94,13 @@ StressStatus evaluate_stress(const Graph& graph, const Layout& layout,
                              StressEvaluation& out,
                              const StressOptions& options = {});
 
-// Deterministic, budgeted gradient descent with energy-audited backtracking.
+// Deterministic, budgeted gradient descent OR Laplacian-based SMACOF
+// majorization (choose via StressOptions::optimizer). SMACOF exactly
+// eliminates declared hard pins from the quadratic step and pins one stable
+// reference per unpinned component to remove the translation nullspace.
+// Optional VPSC projection does NOT itself minimize the Laplacian majorizer;
+// candidates after projection/backtracking are accepted only after measuring
+// actual Stress, so accepted objective values remain monotone.
 // Optional hard pins, alignments, separations, and collision avoidance are
 // projected with native VPSC at initialization and at every trial.
 //

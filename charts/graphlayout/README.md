@@ -214,3 +214,57 @@ The dedicated `StunGraphStressTests` cover analytic two-node equilibrium,
 multi-hop chains, cycles, disconnected graphs, constrained pins and
 non-overlap, permutation stability, invalid geometry, infeasibility,
 resource caps, and forty deterministic graph families.
+
+## Algorithm v6: SMACOF graph-distance Stress majorization
+
+The same public `layout_stress(graph, seed, constraints, output, options)` API
+accepts `StressOptions::optimizer = StressOptimizer::SmacofMajorization`, while
+`GradientDescent` stays the explicit default. **Neither optimizer falls back to
+the other** if a bound is exceeded or a linear solve fails. Both minimize the
+same all-pairs, shortest-path, weighted node-center objective described in v5.
+
+SMACOF builds a quadratic upper bound at the current centers `Z`:
+
+`Q(X|Z) = 0.5 * Σ_(i,j) w_ij * (||x_i-x_j||² - 2*d_ij * (z_i-z_j)·(x_i-x_j)/||z_i-z_j|| + d_ij²)`.
+
+For noncoincident connected centers, Cauchy–Schwarz proves
+`Stress(X) <= Q(X|Z)` and `Stress(Z) = Q(Z|Z)`. Its unconstrained minimizer
+solves the weighted Laplacian normal equation
+`V X = B(Z)Z`. We **solve for displacements**
+`V Δ = (B(Z) - V) Z`, avoiding cancellation from large absolute coordinates.
+For each weak component with no hard pins, a deterministic lexical-ID gauge
+anchor removes the translation nullspace; the component is subsequently
+translated to preserve its centroid. Hard pins are eliminated exactly from
+the reduced system, using their current (already projected) coordinate as a
+fixed value. Two Jacobi-preconditioned conjugate-gradient solves (X/Y) have an
+explicit `max_linear_iterations` per-axis/per-step bound. An exhausted bound
+returns `LinearSolveLimit` with empty output, not a best-effort claim of a
+completed SMACOF step. Invalid or coincident pair centers also fail explicitly.
+
+**Important distinction:** A `ProjectionConstraints` result is computed by
+the existing per-axis VPSC solver. Its Euclidean displacement projection is
+not necessarily a minimizer of the Laplacian majorizer. Therefore every
+interpolated *projected* candidate is evaluated against the **actual Stress**
+objective, and only a strict decrease above `relative_tolerance` is accepted.
+The reported `majorizer_improvements` are pre-projection quadratic reductions,
+whereas `accepted_objectives` are post-projection actual energies. The latter
+must decrease monotonically for *both* algorithms; a line-search stall returns
+a finite, auditable iterate with the distinct `MajorizationStalled` status.
+No global nonconvex optimum, Lean proof of the native floating-point code, or
+unconditional decrease from VPSC projection alone is claimed.
+
+Standalone comparison (optional target; disabled in regular builds):
+
+```sh
+cmake -S charts/graphlayout -B build/graphlayout-bench -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DSTUN_GRAPHLAYOUT_BUILD_BENCHMARKS=ON
+cmake --build build/graphlayout-bench --target stun_graphlayout_stress_compare
+build/graphlayout-bench/stun_graphlayout_stress_compare
+```
+
+The CSV compares both algorithms on identical deterministic chain, ring and
+sparse graphs at equal **outer iteration budgets**, reporting final energy,
+actual accepted steps, linear-CG iterations, elapsed time and rectangle overlap
+counts. Results are machine- and workload-dependent; SMACOF may reach much
+lower energy while doing significantly more work per outer iteration. This
+benchmark compares Stun optimizers, **not** upstream Cola/ELK.
