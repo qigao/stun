@@ -72,6 +72,7 @@ struct TopologyReport {
     double analytic_guard_fraction = 1.0;
     std::size_t straight_constraints = 0;
     std::size_t bend_constraints = 0;
+    std::size_t segment_pair_constraints = 0;
     std::size_t guard_evaluations = 0;
 };
 

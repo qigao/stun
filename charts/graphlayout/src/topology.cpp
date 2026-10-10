@@ -468,6 +468,7 @@ TopologyStatus move_topology_preserving(
         candidate.analytic_guard_fraction=safe.max_safe_fraction;
         candidate.straight_constraints=safe.straight_constraints;
         candidate.bend_constraints=safe.bend_constraints;
+        candidate.segment_pair_constraints=safe.segment_pair_constraints;
         candidate.guard_evaluations=safe.evaluations;
         fraction=std::min(fraction,safe.max_safe_fraction);
         if(fraction<=0.0)

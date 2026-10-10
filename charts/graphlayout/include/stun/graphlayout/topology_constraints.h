@@ -82,6 +82,7 @@ struct TopologyGuardReport {
     double max_safe_fraction = 1.0;
     std::size_t straight_constraints = 0;
     std::size_t bend_constraints = 0;
+    std::size_t segment_pair_constraints = 0;
     std::size_t evaluations = 0;
 };
 
@@ -107,7 +108,10 @@ TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint
 // by original route arclength. For every unrelated node and segment whose
 // scan projection lies inside the segment, generate a fixed-fraction
 // node-face/segment TriConstraint. Consecutive route triples generate bend
-// orientation guards. The minimum analytic safe fraction limits a later
+// orientation guards. For every pair of independent edge segments, each of
+// the four endpoint-vs-segment orientation triples also generates a quadratic
+// event guard. This detects hidden two-segment swaps even if a sampled audit
+// observes only the final frame. The minimum safe fraction limits a later
 // full topology audit; it is NOT an ambient isotopy guarantee. In particular,
 // a moving scan intersection may shift along a segment and must be checked
 // by the independent full geometry/topology validator.

@@ -121,6 +121,44 @@ void run() {
                 "analytic guard work budget exhausts transactionally");
     }
     {
+        // Two disjoint connectors exchange vertical lanes over one move.
+        // A full-frame-only audit would accept both endpoints, but the
+        // analytic segment-pair orientation guards catch the halfway touch.
+        Graph graph;
+        graph.nodes={{"left_top",10,10},{"right_top",10,10},
+                     {"left_bottom",10,10},{"right_bottom",10,10}};
+        graph.edges={{0,1},{2,3}};
+        Layout baseline;
+        baseline.nodes={{0,0,10,10},{100,0,10,10},
+                        {0,100,10,10},{100,100,10,10}};
+        Layout desired=baseline;
+        for(std::size_t i=0;i<2;++i)desired.nodes[i].y+=100;
+        for(std::size_t i=2;i<4;++i)desired.nodes[i].y-=100;
+        Routes paths;
+        paths.edges={{{{10,5},{100,5}}},{{{10,105},{100,105}}}};
+        TopologyGuardReport analytic;
+        require(static_cast<bool>(limit_topology_movement(graph,baseline,desired,paths,analytic)),
+                "segment-pair swap constraints generated");
+        require(analytic.segment_pair_constraints>=4 &&
+                analytic.max_safe_fraction<0.5 &&
+                analytic.max_safe_fraction>0,
+                "quadratic segment orientations are included in safe prefix");
+        TopologyOptions single;
+        single.samples_per_trial=1;
+        single.max_trials=8;
+        std::vector<RouteRequest> ports={
+            {{0,Side::East,0.5},{1,Side::West,0.5}},
+            {{2,Side::East,0.5},{3,Side::West,0.5}}
+        };
+        Layout moved;Routes moved_paths;TopologyReport report;
+        const auto safe=move_topology_preserving(graph,baseline,ports,paths,desired,
+                                                 moved,moved_paths,single,&report);
+        if(!safe)throw std::runtime_error("single-sample topology continuation: "+safe.message);
+        require(report.segment_pair_constraints>=4 &&
+                report.accepted_fraction<0.5 && report.accepted_fraction>0,
+                "single-sample continuation is analytically capped");
+    }
+    {
         // Large translation with unchanged relative node/segment geometry.
         Graph graph;
         graph.nodes={{"A",8,8},{"B",8,8},{"C",12,12}};

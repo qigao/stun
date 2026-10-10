@@ -607,3 +607,22 @@ audit can still miss a contact between samples, and the current implementation
 does not split/merge edge segments at an activated constraint, recompute route
 homotopy, or guarantee a continuous ambient-isotopy certificate. These remain
 algorithmic follow-ups, not Lean/formal-proof tasks.
+
+### Analytic segment-pair crossing events (v14 follow-up)
+
+For each independent pair of routed segments AB and CD, the guard now
+tracks `orient(A,B,C)`, `orient(A,B,D)`, `orient(C,D,A)`, and
+`orient(C,D,B)` under the same affine movement model as the topology
+interpolator. Each orientation is a quadratic in movement fraction.
+Nonzero baseline orientations are prevented from reaching zero before
+the accepted step, even if the start and end orientations share a sign
+but change sign twice between them. Consequently a movement that
+swaps two connectors cannot be incorrectly approved solely because
+`samples_per_trial=1` observes a valid final configuration.
+
+These O(segment-pair-count) orientation guards have explicit operation
+and constraint budgets, and independently report how many were examined.
+Baseline collinear disjoint segments and endpoint contact cases still
+require the full collision/crossing audit; no complete continuous
+embedding guarantee is claimed. Regression includes endpoint-only
+sampling, analytic lane-swap limits and budgeted evaluation.

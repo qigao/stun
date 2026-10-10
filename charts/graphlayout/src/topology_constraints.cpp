@@ -240,6 +240,8 @@ TopologyGuardStatus limit_topology_movement(
             return fail(TopologyGuardError::InvalidInput,"invalid topology guard node geometry");
     }
     TopologyGuardReport candidate;
+    std::vector<std::vector<TopologyPointTrack>> route_tracks;
+    route_tracks.reserve(graph.edges.size());
     std::size_t count=0;
     auto use=[&]() -> bool {
         if(candidate.evaluations==options.max_evaluations ||
@@ -313,6 +315,40 @@ TopologyGuardStatus limit_topology_movement(
             if(!st)return st;
             candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
             ++candidate.bend_constraints;
+        }
+        route_tracks.push_back(std::move(moves));
+    }
+    // For independent segments AB and CD the four orientation predicates
+    // orient(A,B,C), orient(A,B,D), orient(C,D,A), orient(C,D,B) are quadratic
+    // in affine displacement. A proper crossing can only appear/disappear when
+    // one of these orientations reaches zero, so each nonzero baseline
+    // orientation provides an analytically bounded event. Collinear but
+    // disjoint baselines remain outside this guard and require full auditing.
+    for(std::size_t i=0;i<route_tracks.size();++i){
+        const auto& a=route_tracks[i];
+        for(std::size_t j=i+1;j<route_tracks.size();++j){
+            const auto& b=route_tracks[j];
+            for(std::size_t s=0;s+1<a.size();++s){
+                for(std::size_t t=0;t+1<b.size();++t){
+                    const TopologyBendConstraint guards[4]={
+                        {a[s],a[s+1],b[t]},
+                        {a[s],a[s+1],b[t+1]},
+                        {b[t],b[t+1],a[s]},
+                        {b[t],b[t+1],a[s+1]},
+                    };
+                    for(const auto& guard:guards){
+                        if(!use())return fail(TopologyGuardError::CapacityExceeded,
+                                              "topology segment-pair event budget exceeded");
+                        const Real initial_area=area(guard,0.0L);
+                        if(initial_area==0.0L)continue;
+                        double safe=0;
+                        const auto status=bend_bound(guard,safe,options);
+                        if(!status)return status;
+                        candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
+                        ++candidate.segment_pair_constraints;
+                    }
+                }
+            }
         }
     }
     report=candidate;
