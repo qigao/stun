@@ -1,7 +1,8 @@
 # Stun GraphLayout — self-owned layout kernel
 
-`stun_graphlayout` is a dependency-free C++17 graph **placement** solver. It
-is not a widget, docking, rendering or UI layout system. It is built independently
+The Stun GraphLayout modules provide renderer-independent C++17 graph
+**placement, routing and optimization** algorithms, separately linked by chart.
+They are not widgets, docking, rendering or UI layout systems. It is built independently
 of Salts, FlexUI, Cairo, OpenGL and the current Adaptagrams vendor library.
 
 ## Independent algorithm modules
@@ -18,13 +19,16 @@ shared solvers have no knowledge of DOT, Mermaid, Infographic or rendering.
 | `Stun::GraphOrthogonal` | Orthogonal obstacle-aware A* | GraphCore |
 | `Stun::GraphVPSC` | 1D separation constraints | GraphCore |
 | `Stun::GraphProjection` | 2D pins, alignments, non-overlap | GraphVPSC |
-| `Stun::GraphStress` | Gradient and SMACOF optimizers | GraphProjection |
+| `Stun::GraphStressCore` | Shared shortest-path pair construction, objective evaluation and projected backtracking | GraphProjection |
+| `Stun::GraphStressGradient` | Standalone Stress gradient descent | GraphStressCore |
+| `Stun::GraphStressSmacof` | Standalone SMACOF Laplacian majorization | GraphStressCore |
 | `Stun::GraphForce` | Spring plus softened repulsion | GraphProjection |
 
 The **algorithm code and CMake targets** above are independently built and
-linked. `Stun::GraphStress` currently houses two selectable optimizers that
-share the same stress objective and pair data; splitting their implementation
-would require extracting that common kernel, not duplicating its source.
+linked. Gradient and SMACOF are now separate object implementations with two
+explicit public entry points. They share exactly one shortest-path Stress
+objective in `GraphStressCore`, and neither links the other. No runtime
+optimizer selector, provider fallback, or duplicate distance/energy kernel.
 
 Chart adapter dependencies remain explicit: DOT and Mermaid flowcharts
 consume Layered and Orthogonal; Infographic's collision projection consumes
@@ -206,16 +210,16 @@ Adaptagrams' force-directed or topology-preserving algorithms.
 
 ## Algorithm v5: graph-distance stress descent with optional VPSC projection
 
-`stun/graphlayout/stress.h` provides an entirely Stun-owned **nonconvex
-stress** optimizer on node centers. For each pair reachable in the *undirected*
+`stun/graphlayout/stress.h` provides two separately compiled Stun-owned
+**nonconvex stress** optimizers on node centers. For each pair reachable in the *undirected*
 interpretation of the graph, let `h(i,j)` be the unweighted shortest-path hop
 count and `L` the configured ideal edge length. The objective is:
 
 `F = 0.5 * sum_{reachable i<j} (||center_i-center_j|| - L*h(i,j))^2 / h(i,j)^2`
 
 Disconnected node pairs have zero stress weight. Self-loops and duplicate
-edges do not introduce duplicate terms. The solver is **not** claiming SMACOF,
-all-pairs optimality or a general spring-electric force model. It starts from a
+edges do not introduce duplicate terms. The Gradient algorithm is **not** claiming SMACOF,
+global optimality or a general spring-electric force model. It starts from a
 caller-supplied finite `Layout`, accumulates gradients in lexical stable-ID
 order, and uses a bounded backtracking line search on the objective. The
 objective is recomputed after each candidate's constraint projection; **only
@@ -255,11 +259,13 @@ resource caps, and forty deterministic graph families.
 
 ## Algorithm v6: SMACOF graph-distance Stress majorization
 
-The same public `layout_stress(graph, seed, constraints, output, options)` API
-accepts `StressOptions::optimizer = StressOptimizer::SmacofMajorization`, while
-`GradientDescent` stays the explicit default. **Neither optimizer falls back to
-the other** if a bound is exceeded or a linear solve fails. Both minimize the
-same all-pairs, shortest-path, weighted node-center objective described in v5.
+The public entry points are `layout_stress_gradient(...)` and
+`layout_stress_smacof(...)`, exported by separately linked
+`Stun::GraphStressGradient` and `Stun::GraphStressSmacof` targets.
+**Neither optimizer falls back to the other** if a bound is exceeded or a
+linear solve fails. Both share the independently callable `evaluate_stress`
+objective in `GraphStressCore` and minimize the same all-pairs, shortest-path,
+weighted node-center objective described in v5.
 
 SMACOF builds a quadratic upper bound at the current centers `Z`:
 

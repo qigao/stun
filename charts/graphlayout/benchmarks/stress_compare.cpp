@@ -46,10 +46,10 @@ std::size_t overlaps(const Layout& layout) {
     return overlap;
 }
 void run(const Fixture& fixture, const std::string& name,
-         const std::string& kind, StressOptimizer optimizer,
+         const std::string& kind, bool majorization,
          bool collision_projection) {
     StressOptions o;
-    o.optimizer=optimizer;
+    
     o.max_iterations=64;
     o.max_pairs=8192;
     o.max_bfs_scans=3000000;
@@ -59,7 +59,8 @@ void run(const Fixture& fixture, const std::string& name,
     c.avoid_overlaps=collision_projection;
     const auto start = std::chrono::steady_clock::now();
     StressResult result;
-    const auto status=layout_stress(fixture.graph,fixture.seed,c,result,o);
+    const auto status=(majorization ? layout_stress_smacof(fixture.graph,fixture.seed,c,result,o)
+                                     : layout_stress_gradient(fixture.graph,fixture.seed,c,result,o));
     const auto end = std::chrono::steady_clock::now();
     if (!status) {
         std::cerr << "bench " << name << ' ' << kind << ": " << status.message << '\n';
@@ -67,7 +68,7 @@ void run(const Fixture& fixture, const std::string& name,
     }
     const auto ms = std::chrono::duration<double,std::milli>(end-start).count();
     std::cout << name << ',' << kind << ','
-              << (optimizer==StressOptimizer::SmacofMajorization ? "smacof" : "gradient")
+              << (majorization ? "smacof" : "gradient")
               << ',' << (collision_projection ? "true" : "false")
               << ',' << fixture.graph.nodes.size() << ',' << fixture.graph.edges.size()
               << ',' << result.initial.pairs
@@ -86,12 +87,12 @@ int main() {
         for (const auto& kind : {std::string{"chain"},std::string{"ring"},std::string{"sparse"}}) {
             const auto f=build(size,kind);
             const auto name="n"+std::to_string(size);
-            run(f,name,kind,StressOptimizer::GradientDescent,false);
-            run(f,name,kind,StressOptimizer::SmacofMajorization,false);
+            run(f,name,kind,false,false);
+            run(f,name,kind,true,false);
         }
     // Separately measure the cost/quality of true hard geometry constraints.
     const auto constrained=build(24,"sparse");
-    run(constrained,"n24","sparse",StressOptimizer::GradientDescent,true);
-    run(constrained,"n24","sparse",StressOptimizer::SmacofMajorization,true);
+    run(constrained,"n24","sparse",false,true);
+    run(constrained,"n24","sparse",true,true);
     return EXIT_SUCCESS;
 }

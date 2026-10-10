@@ -81,10 +81,9 @@ void compare(const Fixture& f,const std::string& kind,const std::string& method)
         layout=out.layout;iterations=out.iterations;accepted=out.accepted_steps;
     } else {
         StressOptions opt;opt.max_iterations=64;
-        opt.optimizer=method=="smacof"?StressOptimizer::SmacofMajorization:
-                                          StressOptimizer::GradientDescent;
         StressResult out;
-        const auto status=layout_stress(f.graph,f.seed,constraints,out,opt);
+        const auto status=(method=="smacof" ? layout_stress_smacof(f.graph,f.seed,constraints,out,opt)
+                                       : layout_stress_gradient(f.graph,f.seed,constraints,out,opt));
         if(!status){std::cerr<<"stress benchmark: "<<status.message<<'\n';std::exit(EXIT_FAILURE);}
         layout=out.layout;iterations=out.iterations;accepted=out.accepted_steps;
     }

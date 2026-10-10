@@ -38,7 +38,6 @@ Fixture fixture(std::vector<Node> nodes,
 }
 StressOptions smacof() {
     StressOptions o;
-    o.optimizer = StressOptimizer::SmacofMajorization;
     o.max_iterations = 48;
     o.max_linear_iterations = 384;
     o.linear_relative_tolerance = 1e-11;
@@ -47,7 +46,7 @@ StressOptions smacof() {
 StressResult solve(const Fixture& f, const ProjectionConstraints& c,
                    const StressOptions& o) {
     StressResult result;
-    const auto status = layout_stress(f.graph, f.seed, c, result, o);
+    const auto status = layout_stress_smacof(f.graph, f.seed, c, result, o);
     if (!status)
         throw std::runtime_error("SMACOF failed: " + status.message);
     require(result.layout.nodes.size() == f.graph.nodes.size(), "graph size preserved");
@@ -114,16 +113,12 @@ int main() {
         }
         {
             // The exact two-node SMACOF step reaches target distance in one
-            // Laplacian solve. Match its common objective to gradient descent.
+            // Laplacian solve, without linking GradientDescent at all.
             auto f = fixture({{"a",10,10},{"b",10,10}}, {{5,5},{305,5}}, {{0,1}});
             ProjectionConstraints c; c.avoid_overlaps = false;
             StressOptions o = smacof(); o.max_iterations = 1;
             const auto majorized = solve(f, c, o);
-            o.optimizer = StressOptimizer::GradientDescent;
-            const auto gradient = solve(f, c, o);
             close(majorized.final.value, 0.0, 1e-12, "two-node SMACOF optimum");
-            require(majorized.final.value <= gradient.final.value + 1e-9,
-                    "SMACOF one-step result should beat one gradient step on 2 nodes");
             close(majorized.layout.nodes[1].x - majorized.layout.nodes[0].x, 80.0,
                   1e-9, "analytic inter-node separation");
             close(majorized.layout.nodes[0].x + majorized.layout.nodes[1].x,
@@ -189,7 +184,7 @@ int main() {
             auto f = fixture({{"a",8,8},{"b",8,8}},{{15,15},{15,15}},{{0,1}});
             ProjectionConstraints c; c.avoid_overlaps=false;
             StressResult rejected;
-            require(layout_stress(f.graph,f.seed,c,rejected,smacof()).error ==
+            require(layout_stress_smacof(f.graph,f.seed,c,rejected,smacof()).error ==
                     StressError::InvalidGeometry,
                     "undefined coincident centers fail rather than jitter");
             require(rejected.layout.nodes.empty(), "failure returns empty result");
@@ -208,7 +203,7 @@ int main() {
             o.linear_relative_tolerance=1e-14;
             ProjectionConstraints c; c.avoid_overlaps=false;
             StressResult rejected;
-            const auto failed=layout_stress(f.graph,f.seed,c,rejected,o);
+            const auto failed=layout_stress_smacof(f.graph,f.seed,c,rejected,o);
             require(failed.error==StressError::LinearSolveLimit,
                     "linear solver budget exhaustion must be typed");
             require(rejected.accepted_objectives.empty() && rejected.layout.nodes.empty(),

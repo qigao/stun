@@ -39,7 +39,7 @@ Fixture fixture(std::vector<Node> nodes,
 StressResult run(const Fixture& f, const ProjectionConstraints& constraints = {},
                  const StressOptions& options = {}) {
     StressResult result;
-    const auto status = layout_stress(f.graph, f.seed, constraints, result, options);
+    const auto status = layout_stress_gradient(f.graph, f.seed, constraints, result, options);
     if (!status) throw std::runtime_error("layout_stress: " + status.message);
     check(result.layout.nodes.size() == f.graph.nodes.size(), "original index mapping");
     for (std::size_t i = 0; i < result.layout.nodes.size(); ++i) {
@@ -165,7 +165,7 @@ int main() {
             auto f=fixture({{"a",12,12},{"b",12,12}},{{0,0},{0,0}},{{0,1}});
             ProjectionConstraints c; c.avoid_overlaps=false;
             StressResult rejected;
-            check(layout_stress(f.graph,f.seed,c,rejected).error==StressError::InvalidGeometry,
+            check(layout_stress_gradient(f.graph,f.seed,c,rejected).error==StressError::InvalidGeometry,
                   "degenerate seed must fail, not jitter randomly");
             check(rejected.layout.nodes.empty(),"failure clears output");
             c.avoid_overlaps=true;
@@ -178,19 +178,19 @@ int main() {
                            {{0,0},{100,0},{210,0}}, {{0,1},{1,2}});
             StressResult rejected;
             StressOptions options; options.max_pairs=1;
-            check(layout_stress(f.graph,f.seed,{},rejected,options).error==StressError::CapacityExceeded,
+            check(layout_stress_gradient(f.graph,f.seed,{},rejected,options).error==StressError::CapacityExceeded,
                   "all-pair memory budget enforced");
             check(rejected.layout.nodes.empty(),"pair budget failure transactional");
             options.max_pairs=10; options.max_bfs_scans=1;
-            check(layout_stress(f.graph,f.seed,{},rejected,options).error==StressError::CapacityExceeded,
+            check(layout_stress_gradient(f.graph,f.seed,{},rejected,options).error==StressError::CapacityExceeded,
                   "BFS visit budget enforced");
             options.max_bfs_scans=100; options.initial_step=0;
-            check(layout_stress(f.graph,f.seed,{},rejected,options).error==StressError::InvalidOptions,
+            check(layout_stress_gradient(f.graph,f.seed,{},rejected,options).error==StressError::InvalidOptions,
                   "step budget must be positive");
             options.initial_step=0.5;
             auto broken=f;
             broken.graph.edges.push_back({2,4});
-            check(layout_stress(broken.graph,broken.seed,{},rejected,options).error==StressError::InvalidInput,
+            check(layout_stress_gradient(broken.graph,broken.seed,{},rejected,options).error==StressError::InvalidInput,
                   "invalid endpoints rejected");
         }
         {
@@ -198,7 +198,7 @@ int main() {
             ProjectionConstraints cs;
             cs.pins={{0,0,0},{1,0,0}};
             StressResult rejected;
-            auto status=layout_stress(f.graph,f.seed,cs,rejected);
+            auto status=layout_stress_gradient(f.graph,f.seed,cs,rejected);
             check(status.error==StressError::ProjectionFailed &&
                   status.projection_error==ProjectionError::Infeasible,
                   "impossible hard pins propagate exact infeasibility");

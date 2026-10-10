@@ -11,15 +11,11 @@ namespace stun::graphlayout {
 // Undirected shortest-path stress: graph edge orientation affects neither
 // distances nor weights. Connected pairs at hop distance h contribute
 //     0.5 / h^2 * (Euclidean(center_i, center_j) - h * ideal_length)^2.
-// Disconnected pairs do not contribute. This is a NONCONVEX objective and the
-// implementation claims neither global optimality nor SMACOF majorization.
-// Both optimizers minimize the same weighted shortest-path Stress objective.
-// SMACOF builds a global quadratic majorizer and solves its graph-Laplacian
-// normal equations (without adopting any vendor implementation).
-enum class StressOptimizer { GradientDescent, SmacofMajorization };
-
+// Disconnected pairs do not contribute. This is a NONCONVEX objective:
+// neither standalone algorithm claims global optimality. SMACOF uses a
+// quadratic majorizer and graph-Laplacian normal equations; Gradient descent
+// uses the same objective but does not link the SMACOF implementation.
 struct StressOptions {
-    StressOptimizer optimizer = StressOptimizer::GradientDescent;
     double ideal_length = 80.0;
     double initial_step = 0.5;
     double relative_tolerance = 1e-8;
@@ -94,8 +90,8 @@ StressStatus evaluate_stress(const Graph& graph, const Layout& layout,
                              StressEvaluation& out,
                              const StressOptions& options = {});
 
-// Deterministic, budgeted gradient descent OR Laplacian-based SMACOF
-// majorization (choose via StressOptions::optimizer). SMACOF exactly
+// Deterministic, separately linked gradient descent and Laplacian-based SMACOF
+// majorization. SMACOF exactly
 // eliminates declared hard pins from the quadratic step and pins one stable
 // reference per unpinned component to remove the translation nullspace.
 // Optional VPSC projection does NOT itself minimize the Laplacian majorizer;
@@ -108,9 +104,15 @@ StressStatus evaluate_stress(const Graph& graph, const Layout& layout,
 // fallback. The solver reports a finite feasible best iterate only if it
 // passes all configured numerical/geometry checks; IterationBudget is a
 // transparent finite-iterate status, NOT an optimality certificate.
-StressStatus layout_stress(const Graph& graph, const Layout& seed,
-                           const ProjectionConstraints& constraints,
-                           StressResult& out,
-                           const StressOptions& options = {});
+// Explicitly linked independent algorithms: consumers decide at build time.
+// No runtime optimizer selector or internal alternative-solver fallback.
+StressStatus layout_stress_gradient(const Graph& graph, const Layout& seed,
+                                    const ProjectionConstraints& constraints,
+                                    StressResult& out,
+                                    const StressOptions& options = {});
+StressStatus layout_stress_smacof(const Graph& graph, const Layout& seed,
+                                  const ProjectionConstraints& constraints,
+                                  StressResult& out,
+                                  const StressOptions& options = {});
 
 } // namespace stun::graphlayout

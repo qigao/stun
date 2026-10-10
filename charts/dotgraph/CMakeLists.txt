@@ -54,10 +54,10 @@ target_link_libraries(dotgraph_parser PUBLIC TurboParser::Parser)
 # ============================================================================
 
 # ============================================================================
-// DotGraph chart-owned AST-to-Graph placement algorithm adapter.
-// This target builds with only Stun's core/Layered solver, no parser runtime,
-// SVG renderer, libavoid, FlexUI, or OpenGL dependency.
-// ============================================================================
+# DotGraph chart-owned AST-to-Graph placement algorithm adapter.
+# This target builds with only Stun's core/Layered solver, no parser runtime,
+# SVG renderer, libavoid, FlexUI, or OpenGL dependency.
+# ============================================================================
 add_library(stun_dotgraph_layout STATIC src/dotgraph_layout.cpp)
 add_library(Stun::DotGraphLayout ALIAS stun_dotgraph_layout)
 target_include_directories(stun_dotgraph_layout PRIVATE
