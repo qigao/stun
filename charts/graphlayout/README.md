@@ -2,8 +2,31 @@
 
 The Stun GraphLayout modules provide renderer-independent C++17 graph
 **placement, routing and optimization** algorithms, separately linked by chart.
-They are not widgets, docking, rendering or UI layout systems. It is built independently
-of Salts, FlexUI, Cairo, OpenGL and the current Adaptagrams vendor library.
+They are not widgets, docking, rendering or UI layout systems. These algorithms
+build independently of Salts, FlexUI, Cairo, OpenGL and the Adaptagrams vendor library.
+
+## Scope: Adaptagrams-like layout algorithms only (2026-10-10)
+
+This development branch is intentionally limited to independently implemented
+C++ algorithms with similar capabilities to the five Adaptagrams libraries:
+`libvpsc`, `libcola`, `libavoid`, `libtopology` and `libdialect`.
+The upstream repository is a **behavioral reference**, not a source-code
+dependency or an API to copy. The internal `libproject` feasibility techniques
+are in scope only when needed to support Cola-style constrained placement.
+
+| Upstream capability | Native algorithm status | Remaining work |
+| --- | --- | --- |
+| `libvpsc` | Weighted VPSC and pinned/2D projection exist | Coupled-constraint performance, richer separation/cluster cases |
+| `libcola` | Gradient Stress, SMACOF, spring/repulsion exist | Quality/scale and constrained graph-layout parity |
+| `libavoid` | Orthogonal visibility/A* exists | Native polyline, joint nudging/crossing optimization, ports/checkpoints |
+| `libtopology` | Not implemented | Topology-preserving node movement and connector invariants |
+| `libdialect` | Tidy Tree is a partial building block | Decompose, Arrange, Expand/Emend, Transform pipeline |
+
+**Not in scope:** Lean/mathlib/formal proofs, UI/layout widgets, OpenGL
+rendering, chart-specific Sankey/Gantt/Sequence features, and a broad chart
+framework rewrite. C++ unit/property tests, runtime invariants, sanitizers,
+cross-platform CI, bounded resources and Adaptagrams comparison are required.
+Keep the PR Draft / **DO NOT MERGE** until tested algorithm acceptance is complete.
 
 ## Independent algorithm modules
 
@@ -34,9 +57,10 @@ optimizer selector, provider fallback, or duplicate distance/energy kernel.
 Chart adapter dependencies remain explicit: DOT and Mermaid flowcharts
 consume Layered and Orthogonal; Infographic's collision projection consumes
 GraphProjection. The former explicit Polyline/libavoid option is still a
-separately selected provider, **not an automatic fallback**. Chart-specific
-tree, Sankey, lane/timeline and route policy code should live with its chart
-until there is a second real consumer for a shared algorithm.
+separately selected provider, **not an automatic fallback**. This phase is scoped to Adaptagrams-like graph layout only: chart-specific
+Sankey, lane/timeline, Gantt, and other unrelated algorithms are excluded.
+Existing Tidy Tree is retained solely as a useful building block for
+DiAlEcT/HOLA-style decomposition; it is not a new chart-feature workstream.
 
 To qualify an individual algorithm without any UI/chart dependencies:
 
@@ -77,8 +101,8 @@ stages. The renderer owns neither the algorithm nor its node identities.
 - The same graph, configuration and IDs give the same result, regardless
   of node/edge insertion order.
 - Unsupported or invalid inputs return explicit failure with no partial output.
-- A future Lean model will prove SCC condensation acyclicity, rank monotonicity
-  and rectangle-separation invariants; **no Lean proof is claimed yet**.
+- Rank ordering and rectangle separation are validated with deterministic C++
+  tests and runtime geometry checks; formal proofs are not in this project scope.
 
 ## Standalone qualification
 
@@ -115,8 +139,8 @@ fractional offsets, with a fixed convention for self-loops. Dense graphs may
 hit `max_grid_vertices`, `max_expansions`, or `max_queue_entries`: those are
 explicit resource errors, not evidence that the geometric problem has no path.
 
-The geometric validator checks emitted routes but it is **not** a Lean proof,
-and the normal floating-point caveats remain. Additional obligations include
+The geometric validator checks emitted routes under floating-point tolerances;
+its checks do not establish all possible routing cases. Additional obligations include
 joint-edge crossing minimization, compound obstacles, exact shape intersection,
 and rigorous numerical error bounds. Algorithms run in C++17 and have no
 third-party graph layout source or runtime dependency.
@@ -156,8 +180,8 @@ processing order independent of node insertion order.
 The VPSC solver is **not yet wired into DOT/Mermaid's node placement**. The
 full Cola stress minimization, geometry-dependent overlap-disjunction search,
 cluster hierarchy, topology preservation and joint-edge nudging remain separate
-future graph algorithms. Lean formalization of the convex KKT sufficiency
-theorem, positive-cycle witness and composition contracts is pending.
+future graph algorithms. Numerical KKT residuals, positive-cycle witness checks,
+scale tests and upstream differential comparison are the acceptance strategy.
 
 ## Algorithm v4: constraint-aware 2D graph projection
 
@@ -193,8 +217,8 @@ of all feasible non-overlap axis assignments. A viable graph may still be
 reported as incomplete or infeasible when the chosen constraints conflict.
 Unlike geometric validity, globally minimal displacement is proved only for
 **each fixed set of VPSC axis constraints** to numerical tolerance, and does
-not imply globally optimal joint 2D compaction. Exact Lean proof and native
-routing/placement composition are future acceptance tasks.
+not imply globally optimal joint 2D compaction. Native routing/placement
+composition and additional geometric regression tests remain acceptance tasks.
 
 ## First consumer: Infographic collision projection
 
@@ -246,12 +270,12 @@ result from the original graph and positions.
   Exhausted line searches return the best feasible accepted iterate with
   `LineSearchStalled`; an exhausted outer limit returns `IterationBudget`.
   Neither termination code is mislabeled as global optimality. The finite
-  nonincreasing energy trace is a numerical postcondition, not a Lean proof.
+  nonincreasing energy trace is a numerical postcondition, not a claim of global optimality.
 - **Scope:** node-center stress only. It does not yet solve joint edge routing,
   component packing, force-directed Coulomb repulsion, compound constraints,
   or full Cola/Adaptagrams feature equivalence. The separately selected
   SMACOF and Force algorithms are documented below; incremental/large-graph
-  acceleration and Lean correctness modeling remain future work.
+  acceleration and Adaptagrams differential quality tests remain future work.
 
 The dedicated `StunGraphStressTests` cover analytic two-node equilibrium,
 multi-hop chains, cycles, disconnected graphs, constrained pins and
@@ -295,8 +319,8 @@ The reported `majorizer_improvements` are pre-projection quadratic reductions,
 whereas `accepted_objectives` are post-projection actual energies. The latter
 must decrease monotonically for *both* algorithms; a line-search stall returns
 a finite, auditable iterate with the distinct `MajorizationStalled` status.
-No global nonconvex optimum, Lean proof of the native floating-point code, or
-unconditional decrease from VPSC projection alone is claimed.
+No global nonconvex optimum or unconditional decrease from VPSC projection
+alone is claimed.
 
 Standalone comparison (optional target; disabled in regular builds):
 
@@ -365,7 +389,7 @@ cannot introduce duplicate spring energy.
   **different finite iterate termination reasons**, not a global optimum.
 - **Scope:** no Cola source is copied; no silent solver fallback, no graph
   topology preservation, global force-energy optimum, multi-edge nudging,
-  Lean theorem, or complete Cola feature parity is claimed.
+  or complete Cola feature parity is claimed.
 
 Standalone `StunGraphForceTests` exercise an analytic two-node objective,
 finite-difference derivatives, disconnected repulsion, cycles and duplicate
@@ -407,7 +431,7 @@ The solver is deterministic for the **same ordered input**; arbitrary sibling
 permutation is not required to preserve coordinates because sibling order is
 intentional. Contour merging is bounded **O(n^2) worst case**. Explicit node,
 contour and rectangle-verification budgets fail transactionally; this does not
-claim optimal width, Buchheim linear time, or Lean-proved correctness.
+claim optimal width or Buchheim linear time.
 
 Infographic's Tree uses this solver directly and retains full pre-order parent
 indices, stable card dimensions, and expands the canvas instead of scaling
