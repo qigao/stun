@@ -150,6 +150,37 @@ int main() {
             check(static_cast<bool>(status), "SCC and self-loop integration");
             check_valid(layout, requests, result);
         }
+        {
+            // A mesh of obstacles must not make the route generator lose
+            // determinism, miss an obstacle, or select an implicit fallback.
+            Layout l;
+            for (std::size_t row = 0; row < 5; ++row)
+                for (std::size_t col = 0; col < 5; ++col)
+                    l.nodes.push_back({static_cast<double>(col * 95),
+                                       static_cast<double>(row * 90),
+                                       32.0 + (col % 3) * 5, 28.0 + (row % 4) * 7});
+            std::vector<RouteRequest> requests;
+            for (std::size_t i = 0; i < 32; ++i)
+                requests.push_back({{(i * 11 + 2) % l.nodes.size()},
+                                    {(i * 17 + 7) % l.nodes.size()}});
+            Routes a, b;
+            auto status = route_orthogonal(l, requests, a);
+            if (!status) std::cerr << "mesh[" << status.route_index << "]: " << status.message << '\n';
+            check(static_cast<bool>(status), "dense mesh routing succeeds");
+            check_valid(l, requests, a);
+            check(static_cast<bool>(route_orthogonal(l, requests, b)), "repeat dense mesh");
+            check(equal(a, b), "all 32 routes repeat bit-exactly");
+        }
+        {
+            Layout original = boxes({{0, 0, 50, 40}, {80, 90, 45, 50}, {160, 0, 60, 40}});
+            std::vector<RouteRequest> req_a{{{0}, {2}}, {{1}, {0}}, {{2}, {2}}};
+            Routes routes_a, routes_b;
+            check(static_cast<bool>(route_orthogonal(original, req_a, routes_a)), "base permutation layout");
+            Layout permuted = boxes({original.nodes[2], original.nodes[0], original.nodes[1]});
+            std::vector<RouteRequest> req_b{{{1}, {0}}, {{2}, {1}}, {{0}, {0}}};
+            check(static_cast<bool>(route_orthogonal(permuted, req_b, routes_b)), "permuted obstacle layout");
+            check(equal(routes_a, routes_b), "obstacle input permutation does not change route geometry");
+        }
         std::cout << "graphlayout orthogonal routing: all checks passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& ex) {

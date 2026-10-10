@@ -237,14 +237,32 @@ RouteStatus route_one(const Layout& l, const std::vector<Rect>& inflated,
     pending.push({heuristic(start), 0, initial});
     std::size_t iterations = 0;
     std::size_t winner = kNoParent;
+    double best_total = infinity;
+    const std::size_t source_outward = outward_dir(src.side);
+    const std::size_t target_outward = outward_dir(dst.side);
+    const std::size_t target_inward = (target_outward + 2) % 4;
     while (!pending.empty()) {
         if (++iterations > opt.max_expansions)
             return fail(RouteError::CapacityExceeded, "orthogonal A* expansion capacity exceeded", route_index);
         const Step step = pending.top(); pending.pop();
+        if (step.f > best_total) break; // Admissible heuristic bounds all remaining goal costs.
         const std::size_t state = step.state, v = state / kDirs;
         if (closed[state] || step.g != cost[state]) continue;
         closed[state] = 1;
-        if (v == goal) { winner = state; break; }
+        if (v == goal) {
+            const std::size_t entering = state % kDirs;
+            // A terminal cannot be approached from inside its own rectangle.
+            if (entering != target_outward) {
+                const double complete = cost[state] +
+                    (entering == target_inward ? 0.0 : opt.bend_penalty);
+                if (complete < best_total ||
+                    (complete == best_total && state < winner)) {
+                    best_total = complete;
+                    winner = state;
+                }
+            }
+            continue;
+        }
 
         const std::size_t x = v % cols, y = v / cols;
         // Clockwise direction order makes tie resolution reproducible.
@@ -255,6 +273,7 @@ RouteStatus route_one(const Layout& l, const std::vector<Rect>& inflated,
                                                 y > 0 ? v - cols : v}};
         for (std::size_t dir = 0; dir < 4; ++dir) {
             if (!available[dir]) continue;
+            if (state == initial && dir == (source_outward + 2) % 4) continue;
             const auto nv = next[dir];
             if (!is_valid(nv) || !free_segment(point_of(v), point_of(nv), inflated)) continue;
             const Point p = point_of(v), q = point_of(nv);
