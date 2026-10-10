@@ -47,23 +47,71 @@ ctest --test-dir build/graphlayout --output-on-failure
 
 ## Algorithm v2: orthogonal obstacle-aware routing
 
-`stun/graphlayout/orthogonal.h` provides a self-owned orthogonal edge router,
-independent of C++ UI/render APIs or third-party graph layout implementations.
+`stun/graphlayout/orthogonal.h` supplies a separately checked, self-owned
+route generator. A route is a sequence of axis-aligned points from exact
+rectangle-side port anchors, in input edge order.
 
-1. Check bounded, finite rectangles and exact node-side port anchors. Invalid,
-   overlapping or over-capacity obstacles fail with a typed status.
-2. Expand node rectangles by `clearance` and construct a compressed visibility
-   grid using rectangle boundary axes plus port stub axes. No grid segment is
-   allowed through an expanded rectangle interior; each port's own initial
-   stub is exempt from its node's clearance envelope.
-3. Apply direction-aware A* with Manhattan heuristic, nonnegative path length
-   and bend cost. Stable grid/state order breaks ties deterministically.
-4. Reconstruct and simplify paths. An independent postcondition checker tests
-   orthogonality, endpoint direction, obstacle non-penetration and clearance.
-5. On *any* error the entire batch is empty. No arbitrary straight fallback
-   or partial-result success. Error includes failing edge index.
+1. Check all finite obstacle rectangles and route endpoint fractions. Reject
+   overlapping node geometry and over-capacity inputs explicitly.
+2. Expand rectangles by the configured clearance; construct a compressed
+   rectilinear visibility grid from obstacle boundaries and the two port stubs.
+   Points inside expanded obstacles and segments crossing their interior are
+   inadmissible. Port stubs cross only their own clearance envelope.
+3. Run direction-aware A* over `(grid_vertex, arrival_direction)` with
+   nonnegative `Manhattan length + bend_penalty` cost and a Manhattan admissible
+   heuristic. Resolve equal candidates by stable grid/state indices.
+4. Reconstruct a polyline, remove duplicate/collinear points, and validate the
+   full result, including exterior port directions, nonzero orthogonal steps,
+   original terminal rectangles, and expanded non-terminal obstacles.
+5. On any failed route, clear the entire batch and return a typed failure and
+   edge index. There is **no straight-segment fallback**.
 
-The initial scope is **single-edge orthogonal shortest paths on the chosen
-visibility grid**, not a proof of globally optimal multi-edge crossing/nudging.
-No Lean theorem or native SDK integration claim is made by these C++ tests.
-Finite input, hard resource budgets and deterministic operation are required.
+The module currently optimizes **individual routes**, not a joint global
+crossing/nudging objective. It supports `Auto/North/East/South/West` ports and
+fractional offsets, with a fixed convention for self-loops. Dense graphs may
+hit `max_grid_vertices`, `max_expansions`, or `max_queue_entries`: those are
+explicit resource errors, not evidence that the geometric problem has no path.
+
+The geometric validator checks emitted routes but it is **not** a Lean proof,
+and the normal floating-point caveats remain. Additional obligations include
+joint-edge crossing minimization, compound obstacles, exact shape intersection,
+and rigorous numerical error bounds. Algorithms run in C++17 and have no
+third-party graph layout source or runtime dependency.
+
+## Algorithm v3: weighted VPSC (convex separation projection)
+
+`stun/graphlayout/vpsc.h` implements Stun-owned, renderer-independent
+**Variable Placement with Separation Constraints**. It solves
+
+`min 0.5 * sum_i weight[i] * (x[i] - desired[i])^2`
+
+subject to `x[right] - x[left] >= gap`, or equality when explicitly selected.
+Every weight must be finite and strictly positive. Negative gaps are valid.
+Input/output indices are preserved and stable IDs establish a deterministic
+processing order independent of node insertion order.
+
+- Difference-constraint Bellman-Ford feasibility checking detects strictly
+  positive separation cycles, returning a checkable ordered set of directed
+  witness arcs (including the reversed orientation for equality constraints).
+  Cycles indistinguishable from numerical roundoff return `InvalidNumerics`,
+  **not** an unsupported assertion of mathematical infeasibility.
+- Bounded dual coordinate ascent performs exact coordinate updates for the
+  convex weighted objective, with `lambda >= 0` for inequalities and signed
+  multipliers for equalities. It does **not** copy Adaptagrams block code.
+- An independent checker recomputes primal separation violations, dual
+  sign violations, KKT stationarity, complementarity and a dual lower bound.
+  The solver returns success only within an explicit **normalized floating-point
+  tolerance**. A successful certificate is numerical evidence, not an exact
+  proof or a claim that C++ floating point arithmetic is formally verified.
+- Hard limits bound feasibility relaxations, coordinate updates, iteration
+  sweeps and input counts. On exhaustion, return `IterationLimit`/
+  `CapacityExceeded`, clearing the entire output. Infeasible or unstable
+  cases are also explicit errors; never silently relax constraints or use a
+  fallback solver. This algorithm can converge slowly on tightly coupled or
+  degenerate constraints: no unconditional iteration or speed bound is claimed.
+
+The VPSC solver is **not yet wired into DOT/Mermaid's node placement**. The
+full Cola stress minimization, geometry-dependent overlap-disjunction search,
+cluster hierarchy, topology preservation and joint-edge nudging remain separate
+future graph algorithms. Lean formalization of the convex KKT sufficiency
+theorem, positive-cycle witness and composition contracts is pending.
