@@ -30,6 +30,8 @@ stun_graph_algorithm(stun_graph_polyline GraphPolyline src/polyline.cpp)
 stun_graph_algorithm(stun_graph_port_bindings GraphPortBindings src/port_bindings.cpp)
 stun_graph_algorithm(stun_graph_topology_constraints GraphTopologyConstraints src/topology_constraints.cpp)
 stun_graph_algorithm(stun_graph_topology GraphTopology src/topology.cpp)
+stun_graph_algorithm(stun_graph_topology_edits GraphTopologyEdits src/topology_edits.cpp)
+stun_graph_algorithm(stun_graph_topology_projection GraphTopologyProjection src/topology_projection.cpp)
 stun_graph_algorithm(stun_graph_polyline_nudging GraphPolylineNudging src/polyline_nudging.cpp)
 # Bounded multi-edge coordination; consumes the independently validated orthogonal routes.
 stun_graph_algorithm(stun_graph_nudging GraphNudging src/nudging.cpp)
@@ -45,6 +47,8 @@ stun_graph_algorithm(stun_graph_force GraphForce src/force.cpp)
 target_link_libraries(stun_graph_nudging PUBLIC Stun::GraphOrthogonal)
 target_link_libraries(stun_graph_polyline_nudging PUBLIC Stun::GraphPolyline)
 target_link_libraries(stun_graph_topology PUBLIC Stun::GraphTopologyConstraints)
+target_link_libraries(stun_graph_topology_edits PUBLIC Stun::GraphTopology)
+target_link_libraries(stun_graph_topology_projection PUBLIC Stun::GraphTopologyEdits Stun::GraphProjection)
 target_link_libraries(stun_graph_projection PUBLIC Stun::GraphVPSC)
 target_link_libraries(stun_graph_stress_core PUBLIC Stun::GraphProjection)
 target_link_libraries(stun_graph_stress_gradient PUBLIC Stun::GraphStressCore)
@@ -241,4 +245,22 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/tree/src
     )
     target_compile_features(stun_graphlayout_tree_renderer_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphTreeRendererTests COMMAND stun_graphlayout_tree_renderer_tests)
+endif()
+
+# A topology-preserving representation edit cannot silently change the
+# crossing embedding or use unbounded bend/merge candidate operations.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_topology_edits_tests tests/topology_edits_test.cpp)
+    target_link_libraries(stun_graphlayout_topology_edits_tests PRIVATE Stun::GraphTopologyEdits)
+    target_compile_features(stun_graphlayout_topology_edits_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphTopologyEditsTests COMMAND stun_graphlayout_topology_edits_tests)
+endif()
+
+# Exact VPSC pins and separations must be attained, never treated as satisfied
+# by a partial topology-preserving movement.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_topology_projection_tests tests/topology_projection_test.cpp)
+    target_link_libraries(stun_graphlayout_topology_projection_tests PRIVATE Stun::GraphTopologyProjection)
+    target_compile_features(stun_graphlayout_topology_projection_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphTopologyProjectionTests COMMAND stun_graphlayout_topology_projection_tests)
 endif()

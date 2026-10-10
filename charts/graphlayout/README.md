@@ -626,3 +626,43 @@ Baseline collinear disjoint segments and endpoint contact cases still
 require the full collision/crossing audit; no complete continuous
 embedding guarantee is claimed. Regression includes endpoint-only
 sampling, analytic lane-swap limits and budgeted evaluation.
+
+## Algorithm v15: Straight/Bend topology events and bounded VPSC composition
+
+`Stun::GraphTopologyEdits` performs explicit topology-preserving route
+representation changes independently from the original topology search:
+
+- **Straight -> Bend:** insert a caller-specified non-collinear waypoint at
+  a strict interior segment fraction with measured displacement. Audit each
+  sampled intermediate vertex motion against the ORIGINAL full ordered/signed
+  crossing signature, all node rectangles and exact port anchors.
+- **Bend -> Straight:** prune only a forward, (numerically) collinear interior
+  bend and re-audit the complete result. Edits are applied in caller sequence;
+  each subsequent index addresses the updated route.
+- Transactional errors, exact input indices and explicit resource limits
+  (`max_edits`, `max_audits`, `continuation_frames`, route point budgets).
+  No guessed collision detours, libavoid fallback, or silent topology change.
+  The sampled edit continuation does NOT prove an unsampled ambient isotopy.
+
+`Stun::GraphTopologyProjection` composes the native VPSC/2D projection
+with explicitly requested topology edits and the audited topology movement.
+A successful result MUST achieve the **entire** projected node goal and every
+hard pin exactly. If only a fractional topology-preserving move is feasible,
+the composed operation returns `NoAdmissibleStep` with EMPTY output instead
+of claiming the VPSC constraints were met. Projection failures propagate in a
+separate typed field. This is an explicitly ordered combination of native
+algorithms, not an automatic optimization fallback.
+
+The independent tests cover real non-collinear bends, exact straight-bend
+merges, crossing changes, node penetration, route/operation budget exhaustion,
+deterministic variants, full projected moves with exact pins, partial-move
+rejection and infeasible VPSC pin constraints. Both modules are C++17,
+renderer-neutral and independently linked.
+
+**Current limits:** topology surgery locations/displacements are supplied by
+the caller, not automatically scheduled from a scanline collision event.
+This initial module does NOT implement upstream automatic StraightConstraint
+activation, bend-point-to-obstacle-corner ownership, segment reassignment,
+general homotopy transitions, arbitrary obstacle shapes or global topology
+optimization. More libtopology-like event detection and constraint propagation
+remain open. No Lean proofs are in scope.
