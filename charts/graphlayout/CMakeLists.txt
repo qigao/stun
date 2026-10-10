@@ -23,6 +23,7 @@ function(stun_graph_algorithm target public_name source)
 endfunction()
 
 stun_graph_algorithm(stun_graph_layered GraphLayered src/layered.cpp)
+stun_graph_algorithm(stun_graph_tidy_tree GraphTidyTree src/tidy_tree.cpp)
 stun_graph_algorithm(stun_graph_orthogonal GraphOrthogonal src/orthogonal.cpp)
 stun_graph_algorithm(stun_graph_vpsc GraphVPSC src/vpsc.cpp)
 stun_graph_algorithm(stun_graph_projection GraphProjection src/projection.cpp)
@@ -79,7 +80,7 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/src/layo
     target_include_directories(stun_graphlayout_infographic_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../infographic/include/infographic
     )
-    target_link_libraries(stun_graphlayout_infographic_tests PRIVATE Stun::GraphProjection)
+    target_link_libraries(stun_graphlayout_infographic_tests PRIVATE Stun::GraphProjection Stun::GraphTidyTree)
     target_compile_features(stun_graphlayout_infographic_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphInfographicAdapterTests COMMAND stun_graphlayout_infographic_tests)
 endif()
@@ -139,4 +140,37 @@ if(BUILD_TESTING AND
     )
     target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered)
     add_test(NAME StunGraphChartAdaptersTests COMMAND stun_graphlayout_chart_adapter_tests)
+endif()
+
+# Independent ordered-forest layout (unbalanced trees and variable sizes).
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_tidy_tree_tests tests/tidy_tree_test.cpp)
+    target_link_libraries(stun_graphlayout_tidy_tree_tests PRIVATE Stun::GraphTidyTree)
+    add_test(NAME StunGraphTidyTreeTests COMMAND stun_graphlayout_tidy_tree_tests)
+endif()
+
+# Real Mermaid Mindmap AST adapter: no parser, UI or rendering dependency.
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../mermaid/mindmap/src/mindmap_layout.cpp")
+    add_executable(stun_graphlayout_mindmap_tests
+        tests/mindmap_adapter_test.cpp
+        ../mermaid/mindmap/src/mindmap_layout.cpp
+    )
+    target_include_directories(stun_graphlayout_mindmap_tests PRIVATE
+        ../mermaid/mindmap/include
+    )
+    target_link_libraries(stun_graphlayout_mindmap_tests PRIVATE Stun::GraphTidyTree)
+    add_test(NAME StunGraphMindmapAdapterTests COMMAND stun_graphlayout_mindmap_tests)
+endif()
+
+# Compile and execute the actual tree renderer source against a lightweight
+# headless rendering contract; the installed/full Charts build is a separate gate.
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/tree/src/tree_layout_renderer.cpp")
+    add_executable(stun_graphlayout_tree_renderer_tests
+        tests/infographic_tree_renderer_test.cpp
+        ../infographic/tree/src/tree_layout_renderer.cpp
+    )
+    target_include_directories(stun_graphlayout_tree_renderer_tests PRIVATE
+        tests/stubs
+    )
+    add_test(NAME StunGraphTreeRendererTests COMMAND stun_graphlayout_tree_renderer_tests)
 endif()

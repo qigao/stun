@@ -1,6 +1,7 @@
 #include <layout/layout_engine.h>
 #include <ir/unified_infographic.h>
 #include <stun/graphlayout/projection.h>
+#include <stun/graphlayout/tidy_tree.h>
 #include <cmath>
 #include <algorithm>
 #include <memory>
@@ -330,130 +331,77 @@ LayoutResult CircularLayoutEngine::compute(const UnifiedInfographic& ast, int wi
 
 LayoutResult TreeLayoutEngine::compute(const UnifiedInfographic& ast, int width, int height,
                                        const StyleConfig& style) {
+    if (width <= 0 || height <= 0 || style.card_width <= 0 || style.card_height <= 0)
+        throw std::invalid_argument("infographic tree requires positive canvas and card dimensions");
+
     LayoutResult result;
     result.canvas_width = width;
-    result.content_start_y = 100;
-    
-    struct TreeNodeInfo {
-        const DataItem* item;
-        int parent;
-        int depth;
-    };
-
-    std::vector<TreeNodeInfo> nodes;
-    nodes.reserve(64);
-
-    auto add_node = [&](const DataItem* item, int parent, int depth, auto&& self) -> void {
-        int index = static_cast<int>(nodes.size());
-        nodes.push_back({item, parent, depth});
-        for (const auto& child : item->children) {
-            self(child.get(), index, depth + 1, self);
-        }
-    };
-
-    if (!ast.items.empty()) {
-        if (ast.items.size() == 1) {
-            add_node(ast.items[0].get(), -1, 0, add_node);
-        } else {
-            for (const auto& root_item : ast.items) {
-                add_node(root_item.get(), -1, 0, add_node);
-            }
-        }
-    }
-
-    if (nodes.empty()) return result;
-
-    const int node_width = style.card_width;
-    const int node_height = style.card_height > 0 ? style.card_height : 60;
-    const int h_gap = std::max(10, style.item_spacing);
-    const int level_height = std::max(node_height + style.item_spacing, 80);
-
-    int max_depth = 0;
-    for (const auto& node : nodes) {
-        max_depth = std::max(max_depth, node.depth);
-    }
-
-    std::vector<std::vector<int>> levels(max_depth + 1);
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        levels[nodes[i].depth].push_back(static_cast<int>(i));
-    }
-
-    result.nodes.reserve(nodes.size());
-    result.parent_index.reserve(nodes.size());
-    std::vector<int> parent_order_index(nodes.size(), -1);
-
-    for (int depth = 0; depth <= max_depth; ++depth) {
-        const auto& level_nodes = levels[depth];
-        if (level_nodes.empty()) continue;
-        int total_width = static_cast<int>(level_nodes.size()) * node_width +
-                          static_cast<int>(level_nodes.size() - 1) * h_gap;
-        int start_x = (width - total_width) / 2;
-        int y = result.content_start_y + depth * level_height;
-
-        for (size_t i = 0; i < level_nodes.size(); ++i) {
-            int idx = level_nodes[i];
-            LayoutNode node;
-            node.item = nodes[idx].item;
-            node.index = idx;
-            node.bounds.x = static_cast<float>(start_x + static_cast<int>(i) * (node_width + h_gap));
-            node.bounds.y = static_cast<float>(y);
-            node.bounds.width = static_cast<float>(node_width);
-            node.bounds.height = static_cast<float>(node_height);
-            if (result.nodes.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
-                throw std::overflow_error("infographic tree exceeds indexed node capacity");
-            parent_order_index[idx] = static_cast<int>(result.nodes.size());
-            result.nodes.push_back(node);
-            result.parent_index.push_back(nodes[idx].parent);
-        }
-    }
-
-    for (int& parent : result.parent_index) {
-        if (parent == -1) continue;
-        if (parent < 0 || static_cast<std::size_t>(parent) >= parent_order_index.size() ||
-            parent_order_index[parent] < 0)
-            throw std::invalid_argument("invalid infographic tree parent index");
-        parent = parent_order_index[parent];
-    }
-
-    apply_graph_projection(result);
-    for (size_t i = 0; i < nodes.size() && i < result.nodes.size(); ++i) {
-        const int index = result.nodes[i].index;
-        if (index < 0 || static_cast<std::size_t>(index) >= nodes.size())
-            throw std::invalid_argument("invalid infographic tree node index");
-        int depth = nodes[index].depth;
-        result.nodes[i].bounds.y = static_cast<float>(result.content_start_y + depth * level_height);
-        result.nodes[i].bounds.height = static_cast<float>(node_height);
-    }
-
-    // Auto-fit to canvas with margins (center + scale)
-    float min_x = result.nodes[0].bounds.x;
-    float min_y = result.nodes[0].bounds.y;
-    float max_x = min_x + result.nodes[0].bounds.width;
-    float max_y = min_y + result.nodes[0].bounds.height;
-    for (const auto& node : result.nodes) {
-        min_x = std::min(min_x, node.bounds.x);
-        min_y = std::min(min_y, node.bounds.y);
-        max_x = std::max(max_x, node.bounds.x + node.bounds.width);
-        max_y = std::max(max_y, node.bounds.y + node.bounds.height);
-    }
-
-    const float margin = 40.0f;
-    const float content_w = std::max(1.0f, max_x - min_x);
-    const float content_h = std::max(1.0f, max_y - min_y);
-    const float avail_w = std::max(1.0f, width - 2.0f * margin);
-    const float avail_h = std::max(1.0f, height - 2.0f * margin);
-    const float scale = std::min(1.0f, std::min(avail_w / content_w, avail_h / content_h));
-    const float offset_x = margin + (avail_w - content_w * scale) / 2.0f;
-    const float offset_y = margin + (avail_h - content_h * scale) / 2.0f;
-
-    for (auto& node : result.nodes) {
-        node.bounds.x = (node.bounds.x - min_x) * scale + offset_x;
-        node.bounds.y = (node.bounds.y - min_y) * scale + offset_y;
-        node.bounds.width *= scale;
-        node.bounds.height *= scale;
-    }
-
     result.canvas_height = height;
+    result.content_start_y = 100;
+    if (ast.items.empty()) return result;
+
+    using namespace stun::graphlayout;
+    Tree forest;
+    std::vector<const DataItem*> items;
+    std::vector<std::pair<const DataItem*, std::size_t>> todo;
+    for (auto it = ast.items.rbegin(); it != ast.items.rend(); ++it)
+        todo.push_back({it->get(), TreeNoParent});
+
+    // Explicit stack bounds traversal depth and preserves the source's ordered
+    // children without recursive C++ calls on very deep trees.
+    while (!todo.empty()) {
+        const auto current = todo.back();
+        todo.pop_back();
+        if (!current.first)
+            throw std::invalid_argument("infographic tree has a null data item");
+        if (forest.nodes.size() >= 2048 ||
+            forest.nodes.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+            throw std::overflow_error("infographic tree node count exceeds layout capacity");
+        const auto index = forest.nodes.size();
+        forest.nodes.push_back({"infographic:" + std::to_string(index),
+                                static_cast<double>(style.card_width),
+                                static_cast<double>(style.card_height), current.second});
+        items.push_back(current.first);
+        for (auto it = current.first->children.rbegin();
+             it != current.first->children.rend(); ++it)
+            todo.push_back({it->get(), index});
+    }
+
+    TidyTreeOptions options;
+    options.sibling_gap = static_cast<double>(std::max(10, style.item_spacing));
+    options.layer_gap = static_cast<double>(std::max(20, style.item_spacing));
+    options.forest_gap = options.sibling_gap * 3.0;
+
+    TidyTreeLayout placement;
+    const auto status = layout_tidy_tree(forest, placement, options);
+    if (!status)
+        throw std::invalid_argument("infographic tidy tree: " + status.message);
+
+    // Preserve actual card sizes and the minimum connector spacing. An overly
+    // large tree expands the canvas, rather than scaling cards until unreadable.
+    const double margin = 40.0;
+    const double offset_x = std::max(margin,
+        (static_cast<double>(width) - placement.width) * 0.5);
+    result.nodes.reserve(items.size());
+    result.parent_index.reserve(items.size());
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        const auto& p = placement.nodes[i];
+        const double x = p.x + offset_x;
+        const double y = p.y + static_cast<double>(result.content_start_y);
+        if (!std::isfinite(x) || !std::isfinite(y) ||
+            x > std::numeric_limits<float>::max() ||
+            y > std::numeric_limits<float>::max())
+            throw std::overflow_error("infographic tidy tree exceeds float coordinate range");
+        LayoutNode node;
+        node.item = items[i];
+        node.index = static_cast<int>(i);
+        node.bounds.x = static_cast<float>(x);
+        node.bounds.y = static_cast<float>(y);
+        node.bounds.width = static_cast<float>(p.width);
+        node.bounds.height = static_cast<float>(p.height);
+        result.nodes.push_back(std::move(node));
+        result.parent_index.push_back(p.parent == TreeNoParent ? -1 : static_cast<int>(p.parent));
+    }
     ensure_canvas_contains_nodes(result);
     return result;
 }

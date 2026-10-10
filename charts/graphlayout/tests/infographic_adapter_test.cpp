@@ -86,6 +86,45 @@ int main() {
                   result.nodes[find(result,"left")].bounds.y, "deep descendant lower rank");
             check_nonoverlap(result);
         }
+        {
+            // A deep forest must retain every descendant, ordered roots and
+            // exact card sizes even if the requested viewport is too small.
+            UnifiedInfographic info;
+            auto first = DataItem::create("first");
+            auto second = DataItem::create("second");
+            auto child = DataItem::create("child");
+            auto grand = DataItem::create("grand");
+            grand->children.push_back(DataItem::create("great"));
+            child->children.push_back(std::move(grand));
+            first->children.push_back(std::move(child));
+            first->children.push_back(DataItem::create("sibling"));
+            second->children.push_back(DataItem::create("second-child"));
+            info.items.push_back(std::move(first));
+            info.items.push_back(std::move(second));
+            StyleConfig style;
+            style.card_width = 100;
+            style.card_height = 52;
+            style.item_spacing = 24;
+            const auto result = TreeLayoutEngine().compute(info, 220, 200, style);
+            check(result.nodes.size() == 7, "forest includes all roots and grandchildren");
+            check(result.parent_index[find(result,"first")] == -1,
+                  "first root has no parent");
+            check(result.parent_index[find(result,"second")] == -1,
+                  "second root has no parent");
+            check(result.parent_index[find(result,"great")] ==
+                  static_cast<int>(find(result,"grand")),
+                  "grandchild identity uses actual parent index");
+            check(result.parent_index[find(result,"second-child")] ==
+                  static_cast<int>(find(result,"second")),
+                  "second root has its own child");
+            check(result.canvas_width > 220 && result.canvas_height > 200,
+                  "oversized forest expands canvas instead of shrinking nodes");
+            for (const auto& node : result.nodes) {
+                check(node.bounds.width == 100 && node.bounds.height == 52,
+                      "tree cards keep exact dimensions");
+            }
+            check_nonoverlap(result);
+        }
         std::cout << "infographic projection adapter: all checks passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& e) {

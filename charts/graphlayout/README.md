@@ -16,6 +16,7 @@ shared solvers have no knowledge of DOT, Mermaid, Infographic or rendering.
 | --- | --- | --- |
 | `Stun::GraphCore` | Stable Graph/Node/Edge/Layout IR (`graph.h`) | C++17 only |
 | `Stun::GraphLayered` | SCC/DAG ranks and placement | GraphCore |
+| `Stun::GraphTidyTree` | Bounded ordered-forest contours, variable-size nodes | GraphCore |
 | `Stun::GraphOrthogonal` | Orthogonal obstacle-aware A* | GraphCore |
 | `Stun::GraphVPSC` | 1D separation constraints | GraphCore |
 | `Stun::GraphProjection` | 2D pins, alignments, non-overlap | GraphVPSC |
@@ -390,3 +391,33 @@ mathematically different objectives. The CSV provides columns for both only
 so the same solutions can be compared under the **same chosen metric**. Local
 figures vary by CPU, compiler, geometry seed and budget; no upstream
 Adaptagrams/ELK benchmark or cross-platform performance claim follows.
+
+## Algorithm v8: ordered-forest tidy tree
+
+`Stun::GraphTidyTree` is an independent C++17, renderer-free solver for rooted
+ordered **forests**. Its `Tree` IR has input-index-stable parents, unique IDs,
+node-specific measured sizes and an explicit root sentinel. In an iterative
+bottom-up contour pass each new sibling subtree is placed right of all earlier
+sibling contours at every common depth; the parent is centered between its
+first and last children's centers. A depth's Y position is based on the **maximum
+height** in the preceding rank, preventing overlap between variable-height
+nodes. A second forest-contour pass separates independent trees.
+
+The solver is deterministic for the **same ordered input**; arbitrary sibling
+permutation is not required to preserve coordinates because sibling order is
+intentional. Contour merging is bounded **O(n^2) worst case**. Explicit node,
+contour and rectangle-verification budgets fail transactionally; this does not
+claim optimal width, Buchheim linear time, or Lean-proved correctness.
+
+Infographic's Tree uses this solver directly and retains full pre-order parent
+indices, stable card dimensions, and expands the canvas instead of scaling
+cards below their requested size. Its tree renderer now requires complete
+layout/parent geometry and renders **all descendants**; the former shallow
+root/children fallback is removed. Other Infographic chart templates still use
+the independent VPSC projection only where necessary.
+
+`charts/mermaid/mindmap` owns a renderer-independent Mindmap AST adapter over
+the same Tidy Tree solver. The caller supplies a node-measurement callback; the
+adapter does not invent label dimensions from Unicode byte counts or import a
+UI dependency. Mindmap rendering and full parser-SVG integration are separate
+acceptance tasks.
