@@ -1,7 +1,9 @@
 #include "flowchart_layout.h"
 #include "stun/graphlayout/layered.h"
+#include "stun/graphlayout/polyline.h"
 
 #include <stdexcept>
+#include <vector>
 #include <string>
 
 namespace mermaid::flowchart {
@@ -46,6 +48,55 @@ stun::graphlayout::Layout place_flowchart_nodes(
     const auto result = stun::graphlayout::layout_layered(graph, placement, options);
     if (!result) throw std::invalid_argument("graphlayout: " + result.message);
     return placement;
+}
+
+
+stun::graphlayout::Routes route_flowchart_edges(
+    const FlowchartDiagram* diagram,
+    const std::unordered_map<std::string, std::size_t>& index_of,
+    const stun::graphlayout::Layout& placement) {
+    using namespace stun::graphlayout;
+    if (!diagram) throw std::invalid_argument("graphlayout: null Mermaid flowchart");
+    if (diagram->routing_mode != FC_ROUTE_ORTHOGONAL &&
+        diagram->routing_mode != FC_ROUTE_POLYLINE)
+        throw std::invalid_argument("graphlayout: unsupported Mermaid routing mode");
+    if (diagram->routing_nudging_distance >= 0.0 ||
+        diagram->routing_crossing_penalty >= 0.0 ||
+        diagram->routing_angle_penalty >= 0.0 ||
+        diagram->routing_nudge_orthogonal_ends >= 0 ||
+        diagram->routing_nudge_shared_paths >= 0 ||
+        (diagram->routing_mode == FC_ROUTE_POLYLINE &&
+         diagram->routing_segment_penalty >= 0.0))
+        throw std::invalid_argument("graphlayout: Mermaid native routing does not implement crossing/nudging/angle or polyline segment penalties");
+    std::vector<RouteRequest> requests;
+    for (const auto* edge = diagram->edges; edge; edge = edge->next) {
+        const auto first = index_of.find(edge->from ? edge->from : "");
+        const auto second = index_of.find(edge->to ? edge->to : "");
+        if (first == index_of.end() || second == index_of.end() ||
+            first->second >= placement.nodes.size() ||
+            second->second >= placement.nodes.size())
+            throw std::invalid_argument("graphlayout: Mermaid edge references missing node");
+        requests.push_back({{first->second}, {second->second}});
+    }
+    Routes paths;
+    RouteStatus status;
+    if (diagram->routing_mode == FC_ROUTE_ORTHOGONAL) {
+        RouteOptions options;
+        if (diagram->routing_shape_buffer >= 0.0)
+            options.clearance = diagram->routing_shape_buffer;
+        if (diagram->routing_segment_penalty >= 0.0)
+            options.bend_penalty = diagram->routing_segment_penalty;
+        status = route_orthogonal(placement, requests, paths, options);
+    } else {
+        PolylineOptions options;
+        if (diagram->routing_shape_buffer >= 0.0)
+            options.clearance = diagram->routing_shape_buffer;
+        status = route_polyline(placement, requests, paths, options);
+    }
+    if (!status)
+        throw std::invalid_argument("graphlayout: Mermaid edge " +
+            std::to_string(status.route_index) + ": " + status.message);
+    return paths;
 }
 
 } // namespace mermaid::flowchart

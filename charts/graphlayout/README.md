@@ -18,7 +18,7 @@ are in scope only when needed to support Cola-style constrained placement.
 | --- | --- | --- |
 | `libvpsc` | Weighted VPSC and pinned/2D projection exist | Coupled-constraint performance, richer separation/cluster cases |
 | `libcola` | Gradient Stress, SMACOF, spring/repulsion exist | Quality/scale and constrained graph-layout parity |
-| `libavoid` | Orthogonal visibility/A* exists | Native polyline, joint nudging/crossing optimization, ports/checkpoints |
+| `libavoid` | Orthogonal visibility/A* and native Polyline A* exist | Joint nudging/crossing optimization, ports/checkpoints |
 | `libtopology` | Not implemented | Topology-preserving node movement and connector invariants |
 | `libdialect` | Tidy Tree is a partial building block | Decompose, Arrange, Expand/Emend, Transform pipeline |
 
@@ -445,3 +445,30 @@ the same Tidy Tree solver. The caller supplies a node-measurement callback; the
 adapter does not invent label dimensions from Unicode byte counts or import a
 UI dependency. Mindmap rendering and full parser-SVG integration are separate
 acceptance tasks.
+
+## Algorithm v9: native obstacle-avoiding Polyline (libavoid-like scope)
+
+`Stun::GraphPolyline` is independently linkable C++17. Its
+`route_polyline` / `validate_polyline_routes` API reuses the shared
+`Port`, `RouteRequest`, `Routes` and typed `RouteStatus` contracts,
+not the Orthogonal binary solver.
+
+- Stable, lexicographically ordered visibility vertices are the corners of
+  inflated obstacle rectangles plus exact outward endpoint stubs.
+  A* minimizes Euclidean length on this graph, including diagonal segments.
+- A separate validator checks boundary anchors, stubs, nonzero segments,
+  inflated obstacle interiors and terminal original rectangles.
+  All visibility, candidate, obstacle-test, expansion, queue, input and
+  batch-waypoint budgets return explicit errors and transactional empty output.
+- DOT and Mermaid Flowchart explicitly select native Orthogonal or Polyline
+  through their own renderer-independent AST adapters. Both adapters compile
+  and run as headless GraphLayout tests. No libavoid, arbitrary straight-edge,
+  or orthogonal fallback survives in those professional-mode route paths.
+- Unsupported crossing/nudging/angle/Polyline-segment options and named DOT
+  ports lacking measured geometry are rejected, never silently ignored.
+
+**Not yet complete libavoid parity:** joint crossing reduction/nudging,
+bundling, checkpoints, named port geometry, compound/arbitrary-shape
+obstacles and dense graph scaling. Visibility searches are independently
+budgeted per edge. Qualification is based on C++ geometry, sanitizers,
+cross-platform tests and future Adaptagrams differential benchmarks.

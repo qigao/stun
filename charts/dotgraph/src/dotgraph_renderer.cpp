@@ -1,5 +1,4 @@
 #include "dotgraph_layout.h"
-#include <stun/graphlayout/orthogonal.h>
 #include "dotgraph_renderer.h"
 #include "dotgraph/dotgraph_ast.h"
 #include <map>
@@ -13,7 +12,6 @@
 #include <queue>
 #include <deque>
 #include <unordered_map>
-#include "libavoid/libavoid.h"
 #include "mustache/mustache.h"
 #include "dotgraph_template.h"
 #include "flex/runtime/expr.h"
@@ -224,8 +222,6 @@ public:
         // GraphLayered itself is an independently linked algorithm module.
         const auto placement =
             place_dot_nodes(diagram, nodes, index_of, widths, heights, H_GAP, V_GAP);
-        const bool horizontal =
-            diagram->rankdir == DG_RANKDIR_LR || diagram->rankdir == DG_RANKDIR_RL;
         std::vector<std::pair<double, double>> coords(ncount);
         for (size_t i = 0; i < ncount; ++i)
             coords[i] = {placement.nodes[i].x, placement.nodes[i].y};
@@ -278,8 +274,8 @@ public:
             snapshot.nodes.push_back(rn);
         }
 
-        // Edge routing with libavoid
-        route_edges(diagram, snapshot, nodes, index_of, coords, widths, heights, ncount, horizontal);
+        // Explicit Stun-native routing through this Chart\u0027s policy adapter.
+        route_edges_native(diagram, snapshot, index_of, placement);
 
         // Cluster bounding boxes
         build_clusters(diagram, snapshot, index_of, coords, widths, heights, attr_geo);
@@ -288,93 +284,21 @@ public:
     }
 
 private:
-    // Stun-owned orthogonal graph routing. This intentionally does not invoke
-    // libavoid or turn a route failure into a straight edge.
-    static stun::graphlayout::Port native_port(
-        std::size_t node, DotGraphCompass compass, DotGraphCompass fallback) {
-        using stun::graphlayout::Side;
-        const DotGraphCompass selected = compass == DG_COMPASS_NONE ? fallback : compass;
-        Side side = Side::Auto;
-        double offset = 0.5;
-        switch (selected) {
-        case DG_COMPASS_N:  side = Side::North; break;
-        case DG_COMPASS_NE: side = Side::North; offset = 1.0; break;
-        case DG_COMPASS_E:  side = Side::East; break;
-        case DG_COMPASS_SE: side = Side::South; offset = 1.0; break;
-        case DG_COMPASS_S:  side = Side::South; break;
-        case DG_COMPASS_SW: side = Side::South; offset = 0.0; break;
-        case DG_COMPASS_W:  side = Side::West; break;
-        case DG_COMPASS_NW: side = Side::North; offset = 0.0; break;
-        case DG_COMPASS_C:
-            throw std::invalid_argument("graphlayout: central DOT compass is not a boundary port");
-        default:
-            throw std::invalid_argument("graphlayout: unsupported DOT compass");
-        }
-        return {node, side, offset};
-    }
-
+    // Renderer consumes native routes; all routing policy lives in dotgraph_layout.
     void route_edges_native(
         const DotGraphDiagram* diagram, LayoutSnapshot& snapshot,
         const std::unordered_map<std::string, size_t>& index_of,
-        const std::vector<std::pair<double,double>>& coords,
-        const std::vector<double>& widths, const std::vector<double>& heights,
-        size_t ncount, bool horizontal) {
-        using namespace stun::graphlayout;
-        if (diagram->routing_nudging_distance >= 0.0 ||
-            diagram->routing_crossing_penalty >= 0.0 ||
-            diagram->routing_angle_penalty >= 0.0 ||
-            diagram->routing_nudge_orthogonal_ends >= 0 ||
-            diagram->routing_nudge_shared_paths >= 0) {
-            throw std::invalid_argument(
-                "graphlayout: edge nudging/crossing/angle options are not implemented by native orthogonal routing");
-        }
-        Layout placement;
-        placement.nodes.reserve(ncount);
-        for (size_t i = 0; i < ncount; ++i)
-            placement.nodes.push_back({coords[i].first, coords[i].second,
-                                       widths[i], heights[i]});
-
-        std::vector<RouteRequest> requests;
-        std::vector<DotGraphEdge*> edges;
-        for (auto* edge = diagram->edges; edge; edge = edge->next) {
-            const auto fi = index_of.find(edge->from ? edge->from : "");
-            const auto ti = index_of.find(edge->to ? edge->to : "");
-            if (fi == index_of.end() || ti == index_of.end())
-                throw std::invalid_argument("graphlayout: DOT edge references missing node");
-            const size_t u = fi->second, v = ti->second;
-            const bool forward = horizontal ? coords[v].first >= coords[u].first
-                                            : coords[v].second >= coords[u].second;
-            const DotGraphCompass source_default = u == v ? DG_COMPASS_E :
-                (horizontal ? (forward ? DG_COMPASS_E : DG_COMPASS_W)
-                            : (forward ? DG_COMPASS_S : DG_COMPASS_N));
-            const DotGraphCompass target_default = u == v ? DG_COMPASS_N :
-                (horizontal ? (forward ? DG_COMPASS_W : DG_COMPASS_E)
-                            : (forward ? DG_COMPASS_N : DG_COMPASS_S));
-            requests.push_back({native_port(u, edge->from_compass, source_default),
-                                native_port(v, edge->to_compass, target_default)});
-            edges.push_back(edge);
-        }
-
-        RouteOptions route_options;
-        if (diagram->routing_shape_buffer >= 0.0)
-            route_options.clearance = diagram->routing_shape_buffer;
-        if (diagram->routing_segment_penalty >= 0.0)
-            route_options.bend_penalty = diagram->routing_segment_penalty;
-        Routes routes;
-        const auto status = route_orthogonal(placement, requests, routes, route_options);
-        if (!status)
-            throw std::invalid_argument("graphlayout: DOT edge " +
-                std::to_string(status.route_index) + ": " + status.message);
-
+        const stun::graphlayout::Layout& placement) {
+        const auto routes = route_dot_edges(diagram, index_of, placement);
         GeometryEval edge_geo;
-        for (size_t i = 0; i < edges.size(); ++i) {
-            auto* e = edges[i];
+        size_t i = 0;
+        for (auto* edge = diagram->edges; edge; edge = edge->next, ++i) {
             RenderedEdge re;
-            re.from = e->from;
-            re.to = e->to;
-            const char* label = cascaded_attr(e->attrs, diagram->edge_defaults, "label");
-            const char* color = cascaded_attr(e->attrs, diagram->edge_defaults, "color");
-            const char* style = cascaded_attr(e->attrs, diagram->edge_defaults, "style");
+            re.from = edge->from;
+            re.to = edge->to;
+            const char* label = cascaded_attr(edge->attrs, diagram->edge_defaults, "label");
+            const char* color = cascaded_attr(edge->attrs, diagram->edge_defaults, "color");
+            const char* style = cascaded_attr(edge->attrs, diagram->edge_defaults, "style");
             re.label = label ? label : "";
             re.color = color ? color : "#4b5563";
             re.style = style ? style : "";
@@ -385,200 +309,15 @@ private:
                 {"label_rect_h", "20"}
             };
             attrs_to_map(re.extra, diagram->edge_defaults, kSkipEdgeAttrs);
-            attrs_to_map(re.extra, e->attrs, kSkipEdgeAttrs);
-            for (const auto& point : routes.edges[i].points)
-                re.points.push_back({point.x, point.y});
+            attrs_to_map(re.extra, edge->attrs, kSkipEdgeAttrs);
+            for (const auto& p : routes.edges[i].points)
+                re.points.push_back({p.x, p.y});
             edge_geo.bind_edge(re.points.front().x, re.points.front().y,
                                re.points.back().x, re.points.back().y,
                                0, 0, static_cast<double>(re.label.size()));
             eval_numeric_attrs(re.extra, edge_geo);
             snapshot.edges.push_back(std::move(re));
         }
-    }
-
-    struct RoutedEndpoint {
-        Avoid::Point point;
-        Avoid::ConnDirFlags directions = Avoid::ConnDirAll;
-    };
-
-    static RoutedEndpoint endpoint_for(double x, double y,
-                                       double width, double height,
-                                       DotGraphCompass compass,
-                                       DotGraphCompass fallback,
-                                       double padding) {
-        if (compass == DG_COMPASS_NONE) compass = fallback;
-        const double cx = x + width / 2.0;
-        const double cy = y + height / 2.0;
-        switch (compass) {
-            case DG_COMPASS_N:  return {{cx, y - padding}, Avoid::ConnDirUp};
-            case DG_COMPASS_NE: return {{x + width + padding, y - padding},
-                                        Avoid::ConnDirUp | Avoid::ConnDirRight};
-            case DG_COMPASS_E:  return {{x + width + padding, cy}, Avoid::ConnDirRight};
-            case DG_COMPASS_SE: return {{x + width + padding, y + height + padding},
-                                        Avoid::ConnDirDown | Avoid::ConnDirRight};
-            case DG_COMPASS_S:  return {{cx, y + height + padding}, Avoid::ConnDirDown};
-            case DG_COMPASS_SW: return {{x - padding, y + height + padding},
-                                        Avoid::ConnDirDown | Avoid::ConnDirLeft};
-            case DG_COMPASS_W:  return {{x - padding, cy}, Avoid::ConnDirLeft};
-            case DG_COMPASS_NW: return {{x - padding, y - padding},
-                                        Avoid::ConnDirUp | Avoid::ConnDirLeft};
-            case DG_COMPASS_C:  return {{cx, cy}, Avoid::ConnDirAll};
-            case DG_COMPASS_NONE: break;
-        }
-        return {{cx, cy}, Avoid::ConnDirAll};
-    }
-
-    void route_edges(const DotGraphDiagram* diagram, LayoutSnapshot& snapshot,
-                     const std::vector<DotGraphNode*>& nodes,
-                     const std::unordered_map<std::string, size_t>& index_of,
-                     const std::vector<std::pair<double,double>>& coords,
-                     const std::vector<double>& widths, const std::vector<double>& heights,
-                     size_t ncount, bool horizontal) {
-        if (!diagram->edges) return;
-        if (diagram->routing_mode == DG_ROUTE_ORTHOGONAL) {
-            route_edges_native(diagram, snapshot, index_of, coords, widths, heights,
-                               ncount, horizontal);
-            return;
-        }
-        if (diagram->routing_mode != DG_ROUTE_POLYLINE)
-            throw std::invalid_argument("graphlayout: unsupported DOT routing mode");
-        const double pad = 1.0;
-        // Explicitly selected polyline mode still uses the existing provider;
-        // it is not used as a fallback from the native orthogonal solver.
-        Avoid::Router router(Avoid::PolyLineRouting);
-        router.setRoutingParameter(Avoid::anglePenalty, Avoid::chooseSensibleParamValue);
-
-        if (diagram->routing_shape_buffer >= 0.0)
-            router.setRoutingParameter(Avoid::shapeBufferDistance, diagram->routing_shape_buffer);
-        if (diagram->routing_nudging_distance >= 0.0)
-            router.setRoutingParameter(Avoid::idealNudgingDistance, diagram->routing_nudging_distance);
-        if (diagram->routing_segment_penalty >= 0.0)
-            router.setRoutingParameter(Avoid::segmentPenalty, diagram->routing_segment_penalty);
-        if (diagram->routing_angle_penalty >= 0.0)
-            router.setRoutingParameter(Avoid::anglePenalty, diagram->routing_angle_penalty);
-        if (diagram->routing_crossing_penalty >= 0.0)
-            router.setRoutingParameter(Avoid::crossingPenalty, diagram->routing_crossing_penalty);
-        if (diagram->routing_nudge_orthogonal_ends >= 0)
-            router.setRoutingOption(Avoid::nudgeOrthogonalSegmentsConnectedToShapes,
-                                    diagram->routing_nudge_orthogonal_ends != 0);
-        if (diagram->routing_nudge_shared_paths >= 0)
-            router.setRoutingOption(Avoid::nudgeSharedPathsWithCommonEndPoint,
-                                    diagram->routing_nudge_shared_paths != 0);
-
-        std::vector<Avoid::ShapeRef*> shapes;
-        for (size_t i = 0; i < ncount; ++i) {
-            Avoid::Point tl(coords[i].first, coords[i].second);
-            Avoid::Point br(coords[i].first + widths[i], coords[i].second + heights[i]);
-            Avoid::Rectangle rect(tl, br);
-            shapes.push_back(new Avoid::ShapeRef(&router, rect));
-        }
-
-        std::vector<Avoid::ConnRef*> conns;
-        std::vector<DotGraphEdge*> edge_list;
-        GeometryEval edge_geo;
-        for (auto* e = diagram->edges; e; e = e->next) {
-            auto fi = index_of.find(e->from ? e->from : "");
-            auto ti = index_of.find(e->to ? e->to : "");
-            if (fi == index_of.end() || ti == index_of.end()) continue;
-            size_t u = fi->second, v = ti->second;
-            Avoid::ConnRef* cr = new Avoid::ConnRef(&router);
-            if (horizontal) {
-                const bool forward = coords[v].first >= coords[u].first;
-                const auto src = endpoint_for(coords[u].first, coords[u].second,
-                                              widths[u], heights[u], e->from_compass,
-                                              forward ? DG_COMPASS_E : DG_COMPASS_W, pad);
-                const auto dst = endpoint_for(coords[v].first, coords[v].second,
-                                              widths[v], heights[v], e->to_compass,
-                                              forward ? DG_COMPASS_W : DG_COMPASS_E, pad);
-                cr->setEndpoints(Avoid::ConnEnd(src.point, src.directions),
-                                 Avoid::ConnEnd(dst.point, dst.directions));
-            } else {
-                const bool forward = coords[v].second >= coords[u].second;
-                const auto src = endpoint_for(coords[u].first, coords[u].second,
-                                              widths[u], heights[u], e->from_compass,
-                                              forward ? DG_COMPASS_S : DG_COMPASS_N, pad);
-                const auto dst = endpoint_for(coords[v].first, coords[v].second,
-                                              widths[v], heights[v], e->to_compass,
-                                              forward ? DG_COMPASS_N : DG_COMPASS_S, pad);
-                cr->setEndpoints(Avoid::ConnEnd(src.point, src.directions),
-                                 Avoid::ConnEnd(dst.point, dst.directions));
-            }
-            conns.push_back(cr);
-            edge_list.push_back(e);
-        }
-
-        if (!router.processTransaction()) {
-            std::cerr << "libavoid processTransaction returned false (routing transaction failed)\n";
-        }
-
-        for (size_t i = 0; i < edge_list.size(); ++i) {
-            auto* e = edge_list[i];
-            RenderedEdge re;
-            re.from = e->from;
-            re.to = e->to;
-            const char* label = cascaded_attr(
-                e->attrs, diagram->edge_defaults, "label");
-            const char* color = cascaded_attr(
-                e->attrs, diagram->edge_defaults, "color");
-            const char* style = cascaded_attr(
-                e->attrs, diagram->edge_defaults, "style");
-            re.label = label ? label : "";
-            re.color = color ? color : "#4b5563";
-            re.style = style ? style : "";
-            re.directed = diagram->is_directed;
-
-            // Populate extra with defaults
-            re.extra = {
-                {"penwidth", "1.5"},
-                {"stroke_opacity", "0.6"},
-                {"label_fontcolor", "#4b5563"},
-                {"label_rect_rx", "4"},
-                {"label_rect_h", "20"}
-            };
-            // Cascade: graph edge_defaults → per-edge attrs
-            attrs_to_map(re.extra, diagram->edge_defaults, kSkipEdgeAttrs);
-            attrs_to_map(re.extra, e->attrs, kSkipEdgeAttrs);
-
-            Avoid::PolyLine& route = conns[i]->displayRoute();
-            if (route.ps.size() >= 2) {
-                for (const auto& p : route.ps)
-                    re.points.push_back({p.x, p.y});
-            } else {
-                auto fi = index_of.find(e->from ? e->from : "");
-                auto ti = index_of.find(e->to ? e->to : "");
-                if (fi != index_of.end() && ti != index_of.end()) {
-                    size_t u = fi->second, v = ti->second;
-                    if (horizontal) {
-                        const bool forward = coords[v].first >= coords[u].first;
-                        re.points.push_back({forward ? coords[u].first + widths[u]
-                                                     : coords[u].first,
-                                             coords[u].second + heights[u] / 2.0});
-                        re.points.push_back({forward ? coords[v].first
-                                                     : coords[v].first + widths[v],
-                                             coords[v].second + heights[v] / 2.0});
-                    } else {
-                        const bool forward = coords[v].second >= coords[u].second;
-                        re.points.push_back({coords[u].first + widths[u] / 2.0,
-                                             forward ? coords[u].second + heights[u]
-                                                     : coords[u].second});
-                        re.points.push_back({coords[v].first + widths[v] / 2.0,
-                                             forward ? coords[v].second
-                                                     : coords[v].second + heights[v]});
-                    }
-                }
-            }
-            // Evaluate numeric expressions in edge extras
-            if (re.points.size() >= 2) {
-                edge_geo.bind_edge(re.points[0].x, re.points[0].y,
-                                   re.points.back().x, re.points.back().y,
-                                   0, 0, (double)re.label.length());
-                eval_numeric_attrs(re.extra, edge_geo);
-            }
-            snapshot.edges.push_back(re);
-        }
-
-        for (auto* cr : conns) router.deleteConnector(cr);
-        for (auto* sr : shapes) router.deleteShape(sr);
     }
 
     struct ClusterExtent {

@@ -1,5 +1,6 @@
 #include "dotgraph_layout.h"
 #include "flowchart_layout.h"
+#include "stun/graphlayout/polyline.h"
 
 #include <cmath>
 #include <iostream>
@@ -66,6 +67,79 @@ int main() {
             try { (void)mermaid::flowchart::place_flowchart_nodes(&diagram,nodes,index,widths,heights,18,44); }
             catch(const std::invalid_argument&) {rejected=true;}
             check(rejected,"Mermaid unsupported direction rejected");
+        }
+        {
+            char aid[]="First",bid[]="Second", label[]="first";
+            DotGraphNode a{}, b{}; a.id=aid; b.id=bid; a.next=&b;
+            DotGraphEdge edge{}; edge.from=aid; edge.to=bid;
+            DotGraphDiagram diagram{};
+            diagram.nodes=&a; diagram.edges=&edge; diagram.rankdir=DG_RANKDIR_TB;
+            // Upstream parser sets these to -1 when unspecified.
+            diagram.routing_shape_buffer=-1;
+            diagram.routing_nudging_distance=-1;
+            diagram.routing_segment_penalty=-1;
+            diagram.routing_angle_penalty=-1;
+            diagram.routing_crossing_penalty=-1;
+            diagram.routing_nudge_orthogonal_ends=-1;
+            diagram.routing_nudge_shared_paths=-1;
+            std::unordered_map<std::string,std::size_t> lookup{{"First",0},{"Second",1}};
+            stun::graphlayout::Layout layout;
+            layout.nodes={{0,0,30,30},{140,80,30,30}};
+            diagram.routing_mode=DG_ROUTE_POLYLINE;
+            auto poly=dotgraph::route_dot_edges(&diagram,lookup,layout);
+            check(poly.edges.size()==1 && poly.edges.front().points.size()>=4,
+                  "DOT Polyline adapter returns native anchors and stubs");
+            stun::graphlayout::PolylineOptions polyopt;
+            check(static_cast<bool>(stun::graphlayout::validate_polyline_routes(
+                layout,{{{0,stun::graphlayout::Side::South},{1,stun::graphlayout::Side::North}}},poly,polyopt)),
+                "DOT native polyline geometry validated");
+            diagram.routing_mode=DG_ROUTE_ORTHOGONAL;
+            auto ortho=dotgraph::route_dot_edges(&diagram,lookup,layout);
+            check(ortho.edges.size()==1,"DOT native orthogonal still callable");
+            diagram.routing_mode=DG_ROUTE_POLYLINE;
+            diagram.routing_nudging_distance=4;
+            bool rejected=false;
+            try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout); }
+            catch(const std::invalid_argument&) { rejected=true; }
+            check(rejected,"DOT unsupported nudging rejected, never silently ignored");
+            diagram.routing_nudging_distance=-1;
+            edge.from_port=label;
+            rejected=false;
+            try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout); }
+            catch(const std::invalid_argument&) { rejected=true; }
+            check(rejected,"DOT named ports require actual measured port geometry");
+        }
+        {
+            char aid[]="Top",bid[]="Bottom",direction[]="TB";
+            FlowchartNode a{},b{}; a.id=aid; b.id=bid; a.next=&b;
+            FlowchartEdge edge{}; edge.from=aid; edge.to=bid;
+            FlowchartDiagram diagram{};
+            diagram.nodes=&a; diagram.edges=&edge; diagram.direction=direction;
+            diagram.routing_shape_buffer=-1;
+            diagram.routing_nudging_distance=-1;
+            diagram.routing_segment_penalty=-1;
+            diagram.routing_angle_penalty=-1;
+            diagram.routing_crossing_penalty=-1;
+            diagram.routing_nudge_orthogonal_ends=-1;
+            diagram.routing_nudge_shared_paths=-1;
+            std::unordered_map<std::string,std::size_t> lookup{{"Top",0},{"Bottom",1}};
+            stun::graphlayout::Layout layout;
+            layout.nodes={{0,0,30,30},{110,130,30,30}};
+            diagram.routing_mode=FC_ROUTE_POLYLINE;
+            auto poly=mermaid::flowchart::route_flowchart_edges(&diagram,lookup,layout);
+            check(poly.edges.size()==1 && poly.edges[0].points.size()>=4,
+                  "Mermaid Polyline separate solver selected");
+            check(static_cast<bool>(stun::graphlayout::validate_polyline_routes(
+                layout,{{{0},{1}}},poly)),"Mermaid Polyline geometry validated");
+            diagram.routing_mode=FC_ROUTE_ORTHOGONAL;
+            auto ortho=mermaid::flowchart::route_flowchart_edges(&diagram,lookup,layout);
+            check(ortho.edges.size()==1,"Mermaid orthogonal mode independent");
+            diagram.routing_mode=FC_ROUTE_POLYLINE;
+            diagram.routing_segment_penalty=2;
+            bool rejected=false;
+            try { (void)mermaid::flowchart::route_flowchart_edges(&diagram,lookup,layout); }
+            catch(const std::invalid_argument&) { rejected=true; }
+            check(rejected,"Mermaid polyline unsupported bend penalty rejected");
         }
         std::cout<<"chart adapters: all checks passed\n";
         return 0;

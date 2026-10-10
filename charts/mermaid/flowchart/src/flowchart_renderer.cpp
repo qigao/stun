@@ -1,5 +1,4 @@
 #include "flowchart_layout.h"
-#include <stun/graphlayout/orthogonal.h>
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_ast.h"
 #include <map>
@@ -13,7 +12,6 @@
 #include <deque>
 #include <unordered_map>
 #include <stdexcept>
-#include "libavoid/libavoid.h"
 #include "mustache/mustache.h"
 #include "flowchart_template.h"
 namespace mermaid {
@@ -132,11 +130,6 @@ private:
         return snapshot;
     }
 
-    static bool is_horizontal_direction(const FlowchartDiagram* diagram) {
-        if (!diagram || !diagram->direction || !diagram->direction[0]) return false;
-        return diagram->direction[0] == 'L' || diagram->direction[0] == 'R';
-    }
-
     LayoutSnapshot layout_professional(const FlowchartDiagram* diagram) {
         LayoutSnapshot snapshot;
         std::vector<FlowchartNode*> nodes;
@@ -180,174 +173,19 @@ private:
             snapshot.nodes.push_back(rn);
         }
 
-        // The native orthogonal solver owns node-obstacle routing. Polyline
-        // mode is a separately selected algorithm; it is not a fallback.
-        if (diagram->routing_mode == FC_ROUTE_ORTHOGONAL) {
-            using namespace stun::graphlayout;
-            if (diagram->routing_nudging_distance >= 0.0 ||
-                diagram->routing_crossing_penalty >= 0.0 ||
-                diagram->routing_angle_penalty >= 0.0 ||
-                diagram->routing_nudge_orthogonal_ends >= 0 ||
-                diagram->routing_nudge_shared_paths >= 0) {
-                throw std::invalid_argument(
-                    "graphlayout: native orthogonal router does not support nudging/crossing/angle options");
-            }
-            std::vector<RouteRequest> requests;
-            std::vector<FlowchartEdge*> edge_list;
-            for (auto* e = diagram->edges; e; e = e->next) {
-                const auto fi = index_of.find(e->from ? e->from : "");
-                const auto ti = index_of.find(e->to ? e->to : "");
-                if (fi == index_of.end() || ti == index_of.end())
-                    throw std::invalid_argument("graphlayout: Mermaid edge references missing node");
-                requests.push_back({{fi->second}, {ti->second}});
-                edge_list.push_back(e);
-            }
-            RouteOptions route_options;
-            if (diagram->routing_shape_buffer >= 0.0)
-                route_options.clearance = diagram->routing_shape_buffer;
-            if (diagram->routing_segment_penalty >= 0.0)
-                route_options.bend_penalty = diagram->routing_segment_penalty;
-            Routes paths;
-            const auto routing_status = route_orthogonal(placement, requests, paths, route_options);
-            if (!routing_status)
-                throw std::invalid_argument("graphlayout: Mermaid edge " +
-                    std::to_string(routing_status.route_index) + ": " + routing_status.message);
-            for (size_t i = 0; i < edge_list.size(); ++i) {
-                RenderedEdge re;
-                re.source_id = edge_list[i]->from;
-                re.target_id = edge_list[i]->to;
-                re.label = edge_list[i]->label ? edge_list[i]->label : "";
-                for (const auto& p : paths.edges[i].points)
-                    re.points.push_back({p.x, p.y});
-                snapshot.edges.push_back(std::move(re));
-            }
-            return snapshot;
-        }
-
-        const bool horizontal = is_horizontal_direction(diagram);
-        const double endpoint_pad = 1.0;
-
-        auto add_straight_edge = [&](FlowchartEdge* e, size_t u, size_t v) {
+        // Explicit route mode is handled by the Mermaid-owned native adapter.
+        // No arbitrary straight-line fallback is allowed on solver failure.
+        const auto paths = route_flowchart_edges(diagram, index_of, placement);
+        size_t i = 0;
+        for (auto* edge = diagram->edges; edge; edge = edge->next, ++i) {
             RenderedEdge re;
-            re.source_id = e->from;
-            re.target_id = e->to;
-            re.label = e->label ? e->label : "";
-            if (horizontal) {
-                double sx = coords[u].first + widths[u] + endpoint_pad;
-                double sy = coords[u].second + heights[u] / 2.0;
-                double tx = coords[v].first - endpoint_pad;
-                double ty = coords[v].second + heights[v] / 2.0;
-                re.points.push_back({sx, sy});
-                re.points.push_back({tx, ty});
-            } else {
-                double sx = coords[u].first + widths[u] / 2.0;
-                double sy = coords[u].second + heights[u] + endpoint_pad;
-                double tx = coords[v].first + widths[v] / 2.0;
-                double ty = coords[v].second - endpoint_pad;
-                re.points.push_back({sx, sy});
-                re.points.push_back({tx, ty});
-            }
-            snapshot.edges.push_back(re);
-        };
-
-        if (diagram->edges) {
-            const bool use_orthogonal = diagram->routing_mode == FC_ROUTE_ORTHOGONAL;
-            Avoid::Router router(use_orthogonal ? Avoid::OrthogonalRouting : Avoid::PolyLineRouting);
-            if (use_orthogonal) {
-                router.setRoutingParameter(Avoid::segmentPenalty, Avoid::chooseSensibleParamValue);
-            } else {
-                router.setRoutingParameter(Avoid::anglePenalty, Avoid::chooseSensibleParamValue);
-            }
-            if (diagram->routing_shape_buffer >= 0.0) {
-                router.setRoutingParameter(Avoid::shapeBufferDistance, diagram->routing_shape_buffer);
-            }
-            if (diagram->routing_nudging_distance >= 0.0) {
-                router.setRoutingParameter(Avoid::idealNudgingDistance, diagram->routing_nudging_distance);
-            }
-            if (diagram->routing_segment_penalty >= 0.0) {
-                router.setRoutingParameter(Avoid::segmentPenalty, diagram->routing_segment_penalty);
-            }
-            if (diagram->routing_angle_penalty >= 0.0) {
-                router.setRoutingParameter(Avoid::anglePenalty, diagram->routing_angle_penalty);
-            }
-            if (diagram->routing_crossing_penalty >= 0.0) {
-                router.setRoutingParameter(Avoid::crossingPenalty, diagram->routing_crossing_penalty);
-            }
-            if (diagram->routing_nudge_orthogonal_ends >= 0) {
-                router.setRoutingOption(Avoid::nudgeOrthogonalSegmentsConnectedToShapes,
-                                        diagram->routing_nudge_orthogonal_ends != 0);
-            }
-            if (diagram->routing_nudge_shared_paths >= 0) {
-                router.setRoutingOption(Avoid::nudgeSharedPathsWithCommonEndPoint,
-                                        diagram->routing_nudge_shared_paths != 0);
-            }
-
-            std::vector<Avoid::ShapeRef*> shapes;
-            shapes.reserve(ncount);
-            for (size_t i = 0; i < ncount; ++i) {
-                Avoid::Point tl(coords[i].first, coords[i].second);
-                Avoid::Point br(coords[i].first + widths[i], coords[i].second + heights[i]);
-                Avoid::Rectangle rect(tl, br);
-                shapes.push_back(new Avoid::ShapeRef(&router, rect));
-            }
-
-            std::vector<Avoid::ConnRef*> conns;
-            std::vector<FlowchartEdge*> edges;
-            for (auto* e = diagram->edges; e; e = e->next) {
-                auto it_from = index_of.find(e->from ? e->from : "");
-                auto it_to = index_of.find(e->to ? e->to : "");
-                if (it_from == index_of.end() || it_to == index_of.end()) continue;
-                size_t u = it_from->second;
-                size_t v = it_to->second;
-
-                Avoid::ConnRef* cr = new Avoid::ConnRef(&router);
-                if (horizontal) {
-                    Avoid::Point src(coords[u].first + widths[u] + endpoint_pad, coords[u].second + heights[u] / 2.0);
-                    Avoid::Point dst(coords[v].first - endpoint_pad, coords[v].second + heights[v] / 2.0);
-                    cr->setEndpoints(Avoid::ConnEnd(src, Avoid::ConnDirAll), Avoid::ConnEnd(dst, Avoid::ConnDirAll));
-                } else {
-                    Avoid::Point src(coords[u].first + widths[u] / 2.0, coords[u].second + heights[u] + endpoint_pad);
-                    Avoid::Point dst(coords[v].first + widths[v] / 2.0, coords[v].second - endpoint_pad);
-                    cr->setEndpoints(Avoid::ConnEnd(src, Avoid::ConnDirAll), Avoid::ConnEnd(dst, Avoid::ConnDirAll));
-                }
-                conns.push_back(cr);
-                edges.push_back(e);
-            }
-
-            router.processTransaction();
-
-            for (size_t i = 0; i < edges.size(); ++i) {
-                FlowchartEdge* e = edges[i];
-                auto it_from = index_of.find(e->from ? e->from : "");
-                auto it_to = index_of.find(e->to ? e->to : "");
-                if (it_from == index_of.end() || it_to == index_of.end()) continue;
-                size_t u = it_from->second;
-                size_t v = it_to->second;
-
-                Avoid::PolyLine& route = conns[i]->displayRoute();
-                if (route.ps.size() < 2) {
-                    add_straight_edge(e, u, v);
-                    continue;
-                }
-
-                RenderedEdge re;
-                re.source_id = e->from;
-                re.target_id = e->to;
-                re.label = e->label ? e->label : "";
-                for (const auto& p : route.ps) {
-                    re.points.push_back({p.x, p.y});
-                }
-                snapshot.edges.push_back(re);
-            }
-
-            for (auto* cr : conns) {
-                router.deleteConnector(cr);
-            }
-            for (auto* sr : shapes) {
-                router.deleteShape(sr);
-            }
+            re.source_id = edge->from;
+            re.target_id = edge->to;
+            re.label = edge->label ? edge->label : "";
+            for (const auto& p : paths.edges[i].points)
+                re.points.push_back({p.x, p.y});
+            snapshot.edges.push_back(std::move(re));
         }
-
         return snapshot;
     }
 };

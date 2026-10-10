@@ -65,7 +65,7 @@ target_include_directories(stun_dotgraph_layout PRIVATE
 )
 target_link_libraries(stun_dotgraph_layout
     PUBLIC Stun::GraphCore
-    PRIVATE Stun::GraphLayered
+    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline
 )
 target_compile_features(stun_dotgraph_layout PUBLIC cxx_std_17)
 set_target_properties(stun_dotgraph_layout PROPERTIES FOLDER "Modules/DotGraph/Layout")
@@ -83,7 +83,7 @@ target_include_directories(dotgraph
 
 target_link_libraries(dotgraph
     PUBLIC dotgraph_parser
-    PRIVATE flex_expression TurboParser::Mustache avoid Stun::DotGraphLayout Stun::GraphOrthogonal
+    PRIVATE flex_expression TurboParser::Mustache Stun::DotGraphLayout
 )
 
 # ============================================================================
