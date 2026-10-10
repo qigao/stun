@@ -1,3 +1,4 @@
+#include "flowchart_layout.h"
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_ast.h"
 #include <map>
@@ -11,7 +12,6 @@
 #include <deque>
 #include <unordered_map>
 #include <stdexcept>
-#include "libavoid/libavoid.h"
 #include "mustache/mustache.h"
 #include "flowchart_template.h"
 namespace mermaid {
@@ -130,11 +130,6 @@ private:
         return snapshot;
     }
 
-    static bool is_horizontal_direction(const FlowchartDiagram* diagram) {
-        if (!diagram || !diagram->direction || !diagram->direction[0]) return false;
-        return diagram->direction[0] == 'L' || diagram->direction[0] == 'R';
-    }
-
     LayoutSnapshot layout_professional(const FlowchartDiagram* diagram) {
         LayoutSnapshot snapshot;
         std::vector<FlowchartNode*> nodes;
@@ -159,139 +154,12 @@ private:
             if (nodes[i]->layout_height > 0) heights[i] = nodes[i]->layout_height;
         }
 
-        std::vector<std::vector<size_t>> out(ncount);
-        std::vector<std::vector<size_t>> in(ncount);
-        std::vector<int> indeg(ncount, 0);
-
-        for (auto* e = diagram->edges; e; e = e->next) {
-            auto it_from = index_of.find(e->from ? e->from : "");
-            auto it_to = index_of.find(e->to ? e->to : "");
-            if (it_from == index_of.end() || it_to == index_of.end()) continue;
-            size_t u = it_from->second;
-            size_t v = it_to->second;
-            out[u].push_back(v);
-            in[v].push_back(u);
-            indeg[v]++;
-        }
-
-        std::vector<size_t> topo;
-        topo.reserve(ncount);
-        std::deque<size_t> q;
-        std::vector<int> indeg_work = indeg;
-        std::vector<bool> processed(ncount, false);
-
-        for (size_t i = 0; i < ncount; ++i) {
-            if (indeg_work[i] == 0) q.push_back(i);
-        }
-
-        while (topo.size() < ncount) {
-            if (q.empty()) {
-                for (size_t i = 0; i < ncount; ++i) {
-                    if (!processed[i]) {
-                        indeg_work[i] = 0;
-                        q.push_back(i);
-                        break;
-                    }
-                }
-            }
-            size_t u = q.front();
-            q.pop_front();
-            if (processed[u]) continue;
-            processed[u] = true;
-            topo.push_back(u);
-            for (size_t v : out[u]) {
-                indeg_work[v]--;
-                if (indeg_work[v] == 0) q.push_back(v);
-            }
-        }
-
-        std::vector<int> level(ncount, 0);
-        int max_level = 0;
-        for (size_t u : topo) {
-            for (size_t v : out[u]) {
-                if (level[v] < level[u] + 1) {
-                    level[v] = level[u] + 1;
-                    if (level[v] > max_level) max_level = level[v];
-                }
-            }
-        }
-
-        std::vector<std::vector<size_t>> layers(max_level + 1);
-        for (size_t i = 0; i < ncount; ++i) {
-            layers[level[i]].push_back(i);
-        }
-
-        auto order_by_barycenter = [&](int layer_index, bool use_in_neighbors) {
-            if (layer_index < 0 || layer_index >= (int)layers.size()) return;
-            const std::vector<size_t>& prev = use_in_neighbors ? layers[layer_index - 1] : layers[layer_index + 1];
-            std::vector<int> pos(ncount, -1);
-            for (size_t i = 0; i < prev.size(); ++i) pos[prev[i]] = (int)i;
-
-            struct Item {
-                size_t node;
-                double bary;
-                bool has;
-                size_t orig;
-            };
-            std::vector<Item> items;
-            items.reserve(layers[layer_index].size());
-            for (size_t i = 0; i < layers[layer_index].size(); ++i) {
-                size_t u = layers[layer_index][i];
-                const std::vector<size_t>& neigh = use_in_neighbors ? in[u] : out[u];
-                double sum = 0.0;
-                int count = 0;
-                for (size_t v : neigh) {
-                    if (pos[v] >= 0) {
-                        sum += pos[v];
-                        count++;
-                    }
-                }
-                Item it;
-                it.node = u;
-                it.has = count > 0;
-                it.bary = it.has ? (sum / count) : 0.0;
-                it.orig = i;
-                items.push_back(it);
-            }
-
-            std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
-                if (a.has != b.has) return a.has > b.has;
-                if (!a.has) return a.orig < b.orig;
-                if (a.bary == b.bary) return a.orig < b.orig;
-                return a.bary < b.bary;
-            });
-
-            for (size_t i = 0; i < items.size(); ++i) layers[layer_index][i] = items[i].node;
-        };
-
-        for (int iter = 0; iter < 2; ++iter) {
-            for (int l = 1; l <= max_level; ++l) order_by_barycenter(l, true);
-            for (int l = max_level - 1; l >= 0; --l) order_by_barycenter(l, false);
-        }
-
-        std::vector<double> layer_heights(max_level + 1, 0.0);
-        for (int l = 0; l <= max_level; ++l) {
-            double h = 0.0;
-            for (size_t idx : layers[l]) h = std::max(h, heights[idx]);
-            layer_heights[l] = h;
-        }
-
-        std::vector<std::pair<double, double>> coords(ncount, {0.0, 0.0});
-        double y_cursor = 0.0;
-        for (int l = 0; l <= max_level; ++l) {
-            double total_w = 0.0;
-            for (size_t i = 0; i < layers[l].size(); ++i) {
-                total_w += widths[layers[l][i]];
-                if (i + 1 < layers[l].size()) total_w += H_GAP;
-            }
-            double x_cursor = -total_w / 2.0;
-            for (size_t i = 0; i < layers[l].size(); ++i) {
-                size_t idx = layers[l][i];
-                coords[idx] = {x_cursor, y_cursor};
-                x_cursor += widths[idx] + H_GAP;
-            }
-            y_cursor += layer_heights[l] + V_GAP;
-        }
+        // Per-chart AST and direction policy are isolated in this adapter.
+        const auto placement =
+            place_flowchart_nodes(diagram, nodes, index_of, widths, heights, H_GAP, V_GAP);
+        std::vector<std::pair<double, double>> coords(ncount);
+        for (size_t i = 0; i < ncount; ++i)
+            coords[i] = {placement.nodes[i].x, placement.nodes[i].y};
 
         for (size_t i = 0; i < ncount; ++i) {
             RenderedNode rn;
@@ -305,130 +173,19 @@ private:
             snapshot.nodes.push_back(rn);
         }
 
-        const bool horizontal = is_horizontal_direction(diagram);
-        const double endpoint_pad = 1.0;
-
-        auto add_straight_edge = [&](FlowchartEdge* e, size_t u, size_t v) {
+        // Explicit route mode is handled by the Mermaid-owned native adapter.
+        // No arbitrary straight-line fallback is allowed on solver failure.
+        const auto paths = route_flowchart_edges(diagram, index_of, placement);
+        size_t i = 0;
+        for (auto* edge = diagram->edges; edge; edge = edge->next, ++i) {
             RenderedEdge re;
-            re.source_id = e->from;
-            re.target_id = e->to;
-            re.label = e->label ? e->label : "";
-            if (horizontal) {
-                double sx = coords[u].first + widths[u] + endpoint_pad;
-                double sy = coords[u].second + heights[u] / 2.0;
-                double tx = coords[v].first - endpoint_pad;
-                double ty = coords[v].second + heights[v] / 2.0;
-                re.points.push_back({sx, sy});
-                re.points.push_back({tx, ty});
-            } else {
-                double sx = coords[u].first + widths[u] / 2.0;
-                double sy = coords[u].second + heights[u] + endpoint_pad;
-                double tx = coords[v].first + widths[v] / 2.0;
-                double ty = coords[v].second - endpoint_pad;
-                re.points.push_back({sx, sy});
-                re.points.push_back({tx, ty});
-            }
-            snapshot.edges.push_back(re);
-        };
-
-        if (diagram->edges) {
-            const bool use_orthogonal = diagram->routing_mode == FC_ROUTE_ORTHOGONAL;
-            Avoid::Router router(use_orthogonal ? Avoid::OrthogonalRouting : Avoid::PolyLineRouting);
-            if (use_orthogonal) {
-                router.setRoutingParameter(Avoid::segmentPenalty, Avoid::chooseSensibleParamValue);
-            } else {
-                router.setRoutingParameter(Avoid::anglePenalty, Avoid::chooseSensibleParamValue);
-            }
-            if (diagram->routing_shape_buffer >= 0.0) {
-                router.setRoutingParameter(Avoid::shapeBufferDistance, diagram->routing_shape_buffer);
-            }
-            if (diagram->routing_nudging_distance >= 0.0) {
-                router.setRoutingParameter(Avoid::idealNudgingDistance, diagram->routing_nudging_distance);
-            }
-            if (diagram->routing_segment_penalty >= 0.0) {
-                router.setRoutingParameter(Avoid::segmentPenalty, diagram->routing_segment_penalty);
-            }
-            if (diagram->routing_angle_penalty >= 0.0) {
-                router.setRoutingParameter(Avoid::anglePenalty, diagram->routing_angle_penalty);
-            }
-            if (diagram->routing_crossing_penalty >= 0.0) {
-                router.setRoutingParameter(Avoid::crossingPenalty, diagram->routing_crossing_penalty);
-            }
-            if (diagram->routing_nudge_orthogonal_ends >= 0) {
-                router.setRoutingOption(Avoid::nudgeOrthogonalSegmentsConnectedToShapes,
-                                        diagram->routing_nudge_orthogonal_ends != 0);
-            }
-            if (diagram->routing_nudge_shared_paths >= 0) {
-                router.setRoutingOption(Avoid::nudgeSharedPathsWithCommonEndPoint,
-                                        diagram->routing_nudge_shared_paths != 0);
-            }
-
-            std::vector<Avoid::ShapeRef*> shapes;
-            shapes.reserve(ncount);
-            for (size_t i = 0; i < ncount; ++i) {
-                Avoid::Point tl(coords[i].first, coords[i].second);
-                Avoid::Point br(coords[i].first + widths[i], coords[i].second + heights[i]);
-                Avoid::Rectangle rect(tl, br);
-                shapes.push_back(new Avoid::ShapeRef(&router, rect));
-            }
-
-            std::vector<Avoid::ConnRef*> conns;
-            std::vector<FlowchartEdge*> edges;
-            for (auto* e = diagram->edges; e; e = e->next) {
-                auto it_from = index_of.find(e->from ? e->from : "");
-                auto it_to = index_of.find(e->to ? e->to : "");
-                if (it_from == index_of.end() || it_to == index_of.end()) continue;
-                size_t u = it_from->second;
-                size_t v = it_to->second;
-
-                Avoid::ConnRef* cr = new Avoid::ConnRef(&router);
-                if (horizontal) {
-                    Avoid::Point src(coords[u].first + widths[u] + endpoint_pad, coords[u].second + heights[u] / 2.0);
-                    Avoid::Point dst(coords[v].first - endpoint_pad, coords[v].second + heights[v] / 2.0);
-                    cr->setEndpoints(Avoid::ConnEnd(src, Avoid::ConnDirAll), Avoid::ConnEnd(dst, Avoid::ConnDirAll));
-                } else {
-                    Avoid::Point src(coords[u].first + widths[u] / 2.0, coords[u].second + heights[u] + endpoint_pad);
-                    Avoid::Point dst(coords[v].first + widths[v] / 2.0, coords[v].second - endpoint_pad);
-                    cr->setEndpoints(Avoid::ConnEnd(src, Avoid::ConnDirAll), Avoid::ConnEnd(dst, Avoid::ConnDirAll));
-                }
-                conns.push_back(cr);
-                edges.push_back(e);
-            }
-
-            router.processTransaction();
-
-            for (size_t i = 0; i < edges.size(); ++i) {
-                FlowchartEdge* e = edges[i];
-                auto it_from = index_of.find(e->from ? e->from : "");
-                auto it_to = index_of.find(e->to ? e->to : "");
-                if (it_from == index_of.end() || it_to == index_of.end()) continue;
-                size_t u = it_from->second;
-                size_t v = it_to->second;
-
-                Avoid::PolyLine& route = conns[i]->displayRoute();
-                if (route.ps.size() < 2) {
-                    add_straight_edge(e, u, v);
-                    continue;
-                }
-
-                RenderedEdge re;
-                re.source_id = e->from;
-                re.target_id = e->to;
-                re.label = e->label ? e->label : "";
-                for (const auto& p : route.ps) {
-                    re.points.push_back({p.x, p.y});
-                }
-                snapshot.edges.push_back(re);
-            }
-
-            for (auto* cr : conns) {
-                router.deleteConnector(cr);
-            }
-            for (auto* sr : shapes) {
-                router.deleteShape(sr);
-            }
+            re.source_id = edge->from;
+            re.target_id = edge->to;
+            re.label = edge->label ? edge->label : "";
+            for (const auto& p : paths.edges[i].points)
+                re.points.push_back({p.x, p.y});
+            snapshot.edges.push_back(std::move(re));
         }
-
         return snapshot;
     }
 };
@@ -623,6 +380,15 @@ std::string FlowchartRenderer::to_svg(const LayoutSnapshot& snapshot) {
             max_y = std::max(max_y, node.y + node.height);
         }
     }
+
+    // Routed edges (especially self-loops) may exceed node bounds.
+    for (const auto& edge : snapshot.edges)
+        for (const auto& p : edge.points) {
+            min_x = std::min(min_x, p.x);
+            min_y = std::min(min_y, p.y);
+            max_x = std::max(max_x, p.x);
+            max_y = std::max(max_y, p.y);
+        }
 
     LayoutSnapshot mutable_snapshot = snapshot;
     if (mutable_snapshot.total_width <= 0) {

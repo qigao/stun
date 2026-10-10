@@ -33,6 +33,19 @@ add_custom_command(
 # Flowchart Library (mermaid_flowchart)
 # ============================================================================
 
+# Mermaid's renderer-independent flowchart graph algorithm adapter.
+add_library(stun_mermaid_flowchart_layout STATIC src/flowchart_layout.cpp)
+add_library(Stun::MermaidFlowchartLayout ALIAS stun_mermaid_flowchart_layout)
+target_include_directories(stun_mermaid_flowchart_layout PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(stun_mermaid_flowchart_layout
+    PUBLIC Stun::GraphCore
+    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphPolylineNudging Stun::GraphNudging
+)
+target_compile_features(stun_mermaid_flowchart_layout PUBLIC cxx_std_17)
+set_target_properties(stun_mermaid_flowchart_layout PROPERTIES FOLDER "Modules/Mermaid/FlowchartLayout")
+
 add_library(mermaid_flowchart STATIC
     ${FC_LEXER_GEN_C}
     ${FC_PARSER_GEN_C}
@@ -50,7 +63,8 @@ target_include_directories(mermaid_flowchart
 )
  
 target_link_libraries(mermaid_flowchart 
-    PUBLIC TurboParser::Parser flex_runtime TurboParser::Mustache avoid
+    PUBLIC TurboParser::Parser flex_runtime TurboParser::Mustache
+    PRIVATE Stun::MermaidFlowchartLayout
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
