@@ -208,6 +208,11 @@ VpscStatus certificate_for(const VpscProblem& problem,
         if (!std::isfinite(candidate.multipliers[i]))
             return failure(VpscError::InvalidNumerics, "nonfinite dual candidate");
         const Real lambda = candidate.multipliers[i];
+        // Dual feasibility must be exact for inequalities: otherwise the
+        // advertised dual lower bound is not necessarily a true lower bound,
+        // even when the negative multiplier is within a relative tolerance.
+        if (!c.equality && lambda < 0.0L)
+            return failure(VpscError::CertificateFailed, "negative inequality multiplier invalidates dual bound");
         const Real slack = (static_cast<Real>(candidate.positions[c.right]) - candidate.positions[c.left]) - c.gap;
         const Real unit = std::max({1.0L, std::abs(static_cast<Real>(c.gap)),
                                      std::abs(static_cast<Real>(candidate.positions[c.left])),

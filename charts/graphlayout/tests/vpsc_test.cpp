@@ -169,6 +169,10 @@ int main() {
             require(verify_vpsc(p, r, audit).error == VpscError::CertificateFailed,
                     "tampered dual vector rejected");
             r = solve_checked(p);
+            r.multipliers[0] = -1e-12;
+            require(verify_vpsc(p, r, audit).error == VpscError::CertificateFailed,
+                    "even a tiny negative inequality multiplier invalidates the dual lower bound");
+            r = solve_checked(p);
             r.certificate.objective = -1234; // must not be trusted by verifier
             require(static_cast<bool>(verify_vpsc(p, r, audit)), "certificate recomputed independently");
         }
