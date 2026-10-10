@@ -3,7 +3,9 @@
 #include "stun/graphlayout/polyline.h"
 #include "stun/graphlayout/polyline_nudging.h"
 #include "stun/graphlayout/nudging.h"
+#include "stun/graphlayout/port_bindings.h"
 
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 #include <string>
@@ -71,12 +73,65 @@ stun::graphlayout::Port dot_port(std::size_t node, DotGraphCompass compass,
     default: throw std::invalid_argument("graphlayout: unsupported DOT compass");
     }
 }
+
+stun::graphlayout::Side measured_side(DotGraphCompass side) {
+    using stun::graphlayout::Side;
+    switch (side) {
+    case DG_COMPASS_N: return Side::North;
+    case DG_COMPASS_E: return Side::East;
+    case DG_COMPASS_S: return Side::South;
+    case DG_COMPASS_W: return Side::West;
+    default:
+        throw std::invalid_argument("graphlayout: named DOT measurement requires cardinal boundary side");
+    }
+}
+
+bool named_compass_matches(const stun::graphlayout::Port& port,
+                           DotGraphCompass compass) {
+    using stun::graphlayout::Side;
+    constexpr double epsilon = 1e-12;
+    switch (compass) {
+    case DG_COMPASS_NONE: return true;
+    case DG_COMPASS_N: return port.side == Side::North;
+    case DG_COMPASS_E: return port.side == Side::East;
+    case DG_COMPASS_S: return port.side == Side::South;
+    case DG_COMPASS_W: return port.side == Side::West;
+    case DG_COMPASS_NE:
+        return (port.side == Side::North && std::abs(port.offset - 1.0) < epsilon) ||
+               (port.side == Side::East && std::abs(port.offset) < epsilon);
+    case DG_COMPASS_SE:
+        return (port.side == Side::East && std::abs(port.offset - 1.0) < epsilon) ||
+               (port.side == Side::South && std::abs(port.offset - 1.0) < epsilon);
+    case DG_COMPASS_SW:
+        return (port.side == Side::South && std::abs(port.offset) < epsilon) ||
+               (port.side == Side::West && std::abs(port.offset - 1.0) < epsilon);
+    case DG_COMPASS_NW:
+        return (port.side == Side::North && std::abs(port.offset) < epsilon) ||
+               (port.side == Side::West && std::abs(port.offset) < epsilon);
+    case DG_COMPASS_C: return false;
+    default: return false;
+    }
+}
+
+stun::graphlayout::Port resolve_dot_port(
+    std::size_t node, const char* name, DotGraphCompass compass,
+    DotGraphCompass fallback, const stun::graphlayout::NamedPortBindings& bindings) {
+    if (!name || !name[0]) return dot_port(node, compass, fallback);
+    const auto* bound = stun::graphlayout::find_named_port(bindings, node, name);
+    if (!bound)
+        throw std::invalid_argument("graphlayout: DOT named port '" + std::string(name) +
+                                    "' has no measured boundary geometry");
+    if (!named_compass_matches(bound->port, compass))
+        throw std::invalid_argument("graphlayout: DOT named port compass conflicts with measured side/corner");
+    return bound->port;
+}
 }
 
 stun::graphlayout::Routes route_dot_edges(
     const DotGraphDiagram* diagram,
     const std::unordered_map<std::string, std::size_t>& index_of,
-    const stun::graphlayout::Layout& placement) {
+    const stun::graphlayout::Layout& placement,
+    const std::vector<MeasuredDotPort>& measured_ports) {
     using namespace stun::graphlayout;
     if (!diagram) throw std::invalid_argument("graphlayout: null DOT diagram");
     if (diagram->routing_mode != DG_ROUTE_ORTHOGONAL &&
@@ -90,13 +145,27 @@ stun::graphlayout::Routes route_dot_edges(
          diagram->routing_segment_penalty >= 0.0))
         throw std::invalid_argument("graphlayout: DOT native routing does not implement crossing/angle/terminal nudging or polyline segment penalty");
 
+    // Translate actual Chart-measured local node ports into the shared
+    // rectangle-boundary routing contract. Geometry is validated atomically.
+    std::vector<MeasuredNamedPort> measurements;
+    measurements.reserve(measured_ports.size());
+    for (const auto& m : measured_ports) {
+        const auto it = index_of.find(m.node_id);
+        if (it == index_of.end() || it->second >= placement.nodes.size())
+            throw std::invalid_argument("graphlayout: DOT named port references a missing node");
+        measurements.push_back({it->second, m.name, measured_side(m.outward_side),
+                                {m.local_x, m.local_y}});
+    }
+    NamedPortBindings bindings;
+    const auto binding_status = bind_named_ports(placement, measurements, bindings);
+    if (!binding_status)
+        throw std::invalid_argument("graphlayout: DOT measured port " +
+            std::to_string(binding_status.measurement_index) + ": " + binding_status.message);
+
     const bool horizontal = diagram->rankdir == DG_RANKDIR_LR ||
                             diagram->rankdir == DG_RANKDIR_RL;
     std::vector<RouteRequest> requests;
     for (const auto* edge = diagram->edges; edge; edge = edge->next) {
-        if ((edge->from_port && edge->from_port[0]) ||
-            (edge->to_port && edge->to_port[0]))
-            throw std::invalid_argument("graphlayout: named DOT ports need explicit node geometry");
         const auto source = index_of.find(edge->from ? edge->from : "");
         const auto target = index_of.find(edge->to ? edge->to : "");
         if (source == index_of.end() || target == index_of.end() ||
@@ -113,8 +182,10 @@ stun::graphlayout::Routes route_dot_edges(
         const auto last_default = u == v ? DG_COMPASS_N :
             (horizontal ? (forward ? DG_COMPASS_W : DG_COMPASS_E) :
                           (forward ? DG_COMPASS_N : DG_COMPASS_S));
-        requests.push_back({dot_port(u,edge->from_compass,first_default),
-                            dot_port(v,edge->to_compass,last_default)});
+        requests.push_back({resolve_dot_port(u, edge->from_port, edge->from_compass,
+                                             first_default, bindings),
+                            resolve_dot_port(v, edge->to_port, edge->to_compass,
+                                             last_default, bindings)});
     }
     Routes paths;
     RouteStatus status;

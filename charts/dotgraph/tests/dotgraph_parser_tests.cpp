@@ -220,6 +220,42 @@ spec("dotgraph") {
             check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
         }
 
+        it("binds real measured local DOT named port geometry") {
+            auto diagram = parse("digraph { rankdir=LR; A:out -> B:in; }");
+            check_not_null(diagram.get());
+            check_not_null(diagram->edges);
+            check_str_eq(diagram->edges->from_port, "out");
+            check_str_eq(diagram->edges->to_port, "in");
+            dotgraph::DotGraphRenderer renderer;
+            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+
+            // Measurements belong to actual local node geometry, not label text.
+            const std::vector<dotgraph::MeasuredDotPort> measured{
+                {"A", "out", DG_COMPASS_E, 120.0, 12.5},
+                {"B", "in", DG_COMPASS_W, 0.0, 37.5}
+            };
+            for (auto mode : {DG_ROUTE_ORTHOGONAL, DG_ROUTE_POLYLINE}) {
+                diagram->routing_mode = mode;
+                const auto snapshot = renderer.layout(diagram.get(), measured);
+                check_size_eq(snapshot.edges.size(), 1);
+                const auto* a = find_rendered_node(snapshot, "A");
+                const auto* b = find_rendered_node(snapshot, "B");
+                check_not_null(a);
+                check_not_null(b);
+                const auto& points = snapshot.edges.front().points;
+                check(points.size() >= 2);
+                check_double_eq(points.front().x, a->x + a->width, 1e-8);
+                check_double_eq(points.front().y, a->y + 12.5, 1e-8);
+                check_double_eq(points.back().x, b->x, 1e-8);
+                check_double_eq(points.back().y, b->y + 37.5, 1e-8);
+            }
+            auto invalid = measured;
+            invalid[0].local_x = 80.0;
+            check_throws_as(renderer.layout(diagram.get(), invalid), std::invalid_argument);
+            diagram->edges->from_compass = DG_COMPASS_S;
+            check_throws_as(renderer.layout(diagram.get(), measured), std::invalid_argument);
+        }
+
         it("renders nested clusters") {
             auto snapshot = layout(
                 "digraph { subgraph cluster_outer { subgraph cluster_inner { A; B; } } }");

@@ -41,6 +41,7 @@ shared solvers have no knowledge of DOT, Mermaid, Infographic or rendering.
 | `Stun::GraphLayered` | SCC/DAG ranks and placement | GraphCore |
 | `Stun::GraphTidyTree` | Bounded ordered-forest contours, variable-size nodes | GraphCore |
 | `Stun::GraphOrthogonal` | Orthogonal obstacle-aware A* | GraphCore |
+| `Stun::GraphPortBindings` | Bind measured named rectangle ports to exact side/offset | GraphCore |
 | `Stun::GraphNudging` | Bounded multi-edge orthogonal lane offsets & pairwise interaction audit | GraphOrthogonal |
 | `Stun::GraphVPSC` | 1D separation constraints | GraphCore |
 | `Stun::GraphProjection` | 2D pins, alignments, non-overlap | GraphVPSC |
@@ -507,3 +508,25 @@ Compound obstacles, topology-preserving routing, true named-port geometry,
 checkpoint syntax in Chart ASTs, and differential Adaptagrams benchmarks
 are not yet implemented. This work does not use Lean or introduce UI layout.
 
+
+## Algorithm v11: measured named-port boundary binding (libavoid-like)
+
+`Stun::GraphPortBindings` is a separately linkable native C++17 algorithm.
+A chart supplies named port measurements in **node-local pixel coordinates**,
+with an explicit outward N/E/S/W side and a stable node index. The binder
+checks finite rectangles, unique (node, name), bounded resources and exact
+boundary positions within a tightly bounded measurement tolerance before
+deriving the `Port(side,offset)` contract used by Orthogonal and Polyline.
+The result is sorted independent of input measurement order and is cleared
+transactionally on failure. No interior point, missing name, conflicting
+compass or ambiguous corner gets a silently invented attachment point.
+
+DOT's renderer-neutral adapter resolves `node:port[:compass]` from caller-
+supplied actual local port measurements. The public `DotGraphRenderer`
+offers `layout(diagram, measured_ports)` for applications that have measured
+port geometry; `layout(diagram)` intentionally rejects unmeasured names.
+This does **not** claim record-label field layout or arbitrary-shape boundary
+measurement. Real Chart geometry providers must supply such measurements.
+Qualification covers exact world anchors, both native route modes, bad
+geometry, missing/duplicate names, direction conflicts, strict budgets,
+GCC/Clang sanitizers and cross-platform C++ tests.

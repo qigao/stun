@@ -130,10 +130,44 @@ int main() {
             diagram.routing_nudging_distance=-1;
             edge.next=nullptr;
             edge.from_port=label;
+            char entry[]="entry";
+            edge.to_port=entry;
+            const std::vector<dotgraph::MeasuredDotPort> measured{
+                {"First", "first", DG_COMPASS_E, 30.0, 7.5},
+                {"Second", "entry", DG_COMPASS_W, 0.0, 22.5}
+            };
+            auto named=dotgraph::route_dot_edges(&diagram,lookup,layout,measured);
+            check(named.edges.size()==1,"DOT named-port Polyline route emitted");
+            check(named.edges[0].points.front().x==30.0 &&
+                  named.edges[0].points.front().y==7.5 &&
+                  named.edges[0].points.back().x==170.0 &&
+                  named.edges[0].points.back().y==22.5,
+                  "named DOT endpoints keep actual measured anchors");
+            auto actual_requests=std::vector<stun::graphlayout::RouteRequest>{
+                {{0,stun::graphlayout::Side::East,0.25},
+                 {1,stun::graphlayout::Side::West,0.75}}};
+            check(static_cast<bool>(stun::graphlayout::validate_polyline_routes(
+                layout,actual_requests,named)),"named Polyline routes independently validated");
+            diagram.routing_mode=DG_ROUTE_ORTHOGONAL;
+            auto named_ortho=dotgraph::route_dot_edges(&diagram,lookup,layout,measured);
+            check(static_cast<bool>(stun::graphlayout::validate_orthogonal_routes(
+                layout,actual_requests,named_ortho)),"named Orthogonal paths validated");
+            edge.from_compass=DG_COMPASS_S;
             bool rejected=false;
+            try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout,measured); }
+            catch(const std::invalid_argument&) { rejected=true; }
+            check(rejected,"incompatible compass cannot move a measured named anchor");
+            edge.from_compass=DG_COMPASS_NONE;
+            rejected=false;
             try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout); }
             catch(const std::invalid_argument&) { rejected=true; }
-            check(rejected,"DOT named ports require actual measured port geometry");
+            check(rejected,"DOT named ports with no supplied measurements reject explicitly");
+            auto invalid_measurement=measured;
+            invalid_measurement[0].local_x=5.0;
+            rejected=false;
+            try { (void)dotgraph::route_dot_edges(&diagram,lookup,layout,invalid_measurement); }
+            catch(const std::invalid_argument&) { rejected=true; }
+            check(rejected,"interior named port geometry rejects without snapping");
         }
         {
             char aid[]="Top",bid[]="Bottom",direction[]="TB";

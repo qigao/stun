@@ -152,7 +152,8 @@ static DotGraphShape resolve_shape(const char* name) {
 
 class DotGraphRenderer::Impl {
 public:
-    LayoutSnapshot layout(const DotGraphDiagram* diagram) {
+    LayoutSnapshot layout(const DotGraphDiagram* diagram,
+                          const std::vector<MeasuredDotPort>& measured_ports) {
         if (!diagram || !diagram->nodes) return {};
         LayoutSnapshot snapshot;
 
@@ -275,7 +276,7 @@ public:
         }
 
         // Explicit Stun-native routing through this Chart\u0027s policy adapter.
-        route_edges_native(diagram, snapshot, index_of, placement);
+        route_edges_native(diagram, snapshot, index_of, placement, measured_ports);
 
         // Cluster bounding boxes
         build_clusters(diagram, snapshot, index_of, coords, widths, heights, attr_geo);
@@ -288,8 +289,9 @@ private:
     void route_edges_native(
         const DotGraphDiagram* diagram, LayoutSnapshot& snapshot,
         const std::unordered_map<std::string, size_t>& index_of,
-        const stun::graphlayout::Layout& placement) {
-        const auto routes = route_dot_edges(diagram, index_of, placement);
+        const stun::graphlayout::Layout& placement,
+        const std::vector<MeasuredDotPort>& measured_ports) {
+        const auto routes = route_dot_edges(diagram, index_of, placement, measured_ports);
         GeometryEval edge_geo;
         size_t i = 0;
         for (auto* edge = diagram->edges; edge; edge = edge->next, ++i) {
@@ -410,7 +412,13 @@ DotGraphRenderer::DotGraphRenderer() : pimpl(std::make_unique<Impl>()) {}
 DotGraphRenderer::~DotGraphRenderer() = default;
 
 LayoutSnapshot DotGraphRenderer::layout(const DotGraphDiagram* diagram) {
-    return pimpl->layout(diagram);
+    return pimpl->layout(diagram, {});
+}
+
+LayoutSnapshot DotGraphRenderer::layout(
+    const DotGraphDiagram* diagram,
+    const std::vector<MeasuredDotPort>& measured_ports) {
+    return pimpl->layout(diagram, measured_ports);
 }
 
 // --- Mustache SVG Rendering ---

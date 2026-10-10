@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dotgraph/dotgraph_ast.h"
+#include "dotgraph/dotgraph_ports.h"
 #include "stun/graphlayout/graph.h"
 #include "stun/graphlayout/orthogonal.h"
 
@@ -22,12 +23,13 @@ stun::graphlayout::Layout place_dot_nodes(
     const std::vector<double>& heights,
     double node_gap, double layer_gap);
 
-// Ordered source/target ports, routing policy and typed failure belong to the
-// DOT adapter, not to the renderer. The returned route order is AST edge order.
-// Native Polyline and Orthogonal are explicitly selected; no libavoid fallback.
+// Caller supplies actual measured local node port locations; named endpoints
+// with no matching measured port reject explicitly. Both native Orthogonal
+// and Polyline route with exactly the same validated resolved port geometry.
 stun::graphlayout::Routes route_dot_edges(
     const DotGraphDiagram* diagram,
     const std::unordered_map<std::string, std::size_t>& index_of,
-    const stun::graphlayout::Layout& placement);
+    const stun::graphlayout::Layout& placement,
+    const std::vector<MeasuredDotPort>& measured_ports = {});
 
 } // namespace dotgraph

@@ -65,7 +65,7 @@ target_include_directories(stun_dotgraph_layout PRIVATE
 )
 target_link_libraries(stun_dotgraph_layout
     PUBLIC Stun::GraphCore
-    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphPolylineNudging Stun::GraphNudging
+    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphPolylineNudging Stun::GraphNudging Stun::GraphPortBindings
 )
 target_compile_features(stun_dotgraph_layout PUBLIC cxx_std_17)
 set_target_properties(stun_dotgraph_layout PROPERTIES FOLDER "Modules/DotGraph/Layout")

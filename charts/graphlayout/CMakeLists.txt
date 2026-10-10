@@ -26,6 +26,8 @@ stun_graph_algorithm(stun_graph_layered GraphLayered src/layered.cpp)
 stun_graph_algorithm(stun_graph_tidy_tree GraphTidyTree src/tidy_tree.cpp)
 stun_graph_algorithm(stun_graph_orthogonal GraphOrthogonal src/orthogonal.cpp)
 stun_graph_algorithm(stun_graph_polyline GraphPolyline src/polyline.cpp)
+# Geometry-certified named port binding, independent of route algorithm.
+stun_graph_algorithm(stun_graph_port_bindings GraphPortBindings src/port_bindings.cpp)
 stun_graph_algorithm(stun_graph_polyline_nudging GraphPolylineNudging src/polyline_nudging.cpp)
 # Bounded multi-edge coordination; consumes the independently validated orthogonal routes.
 stun_graph_algorithm(stun_graph_nudging GraphNudging src/nudging.cpp)
@@ -91,6 +93,13 @@ if(BUILD_TESTING)
     target_link_libraries(stun_graphlayout_polyline_nudging_tests PRIVATE Stun::GraphPolylineNudging)
     target_compile_features(stun_graphlayout_polyline_nudging_tests PRIVATE cxx_std_17)
     add_test(NAME StunGraphPolylineNudgingTests COMMAND stun_graphlayout_polyline_nudging_tests)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_port_bindings_tests tests/port_bindings_test.cpp)
+    target_link_libraries(stun_graphlayout_port_bindings_tests PRIVATE Stun::GraphPortBindings)
+    target_compile_features(stun_graphlayout_port_bindings_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphPortBindingsTests COMMAND stun_graphlayout_port_bindings_tests)
 endif()
 
 if(BUILD_TESTING)
@@ -177,7 +186,7 @@ if(BUILD_TESTING AND
         ../dotgraph/include ../dotgraph/src
         ../mermaid/flowchart/include ../mermaid/flowchart/src
     )
-    target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging Stun::GraphPolylineNudging)
+    target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging Stun::GraphPolylineNudging Stun::GraphPortBindings)
     add_test(NAME StunGraphChartAdaptersTests COMMAND stun_graphlayout_chart_adapter_tests)
 endif()
 
