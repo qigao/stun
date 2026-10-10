@@ -206,9 +206,9 @@ result from the original graph and positions.
   nonincreasing energy trace is a numerical postcondition, not a Lean proof.
 - **Scope:** node-center stress only. It does not yet solve joint edge routing,
   component packing, force-directed Coulomb repulsion, compound constraints,
-  or full Cola/Adaptagrams feature equivalence. Incremental/large-graph
-  acceleration, SMACOF majorization, energy benchmark data and Lean
-  termination/correctness modeling are future work.
+  or full Cola/Adaptagrams feature equivalence. The separately selected
+  SMACOF and Force algorithms are documented below; incremental/large-graph
+  acceleration and Lean correctness modeling remain future work.
 
 The dedicated `StunGraphStressTests` cover analytic two-node equilibrium,
 multi-hop chains, cycles, disconnected graphs, constrained pins and
@@ -268,3 +268,81 @@ actual accepted steps, linear-CG iterations, elapsed time and rectangle overlap
 counts. Results are machine- and workload-dependent; SMACOF may reach much
 lower energy while doing significantly more work per outer iteration. This
 benchmark compares Stun optimizers, **not** upstream Cola/ELK.
+
+## Algorithm v7: bounded spring/electrostatic Force-directed layout
+
+`stun/graphlayout/force.h` adds a **separately selected** C++17 graph-layout
+optimizer. It does **not** replace the v5/v6 Stress objective with an implicit
+alternative: the user chooses `layout_force()` explicitly. Rendering, UI,
+Polyline/Orthogonal routing, and the existing node ID/order ownership contract
+are unchanged.
+
+For node centers `c_i` and deduplicated undirected input edges `E`, the
+**precisely exposed objective** is
+
+```
+E(c) = 0.5*k * sum_(i,j in edges) (||c_i-c_j|| - L)^2
+     + alpha*L^3 * sum_(i<j) 1/sqrt(||c_i-c_j||^2 + epsilon^2)
+```
+
+Here `L` is the target spring length, `k >= 0` the spring strength,
+`alpha >= 0` the (dimensionless) repulsion coefficient, and `epsilon > 0`
+the Coulomb softening length. The first term is an **edge** spring, not the
+all-shortest-path-pairs Stress used by SMACOF. The second term repels **all
+pairs**, including disconnected components; hence those components are no
+longer isolated optimizations. Self-loops and reversed/duplicate graph edges
+cannot introduce duplicate spring energy.
+
+- **Derivative and monotonicity:** fixed lexical node-ID accumulation order;
+  an analytic pair gradient verified by central finite differences in tests;
+  bounded backtracking line search; all accepted iterates strictly decrease
+  the **actual** total energy after any VPSC projection. An independent
+  evaluator recomputes both energy terms and pair counts, and the accepted
+  energy trace is emitted for auditing.
+- **Constraints:** optional hard pinned nodes, aligned centers, explicit
+  rectangular minimum separation and collision clearance are applied using
+  the existing 2D VPSC projection at initialization and on each candidate.
+  Unlike the unconstrained force step, this projection is **not** a theorem
+  of constrained stationarity; strict post-projection energy acceptance is
+  explicitly checked.
+- **Determinism and work bounds:** `max_nodes` (up to 256), `max_edges`,
+  `max_pairs`, `max_pair_evaluations`, `max_iterations` and `max_backtracks`
+  are validated and enforced. Pairwise repulsion is **O(n^2)** per energy or
+  gradient evaluation; Barnes-Hut/quadtree acceleration is NOT implemented.
+  Pinned geometry remains exact when feasible; node left-to-right order is
+  **not** an invariant of force-directed optimization.
+- **Degeneracy:** `epsilon` keeps potential energy finite when centers
+  coincide, but the derivative then provides no direction to separate them.
+  Without an explicit successful VPSC collision projection, the optimizer
+  fails with `InvalidGeometry`, rather than inventing random jitter. If the
+  nonlinear step or the geometry constraints fail, the error is explicit.
+  `GradientTolerance`, `LineSearchStalled`, and `IterationBudget` denote
+  **different finite iterate termination reasons**, not a global optimum.
+- **Scope:** no Cola source is copied; no silent solver fallback, no graph
+  topology preservation, global force-energy optimum, multi-edge nudging,
+  Lean theorem, or complete Cola feature parity is claimed.
+
+Standalone `StunGraphForceTests` exercise an analytic two-node objective,
+finite-difference derivatives, disconnected repulsion, cycles and duplicate
+edges, reversed edge insertion and node permutations, hard pins and
+non-overlap, degenerate seeds, work budgets and 30 deterministic graph
+families. The standalone CMake/CTest matrix is independent of the full Charts
+package and is **not** evidence that the full `STUN_BUILD_CHARTS=ON` stack
+compiles and renders correctly.
+
+An optional comparison (disabled in normal CI) evaluates **every output** of
+Gradient Stress, SMACOF and Force under both objective functions, and also
+reports edge-length RMSE, rectangle-overlap count and elapsed time:
+
+```sh
+cmake -S charts/graphlayout -B build/graphlayout-bench -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DSTUN_GRAPHLAYOUT_BUILD_BENCHMARKS=ON
+cmake --build build/graphlayout-bench --target stun_graphlayout_force_compare
+build/graphlayout-bench/stun_graphlayout_force_compare
+```
+
+**Never compare the raw Stress energy to the raw Force energy:** they are
+mathematically different objectives. The CSV provides columns for both only
+so the same solutions can be compared under the **same chosen metric**. Local
+figures vary by CPU, compiler, geometry seed and budget; no upstream
+Adaptagrams/ELK benchmark or cross-platform performance claim follows.

@@ -5,7 +5,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(CTest)
 endif()
 
-add_library(stun_graphlayout STATIC src/layered.cpp src/orthogonal.cpp src/vpsc.cpp src/projection.cpp src/stress.cpp)
+add_library(stun_graphlayout STATIC src/layered.cpp src/orthogonal.cpp src/vpsc.cpp src/projection.cpp src/stress.cpp src/force.cpp)
 add_library(Stun::GraphLayout ALIAS stun_graphlayout)
 target_compile_features(stun_graphlayout PUBLIC cxx_std_17)
 target_include_directories(stun_graphlayout PUBLIC
@@ -81,4 +81,18 @@ if(STUN_GRAPHLAYOUT_BUILD_BENCHMARKS)
     add_executable(stun_graphlayout_stress_compare benchmarks/stress_compare.cpp)
     target_link_libraries(stun_graphlayout_stress_compare PRIVATE Stun::GraphLayout)
     target_compile_features(stun_graphlayout_stress_compare PRIVATE cxx_std_17)
+endif()
+
+# Independent softened-Coulomb / spring energy and finite-iterate descent gate.
+if(BUILD_TESTING)
+    add_executable(stun_graphlayout_force_tests tests/force_test.cpp)
+    target_link_libraries(stun_graphlayout_force_tests PRIVATE Stun::GraphLayout)
+    target_compile_features(stun_graphlayout_force_tests PRIVATE cxx_std_17)
+    add_test(NAME StunGraphForceTests COMMAND stun_graphlayout_force_tests)
+endif()
+
+if(STUN_GRAPHLAYOUT_BUILD_BENCHMARKS)
+    add_executable(stun_graphlayout_force_compare benchmarks/force_compare.cpp)
+    target_link_libraries(stun_graphlayout_force_compare PRIVATE Stun::GraphLayout)
+    target_compile_features(stun_graphlayout_force_compare PRIVATE cxx_std_17)
 endif()
