@@ -1,4 +1,5 @@
 #include "stun/graphlayout/topology_constraints.h"
+#include "topology_node_motion.h"
 
 #include <algorithm>
 #include <array>
@@ -461,6 +462,35 @@ TopologyGuardStatus moving_route_points(const Edge& edge, const Route& route,
 }
 
 } // namespace
+
+TopologyGuardStatus detail::limit_bend_node_motion(
+    const std::array<TopologyPointTrack,3>& bend, const Layout& nodes,
+    double& safe_fraction, TopologyNodeMotionWork& work,
+    const TopologyGuardOptions& options) {
+    if(!valid_options(options))return fail(TopologyGuardError::InvalidOptions,"invalid bend-node guard options");
+    if(nodes.nodes.size()>options.max_nodes)
+        return fail(TopologyGuardError::CapacityExceeded,"bend-node guard node budget exceeded");
+    for(const auto& point:bend)
+        if(!valid(point,options))return fail(TopologyGuardError::InvalidGeometry,"unbounded bend-node motion");
+    double candidate=1.0;
+    // Two affected segments, O(nodes) time and O(1) auxiliary storage.
+    // Each pair consumes one constraint and the same bounded evaluations
+    // as the continuous segment/node guard used for graph movement.
+    for(std::size_t segment=0;segment+1<bend.size();++segment)
+        for(const auto& box:nodes.nodes) {
+            if(work.constraints==options.max_constraints || work.evaluations==options.max_evaluations)
+                return fail(TopologyGuardError::CapacityExceeded,"bend-node guard count budget exceeded");
+            ++work.constraints;++work.evaluations;
+            const SegmentNodeMotion motion{{relative_motion(bend[segment],box,box),
+                                             relative_motion(bend[segment+1],box,box)},box.width,box.height};
+            double safe=1.0;
+            const auto st=segment_node_bound(motion,safe,work.evaluations,options);
+            if(!st)return st;
+            candidate=std::min(candidate,safe);
+        }
+    safe_fraction=candidate;
+    return {};
+}
 
 TopologyGuardStatus limit_topology_tri(const TopologyTriConstraint& constraint,
                                        double& max_safe_fraction,

@@ -26,12 +26,15 @@ struct TopologyEdit {
 };
 
 struct TopologyEditOptions {
+    // analytic_guards enables continuous node-interior checks for split
+    // motion. max_guard_constraints/evaluations are shared across the batch.
     TopologyOptions audit;
     std::size_t max_edits = 128;
     std::size_t max_audits = 4096; // Cumulative geometric signature rechecks.
     // For a StraightToBend insertion, also audit 1/N,2/N,...,N/N
-    // of the local continuous vertex displacement. This is a sampled guard,
-    // NOT a certificate of all continuous-time configurations.
+    // of the local continuous vertex displacement after the continuous node
+    // guard. Route contacts/crossing order still use this sampled audit;
+    // these checks are NOT a complete continuous-time certificate.
     std::size_t continuation_frames = 8;
     double collinear_tolerance = 1e-10;
 };
@@ -49,6 +52,13 @@ struct TopologyEditReport {
 // the baseline ordered/signed crossing signature. Every candidate must retain
 // measured port anchors and avoid every node rectangle. Errors clear `out`
 // and report atomically; no legacy/alternative routing fallback exists.
+// Before each split, continuous node guards check both affected affine segments
+// against every fixed rectangle, including source/target nodes. Boundary-only
+// contact is allowed. A partial safe prefix rejects the ENTIRE edit with
+// NoAdmissibleStep; guard exhaustion returns CapacityExceeded. Two constraints
+// per node and 1..30 evaluations per segment/node pair share the cumulative
+// audit.max_guard_* budgets across splits, with O(nodes) work and O(1) storage
+// per split. Disabling audit.analytic_guards explicitly selects sampled checks.
 // The edit changes route topology *representation*, not arbitrary geometry.
 // It does not schedule collision-triggered bends nor guarantee ambient isotopy.
 TopologyStatus apply_topology_edits(

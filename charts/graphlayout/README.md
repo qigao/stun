@@ -757,7 +757,19 @@ the independent full collision/crossing audit.
 representation changes independently from the original topology search:
 
 - **Straight -> Bend:** insert a caller-specified non-collinear waypoint at
-  a strict interior segment fraction with measured displacement. Audit each
+  a strict interior segment fraction with measured displacement. With
+  `audit.analytic_guards` enabled (the default), continuously check both
+  affected affine segments against every fixed node, including source/target
+  rectangles, using the same segment/node event partition as graph movement.
+  Boundary-only contact remains allowed. A collision at any intermediate
+  time rejects the entire edit with `NoAdmissibleStep`; the requested bend
+  is not replaced by an implicit partial edit. A private motion interface
+  shares the existing numerical algorithm without adding a public API.
+  Each split consumes two constraints per node and 1..30 evaluations per
+  segment/node pair, cumulatively across the entire batch through
+  `audit.max_guard_constraints/evaluations`. Each split takes O(nodes) guard
+  work and O(1) auxiliary storage. Explicitly disabling `analytic_guards`
+  retains sampled-only continuation. Audit each
   sampled intermediate vertex motion against the ORIGINAL full ordered/signed
   crossing signature, all node rectangles and exact port anchors.
 - **Bend -> Straight:** prune only a forward, (numerically) collinear interior
@@ -766,7 +778,9 @@ representation changes independently from the original topology search:
 - Transactional errors, exact input indices and explicit resource limits
   (`max_edits`, `max_audits`, `continuation_frames`, route point budgets).
   No guessed collision detours, libavoid fallback, or silent topology change.
-  The sampled edit continuation does NOT prove an unsampled ambient isotopy.
+  Route-to-route contacts and crossing order during edit continuation remain
+  sampled. The node guard and sampled continuation do NOT prove an unsampled
+  ambient isotopy; the numerical node checks are not exact predicates.
 
 `Stun::GraphTopologyProjection` composes the native VPSC/2D projection
 with explicitly requested topology edits and the audited topology movement.
@@ -784,6 +798,15 @@ merges, crossing changes, node penetration, route/operation budget exhaustion,
 deterministic variants, full projected moves with exact pins, partial-move
 rejection and infeasible VPSC pin constraints. Both modules are C++17,
 renderer-neutral and independently linked.
+
+Split-motion regressions move the new point from `(55,5)` to `(95,-995)`
+past a small rectangle at `(55,-30)` (waypoint collision) or `(65,-30)`
+(segment-interior collision with all waypoints outside). All default eight
+sampled frames miss the collision, while continuous checks reject it.
+Sixty-four scaled/transposed/reflected/reversed cases use independent
+intermediate geometry audits. Boundary tangency, incident nodes, exact
+single-edit and cumulative batch budgets, polynomial evaluation exhaustion
+and transactional VPSC composition are also covered.
 
 **Current limits:** topology surgery locations/displacements are supplied by
 the caller, not automatically scheduled from a scanline collision event.

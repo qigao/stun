@@ -22,6 +22,19 @@ Fixture fixture(){
 int main(){
     try{
         {
+            auto f=fixture();f.graph.nodes[2].width=3;f.graph.nodes[2].height=8;
+            f.baseline.nodes[2]={65,-30,3,8};
+            TopologyEdit insert;insert.displacement={40,-1000};
+            Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+            TopologyProjectionReport report;report.edits.inserted_bends=1;
+            const auto status=project_topology_with_edits(f.graph,f.baseline,f.ports,f.routes,
+                f.baseline,{}, {insert},moved,paths,{},&report);
+            check(status.topology_error==TopologyError::NoAdmissibleStep,
+                  "projection composition rejects an unsampled split-segment collision");
+            check(moved.nodes.empty() && paths.edges.empty() && report.edits.inserted_bends==0,
+                  "continuous edit failure publishes neither projected nodes nor edited routes");
+        }
+        {
             Graph graph;graph.nodes={{"pinned",10,10}};
             Layout baseline;baseline.nodes={{1e7,1e7,10,10}};
             Layout desired=baseline;
