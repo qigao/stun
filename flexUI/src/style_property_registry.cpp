@@ -243,13 +243,18 @@ const StylePropertyDesc* style_property_find(std::string_view name) noexcept {
     return nullptr;
 }
 
+bool style_value_type_matches(const cmeta_type_desc* expected,
+                              const cmeta_type_desc* supplied) noexcept {
+    return expected && supplied &&
+           cmeta_type_equal(expected, supplied) &&
+           expected->kind == supplied->kind &&
+           expected->size == supplied->size &&
+           expected->align == supplied->align;
+}
+
 bool style_property_accepts_type(const StylePropertyDesc& property,
                                  const cmeta_type_desc* type) noexcept {
-    return property.type && type &&
-           cmeta_type_equal(property.type, type) &&
-           property.type->kind == type->kind &&
-           property.type->size == type->size &&
-           property.type->align == type->align;
+    return style_value_type_matches(property.type, type);
 }
 
 bool style_property_read(const StylePropertyDesc& property,

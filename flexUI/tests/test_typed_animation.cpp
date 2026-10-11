@@ -4,6 +4,8 @@
 #include <flex/core/cmeta_types.h>
 #include <tinytest.hpp>
 
+#include "typed_value_test_support.h"
+
 using namespace flexUI;
 using namespace flexUI::detail;
 
@@ -23,6 +25,61 @@ std::vector<AnimationValuePoint> opacity_points() {
 } // namespace
 
 suite("FlexUI typed AnimationManager core") {
+    it("interpolates peer Color keyframes through a canonical property query") {
+        const auto* background = style_property_find("background-color");
+        check_not_null(background);
+        const auto* peer = flex_test_peer_color_type();
+        check_not_equal(peer, background->type);
+        auto property = *background;
+        property.type = peer;
+        AnimationManager manager;
+        const std::vector<TypedAnimationPoint> points = {
+            {0.0f, {peer, flex::AnimValue{Color{1, 0, 0, 0.25f}}}},
+            {1.0f, {peer, flex::AnimValue{Color{0, 0, 1, 0.75f}}}},
+        };
+        check_true(manager.start_typed(1, property, points, linear_animation(), 0.0f));
+        const auto sampled = manager.get_color(1, *background, Color{}, 50.0f);
+        check_within(sampled.r, 0.5f, 0.0001f);
+        check_within(sampled.b, 0.5f, 0.0001f);
+        check_within(sampled.a, 0.5f, 0.0001f);
+    }
+
+    it("rejects malformed property layouts without replacing an active animation") {
+        const auto* opacity = style_property_find("opacity");
+        check_not_null(opacity);
+        AnimationManager manager;
+        check_true(manager.start_float(
+            1, *opacity, opacity_points(), linear_animation(), 0.0f));
+        for (const auto& type : incompatible_native_types(*opacity->type)) {
+            auto property = *opacity;
+            property.type = &type;
+            check_false(manager.start_float(
+                1, property, opacity_points(), linear_animation(), 25.0f));
+            check_within(manager.get_float(1, property, -1.0f, 50.0f),
+                         -1.0f, 0.0001f);
+            check_within(manager.get_float(1, *opacity, -1.0f, 50.0f),
+                         0.5f, 0.0001f);
+        }
+    }
+
+    it("rejects malformed keyframe layouts without replacing an active animation") {
+        const auto* opacity = style_property_find("opacity");
+        check_not_null(opacity);
+        AnimationManager manager;
+        check_true(manager.start_float(
+            1, *opacity, opacity_points(), linear_animation(), 0.0f));
+        for (const auto& type : incompatible_native_types(*opacity->type)) {
+            const std::vector<TypedAnimationPoint> points = {
+                {0.0f, {opacity->type, flex::AnimValue{0.0f}}},
+                {1.0f, {&type, flex::AnimValue{1.0f}}},
+            };
+            check_false(manager.start_typed(
+                1, *opacity, points, linear_animation(), 25.0f));
+            check_within(manager.get_float(1, *opacity, -1.0f, 50.0f),
+                         0.5f, 0.0001f);
+        }
+    }
+
     it("interpolates opacity by descriptor identity") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);

@@ -42,9 +42,11 @@ flexUI 的目标是用 CSS 描述界面状态，再把同一棵 Element 树投�
 
 2.4 CMeta 属性类型
    Flex 的 `flex/core/cmeta_types.h` 定义 Color、Vec2、String 的语义身份；FlexUI 属性 registry
-   通过 `cmeta_type_equal()` 比较语义身份，再由 `style_property_accepts_type()` 校验 native
+   通过 `cmeta_type_equal()` 比较语义身份，再由 `style_value_type_matches()` 校验 native
    kind/size/alignment。描述符地址不是跨翻译单元的类型身份，语义相等不代表存储布局兼容。
-   读写入口与 compound write preflight 共享这一准入规则。公开这些头文件的 target 显式
+   属性读写、compound write preflight、typed transition/animation 的准入与查询共享这一规则。
+   非法布局不会覆盖已有轨道。轨道借用 property/type metadata，直至移除；复制值不延长这些
+   metadata 的生命周期。公开这些头文件的 target 显式
    PUBLIC 链接 `Salts::CMeta`。
    描述符只提供类型信息；`AnimValue`、`TransitionValue` 继续拥有值存储，FlexUI 继续拥有 CSS
    解析、插值与 dirty impact。元数据不授予对象构造、写入、销毁或模块保留权限。

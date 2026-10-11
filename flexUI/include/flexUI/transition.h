@@ -194,6 +194,7 @@ std::vector<TransitionDef> parse_transition_list(const std::string& value);
 // ============================================================================
 
 struct TransitionValue {
+    // Metadata is borrowed; copying a value only owns its AnimValue storage.
     const cmeta_type_desc* type = nullptr;
     flex::AnimValue value{};
 
@@ -239,6 +240,7 @@ public:
     void start(std::uintptr_t element_id, const std::string& property,
                float from, float to, const TransitionDef& def, float current_time_ms);
 
+    // Successful admission borrows property and type metadata until removal.
     bool start_typed(std::uintptr_t element_id,
                      const detail::StylePropertyDesc& property,
                      const TransitionValue& from,
@@ -374,6 +376,7 @@ public:
                const std::vector<AnimationValuePoint>& keyframes,
                const AnimationDef& def, float current_time_ms);
 
+    // Successful admission borrows property and keyframe types until removal.
     bool start_typed(std::uintptr_t element_id,
                      const detail::StylePropertyDesc& property,
                      const std::vector<TypedAnimationPoint>& keyframes,

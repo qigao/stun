@@ -22,8 +22,8 @@ installed packages (the following paths match this workspace):
 $env:SALTS_ROOT = 'C:/projects/cpp/external/pkgs/salts/release'
 $env:SALTS_UTILS_ROOT = 'C:/projects/cpp/external/pkgs/salts-utils/release'
 cmake --preset win-core-release-user
-cmake --build --preset win-core-release-user --target test_plugin_create_unwind test_plugin_host test_plugin_manifest test_plugin_abi test_service_registry test_property_cmeta test_style_property_registry test_style_engine test_css_typed_ir test_typed_animation --parallel 2
-ctest --preset win-core-release-user -R '^(test_plugin_create_unwind|test_plugin_host|test_plugin_manifest|test_plugin_abi|test_service_registry|test_property_cmeta|test_style_property_registry|test_style_engine|test_css_typed_ir|test_typed_animation)$'
+cmake --build --preset win-core-release-user --target test_plugin_create_unwind test_plugin_host test_plugin_manifest test_plugin_abi test_service_registry test_property_cmeta test_style_property_registry test_style_engine test_css_typed_ir test_css_typed_apply test_typed_transition test_typed_animation --parallel 2
+ctest --preset win-core-release-user -R '^(test_plugin_create_unwind|test_plugin_host|test_plugin_manifest|test_plugin_abi|test_service_registry|test_property_cmeta|test_style_property_registry|test_style_engine|test_css_typed_ir|test_css_typed_apply|test_typed_transition|test_typed_animation)$'
 ```
 
 This profile's install entry is `install-win-core-release-user`; its destination
