@@ -53,6 +53,23 @@ target_link_libraries(dotgraph_parser PUBLIC TurboParser::Parser)
 # Backend-neutral layout + SVG export
 # ============================================================================
 
+# ============================================================================
+# DotGraph chart-owned AST-to-Graph placement algorithm adapter.
+# This target builds with only Stun's core/Layered solver, no parser runtime,
+# SVG renderer, libavoid, FlexUI, or OpenGL dependency.
+# ============================================================================
+add_library(stun_dotgraph_layout STATIC src/dotgraph_layout.cpp)
+add_library(Stun::DotGraphLayout ALIAS stun_dotgraph_layout)
+target_include_directories(stun_dotgraph_layout PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(stun_dotgraph_layout
+    PUBLIC Stun::GraphCore
+    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphPolylineNudging Stun::GraphNudging Stun::GraphPortBindings
+)
+target_compile_features(stun_dotgraph_layout PUBLIC cxx_std_17)
+set_target_properties(stun_dotgraph_layout PROPERTIES FOLDER "Modules/DotGraph/Layout")
+
 add_library(dotgraph STATIC
     src/dotgraph_renderer.cpp
 )
@@ -66,7 +83,7 @@ target_include_directories(dotgraph
 
 target_link_libraries(dotgraph
     PUBLIC dotgraph_parser
-    PRIVATE flex_expression TurboParser::Mustache avoid
+    PRIVATE flex_expression TurboParser::Mustache Stun::DotGraphLayout
 )
 
 # ============================================================================

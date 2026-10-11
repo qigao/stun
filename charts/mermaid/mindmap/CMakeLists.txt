@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(mindmap_parser C)
+project(mindmap_parser LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 
@@ -42,3 +42,16 @@ target_compile_definitions(mindmap_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR
 add_test(NAME mindmap_test COMMAND mindmap_test)
 set_target_properties(mindmap PROPERTIES FOLDER "Modules/Mermaid")
 set_target_properties(mindmap_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
+
+# The existing C parser remains independent of native C++ graph placement.
+# Stun::GraphTidyTree is a separate algorithm target; this adapter owns only
+# Mindmap AST -> tree geometry conversion, not rendering or parser state.
+add_library(stun_mermaid_mindmap_layout STATIC src/mindmap_layout.cpp)
+add_library(Stun::MermaidMindmapLayout ALIAS stun_mermaid_mindmap_layout)
+target_include_directories(stun_mermaid_mindmap_layout PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(stun_mermaid_mindmap_layout PUBLIC Stun::GraphTidyTree)
+target_compile_features(stun_mermaid_mindmap_layout PUBLIC cxx_std_17)
+set_target_properties(stun_mermaid_mindmap_layout PROPERTIES
+    FOLDER "Modules/Mermaid/MindmapLayout")
