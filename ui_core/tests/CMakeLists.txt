@@ -2,3 +2,8 @@ add_executable(stun_ui_core_test ui_core_test.c)
 target_link_libraries(stun_ui_core_test PRIVATE Stun::UICore)
 target_compile_features(stun_ui_core_test PRIVATE c_std_11)
 add_test(NAME stun_ui_core_test COMMAND stun_ui_core_test)
+
+add_executable(stun_markdown_c11_test markdown_c11_test.c)
+target_compile_features(stun_markdown_c11_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_c11_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_c11_test COMMAND stun_markdown_c11_test)

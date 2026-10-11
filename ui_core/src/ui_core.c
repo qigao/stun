@@ -104,7 +104,7 @@ stun_ui_status stun_ui_rect_view_validate(
 
 static bool valid_block_kind(stun_ui_block_kind kind) {
     return kind >= STUN_UI_BLOCK_DOCUMENT &&
-           kind <= STUN_UI_BLOCK_TABLE_CELL;
+           kind <= STUN_UI_BLOCK_DIAGRAM;
 }
 
 stun_ui_status stun_ui_document_validate(
@@ -151,5 +151,44 @@ stun_ui_status stun_ui_document_visit(
             block, span, block->byte_end - block->byte_begin, context);
         if (result != STUN_UI_OK) return result;
     }
+    return STUN_UI_OK;
+}
+
+/* A RichDoc contains exact semantic text ranges and a separate borrowed
+ * metadata byte arena. Both must remain valid throughout a traversal. */
+stun_ui_status stun_ui_rich_document_validate(
+    const stun_ui_rich_document_view *view, size_t max_blocks) {
+    if (!view || view->block_metadata_count != view->document.block_count ||
+        !view->block_metadata ||
+        (!view->metadata && view->metadata_bytes) ||
+        (!view->raw_markdown && view->raw_markdown_bytes))
+        return STUN_UI_INVALID_ARGUMENT;
+    stun_ui_status status =
+        stun_ui_document_validate(&view->document, max_blocks);
+    if (status != STUN_UI_OK) return status;
+    for (size_t i=0; i<view->block_metadata_count; ++i) {
+        const stun_ui_block_metadata *m = &view->block_metadata[i];
+        if (m->byte_begin > m->byte_end ||
+            m->byte_end > view->metadata_bytes)
+            return STUN_UI_INVALID_ARGUMENT;
+    }
+    return STUN_UI_OK;
+}
+
+stun_ui_status stun_ui_rich_document_metadata(
+    const stun_ui_rich_document_view *view, size_t node_index,
+    const char **out_bytes, size_t *out_length) {
+    if (!view || !out_bytes || !out_length ||
+        node_index >= view->block_metadata_count ||
+        !view->block_metadata)
+        return STUN_UI_INVALID_ARGUMENT;
+    const stun_ui_block_metadata range = view->block_metadata[node_index];
+    if (range.byte_begin > range.byte_end ||
+        range.byte_end > view->metadata_bytes ||
+        (!view->metadata && view->metadata_bytes))
+        return STUN_UI_INVALID_ARGUMENT;
+    *out_bytes = view->metadata
+        ? view->metadata + range.byte_begin : NULL;
+    *out_length = range.byte_end - range.byte_begin;
     return STUN_UI_OK;
 }
