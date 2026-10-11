@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -1044,6 +1045,43 @@ void run() {
                 "desired motion away from constraint admits full displacement");
     }
     {
+        {
+            // n*n - (n-1)*(n+1)=1. Moving the middle point upward
+            // changes that signed area to 1-(2n+1)*alpha.
+            constexpr std::array magnitudes={0x1p27,0x1p38},scales={0.125,1.0};
+            constexpr std::size_t variants=8;
+            constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
+            for(const double n:magnitudes)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant)for(const bool zero_margin:{false,true}) {
+                const auto transformed=[&](TopologyBendConstraint bend) {
+                    for(auto* point:{&bend.first,&bend.bend,&bend.last}) {
+                        for(auto* axis:{&point->x,&point->y}) {axis->initial*=scale;axis->desired*=scale;}
+                        if(variant&1)std::swap(point->x,point->y);
+                        if(variant&2) {point->x.initial=-point->x.initial;point->x.desired=-point->x.desired;}
+                    }
+                    if(variant&4)std::swap(bend.first,bend.last);
+                    return bend;
+                };
+                TopologyBendConstraint small={{{0,0},{0,0}},
+                    {{n,n},{n-1,n}},{{2*n+1,2*n+1},{2*n-1,2*n-1}}};
+                TopologyGuardOptions options;options.coordinate_limit=1e12;
+                if(zero_margin) {options.min_bend_area_ratio=0;options.event_backoff=0;}
+                const double event=(1-options.min_bend_area_ratio)/(2*n+1);
+                double fraction=1;
+                require(static_cast<bool>(limit_topology_bend(transformed(small),fraction,options)),
+                        "cancellation-scale bend deformation is analyzable");
+                require(fraction>0 && fraction<event &&
+                        fraction>=event*(1-2*options.event_backoff-relative_slack),
+                        "a nonzero cancelled baseline determinant retains an accurate early bend event");
+                small.bend.y.desired=n-2;
+                require(static_cast<bool>(limit_topology_bend(transformed(small),fraction,options)) && fraction==1,
+                        "cancellation-scale widening retains the full admissible motion");
+                small.bend.y.initial=n;small.bend.y.desired=n+1;
+                small.last.x={2*n,2*n};small.last.y={2*n,2*n};
+                require(static_cast<bool>(limit_topology_bend(transformed(small),fraction,options)) && fraction==1,
+                        "an exactly collinear baseline still imposes no bend sign guard");
+            }
+        }
         TopologyBendConstraint bend;
         bend.first={{0,0},{0,0}};
         bend.bend={{1,1},{1,-1}};

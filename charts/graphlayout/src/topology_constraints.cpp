@@ -1,5 +1,6 @@
 #include "stun/graphlayout/topology_constraints.h"
 #include "topology_edit_motion.h"
+#include "topology_numeric.h"
 
 #include <algorithm>
 #include <array>
@@ -50,7 +51,7 @@ bool valid(const TopologyPointTrack& t, const TopologyGuardOptions& o) {
 }
 
 Real cross(Real ax, Real ay, Real bx, Real by) {
-    return ax * by - ay * bx;
+    return detail::compensated_determinant(ax,ay,bx,by);
 }
 
 Real area(const TopologyBendConstraint& t, Real a) {

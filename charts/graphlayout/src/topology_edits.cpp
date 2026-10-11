@@ -1,5 +1,6 @@
 #include "stun/graphlayout/topology_edits.h"
 #include "topology_edit_motion.h"
+#include "topology_numeric.h"
 
 #include <algorithm>
 #include <cmath>
@@ -72,11 +73,7 @@ bool redundant_bend(Point a, Point p, Point b, double tolerance, Real& area) {
     const Real uy = static_cast<Real>(p.y) - a.y;
     const Real vx = static_cast<Real>(b.x) - p.x;
     const Real vy = static_cast<Real>(b.y) - p.y;
-    // Recover the rounded product residual before deciding that no motion
-    // exists. Equal rounded products can hide a nonzero determinant.
-    const Real product = uy*vx;
-    const Real residual = std::fma(-uy,vx,product);
-    area = std::fma(ux,vy,-product)+residual;
+    area = detail::compensated_determinant(ux,uy,vx,vy);
     const Real scale = std::max(Real(1),
         std::max(std::abs(ux),std::abs(uy))*
         std::max(std::abs(vx),std::abs(vy)));

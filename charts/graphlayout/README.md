@@ -570,8 +570,10 @@ the midpoint-centered vectors `(n,n-1)` and `(n+1,n)` have determinant 1 and a
 proper intersection with both parameters 1/2. Each family has 64 power-of-two
 scale, transpose, reflection and independent route-reversal cases. Another
 64 exact endpoint-on-segment contacts remain ambiguous. Default-tolerance
-rejections and failure-output clearing are checked separately. No budgets,
-asymptotic complexity or external dependencies change.
+rejections and failure-output clearing are checked separately. Stationary and
+rigid-translation continuation of the 128 disjoint/crossing cases retains all
+four nonzero segment-pair guards and independently audited crossing signs.
+No budgets, asymptotic complexity or external dependencies change.
 
 **Limit:** sampled continuation does **not** certify *every instant* of a
 continuous movement; this is a conservative numerical topology gate, **not
@@ -602,6 +604,10 @@ calculates conservative **analytic event fractions** before sampled auditing:
   has quadratic signed area under affine vertex motion. All analytic roots in
   `[0,1]` are considered, including two interior roots when initial and final
   bend signs agree; the earliest event caps the safe movement fraction.
+  Audit, movement and explicit-edit implementations share a private
+  FMA-compensated determinant so multiplication cancellation cannot silently
+  discard a nonzero baseline bend or endpoint orientation. The targets remain
+  separately linked, with no new public API or numeric dependency.
 - **Node pairs:** intersect the open affine rectangle-overlap intervals on
   both axes, then cap movement before the earliest interior collision. This
   includes isolated nodes and prevents rectangles from tunneling between
@@ -702,6 +708,16 @@ start/end signatures, but exchange their order twice at fractions `1/4` and
 Sixty-four scale/transpose/reflection/reversal cases exercise both exchange
 and pure triple tangency, plus independent accepted-prefix audits, exact
 shared budgets, coefficient subdivision exhaustion and rigid translation.
+
+Cancellation-scale bend regressions use `A=(0,0)`, `P=(n,n-1)` and
+`B=(2n+1,2n-1)` for `n=2^27,2^38`. Moving P by `(0,1)` gives the exact signed
+area `1-(2n+1)*alpha`, with a guard boundary at
+`(1-min_bend_area_ratio)/(2n+1)`. Sixty-four combinations of power-of-two
+scale, transpose, reflection, endpoint reversal and default/zero margins
+require a strictly earlier, positive safe fraction; widening and exactly
+collinear controls retain full movement. These tests target multiplication
+cancellation only; subtraction, polynomial reconstruction, root rounding and
+underflow still limit the numerical guard's precision.
 
 **Limitations:** this is a conservative *local guard*, not a complete
 `libtopology` implementation. Fixed baseline scan fractions may differ from

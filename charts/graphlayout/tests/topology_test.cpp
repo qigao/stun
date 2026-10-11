@@ -120,6 +120,29 @@ void run(){
                       signature.ordered_crossings[1][0].other_edge==0 && signature.ordered_crossings[1][0].sign==-sign,
                       "cancellation-scale crossings retain partner identity and transformed signs");
             }
+            for(const bool translate:{false,true}) {
+                constexpr Point displacement{4,-8};
+                auto desired=f.l;
+                if(translate)for(auto& node:desired.nodes) {
+                    node.x+=displacement.x*scale;node.y+=displacement.y*scale;
+                }
+                Layout moved;Routes paths;TopologyReport report;
+                const auto movement=move_topology_preserving(f.g,f.l,f.ports,f.routes,desired,
+                                                             moved,paths,options,&report);
+                if(!movement)throw std::runtime_error("rigid cancellation-scale movement: "+movement.message);
+                check(report.accepted_fraction==1 && report.baseline_crossings==signature.crossing_count &&
+                      moved.nodes.size()==f.l.nodes.size() && paths.edges.size()==f.routes.edges.size(),
+                      "audited cancellation-scale baselines enter stationary and rigid continuation");
+                check(report.segment_pair_constraints==4,
+                      "all four nonzero endpoint orientations retain their movement guards after cancellation");
+                TopologySignature after;
+                check(static_cast<bool>(audit_topology(f.g,moved,f.ports,paths,after,options)) &&
+                      after.crossing_count==signature.crossing_count,
+                      "independent audit retains cancellation-scale crossing count after guarded movement");
+                if(crossing)check(after.ordered_crossings[0][0].sign==signature.ordered_crossings[0][0].sign &&
+                                  after.ordered_crossings[1][0].sign==signature.ordered_crossings[1][0].sign,
+                                  "guarded rigid continuation preserves both oriented crossing signs");
+            }
             options.orientation_epsilon=TopologyOptions{}.orientation_epsilon;
             check(audit_topology(f.g,f.l,f.ports,f.routes,signature,options).error==TopologyError::AmbiguousTopology &&
                   signature.crossing_count==0 && signature.ordered_crossings.empty(),

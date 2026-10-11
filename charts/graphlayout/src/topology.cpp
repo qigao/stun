@@ -1,5 +1,6 @@
 #include "stun/graphlayout/topology.h"
 #include "stun/graphlayout/topology_constraints.h"
+#include "topology_numeric.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,7 @@ namespace stun::graphlayout {
 namespace {
 
 using Real = long double;
+using detail::compensated_determinant;
 
 TopologyStatus fail(TopologyError error, const std::string& message,
                     std::size_t edge = 0) {
@@ -105,17 +107,9 @@ bool leaves_outward(const Port& port, Point anchor, Point next) {
     }
 }
 
-Real determinant(Real ax, Real ay, Real bx, Real by) {
-    // Retain the second product's residual so independently rounded products
-    // cannot erase a small nonzero orientation or crossing denominator.
-    const Real product=ay*bx;
-    const Real residual=std::fma(-ay,bx,product);
-    return std::fma(ax,by,-product)+residual;
-}
-
 Real cross(Point a, Point b, Point c) {
-    return determinant(static_cast<Real>(b.x)-a.x,static_cast<Real>(b.y)-a.y,
-                       static_cast<Real>(c.x)-a.x,static_cast<Real>(c.y)-a.y);
+    return compensated_determinant(static_cast<Real>(b.x)-a.x,static_cast<Real>(b.y)-a.y,
+                                   static_cast<Real>(c.x)-a.x,static_cast<Real>(c.y)-a.y);
 }
 
 Real relative_orientation_scale(Point a, Point b, Point c) {
@@ -181,12 +175,12 @@ Intersection intersect(Point a, Point b, Point c, Point d, double eps) {
         const Real uy = static_cast<Real>(b.y)-a.y;
         const Real vx = static_cast<Real>(d.x)-c.x;
         const Real vy = static_cast<Real>(d.y)-c.y;
-        const Real det=determinant(ux,uy,vx,vy);
+        const Real det=compensated_determinant(ux,uy,vx,vy);
         if (det == 0.0L) return {Intersection::Type::Ambiguous,0,0,0};
         const Real wx = static_cast<Real>(c.x)-a.x;
         const Real wy = static_cast<Real>(c.y)-a.y;
-        const Real t=determinant(wx,wy,vx,vy)/det;
-        const Real u=determinant(wx,wy,ux,uy)/det;
+        const Real t=compensated_determinant(wx,wy,vx,vy)/det;
+        const Real u=compensated_determinant(wx,wy,ux,uy)/det;
         if (t <= 0.0L || t >= 1.0L || u <= 0.0L || u >= 1.0L)
             return {Intersection::Type::Ambiguous,0,0,0};
         return {Intersection::Type::Proper,t,u,det>0 ? 1 : -1};

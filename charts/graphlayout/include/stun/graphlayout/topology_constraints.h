@@ -101,6 +101,8 @@ TopologyGuardStatus limit_topology_straight(const TopologyStraightConstraint& co
 
 // Preserve the sign of a genuine three-point bend over the entire prefix.
 // Baseline-collinear triples have no bend sign and impose no sign guard.
+// Determinants compensate product cancellation with the same private numeric
+// primitive as the auditor and edit eligibility; this is not an exact predicate.
 TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint,
                                         double& max_safe_fraction,
                                         const TopologyGuardOptions& options = {});
