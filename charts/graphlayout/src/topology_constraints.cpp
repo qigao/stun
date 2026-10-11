@@ -332,6 +332,27 @@ TopologyGuardStatus limit_topology_movement(
         std::vector<TopologyPointTrack> moves;
         auto st=moving_route_points(edge,routes.edges[edge_idx],baseline,desired,options,moves);
         if(!st)return st;
+        // Internal waypoints can pass through a rectangle without the fixed
+        // segment scan noticing. A point is a zero-extent rectangle in the
+        // same continuous open-overlap calculation used for node pairs.
+        // Check incident nodes too. Terminal anchors stay on their own node
+        // boundaries; their collisions with other nodes have node-pair guards.
+        // O(nodes * internal-waypoints) time, O(1) additional storage.
+        for(std::size_t point=1;point+1<moves.size();++point) {
+            const PlacedNode initial_point{moves[point].x.initial,moves[point].y.initial,0,0};
+            const PlacedNode desired_point{moves[point].x.desired,moves[point].y.desired,0,0};
+            for(std::size_t node=0;node<graph.nodes.size();++node) {
+                if(!use())return fail(TopologyGuardError::CapacityExceeded,
+                                      "topology waypoint-node event budget exceeded");
+                double safe=1.0;
+                st=node_pair_bound(baseline.nodes[node],initial_point,
+                                   desired.nodes[node],desired_point,safe,options);
+                if(st.error==TopologyGuardError::InfeasibleBaseline)
+                    return fail(st.error,"baseline internal waypoint penetrates a node rectangle");
+                if(!st)return st;
+                candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
+            }
+        }
         for(std::size_t segment=0;segment+1<moves.size();++segment){
             const auto& u=moves[segment];const auto& v=moves[segment+1];
             const Real dx=static_cast<Real>(v.x.initial)-u.x.initial;

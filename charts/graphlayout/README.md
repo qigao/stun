@@ -593,6 +593,19 @@ calculates conservative **analytic event fractions** before sampled auditing:
   remain admissible. Each pair consumes one constraint and one evaluation
   from the existing shared budgets; this phase is O(nodes²) time and O(1)
   auxiliary storage. Baseline interior overlap is `InfeasibleBaseline`.
+- **Internal waypoints:** use the same open-overlap interval calculation for
+  every internal route vertex against every node rectangle, including the
+  route's source and target. A point has zero extent in this calculation;
+  boundary sliding, isolated corner tangency and a final-frame boundary touch
+  remain admissible. This catches a vertex sweeping through a rectangle when
+  the fixed center scan lies at a segment endpoint and generates no constraint.
+  Baseline interior penetration is `InfeasibleBaseline`. Terminal anchors stay
+  on their own node boundaries, with node-pair guards covering other nodes.
+  Each internal-waypoint/node pair consumes one shared constraint/evaluation;
+  the phase is O(nodes * internal-waypoints) time and O(1) additional storage.
+  Its operations appear in the evaluation report without increasing the
+  separate Straight/Bend counters. Segment-interior collisions still require
+  the local scan guards and subsequent complete geometry audit.
 - **Combination:** `move_topology_preserving` now optionally (default on)
   computes those analytic guards and only then runs its bounded multi-frame,
   complete graph collision and signed crossing-order audits. Reports include
@@ -606,6 +619,14 @@ failure and atomic outputs are required. The new regression suite includes
 96 deterministic affine separation cases, a bend whose sign reverses twice
 within one step, node/segment penetration, port-position composition,
 exactly bounded work and previous GraphTopology movement cases.
+Waypoint regressions include a rigid U-shaped route whose valid start and
+finish hide an obstacle penetration: its right internal vertex first reaches
+the obstacle at fraction `0.3`, even though all fixed scans skip the obstacle.
+Thirty-two scaled/transposed/reflected/reversed cases independently audit
+accepted prefixes. A returning waypoint hits its incident source (or target
+after edge reversal) at fraction `41/124`. Moving obstacles, rigid graph
+translation, diagonal bypass, boundary policies, exact budgets and atomic
+failure outputs are also covered.
 
 **Limitations:** this is a conservative *local guard*, not a complete
 `libtopology` implementation. Fixed baseline scan fractions may differ from

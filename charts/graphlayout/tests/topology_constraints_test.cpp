@@ -78,7 +78,8 @@ MovementFixture collinear_swap(SwapAxis axis=SwapAxis::Horizontal, double scale=
     }
     return f;
 }
-void collinear_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
+// These fixtures translate both endpoints of each route equally.
+void rigid_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
     placement=f.baseline;paths=f.routes;
     for(std::size_t i=0;i<placement.nodes.size();++i) {
         placement.nodes[i].x+=fraction*(f.desired.nodes[i].x-f.baseline.nodes[i].x);
@@ -106,14 +107,224 @@ void collinear_frame(const MovementFixture& f, double fraction, Layout& placemen
         paths.edges[i].points.back()=anchor(f.ports[i].target);
     }
 }
+MovementFixture waypoint_sweep(bool vertical=false, double scale=1.0) {
+    MovementFixture f;
+    f.graph.nodes={{"source",10,10},{"target",10,10},{"obstacle",10,10}};
+    f.graph.edges={{0,1}};
+    f.baseline.nodes={{-5,100,10,10},{15,100,10,10},{80,-5,10,10}};
+    f.routes.edges={{{{0,100},{0,0},{20,0},{20,100}}}};
+    f.ports={{{0,Side::North,0.5},{1,Side::North,0.5}}};
+    if(vertical) {
+        for(auto& n:f.baseline.nodes)std::swap(n.x,n.y);
+        for(auto& p:f.routes.edges[0].points)std::swap(p.x,p.y);
+        f.ports[0].source.side=Side::West;f.ports[0].target.side=Side::West;
+    }
+    for(auto& n:f.graph.nodes) {n.width*=scale;n.height*=scale;}
+    for(auto& n:f.baseline.nodes) {n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;}
+    for(auto& p:f.routes.edges[0].points) {p.x*=scale;p.y*=scale;}
+    f.desired=f.baseline;
+    for(std::size_t i=0;i<2;++i) {
+        if(vertical)f.desired.nodes[i].y+=200*scale;
+        else f.desired.nodes[i].x+=200*scale;
+    }
+    return f;
+}
 void run() {
+    {
+        const auto f=waypoint_sweep();
+        TopologySignature signature;
+        require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,signature)),
+                "rigid U route starts clear of the obstacle");
+        Layout placement;Routes paths;
+        rigid_frame(f,0.325,placement,paths);
+        require(audit_topology(f.graph,placement,f.ports,paths,signature).error==TopologyError::InvalidGeometry,
+                "intermediate U waypoint enters the obstacle interior");
+        TopologyOptions single;single.analytic_guards=false;single.samples_per_trial=1;
+        TopologyReport movement;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction==1,
+                "endpoint-only sampling misses the hidden waypoint collision");
+        // The right waypoint starts at x=20; the obstacle begins at x=80.
+        // With 200-unit translation the first boundary contact is alpha=0.3.
+        constexpr double first_contact=0.3;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction>0.29 && guard.max_safe_fraction<first_contact,
+                "continuous internal-waypoint collision caps a missed scan-endpoint event");
+        single.analytic_guards=true;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<first_contact,
+                "single-sample continuation respects internal-waypoint collision");
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                "guarded U route independently passes audit");
+    }
+    {
+        constexpr std::array scales={0.125,1.0,8.0,1024.0};
+        constexpr std::size_t axes=2, variants=4, samples=16;
+        for(std::size_t axis=0;axis<axes;++axis)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant) {
+                const bool vertical=axis!=0;
+                auto f=waypoint_sweep(vertical,scale);
+                if(variant%2) {
+                    for(auto* layout:{&f.baseline,&f.desired})for(auto& n:layout->nodes) {
+                        if(vertical)n.y=-n.y-n.height;
+                        else n.x=-n.x-n.width;
+                    }
+                    for(auto& p:f.routes.edges[0].points) {
+                        if(vertical)p.y=-p.y;
+                        else p.x=-p.x;
+                    }
+                }
+                if(variant>=variants/2) {
+                    std::swap(f.graph.edges[0].source,f.graph.edges[0].target);
+                    std::swap(f.ports[0].source,f.ports[0].target);
+                    std::reverse(f.routes.edges[0].points.begin(),f.routes.edges[0].points.end());
+                }
+                TopologyGuardReport guard;
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                        "transformed waypoint sweep can be guarded");
+                near(guard.max_safe_fraction,0.3*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+                     "waypoint event is invariant under axis, scale, reflection and edge reversal");
+                require(guard.straight_constraints==0,
+                        "waypoint event is detected when all fixed scans miss their endpoints");
+                Layout placement;Routes paths;TopologyReport movement;TopologySignature signature;
+                TopologyOptions single;single.samples_per_trial=1;
+                require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                        f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                        movement.accepted_fraction<=guard.max_safe_fraction,
+                        "transformed waypoint sweep composes with the full audit");
+                for(std::size_t sample=0;sample<=samples;++sample) {
+                    rigid_frame(f,movement.accepted_fraction*static_cast<double>(sample)/samples,placement,paths);
+                    const auto status=audit_topology(f.graph,placement,f.ports,paths,signature);
+                    if(!status)throw std::runtime_error("waypoint axis "+std::to_string(axis)+
+                        ", variant "+std::to_string(variant)+", sample "+std::to_string(sample)+": "+status.message);
+                }
+                // Move the obstacle with the entire route: all relative
+                // positions remain fixed, so the new checks must admit it.
+                f.desired.nodes[2].x+=f.desired.nodes[0].x-f.baseline.nodes[0].x;
+                f.desired.nodes[2].y+=f.desired.nodes[0].y-f.baseline.nodes[0].y;
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                        guard.max_safe_fraction==1,"rigid graph movement has no artificial waypoint event");
+            }
+    }
+    {
+        const auto f=waypoint_sweep();
+        // Three node pairs, six waypoint/node pairs, three fixed scans, two
+        // bends, four segment orientations: 18 evaluations and 15 constraints.
+        constexpr std::size_t constraints=15, evaluations=18;
+        TopologyGuardOptions limited;limited.max_constraints=constraints;limited.max_evaluations=evaluations;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
+                guard.evaluations==evaluations,"waypoint events fit exact shared budgets");
+        limited.max_constraints=constraints-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "waypoint constraint budget exhaustion clears the report");
+        limited.max_constraints=constraints;limited.max_evaluations=evaluations-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "waypoint evaluation budget exhaustion clears the report");
+        TopologyOptions scarce;scarce.max_guard_evaluations=evaluations-1;
+        Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+        TopologyReport movement;movement.accepted_fraction=1;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,scarce,&movement).error==TopologyError::CapacityExceeded &&
+                moved.nodes.empty() && paths.edges.empty() && movement.accepted_fraction==0,
+                "waypoint budget failure clears all composed outputs");
+    }
+    {
+        auto f=waypoint_sweep();f.desired=f.baseline;f.desired.nodes[2].x-=200;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                "a moving rectangle can sweep over stationary internal waypoints");
+        near(guard.max_safe_fraction,0.3*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+             "relative motion determines the waypoint event");
+        Layout moved;Routes paths;TopologyReport movement;TopologySignature signature;
+        TopologyOptions single;single.samples_per_trial=1;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,single,&movement)) && movement.accepted_fraction<0.3,
+                "moving-obstacle event caps integrated movement");
+        require(static_cast<bool>(audit_topology(f.graph,moved,f.ports,paths,signature)),
+                "moving-obstacle prefix independently passes audit");
+        f=waypoint_sweep();f.desired=f.baseline;
+        for(std::size_t i=0;i<2;++i) {f.desired.nodes[i].x+=200;f.desired.nodes[i].y+=200;}
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"diagonal waypoint bypass has disjoint axis-overlap intervals");
+        f=waypoint_sweep();f.desired=f.baseline;
+        for(std::size_t i=0;i<2;++i) {f.desired.nodes[i].x+=192;f.desired.nodes[i].y+=16;}
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"waypoint corner tangency has no open interior-overlap interval");
+        f=waypoint_sweep();f.desired=f.baseline;
+        for(std::size_t i=0;i<2;++i)f.desired.nodes[i].x+=60;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"final-frame waypoint boundary contact remains admissible");
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,single,&movement)) && movement.accepted_fraction==1,
+                "full audit agrees with final-frame waypoint boundary policy");
+    }
+    {
+        auto f=waypoint_sweep();f.baseline.nodes[2].x=20;
+        f.desired=f.baseline;f.desired.nodes[0].x-=200;f.desired.nodes[1].x-=200;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"a boundary waypoint moving outward is admissible");
+        f.desired=f.baseline;f.desired.nodes[0].y+=200;f.desired.nodes[1].y+=200;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"boundary-only waypoint sliding is admissible");
+        f.desired=f.baseline;f.desired.nodes[0].x+=200;f.desired.nodes[1].x+=200;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==0,"a boundary waypoint moving inward has no positive safe prefix");
+        Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+        TopologyReport movement;movement.accepted_fraction=1;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,{},&movement).error==TopologyError::NoAdmissibleStep &&
+                moved.nodes.empty() && paths.edges.empty() && movement.accepted_fraction==0,
+                "zero waypoint prefix fails atomically through the movement API");
+        f=waypoint_sweep();f.routes.edges[0].points[1]={0,105};
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard).error==
+                TopologyGuardError::InfeasibleBaseline && guard.evaluations==0,
+                "baseline waypoint inside its source node is rejected transactionally");
+    }
+    {
+        MovementFixture f;
+        f.graph.nodes={{"source",10,10},{"target",10,10}};f.graph.edges={{0,1}};
+        f.baseline.nodes={{0,0,10,10},{-210,0,10,10}};
+        f.routes.edges={{{{5,0},{5,-100},{-100,-100},{-100,5},{-200,5}}}};
+        f.ports={{{0,Side::North,0.5},{1,Side::East,0.5}}};
+        f.desired=f.baseline;f.desired.nodes[1].x+=400;
+        // Arclength 310/410 gives the returning waypoint speed 400*310/410.
+        // Its 100-unit gap from the source rectangle closes at 41/124.
+        constexpr double first_contact=41.0/124.0;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                "returning waypoint near an incident node can be guarded");
+        near(guard.max_safe_fraction,first_contact*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+             "incident source node participates in continuous waypoint collision checks");
+        Layout moved;Routes paths;TopologyReport movement;TopologySignature signature;
+        TopologyOptions single;single.samples_per_trial=1;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<first_contact,"incident-node event composes with movement");
+        require(static_cast<bool>(audit_topology(f.graph,moved,f.ports,paths,signature)),
+                "accepted incident-node prefix independently passes audit");
+        std::swap(f.graph.edges[0].source,f.graph.edges[0].target);
+        std::swap(f.ports[0].source,f.ports[0].target);
+        std::reverse(f.routes.edges[0].points.begin(),f.routes.edges[0].points.end());
+        TopologyGuardReport reversed;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reversed)),
+                "reversed incident-node route can be guarded");
+        near(reversed.max_safe_fraction,guard.max_safe_fraction,1e-12,
+             "the same incident event is detected when the rectangle is the target node");
+        require(reversed.evaluations==guard.evaluations,"incident-edge reversal retains shared work counts");
+    }
     {
         const auto f=collinear_swap();
         TopologySignature signature;
         require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,signature)),
                 "collinear disjoint baseline is valid");
         Layout placement;Routes paths;
-        collinear_frame(f,0.25,placement,paths);
+        rigid_frame(f,0.25,placement,paths);
         require(audit_topology(f.graph,placement,f.ports,paths,signature).error==
                 TopologyError::AmbiguousTopology,"collinear segments overlap between valid endpoints");
         TopologyOptions single;single.analytic_guards=false;single.samples_per_trial=1;
@@ -157,7 +368,7 @@ void run() {
                 near(guard.max_safe_fraction,0.2*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
                      "collinear event is invariant under axis, scale, edge reversal and permutation");
                 Layout placement;Routes paths;TopologySignature signature;
-                collinear_frame(f,1,placement,paths);
+                rigid_frame(f,1,placement,paths);
                 require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
                         "transformed collinear swap has valid final geometry");
                 TopologyOptions single;single.samples_per_trial=1;
@@ -175,7 +386,7 @@ void run() {
                 // half of its prefix, even if the full audit shortens the step.
                 const double prefix=std::ldexp(1.0,std::ilogb(movement.accepted_fraction));
                 for(std::size_t sample=0;sample<=samples;++sample) {
-                    collinear_frame(f,prefix*static_cast<double>(sample)/samples,placement,paths);
+                    rigid_frame(f,prefix*static_cast<double>(sample)/samples,placement,paths);
                     const auto audited=audit_topology(f.graph,placement,f.ports,paths,signature);
                     if(!audited)throw std::runtime_error("collinear axis "+std::to_string(static_cast<int>(axis))+
                         ", scale "+std::to_string(scale)+", variant "+std::to_string(variant)+
@@ -369,9 +580,9 @@ void run() {
     }
     {
         const auto f=spiral();
-        // One node pair, four bends and six independent segment pairs with
-        // four orientation evaluations each must share one bounded budget.
-        constexpr std::size_t evaluations=29;
+        // One node pair, eight waypoint/node checks, four bends and six
+        // independent segment pairs with four orientations share one budget.
+        constexpr std::size_t evaluations=37;
         TopologyGuardOptions limited;limited.max_constraints=evaluations;limited.max_evaluations=evaluations;
         TopologyGuardReport guard;
         require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&

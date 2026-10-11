@@ -35,8 +35,8 @@ struct TopologyOptions {
     std::size_t max_segment_checks = 2500000; // Across baseline and ALL trials.
     std::size_t max_trials = 16; // Candidate distance fractions: 1, 1/2, ...
     std::size_t samples_per_trial = 8; // Inspect the entire interpolation prefix.
-    // Analytically cap the candidate motion at local node-segment and bend
-    // orientation events before the sampled full-topology continuation.
+    // Analytically cap the candidate motion at node-pair/waypoint collisions
+    // and local node-segment/bend events before sampled full-topology checks.
     bool analytic_guards = true;
     std::size_t max_guard_constraints = 32768;
     std::size_t max_guard_evaluations = 2500000;
@@ -92,8 +92,8 @@ TopologyStatus audit_topology(const Graph& graph, const Layout& layout,
 // Conservative bounded continuation: linearly interpolate node rectangles
 // toward 'desired'. Each original route waypoint is moved by a deterministic,
 // arclength-weighted blend of its source/target-node displacements. Each trial
-// first analytically caps motion at continuous node-pair collisions and local
-// node/segment and bend events, then
+// first analytically caps motion at continuous node-pair and internal-waypoint
+// collisions plus local node/segment and bend events, then
 // checks intermediate sampled frames against the exact baseline crossing
 // signature, segment contacts and node collisions. An accepted result need
 // not reach the requested target; report.accepted_fraction states its extent.

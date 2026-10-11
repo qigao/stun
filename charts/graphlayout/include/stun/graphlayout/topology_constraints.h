@@ -111,6 +111,14 @@ TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint
 // collision guards, including isolated nodes; boundary-only contact is allowed.
 // Each pair consumes one constraint/evaluation from the shared budgets, with
 // O(nodes^2) time and O(1) auxiliary storage for this part of the guard.
+// Every internal route waypoint also has a continuous open-interior collision
+// guard against every node, including its source and target. Each waypoint/node
+// pair consumes one shared constraint/evaluation, taking O(nodes * internal-
+// waypoints) time and O(1) additional storage. Boundary-only contact is allowed;
+// baseline interior penetration is InfeasibleBaseline. Terminal anchors stay
+// on their own nodes, and node-pair guards cover collisions with other nodes.
+// Waypoint checks contribute to evaluations rather than Straight/Bend counts.
+// Segment interiors remain subject to the local scan guards and full audit.
 // For every unrelated node and segment whose
 // scan projection lies inside the segment, generate a fixed-fraction
 // node-face/segment TriConstraint. Consecutive route triples generate bend
