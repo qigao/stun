@@ -319,6 +319,92 @@ static bool md_list_marker(const char *s, size_t b, size_t e,
     return true;
 }
 
+/* GFM pipe-table subset. Escaped pipes and backtick code spans do not
+ * separate cells. Header/delimiter column counts must agree.
+ * A table is admitted only after two-line lookahead succeeds. */
+static bool md_table_unescaped(const char *s, size_t pos, size_t begin) {
+    size_t slashes = 0;
+    for (size_t p=pos; p>begin && s[p-1]=='\\'; --p) ++slashes;
+    return (slashes % 2u)==0u;
+}
+
+static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end) {
+    begin=md_left(s,begin,end);
+    end=md_right(s,begin,end);
+    if (begin<end && s[begin]==':') ++begin;
+    if (end>begin && s[end-1]==':') --end;
+    if (begin==end) return false;
+    for (size_t i=begin;i<end;++i)
+        if (s[i]!='-') return false;
+    return true;
+}
+
+static bool md_table_scan(const char *s, size_t begin, size_t end,
+                          bool delimiter, size_t *out_columns) {
+    if (begin>=end || !out_columns) return false;
+    begin=md_left(s,begin,end);
+    end=md_right(s,begin,end);
+    if (begin>=end) return false;
+    bool pipe=false;
+    if (s[begin]=='|') { ++begin; pipe=true; }
+    if (end>begin && s[end-1]=='|' &&
+        md_table_unescaped(s,end-1,begin)) { --end; pipe=true; }
+    if (begin>=end) return false;
+    size_t cell_begin=begin, cells=0;
+    bool code=false;
+    for (size_t p=begin;p<=end;++p) {
+        if (p<end && s[p]==(char)0x60 &&
+            md_table_unescaped(s,p,begin)) code=!code;
+        const bool boundary = p==end ||
+            (s[p]=='|' && !code && md_table_unescaped(s,p,begin));
+        if (!boundary) continue;
+        pipe |= p<end;
+        if (delimiter && !md_table_delimiter_cell(s,cell_begin,p))
+            return false;
+        ++cells;
+        cell_begin=p+1;
+    }
+    *out_columns=cells;
+    return cells>0 && pipe;
+}
+
+static bool md_table_row(stun_md_document *d, uint32_t table,
+                         const char *s, size_t begin, size_t end,
+                         size_t expected_columns) {
+    const uint32_t row=md_add(d,table,STUN_UI_BLOCK_TABLE_ROW,0u);
+    if (row==UINT32_MAX) return false;
+    begin=md_left(s,begin,end);
+    end=md_right(s,begin,end);
+    if (begin<end && s[begin]=='|') ++begin;
+    if (end>begin && s[end-1]=='|' &&
+        md_table_unescaped(s,end-1,begin)) --end;
+    size_t cell_begin=begin, cells=0;
+    bool code=false;
+    for(size_t p=begin;p<=end && d->error==STUN_UI_OK;++p) {
+        if(p<end && s[p]==(char)0x60 &&
+           md_table_unescaped(s,p,begin)) code=!code;
+        const bool boundary=p==end ||
+            (s[p]=='|' && !code && md_table_unescaped(s,p,begin));
+        if(!boundary) continue;
+        if(cells<expected_columns) {
+            const uint32_t cell=md_add(d,row,STUN_UI_BLOCK_TABLE_CELL,0u);
+            if(cell==UINT32_MAX) return false;
+            const size_t cell_start=md_left(s,cell_begin,p);
+            const size_t cell_end=md_right(s,cell_start,p);
+            if(!md_inline(d,cell,s+cell_start,cell_end-cell_start,0u))
+                return false;
+        }
+        ++cells;
+        cell_begin=p+1;
+    }
+    while(cells<expected_columns && d->error==STUN_UI_OK) {
+        if(md_add(d,row,STUN_UI_BLOCK_TABLE_CELL,0u)==UINT32_MAX)
+            return false;
+        ++cells;
+    }
+    return d->error==STUN_UI_OK;
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
     uint32_t list = UINT32_MAX;
@@ -403,6 +489,34 @@ static void md_parse_blocks(stun_md_document *d) {
             continue;
         }
         if (quote!=UINT32_MAX) { quote=paragraph=UINT32_MAX; }
+        /* Start a table only at a new block boundary. */
+        if (indent<=3 && paragraph==UINT32_MAX &&
+            list==UINT32_MAX && pos<d->raw_size) {
+            const md_line sep=md_read_line(d,pos);
+            size_t columns=0, delimiter_columns=0;
+            if (md_table_scan(s,begin,end,false,&columns) &&
+                md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
+                              true,&delimiter_columns) &&
+                columns==delimiter_columns) {
+                const uint32_t table=md_add(d,0u,STUN_UI_BLOCK_TABLE,0u);
+                if(table==UINT32_MAX) return;
+                if(!md_table_row(d,table,s,begin,end,columns)) return;
+                pos=sep.next;
+                while(pos<d->raw_size && d->error==STUN_UI_OK) {
+                    const md_line row=md_read_line(d,pos);
+                    const size_t row_begin=md_left(s,row.begin,row.end);
+                    size_t row_columns=0;
+                    if(row_begin-row.begin>3 || md_blank(s,row.begin,row.end) ||
+                       !md_table_scan(s,row_begin,row.end,false,&row_columns))
+                        break;
+                    if(!md_table_row(d,table,s,row_begin,row.end,columns))
+                        return;
+                    pos=row.next;
+                }
+                paragraph=list=quote=previous_item_paragraph=UINT32_MAX;
+                continue;
+            }
+        }
         bool ordered=false;size_t item_start=0;
         if (indent<=3 && md_list_marker(s,begin,end,&ordered,&item_start)) {
             if (list==UINT32_MAX || previous_ordered!=ordered) {
