@@ -12,6 +12,8 @@
 using namespace stun::graphlayout;
 
 namespace {
+constexpr const char* route_contact_message="topology surgery would pass through a route contact";
+
 void require(bool ok, const char* message) {
     if (!ok) throw std::runtime_error(message);
 }
@@ -188,7 +190,7 @@ int main(){
             const auto persistent=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
                     {split(0,-1000)},out,{},&report);
             require(persistent.error==TopologyError::NoAdmissibleStep &&
-                    persistent.message=="topology surgery would pass through a route contact" &&
+                    persistent.message==route_contact_message &&
                     out.edges.empty() && report.audits==0,"persistent collinear bend-route contact is rejected continuously");
             f=hidden_route_contact();
             f.layout.nodes[2].y=30;f.layout.nodes[3].y=1010;
@@ -212,7 +214,7 @@ int main(){
                 const auto status=apply_topology_edits(transformed.graph,transformed.layout,
                         transformed.ports,transformed.paths,{edit},out,{},&report);
                 require(status.error==TopologyError::NoAdmissibleStep &&
-                        status.message=="topology surgery would pass through a route contact" &&
+                        status.message==route_contact_message &&
                         out.edges.empty() && report.audits==0,"shared-terminal collinear overlap is not exempt");
             }
         }
@@ -222,7 +224,7 @@ int main(){
             const auto status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
                     {split(80,0)},out,{},&report);
             require(status.error==TopologyError::NoAdmissibleStep &&
-                    status.message=="topology surgery would pass through a route contact" &&
+                    status.message==route_contact_message &&
                     out.edges.empty() && report.audits==0,"continuous contact guard includes nonadjacent segments of its own route");
         }
         {
