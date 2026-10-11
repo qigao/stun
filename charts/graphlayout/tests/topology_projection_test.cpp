@@ -22,6 +22,28 @@ Fixture fixture(){
 int main(){
     try{
         {
+            constexpr double offset=0x1p-100;
+            Fixture f;
+            f.graph.nodes={{"A",10,10},{"B",10,10},{"C",10,10},{"D",10,10}};
+            f.graph.edges={{0,1},{2,3}};
+            f.baseline.nodes={{-42,-5,10,10},{32,-5,10,10},{-5,-110,10,10},{35,40,10,10}};
+            f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}},
+                     {{2,Side::South,0.5},{3,Side::North,0.5}}};
+            f.routes.edges={{{{-32,0},{0,0x1p-20},{32,0}}},
+                            {{{0,-100},{-2*offset,-offset},{40,40}}}};
+            TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+            TopologyProjectionOptions options;
+            options.edits.collinear_tolerance=1e-5;options.edits.audit.orientation_epsilon=0;
+            Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+            TopologyProjectionReport report;report.projection.passes=1;report.edits.removed_bends=1;
+            const auto status=project_topology_with_edits(f.graph,f.baseline,f.ports,f.routes,
+                f.baseline,{}, {merge},moved,paths,options,&report);
+            check(status.topology_error==TopologyError::NoAdmissibleStep,
+                  "projection rejects a collapse contact whose interior event fraction rounds to one");
+            check(moved.nodes.empty() && paths.edges.empty() && report.projection.passes==0 &&
+                  report.edits.removed_bends==0,"near-terminal contact failure rolls back successful VPSC projection");
+        }
+        {
             for(const bool route_contact:{false,true}) {
                 auto f=fixture();f.routes.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
                 if(route_contact) {

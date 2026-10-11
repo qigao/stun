@@ -25,6 +25,8 @@ TopologyGuardStatus limit_bend_node_motion(
 // Bound finite segment contacts, preserving legal adjacent/shared anchors.
 // affected_segments is one for insertion, two for collapse. Collapse allows
 // contact at the final seed, which is removed before the full final audit.
+// Endpoint orientation signs retain interior roots whose fractions round to
+// zero or one; those are not eligible for initial/final seed exemptions.
 TopologyGuardStatus limit_bend_route_motion(
     const std::array<TopologyPointTrack,3>& bend, const Graph& graph,
     const Routes& routes, std::size_t edge, std::size_t first_segment,

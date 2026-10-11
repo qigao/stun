@@ -483,17 +483,28 @@ TopologyPointTrack reversed_track(const TopologyPointTrack& point) {
 
 // Only one endpoint moves in these segment pairs, so each orientation is
 // affine. Relative coordinates keep translation out of event coefficients.
-std::array<Real,2> contact_orientation(const TopologyPointTrack& a,
+struct ContactOrientation {Real initial,linear,desired;};
+
+ContactOrientation contact_orientation(const TopologyPointTrack& a,
                                       const TopologyPointTrack& b,
-                                      const TopologyPointTrack& point, bool from_final=false) {
+                                      const TopologyPointTrack& point) {
     const auto polynomial=cross_polynomial(point_difference(b,a),point_difference(point,a));
-    if(from_final) {
-        const auto final=contact_orientation(reversed_track(a),reversed_track(b),reversed_track(point));
-        // Endpoint reconstruction retains both initial and final exact zeros
-        // instead of recovering either through coefficient cancellation.
-        return {polynomial[0],final[0]-polynomial[0]};
-    }
-    return {polynomial[0],polynomial[1]};
+    const auto final=cross_polynomial(point_difference(reversed_track(b),reversed_track(a)),
+                                      point_difference(reversed_track(point),reversed_track(a)));
+    // Endpoint reconstruction retains both initial and final computed zeros
+    // instead of recovering either through coefficient cancellation.
+    return {polynomial[0],final[0]-polynomial[0],final[0]};
+}
+
+bool contact_event(const ContactOrientation& orientation, bool collapsing, Real& event) {
+    if(orientation.linear==0.0L)return false;
+    event=-orientation.initial/orientation.linear;
+    // Opposite endpoint signs identify an interior affine root, even when its
+    // fraction rounds to zero or one. Split seeds may leave initial contacts;
+    // collapse only exempts a computed zero at the final removed seed.
+    const bool interior=(orientation.initial<0.0L && orientation.desired>0.0L) ||
+                        (orientation.initial>0.0L && orientation.desired<0.0L);
+    return interior || (!collapsing && orientation.initial!=0.0L && orientation.desired==0.0L);
 }
 
 struct ContactDot {
@@ -524,15 +535,15 @@ TopologyGuardStatus contact_witness_bound(
     // common anchor. Other witnesses still detect collinear retracing there.
     if(common_anchor && same_track(point,pivot) &&
        (same_track(a,pivot) || same_track(b,pivot)))return {};
-    // Collapse coefficients retain the final seed's independently evaluated
-    // orientation, so legal terminal contact has an exact event fraction one.
-    const auto orientation=contact_orientation(a,b,point,collapsing);
-    if(orientation[1]==0.0L && orientation[0]!=0.0L)return {};
-    const bool persistent=orientation[0]==0.0L && orientation[1]==0.0L;
-    const Real event=persistent ? 0.0L : -orientation[0]/orientation[1];
+    // Retain independently evaluated endpoint orientations so root rounding
+    // cannot turn an interior event into an allowed initial/final seed contact.
+    const auto orientation=contact_orientation(a,b,point);
+    if(orientation.linear==0.0L && orientation.initial!=0.0L)return {};
+    const bool persistent=orientation.initial==0.0L && orientation.linear==0.0L;
+    Real event=0.0L;
     // Splitting at an existing proper crossing is legal: the initial seed
     // contact belongs to the old unsplit segment and is not a later event.
-    if(!persistent && !(event>0.0L && (collapsing ? event<1.0L : event<=1.0L)))return {};
+    if(!persistent && !contact_event(orientation,collapsing,event))return {};
     if(!evaluate(work,options))
         return fail(TopologyGuardError::CapacityExceeded,"bend-route contact polynomial budget exceeded");
     const auto dot=contact_dot(a,b,point);
@@ -647,13 +658,12 @@ TopologyGuardStatus detail::limit_bend_route_motion(
                     if(!evaluate(work,options))
                         return fail(TopologyGuardError::CapacityExceeded,"bend-route terminal budget exceeded");
                     const auto& remote=same_track(c,pivot) ? d : c;
-                    const auto orientation=contact_orientation(pivot,moving,remote,affected_segments==2);
-                    if(orientation[1]!=0.0L) {
-                        const Real event=-orientation[0]/orientation[1];
+                    const auto orientation=contact_orientation(pivot,moving,remote);
+                    Real event=0.0L;
+                    if(contact_event(orientation,affected_segments==2,event)) {
                         // The auditor requires distinct rays at a graph
                         // terminal, including when collinear rays oppose.
-                        if(event>0.0L && (affected_segments==2 ? event<1.0L : event<=1.0L))
-                            safe=std::min(safe,earlier(event,options));
+                        safe=std::min(safe,earlier(event,options));
                     }
                 }
                 const std::array<std::array<TopologyPointTrack,3>,4> witnesses={{{pivot,moving,c},

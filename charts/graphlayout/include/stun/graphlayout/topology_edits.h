@@ -62,6 +62,8 @@ struct TopologyEditReport {
 // every other fixed segment, including adjacent/nonadjacent segments of its
 // own route. Qualified shared graph anchors remain legal; collinear overlap
 // does not. Initial split seeds at proper crossings may immediately leave them.
+// Independently evaluated endpoint orientations classify interior affine roots
+// before using their fractions; a root rounded to zero/one is still guarded.
 // For S total segments before insertion, route guards add 2*(S-1) constraints,
 // with 4..13 evaluations per pair. Together the guards take O(nodes+S) work
 // and O(1) storage per split. Their numerical predicates are not exact.
@@ -70,6 +72,8 @@ struct TopologyEditReport {
 // segments are excluded from route-pair tests: 2*(S-2) route constraints and the
 // same two-per-node work use the shared budgets. The final seed is removed
 // before the full final audit, so seed contacts ONLY at that instant are allowed.
+// The collapse exemption requires a computed zero final orientation, not merely
+// an event fraction that rounds to one.
 // Bend area uses FMA product-error compensation, and the perpendicular seed
 // is computed relative to the bend to retain small collapse displacements.
 // A zero compensated bend area prunes directly without consuming motion work.

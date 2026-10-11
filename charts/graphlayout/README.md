@@ -794,6 +794,10 @@ representation changes independently from the original topology search:
   deleted before the full audit, allowing removal at an existing proper
   crossing. Collapse orientation coefficients use independently evaluated
   endpoint orientations to retain a final zero without coefficient cancellation.
+  Endpoint signs classify interior affine events before their fractions are
+  used: an opposite-sign root still rejects the edit when its fraction rounds
+  to zero or one. Initial split contacts and final removed collapse seeds keep
+  their exemptions only when the corresponding computed orientation is zero.
   Bend area uses FMA product-error compensation; equal rounded products alone
   cannot select the motion-free path. The perpendicular seed is computed as
   a normal displacement from the bend, retaining tiny movements that remote
@@ -865,6 +869,18 @@ unobstructed collapse and exactly collinear diagonal pruning. Sixteen further
 variants place a thin rectangle at the midpoint of the tiny perpendicular
 collapse; independent midpoint audits confirm penetration although baseline
 and final routes pass their audits. The continuous guard rejects the batch.
+
+Event-boundary regressions collapse `(-32,0) -> (0,2^-20) -> (32,0)` past a
+route segment from `(-2*e,-e)` to `(40,40)`, with `e=2^-100` and an explicit
+zero orientation tolerance. The bend contacts the other route at height near
+`e`, transferring its proper crossing between child segments. Baseline/final
+signatures agree, but the event fraction near `1-2^-80` rounds to one. Sixteen
+scaled/transposed/reflected cases reject the contact with default or zero
+guard backoff; VPSC composition also clears the entire result. Sixteen further
+cases insert a bend with displacement `(2^38,-2^38)` across a vertical segment
+at `x=2^-1060`. The positive event fraction `2^-1098` underflows in binary64;
+independent contact-frame audits and sampled-only controls verify the missed
+crossing transfer. Endpoint-sign classification rejects these edits too.
 
 **Current limits:** topology surgery locations/displacements are supplied by
 the caller, not automatically scheduled from a scanline collision event.

@@ -73,6 +73,17 @@ Fixture merge_crossing(double offset=5e-5) {
     f.paths.edges[1].points={{20,f.layout.nodes[2].y+10},{90,f.layout.nodes[3].y}};
     return f;
 }
+Fixture terminal_merge_contact(double offset) {
+    Fixture f;
+    f.graph.nodes={{"A",10,10},{"B",10,10},{"C",10,10},{"D",10,10}};
+    f.graph.edges={{0,1},{2,3}};
+    f.layout.nodes={{-42,-5,10,10},{32,-5,10,10},{-5,-110,10,10},{35,40,10,10}};
+    f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}},
+             {{2,Side::South,0.5},{3,Side::North,0.5}}};
+    f.paths.edges={{{{-32,0},{0,0x1p-20},{32,0}}},
+                   {{{0,-100},{-2*offset,-offset},{40,40}}}};
+    return f;
+}
 Fixture hidden_route_contact() {
     auto f=parallel();
     f.layout.nodes[2]={51,-1010,10,10};
@@ -158,6 +169,66 @@ void check_audited(const Fixture& f, const Routes& r) {
 
 int main(){
     try{
+        {
+            constexpr double offset=0x1p-1060,displacement=0x1p38;
+            constexpr std::array scales={0.125,1.0};
+            constexpr std::size_t variants=8;
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=terminal_merge_contact(offset);
+                f.layout.nodes[3]={-5,100,10,10};
+                f.ports[1].target={3,Side::North,0.5};
+                f.paths.edges[0].points={{-32,0},{-16,0},{16,0},{32,0}};
+                f.paths.edges[1].points={{0,-100},{offset,-90},{offset,90},{0,100}};
+                auto edit=split(displacement,-displacement);edit.point_index=1;
+                auto intermediate=f;
+                intermediate.paths.edges[0].points.insert(intermediate.paths.edges[0].points.begin()+2,{offset,-offset});
+                auto frame_edit=edit;transform(intermediate,frame_edit,scale,variant);
+                transform(f,edit,scale,variant);
+                TopologyEditOptions options;options.audit.coordinate_limit=1e12;
+                TopologySignature signature;
+                require(audit_topology(intermediate.graph,intermediate.layout,intermediate.ports,
+                        intermediate.paths,signature,options.audit).error==TopologyError::AmbiguousTopology,
+                        "independent frame exposes contact just after insertion begins");
+                Routes out;TopologyEditReport report;
+                auto unchecked=options;unchecked.audit.analytic_guards=false;
+                const auto final_status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{edit},out,unchecked);
+                if(!final_status)throw std::runtime_error("near-initial contact endpoints: "+final_status.message);
+                const auto guarded=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{edit},out,options,&report);
+                require(guarded.error==TopologyError::NoAdmissibleStep && guarded.message==route_contact_message &&
+                        out.edges.empty() && report.audits==0,
+                        "a positive insertion event cannot become an allowed initial seed contact through root underflow");
+            }
+        }
+        {
+            // The contact at p.y=2^-100 occurs before the end of the 2^-20
+            // collapse, but its fraction is about 1-2^-80 and rounds to one in Real.
+            constexpr double offset=0x1p-100;
+            constexpr std::array scales={0.125,1.0,8.0,1024.0};
+            constexpr std::size_t variants=4;
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=terminal_merge_contact(offset);
+                TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+                auto intermediate=f;intermediate.paths.edges[0].points[1]={0,offset};
+                auto frame_edit=merge;transform(intermediate,frame_edit,scale,variant);
+                transform(f,merge,scale,variant);
+                TopologyEditOptions options;options.audit.orientation_epsilon=0;options.collinear_tolerance=1e-5;
+                TopologySignature signature;
+                require(audit_topology(intermediate.graph,intermediate.layout,intermediate.ports,
+                        intermediate.paths,signature,options.audit).error==TopologyError::AmbiguousTopology,
+                        "independent frame exposes contact just before collapse ends");
+                Routes out;TopologyEditReport report;
+                auto unchecked=options;unchecked.audit.analytic_guards=false;
+                const auto final_status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,unchecked);
+                if(!final_status)throw std::runtime_error("near-terminal contact endpoints: "+final_status.message);
+                for(const double backoff:{0.0,TopologyOptions{}.guard_backoff}) {
+                    options.audit.guard_backoff=backoff;
+                    const auto guarded=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report);
+                    require(guarded.error==TopologyError::NoAdmissibleStep && guarded.message==route_contact_message &&
+                            out.edges.empty() && report.audits==0,
+                            "an interior contact cannot become an allowed final seed contact through root rounding");
+                }
+            }
+        }
         {
             // u=(n,n-1), v=(n+1,n): n*n-(n-1)*(n+1)=1, although
             // independently rounded products can be identical in Real.
