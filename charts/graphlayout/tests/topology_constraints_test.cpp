@@ -175,20 +175,12 @@ MovementFixture crossing_order_sweep(bool quartic=false, bool tangent=false) {
 }
 void crossing_order_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
     placement=f.baseline;paths=f.routes;
-    placement.nodes[2].y-=64*fraction;
-    placement.nodes[3].x+=64*fraction;placement.nodes[3].y+=192*fraction;
-    paths.edges[1].points.front().y-=64*fraction;
-    paths.edges[1].points.back().x+=64*fraction;paths.edges[1].points.back().y+=192*fraction;
-    for(const std::size_t edge:{std::size_t(0),std::size_t(2)}) {
-        const auto& ends=f.graph.edges[edge];
-        for(const auto node:{ends.source,ends.target}) {
-            const double dx=fraction*(f.desired.nodes[node].x-f.baseline.nodes[node].x);
-            const double dy=fraction*(f.desired.nodes[node].y-f.baseline.nodes[node].y);
-            placement.nodes[node].x+=dx;placement.nodes[node].y+=dy;
-            auto& p=node==ends.source?paths.edges[edge].points.front():paths.edges[edge].points.back();
-            p.x+=dx;p.y+=dy;
-        }
+    for(std::size_t node=0;node<placement.nodes.size();++node) {
+        placement.nodes[node].x+=fraction*(f.desired.nodes[node].x-f.baseline.nodes[node].x);
+        placement.nodes[node].y+=fraction*(f.desired.nodes[node].y-f.baseline.nodes[node].y);
     }
+    // Every fixture route is a single segment: measured anchors determine
+    // the whole interpolated path, independently of the production guard.
     for(std::size_t edge=0;edge<paths.edges.size();++edge) {
         paths.edges[edge].points.front()=fixture_anchor(placement,f.ports[edge].source);
         paths.edges[edge].points.back()=fixture_anchor(placement,f.ports[edge].target);
@@ -289,10 +281,47 @@ void run() {
                 require(guard.max_safe_fraction>event-0.001 && guard.max_safe_fraction<event,
                         "quartic guard catches both exchange and boundary-only triple contact");
                 TopologyOptions single;single.samples_per_trial=1;
+                // Near a double root, order gaps shrink quadratically. The
+                // full auditor's geometric epsilon can require a shorter
+                // step than the machine-precision analytic guard, especially
+                // with extended long double. Both gates must remain satisfied.
                 require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
-                        f.desired,moved,paths,single,&movement)) && movement.accepted_fraction>event-0.001 &&
+                        f.desired,moved,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                        movement.accepted_fraction<=guard.max_safe_fraction &&
                         movement.accepted_fraction<event,"quartic order guard composes with independent full audit");
+                constexpr std::size_t samples=16;
+                for(std::size_t sample=0;sample<=samples;++sample) {
+                    crossing_order_frame(f,movement.accepted_fraction*static_cast<double>(sample)/samples,moved,paths);
+                    TopologySignature observed;
+                    const auto st=audit_topology(f.graph,moved,f.ports,paths,observed);
+                    if(!st)throw std::runtime_error("quartic order scale "+std::to_string(scale)+
+                        ", variant "+std::to_string(variant)+", tangent "+std::to_string(tangent)+
+                        ", sample "+std::to_string(sample)+": "+st.message);
+                    require(observed.crossing_count==signature.crossing_count,
+                            "quartic accepted prefix retains all three proper crossings");
+                    for(std::size_t edge=0;edge<signature.ordered_crossings.size();++edge) {
+                        require(observed.ordered_crossings[edge].size()==signature.ordered_crossings[edge].size(),
+                                "quartic prefix retains per-route crossing count");
+                        for(std::size_t cross=0;cross<signature.ordered_crossings[edge].size();++cross)
+                            require(observed.ordered_crossings[edge][cross].other_edge==
+                                    signature.ordered_crossings[edge][cross].other_edge &&
+                                    observed.ordered_crossings[edge][cross].sign==signature.ordered_crossings[edge][cross].sign,
+                                    "quartic accepted prefix retains every crossing identity, sign and order");
+                    }
+                }
             }
+    }
+    {
+        const auto f=crossing_order_sweep(true,true);
+        constexpr double near_tangency=0.5-1.0/262144.0;
+        Layout placement;Routes paths;crossing_order_frame(f,near_tangency,placement,paths);
+        TopologySignature signature;
+        require(audit_topology(f.graph,placement,f.ports,paths,signature).error==TopologyError::AmbiguousTopology,
+                "geometric epsilon rejects an unresolved near-tangent crossing order");
+        TopologyOptions zero_epsilon;zero_epsilon.orientation_epsilon=0;
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature,zero_epsilon)) &&
+                signature.crossing_count==3,
+                "near-tangent crossings are still geometrically separate before the double-root contact");
     }
     {
         auto f=crossing_order_sweep();

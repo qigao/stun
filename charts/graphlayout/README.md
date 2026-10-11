@@ -641,6 +641,8 @@ calculates conservative **analytic event fractions** before sampled auditing:
   reverses. A coefficient-scaled margin of `128 * long-double epsilon` and
   a maximum subdivision depth of `double` precision bits bound numerical
   resolution; the first unresolved interval is excluded conservatively.
+  The subsequent topology auditor retains its separate geometric epsilon;
+  near a multiple root it may require a shorter step than this analytic cap.
   Every order gap consumes one constraint and one construction evaluation;
   every visited subdivision consumes one additional evaluation. Exhaustion
   fails transactionally, without publishing a partially checked prefix.
