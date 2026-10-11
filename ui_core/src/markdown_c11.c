@@ -319,6 +319,21 @@ static bool md_list_marker(const char *s, size_t b, size_t e,
     return true;
 }
 
+/* GFM task marker: optional leading spaces after the list marker were already
+ * consumed by md_list_marker. A marker belongs only to the first paragraph
+ * of a list item, not to arbitrary text or link syntax. */
+static bool md_task_marker(const char *s, size_t start, size_t end,
+                           char *state, size_t *content) {
+    if(end-start<3 || s[start]!='[' || s[start+2]!=']') return false;
+    const char mark=s[start+1];
+    if(mark!=' ' && mark!='\t' && mark!='x' && mark!='X') return false;
+    const size_t after=start+3u;
+    if(after<end && !md_space(s[after])) return false;
+    *state=(mark=='x'||mark=='X') ? 'x' : ' ';
+    *content=md_left(s,after,end);
+    return true;
+}
+
 /* GFM pipe-table subset. Escaped pipes and backtick code spans do not
  * separate cells. Header/delimiter column counts must agree.
  * A table is admitted only after two-line lookahead succeeds. */
@@ -558,8 +573,20 @@ static void md_parse_blocks(stun_md_document *d) {
                     STUN_UI_BLOCK_ORDERED_LIST:STUN_UI_BLOCK_LIST,0);
                 if (list==UINT32_MAX) return;
             }
-            const uint32_t item=md_add(d,list,STUN_UI_BLOCK_LIST_ITEM,0);
+            char check_state=0;
+            size_t task_content=item_start;
+            const bool task=md_task_marker(s,item_start,end,
+                                          &check_state,&task_content);
+            const uint32_t item=md_add(d,list,
+                task ? STUN_UI_BLOCK_TASK_ITEM : STUN_UI_BLOCK_LIST_ITEM,0);
             if (item==UINT32_MAX) return;
+            if(task) {
+                const uint32_t checkbox=md_add(d,item,STUN_UI_BLOCK_CHECKBOX,0);
+                if(checkbox==UINT32_MAX) return;
+                md_meta(d,checkbox,&check_state,1u);
+                if(d->error!=STUN_UI_OK) return;
+                item_start=task_content;
+            }
             previous_item_paragraph=md_add(d,item,STUN_UI_BLOCK_PARAGRAPH,0);
             if (previous_item_paragraph==UINT32_MAX) return;
             (void)md_inline(d,previous_item_paragraph,
