@@ -13,6 +13,8 @@ using namespace stun::graphlayout;
 
 namespace {
 constexpr const char* route_contact_message="topology surgery would pass through a route contact";
+constexpr std::array cancellation_magnitudes={0x1p27,0x1p38};
+constexpr std::size_t cancellation_variants=8;
 
 void require(bool ok, const char* message) {
     if (!ok) throw std::runtime_error(message);
@@ -53,6 +55,14 @@ Fixture hidden_merge() {
     f.graph.nodes[2].width=2e-6;f.graph.nodes[2].height=2e-6;
     f.layout.nodes[2]={55-1e-6,5+4e-5,2e-6,2e-6};
     f.paths.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
+    return f;
+}
+Fixture cancellation_merge(double n) {
+    Fixture f;
+    f.graph.nodes={{"A",10,10},{"B",10,10}};f.graph.edges={{0,1}};
+    f.layout.nodes={{-n-10,-n-5,10,10},{n+1,n-6,10,10}};
+    f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}}};
+    f.paths.edges={{{{-n,-n},{0,-1},{n+1,n-1}}}};
     return f;
 }
 Fixture merge_crossing(double offset=5e-5) {
@@ -148,6 +158,70 @@ void check_audited(const Fixture& f, const Routes& r) {
 
 int main(){
     try{
+        {
+            // u=(n,n-1), v=(n+1,n): n*n-(n-1)*(n+1)=1, although
+            // independently rounded products can be identical in Real.
+            for(const double n:cancellation_magnitudes)
+            for(std::size_t variant=0;variant<cancellation_variants;++variant) {
+                auto f=cancellation_merge(n);
+                TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+                transform(f,merge,1,variant);
+                TopologyEditOptions options;options.audit.coordinate_limit=2*n;
+                TopologySignature signature;
+                require(static_cast<bool>(audit_topology(f.graph,f.layout,f.ports,f.paths,signature,options.audit)),
+                        "cancellation fixture has valid baseline geometry");
+                Routes out;TopologyEditReport report;
+                options.collinear_tolerance=0;
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report).error==
+                        TopologyError::NoAdmissibleStep && out.edges.empty() && report.audits==0,
+                        "rounded product cancellation must not prune a nonzero-area bend at zero tolerance");
+                options.collinear_tolerance=TopologyEditOptions{}.collinear_tolerance;
+                options.audit.max_guard_constraints=1;
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report).error==
+                        TopologyError::CapacityExceeded && out.edges.empty() && report.removed_bends==0,
+                        "a cancellation-prone near-collinear collapse must consume continuous guard work");
+                options.audit.max_guard_constraints=TopologyEditOptions{}.audit.max_guard_constraints;
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options)),
+                        "an unobstructed cancellation-prone collapse remains admissible");
+                auto exact=cancellation_merge(n);
+                exact.layout.nodes[1]={n,n-5,10,10};
+                exact.paths.edges[0].points={{-n,-n},{0,0},{n,n}};
+                auto exact_merge=merge;transform(exact,exact_merge,1,variant);
+                options.collinear_tolerance=0;options.audit.max_guard_constraints=1;
+                options.audit.max_guard_evaluations=1;
+                require(static_cast<bool>(apply_topology_edits(exact.graph,exact.layout,exact.ports,
+                        exact.paths,{exact_merge},out,options)),
+                        "compensated area retains motion-free pruning of exactly collinear diagonal bends");
+            }
+        }
+        {
+            for(const double n:cancellation_magnitudes)
+            for(std::size_t variant=0;variant<cancellation_variants;++variant) {
+                auto f=cancellation_merge(n);
+                // Area is one. Project in bend-local coordinates: q=p+(-dy,dx)/|AB|^2.
+                const double dx=2*n+1,dy=2*n-1,denominator=dx*dx+dy*dy;
+                const Point mid{-dy/(2*denominator),-1+dx/(2*denominator)};
+                const double extent=dx/(8*denominator);
+                f.graph.nodes.push_back({"thin",extent,extent});
+                f.layout.nodes.push_back({mid.x-extent/2,mid.y-extent/2,extent,extent});
+                TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+                TopologyEditOptions options;options.audit.coordinate_limit=2*n;
+                auto intermediate=f;intermediate.paths.edges[0].points[1]=mid;
+                auto intermediate_edit=merge;transform(intermediate,intermediate_edit,1,variant);
+                transform(f,merge,1,variant);
+                TopologySignature signature;
+                require(audit_topology(intermediate.graph,intermediate.layout,intermediate.ports,
+                        intermediate.paths,signature,options.audit).error==
+                        TopologyError::InvalidGeometry,"independent midpoint exposes a cancellation-scale collapse collision");
+                Routes out;TopologyEditReport report;
+                auto unchecked=options;unchecked.audit.analytic_guards=false;
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,unchecked)),
+                        "cancellation-scale collapse has admissible baseline and final geometry");
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report).error==
+                        TopologyError::NoAdmissibleStep && out.edges.empty() && report.audits==0,
+                        "bend-local projection must preserve a tiny collapse through a node interior");
+            }
+        }
         {
             const auto f=hidden_merge();
             TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;

@@ -794,7 +794,13 @@ representation changes independently from the original topology search:
   deleted before the full audit, allowing removal at an existing proper
   crossing. Collapse orientation coefficients use independently evaluated
   endpoint orientations to retain a final zero without coefficient cancellation.
-  Zero computed area prunes without consuming motion work; merge audit/report
+  Bend area uses FMA product-error compensation; equal rounded products alone
+  cannot select the motion-free path. The perpendicular seed is computed as
+  a normal displacement from the bend, retaining tiny movements that remote
+  coordinate interpolation can erase. This uses the standard-library FMA and
+  the [Kahan compensated-product formulation](https://perso.ens-lyon.fr/jean-michel.muller/MathsComp2015.pdf)
+  (Section 1); it is still a numerical predicate, not exact geometry arithmetic.
+  Zero compensated area prunes without consuming motion work; merge audit/report
   counts retain their original final-only behavior. Disabling `analytic_guards`
   explicitly retains unchecked approximate removal followed by the final audit.
   Edits are applied in caller sequence; each subsequent index addresses the
@@ -850,6 +856,15 @@ remain identical. Continuous checks reject both removals. Three sets of 64
 transformed cases cover node sweeps, route contacts and legal final crossing
 seeds; default-tolerance thin obstacles, shared/adjacent anchors, exact pruning,
 cumulative mixed-edit budgets and atomic VPSC composition are also covered.
+
+Cancellation regressions use `u=(n,n-1)`, `v=(n+1,n)` for `n=2^27` and `2^38`:
+the determinant is `n*n-(n-1)*(n+1)=1`, while separately rounded products can
+coincide. Sixteen axis/reflection/reversal variants reject zero-tolerance
+removal and require continuous guard work at nonzero tolerance, while retaining
+unobstructed collapse and exactly collinear diagonal pruning. Sixteen further
+variants place a thin rectangle at the midpoint of the tiny perpendicular
+collapse; independent midpoint audits confirm penetration although baseline
+and final routes pass their audits. The continuous guard rejects the batch.
 
 **Current limits:** topology surgery locations/displacements are supplied by
 the caller, not automatically scheduled from a scanline collision event.

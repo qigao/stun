@@ -70,7 +70,9 @@ struct TopologyEditReport {
 // segments are excluded from route-pair tests: 2*(S-2) route constraints and the
 // same two-per-node work use the shared budgets. The final seed is removed
 // before the full final audit, so seed contacts ONLY at that instant are allowed.
-// A zero computed bend area prunes directly without consuming motion work.
+// Bend area uses FMA product-error compensation, and the perpendicular seed
+// is computed relative to the bend to retain small collapse displacements.
+// A zero compensated bend area prunes directly without consuming motion work.
 // Merges retain the original final-only audit/report counts (no sampled frames).
 // Disabling audit.analytic_guards selects split sampling and final-only merging.
 // The edit changes route topology *representation*, not arbitrary geometry.

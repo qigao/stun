@@ -67,28 +67,33 @@ bool new_bend(Point a, Point b, const TopologyEdit& edit,
            !(target.x == b.x && target.y == b.y);
 }
 
-bool redundant_bend(Point a, Point p, Point b, double tolerance, bool& exact) {
+bool redundant_bend(Point a, Point p, Point b, double tolerance, Real& area) {
     const Real ux = static_cast<Real>(p.x) - a.x;
     const Real uy = static_cast<Real>(p.y) - a.y;
     const Real vx = static_cast<Real>(b.x) - p.x;
     const Real vy = static_cast<Real>(b.y) - p.y;
-    const Real cross = ux*vy - uy*vx;
-    exact=cross==0.0L;
+    // Recover the rounded product residual before deciding that no motion
+    // exists. Equal rounded products can hide a nonzero determinant.
+    const Real product = uy*vx;
+    const Real residual = std::fma(-uy,vx,product);
+    area = std::fma(ux,vy,-product)+residual;
     const Real scale = std::max(Real(1),
         std::max(std::abs(ux),std::abs(uy))*
         std::max(std::abs(vx),std::abs(vy)));
     const Real dot = ux*vx + uy*vy;
     // Merging a u-turn would change connectivity geometry even if collinear.
-    return std::abs(cross) <= static_cast<Real>(tolerance)*scale && dot > 0.0L;
+    return std::abs(area) <= static_cast<Real>(tolerance)*scale && dot > 0.0L;
 }
 
-Point straight_seed(Point a, Point p, Point b) {
+Point straight_seed(Point a, Point p, Point b, Real area) {
     const Real dx=static_cast<Real>(b.x)-a.x,dy=static_cast<Real>(b.y)-a.y;
-    const Real fraction=((static_cast<Real>(p.x)-a.x)*dx+(static_cast<Real>(p.y)-a.y)*dy)/(dx*dx+dy*dy);
+    const Real normal=area/(dx*dx+dy*dy);
     // Forward-redundant bends project strictly inside AB. Moving to the
     // perpendicular projection defines the collapse before removing the seed.
-    return {static_cast<double>(static_cast<Real>(a.x)+fraction*dx),
-            static_cast<double>(static_cast<Real>(a.y)+fraction*dy)};
+    // Use the same compensated area in bend-local coordinates so subtraction
+    // of large neighbor coordinates cannot erase a tiny collapse displacement.
+    return {static_cast<double>(static_cast<Real>(p.x)-normal*dy),
+            static_cast<double>(static_cast<Real>(p.y)+normal*dx)};
 }
 
 TopologyStatus guard_bend_motion(Point a, Point start, Point target, Point b,
@@ -211,11 +216,11 @@ TopologyStatus apply_topology_edits(
             if (edit.point_index == 0 || edit.point_index >= pts.size()-1)
                 return fail(TopologyError::InvalidInput,"only internal bends can be merged",current_edge);
             const std::size_t k = edit.point_index;
-            bool exact=false;
-            if (!redundant_bend(pts[k-1],pts[k],pts[k+1],options.collinear_tolerance,exact))
+            Real area=0;
+            if (!redundant_bend(pts[k-1],pts[k],pts[k+1],options.collinear_tolerance,area))
                 return fail(TopologyError::NoAdmissibleStep,"bend is not straight or reverses the segment",current_edge);
-            if(!exact) {
-                status=guard_bend_motion(pts[k-1],pts[k],straight_seed(pts[k-1],pts[k],pts[k+1]),pts[k+1],
+            if(area!=0.0L) {
+                status=guard_bend_motion(pts[k-1],pts[k],straight_seed(pts[k-1],pts[k],pts[k+1],area),pts[k+1],
                                          graph,layout,candidate,options,guard_work,current_edge,k-1,2);
                 if(!status)return status;
             }
