@@ -765,10 +765,21 @@ representation changes independently from the original topology search:
   time rejects the entire edit with `NoAdmissibleStep`; the requested bend
   is not replaced by an implicit partial edit. A private motion interface
   shares the existing numerical algorithm without adding a public API.
+  Continuously check both child segments against all remaining fixed route
+  segments as well, including adjacent and nonadjacent segments of the same
+  edge. Each pair's four endpoint/line orientations are affine; at their
+  positive roots, a relative-coordinate dot product tests finite segment
+  membership. Permanently collinear witnesses use quadratic dot roots.
+  Supporting-line extensions, legal shared graph terminals, and immediate
+  departure from an initial split seed at an existing crossing remain legal.
+  Endpoint contacts and shared-terminal collinear overlaps reject the edit.
   Each split consumes two constraints per node and 1..30 evaluations per
-  segment/node pair, cumulatively across the entire batch through
-  `audit.max_guard_constraints/evaluations`. Each split takes O(nodes) guard
-  work and O(1) auxiliary storage. Explicitly disabling `analytic_guards`
+  segment/node pair, plus `2*(S-1)` route-pair constraints with 4..13 evaluations
+  each (`S` is the total number of route segments before insertion). Both
+  guards share `audit.max_guard_constraints/evaluations` cumulatively across
+  the entire batch. Each split takes O(nodes+S) guard work and O(1) auxiliary
+  storage. Existing tight budgets may need to account for the added route
+  checks. Explicitly disabling `analytic_guards`
   retains sampled-only continuation. Audit each
   sampled intermediate vertex motion against the ORIGINAL full ordered/signed
   crossing signature, all node rectangles and exact port anchors.
@@ -778,9 +789,9 @@ representation changes independently from the original topology search:
 - Transactional errors, exact input indices and explicit resource limits
   (`max_edits`, `max_audits`, `continuation_frames`, route point budgets).
   No guessed collision detours, libavoid fallback, or silent topology change.
-  Route-to-route contacts and crossing order during edit continuation remain
-  sampled. The node guard and sampled continuation do NOT prove an unsampled
-  ambient isotopy; the numerical node checks are not exact predicates.
+  Crossing order during edit continuation remains sampled. The continuous
+  node/contact guards and sampled continuation do NOT prove an unsampled
+  ambient isotopy; the numerical checks are not exact predicates.
 
 `Stun::GraphTopologyProjection` composes the native VPSC/2D projection
 with explicitly requested topology edits and the audited topology movement.
@@ -807,6 +818,16 @@ Sixty-four scaled/transposed/reflected/reversed cases use independent
 intermediate geometry audits. Boundary tangency, incident nodes, exact
 single-edit and cumulative batch budgets, polynomial evaluation exhaustion
 and transactional VPSC composition are also covered.
+
+An isolated-contact regression splits the same horizontal segment across a
+vertical route at `x=56`. At `alpha=1/40` the new bend lies on the other edge;
+the crossing immediately transfers between the child segments, so every
+default sampled frame retains the original signature and misses the contact.
+Continuous route checks reject the entire edit. Sixty-four transformed cases
+include large translations and independent event-frame audits. Shared graph
+anchors, supporting-line extensions, seeds at existing proper crossings,
+persistent collinearity, self-contact, exact route-work budgets and atomic
+projection failure are also tested.
 
 **Current limits:** topology surgery locations/displacements are supplied by
 the caller, not automatically scheduled from a scanline collision event.

@@ -22,6 +22,22 @@ Fixture fixture(){
 int main(){
     try{
         {
+            auto f=fixture();
+            f.graph.nodes.push_back({"D",10,10});f.graph.edges.push_back({2,3});
+            f.baseline.nodes[2]={51,-1010,10,10};f.baseline.nodes.push_back({51,20,10,10});
+            f.ports.push_back({{2,Side::South,0.5},{3,Side::North,0.5}});
+            f.routes.edges.push_back({{{56,-1000},{56,20}}});
+            TopologyEdit insert;insert.displacement={40,-1000};
+            Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+            TopologyProjectionReport report;report.edits.inserted_bends=1;
+            const auto status=project_topology_with_edits(f.graph,f.baseline,f.ports,f.routes,
+                f.baseline,{}, {insert},moved,paths,{},&report);
+            check(status.topology_error==TopologyError::NoAdmissibleStep,
+                  "projection composition rejects an isolated unsampled split-route contact");
+            check(moved.nodes.empty() && paths.edges.empty() && report.edits.inserted_bends==0,
+                  "route-contact edit failure clears the entire projected result");
+        }
+        {
             auto f=fixture();f.graph.nodes[2].width=3;f.graph.nodes[2].height=8;
             f.baseline.nodes[2]={65,-30,3,8};
             TopologyEdit insert;insert.displacement={40,-1000};

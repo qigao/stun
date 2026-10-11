@@ -1,5 +1,5 @@
 #include "stun/graphlayout/topology_edits.h"
-#include "topology_node_motion.h"
+#include "topology_edit_motion.h"
 
 #include <algorithm>
 #include <cmath>
@@ -81,9 +81,11 @@ bool redundant_bend(Point a, Point p, Point b, double tolerance) {
     return std::abs(cross) <= static_cast<Real>(tolerance)*scale && dot > 0.0L;
 }
 
-TopologyStatus guard_split_nodes(Point a, Point start, Point target, Point b,
-                                 const Layout& layout, const TopologyEditOptions& options,
-                                 detail::TopologyNodeMotionWork& work, std::size_t edge) {
+TopologyStatus guard_split_motion(Point a, Point start, Point target, Point b,
+                                 const Graph& graph, const Layout& layout, const Routes& routes,
+                                 const TopologyEditOptions& options,
+                                 detail::TopologyMotionWork& work, std::size_t edge,
+                                 std::size_t segment) {
     if(!options.audit.analytic_guards)return {};
     const auto track=[](Point initial, Point desired) {
         return TopologyPointTrack{{initial.x,desired.x},{initial.y,desired.y}};
@@ -96,7 +98,7 @@ TopologyStatus guard_split_nodes(Point a, Point start, Point target, Point b,
     guard.max_constraints=options.audit.max_guard_constraints;
     guard.max_evaluations=options.audit.max_guard_evaluations;
     double safe=1.0;
-    const auto st=detail::limit_bend_node_motion(bend,layout,safe,work,guard);
+    auto st=detail::limit_bend_node_motion(bend,layout,safe,work,guard);
     if(!st) {
         if(st.error==TopologyGuardError::CapacityExceeded)
             return fail(TopologyError::CapacityExceeded,"topology surgery continuous node guard budget exhausted",edge);
@@ -106,6 +108,14 @@ TopologyStatus guard_split_nodes(Point a, Point start, Point target, Point b,
     }
     if(safe<1.0)
         return fail(TopologyError::NoAdmissibleStep,"topology surgery would sweep through a node rectangle",edge);
+    st=detail::limit_bend_route_motion(bend,graph,routes,edge,segment,safe,work,guard);
+    if(!st) {
+        if(st.error==TopologyGuardError::CapacityExceeded)
+            return fail(TopologyError::CapacityExceeded,"topology surgery continuous route guard budget exhausted",edge);
+        return fail(TopologyError::InvalidGeometry,"invalid topology surgery continuous route guard geometry",edge);
+    }
+    if(safe<1.0)
+        return fail(TopologyError::NoAdmissibleStep,"topology surgery would pass through a route contact",edge);
     return {};
 }
 
@@ -148,7 +158,7 @@ TopologyStatus apply_topology_edits(
     if (!status) return status;
     TopologyEditReport result;
     result.audits = 1;
-    detail::TopologyNodeMotionWork guard_work;
+    detail::TopologyMotionWork guard_work;
     Routes candidate = baseline;
     for (const auto& edit : edits) {
         if (edit.edge_index >= candidate.edges.size())
@@ -168,8 +178,8 @@ TopologyStatus apply_topology_edits(
             if (!new_bend(pts[edit.point_index],pts[edit.point_index+1],edit,
                           options.audit.coordinate_limit,start,target))
                 return fail(TopologyError::InvalidGeometry,"split cannot create a finite noncollinear bend",current_edge);
-            status=guard_split_nodes(pts[edit.point_index],start,target,pts[edit.point_index+1],
-                                     layout,options,guard_work,current_edge);
+            status=guard_split_motion(pts[edit.point_index],start,target,pts[edit.point_index+1],
+                                     graph,layout,candidate,options,guard_work,current_edge,edit.point_index);
             if(!status)return status;
             const auto location = pts.begin() + static_cast<std::ptrdiff_t>(edit.point_index + 1);
             pts.insert(location,start);

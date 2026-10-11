@@ -46,6 +46,14 @@ Fixture hidden_split(bool segment_only=false) {
     f.layout.nodes[2]={segment_only?65.0:55.0,-30,3,8};
     return f;
 }
+Fixture hidden_route_contact() {
+    auto f=parallel();
+    f.layout.nodes[2]={51,-1010,10,10};
+    f.layout.nodes[3]={51,20,10,10};
+    f.ports[1]={{2,Side::South,0.5},{3,Side::North,0.5}};
+    f.paths.edges[1].points={{56,-1000},{56,20}};
+    return f;
+}
 TopologyEdit split(double dx, double dy) {
     TopologyEdit edit;
     edit.kind = TopologyEditKind::StraightToBend;
@@ -54,6 +62,52 @@ TopologyEdit split(double dx, double dy) {
     edit.segment_fraction = 0.5;
     edit.displacement = {dx,dy};
     return edit;
+}
+void transform(Fixture& f, TopologyEdit& edit, double scale, std::size_t variant) {
+    const auto point=[&](Point& p) {
+        p.x*=scale;p.y*=scale;if(variant&1)std::swap(p.x,p.y);
+        if(variant&2)p.x=-p.x;
+        if(variant&8) {p.x+=1e7;p.y-=1e7;}
+    };
+    for(auto& node:f.graph.nodes) {
+        node.width*=scale;node.height*=scale;
+        if(variant&1)std::swap(node.width,node.height);
+    }
+    for(auto& node:f.layout.nodes) {
+        Point origin{node.x,node.y};point(origin);
+        node.width*=scale;node.height*=scale;
+        if(variant&1)std::swap(node.width,node.height);
+        node.x=origin.x-(variant&2 ? node.width : 0);node.y=origin.y;
+    }
+    for(auto& route:f.paths.edges)for(auto& p:route.points)point(p);
+    edit.displacement.x*=scale;edit.displacement.y*=scale;
+    if(variant&1)std::swap(edit.displacement.x,edit.displacement.y);
+    if(variant&2)edit.displacement.x=-edit.displacement.x;
+    for(auto& request:f.ports)for(auto* port:{&request.source,&request.target}) {
+        if(variant&1) {
+            switch(port->side) {
+            case Side::East: port->side=Side::South;break;
+            case Side::West: port->side=Side::North;break;
+            case Side::North: port->side=Side::West;break;
+            case Side::South: port->side=Side::East;break;
+            default: throw std::runtime_error("transform needs an explicit port side");
+            }
+        }
+        if(variant&2) {
+            if(port->side==Side::East)port->side=Side::West;
+            else if(port->side==Side::West)port->side=Side::East;
+            else port->offset=1-port->offset;
+        }
+    }
+    if(variant&4) {
+        edit.point_index=f.paths.edges[edit.edge_index].points.size()-2-edit.point_index;
+        edit.segment_fraction=1-edit.segment_fraction;
+        for(std::size_t edge=0;edge<f.paths.edges.size();++edge) {
+            std::swap(f.graph.edges[edge].source,f.graph.edges[edge].target);
+            std::swap(f.ports[edge].source,f.ports[edge].target);
+            std::reverse(f.paths.edges[edge].points.begin(),f.paths.edges[edge].points.end());
+        }
+    }
 }
 void check_audited(const Fixture& f, const Routes& r) {
     TopologySignature a,b;
@@ -76,6 +130,119 @@ void check_audited(const Fixture& f, const Routes& r) {
 
 int main(){
     try{
+        {
+            const auto f=hidden_route_contact();
+            // The moving bend reaches edge 1 at alpha=1/40. Before and
+            // after this instant the same signed crossing exists, but changes
+            // from the right child segment to the left child segment.
+            auto intermediate=f.paths;
+            intermediate.edges[0].points={{10,5},{56,-20},{100,5}};
+            TopologySignature signature;
+            require(audit_topology(f.graph,f.layout,f.ports,intermediate,signature).error==
+                    TopologyError::AmbiguousTopology,"independent frame exposes an isolated bend-route contact");
+            Routes out;TopologyEditReport report;
+            TopologyEditOptions sampled;sampled.audit.analytic_guards=false;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {split(40,-1000)},out,sampled,&report)),"sampled split misses isolated route contact");
+            check_audited(f,out);
+            require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {split(40,-1000)},out,{},&report).error==TopologyError::NoAdmissibleStep &&
+                    out.edges.empty() && report.audits==0,"continuous split guard rejects isolated route contact");
+        }
+        {
+            constexpr std::array scales={0.125,1.0,8.0,1024.0};
+            constexpr std::size_t variants=16;
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=hidden_route_contact();auto edit=split(40,-1000);
+                transform(f,edit,scale,variant);
+                TopologySignature signature;
+                require(static_cast<bool>(audit_topology(f.graph,f.layout,f.ports,f.paths,signature)),
+                        "transformed route-contact baseline audited");
+                const auto a=f.paths.edges[0].points.front(),b=f.paths.edges[0].points.back();
+                constexpr double event=1.0/40;
+                const Point p{(a.x+b.x)/2+event*edit.displacement.x,
+                              (a.y+b.y)/2+event*edit.displacement.y};
+                auto intermediate=f.paths;intermediate.edges[0].points={a,p,b};
+                require(audit_topology(f.graph,f.layout,f.ports,intermediate,signature).error==
+                        TopologyError::AmbiguousTopology,"transformed independent frame exposes route contact");
+                Routes out;TopologyEditReport report;
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{edit},out,{},&report).error==
+                        TopologyError::NoAdmissibleStep && out.edges.empty() && report.audits==0,
+                        "continuous contact guards survive scale, axis, reflection, reversal and translation");
+                TopologyEditOptions sampled;sampled.audit.analytic_guards=false;
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                        {edit},out,sampled)),"transformed sampled-only edits still miss isolated contacts");
+                check_audited(f,out);
+            }
+        }
+        {
+            auto f=hidden_route_contact();
+            f.layout.nodes[2].x=50;f.layout.nodes[3].x=50;
+            for(auto& p:f.paths.edges[1].points)p.x=55;
+            Routes out;TopologyEditReport report;
+            for(const double dx:{-5.0,5.0}) {
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                        {split(dx,-10)},out,{},&report)),"splitting at an existing crossing may immediately leave it");
+                check_audited(f,out);
+            }
+            const auto persistent=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {split(0,-1000)},out,{},&report);
+            require(persistent.error==TopologyError::NoAdmissibleStep &&
+                    persistent.message=="topology surgery would pass through a route contact" &&
+                    out.edges.empty() && report.audits==0,"persistent collinear bend-route contact is rejected continuously");
+            f=hidden_route_contact();
+            f.layout.nodes[2].y=30;f.layout.nodes[3].y=1010;
+            f.paths.edges[1].points={{56,40},{56,1010}};
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {split(40,-1000)},out)),"supporting-line events outside finite routes remain legal");
+            check_audited(f,out);
+        }
+        {
+            auto f=parallel();
+            f.graph.edges[1]={0,2};f.layout.nodes[2]={100,-100,10,10};
+            f.ports[1]={{0,Side::East,0.5},{2,Side::West,0.5}};
+            f.paths.edges[1].points={{10,5},{100,-95}};
+            Routes out;TopologyEditReport report;
+            for(std::size_t variant=0;variant<8;++variant) {
+                auto transformed=f;auto edit=split(0,-10);transform(transformed,edit,1,variant);
+                require(static_cast<bool>(apply_topology_edits(transformed.graph,transformed.layout,
+                        transformed.ports,transformed.paths,{edit},out)),"qualified shared graph anchors remain legal");
+                check_audited(transformed,out);
+                edit.displacement.x*=100;edit.displacement.y*=100;
+                const auto status=apply_topology_edits(transformed.graph,transformed.layout,
+                        transformed.ports,transformed.paths,{edit},out,{},&report);
+                require(status.error==TopologyError::NoAdmissibleStep &&
+                        status.message=="topology surgery would pass through a route contact" &&
+                        out.edges.empty() && report.audits==0,"shared-terminal collinear overlap is not exempt");
+            }
+        }
+        {
+            auto f=horizontal();f.paths.edges[0].points={{10,5},{30,-100},{60,-100},{60,-10},{100,5}};
+            Routes out;TopologyEditReport report;
+            const auto status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {split(80,0)},out,{},&report);
+            require(status.error==TopologyError::NoAdmissibleStep &&
+                    status.message=="topology surgery would pass through a route contact" &&
+                    out.edges.empty() && report.audits==0,"continuous contact guard includes nonadjacent segments of its own route");
+        }
+        {
+            auto f=horizontal();f.paths.edges[0].points={{10,5},{55,-5},{100,5}};
+            Routes out;TopologyEditReport report;TopologyEditOptions limited;
+            constexpr std::size_t constraints=8,evaluations=20;
+            limited.audit.max_guard_constraints=constraints;limited.audit.max_guard_evaluations=evaluations;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {split(0,-11)},out,limited)),"adjacent fixed segments fit exact node/route work budgets");
+            check_audited(f,out);
+            for(const std::size_t limit:{std::size_t(6),std::size_t(10),std::size_t(11),evaluations-1}) {
+                limited.audit.max_guard_evaluations=limit;
+                const auto status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                        {split(0,-11)},out,limited,&report);
+                require(status.error==TopologyError::CapacityExceeded &&
+                        status.message=="topology surgery continuous route guard budget exhausted" &&
+                        out.edges.empty() && report.audits==0,
+                        "route orientation, polynomial and classification work consume the cumulative budget");
+            }
+        }
         {
             const auto f=hidden_split();
             // The new point starts at (55,5), reaches (95,-995), and lies
@@ -114,33 +281,7 @@ int main(){
             for(const bool segment_only:{false,true})for(const double scale:scales)
                 for(std::size_t variant=0;variant<variants;++variant) {
                     auto f=hidden_split(segment_only);auto edit=split(40,-1000);
-                    for(auto& n:f.graph.nodes) {
-                        n.width*=scale;n.height*=scale;if(variant&1)std::swap(n.width,n.height);
-                    }
-                    for(auto& n:f.layout.nodes) {
-                        n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;
-                        if(variant&1) {std::swap(n.x,n.y);std::swap(n.width,n.height);}
-                        if(variant&2)n.x=-n.x-n.width;
-                    }
-                    for(auto& p:f.paths.edges[0].points) {
-                        p.x*=scale;p.y*=scale;if(variant&1)std::swap(p.x,p.y);
-                        if(variant&2)p.x=-p.x;
-                    }
-                    edit.displacement.x*=scale;edit.displacement.y*=scale;
-                    if(variant&1)std::swap(edit.displacement.x,edit.displacement.y);
-                    if(variant&2)edit.displacement.x=-edit.displacement.x;
-                    for(auto* port:{&f.ports[0].source,&f.ports[0].target}) {
-                        if(variant&1)port->side=port->side==Side::East?Side::South:Side::North;
-                        if(variant&2) {
-                            if(port->side==Side::East)port->side=Side::West;
-                            else if(port->side==Side::West)port->side=Side::East;
-                        }
-                    }
-                    if(variant&4) {
-                        std::swap(f.graph.edges[0].source,f.graph.edges[0].target);
-                        std::swap(f.ports[0].source,f.ports[0].target);
-                        std::reverse(f.paths.edges[0].points.begin(),f.paths.edges[0].points.end());
-                    }
+                    transform(f,edit,scale,variant);
                     TopologySignature signature;
                     require(static_cast<bool>(audit_topology(f.graph,f.layout,f.ports,f.paths,signature)),
                             "transformed hidden edit has a valid baseline");
@@ -167,7 +308,13 @@ int main(){
             TopologyEditOptions limited;
             // Two affected segments against three stationary nodes; all six
             // pairs retain a separating axis and consume one evaluation each.
-            constexpr std::size_t one_edit_work=6, batch_work=2*one_edit_work;
+            constexpr std::size_t one_edit_work=6;
+            // The second split also tests its two children against the
+            // remaining fixed segment: four orientations each, plus three
+            // supporting-line events outside the finite segments (two tests
+            // each). Those events must consume work without rejecting edits.
+            constexpr std::size_t batch_constraints=2*one_edit_work+2;
+            constexpr std::size_t batch_evaluations=2*one_edit_work+8+6;
             limited.audit.max_guard_constraints=one_edit_work;
             limited.audit.max_guard_evaluations=one_edit_work;
             require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
@@ -180,17 +327,17 @@ int main(){
             require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{split(0,-10)},out,limited,&report).error==
                     TopologyError::CapacityExceeded && report.audits==0,
                     "continuous edit evaluation budget fails transactionally");
-            limited.audit.max_guard_constraints=batch_work;limited.audit.max_guard_evaluations=batch_work;
+            limited.audit.max_guard_constraints=batch_constraints;limited.audit.max_guard_evaluations=batch_evaluations;
             require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
                     {split(0,-10),split(0,-11)},out,limited,&report)) && report.inserted_bends==2,
-                    "two safe edits share an exact cumulative continuous-node budget");
+                    "two safe edits share exact cumulative node and route budgets");
             check_audited(f,out);
-            limited.audit.max_guard_constraints=batch_work-1;
+            limited.audit.max_guard_constraints=batch_constraints-1;
             require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
                     {split(0,-10),split(0,-11)},out,limited,&report).error==TopologyError::CapacityExceeded &&
                     out.edges.empty() && report.inserted_bends==0,
                     "a later edit's constraint exhaustion rolls back the entire batch");
-            limited.audit.max_guard_constraints=batch_work;limited.audit.max_guard_evaluations=batch_work-1;
+            limited.audit.max_guard_constraints=batch_constraints;limited.audit.max_guard_evaluations=batch_evaluations-1;
             require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
                     {split(0,-10),split(0,-11)},out,limited,&report).error==TopologyError::CapacityExceeded &&
                     out.edges.empty() && report.audits==0,

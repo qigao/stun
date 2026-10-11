@@ -26,14 +26,14 @@ struct TopologyEdit {
 };
 
 struct TopologyEditOptions {
-    // analytic_guards enables continuous node-interior checks for split
-    // motion. max_guard_constraints/evaluations are shared across the batch.
+    // analytic_guards enables continuous node-interior and route-contact
+    // checks. max_guard_constraints/evaluations are shared across the batch.
     TopologyOptions audit;
     std::size_t max_edits = 128;
     std::size_t max_audits = 4096; // Cumulative geometric signature rechecks.
     // For a StraightToBend insertion, also audit 1/N,2/N,...,N/N
-    // of the local continuous vertex displacement after the continuous node
-    // guard. Route contacts/crossing order still use this sampled audit;
+    // of the local continuous vertex displacement after continuous node and
+    // route-contact guards. Crossing order still uses this sampled audit;
     // these checks are NOT a complete continuous-time certificate.
     std::size_t continuation_frames = 8;
     double collinear_tolerance = 1e-10;
@@ -57,8 +57,14 @@ struct TopologyEditReport {
 // contact is allowed. A partial safe prefix rejects the ENTIRE edit with
 // NoAdmissibleStep; guard exhaustion returns CapacityExceeded. Two constraints
 // per node and 1..30 evaluations per segment/node pair share the cumulative
-// audit.max_guard_* budgets across splits, with O(nodes) work and O(1) storage
-// per split. Disabling audit.analytic_guards explicitly selects sampled checks.
+// audit.max_guard_* budgets across splits. Route guards check each child against
+// every other fixed segment, including adjacent/nonadjacent segments of its
+// own route. Qualified shared graph anchors remain legal; collinear overlap
+// does not. Initial split seeds at proper crossings may immediately leave them.
+// For S total segments before insertion, route guards add 2*(S-1) constraints,
+// with 4..13 evaluations per pair. Together the guards take O(nodes+S) work
+// and O(1) storage per split. Their numerical predicates are not exact.
+// Disabling audit.analytic_guards explicitly selects sampled checks.
 // The edit changes route topology *representation*, not arbitrary geometry.
 // It does not schedule collision-triggered bends nor guarantee ambient isotopy.
 TopologyStatus apply_topology_edits(
