@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Permit a dependency-free C core gate without configuring the full Stun GUI.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(StunTango LANGUAGES C)
+    include(CTest)
+endif()
 set(TARGET_NAME tango)
 
 set(CMAKE_C_STANDARD 99)
@@ -18,6 +24,11 @@ set(TUI_SOURCES
 
 add_library(${TARGET_NAME} STATIC ${TUI_SOURCES})
 
+# tui_advanced.c uses sqrtf; static consumers need the math dependency.
+if(UNIX)
+    target_link_libraries(${TARGET_NAME} PUBLIC m)
+endif()
+
 target_include_directories(${TARGET_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -30,3 +41,7 @@ if(NANOGUI_BUILD_EXAMPLES)
 endif()
 
 set_target_properties(${TARGET_NAME}  PROPERTIES FOLDER "tango")
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
