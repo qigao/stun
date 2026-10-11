@@ -1,6 +1,6 @@
 #include "flex/core/cubic_bezier.h"
 #include "flex/core/path.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <stdexcept>
 
@@ -14,12 +14,12 @@ spec("Flex cubic Bezier mathematics") {
       const Vec2 start = curve.position(0.0f);
       const Vec2 midpoint = curve.position(0.5f);
       const Vec2 end = curve.position(1.0f);
-      check_float_within_abs(start.x, 0.0f, 1.0e-6f);
-      check_float_within_abs(start.y, 0.0f, 1.0e-6f);
-      check_float_within_abs(midpoint.x, 0.5f, 1.0e-6f);
-      check_float_within_abs(midpoint.y, 0.75f, 1.0e-6f);
-      check_float_within_abs(end.x, 1.0f, 1.0e-6f);
-      check_float_within_abs(end.y, 0.0f, 1.0e-6f);
+      check_within(start.x, 0.0f, 1.0e-6f);
+      check_within(start.y, 0.0f, 1.0e-6f);
+      check_within(midpoint.x, 0.5f, 1.0e-6f);
+      check_within(midpoint.y, 0.75f, 1.0e-6f);
+      check_within(end.x, 1.0f, 1.0e-6f);
+      check_within(end.y, 0.0f, 1.0e-6f);
     }
 
     it("computes first and second derivatives") {
@@ -28,12 +28,12 @@ spec("Flex cubic Bezier mathematics") {
       const Vec2 start_velocity = curve.derivative(0.0f);
       const Vec2 midpoint_velocity = curve.derivative(0.5f);
       const Vec2 midpoint_acceleration = curve.second_derivative(0.5f);
-      check_float_within_abs(start_velocity.x, 0.0f, 1.0e-6f);
-      check_float_within_abs(start_velocity.y, 3.0f, 1.0e-6f);
-      check_float_within_abs(midpoint_velocity.x, 1.5f, 1.0e-6f);
-      check_float_within_abs(midpoint_velocity.y, 0.0f, 1.0e-6f);
-      check_float_within_abs(midpoint_acceleration.x, 0.0f, 1.0e-6f);
-      check_float_within_abs(midpoint_acceleration.y, -6.0f, 1.0e-6f);
+      check_within(start_velocity.x, 0.0f, 1.0e-6f);
+      check_within(start_velocity.y, 3.0f, 1.0e-6f);
+      check_within(midpoint_velocity.x, 1.5f, 1.0e-6f);
+      check_within(midpoint_velocity.y, 0.0f, 1.0e-6f);
+      check_within(midpoint_acceleration.x, 0.0f, 1.0e-6f);
+      check_within(midpoint_acceleration.y, -6.0f, 1.0e-6f);
     }
   }
 
@@ -42,7 +42,7 @@ spec("Flex cubic Bezier mathematics") {
       const CubicBezier2D line({0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {3.0f, 0.0f});
 
       const ArcLengthResult result = line.arc_length();
-      check_float_within_abs(result.length, 3.0f, 1.0e-5f);
+      check_within(result.length, 3.0f, 1.0e-5f);
       check_true(result.converged);
       check_true(result.interval_count > 0);
     }
@@ -74,9 +74,9 @@ spec("Flex cubic Bezier mathematics") {
 
       check_true(path.is_valid());
       const PathPoint midpoint = path.interpolate(0.5f);
-      check_float_within_abs(midpoint.x, 0.5f, 1.0e-6f);
-      check_float_within_abs(midpoint.y, 0.75f, 1.0e-6f);
-      check_float_within_abs(midpoint.time, 0.5f, 1.0e-6f);
+      check_within(midpoint.x, 0.5f, 1.0e-6f);
+      check_within(midpoint.y, 0.75f, 1.0e-6f);
+      check_within(midpoint.time, 0.5f, 1.0e-6f);
     }
 
     it("rejects incomplete and non-monotonic cubic segments") {
@@ -110,10 +110,10 @@ spec("Flex cubic Bezier mathematics") {
       check_true(path.is_valid());
       const PathPoint join = path.interpolate(0.5f);
       const PathPoint second_midpoint = path.interpolate(0.75f);
-      check_float_within_abs(join.x, 1.0f, 1.0e-6f);
-      check_float_within_abs(join.y, 0.0f, 1.0e-6f);
-      check_float_within_abs(second_midpoint.x, 1.5f, 1.0e-6f);
-      check_float_within_abs(second_midpoint.y, -0.75f, 1.0e-6f);
+      check_within(join.x, 1.0f, 1.0e-6f);
+      check_within(join.y, 0.0f, 1.0e-6f);
+      check_within(second_midpoint.x, 1.5f, 1.0e-6f);
+      check_within(second_midpoint.y, -0.75f, 1.0e-6f);
     }
   }
 }

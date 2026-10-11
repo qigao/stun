@@ -1,4 +1,4 @@
-#include <tinytest.h>
+#include <tinytest.hpp>
 #undef group
 #include "test_support.h"
 #include <flexUI/box.h>
