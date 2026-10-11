@@ -617,7 +617,8 @@ algorithmic follow-ups, not Lean/formal-proof tasks.
 
 ### Analytic segment-pair crossing events (v14 follow-up)
 
-For each independent pair of routed segments AB and CD, the guard now
+For each independent pair of routed segments AB and CD, including
+nonadjacent segments within the same route, the guard now
 tracks `orient(A,B,C)`, `orient(A,B,D)`, `orient(C,D,A)`, and
 `orient(C,D,B)` under the same affine movement model as the topology
 interpolator. Each orientation is a quadratic in movement fraction.
@@ -629,6 +630,21 @@ swaps two connectors cannot be incorrectly approved solely because
 
 These O(segment-pair-count) orientation guards have explicit operation
 and constraint budgets, and independently report how many were examined.
+Within a route of S segments, `(S-1)*(S-2)/2` nonadjacent pairs are examined
+when S >= 2. Adjacent segments share their moving waypoint and retain their
+existing bend guards. Each pair consumes four evaluations/constraints from
+the existing shared budgets, including baseline-zero orientation checks;
+the report counts the nonzero orientation constraints. This adds O(S²)
+time per route and O(1) auxiliary storage beyond its existing motion tracks.
+Exhaustion clears the guard report and all composed movement output.
+
+Regression includes a six-waypoint spiral whose start and end geometries
+are valid but whose intermediate motion self-intersects. Its first contact
+at movement fraction `21/850` is capped analytically even with endpoint-only
+sampling. Scaled/reflected variants, reversed edge orientation, rigid
+translation and exact shared-budget boundaries are also covered. The full
+geometry audit can further shorten the analytic prefix for node collisions.
+
 Baseline collinear disjoint segments and endpoint contact cases still
 require the full collision/crossing audit; no complete continuous
 embedding guarantee is claimed. Regression includes endpoint-only

@@ -368,7 +368,8 @@ TopologyGuardStatus limit_topology_movement(
         }
         route_tracks.push_back(std::move(moves));
     }
-    // For independent segments AB and CD the four orientation predicates
+    // For independent segments AB and CD (including nonadjacent segments
+    // of one route) the four orientation predicates
     // orient(A,B,C), orient(A,B,D), orient(C,D,A), orient(C,D,B) are quadratic
     // in affine displacement. A proper crossing can only appear/disappear when
     // one of these orientations reaches zero, so each nonzero baseline
@@ -376,10 +377,13 @@ TopologyGuardStatus limit_topology_movement(
     // disjoint baselines remain outside this guard and require full auditing.
     for(std::size_t i=0;i<route_tracks.size();++i){
         const auto& a=route_tracks[i];
-        for(std::size_t j=i+1;j<route_tracks.size();++j){
+        for(std::size_t j=i;j<route_tracks.size();++j){
             const auto& b=route_tracks[j];
             for(std::size_t s=0;s+1<a.size();++s){
-                for(std::size_t t=0;t+1<b.size();++t){
+                // Adjacent segments share their moving waypoint and already
+                // have a bend guard; each independent pair is examined once.
+                const std::size_t first=(i==j) ? s+2 : 0;
+                for(std::size_t t=first;t+1<b.size();++t){
                     const TopologyBendConstraint guards[4]={
                         {a[s],a[s+1],b[t]},
                         {a[s],a[s+1],b[t+1]},

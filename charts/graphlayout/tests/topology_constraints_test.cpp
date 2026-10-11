@@ -1,6 +1,8 @@
 #include "stun/graphlayout/topology_constraints.h"
 #include "stun/graphlayout/topology.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -17,7 +19,148 @@ void require(bool yes, const char* message) {
 void near(double a, double b, double epsilon, const char* message) {
     if (std::abs(a-b)>epsilon) throw std::runtime_error(message);
 }
+struct SpiralFixture {
+    Graph graph;
+    Layout baseline, desired;
+    Routes routes;
+    std::vector<RouteRequest> ports;
+};
+SpiralFixture spiral(double scale=1.0) {
+    SpiralFixture f;
+    f.graph.nodes={{"source",10,10},{"target",10,10}};
+    f.graph.edges={{0,1}};
+    f.baseline.nodes={{-10,-5,10,10},{80,15,10,10}};
+    f.routes.edges={{{{0,0},{100,0},{100,100},{20,100},{20,20},{80,20}}}};
+    f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}}};
+    for(auto& n:f.graph.nodes) {n.width*=scale;n.height*=scale;}
+    for(auto& n:f.baseline.nodes) {n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;}
+    for(auto& p:f.routes.edges[0].points) {p.x*=scale;p.y*=scale;}
+    f.desired=f.baseline;f.desired.nodes[1].y-=1000*scale;
+    return f;
+}
+void spiral_frame(const SpiralFixture& f, double fraction, Layout& placement, Routes& paths) {
+    constexpr std::array<double,6> lengths={0,100,200,280,360,420};
+    const double displacement=f.desired.nodes[1].y-f.baseline.nodes[1].y;
+    placement=f.baseline;placement.nodes[1].y+=fraction*displacement;
+    paths=f.routes;
+    for(std::size_t i=0;i<lengths.size();++i)
+        paths.edges[0].points[i].y+=fraction*displacement*lengths[i]/lengths.back();
+    paths.edges[0].points.back().y=placement.nodes[1].y+placement.nodes[1].height*0.5;
+}
 void run() {
+    {
+        auto f=spiral();
+        TopologySignature signature;
+        require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,signature)),
+                "spiral baseline has no self contact");
+        // Total arclength is 420. Along the overlapping x range, the inner
+        // horizontal segment is 340 arclength units after the outer one.
+        // Their initial 20-unit separation closes at 20*420/(1000*340).
+        constexpr double first_contact=21.0/850.0;
+        constexpr double probe=0.1;
+        Layout at_contact;Routes crossing;
+        spiral_frame(f,probe,at_contact,crossing);
+        require(audit_topology(f.graph,at_contact,f.ports,crossing,signature).error==
+                TopologyError::AmbiguousTopology,"intermediate spiral genuinely self-intersects");
+        TopologyOptions sampled;sampled.analytic_guards=false;sampled.samples_per_trial=1;
+        Layout moved;Routes paths;TopologyReport movement;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,sampled,&movement)) && movement.accepted_fraction==1,
+                "endpoint-only sampled motion misses the intermediate self contact");
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                "same-route analytic guard can inspect the spiral");
+        require(guard.segment_pair_constraints>0 && guard.max_safe_fraction>0 &&
+                guard.max_safe_fraction<first_contact,"same-route guards cap motion before hidden self contact");
+        sampled.analytic_guards=true;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,sampled,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<first_contact,"single-sample continuation respects self-contact event");
+        require(static_cast<bool>(audit_topology(f.graph,moved,f.ports,paths,signature)),
+                "accepted spiral prefix independently passes geometry audit");
+    }
+    {
+        constexpr std::size_t cases=32;
+        constexpr std::size_t samples=16;
+        constexpr double first_contact=21.0/850.0;
+        for(std::size_t i=0;i<cases;++i) {
+            auto f=spiral(1.0+static_cast<double>(i)/16.0);
+            if(i%2) {
+                for(auto& n:f.baseline.nodes)n.y=-n.y-n.height;
+                for(auto& p:f.routes.edges[0].points)p.y=-p.y;
+                f.desired=f.baseline;f.desired.nodes[1].y+=1000*(1.0+static_cast<double>(i)/16.0);
+            }
+            TopologyGuardReport guard;
+            const auto st=limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard);
+            require(static_cast<bool>(st) && guard.max_safe_fraction>0 &&
+                    guard.max_safe_fraction<first_contact,"scaled and reflected self-contact prefix is bounded");
+            TopologyOptions single;single.samples_per_trial=1;
+            Layout moved;Routes moved_paths;TopologyReport movement;
+            require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                    f.desired,moved,moved_paths,single,&movement)) && movement.accepted_fraction>0 &&
+                    movement.accepted_fraction<=guard.max_safe_fraction,
+                    "full geometry audit may further limit the analytic self-contact prefix");
+            for(std::size_t sample=0;sample<=samples;++sample) {
+                Layout placement;Routes paths;TopologySignature signature;
+                spiral_frame(f,movement.accepted_fraction*static_cast<double>(sample)/samples,placement,paths);
+                const auto audited=audit_topology(f.graph,placement,f.ports,paths,signature);
+                if(!audited)throw std::runtime_error("spiral case "+std::to_string(i)+
+                    ", sample "+std::to_string(sample)+": "+audited.message);
+            }
+        }
+    }
+    {
+        auto f=spiral();
+        TopologyGuardReport original,reversed;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,original)),
+                "forward route can be guarded");
+        std::swap(f.graph.edges[0].source,f.graph.edges[0].target);
+        std::swap(f.ports[0].source,f.ports[0].target);
+        std::reverse(f.routes.edges[0].points.begin(),f.routes.edges[0].points.end());
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reversed)),
+                "reversed route can be guarded");
+        near(original.max_safe_fraction,reversed.max_safe_fraction,1e-12,
+             "self-contact event does not depend on edge orientation");
+        require(original.segment_pair_constraints==reversed.segment_pair_constraints &&
+                original.evaluations==reversed.evaluations,"reversing route retains guard work counts");
+        TopologyOptions single;single.samples_per_trial=1;
+        Layout moved;Routes paths;TopologyReport movement;TopologySignature signature;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,single,&movement)) && movement.accepted_fraction<21.0/850.0,
+                "reversed edge also stays before self contact");
+        require(static_cast<bool>(audit_topology(f.graph,moved,f.ports,paths,signature)),
+                "reversed edge prefix retains exact measured ports");
+        f.desired=f.baseline;
+        for(auto& n:f.desired.nodes) {n.x+=37;n.y-=23;}
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reversed)) &&
+                reversed.max_safe_fraction==1,"rigid spiral translation imposes no artificial event");
+    }
+    {
+        const auto f=spiral();
+        // One node pair, four bends and six independent segment pairs with
+        // four orientation evaluations each must share one bounded budget.
+        constexpr std::size_t evaluations=29;
+        TopologyGuardOptions limited;limited.max_constraints=evaluations;limited.max_evaluations=evaluations;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
+                guard.evaluations==evaluations,"same-route event work fits exact shared budgets");
+        limited.max_constraints=evaluations-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "same-route constraint exhaustion publishes no partial guard report");
+        limited.max_constraints=evaluations;limited.max_evaluations=evaluations-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "same-route evaluation exhaustion is transactional");
+        TopologyOptions scarce;scarce.max_guard_constraints=evaluations-1;
+        Layout moved;moved.nodes.resize(1);
+        Routes paths;paths.edges.resize(1);
+        TopologyReport movement;movement.accepted_fraction=1;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,scarce,&movement).error==TopologyError::CapacityExceeded &&
+                moved.nodes.empty() && paths.edges.empty() && movement.accepted_fraction==0,
+                "self-contact guard budget failure clears movement output");
+    }
     {
         TopologyTriConstraint c;
         c.u={0,0};c.v={10,10};c.w={0,20};c.gap=0;c.p=0.5;c.below=true;
