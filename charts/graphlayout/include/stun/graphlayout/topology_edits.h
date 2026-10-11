@@ -64,6 +64,8 @@ struct TopologyEditReport {
 // does not. Initial split seeds at proper crossings may immediately leave them.
 // Independently evaluated endpoint orientations classify interior affine roots
 // before using their fractions; a root rounded to zero/one is still guarded.
+// Finite-segment dot tests use the absolute product-term bound at each event
+// or probe, so a distant target does not inflate an early contact margin.
 // For S total segments before insertion, route guards add 2*(S-1) constraints,
 // with 4..13 evaluations per pair. Together the guards take O(nodes+S) work
 // and O(1) storage per split. Their numerical predicates are not exact.

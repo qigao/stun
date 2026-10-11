@@ -769,7 +769,11 @@ representation changes independently from the original topology search:
   segments as well, including adjacent and nonadjacent segments of the same
   edge. Each pair's four endpoint/line orientations are affine; at their
   positive roots, a relative-coordinate dot product tests finite segment
-  membership. Permanently collinear witnesses use quadratic dot roots.
+  membership. Finite-segment classification bounds the absolute product terms
+  at the actual event/probe fraction, keeping unrelated late motion out of an
+  early event's roundoff margin. For coefficients' absolute term sums `M0,M1,M2`,
+  the margin is `32*epsilon(long double)*(M0+t*M1+t*t*M2)` at fraction `t`.
+  Permanently collinear witnesses use quadratic dot roots.
   Supporting-line extensions, legal shared graph terminals, and immediate
   departure from an initial split seed at an existing crossing remain legal.
   Endpoint contacts and shared-terminal collinear overlaps reject the edit.
@@ -881,6 +885,19 @@ cases insert a bend with displacement `(2^38,-2^38)` across a vertical segment
 at `x=2^-1060`. The positive event fraction `2^-1098` underflows in binary64;
 independent contact-frame audits and sampled-only controls verify the missed
 crossing transfer. Endpoint-sign classification rejects these edits too.
+
+Large-displacement membership regressions split the internal `(-16,0)` to
+`(16,0)` segment with displacement `(D,-D)`, for `D=2^30` and `2^38`.
+The new bend reaches `(1,-1)` at `t=1/D`; a fixed route from `(1,40)` to
+`(1,100)` is only a supporting-line extension there. Its finite-membership
+dot product is `4141`, and the absolute term sum at this event is `4145`.
+Using the entire displacement for roundoff instead scales as `2*D*D` and can
+incorrectly reject the legal split. Sixty-four scaled/transposed/reflected/
+reversed/translated cases retain exact 14-constraint budgets and atomic
+13-constraint exhaustion. Sixty-four paired cases extend the vertical route
+to `(1,-100)`, making the same event a real contact that must reject; independent
+event audits, sampled-only controls and successful/failing VPSC composition
+verify both outcomes. The numerical guards still do not use exact predicates.
 
 **Current limits:** topology surgery locations/displacements are supplied by
 the caller, not automatically scheduled from a scanline collision event.

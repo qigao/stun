@@ -84,6 +84,16 @@ Fixture terminal_merge_contact(double offset) {
                    {{{0,-100},{-2*offset,-offset},{40,40}}}};
     return f;
 }
+Fixture split_extension() {
+    Fixture f;
+    f.graph.nodes={{"A",10,10},{"B",10,10},{"C",10,10},{"D",10,10}};
+    f.graph.edges={{0,1},{2,3}};
+    f.layout.nodes={{-42,-5,10,10},{32,-5,10,10},{-4,30,10,10},{-4,100,10,10}};
+    f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}},
+             {{2,Side::South,0.5},{3,Side::North,0.5}}};
+    f.paths.edges={{{{-32,0},{-16,0},{16,0},{32,0}}},{{{1,40},{1,100}}}};
+    return f;
+}
 Fixture hidden_route_contact() {
     auto f=parallel();
     f.layout.nodes[2]={51,-1010,10,10};
@@ -169,6 +179,53 @@ void check_audited(const Fixture& f, const Routes& r) {
 
 int main(){
     try{
+        {
+            constexpr std::array displacements={0x1p30,0x1p38};
+            constexpr std::array scales={0.125,1.0};
+            // Four nodes and four original segments: 2*4 + 2*(4-1).
+            constexpr std::size_t variants=16,guard_constraints=14;
+            for(const double displacement:displacements)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=split_extension();
+                auto contact=f;contact.layout.nodes[2].y=-110;contact.paths.edges[1].points.front().y=-100;
+                auto intermediate=f;
+                intermediate.paths.edges[0].points.insert(intermediate.paths.edges[0].points.begin()+2,{1,-1});
+                auto contact_frame=contact;
+                contact_frame.paths.edges[0].points.insert(contact_frame.paths.edges[0].points.begin()+2,{1,-1});
+                auto edit=split(displacement,-displacement);edit.point_index=1;
+                auto frame_edit=edit;transform(intermediate,frame_edit,scale,variant);
+                auto contact_edit=edit;transform(contact,contact_edit,scale,variant);
+                frame_edit=edit;transform(contact_frame,frame_edit,scale,variant);
+                transform(f,edit,scale,variant);
+                TopologyEditOptions options;options.audit.coordinate_limit=1e12;
+                TopologySignature signature;
+                require(static_cast<bool>(audit_topology(intermediate.graph,intermediate.layout,intermediate.ports,
+                        intermediate.paths,signature,options.audit)),
+                        "the supporting-line event lies below the finite vertical route");
+                require(audit_topology(contact_frame.graph,contact_frame.layout,contact_frame.ports,
+                        contact_frame.paths,signature,options.audit).error==TopologyError::AmbiguousTopology,
+                        "the same event is a real contact when the finite vertical interval includes it");
+                Routes out;TopologyEditReport report;
+                auto unchecked=options;unchecked.audit.analytic_guards=false;
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{edit},out,unchecked)),
+                        "large legal split passes independent continuation audits");
+                require(static_cast<bool>(apply_topology_edits(contact.graph,contact.layout,contact.ports,
+                        contact.paths,{contact_edit},out,unchecked)),
+                        "sampled-only split misses the early real contact at the same displacement scale");
+                options.audit.max_guard_constraints=guard_constraints;
+                const auto status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{edit},out,options,&report);
+                if(!status)throw std::runtime_error("large supporting-line extension must remain legal: "+status.message);
+                require(report.inserted_bends==1,"event-local contact classification accepts the complete legal split");
+                const auto guarded=apply_topology_edits(contact.graph,contact.layout,contact.ports,
+                        contact.paths,{contact_edit},out,options,&report);
+                require(guarded.error==TopologyError::NoAdmissibleStep && guarded.message==route_contact_message &&
+                        out.edges.empty() && report.audits==0,"event-local margins still reject true finite-segment contact");
+                options.audit.max_guard_constraints=guard_constraints-1;
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{edit},out,options,&report).error==
+                        TopologyError::CapacityExceeded && out.edges.empty() && report.inserted_bends==0,
+                        "event-local classification retains exact guard constraints and atomic budget failure");
+            }
+        }
         {
             constexpr double offset=0x1p-1060,displacement=0x1p38;
             constexpr std::array scales={0.125,1.0};

@@ -508,20 +508,29 @@ bool contact_event(const ContactOrientation& orientation, bool collapsing, Real&
 }
 
 struct ContactDot {
-    Real constant, linear, quadratic, margin;
+    Real constant, linear, quadratic;
+    Quadratic magnitude;
     Real at(Real alpha) const {return (quadratic*alpha+linear)*alpha+constant;}
+    Real margin(Real alpha) const {
+        constexpr Real roundoff_factor=32.0L;
+        const Real t=std::abs(alpha);
+        return roundoff_factor*std::numeric_limits<Real>::epsilon()*
+               ((magnitude[2]*t+magnitude[1])*t+magnitude[0]);
+    }
 };
 
 ContactDot contact_dot(const TopologyPointTrack& a, const TopologyPointTrack& b,
                        const TopologyPointTrack& point) {
     const auto u=point_difference(point,a), v=point_difference(point,b);
-    const Real scale=(std::abs(u.x)+std::abs(u.dx))*(std::abs(v.x)+std::abs(v.dx))+
-                     (std::abs(u.y)+std::abs(u.dy))*(std::abs(v.y)+std::abs(v.dy));
-    constexpr Real roundoff_factor=32.0L;
+    // Bound the un-cancelled product terms at the classified event, not at
+    // the largest possible motion. A distant target must not inflate an early
+    // supporting-line event into a finite-segment contact.
     return {u.x*v.x+u.y*v.y,
             u.dx*v.x+u.dy*v.y+u.x*v.dx+u.y*v.dy,
             u.dx*v.dx+u.dy*v.dy,
-            roundoff_factor*std::numeric_limits<Real>::epsilon()*scale};
+            {std::abs(u.x*v.x)+std::abs(u.y*v.y),
+             std::abs(u.dx*v.x)+std::abs(u.dy*v.y)+std::abs(u.x*v.dx)+std::abs(u.y*v.dy),
+             std::abs(u.dx*v.dx)+std::abs(u.dy*v.dy)}};
 }
 
 TopologyGuardStatus contact_witness_bound(
@@ -548,14 +557,14 @@ TopologyGuardStatus contact_witness_bound(
         return fail(TopologyGuardError::CapacityExceeded,"bend-route contact polynomial budget exceeded");
     const auto dot=contact_dot(a,b,point);
     if(!std::isfinite(dot.constant) || !std::isfinite(dot.linear) ||
-       !std::isfinite(dot.quadratic) || !std::isfinite(dot.margin))
+       !std::isfinite(dot.quadratic) || !std::isfinite(dot.margin(1.0L)))
         return fail(TopologyGuardError::InvalidGeometry,"nonfinite bend-route contact polynomial");
     if(!evaluate(work,options))
         return fail(TopologyGuardError::CapacityExceeded,"bend-route contact classification budget exceeded");
     if(!persistent) {
         // At an orientation root, dot <= 0 means the endpoint lies on the
         // finite segment; supporting-line extensions must remain admissible.
-        if(dot.at(event)<=dot.margin)safe=std::min(safe,earlier(event,options));
+        if(dot.at(event)<=dot.margin(event))safe=std::min(safe,earlier(event,options));
     } else {
         // Permanently collinear endpoints can enter an interval without an
         // orientation event (e.g. the bend moves along an existing crossing).
@@ -566,7 +575,7 @@ TopologyGuardStatus contact_witness_bound(
             if(roots.values[i]>0.0L && (collapsing ? roots.values[i]<1.0L : roots.values[i]<=1.0L))
                 first=std::min(first,roots.values[i]);
         const Real probe=std::min(first,1.0L)/2.0L;
-        if(dot.at(probe)<=dot.margin)safe=0.0;
+        if(dot.at(probe)<=dot.margin(probe))safe=0.0;
         else if(first<=1.0L)safe=std::min(safe,earlier(first,options));
     }
     return {};

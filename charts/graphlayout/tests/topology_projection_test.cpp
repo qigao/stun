@@ -22,6 +22,34 @@ Fixture fixture(){
 int main(){
     try{
         {
+            constexpr double displacement=0x1p38;
+            Fixture f;
+            f.graph.nodes={{"A",10,10},{"B",10,10},{"C",10,10},{"D",10,10}};
+            f.graph.edges={{0,1},{2,3}};
+            f.baseline.nodes={{-42,-5,10,10},{32,-5,10,10},{-4,30,10,10},{-4,100,10,10}};
+            f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}},
+                     {{2,Side::South,0.5},{3,Side::North,0.5}}};
+            f.routes.edges={{{{-32,0},{-16,0},{16,0},{32,0}}},{{{1,40},{1,100}}}};
+            TopologyEdit insert;insert.point_index=1;insert.displacement={displacement,-displacement};
+            TopologyProjectionOptions options;
+            options.edits.audit.coordinate_limit=1e12;options.topology.coordinate_limit=1e12;
+            Layout moved;Routes paths;TopologyProjectionReport report;
+            const auto status=project_topology_with_edits(f.graph,f.baseline,f.ports,f.routes,
+                f.baseline,{}, {insert},moved,paths,options,&report);
+            if(!status)throw std::runtime_error("large legal split in projection: "+status.message);
+            check(report.edits.inserted_bends==1 && report.topology.accepted_fraction==1 &&
+                  paths.edges[0].points.size()==5,"event-local margin accepts a complete projected split");
+            TopologySignature signature;
+            check(static_cast<bool>(audit_topology(f.graph,moved,f.ports,paths,signature,options.topology)),
+                  "large projected split passes independent full geometry audit");
+            f.baseline.nodes[2].y=-110;f.routes.edges[1].points.front().y=-100;
+            const auto contact=project_topology_with_edits(f.graph,f.baseline,f.ports,f.routes,
+                f.baseline,{}, {insert},moved,paths,options,&report);
+            check(contact.topology_error==TopologyError::NoAdmissibleStep && moved.nodes.empty() &&
+                  paths.edges.empty() && report.edits.inserted_bends==0,
+                  "a real contact at the same scale still clears the complete projected result");
+        }
+        {
             constexpr double offset=0x1p-100;
             Fixture f;
             f.graph.nodes={{"A",10,10},{"B",10,10},{"C",10,10},{"D",10,10}};
