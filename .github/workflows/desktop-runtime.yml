@@ -229,7 +229,7 @@ jobs:
               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
               "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$VCPKG_OVERLAY_PORTS" \
               "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
               "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
               -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
