@@ -339,7 +339,8 @@ static void md_parse_blocks(stun_md_document *d) {
                 code_open=false;
                 continue;
             }
-            const size_t size=line.end-line.begin+(line.newline?1u:0u);
+            /* Preserve exact CRLF/LF bytes in fenced code payloads. */
+            const size_t size=line.next-line.begin;
             md_text(d,fence.node,s+line.begin,size);
             continue;
         }
