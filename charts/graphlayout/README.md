@@ -625,6 +625,29 @@ calculates conservative **analytic event fractions** before sampled auditing:
   times per pair and no per-pair heap allocation. Work appears in the existing
   evaluation report, while Straight/Bend counters retain their local meanings.
   Distinct root counts can change evaluation counts across geometric variants.
+- **Continuous crossing order:** preserving each pair's proper crossing is
+  insufficient when three lines meet and exchange their crossing sequence.
+  Record proper baseline intersections on each carrier segment as rational
+  affine-motion parameters `t=N(alpha)/D(alpha)`, with quadratic `N,D`.
+  Sort the baseline parameters and retain each adjacent order gap. Existing
+  pair-orientation guards keep denominator signs until their bounded event;
+  the signed quartic numerator `N_right*D_left-N_left*D_right` must stay
+  positive. Bernstein control hulls and left-first de Casteljau subdivision
+  bound whole intervals rather than sample frames. Mathematical background:
+  [convex hull property](https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/spline/Bezier/bezier-construct.html)
+  and [curve subdivision](https://pages.mtu.edu/~shene/COURSES/cs3621/NOTES/surface/bezier-sub.html);
+  the crossing polynomial and numerical prefix guard are independently
+  implemented here. A triple contact shortens the step even if order never
+  reverses. A coefficient-scaled margin of `128 * long-double epsilon` and
+  a maximum subdivision depth of `double` precision bits bound numerical
+  resolution; the first unresolved interval is excluded conservatively.
+  Every order gap consumes one constraint and one construction evaluation;
+  every visited subdivision consumes one additional evaluation. Exhaustion
+  fails transactionally, without publishing a partially checked prefix.
+  The existing segment-pair counter includes order gaps. For `C` directed
+  proper crossings, storage is O(C + double precision bits), sorting is
+  O(C log C), and subdivision costs O(consumed evaluations). Two records
+  per crossing are bounded by its four pair-orientation constraints.
 - **Combination:** `move_topology_preserving` now optionally (default on)
   computes those analytic guards and only then runs its bounded multi-frame,
   complete graph collision and signed crossing-order audits. Reports include
@@ -654,11 +677,19 @@ segment with a translating rectangle tests two-root quadratic events and
 ignores a first root lying on the line extension; a double-root corner touch
 remains admissible. Exact constraint/evaluation boundaries cover both root
 generation and interval classification failures.
+Crossing-order regressions have three persistent proper crossings and valid
+start/end signatures, but exchange their order twice at fractions `1/4` and
+`3/4`. Rotating all three lines produces an order polynomial proportional to
+`(alpha-1/4)*(alpha-3/4)*(128-alpha^2)`; a variant uses a double root at `1/2`.
+Sixty-four scale/transpose/reflection/reversal cases exercise both exchange
+and pure triple tangency, plus independent accepted-prefix audits, exact
+shared budgets, coefficient subdivision exhaustion and rigid translation.
 
 **Limitations:** this is a conservative *local guard*, not a complete
 `libtopology` implementation. Fixed baseline scan fractions may differ from
-actual moving scan intersection positions. Full segment/node event checks are
-numerical, using floating-point coefficients, roots and interval classifications;
+actual moving scan intersection positions. Segment/node and crossing-order
+event checks are numerical, using floating-point coefficients, roots, control
+hulls and interval classifications;
 they are not exact predicates or a certified continuous-geometry proof. The
 subsequent sampled topology audit can still miss other contacts between samples,
 and the current implementation

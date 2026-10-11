@@ -309,6 +309,103 @@ TopologyGuardStatus segment_node_bound(const SegmentNodeMotion& motion, double& 
     return {};
 }
 
+using Quadratic = std::array<Real,3>;
+constexpr std::size_t order_degree=4;
+using OrderPolynomial = std::array<Real,order_degree+1>;
+constexpr std::size_t order_subdivision_depth=std::numeric_limits<double>::digits;
+constexpr Real order_roundoff_factor=128.0L;
+
+RelativePointMotion point_difference(const TopologyPointTrack& a, const TopologyPointTrack& b) {
+    return {static_cast<Real>(a.x.initial)-b.x.initial,static_cast<Real>(a.y.initial)-b.y.initial,
+            (static_cast<Real>(a.x.desired)-a.x.initial)-(static_cast<Real>(b.x.desired)-b.x.initial),
+            (static_cast<Real>(a.y.desired)-a.y.initial)-(static_cast<Real>(b.y.desired)-b.y.initial)};
+}
+
+Quadratic cross_polynomial(const RelativePointMotion& a, const RelativePointMotion& b) {
+    return {cross(a.x,a.y,b.x,b.y),cross(a.dx,a.dy,b.x,b.y)+cross(a.x,a.y,b.dx,b.dy),
+            cross(a.dx,a.dy,b.dx,b.dy)};
+}
+
+struct CrossingTrack {
+    std::size_t edge, segment;
+    Quadratic numerator, denominator;
+    Real initial_parameter() const {return numerator[0]/denominator[0];}
+    bool valid() const {
+        if(denominator[0]==0.0L)return false;
+        const Real parameter=initial_parameter();
+        return std::isfinite(parameter) && parameter>0.0L && parameter<1.0L;
+    }
+};
+
+CrossingTrack crossing_track(std::size_t edge, std::size_t segment,
+                             const TopologyPointTrack& a, const TopologyPointTrack& b,
+                             const TopologyPointTrack& c, const TopologyPointTrack& d) {
+    const auto direction=point_difference(d,c);
+    return {edge,segment,cross_polynomial(point_difference(c,a),direction),
+            cross_polynomial(point_difference(b,a),direction)};
+}
+
+OrderPolynomial bernstein_coefficients(const OrderPolynomial& power) {
+    // b_i = sum_{k<=i} c_k * choose(i,k)/choose(4,k).
+    constexpr Real weights[order_degree+1][order_degree+1]={
+        {1,0,0,0,0},{1,1.0L/4,0,0,0},{1,1.0L/2,1.0L/6,0,0},
+        {1,3.0L/4,1.0L/2,1.0L/4,0},{1,1,1,1,1}};
+    OrderPolynomial result{};
+    for(std::size_t i=0;i<result.size();++i)
+        for(std::size_t k=0;k<=i;++k)result[i]+=power[k]*weights[i][k];
+    return result;
+}
+
+// A positive Bernstein control hull bounds the entire interval, not sampled
+// frames. Visit left intervals first; stop conservatively at the first interval
+// unresolved at double-fraction precision. O(evaluations) time, O(depth) stack.
+TopologyGuardStatus positive_order_prefix(const OrderPolynomial& controls, Real floor,
+                                          Real lo, Real hi, std::size_t depth,
+                                          std::size_t& evaluations, const TopologyGuardOptions& opt,
+                                          Real& first) {
+    if(evaluations==opt.max_evaluations)
+        return fail(TopologyGuardError::CapacityExceeded,"crossing-order subdivision budget exceeded");
+    ++evaluations;
+    if(std::all_of(controls.begin(),controls.end(),[&](Real v){return v>floor;}))return {};
+    const Real mid=lo+(hi-lo)/2.0L;
+    if(depth==order_subdivision_depth || mid==lo || mid==hi) {first=lo;return {};}
+    OrderPolynomial work=controls, left{}, right{};
+    left.front()=work.front();right.back()=work.back();
+    for(std::size_t level=1;level<=order_degree;++level) {
+        for(std::size_t i=0;i<=order_degree-level;++i)work[i]=(work[i]+work[i+1])/2.0L;
+        left[level]=work.front();right[order_degree-level]=work[order_degree-level];
+    }
+    auto st=positive_order_prefix(left,floor,lo,mid,depth+1,evaluations,opt,first);
+    if(!st || first<=1.0L)return st;
+    return positive_order_prefix(right,floor,mid,hi,depth+1,evaluations,opt,first);
+}
+
+TopologyGuardStatus crossing_order_bound(const CrossingTrack& left, const CrossingTrack& right,
+                                         double& out, std::size_t& evaluations,
+                                         const TopologyGuardOptions& opt) {
+    OrderPolynomial order{};Real scale=0.0L;
+    const Real sign=(left.denominator[0]>0)==(right.denominator[0]>0) ? 1.0L : -1.0L;
+    // t_right - t_left = (N_right*D_left - N_left*D_right)/(D_left*D_right).
+    // Existing proper-crossing orientation guards keep the denominator signs.
+    for(std::size_t i=0;i<left.numerator.size();++i)
+        for(std::size_t j=0;j<right.numerator.size();++j) {
+            const Real a=right.numerator[i]*left.denominator[j];
+            const Real b=left.numerator[i]*right.denominator[j];
+            order[i+j]+=sign*(a-b);scale+=std::abs(a)+std::abs(b);
+        }
+    if(order[0]<=0.0L)
+        return fail(TopologyGuardError::InfeasibleBaseline,"unseparated baseline crossing order");
+    // Retain a machine-precision margin for coefficient cancellation and
+    // repeated subdivision. This is a numerical guard, not interval arithmetic.
+    const Real floor=order_roundoff_factor*std::numeric_limits<Real>::epsilon()*scale;
+    Real first=2.0L;
+    const auto st=positive_order_prefix(bernstein_coefficients(order),floor,0.0L,1.0L,0,
+                                       evaluations,opt,first);
+    if(!st)return st;
+    out=first<=1.0L ? earlier(first,opt) : 1.0;
+    return {};
+}
+
 TopologyScalarTrack make_track(double initial, Real motion,
                                const TopologyGuardOptions& o,
                                bool& valid_motion) {
@@ -539,6 +636,7 @@ TopologyGuardStatus limit_topology_movement(
     // one of these orientations reaches zero, so each nonzero baseline
     // orientation provides an analytically bounded event. For an entirely
     // collinear disjoint baseline, affine projected gaps bound first contact.
+    std::vector<CrossingTrack> crossings;
     for(std::size_t i=0;i<route_tracks.size();++i){
         const auto& a=route_tracks[i];
         for(std::size_t j=i;j<route_tracks.size();++j){
@@ -555,10 +653,13 @@ TopologyGuardStatus limit_topology_movement(
                         {b[t],b[t+1],a[s+1]},
                     };
                     bool collinear=true;
-                    for(const auto& guard:guards){
+                    std::array<Real,4> initial_areas{};
+                    for(std::size_t k=0;k<initial_areas.size();++k){
+                        const auto& guard=guards[k];
                         if(!use())return fail(TopologyGuardError::CapacityExceeded,
                                               "topology segment-pair event budget exceeded");
                         const Real initial_area=area(guard,0.0L);
+                        initial_areas[k]=initial_area;
                         if(initial_area==0.0L)continue;
                         collinear=false;
                         double safe=0;
@@ -566,6 +667,19 @@ TopologyGuardStatus limit_topology_movement(
                         if(!status)return status;
                         candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
                         ++candidate.segment_pair_constraints;
+                    }
+                    const auto opposite=[](Real x, Real y) {
+                        return (x<0.0L && y>0.0L) || (x>0.0L && y<0.0L);
+                    };
+                    if(i!=j && opposite(initial_areas[0],initial_areas[1]) &&
+                       opposite(initial_areas[2],initial_areas[3])) {
+                        // Two records per proper crossing are bounded by the
+                        // four already-consumed segment-pair constraints.
+                        const auto first_crossing=crossing_track(i,s,a[s],a[s+1],b[t],b[t+1]);
+                        const auto second_crossing=crossing_track(j,t,b[t],b[t+1],a[s],a[s+1]);
+                        if(!first_crossing.valid() || !second_crossing.valid())
+                            return fail(TopologyGuardError::InvalidGeometry,"invalid baseline proper-crossing parameter");
+                        crossings.push_back(first_crossing);crossings.push_back(second_crossing);
                     }
                     if(collinear) {
                         if(!use())return fail(TopologyGuardError::CapacityExceeded,
@@ -579,6 +693,24 @@ TopologyGuardStatus limit_topology_movement(
                 }
             }
         }
+    }
+    std::sort(crossings.begin(),crossings.end(),[](const auto& a,const auto& b) {
+        if(a.edge!=b.edge)return a.edge<b.edge;
+        if(a.segment!=b.segment)return a.segment<b.segment;
+        return a.initial_parameter()<b.initial_parameter();
+    });
+    // Preserving adjacent order gaps preserves the entire sequence. Crossings
+    // on different carrier segments cannot exchange without an endpoint event,
+    // already bounded by the pair-orientation guards.
+    for(std::size_t i=1;i<crossings.size();++i) {
+        const auto& left=crossings[i-1];const auto& right=crossings[i];
+        if(left.edge!=right.edge || left.segment!=right.segment)continue;
+        if(!use())return fail(TopologyGuardError::CapacityExceeded,"crossing-order constraint budget exceeded");
+        double safe=1.0;
+        const auto st=crossing_order_bound(left,right,safe,candidate.evaluations,options);
+        if(!st)return st;
+        candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
+        ++candidate.segment_pair_constraints;
     }
     report=candidate;
     return {};

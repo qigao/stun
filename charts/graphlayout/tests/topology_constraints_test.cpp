@@ -78,6 +78,16 @@ MovementFixture collinear_swap(SwapAxis axis=SwapAxis::Horizontal, double scale=
     }
     return f;
 }
+Point fixture_anchor(const Layout& layout, const Port& port) {
+    const auto& node=layout.nodes[port.node];
+    switch(port.side) {
+    case Side::North:return {node.x+node.width*port.offset,node.y};
+    case Side::East:return {node.x+node.width,node.y+node.height*port.offset};
+    case Side::South:return {node.x+node.width*port.offset,node.y+node.height};
+    case Side::West:return {node.x,node.y+node.height*port.offset};
+    default:throw std::runtime_error("invalid fixture port");
+    }
+}
 // These fixtures translate both endpoints of each route equally.
 void rigid_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
     placement=f.baseline;paths=f.routes;
@@ -93,18 +103,8 @@ void rigid_frame(const MovementFixture& f, double fraction, Layout& placement, R
         }
         // Auditing requires exact measured anchors, including rounding after
         // the independently interpolated node position is computed.
-        const auto anchor=[&](const Port& port) -> Point {
-            const auto& node=placement.nodes[port.node];
-            switch(port.side) {
-            case Side::North:return {node.x+node.width*port.offset,node.y};
-            case Side::East:return {node.x+node.width,node.y+node.height*port.offset};
-            case Side::South:return {node.x+node.width*port.offset,node.y+node.height};
-            case Side::West:return {node.x,node.y+node.height*port.offset};
-            default:throw std::runtime_error("invalid fixture port");
-            }
-        };
-        paths.edges[i].points.front()=anchor(f.ports[i].source);
-        paths.edges[i].points.back()=anchor(f.ports[i].target);
+        paths.edges[i].points.front()=fixture_anchor(placement,f.ports[i].source);
+        paths.edges[i].points.back()=fixture_anchor(placement,f.ports[i].target);
     }
 }
 MovementFixture waypoint_sweep(bool vertical=false, double scale=1.0) {
@@ -150,7 +150,203 @@ MovementFixture segment_sweep(bool vertical=false, double scale=1.0) {
     for(auto& p:f.routes.edges[0].points) {p.x*=scale;p.y*=scale;}
     return f;
 }
+MovementFixture crossing_order_sweep(bool quartic=false, bool tangent=false) {
+    MovementFixture f;
+    f.graph.nodes={{"west",8,8},{"east",8,8},{"southwest",8,8},
+                   {"northeast",8,8},{"north",8,8},{"south",8,8}};
+    f.graph.edges={{0,1},{2,3},{4,5}};
+    f.baseline.nodes={{-264,-4,8,8},{256,-4,8,8},{-68,-72,8,8},
+                      {60,52,8,8},{-4,-264,8,8},{-4,256,8,8}};
+    f.routes.edges={{{{-256,0},{256,0}}},{{{-64,-64},{64,52}}},{{{0,-256},{0,256}}}};
+    f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}},
+             {{2,Side::South,0.5},{3,Side::North,0.5}},
+             {{4,Side::South,0.5},{5,Side::North,0.5}}};
+    f.desired=f.baseline;f.desired.nodes[2].y-=64;
+    f.desired.nodes[3].x+=64;f.desired.nodes[3].y+=192;
+    if(tangent) {
+        f.baseline.nodes[3].y-=4;f.desired.nodes[3].y-=4;
+        f.routes.edges[1].points.back().y-=4;
+    }
+    if(quartic) {
+        f.desired.nodes[0].y-=32;f.desired.nodes[1].y+=32;
+        f.desired.nodes[4].x-=16;f.desired.nodes[5].x+=16;
+    }
+    return f;
+}
+void crossing_order_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
+    placement=f.baseline;paths=f.routes;
+    placement.nodes[2].y-=64*fraction;
+    placement.nodes[3].x+=64*fraction;placement.nodes[3].y+=192*fraction;
+    paths.edges[1].points.front().y-=64*fraction;
+    paths.edges[1].points.back().x+=64*fraction;paths.edges[1].points.back().y+=192*fraction;
+    for(const std::size_t edge:{std::size_t(0),std::size_t(2)}) {
+        const auto& ends=f.graph.edges[edge];
+        for(const auto node:{ends.source,ends.target}) {
+            const double dx=fraction*(f.desired.nodes[node].x-f.baseline.nodes[node].x);
+            const double dy=fraction*(f.desired.nodes[node].y-f.baseline.nodes[node].y);
+            placement.nodes[node].x+=dx;placement.nodes[node].y+=dy;
+            auto& p=node==ends.source?paths.edges[edge].points.front():paths.edges[edge].points.back();
+            p.x+=dx;p.y+=dy;
+        }
+    }
+    for(std::size_t edge=0;edge<paths.edges.size();++edge) {
+        paths.edges[edge].points.front()=fixture_anchor(placement,f.ports[edge].source);
+        paths.edges[edge].points.back()=fixture_anchor(placement,f.ports[edge].target);
+    }
+}
 void run() {
+    {
+        const auto f=crossing_order_sweep();
+        TopologySignature initial, middle, final;
+        require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,initial)) &&
+                initial.crossing_count==3,"three proper crossings form the order-sweep baseline");
+        Layout placement;Routes paths;crossing_order_frame(f,0.5,placement,paths);
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,middle)) &&
+                middle.crossing_count==3 &&
+                middle.ordered_crossings[0][0].other_edge!=initial.ordered_crossings[0][0].other_edge,
+                "crossing order changes without any pair losing a proper crossing");
+        crossing_order_frame(f,1,placement,paths);
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,final)) &&
+                final.ordered_crossings[0][0].other_edge==initial.ordered_crossings[0][0].other_edge,
+                "final crossing order returns to its initial sequence");
+        crossing_order_frame(f,0.25,placement,paths);
+        require(audit_topology(f.graph,placement,f.ports,paths,middle).error==TopologyError::AmbiguousTopology,
+                "independent audit rejects the exact triple intersection");
+        TopologyOptions single;single.samples_per_trial=1;single.analytic_guards=false;
+        TopologyReport movement;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction==1,
+                "final-frame sampling misses two intermediate crossing-order exchanges");
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction>0.24 && guard.max_safe_fraction<0.25,
+                "continuous crossing-order guard stops before the first triple event");
+        single.analytic_guards=true;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0.24 &&
+                movement.accepted_fraction<0.25,"single-sample continuation respects crossing-order events");
+        constexpr std::size_t samples=32;
+        for(std::size_t i=0;i<=samples;++i) {
+            crossing_order_frame(f,movement.accepted_fraction*static_cast<double>(i)/samples,placement,paths);
+            require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,middle)) &&
+                    middle.crossing_count==initial.crossing_count,
+                    "independent frames retain the accepted prefix's crossing count");
+            for(std::size_t edge=0;edge<initial.ordered_crossings.size();++edge) {
+                require(middle.ordered_crossings[edge].size()==initial.ordered_crossings[edge].size(),
+                        "accepted prefix retains each route's crossing sequence length");
+                for(std::size_t event=0;event<initial.ordered_crossings[edge].size();++event)
+                    require(middle.ordered_crossings[edge][event].other_edge==
+                            initial.ordered_crossings[edge][event].other_edge &&
+                            middle.ordered_crossings[edge][event].sign==initial.ordered_crossings[edge][event].sign,
+                            "independent frames retain every crossing identity, sign and order");
+            }
+        }
+    }
+    {
+        // With all three lines rotating, the carrier's order numerator is
+        // proportional to (alpha-1/4)*(alpha-3/4)*(128-alpha^2).
+        // A double root instead uses (alpha-1/2)^2: it must still stop before
+        // the triple contact even though the order never reverses there.
+        constexpr std::array scales={0.125,1.0,8.0,1024.0};
+        constexpr std::size_t variants=8;
+        for(const bool tangent:{false,true})for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=crossing_order_sweep(true,tangent);
+                for(auto& n:f.graph.nodes) {n.width*=scale;n.height*=scale;}
+                for(auto* layout:{&f.baseline,&f.desired})for(auto& n:layout->nodes) {
+                    n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;
+                    if(variant&1) {std::swap(n.x,n.y);std::swap(n.width,n.height);}
+                    if(variant&2)n.x=-n.x-n.width;
+                }
+                for(auto& route:f.routes.edges)for(auto& p:route.points) {
+                    p.x*=scale;p.y*=scale;if(variant&1)std::swap(p.x,p.y);
+                    if(variant&2)p.x=-p.x;
+                }
+                for(auto& request:f.ports)for(auto* port:{&request.source,&request.target}) {
+                    if(variant&1) {
+                        if(port->side==Side::East)port->side=Side::South;
+                        else if(port->side==Side::West)port->side=Side::North;
+                        else if(port->side==Side::South)port->side=Side::East;
+                        else port->side=Side::West;
+                    }
+                    if(variant&2) {
+                        if(port->side==Side::East)port->side=Side::West;
+                        else if(port->side==Side::West)port->side=Side::East;
+                    }
+                }
+                if(variant&4)for(std::size_t edge=0;edge<f.graph.edges.size();++edge) {
+                    std::swap(f.graph.edges[edge].source,f.graph.edges[edge].target);
+                    std::swap(f.ports[edge].source,f.ports[edge].target);
+                    std::reverse(f.routes.edges[edge].points.begin(),f.routes.edges[edge].points.end());
+                }
+                TopologyGuardReport guard;TopologyReport movement;Layout moved;Routes paths;
+                TopologySignature signature;
+                require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,signature)),
+                        "transformed quartic order sweep has a valid baseline");
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                        "quartic order event can be guarded under scale, transpose, reflection and reversal");
+                const double event=tangent?0.5:0.25;
+                require(guard.max_safe_fraction>event-0.001 && guard.max_safe_fraction<event,
+                        "quartic guard catches both exchange and boundary-only triple contact");
+                TopologyOptions single;single.samples_per_trial=1;
+                require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                        f.desired,moved,paths,single,&movement)) && movement.accepted_fraction>event-0.001 &&
+                        movement.accepted_fraction<event,"quartic order guard composes with independent full audit");
+            }
+    }
+    {
+        auto f=crossing_order_sweep();
+        // 15 node pairs, 18 segment/node pairs, 10 fixed scans, 12 pair
+        // orientations and three adjacent crossing-order constraints.
+        constexpr std::size_t constraints=58;
+        TopologyGuardReport reference, guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reference)) &&
+                reference.segment_pair_constraints==15,"three order gaps augment the twelve pair orientations");
+        TopologyGuardOptions limited;limited.max_constraints=constraints;
+        limited.max_evaluations=reference.evaluations;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
+                guard.evaluations==reference.evaluations,"crossing-order phase fits exact shared budgets");
+        limited.max_constraints=constraints-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "crossing-order constraint exhaustion is transactional");
+        limited.max_constraints=constraints;limited.max_evaluations=reference.evaluations-1;
+        const auto exhausted=limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited);
+        require(exhausted.error==TopologyGuardError::CapacityExceeded && guard.evaluations==0 &&
+                exhausted.message=="crossing-order subdivision budget exceeded",
+                "Bernstein subdivision work consumes the shared evaluation budget");
+        TopologyOptions scarce;scarce.max_guard_evaluations=reference.evaluations-1;
+        Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+        TopologyReport movement;movement.accepted_fraction=1;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,moved,paths,
+                scarce,&movement).error==TopologyError::CapacityExceeded && moved.nodes.empty() &&
+                paths.edges.empty() && movement.accepted_fraction==0,
+                "order subdivision exhaustion clears composed outputs");
+        for(std::size_t node=0;node<f.graph.nodes.size();++node) {
+            f.desired.nodes[node]=f.baseline.nodes[node];
+            f.desired.nodes[node].x+=64;f.desired.nodes[node].y-=128;
+        }
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"crossing-order guards preserve rigid translation");
+        f=crossing_order_sweep(true);
+        constexpr double short_motion=0.125;
+        for(std::size_t node=0;node<f.graph.nodes.size();++node) {
+            f.desired.nodes[node].x=f.baseline.nodes[node].x+
+                short_motion*(f.desired.nodes[node].x-f.baseline.nodes[node].x);
+            f.desired.nodes[node].y=f.baseline.nodes[node].y+
+                short_motion*(f.desired.nodes[node].y-f.baseline.nodes[node].y);
+        }
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"a positive nonconstant order polynomial admits the whole safe step");
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,{},&movement)) && movement.accepted_fraction==1,
+                "nonrigid motion without an order event passes the complete topology audit");
+        f=crossing_order_sweep();f.baseline.nodes[3].y=64;f.routes.edges[1].points.back().y=64;
+        f.desired=f.baseline;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard).error==
+                TopologyGuardError::InfeasibleBaseline && guard.evaluations==0,
+                "coincident baseline crossings fail without a partial report");
+    }
     {
         const auto f=segment_sweep();
         TopologySignature signature;

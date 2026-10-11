@@ -82,8 +82,8 @@ struct TopologyGuardReport {
     double max_safe_fraction = 1.0;
     std::size_t straight_constraints = 0;
     std::size_t bend_constraints = 0;
-    // Nonzero orientation guards plus disjoint-collinear interval guards,
-    // across routes and within nonadjacent segment pairs.
+    // Nonzero orientation guards, disjoint-collinear interval guards and
+    // adjacent proper-crossing order gaps on each carrier segment.
     std::size_t segment_pair_constraints = 0;
     std::size_t evaluations = 0;
 };
@@ -141,6 +141,17 @@ TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint
 // are left to the full audit. The report counts each disjoint interval guard
 // once. Segment-pair checks take O(segment-pair-count) time and O(1) additional
 // storage beyond the motion tracks. Adjacent segments use bend guards instead.
+// Proper baseline crossings are ordered on each carrier segment. Adjacent
+// crossing-parameter differences have quartic numerators; Bernstein control
+// hull subdivision retains their strict baseline order, including triple
+// contacts without a sign reversal. Each order gap consumes one constraint,
+// one construction evaluation and one evaluation per visited subdivision.
+// The first interval unresolved after double-fraction precision subdivision
+// bounds the step conservatively; evaluation exhaustion returns CapacityExceeded.
+// A coefficient-scaled machine-precision margin can also shorten near-degenerate
+// motion. Storage is O(C + double precision bits) for C directed crossings,
+// bounded by the pair-constraint budget; sorting takes O(C log C), subsequent
+// subdivision O(consumed evaluations). No exact-arithmetic guarantee is made.
 // This detects hidden two-segment swaps and self contacts even if a sampled audit
 // observes only the final frame. The minimum safe fraction limits a later
 // full topology audit; it is NOT an ambient isotopy guarantee. In particular,

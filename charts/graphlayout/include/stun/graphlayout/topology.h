@@ -36,7 +36,7 @@ struct TopologyOptions {
     std::size_t max_trials = 16; // Candidate distance fractions: 1, 1/2, ...
     std::size_t samples_per_trial = 8; // Inspect the entire interpolation prefix.
     // Analytically cap motion at node-pair, waypoint and full segment/node
-    // collisions plus local bend/crossing events before sampled full checks.
+    // collisions plus bend, crossing and crossing-order events before full checks.
     bool analytic_guards = true;
     std::size_t max_guard_constraints = 32768;
     std::size_t max_guard_evaluations = 2500000;
