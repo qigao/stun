@@ -72,7 +72,7 @@ struct TopologyEditReport {
 // before the full final audit, so seed contacts ONLY at that instant are allowed.
 // A zero computed bend area prunes directly without consuming motion work.
 // Merges retain the original final-only audit/report counts (no sampled frames).
-// Disabling audit.analytic_guards explicitly selects sampled checks.
+// Disabling audit.analytic_guards selects split sampling and final-only merging.
 // The edit changes route topology *representation*, not arbitrary geometry.
 // It does not schedule collision-triggered bends nor guarantee ambient isotopy.
 TopologyStatus apply_topology_edits(
