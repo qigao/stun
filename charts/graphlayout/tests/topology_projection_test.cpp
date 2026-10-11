@@ -22,6 +22,31 @@ Fixture fixture(){
 int main(){
     try{
         {
+            for(const bool route_contact:{false,true}) {
+                auto f=fixture();f.routes.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
+                if(route_contact) {
+                    constexpr double offset=5e-5;
+                    f.graph.nodes.push_back({"D",10,10});f.graph.edges.push_back({2,3});
+                    f.baseline.nodes[2]={15,-40+offset,10,10};f.baseline.nodes.push_back({85,40+offset,10,10});
+                    f.ports.push_back({{2,Side::South,0.5},{3,Side::North,0.5}});
+                    f.routes.edges.push_back({{{20,f.baseline.nodes[2].y+10},{90,f.baseline.nodes[3].y}}});
+                } else {
+                    f.graph.nodes[2].width=2e-6;f.graph.nodes[2].height=2e-6;
+                    f.baseline.nodes[2]={55-1e-6,5+4e-5,2e-6,2e-6};
+                }
+                TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+                TopologyProjectionOptions options;options.edits.collinear_tolerance=1e-5;
+                Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+                TopologyProjectionReport report;report.edits.removed_bends=1;
+                const auto status=project_topology_with_edits(f.graph,f.baseline,f.ports,f.routes,
+                    f.baseline,{}, {merge},moved,paths,options,&report);
+                check(status.topology_error==TopologyError::NoAdmissibleStep,
+                      "projection rejects node and route contacts during near-collinear collapse");
+                check(moved.nodes.empty() && paths.edges.empty() && report.edits.removed_bends==0,
+                      "continuous collapse failure clears the entire projected result");
+            }
+        }
+        {
             auto f=fixture();
             f.graph.nodes.push_back({"D",10,10});f.graph.edges.push_back({2,3});
             f.baseline.nodes[2]={51,-1010,10,10};f.baseline.nodes.push_back({51,20,10,10});

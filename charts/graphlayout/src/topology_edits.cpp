@@ -67,12 +67,13 @@ bool new_bend(Point a, Point b, const TopologyEdit& edit,
            !(target.x == b.x && target.y == b.y);
 }
 
-bool redundant_bend(Point a, Point p, Point b, double tolerance) {
+bool redundant_bend(Point a, Point p, Point b, double tolerance, bool& exact) {
     const Real ux = static_cast<Real>(p.x) - a.x;
     const Real uy = static_cast<Real>(p.y) - a.y;
     const Real vx = static_cast<Real>(b.x) - p.x;
     const Real vy = static_cast<Real>(b.y) - p.y;
     const Real cross = ux*vy - uy*vx;
+    exact=cross==0.0L;
     const Real scale = std::max(Real(1),
         std::max(std::abs(ux),std::abs(uy))*
         std::max(std::abs(vx),std::abs(vy)));
@@ -81,11 +82,20 @@ bool redundant_bend(Point a, Point p, Point b, double tolerance) {
     return std::abs(cross) <= static_cast<Real>(tolerance)*scale && dot > 0.0L;
 }
 
-TopologyStatus guard_split_motion(Point a, Point start, Point target, Point b,
+Point straight_seed(Point a, Point p, Point b) {
+    const Real dx=static_cast<Real>(b.x)-a.x,dy=static_cast<Real>(b.y)-a.y;
+    const Real fraction=((static_cast<Real>(p.x)-a.x)*dx+(static_cast<Real>(p.y)-a.y)*dy)/(dx*dx+dy*dy);
+    // Forward-redundant bends project strictly inside AB. Moving to the
+    // perpendicular projection defines the collapse before removing the seed.
+    return {static_cast<double>(static_cast<Real>(a.x)+fraction*dx),
+            static_cast<double>(static_cast<Real>(a.y)+fraction*dy)};
+}
+
+TopologyStatus guard_bend_motion(Point a, Point start, Point target, Point b,
                                  const Graph& graph, const Layout& layout, const Routes& routes,
                                  const TopologyEditOptions& options,
                                  detail::TopologyMotionWork& work, std::size_t edge,
-                                 std::size_t segment) {
+                                 std::size_t segment, std::size_t affected_segments) {
     if(!options.audit.analytic_guards)return {};
     const auto track=[](Point initial, Point desired) {
         return TopologyPointTrack{{initial.x,desired.x},{initial.y,desired.y}};
@@ -108,7 +118,7 @@ TopologyStatus guard_split_motion(Point a, Point start, Point target, Point b,
     }
     if(safe<1.0)
         return fail(TopologyError::NoAdmissibleStep,"topology surgery would sweep through a node rectangle",edge);
-    st=detail::limit_bend_route_motion(bend,graph,routes,edge,segment,safe,work,guard);
+    st=detail::limit_bend_route_motion(bend,graph,routes,edge,segment,affected_segments,safe,work,guard);
     if(!st) {
         if(st.error==TopologyGuardError::CapacityExceeded)
             return fail(TopologyError::CapacityExceeded,"topology surgery continuous route guard budget exhausted",edge);
@@ -178,8 +188,8 @@ TopologyStatus apply_topology_edits(
             if (!new_bend(pts[edit.point_index],pts[edit.point_index+1],edit,
                           options.audit.coordinate_limit,start,target))
                 return fail(TopologyError::InvalidGeometry,"split cannot create a finite noncollinear bend",current_edge);
-            status=guard_split_motion(pts[edit.point_index],start,target,pts[edit.point_index+1],
-                                     graph,layout,candidate,options,guard_work,current_edge,edit.point_index);
+            status=guard_bend_motion(pts[edit.point_index],start,target,pts[edit.point_index+1],
+                                     graph,layout,candidate,options,guard_work,current_edge,edit.point_index,1);
             if(!status)return status;
             const auto location = pts.begin() + static_cast<std::ptrdiff_t>(edit.point_index + 1);
             pts.insert(location,start);
@@ -201,8 +211,14 @@ TopologyStatus apply_topology_edits(
             if (edit.point_index == 0 || edit.point_index >= pts.size()-1)
                 return fail(TopologyError::InvalidInput,"only internal bends can be merged",current_edge);
             const std::size_t k = edit.point_index;
-            if (!redundant_bend(pts[k-1],pts[k],pts[k+1],options.collinear_tolerance))
+            bool exact=false;
+            if (!redundant_bend(pts[k-1],pts[k],pts[k+1],options.collinear_tolerance,exact))
                 return fail(TopologyError::NoAdmissibleStep,"bend is not straight or reverses the segment",current_edge);
+            if(!exact) {
+                status=guard_bend_motion(pts[k-1],pts[k],straight_seed(pts[k-1],pts[k],pts[k+1]),pts[k+1],
+                                         graph,layout,candidate,options,guard_work,current_edge,k-1,2);
+                if(!status)return status;
+            }
             pts.erase(pts.begin()+static_cast<std::ptrdiff_t>(k));
             status = audit(graph,layout,ports,candidate,initial,options,result,current_edge);
             if (!status) return status;

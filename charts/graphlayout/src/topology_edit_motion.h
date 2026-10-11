@@ -7,7 +7,7 @@
 namespace stun::graphlayout::detail {
 
 // Private cumulative work for explicit bend transitions. The layout/routes
-// have passed the complete baseline topology audit; only the new bend moves.
+// have passed the complete baseline topology audit; only the bend moves.
 struct TopologyMotionWork {
     std::size_t constraints=0, evaluations=0;
 };
@@ -20,12 +20,15 @@ TopologyGuardStatus limit_bend_node_motion(
     double& safe_fraction, TopologyMotionWork& work,
     const TopologyGuardOptions& options);
 
-// The split segment is still present in routes. Only the bend's middle point
+// The original segment(s) are still present in routes. Only the middle point
 // moves; its two outer points and every other route segment remain fixed.
 // Bound finite segment contacts, preserving legal adjacent/shared anchors.
+// affected_segments is one for insertion, two for collapse. Collapse allows
+// contact at the final seed, which is removed before the full final audit.
 TopologyGuardStatus limit_bend_route_motion(
     const std::array<TopologyPointTrack,3>& bend, const Graph& graph,
-    const Routes& routes, std::size_t edge, std::size_t split_segment,
+    const Routes& routes, std::size_t edge, std::size_t first_segment,
+    std::size_t affected_segments,
     double& safe_fraction, TopologyMotionWork& work,
     const TopologyGuardOptions& options);
 

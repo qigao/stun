@@ -477,12 +477,22 @@ bool same_track(const TopologyPointTrack& a, const TopologyPointTrack& b) {
            a.y.initial==b.y.initial && a.y.desired==b.y.desired;
 }
 
+TopologyPointTrack reversed_track(const TopologyPointTrack& point) {
+    return {{point.x.desired,point.x.initial},{point.y.desired,point.y.initial}};
+}
+
 // Only one endpoint moves in these segment pairs, so each orientation is
 // affine. Relative coordinates keep translation out of event coefficients.
 std::array<Real,2> contact_orientation(const TopologyPointTrack& a,
                                       const TopologyPointTrack& b,
-                                      const TopologyPointTrack& point) {
+                                      const TopologyPointTrack& point, bool from_final=false) {
     const auto polynomial=cross_polynomial(point_difference(b,a),point_difference(point,a));
+    if(from_final) {
+        const auto final=contact_orientation(reversed_track(a),reversed_track(b),reversed_track(point));
+        // Endpoint reconstruction retains both initial and final exact zeros
+        // instead of recovering either through coefficient cancellation.
+        return {polynomial[0],final[0]-polynomial[0]};
+    }
     return {polynomial[0],polynomial[1]};
 }
 
@@ -506,20 +516,23 @@ ContactDot contact_dot(const TopologyPointTrack& a, const TopologyPointTrack& b,
 TopologyGuardStatus contact_witness_bound(
     const TopologyPointTrack& a, const TopologyPointTrack& b,
     const TopologyPointTrack& point, const TopologyPointTrack& pivot,
-    bool common_anchor, double& safe, MotionWork& work, const TopologyGuardOptions& options) {
+    bool common_anchor, bool collapsing, double& safe, MotionWork& work,
+    const TopologyGuardOptions& options) {
     if(!evaluate(work,options))
         return fail(TopologyGuardError::CapacityExceeded,"bend-route orientation budget exceeded");
     // Adjacent segments and qualified graph terminals may meet at their fixed
     // common anchor. Other witnesses still detect collinear retracing there.
     if(common_anchor && same_track(point,pivot) &&
        (same_track(a,pivot) || same_track(b,pivot)))return {};
-    const auto orientation=contact_orientation(a,b,point);
+    // Collapse coefficients retain the final seed's independently evaluated
+    // orientation, so legal terminal contact has an exact event fraction one.
+    const auto orientation=contact_orientation(a,b,point,collapsing);
     if(orientation[1]==0.0L && orientation[0]!=0.0L)return {};
     const bool persistent=orientation[0]==0.0L && orientation[1]==0.0L;
     const Real event=persistent ? 0.0L : -orientation[0]/orientation[1];
     // Splitting at an existing proper crossing is legal: the initial seed
     // contact belongs to the old unsplit segment and is not a later event.
-    if(!persistent && !(event>0.0L && event<=1.0L))return {};
+    if(!persistent && !(event>0.0L && (collapsing ? event<1.0L : event<=1.0L)))return {};
     if(!evaluate(work,options))
         return fail(TopologyGuardError::CapacityExceeded,"bend-route contact polynomial budget exceeded");
     const auto dot=contact_dot(a,b,point);
@@ -539,7 +552,8 @@ TopologyGuardStatus contact_witness_bound(
         Real first=2.0L;
         const auto roots=polynomial_roots(dot.quadratic,dot.linear,dot.constant);
         for(std::size_t i=0;i<roots.count;++i)
-            if(roots.values[i]>0.0L && roots.values[i]<=1.0L)first=std::min(first,roots.values[i]);
+            if(roots.values[i]>0.0L && (collapsing ? roots.values[i]<1.0L : roots.values[i]<=1.0L))
+                first=std::min(first,roots.values[i]);
         const Real probe=std::min(first,1.0L)/2.0L;
         if(dot.at(probe)<=dot.margin)safe=0.0;
         else if(first<=1.0L)safe=std::min(safe,earlier(first,options));
@@ -549,18 +563,18 @@ TopologyGuardStatus contact_witness_bound(
 
 enum class CommonAnchor { None, Adjacent, GraphTerminal };
 
-CommonAnchor split_common_anchor(const Graph& graph, const Routes& routes,
+CommonAnchor bend_common_anchor(const Graph& graph, const Routes& routes,
                                 std::size_t edge, std::size_t split, std::size_t child,
-                                std::size_t other, std::size_t segment) {
+                                std::size_t affected_segments, std::size_t other, std::size_t segment) {
     if(edge==other) {
-        const bool adjacent=child==0 ? split>0 && segment==split-1 : segment==split+1;
+        const bool adjacent=child==0 ? split>0 && segment==split-1 : segment==split+affected_segments;
         return adjacent ? CommonAnchor::Adjacent : CommonAnchor::None;
     }
     const auto& points=routes.edges[edge].points;
-    const bool terminal=child==0 ? split==0 : split+2==points.size();
+    const bool terminal=child==0 ? split==0 : split+affected_segments+1==points.size();
     if(!terminal)return CommonAnchor::None;
     const auto node=child==0 ? graph.edges[edge].source : graph.edges[edge].target;
-    const auto anchor=points[split+child];
+    const auto anchor=points[split+(child==0 ? 0 : affected_segments)];
     const auto& other_points=routes.edges[other].points;
     const auto same=[&](Point p) {return anchor.x==p.x && anchor.y==p.y;};
     if((segment==0 && node==graph.edges[other].source && same(other_points.front())) ||
@@ -602,47 +616,51 @@ TopologyGuardStatus detail::limit_bend_node_motion(
 
 TopologyGuardStatus detail::limit_bend_route_motion(
     const std::array<TopologyPointTrack,3>& bend, const Graph& graph,
-    const Routes& routes, std::size_t edge, std::size_t split_segment,
+    const Routes& routes, std::size_t edge, std::size_t first_segment,
+    std::size_t affected_segments,
     double& safe_fraction, TopologyMotionWork& work, const TopologyGuardOptions& options) {
     if(!valid_options(options))return fail(TopologyGuardError::InvalidOptions,"invalid bend-route guard options");
     if(edge>=routes.edges.size() || graph.edges.size()!=routes.edges.size() ||
-       routes.edges[edge].points.size()<2 ||
-       split_segment>=routes.edges[edge].points.size()-1)
-        return fail(TopologyGuardError::InvalidInput,"invalid bend-route split indices");
+       routes.edges[edge].points.size()<2 || affected_segments<1 || affected_segments>2 ||
+       first_segment>=routes.edges[edge].points.size()-1 ||
+       affected_segments>routes.edges[edge].points.size()-1-first_segment)
+        return fail(TopologyGuardError::InvalidInput,"invalid bend-route motion indices");
     for(const auto& point:bend)
         if(!valid(point,options))return fail(TopologyGuardError::InvalidGeometry,"unbounded bend-route motion");
     double safe=1.0;
-    // O(total route segments) time, O(1) storage per split. The original
-    // segment is replaced by the two children; all other segments stay fixed.
+    // O(total route segments) time, O(1) storage per edit. Only these two
+    // moving segments replace the original affected segment(s).
     for(std::size_t child=0;child+1<bend.size();++child) {
         const auto& pivot=bend[child==0 ? 0 : 2];
         const auto& moving=bend[1];
         for(std::size_t other=0;other<routes.edges.size();++other) {
             const auto& points=routes.edges[other].points;
             for(std::size_t segment=0;segment+1<points.size();++segment) {
-                if(other==edge && segment==split_segment)continue;
+                if(other==edge && segment>=first_segment && segment-first_segment<affected_segments)continue;
                 if(work.constraints==options.max_constraints)
                     return fail(TopologyGuardError::CapacityExceeded,"bend-route constraint budget exceeded");
                 ++work.constraints;
                 const auto c=fixed_track(points[segment]), d=fixed_track(points[segment+1]);
-                const auto common=split_common_anchor(graph,routes,edge,split_segment,child,other,segment);
+                const auto common=bend_common_anchor(graph,routes,edge,first_segment,child,
+                                                       affected_segments,other,segment);
                 if(common==CommonAnchor::GraphTerminal) {
                     if(!evaluate(work,options))
                         return fail(TopologyGuardError::CapacityExceeded,"bend-route terminal budget exceeded");
                     const auto& remote=same_track(c,pivot) ? d : c;
-                    const auto orientation=contact_orientation(pivot,moving,remote);
+                    const auto orientation=contact_orientation(pivot,moving,remote,affected_segments==2);
                     if(orientation[1]!=0.0L) {
                         const Real event=-orientation[0]/orientation[1];
                         // The auditor requires distinct rays at a graph
                         // terminal, including when collinear rays oppose.
-                        if(event>0.0L && event<=1.0L)safe=std::min(safe,earlier(event,options));
+                        if(event>0.0L && (affected_segments==2 ? event<1.0L : event<=1.0L))
+                            safe=std::min(safe,earlier(event,options));
                     }
                 }
                 const std::array<std::array<TopologyPointTrack,3>,4> witnesses={{{pivot,moving,c},
                     {pivot,moving,d},{c,d,pivot},{c,d,moving}}};
                 for(const auto& witness:witnesses) {
                     const auto st=contact_witness_bound(witness[0],witness[1],witness[2],pivot,
-                                                        common!=CommonAnchor::None,safe,work,options);
+                                                        common!=CommonAnchor::None,affected_segments==2,safe,work,options);
                     if(!st)return st;
                 }
             }

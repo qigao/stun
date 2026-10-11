@@ -48,6 +48,21 @@ Fixture hidden_split(bool segment_only=false) {
     f.layout.nodes[2]={segment_only?65.0:55.0,-30,3,8};
     return f;
 }
+Fixture hidden_merge() {
+    auto f=horizontal();
+    f.graph.nodes[2].width=2e-6;f.graph.nodes[2].height=2e-6;
+    f.layout.nodes[2]={55-1e-6,5+4e-5,2e-6,2e-6};
+    f.paths.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
+    return f;
+}
+Fixture merge_crossing(double offset=5e-5) {
+    auto f=parallel();
+    f.paths.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
+    f.layout.nodes[2]={15,-40+offset,10,10};f.layout.nodes[3]={85,40+offset,10,10};
+    f.ports[1]={{2,Side::South,0.5},{3,Side::North,0.5}};
+    f.paths.edges[1].points={{20,f.layout.nodes[2].y+10},{90,f.layout.nodes[3].y}};
+    return f;
+}
 Fixture hidden_route_contact() {
     auto f=parallel();
     f.layout.nodes[2]={51,-1010,10,10};
@@ -102,7 +117,8 @@ void transform(Fixture& f, TopologyEdit& edit, double scale, std::size_t variant
         }
     }
     if(variant&4) {
-        edit.point_index=f.paths.edges[edit.edge_index].points.size()-2-edit.point_index;
+        const auto removed=edit.kind==TopologyEditKind::BendToStraight ? 1 : 2;
+        edit.point_index=f.paths.edges[edit.edge_index].points.size()-removed-edit.point_index;
         edit.segment_fraction=1-edit.segment_fraction;
         for(std::size_t edge=0;edge<f.paths.edges.size();++edge) {
             std::swap(f.graph.edges[edge].source,f.graph.edges[edge].target);
@@ -132,6 +148,155 @@ void check_audited(const Fixture& f, const Routes& r) {
 
 int main(){
     try{
+        {
+            const auto f=hidden_merge();
+            TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+            TopologyEditOptions options;options.collinear_tolerance=1e-5;
+            auto intermediate=f.paths;intermediate.edges[0].points[1].y=5+4.1e-5;
+            TopologySignature signature;
+            require(audit_topology(f.graph,f.layout,f.ports,intermediate,signature).error==
+                    TopologyError::InvalidGeometry,"independent frame exposes a near-collinear bend-collapse collision");
+            Routes out;TopologyEditReport report;
+            auto sampled=options;sampled.audit.analytic_guards=false;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {merge},out,sampled)),"unchecked bend removal misses its swept node interior");
+            check_audited(f,out);
+            require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report).error==
+                    TopologyError::NoAdmissibleStep && out.edges.empty() && report.audits==0,
+                    "continuous bend-collapse guard rejects an intermediate node collision");
+        }
+        {
+            const auto f=merge_crossing(0);
+            TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+            TopologyEditOptions options;options.collinear_tolerance=1e-5;
+            constexpr std::array scales={0.125,1.0,8.0,1024.0};
+            constexpr std::size_t variants=16;
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant) {
+                auto candidate=f;auto edit=merge;transform(candidate,edit,scale,variant);
+                Routes out;
+                require(static_cast<bool>(apply_topology_edits(candidate.graph,candidate.layout,
+                        candidate.ports,candidate.paths,{edit},out,options)),
+                        "the final removed collapse seed may lie at an existing proper crossing");
+                check_audited(candidate,out);
+            }
+        }
+        {
+            constexpr std::array scales={0.125,1.0,8.0,1024.0};
+            constexpr std::size_t variants=16;
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=hidden_merge();TopologyEdit merge;
+                merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+                transform(f,merge,scale,variant);
+                auto intermediate=f.paths;
+                const auto a=f.paths.edges[0].points.front(),b=f.paths.edges[0].points.back();
+                const Point seed{(a.x+b.x)/2,(a.y+b.y)/2};
+                const auto p=f.paths.edges[0].points[1];
+                constexpr double event=0.59;
+                intermediate.edges[0].points[1]={p.x+event*(seed.x-p.x),p.y+event*(seed.y-p.y)};
+                TopologySignature signature;
+                require(audit_topology(f.graph,f.layout,f.ports,intermediate,signature).error==
+                        TopologyError::InvalidGeometry,"transformed independent frame exposes a bend-collapse collision");
+                TopologyEditOptions options;options.collinear_tolerance=1e-5;
+                Routes out;TopologyEditReport report;
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report).error==
+                        TopologyError::NoAdmissibleStep && out.edges.empty() && report.audits==0,
+                        "continuous collapse guards survive scale, axis, reflection, reversal and translation");
+                options.audit.analytic_guards=false;
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options)),
+                        "transformed unchecked removals miss the swept interior");
+                check_audited(f,out);
+            }
+        }
+        {
+            constexpr std::array scales={0.125,1.0,8.0,1024.0};
+            constexpr std::size_t variants=16;
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=merge_crossing();TopologyEdit merge;
+                merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+                transform(f,merge,scale,variant);
+                auto intermediate=f.paths;
+                const auto c=f.paths.edges[1].points.front(),d=f.paths.edges[1].points.back();
+                intermediate.edges[0].points[1]={(c.x+d.x)/2,(c.y+d.y)/2};
+                TopologySignature signature;
+                require(audit_topology(f.graph,f.layout,f.ports,intermediate,signature).error==
+                        TopologyError::AmbiguousTopology,"independent frame exposes an isolated collapse-route contact");
+                TopologyEditOptions options;options.collinear_tolerance=1e-5;
+                Routes out;TopologyEditReport report;
+                const auto status=apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options,&report);
+                require(status.error==TopologyError::NoAdmissibleStep && status.message==route_contact_message &&
+                        out.edges.empty() && report.audits==0,"continuous collapse guards reject isolated route contact");
+                options.audit.analytic_guards=false;
+                require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options)),
+                        "unchecked near-collinear removal misses a transient crossing-ownership transfer");
+                check_audited(f,out);
+            }
+        }
+        {
+            auto f=hidden_merge();
+            f.graph.nodes[2].height=2e-11;f.layout.nodes[2].height=2e-11;
+            f.layout.nodes[2].y=5+4e-10;f.paths.edges[0].points[1].y=5+1e-9;
+            TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+            Routes out;
+            require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out).error==
+                    TopologyError::NoAdmissibleStep,"default collinearity tolerance also guards thin swept obstacles");
+            TopologyEditOptions unchecked;unchecked.audit.analytic_guards=false;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,unchecked)),
+                    "default-tolerance unchecked collapse has valid endpoint geometry");
+            check_audited(f,out);
+        }
+        {
+            auto f=horizontal();f.paths.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
+            TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+            TopologyEditOptions limited;limited.collinear_tolerance=1e-5;
+            constexpr std::size_t one_edit=6,batch_work=2*one_edit;
+            limited.audit.max_guard_constraints=one_edit;limited.audit.max_guard_evaluations=one_edit;
+            Routes out;TopologyEditReport report;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {merge},out,limited,&report)) && report.removed_bends==1 && report.continuation_frames==0,
+                    "safe near-collinear collapse fits exact guard budgets without extra sampled frames");
+            check_audited(f,out);
+            limited.audit.max_guard_constraints=batch_work;limited.audit.max_guard_evaluations=batch_work;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,
+                    {merge,split(0,-10)},out,limited,&report)) && report.removed_bends==1 && report.inserted_bends==1,
+                    "collapse and split share the same cumulative motion budget");
+            for(const bool evaluation_limit:{false,true}) {
+                limited.audit.max_guard_constraints=evaluation_limit ? batch_work : batch_work-1;
+                limited.audit.max_guard_evaluations=evaluation_limit ? batch_work-1 : batch_work;
+                require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge,split(0,-10)},out,limited,&report).error==
+                        TopologyError::CapacityExceeded && out.edges.empty() && report.removed_bends==0,
+                        "a later split cannot reset work used by collapse and rolls back the batch");
+            }
+            f.paths.edges[0].points[1].y=5;
+            limited.audit.max_guard_constraints=1;limited.audit.max_guard_evaluations=1;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,limited)),
+                    "exact collinear pruning needs no geometric motion guard work");
+        }
+        {
+            auto f=parallel();f.graph.edges[1]={0,2};f.layout.nodes[2]={100,-100,10,10};
+            f.ports[1]={{0,Side::East,0.5},{2,Side::West,0.5}};
+            f.paths.edges[0].points={{10,5},{55,5+1e-4},{100,5}};
+            f.paths.edges[1].points={{10,5},{100,-95}};
+            TopologyEdit merge;merge.kind=TopologyEditKind::BendToStraight;merge.point_index=1;
+            TopologyEditOptions options;options.collinear_tolerance=1e-5;
+            for(std::size_t variant=0;variant<8;++variant) {
+                auto candidate=f;auto edit=merge;transform(candidate,edit,1,variant);
+                Routes out;
+                require(static_cast<bool>(apply_topology_edits(candidate.graph,candidate.layout,
+                        candidate.ports,candidate.paths,{edit},out,options)),"collapse preserves qualified shared graph anchors");
+                check_audited(candidate,out);
+            }
+            f=horizontal();f.paths.edges[0].points={{10,5},{40,5+1e-4},{70,5},{100,5}};
+            // Six node tests, eight orientation tests and two tests of a
+            // permanently collinear fixed anchor outside the adjacent segment.
+            options.audit.max_guard_constraints=8;options.audit.max_guard_evaluations=16;
+            Routes out;
+            require(static_cast<bool>(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options)),
+                    "collapse skips both affected segments and retains its fixed adjacent segment at exact budgets");
+            check_audited(f,out);
+            options.audit.max_guard_evaluations=15;
+            require(apply_topology_edits(f.graph,f.layout,f.ports,f.paths,{merge},out,options).error==
+                    TopologyError::CapacityExceeded && out.edges.empty(),"collapse route work has an independent cumulative evaluation limit");
+        }
         {
             const auto f=hidden_route_contact();
             // The moving bend reaches edge 1 at alpha=1/40. Before and

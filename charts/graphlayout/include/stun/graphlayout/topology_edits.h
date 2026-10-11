@@ -27,7 +27,8 @@ struct TopologyEdit {
 
 struct TopologyEditOptions {
     // analytic_guards enables continuous node-interior and route-contact
-    // checks. max_guard_constraints/evaluations are shared across the batch.
+    // checks for insertion and near-collinear collapse. Guard work is shared
+    // across the entire batch; exactly collinear pruning needs no motion.
     TopologyOptions audit;
     std::size_t max_edits = 128;
     std::size_t max_audits = 4096; // Cumulative geometric signature rechecks.
@@ -64,6 +65,13 @@ struct TopologyEditReport {
 // For S total segments before insertion, route guards add 2*(S-1) constraints,
 // with 4..13 evaluations per pair. Together the guards take O(nodes+S) work
 // and O(1) storage per split. Their numerical predicates are not exact.
+// For a near-collinear BendToStraight, first check continuous collapse to the
+// perpendicular projection of the bend on its neighbor segment. Both original
+// segments are excluded from route-pair tests: 2*(S-2) route constraints and the
+// same two-per-node work use the shared budgets. The final seed is removed
+// before the full final audit, so seed contacts ONLY at that instant are allowed.
+// A zero computed bend area prunes directly without consuming motion work.
+// Merges retain the original final-only audit/report counts (no sampled frames).
 // Disabling audit.analytic_guards explicitly selects sampled checks.
 // The edit changes route topology *representation*, not arbitrary geometry.
 // It does not schedule collision-triggered bends nor guarantee ambient isotopy.

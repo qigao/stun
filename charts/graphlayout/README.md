@@ -784,8 +784,21 @@ representation changes independently from the original topology search:
   sampled intermediate vertex motion against the ORIGINAL full ordered/signed
   crossing signature, all node rectangles and exact port anchors.
 - **Bend -> Straight:** prune only a forward, (numerically) collinear interior
-  bend and re-audit the complete result. Edits are applied in caller sequence;
-  each subsequent index addresses the updated route.
+  bend and re-audit the complete result. For a nonzero computed area within
+  `collinear_tolerance`, first check the continuous affine collapse from the
+  bend to its perpendicular projection onto the neighbor segment. Both moving
+  segments use the same node/contact guards and cumulative budgets as a split.
+  Their two original segments are excluded from route-pair checks, giving
+  `2*(S-2)` route constraints plus the same two-per-node work. A contact before
+  the final seed rejects the entire edit. At the final instant the seed is
+  deleted before the full audit, allowing removal at an existing proper
+  crossing. Collapse orientation coefficients use independently evaluated
+  endpoint orientations to retain a final zero without coefficient cancellation.
+  Zero computed area prunes without consuming motion work; merge audit/report
+  counts retain their original final-only behavior. Disabling `analytic_guards`
+  explicitly retains unchecked approximate removal followed by the final audit.
+  Edits are applied in caller sequence; each subsequent index addresses the
+  updated route. Tight mixed-batch budgets must account for collapse work too.
 - Transactional errors, exact input indices and explicit resource limits
   (`max_edits`, `max_audits`, `continuation_frames`, route point budgets).
   No guessed collision detours, libavoid fallback, or silent topology change.
@@ -828,6 +841,15 @@ include large translations and independent event-frame audits. Shared graph
 anchors, supporting-line extensions, seeds at existing proper crossings,
 persistent collinearity, self-contact, exact route-work budgets and atomic
 projection failure are also tested.
+
+Near-collinear collapse regressions start at `(10,5) -> (55,5.0001) -> (100,5)`.
+A thin node inside the swept triangle is absent from both endpoint geometries,
+yet the collapsing bend penetrates it. A diagonal second route through
+`(55,5.00005)` produces an isolated bend contact while both endpoint signatures
+remain identical. Continuous checks reject both removals. Three sets of 64
+transformed cases cover node sweeps, route contacts and legal final crossing
+seeds; default-tolerance thin obstacles, shared/adjacent anchors, exact pruning,
+cumulative mixed-edit budgets and atomic VPSC composition are also covered.
 
 **Current limits:** topology surgery locations/displacements are supplied by
 the caller, not automatically scheduled from a scanline collision event.
