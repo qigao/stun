@@ -1106,6 +1106,38 @@ void run() {
                         "large target growth away from a small-area bend retains the full admissible motion");
             }
         }
+        {
+            // Area=(alpha*(n+e)-e)^2. At its zero the points remain
+            // distinct: (0,0), (0,1), (0,2), so only the bend straightens.
+            // Each n+e is representable even with binary64 long double.
+            constexpr std::array<std::array<double,2>,3> cases={{{0x1p27,0x1p-20},
+                {0x1p30,0x1p-20},{0x1p38,0x1p-10}}};
+            constexpr std::array scales={0.125,1.0};
+            constexpr std::size_t variants=8;
+            constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
+            for(const auto& parameters:cases)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant)for(const bool zero_margin:{false,true}) {
+                const double n=parameters[0],e=parameters[1];
+                TopologyBendConstraint tangent={{{0,0},{0,0}},{{-e,n},{1,1}},{{-2*e,2*n},{2-e,2+n}}};
+                TopologyGuardOptions options;options.coordinate_limit=1e12;
+                if(zero_margin) {options.min_bend_area_ratio=0;options.event_backoff=0;}
+                const double event=e/(n+e)*(1-std::sqrt(options.min_bend_area_ratio));
+                double fraction=1;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(tangent,scale,variant),fraction,options)),
+                        "distinct-point cancellation-scale bend tangency is analyzable");
+                require(fraction>0 && fraction<event &&
+                        fraction>=event*(1-2*options.event_backoff-relative_slack),
+                        "cancelling linear determinants must retain an accurate distinct-point bend tangency");
+                auto separated=tangent;
+                // Adding e^2*(1-alpha) to the area removes the tangency.
+                separated.last.x.initial-=e*e;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(separated,scale,variant),fraction,options)) && fraction==1,
+                        "a cancellation-scale bend with no real area root retains the full admissible motion");
+                tangent.bend.x.desired=-n;tangent.last.x.desired=-2*n;tangent.last.y.desired=2-n;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(tangent,scale,variant),fraction,options)) && fraction==1,
+                        "distinct-point bend growth away from tangency retains the full admissible motion");
+            }
+        }
         TopologyBendConstraint bend;
         bend.first={{0,0},{0,0}};
         bend.bend={{1,1},{1,-1}};

@@ -67,7 +67,8 @@ RelativePointMotion point_difference(const TopologyPointTrack& a, const Topology
 }
 
 Quadratic cross_polynomial(const RelativePointMotion& a, const RelativePointMotion& b) {
-    return {cross(a.x,a.y,b.x,b.y),cross(a.dx,a.dy,b.x,b.y)+cross(a.x,a.y,b.dx,b.dy),
+    const Real linear=detail::compensated_dot4({a.dx,-a.dy,a.x,-a.y},{b.y,b.x,b.dy,b.dx});
+    return {cross(a.x,a.y,b.x,b.y),linear,
             cross(a.dx,a.dy,b.dx,b.dy)};
 }
 
@@ -309,9 +310,8 @@ TopologyGuardStatus segment_node_bound(const SegmentNodeMotion& motion, double& 
     const Real rx=b.x-a.x, ry=b.y-a.y, drx=b.dx-a.dx, dry=b.dy-a.dy;
     for(const Real x:{0.0L,motion.width})for(const Real y:{0.0L,motion.height}) {
         if(!use_evaluation())return fail(TopologyGuardError::CapacityExceeded,segment_node_root_budget_message);
-        events.add(cross(drx,dry,-a.dx,-a.dy),
-                   cross(drx,dry,x-a.x,y-a.y)+cross(rx,ry,-a.dx,-a.dy),
-                   cross(rx,ry,x-a.x,y-a.y));
+        const auto polynomial=cross_polynomial({rx,ry,drx,dry},{x-a.x,y-a.y,-a.dx,-a.dy});
+        events.add(polynomial[2],polynomial[1],polynomial[0]);
     }
     std::sort(events.values.begin(),events.values.begin()+events.count);
     const auto end=std::unique(events.values.begin(),events.values.begin()+events.count);

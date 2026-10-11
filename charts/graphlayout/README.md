@@ -613,6 +613,14 @@ calculates conservative **analytic event fractions** before sampled auditing:
   `cross(du,v0)+cross(u0,dv)`, quadratic `cross(du,dv)`. This reuses the existing
   crossing polynomial primitive instead of inferring the coefficients from
   areas at `alpha=0,1,-1`, where large targets can erase an early event.
+  Its linear coefficient accumulates all four signed products with FMA product
+  residuals and TwoSum addition residuals, following
+  [Ogita/Rump/Oishi Dot2](https://www.tuhh.de/ti3/paper/rump/OgRuOi05.pdf)
+  (Algorithms 3.1, 3.5, 5.3). Summing two separately rounded determinants can
+  otherwise lose a small term and miss a distinct-point bend tangency. Segment
+  pair, crossing-track and segment/node corner polynomials share this primitive.
+  This remains a numerical guard: coordinate subtraction, underflow, coefficient
+  rounding and root arithmetic are not exact.
 - **Node pairs:** intersect the open affine rectangle-overlap intervals on
   both axes, then cap movement before the earliest interior collision. This
   includes isolated nodes and prevents rectangles from tunneling between
