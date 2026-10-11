@@ -229,7 +229,7 @@ jobs:
             -Wextra
             -Werror
             -IflexUI/include
-            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include

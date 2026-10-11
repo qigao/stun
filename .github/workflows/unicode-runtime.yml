@@ -79,9 +79,9 @@ jobs:
           re2c --lang c --utf8 --encoding-policy fail --no-generation-date -W -Werror \
             -I "$RE2C_ROOT/share/re2c/stdlib" \
             -o build/unicode-runtime/salts_unicode_gen.c \
-            .ci/salts-utils/unicode/src/salts_unicode.re
+            .ci/salts/unicode/src/salts_unicode.re
           headers=(
-            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include
@@ -113,7 +113,7 @@ jobs:
             | tee build/unicode-runtime/test.log
           {
             echo '### Unicode runtime validation'
-            echo 'Executed the released SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
+            echo 'Executed the released Salts::Unicode scanner and FlexUI text utility tests with ASan/UBSan.'
             echo 'Scope: source-level runtime; installed-package and full-GUI integration are separate gates.'
             echo '```text'
             cat build/unicode-runtime/test.log
