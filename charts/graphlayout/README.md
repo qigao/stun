@@ -633,8 +633,10 @@ and constraint budgets, and independently report how many were examined.
 Within a route of S segments, `(S-1)*(S-2)/2` nonadjacent pairs are examined
 when S >= 2. Adjacent segments share their moving waypoint and retain their
 existing bend guards. Each pair consumes four evaluations/constraints from
-the existing shared budgets, including baseline-zero orientation checks;
-the report counts the nonzero orientation constraints. This adds O(S²)
+the existing shared budgets, including baseline-zero orientation checks.
+A fully collinear pair consumes one additional evaluation/constraint for
+the projected interval check; the report counts each disjoint interval guard
+once, alongside the nonzero orientation constraints. This adds O(S²)
 time per route and O(1) auxiliary storage beyond its existing motion tracks.
 Exhaustion clears the guard report and all composed movement output.
 
@@ -645,10 +647,25 @@ sampling. Scaled/reflected variants, reversed edge orientation, rigid
 translation and exact shared-budget boundaries are also covered. The full
 geometry audit can further shorten the analytic prefix for node collisions.
 
-Baseline collinear disjoint segments and endpoint contact cases still
-require the full collision/crossing audit; no complete continuous
-embedding guarantee is claimed. Regression includes endpoint-only
-sampling, analytic lane-swap limits and budgeted evaluation.
+For baseline-collinear **disjoint** pairs, the first segment's dominant axis
+provides strictly separated projected intervals. All four endpoint gaps are
+affine in movement fraction; the guard stops before the first gap reaches
+zero, allowing either segment's endpoint order to change without overlooking
+the approaching endpoint. This applies to cross-route and same-route
+nonadjacent pairs. It is conservative: transverse separation during motion
+could permit a longer step than fixed-axis projection admits. Baseline
+touching/overlapping pairs remain subject to the existing full audit.
+
+Regression includes collinear connectors with a valid start and finish but
+an intermediate overlap at fraction `1/5`; their nodes slide in opposite
+boundary lanes without colliding. Horizontal, vertical and diagonal variants,
+four scales, reversed edges and route permutation exercise the same event,
+with independently audited accepted prefixes. Same-route collinear segments,
+rigid translation, separating motion, changing endpoint motion, baseline
+contact policy and exact shared-budget failures are covered as well.
+No complete continuous embedding guarantee is claimed: endpoint events,
+incident-node geometry and other baseline-zero degeneracies still require
+the independent full collision/crossing audit.
 
 ## Algorithm v15: Straight/Bend topology events and bounded VPSC composition
 

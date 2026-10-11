@@ -82,7 +82,8 @@ struct TopologyGuardReport {
     double max_safe_fraction = 1.0;
     std::size_t straight_constraints = 0;
     std::size_t bend_constraints = 0;
-    // Nonzero orientation guards across routes and within nonadjacent pairs.
+    // Nonzero orientation guards plus disjoint-collinear interval guards,
+    // across routes and within nonadjacent segment pairs.
     std::size_t segment_pair_constraints = 0;
     std::size_t evaluations = 0;
 };
@@ -115,8 +116,15 @@ TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint
 // node-face/segment TriConstraint. Consecutive route triples generate bend
 // orientation guards. For every pair of independent segments, including
 // nonadjacent segments of the same route, each of
-// the four endpoint-vs-segment orientation triples also generates a quadratic
-// event guard. Adjacent segments are covered by the bend guards instead.
+// the four endpoint-vs-segment orientation triples with nonzero baseline area
+// generates a quadratic event guard. Baseline-collinear disjoint pairs retain
+// strict interval separation on the first segment's dominant axis by checking
+// all four affine endpoint gaps. This is conservative if transverse movement
+// would permit a longer step. Each fully collinear pair consumes one additional
+// constraint/evaluation, including baseline touching/overlapping pairs that
+// are left to the full audit. The report counts each disjoint interval guard
+// once. Segment-pair checks take O(segment-pair-count) time and O(1) additional
+// storage beyond the motion tracks. Adjacent segments use bend guards instead.
 // This detects hidden two-segment swaps and self contacts even if a sampled audit
 // observes only the final frame. The minimum safe fraction limits a later
 // full topology audit; it is NOT an ambient isotopy guarantee. In particular,

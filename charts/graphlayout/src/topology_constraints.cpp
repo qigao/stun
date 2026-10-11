@@ -173,6 +173,32 @@ TopologyGuardStatus bend_bound(const TopologyBendConstraint& c, double& out,
     return {};
 }
 
+// For a baseline-collinear disjoint pair, keep its projected intervals
+// strictly separated on the first segment's dominant axis. All four endpoint
+// gaps are affine; their first zero bounds contact even if endpoint order
+// changes. This O(1) guard is conservative when transverse motion later
+// separates the segments. Touching/shared baseline anchors need full auditing.
+bool collinear_pair_bound(const TopologyPointTrack& a, const TopologyPointTrack& b,
+                           const TopologyPointTrack& c, const TopologyPointTrack& d,
+                           double& out, const TopologyGuardOptions& opt) {
+    const bool scan_x=std::abs(static_cast<Real>(b.x.initial)-a.x.initial)>=
+                      std::abs(static_cast<Real>(b.y.initial)-a.y.initial);
+    std::array<TopologyScalarTrack,2> left={scan_x?a.x:a.y,scan_x?b.x:b.y};
+    std::array<TopologyScalarTrack,2> right={scan_x?c.x:c.y,scan_x?d.x:d.y};
+    const auto lower=[](const auto& pair) {return std::min(pair[0].initial,pair[1].initial);};
+    const auto upper=[](const auto& pair) {return std::max(pair[0].initial,pair[1].initial);};
+    if(upper(right)<lower(left))std::swap(left,right);
+    else if(!(upper(left)<lower(right)))return false;
+    out=1.0;
+    for(const auto& l:left)for(const auto& r:right) {
+        const Real initial=static_cast<Real>(r.initial)-l.initial;
+        const Real desired=static_cast<Real>(r.desired)-l.desired;
+        if(desired<=0.0L)
+            out=std::min(out,earlier(initial/(initial-desired),opt));
+    }
+    return true;
+}
+
 TopologyScalarTrack make_track(double initial, Real motion,
                                const TopologyGuardOptions& o,
                                bool& valid_motion) {
@@ -373,8 +399,8 @@ TopologyGuardStatus limit_topology_movement(
     // orient(A,B,C), orient(A,B,D), orient(C,D,A), orient(C,D,B) are quadratic
     // in affine displacement. A proper crossing can only appear/disappear when
     // one of these orientations reaches zero, so each nonzero baseline
-    // orientation provides an analytically bounded event. Collinear but
-    // disjoint baselines remain outside this guard and require full auditing.
+    // orientation provides an analytically bounded event. For an entirely
+    // collinear disjoint baseline, affine projected gaps bound first contact.
     for(std::size_t i=0;i<route_tracks.size();++i){
         const auto& a=route_tracks[i];
         for(std::size_t j=i;j<route_tracks.size();++j){
@@ -390,16 +416,27 @@ TopologyGuardStatus limit_topology_movement(
                         {b[t],b[t+1],a[s]},
                         {b[t],b[t+1],a[s+1]},
                     };
+                    bool collinear=true;
                     for(const auto& guard:guards){
                         if(!use())return fail(TopologyGuardError::CapacityExceeded,
                                               "topology segment-pair event budget exceeded");
                         const Real initial_area=area(guard,0.0L);
                         if(initial_area==0.0L)continue;
+                        collinear=false;
                         double safe=0;
                         const auto status=bend_bound(guard,safe,options);
                         if(!status)return status;
                         candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
                         ++candidate.segment_pair_constraints;
+                    }
+                    if(collinear) {
+                        if(!use())return fail(TopologyGuardError::CapacityExceeded,
+                                              "topology collinear-pair event budget exceeded");
+                        double safe=1.0;
+                        if(collinear_pair_bound(a[s],a[s+1],b[t],b[t+1],safe,options)) {
+                            candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
+                            ++candidate.segment_pair_constraints;
+                        }
                     }
                 }
             }

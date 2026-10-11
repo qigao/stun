@@ -19,14 +19,14 @@ void require(bool yes, const char* message) {
 void near(double a, double b, double epsilon, const char* message) {
     if (std::abs(a-b)>epsilon) throw std::runtime_error(message);
 }
-struct SpiralFixture {
+struct MovementFixture {
     Graph graph;
     Layout baseline, desired;
     Routes routes;
     std::vector<RouteRequest> ports;
 };
-SpiralFixture spiral(double scale=1.0) {
-    SpiralFixture f;
+MovementFixture spiral(double scale=1.0) {
+    MovementFixture f;
     f.graph.nodes={{"source",10,10},{"target",10,10}};
     f.graph.edges={{0,1}};
     f.baseline.nodes={{-10,-5,10,10},{80,15,10,10}};
@@ -38,7 +38,7 @@ SpiralFixture spiral(double scale=1.0) {
     f.desired=f.baseline;f.desired.nodes[1].y-=1000*scale;
     return f;
 }
-void spiral_frame(const SpiralFixture& f, double fraction, Layout& placement, Routes& paths) {
+void spiral_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
     constexpr std::array<double,6> lengths={0,100,200,280,360,420};
     const double displacement=f.desired.nodes[1].y-f.baseline.nodes[1].y;
     placement=f.baseline;placement.nodes[1].y+=fraction*displacement;
@@ -47,7 +47,230 @@ void spiral_frame(const SpiralFixture& f, double fraction, Layout& placement, Ro
         paths.edges[0].points[i].y+=fraction*displacement*lengths[i]/lengths.back();
     paths.edges[0].points.back().y=placement.nodes[1].y+placement.nodes[1].height*0.5;
 }
+enum class SwapAxis { Horizontal, Vertical, Diagonal };
+MovementFixture collinear_swap(SwapAxis axis=SwapAxis::Horizontal, double scale=1.0) {
+    MovementFixture f;
+    f.graph.nodes={{"a",10,10},{"b",10,10},{"c",10,10},{"d",10,10}};
+    f.graph.edges={{0,1},{2,3}};
+    // Opposite boundary lanes let nodes pass with no interior collision.
+    f.baseline.nodes={{-10,-10,10,10},{20,-10,10,10},{90,0,10,10},{120,0,10,10}};
+    f.routes.edges={{{{0,0},{20,0}}},{{{100,0},{120,0}}}};
+    f.ports={{{0,Side::East,1},{1,Side::West,1}},
+             {{2,Side::East,0},{3,Side::West,0}}};
+    if(axis==SwapAxis::Vertical) {
+        for(auto& n:f.baseline.nodes)std::swap(n.x,n.y);
+        for(auto& route:f.routes.edges)for(auto& p:route.points)std::swap(p.x,p.y);
+        for(auto& ports:f.ports) {ports.source.side=Side::South;ports.target.side=Side::North;}
+    } else if(axis==SwapAxis::Diagonal) {
+        f.baseline.nodes={{-10,0,10,10},{10,20,10,10},{100,90,10,10},{120,110,10,10}};
+        for(auto& route:f.routes.edges)for(auto& p:route.points)p.y=p.x;
+        f.ports={{{0,Side::East,0},{1,Side::North,1}},
+                 {{2,Side::South,0},{3,Side::West,1}}};
+    }
+    for(auto& n:f.graph.nodes) {n.width*=scale;n.height*=scale;}
+    for(auto& n:f.baseline.nodes) {n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;}
+    for(auto& route:f.routes.edges)for(auto& p:route.points) {p.x*=scale;p.y*=scale;}
+    f.desired=f.baseline;
+    for(std::size_t i=0;i<f.desired.nodes.size();++i) {
+        const double displacement=(i<2 ? 200 : -200)*scale;
+        if(axis!=SwapAxis::Vertical)f.desired.nodes[i].x+=displacement;
+        if(axis!=SwapAxis::Horizontal)f.desired.nodes[i].y+=displacement;
+    }
+    return f;
+}
+void collinear_frame(const MovementFixture& f, double fraction, Layout& placement, Routes& paths) {
+    placement=f.baseline;paths=f.routes;
+    for(std::size_t i=0;i<placement.nodes.size();++i) {
+        placement.nodes[i].x+=fraction*(f.desired.nodes[i].x-f.baseline.nodes[i].x);
+        placement.nodes[i].y+=fraction*(f.desired.nodes[i].y-f.baseline.nodes[i].y);
+    }
+    for(std::size_t i=0;i<paths.edges.size();++i) {
+        const auto source=f.graph.edges[i].source;
+        for(auto& p:paths.edges[i].points) {
+            p.x+=fraction*(f.desired.nodes[source].x-f.baseline.nodes[source].x);
+            p.y+=fraction*(f.desired.nodes[source].y-f.baseline.nodes[source].y);
+        }
+        // Auditing requires exact measured anchors, including rounding after
+        // the independently interpolated node position is computed.
+        const auto anchor=[&](const Port& port) -> Point {
+            const auto& node=placement.nodes[port.node];
+            switch(port.side) {
+            case Side::North:return {node.x+node.width*port.offset,node.y};
+            case Side::East:return {node.x+node.width,node.y+node.height*port.offset};
+            case Side::South:return {node.x+node.width*port.offset,node.y+node.height};
+            case Side::West:return {node.x,node.y+node.height*port.offset};
+            default:throw std::runtime_error("invalid fixture port");
+            }
+        };
+        paths.edges[i].points.front()=anchor(f.ports[i].source);
+        paths.edges[i].points.back()=anchor(f.ports[i].target);
+    }
+}
 void run() {
+    {
+        const auto f=collinear_swap();
+        TopologySignature signature;
+        require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,signature)),
+                "collinear disjoint baseline is valid");
+        Layout placement;Routes paths;
+        collinear_frame(f,0.25,placement,paths);
+        require(audit_topology(f.graph,placement,f.ports,paths,signature).error==
+                TopologyError::AmbiguousTopology,"collinear segments overlap between valid endpoints");
+        TopologyOptions single;single.analytic_guards=false;single.samples_per_trial=1;
+        TopologyReport movement;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction==1,
+                "endpoint-only sampling misses collinear overlap");
+        // The 80-unit gap closes at relative speed 400: first contact = 1/5.
+        constexpr double first_contact=0.2;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.segment_pair_constraints>0 && guard.max_safe_fraction>0 &&
+                guard.max_safe_fraction<first_contact,"collinear motion is capped before first contact");
+        single.analytic_guards=true;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<first_contact,"single-sample motion respects collinear event");
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                "collinear prefix independently passes audit");
+    }
+    {
+        constexpr std::array axes={SwapAxis::Horizontal,SwapAxis::Vertical,SwapAxis::Diagonal};
+        constexpr std::array scales={0.125,1.0,8.0,1024.0};
+        constexpr std::size_t variants=4, samples=16;
+        for(const auto axis:axes)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant) {
+                auto f=collinear_swap(axis,scale);
+                if(variant%2)for(std::size_t i=0;i<f.graph.edges.size();++i) {
+                    std::swap(f.graph.edges[i].source,f.graph.edges[i].target);
+                    std::swap(f.ports[i].source,f.ports[i].target);
+                    std::reverse(f.routes.edges[i].points.begin(),f.routes.edges[i].points.end());
+                }
+                if(variant>=variants/2) {
+                    std::swap(f.graph.edges[0],f.graph.edges[1]);
+                    std::swap(f.ports[0],f.ports[1]);
+                    std::swap(f.routes.edges[0],f.routes.edges[1]);
+                }
+                TopologyGuardReport guard;
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                        guard.segment_pair_constraints==1,"one projected-gap guard covers collinear pair");
+                near(guard.max_safe_fraction,0.2*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+                     "collinear event is invariant under axis, scale, edge reversal and permutation");
+                Layout placement;Routes paths;TopologySignature signature;
+                collinear_frame(f,1,placement,paths);
+                require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                        "transformed collinear swap has valid final geometry");
+                TopologyOptions single;single.samples_per_trial=1;
+                TopologyReport movement;
+                require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                        f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                        movement.accepted_fraction<=guard.max_safe_fraction,
+                        "transformed collinear event caps integrated movement");
+                for(std::size_t sample=0;sample<=samples;++sample) {
+                    collinear_frame(f,movement.accepted_fraction*static_cast<double>(sample)/samples,
+                                    placement,paths);
+                    const auto audited=audit_topology(f.graph,placement,f.ports,paths,signature);
+                    if(!audited)throw std::runtime_error("collinear prefix audit: "+audited.message);
+                }
+                f.desired=f.baseline;
+                for(auto& n:f.desired.nodes) {n.x+=37*scale;n.y-=23*scale;}
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                        guard.max_safe_fraction==1,"rigid collinear translation remains fully admissible");
+            }
+    }
+    {
+        auto f=collinear_swap();
+        f.desired=f.baseline;
+        for(std::size_t i=0;i<f.desired.nodes.size();++i)f.desired.nodes[i].x+=(i<2 ? -200 : 200);
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"separating collinear motion has no artificial event");
+        f=collinear_swap();
+        // Each segment tilts as its inner endpoint approaches the other route.
+        // The projected guard intentionally stops when projection separation
+        // is lost, even though transverse separation could permit a longer move.
+        f.desired=f.baseline;f.desired.nodes[1].x+=100;f.desired.nodes[1].y-=50;
+        f.desired.nodes[2].x-=100;f.desired.nodes[2].y+=50;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction>0.39 && guard.max_safe_fraction<0.4,
+                "changing endpoint motion preserves a conservative projected-separation prefix");
+        f=collinear_swap();f.baseline.nodes[1].y=0;f.ports[0].target.offset=0;
+        f.desired=f.baseline;f.desired.nodes[0].x+=200;f.desired.nodes[1].x-=20;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                "independent pair can inspect changing endpoint order");
+        near(guard.max_safe_fraction,0.5*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+             "all four gaps detect the initially farther endpoint approaching after order reversal");
+        f=collinear_swap();f.desired=f.baseline;
+        for(std::size_t i=0;i<2;++i)f.desired.nodes[i].x+=80;
+        TopologyGuardOptions exact;exact.event_backoff=0;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,exact)) &&
+                guard.max_safe_fraction==std::nextafter(1.0,0.0),
+                "a final-frame collinear contact is backed off even with zero configured margin");
+    }
+    {
+        const auto f=collinear_swap();
+        // Six node pairs, four scans, four zero orientations, one projected
+        // interval check: 15 evaluations, of which 11 consume constraints.
+        constexpr std::size_t constraints=11, evaluations=15;
+        TopologyGuardOptions limited;limited.max_constraints=constraints;limited.max_evaluations=evaluations;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
+                guard.evaluations==evaluations,"collinear checks fit exact shared budgets");
+        limited.max_constraints=constraints-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0 && guard.segment_pair_constraints==0,
+                "collinear constraint exhaustion publishes no partial report");
+        limited.max_constraints=constraints;limited.max_evaluations=evaluations-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "collinear evaluation exhaustion is transactional");
+        TopologyOptions scarce;scarce.max_guard_constraints=constraints-1;
+        Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+        TopologyReport movement;movement.accepted_fraction=1;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,scarce,&movement).error==TopologyError::CapacityExceeded &&
+                moved.nodes.empty() && paths.edges.empty() && movement.accepted_fraction==0,
+                "collinear budget failure clears composed movement outputs");
+    }
+    {
+        MovementFixture f;
+        f.graph.nodes={{"start",10,10},{"end",10,10}};f.graph.edges={{0,1}};
+        f.baseline.nodes={{-10,-5,10,10},{120,-5,10,10}};
+        f.routes.edges={{{{0,0},{20,0},{20,40},{100,40},{100,0},{120,0}}}};
+        f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}}};
+        f.desired=f.baseline;f.desired.nodes[0].x+=200;f.desired.nodes[1].x-=200;
+        // Total arclength 200 gives inner endpoints weights 0.1 and 0.9.
+        // Their 80-unit projected gap closes at speed 320, hence alpha=1/4.
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction>0.24 && guard.max_safe_fraction<0.25,
+                "same-route collinear nonadjacent pair is bounded");
+        Layout moved;Routes paths;TopologyReport movement;TopologySignature signature;
+        TopologyOptions single;single.samples_per_trial=1;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,moved,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<0.25,"same-route projected guard composes with full audit");
+        require(static_cast<bool>(audit_topology(f.graph,moved,f.ports,paths,signature)),
+                "same-route collinear prefix is geometrically valid");
+    }
+    {
+        MovementFixture f;
+        f.graph.nodes={{"shared",10,10},{"northwest",10,10},{"southeast",10,10}};
+        f.graph.edges={{0,1},{0,2}};
+        f.baseline.nodes={{0,0,10,10},{-30,-40,10,10},{40,30,10,10}};
+        f.routes.edges={{{{10,0},{-20,-30}}},{{{10,0},{40,30}}}};
+        f.ports={{{0,Side::North,1},{1,Side::East,1}},
+                 {{0,Side::East,0},{2,Side::West,0}}};
+        f.desired=f.baseline;for(auto& n:f.desired.nodes) {n.x+=37;n.y-=23;}
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1 && guard.segment_pair_constraints==0,
+                "baseline shared anchor creates no strict projected-gap guard");
+        Layout moved;Routes paths;TopologyReport movement;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,{},&movement).error==TopologyError::AmbiguousTopology,
+                "full audit retains its rejection of baseline collinear endpoint contacts");
+    }
     {
         auto f=spiral();
         TopologySignature signature;
