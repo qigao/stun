@@ -1,0 +1,45 @@
+name: Resolve current Salts SDK releases
+
+on:
+  workflow_call:
+    outputs:
+      salts_sha:
+        value: ${{ jobs.resolve.outputs.salts_sha }}
+      salts_utils_sha:
+        value: ${{ jobs.resolve.outputs.salts_utils_sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      salts_sha: ${{ steps.releases.outputs.salts_sha }}
+      salts_utils_sha: ${{ steps.releases.outputs.salts_utils_sha }}
+    steps:
+      - name: Resolve newest published releases including RCs
+        id: releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolve_release() {
+            local name="$1" repo="$2" release sha
+            release="$(gh api "repos/$repo/releases" --jq \
+              '[.[] | select(.draft == false)] | max_by(.published_at).tag_name')"
+            if [[ -z "$release" || "$release" == null ]]; then
+              echo "No published SDK release found for $repo" >&2
+              return 1
+            fi
+            sha="$(gh api "repos/$repo/commits/$release" --jq .sha)"
+            if [[ -z "$sha" || "$sha" == null ]]; then
+              echo "Cannot resolve SDK release commit for $repo/$release" >&2
+              return 1
+            fi
+            echo "${name}_sha=$sha" >> "$GITHUB_OUTPUT"
+            printf 'Resolved %s: %s (%s)\n' "$repo" "$release" "$sha"
+          }
+          resolve_release salts qigao/salts
+          resolve_release salts_utils qigao/salts-utils

@@ -16,15 +16,18 @@ concurrency:
   group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
-env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
-
 jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
   unicode-runtime:
+    needs: sdk-releases
     name: Unicode source runtime ASan and UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
     steps:
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
@@ -32,7 +35,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout pinned Salts
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
@@ -40,7 +43,7 @@ jobs:
           path: .ci/salts
           persist-credentials: false
 
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout released SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
@@ -110,7 +113,7 @@ jobs:
             | tee build/unicode-runtime/test.log
           {
             echo '### Unicode runtime validation'
-            echo 'Executed the real pinned SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
+            echo 'Executed the released SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
             echo 'Scope: source-level runtime; installed-package and full-GUI integration are separate gates.'
             echo '```text'
             cat build/unicode-runtime/test.log
@@ -127,10 +130,13 @@ jobs:
           git -C .ci/salts-utils diff --exit-code
 
   unicode-install-consumer:
+    needs: sdk-releases
     name: FlexUI production and installed packages ASan and UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
       VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_MAX_CONCURRENCY: 2
       EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
@@ -143,7 +149,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout pinned Salts
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
@@ -151,7 +157,7 @@ jobs:
           path: .ci/install-sources/salts
           persist-credentials: false
 
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout released SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
