@@ -27,7 +27,6 @@ jobs:
     timeout-minutes: 15
     env:
       SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
-      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
     steps:
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
@@ -43,14 +42,6 @@ jobs:
           path: .ci/salts
           persist-credentials: false
 
-      - name: Checkout released SaltsUtils
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
-          path: .ci/salts-utils
-          persist-credentials: false
-
       - name: Restore shared re2c binary
         uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@master
 
@@ -62,8 +53,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
           test "$(git -C .ci/salts rev-parse HEAD)" = "$SALTS_SHA"
-          test "$(git -C .ci/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA"
+          printf 'Stun: %s\nSalts: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA"
           cc --version
           c++ --version
 
@@ -81,6 +71,7 @@ jobs:
             -o build/unicode-runtime/salts_unicode_gen.c \
             .ci/salts/unicode/src/salts_unicode.re
           headers=(
+            -I .ci/salts/unicode/src
             -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
@@ -93,13 +84,13 @@ jobs:
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
-            -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
+            -c .ci/salts/unicode/src/salts_unicode_emoji.c -o build/unicode-runtime/unicode_emoji.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
-            -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
+            -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
           c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
             flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
-            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
-            build/unicode-runtime/tinymock.o -pthread -ldl -lm \
+            build/unicode-runtime/unicode.o build/unicode-runtime/unicode_emoji.o \
+            build/unicode-runtime/tinytest.o -pthread -ldl -lm \
             -o build/unicode-runtime/test_text_util_unicode
 
       - name: Run strict Unicode behavior tests
@@ -127,7 +118,6 @@ jobs:
           set -euo pipefail
           git diff --exit-code
           git -C .ci/salts diff --exit-code
-          git -C .ci/salts-utils diff --exit-code
 
   unicode-install-consumer:
     needs: sdk-releases
