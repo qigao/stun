@@ -54,12 +54,14 @@ boundary, not to this initial grammar slice.
 
 **Currently implemented subset**: paragraphs, ATX/Setext headings, thematic
 rules, backtick/tilde fenced code blocks, quotes, basic unordered/ordered lists,
+GFM pipe tables (matching header/delimiter columns, bounded rows/cells),
 emphasis, strong, strikethrough, inline code, basic links/images,
 backslash punctuation escaping and line breaks. Code fences retain
 exact CRLF/LF bytes and language metadata; links retain target metadata.
 
 **Not yet CommonMark/GFM complete**: reference links, nested/lazy-continuation
-list and quote semantics, tables, HTML/entity decoding, footnotes, math,
+list and quote semantics, full GFM table alignment/corner cases,
+HTML/entity decoding, footnotes, math,
 definition lists, and full delimiter-run/flanking algorithms. Such syntax is
 not yet parity-qualified; do not switch all MarkdownWidget callers to C11
 until the entire canonical fixture matrix passes.
@@ -77,3 +79,8 @@ The C11 native test stun_markdown_c11_test covers actual parsing, hierarchy,
 owned source and semantic spans, stable snapshot identities, metadata,
 Unicode/Emoji passthrough, limits, and failure rollback. The installed Salts
 SDK test runs it under ASan/UBSan alongside CMeta reflection tests.
+
+The GFM table slice parses escaped pipes and basic inline-code pipes without
+splitting a cell. It accepts a header only when the next line is a matching
+separator row, and pads or truncates data rows to the header's column count.
+This is a tested subset, not a complete GFM table conformance claim.
