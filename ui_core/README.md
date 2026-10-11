@@ -80,7 +80,9 @@ owned source and semantic spans, stable snapshot identities, metadata,
 Unicode/Emoji passthrough, limits, and failure rollback. The installed Salts
 SDK test runs it under ASan/UBSan alongside CMeta reflection tests.
 
-The GFM table slice parses escaped pipes and basic inline-code pipes without
-splitting a cell. It accepts a header only when the next line is a matching
-separator row, and pads or truncates data rows to the header's column count.
+The GFM table slice parses escaped pipes and inline-code pipes (including
+multi-backtick code spans) without splitting a cell. It admits a table header
+only when the next line is a matching delimiter row, accepts pipe-free data
+rows, and pads/truncates data cells to the header's column count. A following
+blockquote, heading, thematic rule, code fence or list begins a new block.
 This is a tested subset, not a complete GFM table conformance claim.
