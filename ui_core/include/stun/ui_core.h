@@ -14,7 +14,8 @@ extern "C" {
 typedef enum stun_ui_status {
     STUN_UI_OK = 0,
     STUN_UI_INVALID_ARGUMENT = -1,
-    STUN_UI_CAPACITY_EXCEEDED = -2
+    STUN_UI_CAPACITY_EXCEEDED = -2,
+    STUN_UI_OUT_OF_MEMORY = -3
 } stun_ui_status;
 
 /* Owned by the application. Reflection borrows this live native record.
