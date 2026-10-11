@@ -86,3 +86,21 @@ only when the next line is a matching delimiter row, accepts pipe-free data
 rows, and pads/truncates data cells to the header's column count. A following
 blockquote, heading, thematic rule, code fence or list begins a new block.
 This is a tested subset, not a complete GFM table conformance claim.
+
+## GFM task list extension (M2 candidate)
+
+Task markers are parsed **only** at the start of a list-item paragraph:
+- [x] or [X] produces a checked TaskItem → Checkbox semantic node.
+- [ ] produces an unchecked TaskItem → Checkbox semantic node.
+- The Checkbox owns no mutable UI state; exactly one byte in its metadata
+  range encodes the normalized checked state ('x' or ' ').
+- The remainder of the item is still parsed as inline Markdown.
+- A marker with following content must be separated by whitespace after ']'.
+  Markers inside ordinary paragraphs or escaped markup are not admitted.
+- Simple ordered and unordered lists are supported. Nested/lazy task-list
+  continuation follows the wider CommonMark block-parsing backlog under #167.
+
+For application interaction, check/uncheck is **not** a parser mutation:
+the application keeps the runtime state and performs an explicit source/model
+transaction before reparse. CMeta may describe/read that live state without
+becoming an implicit writable registry.

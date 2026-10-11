@@ -260,6 +260,60 @@ static int test_gfm_table_termination_and_uneven_rows(void) {
     return 0;
 }
 
+static int test_gfm_task_items(void) {
+    const char markdown[] =
+        "- [x] shipped\n"
+        "- [ ] pending 👩‍💻\n"
+        "- [X] uppercase\n"
+        "- [x]invalid marker\n"
+        "- [y] invalid glyph\n"
+        "1. [x] ordered\n"
+        "2. [ ]\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(markdown,sizeof(markdown)-1,128,2048,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&v,128)==STUN_UI_OK);
+    CHECK(kinds(v,STUN_UI_BLOCK_TASK_ITEM)==5);
+    CHECK(kinds(v,STUN_UI_BLOCK_CHECKBOX)==5);
+    CHECK(kinds(v,STUN_UI_BLOCK_LIST_ITEM)==2);
+    CHECK(kinds(v,STUN_UI_BLOCK_ORDERED_LIST)==1);
+    CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1);
+    CHECK(metadata_is(v,STUN_UI_BLOCK_CHECKBOX,"x"));
+    CHECK(metadata_is(v,STUN_UI_BLOCK_CHECKBOX," "));
+    CHECK(text_is(v,"shipped"));
+    CHECK(text_is(v,"pending 👩‍💻"));
+    CHECK(text_is(v,"uppercase"));
+    CHECK(text_is(v,"[x]invalid marker"));
+    CHECK(text_is(v,"[y] invalid glyph"));
+    CHECK(text_is(v,"ordered"));
+
+    size_t checked=0,unchecked=0;
+    for(size_t i=0;i<v.document.block_count;++i) {
+        const stun_ui_block *b=&v.document.blocks[i];
+        if(b->kind!=STUN_UI_BLOCK_CHECKBOX) continue;
+        CHECK(b->parent_index<i);
+        CHECK(v.document.blocks[b->parent_index].kind==STUN_UI_BLOCK_TASK_ITEM);
+        const char *bytes=NULL;
+        size_t len=0;
+        CHECK(stun_ui_rich_document_metadata(&v,i,&bytes,&len)==STUN_UI_OK);
+        CHECK(bytes!=NULL && len==1);
+        if(bytes[0]=='x') ++checked;
+        else { CHECK(bytes[0]==' '); ++unchecked; }
+    }
+    CHECK(checked==3);
+    CHECK(unchecked==2);
+    stun_md_document_destroy(doc);
+
+    /* The state is derived from source; no mutable checkbox registry exists. */
+    const char plain[]="* [x]done\n* \\[x] escaped\n";
+    CHECK(stun_md_parse(plain,sizeof(plain)-1,64,256,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view unmarked=stun_md_document_view(doc);
+    CHECK(kinds(unmarked,STUN_UI_BLOCK_TASK_ITEM)==0);
+    CHECK(kinds(unmarked,STUN_UI_BLOCK_CHECKBOX)==0);
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -268,6 +322,7 @@ int main(void) {
     if(test_deterministic_ids()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
+    if(test_gfm_task_items()) return 1;
     puts("C11 Markdown parser: all native tests passed");
     return 0;
 }
