@@ -1138,6 +1138,38 @@ void run() {
                         "distinct-point bend growth away from tangency retains the full admissible motion");
             }
         }
+        {
+            // Area=(alpha-1)*((n+1)*alpha-(n-1)). Its discriminant is 4,
+            // though both separately rounded products can be 4*n*n.
+            constexpr std::array magnitudes={0x1p24,0x1p26,0x1p27,0x1p38};
+            constexpr std::array scales={0.125,1.0};
+            constexpr std::size_t variants=8;
+            constexpr double largest_no_root_magnitude=0x1p26;
+            constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
+            for(const double n:magnitudes)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant)for(const bool zero_backoff:{false,true}) {
+                TopologyGuardOptions options;options.coordinate_limit=1e12;
+                options.min_bend_area_ratio=0;
+                if(zero_backoff)options.event_backoff=0;
+                double fraction=1;
+                // For these n, n-1+1/n is representable in binary64.
+                // Area=(n+1)*alpha^2-2*n*alpha+(n-1+1/n) has
+                // discriminant -4/n and a strictly positive minimum.
+                if(n<=largest_no_root_magnitude) {
+                    TopologyBendConstraint no_roots={{{0,0},{0,0}},{{-1,0},{1,1}},
+                        {{-1-1/n,-1/n},{2-n,3}}};
+                    require(static_cast<bool>(limit_topology_bend(transform_bend(no_roots,scale,variant),fraction,options)) && fraction==1,
+                            "a small negative discriminant must not create a spurious bend tangency");
+                }
+                TopologyBendConstraint close_roots={{{0,0},{0,0}},{{-1,0},{0,0}},{{1,1},{1-n,2}}};
+                const double event=(n-1)/(n+1);
+                require(static_cast<bool>(limit_topology_bend(transform_bend(close_roots,scale,variant),fraction,options)),
+                        "close distinct bend roots are analyzable");
+                require(fraction>0 && fraction<event &&
+                        fraction>=event*(1-2*options.event_backoff-relative_slack),
+                        "discriminant cancellation must not merge distinct bend roots and stop after the first");
+            }
+        }
         TopologyBendConstraint bend;
         bend.first={{0,0},{0,0}};
         bend.bend={{1,1},{1,-1}};

@@ -619,6 +619,11 @@ calculates conservative **analytic event fractions** before sampled auditing:
   (Algorithms 3.1, 3.5, 5.3). Summing two separately rounded determinants can
   otherwise lose a small term and miss a distinct-point bend tangency. Segment
   pair, crossing-track and segment/node corner polynomials share this primitive.
+  The shared quadratic root solver also evaluates `b*b-4*a*c` with the private
+  FMA-compensated determinant. Rounding the two products separately can merge
+  nearby roots (stopping after the first) or turn a small negative discriminant
+  into a spurious tangency. Bend, segment/node and collinear edit-contact events
+  retain their existing root formulas and shared work budgets.
   This remains a numerical guard: coordinate subtraction, underflow, coefficient
   rounding and root arithmetic are not exact.
 - **Node pairs:** intersect the open affine rectangle-overlap intervals on

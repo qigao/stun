@@ -89,7 +89,9 @@ PolynomialRoots polynomial_roots(Real quadratic, Real linear, Real constant) {
     if(quadratic==0.0L) {
         if(linear!=0.0L)roots.values[roots.count++]=-constant/linear;
     } else {
-        const Real disc=linear*linear-4.0L*quadratic*constant;
+        // Keep the product residual when nearby roots make b*b and 4*a*c
+        // cancel. A rounded zero can merge two roots or invent a tangency.
+        const Real disc=detail::compensated_determinant(linear,4.0L*quadratic,constant,linear);
         if(disc==0.0L)roots.values[roots.count++]=-linear/(2.0L*quadratic);
         else if(disc>0.0L) {
             const Real denom=-linear+std::copysign(std::sqrt(disc),-linear);
