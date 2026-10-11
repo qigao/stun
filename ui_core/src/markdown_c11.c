@@ -467,9 +467,10 @@ stun_ui_rich_document_view stun_md_document_view(const stun_md_document *d) {
 stun_ui_status stun_md_parse(const char *input,size_t length,
                              size_t max_nodes,size_t max_source_bytes,
                              stun_md_document **out) {
-    if (!out || (!input && length) || !max_nodes || !max_source_bytes)
-        return STUN_UI_INVALID_ARGUMENT;
+    if (!out) return STUN_UI_INVALID_ARGUMENT;
     *out=NULL;
+    if ((!input && length) || !max_nodes || !max_source_bytes)
+        return STUN_UI_INVALID_ARGUMENT;
     if (length>max_source_bytes || max_nodes>UINT32_MAX ||
         length==SIZE_MAX) return STUN_UI_CAPACITY_EXCEEDED;
     stun_md_document *d=(stun_md_document *)calloc(1,sizeof(*d));
