@@ -7,7 +7,7 @@
 
 #define CHECK(cond) do { \
     if (!(cond)) { \
-        fprintf(stderr, "%s:%d: failed: %s\\n", __FILE__, __LINE__, #cond); \
+        fprintf(stderr, "%s:%d: failed: %s\n", __FILE__, __LINE__, #cond); \
         return 1; \
     } \
 } while (0)
@@ -66,14 +66,14 @@ static int test_textarea_bounds(void) {
     tui_event_t del = key_event(TUI_KEY_DELETE);
 
     /* Small joins still work. */
-    tui_textarea_set_text(ta, "ab\\ncd");
+    tui_textarea_set_text(ta, "ab\ncd");
     ta->cursor_y = 1;
     ta->cursor_x = 0;
     CHECK(tui_textarea_handle(ta, &backspace));
     CHECK(ta->line_count == 1);
     CHECK(strcmp(ta->lines[0], "abcd") == 0);
 
-    tui_textarea_set_text(ta, "ab\\ncd");
+    tui_textarea_set_text(ta, "ab\ncd");
     ta->cursor_y = 0;
     ta->cursor_x = 2;
     CHECK(tui_textarea_handle(ta, &del));
@@ -83,7 +83,7 @@ static int test_textarea_bounds(void) {
     /* Neither join may overrun TUI_TEXTAREA_LINE_LEN. */
     char long_text[340];
     memset(long_text, 'a', 250);
-    long_text[250] = '\\n';
+    long_text[250] = '\n';
     memset(long_text + 251, 'b', 80);
     long_text[331] = 0;
     tui_textarea_set_text(ta, long_text);
@@ -108,7 +108,7 @@ static int test_textarea_bounds(void) {
     CHECK(many != NULL);
     for (size_t j = 0; j < n; ++j) {
         many[2 * j] = 'x';
-        many[2 * j + 1] = '\\n';
+        many[2 * j + 1] = '\n';
     }
     many[2 * n] = 0;
     tui_textarea_set_text(ta, many);
