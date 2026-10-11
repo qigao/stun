@@ -3,6 +3,48 @@
 状态：已采用
 日期：2026-08-31
 
+## 2026-09-20 架构收敛补充
+
+以下决策覆盖本文中仍把旧实现描述为长期目标的段落；当前代码尚未全部完成这些迁移，因此应区分“目标契约”与“当前实现事实”。
+
+### Text / Unicode
+
+- XML、CSS、TBS 和运行时文本的公开字符串编码统一为严格 UTF-8。
+- UTF-8 准入、Unicode scalar 与版本化 Unicode property/boundary 数据由 Salts 字符串层 / `Salts::Unicode` 拥有；FlexUI 不维护第二套 decoder 或 Unicode 数据表。
+- 原始合法 UTF-8 bytes 保真，不隐式执行 NFC/NFD normalization。
+- source span / storage offset 使用 byte offset；用户可见 cursor/selection 不得切开 extended grapheme cluster。
+- grapheme、word、line-break、bidi 基础能力由独立 Unicode 模块提供；CSS text layout、font shaping、glyph measurement 与 GPU font resource 不属于 Unicode 模块。
+- 当前 `flexUI/src/text_util.cpp` 与 `text_layout.cpp` 中的私有 UTF-8、emoji range、byte truncation/wrap 逻辑属于待迁移实现，不是长期契约。跟踪：`stun#8`、`salts-utils#101`。
+
+### XML typed schema
+
+XML 不再把所有 element 长期视为同一种无限制节点。Compiler/registry 目标上必须区分：
+
+- structural/container；
+- leaf/content widget；
+- composite widget；
+- text；
+- reusable component。
+
+每个 descriptor 定义 content model、properties、events、bindings 以及可选 widget factory。非法 children/property/event/binding 应在 XML compile 阶段带 source location 拒绝，而不是延后到 paint/runtime。
+
+Text-capable widget 目标上支持自然内容，例如：
+
+```xml
+<label>保存</label>
+<button on:click="save">Save</button>
+```
+
+`id` 只在需要 application-visible durable identity 时强制；匿名结构节点仍有 compiler-owned identity。对脚本公开的 `UiHandle` 仍依赖稳定公开 ID + generation，不把匿名内部 identity 暴露为持久 ABI。跟踪：`stun#9`。
+
+### Tailwind compatibility
+
+- 用户 authoring surface 使用标准 `class="..."`，不新增平行 `tw=` 语法。
+- 长期目标是固定一个上游 Tailwind compatibility profile，并实现 native token/variant/utility/theme compiler；Node/npm/Tailwind JS 仅可用于开发期 differential oracle，不进入安装运行时。
+- state、responsive、dark、data/aria、container query、arbitrary value/property 等语义按兼容 profile 明确支持或明确 Unsupported；不得悄悄解释为另一套本地语义。
+- ordinary semantic class 与 Tailwind candidate 共存，最终都进入同一个 StyleEngine cascade。
+- 当前 `utility_whitelist.json` / `UtilityCatalog` / exact-token JIT 是正在工作的迁移实现事实，不再作为长期 Tailwind 语义事实源。跟踪：`stun#10`。
+
 ## 背景
 
 FlexUI 需要形成类似 Qt `.ui` + QtScript 的桌面应用开发模型，但不引入浏览器 DOM、JavaScript

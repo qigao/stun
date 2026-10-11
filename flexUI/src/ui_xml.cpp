@@ -1,6 +1,7 @@
 #include <flexUI/ui_xml.h>
 
 #include <pugixml.hpp>
+#include <turbo_vstr.h>
 
 #include <charconv>
 #include <cmath>
@@ -302,6 +303,17 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   if (source.find('\0') != std::string_view::npos) {
     result.error = make_error(UiDocumentErrorCode::ParseError,
                               "UI XML source must not contain embedded NUL bytes");
+    return result;
+  }
+
+  const auto invalid_utf8 =
+      vstr_utf8_invalid_offset(vstr_from_buf(source.data(), source.size()));
+  if (invalid_utf8 != VSTR_NPOS) {
+    const auto location =
+        source_span(source, static_cast<std::ptrdiff_t>(invalid_utf8));
+    result.error = make_error(UiDocumentErrorCode::ParseError,
+                              "UI XML source must be valid UTF-8",
+                              location.line, location.column);
     return result;
   }
 
