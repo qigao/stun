@@ -1,6 +1,7 @@
 #include "stun/graphlayout/topology.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -40,7 +41,102 @@ TopologySignature audited(const Fixture& f){
     return s;
 }
 
+Fixture cancellation_routes(double n, bool crossing){
+    constexpr double size=0.125;
+    Fixture f;
+    f.g.nodes={{"a",size,size},{"b",size,size},{"c",size,size},{"d",size,size}};
+    f.g.edges={{0,1},{2,3}};
+    if(crossing) {
+        f.l.nodes={{-n/2-size,-(n-1)/2,size,size},{n/2,(n-1)/2-size,size,size},
+                   {-(n+1)/2-size,-n/2,size,size},{(n+1)/2-size,n/2,size,size}};
+        f.ports={{{0,Side::East,0},{1,Side::West,1}},
+                 {{2,Side::East,0},{3,Side::North,1}}};
+        f.routes.edges={{{{-n/2,-(n-1)/2},{n/2,(n-1)/2}}},
+                        {{{-(n+1)/2,-n/2},{(n+1)/2,n/2}}}};
+    } else {
+        f.l.nodes={{-size,0,size,size},{2*n-size,2*n-2,size,size},
+                   {n+1-size,n,size,size},{n+2-size,n+1,size,size}};
+        f.ports={{{0,Side::East,0},{1,Side::North,1}},
+                 {{2,Side::East,0},{3,Side::North,1}}};
+        f.routes.edges={{{{0,0},{2*n,2*n-2}}},{{{n+1,n},{n+2,n+1}}}};
+    }
+    return f;
+}
+
+void transform_cancellation(Fixture& f, double scale, std::size_t variant){
+    const auto point=[&](Point& p) {
+        p.x*=scale;p.y*=scale;
+        if(variant&1)std::swap(p.x,p.y);
+        if(variant&2)p.x=-p.x;
+    };
+    for(auto& n:f.g.nodes) {n.width*=scale;n.height*=scale;}
+    for(auto& n:f.l.nodes) {
+        Point p{n.x,n.y};point(p);n.width*=scale;n.height*=scale;
+        n.x=p.x-((variant&2) ? n.width : 0);n.y=p.y;
+    }
+    for(auto& route:f.routes.edges)for(auto& p:route.points)point(p);
+    for(auto& request:f.ports)for(auto* port:{&request.source,&request.target}) {
+        if(variant&1) {
+            switch(port->side) {
+            case Side::East:port->side=Side::South;break;
+            case Side::West:port->side=Side::North;break;
+            case Side::North:port->side=Side::West;break;
+            default:throw std::runtime_error("unexpected cancellation fixture side");
+            }
+        }
+        if(variant&2) {
+            if(port->side==Side::East)port->side=Side::West;
+            else if(port->side==Side::West)port->side=Side::East;
+            else port->offset=1-port->offset;
+        }
+    }
+    for(std::size_t edge=0;edge<f.g.edges.size();++edge)if(variant&(4u<<edge)) {
+        std::swap(f.g.edges[edge].source,f.g.edges[edge].target);
+        std::swap(f.ports[edge].source,f.ports[edge].target);
+        std::reverse(f.routes.edges[edge].points.begin(),f.routes.edges[edge].points.end());
+    }
+}
+
 void run(){
+    {
+        constexpr std::array magnitudes={0x1p27,0x1p38},scales={0.125,1.0};
+        constexpr std::size_t variants=16;
+        for(const double n:magnitudes)for(const double scale:scales)
+        for(std::size_t variant=0;variant<variants;++variant)for(const bool crossing:{false,true}) {
+            // Disjoint: AB=(2n,2n-2), C=(n+1,n), D=(n+2,n+1),
+            // so endpoint orientations are 2 and 4. Crossing: AB=(n,n-1),
+            // CD=(n+1,n) have determinant 1 and intersect at both midpoints.
+            auto f=cancellation_routes(n,crossing);transform_cancellation(f,scale,variant);
+            TopologyOptions options;options.coordinate_limit=1e12;options.orientation_epsilon=0;
+            TopologySignature signature;
+            const auto status=audit_topology(f.g,f.l,f.ports,f.routes,signature,options);
+            if(!status)throw std::runtime_error("cancellation-scale routes: "+status.message);
+            check(signature.crossing_count==(crossing ? 1u : 0u),
+                  "nonzero determinants distinguish disjoint routes from proper crossings");
+            if(crossing) {
+                const int sign=((variant&1)!=0)^((variant&2)!=0)^((variant&4)!=0)^((variant&8)!=0) ? -1 : 1;
+                check(signature.ordered_crossings[0].size()==1 && signature.ordered_crossings[1].size()==1 &&
+                      signature.ordered_crossings[0][0].other_edge==1 && signature.ordered_crossings[0][0].sign==sign &&
+                      signature.ordered_crossings[1][0].other_edge==0 && signature.ordered_crossings[1][0].sign==-sign,
+                      "cancellation-scale crossings retain partner identity and transformed signs");
+            }
+            options.orientation_epsilon=TopologyOptions{}.orientation_epsilon;
+            check(audit_topology(f.g,f.l,f.ports,f.routes,signature,options).error==TopologyError::AmbiguousTopology &&
+                  signature.crossing_count==0 && signature.ordered_crossings.empty(),
+                  "compensation preserves the configured geometric ambiguity tolerance");
+            if(!crossing) {
+                auto touch=cancellation_routes(n,false);
+                // C is now the exact midpoint of AB: this contact must remain
+                // ambiguous even with no user-specified orientation tolerance.
+                touch.routes.edges[1].points.front()={n,n-1};
+                touch.l.nodes[2].x=n-touch.l.nodes[2].width;touch.l.nodes[2].y=n-1;
+                transform_cancellation(touch,scale,variant);options.orientation_epsilon=0;
+                check(audit_topology(touch.g,touch.l,touch.ports,touch.routes,signature,options).error==
+                      TopologyError::AmbiguousTopology && signature.ordered_crossings.empty(),
+                      "exact finite-segment contacts remain ambiguous after compensation");
+            }
+        }
+    }
     {
         Fixture f;
         f.g.nodes={{"a",10,10},{"b",10,10}};

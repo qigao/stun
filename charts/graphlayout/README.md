@@ -557,6 +557,22 @@ explicit measured N/E/S/W boundary ports, and baseline polyline connectors.
   reversal of crossing order, intermediate route contacts, impossible moves,
   bad ports, degenerate geometry, exhaustion and 48 deterministic graph moves.
 
+The auditor uses FMA-compensated determinants for endpoint orientations and
+proper-crossing denominators/numerators, following the same
+[Kahan product-residual formulation](https://perso.ens-lyon.fr/jean-michel.muller/MathsComp2015.pdf)
+(Section 1) as bend-collapse eligibility. This prevents independently rounded
+products from erasing a small nonzero determinant; the configured relative
+`orientation_epsilon` still controls geometric ambiguity. Zero epsilon does
+not enable exact predicates: subtraction rounding and underflow remain.
+Regression inputs use `n=2^27` and `2^38`: the disjoint segments
+`(0,0)->(2n,2n-2)` and `(n+1,n)->(n+2,n+1)` have endpoint orientations 2 and 4;
+the midpoint-centered vectors `(n,n-1)` and `(n+1,n)` have determinant 1 and a
+proper intersection with both parameters 1/2. Each family has 64 power-of-two
+scale, transpose, reflection and independent route-reversal cases. Another
+64 exact endpoint-on-segment contacts remain ambiguous. Default-tolerance
+rejections and failure-output clearing are checked separately. No budgets,
+asymptotic complexity or external dependencies change.
+
 **Limit:** sampled continuation does **not** certify *every instant* of a
 continuous movement; this is a conservative numerical topology gate, **not
 complete libtopology parity**. In particular, it does not yet preserve

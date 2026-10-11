@@ -105,11 +105,17 @@ bool leaves_outward(const Port& port, Point anchor, Point next) {
     }
 }
 
+Real determinant(Real ax, Real ay, Real bx, Real by) {
+    // Retain the second product's residual so independently rounded products
+    // cannot erase a small nonzero orientation or crossing denominator.
+    const Real product=ay*bx;
+    const Real residual=std::fma(-ay,bx,product);
+    return std::fma(ax,by,-product)+residual;
+}
+
 Real cross(Point a, Point b, Point c) {
-    return (static_cast<Real>(b.x) - a.x) *
-               (static_cast<Real>(c.y) - a.y) -
-           (static_cast<Real>(b.y) - a.y) *
-               (static_cast<Real>(c.x) - a.x);
+    return determinant(static_cast<Real>(b.x)-a.x,static_cast<Real>(b.y)-a.y,
+                       static_cast<Real>(c.x)-a.x,static_cast<Real>(c.y)-a.y);
 }
 
 Real relative_orientation_scale(Point a, Point b, Point c) {
@@ -175,12 +181,12 @@ Intersection intersect(Point a, Point b, Point c, Point d, double eps) {
         const Real uy = static_cast<Real>(b.y)-a.y;
         const Real vx = static_cast<Real>(d.x)-c.x;
         const Real vy = static_cast<Real>(d.y)-c.y;
-        const Real det=ux*vy - uy*vx;
+        const Real det=determinant(ux,uy,vx,vy);
         if (det == 0.0L) return {Intersection::Type::Ambiguous,0,0,0};
         const Real wx = static_cast<Real>(c.x)-a.x;
         const Real wy = static_cast<Real>(c.y)-a.y;
-        const Real t=(wx*vy-wy*vx)/det;
-        const Real u=(wx*uy-wy*ux)/det;
+        const Real t=determinant(wx,wy,vx,vy)/det;
+        const Real u=determinant(wx,wy,ux,uy)/det;
         if (t <= 0.0L || t >= 1.0L || u <= 0.0L || u >= 1.0L)
             return {Intersection::Type::Ambiguous,0,0,0};
         return {Intersection::Type::Proper,t,u,det>0 ? 1 : -1};

@@ -27,6 +27,9 @@ struct TopologyOptions {
     double coordinate_limit = 1.0e8;
     // Relative orientation tolerance; borderline/tangent arrangements fail
     // as ambiguous rather than claiming a stable topology.
+    // Audit orientations and proper-crossing ratios compensate product
+    // cancellation with FMA. Zero epsilon still does not make them exact
+    // predicates: coordinate differences and underflow remain numerical.
     double orientation_epsilon = 1.0e-12;
     std::size_t max_nodes = 256;
     std::size_t max_edges = 512;
