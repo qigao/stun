@@ -252,11 +252,21 @@ def first_difference(actual, expected, location="$") -> str | None:
     return None
 
 
+EXPECTED_GATE_CASES = 20
+EXPECTED_SURVEY_CASES = 4
+
+
 def main() -> int:
     cmd = argparse.ArgumentParser(description=__doc__)
     cmd.add_argument("--parser", required=True, help="Built native C11 RichDoc dump executable")
     cmd.add_argument("--report", type=Path, required=True, help="JSON evidence output")
     args = cmd.parse_args()
+    got_gate = sum(case.gate for case in CASES)
+    got_survey = len(CASES) - got_gate
+    if (got_gate, got_survey) != (EXPECTED_GATE_CASES, EXPECTED_SURVEY_CASES):
+        print("INFRASTRUCTURE ERROR: Markdown oracle fixture denominator changed"
+              f": gate={got_gate} survey={got_survey}", file=sys.stderr)
+        return 2
     binary = Path(args.parser)
     if not binary.is_file():
         print(f"INFRASTRUCTURE ERROR: missing C11 parser binary: {binary}", file=sys.stderr)
