@@ -1,0 +1,59 @@
+name: UI C11 Reflection Contract
+
+on:
+  pull_request:
+    paths:
+      - 'ui_core/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/ui-core-c11.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'ui_core/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/ui-core-c11.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
+  c11-headers:
+    needs: sdk-releases
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout canonical released Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
+          path: .ci/salts
+          persist-credentials: false
+
+      - name: Strict C11 source and reflection compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c11 -Wall -Wextra -Wpedantic -Werror
+            -Iui_core/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+          )
+          cc "${common[@]}" -fsyntax-only ui_core/src/ui_core.c
+          cc "${common[@]}" -fsyntax-only ui_core/tests/ui_core_test.c
+
+      - name: Verify clean source tree
+        shell: bash
+        run: git diff --exit-code
