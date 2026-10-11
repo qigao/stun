@@ -104,3 +104,24 @@ For application interaction, check/uncheck is **not** a parser mutation:
 the application keeps the runtime state and performs an explicit source/model
 transaction before reparse. CMeta may describe/read that live state without
 becoming an implicit writable registry.
+
+## Markdown conformance truthfulness (#172)
+
+The bundled CommonMark 0.31.2 `tools/md/test/spec.txt` contains expected HTML.
+The historical `tools/md/test/spec_runner.cpp` checked only that a C++ parse
+returned a nonempty root, **never compared expected HTML**, and did not
+register its `spec_test_*` executables as normative CTest gates. Its output
+now explicitly labels this a parse-only smoke diagnostic rather than
+reporting a CommonMark pass percentage.
+
+The C11 `stun_markdown_golden_test` is a separate, executable CTest gate
+containing **15 explicitly approved subset fixtures**, verifying every
+RichDoc node's kind, parent, heading level, ordinal identity, semantic UTF-8
+text bytes, and metadata. The denominator is a checked-in compile-time
+constant; missing/extra nodes fail the test. All fixtures run under the
+existing installed-Salts ASan/UBSan C11 consumer gate. This is structural
+parity for these 15 examples, **not** CommonMark or GFM conformance.
+
+A full spec runner must compare actual rendered HTML against expected HTML
+with exact fixture IDs and a complete pass/fail/unsupported denominator,
+then expand coverage until the production C++ parser can be retired.

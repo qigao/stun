@@ -55,6 +55,7 @@ jobs:
           cc "${common[@]}" -fsyntax-only ui_core/src/markdown_c11.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/ui_core_test.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_c11_test.c
+          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_golden_test.c
 
       - name: Verify clean source tree
         shell: bash
