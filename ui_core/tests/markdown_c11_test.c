@@ -222,6 +222,44 @@ static int test_gfm_tables(void) {
     return 0;
 }
 
+static int test_gfm_table_termination_and_uneven_rows(void) {
+    const char sample[] =
+        "| First | Second |\n"
+        "| --- | :---: |\n"
+        "| " TICK TICK "a|b" TICK TICK " | Value |\n"
+        "alone\n"
+        "| final | extra | ignored |\n"
+        "||\n"
+        "> quote after table\n"
+        "## Section\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1,256,4096,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&view,256)==STUN_UI_OK);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE)==1);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_ROW)==5);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_CELL)==10);
+    CHECK(kinds(view,STUN_UI_BLOCK_CODE_SPAN)==1);
+    CHECK(text_is(view,"a|b"));
+    CHECK(text_is(view,"alone"));
+    CHECK(!text_is(view,"ignored"));
+    CHECK(kinds(view,STUN_UI_BLOCK_QUOTE)==1);
+    CHECK(kinds(view,STUN_UI_BLOCK_HEADING)==1);
+
+    /* Each accepted row keeps exactly two cells, regardless of data width. */
+    for(size_t i=0;i<view.document.block_count;++i) {
+        if(view.document.blocks[i].kind!=STUN_UI_BLOCK_TABLE_ROW) continue;
+        size_t cells=0;
+        for(size_t j=i+1;j<view.document.block_count;++j) {
+            if(view.document.blocks[j].parent_index==i &&
+               view.document.blocks[j].kind==STUN_UI_BLOCK_TABLE_CELL) ++cells;
+        }
+        CHECK(cells==2);
+    }
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -229,6 +267,7 @@ int main(void) {
     if(test_limit_and_failure_transaction()) return 1;
     if(test_deterministic_ids()) return 1;
     if(test_gfm_tables()) return 1;
+    if(test_gfm_table_termination_and_uneven_rows()) return 1;
     puts("C11 Markdown parser: all native tests passed");
     return 0;
 }
