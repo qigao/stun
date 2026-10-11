@@ -328,6 +328,19 @@ static bool md_table_unescaped(const char *s, size_t pos, size_t begin) {
     return (slashes % 2u)==0u;
 }
 
+/* Skip a valid fenced inline-code run (including multi-backtick runs).
+ * Unclosed runs are ordinary text. The caller processes the next candidate
+ * separator after the returned byte. */
+static size_t md_table_skip_code(const char *s, size_t begin,
+                                 size_t end, size_t pos) {
+    if (pos >= end || s[pos] != (char)0x60 ||
+        !md_table_unescaped(s,pos,begin)) return pos;
+    size_t run = 1;
+    while (pos+run<end && s[pos+run]==(char)0x60) ++run;
+    const size_t close=md_match(s,end,pos+run,(char)0x60,run);
+    return close==SIZE_MAX ? pos+run-1 : close+run-1;
+}
+
 static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end) {
     begin=md_left(s,begin,end);
     end=md_right(s,begin,end);
@@ -340,7 +353,8 @@ static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end) {
 }
 
 static bool md_table_scan(const char *s, size_t begin, size_t end,
-                          bool delimiter, size_t *out_columns) {
+                          bool delimiter, bool require_pipe,
+                          size_t *out_columns) {
     if (begin>=end || !out_columns) return false;
     begin=md_left(s,begin,end);
     end=md_right(s,begin,end);
@@ -349,14 +363,18 @@ static bool md_table_scan(const char *s, size_t begin, size_t end,
     if (s[begin]=='|') { ++begin; pipe=true; }
     if (end>begin && s[end-1]=='|' &&
         md_table_unescaped(s,end-1,begin)) { --end; pipe=true; }
-    if (begin>=end) return false;
+    if (begin>=end) {
+        if (pipe && !delimiter) { *out_columns=1u; return true; }
+        return false;
+    }
     size_t cell_begin=begin, cells=0;
-    bool code=false;
     for (size_t p=begin;p<=end;++p) {
-        if (p<end && s[p]==(char)0x60 &&
-            md_table_unescaped(s,p,begin)) code=!code;
+        if(p<end && s[p]==(char)0x60) {
+            p=md_table_skip_code(s,begin,end,p);
+            continue;
+        }
         const bool boundary = p==end ||
-            (s[p]=='|' && !code && md_table_unescaped(s,p,begin));
+            (s[p]=='|' && md_table_unescaped(s,p,begin));
         if (!boundary) continue;
         pipe |= p<end;
         if (delimiter && !md_table_delimiter_cell(s,cell_begin,p))
@@ -365,7 +383,7 @@ static bool md_table_scan(const char *s, size_t begin, size_t end,
         cell_begin=p+1;
     }
     *out_columns=cells;
-    return cells>0 && pipe;
+    return cells>0 && (!require_pipe || pipe);
 }
 
 static bool md_table_row(stun_md_document *d, uint32_t table,
@@ -379,12 +397,13 @@ static bool md_table_row(stun_md_document *d, uint32_t table,
     if (end>begin && s[end-1]=='|' &&
         md_table_unescaped(s,end-1,begin)) --end;
     size_t cell_begin=begin, cells=0;
-    bool code=false;
     for(size_t p=begin;p<=end && d->error==STUN_UI_OK;++p) {
-        if(p<end && s[p]==(char)0x60 &&
-           md_table_unescaped(s,p,begin)) code=!code;
+        if(p<end && s[p]==(char)0x60) {
+            p=md_table_skip_code(s,begin,end,p);
+            continue;
+        }
         const bool boundary=p==end ||
-            (s[p]=='|' && !code && md_table_unescaped(s,p,begin));
+            (s[p]=='|' && md_table_unescaped(s,p,begin));
         if(!boundary) continue;
         if(cells<expected_columns) {
             const uint32_t cell=md_add(d,row,STUN_UI_BLOCK_TABLE_CELL,0u);
@@ -403,6 +422,20 @@ static bool md_table_row(stun_md_document *d, uint32_t table,
         ++cells;
     }
     return d->error==STUN_UI_OK;
+}
+
+/* A table ends before a new block-level structure. Ordinary text without
+ * a pipe still supplies a one-column data row (padded to header width). */
+static bool md_table_starts_new_block(const char *s, size_t b, size_t e) {
+    if (b>=e || s[b]=='>') return true;
+    if (md_rule(s,b,e)) return true;
+    size_t hb=b,he=e;
+    if (md_atx(s,&hb,&he)) return true;
+    char marker=0; size_t count=0,info_begin=0,info_end=0;
+    if (md_fence_start(s,b,e,&marker,&count,&info_begin,&info_end)) return true;
+    bool ordered=false;size_t content=0;
+    if (md_list_marker(s,b,e,&ordered,&content)) return true;
+    return false;
 }
 
 static void md_parse_blocks(stun_md_document *d) {
@@ -494,9 +527,9 @@ static void md_parse_blocks(stun_md_document *d) {
             list==UINT32_MAX && pos<d->raw_size) {
             const md_line sep=md_read_line(d,pos);
             size_t columns=0, delimiter_columns=0;
-            if (md_table_scan(s,begin,end,false,&columns) &&
+            if (md_table_scan(s,begin,end,false,true,&columns) &&
                 md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
-                              true,&delimiter_columns) &&
+                              true,true,&delimiter_columns) &&
                 columns==delimiter_columns) {
                 const uint32_t table=md_add(d,0u,STUN_UI_BLOCK_TABLE,0u);
                 if(table==UINT32_MAX) return;
@@ -507,7 +540,8 @@ static void md_parse_blocks(stun_md_document *d) {
                     const size_t row_begin=md_left(s,row.begin,row.end);
                     size_t row_columns=0;
                     if(row_begin-row.begin>3 || md_blank(s,row.begin,row.end) ||
-                       !md_table_scan(s,row_begin,row.end,false,&row_columns))
+                       md_table_starts_new_block(s,row_begin,row.end) ||
+                       !md_table_scan(s,row_begin,row.end,false,false,&row_columns))
                         break;
                     if(!md_table_row(d,table,s,row_begin,row.end,columns))
                         return;
