@@ -59,6 +59,27 @@ Real area(const TopologyBendConstraint& t, Real a) {
                  value(t.last.y,a)-value(t.bend.y,a));
 }
 
+struct PolynomialRoots {
+    std::array<Real,2> values{};
+    std::size_t count=0;
+};
+
+PolynomialRoots polynomial_roots(Real quadratic, Real linear, Real constant) {
+    PolynomialRoots roots;
+    if(quadratic==0.0L) {
+        if(linear!=0.0L)roots.values[roots.count++]=-constant/linear;
+    } else {
+        const Real disc=linear*linear-4.0L*quadratic*constant;
+        if(disc==0.0L)roots.values[roots.count++]=-linear/(2.0L*quadratic);
+        else if(disc>0.0L) {
+            const Real denom=-linear+std::copysign(std::sqrt(disc),-linear);
+            roots.values[roots.count++]=denom/(2.0L*quadratic);
+            roots.values[roots.count++]=(2.0L*constant)/denom;
+        }
+    }
+    return roots;
+}
+
 // For an analytic boundary event, do not return the exact zero-slack instant:
 // boundary tangency is ambiguous to the topology analyzer.
 double earlier(Real first, const TopologyGuardOptions& o) {
@@ -154,21 +175,9 @@ TopologyGuardStatus bend_bound(const TopologyBendConstraint& c, double& out,
     if (constant <= 0.0L)
         return fail(TopologyGuardError::InfeasibleBaseline,"degenerate signed bend at baseline");
     Real root=2.0L;
-    if (quadratic == 0.0L) {
-        if (linear < 0.0L) root = -constant/linear;
-    } else {
-        const Real disc=linear*linear-4.0L*quadratic*constant;
-        if (disc >= 0.0L) {
-            const Real square=std::sqrt(disc);
-            const Real denom=-linear+std::copysign(square, -linear);
-            if (denom != 0.0L) {
-                const Real r1=denom/(2.0L*quadratic);
-                const Real r2=(2.0L*constant)/denom;
-                if (r1 >= 0.0L)root=std::min(root,r1);
-                if (r2 >= 0.0L)root=std::min(root,r2);
-            }
-        }
-    }
+    const auto roots=polynomial_roots(quadratic,linear,constant);
+    for(std::size_t i=0;i<roots.count;++i)
+        if(roots.values[i]>=0.0L)root=std::min(root,roots.values[i]);
     out=(root <= 1.0L) ? earlier(root,opt) : 1.0;
     return {};
 }
@@ -197,6 +206,107 @@ bool collinear_pair_bound(const TopologyPointTrack& a, const TopologyPointTrack&
             out=std::min(out,earlier(initial/(initial-desired),opt));
     }
     return true;
+}
+
+struct RelativePointMotion {
+    Real x, y, dx, dy;
+};
+
+RelativePointMotion relative_motion(const TopologyPointTrack& p,
+                                    const PlacedNode& box, const PlacedNode& moved) {
+    return {static_cast<Real>(p.x.initial)-box.x,static_cast<Real>(p.y.initial)-box.y,
+            (static_cast<Real>(p.x.desired)-p.x.initial)-(static_cast<Real>(moved.x)-box.x),
+            (static_cast<Real>(p.y.desired)-p.y.initial)-(static_cast<Real>(moved.y)-box.y)};
+}
+
+struct SegmentNodeMotion {
+    std::array<RelativePointMotion,2> endpoints;
+    Real width, height;
+
+    bool penetrates(Real alpha) const {
+        const auto& a=endpoints[0];const auto& b=endpoints[1];
+        const Real ax=a.x+alpha*a.dx, ay=a.y+alpha*a.dy;
+        const Real bx=b.x+alpha*b.dx, by=b.y+alpha*b.dy;
+        if(std::max(ax,bx)<=0.0L || std::min(ax,bx)>=width ||
+           std::max(ay,by)<=0.0L || std::min(ay,by)>=height)return false;
+        const Real dx=bx-ax, dy=by-ay;
+        if(dx==0.0L && dy==0.0L)return true;
+        // Rectangle axes and the segment normal are the separating axes.
+        // Strict opposite corner signs mean the supporting line cuts the
+        // open rectangle; boundary-only tangencies remain admissible.
+        bool negative=false, positive=false;
+        for(const Real x:{0.0L,width})for(const Real y:{0.0L,height}) {
+            const Real side=cross(dx,dy,x-ax,y-ay);
+            negative=negative || side<0.0L;positive=positive || side>0.0L;
+        }
+        return negative && positive;
+    }
+
+    bool swept_axis_separation() const {
+        const auto& a=endpoints[0];const auto& b=endpoints[1];
+        return std::max({a.x,b.x,a.x+a.dx,b.x+b.dx})<=0.0L ||
+               std::min({a.x,b.x,a.x+a.dx,b.x+b.dx})>=width ||
+               std::max({a.y,b.y,a.y+a.dy,b.y+b.dy})<=0.0L ||
+               std::min({a.y,b.y,a.y+a.dy,b.y+b.dy})>=height;
+    }
+};
+
+constexpr std::size_t endpoint_face_events=8, rectangle_corners=4;
+constexpr const char* segment_node_root_budget_message="segment/node root budget exceeded";
+struct SegmentNodeEvents {
+    // Eight affine endpoint/face roots, two roots per corner orientation,
+    // and the interval endpoints. No allocation or unbounded event storage.
+    std::array<Real,2+endpoint_face_events+2*rectangle_corners> values{0.0L,1.0L};
+    std::size_t count=2;
+    void add(Real quadratic, Real linear, Real constant) {
+        const auto roots=polynomial_roots(quadratic,linear,constant);
+        for(std::size_t i=0;i<roots.count;++i)
+            if(roots.values[i]>=0.0L && roots.values[i]<=1.0L)values[count++]=roots.values[i];
+    }
+};
+
+// Between endpoint/face and corner/line events all separating-axis signs are
+// fixed. Inspect each open event interval to bound the first penetration.
+// O(1) time/space per pair; work includes every polynomial and interval test.
+TopologyGuardStatus segment_node_bound(const SegmentNodeMotion& motion, double& out,
+                                       std::size_t& evaluations, const TopologyGuardOptions& opt) {
+    out=1.0;
+    if(motion.swept_axis_separation())return {};
+    if(motion.penetrates(0.0L))
+        return fail(TopologyGuardError::InfeasibleBaseline,"baseline segment penetrates a node rectangle");
+    const auto& a=motion.endpoints[0];const auto& b=motion.endpoints[1];
+    if(a.dx==0.0L && a.dy==0.0L && b.dx==0.0L && b.dy==0.0L)return {};
+    auto use_evaluation=[&]() {
+        if(evaluations==opt.max_evaluations)return false;
+        ++evaluations;return true;
+    };
+    SegmentNodeEvents events;
+    for(const auto& p:motion.endpoints) {
+        for(const Real x:{0.0L,motion.width}) {
+            if(!use_evaluation())return fail(TopologyGuardError::CapacityExceeded,segment_node_root_budget_message);
+            events.add(0.0L,p.dx,p.x-x);
+        }
+        for(const Real y:{0.0L,motion.height}) {
+            if(!use_evaluation())return fail(TopologyGuardError::CapacityExceeded,segment_node_root_budget_message);
+            events.add(0.0L,p.dy,p.y-y);
+        }
+    }
+    const Real rx=b.x-a.x, ry=b.y-a.y, drx=b.dx-a.dx, dry=b.dy-a.dy;
+    for(const Real x:{0.0L,motion.width})for(const Real y:{0.0L,motion.height}) {
+        if(!use_evaluation())return fail(TopologyGuardError::CapacityExceeded,segment_node_root_budget_message);
+        events.add(cross(drx,dry,-a.dx,-a.dy),
+                   cross(drx,dry,x-a.x,y-a.y)+cross(rx,ry,-a.dx,-a.dy),
+                   cross(rx,ry,x-a.x,y-a.y));
+    }
+    std::sort(events.values.begin(),events.values.begin()+events.count);
+    const auto end=std::unique(events.values.begin(),events.values.begin()+events.count);
+    events.count=static_cast<std::size_t>(end-events.values.begin());
+    for(std::size_t i=1;i<events.count;++i) {
+        if(!use_evaluation())return fail(TopologyGuardError::CapacityExceeded,"segment/node interval budget exceeded");
+        const Real lo=events.values[i-1], hi=events.values[i];
+        if(motion.penetrates(lo+(hi-lo)/2.0L)) {out=earlier(lo,opt);return {};}
+    }
+    return {};
 }
 
 TopologyScalarTrack make_track(double initial, Real motion,
@@ -362,11 +472,18 @@ TopologyGuardStatus limit_topology_movement(
             const Real denom=scan_y?dy:dx;
             if(denom==0.0L)continue;
             for(std::size_t node=0;node<graph.nodes.size();++node){
+                const auto& box=baseline.nodes[node];const auto& moved=desired.nodes[node];
+                if(!use())return fail(TopologyGuardError::CapacityExceeded,"topology segment/node count budget exceeded");
+                const SegmentNodeMotion motion{{relative_motion(u,box,moved),relative_motion(v,box,moved)},
+                                                box.width,box.height};
+                double segment_safe=1.0;
+                st=segment_node_bound(motion,segment_safe,candidate.evaluations,options);
+                if(!st)return st;
+                candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,segment_safe);
                 if(node==edge.source || node==edge.target)continue;
                 if(candidate.evaluations==options.max_evaluations)
                     return fail(TopologyGuardError::CapacityExceeded,"segment/node scan budget exceeded");
                 ++candidate.evaluations;
-                const auto& box=baseline.nodes[node];const auto& moved=desired.nodes[node];
                 const Real scan=scan_y ? static_cast<Real>(box.y)+box.height/2.0L :
                                          static_cast<Real>(box.x)+box.width/2.0L;
                 const Real origin=scan_y ? u.y.initial : u.x.initial;

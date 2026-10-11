@@ -604,8 +604,27 @@ calculates conservative **analytic event fractions** before sampled auditing:
   Each internal-waypoint/node pair consumes one shared constraint/evaluation;
   the phase is O(nodes * internal-waypoints) time and O(1) additional storage.
   Its operations appear in the evaluation report without increasing the
-  separate Straight/Bend counters. Segment-interior collisions still require
-  the local scan guards and subsequent complete geometry audit.
+  separate Straight/Bend counters.
+- **Full segment/node events:** every segment is checked against every moving
+  node rectangle, including its source and target. Work in node-relative
+  coordinates to retain constant rectangle dimensions. Eight affine functions
+  track endpoint/rectangle-face events; four quadratic functions track the
+  rectangle corners against the moving supporting line. Their roots and `0/1`
+  partition the motion into intervals whose separation signs are constant.
+  Rectangle-axis projections and the segment normal classify each open
+  interval, so extension-line roots and boundary-only tangencies do not cause
+  a false collision. The separating-axis background is described by
+  [David Eberly](https://www.geometrictools.com/Documentation/MethodOfSeparatingAxes.pdf);
+  the affine/quadratic event partition is implemented independently here.
+  The first penetrating interval caps motion before its entry boundary.
+  Baseline penetration is `InfeasibleBaseline`. Each pair consumes one shared
+  constraint and 1..30 evaluations: one initial check, up to 12 polynomial
+  checks and up to 17 interval classifications. Swept axis separation and
+  static relative geometry can finish at the initial check. The phase is
+  O(nodes * segments) time and O(1) auxiliary storage, with at most 18 event
+  times per pair and no per-pair heap allocation. Work appears in the existing
+  evaluation report, while Straight/Bend counters retain their local meanings.
+  Distinct root counts can change evaluation counts across geometric variants.
 - **Combination:** `move_topology_preserving` now optionally (default on)
   computes those analytic guards and only then runs its bounded multi-frame,
   complete graph collision and signed crossing-order audits. Reports include
@@ -627,11 +646,22 @@ accepted prefixes. A returning waypoint hits its incident source (or target
 after edge reversal) at fraction `41/124`. Moving obstacles, rigid graph
 translation, diagonal bypass, boundary policies, exact budgets and atomic
 failure outputs are also covered.
+Full-segment regressions include a horizontal connector moving by `(200,-100)`
+past a rectangle at `(150,-50)`: its endpoints never enter the rectangle,
+but its interior penetrates between fractions `0.4` and `0.5`. Thirty-two
+scaled/transposed/reflected/reversed cases audit accepted prefixes. A rotating
+segment with a translating rectangle tests two-root quadratic events and
+ignores a first root lying on the line extension; a double-root corner touch
+remains admissible. Exact constraint/evaluation boundaries cover both root
+generation and interval classification failures.
 
 **Limitations:** this is a conservative *local guard*, not a complete
 `libtopology` implementation. Fixed baseline scan fractions may differ from
-actual moving scan intersection positions. The subsequent sampled topology
-audit can still miss a contact between samples, and the current implementation
+actual moving scan intersection positions. Full segment/node event checks are
+numerical, using floating-point coefficients, roots and interval classifications;
+they are not exact predicates or a certified continuous-geometry proof. The
+subsequent sampled topology audit can still miss other contacts between samples,
+and the current implementation
 does not split/merge edge segments at an activated constraint, recompute route
 homotopy, or guarantee a continuous ambient-isotopy certificate. These remain
 algorithmic follow-ups, not Lean/formal-proof tasks.

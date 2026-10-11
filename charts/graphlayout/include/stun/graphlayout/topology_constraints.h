@@ -118,7 +118,15 @@ TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint
 // baseline interior penetration is InfeasibleBaseline. Terminal anchors stay
 // on their own nodes, and node-pair guards cover collisions with other nodes.
 // Waypoint checks contribute to evaluations rather than Straight/Bend counts.
-// Segment interiors remain subject to the local scan guards and full audit.
+// Every segment/node pair, including incident nodes, also has a continuous
+// open-interior guard. Eight affine endpoint/face events and four quadratic
+// corner/line events partition [0,1]; separating-axis tests classify each
+// open interval. Boundary-only tangencies remain admissible. Each pair consumes
+// one constraint and 1..30 evaluations (initial check, up to 12 polynomials and
+// 17 intervals); this phase is O(nodes * segments) time and O(1) extra storage,
+// with at most 18 event times per pair. These checks contribute to evaluations
+// rather than the local Straight/Bend counters. Counts can vary with distinct
+// root times. This is a floating-point numerical guard, not an exact certificate.
 // For every unrelated node and segment whose
 // scan projection lies inside the segment, generate a fixed-fraction
 // node-face/segment TriConstraint. Consecutive route triples generate bend

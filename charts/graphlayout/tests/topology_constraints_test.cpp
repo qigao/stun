@@ -129,7 +129,200 @@ MovementFixture waypoint_sweep(bool vertical=false, double scale=1.0) {
     }
     return f;
 }
+MovementFixture segment_sweep(bool vertical=false, double scale=1.0) {
+    MovementFixture f;
+    f.graph.nodes={{"source",10,10},{"target",10,10},{"obstacle",10,10}};
+    f.graph.edges={{0,1}};
+    f.baseline.nodes={{-10,-5,10,10},{100,-5,10,10},{150,-50,10,10}};
+    f.routes.edges={{{{0,0},{100,0}}}};
+    f.ports={{{0,Side::East,0.5},{1,Side::West,0.5}}};
+    f.desired=f.baseline;
+    for(std::size_t i=0;i<2;++i) {f.desired.nodes[i].x+=200;f.desired.nodes[i].y-=100;}
+    if(vertical) {
+        for(auto* layout:{&f.baseline,&f.desired})for(auto& n:layout->nodes)std::swap(n.x,n.y);
+        for(auto& p:f.routes.edges[0].points)std::swap(p.x,p.y);
+        f.ports[0].source.side=Side::South;f.ports[0].target.side=Side::North;
+    }
+    for(auto& n:f.graph.nodes) {n.width*=scale;n.height*=scale;}
+    for(auto* layout:{&f.baseline,&f.desired})for(auto& n:layout->nodes) {
+        n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;
+    }
+    for(auto& p:f.routes.edges[0].points) {p.x*=scale;p.y*=scale;}
+    return f;
+}
 void run() {
+    {
+        const auto f=segment_sweep();
+        TopologySignature signature;
+        require(static_cast<bool>(audit_topology(f.graph,f.baseline,f.ports,f.routes,signature)),
+                "segment-interior sweep has a valid baseline");
+        Layout placement;Routes paths;rigid_frame(f,0.45,placement,paths);
+        require(paths.edges[0].points[0].x<placement.nodes[2].x &&
+                paths.edges[0].points[1].x>placement.nodes[2].x+placement.nodes[2].width,
+                "both endpoints stay outside while the segment spans the obstacle");
+        require(audit_topology(f.graph,placement,f.ports,paths,signature).error==TopologyError::InvalidGeometry,
+                "intermediate segment interior genuinely penetrates the obstacle");
+        TopologyOptions single;single.samples_per_trial=1;single.analytic_guards=false;TopologyReport movement;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction==1,
+                "endpoint-only sampling misses a hidden segment-interior sweep");
+        // The line y=-100*alpha first reaches the box's y=-40 face at 0.4.
+        constexpr double first_contact=0.4;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.straight_constraints==0 && guard.max_safe_fraction>0.39 &&
+                guard.max_safe_fraction<first_contact,
+                "continuous segment-interior guard caps a collision missed by the initial scan");
+        single.analytic_guards=true;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<first_contact,"integrated single-sample movement respects segment events");
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                "accepted segment-interior prefix independently passes audit");
+    }
+    {
+        constexpr std::array scales={0.125,1.0,8.0,1024.0};
+        constexpr std::size_t axes=2, variants=4, samples=16;
+        for(std::size_t axis=0;axis<axes;++axis)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant) {
+                const bool vertical=axis!=0;
+                auto f=segment_sweep(vertical,scale);
+                if(variant%2) {
+                    for(auto* layout:{&f.baseline,&f.desired})for(auto& n:layout->nodes) {
+                        if(vertical)n.y=-n.y-n.height;
+                        else n.x=-n.x-n.width;
+                    }
+                    for(auto& p:f.routes.edges[0].points) {
+                        if(vertical)p.y=-p.y;
+                        else p.x=-p.x;
+                    }
+                    f.ports[0].source.side=vertical?Side::North:Side::West;
+                    f.ports[0].target.side=vertical?Side::South:Side::East;
+                }
+                if(variant>=variants/2) {
+                    std::swap(f.graph.edges[0].source,f.graph.edges[0].target);
+                    std::swap(f.ports[0].source,f.ports[0].target);
+                    std::reverse(f.routes.edges[0].points.begin(),f.routes.edges[0].points.end());
+                }
+                TopologyGuardReport guard;
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                        "transformed full segment sweep can be guarded");
+                near(guard.max_safe_fraction,0.4*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+                     "segment-interior event survives transpose, scale, reflection and reversal");
+                TopologyOptions single;single.samples_per_trial=1;
+                Layout placement;Routes paths;TopologyReport movement;TopologySignature signature;
+                require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                        f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                        movement.accepted_fraction<=guard.max_safe_fraction,
+                        "transformed segment sweep composes with full geometry checks");
+                for(std::size_t sample=0;sample<=samples;++sample) {
+                    rigid_frame(f,movement.accepted_fraction*static_cast<double>(sample)/samples,placement,paths);
+                    const auto status=audit_topology(f.graph,placement,f.ports,paths,signature);
+                    if(!status)throw std::runtime_error("segment axis "+std::to_string(axis)+
+                        ", variant "+std::to_string(variant)+", sample "+std::to_string(sample)+": "+status.message);
+                }
+                f.desired.nodes[2].x+=f.desired.nodes[0].x-f.baseline.nodes[0].x;
+                f.desired.nodes[2].y+=f.desired.nodes[0].y-f.baseline.nodes[0].y;
+                require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                        guard.max_safe_fraction==1,"full segment checks retain rigid graph translation");
+            }
+    }
+    {
+        const auto f=segment_sweep();
+        // Three node pairs and three segment/node pairs. The unrelated pair
+        // adds 12 polynomial evaluations and four open interval tests.
+        constexpr std::size_t constraints=6, evaluations=23;
+        TopologyGuardOptions limited;limited.max_constraints=constraints;limited.max_evaluations=evaluations;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
+                guard.evaluations==evaluations,"segment events fit exact shared budgets");
+        limited.max_constraints=constraints-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "segment constraint exhaustion clears the report");
+        limited.max_constraints=constraints;limited.max_evaluations=evaluations-1;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "segment interval exhaustion clears the report");
+        limited.max_evaluations=10;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
+                TopologyGuardError::CapacityExceeded && guard.evaluations==0,
+                "segment root extraction also obeys the evaluation budget");
+        TopologyOptions scarce;scarce.max_guard_evaluations=evaluations-1;
+        Layout moved;moved.nodes.resize(1);Routes paths;paths.edges.resize(1);
+        TopologyReport movement;movement.accepted_fraction=1;
+        require(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,f.desired,
+                moved,paths,scarce,&movement).error==TopologyError::CapacityExceeded &&
+                moved.nodes.empty() && paths.edges.empty() && movement.accepted_fraction==0,
+                "segment event failure clears all composed outputs");
+    }
+    {
+        MovementFixture f;
+        f.graph.nodes={{"source",8,8},{"target",8,8},{"obstacle",8,8}};
+        f.graph.edges={{0,1}};
+        f.baseline.nodes={{-4,-8,8,8},{-4,256,8,8},{-48,-128,8,8}};
+        f.routes.edges={{{{0,0},{0,256}}}};
+        f.ports={{{0,Side::South,0.5},{1,Side::North,0.5}}};
+        f.desired=f.baseline;f.desired.nodes[1].x+=256;
+        f.desired.nodes[2].x+=128;f.desired.nodes[2].y+=256;
+        // Upper-left corner orientation divided by 256^2 is
+        // alpha^2 - (31/32)*alpha + 3/16. The first root is on the
+        // segment extension below its source; entry occurs at the second.
+        const double first_contact=(31.0+std::sqrt(193.0))/64.0;
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)),
+                "rotating segment and translating node produce quadratic events");
+        near(guard.max_safe_fraction,first_contact*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
+             "quadratic segment event ignores extension roots and catches the first actual penetration");
+        TopologyOptions single;single.samples_per_trial=1;single.analytic_guards=false;
+        Layout placement;Routes paths;TopologyReport movement;TopologySignature signature;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction==1,
+                "quadratic sweep has valid endpoints despite an intermediate penetration");
+        single.analytic_guards=true;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
+                movement.accepted_fraction<first_contact,"quadratic event caps single-sample continuation");
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                "quadratic accepted prefix independently passes audit");
+        std::swap(f.graph.edges[0].source,f.graph.edges[0].target);
+        std::swap(f.ports[0].source,f.ports[0].target);
+        std::reverse(f.routes.edges[0].points.begin(),f.routes.edges[0].points.end());
+        TopologyGuardReport reversed;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reversed)),
+                "reversed quadratic sweep can be guarded");
+        near(reversed.max_safe_fraction,guard.max_safe_fraction,1e-12,
+             "quadratic segment event is independent of edge direction");
+    }
+    {
+        MovementFixture f;
+        f.graph.nodes={{"source",8,8},{"target",8,8},{"obstacle",8,8}};
+        f.graph.edges={{0,1}};
+        f.baseline.nodes={{-4,-8,8,8},{-4,256,8,8},{-72,-64,8,8}};
+        f.routes.edges={{{{0,0},{0,256}}}};
+        f.ports={{{0,Side::South,0.5},{1,Side::North,0.5}}};
+        f.desired=f.baseline;f.desired.nodes[1].x+=256;
+        f.desired.nodes[2].x+=192;f.desired.nodes[2].y+=256;
+        // The lower-right corner has signed area 256^2*(alpha-1/2)^2.
+        // Other corners remain on the same side: the double root is a
+        // boundary-only tangency, not an interval of interior penetration.
+        TopologyGuardReport guard;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard)) &&
+                guard.max_safe_fraction==1,"quadratic double-root tangency does not shorten movement");
+        Layout placement=f.baseline;Routes paths=f.routes;TopologySignature signature;
+        placement.nodes[1].x+=128;placement.nodes[2].x+=96;placement.nodes[2].y+=128;
+        paths.edges[0].points.back().x+=128;
+        require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                "independent audit permits the exact quadratic corner tangency");
+        TopologyReport movement;
+        require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
+                f.desired,placement,paths,{},&movement)) && movement.accepted_fraction==1,
+                "double-root tangency composes with sampled full topology checks");
+        f=segment_sweep();f.baseline.nodes[2]={50,-5,10,10};f.desired=f.baseline;
+        require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard).error==
+                TopologyGuardError::InfeasibleBaseline && guard.evaluations==0,
+                "baseline segment-interior penetration fails transactionally");
+    }
     {
         const auto f=waypoint_sweep();
         TopologySignature signature;
@@ -210,9 +403,13 @@ void run() {
     }
     {
         const auto f=waypoint_sweep();
-        // Three node pairs, six waypoint/node pairs, three fixed scans, two
-        // bends, four segment orientations: 18 evaluations and 15 constraints.
-        constexpr std::size_t constraints=15, evaluations=18;
+        // Existing 15 constraints plus nine full segment/node pairs. Root
+        // classification work depends on the number of distinct event times.
+        constexpr std::size_t constraints=24;
+        TopologyGuardReport reference;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reference)),
+                "reference waypoint sweep provides the full event work count");
+        const std::size_t evaluations=reference.evaluations;
         TopologyGuardOptions limited;limited.max_constraints=constraints;limited.max_evaluations=evaluations;
         TopologyGuardReport guard;
         require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
@@ -429,9 +626,9 @@ void run() {
     }
     {
         const auto f=collinear_swap();
-        // Six node pairs, four scans, four zero orientations, one projected
-        // interval check: 15 evaluations, of which 11 consume constraints.
-        constexpr std::size_t constraints=11, evaluations=15;
+        // Six node pairs, eight swept-separated segment/node pairs, four
+        // scans, four zero orientations, one projected interval check.
+        constexpr std::size_t constraints=19, evaluations=23;
         TopologyGuardOptions limited;limited.max_constraints=constraints;limited.max_evaluations=evaluations;
         TopologyGuardReport guard;
         require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
@@ -580,22 +777,26 @@ void run() {
     }
     {
         const auto f=spiral();
-        // One node pair, eight waypoint/node checks, four bends and six
-        // independent segment pairs with four orientations share one budget.
-        constexpr std::size_t evaluations=37;
-        TopologyGuardOptions limited;limited.max_constraints=evaluations;limited.max_evaluations=evaluations;
+        // One node pair, eight waypoint/node checks, ten segment/node pairs,
+        // four bends and six independent segment pairs share one budget.
+        constexpr std::size_t constraints=47;
+        TopologyGuardReport reference;
+        require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,reference)),
+                "reference spiral provides the full segment event work count");
+        const std::size_t evaluations=reference.evaluations;
+        TopologyGuardOptions limited;limited.max_constraints=constraints;limited.max_evaluations=evaluations;
         TopologyGuardReport guard;
         require(static_cast<bool>(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited)) &&
                 guard.evaluations==evaluations,"same-route event work fits exact shared budgets");
-        limited.max_constraints=evaluations-1;
+        limited.max_constraints=constraints-1;
         require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
                 TopologyGuardError::CapacityExceeded && guard.evaluations==0,
                 "same-route constraint exhaustion publishes no partial guard report");
-        limited.max_constraints=evaluations;limited.max_evaluations=evaluations-1;
+        limited.max_constraints=constraints;limited.max_evaluations=evaluations-1;
         require(limit_topology_movement(f.graph,f.baseline,f.desired,f.routes,guard,limited).error==
                 TopologyGuardError::CapacityExceeded && guard.evaluations==0,
                 "same-route evaluation exhaustion is transactional");
-        TopologyOptions scarce;scarce.max_guard_constraints=evaluations-1;
+        TopologyOptions scarce;scarce.max_guard_constraints=constraints-1;
         Layout moved;moved.nodes.resize(1);
         Routes paths;paths.edges.resize(1);
         TopologyReport movement;movement.accepted_fraction=1;
@@ -663,13 +864,13 @@ void run() {
                 "separating node from connector is valid");
         near(result.max_safe_fraction,1,0,"full motion when separating");
         TopologyGuardOptions limited;
-        limited.max_constraints=4;
+        limited.max_constraints=7;
         require(static_cast<bool>(limit_topology_movement(graph,baseline,desired,routes,result,limited)),
-                "three node pairs and one node-segment constraint fit exact configured count");
-        limited.max_constraints=3;
+                "three node pairs, three full segment/node pairs and one scan fit the exact count");
+        limited.max_constraints=6;
         require(limit_topology_movement(graph,baseline,desired,routes,result,limited).error==
                 TopologyGuardError::CapacityExceeded,"node pairs share the constraint budget");
-        limited.max_constraints=4;
+        limited.max_constraints=7;
         limited.max_evaluations=1;
         require(limit_topology_movement(graph,baseline,desired,routes,result,limited).error==
                 TopologyGuardError::CapacityExceeded,
