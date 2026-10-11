@@ -243,12 +243,26 @@ const StylePropertyDesc* style_property_find(std::string_view name) noexcept {
     return nullptr;
 }
 
+bool style_value_type_matches(const cmeta_type_desc* expected,
+                              const cmeta_type_desc* supplied) noexcept {
+    return expected && supplied &&
+           cmeta_type_equal(expected, supplied) &&
+           expected->kind == supplied->kind &&
+           expected->size == supplied->size &&
+           expected->align == supplied->align;
+}
+
+bool style_property_accepts_type(const StylePropertyDesc& property,
+                                 const cmeta_type_desc* type) noexcept {
+    return style_value_type_matches(property.type, type);
+}
+
 bool style_property_read(const StylePropertyDesc& property,
                          const ComputedStyle& style,
                          const cmeta_type_desc* expected_type,
                          void* out_value) noexcept {
-    return property.read && property.type && expected_type && out_value &&
-           cmeta_type_equal(property.type, expected_type) &&
+    return property.read && out_value &&
+           style_property_accepts_type(property, expected_type) &&
            property.read(style, out_value);
 }
 
@@ -256,8 +270,8 @@ bool style_property_write(const StylePropertyDesc& property,
                           ComputedStyle& style,
                           const cmeta_type_desc* supplied_type,
                           const void* value) noexcept {
-    return property.write && property.type && supplied_type && value &&
-           cmeta_type_equal(property.type, supplied_type) &&
+    return property.write && value &&
+           style_property_accepts_type(property, supplied_type) &&
            property.write(style, value);
 }
 

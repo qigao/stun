@@ -7,7 +7,6 @@ Bundled third-party components retain their upstream license terms.
 | --- | --- | --- | --- |
 | TextEdit | `TextEdit/` | MIT | See `TextEdit/LICENSE`. |
 | OpenXLSX | `vendor/OpenXLSX/` | BSD-3-Clause | See `vendor/OpenXLSX/LICENSE.md`; bundled subcomponents retain their own notices. |
-| Adaptagrams/cola | `vendor/cola/` | LGPL-2.1 | See `vendor/cola/LICENSE` and `vendor/cola/COPYING`. |
 | libDXFrw | `vendor/dxf/` | GPL-2.0-or-later | License terms are stated in the upstream source headers. |
 | gCanvas | `vendor/gCanvas/` | MIT | See `vendor/gCanvas/LICENSE`. |
 | MIR | `vendor/mir/` | MIT | See `vendor/mir/LICENSE`. |

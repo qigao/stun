@@ -5,10 +5,20 @@ on:
       - 'charts/graphlayout/**'
       - 'charts/dotgraph/**'
       - 'charts/mermaid/flowchart/**'
+      - 'charts/mermaid/mindmap/**'
+      - 'charts/infographic/**'
+      - 'vendor/CMakeLists.txt'
+      - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
   push:
     paths:
       - 'charts/graphlayout/**'
+      - 'charts/dotgraph/**'
+      - 'charts/mermaid/flowchart/**'
+      - 'charts/mermaid/mindmap/**'
+      - 'charts/infographic/**'
+      - 'vendor/CMakeLists.txt'
+      - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
   workflow_dispatch:
 

@@ -16,15 +16,17 @@ concurrency:
   group: stun-unicode-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
-env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
-
 jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
   unicode-runtime:
+    needs: sdk-releases
     name: Unicode source runtime ASan and UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
     steps:
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
@@ -32,20 +34,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout pinned Salts
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
           ref: ${{ env.SALTS_SHA }}
           path: .ci/salts
-          persist-credentials: false
-
-      - name: Checkout pinned SaltsUtils
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts-utils
-          ref: ${{ env.SALTS_UTILS_SHA }}
-          path: .ci/salts-utils
           persist-credentials: false
 
       - name: Restore shared re2c binary
@@ -59,8 +53,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
           test "$(git -C .ci/salts rev-parse HEAD)" = "$SALTS_SHA"
-          test "$(git -C .ci/salts-utils rev-parse HEAD)" = "$SALTS_UTILS_SHA"
-          printf 'Stun: %s\nSalts: %s\nSaltsUtils: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA"
+          printf 'Stun: %s\nSalts: %s\n' "$EXPECTED_STUN_SHA" "$SALTS_SHA"
           cc --version
           c++ --version
 
@@ -76,9 +69,10 @@ jobs:
           re2c --lang c --utf8 --encoding-policy fail --no-generation-date -W -Werror \
             -I "$RE2C_ROOT/share/re2c/stdlib" \
             -o build/unicode-runtime/salts_unicode_gen.c \
-            .ci/salts-utils/unicode/src/salts_unicode.re
+            .ci/salts/unicode/src/salts_unicode.re
           headers=(
-            -isystem .ci/salts-utils/unicode/include
+            -I .ci/salts/unicode/src
+            -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include
@@ -90,13 +84,13 @@ jobs:
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
             -c build/unicode-runtime/salts_unicode_gen.c -o build/unicode-runtime/unicode.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
-            -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
+            -c .ci/salts/unicode/src/salts_unicode_emoji.c -o build/unicode-runtime/unicode_emoji.o
           cc -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L "${flags[@]}" "${headers[@]}" \
-            -c .ci/salts/tinytest/src/tinymock.c -o build/unicode-runtime/tinymock.o
+            -c .ci/salts/tinytest/src/tinytest.c -o build/unicode-runtime/tinytest.o
           c++ -std=c++17 -Wall -Wextra -Werror "${flags[@]}" "${headers[@]}" -IflexUI/include \
             flexUI/src/text_util.cpp flexUI/tests/test_text_util_unicode.cpp \
-            build/unicode-runtime/unicode.o build/unicode-runtime/tinytest.o \
-            build/unicode-runtime/tinymock.o -pthread -ldl -lm \
+            build/unicode-runtime/unicode.o build/unicode-runtime/unicode_emoji.o \
+            build/unicode-runtime/tinytest.o -pthread -ldl -lm \
             -o build/unicode-runtime/test_text_util_unicode
 
       - name: Run strict Unicode behavior tests
@@ -110,7 +104,7 @@ jobs:
             | tee build/unicode-runtime/test.log
           {
             echo '### Unicode runtime validation'
-            echo 'Executed the real pinned SaltsUtils scanner and FlexUI text utility tests with ASan/UBSan.'
+            echo 'Executed the released Salts::Unicode scanner and FlexUI text utility tests with ASan/UBSan.'
             echo 'Scope: source-level runtime; installed-package and full-GUI integration are separate gates.'
             echo '```text'
             cat build/unicode-runtime/test.log
@@ -124,13 +118,17 @@ jobs:
           set -euo pipefail
           git diff --exit-code
           git -C .ci/salts diff --exit-code
-          git -C .ci/salts-utils diff --exit-code
 
   unicode-install-consumer:
+    needs: sdk-releases
     name: FlexUI production and installed packages ASan and UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
       VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_MAX_CONCURRENCY: 2
       EVIDENCE_DIR: ${{ github.workspace }}/build/unicode-install-evidence
@@ -143,7 +141,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout pinned Salts
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
@@ -151,7 +149,7 @@ jobs:
           path: .ci/install-sources/salts
           persist-credentials: false
 
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout released SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
@@ -254,7 +252,7 @@ jobs:
               -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
               "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$VCPKG_OVERLAY_PORTS" \
               "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
               "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
               -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
@@ -497,10 +495,9 @@ jobs:
             local name="$3"
             local config_rel="$4"
             local dir="$sdk_root/$name"
-            local tag
+            local tag="$5"
             local nupkg
 
-            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
             test -n "$tag"
             mkdir -p "$dir/download" "$dir/package"
             gh release download "$tag" --repo "$repo" --pattern "$pattern" \
@@ -515,13 +512,14 @@ jobs:
 
           IFS='|' read -r latest_salts_root latest_salts_release < <(
             restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts \
-              'lib/cmake/Salts/SaltsConfig.cmake')
+              'lib/cmake/Salts/SaltsConfig.cmake' "$SALTS_RELEASE")
           IFS='|' read -r latest_utils_root latest_utils_release < <(
             restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils \
-              'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')
+              'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake' "$SALTS_UTILS_RELEASE")
+          turboscript_tag="$(gh release view --repo qigao/TurboScript --json tagName --jq .tagName)"
           IFS='|' read -r latest_turboscript_root latest_turboscript_release < <(
             restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript \
-              'lib/cmake/TurboScript/TurboScriptConfig.cmake')
+              'lib/cmake/TurboScript/TurboScriptConfig.cmake' "$turboscript_tag")
 
           header="$latest_turboscript_root/include/turbo_script.h"
           test -f "$header"

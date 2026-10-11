@@ -581,6 +581,10 @@ facade 解析；不开插件时不应引入 PluginHost/TOML 运行路径。Plugi
   Unix 使用 `RTLD_NOW | RTLD_LOCAL`。manifest candidate 先完成全图解析，之后按 dependency-first 顺序
   load/create；registry build、required capability validation 与 start 仍是一个 publication transaction。
   失败不发布 registry，已 start 的 candidate 逆序 stop/join。
+- create 输出的 instance 直接进入 module 的唯一所有权槽。返回失败，或违规跨 C ABI 抛出异常时，
+  同一 create-unwind 路径恰好 destroy 一次，再卸载 DLL；未成功 create 的实例不进入 start/stop/join。
+  create 的异常捕获在 module 存活期间完成，先复制诊断并销毁异常对象，再释放 instance 和 DLL，
+  避免自定义异常的 `what()` 或析构调用已卸载的 provider 代码。
 - descriptor 在 DLL 卸载前复制到 host-owned C++ storage，再与 built-in endpoint 一起生成不可变 registry。
   插件默认最多 16 个，每个插件最多 256 个 in-flight request；槽表构建时一次预分配，满时返回 Busy，
   不扩容、不阻塞、不丢弃。
@@ -599,6 +603,12 @@ facade 解析；不开插件时不应引入 PluginHost/TOML 运行路径。Plugi
 当前仍只承载受限 opaque payload 和长度契约，尚未实现 tagged value/schema、目录 discovery、权限
 API mediation/OS sandbox、签名验证、热重载和进程隔离。因此“可加载”
 只适用于调用方显式指定的可信 DLL，不表示可运行任意第三方 DLL。
+
+这里的 builder/publication/rollback 使用 ACE Component Configurator 的模式边界，但实现仍属于
+FlexUI PluginHost。当前 FlexUI v1 ABI 不交换 CMeta descriptor，也未接入 Salts Component、
+ComponentPlugin 或 Plugin runtime。未来若迁移到这些 runtime，静态能力声明归 CMeta，实例图与
+rollback 归 Component，generation/scope 归 ComponentPlugin，DSO lease/unload 归 Plugin；必须
+另行设计 ABI 迁移和版本协商，不能把现有 registry snapshot 当成 generation scope 或 DSO lease。
 
 ### 9.6 Plugin SDK 安装与版本契约
 

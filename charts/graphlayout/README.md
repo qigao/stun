@@ -3,7 +3,8 @@
 The Stun GraphLayout modules provide renderer-independent C++17 graph
 **placement, routing and optimization** algorithms, separately linked by chart.
 They are not widgets, docking, rendering or UI layout systems. These algorithms
-build independently of Salts, FlexUI, Cairo, OpenGL and the Adaptagrams vendor library.
+build independently of Salts, FlexUI, Cairo and OpenGL. Stun no longer bundles
+or builds Adaptagrams; all chart layout consumers use the native modules.
 
 ## Scope: Adaptagrams-like layout algorithms only (2026-10-10)
 
@@ -18,7 +19,7 @@ are in scope only when needed to support Cola-style constrained placement.
 | --- | --- | --- |
 | `libvpsc` | Weighted VPSC and pinned/2D projection exist | Coupled-constraint performance, richer separation/cluster cases |
 | `libcola` | Gradient Stress, SMACOF, spring/repulsion exist | Quality/scale and constrained graph-layout parity |
-| `libavoid` | Orthogonal and Polyline A*; bounded orthogonal joint Nudging exists | Global crossing/nudging, ports/checkpoints |
+| `libavoid` | Orthogonal/Polyline A*, bounded local Nudging, Polyline checkpoints and measured DOT port bindings exist | Global routing quality, compound obstacles, chart checkpoint syntax and differential benchmarks |
 | `libtopology` | Signed-crossing audit, analytic collision guards, explicit route edits and VPSC composition | Complete continuous topology guarantees, automatic bend events and compound constraints |
 | `libdialect` | Tidy Tree is a partial building block | Decompose, Arrange, Expand/Emend, Transform pipeline |
 
@@ -26,7 +27,9 @@ are in scope only when needed to support Cola-style constrained placement.
 rendering, chart-specific Sankey/Gantt/Sequence features, and a broad chart
 framework rewrite. C++ unit/property tests, runtime invariants, sanitizers,
 cross-platform CI, bounded resources and Adaptagrams comparison are required.
-Keep the PR Draft / **DO NOT MERGE** until tested algorithm acceptance is complete.
+Removing the vendor dependency does not establish full Adaptagrams API,
+algorithm, layout-quality or performance equivalence. The remaining algorithm
+acceptance work above is separate from the completed chart dependency migration.
 
 ## Independent algorithm modules
 
@@ -57,20 +60,25 @@ objective in `GraphStressCore`, and neither links the other. No runtime
 optimizer selector, provider fallback, or duplicate distance/energy kernel.
 
 Chart adapter dependencies remain explicit: DOT and Mermaid flowcharts
-consume Layered and Orthogonal; Infographic's collision projection consumes
-GraphProjection. The former explicit Polyline/libavoid option is still a
-separately selected provider, **not an automatic fallback**. This phase is scoped to Adaptagrams-like graph layout only: chart-specific
+consume Layered, native Orthogonal/Polyline and the corresponding explicitly
+selected Nudging modules. DOT also consumes measured PortBindings. Infographic
+uses GraphProjection and TidyTree; Mermaid Mindmap uses TidyTree. No adapter
+links or calls an external Cola/libavoid provider. Unsupported routing options
+fail explicitly, including crossing/angle penalties, terminal/shared-path
+nudging flags and Polyline segment penalty. This phase is scoped to
+Adaptagrams-like graph layout only: chart-specific
 Sankey, lane/timeline, Gantt, and other unrelated algorithms are excluded.
 Existing Tidy Tree is retained solely as a useful building block for
 DiAlEcT/HOLA-style decomposition; it is not a new chart-feature workstream.
 
-To qualify an individual algorithm without any UI/chart dependencies:
+To qualify an individual algorithm on Windows without UI/parser dependencies,
+enter an x64 Visual Studio developer shell and use the standalone presets:
 
 ```sh
-cmake -S charts/graphlayout -B build/graphlayout -DBUILD_TESTING=ON
-cmake --build build/graphlayout --target stun_graph_vpsc
-cmake --build build/graphlayout --target stun_graph_force
-ctest --test-dir build/graphlayout --output-on-failure
+cd charts/graphlayout
+cmake --preset win-release-user
+cmake --build --preset win-release-user --target stun_graph_vpsc
+cmake --build --preset win-release-user --target stun_graph_force
 ```
 
 ## Algorithm v1: layered graph placement
@@ -109,10 +117,18 @@ stages. The renderer owns neither the algorithm nor its node identities.
 ## Standalone qualification
 
 ```sh
-cmake -S charts/graphlayout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON
-cmake --build build/graphlayout --parallel
-ctest --test-dir build/graphlayout --output-on-failure
+cd charts/graphlayout
+cmake --preset win-release-user
+cmake --build --preset win-release-user --parallel 2
+ctest --preset win-release-user
 ```
+
+The standalone manifest has no external dependencies. Its vcpkg toolchain
+remains enabled through the preset. The formal suites include the actual
+DOT/Mermaid Flowchart, Infographic and Mindmap layout adapter implementations.
+This headless qualification does not replace a full `STUN_BUILD_CHARTS=ON`
+build, which additionally requires the configured TurboParser SDK and render
+dependencies.
 
 ## Algorithm v2: orthogonal obstacle-aware routing
 

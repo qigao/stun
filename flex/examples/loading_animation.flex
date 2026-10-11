@@ -21,7 +21,7 @@ scene loading {
     group spinner1 {
         x: 200, y: 200
 
-        text label { x: 0, y: 100, content: "Spinner", fontSize: 16, color: #888888 }
+        text spinnerLabel { x: 0, y: 100, content: "Spinner", fontSize: 16, color: #888888 }
 
         group rotator {
             rotation: 0
@@ -35,7 +35,7 @@ scene loading {
     group spinner2 {
         x: 800 / 2, y: 200
 
-        text label { x: 0, y: 100, content: "Pulse", fontSize: 16, color: #888888 }
+        text pulseLabel { x: 0, y: 100, content: "Pulse", fontSize: 16, color: #888888 }
 
         circle pulse {
             radius: 30
@@ -48,7 +48,7 @@ scene loading {
     group spinner3 {
         x: 600, y: 200
 
-        text label { x: 0, y: 100, content: "Bounce", fontSize: 16, color: #888888 }
+        text bounceLabel { x: 0, y: 100, content: "Bounce", fontSize: 16, color: #888888 }
 
         // Dots evenly spaced: -30, -10, 10, 30 (spacing of 20)
         circle dot1 { x: 0 - 30, y: 0, radius: 8, fill: #ff006e }
@@ -61,7 +61,7 @@ scene loading {
     group progressBar {
         x: 800 / 2, y: 350
 
-        text label { x: 0, y: 0 - 50, content: "LOADING...", fontSize: 20, color: #00d9ff }
+        text progressLabel { x: 0, y: 0 - 50, content: "LOADING...", fontSize: 20, color: #00d9ff }
 
         // Track: 400px wide, centered
         rect trackBg { x: 0 - 200, y: 0 - 8, width: 400, height: 16, fill: #1a1a2e }
@@ -74,7 +74,7 @@ scene loading {
     group spinner4 {
         x: 200, y: 500
 
-        text label { x: 0, y: 80, content: "Geometric", fontSize: 16, color: #888888 }
+        text geometricLabel { x: 0, y: 80, content: "Geometric", fontSize: 16, color: #888888 }
 
         group square {
             rotation: 0
@@ -89,7 +89,7 @@ scene loading {
     group spinner5 {
         x: 800 / 2, y: 500
 
-        text label { x: 0, y: 80, content: "Fade", fontSize: 16, color: #888888 }
+        text fadeLabel { x: 0, y: 80, content: "Fade", fontSize: 16, color: #888888 }
 
         // Three circles with 25px spacing
         circle fade1 { x: 0 - 25, y: 0, radius: 12, fill: #8338ec, opacity: 1.0 }
@@ -101,7 +101,7 @@ scene loading {
     group spinner6 {
         x: 600, y: 500
 
-        text label { x: 0, y: 80, content: "Scale", fontSize: 16, color: #888888 }
+        text scaleLabel { x: 0, y: 80, content: "Scale", fontSize: 16, color: #888888 }
 
         circle scaler {
             radius: 25

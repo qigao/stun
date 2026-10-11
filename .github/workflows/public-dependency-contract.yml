@@ -8,7 +8,11 @@ permissions:
   contents: read
 
 jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
   controller-salts-concurrency:
+    needs: sdk-releases
     name: Controller Salts::Concurrency contract
     runs-on: ubuntu-latest
     steps:
@@ -19,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
       - name: Verify canonical dependency surface
@@ -40,6 +44,7 @@ jobs:
           c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -I.ci/salts/concurrency/include             -fsyntax-only flexUI/modules/controller/application_completion.cpp
 
   flexui-salts-core-provider:
+    needs: sdk-releases
     name: FlexUI Salts::Core provider contract
     runs-on: ubuntu-latest
     steps:
@@ -50,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
       - name: Verify FlexUI main runtime has one Core provider
@@ -102,10 +107,10 @@ jobs:
           c++ "${common[@]}" -Iflex/include -fsyntax-only /tmp/flex_debug_contract.cpp
 
           cat > /tmp/flex_fs_contract.cpp <<'EOF'
-          #include <salts_fs.h>
+          #include <cmeta_fs.h>
           int main() {
-            salts_fs_stat_t stat{};
-            salts_fs_buf_t buf{};
+            cmeta_fs_stat_t stat{};
+            cmeta_fs_buf_t buf{};
             (void)stat;
             (void)buf;
             return 0;
@@ -114,6 +119,7 @@ jobs:
           c++ "${common[@]}" -fsyntax-only /tmp/flex_fs_contract.cpp
 
   pluginhost-canonical-packages:
+    needs: sdk-releases
     name: PluginHost canonical Salts contracts
     runs-on: ubuntu-latest
     steps:
@@ -124,14 +130,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
       - name: Checkout canonical SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+          ref: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
           path: .ci/salts-utils
 
       - name: Verify source and install package ownership
@@ -179,24 +185,25 @@ jobs:
 
 
   flexui-salts-unicode:
+    needs: sdk-releases
     name: FlexUI Salts::Unicode contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Stun
         uses: actions/checkout@v4
 
-      - name: Checkout pinned Salts
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout released SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: 9735484c429ac6e77dfc6f09b916b97af96ff55f
+          ref: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
           path: .ci/salts-utils
 
       - name: Verify Unicode ownership contract
@@ -222,7 +229,7 @@ jobs:
             -Wextra
             -Werror
             -IflexUI/include
-            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include

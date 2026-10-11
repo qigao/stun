@@ -15,35 +15,39 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SALTS_SHA: ce9b57bc166bf86bd311fe6f86b7619dd64673e1
-  SALTS_UTILS_SHA: 9735484c429ac6e77dfc6f09b916b97af96ff55f
   VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
   VCPKG_MAX_CONCURRENCY: 2
   ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
 jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
   mesa-driver:
     uses: ./.github/workflows/mesa-driver.yml
   desktop-runtime:
-    needs: mesa-driver
+    needs: [mesa-driver, sdk-releases]
     name: Linux gCanvas windows and pixels ASan and UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
     steps:
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Checkout pinned Salts
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
           ref: ${{ env.SALTS_SHA }}
           path: .ci/sources/salts
           persist-credentials: false
-      - name: Checkout pinned SaltsUtils
+      - name: Checkout released SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
@@ -225,7 +229,7 @@ jobs:
               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
               "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
               -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$source/vcpkg-ports" \
+              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$VCPKG_OVERLAY_PORTS" \
               "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
               "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
               -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
