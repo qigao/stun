@@ -608,6 +608,11 @@ calculates conservative **analytic event fractions** before sampled auditing:
   FMA-compensated determinant so multiplication cancellation cannot silently
   discard a nonzero baseline bend or endpoint orientation. The targets remain
   separately linked, with no new public API or numeric dependency.
+  Bend coefficients expand the relative affine vectors `u=u0+alpha*du`,
+  `v=v0+alpha*dv`: constant `cross(u0,v0)`, linear
+  `cross(du,v0)+cross(u0,dv)`, quadratic `cross(du,dv)`. This reuses the existing
+  crossing polynomial primitive instead of inferring the coefficients from
+  areas at `alpha=0,1,-1`, where large targets can erase an early event.
 - **Node pairs:** intersect the open affine rectangle-overlap intervals on
   both axes, then cap movement before the earliest interior collision. This
   includes isolated nodes and prevents rectangles from tunneling between
@@ -716,8 +721,21 @@ area `1-(2n+1)*alpha`, with a guard boundary at
 scale, transpose, reflection, endpoint reversal and default/zero margins
 require a strictly earlier, positive safe fraction; widening and exactly
 collinear controls retain full movement. These tests target multiplication
-cancellation only; subtraction, polynomial reconstruction, root rounding and
+cancellation only; subtraction, coefficient arithmetic, root rounding and
 underflow still limit the numerical guard's precision.
+
+Early double-root regressions use fixed `A=(0,0)`,
+`P: (-e,0)->(n,0)` and `B: (0,-e)->(0,n)`. Their exact signed area is
+`(alpha*(n+e)-e)^2`, so the guard boundary is
+`e/(n+e)*(1-sqrt(min_bend_area_ratio))`. At `n=2^38,e=2^-100`, the large
+areas sampled at `+/-1` lose the linear coefficient entirely, despite a
+positive normal-range baseline area `2^-200`. The direct expansion retains
+the event. Tests exercise 128 combinations of `n=2^30,2^38`,
+`e=2^-20,2^-100`, power-of-two scales, axis/reflection/endpoint transformations
+and default/zero margins. Corresponding moves toward `(-n,0)` and `(0,-n)`
+increase the area and retain full movement. Existing two-distinct-root and
+crossing-order cases remain separate regressions; no budget or public
+interface changes accompany the coefficient construction.
 
 **Limitations:** this is a conservative *local guard*, not a complete
 `libtopology` implementation. Fixed baseline scan fractions may differ from

@@ -41,7 +41,8 @@ struct TopologyStraightConstraint {
 
 // Keeps a non-straight bend's signed area from vanishing or changing sign.
 // The three tracked points move affinely; the signed area is a quadratic in
-// alpha, so all roots within [0,1] can be checked analytically.
+// alpha, expanded directly from relative positions/displacements rather than
+// reconstructed from distant area samples. Roots in [0,1] are checked numerically.
 struct TopologyBendConstraint {
     TopologyPointTrack first, bend, last;
 };

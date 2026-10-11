@@ -187,6 +187,16 @@ void crossing_order_frame(const MovementFixture& f, double fraction, Layout& pla
         paths.edges[edge].points.back()=fixture_anchor(placement,f.ports[edge].target);
     }
 }
+TopologyBendConstraint transform_bend(TopologyBendConstraint bend, double scale, std::size_t variant) {
+    for(auto* point:{&bend.first,&bend.bend,&bend.last}) {
+        for(auto* axis:{&point->x,&point->y}) {axis->initial*=scale;axis->desired*=scale;}
+        if(variant&1)std::swap(point->x,point->y);
+        if(variant&2) {point->x.initial=-point->x.initial;point->x.desired=-point->x.desired;}
+    }
+    if(variant&4)std::swap(bend.first,bend.last);
+    return bend;
+}
+
 void run() {
     {
         const auto f=crossing_order_sweep();
@@ -1053,33 +1063,47 @@ void run() {
             constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
             for(const double n:magnitudes)for(const double scale:scales)
             for(std::size_t variant=0;variant<variants;++variant)for(const bool zero_margin:{false,true}) {
-                const auto transformed=[&](TopologyBendConstraint bend) {
-                    for(auto* point:{&bend.first,&bend.bend,&bend.last}) {
-                        for(auto* axis:{&point->x,&point->y}) {axis->initial*=scale;axis->desired*=scale;}
-                        if(variant&1)std::swap(point->x,point->y);
-                        if(variant&2) {point->x.initial=-point->x.initial;point->x.desired=-point->x.desired;}
-                    }
-                    if(variant&4)std::swap(bend.first,bend.last);
-                    return bend;
-                };
                 TopologyBendConstraint small={{{0,0},{0,0}},
                     {{n,n},{n-1,n}},{{2*n+1,2*n+1},{2*n-1,2*n-1}}};
                 TopologyGuardOptions options;options.coordinate_limit=1e12;
                 if(zero_margin) {options.min_bend_area_ratio=0;options.event_backoff=0;}
                 const double event=(1-options.min_bend_area_ratio)/(2*n+1);
                 double fraction=1;
-                require(static_cast<bool>(limit_topology_bend(transformed(small),fraction,options)),
+                require(static_cast<bool>(limit_topology_bend(transform_bend(small,scale,variant),fraction,options)),
                         "cancellation-scale bend deformation is analyzable");
                 require(fraction>0 && fraction<event &&
                         fraction>=event*(1-2*options.event_backoff-relative_slack),
                         "a nonzero cancelled baseline determinant retains an accurate early bend event");
                 small.bend.y.desired=n-2;
-                require(static_cast<bool>(limit_topology_bend(transformed(small),fraction,options)) && fraction==1,
+                require(static_cast<bool>(limit_topology_bend(transform_bend(small,scale,variant),fraction,options)) && fraction==1,
                         "cancellation-scale widening retains the full admissible motion");
                 small.bend.y.initial=n;small.bend.y.desired=n+1;
                 small.last.x={2*n,2*n};small.last.y={2*n,2*n};
-                require(static_cast<bool>(limit_topology_bend(transformed(small),fraction,options)) && fraction==1,
+                require(static_cast<bool>(limit_topology_bend(transform_bend(small,scale,variant),fraction,options)) && fraction==1,
                         "an exactly collinear baseline still imposes no bend sign guard");
+            }
+        }
+        {
+            // Area=(alpha*(n+e)-e)^2: the two moving points coincide
+            // with the origin at e/(n+e), although endpoint areas are large.
+            constexpr std::array magnitudes={0x1p30,0x1p38},offsets={0x1p-20,0x1p-100},scales={0.125,1.0};
+            constexpr std::size_t variants=8;
+            constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
+            for(const double n:magnitudes)for(const double e:offsets)for(const double scale:scales)
+            for(std::size_t variant=0;variant<variants;++variant)for(const bool zero_margin:{false,true}) {
+                TopologyBendConstraint tangent={{{0,0},{0,0}},{{-e,n},{0,0}},{{0,0},{-e,n}}};
+                TopologyGuardOptions options;options.coordinate_limit=1e12;
+                if(zero_margin) {options.min_bend_area_ratio=0;options.event_backoff=0;}
+                const double event=e/(n+e)*(1-std::sqrt(options.min_bend_area_ratio));
+                double fraction=1;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(tangent,scale,variant),fraction,options)),
+                        "early cancellation-scale bend tangency is analyzable");
+                require(fraction>0 && fraction<event &&
+                        fraction>=event*(1-2*options.event_backoff-relative_slack),
+                        "large endpoint samples must not erase or misplace an early double-root bend event");
+                tangent.bend.x.desired=-n;tangent.last.y.desired=-n;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(tangent,scale,variant),fraction,options)) && fraction==1,
+                        "large target growth away from a small-area bend retains the full admissible motion");
             }
         }
         TopologyBendConstraint bend;

@@ -54,11 +54,28 @@ Real cross(Real ax, Real ay, Real bx, Real by) {
     return detail::compensated_determinant(ax,ay,bx,by);
 }
 
-Real area(const TopologyBendConstraint& t, Real a) {
-    return cross(value(t.bend.x,a)-value(t.first.x,a),
-                 value(t.bend.y,a)-value(t.first.y,a),
-                 value(t.last.x,a)-value(t.bend.x,a),
-                 value(t.last.y,a)-value(t.bend.y,a));
+struct RelativePointMotion {
+    Real x, y, dx, dy;
+};
+
+using Quadratic = std::array<Real,3>;
+
+RelativePointMotion point_difference(const TopologyPointTrack& a, const TopologyPointTrack& b) {
+    return {static_cast<Real>(a.x.initial)-b.x.initial,static_cast<Real>(a.y.initial)-b.y.initial,
+            (static_cast<Real>(a.x.desired)-a.x.initial)-(static_cast<Real>(b.x.desired)-b.x.initial),
+            (static_cast<Real>(a.y.desired)-a.y.initial)-(static_cast<Real>(b.y.desired)-b.y.initial)};
+}
+
+Quadratic cross_polynomial(const RelativePointMotion& a, const RelativePointMotion& b) {
+    return {cross(a.x,a.y,b.x,b.y),cross(a.dx,a.dy,b.x,b.y)+cross(a.x,a.y,b.dx,b.dy),
+            cross(a.dx,a.dy,b.dx,b.dy)};
+}
+
+Real initial_bend_area(const TopologyBendConstraint& t) {
+    return cross(static_cast<Real>(t.bend.x.initial)-t.first.x.initial,
+                 static_cast<Real>(t.bend.y.initial)-t.first.y.initial,
+                 static_cast<Real>(t.last.x.initial)-t.bend.x.initial,
+                 static_cast<Real>(t.last.y.initial)-t.bend.y.initial);
 }
 
 struct PolynomialRoots {
@@ -159,21 +176,21 @@ TopologyGuardStatus bend_bound(const TopologyBendConstraint& c, double& out,
                                const TopologyGuardOptions& opt) {
     if (!valid(c.first,opt) || !valid(c.bend,opt) || !valid(c.last,opt))
         return fail(TopologyGuardError::InvalidInput,"invalid bend point motion track");
-    const Real original=area(c,0.0L);
+    // Expand relative affine vectors directly. Reconstructing coefficients
+    // from areas at +/-1 can erase a small linear term beside large targets.
+    const auto polynomial=cross_polynomial(point_difference(c.bend,c.first),
+                                           point_difference(c.last,c.bend));
+    const Real original=polynomial[0];
     if (!std::isfinite(original))
         return fail(TopologyGuardError::InvalidGeometry,"nonfinite initial bend area");
     if (original == 0.0L) {out=1.0;return {};}
     const Real sign=original>0 ? 1.0L : -1.0L;
     const Real floor=std::abs(original)*opt.min_bend_area_ratio;
-    // Reconstruct the signed-area quadratic from f(0), f(1), f(-1).
-    const Real f0=sign*original-floor;
-    const Real f1=sign*area(c,1.0L)-floor;
-    const Real fm=sign*area(c,-1.0L)-floor;
-    if (!std::isfinite(f0) || !std::isfinite(f1) || !std::isfinite(fm))
+    const Real quadratic=sign*polynomial[2];
+    const Real linear=sign*polynomial[1];
+    const Real constant=sign*original-floor;
+    if (!std::isfinite(constant) || !std::isfinite(linear) || !std::isfinite(quadratic))
         return fail(TopologyGuardError::InvalidGeometry,"nonfinite bend deformation area");
-    const Real quadratic=(f1+fm-2.0L*f0)/2.0L;
-    const Real linear=(f1-fm)/2.0L;
-    const Real constant=f0;
     if (constant <= 0.0L)
         return fail(TopologyGuardError::InfeasibleBaseline,"degenerate signed bend at baseline");
     Real root=2.0L;
@@ -209,10 +226,6 @@ bool collinear_pair_bound(const TopologyPointTrack& a, const TopologyPointTrack&
     }
     return true;
 }
-
-struct RelativePointMotion {
-    Real x, y, dx, dy;
-};
 
 RelativePointMotion relative_motion(const TopologyPointTrack& p,
                                     const PlacedNode& box, const PlacedNode& moved) {
@@ -311,22 +324,10 @@ TopologyGuardStatus segment_node_bound(const SegmentNodeMotion& motion, double& 
     return {};
 }
 
-using Quadratic = std::array<Real,3>;
 constexpr std::size_t order_degree=4;
 using OrderPolynomial = std::array<Real,order_degree+1>;
 constexpr std::size_t order_subdivision_depth=std::numeric_limits<double>::digits;
 constexpr Real order_roundoff_factor=128.0L;
-
-RelativePointMotion point_difference(const TopologyPointTrack& a, const TopologyPointTrack& b) {
-    return {static_cast<Real>(a.x.initial)-b.x.initial,static_cast<Real>(a.y.initial)-b.y.initial,
-            (static_cast<Real>(a.x.desired)-a.x.initial)-(static_cast<Real>(b.x.desired)-b.x.initial),
-            (static_cast<Real>(a.y.desired)-a.y.initial)-(static_cast<Real>(b.y.desired)-b.y.initial)};
-}
-
-Quadratic cross_polynomial(const RelativePointMotion& a, const RelativePointMotion& b) {
-    return {cross(a.x,a.y,b.x,b.y),cross(a.dx,a.dy,b.x,b.y)+cross(a.x,a.y,b.dx,b.dy),
-            cross(a.dx,a.dy,b.dx,b.dy)};
-}
 
 struct CrossingTrack {
     std::size_t edge, segment;
@@ -847,7 +848,7 @@ TopologyGuardStatus limit_topology_movement(
         for(std::size_t i=1;i+1<moves.size();++i){
             if(!use())return fail(TopologyGuardError::CapacityExceeded,"topology bend count budget exceeded");
             TopologyBendConstraint bend{moves[i-1],moves[i],moves[i+1]};
-            const Real baseline_area=area(bend,0.0L);
+            const Real baseline_area=initial_bend_area(bend);
             if(baseline_area==0.0L)continue;
             double safe=0;
             st=bend_bound(bend,safe,options);
@@ -886,7 +887,7 @@ TopologyGuardStatus limit_topology_movement(
                         const auto& guard=guards[k];
                         if(!use())return fail(TopologyGuardError::CapacityExceeded,
                                               "topology segment-pair event budget exceeded");
-                        const Real initial_area=area(guard,0.0L);
+                        const Real initial_area=initial_bend_area(guard);
                         initial_areas[k]=initial_area;
                         if(initial_area==0.0L)continue;
                         collinear=false;
