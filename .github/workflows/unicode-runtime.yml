@@ -284,6 +284,27 @@ jobs:
           test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
 
+      - name: Build and execute C11 UI Core against installed Salts::CMeta
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          build_dir="$GITHUB_WORKSPACE/build/ui-core-c11-installed"
+          cmake -S ui_core -B "$build_dir" -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DBUILD_TESTING=ON \
+            '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            2>&1 | tee "$EVIDENCE_DIR/ui-core-c11-configure.log"
+          cmake --build "$build_dir" --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/ui-core-c11-build.log"
+          ctest --test-dir "$build_dir" --no-tests=error --verbose \
+            --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/ui-core-c11-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/ui-core-c11-ctest.log"
+          git diff --exit-code
+
       - name: Configure, link, and run the installed Unicode consumer
         shell: bash
         run: |
