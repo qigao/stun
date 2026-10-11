@@ -35,3 +35,45 @@ ctest --test-dir build/ui-c11 --output-on-failure
 ```
 
 A missing `Salts::CMeta` is a configuration failure; no stub or alternative reflection provider is selected. The integration also builds as part of the Stun top-level CMake project. Phase M1 is not complete until executable native CTest passes against an installed Salts provider.
+
+## Native C11 Markdown parser (M2 candidate)
+
+A real Markdown **parser**, not a C++ AST projector, is now available:
+
+- Public API: <stun/markdown_c11.h>
+- Entry: stun_md_parse(source, bytes, max_nodes, max_source_bytes, &document)
+- Lifetime: stun_md_document_destroy(document)
+- Output: stun_md_document_view(document) borrows an owned RichDoc
+  with typed block nodes, semantic text spans, metadata, and original bytes.
+
+The parser itself is strict C11, contains no std::string or C++ runtime, and
+does not clone Unicode tables. It recognizes ASCII Markdown delimiters while
+retaining embedded Unicode text/Emoji bytes. Unicode validity and grapheme
+boundaries belong to Salts::Unicode at the surrounding admission/rendering
+boundary, not to this initial grammar slice.
+
+**Currently implemented subset**: paragraphs, ATX/Setext headings, thematic
+rules, backtick/tilde fenced code blocks, quotes, basic unordered/ordered lists,
+emphasis, strong, strikethrough, inline code, basic links/images,
+backslash punctuation escaping and line breaks. Code fences retain
+exact CRLF/LF bytes and language metadata; links retain target metadata.
+
+**Not yet CommonMark/GFM complete**: reference links, nested/lazy-continuation
+list and quote semantics, tables, HTML/entity decoding, footnotes, math,
+definition lists, and full delimiter-run/flanking algorithms. Such syntax is
+not yet parity-qualified; do not switch all MarkdownWidget callers to C11
+until the entire canonical fixture matrix passes.
+
+The existing C++ tools/md parser remains the production semantic authority
+during migration. The C11 implementation is a **replacement candidate**, not
+a permanent second parsing truth source. Do not parse the same production UI
+document through both implementations. Port each feature against the existing
+CommonMark/GFM fixtures and retire the corresponding old C++ paths when
+end-to-end parity is established. Grammar-tool generation (re2c/Lemon) can
+replace current context-aware C11 hand-coded scanning as a single canonical
+pipeline, but no second grammar or optional fallback may remain.
+
+The C11 native test stun_markdown_c11_test covers actual parsing, hierarchy,
+owned source and semantic spans, stable snapshot identities, metadata,
+Unicode/Emoji passthrough, limits, and failure rollback. The installed Salts
+SDK test runs it under ASan/UBSan alongside CMeta reflection tests.
