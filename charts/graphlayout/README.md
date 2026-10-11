@@ -19,7 +19,7 @@ are in scope only when needed to support Cola-style constrained placement.
 | `libvpsc` | Weighted VPSC and pinned/2D projection exist | Coupled-constraint performance, richer separation/cluster cases |
 | `libcola` | Gradient Stress, SMACOF, spring/repulsion exist | Quality/scale and constrained graph-layout parity |
 | `libavoid` | Orthogonal and Polyline A*; bounded orthogonal joint Nudging exists | Global crossing/nudging, ports/checkpoints |
-| `libtopology` | Baseline signed-crossing audit and sampled bounded displacement | Continuous topology guarantees, arbitrary connector routing and compound constraints |
+| `libtopology` | Signed-crossing audit, analytic collision guards, explicit route edits and VPSC composition | Complete continuous topology guarantees, automatic bend events and compound constraints |
 | `libdialect` | Tidy Tree is a partial building block | Decompose, Arrange, Expand/Emend, Transform pipeline |
 
 **Not in scope:** Lean/mathlib/formal proofs, UI/layout widgets, OpenGL
@@ -538,8 +538,8 @@ GCC/Clang sanitizers and cross-platform C++ tests.
 UI and rendering. The input is a graph, nonoverlapping node rectangles,
 explicit measured N/E/S/W boundary ports, and baseline polyline connectors.
 
-- `audit_topology` validates routes against nodes, checks nonadjacent
-  self-contact and ambiguous edge contacts, then records the **ordered,
+- `audit_topology` validates routes against nodes, checks adjacent retracing,
+  nonadjacent self-contact and ambiguous edge contacts, then records the **ordered,
   signed crossing partner sequence along every edge**, not merely a crossing
   count. Unmeasured Auto ports, self-loop edges, duplicate IDs and ambiguous
   collinear/shared routing are explicitly unsupported in this first stage.
@@ -586,6 +586,13 @@ calculates conservative **analytic event fractions** before sampled auditing:
   has quadratic signed area under affine vertex motion. All analytic roots in
   `[0,1]` are considered, including two interior roots when initial and final
   bend signs agree; the earliest event caps the safe movement fraction.
+- **Node pairs:** intersect the open affine rectangle-overlap intervals on
+  both axes, then cap movement before the earliest interior collision. This
+  includes isolated nodes and prevents rectangles from tunneling between
+  sampled frames. Boundary-only sliding/corner contacts and diagonal bypasses
+  remain admissible. Each pair consumes one constraint and one evaluation
+  from the existing shared budgets; this phase is O(nodes²) time and O(1)
+  auxiliary storage. Baseline interior overlap is `InfeasibleBaseline`.
 - **Combination:** `move_topology_preserving` now optionally (default on)
   computes those analytic guards and only then runs its bounded multi-frame,
   complete graph collision and signed crossing-order audits. Reports include
@@ -647,7 +654,9 @@ representation changes independently from the original topology search:
 `Stun::GraphTopologyProjection` composes the native VPSC/2D projection
 with explicitly requested topology edits and the audited topology movement.
 A successful result MUST achieve the **entire** projected node goal and every
-hard pin exactly. If only a fractional topology-preserving move is feasible,
+hard pin exactly. Full displacement takes node coordinates directly from the
+projected goal, preserving small exact pins even after large translations.
+If only a fractional topology-preserving move is feasible,
 the composed operation returns `NoAdmissibleStep` with EMPTY output instead
 of claiming the VPSC constraints were met. Projection failures propagate in a
 separate typed field. This is an explicitly ordered combination of native

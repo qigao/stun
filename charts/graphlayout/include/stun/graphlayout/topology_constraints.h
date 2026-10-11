@@ -105,7 +105,11 @@ TopologyGuardStatus limit_topology_bend(const TopologyBendConstraint& constraint
 
 // Construct topology guards from the exact same affine route-point displacement
 // model as move_topology_preserving(): source/target translations are blended
-// by original route arclength. For every unrelated node and segment whose
+// by original route arclength. All node pairs have continuous open-rectangle
+// collision guards, including isolated nodes; boundary-only contact is allowed.
+// Each pair consumes one constraint/evaluation from the shared budgets, with
+// O(nodes^2) time and O(1) auxiliary storage for this part of the guard.
+// For every unrelated node and segment whose
 // scan projection lies inside the segment, generate a fixed-fraction
 // node-face/segment TriConstraint. Consecutive route triples generate bend
 // orientation guards. For every pair of independent edge segments, each of

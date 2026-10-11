@@ -77,10 +77,13 @@ void run() {
                 "separating node from connector is valid");
         near(result.max_safe_fraction,1,0,"full motion when separating");
         TopologyGuardOptions limited;
-        limited.max_constraints=1;
+        limited.max_constraints=4;
         require(static_cast<bool>(limit_topology_movement(graph,baseline,desired,routes,result,limited)),
-                "one node-segment constraint fits exact configured count");
-        limited.max_constraints=1;
+                "three node pairs and one node-segment constraint fit exact configured count");
+        limited.max_constraints=3;
+        require(limit_topology_movement(graph,baseline,desired,routes,result,limited).error==
+                TopologyGuardError::CapacityExceeded,"node pairs share the constraint budget");
+        limited.max_constraints=4;
         limited.max_evaluations=1;
         require(limit_topology_movement(graph,baseline,desired,routes,result,limited).error==
                 TopologyGuardError::CapacityExceeded,
@@ -157,6 +160,80 @@ void run() {
         require(report.segment_pair_constraints>=4 &&
                 report.accepted_fraction<0.5 && report.accepted_fraction>0,
                 "single-sample continuation is analytically capped");
+    }
+    {
+        Graph graph;graph.nodes={{"moving",10,10},{"fixed",10,10}};
+        Layout baseline;baseline.nodes={{0,0,10,10},{100,0,10,10}};
+        Layout desired=baseline;desired.nodes[0].x=300;
+        TopologyGuardReport report;
+        auto st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(static_cast<bool>(st) && report.max_safe_fraction>0.29 &&
+                report.max_safe_fraction<0.3,"continuous isolated-node collision is capped");
+        require(report.evaluations==1,"one node pair consumes one guard evaluation");
+        desired.nodes[0].y=100;
+        st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(static_cast<bool>(st) && report.max_safe_fraction==1,
+                "changing axis of separation permits a diagonal bypass");
+        baseline.nodes[1].y=10;desired=baseline;desired.nodes[0].x=300;
+        st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(static_cast<bool>(st) && report.max_safe_fraction==1,
+                "boundary-only sliding contact is permitted");
+        baseline.nodes[1]={40,60,10,10};desired=baseline;desired.nodes[0].x=100;desired.nodes[0].y=100;
+        st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(static_cast<bool>(st) && report.max_safe_fraction==1,
+                "open overlap intervals meeting at a single corner are permitted");
+        baseline.nodes[1]={10,0,10,10};desired=baseline;desired.nodes[0].x=1;
+        st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(static_cast<bool>(st) && report.max_safe_fraction==0,
+                "initial touching rectangles moving inward allow no positive prefix");
+        desired.nodes[0].x=-1;
+        st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(static_cast<bool>(st) && report.max_safe_fraction==1,
+                "initial touching rectangles may separate");
+        baseline.nodes[1].x=9;desired=baseline;
+        report.max_safe_fraction=0.5;
+        st=limit_topology_movement(graph,baseline,desired,{},report);
+        require(st.error==TopologyGuardError::InfeasibleBaseline && report.max_safe_fraction==1 &&
+                report.evaluations==0,"overlapping baseline rejected without publishing a partial report");
+        graph.nodes[0].width=-10;baseline.nodes[0].width=-10;desired=baseline;
+        require(limit_topology_movement(graph,baseline,desired,{},report).error==
+                TopologyGuardError::InvalidInput,"negative node extents rejected before swept math");
+    }
+    {
+        // Fixed 10-unit rectangles exchange horizontal positions. Collision
+        // begins at (initial gap)/(relative displacement), independently of sampling.
+        constexpr std::size_t cases=64;
+        constexpr std::size_t samples=32;
+        for(std::size_t i=0;i<cases;++i) {
+            const double spacing=40.0+i;
+            Graph graph;graph.nodes={{"a",10,10},{"b",10,10}};
+            Layout baseline;baseline.nodes={{-spacing,0,10,10},{spacing,0,10,10}};
+            Layout desired=baseline;desired.nodes[0].x=spacing;desired.nodes[1].x=-spacing;
+            TopologyGuardReport report;
+            const auto st=limit_topology_movement(graph,baseline,desired,{},report);
+            const double event=(2*spacing-10)/(4*spacing);
+            require(static_cast<bool>(st) && report.max_safe_fraction>0 &&
+                    report.max_safe_fraction<event,"swapped-node prefix ends before continuous collision");
+            for(std::size_t sample=0;sample<=samples;++sample) {
+                const double f=report.max_safe_fraction*static_cast<double>(sample)/samples;
+                const double left=-spacing+f*2*spacing;
+                const double right=spacing-f*2*spacing;
+                require(left+10<=right,"all checked rectangle-prefix positions remain separated");
+            }
+        }
+    }
+    {
+        Graph graph;graph.nodes={{"a",10,10},{"b",10,10},{"c",10,10}};
+        Layout baseline;baseline.nodes={{0,0,10,10},{100,0,10,10},{200,0,10,10}};
+        TopologyGuardOptions options;options.max_constraints=2;
+        TopologyGuardReport report;
+        auto st=limit_topology_movement(graph,baseline,baseline,{},report,options);
+        require(st.error==TopologyGuardError::CapacityExceeded && report.evaluations==0,
+                "node-pair constraint cap fails transactionally before publishing report");
+        options={};options.max_evaluations=2;
+        st=limit_topology_movement(graph,baseline,baseline,{},report,options);
+        require(st.error==TopologyGuardError::CapacityExceeded && report.evaluations==0,
+                "node-pair evaluation cap fails transactionally");
     }
     {
         // Large translation with unchanged relative node/segment geometry.

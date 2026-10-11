@@ -44,8 +44,7 @@ bool valid_options(const TopologyOptions& o) {
 
 bool valid_placement(const Graph& g, const Layout& l,
                      const TopologyOptions& o) {
-    if (g.nodes.size() != l.nodes.size() || g.nodes.size() > o.max_nodes ||
-        g.edges.size() > o.max_edges) return false;
+    if (g.nodes.size() != l.nodes.size()) return false;
     std::unordered_set<std::string> ids;
     ids.reserve(g.nodes.size());
     for (std::size_t i = 0; i < g.nodes.size(); ++i) {
@@ -201,11 +200,11 @@ TopologyStatus analyze(const Graph& graph, const Layout& layout,
                        const Routes& routes, const TopologyOptions& options,
                        Budget& budget, TopologySignature& out) {
     out = {};
-    if (!valid_placement(graph,layout,options))
-        return fail(TopologyError::InvalidInput, "invalid graph IDs, endpoints or placement geometry");
     if (graph.nodes.size() > options.max_nodes ||
         graph.edges.size() > options.max_edges)
         return fail(TopologyError::CapacityExceeded,"topology graph budget exceeded");
+    if (!valid_placement(graph,layout,options))
+        return fail(TopologyError::InvalidInput, "invalid graph IDs, endpoints or placement geometry");
     if (ports.size() != graph.edges.size() ||
         routes.edges.size() != graph.edges.size())
         return fail(TopologyError::InvalidInput, "graph, ports and routes differ in edge counts");
@@ -261,6 +260,18 @@ TopologyStatus analyze(const Graph& graph, const Layout& layout,
                 if (penetrates(a,b,box))
                     return fail(TopologyError::InvalidGeometry,"edge penetrates a node rectangle",i);
             }
+        }
+        for(std::size_t k=1;k+1<p.size();++k) {
+            if (!budget.use()) return fail(TopologyError::CapacityExceeded,"topology adjacent-contact budget exceeded",i);
+            // Incident segments may share their waypoint, but cannot retrace
+            // the same ray from it, even when both terminal anchors coincide.
+            const Real ux=static_cast<Real>(p[k-1].x)-p[k].x;
+            const Real uy=static_cast<Real>(p[k-1].y)-p[k].y;
+            const Real vx=static_cast<Real>(p[k+1].x)-p[k].x;
+            const Real vy=static_cast<Real>(p[k+1].y)-p[k].y;
+            if (orientation(p[k-1],p[k],p[k+1],options.orientation_epsilon)==0 &&
+                ux*vx+uy*vy>0.0L)
+                return fail(TopologyError::AmbiguousTopology,"adjacent connector segments overlap",i);
         }
         for(std::size_t s=0;s+1<p.size();++s)
             for(std::size_t t=s+2;t+1<p.size();++t){
@@ -355,6 +366,13 @@ TopologyStatus interpolate(const Graph& g, const Layout& base,
     paths=routes;
     for(std::size_t i=0;i<base.nodes.size();++i){
         const auto& a=base.nodes[i];const auto& b=desired.nodes[i];
+        // At full attainment, use the authoritative goal coordinates. Adding
+        // a large displacement can otherwise round away a small exact pin.
+        if (fraction==1.0) {
+            positions.nodes[i].x=b.x;
+            positions.nodes[i].y=b.y;
+            continue;
+        }
         const Real nx=static_cast<Real>(a.x)+fraction*(static_cast<Real>(b.x)-a.x);
         const Real ny=static_cast<Real>(a.y)+fraction*(static_cast<Real>(b.y)-a.y);
         if(!std::isfinite(nx)||!std::isfinite(ny)||

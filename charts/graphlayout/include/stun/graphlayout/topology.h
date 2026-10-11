@@ -92,7 +92,8 @@ TopologyStatus audit_topology(const Graph& graph, const Layout& layout,
 // Conservative bounded continuation: linearly interpolate node rectangles
 // toward 'desired'. Each original route waypoint is moved by a deterministic,
 // arclength-weighted blend of its source/target-node displacements. Each trial
-// first analytically caps motion at local node/segment and bend events, then
+// first analytically caps motion at continuous node-pair collisions and local
+// node/segment and bend events, then
 // checks intermediate sampled frames against the exact baseline crossing
 // signature, segment contacts and node collisions. An accepted result need
 // not reach the requested target; report.accepted_fraction states its extent.

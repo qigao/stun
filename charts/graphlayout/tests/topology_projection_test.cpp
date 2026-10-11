@@ -22,6 +22,32 @@ Fixture fixture(){
 int main(){
     try{
         {
+            Graph graph;graph.nodes={{"pinned",10,10}};
+            Layout baseline;baseline.nodes={{1e7,1e7,10,10}};
+            Layout desired=baseline;
+            ProjectionConstraints constraints;constraints.pins={{0,1e-9,-1e-9}};
+            Layout moved;Routes paths;TopologyProjectionReport report;
+            const auto status=project_topology_with_edits(graph,baseline,{}, {},
+                desired,constraints,{},moved,paths,{},&report);
+            if(!status)throw std::runtime_error("small exact pin after large displacement: "+status.message);
+            check(moved.nodes[0].x==1e-9 && moved.nodes[0].y==-1e-9,
+                  "full topology displacement preserves small projected hard pins exactly");
+            check(report.topology.accepted_fraction==1,"large pinned displacement is fully attained");
+        }
+        {
+            Graph graph;graph.nodes={{"moving",10,10},{"fixed",10,10}};
+            Layout baseline;baseline.nodes={{0,0,10,10},{100,0,10,10}};
+            ProjectionConstraints constraints;constraints.pins={{0,300,0},{1,100,0}};
+            Layout moved;Routes paths;TopologyProjectionReport report;
+            moved.nodes.resize(1);paths.edges.resize(1);report.topology.accepted_fraction=1;
+            const auto status=project_topology_with_edits(graph,baseline,{}, {},
+                baseline,constraints,{},moved,paths,{},&report);
+            check(status.topology_error==TopologyError::NoAdmissibleStep,
+                  "continuous isolated-node collision prevents full projected hard pins");
+            check(moved.nodes.empty() && paths.edges.empty() && report.topology.accepted_fraction==0,
+                  "continuous collision failure clears composed output and report");
+        }
+        {
             auto f=fixture();
             Layout desired=f.baseline;desired.nodes[0].x=15;desired.nodes[1].x=140;
             ProjectionConstraints c;c.pins={{0,0,0}};

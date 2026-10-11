@@ -1,6 +1,7 @@
 #include "stun/graphlayout/topology_constraints.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -66,6 +67,43 @@ double earlier(Real first, const TopologyGuardOptions& o) {
     const Real candidate = first * (1.0L - static_cast<Real>(o.event_backoff));
     const double rounded = static_cast<double>(candidate);
     return std::max(0.0, std::nextafter(rounded, 0.0));
+}
+
+// Intersect the open affine overlap intervals on both axes. The first
+// intersection bounds continuous rectangle motion, including isolated nodes.
+// O(1) time/space per pair; mere boundary contact remains admissible.
+TopologyGuardStatus node_pair_bound(const PlacedNode& a, const PlacedNode& b,
+                                    const PlacedNode& da, const PlacedNode& db,
+                                    double& out, const TopologyGuardOptions& opt) {
+    const std::array initial={
+        static_cast<Real>(b.x)+b.width-a.x,
+        static_cast<Real>(a.x)+a.width-b.x,
+        static_cast<Real>(b.y)+b.height-a.y,
+        static_cast<Real>(a.y)+a.height-b.y,
+    };
+    const std::array desired={
+        static_cast<Real>(db.x)+db.width-da.x,
+        static_cast<Real>(da.x)+da.width-db.x,
+        static_cast<Real>(db.y)+db.height-da.y,
+        static_cast<Real>(da.y)+da.height-db.y,
+    };
+    bool baseline_overlap=true;
+    for (const auto slack:initial) baseline_overlap=baseline_overlap && slack>0.0L;
+    if (baseline_overlap)
+        return fail(TopologyGuardError::InfeasibleBaseline,"overlapping baseline node rectangles");
+    Real lo=0.0L, hi=1.0L;
+    for (std::size_t axis=0;axis<initial.size();++axis) {
+        const Real delta=desired[axis]-initial[axis];
+        if (delta==0.0L) {
+            if (initial[axis]<=0.0L) {out=1.0;return {};}
+        } else {
+            const Real event=-initial[axis]/delta;
+            if (delta>0.0L) lo=std::max(lo,event);
+            else hi=std::min(hi,event);
+        }
+    }
+    out=lo<hi ? earlier(lo,opt) : 1.0;
+    return {};
 }
 
 TopologyGuardStatus tri_bound(const TopologyTriConstraint& c, double& out,
@@ -233,6 +271,8 @@ TopologyGuardStatus limit_topology_movement(
         const auto& n=graph.nodes[i];const auto& a=baseline.nodes[i];const auto& b=desired.nodes[i];
         if(n.id.empty() || a.width!=n.width || b.width!=n.width ||
            a.height!=n.height || b.height!=n.height ||
+           !bounded(n.width,options) || !bounded(n.height,options) ||
+           n.width<=0.0 || n.height<=0.0 ||
            !bounded(a.x,options) || !bounded(a.y,options) ||
            !bounded(b.x,options) || !bounded(b.y,options) ||
            !bounded(a.x+a.width,options) || !bounded(a.y+a.height,options) ||
@@ -248,6 +288,16 @@ TopologyGuardStatus limit_topology_movement(
            count==options.max_constraints) return false;
         ++candidate.evaluations;++count;return true;
     };
+    for(std::size_t i=0;i<graph.nodes.size();++i)
+        for(std::size_t j=i+1;j<graph.nodes.size();++j) {
+            if(!use())return fail(TopologyGuardError::CapacityExceeded,
+                                  "topology node-pair event budget exceeded");
+            double safe=0.0;
+            const auto st=node_pair_bound(baseline.nodes[i],baseline.nodes[j],
+                                           desired.nodes[i],desired.nodes[j],safe,options);
+            if(!st)return st;
+            candidate.max_safe_fraction=std::min(candidate.max_safe_fraction,safe);
+        }
     for(std::size_t edge_idx=0;edge_idx<graph.edges.size();++edge_idx){
         const auto& edge=graph.edges[edge_idx];
         if(edge.source>=graph.nodes.size() || edge.target>=graph.nodes.size() ||

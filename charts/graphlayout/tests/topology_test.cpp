@@ -42,6 +42,31 @@ TopologySignature audited(const Fixture& f){
 
 void run(){
     {
+        Fixture f;
+        f.g.nodes={{"a",10,10},{"b",10,10}};
+        f.g.edges={{0,1}};
+        f.l.nodes={{0,0,10,10},{10,10,10,10}};
+        f.ports={{{0,Side::East,1},{1,Side::North,0}}};
+        f.routes.edges={{{{10,10},{20,0},{10,10}}}};
+        TopologySignature signature;signature.crossing_count=7;
+        const auto st=audit_topology(f.g,f.l,f.ports,f.routes,signature);
+        check(st.error==TopologyError::AmbiguousTopology,
+              "adjacent backtracking at coincident corner ports is rejected");
+        check(signature.ordered_crossings.empty() && signature.crossing_count==0,
+              "backtracking failure clears the topology signature");
+    }
+    {
+        Graph graph;graph.nodes={{"moving",10,10},{"fixed",10,10}};
+        Layout baseline;baseline.nodes={{0,0,10,10},{100,0,10,10}};
+        Layout desired=baseline;desired.nodes[0].x=300;
+        Layout moved;Routes paths;TopologyReport report;
+        const auto st=move_topology_preserving(graph,baseline,{}, {},desired,moved,paths,{},&report);
+        check(static_cast<bool>(st),"a safe prefix of isolated-node movement is available");
+        check(report.accepted_fraction>0 && report.accepted_fraction<0.3,
+              "analytic guard prevents node tunneling between sampled frames");
+        check(moved.nodes[0].x+10<100,"moving rectangle stays before the fixed rectangle");
+    }
+    {
         const auto f=quad(true);
         const auto sig=audited(f);
         check(sig.crossing_count==1,"crossing diagonals should have exactly one crossing");
@@ -210,11 +235,21 @@ void run(){
         check(st.error==TopologyError::InvalidInput,"self-loops are explicitly unsupported");
     }
     {
+        const auto f=quad(false);
+        TopologyOptions limited;limited.max_nodes=f.g.nodes.size()-1;
+        TopologySignature signature;
+        auto st=audit_topology(f.g,f.l,f.ports,f.routes,signature,limited);
+        check(st.error==TopologyError::CapacityExceeded,"audit graph node limit has a capacity error");
+        limited={};limited.max_edges=f.g.edges.size()-1;
+        st=audit_topology(f.g,f.l,f.ports,f.routes,signature,limited);
+        check(st.error==TopologyError::CapacityExceeded,"audit graph edge limit has a capacity error");
+    }
+    {
         auto f=quad(false);
         Layout desired=f.l;
         desired.nodes[2].y=0;
         desired.nodes[3].y=0;
-        TopologyOptions opts;opts.max_trials=1;
+        TopologyOptions opts;opts.max_trials=1;opts.analytic_guards=false;
         Layout moved;Routes routes;TopologyReport report;
         moved.nodes.resize(2);routes.edges.resize(1);report.accepted_fraction=99;
         const auto st=move_topology_preserving(f.g,f.l,f.ports,f.routes,desired,moved,routes,opts,&report);
