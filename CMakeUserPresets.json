@@ -78,6 +78,21 @@
             ]
         },
         {
+            "name": "win-core-release-user",
+            "displayName": "Core Release (Windows, Salts)",
+            "inherits": "win-release-user",
+            "binaryDir": "${sourceDir}/build/Msvc-Core-Release",
+            "cacheVariables": {
+                "STUN_BUILD_APPLICATIONS": "OFF",
+                "STUN_BUILD_CHARTS": "OFF",
+                "FLEXUI_ENABLE_PLUGINS": "ON",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/Msvc-Core-Release/install"
+            },
+            "environment": {
+                "PATH": "${sourceDir}/build/Msvc-Core-Release/bin;${sourceDir}/vcpkg_installed/x64-windows/bin;$penv{SALTS_ROOT}/bin;$penv{SALTS_UTILS_ROOT}/bin;$penv{PATH}"
+            }
+        },
+        {
             "name": "win-dev-turboscript-user",
             "displayName": "Developer Build with TurboScript (Windows, User)",
             "binaryDir": "${sourceDir}/build/Msvc-TurboScript",
@@ -114,6 +129,15 @@
     ],
     "buildPresets": [
         {
+            "name": "win-core-release-user",
+            "configurePreset": "win-core-release-user"
+        },
+        {
+            "name": "install-win-core-release-user",
+            "configurePreset": "win-core-release-user",
+            "targets": ["install"]
+        },
+        {
             "name": "win-dev-user",
             "configurePreset": "win-dev-user"
         },
@@ -135,6 +159,17 @@
         }
     ],
     "testPresets": [
+        {
+            "name": "win-core-release-user",
+            "configurePreset": "win-core-release-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
+        },
         {
             "name": "win-dev-user",
             "configurePreset": "win-dev-user",

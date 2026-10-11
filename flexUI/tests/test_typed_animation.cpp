@@ -32,9 +32,9 @@ suite("FlexUI typed AnimationManager core") {
         check_true(manager.start_float(
             1, *opacity, opacity_points(), linear_animation(), 0.0f));
         check_true(manager.has_effect(1, 50.0f));
-        check_float_eq(manager.get_float(1, *opacity, -1.0f, 50.0f),
+        check_within(manager.get_float(1, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_float_eq(manager.get(1, "opacity", -1.0f, 50.0f),
+        check_within(manager.get(1, "opacity", -1.0f, 50.0f),
                        0.5f, 0.0001f);
     }
 
@@ -49,11 +49,11 @@ suite("FlexUI typed AnimationManager core") {
         def.fill_mode = AnimationFillMode::Both;
         check_true(manager.start_float(2, *opacity, opacity_points(), def, 0.0f));
 
-        check_float_eq(manager.get_float(2, *opacity, 0.25f, 10.0f),
+        check_within(manager.get_float(2, *opacity, 0.25f, 10.0f),
                        0.0f, 0.0001f);
-        check_float_eq(manager.get_float(2, *opacity, 0.25f, 75.0f),
+        check_within(manager.get_float(2, *opacity, 0.25f, 75.0f),
                        0.5f, 0.0001f);
-        check_float_eq(manager.get_float(2, *opacity, 0.25f, 150.0f),
+        check_within(manager.get_float(2, *opacity, 0.25f, 150.0f),
                        1.0f, 0.0001f);
         manager.update(150.0f);
         check_true(manager.has_effect(2, 150.0f));
@@ -70,16 +70,16 @@ suite("FlexUI typed AnimationManager core") {
         def.direction = AnimationDirection::Alternate;
         check_true(manager.start_float(3, *opacity, opacity_points(), def, 0.0f));
 
-        check_float_eq(manager.get_float(3, *opacity, -1.0f, 50.0f),
+        check_within(manager.get_float(3, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_float_eq(manager.get_float(3, *opacity, -1.0f, 150.0f),
+        check_within(manager.get_float(3, *opacity, -1.0f, 150.0f),
                        0.5f, 0.0001f);
 
         manager.set_play_state(3, AnimationPlayState::Paused, 60.0f);
-        check_float_eq(manager.get_float(3, *opacity, -1.0f, 90.0f),
+        check_within(manager.get_float(3, *opacity, -1.0f, 90.0f),
                        0.6f, 0.0001f);
         manager.set_play_state(3, AnimationPlayState::Running, 90.0f);
-        check_float_eq(manager.get_float(3, *opacity, -1.0f, 100.0f),
+        check_within(manager.get_float(3, *opacity, -1.0f, 100.0f),
                        0.7f, 0.0001f);
     }
 
@@ -124,12 +124,12 @@ suite("FlexUI typed AnimationManager core") {
 
         const Color midpoint = manager.get_color(
             5, *background, Color{}, 50.0f);
-        check_float_eq(midpoint.r, 0.5f, 0.0001f);
-        check_float_eq(midpoint.g, 0.0f, 0.0001f);
-        check_float_eq(midpoint.b, 0.5f, 0.0001f);
-        check_float_eq(midpoint.a, 0.5f, 0.0001f);
+        check_within(midpoint.r, 0.5f, 0.0001f);
+        check_within(midpoint.g, 0.0f, 0.0001f);
+        check_within(midpoint.b, 0.5f, 0.0001f);
+        check_within(midpoint.a, 0.5f, 0.0001f);
 
-        check_float_eq(
+        check_within(
             manager.get_float(5, *background, 0.375f, 50.0f),
             0.375f, 0.0001f);
     }
@@ -147,9 +147,9 @@ suite("FlexUI typed AnimationManager core") {
             {0.0f, 10.0f}, {1.0f, 20.0f}};
         manager.start(6, "transform-x", legacy, linear_animation(), 0.0f);
 
-        check_float_eq(manager.get_float(6, *opacity, -1.0f, 50.0f),
+        check_within(manager.get_float(6, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_float_eq(manager.get(6, "transform-x", -1.0f, 50.0f),
+        check_within(manager.get(6, "transform-x", -1.0f, 50.0f),
                        15.0f, 0.0001f);
 
         manager.clear_element(6);

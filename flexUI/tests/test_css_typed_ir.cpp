@@ -16,7 +16,7 @@ suite("FlexUI typed CSS declaration literals") {
         check_true(compiled.has_value());
         check_true(cmeta_type_equal(compiled.type, &cmeta_type_float));
         check_true(std::holds_alternative<float>(compiled.value));
-        check_float_eq(std::get<float>(compiled.value), 0.625f, 0.0001f);
+        check_within(std::get<float>(compiled.value), 0.625f, 0.0001f);
     }
 
     it("keeps deferred opacity values on the legacy path") {
@@ -70,9 +70,9 @@ suite("FlexUI typed CSS declaration literals") {
         }
 
         const auto color = std::get<Color>(hex.value);
-        check_float_eq(color.r, 0.2f, 0.001f);
-        check_float_eq(color.g, 0.4f, 0.001f);
-        check_float_eq(color.b, 0.6f, 0.001f);
+        check_within(color.r, 0.2f, 0.001f);
+        check_within(color.g, 0.4f, 0.001f);
+        check_within(color.b, 0.6f, 0.001f);
     }
 
     it("compiles context-independent effect lengths") {
@@ -91,8 +91,8 @@ suite("FlexUI typed CSS declaration literals") {
             check_true(cmeta_type_equal(compiled->type, &cmeta_type_float));
             check_true(std::holds_alternative<float>(compiled->value));
         }
-        check_float_eq(std::get<float>(thin.value), 1.0f, 0.0001f);
-        check_float_eq(std::get<float>(px.value), 2.0f, 0.0001f);
+        check_within(std::get<float>(thin.value), 1.0f, 0.0001f);
+        check_within(std::get<float>(px.value), 2.0f, 0.0001f);
     }
 
     it("defers context-dependent effect lengths") {
@@ -114,32 +114,32 @@ suite("FlexUI typed CSS declaration literals") {
         check(translate.size() == static_cast<std::size_t>(2));
         check(translate[0].property->id == StylePropertyId::TransformX);
         check(translate[1].property->id == StylePropertyId::TransformY);
-        check_float_eq(std::get<float>(translate[0].value.value),
+        check_within(std::get<float>(translate[0].value.value),
                        12.0f, 0.0001f);
-        check_float_eq(std::get<float>(translate[1].value.value),
+        check_within(std::get<float>(translate[1].value.value),
                        -4.0f, 0.0001f);
 
         const auto uniform = compile_css_property_writes("scale", "2");
         check(uniform.size() == static_cast<std::size_t>(3));
         check(uniform[0].property->id == StylePropertyId::TransformScale);
-        check_float_eq(std::get<float>(uniform[0].value.value),
+        check_within(std::get<float>(uniform[0].value.value),
                        2.0f, 0.0001f);
 
         const auto non_uniform =
             compile_css_property_writes("scale", "2 3");
         check(non_uniform.size() == static_cast<std::size_t>(3));
-        check_float_eq(std::get<float>(non_uniform[0].value.value),
+        check_within(std::get<float>(non_uniform[0].value.value),
                        1.0f, 0.0001f);
-        check_float_eq(std::get<float>(non_uniform[1].value.value),
+        check_within(std::get<float>(non_uniform[1].value.value),
                        2.0f, 0.0001f);
-        check_float_eq(std::get<float>(non_uniform[2].value.value),
+        check_within(std::get<float>(non_uniform[2].value.value),
                        3.0f, 0.0001f);
 
         const auto rotate =
             compile_css_property_writes("rotate", ".25turn");
         check(rotate.size() == static_cast<std::size_t>(1));
         check(rotate[0].property->id == StylePropertyId::TransformRotate);
-        check_float_eq(std::get<float>(rotate[0].value.value),
+        check_within(std::get<float>(rotate[0].value.value),
                        90.0f, 0.0001f);
     }
 

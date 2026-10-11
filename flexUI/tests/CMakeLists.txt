@@ -24,6 +24,9 @@ if(FLEXUI_ENABLE_PLUGINS)
   add_library(flexui_test_plugin_static_crt MODULE plugin_test_echo.cpp)
   add_library(flexui_test_plugin_provider MODULE plugin_test_echo.cpp)
   add_library(flexui_test_plugin_consumer MODULE plugin_test_echo.cpp)
+  add_library(flexui_test_plugin_create_unwind MODULE plugin_test_create_unwind.cpp)
+  target_link_libraries(
+    flexui_test_plugin_create_unwind PRIVATE FlexUI::PluginSDK)
   target_link_libraries(
     flexui_test_plugin_bad_abi PRIVATE FlexUI::PluginSDK)
   target_link_libraries(
@@ -76,6 +79,7 @@ if(FLEXUI_ENABLE_PLUGINS)
     flexui_test_plugin_fail_create flexui_test_plugin_fail_stop
     flexui_test_plugin_static_crt
     flexui_test_plugin_provider flexui_test_plugin_consumer
+    flexui_test_plugin_create_unwind
     PROPERTIES FOLDER "flexUI/tests/plugins"
                C_VISIBILITY_PRESET hidden
                CXX_VISIBILITY_PRESET hidden
@@ -101,6 +105,18 @@ if(FLEXUI_ENABLE_PLUGINS)
     flexui_test_plugin_missing_entry)
   set_target_properties(test_plugin_host PROPERTIES FOLDER "flexUI/tests")
   add_test(NAME test_plugin_host COMMAND test_plugin_host)
+
+  add_executable(test_plugin_create_unwind test_plugin_create_unwind.cpp)
+  target_link_libraries(test_plugin_create_unwind PRIVATE FlexUI::PluginHost)
+  flexui_configure_tinytest(test_plugin_create_unwind)
+  target_include_directories(
+    test_plugin_create_unwind PRIVATE ${CMAKE_SOURCE_DIR}/flexUI/modules/plugin_host)
+  target_compile_definitions(
+    test_plugin_create_unwind
+    PRIVATE FLEXUI_TEST_CREATE_UNWIND_PLUGIN="$<TARGET_FILE:flexui_test_plugin_create_unwind>")
+  add_dependencies(test_plugin_create_unwind flexui_test_plugin_create_unwind)
+  set_target_properties(test_plugin_create_unwind PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_plugin_create_unwind COMMAND test_plugin_create_unwind)
 
   add_executable(test_plugin_manifest test_plugin_manifest.cpp)
   target_link_libraries(test_plugin_manifest PRIVATE FlexUI::PluginHost)
@@ -134,7 +150,8 @@ target_include_directories(test_style_engine PRIVATE ../include)
 set_target_properties(test_style_engine PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_style_engine COMMAND test_style_engine)
 
-add_executable(test_style_property_registry test_style_property_registry.cpp)
+add_executable(test_style_property_registry test_style_property_registry.cpp
+               ${CMAKE_SOURCE_DIR}/flex/tests/cmeta_types_peer.cpp)
 target_link_libraries(test_style_property_registry PRIVATE flexUI)
 flexui_configure_tinytest(test_style_property_registry)
 target_include_directories(test_style_property_registry PRIVATE ../include)
@@ -506,7 +523,8 @@ if(WIN32)
       test_application_service_requests
       test_service_registry)
   if(FLEXUI_ENABLE_PLUGINS)
-    list(APPEND _flexui_runtime_tests test_plugin_host test_plugin_manifest)
+    list(APPEND _flexui_runtime_tests test_plugin_host test_plugin_create_unwind
+                test_plugin_manifest)
     if(TARGET test_gcanvas_plugin_window_host)
       list(APPEND _flexui_runtime_tests test_gcanvas_plugin_window_host)
     endif()

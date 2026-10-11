@@ -40,6 +40,15 @@ flexUI 的目标是用 CSS 描述界面状态，再把同一棵 Element 树投�
    排序和退役节点，不拥有业务集合、CSS 或每帧更新。条目仍是普通 Element/Widget 子树，class、
    attribute、事件和 binding 继续走同一矩形树。
 
+2.4 CMeta 属性类型
+   Flex 的 `flex/core/cmeta_types.h` 定义 Color、Vec2、String 的语义身份；FlexUI 属性 registry
+   通过 `cmeta_type_equal()` 比较语义身份，再由 `style_property_accepts_type()` 校验 native
+   kind/size/alignment。描述符地址不是跨翻译单元的类型身份，语义相等不代表存储布局兼容。
+   读写入口与 compound write preflight 共享这一准入规则。公开这些头文件的 target 显式
+   PUBLIC 链接 `Salts::CMeta`。
+   描述符只提供类型信息；`AnimValue`、`TransitionValue` 继续拥有值存储，FlexUI 继续拥有 CSS
+   解析、插值与 dirty impact。元数据不授予对象构造、写入、销毁或模块保留权限。
+
 3. ViewPipeline
    调度一帧更新的生命周期：style -> layout -> semantics -> positioning -> render。
    它只通过 `ViewPipelineHost` 请求阶段执行，不依赖具体的 `Box` 实现；

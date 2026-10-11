@@ -78,6 +78,10 @@ const StylePropertyDesc* style_property_at(std::size_t index) noexcept;
 const StylePropertyDesc* style_property_descriptor(StylePropertyId id) noexcept;
 const StylePropertyDesc* style_property_find(std::string_view name) noexcept;
 
+// Native accessors require matching storage as well as semantic identity.
+bool style_property_accepts_type(const StylePropertyDesc& property,
+                                 const cmeta_type_desc* type) noexcept;
+
 bool style_property_read(const StylePropertyDesc& property,
                          const ComputedStyle& style,
                          const cmeta_type_desc* expected_type,

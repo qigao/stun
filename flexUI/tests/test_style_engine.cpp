@@ -7397,6 +7397,9 @@ spec("Box starts outline and ring transitions on focus-visible changes") {
 
 spec("Box registers and samples CSS box-shadow animations at runtime") {
   it("runs") {
+    const auto* shadow_color = detail::style_property_descriptor(
+        detail::StylePropertyId::BoxShadowColor);
+    check(shadow_color != nullptr);
     Box box(nullptr);
     auto* elem = box.create("div", "anim");
     box.set_root(elem);
@@ -7440,10 +7443,11 @@ spec("Box registers and samples CSS box-shadow animations at runtime") {
                                          elem->computed_style->shadow.spread_radius,
                                          box.time()),
                     1.0f, 0.02f));
-    check(approx_eq(box.animations().get(element_id, "box-shadow-color-a",
-                                         elem->computed_style->shadow.color.a,
-                                         box.time()),
-                    0.5f, 0.02f));
+    require_color(
+        box.animations().get_color(element_id, *shadow_color,
+                                   elem->computed_style->shadow.color,
+                                   box.time()),
+        60.0f / 255.0f, 70.0f / 255.0f, 80.0f / 255.0f, 0.5f, 0.02f);
   }
 }
 

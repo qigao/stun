@@ -777,7 +777,7 @@ static bool apply_compiled_writes(
     const auto& write = writes[i];
     if (!write.property || !write.property->write ||
         !write.value.has_value() ||
-        !cmeta_type_equal(write.value.type, write.property->type) ||
+        !detail::style_property_accepts_type(*write.property, write.value.type) ||
         !compiled_literal_data(write.value)) {
       return false;
     }
@@ -804,8 +804,8 @@ static bool apply_compiled_declaration(const CSSDeclaration& declaration,
   }
   if (!declaration.resolved_property ||
       !declaration.compiled_value.has_value() ||
-      !cmeta_type_equal(declaration.compiled_value.type,
-                        declaration.resolved_property->type)) {
+      !detail::style_property_accepts_type(*declaration.resolved_property,
+                                           declaration.compiled_value.type)) {
     return false;
   }
 
