@@ -166,11 +166,20 @@ void run() {
                         f.desired,placement,paths,single,&movement)) && movement.accepted_fraction>0 &&
                         movement.accepted_fraction<=guard.max_safe_fraction,
                         "transformed collinear event caps integrated movement");
+                require(static_cast<bool>(audit_topology(f.graph,placement,f.ports,paths,signature)),
+                        "actual transformed collinear output independently passes audit");
+                // Binary fractions retain exact corner geometry in these
+                // binary-scaled fixtures. Arbitrary fractions can round node
+                // coordinates differently across a shared diagonal boundary.
+                // The largest binary power below acceptance covers at least
+                // half of its prefix, even if the full audit shortens the step.
+                const double prefix=std::ldexp(1.0,std::ilogb(movement.accepted_fraction));
                 for(std::size_t sample=0;sample<=samples;++sample) {
-                    collinear_frame(f,movement.accepted_fraction*static_cast<double>(sample)/samples,
-                                    placement,paths);
+                    collinear_frame(f,prefix*static_cast<double>(sample)/samples,placement,paths);
                     const auto audited=audit_topology(f.graph,placement,f.ports,paths,signature);
-                    if(!audited)throw std::runtime_error("collinear prefix audit: "+audited.message);
+                    if(!audited)throw std::runtime_error("collinear axis "+std::to_string(static_cast<int>(axis))+
+                        ", scale "+std::to_string(scale)+", variant "+std::to_string(variant)+
+                        ", sample "+std::to_string(sample)+": "+audited.message);
                 }
                 f.desired=f.baseline;
                 for(auto& n:f.desired.nodes) {n.x+=37*scale;n.y-=23*scale;}
