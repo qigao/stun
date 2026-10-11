@@ -82,7 +82,30 @@ typedef enum stun_ui_block_kind {
     STUN_UI_BLOCK_QUOTE,
     STUN_UI_BLOCK_TABLE,
     STUN_UI_BLOCK_TABLE_ROW,
-    STUN_UI_BLOCK_TABLE_CELL
+    STUN_UI_BLOCK_TABLE_CELL,
+    STUN_UI_BLOCK_ORDERED_LIST,
+    STUN_UI_BLOCK_EMPHASIS,
+    STUN_UI_BLOCK_STRONG,
+    STUN_UI_BLOCK_LINK,
+    STUN_UI_BLOCK_IMAGE,
+    STUN_UI_BLOCK_STRIKETHROUGH,
+    STUN_UI_BLOCK_UNDERLINE,
+    STUN_UI_BLOCK_RULE,
+    STUN_UI_BLOCK_ENTITY,
+    STUN_UI_BLOCK_LINE_BREAK,
+    STUN_UI_BLOCK_TASK_ITEM,
+    STUN_UI_BLOCK_CHECKBOX,
+    STUN_UI_BLOCK_MATH,
+    STUN_UI_BLOCK_MATH_BLOCK,
+    STUN_UI_BLOCK_HIGHLIGHT,
+    STUN_UI_BLOCK_SUPERSCRIPT,
+    STUN_UI_BLOCK_SUBSCRIPT,
+    STUN_UI_BLOCK_FOOTNOTE,
+    STUN_UI_BLOCK_FOOTNOTE_DEF,
+    STUN_UI_BLOCK_DEFINITION_LIST,
+    STUN_UI_BLOCK_DEFINITION_TERM,
+    STUN_UI_BLOCK_DEFINITION_DESC,
+    STUN_UI_BLOCK_DIAGRAM
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {
@@ -111,6 +134,41 @@ typedef stun_ui_status (*stun_ui_document_visit_fn)(
 stun_ui_status stun_ui_document_visit(
     const stun_ui_document_view *view, size_t max_blocks,
     stun_ui_document_visit_fn visit, void *context);
+
+/* RichDoc bridge: the existing Markdown AST does not record raw source offsets.
+ * Therefore text.source is an OWNED-BY-PROJECTOR concatenation of decoded
+ * semantic text nodes; byte_begin/end do NOT index into raw Markdown. Block
+ * kinds retain structural semantics. Node metadata (fence language, link or
+ * image target, footnote label) is borrowed separately from the projector.
+ * The raw Markdown is preserved for explicit diagnostics only.
+ *
+ * Lifetime: all pointers are borrowed for the call; the producer must keep
+ * source, metadata and both arrays alive until the last consumer finishes.
+ * A projector re-build, move or release invalidates all these views. Stable
+ * node IDs are deterministic only within a snapshot; streaming reconciliation
+ * must use a separate identity policy rather than relying on ordinal IDs.
+ */
+typedef struct stun_ui_block_metadata {
+    size_t byte_begin;
+    size_t byte_end;
+} stun_ui_block_metadata;
+
+typedef struct stun_ui_rich_document_view {
+    stun_ui_document_view document;
+    const char *metadata;
+    size_t metadata_bytes;
+    const stun_ui_block_metadata *block_metadata;
+    size_t block_metadata_count;
+    const char *raw_markdown;
+    size_t raw_markdown_bytes;
+} stun_ui_rich_document_view;
+
+stun_ui_status stun_ui_rich_document_validate(
+    const stun_ui_rich_document_view *view, size_t max_blocks);
+
+stun_ui_status stun_ui_rich_document_metadata(
+    const stun_ui_rich_document_view *view, size_t node_index,
+    const char **out_bytes, size_t *out_length);
 
 #ifdef __cplusplus
 }
