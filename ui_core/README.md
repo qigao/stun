@@ -125,3 +125,48 @@ parity for these 15 examples, **not** CommonMark or GFM conformance.
 A full spec runner must compare actual rendered HTML against expected HTML
 with exact fixture IDs and a complete pass/fail/unsupported denominator,
 then expand coverage until the production C++ parser can be retired.
+
+## Independent Python parser oracle (#172)
+
+`ui_core/tests/compare_python_markdown.py` compares **real C11 parser output**
+against Mistune 3's independently parsed AST using the CommonMark profile
+or the explicit GFM table/task-list/strikethrough plugins. The test invokes
+the strict C11 `stun_markdown_ast_dump` executable as a subprocess and reads
+hex-encoded RichDoc bytes (not mocked objects or C++ AST). It canonicalizes
+known purely representational differences such as adjacent Text segments
+and list `block_text` wrappers, but preserves real semantic differences in
+heading levels, node hierarchy, links, task checked state, Markdown text,
+and table cell alignment metadata.
+
+Every fixture is labeled `gate` or `survey`. **Gated** cases must match
+the independent Python AST exactly. Non-gating survey cases have an explicit
+denominator and are reported as `DIFF` or `PASS` without contributing to
+the gate result; this avoids treating not-yet-supported syntax as success.
+
+Independent `cmarkgfm` bindings render each input to GitHub cmark-gfm
+(or CommonMark) HTML and include that reference HTML in the JSON evidence.
+The comparison does NOT yet assert C11-generated HTML against this
+reference. A future proper HTML renderer/conformance runner must compare
+exact expected HTML for the full CommonMark/GFM fixtures.
+
+Important reference limitation: Mistune's GFM table extension may treat
+pipes in some backtick code spans as separators even when the intended GFM
+semantics differ. `survey.gfm.table-code-pipe` makes that disagreement
+reproducible; its cmarkgfm HTML is available for investigation. Do not
+silently trust a single Python implementation for disputed GFM syntax.
+
+Executable CI: `unicode-runtime.yml` uses the **installed canonical Salts
+SDK** to build the C11 RichDoc dumper, then installs the latest available
+Python `mistune` and `cmarkgfm` tools in an isolated test-only virtual
+environment without exact package pins. The JSON report and human-readable
+comparison log are kept in the normal Unicode CI evidence directory.
+
+Example after building `ui_core` with installed Salts:
+
+```sh
+python -m venv .venv-reference
+.venv-reference/bin/python -m pip install mistune cmarkgfm
+.venv-reference/bin/python ui_core/tests/compare_python_markdown.py \
+  --parser build/ui-core-c11-installed/tests/stun_markdown_ast_dump \
+  --report build/markdown-python-oracle.json
+```

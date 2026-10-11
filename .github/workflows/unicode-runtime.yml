@@ -305,6 +305,21 @@ jobs:
             2>&1 | tee "$EVIDENCE_DIR/ui-core-c11-ctest.log"
           git diff --exit-code
 
+      - name: Compare C11 Markdown AST with independent Python GFM parsers
+        shell: bash
+        run: |
+          set -euo pipefail
+          reference_venv="$RUNNER_TEMP/stun-markdown-oracle"
+          python3 -m venv "$reference_venv"
+          "$reference_venv/bin/python" -m pip install \
+            --disable-pip-version-check --no-cache-dir mistune cmarkgfm
+          "$reference_venv/bin/python" ui_core/tests/compare_python_markdown.py \
+            --parser "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_ast_dump" \
+            --report "$EVIDENCE_DIR/markdown-python-oracle.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-python-oracle.log"
+          test -s "$EVIDENCE_DIR/markdown-python-oracle.json"
+          git diff --exit-code
+
       - name: Configure, link, and run the installed Unicode consumer
         shell: bash
         run: |
