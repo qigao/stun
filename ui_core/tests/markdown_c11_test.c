@@ -139,6 +139,7 @@ static int test_limit_and_failure_transaction(void) {
     CHECK(stun_md_parse(md,sizeof(md)-1,128,5,&d)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(d==NULL);
     CHECK(stun_md_parse(NULL,3,128,128,&d)==STUN_UI_INVALID_ARGUMENT);
+    CHECK(d==NULL);
     CHECK(stun_md_document_view(NULL).document.blocks==NULL);
 
     stun_md_document *good=NULL;
