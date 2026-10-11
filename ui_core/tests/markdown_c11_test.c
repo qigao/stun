@@ -169,12 +169,105 @@ static int test_deterministic_ids(void) {
     return 0;
 }
 
+static int test_gfm_tables(void) {
+    const char markdown[] =
+        "| Name | Value |\n"
+        "| :--- | ---: |\n"
+        "| 中😀 | " TICK "a|b" TICK " |\n"
+        "| a\\|b | **bold** |\n"
+        "\n"
+        "After table.\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(markdown,sizeof(markdown)-1,128,2048,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&v,128)==STUN_UI_OK);
+    CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1);
+    CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==3);
+    CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==6);
+    CHECK(kinds(v,STUN_UI_BLOCK_CODE_SPAN)==1);
+    CHECK(kinds(v,STUN_UI_BLOCK_STRONG)==1);
+    CHECK(text_is(v,"Name"));
+    CHECK(text_is(v,"Value"));
+    CHECK(text_is(v,"中😀"));
+    CHECK(text_is(v,"a|b"));
+    CHECK(text_is(v,"bold"));
+    CHECK(text_is(v,"After table."));
+    size_t table_index=SIZE_MAX, rows=0;
+    for(size_t i=0;i<v.document.block_count;++i) {
+        const stun_ui_block *b=&v.document.blocks[i];
+        if(b->kind==STUN_UI_BLOCK_TABLE) table_index=i;
+        if(b->kind==STUN_UI_BLOCK_TABLE_ROW) {
+            CHECK(table_index!=SIZE_MAX);
+            CHECK(b->parent_index==table_index);
+            ++rows;
+        }
+        if(b->kind==STUN_UI_BLOCK_TABLE_CELL) {
+            CHECK(b->parent_index<i);
+            CHECK(v.document.blocks[b->parent_index].kind==STUN_UI_BLOCK_TABLE_ROW);
+        }
+    }
+    CHECK(rows==3);
+    stun_md_document_destroy(doc);
+
+    const char invalid[]="| A | B |\n| not | delimiter |\n";
+    CHECK(stun_md_parse(invalid,sizeof(invalid)-1,128,128,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view no_table=stun_md_document_view(doc);
+    CHECK(kinds(no_table,STUN_UI_BLOCK_TABLE)==0);
+    stun_md_document_destroy(doc);
+
+    doc=(stun_md_document *)(uintptr_t)0x1;
+    CHECK(stun_md_parse(markdown,sizeof(markdown)-1,7,2048,&doc)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(doc==NULL);
+    return 0;
+}
+
+static int test_gfm_table_termination_and_uneven_rows(void) {
+    const char sample[] =
+        "| First | Second |\n"
+        "| --- | :---: |\n"
+        "| " TICK TICK "a|b" TICK TICK " | Value |\n"
+        "alone\n"
+        "| final | extra | ignored |\n"
+        "||\n"
+        "> quote after table\n"
+        "## Section\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1,256,4096,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&view,256)==STUN_UI_OK);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE)==1);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_ROW)==5);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_CELL)==10);
+    CHECK(kinds(view,STUN_UI_BLOCK_CODE_SPAN)==1);
+    CHECK(text_is(view,"a|b"));
+    CHECK(text_is(view,"alone"));
+    CHECK(!text_is(view,"ignored"));
+    CHECK(kinds(view,STUN_UI_BLOCK_QUOTE)==1);
+    CHECK(kinds(view,STUN_UI_BLOCK_HEADING)==1);
+
+    /* Each accepted row keeps exactly two cells, regardless of data width. */
+    for(size_t i=0;i<view.document.block_count;++i) {
+        if(view.document.blocks[i].kind!=STUN_UI_BLOCK_TABLE_ROW) continue;
+        size_t cells=0;
+        for(size_t j=i+1;j<view.document.block_count;++j) {
+            if(view.document.blocks[j].parent_index==i &&
+               view.document.blocks[j].kind==STUN_UI_BLOCK_TABLE_CELL) ++cells;
+        }
+        CHECK(cells==2);
+    }
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
     if(test_unclosed_fence_and_empty()) return 1;
     if(test_limit_and_failure_transaction()) return 1;
     if(test_deterministic_ids()) return 1;
+    if(test_gfm_tables()) return 1;
+    if(test_gfm_table_termination_and_uneven_rows()) return 1;
     puts("C11 Markdown parser: all native tests passed");
     return 0;
 }
