@@ -510,6 +510,22 @@ void run() {
                 "rotating segment and translating node produce quadratic events");
         near(guard.max_safe_fraction,first_contact*(1.0-TopologyGuardOptions{}.event_backoff),1e-12,
              "quadratic segment event ignores extension roots and catches the first actual penetration");
+        constexpr std::array small_scales={0x1p-100,0x1p-300,0x1p-500};
+        for(const double scale:small_scales) {
+            auto scaled=f;
+            for(auto& n:scaled.graph.nodes) {n.width*=scale;n.height*=scale;}
+            for(auto* layout:{&scaled.baseline,&scaled.desired})for(auto& n:layout->nodes) {
+                n.x*=scale;n.y*=scale;n.width*=scale;n.height*=scale;
+            }
+            for(auto& route:scaled.routes.edges)for(auto& p:route.points) {p.x*=scale;p.y*=scale;}
+            TopologyGuardReport observed;
+            require(static_cast<bool>(limit_topology_movement(scaled.graph,scaled.baseline,scaled.desired,scaled.routes,observed)),
+                    "small-scale segment/node corner events remain analyzable");
+            near(observed.max_safe_fraction,guard.max_safe_fraction,1e-12,
+                 "small-scale corner roots retain the first actual penetration event");
+            require(observed.evaluations==guard.evaluations,
+                    "small-coefficient root scaling retains the existing shared work accounting");
+        }
         TopologyOptions single;single.samples_per_trial=1;single.analytic_guards=false;
         Layout placement;Routes paths;TopologyReport movement;TopologySignature signature;
         require(static_cast<bool>(move_topology_preserving(f.graph,f.baseline,f.ports,f.routes,
@@ -1086,7 +1102,11 @@ void run() {
         {
             // Area=(alpha*(n+e)-e)^2: the two moving points coincide
             // with the origin at e/(n+e), although endpoint areas are large.
-            constexpr std::array magnitudes={0x1p30,0x1p38},offsets={0x1p-20,0x1p-100},scales={0.125,1.0};
+            constexpr std::array magnitudes={0x1p30,0x1p38};
+            // With binary64 long double, the last offset leaves a subnormal
+            // constant beside a large quadratic; scaling down would erase it.
+            constexpr std::array offsets={0x1p-20,0x1p-100,0x1p-520};
+            constexpr std::array scales={0.125,1.0};
             constexpr std::size_t variants=8;
             constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
             for(const double n:magnitudes)for(const double e:offsets)for(const double scale:scales)
@@ -1168,6 +1188,41 @@ void run() {
                 require(fraction>0 && fraction<event &&
                         fraction>=event*(1-2*options.event_backoff-relative_slack),
                         "discriminant cancellation must not merge distinct bend roots and stop after the first");
+            }
+        }
+        {
+            // Area=scale^2*(alpha-1/4)*(alpha-3/4). All coefficients
+            // remain nonzero even when discriminant products underflow.
+            constexpr std::array scales={1.0,0x1p-100,0x1p-300,0x1p-500};
+            constexpr std::size_t variants=8;
+            constexpr double baseline_area=0.1875;
+            constexpr double relative_slack=128*std::numeric_limits<double>::epsilon();
+            for(const double scale:scales)for(std::size_t variant=0;variant<variants;++variant)
+            for(const bool zero_margin:{false,true}) {
+                TopologyBendConstraint small={{{0,0},{0,0}},{{0,1},{1,1}},
+                    {{-baseline_area,-baseline_area},{-1,0}}};
+                TopologyGuardOptions options;
+                if(zero_margin) {options.min_bend_area_ratio=0;options.event_backoff=0;}
+                const double constant=baseline_area*(1-options.min_bend_area_ratio);
+                const double event=2*constant/(1+std::sqrt(1-4*constant));
+                double fraction=1;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(small,scale,variant),fraction,options)),
+                        "small nonzero bend coefficients are analyzable");
+                require(fraction>0 && fraction<event &&
+                        fraction>=event*(1-2*options.event_backoff-relative_slack),
+                        "discriminant product underflow must not merge or misplace the two bend events");
+                auto tangent=small;tangent.last.x={-0.25,-0.25};
+                const double tangent_event=0.5*(1-std::sqrt(options.min_bend_area_ratio));
+                require(static_cast<bool>(limit_topology_bend(transform_bend(tangent,scale,variant),fraction,options)) &&
+                        fraction>0 && fraction<tangent_event &&
+                        fraction>=tangent_event*(1-2*options.event_backoff-relative_slack),
+                        "small-coefficient double-root bend tangency retains its accurate early bound");
+                auto no_roots=small;no_roots.last.x={-1,-1};
+                require(static_cast<bool>(limit_topology_bend(transform_bend(no_roots,scale,variant),fraction,options)) && fraction==1,
+                        "a small-coefficient bend with negative discriminant permits the full admissible motion");
+                auto widening=small;widening.bend.x.desired=-1;widening.last.y.desired=-2;
+                require(static_cast<bool>(limit_topology_bend(transform_bend(widening,scale,variant),fraction,options)) && fraction==1,
+                        "small-coefficient widening with only negative roots permits the full admissible motion");
             }
         }
         TopologyBendConstraint bend;

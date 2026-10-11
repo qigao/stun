@@ -89,6 +89,17 @@ PolynomialRoots polynomial_roots(Real quadratic, Real linear, Real constant) {
     if(quadratic==0.0L) {
         if(linear!=0.0L)roots.values[roots.count++]=-constant/linear;
     } else {
+        // Scale small triples upward by an exact power of two before forming
+        // products. Never scale downward: that could erase a tiny nonzero
+        // constant beside a large target and move an early event to zero.
+        const Real maximum=std::max({std::abs(quadratic),std::abs(linear),std::abs(constant)});
+        int exponent=0;
+        std::frexp(maximum,&exponent);
+        if(exponent<0) {
+            quadratic=std::ldexp(quadratic,-exponent);
+            linear=std::ldexp(linear,-exponent);
+            constant=std::ldexp(constant,-exponent);
+        }
         // Keep the product residual when nearby roots make b*b and 4*a*c
         // cancel. A rounded zero can merge two roots or invent a tangency.
         const Real disc=detail::compensated_determinant(linear,4.0L*quadratic,constant,linear);

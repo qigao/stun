@@ -624,8 +624,16 @@ calculates conservative **analytic event fractions** before sampled auditing:
   nearby roots (stopping after the first) or turn a small negative discriminant
   into a spurious tangency. Bend, segment/node and collinear edit-contact events
   retain their existing root formulas and shared work budgets.
-  This remains a numerical guard: coordinate subtraction, underflow, coefficient
-  rounding and root arithmetic are not exact.
+  When all three quadratic coefficients are small,
+  [`frexp`](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/frexp)
+  and [`ldexp`](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/ldexp) scale them
+  upward by a common power of two before discriminant products are formed.
+  This preserves their roots and avoids premature product underflow for small
+  geometries. Coefficients are never scaled downward, which could erase a tiny
+  constant beside a large quadratic target and move an early root to zero.
+  This remains a numerical guard. Coordinate subtraction, coefficient/root
+  rounding, underflow before scaling and extreme coefficient ratios can still
+  affect events.
 - **Node pairs:** intersect the open affine rectangle-overlap intervals on
   both axes, then cap movement before the earliest interior collision. This
   includes isolated nodes and prevents rectangles from tunneling between

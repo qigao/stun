@@ -44,8 +44,10 @@ struct TopologyStraightConstraint {
 // alpha, expanded directly from relative positions/displacements rather than
 // reconstructed from distant area samples. The linear coefficient retains
 // product/addition residuals across its four terms; the discriminant compensates
-// product cancellation. Roots in [0,1] are checked numerically; coordinate
-// subtraction, underflow, coefficient rounding and root rounding remain.
+// product cancellation. Small quadratic coefficient triples scale upward by
+// a common power of two before discriminant products. Roots in [0,1] are checked
+// numerically; coordinate subtraction, underflow, extreme coefficient ratios,
+// coefficient rounding and root rounding remain.
 struct TopologyBendConstraint {
     TopologyPointTrack first, bend, last;
 };
