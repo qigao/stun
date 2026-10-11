@@ -3,8 +3,12 @@ name: Resolve current Salts SDK releases
 on:
   workflow_call:
     outputs:
+      salts_release:
+        value: ${{ jobs.resolve.outputs.salts_release }}
       salts_sha:
         value: ${{ jobs.resolve.outputs.salts_sha }}
+      salts_utils_release:
+        value: ${{ jobs.resolve.outputs.salts_utils_release }}
       salts_utils_sha:
         value: ${{ jobs.resolve.outputs.salts_utils_sha }}
 
@@ -15,7 +19,9 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
+      salts_release: ${{ steps.releases.outputs.salts_release }}
       salts_sha: ${{ steps.releases.outputs.salts_sha }}
+      salts_utils_release: ${{ steps.releases.outputs.salts_utils_release }}
       salts_utils_sha: ${{ steps.releases.outputs.salts_utils_sha }}
     steps:
       - name: Resolve newest published releases including RCs
@@ -38,6 +44,7 @@ jobs:
               echo "Cannot resolve SDK release commit for $repo/$release" >&2
               return 1
             fi
+            echo "${name}_release=$release" >> "$GITHUB_OUTPUT"
             echo "${name}_sha=$sha" >> "$GITHUB_OUTPUT"
             printf 'Resolved %s: %s (%s)\n' "$repo" "$release" "$sha"
           }

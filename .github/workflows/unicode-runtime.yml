@@ -135,7 +135,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
       SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
       SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
       VCPKG_PORT_BASELINE: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
       VCPKG_MAX_CONCURRENCY: 2
@@ -503,10 +505,9 @@ jobs:
             local name="$3"
             local config_rel="$4"
             local dir="$sdk_root/$name"
-            local tag
+            local tag="$5"
             local nupkg
 
-            tag="$(gh release view --repo "$repo" --json tagName --jq .tagName)"
             test -n "$tag"
             mkdir -p "$dir/download" "$dir/package"
             gh release download "$tag" --repo "$repo" --pattern "$pattern" \
@@ -521,13 +522,14 @@ jobs:
 
           IFS='|' read -r latest_salts_root latest_salts_release < <(
             restore_sdk qigao/salts 'Salts.Native.*.nupkg' salts \
-              'lib/cmake/Salts/SaltsConfig.cmake')
+              'lib/cmake/Salts/SaltsConfig.cmake' "$SALTS_RELEASE")
           IFS='|' read -r latest_utils_root latest_utils_release < <(
             restore_sdk qigao/salts-utils 'SaltsUtils.Native.*.nupkg' salts-utils \
-              'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake')
+              'lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake' "$SALTS_UTILS_RELEASE")
+          turboscript_tag="$(gh release view --repo qigao/TurboScript --json tagName --jq .tagName)"
           IFS='|' read -r latest_turboscript_root latest_turboscript_release < <(
             restore_sdk qigao/TurboScript 'TurboScript.Native.*.nupkg' turboscript \
-              'lib/cmake/TurboScript/TurboScriptConfig.cmake')
+              'lib/cmake/TurboScript/TurboScriptConfig.cmake' "$turboscript_tag")
 
           header="$latest_turboscript_root/include/turbo_script.h"
           test -f "$header"
