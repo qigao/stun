@@ -24,7 +24,7 @@ jobs:
       salts_utils_release: ${{ steps.releases.outputs.salts_utils_release }}
       salts_utils_sha: ${{ steps.releases.outputs.salts_utils_sha }}
     steps:
-      - name: Resolve newest published releases including RCs
+      - name: Resolve newest matching published releases including RCs
         id: releases
         shell: bash
         env:
@@ -32,11 +32,12 @@ jobs:
         run: |
           set -euo pipefail
           resolve_release() {
-            local name="$1" repo="$2" release sha
-            release="$(gh api "repos/$repo/releases" --jq \
-              '[.[] | select(.draft == false)] | max_by(.published_at).tag_name')"
+            local name="$1" repo="$2" tag_pattern="${3:-^}" release sha
+            release="$(gh api "repos/$repo/releases?per_page=100" --paginate --slurp | \
+              jq -r --arg pattern "$tag_pattern" \
+                '[.[][] | select(.draft == false and (.tag_name | test($pattern)))] | max_by(.published_at).tag_name')"
             if [[ -z "$release" || "$release" == null ]]; then
-              echo "No published SDK release found for $repo" >&2
+              echo "No published SDK release matching $tag_pattern found for $repo" >&2
               return 1
             fi
             sha="$(gh api "repos/$repo/commits/$release" --jq .sha)"
@@ -48,5 +49,6 @@ jobs:
             echo "${name}_sha=$sha" >> "$GITHUB_OUTPUT"
             printf 'Resolved %s: %s (%s)\n' "$repo" "$release" "$sha"
           }
-          resolve_release salts qigao/salts
+          # Float within 2.3.0 (stable or prerelease), without following master.
+          resolve_release salts qigao/salts '^v2[.]3[.]0(-|$)'
           resolve_release salts_utils qigao/salts-utils
