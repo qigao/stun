@@ -104,7 +104,7 @@ int main(void) {
         boundary[boundary_bytes++]=' ';
     }
     boundary[boundary_bytes++]='x';
-    boundary[boundary_bytes++]='\\n';
+    boundary[boundary_bytes++]='\n';
     stun_md_document *accepted=NULL;
     if(stun_md_parse(boundary,boundary_bytes,256u,boundary_bytes+1u,
                      &accepted)!=STUN_UI_OK || !accepted) {
