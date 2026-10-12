@@ -43,7 +43,7 @@ env:
   GALLIUM_DRIVER: llvmpipe
   # Compiler cache is an acceleration layer only: no object files or SDK
   # runtime state bypasses our original CTest, sanitizer, and driver gates.
-  CCACHE_DIR: ${{ runner.temp }}/stun-runtime-ccache
+  CCACHE_DIR: ${{ github.workspace }}/build/runtime-ccache
   CCACHE_COMPILERCHECK: content
   CCACHE_MAXSIZE: 512M
   CMAKE_C_COMPILER_LAUNCHER: ccache
