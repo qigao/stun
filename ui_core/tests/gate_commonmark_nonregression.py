@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gated no-regression check of 401 previously qualified official HTML IDs.
+"""Gated no-regression check of 417 previously qualified official HTML IDs.
 
 The full 652-case report remains diagnostic; every baseline ID must still
 render *exactly* the official CommonMark 0.31.2 expected HTML.
@@ -23,7 +23,7 @@ def main():
         baseline.get("commonmark_version")!="0.31.2" or
         data.get("source")!=baseline.get("source") or
         data.get("total")!=652 or baseline.get("official_total")!=652 or
-        not isinstance(ids,list) or len(ids)!=401 or
+        not isinstance(ids,list) or len(ids)!=417 or
         any(type(x) is not int or x<1 or x>652 for x in ids) or
         ids!=sorted(set(ids))):
         print("INFRA: immutable CommonMark baseline differs",file=sys.stderr)
@@ -49,6 +49,22 @@ def main():
         number=int(row["id"].rsplit("-",1)[-1])
         if row["id"]!=f"cm-0.31.2-{number:04d}" or number in by_id:
             print("INFRA: malformed/repeated official example",file=sys.stderr)
+            return 2
+        # The survey's declared match bit is not conformance evidence by
+        # itself: recompute byte-exact HTML equality from the actual output.
+        # This rejects silently forged flags and unsupported-as-pass errors.
+        if (row.get("native_status") not in ("rendered","unsupported") or
+            not isinstance(row.get("markdown"),str) or
+            not isinstance(row.get("official_expected_html"),str) or
+            type(row.get("native_matches_official")) is not bool):
+            print(f"INFRA: malformed survey row #{number}",file=sys.stderr)
+            return 2
+        exact=(row["native_status"]=="rendered" and
+               isinstance(row.get("native_html"),str) and
+               row["native_html"]==row["official_expected_html"])
+        if row["native_matches_official"]!=exact:
+            print(f"INFRA: untruthful exact HTML result #{number}",
+                  file=sys.stderr)
             return 2
         by_id[number]=row
     if set(by_id)!=set(range(1,653)):
