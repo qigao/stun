@@ -1537,11 +1537,10 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
     if(*paragraph!=UINT32_MAX || begin>=first.end ||
        memchr(s+begin,(char)0x60,first.end-begin)!=NULL)
         return false;
-    /* #185 owns hard-break origin and spaces before a physical LF. Do not
-     * combine such paragraphs until explicit hard/soft IR is available. */
-    if(s[first.end-1u]=='\\' ||
-       (first.end-begin>=2u && s[first.end-1u]==' ' &&
-        s[first.end-2u]==' '))
+    /* #185 owns trimming/typing whitespace and backslash before a physical
+     * LF (including ONE trailing space or tab, not merely two-space hard
+     * breaks). Do not normalize these until explicit hard/soft IR exists. */
+    if(s[first.end-1u]=='\\' || md_space(s[first.end-1u]))
         return false;
     md_line lines[MD_PARAGRAPH_LOOKAHEAD_LINES]={0};
     size_t begins[MD_PARAGRAPH_LOOKAHEAD_LINES]={0};
@@ -1554,9 +1553,7 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
         if(at!=next.begin || at==next.end ||
            md_root_code_span_interrupts(d,next) ||
            memchr(s+at,(char)0x60,next.end-at)!=NULL ||
-           s[next.end-1u]=='\\' ||
-           (next.end-at>=2u && s[next.end-1u]==' ' &&
-            s[next.end-2u]==' '))
+           s[next.end-1u]=='\\' || md_space(s[next.end-1u]))
             break;
         if(bytes>=d->raw_size || next.end-at>d->raw_size-bytes-1u)
             break;
