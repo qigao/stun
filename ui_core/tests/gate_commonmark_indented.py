@@ -21,8 +21,10 @@ from survey_commonmark_spec import (
 
 SECTION_IDS = frozenset(range(107, 119))
 GATED_IDS = frozenset({48, 69, 107, 108, 109, 110, 111, 112, 113, 114,
-                       115, 116, 117, 118, 225, 254, 256, 301, 302, 304, 305})
-EXPECTED_GATES = 21
+                       115, 116, 117, 118, 225,
+                       228, 229, 230, 232, 236, 237, 239, 240, 250, 252,
+                       254, 256, 301, 302, 304, 305})
+EXPECTED_GATES = 31
 
 
 def main() -> int:

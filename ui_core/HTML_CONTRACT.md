@@ -97,3 +97,28 @@ alongside the previous 13 cases: **21 strict IDs** (not full 652 compliance).
 The full **652**-example diagnostic remains separate. Other lazy/container,
 task and raw-HTML semantics stay under #181/#172 and must not be reported as
 supported without passing the corresponding official HTML.
+
+
+## Nested Blockquote semantics (#181, PR #189)
+
+The single C11 block parser now admits a bounded 32-level quote-container
+stack. It owns nested quote ancestry and nested lazy unmarked paragraph
+continuation, plus quoted ATX/setext headings, thematic breaks, fenced code
+and indented code. An explicitly empty quote marker closes its paragraph
+without destroying the outer quote; root block interruptions close the
+quote. There is no second grammar or permanent C++ fallback, and source
+bytes remain owned and unmodified. 33 nested quote levels must fail
+atomically with `STUN_UI_CAPACITY_EXCEEDED` and no returned document.
+
+`stun_markdown_nested_quote_test` enforces six native quote AST/HTML
+fixtures and depth-exhaustion rollback. The official byte-exact CommonMark
+HTML allowlist is expanded from 21 to **31** explicit IDs after observing
+true expected-HTML matches on exact-head CI: #228, #229, #230, #232,
+#236, #237, #239, #240, #250, #252. The full 652-case survey remains
+diagnostic and the previously passing 256 example identities remain
+protected by their own strict nonregression gate.
+
+Known gaps: partial-marker lazy nesting (#251) and quote/list ownership
+(#235) are not qualified. C++ MarkdownWidget and Tango still retain
+their declared pre-cutover ownership and must not use this as a full
+CommonMark/GFM parity claim.

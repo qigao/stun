@@ -798,13 +798,147 @@ static bool md_quote_lazy_interrupts(const char *s,md_line line,
     return false;
 }
 
+
+enum { MD_QUOTE_MAX_DEPTH=32 };
+typedef struct md_quote_stack {
+    uint32_t nodes[MD_QUOTE_MAX_DEPTH];
+    size_t depth;
+    uint32_t paragraph, code;
+    md_fence fence;
+    bool lazy, fence_open;
+} md_quote_stack;
+
+/* Match all explicit quote markers using CommonMark's <=3-column leading
+ * indent per layer and consume at most one optional whitespace character
+ * after each '>'. No unbounded recursion or separate Markdown frontend. */
+static size_t md_quote_prefix(const char *s,md_line line,size_t *body) {
+    size_t pos=line.begin,depth=0u;
+    while(pos<line.end) {
+        size_t next=pos,column=0u;
+        while(next<line.end && md_space(s[next]) && column<=3u) {
+            const size_t step=s[next]=='\t' ? 4u-column%4u : 1u;
+            column+=step;
+            if(column>3u) break;
+            ++next;
+        }
+        if(column>3u || next>=line.end || s[next]!='>') break;
+        ++depth;
+        pos=next+1u;
+        if(pos<line.end && md_space(s[pos])) ++pos;
+        if(depth>MD_QUOTE_MAX_DEPTH) break;
+    }
+    *body=pos;
+    return depth;
+}
+
+/* One explicitly owned stack of quote containers. All admitted blocks keep
+ * their true parent in the pre-order RichDoc, with one document lifetime. */
+static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
+                          md_line line,size_t level,size_t body) {
+    if(level>MD_QUOTE_MAX_DEPTH) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    if(level!=q->depth) {
+        if(level<q->depth) q->depth=level;
+        else {
+            while(q->depth<level) {
+                const uint32_t parent=q->depth ? q->nodes[q->depth-1u] : 0u;
+                const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_QUOTE,0u);
+                if(node==UINT32_MAX) return false;
+                q->nodes[q->depth++]=node;
+            }
+        }
+        q->paragraph=q->code=UINT32_MAX;
+        q->fence_open=q->lazy=false;
+    }
+    const uint32_t parent=q->nodes[level-1u];
+    const char *s=d->raw;
+    const size_t begin=md_left(s,body,line.end);
+    const size_t indent=md_columns(s,body,begin);
+    if(q->fence_open) {
+        if(indent<=3u && md_fence_close(s,begin,line.end,q->fence)) {
+            q->fence_open=false;
+            return true;
+        }
+        /* Quoted fence payload excludes quote markers, never the raw UTF-8
+         * bytes of the owned source. */
+        md_text(d,q->fence.node,s+body,line.end-body);
+        if(line.newline) md_text(d,q->fence.node,"\n",1u);
+        return d->error==STUN_UI_OK;
+    }
+    if(md_blank(s,body,line.end)) {
+        q->paragraph=q->code=UINT32_MAX;
+        q->lazy=false;
+        return true;
+    }
+    if(q->code!=UINT32_MAX) {
+        if(indent>=4u) {
+            md_line code_line=line;
+            code_line.begin=body;
+            return md_code_line(d,q->code,code_line,false);
+        }
+        q->code=UINT32_MAX;
+    }
+    if(q->paragraph!=UINT32_MAX && indent<=3u) {
+        const unsigned setext=md_setext(s,begin,line.end);
+        if(setext) {
+            d->nodes[q->paragraph].kind=STUN_UI_BLOCK_HEADING;
+            d->nodes[q->paragraph].heading_level=setext;
+            q->paragraph=UINT32_MAX;q->lazy=false;
+            return true;
+        }
+    }
+    if(indent<=3u && md_rule(s,begin,line.end)) {
+        if(md_add(d,parent,STUN_UI_BLOCK_RULE,0u)==UINT32_MAX)return false;
+        q->paragraph=UINT32_MAX;q->lazy=false;return true;
+    }
+    char marker=0u;size_t run=0u,info_begin=0u,info_end=0u;
+    if(indent<=3u && md_fence_start(s,begin,line.end,
+                                    &marker,&run,&info_begin,&info_end)) {
+        const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_CODE_FENCE,0u);
+        if(node==UINT32_MAX)return false;
+        md_meta(d,node,s+info_begin,info_end-info_begin);
+        if(d->error!=STUN_UI_OK)return false;
+        q->fence=(md_fence){marker,run,node};
+        q->fence_open=true;
+        q->paragraph=UINT32_MAX;q->lazy=false;
+        return true;
+    }
+    if(indent<=3u) {
+        size_t hbegin=begin,hend=line.end;
+        const unsigned heading=md_atx(s,&hbegin,&hend);
+        if(heading) {
+            const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_HEADING,heading);
+            if(node==UINT32_MAX)return false;
+            q->paragraph=UINT32_MAX;q->lazy=false;
+            return md_inline(d,node,s+hbegin,hend-hbegin,0u);
+        }
+    }
+    if(indent>=4u && q->paragraph==UINT32_MAX) {
+        q->code=md_add(d,parent,STUN_UI_BLOCK_CODE_INDENTED,0u);
+        if(q->code==UINT32_MAX)return false;
+        md_line code_line=line;
+        code_line.begin=body;
+        q->lazy=false;
+        return md_code_line(d,q->code,code_line,false);
+    }
+    if(q->paragraph==UINT32_MAX) {
+        q->paragraph=md_add(d,parent,STUN_UI_BLOCK_PARAGRAPH,0u);
+        if(q->paragraph==UINT32_MAX)return false;
+    } else if(md_add(d,q->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u)
+              ==UINT32_MAX) return false;
+    q->lazy=true;
+    return md_inline(d,q->paragraph,s+begin,line.end-begin,0u);
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
-    uint32_t quote = UINT32_MAX;
     uint32_t indented = UINT32_MAX;
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
-    bool code_open=false, quote_lazy_allowed=false;
+    bool code_open=false;
+    md_quote_stack quotes={0};
+    quotes.paragraph=quotes.code=UINT32_MAX;
     md_fence fence = {0,0,UINT32_MAX};
 
     for (size_t pos=0; pos<d->raw_size && d->error==STUN_UI_OK;) {
@@ -831,6 +965,34 @@ static void md_parse_blocks(stun_md_document *d) {
         }
         if(md_list_consume(d,&lists,line)) continue;
         if(d->error!=STUN_UI_OK) return;
+        /* A root quote container is matched before admitting root blocks.
+         * Lazy lines may continue only the last quoted paragraph and never
+         * create a new quote or survive a blank/competing block opener. */
+        size_t quote_body=line.begin;
+        const size_t quote_depth=md_quote_prefix(s,line,&quote_body);
+        if(quote_depth) {
+            if(indented!=UINT32_MAX) {
+                indented=UINT32_MAX;
+                pending_code_blank=SIZE_MAX;
+            }
+            paragraph=UINT32_MAX;
+            if(!md_quote_line(d,&quotes,line,quote_depth,quote_body)) return;
+            continue;
+        }
+        if(quotes.depth) {
+            if(quotes.lazy && quotes.paragraph!=UINT32_MAX &&
+               !md_blank(s,line.begin,line.end) &&
+               !md_quote_lazy_interrupts(s,line,begin)) {
+                if(md_add(d,quotes.paragraph,STUN_UI_BLOCK_LINE_BREAK,0u)
+                   ==UINT32_MAX ||
+                   !md_inline(d,quotes.paragraph,s+begin,end-begin,0u))
+                    return;
+                continue;
+            }
+            quotes.depth=0u;
+            quotes.paragraph=quotes.code=UINT32_MAX;
+            quotes.fence_open=quotes.lazy=false;
+        }
         /* Keep interstitial blank lines pending until another indented line
          * proves that they are interior. On termination/EOF they vanish. */
         if (indented!=UINT32_MAX) {
@@ -855,25 +1017,8 @@ static void md_parse_blocks(stun_md_document *d) {
         }
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
-            quote=UINT32_MAX;
-            quote_lazy_allowed=false;
             continue;
         }
-        /* A paragraph of a blockquote may continue without '>' when the
-         * line would not start a competing CommonMark block. This is a
-         * continuation of the owned quote paragraph, never a second tree. */
-        if(quote!=UINT32_MAX && !(indent<=3 && begin<end && s[begin]=='>')) {
-            if(quote_lazy_allowed && paragraph!=UINT32_MAX &&
-               !md_quote_lazy_interrupts(s,line,begin)) {
-                (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
-                (void)md_inline(d,paragraph,s+begin,end-begin,0u);
-                if(d->error!=STUN_UI_OK) return;
-                continue;
-            }
-            quote=paragraph=UINT32_MAX;
-            quote_lazy_allowed=false;
-        }
-
         /* Four indentation columns select literal code before checking ATX,
          * thematic rules, fences, or other block markers. Indented code
          * cannot interrupt a paragraph or the active list-item continuation. */
@@ -889,12 +1034,11 @@ static void md_parse_blocks(stun_md_document *d) {
             d->nodes[paragraph].kind=STUN_UI_BLOCK_HEADING;
             d->nodes[paragraph].heading_level=setext;
             paragraph=UINT32_MAX;
-            quote=UINT32_MAX;
             continue;
         }
         if (indent <= 3 && md_rule(s,begin,end)) {
             (void)md_add(d,0u,STUN_UI_BLOCK_RULE,0);
-            paragraph=quote=UINT32_MAX;
+            paragraph=UINT32_MAX;
             continue;
         }
         char marker=0; size_t run=0, info_b=0,info_e=0;
@@ -905,7 +1049,7 @@ static void md_parse_blocks(stun_md_document *d) {
             md_meta(d,node,s+info_b,info_e-info_b);
             fence=(md_fence){marker,run,node};
             code_open=true;
-            paragraph=quote=UINT32_MAX;
+            paragraph=UINT32_MAX;
             continue;
         }
         if (indent<=3) {
@@ -915,34 +1059,10 @@ static void md_parse_blocks(stun_md_document *d) {
                 const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_HEADING,level);
                 if (node==UINT32_MAX) return;
                 (void)md_inline(d,node,s+hstart,hend-hstart,0);
-                paragraph=quote=UINT32_MAX;
+                paragraph=UINT32_MAX;
                 continue;
             }
         }
-        if (indent<=3 && begin<end && s[begin]=='>') {
-            if (quote==UINT32_MAX) {
-                quote=md_add(d,0u,STUN_UI_BLOCK_QUOTE,0);
-                if (quote==UINT32_MAX) return;
-                paragraph=UINT32_MAX;
-            }
-            begin=md_left(s,begin+1,end);
-            /* Empty quote markers end the paragraph but retain the quote
-             * container for a following explicitly marked new paragraph. */
-            if(begin==end) {
-                paragraph=UINT32_MAX;
-                quote_lazy_allowed=false;
-                continue;
-            }
-            if (paragraph==UINT32_MAX) {
-                paragraph=md_add(d,quote,STUN_UI_BLOCK_PARAGRAPH,0);
-                if (paragraph==UINT32_MAX) return;
-            } else (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
-            (void)md_inline(d,paragraph,s+begin,end-begin,0);
-            if(d->error!=STUN_UI_OK) return;
-            quote_lazy_allowed=true;
-            continue;
-        }
-        if (quote!=UINT32_MAX) { quote=paragraph=UINT32_MAX; }
         /* Start a table only at a new block boundary. */
         if (indent<=3 && paragraph==UINT32_MAX &&
             lists.depth==0u && pos<d->raw_size) {
@@ -968,7 +1088,7 @@ static void md_parse_blocks(stun_md_document *d) {
                         return;
                     pos=row.next;
                 }
-                paragraph=quote=UINT32_MAX;
+                paragraph=UINT32_MAX;
                 continue;
             }
         }
@@ -978,7 +1098,7 @@ static void md_parse_blocks(stun_md_document *d) {
             top_marker.start==1u) &&
            !md_rule(s,begin,end)) {
             if(!md_list_open(d,&lists,0u,&top_marker,s,end)) return;
-            paragraph=quote=UINT32_MAX;
+            paragraph=UINT32_MAX;
             continue;
         }
         if (paragraph==UINT32_MAX) {
