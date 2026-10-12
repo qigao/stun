@@ -493,6 +493,15 @@ static bool md_list_token(const char *s,md_line line,
     return true;
 }
 
+/* A marker-only item cannot interrupt an existing paragraph, whether it is
+ * root-owned or within a Blockquote. Ordered interrupters also start at 1.
+ * This is an admission rule, not a restriction on empty sibling list items. */
+static bool md_list_interrupts_paragraph(const md_list_marker_info *m,
+                                         md_line line) {
+    return m->content_offset<line.end &&
+           (!m->ordered || m->start==1u);
+}
+
 /* Both marker-line and continuation-line fences use the same owned item
  * frame.  A recognized opener is consumed even when allocation fails; the
  * caller will propagate d->error and discard the incomplete document. */
@@ -882,7 +891,7 @@ static bool md_quote_lazy_interrupts(const char *s,md_line line,
                       &mark,&count,&info_begin,&info_end)) return true;
     md_list_marker_info marker={0};
     if(md_list_token(s,line,&marker) && marker.column<=3u &&
-       (!marker.ordered || marker.start==1u)) return true;
+       md_list_interrupts_paragraph(&marker,line)) return true;
     return false;
 }
 
@@ -1014,7 +1023,8 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
      * A numbered marker >1 never interrupts an existing paragraph. */
     md_list_marker_info item={0};
     if(indent<=3u && md_list_token(s,inner,&item) &&
-       (q->paragraph==UINT32_MAX || !item.ordered || item.start==1u) &&
+       (q->paragraph==UINT32_MAX ||
+        md_list_interrupts_paragraph(&item,inner)) &&
        !md_rule(s,begin,line.end)) {
         if(!md_list_open(d,&q->lists,parent,&item,s,line.end))
             return false;
@@ -1222,8 +1232,8 @@ static void md_parse_blocks(stun_md_document *d) {
         }
         md_list_marker_info top_marker={0};
         if(indent<=3 && md_list_token(s,line,&top_marker) &&
-           (paragraph==UINT32_MAX || !top_marker.ordered ||
-            top_marker.start==1u) &&
+           (paragraph==UINT32_MAX ||
+            md_list_interrupts_paragraph(&top_marker,line)) &&
            !md_rule(s,begin,end)) {
             if(!md_list_open(d,&lists,0u,&top_marker,s,end)) return;
             paragraph=UINT32_MAX;
