@@ -783,6 +783,9 @@ static bool md_table_starts_new_block(const char *s, size_t b, size_t e) {
  * ordinary continuation text, not a new root list. */
 static bool md_quote_lazy_interrupts(const char *s,md_line line,
                                      size_t begin) {
+    /* Four-space indentation after an open quote paragraph is literal
+     * lazy text, not a root heading/rule/fence/list admission. */
+    if(md_columns(s,line.begin,begin)>3u) return false;
     if(md_rule(s,begin,line.end)) return true;
     size_t hbegin=begin,hend=line.end;
     if(md_atx(s,&hbegin,&hend)) return true;
