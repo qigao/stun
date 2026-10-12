@@ -107,9 +107,21 @@ static const fixture cases[]={
     {"inline-nested-continuation","- - foo\n    bar\n",
      "<ul>\n<li>\n<ul>\n<li>foo\nbar</li>\n</ul>\n</li>\n</ul>\n",0,2u},
     {"inline-nested-empty","- -\n",
-     "<ul>\n<li>\n<ul>\n<li></li>\n</ul>\n</li>\n</ul>\n",0,2u}
+     "<ul>\n<li>\n<ul>\n<li></li>\n</ul>\n</li>\n</ul>\n",0,2u},
+    /* #319: the child consumes the separating blank; the outer list stays
+     * tight. Do not propagate nested looseness to ancestor list metadata. */
+    {"cm-319","- a\n  - b\n\n    c\n- d\n",
+     "<ul>\n<li>a\n<ul>\n<li>\n<p>b</p>\n<p>c</p>\n</li>\n</ul>\n</li>\n<li>d</li>\n</ul>\n",0,2u},
+    {"nested-blank-sibling","- a\n  - b\n\n  - c\n- d\n",
+     "<ul>\n<li>a\n<ul>\n<li>\n<p>b</p>\n</li>\n<li>\n<p>c</p>\n</li>\n</ul>\n</li>\n<li>d</li>\n</ul>\n",0,2u},
+    {"quoted-nested-blank","> - a\n>   - b\n>\n>     c\n> - d\n",
+     "<blockquote>\n<ul>\n<li>a\n<ul>\n<li>\n<p>b</p>\n<p>c</p>\n</li>\n</ul>\n</li>\n<li>d</li>\n</ul>\n</blockquote>\n",0,2u},
+    /* #326 is deliberately loose at the OUTER level: a blank separates
+     * the outer -a and -d items, rather than a consumed child continuation. */
+    {"cm-326","- a\n  - b\n  - c\n\n- d\n  - e\n  - f\n",
+     "<ul>\n<li>\n<p>a</p>\n<ul>\n<li>b</li>\n<li>c</li>\n</ul>\n</li>\n<li>\n<p>d</p>\n<ul>\n<li>e</li>\n<li>f</li>\n</ul>\n</li>\n</ul>\n",1,3u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==42u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==46u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {

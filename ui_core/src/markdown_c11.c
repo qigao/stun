@@ -603,6 +603,15 @@ static bool md_list_open(stun_md_document *d,md_list_stack *stack,
     return md_list_append_item(d,stack,f,m,s,end);
 }
 
+/* A blank line first belongs to every still-open candidate container. If a
+ * deeper item consumes the next nonblank line, that line proves the blank
+ * was internal to the child, not a separator of outer list items. Only the
+ * consuming list is loosened; outer list tightness remains unchanged. */
+static void md_list_claim_nested_blank(md_list_stack *stack) {
+    for(size_t depth=0u;depth+1u<stack->depth;++depth)
+        stack->frames[depth].pending_blank=false;
+}
+
 static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                             md_line line) {
     if(!stack->depth) return false;
@@ -648,7 +657,10 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
               marker.column-f->list_base_column<=3u));
         if(sibling) {
             if(f->ordered==marker.ordered && f->marker==marker.marker) {
-                if(f->pending_blank) md_mark_list_loose(d,f->list);
+                if(f->pending_blank) {
+                    md_mark_list_loose(d,f->list);
+                    md_list_claim_nested_blank(stack);
+                }
                 f->marker_column=marker.column;
                 (void)md_list_append_item(d,stack,f,&marker,s,line.end);
                 return true;
@@ -691,7 +703,10 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
              * begins a literal code block. */
             if(marker_found && marker.column>=f->content_column &&
                marker.column<=f->content_column+3u) {
-                if(f->pending_blank) md_mark_list_loose(d,f->list);
+                if(f->pending_blank) {
+                    md_mark_list_loose(d,f->list);
+                    md_list_claim_nested_blank(stack);
+                }
                 (void)md_list_open(d,stack,f->item,&marker,s,line.end);
                 return true;
             }
@@ -708,6 +723,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                     --f->code_blank_lines;
                 }
                 f->pending_blank=false;
+                md_list_claim_nested_blank(stack);
                 md_line inner=line;
                 inner.begin=body;
                 (void)md_code_line(d,f->code,inner,false);
@@ -715,6 +731,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             }
             if(f->pending_blank) {
                 md_mark_list_loose(d,f->list);
+                md_list_claim_nested_blank(stack);
                 f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
                 f->pending_blank=false;
                 f->code_blank_lines=0u;
