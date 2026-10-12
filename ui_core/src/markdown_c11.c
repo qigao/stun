@@ -251,7 +251,8 @@ static size_t md_code_span_close(const char *s,size_t n,size_t begin,
  * All source/text lifetimes remain owned by the containing RichDoc. */
 static bool md_inline_whitespace_after(const char *s,size_t n,size_t at) {
     if(at>=n) return true; /* end of span */
-    if((unsigned char)s[at]<0x80u) return md_space(s[at]);
+    if((unsigned char)s[at]<0x80u)
+        return md_space(s[at]) || s[at]=='\n' || s[at]=='\r';
     size_t cursor=0u;
     salts_unicode_scalar scalar={0};
     const vstr borrowed=vstr_from_buf(s+at,n-at);
@@ -263,7 +264,8 @@ static bool md_inline_whitespace_after(const char *s,size_t n,size_t at) {
 static bool md_inline_whitespace_before(const char *s,size_t at) {
     if(!at) return true; /* beginning of span */
     const size_t last=at-1u;
-    if((unsigned char)s[last]<0x80u) return md_space(s[last]);
+    if((unsigned char)s[last]<0x80u)
+        return md_space(s[last]) || s[last]=='\n' || s[last]=='\r';
     size_t first=last;
     while(first>0u && at-first<4u &&
           ((unsigned char)s[first]&0xc0u)==0x80u) --first;
@@ -532,6 +534,18 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             owners[++nested]=node;
             p+=events[p].open;
             text_start=p;continue;
+        }
+        /* A paragraph-scoped inline source can contain normalized physical
+         * LF boundaries. Soft breaks belong to the CURRENT typed inline
+         * owner (including emphasis/strong), not a paragraph sibling.
+         * Explicit hard-break origin remains #185, not silently inferred. */
+        if(s[p]=='\n') {
+            md_text(d,owners[nested],s+text_start,p-text_start);
+            if(md_add(d,owners[nested],STUN_UI_BLOCK_LINE_BREAK,0u)==
+               UINT32_MAX) break;
+            ++p;
+            text_start=p;
+            continue;
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
             md_text(d,owners[nested],s+text_start,p-text_start);
@@ -1501,6 +1515,105 @@ static bool md_root_multiline_code_span(stun_md_document *d,
     return false;
 }
 
+/* Root-paragraph inline ownership spans physical lines when * / _ runs
+ * pair across a SOFT line break. Collect only an unindented, uninterrupted,
+ * bounded root paragraph prefix; no quote/list/container, Setext, code,
+ * hard-break admission, or competing block may be crossed here.
+ *
+ * The original raw bytes remain owned unchanged by d->raw. This scratch
+ * UTF-8 buffer normalizes LF/CRLF solely for semantic inline processing.
+ * The same md_inline/md_emph_pairs code produces the typed RichDoc; there
+ * is no second Markdown grammar and no delayed pointer into scratch.
+ *
+ * Delimiters may be parsed twice in this test-and-admit path. Both passes
+ * remain subject to the identical work cap and the 32-deep owner ceiling;
+ * this is bounded by the full original raw-byte input budget. */
+static bool md_root_paragraph_emphasis(stun_md_document *d,
+                                        uint32_t *paragraph,
+                                        md_line first,size_t begin,
+                                        size_t *next_pos) {
+    enum { MD_PARAGRAPH_LOOKAHEAD_LINES=32 };
+    const char *s=d->raw;
+    if(*paragraph!=UINT32_MAX || begin>=first.end ||
+       memchr(s+begin,(char)0x60,first.end-begin)!=NULL)
+        return false;
+    /* #185 owns hard-break origin and spaces before a physical LF. Do not
+     * combine such paragraphs until explicit hard/soft IR is available. */
+    if(s[first.end-1u]=='\\' ||
+       (first.end-begin>=2u && s[first.end-1u]==' ' &&
+        s[first.end-2u]==' '))
+        return false;
+    md_line lines[MD_PARAGRAPH_LOOKAHEAD_LINES]={0};
+    size_t begins[MD_PARAGRAPH_LOOKAHEAD_LINES]={0};
+    lines[0]=first;begins[0]=begin;
+    size_t count=1u,bytes=first.end-begin;
+    for(size_t cursor=first.next;
+        cursor<d->raw_size && count<MD_PARAGRAPH_LOOKAHEAD_LINES;) {
+        const md_line next=md_read_line(d,cursor);
+        const size_t at=md_left(s,next.begin,next.end);
+        if(at!=next.begin || at==next.end ||
+           md_root_code_span_interrupts(d,next) ||
+           memchr(s+at,(char)0x60,next.end-at)!=NULL ||
+           s[next.end-1u]=='\\' ||
+           (next.end-at>=2u && s[next.end-1u]==' ' &&
+            s[next.end-2u]==' '))
+            break;
+        if(bytes>=d->raw_size || next.end-at>d->raw_size-bytes-1u)
+            break;
+        bytes+=1u+next.end-at;
+        lines[count]=next;begins[count]=at;
+        ++count;cursor=next.next;
+    }
+    if(count<2u || bytes>=SIZE_MAX/sizeof(md_emph_event))return false;
+    char *joined=(char*)malloc(bytes+1u);
+    md_emph_event *events=(md_emph_event*)calloc(bytes,sizeof(*events));
+    if(!joined || !events) {
+        free(joined);free(events);
+        md_error(d,STUN_UI_OUT_OF_MEMORY);
+        return false;
+    }
+    size_t used=0u;
+    for(size_t i=0u;i<count;++i) {
+        if(i) joined[used++]='\n';
+        const size_t len=lines[i].end-begins[i];
+        if(len) memcpy(joined+used,s+begins[i],len);
+        used+=len;
+    }
+    joined[used]='\0';
+    if(used!=bytes || !md_emph_pairs(d,joined,bytes,events)) {
+        if(d->error==STUN_UI_OK)md_error(d,STUN_UI_INVALID_ARGUMENT);
+        free(events);free(joined);return false;
+    }
+    /* Check actual matched pair ancestry across at least one LF. Merely
+     * seeing markers on both lines is not sufficient admission. */
+    size_t openings[33]={0u},last_lf=SIZE_MAX;
+    unsigned nested=0u;
+    bool across=false;
+    for(size_t p=0u;p<bytes;++p) {
+        if(joined[p]=='\n')last_lf=p;
+        if(events[p].close) {
+            if(nested && last_lf!=SIZE_MAX &&
+               openings[nested-1u]<last_lf)
+                across=true;
+            if(nested)--nested;
+        }
+        if(events[p].open) {
+            if(nested>=32u)break; /* normal per-line bounded parser */
+            openings[nested++]=p;
+        }
+    }
+    free(events);
+    if(!across) {free(joined);return false;}
+    const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0u);
+    if(node==UINT32_MAX) {free(joined);return false;}
+    *paragraph=node;
+    const bool ok=md_inline(d,node,joined,bytes,0u);
+    free(joined);
+    if(!ok)return true; /* parse error is already recorded; no publication */
+    *next_pos=lines[count-1u].next;
+    return true;
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
     uint32_t indented = UINT32_MAX;
@@ -1711,6 +1824,14 @@ static void md_parse_blocks(stun_md_document *d) {
             if(d->error!=STUN_UI_OK) return;
             continue;
         }
+        /* #182: allow matched runs across SOFT physical paragraph lines
+         * without permitting a match across a block/container boundary. */
+        if(paragraph==UINT32_MAX && lists.depth==0u &&
+           md_root_paragraph_emphasis(d,&paragraph,line,begin,&pos)) {
+            if(d->error!=STUN_UI_OK)return;
+            continue;
+        }
+        if(d->error!=STUN_UI_OK)return;
         if (paragraph==UINT32_MAX) {
             paragraph=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0);
             if (paragraph==UINT32_MAX) return;
