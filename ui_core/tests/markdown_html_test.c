@@ -119,10 +119,16 @@ static const html_fixture cases[] = {
       "<p><em>foo_bar_baz</em></p>\n" },                 /* #376 */
     { "a**\"foo\"**\n",
       "<p>a**&quot;foo&quot;**</p>\n" },                         /* #380 */
+    /* A later delimiter immediately following whitespace may be a nearer
+     * opener; it must retain ownership of the final matching closer. */
+    { "**foo **bar baz**\n",
+      "<p>**foo <strong>bar baz</strong></p>\n" },       /* #471 */
+    { "*foo *bar baz*\n",
+      "<p>*foo <em>bar baz</em></p>\n" },                /* #472 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==54,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==56,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
