@@ -230,12 +230,31 @@ static bool md_code_line(stun_md_document *d, uint32_t parent,
     return true;
 }
 
+/* Code spans are opaque to outer emphasis and link-label delimiter scans,
+ * and close only on an EXACTLY equal-sized backtick run. */
+static size_t md_code_span_close(const char *s,size_t n,size_t begin,
+                                 size_t marker_size);
+
 /* This is a constrained, bounded first pass, not a claim of full CommonMark
  * delimiter-run or nested-link conformance. Unmatched delimiters are text. */
 static size_t md_match(const char *s, size_t n, size_t start,
                        char symbol, size_t count) {
+    const bool opaque_code=symbol=='*' || symbol=='_' ||
+                           symbol=='~' || symbol==']';
     for (size_t p = start; p < n; ++p) {
         if (s[p] == '\\' && p + 1 < n) { ++p; continue; }
+        if(opaque_code && s[p]==(char)0x60) {
+            size_t end=p+1u;
+            while(end<n && s[end]==(char)0x60) ++end;
+            const size_t count_ticks=end-p;
+            const size_t close=md_code_span_close(s,n,end,count_ticks);
+            if(close!=SIZE_MAX) {
+                p=close+count_ticks-1u; /* no delimiter inside a code span */
+                continue;
+            }
+            p=end-1u; /* unmatched runs remain ordinary literal text */
+            continue;
+        }
         if (s[p] != symbol) continue;
         size_t run = 0;
         while (p + run < n && s[p + run] == symbol) ++run;
