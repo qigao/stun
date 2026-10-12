@@ -245,6 +245,37 @@ static size_t md_match(const char *s, size_t n, size_t start,
     return SIZE_MAX;
 }
 
+/* CommonMark backtick delimiters close only on an EXACTLY equal-sized run.
+ * Unlike emphasis/link matching, backslashes are ordinary literal payload
+ * inside a code span, including when directly preceding a backtick. Skip
+ * entire mismatching runs so their suffix cannot impersonate a delimiter. */
+static size_t md_code_span_close(const char *s,size_t n,size_t begin,
+                                 size_t marker_size) {
+    for(size_t p=begin;p<n;) {
+        if(s[p]!=(char)0x60) { ++p;continue; }
+        size_t end=p+1u;
+        while(end<n && s[end]==(char)0x60) ++end;
+        if(end-p==marker_size) return p;
+        p=end;
+    }
+    return SIZE_MAX;
+}
+
+/* Normalize one line of code-span content. Trim ONE ASCII space at each
+ * edge iff BOTH edges are spaces and the content is not all spaces.
+ * NBSP and Unicode payload bytes remain untouched. Multiline code-span
+ * admission is a separate #182 slice; only valid equal-run spans enter here. */
+static void md_code_span_text(stun_md_document *d,uint32_t parent,
+                              const char *s,size_t start,size_t end) {
+    if(end>start+1u && s[start]==' ' && s[end-1u]==' ') {
+        bool nonspace=false;
+        for(size_t i=start;i<end;++i)
+            if(s[i]!=' ') {nonspace=true;break;}
+        if(nonspace) {++start;--end;}
+    }
+    md_text(d,parent,s+start,end-start);
+}
+
 static bool md_inline(stun_md_document *d, uint32_t parent,
                       const char *s, size_t n, unsigned depth) {
     if (depth > 32) {
@@ -265,8 +296,14 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
         }
         if (s[p] == (char)0x60) {
             while (p + marker < n && s[p + marker] == (char)0x60) ++marker;
-            close = md_match(s, n, p+marker, (char)0x60, marker);
-            if (close != SIZE_MAX) kind = STUN_UI_BLOCK_CODE_SPAN;
+            close=md_code_span_close(s,n,p+marker,marker);
+            if(close!=SIZE_MAX) kind=STUN_UI_BLOCK_CODE_SPAN;
+            else {
+                /* Do not reinterpret the suffix of an unmatched run as a
+                 * shorter opener (official CommonMark #347). */
+                p+=marker;
+                continue;
+            }
         } else if (s[p] == '*' || s[p] == '_' || s[p] == '~') {
             if (s[p] == '~' && p + 1 < n && s[p+1] == '~') {
                 marker = 2;
@@ -310,7 +347,7 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
         const uint32_t node = md_add(d,parent,kind,0);
         if (node == UINT32_MAX) return false;
         if (kind == STUN_UI_BLOCK_CODE_SPAN)
-            md_text(d,node,s+opener+marker,close-opener-marker);
+            md_code_span_text(d,node,s,opener+marker,close);
         else if (!md_inline(d,node,s+opener+marker,close-opener-marker,depth+1))
             return false;
         after = close + marker;
