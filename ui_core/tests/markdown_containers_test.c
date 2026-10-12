@@ -71,9 +71,19 @@ static const fixture cases[]={
     {"quote-list-code-interior-blanks","> - Foo\n>\n>       bar\n>\n>\n>       baz\n",
      "<blockquote>\n<ul>\n<li>\n<p>Foo</p>\n<pre><code>bar\n\n\nbaz\n</code></pre>\n</li>\n</ul>\n</blockquote>\n",1,1u},
     {"list-code-trailing-blanks","- Foo\n\n      bar\n\n\n",
-     "<ul>\n<li>\n<p>Foo</p>\n<pre><code>bar\n</code></pre>\n</li>\n</ul>\n",1,1u}
+     "<ul>\n<li>\n<p>Foo</p>\n<pre><code>bar\n</code></pre>\n</li>\n</ul>\n",1,1u},
+    {"cm-285","foo\n*\n\nfoo\n1.\n",
+     "<p>foo\n*</p>\n<p>foo\n1.</p>\n",-1,0u},
+    {"cm-315","* a\n*\n\n* c\n",
+     "<ul>\n<li>\n<p>a</p>\n</li>\n<li></li>\n<li>\n<p>c</p>\n</li>\n</ul>\n",1,1u},
+    {"root-empty-list-item","*\n",
+     "<ul>\n<li></li>\n</ul>\n",0,1u},
+    {"quote-marked-empty-not-interrupt","> foo\n> *\n",
+     "<blockquote>\n<p>foo\n*</p>\n</blockquote>\n",-1,0u},
+    {"quote-lazy-empty-not-interrupt","> foo\n*\n",
+     "<blockquote>\n<p>foo\n*</p>\n</blockquote>\n",-1,0u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==25u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==30u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
