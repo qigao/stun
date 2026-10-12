@@ -80,3 +80,20 @@ official-spec test \`gate_commonmark_indented.py\` checks explicit numbered
 CommonMark 0.31.2 samples against **official expected HTML**. All 652 examples
 remain in the separately counted diagnostic survey. Loose list precedence
 (#108/#109) remains diagnostic until typed loose-list semantics are added.
+
+## List-container conformance subset (#181)
+
+A bounded C11 list-container frame stack now owns list/item continuation,
+marker-family boundaries, nested lists, blank lines and selected indented
+code/quote items. Owned binary `stun_ui_list_semantics` metadata records the
+exact ordered start (including zero), list marker and loose/tight distinction.
+The existing HTML renderer consumes these typed facts without reparsing
+Markdown. Legacy projected lists with zero metadata retain tight semantics.
+
+`stun_markdown_containers_test` now has **13** exact HTML/AST fixtures plus
+an atomic depth-exhaustion regression. The explicit official CommonMark
+0.31.2 gate covers #108/#109 and list precedence #254/#256/#301/#302/#304/#305
+alongside the previous 13 cases: **21 strict IDs** (not full 652 compliance).
+The full **652**-example diagnostic remains separate. Other lazy/container,
+task and raw-HTML semantics stay under #181/#172 and must not be reported as
+supported without passing the corresponding official HTML.

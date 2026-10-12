@@ -16,6 +16,7 @@ struct stun_md_document {
     size_t text_size;
     char *metadata;
     size_t metadata_size;
+    size_t metadata_capacity;
     stun_ui_block *nodes;
     stun_ui_block_metadata *node_metadata;
     size_t node_count;
@@ -118,10 +119,31 @@ static bool md_store(stun_md_document *d, bool is_meta,
     size_t *used = is_meta ? &d->metadata_size : &d->text_size;
     char *target = is_meta ? d->metadata : d->text;
     if (d->error != STUN_UI_OK) return false;
-    if (n > d->raw_size - *used) {
-        md_error(d, STUN_UI_CAPACITY_EXCEEDED);
-        return false;
+    size_t limit=is_meta ? d->metadata_capacity : d->raw_size;
+    if(*used>limit) {md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;}
+    if(is_meta && n>limit-*used) {
+        /* Bound metadata by the node budget; short Markdown sources may still
+         * need eight metadata bytes for one list. */
+        if(d->node_limit>SIZE_MAX/sizeof(stun_ui_list_semantics) ||
+           d->raw_size>SIZE_MAX-d->node_limit*sizeof(stun_ui_list_semantics)) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED); return false;
+        }
+        const size_t maximum=d->raw_size+
+                              d->node_limit*sizeof(stun_ui_list_semantics);
+        if(*used>maximum || n>maximum-*used) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+        }
+        size_t cap=limit?limit:1u;
+        while(cap<*used+n) {
+            if(cap>(maximum-1u)/2u) {cap=maximum;break;}
+            cap=cap*2u+1u;
+        }
+        char *data=(char*)realloc(d->metadata,cap+1u);
+        if(!data) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
+        d->metadata=data;d->metadata_capacity=cap;limit=cap;
     }
+    if(n>limit-*used) {md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;}
+    target=is_meta ? d->metadata : d->text;
     *begin = *used;
     if (n) memcpy(target + *used, s, n);
     *used += n;
@@ -150,6 +172,25 @@ static void md_meta(stun_md_document *d, uint32_t node,
         d->node_metadata[node] = (stun_ui_block_metadata){from,to};
 }
 
+
+/* List metadata is owned by the parser; update before publishing the view. */
+static bool md_list_meta(stun_md_document *d, uint32_t id,
+                         uint32_t start, char marker) {
+    const stun_ui_list_semantics info={start,(uint8_t)marker,0u,{0u,0u}};
+    md_meta(d,id,(const char*)&info,sizeof(info));
+    return d->error==STUN_UI_OK;
+}
+static void md_mark_list_loose(stun_md_document *d, uint32_t id) {
+    if(id>=d->node_count) {md_error(d,STUN_UI_INVALID_ARGUMENT);return;}
+    const stun_ui_block_metadata span=d->node_metadata[id];
+    if(span.byte_end-span.byte_begin!=sizeof(stun_ui_list_semantics)) {
+        md_error(d,STUN_UI_INVALID_ARGUMENT);return;
+    }
+    stun_ui_list_semantics info;
+    memcpy(&info,d->metadata+span.byte_begin,sizeof(info));
+    info.loose=1u;
+    memcpy(d->metadata+span.byte_begin,&info,sizeof(info));
+}
 
 /* CommonMark tab stops are four *columns*, not four bytes. For a root-level
  * indented code line, consume precisely four indentation columns. A tab
@@ -373,6 +414,251 @@ static bool md_task_marker(const char *s, size_t start, size_t end,
     return true;
 }
 
+
+enum { MD_LIST_MAX_DEPTH = 32 };
+typedef struct md_list_marker_info {
+    size_t column;
+    size_t content_column;
+    size_t content_offset;
+    uint32_t start;
+    char marker;
+    bool ordered;
+} md_list_marker_info;
+typedef struct md_list_frame {
+    uint32_t list, item, paragraph, code, quote;
+    size_t marker_column, content_column, list_base_column;
+    char marker;
+    bool ordered, pending_blank, empty_item;
+} md_list_frame;
+typedef struct md_list_stack {
+    md_list_frame frames[MD_LIST_MAX_DEPTH];
+    size_t depth;
+} md_list_stack;
+
+/* CommonMark indentation is measured in source columns. Relative container
+ * indentation is derived after matching the outer container; a tab occupies
+ * the remainder of its four-column stop. */
+static size_t md_columns(const char *s,size_t begin,size_t end) {
+    size_t col=0u;
+    for(size_t p=begin;p<end;++p) {
+        if(s[p]==' ') ++col;
+        else if(s[p]=='\t') col+=4u-(col%4u);
+        else break;
+    }
+    return col;
+}
+static size_t md_skip_columns(const char *s,size_t begin,size_t end,
+                              size_t wanted) {
+    size_t col=0u, p=begin;
+    while(p<end && col<wanted && md_space(s[p])) {
+        col+=s[p]=='\t'?4u-(col%4u):1u;
+        ++p;
+    }
+    return col>=wanted?p:begin;
+}
+
+/* Admit a list marker, recording the marker's visual column, exact ordered
+ * start, and the item content column. Marker type is part of list identity. */
+static bool md_list_token(const char *s,md_line line,
+                          md_list_marker_info *out) {
+    const size_t b=md_left(s,line.begin,line.end);
+    bool ordered=false;
+    size_t content=0u;
+    if(!md_list_marker(s,b,line.end,&ordered,&content)) return false;
+    size_t marker_end=b;
+    uint32_t start=0u;
+    char marker=s[b];
+    if(ordered) {
+        while(marker_end<line.end && s[marker_end]>='0' &&
+              s[marker_end]<='9') {
+            start=start*10u+(uint32_t)(s[marker_end]-'0');
+            ++marker_end;
+        }
+        marker=s[marker_end];
+        ++marker_end;
+    } else ++marker_end;
+    const size_t marker_col=md_columns(s,line.begin,b);
+    size_t total=marker_col+(marker_end-b);
+    for(size_t p=marker_end;p<content;++p)
+        total+=s[p]=='\t' ? 4u-(total%4u) : 1u;
+    /* Empty item still occupies one separating space after its marker. */
+    if(content==line.end && marker_end==line.end)
+        total=marker_col+(marker_end-b)+1u;
+    *out=(md_list_marker_info){
+        marker_col,total,content,start,marker,ordered
+    };
+    return true;
+}
+
+static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
+                                const md_list_marker_info *m,
+                                const char *s,size_t end) {
+    char state=0;
+    size_t content=m->content_offset;
+    const bool task=md_task_marker(s,content,end,&state,&content);
+    f->item=md_add(d,f->list,task ? STUN_UI_BLOCK_TASK_ITEM :
+                                    STUN_UI_BLOCK_LIST_ITEM,0u);
+    if(f->item==UINT32_MAX) return false;
+    if(task) {
+        const uint32_t checkbox=md_add(d,f->item,STUN_UI_BLOCK_CHECKBOX,0u);
+        if(checkbox==UINT32_MAX) return false;
+        md_meta(d,checkbox,&state,1u);
+        if(d->error!=STUN_UI_OK) return false;
+    }
+    /* A marker-only item is a genuinely empty item. Do not manufacture
+     * an empty paragraph or permit an intervening blank to attach a
+     * following top-level paragraph to it. */
+    f->empty_item=content==end && !task;
+    f->paragraph=UINT32_MAX;
+    if(!f->empty_item) {
+        f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
+        if(f->paragraph==UINT32_MAX) return false;
+        if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
+    }
+    f->content_column=m->content_column;
+    f->code=f->quote=UINT32_MAX;
+    f->pending_blank=false;
+    return d->error==STUN_UI_OK;
+}
+
+static bool md_list_open(stun_md_document *d,md_list_stack *stack,
+                         uint32_t parent,const md_list_marker_info *m,
+                         const char *s,size_t end) {
+    if(stack->depth>=MD_LIST_MAX_DEPTH) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    const uint32_t list=md_add(d,parent,m->ordered ?
+        STUN_UI_BLOCK_ORDERED_LIST : STUN_UI_BLOCK_LIST,0u);
+    if(list==UINT32_MAX || !md_list_meta(d,list,m->start,m->marker))
+        return false;
+    md_list_frame *f=&stack->frames[stack->depth++];
+    *f=(md_list_frame){0};
+    f->list=list;
+    f->marker=m->marker;
+    f->ordered=m->ordered;
+    f->marker_column=m->column;
+    f->list_base_column=m->column;
+    return md_list_append_item(d,f,m,s,end);
+}
+
+static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
+                            md_line line) {
+    if(!stack->depth) return false;
+    const char *s=d->raw;
+    if(md_blank(s,line.begin,line.end)) {
+        /* A separator can loosen an enclosing list item even when the
+         * deepest nested list closes before the next nonblank line. */
+        for(size_t depth=0u;depth<stack->depth;++depth)
+            stack->frames[depth].pending_blank=true;
+        return true;
+    }
+    const size_t indent=md_columns(s,line.begin,md_left(s,line.begin,line.end));
+    md_list_marker_info marker={0};
+    const bool marker_found=md_list_token(s,line,&marker);
+    const size_t line_begin=md_left(s,line.begin,line.end);
+    /* Thematic breaks interrupt active list items (including '* * *').
+     * They do not become a new list item merely because '*' is a marker. */
+    if(indent<=3u && md_rule(s,line_begin,line.end)) {
+        stack->depth=0u;
+        return false;
+    }
+    while(stack->depth) {
+        md_list_frame *f=&stack->frames[stack->depth-1u];
+        /* A sibling's marker can shift between 0..3 root columns, while
+         * its content indent still determines the nesting boundary. For
+         * instance '- a /  - b /   - c' denotes three siblings when the
+         * preceding marker is at the previous column. */
+        const bool sibling=marker_found &&
+            marker.column>=f->list_base_column &&
+            (marker.column==f->marker_column ||
+             (marker.column<f->content_column &&
+              marker.column-f->list_base_column<=3u));
+        if(sibling) {
+            if(f->ordered==marker.ordered && f->marker==marker.marker) {
+                if(f->pending_blank) md_mark_list_loose(d,f->list);
+                f->marker_column=marker.column;
+                (void)md_list_append_item(d,f,&marker,s,line.end);
+                return true;
+            }
+            --stack->depth; /* differing marker families never coalesce */
+            continue;
+        }
+        if(f->empty_item && f->pending_blank) {
+            --stack->depth;
+            continue;
+        }
+        if(indent>=f->content_column) {
+            const size_t body=md_skip_columns(s,line.begin,line.end,
+                                              f->content_column);
+            if(body==line.begin && f->content_column) {
+                md_error(d,STUN_UI_INVALID_ARGUMENT);return true;
+            }
+            /* A nested list is admitted after matching this item, never as
+             * a new root list. Indentation four columns deeper instead
+             * begins a literal code block. */
+            if(marker_found && marker.column>=f->content_column &&
+               marker.column<=f->content_column+3u) {
+                if(f->pending_blank) md_mark_list_loose(d,f->list);
+                (void)md_list_open(d,stack,f->item,&marker,s,line.end);
+                return true;
+            }
+            if(f->pending_blank) {
+                md_mark_list_loose(d,f->list);
+                f->paragraph=f->code=f->quote=UINT32_MAX;
+                f->pending_blank=false;
+            }
+            const size_t inner_indent=indent-f->content_column;
+            if(inner_indent>=4u && f->paragraph==UINT32_MAX &&
+               f->quote==UINT32_MAX) {
+                if(f->code==UINT32_MAX) {
+                    f->code=md_add(d,f->item,STUN_UI_BLOCK_CODE_INDENTED,0u);
+                    if(f->code==UINT32_MAX) return true;
+                }
+                md_line inner=line;
+                inner.begin=body;
+                (void)md_code_line(d,f->code,inner,false);
+                return true;
+            }
+            f->code=UINT32_MAX;
+            if(body<line.end && s[body]=='>') {
+                if(f->quote==UINT32_MAX) {
+                    f->quote=md_add(d,f->item,STUN_UI_BLOCK_QUOTE,0u);
+                    if(f->quote==UINT32_MAX) return true;
+                }
+                const size_t qb=md_left(s,body+1u,line.end);
+                const uint32_t paragraph=md_add(d,f->quote,
+                                                  STUN_UI_BLOCK_PARAGRAPH,0u);
+                if(paragraph!=UINT32_MAX)
+                    (void)md_inline(d,paragraph,s+qb,line.end-qb,0u);
+                f->paragraph=UINT32_MAX;
+                return true;
+            }
+            f->quote=UINT32_MAX;
+            if(f->paragraph==UINT32_MAX) {
+                f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
+                if(f->paragraph==UINT32_MAX) return true;
+            } else (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
+            const size_t text_begin=md_left(s,body,line.end);
+            (void)md_inline(d,f->paragraph,s+text_begin,
+                            line.end-text_begin,0u);
+            return true;
+        }
+        /* Lazy non-marker line continuation is allowed only within an
+         * unseparated item paragraph; a blank line closes that admission. */
+        if(!f->pending_blank &&
+           (!marker_found || marker.column>3u) &&
+           f->paragraph!=UINT32_MAX && !md_rule(s,line.begin,line.end) &&
+           s[md_left(s,line.begin,line.end)]!='>') {
+            (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
+            const size_t body=md_left(s,line.begin,line.end);
+            (void)md_inline(d,f->paragraph,s+body,line.end-body,0u);
+            return true;
+        }
+        --stack->depth;
+    }
+    return false;
+}
+
 /* GFM pipe-table subset. Escaped pipes and backtick code spans do not
  * separate cells. Header/delimiter column counts must agree.
  * A table is admitted only after two-line lookahead succeeds. */
@@ -494,12 +780,11 @@ static bool md_table_starts_new_block(const char *s, size_t b, size_t e) {
 
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
-    uint32_t list = UINT32_MAX;
     uint32_t quote = UINT32_MAX;
-    uint32_t previous_item_paragraph = UINT32_MAX;
     uint32_t indented = UINT32_MAX;
     size_t pending_code_blank = SIZE_MAX;
-    bool previous_ordered = false, code_open = false;
+    md_list_stack lists={0};
+    bool code_open=false;
     md_fence fence = {0,0,UINT32_MAX};
 
     for (size_t pos=0; pos<d->raw_size && d->error==STUN_UI_OK;) {
@@ -524,6 +809,8 @@ static void md_parse_blocks(stun_md_document *d) {
             md_text(d,fence.node,s+line.begin,size);
             continue;
         }
+        if(md_list_consume(d,&lists,line)) continue;
+        if(d->error!=STUN_UI_OK) return;
         /* Keep interstitial blank lines pending until another indented line
          * proves that they are interior. On termination/EOF they vanish. */
         if (indented!=UINT32_MAX) {
@@ -549,8 +836,6 @@ static void md_parse_blocks(stun_md_document *d) {
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
             quote=UINT32_MAX;
-            list=UINT32_MAX;
-            previous_item_paragraph=UINT32_MAX;
             continue;
         }
         /* A non-quote line closes the previous quote paragraph before block
@@ -561,12 +846,11 @@ static void md_parse_blocks(stun_md_document *d) {
         /* Four indentation columns select literal code before checking ATX,
          * thematic rules, fences, or other block markers. Indented code
          * cannot interrupt a paragraph or the active list-item continuation. */
-        if(paragraph==UINT32_MAX && list==UINT32_MAX &&
+        if(paragraph==UINT32_MAX && lists.depth==0u &&
            md_code_unindent(s,line.begin,line.end)>line.begin) {
             indented=md_add(d,0u,STUN_UI_BLOCK_CODE_INDENTED,0u);
             if(indented==UINT32_MAX || !md_code_line(d,indented,line,false))
                 return;
-            previous_item_paragraph=UINT32_MAX;
             continue;
         }
         unsigned setext = md_setext(s,begin,end);
@@ -574,13 +858,12 @@ static void md_parse_blocks(stun_md_document *d) {
             d->nodes[paragraph].kind=STUN_UI_BLOCK_HEADING;
             d->nodes[paragraph].heading_level=setext;
             paragraph=UINT32_MAX;
-            list=UINT32_MAX;
             quote=UINT32_MAX;
             continue;
         }
         if (indent <= 3 && md_rule(s,begin,end)) {
             (void)md_add(d,0u,STUN_UI_BLOCK_RULE,0);
-            paragraph=list=quote=UINT32_MAX;
+            paragraph=quote=UINT32_MAX;
             continue;
         }
         char marker=0; size_t run=0, info_b=0,info_e=0;
@@ -591,7 +874,7 @@ static void md_parse_blocks(stun_md_document *d) {
             md_meta(d,node,s+info_b,info_e-info_b);
             fence=(md_fence){marker,run,node};
             code_open=true;
-            paragraph=list=quote=UINT32_MAX;
+            paragraph=quote=UINT32_MAX;
             continue;
         }
         if (indent<=3) {
@@ -601,7 +884,7 @@ static void md_parse_blocks(stun_md_document *d) {
                 const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_HEADING,level);
                 if (node==UINT32_MAX) return;
                 (void)md_inline(d,node,s+hstart,hend-hstart,0);
-                paragraph=list=quote=UINT32_MAX;
+                paragraph=quote=UINT32_MAX;
                 continue;
             }
         }
@@ -617,13 +900,12 @@ static void md_parse_blocks(stun_md_document *d) {
                 if (paragraph==UINT32_MAX) return;
             } else (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
             (void)md_inline(d,paragraph,s+begin,end-begin,0);
-            list=UINT32_MAX;
             continue;
         }
         if (quote!=UINT32_MAX) { quote=paragraph=UINT32_MAX; }
         /* Start a table only at a new block boundary. */
         if (indent<=3 && paragraph==UINT32_MAX &&
-            list==UINT32_MAX && pos<d->raw_size) {
+            lists.depth==0u && pos<d->raw_size) {
             const md_line sep=md_read_line(d,pos);
             size_t columns=0, delimiter_columns=0;
             if (md_table_scan(s,begin,end,false,true,&columns) &&
@@ -646,47 +928,19 @@ static void md_parse_blocks(stun_md_document *d) {
                         return;
                     pos=row.next;
                 }
-                paragraph=list=quote=previous_item_paragraph=UINT32_MAX;
+                paragraph=quote=UINT32_MAX;
                 continue;
             }
         }
-        bool ordered=false;size_t item_start=0;
-        if (indent<=3 && md_list_marker(s,begin,end,&ordered,&item_start)) {
-            if (list==UINT32_MAX || previous_ordered!=ordered) {
-                list=md_add(d,0u,ordered?
-                    STUN_UI_BLOCK_ORDERED_LIST:STUN_UI_BLOCK_LIST,0);
-                if (list==UINT32_MAX) return;
-            }
-            char check_state=0;
-            size_t task_content=item_start;
-            const bool task=md_task_marker(s,item_start,end,
-                                          &check_state,&task_content);
-            const uint32_t item=md_add(d,list,
-                task ? STUN_UI_BLOCK_TASK_ITEM : STUN_UI_BLOCK_LIST_ITEM,0);
-            if (item==UINT32_MAX) return;
-            if(task) {
-                const uint32_t checkbox=md_add(d,item,STUN_UI_BLOCK_CHECKBOX,0);
-                if(checkbox==UINT32_MAX) return;
-                md_meta(d,checkbox,&check_state,1u);
-                if(d->error!=STUN_UI_OK) return;
-                item_start=task_content;
-            }
-            previous_item_paragraph=md_add(d,item,STUN_UI_BLOCK_PARAGRAPH,0);
-            if (previous_item_paragraph==UINT32_MAX) return;
-            (void)md_inline(d,previous_item_paragraph,
-                            s+item_start,end-item_start,0);
-            previous_ordered=ordered;
-            paragraph=UINT32_MAX;
+        md_list_marker_info top_marker={0};
+        if(indent<=3 && md_list_token(s,line,&top_marker) &&
+           (paragraph==UINT32_MAX || !top_marker.ordered ||
+            top_marker.start==1u) &&
+           !md_rule(s,begin,end)) {
+            if(!md_list_open(d,&lists,0u,&top_marker,s,end)) return;
+            paragraph=quote=UINT32_MAX;
             continue;
         }
-        if (list!=UINT32_MAX && previous_item_paragraph!=UINT32_MAX &&
-            indent>=2) {
-            (void)md_add(d,previous_item_paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
-            (void)md_inline(d,previous_item_paragraph,s+begin,end-begin,0);
-            continue;
-        }
-        list=UINT32_MAX;
-        previous_item_paragraph=UINT32_MAX;
         if (paragraph==UINT32_MAX) {
             paragraph=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0);
             if (paragraph==UINT32_MAX) return;
@@ -739,6 +993,7 @@ stun_ui_status stun_md_parse(const char *input,size_t length,
     d->raw=(char*)malloc(length+1u);
     d->text=(char*)malloc(length+1u);
     d->metadata=(char*)malloc(length+1u);
+    d->metadata_capacity=length;
     if (!d->raw || !d->text || !d->metadata) {
         stun_md_document_destroy(d);
         return STUN_UI_OUT_OF_MEMORY;

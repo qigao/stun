@@ -151,6 +151,14 @@ stun_ui_status stun_ui_document_visit(
  * node IDs are deterministic only within a snapshot; streaming reconciliation
  * must use a separate identity policy rather than relying on ordinal IDs.
  */
+/* Owned eight-byte metadata payload for list semantics. */
+typedef struct stun_ui_list_semantics {
+    uint32_t start; /* 0 for bullet, 0..999999999 for ordered */
+    uint8_t marker; /* '-', '+', '*', '.', ')' */
+    uint8_t loose; /* 0 tight; 1 loose */
+    uint8_t reserved[2];
+} stun_ui_list_semantics;
+
 typedef struct stun_ui_block_metadata {
     size_t byte_begin;
     size_t byte_end;

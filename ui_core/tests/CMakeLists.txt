@@ -34,3 +34,9 @@ add_executable(stun_markdown_indented_test markdown_indented_test.c)
 target_compile_features(stun_markdown_indented_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_indented_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_indented_test COMMAND stun_markdown_indented_test)
+
+# CommonMark #181 typed list/container metadata, exact HTML and ownership.
+add_executable(stun_markdown_containers_test markdown_containers_test.c)
+target_compile_features(stun_markdown_containers_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_containers_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_containers_test COMMAND stun_markdown_containers_test)
