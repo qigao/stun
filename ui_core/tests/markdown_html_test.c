@@ -181,10 +181,31 @@ static const html_fixture cases[] = {
     { "*foo *bar**\n", "<p><em>foo <em>bar</em></em></p>\n" }, /* #409 */
     { "**foo **bar****\n",
       "<p><strong>foo <strong>bar</strong></strong></p>\n" }, /* #427 */
+    /* #182: maximal 1/2/3+ runs, nested strong/emphasis, and rule-of-three.
+     * Reference bytes cross-checked against CommonMark 0.31.2 semantics.
+     * These are independent strict HTML fixtures, not the full 652 gate. */
+    { "***foo***\n", "<p><em><strong>foo</strong></em></p>\n" },
+    { "___foo___\n", "<p><em><strong>foo</strong></em></p>\n" },
+    { "***foo**\n", "<p>*<strong>foo</strong></p>\n" },
+    { "***foo* bar**\n",
+      "<p><strong><em>foo</em> bar</strong></p>\n" },
+    { "*foo**bar*\n", "<p><em>foo**bar</em></p>\n" },
+    { "**foo*, bar**\n",
+      "<p><em><em>foo</em>, bar</em>*</p>\n" },
+    { "*foo **bar***\n",
+      "<p><em>foo <strong>bar</strong></em></p>\n" },
+    { "***foo**bar*\n",
+      "<p><em><strong>foo</strong>bar</em></p>\n" },
+    { "*foo**bar**baz*\n",
+      "<p><em>foo<strong>bar</strong>baz</em></p>\n" },
+    { "a***b***c\n",
+      "<p>a<em><strong>b</strong></em>c</p>\n" },
+    { "***foo " TICK "a*b" TICK " bar***\n",
+      "<p><em><strong>foo <code>a*b</code> bar</strong></em></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==81,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==92,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
