@@ -422,99 +422,227 @@ static void md_code_span_text(stun_md_document *d,uint32_t parent,
     free(normalized);
 }
 
-static bool md_inline(stun_md_document *d, uint32_t parent,
-                      const char *s, size_t n, unsigned depth) {
-    if (depth > 32) {
-        md_error(d, STUN_UI_CAPACITY_EXCEEDED);
-        return false;
-    }
-    size_t p = 0, text_start = 0;
-    while (p < n && d->error == STUN_UI_OK) {
-        size_t opener = p, close = SIZE_MAX, after = 0;
-        stun_ui_block_kind kind = STUN_UI_BLOCK_TEXT;
-        size_t marker = 1;
+/* Runs retain their original source offsets, with closers consuming from the
+ * LEFT and openers from the RIGHT. Each consumed marker receives exactly one
+ * event; the source buffer itself is never changed. This is one C11 grammar,
+ * not a fallback renderer or a second Markdown parser. */
+typedef struct md_emph_run {
+    size_t start, remaining, consumed_left;
+    char marker;
+    bool can_open, can_close, inactive;
+} md_emph_run;
 
-        if (s[p] == '\\' && p + 1 < n && md_ascii_punct(s[p+1])) {
-            md_text(d, parent, s+text_start, p-text_start);
-            md_text(d, parent, s+p+1, 1);
-            p += 2; text_start = p;
+typedef struct md_emph_event {
+    uint8_t open, close; /* 1: emphasis, 2: strong, 0: literal */
+} md_emph_event;
+
+/* Build all * / _ pairs before emitting RichDoc nodes. This is essential
+ * when one delimiter run is both opener and closer, when runs have lengths
+ * 1/2/3+, or when an inner opener owns the nearer closer. Code/link/strike
+ * payloads are scanned by their existing canonical inline semantics.
+ *
+ * A pair is forbidden by CommonMark's rule of three if either endpoint can
+ * both open and close, the combined remaining lengths are divisible by 3,
+ * and at least one remaining length is NOT divisible by 3.
+ *
+ * Comparison work is capped relative to this inline source's byte count:
+ * malicious alternating runs fail atomically instead of searching forever. */
+static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
+                          md_emph_event *events) {
+    if(n>SIZE_MAX/sizeof(md_emph_run)) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    md_emph_run *runs=(md_emph_run*)malloc((n?n:1u)*sizeof(*runs));
+    if(!runs) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
+    size_t count=0u;
+    for(size_t p=0u;p<n;) {
+        if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+            p+=2u;continue;
+        }
+        if(s[p]==(char)0x60) {
+            size_t end=p+1u;
+            while(end<n && s[end]==(char)0x60) ++end;
+            const size_t closer=md_code_span_close(s,n,end,end-p);
+            p=closer==SIZE_MAX?end:closer+end-p;
             continue;
         }
-        if (s[p] == (char)0x60) {
-            while (p + marker < n && s[p + marker] == (char)0x60) ++marker;
-            close=md_code_span_close(s,n,p+marker,marker);
-            if(close!=SIZE_MAX) kind=STUN_UI_BLOCK_CODE_SPAN;
-            else {
-                /* Do not reinterpret the suffix of an unmatched run as a
-                 * shorter opener (official CommonMark #347). */
-                p+=marker;
-                continue;
+        if(s[p]=='[' || (s[p]=='!' && p+1u<n && s[p+1u]=='[')) {
+            const size_t b=p+(s[p]=='!'?2u:1u);
+            const size_t square=md_match(s,n,b,']',1u);
+            if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
+                const size_t round=md_match(s,n,square+2u,')',1u);
+                if(round!=SIZE_MAX) {p=round+1u;continue;}
             }
-        } else if (s[p] == '*' || s[p] == '_' || s[p] == '~') {
-            if (s[p] == '~' && p + 1 < n && s[p+1] == '~') {
-                marker = 2;
-                kind = STUN_UI_BLOCK_STRIKETHROUGH;
-            } else if (p + 1 < n && s[p+1] == s[p]) {
-                marker = 2;
-                kind = STUN_UI_BLOCK_STRONG;
-            } else if (s[p] != '~') {
-                kind = STUN_UI_BLOCK_EMPHASIS;
-            }
-            bool can_open=true;
-            if(s[p]=='*' || s[p]=='_') {
-                bool can_close=false;
-                md_emph_flanking(s,n,p,marker,s[p],
-                                 &can_open,&can_close);
-            }
-            if(!can_open) {
-                /* Do not reinterpret the suffix of a rejected run as a
-                 * shorter delimiter (the same rule as unmatched backticks). */
-                p+=marker;
-                continue;
-            }
-            if (kind != STUN_UI_BLOCK_TEXT && p+marker < n &&
-                !md_space(s[p+marker])) {
-                close = md_match(s, n, p+marker, s[p], marker);
-                if (close != SIZE_MAX && close == p+marker)
-                    close=SIZE_MAX;
-            }
-        } else if (s[p] == '[' || (s[p] == '!' && p+1 < n && s[p+1] == '[')) {
-            const bool image = s[p] == '!';
-            const size_t b = p + (image ? 2 : 1);
-            const size_t square = md_match(s,n,b,']',1);
-            if (square != SIZE_MAX && square+1 < n && s[square+1] == '(') {
-                const size_t round = md_match(s,n,square+2,')',1);
-                if (round != SIZE_MAX) {
-                    md_text(d,parent,s+text_start,p-text_start);
-                    const uint32_t node = md_add(
-                        d,parent,image ? STUN_UI_BLOCK_IMAGE : STUN_UI_BLOCK_LINK,0);
-                    if (node == UINT32_MAX) return false;
-                    md_meta(d,node,s+square+2,round-(square+2));
-                    if (!md_inline(d,node,s+b,square-b,depth+1)) return false;
-                    p = round + 1; text_start = p;
+        }
+        if(s[p]=='~' && p+1u<n && s[p+1u]=='~') {
+            const size_t closer=md_match(s,n,p+2u,'~',2u);
+            if(closer!=SIZE_MAX) {p=closer+2u;continue;}
+        }
+        if(s[p]=='*' || s[p]=='_') {
+            size_t end=p+1u;
+            while(end<n && s[end]==s[p]) ++end;
+            bool can_open=false,can_close=false;
+            md_emph_flanking(s,n,p,end-p,s[p],&can_open,&can_close);
+            if(can_open || can_close)
+                runs[count++]=(md_emph_run){
+                    .start=p,.remaining=end-p,.consumed_left=0u,
+                    .marker=s[p],.can_open=can_open,.can_close=can_close,
+                    .inactive=false
+                };
+            p=end;continue;
+        }
+        ++p;
+    }
+    const size_t limit=n>(SIZE_MAX-64u)/64u?
+                        SIZE_MAX:n*64u+64u;
+    size_t examined=0u;
+    for(size_t c=0u;c<count && d->error==STUN_UI_OK;++c) {
+        md_emph_run *closer=&runs[c];
+        if(!closer->can_close || closer->inactive) continue;
+        while(closer->remaining) {
+            size_t candidate=SIZE_MAX;
+            for(size_t k=c;k>0u;) {
+                --k;
+                if(++examined>limit) {
+                    md_error(d,STUN_UI_CAPACITY_EXCEEDED);break;
+                }
+                const md_emph_run *opener=&runs[k];
+                if(opener->inactive || !opener->remaining ||
+                   !opener->can_open || opener->marker!=closer->marker)
                     continue;
+                const size_t sum_mod3=(opener->remaining%3u+
+                                       closer->remaining%3u)%3u;
+                const bool odd_match=
+                    (opener->can_close || closer->can_open) &&
+                    sum_mod3==0u &&
+                    (opener->remaining%3u!=0u ||
+                     closer->remaining%3u!=0u);
+                if(!odd_match) {candidate=k;break;}
+            }
+            if(d->error!=STUN_UI_OK || candidate==SIZE_MAX) break;
+            md_emph_run *opener=&runs[candidate];
+            const uint8_t width=opener->remaining>=2u &&
+                                closer->remaining>=2u?2u:1u;
+            const size_t opening=opener->start+opener->consumed_left+
+                                 opener->remaining-width;
+            const size_t closing=closer->start+closer->consumed_left;
+            if(opening>=n || closing>=n ||
+               events[opening].open || events[closing].close ||
+               opening+width>closing) {
+                md_error(d,STUN_UI_INVALID_ARGUMENT);break;
+            }
+            events[opening].open=width;
+            events[closing].close=width;
+            opener->remaining-=width;
+            closer->remaining-=width;
+            closer->consumed_left+=width;
+            /* Delimiters enclosed by a completed match cannot subsequently
+             * participate in a crossing pair. They remain literal text if
+             * not already consumed by a nested pair. */
+            for(size_t j=candidate+1u;j<c;++j)
+                runs[j].inactive=true;
+        }
+    }
+    free(runs);
+    return d->error==STUN_UI_OK;
+}
+
+/* Emit the paired spans as typed nodes in source order. Node ownership is
+ * explicit, with a bounded ancestor stack; escapes and code/link payloads
+ * still follow their original single C11 producer. */
+static bool md_inline(stun_md_document *d, uint32_t parent,
+                      const char *s, size_t n, unsigned depth) {
+    if(depth>32u || n>SIZE_MAX/sizeof(md_emph_event)) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    md_emph_event *events=(md_emph_event*)calloc(
+        n?n:1u,sizeof(*events));
+    if(!events) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
+    if(!md_emph_pairs(d,s,n,events)) {
+        free(events);return false;
+    }
+    uint32_t owners[33]={0u};
+    owners[0]=parent;
+    unsigned nested=0u;
+    size_t p=0u,text_start=0u;
+    while(p<n && d->error==STUN_UI_OK) {
+        if(events[p].close) {
+            if(!nested) {md_error(d,STUN_UI_INVALID_ARGUMENT);break;}
+            md_text(d,owners[nested],s+text_start,p-text_start);
+            --nested;
+            p+=events[p].close;
+            text_start=p;continue;
+        }
+        if(events[p].open) {
+            if(depth+nested>=32u) {
+                md_error(d,STUN_UI_CAPACITY_EXCEEDED);break;
+            }
+            md_text(d,owners[nested],s+text_start,p-text_start);
+            const stun_ui_block_kind kind=events[p].open==2u?
+                STUN_UI_BLOCK_STRONG:STUN_UI_BLOCK_EMPHASIS;
+            const uint32_t node=md_add(d,owners[nested],kind,0u);
+            if(node==UINT32_MAX) break;
+            owners[++nested]=node;
+            p+=events[p].open;
+            text_start=p;continue;
+        }
+        if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+            md_text(d,owners[nested],s+text_start,p-text_start);
+            md_text(d,owners[nested],s+p+1u,1u);
+            p+=2u;text_start=p;continue;
+        }
+        if(s[p]==(char)0x60) {
+            size_t end=p+1u;
+            while(end<n && s[end]==(char)0x60) ++end;
+            const size_t close=md_code_span_close(s,n,end,end-p);
+            if(close!=SIZE_MAX) {
+                md_text(d,owners[nested],s+text_start,p-text_start);
+                const uint32_t node=md_add(d,owners[nested],
+                    STUN_UI_BLOCK_CODE_SPAN,0u);
+                if(node==UINT32_MAX) break;
+                md_code_span_text(d,node,s,end,close);
+                p=close+end-p;text_start=p;
+            } else p=end;
+            continue;
+        }
+        if(s[p]=='~' && p+1u<n && s[p+1u]=='~') {
+            const size_t close=md_match(s,n,p+2u,'~',2u);
+            if(close!=SIZE_MAX) {
+                md_text(d,owners[nested],s+text_start,p-text_start);
+                const uint32_t node=md_add(d,owners[nested],
+                    STUN_UI_BLOCK_STRIKETHROUGH,0u);
+                if(node==UINT32_MAX) break;
+                if(!md_inline(d,node,s+p+2u,close-(p+2u),
+                              depth+nested+1u)) break;
+                p=close+2u;text_start=p;continue;
+            }
+        }
+        if(s[p]=='[' || (s[p]=='!' && p+1u<n && s[p+1u]=='[')) {
+            const bool image=s[p]=='!';
+            const size_t b=p+(image?2u:1u);
+            const size_t square=md_match(s,n,b,']',1u);
+            if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
+                const size_t round=md_match(s,n,square+2u,')',1u);
+                if(round!=SIZE_MAX) {
+                    md_text(d,owners[nested],s+text_start,p-text_start);
+                    const uint32_t node=md_add(d,owners[nested],
+                        image?STUN_UI_BLOCK_IMAGE:STUN_UI_BLOCK_LINK,0u);
+                    if(node==UINT32_MAX) break;
+                    md_meta(d,node,s+square+2u,round-(square+2u));
+                    if(!md_inline(d,node,s+b,square-b,
+                                  depth+nested+1u)) break;
+                    p=round+1u;text_start=p;continue;
                 }
             }
         }
-
-        if (close == SIZE_MAX || kind == STUN_UI_BLOCK_TEXT) {
-            ++p;
-            continue;
-        }
-        md_text(d,parent,s+text_start,opener-text_start);
-        const uint32_t node = md_add(d,parent,kind,0);
-        if (node == UINT32_MAX) return false;
-        if (kind == STUN_UI_BLOCK_CODE_SPAN)
-            md_code_span_text(d,node,s,opener+marker,close);
-        else if (!md_inline(d,node,s+opener+marker,close-opener-marker,depth+1))
-            return false;
-        after = close + marker;
-        p = after;
-        text_start = p;
+        ++p;
     }
-    if (d->error != STUN_UI_OK) return false;
-    md_text(d,parent,s+text_start,n-text_start);
-    return d->error == STUN_UI_OK;
+    if(d->error==STUN_UI_OK && nested)
+        md_error(d,STUN_UI_INVALID_ARGUMENT);
+    if(d->error==STUN_UI_OK)
+        md_text(d,owners[0],s+text_start,n-text_start);
+    free(events);
+    return d->error==STUN_UI_OK;
 }
 
 static bool md_rule(const char *s, size_t b, size_t e) {
