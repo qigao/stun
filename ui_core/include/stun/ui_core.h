@@ -108,7 +108,9 @@ typedef enum stun_ui_block_kind {
     STUN_UI_BLOCK_DEFINITION_DESC,
     STUN_UI_BLOCK_DIAGRAM,
     /* Appended: keep all existing public enum values stable. */
-    STUN_UI_BLOCK_CODE_INDENTED
+    STUN_UI_BLOCK_CODE_INDENTED,
+    /* Distinct from the existing SOFT STUN_UI_BLOCK_LINE_BREAK node. */
+    STUN_UI_BLOCK_HARD_LINE_BREAK
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {
@@ -158,6 +160,19 @@ typedef struct stun_ui_list_semantics {
     uint8_t loose; /* 0 tight; 1 loose */
     uint8_t reserved[2];
 } stun_ui_list_semantics;
+
+/* Hard-break source origin is owned as four metadata bytes on a
+ * STUN_UI_BLOCK_HARD_LINE_BREAK node, never re-read from decoded text or
+ * inferred by an HTML consumer. Soft breaks carry no origin metadata.
+ * Additional origins require explicit admission and validation. */
+typedef enum stun_ui_line_break_origin {
+    STUN_UI_LINE_BREAK_TRAILING_SPACES = 1,
+    STUN_UI_LINE_BREAK_BACKSLASH = 2
+} stun_ui_line_break_origin;
+typedef struct stun_ui_line_break_semantics {
+    uint8_t origin; /* stun_ui_line_break_origin */
+    uint8_t reserved[3];
+} stun_ui_line_break_semantics;
 
 typedef struct stun_ui_block_metadata {
     size_t byte_begin;
