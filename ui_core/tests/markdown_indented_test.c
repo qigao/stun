@@ -66,10 +66,16 @@ static const indented_fixture cases[] = {
     { "paragraph-not-interrupted", "Foo\n    bar\n",
       "<p>Foo\nbar</p>\n", NULL, 0u },
     { "list-continuation-precedence", "- foo\n    bar\n",
-      "<ul>\n<li>foo\nbar</li>\n</ul>\n", NULL, 0u }
+      "<ul>\n<li>foo\nbar</li>\n</ul>\n", NULL, 0u },
+    { "tabbed-list-continuation", "- foo\n\tbar\n",
+      "<ul>\n<li>foo\nbar</li>\n</ul>\n", NULL, 0u },
+    { "tab-cannot-open-atx-inside-paragraph", "Foo\n\t# heading\n",
+      "<p>Foo\n# heading</p>\n", NULL, 0u },
+    { "tab-cannot-open-thematic-rule-inside-paragraph", "Foo\n\t---\n",
+      "<p>Foo\n---</p>\n", NULL, 0u }
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==19u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==22u,
                "Indendated-code fixture denominator changed");
 
 static int run_case(const indented_fixture *f) {

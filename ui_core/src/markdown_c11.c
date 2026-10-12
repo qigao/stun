@@ -507,7 +507,12 @@ static void md_parse_blocks(stun_md_document *d) {
         pos=line.next;
         const char *s=d->raw;
         const size_t indent_begin=md_left(s,line.begin,line.end);
-        const size_t indent=indent_begin-line.begin;
+        /* Block precedence uses visual columns, not raw prefix bytes:
+         * a tab at column N advances to the next 4-column stop. Saturating
+         * at four is enough for every current admission/continuation test. */
+        size_t indent=0u;
+        for(size_t i=line.begin;i<indent_begin && indent<4u;++i)
+            indent += s[i]=='\t' ? 4u-(indent%4u) : 1u;
         size_t begin=indent_begin, end=line.end;
         if (code_open) {
             if (indent<=3 && md_fence_close(s,begin,end,fence)) {
