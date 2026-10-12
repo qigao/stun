@@ -703,6 +703,19 @@ jobs:
           test -s "$EVIDENCE_DIR/markdown-cmarkgfm-html.json"
           git diff --exit-code
 
+      - name: Gate all 256 previously passing official CommonMark HTML examples
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ui_core/tests/gate_commonmark_nonregression.py \
+            --survey "$EVIDENCE_DIR/markdown-commonmark-652-survey.json" \
+            --baseline ui_core/tests/commonmark_0_31_2_baseline.json \
+            --out "$EVIDENCE_DIR/markdown-commonmark-nonregression.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-nonregression.log"
+          test -s "$EVIDENCE_DIR/markdown-commonmark-nonregression.json"
+          git diff --exit-code
+
       - name: Gate exact official CommonMark indented code examples
         if: ${{ inputs.run_runtime && success() }}
         shell: bash
