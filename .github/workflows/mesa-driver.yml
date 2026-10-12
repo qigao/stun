@@ -495,59 +495,104 @@ jobs:
           printf '%s\n' "$RUNNER_TEMP/stun-build-tools/cmake/data/bin" >> "$GITHUB_PATH"
 
 
-      - name: Build and install the real dependency packages
+      - name: Restore published Salts Native SDKs from GitHub Packages
         if: ${{ inputs.run_runtime && success() }}
         id: dependency_packages
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cmake --version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          ninja --version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          gcc --version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          g++ --version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          re2c --version | tee -a "$EVIDENCE_DIR/provenance.txt"
-
-          "$VCPKG_ROOT/vcpkg" version | tee -a "$EVIDENCE_DIR/provenance.txt"
-          test "$(re2c --version)" = "re2c 4.6"
-          cmake -S .ci/install-sources/salts-utils/tools/lemon -B "$PACKAGE_BUILD_ROOT/host-lemon" \
-            -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | tee "$EVIDENCE_DIR/lemon-configure.log"
-          cmake --build "$PACKAGE_BUILD_ROOT/host-lemon" --target lemon --parallel 2 \
-            2>&1 | tee "$EVIDENCE_DIR/lemon-build.log"
-          for package in salts salts-utils; do
-            source="$GITHUB_WORKSPACE/.ci/install-sources/$package"
-            package_build="$PACKAGE_BUILD_ROOT/$package"
-            ports="$EXTERNAL_PORTS_ROOT/$package"
-            extra=()
-            if [ "$package" = salts-utils ]; then
-              extra+=(
-                -DSALTS_UTILS_ENABLE_CAPTURE=OFF -DSALTS_UTILS_ENABLE_CFLOW_USB=OFF
-                "-DSALTS_UTILS_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
-                "-DDATABIND_HOST_LEMON_EXECUTABLE=$PACKAGE_BUILD_ROOT/host-lemon/lemon"
-              )
-            fi
-            cmake -S "$source" -B "$package_build" -G Ninja \
-              -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-              "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-              -DVCPKG_MANIFEST_MODE=ON -DVCPKG_TARGET_TRIPLET=x64-linux \
-              "-DVCPKG_INSTALLED_DIR=$ports" "-DVCPKG_OVERLAY_PORTS=$VCPKG_OVERLAY_PORTS" \
-              "-DCMAKE_PREFIX_PATH=$ports/x64-linux/debug" \
-              "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
-              -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON "-DOpenSSL_DIR=$ports/x64-linux/share/OpenSSL" \
-              "-DCMAKE_INSTALL_PREFIX=$SALTS_ROOT" -DCMAKE_INSTALL_LIBDIR=lib \
-              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-              -DBUILD_TESTING=OFF -DBUILD_TESTS=OFF -DENABLE_TESTS=OFF \
-              -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF \
-              -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
-              "${extra[@]}" 2>&1 | tee "$EVIDENCE_DIR/$package-configure.log"
-            cmake --build "$package_build" --parallel 2 \
-              2>&1 | tee "$EVIDENCE_DIR/$package-build.log"
-            cmake --install "$package_build" \
-              2>&1 | tee "$EVIDENCE_DIR/$package-install.log"
-            cp "$package_build/CMakeCache.txt" "$EVIDENCE_DIR/$package-CMakeCache.txt"
-            cp "$package_build/compile_commands.json" "$EVIDENCE_DIR/$package-compile_commands.json"
-            cp "$package_build/install_manifest.txt" "$EVIDENCE_DIR/$package-install-manifest.txt"
-            git -C "$source" diff --exit-code
+          : "$SALTS_RELEASE" "$SALTS_UTILS_RELEASE" "$SALTS_SHA" "$SALTS_UTILS_SHA"
+          salts_version="$(printf '%s' "$SALTS_RELEASE" | sed 's/^v//')"
+          utils_version="$(printf '%s' "$SALTS_UTILS_RELEASE" | sed 's/^v//')"
+          test "$(gh api "repos/qigao/salts/commits/$SALTS_RELEASE" --jq .sha)" = "$SALTS_SHA"
+          test "$(gh api "repos/qigao/salts-utils/commits/$SALTS_UTILS_RELEASE" --jq .sha)" = "$SALTS_UTILS_SHA"
+          config=".ci/install-sources/salts/cmake/vcpkg-cache.nuget.config"
+          test -f "$config"
+          sdk_packages="$RUNNER_TEMP/stun-native-nuget"
+          restore_root="$RUNNER_TEMP/stun-native-restore"
+          mkdir -p "$sdk_packages" "$restore_root" "$SALTS_ROOT"
+          cat > "$restore_root/NativeSdk.csproj" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="$salts_version" />
+              <PackageReference Include="SaltsUtils.Native" Version="$utils_version" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore "$restore_root/NativeSdk.csproj" \
+            --configfile "$config" --packages "$sdk_packages" \
+            --no-cache --force-evaluate --verbosity minimal
+          # Fail closed if either NuGet archive differs from the publishing
+          # repository's immutable GitHub Release SHA256SUMS artifact.
+          for item in "qigao/salts|$SALTS_RELEASE|salts.native" \
+                      "qigao/salts-utils|$SALTS_UTILS_RELEASE|saltsutils.native"; do
+            IFS='|' read -r source tag package <<< "$item"
+            checks="$restore_root/checks/$package"
+            mkdir -p "$checks"
+            gh release download "$tag" --repo "$source" \
+              --pattern SHA256SUMS --dir "$checks" --clobber
+            archive="$sdk_packages/$package/$(printf '%s' "$tag" | sed 's/^v//')/$package.$(printf '%s' "$tag" | sed 's/^v//').nupkg"
+            test -s "$archive"
+            python3 - "$checks/SHA256SUMS" "$archive" <<'PY'
+          import hashlib, pathlib, sys
+          lines=pathlib.Path(sys.argv[1]).read_text().splitlines()
+          name=pathlib.Path(sys.argv[2]).name.lower()
+          matches=[row.split()[0] for row in lines if row.split() and
+                   pathlib.Path(row.split()[-1].lstrip("*")).name.lower()==name]
+          if len(matches)!=1: raise SystemExit("missing or duplicate official package SHA256: "+name)
+          actual=hashlib.sha256(pathlib.Path(sys.argv[2]).read_bytes()).hexdigest()
+          if actual.lower()!=matches[0].lower(): raise SystemExit("published package checksum mismatch: "+name)
+          print("Verified published package:",name,actual)
+          PY
           done
+          # Preserve existing installed consumer invariant: both CMake SDKs
+          # are imported from ONE isolated prefix, without source fallbacks.
+          python3 - "$restore_root/obj/project.assets.json" "$sdk_packages" "$SALTS_ROOT" \
+                    "$salts_version" "$utils_version" "$EVIDENCE_DIR" <<'PY'
+          import hashlib,json,os,pathlib,shutil,sys
+          assets=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          packages=pathlib.Path(sys.argv[2]); target=pathlib.Path(sys.argv[3])
+          manifest={"kind":"published-native-NuGet","packages":{},"rid":"linux-x64","copied":0}
+          for name,version in (("Salts.Native",sys.argv[4]),("SaltsUtils.Native",sys.argv[5])):
+              ids=[v["path"] for k,v in assets["libraries"].items() if k.lower()==f"{name.lower()}/{version.lower()}"]
+              if len(ids)!=1: raise SystemExit(f"missing exactly one {name}/{version}")
+              root=packages/ids[0]/"sdk/linux-x64"
+              archive=packages/ids[0]/f"{name.lower()}.{version}.nupkg"
+              if not root.is_dir() or not archive.is_file(): raise SystemExit("published SDK payload absent "+str(root))
+              manifest["packages"][name]={"version":version,"sha256":hashlib.sha256(archive.read_bytes()).hexdigest()}
+              for src in sorted(root.rglob("*")):
+                  dst=target/src.relative_to(root)
+                  if src.is_dir() and not src.is_symlink():
+                      dst.mkdir(parents=True,exist_ok=True); continue
+                  dst.parent.mkdir(parents=True,exist_ok=True)
+                  if dst.exists() or dst.is_symlink():
+                      if src.is_symlink() and dst.is_symlink() and os.readlink(src)==os.readlink(dst): continue
+                      if src.is_file() and dst.is_file() and src.read_bytes()==dst.read_bytes(): continue
+                      raise SystemExit("conflicting published SDK file "+str(dst))
+                  if src.is_symlink(): dst.symlink_to(os.readlink(src))
+                  elif src.is_file(): shutil.copy2(src,dst)
+                  else: raise SystemExit("unexpected SDK entry "+str(src))
+                  manifest["copied"]+=1
+          for rel in ("lib/cmake/Salts/SaltsConfig.cmake","lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"):
+              if not (target/rel).is_file(): raise SystemExit("missing CMake package config "+rel)
+          (pathlib.Path(sys.argv[6])/"native-sdk-provenance.json").write_text(json.dumps(manifest,indent=2)+"\n")
+          print(json.dumps(manifest,indent=2))
+          PY
+          # vcpkg-cache remains only for third-party manifest dependencies.
+          for package in salts salts-utils; do
+            "$VCPKG_ROOT/vcpkg" install \
+              "--x-manifest-root=$GITHUB_WORKSPACE/.ci/install-sources/$package" \
+              "--x-install-root=$EXTERNAL_PORTS_ROOT/$package" \
+              --triplet x64-linux --only-binarycaching \
+              2>&1 | tee "$EVIDENCE_DIR/$package-ports-install.log"
+          done
+          test -f "$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/tools/pkgconf/pkgconf"
+          printf 'NativeSDKSource=GitHubPackages\nSaltsNative=%s\nSaltsUtilsNative=%s\n' \
+            "$salts_version" "$utils_version" | tee -a "$EVIDENCE_DIR/provenance.txt"
 
       - name: Remove dependency source and build paths from consumer access
         if: ${{ inputs.run_runtime && success() }}
@@ -556,9 +601,9 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/stun-unicode-isolated"
           mv .ci/install-sources "$RUNNER_TEMP/stun-unicode-isolated/sources"
-          mv "$PACKAGE_BUILD_ROOT" "$RUNNER_TEMP/stun-unicode-isolated/builds"
-          test ! -e .ci/install-sources
+          # The published Salts SDK never creates a native build tree.
           test ! -e "$PACKAGE_BUILD_ROOT"
+          test ! -e .ci/install-sources
           test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
 
@@ -787,7 +832,7 @@ jobs:
           PY
           {
             echo '### Installed Unicode package validation'
-            echo 'Real Salts/SaltsUtils packages; dependency source/build paths absent during consumer configure/build/test.'
+            echo 'Verified published Salts Native SDKs; dependency source/build paths absent during consumer configure/build/test.'
             echo '```text'
             cat "$EVIDENCE_DIR/provenance.txt" "$CONSUMER_BINARY_DIR/ctest.log"
             echo '```'
