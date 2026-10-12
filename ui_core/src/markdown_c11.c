@@ -265,7 +265,7 @@ static bool md_inline_whitespace_before(const char *s,size_t at) {
     const size_t last=at-1u;
     if((unsigned char)s[last]<0x80u) return md_space(s[last]);
     size_t first=last;
-    while(first>0u && at-first<=4u &&
+    while(first>0u && at-first<4u &&
           ((unsigned char)s[first]&0xc0u)==0x80u) --first;
     size_t cursor=0u;
     salts_unicode_scalar scalar={0};
