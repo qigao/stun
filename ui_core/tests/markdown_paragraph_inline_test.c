@@ -135,16 +135,20 @@ int main(void) {
                                STUN_UI_LINE_BREAK_BACKSLASH,
                                STUN_UI_BLOCK_EMPHASIS)==0);
 
+    /* These are now VALID cross-line soft emphasis pairs rather than
+     * negative boundary fixtures after #185 normalizes their whitespace. */
+    CHECK(check_multiline("*foo \nbar*\n","foo","bar",
+                          1u,0u,STUN_UI_BLOCK_EMPHASIS)==0);
+    CHECK(check_multiline("*foo\nbar*\t\n","foo","bar",
+                          1u,0u,STUN_UI_BLOCK_EMPHASIS)==0);
+    /* Only genuine root paragraph interruptions are negative: a blank
+     * line, an ATX heading, and a quote marker. */
     static const char *barriers[]={
         "*foo\n\nbar*\n",
         "*foo\n# Heading\nbar*\n",
-        "*foo\n> quote*\n",
-        "*foo  \nbar*\n",
-        "*foo\\\nbar*\n",
-        "*foo \nbar*\n",
-        "*foo\nbar*\t\n"
+        "*foo\n> quote*\n"
     };
-    _Static_assert(sizeof(barriers)/sizeof(barriers[0])==7u,
+    _Static_assert(sizeof(barriers)/sizeof(barriers[0])==3u,
                    "cross-block barrier fixture count");
     for(size_t i=0u;i<sizeof(barriers)/sizeof(barriers[0]);++i) {
         const size_t n=strlen(barriers[i]);
@@ -164,7 +168,13 @@ int main(void) {
     CHECK(stun_md_parse(limited,sizeof(limited)-1u,5u,
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
-    puts("C11 Markdown root paragraph inline ownership: 7/7 positive, "
-         "7/7 block barriers and atomic budget rejection");
+    const char hard_limited[]="*foo  \nbar*\n";
+    rejected=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(hard_limited,sizeof(hard_limited)-1u,5u,
+                        sizeof(hard_limited),&rejected)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(rejected==NULL);
+    puts("C11 Markdown root paragraph inline ownership: 9/9 positive, "
+         "3/3 real block barriers and atomic soft/hard node-budget rejection");
     return 0;
 }
