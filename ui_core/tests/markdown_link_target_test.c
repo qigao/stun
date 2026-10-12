@@ -181,6 +181,8 @@ int main(void) {
     CHECK(verify_safe_rejection("[x](#frag&#13;bad)\n")==0);
     CHECK(verify_safe_rejection("[x](mailto:foo&#x0A;bar \"t\")\n")==0);
     CHECK(verify_safe_rejection("[x](</path&#10;bad>)\n")==0);
+    CHECK(verify_safe_rejection("[x](custom+scheme:payload)\n")==0);
+
 
 
     /* The entity-produced quote cannot fabricate a syntactic link TITLE. */
@@ -224,7 +226,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 18/18 targets, 9 safety rejections, "
+    puts("C11 link metadata: 18/18 targets, 10 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }

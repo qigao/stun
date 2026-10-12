@@ -90,8 +90,24 @@ static bool html_safe_href(const char *s, size_t n) {
         if(c==':' && !seen_separator && scheme_colon==SIZE_MAX)
             scheme_colon=i;
     }
-    return scheme_colon==SIZE_MAX ||
-           html_ascii_equal(s,scheme_colon,"https") ||
+    if(scheme_colon==SIZE_MAX)return true;
+    /* A colon only declares a URL scheme when the FIRST path component
+     * matches RFC3986 scheme syntax: ALPHA *( ALPHA / DIGIT / "+" /
+     * "-" / "." ). In "foo):" or a literal decoded closing parenthesis,
+     * the colon is relative-path punctuation and is not a scheme bypass.
+     * Keep the FULL byte scan above, and reject genuine unknown schemes
+     * (javascript:, data:, vbscript:, etc.) without an allowlist fallback. */
+    bool scheme=scheme_colon!=0u;
+    for(size_t i=0u;i<scheme_colon && scheme;++i) {
+        const unsigned char c=(unsigned char)s[i];
+        const bool alpha=(c>='A'&&c<='Z')||(c>='a'&&c<='z');
+        const bool digit=c>='0'&&c<='9';
+        if(!alpha && (i==0u || (!digit && c!='+' && c!='-' &&
+                                   c!='.')))
+            scheme=false;
+    }
+    if(!scheme)return true;
+    return html_ascii_equal(s,scheme_colon,"https") ||
            html_ascii_equal(s,scheme_colon,"http") ||
            html_ascii_equal(s,scheme_colon,"mailto");
 }
