@@ -282,7 +282,17 @@ static size_t md_match(const char *s, size_t n, size_t start,
             if(symbol=='*' || symbol=='_') {
                 bool can_open=false,can_close=false;
                 md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
-                if(!can_close) {p+=run-1u;continue;}
+                if(!can_close) {
+                    /* An opener immediately after whitespace owns the
+                     * later closing delimiter; do not let an earlier opener
+                     * leap over it (#471/#472). This preserves the previous
+                     * bounded pairing boundary without introducing a second
+                     * delimiter stack or guessing Unicode punctuation. */
+                    if(p>0u && md_space(s[p-1u]) && can_open)
+                        return SIZE_MAX;
+                    p+=run-1u;
+                    continue;
+                }
             }
             return p;
         }
