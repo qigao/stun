@@ -86,6 +86,7 @@ int main(void) {
     stun_md_document *owner=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(deep,n,256u,n+1u,&owner)!=
        STUN_UI_CAPACITY_EXCEEDED || owner!=NULL)return 1;
-    printf("Native nested-quote fixtures %zu/%zu, depth overflow PASS\n",\n           sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
+    printf("Native nested-quote fixtures %zu/%zu, depth overflow PASS\n",
+           sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
     return 0;
 }
