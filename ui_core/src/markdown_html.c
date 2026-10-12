@@ -37,6 +37,7 @@ static void html_str(stun_html_writer *w, const char *str) {
 
 static void html_escaped(stun_html_writer *w,
                          const char *s, size_t len, bool attribute) {
+    (void)attribute; /* identical quote escaping for text and attributes */
     if (!s && len) { w->error = STUN_UI_INVALID_ARGUMENT; return; }
     for (size_t i=0;i<len && w->error==STUN_UI_OK;++i) {
         switch(s[i]) {
