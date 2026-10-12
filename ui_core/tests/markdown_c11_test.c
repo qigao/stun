@@ -494,9 +494,11 @@ static int test_ascii_emphasis_flanking(void) {
         {"aa_\"bb\"_cc\n","aa_\"bb\"_cc",0u,0u},
         {"_foo_bar\n","_foo_bar",0u,0u},
         {"_foo_bar_baz_\n","foo_bar_baz",1u,0u},
-        {"a**\"foo\"**\n","a**\"foo\"**",0u,0u}
+        {"a**\"foo\"**\n","a**\"foo\"**",0u,0u},
+        {"**foo **bar baz**\n","bar baz",0u,1u}, /* #471 */
+        {"*foo *bar baz*\n","bar baz",1u,0u}   /* #472 */
     };
-    _Static_assert(sizeof(samples)/sizeof(samples[0])==8u,
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==10u,
                    "flanking ownership sample count");
     for(size_t i=0u;i<sizeof(samples)/sizeof(samples[0]);++i) {
         const size_t n=strlen(samples[i].markdown);
