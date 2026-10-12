@@ -778,13 +778,33 @@ static bool md_table_starts_new_block(const char *s, size_t b, size_t e) {
     return false;
 }
 
+/* Lazy quote continuation is admitted only into an already open paragraph.
+ * A new block opener ends that admission; indented candidate markers are
+ * ordinary continuation text, not a new root list. */
+static bool md_quote_lazy_interrupts(const char *s,md_line line,
+                                     size_t begin) {
+    /* Four-space indentation after an open quote paragraph is literal
+     * lazy text, not a root heading/rule/fence/list admission. */
+    if(md_columns(s,line.begin,begin)>3u) return false;
+    if(md_rule(s,begin,line.end)) return true;
+    size_t hbegin=begin,hend=line.end;
+    if(md_atx(s,&hbegin,&hend)) return true;
+    char mark=0;size_t count=0,info_begin=0,info_end=0;
+    if(md_fence_start(s,begin,line.end,
+                      &mark,&count,&info_begin,&info_end)) return true;
+    md_list_marker_info marker={0};
+    if(md_list_token(s,line,&marker) && marker.column<=3u &&
+       (!marker.ordered || marker.start==1u)) return true;
+    return false;
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
     uint32_t quote = UINT32_MAX;
     uint32_t indented = UINT32_MAX;
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
-    bool code_open=false;
+    bool code_open=false, quote_lazy_allowed=false;
     md_fence fence = {0,0,UINT32_MAX};
 
     for (size_t pos=0; pos<d->raw_size && d->error==STUN_UI_OK;) {
@@ -836,12 +856,23 @@ static void md_parse_blocks(stun_md_document *d) {
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
             quote=UINT32_MAX;
+            quote_lazy_allowed=false;
             continue;
         }
-        /* A non-quote line closes the previous quote paragraph before block
-         * admission. This allows an indented block immediately after a quote. */
-        if(quote!=UINT32_MAX && !(indent<=3 && begin<end && s[begin]=='>'))
+        /* A paragraph of a blockquote may continue without '>' when the
+         * line would not start a competing CommonMark block. This is a
+         * continuation of the owned quote paragraph, never a second tree. */
+        if(quote!=UINT32_MAX && !(indent<=3 && begin<end && s[begin]=='>')) {
+            if(quote_lazy_allowed && paragraph!=UINT32_MAX &&
+               !md_quote_lazy_interrupts(s,line,begin)) {
+                (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
+                (void)md_inline(d,paragraph,s+begin,end-begin,0u);
+                if(d->error!=STUN_UI_OK) return;
+                continue;
+            }
             quote=paragraph=UINT32_MAX;
+            quote_lazy_allowed=false;
+        }
 
         /* Four indentation columns select literal code before checking ATX,
          * thematic rules, fences, or other block markers. Indented code
@@ -895,11 +926,20 @@ static void md_parse_blocks(stun_md_document *d) {
                 paragraph=UINT32_MAX;
             }
             begin=md_left(s,begin+1,end);
+            /* Empty quote markers end the paragraph but retain the quote
+             * container for a following explicitly marked new paragraph. */
+            if(begin==end) {
+                paragraph=UINT32_MAX;
+                quote_lazy_allowed=false;
+                continue;
+            }
             if (paragraph==UINT32_MAX) {
                 paragraph=md_add(d,quote,STUN_UI_BLOCK_PARAGRAPH,0);
                 if (paragraph==UINT32_MAX) return;
             } else (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
             (void)md_inline(d,paragraph,s+begin,end-begin,0);
+            if(d->error!=STUN_UI_OK) return;
+            quote_lazy_allowed=true;
             continue;
         }
         if (quote!=UINT32_MAX) { quote=paragraph=UINT32_MAX; }

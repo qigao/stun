@@ -40,3 +40,10 @@ add_executable(stun_markdown_containers_test markdown_containers_test.c)
 target_compile_features(stun_markdown_containers_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_containers_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_containers_test COMMAND stun_markdown_containers_test)
+
+# #181 second slice: root blockquote lazy continuation and exact owned AST/HTML.
+add_executable(stun_markdown_quote_test markdown_quote_test.c)
+target_compile_features(stun_markdown_quote_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_quote_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_quote_test COMMAND stun_markdown_quote_test)
+
