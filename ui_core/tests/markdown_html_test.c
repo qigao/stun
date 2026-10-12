@@ -255,10 +255,14 @@ static const html_fixture cases[] = {
       "<p>*foo</p>\n<h1>head</h1>\n<p>bar*</p>\n" },
     { "*foo\n> quote*\n",
       "<p>*foo</p>\n<blockquote>\n<p>quote*</p>\n</blockquote>\n" },
+    /* #81: paragraph spanning two lines can subsequently become an
+     * inherited Setext heading without losing inner emphasis ownership. */
+    { "Foo *bar\nbaz*\n====\n",
+      "<h1>Foo <em>bar\nbaz</em></h1>\n" }, /* #81 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==111,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==112,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
