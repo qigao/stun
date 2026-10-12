@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Gated no-regression check of 256 previously qualified official HTML IDs.
+"""Gated no-regression check of 401 previously qualified official HTML IDs.
 
 The full 652-case report remains diagnostic; every baseline ID must still
 render *exactly* the official CommonMark 0.31.2 expected HTML.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -22,7 +23,7 @@ def main():
         baseline.get("commonmark_version")!="0.31.2" or
         data.get("source")!=baseline.get("source") or
         data.get("total")!=652 or baseline.get("official_total")!=652 or
-        not isinstance(ids,list) or len(ids)!=256 or
+        not isinstance(ids,list) or len(ids)!=401 or
         any(type(x) is not int or x<1 or x>652 for x in ids) or
         ids!=sorted(set(ids))):
         print("INFRA: immutable CommonMark baseline differs",file=sys.stderr)
@@ -30,6 +31,18 @@ def main():
     rows=data.get("cases")
     if not isinstance(rows,list) or len(rows)!=652:
         print("INFRA: malformed full official survey",file=sys.stderr)
+        return 2
+    # Bind the whole official corpus (ID, Markdown source and expected HTML)
+    # to the previously qualified run; a fixture rewrite is NOT a regression
+    # fix. Keep UTF-8 and compact separators stable across hosts.
+    fixture_bytes=json.dumps(
+        [(row["id"],row["markdown"],row["official_expected_html"])
+         for row in rows],
+        ensure_ascii=False,separators=(",",":")).encode("utf-8")
+    if hashlib.sha256(fixture_bytes).hexdigest()!=baseline.get(
+            "official_fixture_sha256"):
+        print("INFRA: CommonMark official fixture provenance drift",
+              file=sys.stderr)
         return 2
     by_id={}
     for row in rows:
@@ -59,7 +72,7 @@ def main():
     }
     args.out.parent.mkdir(parents=True,exist_ok=True)
     args.out.write_text(json.dumps(result,indent=2)+"\n",encoding="utf-8")
-    print(f"Prior official HTML equalities: {result['baseline_passed']}/256;"
+    print(f"Prior official HTML equalities: {result['baseline_passed']}/{len(ids)};"
           f" additional official matches: {len(additional)}")
     for item in regressions:
         print(f"REGRESSED #{item['id']}: {item['status']}:"
