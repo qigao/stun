@@ -1,5 +1,6 @@
 #include <stun/markdown_c11.h>
 #include <salts_unicode.h>
+#include "markdown_entities.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -609,6 +610,23 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             md_text(d,owners[nested],s+text_start,p-text_start);
             md_text(d,owners[nested],s+p+1u,1u);
             p+=2u;text_start=p;continue;
+        }
+        /* #185: decode a recognized HTML5 entity as SEMANTIC UTF-8 only
+         * after raw-source punctuation/escape/code admission. The decoded
+         * value is never rescanned as a Markdown delimiter, so &#42; cannot
+         * manufacture emphasis or a list marker. Code spans remain opaque;
+         * malformed or semicolon-less references remain literal source. */
+        if(s[p]=='&') {
+            char decoded[8];
+            size_t consumed=0u,written=0u;
+            if(stun_md_decode_character_reference(
+                    s+p,n-p,&consumed,decoded,&written)) {
+                md_text(d,owners[nested],s+text_start,p-text_start);
+                md_text(d,owners[nested],decoded,written);
+                p+=consumed;
+                text_start=p;
+                continue;
+            }
         }
         if(s[p]==(char)0x60) {
             size_t end=p+1u;

@@ -6,7 +6,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     find_package(Salts CONFIG REQUIRED)
 endif()
 
-add_library(stun_ui_core STATIC src/ui_core.c src/markdown_c11.c src/markdown_html.c)
+add_library(stun_ui_core STATIC src/ui_core.c src/markdown_c11.c src/markdown_entities.c src/markdown_html.c)
 add_library(Stun::UICore ALIAS stun_ui_core)
 
 target_compile_features(stun_ui_core PUBLIC c_std_11)

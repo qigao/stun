@@ -8,6 +8,13 @@ target_compile_features(stun_markdown_c11_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_c11_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_c11_test COMMAND stun_markdown_c11_test)
 
+# #185: canonical HTML5 named/numeric character references through one C11
+# frontend; independent native AST and exact HTML byte gates.
+add_executable(stun_markdown_entities_test markdown_entities_test.c)
+target_compile_features(stun_markdown_entities_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_entities_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_entities_test COMMAND stun_markdown_entities_test)
+
 # #182/#185: strict C11 root paragraph cross-line inline owner and rollback.
 add_executable(stun_markdown_paragraph_inline_test markdown_paragraph_inline_test.c)
 target_compile_features(stun_markdown_paragraph_inline_test PRIVATE c_std_11)

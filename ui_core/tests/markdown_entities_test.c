@@ -1,0 +1,181 @@
+#include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
+
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#define TICK "\x60"
+#define CHECK(test_) do { \
+    if (!(test_)) { \
+        fprintf(stderr,"%s:%d: failed: %s\n",__FILE__,__LINE__,#test_); \
+        return 1; \
+    } \
+} while (0)
+
+typedef struct md_entity_fixture {
+    const char *source,*html;
+    const char *decoded_text;
+    size_t emphasis, code_spans;
+} md_entity_fixture;
+
+static size_t count_kind(stun_ui_rich_document_view v,
+                         stun_ui_block_kind kind) {
+    size_t count=0u;
+    for(size_t i=0u;i<v.document.block_count;++i)
+        count+=(v.document.blocks[i].kind==kind);
+    return count;
+}
+
+static bool has_text(stun_ui_rich_document_view v,const char *needle,
+                     stun_ui_block_kind parent) {
+    const size_t length=strlen(needle);
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        if(node->kind!=STUN_UI_BLOCK_TEXT || node->parent_index>=i ||
+           v.document.blocks[node->parent_index].kind!=parent ||
+           node->byte_end<node->byte_begin ||
+           node->byte_end>v.document.source_bytes ||
+           node->byte_end-node->byte_begin!=length)
+            continue;
+        if(!memcmp(v.document.source+node->byte_begin,needle,length))
+            return true;
+    }
+    return false;
+}
+
+static int check_entity(const md_entity_fixture *fixture) {
+    const size_t raw_bytes=strlen(fixture->source);
+    stun_md_document *owner=NULL;
+    CHECK(stun_md_parse(fixture->source,raw_bytes,256u,raw_bytes+1u,
+                        &owner)==STUN_UI_OK);
+    CHECK(owner!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(owner);
+    CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    CHECK(v.raw_markdown_bytes==raw_bytes);
+    CHECK(memcmp(v.raw_markdown,fixture->source,raw_bytes)==0);
+    CHECK(count_kind(v,STUN_UI_BLOCK_EMPHASIS)==fixture->emphasis);
+    CHECK(count_kind(v,STUN_UI_BLOCK_CODE_SPAN)==fixture->code_spans);
+    if(fixture->decoded_text)
+        CHECK(has_text(v,fixture->decoded_text,
+              fixture->code_spans?STUN_UI_BLOCK_CODE_SPAN:
+              fixture->emphasis?STUN_UI_BLOCK_EMPHASIS:
+              STUN_UI_BLOCK_PARAGRAPH));
+
+    /* Decoded semantic TEXT byte ranges index the owned UTF-8 arena, never
+     * the raw Markdown source that is held separately for diagnostics. */
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        CHECK(node->parent_index<i);
+        if(node->kind!=STUN_UI_BLOCK_TEXT) continue;
+        CHECK(node->byte_end>=node->byte_begin);
+        CHECK(node->byte_end<=v.document.source_bytes);
+    }
+    size_t required=SIZE_MAX;
+    CHECK(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+    const size_t expected=strlen(fixture->html);
+    CHECK(required==expected);
+    char output[1024];
+    CHECK(expected+2u<=sizeof(output));
+    memset(output,0xA5,sizeof(output));
+    size_t reported=SIZE_MAX;
+    if(expected) {
+        CHECK(stun_md_render_html(&v,256u,output,expected,&reported)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(reported==expected);
+        for(size_t i=0u;i<sizeof(output);++i)
+            CHECK((unsigned char)output[i]==0xA5u);
+    }
+    CHECK(stun_md_render_html(&v,256u,output,expected+1u,&reported)==
+          STUN_UI_OK);
+    CHECK(reported==expected);
+    CHECK(memcmp(output,fixture->html,expected+1u)==0);
+    CHECK((unsigned char)output[expected+1u]==0xA5u);
+    stun_md_document_destroy(owner);
+    return 0;
+}
+
+int main(void) {
+    static const md_entity_fixture cases[]={
+        /* Official CommonMark 0.31.2 normative character refs. */
+        {"&nbsp; &amp; &copy; &AElig; &Dcaron;\n"
+         "&frac34; &HilbertSpace; &DifferentialD;\n"
+         "&ClockwiseContourIntegral; &ngE;\n",
+         "<p>  &amp; © Æ Ď\n¾ ℋ ⅆ\n∲ ≧̸</p>\n",
+         NULL,0u,0u},                                      /* #25 */
+        {"&#35; &#1234; &#992; &#0;\n",
+         "<p># Ӓ Ϡ �</p>\n",NULL,0u,0u},                 /* #26 */
+        {"&#X22; &#XD06; &#xcab;\n",
+         "<p>&quot; ആ ಫ</p>\n",NULL,0u,0u},          /* #27 */
+        {"&nbsp &x; &#; &#x;\n&#87654321;\n&#abcdef0;\n"
+         "&ThisIsNotDefined; &hi?;\n",
+         "<p>&amp;nbsp &amp;x; &amp;#; &amp;#x;\n"
+         "&amp;#87654321;\n&amp;#abcdef0;\n"
+         "&amp;ThisIsNotDefined; &amp;hi?;</p>\n",
+         NULL,0u,0u},                                      /* #28 */
+        {"&copy\n","<p>&amp;copy</p>\n",NULL,0u,0u},      /* #29 */
+        {"&MadeUpEntity;\n","<p>&amp;MadeUpEntity;</p>\n",
+         NULL,0u,0u},                                      /* #30 */
+        {TICK "f&ouml;&ouml;" TICK "\n",
+         "<p><code>f&amp;ouml;&amp;ouml;</code></p>\n",
+         "f&ouml;&ouml;",0u,1u},                       /* #35 */
+        {"&#42;foo&#42;\n*foo*\n",
+         "<p>*foo*\n<em>foo</em></p>\n",NULL,1u,0u},     /* #37 */
+        {"foo&#10;&#10;bar\n","<p>foo\n\nbar</p>\n",
+         "\n",0u,0u},                                       /* #39 */
+        {"&#9;foo\n","<p>\tfoo</p>\n",
+         "\t",0u,0u},                                       /* #40 */
+        {"&ngE;\n","<p>≧̸</p>\n","≧̸",0u,0u},
+        {"&NotEqualTilde;\n","<p>≂̸</p>\n","≂̸",0u,0u},
+        {"&#x80; &#x9f;\n","<p>€ Ÿ</p>\n",
+         "€",0u,0u},                                       /* C1 remap */
+        {"&#xD800; &#x110000; &#9999999;\n",
+         "<p>� � �</p>\n","�",0u,0u},
+        {"\\&copy; \\&#35;\n","<p>&amp;copy; &amp;#35;</p>\n",
+         NULL,0u,0u},
+        {"*x &copy; y*\n","<p><em>x © y</em></p>\n",
+         "©",1u,0u},
+        {"[&copy;](url)\n","<p><a href=\"url\">©</a></p>\n",
+         NULL,0u,0u},
+        {"&#x26;lt;\n","<p>&amp;lt;</p>\n","&",0u,0u},
+        {"&amp;copy;\n","<p>&amp;copy;</p>\n","&",0u,0u},
+        {TICK "&#42;" TICK "\n",
+         "<p><code>&amp;#42;</code></p>\n",
+         "&#42;",0u,1u}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==20u,
+                   "C11 entity reference AST/HTML fixture denominator");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        if(check_entity(&cases[i])) {
+            fprintf(stderr,"Entity reference case %zu failed\n",i);
+            return 1;
+        }
+    }
+    const char limited[]="*A &ngE; B*\n";
+    stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited,sizeof(limited)-1u,3u,
+                        sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(rejected==NULL);
+
+    /* Unknown names remain bounded ordinary text, with no recursive
+     * interpretation or permissive fallback name grammar. */
+    char repeated[1024];
+    size_t used=0u;
+    for(size_t i=0u;i<40u;++i) {
+        const char item[]="&Unknown;";
+        memcpy(repeated+used,item,sizeof(item)-1u);
+        used+=sizeof(item)-1u;
+    }
+    repeated[used++]='\n';
+    CHECK(used<sizeof(repeated));
+    stun_md_document *document=NULL;
+    CHECK(stun_md_parse(repeated,used,128u,used+1u,&document)==STUN_UI_OK);
+    CHECK(document!=NULL);
+    const stun_ui_rich_document_view view=stun_md_document_view(document);
+    CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+    CHECK(view.raw_markdown_bytes==used);
+    CHECK(memcmp(view.raw_markdown,repeated,used)==0);
+    stun_md_document_destroy(document);
+    puts("C11 HTML5 entities: 20/20 AST/HTML, atomic rollback and bounded unknown names");
+    return 0;
+}

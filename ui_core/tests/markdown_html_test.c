@@ -298,10 +298,28 @@ static const html_fixture cases[] = {
       "<p><strong>foo <em>bar</em><br />\nbaz</strong></p>\n" },
     { "*foo **bar**\\\nbaz*\n",
       "<p><em>foo <strong>bar</strong><br />\nbaz</em></p>\n" },
+    { "&nbsp; &amp; &copy; &AElig; &Dcaron;\n&frac34; &HilbertSpace; &DifferentialD;\n&ClockwiseContourIntegral; &ngE;\n", "<p>  &amp; © Æ Ď\n¾ ℋ ⅆ\n∲ ≧̸</p>\n" }, /* CommonMark #25 */
+    { "&#35; &#1234; &#992; &#0;\n", "<p># Ӓ Ϡ �</p>\n" }, /* CommonMark #26 */
+    { "&#X22; &#XD06; &#xcab;\n", "<p>&quot; ആ ಫ</p>\n" }, /* CommonMark #27 */
+    { "&nbsp &x; &#; &#x;\n&#87654321;\n&#abcdef0;\n&ThisIsNotDefined; &hi?;\n", "<p>&amp;nbsp &amp;x; &amp;#; &amp;#x;\n&amp;#87654321;\n&amp;#abcdef0;\n&amp;ThisIsNotDefined; &amp;hi?;</p>\n" }, /* CommonMark #28 */
+    { "&copy\n", "<p>&amp;copy</p>\n" }, /* CommonMark #29 */
+    { "&MadeUpEntity;\n", "<p>&amp;MadeUpEntity;</p>\n" }, /* CommonMark #30 */
+    { "`f&ouml;&ouml;`\n", "<p><code>f&amp;ouml;&amp;ouml;</code></p>\n" }, /* CommonMark #35 code span literal */
+    { "&#42;foo&#42;\n*foo*\n", "<p>*foo*\n<em>foo</em></p>\n" }, /* CommonMark #37 entities not emphasis */
+    { "foo&#10;&#10;bar\n", "<p>foo\n\nbar</p>\n" }, /* CommonMark #39 character refs preserve logical LF */
+    { "&#9;foo\n", "<p>\tfoo</p>\n" }, /* CommonMark #40 character ref literal tab */
+    { "&ngE;\n", "<p>≧̸</p>\n" }, /* HTML5 two scalar ngE */
+    { "&NotEqualTilde;\n", "<p>≂̸</p>\n" }, /* HTML5 two scalar NotEqualTilde */
+    { "&#x80; &#x9f;\n", "<p>€ Ÿ</p>\n" }, /* WHATWG C1 remap */
+    { "&#xD800; &#x110000; &#9999999;\n", "<p>� � �</p>\n" }, /* Invalid scalar replacement */
+    { "\\&copy; \\&#35;\n", "<p>&amp;copy; &amp;#35;</p>\n" }, /* Escaped ampersand not redecoded */
+    { "*x &copy; y*\n", "<p><em>x © y</em></p>\n" }, /* Nested emphasis source entities */
+    { "[&copy;](url)\n", "<p><a href=\"url\">©</a></p>\n" }, /* Link label semantic ownership */
+    { "&#x26;lt;\n", "<p>&amp;lt;</p>\n" }, /* No recursive interpretation */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==133,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==151,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
