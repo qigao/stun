@@ -414,6 +414,213 @@ static bool md_task_marker(const char *s, size_t start, size_t end,
     return true;
 }
 
+
+enum { MD_LIST_MAX_DEPTH = 32 };
+typedef struct md_list_marker_info {
+    size_t column;
+    size_t content_column;
+    size_t content_offset;
+    uint32_t start;
+    char marker;
+    bool ordered;
+} md_list_marker_info;
+typedef struct md_list_frame {
+    uint32_t list, item, paragraph, code, quote;
+    size_t marker_column, content_column;
+    char marker;
+    bool ordered, pending_blank;
+} md_list_frame;
+typedef struct md_list_stack {
+    md_list_frame frames[MD_LIST_MAX_DEPTH];
+    size_t depth;
+} md_list_stack;
+
+/* CommonMark indentation is measured in source columns. Relative container
+ * indentation is derived after matching the outer container; a tab occupies
+ * the remainder of its four-column stop. */
+static size_t md_columns(const char *s,size_t begin,size_t end) {
+    size_t col=0u;
+    for(size_t p=begin;p<end;++p) {
+        if(s[p]==' ') ++col;
+        else if(s[p]=='\t') col+=4u-(col%4u);
+        else break;
+    }
+    return col;
+}
+static size_t md_skip_columns(const char *s,size_t begin,size_t end,
+                              size_t wanted) {
+    size_t col=0u, p=begin;
+    while(p<end && col<wanted && md_space(s[p])) {
+        col+=s[p]=='\t'?4u-(col%4u):1u;
+        ++p;
+    }
+    return col>=wanted?p:begin;
+}
+
+/* Admit a list marker, recording the marker's visual column, exact ordered
+ * start, and the item content column. Marker type is part of list identity. */
+static bool md_list_token(const char *s,md_line line,
+                          md_list_marker_info *out) {
+    const size_t b=md_left(s,line.begin,line.end);
+    bool ordered=false;
+    size_t content=0u;
+    if(!md_list_marker(s,b,line.end,&ordered,&content)) return false;
+    size_t marker_end=b;
+    uint32_t start=0u;
+    char marker=s[b];
+    if(ordered) {
+        while(marker_end<line.end && s[marker_end]>='0' &&
+              s[marker_end]<='9') {
+            start=start*10u+(uint32_t)(s[marker_end]-'0');
+            ++marker_end;
+        }
+        marker=s[marker_end];
+        ++marker_end;
+    } else ++marker_end;
+    const size_t marker_col=md_columns(s,line.begin,b);
+    size_t total=md_columns(s,line.begin,content);
+    /* Empty item still occupies one separating space after its marker. */
+    if(content==line.end && marker_end==line.end)
+        total=marker_col+(marker_end-b)+1u;
+    *out=(md_list_marker_info){
+        marker_col,total,content,start,marker,ordered
+    };
+    return true;
+}
+
+static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
+                                const md_list_marker_info *m,
+                                const char *s,size_t end) {
+    char state=0;
+    size_t content=m->content_offset;
+    const bool task=md_task_marker(s,content,end,&state,&content);
+    f->item=md_add(d,f->list,task ? STUN_UI_BLOCK_TASK_ITEM :
+                                    STUN_UI_BLOCK_LIST_ITEM,0u);
+    if(f->item==UINT32_MAX) return false;
+    if(task) {
+        const uint32_t checkbox=md_add(d,f->item,STUN_UI_BLOCK_CHECKBOX,0u);
+        if(checkbox==UINT32_MAX) return false;
+        md_meta(d,checkbox,&state,1u);
+        if(d->error!=STUN_UI_OK) return false;
+    }
+    f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
+    if(f->paragraph==UINT32_MAX) return false;
+    if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
+    f->content_column=m->content_column;
+    f->code=f->quote=UINT32_MAX;
+    f->pending_blank=false;
+    return d->error==STUN_UI_OK;
+}
+
+static bool md_list_open(stun_md_document *d,md_list_stack *stack,
+                         uint32_t parent,const md_list_marker_info *m,
+                         const char *s,size_t end) {
+    if(stack->depth>=MD_LIST_MAX_DEPTH) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    const uint32_t list=md_add(d,parent,m->ordered ?
+        STUN_UI_BLOCK_ORDERED_LIST : STUN_UI_BLOCK_LIST,0u);
+    if(list==UINT32_MAX || !md_list_meta(d,list,m->start,m->marker))
+        return false;
+    md_list_frame *f=&stack->frames[stack->depth++];
+    *f=(md_list_frame){0};
+    f->list=list;
+    f->marker=m->marker;
+    f->ordered=m->ordered;
+    f->marker_column=m->column;
+    return md_list_append_item(d,f,m,s,end);
+}
+
+static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
+                            md_line line) {
+    if(!stack->depth) return false;
+    const char *s=d->raw;
+    if(md_blank(s,line.begin,line.end)) {
+        stack->frames[stack->depth-1u].pending_blank=true;
+        return true;
+    }
+    const size_t indent=md_columns(s,line.begin,md_left(s,line.begin,line.end));
+    md_list_marker_info marker={0};
+    const bool marker_found=md_list_token(s,line,&marker);
+    while(stack->depth) {
+        md_list_frame *f=&stack->frames[stack->depth-1u];
+        if(marker_found && marker.column==f->marker_column) {
+            if(f->ordered==marker.ordered && f->marker==marker.marker) {
+                if(f->pending_blank) md_mark_list_loose(d,f->list);
+                (void)md_list_append_item(d,f,&marker,s,line.end);
+                return true;
+            }
+            --stack->depth; /* differing marker families never coalesce */
+            continue;
+        }
+        if(indent>=f->content_column) {
+            const size_t body=md_skip_columns(s,line.begin,line.end,
+                                              f->content_column);
+            if(body==line.begin && f->content_column) {
+                md_error(d,STUN_UI_INVALID_ARGUMENT);return true;
+            }
+            /* A nested list is admitted after matching this item, never as
+             * a new root list. Indentation four columns deeper instead
+             * begins a literal code block. */
+            if(marker_found && marker.column>=f->content_column &&
+               marker.column<=f->content_column+3u) {
+                if(f->pending_blank) md_mark_list_loose(d,f->list);
+                (void)md_list_open(d,stack,f->item,&marker,s,line.end);
+                return true;
+            }
+            if(f->pending_blank) {
+                md_mark_list_loose(d,f->list);
+                f->paragraph=f->code=f->quote=UINT32_MAX;
+                f->pending_blank=false;
+            }
+            const size_t inner_indent=indent-f->content_column;
+            if(inner_indent>=4u && f->paragraph==UINT32_MAX &&
+               f->quote==UINT32_MAX) {
+                if(f->code==UINT32_MAX) {
+                    f->code=md_add(d,f->item,STUN_UI_BLOCK_CODE_INDENTED,0u);
+                    if(f->code==UINT32_MAX) return true;
+                }
+                md_line inner=line;
+                inner.begin=body;
+                (void)md_code_line(d,f->code,inner,false);
+                return true;
+            }
+            f->code=UINT32_MAX;
+            if(body<line.end && s[body]=='>') {
+                if(f->quote==UINT32_MAX) {
+                    f->quote=md_add(d,f->item,STUN_UI_BLOCK_QUOTE,0u);
+                    if(f->quote==UINT32_MAX) return true;
+                }
+                const size_t qb=md_left(s,body+1u,line.end);
+                const uint32_t paragraph=md_add(d,f->quote,
+                                                  STUN_UI_BLOCK_PARAGRAPH,0u);
+                if(paragraph!=UINT32_MAX)
+                    (void)md_inline(d,paragraph,s+qb,line.end-qb,0u);
+                f->paragraph=UINT32_MAX;
+                return true;
+            }
+            f->quote=UINT32_MAX;
+            if(f->paragraph==UINT32_MAX) {
+                f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
+                if(f->paragraph==UINT32_MAX) return true;
+            } else (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
+            (void)md_inline(d,f->paragraph,s+body,line.end-body,0u);
+            return true;
+        }
+        /* Lazy non-marker line continuation is allowed only within an
+         * unseparated item paragraph; a blank line closes that admission. */
+        if(!f->pending_blank && !marker_found &&
+           f->paragraph!=UINT32_MAX && !md_rule(s,line.begin,line.end)) {
+            (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
+            const size_t body=md_left(s,line.begin,line.end);
+            (void)md_inline(d,f->paragraph,s+body,line.end-body,0u);
+            return true;
+        }
+        --stack->depth;
+    }
+    return false;
+}
+
 /* GFM pipe-table subset. Escaped pipes and backtick code spans do not
  * separate cells. Header/delimiter column counts must agree.
  * A table is admitted only after two-line lookahead succeeds. */
@@ -535,12 +742,11 @@ static bool md_table_starts_new_block(const char *s, size_t b, size_t e) {
 
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
-    uint32_t list = UINT32_MAX;
     uint32_t quote = UINT32_MAX;
-    uint32_t previous_item_paragraph = UINT32_MAX;
     uint32_t indented = UINT32_MAX;
     size_t pending_code_blank = SIZE_MAX;
-    bool previous_ordered = false, code_open = false;
+    md_list_stack lists={0};
+    bool code_open=false;
     md_fence fence = {0,0,UINT32_MAX};
 
     for (size_t pos=0; pos<d->raw_size && d->error==STUN_UI_OK;) {
@@ -565,6 +771,8 @@ static void md_parse_blocks(stun_md_document *d) {
             md_text(d,fence.node,s+line.begin,size);
             continue;
         }
+        if(md_list_consume(d,&lists,line)) continue;
+        if(d->error!=STUN_UI_OK) return;
         /* Keep interstitial blank lines pending until another indented line
          * proves that they are interior. On termination/EOF they vanish. */
         if (indented!=UINT32_MAX) {
@@ -590,8 +798,6 @@ static void md_parse_blocks(stun_md_document *d) {
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
             quote=UINT32_MAX;
-            list=UINT32_MAX;
-            previous_item_paragraph=UINT32_MAX;
             continue;
         }
         /* A non-quote line closes the previous quote paragraph before block
@@ -602,12 +808,11 @@ static void md_parse_blocks(stun_md_document *d) {
         /* Four indentation columns select literal code before checking ATX,
          * thematic rules, fences, or other block markers. Indented code
          * cannot interrupt a paragraph or the active list-item continuation. */
-        if(paragraph==UINT32_MAX && list==UINT32_MAX &&
+        if(paragraph==UINT32_MAX && lists.depth==0u &&
            md_code_unindent(s,line.begin,line.end)>line.begin) {
             indented=md_add(d,0u,STUN_UI_BLOCK_CODE_INDENTED,0u);
             if(indented==UINT32_MAX || !md_code_line(d,indented,line,false))
                 return;
-            previous_item_paragraph=UINT32_MAX;
             continue;
         }
         unsigned setext = md_setext(s,begin,end);
@@ -615,13 +820,12 @@ static void md_parse_blocks(stun_md_document *d) {
             d->nodes[paragraph].kind=STUN_UI_BLOCK_HEADING;
             d->nodes[paragraph].heading_level=setext;
             paragraph=UINT32_MAX;
-            list=UINT32_MAX;
             quote=UINT32_MAX;
             continue;
         }
         if (indent <= 3 && md_rule(s,begin,end)) {
             (void)md_add(d,0u,STUN_UI_BLOCK_RULE,0);
-            paragraph=list=quote=UINT32_MAX;
+            paragraph=quote=UINT32_MAX;
             continue;
         }
         char marker=0; size_t run=0, info_b=0,info_e=0;
@@ -632,7 +836,7 @@ static void md_parse_blocks(stun_md_document *d) {
             md_meta(d,node,s+info_b,info_e-info_b);
             fence=(md_fence){marker,run,node};
             code_open=true;
-            paragraph=list=quote=UINT32_MAX;
+            paragraph=quote=UINT32_MAX;
             continue;
         }
         if (indent<=3) {
@@ -642,7 +846,7 @@ static void md_parse_blocks(stun_md_document *d) {
                 const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_HEADING,level);
                 if (node==UINT32_MAX) return;
                 (void)md_inline(d,node,s+hstart,hend-hstart,0);
-                paragraph=list=quote=UINT32_MAX;
+                paragraph=quote=UINT32_MAX;
                 continue;
             }
         }
@@ -658,13 +862,12 @@ static void md_parse_blocks(stun_md_document *d) {
                 if (paragraph==UINT32_MAX) return;
             } else (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
             (void)md_inline(d,paragraph,s+begin,end-begin,0);
-            list=UINT32_MAX;
             continue;
         }
         if (quote!=UINT32_MAX) { quote=paragraph=UINT32_MAX; }
         /* Start a table only at a new block boundary. */
         if (indent<=3 && paragraph==UINT32_MAX &&
-            list==UINT32_MAX && pos<d->raw_size) {
+            lists.depth==0u && pos<d->raw_size) {
             const md_line sep=md_read_line(d,pos);
             size_t columns=0, delimiter_columns=0;
             if (md_table_scan(s,begin,end,false,true,&columns) &&
@@ -687,47 +890,19 @@ static void md_parse_blocks(stun_md_document *d) {
                         return;
                     pos=row.next;
                 }
-                paragraph=list=quote=previous_item_paragraph=UINT32_MAX;
+                paragraph=quote=UINT32_MAX;
                 continue;
             }
         }
-        bool ordered=false;size_t item_start=0;
-        if (indent<=3 && md_list_marker(s,begin,end,&ordered,&item_start)) {
-            if (list==UINT32_MAX || previous_ordered!=ordered) {
-                list=md_add(d,0u,ordered?
-                    STUN_UI_BLOCK_ORDERED_LIST:STUN_UI_BLOCK_LIST,0);
-                if (list==UINT32_MAX) return;
-            }
-            char check_state=0;
-            size_t task_content=item_start;
-            const bool task=md_task_marker(s,item_start,end,
-                                          &check_state,&task_content);
-            const uint32_t item=md_add(d,list,
-                task ? STUN_UI_BLOCK_TASK_ITEM : STUN_UI_BLOCK_LIST_ITEM,0);
-            if (item==UINT32_MAX) return;
-            if(task) {
-                const uint32_t checkbox=md_add(d,item,STUN_UI_BLOCK_CHECKBOX,0);
-                if(checkbox==UINT32_MAX) return;
-                md_meta(d,checkbox,&check_state,1u);
-                if(d->error!=STUN_UI_OK) return;
-                item_start=task_content;
-            }
-            previous_item_paragraph=md_add(d,item,STUN_UI_BLOCK_PARAGRAPH,0);
-            if (previous_item_paragraph==UINT32_MAX) return;
-            (void)md_inline(d,previous_item_paragraph,
-                            s+item_start,end-item_start,0);
-            previous_ordered=ordered;
-            paragraph=UINT32_MAX;
+        md_list_marker_info top_marker={0};
+        if(indent<=3 && md_list_token(s,line,&top_marker) &&
+           (paragraph==UINT32_MAX || !top_marker.ordered ||
+            top_marker.start==1u) &&
+           !md_rule(s,begin,end)) {
+            if(!md_list_open(d,&lists,0u,&top_marker,s,end)) return;
+            paragraph=quote=UINT32_MAX;
             continue;
         }
-        if (list!=UINT32_MAX && previous_item_paragraph!=UINT32_MAX &&
-            indent>=2) {
-            (void)md_add(d,previous_item_paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
-            (void)md_inline(d,previous_item_paragraph,s+begin,end-begin,0);
-            continue;
-        }
-        list=UINT32_MAX;
-        previous_item_paragraph=UINT32_MAX;
         if (paragraph==UINT32_MAX) {
             paragraph=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0);
             if (paragraph==UINT32_MAX) return;
