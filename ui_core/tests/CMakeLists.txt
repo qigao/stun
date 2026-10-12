@@ -15,6 +15,13 @@ target_link_libraries(stun_markdown_paragraph_inline_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_paragraph_inline_test
          COMMAND stun_markdown_paragraph_inline_test)
 
+# #185: strict typed hard-vs-soft break origin and fail-closed HTML semantics.
+add_executable(stun_markdown_break_semantics_test markdown_break_semantics_test.c)
+target_compile_features(stun_markdown_break_semantics_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_break_semantics_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_break_semantics_test
+         COMMAND stun_markdown_break_semantics_test)
+
 add_executable(stun_markdown_golden_test markdown_golden_test.c)
 target_link_libraries(stun_markdown_golden_test PRIVATE Stun::UICore)
 target_compile_features(stun_markdown_golden_test PRIVATE c_std_11)
