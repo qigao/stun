@@ -122,7 +122,8 @@ def normalize_mistune_token(token: dict) -> list[dict]:
         node = group(list_kind, normalize_mistune_nodes(children))
         marker = token.get("bullet")
         start = int(attrs.get("start", 1)) if ordered else 0
-        if marker not in ((".", ")") if ordered else ("-", "+", "*")):
+        allowed_markers = (".", ")") if ordered else ("-", "+", "*")
+        if marker not in allowed_markers:
             raise ValueError(f"Unexpected Mistune list marker: {marker!r}")
         if not 0 <= start <= 999999999 or (not ordered and start != 0):
             raise ValueError(f"Invalid independent list start: {start}")
@@ -227,11 +228,12 @@ def native_ast(parser: str, source: str) -> dict:
                 "<IBBBB", raw_meta)
             ordered = kind == "ordered_list"
             marker = chr(marker_byte)
-            if (marker not in ((".", ")") if ordered else ("-", "+", "*"))
-                    or not 0 <= start <= 999999999
-                    or (not ordered and start != 0)
-                    or loose not in (0, 1)
-                    or reserved0 != 0 or reserved1 != 0):
+            allowed_markers = (".", ")") if ordered else ("-", "+", "*")
+            if (marker not in allowed_markers or
+                    not 0 <= start <= 999999999 or
+                    (not ordered and start != 0) or
+                    loose not in (0, 1) or
+                    reserved0 != 0 or reserved1 != 0):
                 raise ValueError("Invalid typed native list semantic metadata")
             node = group(kind, [])
             node["list_semantics"] = {
