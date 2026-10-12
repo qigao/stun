@@ -86,6 +86,7 @@ static int check(const fixture *f){
 int main(void){
  for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i)
    if(check(&cases[i]))return 1;
- printf("Quoted list ownership %zu/%zu PASS\n",\n        sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
+ printf("Quoted list ownership %zu/%zu PASS\n",
+        sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
  return 0;
 }
