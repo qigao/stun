@@ -259,10 +259,23 @@ static const html_fixture cases[] = {
      * inherited Setext heading without losing inner emphasis ownership. */
     { "Foo *bar\nbaz*\n====\n",
       "<h1>Foo <em>bar\nbaz</em></h1>\n" }, /* #81 */
+    /* #185: real CommonMark hard/soft physical break origin. Only root
+     * paragraph boundaries are admitted here; nested/list/quote still use
+     * their previously qualified semantics until scoped later. */
+    { "foo  \nbaz\n", "<p>foo<br />\nbaz</p>\n" },          /* #633 */
+    { "foo\\\nbaz\n", "<p>foo<br />\nbaz</p>\n" },         /* #634 */
+    { "foo       \nbaz\n", "<p>foo<br />\nbaz</p>\n" },     /* #635 */
+    { "foo  \n     bar\n", "<p>foo<br />\nbar</p>\n" },    /* #636 */
+    { "foo\\\n     bar\n", "<p>foo<br />\nbar</p>\n" },   /* #637 */
+    { "foo  \n", "<p>foo</p>\n" },                          /* #645 */
+    { "foo \n baz\n", "<p>foo\nbaz</p>\n" },                /* #649 */
+    { "foo\\\\\nbaz\n", "<p>foo\\\nbaz</p>\n" },
+    { "foo\\\n", "<p>foo\\</p>\n" },
+    { "foo \nbaz\n", "<p>foo\nbaz</p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==112,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==122,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
