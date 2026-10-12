@@ -28,3 +28,9 @@ add_test(NAME stun_markdown_html_test COMMAND stun_markdown_html_test)
 add_executable(stun_markdown_html_dump markdown_html_dump.c)
 target_compile_features(stun_markdown_html_dump PRIVATE c_std_11)
 target_link_libraries(stun_markdown_html_dump PRIVATE Stun::UICore)
+
+# CommonMark #177: native typed indented-code AST, HTML and ownership checks.
+add_executable(stun_markdown_indented_test markdown_indented_test.c)
+target_compile_features(stun_markdown_indented_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_indented_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_indented_test COMMAND stun_markdown_indented_test)

@@ -155,7 +155,7 @@ semantics differ. `survey.gfm.table-code-pipe` makes that disagreement
 reproducible; its cmarkgfm HTML is available for investigation. Do not
 silently trust a single Python implementation for disputed GFM syntax.
 
-Executable CI: `unicode-runtime.yml` uses the **installed canonical Salts
+Executable CI: `runtime-conformance.yml` uses the **installed canonical Salts
 SDK** to build the C11 RichDoc dumper, then installs the latest available
 Python `mistune` and `cmarkgfm` tools in an isolated test-only virtual
 environment without exact package pins. The JSON report and human-readable
@@ -170,3 +170,29 @@ python -m venv .venv-reference
   --parser build/ui-core-c11-installed/tests/stun_markdown_ast_dump \
   --report build/markdown-python-oracle.json
 ```
+
+### Unified Mesa/Desktop runner
+
+The runtime workflow calls `mesa-driver.yml` once with the resolved Salts
+release SHAs and `run_desktop: true`. Its one Linux runner builds pinned Mesa,
+executes baseline/patched control evidence, then directly consumes the same
+patched installation for real gCanvas/OpenGL/Vulkan and FlexUI window lifecycle
+tests under ASan/UBSan. No second desktop runner, Mesa artifact download or
+unpack is needed. Separate production FlexUI installed-SDK and Unicode jobs
+still run independently. Manual Mesa `workflow_dispatch` remains Mesa-only.
+ 
+### One Mesa runner for every runtime gate
+
+The `Stun runtime conformance` workflow resolves one exact Salts/SaltsUtils
+release graph and invokes `mesa-driver.yml` in `run_runtime` mode.
+The same Linux runner constructs Mesa's patched llvmpipe desktop environment
+once, then executes Unicode source/TinyTest, native C11 Markdown and official
+HTML oracle gates, installed Salts/FlexUI package consumers, production
+PluginSDK tests, and finally six real gCanvas/FlexUI OpenGL/Vulkan window
+CTest processes. One installed Salts SDK and one restored FlexUI ports graph
+serve both non-window and desktop tests: no second Salts build, Mesa download,
+Desktop runner or duplicated CMake setup. Standalone Mesa dispatch remains a
+Mesa-only driver lifecycle test. All prior JSON/JUnit and sanitizer evidence
+remains separate by directory and artifact name. Strict C11 and Public
+Dependency compile contracts stay independent as fast checks.
+

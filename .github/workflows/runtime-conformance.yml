@@ -1,0 +1,32 @@
+name: Stun runtime conformance
+
+# One trigger and one release-resolution job for the existing independent
+# Unicode source, installed-SDK/FlexUI, Mesa and gCanvas Desktop gates.
+# Job isolation, sanitizer evidence and original job names are preserved.
+on:
+  pull_request:
+  push:
+    branches: [master, refactor/flexui-salts-unicode]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: stun-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
+  mesa-driver:
+    needs: sdk-releases
+    uses: ./.github/workflows/mesa-driver.yml
+    with:
+      run_runtime: true
+      salts_sha: ${{ needs.sdk-releases.outputs.salts_sha }}
+      salts_utils_sha: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
+      salts_release: ${{ needs.sdk-releases.outputs.salts_release }}
+      salts_utils_release: ${{ needs.sdk-releases.outputs.salts_utils_release }}

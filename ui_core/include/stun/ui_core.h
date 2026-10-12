@@ -106,7 +106,9 @@ typedef enum stun_ui_block_kind {
     STUN_UI_BLOCK_DEFINITION_LIST,
     STUN_UI_BLOCK_DEFINITION_TERM,
     STUN_UI_BLOCK_DEFINITION_DESC,
-    STUN_UI_BLOCK_DIAGRAM
+    STUN_UI_BLOCK_DIAGRAM,
+    /* Appended: keep all existing public enum values stable. */
+    STUN_UI_BLOCK_CODE_INDENTED
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {

@@ -4,7 +4,7 @@ This standalone project consumes only an installed FlexUI package. It builds a
 pure C echo plugin module and a C++ host executable, then verifies the complete
 load, start, service request, completion, stop, join and unload path.
 
-The [Unicode runtime workflow](../../../.github/workflows/unicode-runtime.yml)
+The [Runtime conformance workflow](../../../.github/workflows/runtime-conformance.yml)
 configures and tests the actual production FlexUI targets on Linux with ASan and
 UBSan, then directly installs and consumes the package. Its producer profile
 enables `FLEXUI_ENABLE_PLUGINS` and disables the window/GPU backends. After

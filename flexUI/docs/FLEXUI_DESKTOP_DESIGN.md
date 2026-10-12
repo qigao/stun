@@ -632,7 +632,7 @@ Salts profile，并使用与 producer 一致的 OpenSSL package；FlexUI 配置�
 `SameMajorVersion` 兼容规则。新增 reserved 字段解释、可选 target 或不改变既有字段含义的实现修复只增加
 minor/patch；改变调用约定、结构布局、ownership/lifetime 或错误语义必须提升 ABI 与 package major。
 独立示例 `flexUI/examples/plugin_echo` 消费安装包：它构建纯 C 动态模块，再由 C++ host 完成
-load/start/echo completion/stop/join/unload。`unicode-runtime.yml` 直接配置、构建并测试真实 production
+load/start/echo completion/stop/join/unload。`runtime-conformance.yml` 直接配置、构建并测试真实 production
 targets，以 `cmake --install ... --component FlexUIPlugin` 安装后，再单独 configure/build/CTest
 外部工程。`flexUI/tests/plugin_install_consumer` 通过 `FLEXUI_CONSUMER_COMPONENT=PluginSDK/Services`
 分别选择纯 C header 检查与真实 C++ registry 调用；两种消费都取消 Salts 环境变量并显式禁用包查找，

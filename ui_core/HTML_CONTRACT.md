@@ -63,3 +63,20 @@ unexpected partial writes fail the survey immediately. The 652 semantic
 matches are **diagnostic only**, because the current C11 renderer deliberately
 rejects many unsupported grammar features. Full spec compliance is a separate
 future gate, not inferred from the 17-fixture supported-subset HTML comparison.
+
+## Indented code subset (#177)
+
+The C11 parser now distinguishes \`STUN_UI_BLOCK_CODE_INDENTED\` from fenced
+code. Its payload is owned literal UTF-8 text with four *column* indentation
+removed using CommonMark tab stops; CRLF and EOF are emitted as normalized LF.
+Interior blank lines remain pending until a following indented content line
+proves they belong to the code block; leading/trailing blank lines are dropped.
+Raw Markdown is untouched. The renderer escapes the text as \`<pre><code>\`
+without an info-string or a second Markdown grammar.
+
+\`stun_markdown_indented_test\` checks native tree ancestry, exact rendered
+HTML, bounded output, and rejection without partial writes. The independent
+official-spec test \`gate_commonmark_indented.py\` checks explicit numbered
+CommonMark 0.31.2 samples against **official expected HTML**. All 652 examples
+remain in the separately counted diagnostic survey. Loose list precedence
+(#108/#109) remains diagnostic until typed loose-list semantics are added.

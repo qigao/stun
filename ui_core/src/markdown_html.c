@@ -207,6 +207,9 @@ static void html_node(stun_html_writer *w, size_t id,
         html_escaped(w,meta,meta_length,true);
         html_str(w,"\">");
         break;
+    case STUN_UI_BLOCK_CODE_INDENTED:
+        html_str(w,"<pre><code>");
+        break;
     case STUN_UI_BLOCK_CODE_FENCE:
         if(!html_metadata(w,id,&meta,&meta_length)) return;
         html_str(w,"<pre><code");
@@ -264,7 +267,8 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_STRIKETHROUGH: html_str(w,"</del>"); break;
     case STUN_UI_BLOCK_CODE_SPAN: html_str(w,"</code>"); break;
     case STUN_UI_BLOCK_LINK: html_str(w,"</a>"); break;
-    case STUN_UI_BLOCK_CODE_FENCE: html_str(w,"</code></pre>\n"); break;
+    case STUN_UI_BLOCK_CODE_FENCE:
+    case STUN_UI_BLOCK_CODE_INDENTED: html_str(w,"</code></pre>\n"); break;
     case STUN_UI_BLOCK_LIST: html_str(w,"</ul>\n"); break;
     case STUN_UI_BLOCK_ORDERED_LIST: html_str(w,"</ol>\n"); break;
     case STUN_UI_BLOCK_LIST_ITEM: html_str(w,"</li>\n"); break;
