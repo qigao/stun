@@ -577,6 +577,42 @@ jobs:
                   elif src.is_file(): shutil.copy2(src,dst)
                   else: raise SystemExit("unexpected SDK entry "+str(src))
                   manifest["copied"]+=1
+          # NuGet's ZIP format flattened native POSIX SONAME symlinks into
+          # independent byte-identical files. Reconstruct *only* the verified
+          # libsalts Core chain so dlopen/ldd canonicalizes to the very same
+          # imported Salts::Core provider; never bypass Core identity checks.
+          import re,subprocess
+          core_version=sys.argv[4].split("-",1)[0]
+          core=target/"lib"/("libsalts.so."+core_version)
+          if not core.is_file() or core.is_symlink():
+              raise SystemExit(f"missing canonical published Core DSO: {core}")
+          metadata=subprocess.check_output(["readelf","-d",str(core)],text=True)
+          sonames=re.findall(r"\\(SONAME\\).*?\\[([^\\]]+)\\]",metadata)
+          if len(sonames)!=1 or not re.fullmatch(r"libsalts[.]so[.][0-9]+(?:[.][0-9]+)*",sonames[0]):
+              raise SystemExit(f"invalid released Salts Core ELF SONAME: {sonames}")
+          if not core.name.startswith(sonames[0]+"."):
+              raise SystemExit(f"Core SONAME is inconsistent with release: {sonames[0]} / {core.name}")
+          canonical_digest=hashlib.sha256(core.read_bytes()).hexdigest()
+          aliases={}
+          for alias in (sonames[0],"libsalts.so"):
+              path=core.parent/alias
+              if not path.is_file():
+                  raise SystemExit(f"missing published Core SONAME alias: {path}")
+              if hashlib.sha256(path.read_bytes()).hexdigest()!=canonical_digest:
+                  raise SystemExit(f"conflicting Core SONAME bytes: {path}")
+              if path.is_symlink():
+                  if path.resolve(strict=True)!=core.resolve(strict=True):
+                      raise SystemExit(f"noncanonical Core symlink: {path}")
+              else:
+                  # Preserve the verified canonical ELF bytes. Only convert a
+                  # byte-identical NuGet-flattened alias into a relative link.
+                  path.unlink()
+                  path.symlink_to(core.name)
+              if path.resolve(strict=True)!=core.resolve(strict=True):
+                  raise SystemExit(f"Core alias fails canonical identity: {path}")
+              aliases[alias]={"target":core.name,"sha256":canonical_digest}
+          manifest["canonical_core"]={"soname":sonames[0],"sha256":canonical_digest,
+                                       "aliases":aliases}
           for rel in ("lib/cmake/Salts/SaltsConfig.cmake","lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"):
               if not (target/rel).is_file(): raise SystemExit("missing CMake package config "+rel)
           (pathlib.Path(sys.argv[6])/"native-sdk-provenance.json").write_text(json.dumps(manifest,indent=2)+"\n")
