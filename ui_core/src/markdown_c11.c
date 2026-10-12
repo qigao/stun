@@ -16,6 +16,7 @@ struct stun_md_document {
     size_t raw_size;
     char *text;
     size_t text_size;
+    size_t text_capacity;
     char *metadata;
     size_t metadata_size;
     size_t metadata_capacity;
@@ -121,17 +122,39 @@ static bool md_store(stun_md_document *d, bool is_meta,
     size_t *used = is_meta ? &d->metadata_size : &d->text_size;
     char *target = is_meta ? d->metadata : d->text;
     if (d->error != STUN_UI_OK) return false;
-    size_t limit=is_meta ? d->metadata_capacity : d->raw_size;
+    size_t limit=is_meta ? d->metadata_capacity : d->text_capacity;
     if(*used>limit) {md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;}
+    if(!is_meta && n>limit-*used) {
+        /* Two-codepoint HTML5 aliases such as &nGt; expand five raw ASCII
+         * bytes into six UTF-8 bytes. The existing semantic arena therefore
+         * cannot be capped at exactly raw_size. Grow only on demand, with
+         * an explicit 2 * raw_size absolute bound and no borrowed views
+         * until the successful document is published. */
+        if(d->raw_size>(SIZE_MAX-1u)/2u) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+        }
+        const size_t maximum=d->raw_size*2u;
+        if(*used>maximum || n>maximum-*used) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+        }
+        char *data=(char*)realloc(d->text,maximum+1u);
+        if(!data) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
+        d->text=data;d->text_capacity=maximum;limit=maximum;
+    }
     if(is_meta && n>limit-*used) {
         /* Bound metadata by the node budget; short Markdown sources may still
          * need eight metadata bytes for one list. */
-        if(d->node_limit>SIZE_MAX/sizeof(stun_ui_list_semantics) ||
-           d->raw_size>SIZE_MAX-d->node_limit*sizeof(stun_ui_list_semantics)) {
-            md_error(d,STUN_UI_CAPACITY_EXCEEDED); return false;
+        if(d->raw_size>(SIZE_MAX-1u)/2u ||
+           d->node_limit>SIZE_MAX/sizeof(stun_ui_list_semantics)) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
         }
-        const size_t maximum=d->raw_size+
-                              d->node_limit*sizeof(stun_ui_list_semantics);
+        const size_t semantic_ceiling=d->raw_size*2u;
+        if(semantic_ceiling>
+           SIZE_MAX-d->node_limit*sizeof(stun_ui_list_semantics)) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+        }
+        const size_t maximum=semantic_ceiling+
+                             d->node_limit*sizeof(stun_ui_list_semantics);
         if(*used>maximum || n>maximum-*used) {
             md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
         }
@@ -174,6 +197,47 @@ static void md_meta(stun_md_document *d, uint32_t node,
         d->node_metadata[node] = (stun_ui_block_metadata){from,to};
 }
 
+
+/* Fence info strings share the SAME CommonMark character-reference decoder
+ * as normal inline text. Backslash-escaped ASCII punctuation produces only
+ * a literal byte, never another chance to decode a just-created '&'.
+ * Code fence BODY stays verbatim. Metadata is an owned, decoded byte arena
+ * separate from raw Markdown and the semantic TEXT arena.
+ *
+ * Worst-case HTML5 two-scalar references can expand a five-byte name to
+ * six UTF-8 bytes; bounded scratch is at most twice the raw info length. */
+static void md_fence_info_meta(stun_md_document *d,uint32_t node,
+                               const char *s,size_t n) {
+    if(node==UINT32_MAX || !n || d->error!=STUN_UI_OK)return;
+    if(n>(SIZE_MAX-1u)/2u) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return;
+    }
+    const size_t cap=n*2u;
+    char *text=(char*)malloc(cap+1u);
+    if(!text) {md_error(d,STUN_UI_OUT_OF_MEMORY);return;}
+    size_t used=0u;
+    for(size_t p=0u;p<n && d->error==STUN_UI_OK;) {
+        if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+            text[used++]=s[p+1u];
+            p+=2u;
+            continue;
+        }
+        char decoded[8];
+        size_t consumed=0u,written=0u;
+        if(s[p]=='&' && stun_md_decode_character_reference(
+               s+p,n-p,&consumed,decoded,&written)) {
+            if(written>cap-used) {
+                md_error(d,STUN_UI_CAPACITY_EXCEEDED);break;
+            }
+            memcpy(text+used,decoded,written);
+            used+=written;p+=consumed;
+            continue;
+        }
+        text[used++]=s[p++];
+    }
+    if(d->error==STUN_UI_OK)md_meta(d,node,text,used);
+    free(text);
+}
 
 /* List metadata is owned by the parser; update before publishing the view. */
 static bool md_list_meta(stun_md_document *d, uint32_t id,
@@ -889,7 +953,7 @@ static bool md_list_begin_fence(stun_md_document *d,md_list_frame *f,
         return false;
     const uint32_t node=md_add(d,f->item,STUN_UI_BLOCK_CODE_FENCE,0u);
     if(node==UINT32_MAX) return true;
-    md_meta(d,node,s+info_b,info_e-info_b);
+    md_fence_info_meta(d,node,s+info_b,info_e-info_b);
     if(d->error!=STUN_UI_OK) return true;
     f->fence=(md_fence){marker,run,node};
     f->fence_open=true;
@@ -1482,7 +1546,7 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
                                     &marker,&run,&info_begin,&info_end)) {
         const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_CODE_FENCE,0u);
         if(node==UINT32_MAX)return false;
-        md_meta(d,node,s+info_begin,info_end-info_begin);
+        md_fence_info_meta(d,node,s+info_begin,info_end-info_begin);
         if(d->error!=STUN_UI_OK)return false;
         q->fence=(md_fence){marker,run,node};
         q->fence_open=true;
@@ -1856,7 +1920,7 @@ static void md_parse_blocks(stun_md_document *d) {
                 &marker,&run,&info_b,&info_e)) {
             const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_CODE_FENCE,0);
             if (node==UINT32_MAX) return;
-            md_meta(d,node,s+info_b,info_e-info_b);
+            md_fence_info_meta(d,node,s+info_b,info_e-info_b);
             fence=(md_fence){marker,run,node};
             code_open=true;
             paragraph=UINT32_MAX;
@@ -1991,6 +2055,7 @@ stun_ui_status stun_md_parse(const char *input,size_t length,
     d->text=(char*)malloc(length+1u);
     d->metadata=(char*)malloc(length+1u);
     d->metadata_capacity=length;
+    d->text_capacity=length;
     if (!d->raw || !d->text || !d->metadata) {
         stun_md_document_destroy(d);
         return STUN_UI_OUT_OF_MEMORY;

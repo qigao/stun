@@ -95,6 +95,94 @@ static int check_entity(const md_entity_fixture *fixture) {
     return 0;
 }
 
+/* #185: fence INFO is decoded metadata; fenced payload stays literal code.
+ * Raw Markdown byte offsets are never reused as decoded metadata offsets. */
+static int check_fence_metadata(const char *source,const char *expected) {
+    const size_t n=strlen(source);
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_OK);
+    CHECK(doc!=NULL);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&view,256u)==STUN_UI_OK);
+    CHECK(view.raw_markdown_bytes==n);
+    CHECK(memcmp(view.raw_markdown,source,n)==0);
+    size_t found=0u;
+    for(size_t i=1u;i<view.document.block_count;++i) {
+        const stun_ui_block *node=&view.document.blocks[i];
+        if(node->kind!=STUN_UI_BLOCK_CODE_FENCE)continue;
+        CHECK(node->parent_index<i);
+        const char *metadata=NULL;
+        size_t length=SIZE_MAX;
+        CHECK(stun_ui_rich_document_metadata(&view,i,&metadata,&length)==
+              STUN_UI_OK);
+        const size_t want=strlen(expected);
+        CHECK(length==want);
+        CHECK(want==0u || (metadata &&
+              !memcmp(metadata,expected,want)));
+        ++found;
+    }
+    CHECK(found==1u);
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
+static int test_fence_entities_and_expanding_utf8(void) {
+    CHECK(check_fence_metadata(
+        TICK TICK TICK " f&ouml;&ouml;\nfoo\n" TICK TICK TICK "\n",
+        "föö")==0); /* CommonMark #34 */
+    CHECK(check_fence_metadata(
+        TICK TICK TICK " foo\\+bar\nfoo\n" TICK TICK TICK "\n",
+        "foo+bar")==0); /* CommonMark #24 */
+    CHECK(check_fence_metadata(
+        "> " TICK TICK TICK " f&ouml;\n> body\n> " TICK TICK TICK "\n",
+        "fö")==0);
+    CHECK(check_fence_metadata(
+        "- " TICK TICK TICK " f&nGt;\n  body\n  " TICK TICK TICK "\n",
+        "f≫⃒")==0);
+    CHECK(check_fence_metadata(
+        TICK TICK TICK " \\&copy;\nbody\n" TICK TICK TICK "\n",
+        "&copy;")==0);
+
+    /* HTML5 alias expansion from five RAW bytes to six decoded UTF-8 bytes
+     * must not invalidate owned semantic text spans or metadata. */
+    const char expanded[]="&nGt;&nGt;&nLt;&nLt;\n";
+    const size_t size=sizeof(expanded)-1u;
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(expanded,size,256u,size+1u,&doc)==STUN_UI_OK);
+    CHECK(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    CHECK(v.document.source_bytes>v.raw_markdown_bytes);
+    CHECK(v.raw_markdown_bytes==size);
+    CHECK(memcmp(v.raw_markdown,expanded,size)==0);
+    CHECK(has_text(v,"≫⃒",STUN_UI_BLOCK_PARAGRAPH));
+    CHECK(has_text(v,"≪⃒",STUN_UI_BLOCK_PARAGRAPH));
+    stun_md_document_destroy(doc);
+
+    char source[512],semantic[512];
+    size_t raw=0u,decoded=0u;
+    const char *prefix=TICK TICK TICK " ";
+    memcpy(source+raw,prefix,4u);raw+=4u;
+    for(size_t i=0u;i<40u;++i) {
+        const char raw_entity[]="&nGt;";
+        const char decoded_entity[]="≫⃒";
+        CHECK(raw+sizeof(raw_entity)-1u<sizeof(source));
+        CHECK(decoded+sizeof(decoded_entity)-1u<sizeof(semantic));
+        memcpy(source+raw,raw_entity,sizeof(raw_entity)-1u);
+        raw+=sizeof(raw_entity)-1u;
+        memcpy(semantic+decoded,decoded_entity,sizeof(decoded_entity)-1u);
+        decoded+=sizeof(decoded_entity)-1u;
+    }
+    const char suffix[]="\nbody\n" TICK TICK TICK "\n";
+    CHECK(raw+sizeof(suffix)<=sizeof(source));
+    memcpy(source+raw,suffix,sizeof(suffix));
+    raw+=sizeof(suffix)-1u;
+    semantic[decoded]='\0';
+    CHECK(raw<decoded);
+    CHECK(check_fence_metadata(source,semantic)==0);
+    return 0;
+}
+
 int main(void) {
     static const md_entity_fixture cases[]={
         /* Official CommonMark 0.31.2 normative character refs. */
@@ -151,6 +239,7 @@ int main(void) {
             return 1;
         }
     }
+    if(test_fence_entities_and_expanding_utf8())return 1;
     const char limited[]="*A &ngE; B*\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     CHECK(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -176,6 +265,6 @@ int main(void) {
     CHECK(view.raw_markdown_bytes==used);
     CHECK(memcmp(view.raw_markdown,repeated,used)==0);
     stun_md_document_destroy(document);
-    puts("C11 HTML5 entities: 20/20 AST/HTML, atomic rollback and bounded unknown names");
+    puts("C11 HTML5 entities: 20/20 AST/HTML, fence info, bounded UTF-8 growth and rollback");
     return 0;
 }

@@ -316,10 +316,19 @@ static const html_fixture cases[] = {
     { "*x &copy; y*\n", "<p><em>x © y</em></p>\n" }, /* Nested emphasis source entities */
     { "[&copy;](url)\n", "<p><a href=\"url\">©</a></p>\n" }, /* Link label semantic ownership */
     { "&#x26;lt;\n", "<p>&amp;lt;</p>\n" }, /* No recursive interpretation */
+    { "``` foo\\+bar\nfoo\n```\n", "<pre><code class=\"language-foo+bar\">foo\n</code></pre>\n" }, /* #24 official escaped fence info */
+    { "``` f&ouml;&ouml;\nfoo\n```\n", "<pre><code class=\"language-föö\">foo\n</code></pre>\n" }, /* #34 official named fence info */
+    { "``` f&nGt;&nLt;\nbody\n```\n", "<pre><code class=\"language-f≫⃒≪⃒\">body\n</code></pre>\n" }, /* Two scalar named references in fence info */
+    { "``` f&NotDefined;\nbody\n```\n", "<pre><code class=\"language-f&amp;NotDefined;\">body\n</code></pre>\n" }, /* Unknown fence info name not resolved */
+    { "``` \\&copy;\nbody\n```\n", "<pre><code class=\"language-&amp;copy;\">body\n</code></pre>\n" }, /* Escaped amp not recursively decoded */
+    { "``` code\n&copy;\n```\n", "<pre><code class=\"language-code\">&amp;copy;\n</code></pre>\n" }, /* Fenced body remains literal */
+    { "``` lang&#x41;\nbody\n```\n", "<pre><code class=\"language-langA\">body\n</code></pre>\n" }, /* Numeric fence language */
+    { "&nGt;&nGt;&nLt;&nLt;\n", "<p>≫⃒≫⃒≪⃒≪⃒</p>\n" }, /* Named reference expansion capacity */
+    { "&nGt;", "<p>≫⃒</p>\n" }, /* Named reference expansion at EOF */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==151,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==160,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
