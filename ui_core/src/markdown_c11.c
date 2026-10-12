@@ -341,6 +341,21 @@ static size_t md_match(const char *s, size_t n, size_t start,
             }
             return p;
         }
+        /* A longer *terminal* closing run may supply the current closer
+         * and leave unused literal markers (#443/#446/#447/#455/#458/#459).
+         * If inner same-sized runs are open, reserve exactly one matching
+         * closing group per inner owner before closing the outer (#409/#427).
+         *
+         * Keep this restricted to a terminal run and same marker length:
+         * general mixed-length/triple runs need CommonMark's full delimiter
+         * stack and modulo-3 rules, not a greedy fallback or tail rewrite. */
+        if(emphasis && run>count && p+run==n) {
+            bool can_open=false,can_close=false;
+            md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
+            if(can_close &&
+               (!inner_open || run==(inner_open+1u)*count))
+                return p+inner_open*count;
+        }
         p += run - 1;
     }
     return SIZE_MAX;
