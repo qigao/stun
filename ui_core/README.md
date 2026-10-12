@@ -180,3 +180,19 @@ patched installation for real gCanvas/OpenGL/Vulkan and FlexUI window lifecycle
 tests under ASan/UBSan. No second desktop runner, Mesa artifact download or
 unpack is needed. Separate production FlexUI installed-SDK and Unicode jobs
 still run independently. Manual Mesa `workflow_dispatch` remains Mesa-only.
+ 
+### One Mesa runner for every runtime gate
+
+The `Stun runtime conformance` workflow resolves one exact Salts/SaltsUtils
+release graph and invokes `mesa-driver.yml` in `run_runtime` mode.
+The same Linux runner constructs Mesa's patched llvmpipe desktop environment
+once, then executes Unicode source/TinyTest, native C11 Markdown and official
+HTML oracle gates, installed Salts/FlexUI package consumers, production
+PluginSDK tests, and finally six real gCanvas/FlexUI OpenGL/Vulkan window
+CTest processes. One installed Salts SDK and one restored FlexUI ports graph
+serve both non-window and desktop tests: no second Salts build, Mesa download,
+Desktop runner or duplicated CMake setup. Standalone Mesa dispatch remains a
+Mesa-only driver lifecycle test. All prior JSON/JUnit and sanitizer evidence
+remains separate by directory and artifact name. Strict C11 and Public
+Dependency compile contracts stay independent as fast checks.
+
