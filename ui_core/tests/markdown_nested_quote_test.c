@@ -77,7 +77,46 @@ static int verify(const sample *f) {
     if(fail)fprintf(stderr,"Nested quote mismatch: %s\n",f->name);
     return fail;
 }
+/* A fenced code block belongs to its list item, not the document root. */
+static int verify_list_owned_fence(void) {
+    static const char source[]="- item\n  ~~~c\n  abc\n  ~~~\n";
+    stun_md_document *owner=NULL;
+    const size_t bytes=sizeof(source)-1u;
+    if(stun_md_parse(source,bytes,256u,bytes+1u,&owner)!=STUN_UI_OK ||
+       !owner) return 1;
+    const stun_ui_rich_document_view view=stun_md_document_view(owner);
+    int fail=stun_ui_rich_document_validate(&view,256u)!=STUN_UI_OK;
+    size_t fences=0u;
+    for(size_t i=1u;i<view.document.block_count&&!fail;++i) {
+        if(view.document.blocks[i].kind!=STUN_UI_BLOCK_CODE_FENCE)continue;
+        ++fences;
+        const uint32_t parent=view.document.blocks[i].parent_index;
+        if(parent>=i ||
+           view.document.blocks[parent].kind!=STUN_UI_BLOCK_LIST_ITEM)
+            fail=1;
+        size_t payloads=0u;
+        for(size_t j=i+1u;j<view.document.block_count;++j) {
+            if(view.document.blocks[j].parent_index!=(uint32_t)i)continue;
+            const stun_ui_block *text=&view.document.blocks[j];
+            if(text->kind!=STUN_UI_BLOCK_TEXT)continue;
+            if(text->byte_end<text->byte_begin ||
+               text->byte_end>view.document.source_bytes) {
+                fail=1;break;
+            }
+            const size_t n=text->byte_end-text->byte_begin;
+            if((n==3u && memcmp(view.document.source+text->byte_begin,"abc",3u)==0) ||
+               (n==1u && view.document.source[text->byte_begin]=='\n'))
+                ++payloads;
+        }
+        if(payloads!=2u)fail=1; /* 'abc' and LF are separate owned nodes */
+    }
+    if(fences!=1u)fail=1;
+    stun_md_document_destroy(owner);
+    if(fail)fprintf(stderr,"List-owned fence ancestry/payload mismatch\n");
+    return fail;
+}
 int main(void) {
+    if(verify_list_owned_fence())return 1;
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(verify(&cases[i]))return 1;
     /* Every quoted fixture must reject exhausted node/source budgets without

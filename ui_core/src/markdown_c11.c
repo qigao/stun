@@ -426,6 +426,8 @@ typedef struct md_list_marker_info {
 } md_list_marker_info;
 typedef struct md_list_frame {
     uint32_t list, item, paragraph, code, quote;
+    md_fence fence;
+    bool fence_open;
     size_t marker_column, content_column, list_base_column;
     char marker;
     bool ordered, pending_blank, empty_item;
@@ -517,6 +519,7 @@ static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
     }
     f->content_column=m->content_column;
     f->code=f->quote=UINT32_MAX;
+    f->fence_open=false;
     f->pending_blank=false;
     return d->error==STUN_UI_OK;
 }
@@ -545,6 +548,12 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                             md_line line) {
     if(!stack->depth) return false;
     const char *s=d->raw;
+    if(stack->frames[stack->depth-1u].fence_open &&
+       md_blank(s,line.begin,line.end)) {
+        md_list_frame *f=&stack->frames[stack->depth-1u];
+        md_text(d,f->fence.node,"\n",1u);
+        return true;
+    }
     if(md_blank(s,line.begin,line.end)) {
         /* A separator can loosen an enclosing list item even when the
          * deepest nested list closes before the next nonblank line. */
@@ -558,7 +567,8 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
     const size_t line_begin=md_left(s,line.begin,line.end);
     /* Thematic breaks interrupt active list items (including '* * *').
      * They do not become a new list item merely because '*' is a marker. */
-    if(indent<=3u && md_rule(s,line_begin,line.end)) {
+    if(indent<=3u && md_rule(s,line_begin,line.end) &&
+       !stack->frames[stack->depth-1u].fence_open) {
         stack->depth=0u;
         return false;
     }
@@ -568,7 +578,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
          * its content indent still determines the nesting boundary. For
          * instance '- a /  - b /   - c' denotes three siblings when the
          * preceding marker is at the previous column. */
-        const bool sibling=marker_found &&
+        const bool sibling=!f->fence_open && marker_found &&
             marker.column>=f->list_base_column &&
             (marker.column==f->marker_column ||
              (marker.column<f->content_column &&
@@ -582,6 +592,22 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             }
             --stack->depth; /* differing marker families never coalesce */
             continue;
+        }
+        if(f->fence_open) {
+            if(indent<f->content_column) {
+                --stack->depth;
+                continue;
+            }
+            const size_t body=md_skip_columns(s,line.begin,line.end,
+                                               f->content_column);
+            const size_t content=md_left(s,body,line.end);
+            if(md_fence_close(s,content,line.end,f->fence)) {
+                f->fence_open=false;
+                return true;
+            }
+            md_text(d,f->fence.node,s+body,line.end-body);
+            if(line.newline) md_text(d,f->fence.node,"\n",1u);
+            return true;
         }
         if(f->empty_item && f->pending_blank) {
             --stack->depth;
@@ -608,6 +634,21 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 f->pending_blank=false;
             }
             const size_t inner_indent=indent-f->content_column;
+            char fence_marker=0;
+            size_t fence_run=0,info_b=0,info_e=0;
+            const size_t inner_begin=md_left(s,body,line.end);
+            if(inner_indent<=3u &&
+               md_fence_start(s,inner_begin,line.end,&fence_marker,
+                              &fence_run,&info_b,&info_e)) {
+                const uint32_t node=md_add(d,f->item,STUN_UI_BLOCK_CODE_FENCE,0u);
+                if(node==UINT32_MAX) return true;
+                md_meta(d,node,s+info_b,info_e-info_b);
+                if(d->error!=STUN_UI_OK) return true;
+                f->fence=(md_fence){fence_marker,fence_run,node};
+                f->fence_open=true;
+                f->paragraph=f->code=f->quote=UINT32_MAX;
+                return true;
+            }
             if(inner_indent>=4u && f->paragraph==UINT32_MAX &&
                f->quote==UINT32_MAX) {
                 if(f->code==UINT32_MAX) {
