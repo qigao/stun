@@ -355,10 +355,27 @@ static const html_fixture cases[] = {
     { "[x](f(a(b)) \"info\")\n", "<p><a href=\"f(a(b))\" title=\"info\">x</a></p>\n" }, /* nested parentheses in unquoted href plus title */
     { "[x](dest (hello world))\n", "<p><a href=\"dest\" title=\"hello world\">x</a></p>\n" }, /* nested title parentheses literal title delimited */
     { "[x](<a<b>)\n", "<p>[x](&lt;a&lt;b&gt;)</p>\n" }, /* angle nested opening bracket invalid */
+    { "[foo][bar]\n\n[bar]: /url \"title\"\n", "<p><a href=\"/url\" title=\"title\">foo</a></p>\n" }, /* #527 forward explicit binding */
+    { "[foo][BaR]\n\n[bar]: /url \"title\"\n", "<p><a href=\"/url\" title=\"title\">foo</a></p>\n" }, /* #539 ASCII case-fold full reference label */
+    { "[foo]: /url1\n\n[foo]: /url2\n\n[bar][foo]\n", "<p><a href=\"/url1\">bar</a></p>\n" }, /* #544 first definition wins */
+    { "[foo][]\n\n[foo]: /url \"title\"\n", "<p><a href=\"/url\" title=\"title\">foo</a></p>\n" }, /* #553 collapsed reference */
+    { "[Foo][]\n\n[foo]: /url \"title\"\n", "<p><a href=\"/url\" title=\"title\">Foo</a></p>\n" }, /* #555 normalized case collapsed */
+    { "[foo]\n\n[foo]: /url \"title\"\n", "<p><a href=\"/url\" title=\"title\">foo</a></p>\n" }, /* #557 shortcut reference after forward declaration */
+    { "[Foo]\n\n[foo]: /url \"title\"\n", "<p><a href=\"/url\" title=\"title\">Foo</a></p>\n" }, /* #561 normalized case shortcut */
+    { "[foo] bar\n\n[foo]: /url\n", "<p><a href=\"/url\">foo</a> bar</p>\n" }, /* #562 shortcut with text following */
+    { "[foo][bar]\n\n[foo]: /url1\n[bar]: /url2\n", "<p><a href=\"/url2\">foo</a></p>\n" }, /* #565 explicit label wins when both defined */
+    { "[foo][]\n\n[foo]: /url1\n", "<p><a href=\"/url1\">foo</a></p>\n" }, /* #566 collapsed reference vs link target */
+    { "[foo]()\n\n[foo]: /url1\n", "<p><a href=\"\">foo</a></p>\n" }, /* #567 inline link has precedence over shortcut */
+    { "[foo](not a link)\n\n[foo]: /url1\n", "<p><a href=\"/url1\">foo</a>(not a link)</p>\n" }, /* #568 invalid inline link permits shortcut */
+    { "[foo] [bar]\n\n[bar]: /url \"title\"\n", "<p>[foo] <a href=\"/url\" title=\"title\">bar</a></p>\n" }, /* #542 unknown adjacent full vs linked shortcut */
+    { "[foo]\n[bar]\n\n[bar]: /url \"title\"\n", "<p>[foo]\n<a href=\"/url\" title=\"title\">bar</a></p>\n" }, /* #543 separate reference shortcuts across LF */
+    { "# [foo][bar]\n\n[bar]: /url\n", "<h1><a href=\"/url\">foo</a></h1>\n" }, /* simple reference text resolves in heading */
+    { "[x][id]\n\n[id]: /f&ouml; \"A &copy;\"\n", "<p><a href=\"/f%C3%B6\" title=\"A ©\">x</a></p>\n" }, /* root reference inline punctuation and title */
+    { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==190,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==207,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

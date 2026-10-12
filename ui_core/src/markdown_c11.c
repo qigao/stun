@@ -11,6 +11,22 @@
  * emits semantic text spans and metadata into two distinct owned buffers.
  * All RichDoc views borrow this document until stun_md_document_destroy().
  */
+/* Parse-local root reference-definition bindings, never exposed through
+ * RichDoc or persisted as runtime state. First normalized label wins.
+ * Restrict this slice to bounded ASCII alphanumeric/whitespace labels:
+ * full Unicode Default Case Folding and escaped-label equivalence are
+ * tracked separately, not implemented via a locale or Stun fallback. */
+enum { MD_REF_MAX=128u, MD_REF_KEY_MAX=128u };
+typedef struct md_reference_binding {
+    char key[MD_REF_KEY_MAX+1u];
+    char *href;
+    size_t href_bytes;
+    char *title;
+    size_t title_bytes;
+    bool has_title;
+    size_t source_line;
+} md_reference_binding;
+
 struct stun_md_document {
     char *raw;
     size_t raw_size;
@@ -25,6 +41,8 @@ struct stun_md_document {
     size_t node_count;
     size_t capacity;
     size_t node_limit;
+    md_reference_binding *references;
+    size_t reference_count;
     stun_ui_status error;
 };
 
@@ -485,6 +503,76 @@ static bool md_link_target_parse(const char *s,size_t n,size_t round_open,
     return true;
 }
 
+/* Label normalization operates on the bounded, literal ASCII subset:
+ * trim/collapse horizontal whitespace and ASCII case-fold. Never claim
+ * Unicode case folding by silently borrowing locale-dependent C routines.
+ * Only recognized reference keys are allowed to create LINK nodes. */
+static bool md_reference_key(const char *s,size_t b,size_t e,
+                             char key[MD_REF_KEY_MAX+1u]) {
+    if(b>=e || e-b>MD_REF_KEY_MAX)return false;
+    size_t used=0u;bool gap=false;
+    for(size_t i=b;i<e;++i) {
+        const unsigned char c=(unsigned char)s[i];
+        if(c==' ' || c=='\t') {if(used)gap=true;continue;}
+        const bool alpha=(c>='A'&&c<='Z')||(c>='a'&&c<='z');
+        const bool digit=c>='0'&&c<='9';
+        if(!alpha && !digit)return false;
+        if(gap) {
+            if(used>=MD_REF_KEY_MAX)return false;
+            key[used++]=' ';
+            gap=false;
+        }
+        if(used>=MD_REF_KEY_MAX)return false;
+        key[used++]=(char)((c>='A'&&c<='Z')?c+('a'-'A'):c);
+    }
+    if(!used)return false;
+    key[used]='\0';
+    return true;
+}
+
+static const md_reference_binding *md_reference_lookup(
+    const stun_md_document *d,const char *s,size_t begin,size_t end) {
+    if(!d->reference_count)return NULL;
+    char key[MD_REF_KEY_MAX+1u];
+    if(!md_reference_key(s,begin,end,key))return NULL;
+    for(size_t i=0u;i<d->reference_count;++i)
+        if(!strcmp(d->references[i].key,key))
+            return &d->references[i]; /* first matching definition wins */
+    return NULL;
+}
+
+/* One semantic admission path for full, collapsed and shortcut references.
+ * Resolve explicit second labels before looking for shortcut bindings.
+ * The surrounding delimiter matcher and RichDoc emitter call this SAME
+ * function so emphasis cannot borrow characters from a real link label. */
+static bool md_reference_inline_match(
+    const stun_md_document *d,const char *s,size_t n,size_t at,
+    const md_reference_binding **binding,size_t *label_end,
+    size_t *token_end) {
+    if(!d->reference_count || !binding || !label_end || !token_end ||
+       at>=n || s[at]!='[')return false;
+    const size_t first=md_match(s,n,at+1u,']',1u);
+    if(first==SIZE_MAX)return false;
+    if(first+1u<n && s[first+1u]=='[') {
+        const size_t second=md_match(s,n,first+2u,']',1u);
+        if(second!=SIZE_MAX) {
+            const bool collapsed=second==first+2u;
+            const md_reference_binding *found=md_reference_lookup(
+                d,s,collapsed?at+1u:first+2u,collapsed?first:second);
+            if(found) {
+                *binding=found;*label_end=first;*token_end=second+1u;
+                return true;
+            }
+            return false;
+        }
+    }
+    const md_reference_binding *found=
+        md_reference_lookup(d,s,at+1u,first);
+    if(!found)return false;
+    *binding=found;*label_end=first;*token_end=first+1u;
+    return true;
+}
+
 /* CommonMark backtick delimiters close only on an EXACTLY equal-sized run.
  * Unlike emphasis/link matching, backslashes are ordinary literal payload
  * inside a code span, including when directly preceding a backtick. Skip
@@ -592,6 +680,14 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
                 if(md_link_target_parse(
                        s,n,square+1u,&target,&round)) {
                     p=round+1u;continue;
+                }
+            }
+            if(s[p]=='[') {
+                const md_reference_binding *ref=NULL;
+                size_t label_end=0u,token_end=0u;
+                if(md_reference_inline_match(d,s,n,p,&ref,
+                                             &label_end,&token_end)) {
+                    p=token_end;continue;
                 }
             }
         }
@@ -869,6 +965,30 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
                     if(!md_inline(d,node,s+b,square-b,
                                   depth+nested+1u))break;
                     p=round+1u;text_start=p;continue;
+                }
+            }
+            if(!image) {
+                const md_reference_binding *ref=NULL;
+                size_t first_end=0u,token_end=0u;
+                if(md_reference_inline_match(
+                       d,s,n,p,&ref,&first_end,&token_end)) {
+                    md_text(d,owners[nested],s+text_start,p-text_start);
+                    const uint32_t node=md_add(
+                        d,owners[nested],STUN_UI_BLOCK_LINK,0u);
+                    if(node==UINT32_MAX)break;
+                    md_meta(d,node,ref->href,ref->href_bytes);
+                    if(ref->has_title) {
+                        const uint32_t title=md_add(
+                            d,node,STUN_UI_BLOCK_LINK_TITLE,0u);
+                        if(title==UINT32_MAX)break;
+                        md_meta(d,title,ref->title,ref->title_bytes);
+                    }
+                    if(d->error!=STUN_UI_OK)break;
+                    if(!md_inline(d,node,s+p+1u,first_end-p-1u,
+                                  depth+nested+1u))break;
+                    p=token_end;
+                    text_start=p;
+                    continue;
                 }
             }
         }
@@ -1906,6 +2026,143 @@ static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
     return !md_root_code_span_interrupts(d,next);
 }
 
+/* Collect only single-line ASCII root reference definitions. The scan is
+ * BEFORE inline admission, so a later [ref]: ... can bind an earlier
+ * [text][ref]. Definitions inside code fences, indented code, lists or
+ * quotes are NOT recognized by this restricted root-only slice. This
+ * prepass has no AST side effects and cannot reinterpret decoded entities
+ * as syntax. Tables/complex reference label folding remain separate.
+ *
+ * Definition entries also record exact source-line offsets to suppress
+ * their block output; duplicates are consumed but lookup selects the FIRST.
+ * Fixed 128-entry budget prevents unbounded hash/state growth. */
+static bool md_reference_definition_line(
+    const stun_md_document *d,size_t begin) {
+    size_t low=0u,high=d->reference_count;
+    while(low<high) {
+        const size_t mid=low+(high-low)/2u;
+        if(d->references[mid].source_line<begin)low=mid+1u;
+        else high=mid;
+    }
+    return low<d->reference_count &&
+           d->references[low].source_line==begin;
+}
+
+static bool md_reference_collect_line(stun_md_document *d,md_line line,
+                                      size_t begin) {
+    const char *s=d->raw;
+    if(begin>=line.end || s[begin]!='[')return false;
+    const size_t close=md_match(s,line.end,begin+1u,']',1u);
+    if(close==SIZE_MAX || close+1u>=line.end ||
+       s[close+1u]!=':')return false;
+    char key[MD_REF_KEY_MAX+1u];
+    if(!md_reference_key(s,begin+1u,close,key))return false;
+    const size_t target_begin=md_left(s,close+2u,line.end);
+    const size_t length=line.end-target_begin;
+    if(!length || length>SIZE_MAX-3u)return false;
+    char *scratch=(char*)malloc(length+3u);
+    if(!scratch) {
+        md_error(d,STUN_UI_OUT_OF_MEMORY);return false;
+    }
+    scratch[0]='(';
+    memcpy(scratch+1u,s+target_begin,length);
+    scratch[length+1u]=')';
+    scratch[length+2u]='\0';
+    md_link_parts parts={0};
+    size_t close_paren=SIZE_MAX;
+    const bool valid=md_link_target_parse(
+        scratch,length+2u,0u,&parts,&close_paren) &&
+        close_paren==length+1u;
+    if(!valid) {free(scratch);return false;}
+    if(d->reference_count>=MD_REF_MAX) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);free(scratch);return true;
+    }
+    char *href=NULL,*title=NULL;
+    size_t href_len=0u,title_len=0u;
+    if(!md_decode_component(
+           d,scratch+parts.destination_begin,
+           parts.destination_end-parts.destination_begin,
+           &href,&href_len)) {
+        free(scratch);return true;
+    }
+    if(parts.has_title &&
+       !md_decode_component(d,scratch+parts.title_begin,
+                            parts.title_end-parts.title_begin,
+                            &title,&title_len)) {
+        free(href);free(scratch);return true;
+    }
+    if(!d->references) {
+        d->references=(md_reference_binding*)calloc(
+            MD_REF_MAX,sizeof(*d->references));
+        if(!d->references) {
+            md_error(d,STUN_UI_OUT_OF_MEMORY);
+            free(title);free(href);free(scratch);return true;
+        }
+    }
+    md_reference_binding *item=&d->references[d->reference_count++];
+    memcpy(item->key,key,strlen(key)+1u);
+    item->href=href;item->href_bytes=href_len;
+    item->title=title;item->title_bytes=title_len;
+    item->has_title=parts.has_title;
+    item->source_line=line.begin;
+    free(scratch);
+    return true;
+}
+
+static void md_reference_collect_root(stun_md_document *d) {
+    const char *s=d->raw;
+    bool paragraph_started=false;
+    bool fenced=false;
+    md_fence fence={0u,0u,UINT32_MAX};
+    for(size_t pos=0u;pos<d->raw_size && d->error==STUN_UI_OK;) {
+        const md_line line=md_read_line(d,pos);
+        pos=line.next;
+        const size_t begin=md_left(s,line.begin,line.end);
+        const size_t columns=md_columns(s,line.begin,begin);
+        if(fenced) {
+            if(columns<=3u && md_fence_close(s,begin,line.end,fence))
+                fenced=false;
+            continue;
+        }
+        if(md_blank(s,line.begin,line.end)) {
+            paragraph_started=false;continue;
+        }
+        char marker=0;size_t count=0,ib=0,ie=0;
+        if(columns<=3u &&
+           md_fence_start(s,begin,line.end,&marker,&count,&ib,&ie)) {
+            fenced=true;
+            fence=(md_fence){marker,count,UINT32_MAX};
+            paragraph_started=false;continue;
+        }
+        bool ordered=false;size_t content=0u;
+        if(columns>3u || s[begin]=='>' ||
+           md_list_marker(s,begin,line.end,&ordered,&content) ||
+           md_rule(s,begin,line.end)) {
+            paragraph_started=false;continue;
+        }
+        size_t heading_begin=begin,heading_end=line.end;
+        if(md_atx(s,&heading_begin,&heading_end)) {
+            paragraph_started=false;continue;
+        }
+        if(!paragraph_started &&
+           md_reference_collect_line(d,line,begin)) {
+            paragraph_started=false;continue;
+        }
+        paragraph_started=true;
+    }
+}
+
+static void md_reference_clear(stun_md_document *d) {
+    if(!d)return;
+    for(size_t i=0u;i<d->reference_count;++i) {
+        free(d->references[i].href);
+        free(d->references[i].title);
+    }
+    free(d->references);
+    d->references=NULL;
+    d->reference_count=0u;
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
     md_root_break pending_break=MD_ROOT_BREAK_SOFT;
@@ -2027,6 +2284,14 @@ static void md_parse_blocks(stun_md_document *d) {
         }
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
+            continue;
+        }
+        /* Definitions are recorded by the bounded root prepass. Do not
+         * emit their RAW syntax as paragraph TEXT; all link metadata was
+         * already copied and is consulted only during this parse. */
+        if(paragraph==UINT32_MAX && lists.depth==0u && indent<=3u &&
+           md_reference_definition_line(d,line.begin)) {
+            pending_break=MD_ROOT_BREAK_SOFT;
             continue;
         }
         /* Four indentation columns select literal code before checking ATX,
@@ -2153,6 +2418,7 @@ void stun_md_document_destroy(stun_md_document *d) {
     free(d->metadata);
     free(d->nodes);
     free(d->node_metadata);
+    md_reference_clear(d);
     free(d);
 }
 
@@ -2204,7 +2470,11 @@ stun_ui_status stun_md_parse(const char *input,size_t length,
         stun_md_document_destroy(d);
         return error;
     }
-    md_parse_blocks(d);
+    md_reference_collect_root(d);
+    if(d->error==STUN_UI_OK)md_parse_blocks(d);
+    /* Parse-local binding state is discarded before the public RichDoc
+     * snapshot is validated or returned. No raw runtime binding persists. */
+    md_reference_clear(d);
     if (d->error==STUN_UI_OK) {
         d->nodes[0].byte_end=d->text_size;
         const stun_ui_rich_document_view view=stun_md_document_view(d);
