@@ -220,7 +220,7 @@ static const html_fixture cases[] = {
     { "_____foo_____\n",
       "<p><em><strong><strong>foo</strong></strong></em></p>\n" }, /* #468 */
     { "*foo __bar *baz bim__ bam*\n",
-      "<p><em>foo <strong>bar *baz bim</strong> bam</em></p>\n" } /* #470 */
+      "<p><em>foo <strong>bar *baz bim</strong> bam</em></p>\n" }, /* #470 */
     { "", "" },
 };
 
