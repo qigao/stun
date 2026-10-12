@@ -280,6 +280,16 @@ int main(void) {
         fprintf(stderr,"initial indented code must roll back on node OOM\n");
         return 1;
     }
+    /* The inline text child of a directly admitted heading is still
+     * resource-bounded and must not publish a partial RichDoc on failure. */
+    const char *heading_limited="- # Foo\n";
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(heading_limited,strlen(heading_limited),4u,
+                     strlen(heading_limited)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
+       d!=NULL) {
+        fprintf(stderr,"list heading node-budget failure must roll back\n");
+        return 1;
+    }
     /* The container nesting limit is executable, not just documented:
      * forcing a 33rd frame must fail atomically without returning a view. */
     char deep[4096];
