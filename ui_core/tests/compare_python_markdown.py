@@ -17,6 +17,7 @@ from importlib import metadata
 import json
 from pathlib import Path
 import subprocess
+import struct
 import sys
 
 import cmarkgfm
@@ -116,8 +117,20 @@ def normalize_mistune_token(token: dict) -> list[dict]:
     if kind == "block_quote":
         return [group("quote", normalize_mistune_nodes(children))]
     if kind == "list":
-        list_kind = "ordered_list" if attrs.get("ordered") else "list"
-        return [group(list_kind, normalize_mistune_nodes(children))]
+        ordered = bool(attrs.get("ordered"))
+        list_kind = "ordered_list" if ordered else "list"
+        node = group(list_kind, normalize_mistune_nodes(children))
+        marker = token.get("bullet")
+        start = int(attrs.get("start", 1)) if ordered else 0
+        if marker not in ((".", ")") if ordered else ("-", "+", "*")):
+            raise ValueError(f"Unexpected Mistune list marker: {marker!r}")
+        if not 0 <= start <= 999999999 or (not ordered and start != 0):
+            raise ValueError(f"Invalid independent list start: {start}")
+        node["list_semantics"] = {
+            "start": start, "marker": marker,
+            "loose": not bool(token.get("tight", True)),
+        }
+        return [node]
     if kind == "list_item":
         return [group("list_item", normalize_mistune_nodes(children))]
     if kind == "task_list_item":
@@ -199,10 +212,32 @@ def native_ast(parser: str, source: str) -> dict:
         if index != len(nodes):
             raise ValueError("C11 node IDs are not contiguous")
         body = bytes.fromhex(hex_text).decode("utf-8", "strict")
-        meta = bytes.fromhex(hex_meta).decode("utf-8", "strict")
+        raw_meta = bytes.fromhex(hex_meta)
         if kind == "text":
+            if raw_meta:
+                raise ValueError("Unexpected metadata on plain text")
             node = text_node(body)
+        elif kind in ("list", "ordered_list"):
+            # ABI-stable C11 stun_ui_list_semantics is 8 bytes: uint32_t
+            # start + marker + loose + two reserved bytes. Decode explicitly
+            # rather than silently discarding new semantic facts as "text".
+            if len(raw_meta) != 8:
+                raise ValueError(f"Expected eight typed list metadata bytes: {len(raw_meta)}")
+            start, marker_byte, loose, reserved0, reserved1 = struct.unpack(
+                "<IBBBB", raw_meta)
+            ordered = kind == "ordered_list"
+            marker = chr(marker_byte)
+            if (marker not in ((".", ")") if ordered else ("-", "+", "*"))
+                    or not 0 <= start <= 999999999
+                    or (not ordered and start != 0)
+                    or loose not in (0, 1)
+                    or reserved0 != 0 or reserved1 != 0):
+                raise ValueError("Invalid typed native list semantic metadata")
+            node = group(kind, [])
+            node["list_semantics"] = {
+                "start": start, "marker": marker, "loose": bool(loose)}
         else:
+            meta = raw_meta.decode("utf-8", "strict")
             node = group(kind, [], level=level, meta=meta)
         if index == 0:
             if kind != "document" or parent != 2**32-1:
