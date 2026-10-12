@@ -169,10 +169,22 @@ static const html_fixture cases[] = {
     { "*" ZWSP "a*\n",
       "<p><em>" ZWSP "a</em></p>\n" },
     { "*中*\n", "<p><em>中</em></p>\n" },
+    /* Longer terminal delimiter runs can close a shorter outer span with
+     * unused literal suffix, or exactly close inner+outer same-length spans.
+     * Nonterminal and triple/mixed-length rules are NOT generalized here. */
+    { "*foo**\n", "<p><em>foo</em>*</p>\n" },              /* #443 */
+    { "**foo***\n", "<p><strong>foo</strong>*</p>\n" },    /* #446 */
+    { "*foo****\n", "<p><em>foo</em>***</p>\n" },           /* #447 */
+    { "_foo__\n", "<p><em>foo</em>_</p>\n" },               /* #455 */
+    { "__foo___\n", "<p><strong>foo</strong>_</p>\n" },    /* #458 */
+    { "_foo____\n", "<p><em>foo</em>___</p>\n" },           /* #459 */
+    { "*foo *bar**\n", "<p><em>foo <em>bar</em></em></p>\n" }, /* #409 */
+    { "**foo **bar****\n",
+      "<p><strong>foo <strong>bar</strong></strong></p>\n" }, /* #427 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==73,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==81,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
