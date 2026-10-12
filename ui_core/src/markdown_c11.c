@@ -428,7 +428,7 @@ typedef struct md_list_frame {
     uint32_t list, item, paragraph, code, quote;
     size_t marker_column, content_column;
     char marker;
-    bool ordered, pending_blank;
+    bool ordered, pending_blank, empty_item;
 } md_list_frame;
 typedef struct md_list_stack {
     md_list_frame frames[MD_LIST_MAX_DEPTH];
@@ -505,9 +505,16 @@ static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
         md_meta(d,checkbox,&state,1u);
         if(d->error!=STUN_UI_OK) return false;
     }
-    f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
-    if(f->paragraph==UINT32_MAX) return false;
-    if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
+    /* A marker-only item is a genuinely empty item. Do not manufacture
+     * an empty paragraph or permit an intervening blank to attach a
+     * following top-level paragraph to it. */
+    f->empty_item=content==end && !task;
+    f->paragraph=UINT32_MAX;
+    if(!f->empty_item) {
+        f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
+        if(f->paragraph==UINT32_MAX) return false;
+        if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
+    }
     f->content_column=m->content_column;
     f->code=f->quote=UINT32_MAX;
     f->pending_blank=false;
@@ -538,21 +545,45 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
     if(!stack->depth) return false;
     const char *s=d->raw;
     if(md_blank(s,line.begin,line.end)) {
-        stack->frames[stack->depth-1u].pending_blank=true;
+        /* A separator can loosen an enclosing list item even when the
+         * deepest nested list closes before the next nonblank line. */
+        for(size_t depth=0u;depth<stack->depth;++depth)
+            stack->frames[depth].pending_blank=true;
         return true;
     }
     const size_t indent=md_columns(s,line.begin,md_left(s,line.begin,line.end));
     md_list_marker_info marker={0};
     const bool marker_found=md_list_token(s,line,&marker);
+    const size_t line_begin=md_left(s,line.begin,line.end);
+    /* Thematic breaks interrupt active list items (including '* * *').
+     * They do not become a new list item merely because '*' is a marker. */
+    if(indent<=3u && md_rule(s,line_begin,line.end)) {
+        stack->depth=0u;
+        return false;
+    }
     while(stack->depth) {
         md_list_frame *f=&stack->frames[stack->depth-1u];
-        if(marker_found && marker.column==f->marker_column) {
+        /* A sibling's marker can shift between 0..3 root columns, while
+         * its content indent still determines the nesting boundary. For
+         * instance '- a /  - b /   - c' denotes three siblings when the
+         * preceding marker is at the previous column. */
+        const bool sibling=marker_found &&
+            marker.column<=3u &&
+            (marker.column==f->marker_column ||
+             (marker.column<f->content_column &&
+              marker.column<=f->marker_column+3u));
+        if(sibling) {
             if(f->ordered==marker.ordered && f->marker==marker.marker) {
                 if(f->pending_blank) md_mark_list_loose(d,f->list);
+                f->marker_column=marker.column;
                 (void)md_list_append_item(d,f,&marker,s,line.end);
                 return true;
             }
             --stack->depth; /* differing marker families never coalesce */
+            continue;
+        }
+        if(f->empty_item && f->pending_blank) {
+            --stack->depth;
             continue;
         }
         if(indent>=f->content_column) {
@@ -613,7 +644,8 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
         }
         /* Lazy non-marker line continuation is allowed only within an
          * unseparated item paragraph; a blank line closes that admission. */
-        if(!f->pending_blank && !marker_found &&
+        if(!f->pending_blank &&
+           (!marker_found || marker.column>3u) &&
            f->paragraph!=UINT32_MAX && !md_rule(s,line.begin,line.end) &&
            s[md_left(s,line.begin,line.end)]!='>') {
             (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
