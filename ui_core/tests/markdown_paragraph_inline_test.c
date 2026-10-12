@@ -78,15 +78,19 @@ int main(void) {
                           STUN_UI_BLOCK_EMPHASIS)==0); /* #432 */
     CHECK(check_multiline("*foo\r\nbar*\r\n","foo","bar",1u,0u,
                           STUN_UI_BLOCK_EMPHASIS)==0);
+    CHECK(check_multiline("Foo *bar\nbaz*\n====\n","Foo ","baz",
+                          1u,0u,STUN_UI_BLOCK_EMPHASIS)==0); /* #81 */
 
     static const char *barriers[]={
         "*foo\n\nbar*\n",
         "*foo\n# Heading\nbar*\n",
         "*foo\n> quote*\n",
         "*foo  \nbar*\n",
-        "*foo\\\nbar*\n"
+        "*foo\\\nbar*\n",
+        "*foo \nbar*\n",
+        "*foo\nbar*\t\n"
     };
-    _Static_assert(sizeof(barriers)/sizeof(barriers[0])==5u,
+    _Static_assert(sizeof(barriers)/sizeof(barriers[0])==7u,
                    "cross-block barrier fixture count");
     for(size_t i=0u;i<sizeof(barriers)/sizeof(barriers[0]);++i) {
         const size_t n=strlen(barriers[i]);
@@ -106,7 +110,7 @@ int main(void) {
     CHECK(stun_md_parse(limited,sizeof(limited)-1u,5u,
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
-    puts("C11 Markdown root paragraph inline ownership: 5/5 positive, "
-         "5/5 block barriers and atomic budget rejection");
+    puts("C11 Markdown root paragraph inline ownership: 6/6 positive, "
+         "7/7 block barriers and atomic budget rejection");
     return 0;
 }
