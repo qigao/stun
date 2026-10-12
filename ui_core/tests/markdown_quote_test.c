@@ -81,9 +81,11 @@ static int check_fixture(const quote_fixture *f) {
             if(!failed && (measured!=needed ||
                memcmp(output,f->html,needed+1u)!=0 ||
                (unsigned char)output[needed+1u]!=0xa5u)) failed=1;
+            /* A failed writer might not have NUL-terminated output;
+             * never treat a partial/sentinel buffer as a C string. */
             if(failed)
-                fprintf(stderr,"Quote fixture %s\nexpected:\n%s\nactual:\n%s\n",
-                        f->name,f->html,output);
+                fprintf(stderr,"Quote fixture %s: HTML/atomic output mismatch\n",
+                        f->name);
             free(output);
         }
     }
