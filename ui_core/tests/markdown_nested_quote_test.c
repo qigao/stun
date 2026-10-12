@@ -21,9 +21,15 @@ static const sample cases[]={
     {"fenced","> ~~~c\n> hi\n> ~~~\n",
      "<blockquote>\n<pre><code class=\"language-c\">hi\n</code></pre>\n</blockquote>\n",1,1},
     {"changing-depth","> outer\n> > inner\n> after\n",
-     "<blockquote>\n<p>outer</p>\n<blockquote>\n<p>inner</p>\n</blockquote>\n<p>after</p>\n</blockquote>\n",2,2}
+     "<blockquote>\n<p>outer</p>\n<blockquote>\n<p>inner\nafter</p>\n</blockquote>\n</blockquote>\n",2,2},
+    {"cm251",">>> foo\n> bar\n>>baz\n",
+     "<blockquote>\n<blockquote>\n<blockquote>\n<p>foo\nbar\nbaz</p>\n</blockquote>\n</blockquote>\n</blockquote>\n",3,3},
+    {"partial-marker-interrupt",">>> foo\n> # Heading\n",
+     "<blockquote>\n<blockquote>\n<blockquote>\n<p>foo</p>\n</blockquote>\n</blockquote>\n<h1>Heading</h1>\n</blockquote>\n",3,3},
+    {"partial-marker-list",">>> foo\n> - bar\n",
+     "<blockquote>\n<blockquote>\n<blockquote>\n<p>foo</p>\n</blockquote>\n</blockquote>\n<ul>\n<li>bar</li>\n</ul>\n</blockquote>\n",3,3}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==6u,"fixture count");
+_Static_assert(sizeof(cases)/sizeof(cases[0])==9u,"fixture count");
 static int verify(const sample *f) {
     stun_md_document *owner=NULL;
     const size_t input_size=strlen(f->source);

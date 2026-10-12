@@ -991,6 +991,25 @@ static void md_parse_blocks(stun_md_document *d) {
         size_t quote_body=line.begin;
         const size_t quote_depth=md_quote_prefix(s,line,&quote_body);
         if(quote_depth) {
+            /* A continuing nested quote paragraph may omit any number of
+             * innermost markers. Match already-open quote containers
+             * before closing them; block starts and blanks are not lazy. */
+            if(quote_depth<quotes.depth && quotes.lazy &&
+               quotes.paragraph!=UINT32_MAX &&
+               quotes.lists.depth==0u && !quotes.fence_open &&
+               !md_blank(s,quote_body,line.end)) {
+                md_line inner=line;
+                inner.begin=quote_body;
+                const size_t content=md_left(s,quote_body,line.end);
+                if(!md_quote_lazy_interrupts(s,inner,content)) {
+                    if(md_add(d,quotes.paragraph,STUN_UI_BLOCK_LINE_BREAK,0u)
+                       ==UINT32_MAX ||
+                       !md_inline(d,quotes.paragraph,s+content,
+                                  line.end-content,0u))
+                        return;
+                    continue;
+                }
+            }
             if(indented!=UINT32_MAX) {
                 indented=UINT32_MAX;
                 pending_code_blank=SIZE_MAX;
