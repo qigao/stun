@@ -805,6 +805,7 @@ typedef struct md_quote_stack {
     size_t depth;
     uint32_t paragraph, code;
     md_fence fence;
+    md_list_stack lists; /* bounded list frames owned by the active quote */
     bool lazy, fence_open;
 } md_quote_stack;
 
@@ -849,6 +850,7 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
             }
         }
         q->paragraph=q->code=UINT32_MAX;
+        q->lists.depth=0u; /* no list state across quote generation/depth */
         q->fence_open=q->lazy=false;
     }
     const uint32_t parent=q->nodes[level-1u];
@@ -866,11 +868,17 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
         if(line.newline) md_text(d,q->fence.node,"\n",1u);
         return d->error==STUN_UI_OK;
     }
+    md_line inner=line;
+    inner.begin=body; /* all list columns relative to the quote content */
     if(md_blank(s,body,line.end)) {
+        if(q->lists.depth) (void)md_list_consume(d,&q->lists,inner);
         q->paragraph=q->code=UINT32_MAX;
         q->lazy=false;
-        return true;
+        return d->error==STUN_UI_OK;
     }
+    if(q->lists.depth && md_list_consume(d,&q->lists,inner))
+        return d->error==STUN_UI_OK;
+    if(d->error!=STUN_UI_OK)return false;
     if(q->code!=UINT32_MAX) {
         if(indent>=4u) {
             md_line code_line=line;
@@ -913,6 +921,18 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
             q->paragraph=UINT32_MAX;q->lazy=false;
             return md_inline(d,node,s+hbegin,hend-hbegin,0u);
         }
+    }
+    /* An admitted quote list belongs to this quote node, not the document.
+     * A numbered marker >1 never interrupts an existing paragraph. */
+    md_list_marker_info item={0};
+    if(indent<=3u && md_list_token(s,inner,&item) &&
+       (q->paragraph==UINT32_MAX || !item.ordered || item.start==1u) &&
+       !md_rule(s,begin,line.end)) {
+        if(!md_list_open(d,&q->lists,parent,&item,s,line.end))
+            return false;
+        q->paragraph=q->code=UINT32_MAX;
+        q->lazy=false;
+        return true;
     }
     if(indent>=4u && q->paragraph==UINT32_MAX) {
         q->code=md_add(d,parent,STUN_UI_BLOCK_CODE_INDENTED,0u);
@@ -991,6 +1011,7 @@ static void md_parse_blocks(stun_md_document *d) {
             }
             quotes.depth=0u;
             quotes.paragraph=quotes.code=UINT32_MAX;
+            quotes.lists.depth=0u;
             quotes.fence_open=quotes.lazy=false;
         }
         /* Keep interstitial blank lines pending until another indented line
