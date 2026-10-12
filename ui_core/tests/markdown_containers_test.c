@@ -119,9 +119,23 @@ static const fixture cases[]={
     /* #326 is deliberately loose at the OUTER level: a blank separates
      * the outer -a and -d items, rather than a consumed child continuation. */
     {"cm-326","- a\n  - b\n  - c\n\n- d\n  - e\n  - f\n",
-     "<ul>\n<li>\n<p>a</p>\n<ul>\n<li>b</li>\n<li>c</li>\n</ul>\n</li>\n<li>\n<p>d</p>\n<ul>\n<li>e</li>\n<li>f</li>\n</ul>\n</li>\n</ul>\n",1,3u}
+     "<ul>\n<li>\n<p>a</p>\n<ul>\n<li>b</li>\n<li>c</li>\n</ul>\n</li>\n<li>\n<p>d</p>\n<ul>\n<li>e</li>\n<li>f</li>\n</ul>\n</li>\n</ul>\n",1,3u},
+    /* Five-plus ASCII spaces after a marker: exactly one separates the
+     * marker; the other four-plus begin a code block within that item. */
+    {"cm-273","1.     indented code\n\n   paragraph\n\n       more code\n",
+     "<ol>\n<li>\n<pre><code>indented code\n</code></pre>\n<p>paragraph</p>\n<pre><code>more code\n</code></pre>\n</li>\n</ol>\n",1,1u},
+    {"cm-274","1.      indented code\n\n   paragraph\n\n       more code\n",
+     "<ol>\n<li>\n<pre><code> indented code\n</code></pre>\n<p>paragraph</p>\n<pre><code>more code\n</code></pre>\n</li>\n</ol>\n",1,1u},
+    {"unordered-initial-code","-     code\n",
+     "<ul>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ul>\n",0,1u},
+    {"four-space-marker-paragraph","1.    paragraph\n",
+     "<ol>\n<li>paragraph</li>\n</ol>\n",0,1u},
+    {"quoted-initial-code","> 1.     indented code\n>\n>    paragraph\n>\n>        more code\n",
+     "<blockquote>\n<ol>\n<li>\n<pre><code>indented code\n</code></pre>\n<p>paragraph</p>\n<pre><code>more code\n</code></pre>\n</li>\n</ol>\n</blockquote>\n",1,1u},
+    {"initial-code-trailing-blank","1.     code\n\n",
+     "<ol>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ol>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==46u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==52u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -240,6 +254,16 @@ int main(void) {
                      strlen(inline_limited)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
        d!=NULL) {
         fprintf(stderr,"inline nesting node exhaustion must roll back\n");
+        return 1;
+    }
+    /* The initial indented code must not publish a partially initialized
+     * RichDoc when creating its first TEXT node exhausts the node budget. */
+    const char *initial_code_limited="1.     code\n";
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(initial_code_limited,strlen(initial_code_limited),4u,
+                     strlen(initial_code_limited)+1u,&d)!=
+       STUN_UI_CAPACITY_EXCEEDED || d!=NULL) {
+        fprintf(stderr,"initial indented code must roll back on node OOM\n");
         return 1;
     }
     /* The container nesting limit is executable, not just documented:

@@ -486,9 +486,23 @@ static bool md_list_token(const char *s,md_line line,
         total+=s[p]=='\t' ? 4u-(total%4u) : 1u;
     /* A marker-only item has no content on this line. Its continuation
      * indentation is one column past the marker, independent of trailing
-     * whitespace. "-   \n  foo" keeps foo within the item (CommonMark #279). */
-    if(content==line.end)
+     * whitespace. "-   \n  foo" keeps foo within the item (CommonMark #279).
+     * When FIVE OR MORE ASCII spaces separate a marker and actual content,
+     * only one belongs to the list marker. The remaining four-plus columns
+     * form an indented code block inside the item (#273/#274). Preserve the
+     * residual source bytes instead of discarding them as marker padding.
+     * The more general tab-expanded marker case remains separately scoped. */
+    if(content==line.end) {
         total=marker_col+(marker_end-b)+1u;
+    } else if(content-marker_end>4u) {
+        bool ascii_spaces=true;
+        for(size_t p=marker_end;p<content;++p)
+            if(s[p]!=' ') {ascii_spaces=false;break;}
+        if(ascii_spaces) {
+            total=marker_col+(marker_end-b)+1u;
+            content=marker_end+1u;
+        }
+    }
     *out=(md_list_marker_info){
         marker_col,total,content,start,marker,ordered
     };
@@ -556,6 +570,15 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
     f->code_blank_lines=0u;
     f->fence_open=f->pending_blank=false;
     if(!f->empty_item) {
+        /* The excess marker separation belongs to an indented code block,
+         * not a manufactured paragraph. Admit the first code line through
+         * the same owned frame as later indented-code continuation lines. */
+        if(!task && md_columns(s,content,end)>=4u) {
+            f->code=md_add(d,f->item,STUN_UI_BLOCK_CODE_INDENTED,0u);
+            if(f->code==UINT32_MAX) return false;
+            const md_line initial={content,end,end,false};
+            return md_code_line(d,f->code,initial,false);
+        }
         /* CommonMark permits list containers to nest on one source line:
          * "- - foo" and "1. - 2. foo". Reuse the same bounded list-frame
          * admission, with nested marker columns relative to this item. */
