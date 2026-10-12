@@ -46,6 +46,7 @@ jobs:
             -std=c11 -Wall -Wextra -Wpedantic -Werror
             -Iui_core/include
             -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include
