@@ -408,6 +408,76 @@ static int test_code_span_exact_runs_and_text(void) {
     return 0;
 }
 
+/* A valid code span is opaque to its surrounding emphasis/link scan.
+ * The typed RichDoc child must belong to the REAL paragraph/emphasis/link
+ * owner, rather than being swallowed by an earlier delimiter candidate. */
+static int test_code_span_delimiter_precedence(void) {
+    typedef struct {
+        const char *markdown,*code;
+        stun_ui_block_kind parent;
+        size_t emphasis,link,strong;
+    } precedence_fixture;
+    static const precedence_fixture cases[]={
+        {"*foo" TICK "*" TICK "\n","*",STUN_UI_BLOCK_PARAGRAPH,0u,0u,0u},
+        {"[not a " TICK "link](/foo" TICK ")\n",
+         "link](/foo",STUN_UI_BLOCK_PARAGRAPH,0u,0u,0u},
+        {"*hello " TICK "a*b" TICK " world*\n",
+         "a*b",STUN_UI_BLOCK_EMPHASIS,1u,0u,0u},
+        {"[hello " TICK "x]y" TICK "](url)\n",
+         "x]y",STUN_UI_BLOCK_LINK,0u,1u,0u},
+        {"*foo" TICK TICK "bar*\n",
+         NULL,STUN_UI_BLOCK_PARAGRAPH,1u,0u,0u},
+        {"**hi " TICK "x*y" TICK " done**\n",
+         "x*y",STUN_UI_BLOCK_STRONG,0u,0u,1u}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==6u,
+                   "code-span precedence denominator");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        const size_t n=strlen(cases[i].markdown);
+        stun_md_document *d=NULL;
+        CHECK(stun_md_parse(cases[i].markdown,n,128u,n+1u,&d)==STUN_UI_OK);
+        CHECK(d!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(d);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==n);
+        CHECK(memcmp(v.raw_markdown,cases[i].markdown,n)==0);
+        CHECK(kinds(v,STUN_UI_BLOCK_EMPHASIS)==cases[i].emphasis);
+        CHECK(kinds(v,STUN_UI_BLOCK_LINK)==cases[i].link);
+        CHECK(kinds(v,STUN_UI_BLOCK_STRONG)==cases[i].strong);
+        CHECK(kinds(v,STUN_UI_BLOCK_CODE_SPAN)==(cases[i].code?1u:0u));
+        if(cases[i].code) {
+            bool found=false;
+            for(size_t j=1u;j<v.document.block_count;++j) {
+                const stun_ui_block *node=&v.document.blocks[j];
+                if(node->kind!=STUN_UI_BLOCK_CODE_SPAN)continue;
+                CHECK(node->parent_index<j);
+                CHECK(v.document.blocks[node->parent_index].kind==
+                      cases[i].parent);
+                for(size_t k=j+1u;k<v.document.block_count;++k) {
+                    const stun_ui_block *text=&v.document.blocks[k];
+                    if(text->parent_index!=j||
+                       text->kind!=STUN_UI_BLOCK_TEXT)continue;
+                    const size_t len=strlen(cases[i].code);
+                    CHECK(text->byte_end<=v.document.source_bytes);
+                    if(text->byte_end-text->byte_begin==len &&
+                       memcmp(v.document.source+text->byte_begin,
+                              cases[i].code,len)==0) found=true;
+                }
+            }
+            CHECK(found);
+        }
+        stun_md_document_destroy(d);
+    }
+    /* Capacity exhaustion while publishing nested code-span text is
+     * failure atomic even when a surrounding emphasis was admitted. */
+    const char limited[]="*hello " TICK "a*b" TICK " world*\n";
+    stun_md_document *out=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited,sizeof(limited)-1u,5u,
+                        sizeof(limited),&out)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(out==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -415,6 +485,7 @@ int main(void) {
     if(test_limit_and_failure_transaction()) return 1;
     if(test_deterministic_ids()) return 1;
     if(test_code_span_exact_runs_and_text()) return 1;
+    if(test_code_span_delimiter_precedence()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;
