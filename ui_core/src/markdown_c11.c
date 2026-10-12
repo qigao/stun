@@ -559,6 +559,32 @@ static bool md_list_begin_atx(stun_md_document *d,md_list_frame *f,
     return true;
 }
 
+/* An inline '>' on a list marker line and subsequent explicitly marked
+ * quote lines share the same list-owned quote paragraph. The owned quote
+ * node stays a child of the list item; no root quote grammar is duplicated. */
+static bool md_list_append_quote(stun_md_document *d,md_list_frame *f,
+                                 const char *s,size_t begin,size_t end) {
+    if(begin>=end || s[begin]!='>') return false;
+    if(f->quote==UINT32_MAX) {
+        f->quote=md_add(d,f->item,STUN_UI_BLOCK_QUOTE,0u);
+        if(f->quote==UINT32_MAX) return true;
+        f->quote_paragraph=UINT32_MAX;
+    }
+    const size_t body=md_left(s,begin+1u,end);
+    if(body==end) {
+        f->quote_paragraph=UINT32_MAX;
+    } else {
+        if(f->quote_paragraph==UINT32_MAX) {
+            f->quote_paragraph=md_add(d,f->quote,STUN_UI_BLOCK_PARAGRAPH,0u);
+            if(f->quote_paragraph==UINT32_MAX) return true;
+        } else if(md_add(d,f->quote_paragraph,STUN_UI_BLOCK_LINE_BREAK,0u)
+                  ==UINT32_MAX) return true;
+        (void)md_inline(d,f->quote_paragraph,s+body,end-body,0u);
+    }
+    f->paragraph=UINT32_MAX;
+    return true;
+}
+
 static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
                                 md_list_frame *f,
                                 const md_list_marker_info *m,
@@ -615,6 +641,8 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
             return d->error==STUN_UI_OK;
         if(!task && md_list_begin_fence(d,f,s,content,end))
             return d->error==STUN_UI_OK;
+        if(!task && md_list_append_quote(d,f,s,content,end))
+            return d->error==STUN_UI_OK;
         f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
         if(f->paragraph==UINT32_MAX) return false;
         if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
@@ -650,6 +678,10 @@ static void md_list_claim_nested_blank(md_list_stack *stack) {
     for(size_t depth=0u;depth+1u<stack->depth;++depth)
         stack->frames[depth].pending_blank=false;
 }
+
+/* Defined with the quote-container admission policy below. */
+static bool md_quote_lazy_interrupts(const char *s,md_line line,
+                                     size_t begin);
 
 static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                             md_line line) {
@@ -810,31 +842,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 return true;
             }
             f->code=UINT32_MAX;
-            if(body<line.end && s[body]=='>') {
-                if(f->quote==UINT32_MAX) {
-                    f->quote=md_add(d,f->item,STUN_UI_BLOCK_QUOTE,0u);
-                    if(f->quote==UINT32_MAX) return true;
-                    f->quote_paragraph=UINT32_MAX;
-                }
-                const size_t qb=md_left(s,body+1u,line.end);
-                if(qb==line.end) {
-                    /* An explicitly empty '>' separates quote paragraphs;
-                     * it must not synthesize a blank <p></p> node. */
-                    f->quote_paragraph=UINT32_MAX;
-                } else {
-                    if(f->quote_paragraph==UINT32_MAX) {
-                        f->quote_paragraph=md_add(d,f->quote,
-                                                STUN_UI_BLOCK_PARAGRAPH,0u);
-                        if(f->quote_paragraph==UINT32_MAX) return true;
-                    } else if(md_add(d,f->quote_paragraph,
-                                     STUN_UI_BLOCK_LINE_BREAK,0u)==UINT32_MAX)
-                        return true;
-                    if(!md_inline(d,f->quote_paragraph,s+qb,
-                                  line.end-qb,0u)) return true;
-                }
-                f->paragraph=UINT32_MAX;
-                return true;
-            }
+            if(md_list_append_quote(d,f,s,body,line.end)) return true;
             f->quote=f->quote_paragraph=UINT32_MAX;
             if(f->paragraph==UINT32_MAX) {
                 f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
@@ -845,15 +853,22 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                             line.end-text_begin,0u);
             return true;
         }
-        /* Lazy non-marker line continuation is allowed only within an
-         * unseparated item paragraph; a blank line closes that admission. */
+        /* Lazy paragraph continuation may also belong to the list-owned
+         * inner quote (CommonMark #292/#293). Only its already-open text
+         * may continue: new block openers, blanks and competing quote markers
+         * must not be silently admitted into the borrowed paragraph. */
+        const uint32_t continuation=f->quote_paragraph!=UINT32_MAX ?
+                                    f->quote_paragraph:f->paragraph;
         if(!f->pending_blank &&
            (!marker_found || marker.column>3u) &&
-           f->paragraph!=UINT32_MAX && !md_rule(s,line.begin,line.end) &&
-           s[md_left(s,line.begin,line.end)]!='>') {
-            (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
-            const size_t body=md_left(s,line.begin,line.end);
-            (void)md_inline(d,f->paragraph,s+body,line.end-body,0u);
+           continuation!=UINT32_MAX && !md_rule(s,line.begin,line.end) &&
+           s[line_begin]!='>' &&
+           (f->quote_paragraph==UINT32_MAX ||
+            !md_quote_lazy_interrupts(s,line,line_begin))) {
+            if(md_add(d,continuation,STUN_UI_BLOCK_LINE_BREAK,0u)
+               ==UINT32_MAX) return true;
+            (void)md_inline(d,continuation,s+line_begin,
+                            line.end-line_begin,0u);
             return true;
         }
         --stack->depth;
@@ -1222,6 +1237,20 @@ static void md_parse_blocks(stun_md_document *d) {
             continue;
         }
         if(quotes.depth) {
+            /* A missing OUTER '>' can lazily continue the deepest paragraph
+             * of a list-owned INNER quote, but not a generic list paragraph.
+             * This is bounded by the existing active quote/list generations. */
+            if(quotes.lists.depth) {
+                md_list_frame *top=
+                    &quotes.lists.frames[quotes.lists.depth-1u];
+                if(top->quote_paragraph!=UINT32_MAX &&
+                   !top->pending_blank &&
+                   !md_blank(s,line.begin,line.end) &&
+                   !md_quote_lazy_interrupts(s,line,begin)) {
+                    if(md_list_consume(d,&quotes.lists,line)) continue;
+                    if(d->error!=STUN_UI_OK) return;
+                }
+            }
             if(quotes.lazy && quotes.paragraph!=UINT32_MAX &&
                !md_blank(s,line.begin,line.end) &&
                !md_quote_lazy_interrupts(s,line,begin)) {
