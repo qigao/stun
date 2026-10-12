@@ -65,9 +65,15 @@ static const fixture cases[]={
     {"list-quote-marked-continuation","* a\n  > b\n  > c\n* d\n",
      "<ul>\n<li>a\n<blockquote>\n<p>b\nc</p>\n</blockquote>\n</li>\n<li>d</li>\n</ul>\n",0,1u},
     {"list-quote-explicit-blank","* a\n  > b\n  >\n  > c\n* d\n",
-     "<ul>\n<li>a\n<blockquote>\n<p>b</p>\n<p>c</p>\n</blockquote>\n</li>\n<li>d</li>\n</ul>\n",0,1u}
+     "<ul>\n<li>a\n<blockquote>\n<p>b</p>\n<p>c</p>\n</blockquote>\n</li>\n<li>d</li>\n</ul>\n",0,1u},
+    {"cm-264","- Foo\n\n      bar\n\n\n      baz\n",
+     "<ul>\n<li>\n<p>Foo</p>\n<pre><code>bar\n\n\nbaz\n</code></pre>\n</li>\n</ul>\n",1,1u},
+    {"quote-list-code-interior-blanks","> - Foo\n>\n>       bar\n>\n>\n>       baz\n",
+     "<blockquote>\n<ul>\n<li>\n<p>Foo</p>\n<pre><code>bar\n\n\nbaz\n</code></pre>\n</li>\n</ul>\n</blockquote>\n",1,1u},
+    {"list-code-trailing-blanks","- Foo\n\n      bar\n\n\n",
+     "<ul>\n<li>\n<p>Foo</p>\n<pre><code>bar\n</code></pre>\n</li>\n</ul>\n",1,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==22u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==25u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -151,6 +157,16 @@ int main(void) {
                      strlen(quote_limit)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
        d!=NULL) {
         fprintf(stderr,"quote continuation node exhaustion must roll back\n");
+        return 1;
+    }
+    /* Interior blank line publication must also fail atomically. With
+     * eight nodes, the second deferred newline exceeds the node budget. */
+    const char *code_blanks="- Foo\n\n      bar\n\n\n      baz\n";
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(code_blanks,strlen(code_blanks),8u,
+                     strlen(code_blanks)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
+       d!=NULL) {
+        fprintf(stderr,"indented code blank-node exhaustion must roll back\n");
         return 1;
     }
     /* The container nesting limit is executable, not just documented:
