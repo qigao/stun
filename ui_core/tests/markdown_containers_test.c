@@ -142,6 +142,17 @@ int main(void) {
         fprintf(stderr,"node exhaustion must roll back exactly once\n");
         return 1;
     }
+    /* The quote-continuation soft-break allocation must also be failure
+     * atomic. Eight nodes admit the first quote text but not its next
+     * LINE_BREAK, and the caller must never receive a partial RichDoc. */
+    const char *quote_limit="* a\n  > b\n  > c\n";
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(quote_limit,strlen(quote_limit),8u,
+                     strlen(quote_limit)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
+       d!=NULL) {
+        fprintf(stderr,"quote continuation node exhaustion must roll back\n");
+        return 1;
+    }
     /* The container nesting limit is executable, not just documented:
      * forcing a 33rd frame must fail atomically without returning a view. */
     char deep[4096];
