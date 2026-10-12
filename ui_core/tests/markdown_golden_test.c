@@ -161,9 +161,27 @@ static int check_fixture(const fixture *f) {
         }
         const char *metadata = NULL;
         size_t length = SIZE_MAX;
-        if (stun_ui_rich_document_metadata(
-                &view,i,&metadata,&length) != STUN_UI_OK ||
-            !same_bytes(metadata,length,exp->metadata)) {
+        if(stun_ui_rich_document_metadata(&view,i,&metadata,&length)
+                != STUN_UI_OK) {
+            fprintf(stderr,"%s: node %zu metadata lookup failed\n",f->name,i);
+            failed=1;
+            break;
+        }
+        bool match=same_bytes(metadata,length,exp->metadata);
+        if((got->kind==STUN_UI_BLOCK_LIST ||
+            got->kind==STUN_UI_BLOCK_ORDERED_LIST) &&
+           exp->metadata==NULL) {
+            stun_ui_list_semantics info={0};
+            if(metadata && length==sizeof(info)) {
+                memcpy(&info,metadata,sizeof(info));
+                const bool ordered=got->kind==STUN_UI_BLOCK_ORDERED_LIST;
+                match=info.start==(ordered?1u:0u) &&
+                      info.marker==(ordered?'.':'-') &&
+                      info.loose==0u &&
+                      info.reserved[0]==0u && info.reserved[1]==0u;
+            } else match=false;
+        }
+        if (!match) {
             fprintf(stderr,"%s: node %zu metadata mismatch\n",f->name,i);
             failed = 1;
             break;

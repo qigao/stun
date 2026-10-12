@@ -606,13 +606,16 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
                 if(f->paragraph==UINT32_MAX) return true;
             } else (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
-            (void)md_inline(d,f->paragraph,s+body,line.end-body,0u);
+            const size_t text_begin=md_left(s,body,line.end);
+            (void)md_inline(d,f->paragraph,s+text_begin,
+                            line.end-text_begin,0u);
             return true;
         }
         /* Lazy non-marker line continuation is allowed only within an
          * unseparated item paragraph; a blank line closes that admission. */
         if(!f->pending_blank && !marker_found &&
-           f->paragraph!=UINT32_MAX && !md_rule(s,line.begin,line.end)) {
+           f->paragraph!=UINT32_MAX && !md_rule(s,line.begin,line.end) &&
+           s[md_left(s,line.begin,line.end)]!='>') {
             (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
             const size_t body=md_left(s,line.begin,line.end);
             (void)md_inline(d,f->paragraph,s+body,line.end-body,0u);
