@@ -773,13 +773,18 @@ static int test_triple_and_mixed_delimiter_runs(void) {
     CHECK(rejected==NULL);
     /* Explicitly bound worst-case delimiter searches without publishing an
      * incomplete document; repeated unmatched opener candidates are hostile. */
-    char hostile[8192];
-    for(size_t i=0u;i<sizeof(hostile)-1u;++i)
-        hostile[i]=(i%2u)?' ':'*';
-    hostile[sizeof(hostile)-1u]='\n';
+    char hostile[6001];
+    size_t written=0u;
+    for(size_t i=0u;i<1000u;++i) {
+        memcpy(hostile+written,"*a ",3u);written+=3u;
+    }
+    for(size_t i=0u;i<1000u;++i) {
+        memcpy(hostile+written,"b_ ",3u);written+=3u;
+    }
+    hostile[written++]='\n';
     rejected=(stun_md_document*)(uintptr_t)1u;
-    CHECK(stun_md_parse(hostile,sizeof(hostile),16384u,
-                        sizeof(hostile)+1u,&rejected)==
+    CHECK(stun_md_parse(hostile,written,16384u,
+                        written+1u,&rejected)==
           STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
     return 0;
