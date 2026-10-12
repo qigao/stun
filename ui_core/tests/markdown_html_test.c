@@ -221,10 +221,18 @@ static const html_fixture cases[] = {
       "<p><em><strong><strong>foo</strong></strong></em></p>\n" }, /* #468 */
     { "*foo __bar *baz bim__ bam*\n",
       "<p><em>foo <strong>bar *baz bim</strong> bam</em></p>\n" }, /* #470 */
+    /* Official #473/#474/#521: a link label is opaque to an outside
+     * delimiter run; neither side may steal the label's marker. */
+    { "*[bar*](/url)\\n",
+      "<p>*<a href=\\\"/url\\\">bar*</a></p>\\n" }, /* #473 */
+    { "_foo [bar_](/url)\\n",
+      "<p>_foo <a href=\\\"/url\\\">bar_</a></p>\\n" }, /* #474 */
+    { "*[foo*](/uri)\\n",
+      "<p>*<a href=\\\"/uri\\\">foo*</a></p>\\n" }, /* #521 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==100,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==103,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
