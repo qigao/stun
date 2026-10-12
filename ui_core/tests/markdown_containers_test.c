@@ -44,9 +44,22 @@ static const fixture cases[]={
     {"tab-item","- alpha\n\tbeta\n",
      "<ul>\n<li>alpha\nbeta</li>\n</ul>\n",0,1u},
     {"unicode-loose","- \xe4\xb8\xad\xf0\x9f\x91\xa9\n\n  \xe6\x97\xa5\n",
-     "<ul>\n<li>\n<p>\xe4\xb8\xad\xf0\x9f\x91\xa9</p>\n<p>\xe6\x97\xa5</p>\n</li>\n</ul>\n",1,1u}
+     "<ul>\n<li>\n<p>\xe4\xb8\xad\xf0\x9f\x91\xa9</p>\n<p>\xe6\x97\xa5</p>\n</li>\n</ul>\n",1,1u},
+    /* Preserve already-successful CommonMark examples, not only new gates. */
+    {"cm-060","* Foo\n* * *\n* Bar\n",
+     "<ul>\n<li>Foo</li>\n</ul>\n<hr />\n<ul>\n<li>Bar</li>\n</ul>\n",0,2u},
+    {"cm-280","-\n\n  foo\n",
+     "<ul>\n<li></li>\n</ul>\n<p>foo</p>\n",0,1u},
+    {"cm-295","- foo\n - bar\n  - baz\n   - boo\n",
+     "<ul>\n<li>foo</li>\n<li>bar</li>\n<li>baz</li>\n<li>boo</li>\n</ul>\n",0,1u},
+    {"cm-310","- a\n - b\n  - c\n   - d\n  - e\n - f\n- g\n",
+     "<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n<li>d</li>\n<li>e</li>\n<li>f</li>\n<li>g</li>\n</ul>\n",0,1u},
+    {"cm-312","- a\n - b\n  - c\n   - d\n    - e\n",
+     "<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n<li>d\n- e</li>\n</ul>\n",0,1u},
+    {"cm-325","* foo\n  * bar\n\n  baz\n",
+     "<ul>\n<li>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n<p>baz</p>\n</li>\n</ul>\n",1,2u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==13u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==19u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
