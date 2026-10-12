@@ -18,3 +18,8 @@ add_test(NAME stun_markdown_golden_test COMMAND stun_markdown_golden_test)
 add_executable(stun_markdown_ast_dump markdown_c11_dump.c)
 target_compile_features(stun_markdown_ast_dump PRIVATE c_std_11)
 target_link_libraries(stun_markdown_ast_dump PRIVATE Stun::UICore)
+
+add_executable(stun_markdown_html_test markdown_html_test.c)
+target_compile_features(stun_markdown_html_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_html_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_html_test COMMAND stun_markdown_html_test)
