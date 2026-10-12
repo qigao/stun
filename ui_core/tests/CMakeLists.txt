@@ -47,3 +47,8 @@ target_compile_features(stun_markdown_quote_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_quote_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_quote_test COMMAND stun_markdown_quote_test)
 
+
+add_executable(stun_markdown_nested_quote_test markdown_nested_quote_test.c)
+target_compile_features(stun_markdown_nested_quote_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_nested_quote_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_nested_quote_test COMMAND stun_markdown_nested_quote_test)
