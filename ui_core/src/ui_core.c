@@ -104,7 +104,7 @@ stun_ui_status stun_ui_rect_view_validate(
 
 static bool valid_block_kind(stun_ui_block_kind kind) {
     return kind >= STUN_UI_BLOCK_DOCUMENT &&
-           kind <= STUN_UI_BLOCK_CODE_INDENTED;
+           kind <= STUN_UI_BLOCK_HARD_LINE_BREAK;
 }
 
 stun_ui_status stun_ui_document_validate(
