@@ -259,8 +259,14 @@ static void md_emph_flanking(const char *s,size_t n,size_t at,size_t run,
  * delimiter-run or nested-link conformance. Unmatched delimiters are text. */
 static size_t md_match(const char *s, size_t n, size_t start,
                        char symbol, size_t count) {
-    const bool opaque_code=symbol=='*' || symbol=='_' ||
-                           symbol=='~' || symbol==']';
+    const bool emphasis=symbol=='*' || symbol=='_';
+    const bool opaque_code=emphasis || symbol=='~' || symbol==']';
+    /* A bounded pairing depth lets nested SAME-LENGTH delimiter runs own
+     * their nearer closers. An older opener remains literal when only the
+     * inner opener can be closed (#471/#472); two closers admit nesting,
+     * including *(*foo*)*, _(_foo_)_ and __foo, __bar__, baz__.
+     * This is not the complete CommonMark modulo-3/delimiter-stack model. */
+    size_t inner_open=0u;
     for (size_t p = start; p < n; ++p) {
         if (s[p] == '\\' && p + 1 < n) { ++p; continue; }
         if(opaque_code && s[p]==(char)0x60) {
@@ -279,20 +285,23 @@ static size_t md_match(const char *s, size_t n, size_t start,
         size_t run = 0;
         while (p + run < n && s[p + run] == symbol) ++run;
         if (run == count) {
-            if(symbol=='*' || symbol=='_') {
+            if(emphasis) {
                 bool can_open=false,can_close=false;
                 md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
-                if(!can_close) {
-                    /* An opener immediately after whitespace owns the
-                     * later closing delimiter; do not let an earlier opener
-                     * leap over it (#471/#472). This preserves the previous
-                     * bounded pairing boundary without introducing a second
-                     * delimiter stack or guessing Unicode punctuation. */
-                    if(p>0u && md_space(s[p-1u]) && can_open)
-                        return SIZE_MAX;
-                    p+=run-1u;
-                    continue;
+                if(can_close) {
+                    if(inner_open) {
+                        --inner_open; /* matching closer belongs to inner */
+                        p+=run-1u;
+                        continue;
+                    }
+                    return p; /* the first unclaimed legal closer */
                 }
+                if(can_open) {
+                    if(inner_open>=32u) return SIZE_MAX;
+                    ++inner_open;
+                }
+                p+=run-1u;
+                continue;
             }
             return p;
         }

@@ -517,6 +517,68 @@ static int test_ascii_emphasis_flanking(void) {
     return 0;
 }
 
+/* Nested same-length delimiter pairs must own their INNER decoded text,
+ * not attach it to the outer sibling or manufacture literal delimiter nodes.
+ * The producer retains the exact original UTF-8 document for every sample. */
+static int test_nested_emphasis_pairs(void) {
+    typedef struct {
+        const char *source,*inner_text;
+        stun_ui_block_kind kind;
+    } nested_fixture;
+    static const nested_fixture cases[]={
+        {"*(*foo*)*\n","foo",STUN_UI_BLOCK_EMPHASIS},      /* #369 */
+        {"_(_foo_)_\n","foo",STUN_UI_BLOCK_EMPHASIS},      /* #373 */
+        {"__foo, __bar__, baz__\n","bar",STUN_UI_BLOCK_STRONG}, /* #389 */
+        {"*emph *with emph* in it*\n","with emph",STUN_UI_BLOCK_EMPHASIS},
+        {"**strong **with strong** in it**\n","with strong",STUN_UI_BLOCK_STRONG},
+        {"*x (*y*) z*\n","y",STUN_UI_BLOCK_EMPHASIS},
+        {"**x (**y**) z**\n","y",STUN_UI_BLOCK_STRONG}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==7u,
+                   "nested delimiter fixture denominator");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        const size_t bytes=strlen(cases[i].source);
+        stun_md_document *d=NULL;
+        CHECK(stun_md_parse(cases[i].source,bytes,128u,bytes+1u,&d)==STUN_UI_OK);
+        CHECK(d!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(d);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==bytes);
+        CHECK(memcmp(v.raw_markdown,cases[i].source,bytes)==0);
+        CHECK(kinds(v,cases[i].kind)==2u);
+        const size_t expected=strlen(cases[i].inner_text);
+        bool child_found=false;
+        for(size_t j=1u;j<v.document.block_count;++j) {
+            const stun_ui_block *inner=&v.document.blocks[j];
+            if(inner->kind!=cases[i].kind || inner->parent_index>=j)
+                continue;
+            if(v.document.blocks[inner->parent_index].kind!=cases[i].kind)
+                continue;
+            for(size_t k=j+1u;k<v.document.block_count;++k) {
+                const stun_ui_block *text=&v.document.blocks[k];
+                if(text->parent_index!=j ||
+                   text->kind!=STUN_UI_BLOCK_TEXT ||
+                   text->byte_end<text->byte_begin ||
+                   text->byte_end>v.document.source_bytes) continue;
+                if(text->byte_end-text->byte_begin==expected &&
+                   memcmp(v.document.source+text->byte_begin,
+                          cases[i].inner_text,expected)==0)
+                    child_found=true;
+            }
+        }
+        CHECK(child_found);
+        stun_md_document_destroy(d);
+    }
+    /* The inner TEXT would exceed the fifth allocated node. A rejected
+     * source never escapes as an incomplete RichDoc owner. */
+    const char limited[]="*(*foo*)*\n";
+    stun_md_document *out=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited,sizeof(limited)-1u,5u,
+                        sizeof(limited),&out)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(out==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -526,6 +588,7 @@ int main(void) {
     if(test_code_span_exact_runs_and_text()) return 1;
     if(test_code_span_delimiter_precedence()) return 1;
     if(test_ascii_emphasis_flanking()) return 1;
+    if(test_nested_emphasis_pairs()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;
