@@ -45,10 +45,30 @@ static const html_fixture cases[] = {
       "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n</tr>\n"
       "</thead>\n<tbody>\n<tr>\n<td>one</td>\n<td>two</td>\n</tr>\n"
       "</tbody>\n</table>\n" },
+    /* CommonMark 0.31.2 #329–#331, #338–#340, #347; code-span
+     * contents are literal UTF-8, with exact-run and edge-space rules. */
+    { TICK TICK " foo " TICK " bar " TICK TICK "\n",
+      "<p><code>foo " TICK " bar</code></p>\n" },          /* #329 */
+    { TICK " " TICK TICK " " TICK "\n",
+      "<p><code>" TICK TICK "</code></p>\n" },             /* #330 */
+    { TICK "  " TICK TICK "  " TICK "\n",
+      "<p><code> " TICK TICK " </code></p>\n" },           /* #331 */
+    { TICK "\xc2\xa0" "b" "\xc2\xa0" TICK "\n",
+      "<p><code>\xc2\xa0" "b" "\xc2\xa0</code></p>\n" },    /* #333 */
+    { TICK "  " TICK "\n",
+      "<p><code>  </code></p>\n" },                        /* #334 */
+    { TICK "foo\\" TICK "bar" TICK "\n",
+      "<p><code>foo\\</code>bar" TICK "</p>\n" },          /* #338 */
+    { TICK TICK "foo" TICK "bar" TICK TICK "\n",
+      "<p><code>foo" TICK "bar</code></p>\n" },             /* #339 */
+    { TICK " foo " TICK TICK " bar " TICK "\n",
+      "<p><code>foo " TICK TICK " bar</code></p>\n" },     /* #340 */
+    { TICK TICK TICK "foo" TICK TICK "\n",
+      "<p>" TICK TICK TICK "foo" TICK TICK "</p>\n" },    /* #347 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==17,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==26,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
@@ -138,6 +158,7 @@ int main(void) {
         }
     }
     if(test_unsafe_unsupported()) return 1;
-    puts("Stun C11 RichDoc HTML: 17/17 bounded subset fixtures passed");
+    printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",
+           sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
     return 0;
 }
