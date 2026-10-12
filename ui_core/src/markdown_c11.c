@@ -261,19 +261,42 @@ static size_t md_code_span_close(const char *s,size_t n,size_t begin,
     return SIZE_MAX;
 }
 
-/* Normalize one line of code-span content. Trim ONE ASCII space at each
- * edge iff BOTH edges are spaces and the content is not all spaces.
- * NBSP and Unicode payload bytes remain untouched. Multiline code-span
- * admission is a separate #182 slice; only valid equal-run spans enter here. */
+/* Normalize code-span payload into owned semantic UTF-8. Each LF/CRLF
+ * line ending becomes ONE ASCII space. Trim exactly one edge space when
+ * both edges are spaces and the payload is not all spaces. Backslashes,
+ * other interior spaces and Unicode bytes are literal. The scratch buffer
+ * cannot exceed the already admitted raw-source budget; publication still
+ * goes through the single RichDoc text arena and failure-atomic md_text. */
 static void md_code_span_text(stun_md_document *d,uint32_t parent,
                               const char *s,size_t start,size_t end) {
-    if(end>start+1u && s[start]==' ' && s[end-1u]==' ') {
-        bool nonspace=false;
-        for(size_t i=start;i<end;++i)
-            if(s[i]!=' ') {nonspace=true;break;}
-        if(nonspace) {++start;--end;}
+    const size_t n=end-start;
+    const bool multiline=memchr(s+start,'\n',n)!=NULL ||
+                         memchr(s+start,'\r',n)!=NULL;
+    char *normalized=NULL;
+    const char *text=s+start;
+    size_t begin=0u,bytes=n;
+    if(multiline) {
+        normalized=(char*)malloc(n+1u);
+        if(!normalized) {md_error(d,STUN_UI_OUT_OF_MEMORY);return;}
+        bytes=0u;
+        for(size_t i=start;i<end;++i) {
+            const char c=s[i];
+            if(c=='\r') {
+                if(i+1u<end && s[i+1u]=='\n') ++i;
+                normalized[bytes++]=' ';
+            } else if(c=='\n') normalized[bytes++]=' ';
+            else normalized[bytes++]=c;
+        }
+        text=normalized;
     }
-    md_text(d,parent,s+start,end-start);
+    if(bytes>1u && text[0]==' ' && text[bytes-1u]==' ') {
+        bool nonspace=false;
+        for(size_t i=0u;i<bytes;++i)
+            if(text[i]!=' ') {nonspace=true;break;}
+        if(nonspace) {++begin;--bytes;}
+    }
+    md_text(d,parent,text+begin,bytes-begin);
+    free(normalized);
 }
 
 static bool md_inline(stun_md_document *d, uint32_t parent,
@@ -1206,6 +1229,68 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
     return md_inline(d,q->paragraph,s+begin,line.end-begin,0u);
 }
 
+/* Bounded multiline code-span admission within ROOT paragraphs only.
+ * The legacy C11 per-line inline scan remains canonical for all other
+ * constructs. Read ahead for the SAME exact-length closing backtick run,
+ * never crossing a blank line or a block that interrupts this paragraph.
+ * At most 64 continuation lines are examined per opener to keep repeated
+ * unmatched candidates from causing unbounded quadratic rescanning.
+ * Nested quote/list paragraph admission is a separate #182 slice. */
+static bool md_root_code_span_interrupts(stun_md_document *d,md_line line) {
+    const char *s=d->raw;
+    const size_t begin=md_left(s,line.begin,line.end);
+    if(begin==line.end) return true;
+    const size_t indent=md_columns(s,line.begin,begin);
+    if(indent>3u) return false; /* still part of an open paragraph */
+    if(md_rule(s,begin,line.end) || md_setext(s,begin,line.end)) return true;
+    size_t hb=begin,he=line.end;
+    if(md_atx(s,&hb,&he)) return true;
+    char fence=0;size_t count=0,info_begin=0,info_end=0;
+    if(md_fence_start(s,begin,line.end,&fence,&count,
+                      &info_begin,&info_end)) return true;
+    size_t quote_body=line.begin;
+    if(md_quote_prefix(s,line,&quote_body)) return true;
+    md_list_marker_info item={0};
+    return md_list_token(s,line,&item) &&
+           md_list_interrupts_paragraph(&item,line);
+}
+
+static bool md_root_multiline_code_span(stun_md_document *d,
+                                        uint32_t *paragraph,md_line first,
+                                        size_t begin,size_t *next_pos) {
+    const char *s=d->raw;
+    if(begin>=first.end || s[begin]!=(char)0x60) return false;
+    size_t run=1u;
+    while(begin+run<first.end && s[begin+run]==(char)0x60) ++run;
+    /* A same-line match already belongs to the normal inline scanner. */
+    if(md_code_span_close(s,first.end,begin+run,run)!=SIZE_MAX)
+        return false;
+    size_t pos=first.next;
+    for(size_t lines=0u;pos<d->raw_size && lines<64u;++lines) {
+        const md_line line=md_read_line(d,pos);
+        if(md_root_code_span_interrupts(d,line)) break;
+        const size_t close=md_code_span_close(s,line.end,line.begin,run);
+        if(close!=SIZE_MAX) {
+            if(*paragraph==UINT32_MAX) {
+                *paragraph=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0u);
+                if(*paragraph==UINT32_MAX) return true;
+            } else if(md_add(d,*paragraph,STUN_UI_BLOCK_LINE_BREAK,0u)
+                      ==UINT32_MAX) return true;
+            const uint32_t code=md_add(d,*paragraph,STUN_UI_BLOCK_CODE_SPAN,0u);
+            if(code==UINT32_MAX) return true;
+            md_code_span_text(d,code,s,begin+run,close);
+            if(d->error!=STUN_UI_OK) return true;
+            if(close+run<line.end)
+                (void)md_inline(d,*paragraph,s+close+run,
+                                line.end-close-run,0u);
+            *next_pos=line.next;
+            return true;
+        }
+        pos=line.next;
+    }
+    return false;
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
     uint32_t indented = UINT32_MAX;
@@ -1408,6 +1493,12 @@ static void md_parse_blocks(stun_md_document *d) {
            !md_rule(s,begin,end)) {
             if(!md_list_open(d,&lists,0u,&top_marker,s,end)) return;
             paragraph=UINT32_MAX;
+            continue;
+        }
+        /* A root-paragraph code span can own multiple physical lines.
+         * Consume them as ONE typed code node before emitting soft breaks. */
+        if(md_root_multiline_code_span(d,&paragraph,line,begin,&pos)) {
+            if(d->error!=STUN_UI_OK) return;
             continue;
         }
         if (paragraph==UINT32_MAX) {

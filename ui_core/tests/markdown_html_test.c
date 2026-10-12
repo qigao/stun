@@ -65,10 +65,32 @@ static const html_fixture cases[] = {
       "<p><code>foo " TICK TICK " bar</code></p>\n" },     /* #340 */
     { TICK TICK TICK "foo" TICK TICK "\n",
       "<p>" TICK TICK TICK "foo" TICK TICK "</p>\n" },    /* #347 */
+    /* #182: a code span may cross root-paragraph physical lines; its
+     * internal line endings become spaces, preserving all other bytes. */
+    { TICK TICK "\nfoo\nbar  \nbaz\n" TICK TICK "\n",
+      "<p><code>foo bar   baz</code></p>\n" },           /* #335 */
+    { TICK TICK "\nfoo \n" TICK TICK "\n",
+      "<p><code>foo </code></p>\n" },                    /* #336 */
+    { TICK "foo   bar \nbaz" TICK "\n",
+      "<p><code>foo   bar  baz</code></p>\n" },          /* #337 */
+    { TICK TICK "\r\nfoo\r\nbar  \r\nbaz\r\n" TICK TICK "\r\n",
+      "<p><code>foo bar   baz</code></p>\n" },
+    { TICK "line\nnext" TICK " tail\n",
+      "<p><code>line next</code> tail</p>\n" },
+    { TICK "foo\nbar" TICK "\nafter\n",
+      "<p><code>foo bar</code>\nafter</p>\n" },
+    { TICK "foo\n\nbar" TICK "\n",
+      "<p>" TICK "foo</p>\n<p>bar" TICK "</p>\n" },
+    { TICK "foo\n# Heading\nbar" TICK "\n",
+      "<p>" TICK "foo</p>\n<h1>Heading</h1>\n<p>bar" TICK "</p>\n" },
+    { TICK TICK "a\n" TICK "b" TICK TICK "\n",
+      "<p><code>a " TICK "b</code></p>\n" },
+    { TICK " \n " TICK "\n",
+      "<p><code>   </code></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==26,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==36,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
