@@ -125,10 +125,26 @@ static const html_fixture cases[] = {
       "<p>**foo <strong>bar baz</strong></p>\n" },       /* #471 */
     { "*foo *bar baz*\n",
       "<p>*foo <em>bar baz</em></p>\n" },                /* #472 */
+    /* Same-length nested flanking runs claim their own nearer closers.
+     * The outer delimiter remains valid only when another closer exists. */
+    { "*(*foo*)*\n",
+      "<p><em>(<em>foo</em>)</em></p>\n" },           /* #369 */
+    { "_(_foo_)_\n",
+      "<p><em>(<em>foo</em>)</em></p>\n" },           /* #373 */
+    { "__foo, __bar__, baz__\n",
+      "<p><strong>foo, <strong>bar</strong>, baz</strong></p>\n" }, /* #389 */
+    { "*emph *with emph* in it*\n",
+      "<p><em>emph <em>with emph</em> in it</em></p>\n" },
+    { "**strong **with strong** in it**\n",
+      "<p><strong>strong <strong>with strong</strong> in it</strong></p>\n" },
+    { "*x (*y*) z*\n",
+      "<p><em>x (<em>y</em>) z</em></p>\n" },
+    { "**x (**y**) z**\n",
+      "<p><strong>x (<strong>y</strong>) z</strong></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==56,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==63,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
