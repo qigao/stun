@@ -280,7 +280,14 @@ static void html_node(stun_html_writer *w, size_t id,
     }
     case STUN_UI_BLOCK_LIST_ITEM:
         html_str(w,"<li>");
-        if(html_loose_item(w,id)) html_str(w,"\n");
+        /* A block-level code node as the first child starts on a new line.
+         * Tight list paragraphs still remain inline with the <li> tag. */
+        if(html_loose_item(w,id) ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id &&
+            (doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_FENCE ||
+             doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_INDENTED)))
+            html_str(w,"\n");
         break;
     case STUN_UI_BLOCK_QUOTE: html_str(w,"<blockquote>\n"); break;
     case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"<tr>\n"); break;

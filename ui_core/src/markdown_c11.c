@@ -492,6 +492,25 @@ static bool md_list_token(const char *s,md_line line,
     return true;
 }
 
+/* Both marker-line and continuation-line fences use the same owned item
+ * frame.  A recognized opener is consumed even when allocation fails; the
+ * caller will propagate d->error and discard the incomplete document. */
+static bool md_list_begin_fence(stun_md_document *d,md_list_frame *f,
+                                const char *s,size_t begin,size_t end) {
+    char marker=0;
+    size_t run=0,info_b=0,info_e=0;
+    if(!md_fence_start(s,begin,end,&marker,&run,&info_b,&info_e))
+        return false;
+    const uint32_t node=md_add(d,f->item,STUN_UI_BLOCK_CODE_FENCE,0u);
+    if(node==UINT32_MAX) return true;
+    md_meta(d,node,s+info_b,info_e-info_b);
+    if(d->error!=STUN_UI_OK) return true;
+    f->fence=(md_fence){marker,run,node};
+    f->fence_open=true;
+    f->paragraph=f->code=f->quote=UINT32_MAX;
+    return true;
+}
+
 static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
                                 const md_list_marker_info *m,
                                 const char *s,size_t end) {
@@ -511,16 +530,18 @@ static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
      * an empty paragraph or permit an intervening blank to attach a
      * following top-level paragraph to it. */
     f->empty_item=content==end && !task;
-    f->paragraph=UINT32_MAX;
+    f->paragraph=f->code=f->quote=UINT32_MAX;
+    f->content_column=m->content_column;
+    f->fence_open=f->pending_blank=false;
     if(!f->empty_item) {
+        /* A list marker may introduce a fenced block directly: "- ~~~".
+         * Do not manufacture a paragraph containing the fence opener. */
+        if(!task && md_list_begin_fence(d,f,s,content,end))
+            return d->error==STUN_UI_OK;
         f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
         if(f->paragraph==UINT32_MAX) return false;
         if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
     }
-    f->content_column=m->content_column;
-    f->code=f->quote=UINT32_MAX;
-    f->fence_open=false;
-    f->pending_blank=false;
     return d->error==STUN_UI_OK;
 }
 
@@ -634,21 +655,10 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 f->pending_blank=false;
             }
             const size_t inner_indent=indent-f->content_column;
-            char fence_marker=0;
-            size_t fence_run=0,info_b=0,info_e=0;
             const size_t inner_begin=md_left(s,body,line.end);
             if(inner_indent<=3u &&
-               md_fence_start(s,inner_begin,line.end,&fence_marker,
-                              &fence_run,&info_b,&info_e)) {
-                const uint32_t node=md_add(d,f->item,STUN_UI_BLOCK_CODE_FENCE,0u);
-                if(node==UINT32_MAX) return true;
-                md_meta(d,node,s+info_b,info_e-info_b);
-                if(d->error!=STUN_UI_OK) return true;
-                f->fence=(md_fence){fence_marker,fence_run,node};
-                f->fence_open=true;
-                f->paragraph=f->code=f->quote=UINT32_MAX;
+               md_list_begin_fence(d,f,s,inner_begin,line.end))
                 return true;
-            }
             if(inner_indent>=4u && f->paragraph==UINT32_MAX &&
                f->quote==UINT32_MAX) {
                 if(f->code==UINT32_MAX) {
