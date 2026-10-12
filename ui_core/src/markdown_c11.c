@@ -1611,8 +1611,73 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
     return true;
 }
 
+/* #185: root paragraph line boundaries must decide whitespace and break
+ * origin BEFORE publishing decoded RichDoc text. A backward trim of the
+ * shared text arena would invalidate borrowed byte spans and node owners.
+ * Do not cross competing blocks, list/quote generations or blank lines. */
+typedef enum md_root_break {
+    MD_ROOT_BREAK_SOFT = 0,
+    MD_ROOT_BREAK_SPACES,
+    MD_ROOT_BREAK_BACKSLASH
+} md_root_break;
+
+static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
+    if(!current.newline || current.next>=d->raw_size)return false;
+    const md_line next=md_read_line(d,current.next);
+    const char *s=d->raw;
+    if(md_blank(s,next.begin,next.end))return false;
+    /* An indented continuation is still a paragraph continuation when its
+     * owner already exists. This preserves the existing paragraph precedence. */
+    return !md_root_code_span_interrupts(d,next);
+}
+
+static md_root_break md_root_line_content(const char *s,size_t begin,
+                                           size_t end,bool continues,
+                                           size_t *content_end) {
+    size_t trimmed=md_right(s,begin,end);
+    *content_end=trimmed; /* one trailing space/tab is not semantic TEXT */
+    if(!continues || trimmed==begin)return MD_ROOT_BREAK_SOFT;
+    /* CommonMark #633–#635: two or more literal ASCII spaces before LF.
+     * Tab-column hard-break interpretation remains a separate #185 slice. */
+    if(end-trimmed>=2u) {
+        bool only_spaces=true;
+        for(size_t i=trimmed;i<end;++i)
+            if(s[i]!=' ') {only_spaces=false;break;}
+        if(only_spaces)return MD_ROOT_BREAK_SPACES;
+    }
+    /* CommonMark #634/#637: ONLY an unescaped final backslash marks a hard
+     * break. Even-length trailing backslash runs retain literal backslashes. */
+    if(trimmed==end && s[end-1u]=='\\') {
+        size_t at=end;
+        while(at>begin && s[at-1u]=='\\')--at;
+        if((end-at)%2u!=0u) {
+            *content_end=end-1u;
+            return MD_ROOT_BREAK_BACKSLASH;
+        }
+    }
+    return MD_ROOT_BREAK_SOFT;
+}
+
+static bool md_root_emit_break(stun_md_document *d,uint32_t paragraph,
+                               md_root_break kind) {
+    const bool hard=kind!=MD_ROOT_BREAK_SOFT;
+    const uint32_t node=md_add(d,paragraph,hard?
+        STUN_UI_BLOCK_HARD_LINE_BREAK:STUN_UI_BLOCK_LINE_BREAK,0u);
+    if(node==UINT32_MAX)return false;
+    if(hard) {
+        const stun_ui_line_break_semantics info={
+            (uint8_t)(kind==MD_ROOT_BREAK_SPACES ?
+             STUN_UI_LINE_BREAK_TRAILING_SPACES :
+             STUN_UI_LINE_BREAK_BACKSLASH),{0u,0u,0u}
+        };
+        md_meta(d,node,(const char*)&info,sizeof(info));
+    }
+    return d->error==STUN_UI_OK;
+}
+
 static void md_parse_blocks(stun_md_document *d) {
     uint32_t paragraph = UINT32_MAX;
+    md_root_break pending_break=MD_ROOT_BREAK_SOFT;
     uint32_t indented = UINT32_MAX;
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
@@ -1826,14 +1891,27 @@ static void md_parse_blocks(stun_md_document *d) {
         if(paragraph==UINT32_MAX && lists.depth==0u &&
            md_root_paragraph_emphasis(d,&paragraph,line,begin,&pos)) {
             if(d->error!=STUN_UI_OK)return;
+            pending_break=MD_ROOT_BREAK_SOFT;
             continue;
         }
         if(d->error!=STUN_UI_OK)return;
+        /* This slice owns root paragraph semantics only. Nested list/quote
+         * breaks still use their existing parser until scoped admission. */
+        const bool root=lists.depth==0u && quotes.depth==0u;
+        const bool continues=root && md_root_paragraph_continues(d,line);
+        size_t text_end=end;
+        const md_root_break next_break=root?
+            md_root_line_content(s,begin,end,continues,&text_end):
+            MD_ROOT_BREAK_SOFT;
         if (paragraph==UINT32_MAX) {
             paragraph=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0);
             if (paragraph==UINT32_MAX) return;
-        } else (void)md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0);
-        (void)md_inline(d,paragraph,s+begin,end-begin,0);
+        } else if(root) {
+            if(!md_root_emit_break(d,paragraph,pending_break))return;
+        } else if(md_add(d,paragraph,STUN_UI_BLOCK_LINE_BREAK,0)==
+                  UINT32_MAX)return;
+        if(!md_inline(d,paragraph,s+begin,text_end-begin,0u))return;
+        pending_break=next_break;
     }
 }
 
