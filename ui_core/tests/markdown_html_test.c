@@ -42,8 +42,8 @@ static const html_fixture cases[] = {
     { "中😀 👩‍💻\n", "<p>中😀 👩‍💻</p>\n" },
     { "a ~~red~~ day\n", "<p>a <del>red</del> day</p>\n" },
     { "| A | B |\n| --- | --- |\n| one | two |\n",
-      "<table>\n<thead>\n<tr><th>A</th><th>B</th></tr>\n"
-      "</thead>\n<tbody>\n<tr><td>one</td><td>two</td></tr>\n"
+      "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n</tr>\n"
+      "</thead>\n<tbody>\n<tr>\n<td>one</td>\n<td>two</td>\n</tr>\n"
       "</tbody>\n</table>\n" },
     { "", "" },
 };

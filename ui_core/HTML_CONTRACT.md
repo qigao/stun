@@ -19,3 +19,47 @@ The IR currently lacks loose-vs-tight list facts, hard-vs-soft line break distin
 `stun_markdown_html_test` is a real strict C11 executable using the installed `Stun::UICore`, checked by the existing installed-Salts SDK ASan/UBSan workflow. It asserts 17 exact HTML golden outputs, atomic capacity rejection, safe link admission, and unsupported image handling.
 
 The next gate must **also** compare actual C11-produced HTML against independent `cmarkgfm` HTML on a complete, versioned sample suite. Mistune AST parity alone is not an HTML conformance proof, and our test-only HTML examples do not replace that independent oracle.
+
+## Independent HTML oracle (test-only)
+
+The test program `stun_markdown_html_dump` runs the **real** C11 Markdown
+parser and C11 RichDoc HTML renderer. It accepts at most 1 MiB of Markdown
+from stdin and writes only HTML bytes to stdout; failures use nonzero exit
+and stderr, never fallback to C++ or a Python parser.
+
+`ui_core/tests/compare_cmarkgfm_html.py` independently processes the *same*
+input through Python `cmarkgfm`: CommonMark examples use `markdown_to_html`,
+GFM examples use `github_flavored_markdown_to_html`. It asserts **exact HTML
+bytes**, including whitespace, escaping and structural tags, for an
+explicit 17-case support subset. The separate diagnostic survey records
+unsupported/reference-link/table-alignment/task/HTML-entity differences
+without counting them as passes or bypassing failure in a supported case.
+
+The existing Unicode runtime installed-Salts SDK gate compiles the C11
+executable with its ASan/UBSan settings and runs the Python oracle inside
+a separate ephemeral virtualenv. The `cmarkgfm` package is not linked into
+Stun or required by any consumer; its resolved version and per-fixture
+first-byte differences are saved in `markdown-cmarkgfm-html.json`.
+
+**Important:** 17 supported fixtures passing means only *subset* byte-for-byte
+HTML equality, not normative full CommonMark/GFM compliance. Full official
+spec coverage, reference links, list tightness, ordered starts, alignment
+metadata, hardbreaks and task checkbox HTML remain required by #172.
+
+## Full CommonMark 0.31.2 survey (652 official examples)
+
+The repo's existing `tools/md/test/spec.txt` contains **652 official
+CommonMark 0.31.2 examples**, with canonical expected HTML. The test-only
+`ui_core/tests/survey_commonmark_spec.py` extracts every fenced example
+(substituting the spec's right-arrow TAB notation), invokes the **actual**
+C11 HTML executable and independently computes cmarkgfm reference HTML.
+
+It emits `markdown-commonmark-652-survey.json` with every numbered fixture's
+raw input, official expected HTML, cmarkgfm HTML, actual C11 HTML or explicit
+unsupported status, and first byte difference. It reports C11-vs-official,
+C11-vs-cmarkgfm and cmarkgfm-vs-official totals separately. Missing fixtures,
+unexpected interpreter/tool failures, native crashes, sanitizer reports or
+unexpected partial writes fail the survey immediately. The 652 semantic
+matches are **diagnostic only**, because the current C11 renderer deliberately
+rejects many unsupported grammar features. Full spec compliance is a separate
+future gate, not inferred from the 17-fixture supported-subset HTML comparison.
