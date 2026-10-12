@@ -100,6 +100,46 @@ static int check_crossline_hard(const char *source,uint8_t origin,
     return 0;
 }
 
+/* #185: when an inner strong/em/link closes before two trailing spaces,
+ * the HARD break still belongs to the OUTER inline owner. Its provenance
+ * comes from the whole physical line rather than a residual text fragment. */
+static int check_hard_after_nested_inline(
+    const char *source,stun_ui_block_kind outer,
+    stun_ui_block_kind inner,uint8_t origin) {
+    const size_t n=strlen(source);
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(source,n,128u,n+1u,&doc)==STUN_UI_OK);
+    CHECK(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+    CHECK(v.raw_markdown_bytes==n);
+    CHECK(memcmp(v.raw_markdown,source,n)==0);
+    CHECK(kind_count(v,inner)==1u);
+    CHECK(kind_count(v,STUN_UI_BLOCK_HARD_LINE_BREAK)==1u);
+    CHECK(has_text(v,"baz"));
+    bool inner_owned=false,hard_owned=false;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        CHECK(node->parent_index<i);
+        const stun_ui_block_kind parent_kind=
+            v.document.blocks[node->parent_index].kind;
+        if(node->kind==inner && parent_kind==outer)inner_owned=true;
+        if(node->kind!=STUN_UI_BLOCK_HARD_LINE_BREAK)continue;
+        CHECK(parent_kind==outer);
+        const char *meta=NULL;size_t len=SIZE_MAX;
+        CHECK(stun_ui_rich_document_metadata(&v,i,&meta,&len)==STUN_UI_OK);
+        CHECK(len==sizeof(stun_ui_line_break_semantics));
+        stun_ui_line_break_semantics sem;
+        memcpy(&sem,meta,sizeof(sem));
+        CHECK(sem.origin==origin);
+        CHECK(!sem.reserved[0]&&!sem.reserved[1]&&!sem.reserved[2]);
+        hard_owned=true;
+    }
+    CHECK(inner_owned && hard_owned);
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     CHECK(check_multiline(
         "**Gomphocarpus (*Gomphocarpus physocarpus*, syn.\n"
@@ -134,6 +174,19 @@ int main(void) {
     CHECK(check_crossline_hard("*foo\\\r\nbar*\r\n",
                                STUN_UI_LINE_BREAK_BACKSLASH,
                                STUN_UI_BLOCK_EMPHASIS)==0);
+    CHECK(check_hard_after_nested_inline("*foo **bar**  \nbaz*\n",
+           STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_STRONG,
+           STUN_UI_LINE_BREAK_TRAILING_SPACES)==0);
+    CHECK(check_hard_after_nested_inline("*foo [bar](url)  \nbaz*\n",
+           STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_LINK,
+           STUN_UI_LINE_BREAK_TRAILING_SPACES)==0);
+    CHECK(check_hard_after_nested_inline("**foo _bar_  \nbaz**\n",
+           STUN_UI_BLOCK_STRONG,STUN_UI_BLOCK_EMPHASIS,
+           STUN_UI_LINE_BREAK_TRAILING_SPACES)==0);
+    CHECK(check_hard_after_nested_inline("*foo **bar**\\\nbaz*\n",
+           STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_STRONG,
+           STUN_UI_LINE_BREAK_BACKSLASH)==0);
+
 
     /* These are now VALID cross-line soft emphasis pairs rather than
      * negative boundary fixtures after #185 normalizes their whitespace. */
@@ -175,6 +228,6 @@ int main(void) {
           STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
     puts("C11 Markdown root paragraph inline ownership: 9/9 positive, "
-         "3/3 real block barriers and atomic soft/hard node-budget rejection");
+         "3/3 real block barriers, 4/4 nested hard origins and atomic soft/hard node-budget rejection");
     return 0;
 }

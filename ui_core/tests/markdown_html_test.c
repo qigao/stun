@@ -288,10 +288,20 @@ static const html_fixture cases[] = {
       "<p><em>foo\nbar</em></p>\n" },
     { "*foo\\\r\nbar*\r\n",
       "<p><em>foo<br />\nbar</em></p>\n" },
+    /* #185: a nested inline token can finish BEFORE trailing hard-break
+     * spaces, while the outer emphasis/strong still owns the break. */
+    { "*foo **bar**  \nbaz*\n",
+      "<p><em>foo <strong>bar</strong><br />\nbaz</em></p>\n" },
+    { "*foo [bar](url)  \nbaz*\n",
+      "<p><em>foo <a href=\"url\">bar</a><br />\nbaz</em></p>\n" },
+    { "**foo _bar_  \nbaz**\n",
+      "<p><strong>foo <em>bar</em><br />\nbaz</strong></p>\n" },
+    { "*foo **bar**\\\nbaz*\n",
+      "<p><em>foo <strong>bar</strong><br />\nbaz</em></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==129,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==133,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

@@ -563,7 +563,7 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
     uint32_t owners[33]={0u};
     owners[0]=parent;
     unsigned nested=0u;
-    size_t p=0u,text_start=0u;
+    size_t p=0u,text_start=0u,physical_line_start=0u;
     while(p<n && d->error==STUN_UI_OK) {
         if(events[p].close) {
             if(!nested) {md_error(d,STUN_UI_INVALID_ARGUMENT);break;}
@@ -591,13 +591,18 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
          * hard or soft break under the actual nested Emphasis/Strong owner.
          * Code spans are opaque and remain literal under this path. */
         if(s[p]=='\n') {
+            /* Classify the physical line, NOT only the remaining TEXT
+             * suffix: inner strong/link owners may have closed immediately
+             * before the hard-break whitespace. Keep output TEXT trimmed
+             * from its own admitted span without reviving source markers. */
             size_t content_end=p;
             const md_root_break kind=md_root_line_content(
-                s,text_start,p,true,&content_end);
+                s,physical_line_start,p,true,&content_end);
+            if(content_end<text_start)content_end=text_start;
             md_text(d,owners[nested],s+text_start,content_end-text_start);
             if(!md_root_emit_break(d,owners[nested],kind))break;
             ++p;
-            text_start=p;
+            text_start=physical_line_start=p;
             continue;
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
