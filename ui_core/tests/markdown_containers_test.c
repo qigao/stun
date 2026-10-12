@@ -57,9 +57,17 @@ static const fixture cases[]={
     {"cm-312","- a\n - b\n  - c\n   - d\n    - e\n",
      "<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n<li>d\n- e</li>\n</ul>\n",0,1u},
     {"cm-325","* foo\n  * bar\n\n  baz\n",
-     "<ul>\n<li>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n<p>baz</p>\n</li>\n</ul>\n",1,2u}
+     "<ul>\n<li>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n<p>baz</p>\n</li>\n</ul>\n",1,2u},
+    /* #181: quote paragraphs inside a list item are owned and continued
+     * within one quote, without admitting synthetic blank paragraphs. */
+    {"cm-320","* a\n  > b\n  >\n* c\n",
+     "<ul>\n<li>a\n<blockquote>\n<p>b</p>\n</blockquote>\n</li>\n<li>c</li>\n</ul>\n",0,1u},
+    {"list-quote-marked-continuation","* a\n  > b\n  > c\n* d\n",
+     "<ul>\n<li>a\n<blockquote>\n<p>b\nc</p>\n</blockquote>\n</li>\n<li>d</li>\n</ul>\n",0,1u},
+    {"list-quote-explicit-blank","* a\n  > b\n  >\n  > c\n* d\n",
+     "<ul>\n<li>a\n<blockquote>\n<p>b</p>\n<p>c</p>\n</blockquote>\n</li>\n<li>d</li>\n</ul>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==19u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==22u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
