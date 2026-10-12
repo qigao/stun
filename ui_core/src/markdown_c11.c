@@ -16,6 +16,7 @@ struct stun_md_document {
     size_t text_size;
     char *metadata;
     size_t metadata_size;
+    size_t metadata_capacity;
     stun_ui_block *nodes;
     stun_ui_block_metadata *node_metadata;
     size_t node_count;
@@ -118,10 +119,31 @@ static bool md_store(stun_md_document *d, bool is_meta,
     size_t *used = is_meta ? &d->metadata_size : &d->text_size;
     char *target = is_meta ? d->metadata : d->text;
     if (d->error != STUN_UI_OK) return false;
-    if (n > d->raw_size - *used) {
-        md_error(d, STUN_UI_CAPACITY_EXCEEDED);
-        return false;
+    size_t limit=is_meta ? d->metadata_capacity : d->raw_size;
+    if(*used>limit) {md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;}
+    if(is_meta && n>limit-*used) {
+        /* Bound metadata by the node budget; short Markdown sources may still
+         * need eight metadata bytes for one list. */
+        if(d->node_limit>SIZE_MAX/sizeof(stun_ui_list_semantics) ||
+           d->raw_size>SIZE_MAX-d->node_limit*sizeof(stun_ui_list_semantics)) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED); return false;
+        }
+        const size_t maximum=d->raw_size+
+                              d->node_limit*sizeof(stun_ui_list_semantics);
+        if(*used>maximum || n>maximum-*used) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+        }
+        size_t cap=limit?limit:1u;
+        while(cap<*used+n) {
+            if(cap>(maximum-1u)/2u) {cap=maximum;break;}
+            cap=cap*2u+1u;
+        }
+        char *data=(char*)realloc(d->metadata,cap+1u);
+        if(!data) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
+        d->metadata=data;d->metadata_capacity=cap;limit=cap;
     }
+    if(n>limit-*used) {md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;}
+    target=is_meta ? d->metadata : d->text;
     *begin = *used;
     if (n) memcpy(target + *used, s, n);
     *used += n;
@@ -150,6 +172,25 @@ static void md_meta(stun_md_document *d, uint32_t node,
         d->node_metadata[node] = (stun_ui_block_metadata){from,to};
 }
 
+
+/* List metadata is owned by the parser; update before publishing the view. */
+static bool md_list_meta(stun_md_document *d, uint32_t id,
+                         uint32_t start, char marker) {
+    const stun_ui_list_semantics info={start,(uint8_t)marker,0u,{0u,0u}};
+    md_meta(d,id,(const char*)&info,sizeof(info));
+    return d->error==STUN_UI_OK;
+}
+static void md_mark_list_loose(stun_md_document *d, uint32_t id) {
+    if(id>=d->node_count) {md_error(d,STUN_UI_INVALID_ARGUMENT);return;}
+    const stun_ui_block_metadata span=d->node_metadata[id];
+    if(span.byte_end-span.byte_begin!=sizeof(stun_ui_list_semantics)) {
+        md_error(d,STUN_UI_INVALID_ARGUMENT);return;
+    }
+    stun_ui_list_semantics info;
+    memcpy(&info,d->metadata+span.byte_begin,sizeof(info));
+    info.loose=1u;
+    memcpy(d->metadata+span.byte_begin,&info,sizeof(info));
+}
 
 /* CommonMark tab stops are four *columns*, not four bytes. For a root-level
  * indented code line, consume precisely four indentation columns. A tab
@@ -739,6 +780,7 @@ stun_ui_status stun_md_parse(const char *input,size_t length,
     d->raw=(char*)malloc(length+1u);
     d->text=(char*)malloc(length+1u);
     d->metadata=(char*)malloc(length+1u);
+    d->metadata_capacity=length;
     if (!d->raw || !d->text || !d->metadata) {
         stun_md_document_destroy(d);
         return STUN_UI_OUT_OF_MEMORY;

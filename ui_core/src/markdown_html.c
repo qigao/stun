@@ -90,6 +90,41 @@ static bool html_metadata(stun_html_writer *w, size_t id,
     return true;
 }
 
+static bool html_list_meta(stun_html_writer *w,size_t id,
+                           stun_ui_list_semantics *info) {
+    const stun_ui_block *node=&w->doc->document.blocks[id];
+    const char *data=NULL;size_t size=0;
+    *info=(stun_ui_list_semantics){0};
+    info->start=node->kind==STUN_UI_BLOCK_ORDERED_LIST?1u:0u;
+    if(!html_metadata(w,id,&data,&size)) return false;
+    if(!size) return true; /* existing projected tight lists */
+    if(size!=sizeof(*info)) {w->error=STUN_UI_INVALID_ARGUMENT;return false;}
+    memcpy(info,data,sizeof(*info));
+    const bool ordered=node->kind==STUN_UI_BLOCK_ORDERED_LIST;
+    if(info->loose>1u||info->reserved[0]||info->reserved[1]||
+       (ordered ? (info->start<1u||info->start>999999999u||
+                   (info->marker!='.'&&info->marker!=')'))
+                : (info->start!=0u||(info->marker!='-'&&
+                       info->marker!='+'&&info->marker!='*')))) {
+        w->error=STUN_UI_INVALID_ARGUMENT;return false;
+    }
+    return true;
+}
+static bool html_loose_item(stun_html_writer *w,size_t id) {
+    const uint32_t parent=w->doc->document.blocks[id].parent_index;
+    stun_ui_list_semantics info;
+    if(parent>=w->doc->document.block_count ||
+       !html_list_meta(w,parent,&info)) {
+        w->error=STUN_UI_INVALID_ARGUMENT;return false;
+    }
+    return info.loose!=0u;
+}
+static void html_number(stun_html_writer *w,uint32_t v) {
+    char digits[10];size_t n=0;
+    do {digits[n++]=(char)('0'+v%10u);v/=10u;} while(v);
+    while(n) html_bytes(w,&digits[--n],1u);
+}
+
 static void html_text(stun_html_writer *w, const stun_ui_block *node) {
     if (node->byte_end < node->byte_begin ||
         node->byte_end > w->doc->document.source_bytes) {
@@ -175,11 +210,13 @@ static void html_node(stun_html_writer *w, size_t id,
     size_t meta_length=0;
     switch(kind) {
     case STUN_UI_BLOCK_DOCUMENT: break;
-    case STUN_UI_BLOCK_PARAGRAPH:
-        if(id==0 || (doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_LIST_ITEM &&
-                     doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_TASK_ITEM))
-            html_str(w,"<p>");
+    case STUN_UI_BLOCK_PARAGRAPH: {
+        const uint32_t parent=node->parent_index;
+        if(parent==0u || (doc->blocks[parent].kind!=STUN_UI_BLOCK_LIST_ITEM &&
+                          doc->blocks[parent].kind!=STUN_UI_BLOCK_TASK_ITEM) ||
+           html_loose_item(w,parent)) html_str(w,"<p>");
         break;
+    }
     case STUN_UI_BLOCK_HEADING:
         if(node->heading_level<1 || node->heading_level>6) {
             w->error=STUN_UI_INVALID_ARGUMENT; return;
@@ -225,9 +262,26 @@ static void html_node(stun_html_writer *w, size_t id,
         }
         html_str(w,">");
         break;
-    case STUN_UI_BLOCK_LIST: html_str(w,"<ul>\n"); break;
-    case STUN_UI_BLOCK_ORDERED_LIST: html_str(w,"<ol>\n"); break;
-    case STUN_UI_BLOCK_LIST_ITEM: html_str(w,"<li>"); break;
+    case STUN_UI_BLOCK_LIST: {
+        stun_ui_list_semantics info;
+        if(!html_list_meta(w,id,&info)) return;
+        html_str(w,"<ul>\n");break;
+    }
+    case STUN_UI_BLOCK_ORDERED_LIST: {
+        stun_ui_list_semantics info;
+        if(!html_list_meta(w,id,&info)) return;
+        html_str(w,"<ol");
+        if(info.start!=1u) {
+            html_str(w," start=\"");
+            html_number(w,info.start);
+            html_str(w,"\"");
+        }
+        html_str(w,">\n");break;
+    }
+    case STUN_UI_BLOCK_LIST_ITEM:
+        html_str(w,"<li>");
+        if(html_loose_item(w,id)) html_str(w,"\n");
+        break;
     case STUN_UI_BLOCK_QUOTE: html_str(w,"<blockquote>\n"); break;
     case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"<tr>\n"); break;
     case STUN_UI_BLOCK_TABLE_CELL:
@@ -252,11 +306,16 @@ static void html_node(stun_html_writer *w, size_t id,
 
     switch(kind) {
     case STUN_UI_BLOCK_DOCUMENT: break;
-    case STUN_UI_BLOCK_PARAGRAPH:
-        if(id==0 || (doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_LIST_ITEM &&
-                     doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_TASK_ITEM))
-            html_str(w,"</p>\n");
+    case STUN_UI_BLOCK_PARAGRAPH: {
+        const uint32_t parent=node->parent_index;
+        if(parent==0u || (doc->blocks[parent].kind!=STUN_UI_BLOCK_LIST_ITEM &&
+                          doc->blocks[parent].kind!=STUN_UI_BLOCK_TASK_ITEM) ||
+           html_loose_item(w,parent)) html_str(w,"</p>\n");
+        else if(child_end<doc->block_count &&
+                doc->blocks[child_end].parent_index==parent)
+            html_str(w,"\n");
         break;
+    }
     case STUN_UI_BLOCK_HEADING:
         html_str(w,"</h");
         { char digit=(char)('0'+node->heading_level); html_bytes(w,&digit,1u); }
