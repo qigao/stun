@@ -426,7 +426,7 @@ typedef struct md_list_marker_info {
 } md_list_marker_info;
 typedef struct md_list_frame {
     uint32_t list, item, paragraph, code, quote;
-    size_t marker_column, content_column;
+    size_t marker_column, content_column, list_base_column;
     char marker;
     bool ordered, pending_blank, empty_item;
 } md_list_frame;
@@ -537,6 +537,7 @@ static bool md_list_open(stun_md_document *d,md_list_stack *stack,
     f->marker=m->marker;
     f->ordered=m->ordered;
     f->marker_column=m->column;
+    f->list_base_column=m->column;
     return md_list_append_item(d,f,m,s,end);
 }
 
@@ -568,10 +569,10 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
          * instance '- a /  - b /   - c' denotes three siblings when the
          * preceding marker is at the previous column. */
         const bool sibling=marker_found &&
-            marker.column<=3u &&
+            marker.column>=f->list_base_column &&
             (marker.column==f->marker_column ||
              (marker.column<f->content_column &&
-              marker.column<=f->marker_column+3u));
+              marker.column-f->list_base_column<=3u));
         if(sibling) {
             if(f->ordered==marker.ordered && f->marker==marker.marker) {
                 if(f->pending_blank) md_mark_list_loose(d,f->list);
