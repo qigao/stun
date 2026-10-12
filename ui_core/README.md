@@ -170,3 +170,13 @@ python -m venv .venv-reference
   --parser build/ui-core-c11-installed/tests/stun_markdown_ast_dump \
   --report build/markdown-python-oracle.json
 ```
+
+### Unified Mesa/Desktop runner
+
+The runtime workflow calls `mesa-driver.yml` once with the resolved Salts
+release SHAs and `run_desktop: true`. Its one Linux runner builds pinned Mesa,
+executes baseline/patched control evidence, then directly consumes the same
+patched installation for real gCanvas/OpenGL/Vulkan and FlexUI window lifecycle
+tests under ASan/UBSan. No second desktop runner, Mesa artifact download or
+unpack is needed. Separate production FlexUI installed-SDK and Unicode jobs
+still run independently. Manual Mesa `workflow_dispatch` remains Mesa-only.
