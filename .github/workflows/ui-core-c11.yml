@@ -61,6 +61,13 @@ jobs:
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_indented_test.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_c11_dump.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_golden_test.c
+          # Fast failure for the conformance tests added under #181: the
+          # complete installed-SDK ASan/UBSan runner remains independently
+          # mandatory, but malformed C11 fixtures must fail this short gate.
+          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_containers_test.c
+          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_quote_test.c
+          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_nested_quote_test.c
+          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_quoted_list_test.c
 
       - name: Verify clean source tree
         shell: bash
