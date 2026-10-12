@@ -391,50 +391,97 @@ static size_t md_match(const char *s, size_t n, size_t start,
     return SIZE_MAX;
 }
 
-/* Restricted inline link target admission. The destination and optional
- * quoted title are identified in RAW Markdown before any entity expansion.
- * A malformed title (including entity-produced quotes masquerading as
- * syntax) is literal Markdown, never an admitted unsafe href. Nested
- * parentheses and reference links remain separate CommonMark slices. */
+/* One raw-source link destination/title parser shared by delimiter
+ * discovery and RichDoc emission. Do not use the first ')' as a closer:
+ * CommonMark admits balanced destination parentheses and <...> targets
+ * containing spaces or ')' bytes. Angle delimiters are stripped BEFORE
+ * decoding the semantic destination, and none of the decoded characters
+ * are reused as Markdown grammar.
+ *
+ * All scans remain within n owned source bytes. Unbracketed parentheses
+ * nesting is bounded to 32 levels; malformed/over-depth syntax remains
+ * literal input rather than inventing partial LINK/URI ownership.
+ * Reference links and complex bracket labels belong to a separate slice. */
 typedef struct md_link_parts {
     size_t destination_begin,destination_end;
     size_t title_begin,title_end;
     bool has_title;
 } md_link_parts;
 
-static bool md_link_target_parts(const char *s,size_t begin,size_t end,
-                                  md_link_parts *out) {
-    if(!out || begin>end)return false;
-    size_t p=begin;
-    while(p<end && !md_space(s[p])) {
-        if(s[p]=='\\' && p+1u<end && md_ascii_punct(s[p+1u]))
-            p+=2u;
-        else ++p;
-    }
-    const size_t dest_end=p;
-    while(p<end && md_space(s[p]))++p;
-    md_link_parts result={
-        .destination_begin=begin,.destination_end=dest_end,
-        .title_begin=0u,.title_end=0u,.has_title=false
-    };
-    if(p<end) {
-        if(s[p]!='"' && s[p]!='\'')return false;
-        const char quote=s[p++];
-        const size_t title_start=p;
-        while(p<end && s[p]!=quote) {
-            if(s[p]=='\\' && p+1u<end &&
+static bool md_link_target_parse(const char *s,size_t n,size_t round_open,
+                                 md_link_parts *out,size_t *round_close) {
+    if(!s || !out || !round_close || round_open>=n ||
+       s[round_open]!='(')return false;
+    size_t p=round_open+1u;
+    while(p<n && md_space(s[p]))++p;
+    const bool angle=p<n && s[p]=='<';
+    size_t begin=p,end=p;
+
+    if(angle) {
+        /* In an angle destination the first UNESCAPED '>' owns the end;
+         * literal ')' and ASCII spaces are ordinary destination bytes.
+         * A newline or a nested raw '<' cannot enter angle syntax. */
+        begin=++p;
+        while(p<n && s[p]!='>') {
+            if(s[p]=='\n' || s[p]=='\r' || s[p]=='<')return false;
+            if(s[p]=='\\' && p+1u<n &&
                md_ascii_punct(s[p+1u]))p+=2u;
             else ++p;
         }
-        if(p==end)return false;
-        result.title_begin=title_start;
-        result.title_end=p;
-        result.has_title=true;
-        ++p;
-        while(p<end && md_space(s[p]))++p;
-        if(p!=end)return false;
+        if(p>=n || s[p]!='>')return false;
+        end=p++;
+    } else {
+        begin=p;
+        unsigned depth=0u;
+        while(p<n) {
+            const char ch=s[p];
+            if(ch=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+                p+=2u;continue;
+            }
+            if(ch=='\n' || ch=='\r' || ch=='<' || ch=='>' ||
+               md_space(ch))break;
+            if(ch=='(') {
+                if(depth>=32u)return false;
+                ++depth;
+            } else if(ch==')') {
+                if(!depth)break;
+                --depth;
+            }
+            ++p;
+        }
+        if(depth || p>=n)return false;
+        end=p;
     }
-    *out=result;
+
+    const size_t separator_start=p;
+    while(p<n && md_space(s[p]))++p;
+    const bool separated=p>separator_start;
+    md_link_parts parts={
+        .destination_begin=begin,.destination_end=end,
+        .title_begin=0u,.title_end=0u,.has_title=false
+    };
+    if(p<n && s[p]==')') {
+        *out=parts;*round_close=p;return true;
+    }
+    if(!separated || p>=n)return false;
+    const char quote=s[p];
+    if(quote!='"' && quote!='\'' && quote!='(')return false;
+    ++p;
+    const size_t title_begin=p;
+    const char closer=quote=='('?')':quote;
+    while(p<n && s[p]!=closer) {
+        if(s[p]=='\n' || s[p]=='\r')return false;
+        if(s[p]=='\\' && p+1u<n &&
+           md_ascii_punct(s[p+1u]))p+=2u;
+        else ++p;
+    }
+    if(p>=n)return false;
+    parts.title_begin=title_begin;
+    parts.title_end=p++;
+    parts.has_title=true;
+    while(p<n && md_space(s[p]))++p;
+    if(p>=n || s[p]!=')')return false;
+    *out=parts;*round_close=p;
     return true;
 }
 
@@ -540,10 +587,10 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
             const size_t b=p+(s[p]=='!'?2u:1u);
             const size_t square=md_match(s,n,b,']',1u);
             if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
-                const size_t round=md_match(s,n,square+2u,')',1u);
+                size_t round=SIZE_MAX;
                 md_link_parts target={0};
-                if(round!=SIZE_MAX &&
-                   md_link_target_parts(s,square+2u,round,&target)) {
+                if(md_link_target_parse(
+                       s,n,square+1u,&target,&round)) {
                     p=round+1u;continue;
                 }
             }
@@ -783,10 +830,10 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             const size_t b=p+(image?2u:1u);
             const size_t square=md_match(s,n,b,']',1u);
             if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
-                const size_t round=md_match(s,n,square+2u,')',1u);
+                size_t round=SIZE_MAX;
                 md_link_parts target={0};
-                if(round!=SIZE_MAX &&
-                   md_link_target_parts(s,square+2u,round,&target)) {
+                if(md_link_target_parse(
+                       s,n,square+1u,&target,&round)) {
                     /* Decode metadata before publishing nodes. An invalid
                      * or unsafe decoded href still fails closed in the HTML
                      * renderer; no URL filtering is delegated to the text

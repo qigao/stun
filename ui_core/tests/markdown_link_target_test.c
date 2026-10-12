@@ -146,6 +146,26 @@ int main(void) {
     for(size_t i=0u;i<sizeof(samples)/sizeof(samples[0]);++i)
         if(verify_link(&samples[i]))return 1;
 
+    /* #185 target grammar: balanced unescaped parentheses, angle mode,
+     * escaped closers and no re-interpretation of Unicode NBSP. */
+    static const link_fixture balanced[] = {
+        {"[link](<>)\n","",NULL,"link","<p><a href=\"\">link</a></p>\n"},
+        {"[link](</my uri>)\n","/my uri",NULL,"link","<p><a href=\"/my%20uri\">link</a></p>\n"},
+        {"[a](<b)c>)\n","b)c",NULL,"a","<p><a href=\"b)c\">a</a></p>\n"},
+        {"[link](foo(and(bar)))\n","foo(and(bar))",NULL,"link","<p><a href=\"foo(and(bar))\">link</a></p>\n"},
+        {"[link](<foo(and(bar)>)\n","foo(and(bar)",NULL,"link","<p><a href=\"foo(and(bar)\">link</a></p>\n"},
+        {"[link](foo\\)\\:)\n","foo):",NULL,"link","<p><a href=\"foo):\">link</a></p>\n"},
+        {"[link](foo\\bar)\n","foo\\bar",NULL,"link","<p><a href=\"foo%5Cbar\">link</a></p>\n"},
+        {"[link](\"title\")\n","\"title\"",NULL,"link","<p><a href=\"%22title%22\">link</a></p>\n"},
+        {"[link](/url \"title\")\n","/url \"title\"",NULL,"link","<p><a href=\"/url%C2%A0%22title%22\">link</a></p>\n"},
+        {"[x](f(a(b)) \"info\")\n","f(a(b))","info","x","<p><a href=\"f(a(b))\" title=\"info\">x</a></p>\n"},
+        {"[x](dest (hello world))\n","dest","hello world","x","<p><a href=\"dest\" title=\"hello world\">x</a></p>\n"},
+    };
+    _Static_assert(sizeof(balanced)/sizeof(balanced[0])==11u,
+                   "balanced/angle target test denominator");
+    for(size_t i=0u;i<sizeof(balanced)/sizeof(balanced[0]);++i)
+        if(verify_link(&balanced[i]))return 1;
+
     /* An entity-expanded disallowed scheme must fail AFTER decoding, never
      * be normalized into an apparently safe ASCII URL. */
     CHECK(verify_safe_rejection("[x](java&#x73;cript:alert \"t\")\n")==0);
@@ -160,6 +180,8 @@ int main(void) {
     CHECK(verify_safe_rejection("[x](foo?bad&#10;value)\n")==0);
     CHECK(verify_safe_rejection("[x](#frag&#13;bad)\n")==0);
     CHECK(verify_safe_rejection("[x](mailto:foo&#x0A;bar \"t\")\n")==0);
+    CHECK(verify_safe_rejection("[x](</path&#10;bad>)\n")==0);
+
 
     /* The entity-produced quote cannot fabricate a syntactic link TITLE. */
     const char invalid[]="[a](url &quot;tit&quot;)\n";
@@ -171,6 +193,30 @@ int main(void) {
     CHECK(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
     stun_md_document_destroy(doc);
 
+    /* Malformed or over-depth targets remain source text; no partial
+     * LINK may be published or borrowed from this bounded parser. */
+    static const char *invalid_targets[]={
+        "[link](foo(and(bar))\n",
+        "[link](<foo\\>)\n",
+        "[link](<a<b>)\n",
+        "[deep]((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))\n"
+    };
+    _Static_assert(sizeof(invalid_targets)/sizeof(invalid_targets[0])==4u,
+                   "target rejection sample denominator");
+    for(size_t i=0u;i<4u;++i) {
+        const size_t len=strlen(invalid_targets[i]);
+        stun_md_document *negative=NULL;
+        CHECK(stun_md_parse(invalid_targets[i],len,256u,len+1u,
+                            &negative)==STUN_UI_OK);
+        CHECK(negative!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(negative);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
+        CHECK(v.raw_markdown_bytes==len);
+        CHECK(!memcmp(v.raw_markdown,invalid_targets[i],len));
+        stun_md_document_destroy(negative);
+    }
+
     /* Node budget exhaustion with a title must discard every partial node. */
     const char limited[]="[x](/f&ouml;&ouml; \"f&ouml;&ouml;\")\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
@@ -178,7 +224,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 7/7 title/URL fixtures, 8 safety rejections, "
+    puts("C11 link metadata: 18/18 targets, 9 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }

@@ -337,10 +337,28 @@ static const html_fixture cases[] = {
     { "[x](dest \"\")\n", "<p><a href=\"dest\" title=\"\">x</a></p>\n" }, /* empty title explicitly retained */
     { "[x](/f&#xF6; \"copy &copy;\")\n", "<p><a href=\"/f%C3%B6\" title=\"copy ©\">x</a></p>\n" }, /* numeric reference href UTF-8 percent */
     { "[x]()\n", "<p><a href=\"\">x</a></p>\n" }, /* empty destination */
+    { "[link](<>)\n", "<p><a href=\"\">link</a></p>\n" }, /* #486 angle empty URI */
+    { "[link](</my uri>)\n", "<p><a href=\"/my%20uri\">link</a></p>\n" }, /* #489 angle URI spaces */
+    { "[a](<b)c>)\n", "<p><a href=\"b)c\">a</a></p>\n" }, /* #492 angle with literal right parenthesis */
+    { "[link](foo(and(bar)))\n", "<p><a href=\"foo(and(bar))\">link</a></p>\n" }, /* #496 nested balanced destination */
+    { "[link](foo(and(bar))\n", "<p>[link](foo(and(bar))</p>\n" }, /* #497 unbalanced destination remains literal */
+    { "[link](<foo(and(bar)>)\n", "<p><a href=\"foo(and(bar)\">link</a></p>\n" }, /* #499 angle destination unbalanced punctuation is text */
+    { "[link](foo\\)\\:)\n", "<p><a href=\"foo):\">link</a></p>\n" }, /* #500 escaped delimiter not grammar */
+    { "[link](foo\\bar)\n", "<p><a href=\"foo%5Cbar\">link</a></p>\n" }, /* #502 raw backslash is percent encoded */
+    { "[link](\"title\")\n", "<p><a href=\"%22title%22\">link</a></p>\n" }, /* #504 raw quote in URL is percent encoded */
+    { "[link](/url \"title\")\n[link](/url 'title')\n[link](/url (title))\n", "<p><a href=\"/url\" title=\"title\">link</a>\n<a href=\"/url\" title=\"title\">link</a>\n<a href=\"/url\" title=\"title\">link</a></p>\n" }, /* #505 all 3 supported title delimiters */
+    { "[link](/url \"title\")\n", "<p><a href=\"/url%C2%A0%22title%22\">link</a></p>\n" }, /* #507 Unicode NBSP not syntactic separator */
+    { "[deep](((((((((((((((((((((((((((((((((x)))))))))))))))))))))))))))))))))\n", "<p><a href=\"((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))\">deep</a></p>\n" }, /* literal nested depth equals 32 */
+    { "[deep]((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))\n", "<p>[deep]((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))</p>\n" }, /* no partial link with 33-deep nesting */
+    { "[x](<foo bar>)\n", "<p><a href=\"foo%20bar\">x</a></p>\n" }, /* angle space decoded then percent encoded */
+    { "[link](<foo\\>)\n", "<p>[link](&lt;foo&gt;)</p>\n" }, /* angle closing delimiter escaped invalid */
+    { "[x](f(a(b)) \"info\")\n", "<p><a href=\"f(a(b))\" title=\"info\">x</a></p>\n" }, /* nested parentheses in unquoted href plus title */
+    { "[x](dest (hello world))\n", "<p><a href=\"dest\" title=\"hello world\">x</a></p>\n" }, /* nested title parentheses literal title delimited */
+    { "[x](<a<b>)\n", "<p>[x](&lt;a&lt;b&gt;)</p>\n" }, /* angle nested opening bracket invalid */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==172,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==190,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

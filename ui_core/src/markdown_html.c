@@ -83,7 +83,9 @@ static bool html_safe_href(const char *s, size_t n) {
     size_t scheme_colon=SIZE_MAX;
     for(size_t i=0u;i<n;++i) {
         const unsigned char c=(unsigned char)s[i];
-        if(c<=0x20u || c==0x7Fu)return false;
+        /* Literal ASCII space is safe only after %20 normalization.
+         * All other C0 controls, including TAB/CR/LF, remain rejected. */
+        if(c<0x20u || c==0x7Fu)return false;
         if(c=='/' || c=='?' || c=='#')seen_separator=true;
         if(c==':' && !seen_separator && scheme_colon==SIZE_MAX)
             scheme_colon=i;
@@ -102,7 +104,12 @@ static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
     static const char digits[]="0123456789ABCDEF";
     for(size_t i=0u;i<n && w->error==STUN_UI_OK;++i) {
         const unsigned char b=(unsigned char)s[i];
-        if(b>=0x80u) {
+        /* CommonMark URI normalization percent-encodes decoded UTF-8,
+         * raw backslash, angle/quote delimiters and ASCII space, while
+         * existing %HH syntax and URL structural punctuation stay intact.
+         * This runs AFTER the full decoded href safety admission. */
+        if(b>=0x80u || b==' ' || b=='\\' || b=='<' ||
+           b=='>' || b=='\"') {
             const char pct[3]={'%',digits[b>>4u],digits[b&0x0Fu]};
             html_bytes(w,pct,sizeof(pct));
         } else html_escaped(w,s+i,1u,true);
