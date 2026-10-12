@@ -13,16 +13,23 @@ static const fixture cases[]={
   {"quoted-continuation","> - foo\n>   bar\n","<blockquote>\n<ul>\n<li>foo\nbar</li>\n</ul>\n</blockquote>\n",1,1},
   {"quoted-interruption","> foo\n> - bar\n","<blockquote>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n</blockquote>\n",1,1},
   {"ordered-noninterrupt","> foo\n> 2. bar\n","<blockquote>\n<p>foo\n2. bar</p>\n</blockquote>\n",1,0},
-  {"quote-to-root-paragraph","> - foo\n> - bar\nplain\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n</blockquote>\n<p>plain</p>\n",1,1}
+  {"quote-to-root-paragraph","> - foo\n> - bar\nplain\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n</blockquote>\n<p>plain</p>\n",1,1},
+  {"quoted-direct-fence","> - ~~~c\n>   alpha & beta\n>   ~~~\n",
+   "<blockquote>\n<ul>\n<li>\n<pre><code class=\"language-c\">alpha &amp; beta\n</code></pre>\n</li>\n</ul>\n</blockquote>\n",1,1},
+  {"quoted-direct-fence-blank","> - ~~~\n>   one\n>\n>   two\n>   ~~~\n",
+   "<blockquote>\n<ul>\n<li>\n<pre><code>one\n\ntwo\n</code></pre>\n</li>\n</ul>\n</blockquote>\n",1,1},
+  {"quoted-direct-fence-sibling","> - ~~~\n>   ```\n>   abc\n>   ~~~\n> - bar\n",
+   "<blockquote>\n<ul>\n<li>\n<pre><code>```\nabc\n</code></pre>\n</li>\n<li>bar</li>\n</ul>\n</blockquote>\n",1,1}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==7u,"fixture denominator");
+_Static_assert(sizeof(cases)/sizeof(cases[0])==10u,"fixture denominator");
 static int check(const fixture *f){
  stun_md_document *d=NULL;size_t n=strlen(f->input);
  if(stun_md_parse(f->input,n,256u,n+1u,&d)!=STUN_UI_OK||!d)return 1;
  const stun_ui_rich_document_view v=stun_md_document_view(d);
  int failed=stun_ui_rich_document_validate(&v,256u)!=STUN_UI_OK ||
             v.raw_markdown_bytes!=n || memcmp(v.raw_markdown,f->input,n)!=0;
- unsigned quotes=0,lists=0;
+ unsigned quotes=0,lists=0,fences=0;
+ const bool direct_fence=strncmp(f->id,"quoted-direct-fence",19u)==0;
  for(size_t i=1;i<v.document.block_count && !failed;++i){
   const stun_ui_block *node=&v.document.blocks[i];
   if(node->kind==STUN_UI_BLOCK_QUOTE){++quotes; if(node->parent_index!=0)failed=1;}
@@ -36,8 +43,25 @@ static int check(const fixture *f){
    }else if(v.document.blocks[node->parent_index].kind!=STUN_UI_BLOCK_QUOTE)
      failed=1;
   }
+  if(node->kind==STUN_UI_BLOCK_CODE_FENCE){
+   ++fences;
+   const uint32_t item=node->parent_index;
+   if(item>=i || v.document.blocks[item].kind!=STUN_UI_BLOCK_LIST_ITEM)
+    failed=1;
+   else{
+    const uint32_t list=v.document.blocks[item].parent_index;
+    if(list>=item || v.document.blocks[list].kind!=STUN_UI_BLOCK_LIST)
+     failed=1;
+    else{
+     const uint32_t quote=v.document.blocks[list].parent_index;
+     if(quote>=list || v.document.blocks[quote].kind!=STUN_UI_BLOCK_QUOTE)
+      failed=1;
+    }
+   }
+  }
  }
- if(quotes!=f->quotes||lists!=f->lists)failed=1;
+ if(quotes!=f->quotes||lists!=f->lists||
+    fences!=(direct_fence?1u:0u))failed=1;
  size_t needed=0,actual=0;
  if(!failed && stun_md_render_html(&v,256u,NULL,0u,&needed)!=STUN_UI_OK)failed=1;
  if(!failed && needed!=strlen(f->html))failed=1;
@@ -62,6 +86,6 @@ static int check(const fixture *f){
 int main(void){
  for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i)
    if(check(&cases[i]))return 1;
- puts("Quoted list ownership 7/7 PASS");
+ printf("Quoted list ownership %zu/%zu PASS\n",\n        sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
  return 0;
 }
