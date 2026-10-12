@@ -337,9 +337,24 @@ static int test_code_span_exact_runs_and_text(void) {
          "foo" TICK "bar",1u},                             /* #339 */
         {TICK " foo " TICK TICK " bar " TICK "\n",
          "foo " TICK TICK " bar",1u},                      /* #340 */
-        {TICK TICK TICK "foo" TICK TICK "\n",NULL,0u}    /* #347 */
+        {TICK TICK TICK "foo" TICK TICK "\n",NULL,0u},  /* #347 */
+        {TICK TICK "\nfoo\nbar  \nbaz\n" TICK TICK "\n",
+         "foo bar   baz",1u},                               /* #335 */
+        {TICK TICK "\nfoo \n" TICK TICK "\n",
+         "foo ",1u},                                       /* #336 */
+        {TICK "foo   bar \nbaz" TICK "\n",
+         "foo   bar  baz",1u},                              /* #337 */
+        {TICK TICK "\r\nfoo\r\nbar  \r\nbaz\r\n" TICK TICK "\r\n",
+         "foo bar   baz",1u},
+        {TICK "line\nnext" TICK " tail\n","line next",1u},
+        {TICK "foo\nbar" TICK "\nafter\n","foo bar",1u},
+        {TICK "foo\n\nbar" TICK "\n",NULL,0u},
+        {TICK "foo\n# Heading\nbar" TICK "\n",NULL,0u},
+        {TICK TICK "a\n" TICK "b" TICK TICK "\n",
+         "a " TICK "b",1u},
+        {TICK " \n " TICK "\n","   ",1u}
     };
-    _Static_assert(sizeof(samples)/sizeof(samples[0])==9u,
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==19u,
                    "code-span fixture count");
     for(size_t i=0u;i<sizeof(samples)/sizeof(samples[0]);++i) {
         const size_t n=strlen(samples[i].markdown);
@@ -377,6 +392,18 @@ static int test_code_span_exact_runs_and_text(void) {
     stun_md_document *out=(stun_md_document*)(uintptr_t)1u;
     CHECK(stun_md_parse(limited,sizeof(limited)-1u,3u,
                         sizeof(limited),&out)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(out==NULL);
+    /* A multiline opener can allocate its paragraph and typed code node,
+     * but exhausting its normalized TEXT must destroy the entire document. */
+    const char multi_limited[]=TICK TICK "\nfoo\nbar  \nbaz\n" TICK TICK "\n";
+    out=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(multi_limited,sizeof(multi_limited)-1u,3u,
+                        sizeof(multi_limited),&out)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(out==NULL);
+    out=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(multi_limited,sizeof(multi_limited)-1u,128u,
+                        sizeof(multi_limited)-2u,&out)==
+          STUN_UI_CAPACITY_EXCEEDED);
     CHECK(out==NULL);
     return 0;
 }
