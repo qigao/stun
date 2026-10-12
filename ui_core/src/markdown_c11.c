@@ -150,6 +150,45 @@ static void md_meta(stun_md_document *d, uint32_t node,
         d->node_metadata[node] = (stun_ui_block_metadata){from,to};
 }
 
+
+/* CommonMark tab stops are four *columns*, not four bytes. For a root-level
+ * indented code line, consume precisely four indentation columns. A tab
+ * advances to the next multiple of four and is never mistaken for one space.
+ * Bytes after those four columns belong to literal code (including tabs). */
+static size_t md_code_unindent(const char *s, size_t begin, size_t end) {
+    size_t column=0u, at=begin;
+    while(at<end && column<4u && md_space(s[at])) {
+        column += s[at]=='\t' ? 4u-(column%4u) : 1u;
+        ++at;
+    }
+    return column>=4u ? at : begin;
+}
+
+/* One text child per logical code line, with LF normalized at EOF/CRLF.
+ * Code is not recursively parsed as inline Markdown; decoded text and the
+ * original raw input remain separately owned by the same document. */
+static bool md_code_line(stun_md_document *d, uint32_t parent,
+                         md_line line, bool blank) {
+    const char *s=d->raw;
+    size_t content=md_code_unindent(s,line.begin,line.end);
+    if (content==line.begin) {
+        if (!blank) {
+            md_error(d,STUN_UI_INVALID_ARGUMENT);
+            return false;
+        }
+        content=line.end; /* blank lines indented less than four columns */
+    }
+    const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_TEXT,0u);
+    if(node==UINT32_MAX) return false;
+    size_t from=0u,to=0u,lf_begin=0u,lf_end=0u;
+    if(!md_store(d,false,s+content,line.end-content,&from,&to) ||
+       !md_store(d,false,"\n",1u,&lf_begin,&lf_end))
+        return false;
+    d->nodes[node].byte_begin=from;
+    d->nodes[node].byte_end=lf_end;
+    return true;
+}
+
 /* This is a constrained, bounded first pass, not a claim of full CommonMark
  * delimiter-run or nested-link conformance. Unmatched delimiters are text. */
 static size_t md_match(const char *s, size_t n, size_t start,
@@ -458,6 +497,8 @@ static void md_parse_blocks(stun_md_document *d) {
     uint32_t list = UINT32_MAX;
     uint32_t quote = UINT32_MAX;
     uint32_t previous_item_paragraph = UINT32_MAX;
+    uint32_t indented = UINT32_MAX;
+    size_t pending_code_blank = SIZE_MAX;
     bool previous_ordered = false, code_open = false;
     md_fence fence = {0,0,UINT32_MAX};
 
@@ -478,10 +519,48 @@ static void md_parse_blocks(stun_md_document *d) {
             md_text(d,fence.node,s+line.begin,size);
             continue;
         }
+        /* Keep interstitial blank lines pending until another indented line
+         * proves that they are interior. On termination/EOF they vanish. */
+        if (indented!=UINT32_MAX) {
+            if(md_blank(s,line.begin,line.end)) {
+                if(pending_code_blank==SIZE_MAX) pending_code_blank=line.begin;
+                continue;
+            }
+            if(md_code_unindent(s,line.begin,line.end)>line.begin) {
+                if(pending_code_blank!=SIZE_MAX) {
+                    for(size_t at=pending_code_blank;at<line.begin;) {
+                        const md_line gap=md_read_line(d,at);
+                        if(!md_code_line(d,indented,gap,true)) return;
+                        at=gap.next;
+                    }
+                    pending_code_blank=SIZE_MAX;
+                }
+                if(!md_code_line(d,indented,line,false)) return;
+                continue;
+            }
+            indented=UINT32_MAX;
+            pending_code_blank=SIZE_MAX;
+        }
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
             quote=UINT32_MAX;
             list=UINT32_MAX;
+            previous_item_paragraph=UINT32_MAX;
+            continue;
+        }
+        /* A non-quote line closes the previous quote paragraph before block
+         * admission. This allows an indented block immediately after a quote. */
+        if(quote!=UINT32_MAX && !(indent<=3 && begin<end && s[begin]=='>'))
+            quote=paragraph=UINT32_MAX;
+
+        /* Four indentation columns select literal code before checking ATX,
+         * thematic rules, fences, or other block markers. Indented code
+         * cannot interrupt a paragraph or the active list-item continuation. */
+        if(paragraph==UINT32_MAX && list==UINT32_MAX &&
+           md_code_unindent(s,line.begin,line.end)>line.begin) {
+            indented=md_add(d,0u,STUN_UI_BLOCK_CODE_INDENTED,0u);
+            if(indented==UINT32_MAX || !md_code_line(d,indented,line,false))
+                return;
             previous_item_paragraph=UINT32_MAX;
             continue;
         }

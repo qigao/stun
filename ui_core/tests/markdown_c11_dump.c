@@ -21,6 +21,7 @@ static const char *node_kind(stun_ui_block_kind kind) {
     case STUN_UI_BLOCK_HEADING: return "heading";
     case STUN_UI_BLOCK_TEXT: return "text";
     case STUN_UI_BLOCK_CODE_FENCE: return "code_fence";
+    case STUN_UI_BLOCK_CODE_INDENTED: return "code_indented";
     case STUN_UI_BLOCK_CODE_SPAN: return "code_span";
     case STUN_UI_BLOCK_LIST: return "list";
     case STUN_UI_BLOCK_LIST_ITEM: return "list_item";
