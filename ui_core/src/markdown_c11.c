@@ -235,6 +235,26 @@ static bool md_code_line(stun_md_document *d, uint32_t parent,
 static size_t md_code_span_close(const char *s,size_t n,size_t begin,
                                  size_t marker_size);
 
+/* ASCII CommonMark left/right flanking: punctuation adjacent to an opener
+ * or closer matters, and underscores inside a word cannot open or close.
+ * Unicode whitespace/punctuation classification remains a separate #182
+ * provider-backed task; do not invent a second Unicode character table. */
+static void md_emph_flanking(const char *s,size_t n,size_t at,size_t run,
+                             char marker,bool *can_open,bool *can_close) {
+    const bool left_space=at==0u || md_space(s[at-1u]);
+    const bool right_space=at+run>=n || md_space(s[at+run]);
+    const bool left_punct=at>0u && md_ascii_punct(s[at-1u]);
+    const bool right_punct=at+run<n && md_ascii_punct(s[at+run]);
+    const bool left_flanking=!right_space &&
+        (!right_punct || left_space || left_punct);
+    const bool right_flanking=!left_space &&
+        (!left_punct || right_space || right_punct);
+    *can_open=left_flanking &&
+              (marker!='_' || !right_flanking || left_punct);
+    *can_close=right_flanking &&
+               (marker!='_' || !left_flanking || right_punct);
+}
+
 /* This is a constrained, bounded first pass, not a claim of full CommonMark
  * delimiter-run or nested-link conformance. Unmatched delimiters are text. */
 static size_t md_match(const char *s, size_t n, size_t start,
@@ -258,7 +278,14 @@ static size_t md_match(const char *s, size_t n, size_t start,
         if (s[p] != symbol) continue;
         size_t run = 0;
         while (p + run < n && s[p + run] == symbol) ++run;
-        if (run == count) return p;
+        if (run == count) {
+            if(symbol=='*' || symbol=='_') {
+                bool can_open=false,can_close=false;
+                md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
+                if(!can_close) {p+=run-1u;continue;}
+            }
+            return p;
+        }
         p += run - 1;
     }
     return SIZE_MAX;
@@ -356,11 +383,23 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             } else if (s[p] != '~') {
                 kind = STUN_UI_BLOCK_EMPHASIS;
             }
+            bool can_open=true;
+            if(s[p]=='*' || s[p]=='_') {
+                bool can_close=false;
+                md_emph_flanking(s,n,p,marker,s[p],
+                                 &can_open,&can_close);
+            }
+            if(!can_open) {
+                /* Do not reinterpret the suffix of a rejected run as a
+                 * shorter delimiter (the same rule as unmatched backticks). */
+                p+=marker;
+                continue;
+            }
             if (kind != STUN_UI_BLOCK_TEXT && p+marker < n &&
                 !md_space(s[p+marker])) {
                 close = md_match(s, n, p+marker, s[p], marker);
-                if (close != SIZE_MAX && (close == p+marker ||
-                    md_space(s[close-1]))) close = SIZE_MAX;
+                if (close != SIZE_MAX && close == p+marker)
+                    close=SIZE_MAX;
             }
         } else if (s[p] == '[' || (s[p] == '!' && p+1 < n && s[p+1] == '[')) {
             const bool image = s[p] == '!';
