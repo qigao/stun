@@ -80,13 +80,30 @@ static int verify(const sample *f) {
 int main(void) {
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(verify(&cases[i]))return 1;
+    /* Every quoted fixture must reject exhausted node/source budgets without
+     * publishing a partially constructed document to the caller. */
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        const size_t bytes=strlen(cases[i].source);
+        stun_md_document *limited=(stun_md_document*)(uintptr_t)1u;
+        if(stun_md_parse(cases[i].source,bytes,1u,bytes+1u,&limited)!=
+           STUN_UI_CAPACITY_EXCEEDED || limited!=NULL) {
+            fprintf(stderr,"Node budget rollback: %s\n",cases[i].name);
+            return 1;
+        }
+        limited=(stun_md_document*)(uintptr_t)1u;
+        if(stun_md_parse(cases[i].source,bytes,256u,bytes-1u,&limited)!=
+           STUN_UI_CAPACITY_EXCEEDED || limited!=NULL) {
+            fprintf(stderr,"Source budget rollback: %s\n",cases[i].name);
+            return 1;
+        }
+    }
     char deep[160];size_t n=0u;
     for(size_t i=0;i<33u;++i){deep[n++]='>';deep[n++]=' ';}
     deep[n++]='x';deep[n++]='\n';
     stun_md_document *owner=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(deep,n,256u,n+1u,&owner)!=
        STUN_UI_CAPACITY_EXCEEDED || owner!=NULL)return 1;
-    printf("Native nested-quote fixtures %zu/%zu, depth overflow PASS\n",
+    printf("Native nested-quote fixtures %zu/%zu, node/source budgets and depth overflow PASS\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
     return 0;
 }
