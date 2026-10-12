@@ -551,7 +551,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
     if(stack->frames[stack->depth-1u].fence_open &&
        md_blank(s,line.begin,line.end)) {
         md_list_frame *f=&stack->frames[stack->depth-1u];
-        md_text(d,f->fence.node,"\\n",1u);
+        md_text(d,f->fence.node,"\n",1u);
         return true;
     }
     if(md_blank(s,line.begin,line.end)) {
@@ -567,7 +567,8 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
     const size_t line_begin=md_left(s,line.begin,line.end);
     /* Thematic breaks interrupt active list items (including '* * *').
      * They do not become a new list item merely because '*' is a marker. */
-    if(indent<=3u && md_rule(s,line_begin,line.end)) {
+    if(indent<=3u && md_rule(s,line_begin,line.end) &&
+       !stack->frames[stack->depth-1u].fence_open) {
         stack->depth=0u;
         return false;
     }
@@ -605,7 +606,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 return true;
             }
             md_text(d,f->fence.node,s+body,line.end-body);
-            if(line.newline) md_text(d,f->fence.node,"\\n",1u);
+            if(line.newline) md_text(d,f->fence.node,"\n",1u);
             return true;
         }
         if(f->empty_item && f->pending_blank) {
