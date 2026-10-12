@@ -291,79 +291,26 @@ static void md_emph_flanking(const char *s,size_t n,size_t at,size_t run,
                (marker!='_' || !left_flanking || right_punct);
 }
 
-/* This is a constrained, bounded first pass, not a claim of full CommonMark
- * delimiter-run or nested-link conformance. Unmatched delimiters are text. */
+/* Generic exact-size matcher for link/strike/fence syntax. Emphasis and
+ * strong runs are handled EXCLUSIVELY by md_emph_pairs below: do not
+ * resurrect a competing greedy * / _ matcher here. */
 static size_t md_match(const char *s, size_t n, size_t start,
                        char symbol, size_t count) {
-    const bool emphasis=symbol=='*' || symbol=='_';
-    const bool opaque_code=emphasis || symbol=='~' || symbol==']';
-    /* The candidate opener may be the SUFFIX of an earlier unmatched
-     * longer run. CommonMark permits that suffix to pair with an exact
-     * matching closer, but it must not claim an OVERSIZED terminal run:
-     * "**foo **bar baz**" belongs to the later "**bar baz**"
-     * (#471), not a fabricated "*foo ..." emphasis (#472 too). */
-    const bool suffix_opener=emphasis && start>count &&
-                             s[start-count-1u]==symbol;
-    /* A bounded pairing depth lets nested SAME-LENGTH delimiter runs own
-     * their nearer closers. An older opener remains literal when only the
-     * inner opener can be closed (#471/#472); two closers admit nesting,
-     * including *(*foo*)*, _(_foo_)_ and __foo, __bar__, baz__.
-     * This is not the complete CommonMark modulo-3/delimiter-stack model. */
-    size_t inner_open=0u;
-    for (size_t p = start; p < n; ++p) {
-        if (s[p] == '\\' && p + 1 < n) { ++p; continue; }
+    const bool opaque_code=symbol=='~' || symbol==']';
+    for(size_t p=start;p<n;) {
+        if(s[p]=='\\' && p+1u<n) {p+=2u;continue;}
         if(opaque_code && s[p]==(char)0x60) {
             size_t end=p+1u;
             while(end<n && s[end]==(char)0x60) ++end;
-            const size_t count_ticks=end-p;
-            const size_t close=md_code_span_close(s,n,end,count_ticks);
-            if(close!=SIZE_MAX) {
-                p=close+count_ticks-1u; /* no delimiter inside a code span */
-                continue;
-            }
-            p=end-1u; /* unmatched runs remain ordinary literal text */
+            const size_t close=md_code_span_close(s,n,end,end-p);
+            p=close==SIZE_MAX?end:close+(end-p);
             continue;
         }
-        if (s[p] != symbol) continue;
-        size_t run = 0;
-        while (p + run < n && s[p + run] == symbol) ++run;
-        if (run == count) {
-            if(emphasis) {
-                bool can_open=false,can_close=false;
-                md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
-                if(can_close) {
-                    if(inner_open) {
-                        --inner_open; /* matching closer belongs to inner */
-                        p+=run-1u;
-                        continue;
-                    }
-                    return p; /* the first unclaimed legal closer */
-                }
-                if(can_open) {
-                    if(inner_open>=32u) return SIZE_MAX;
-                    ++inner_open;
-                }
-                p+=run-1u;
-                continue;
-            }
-            return p;
-        }
-        /* A longer *terminal* closing run may supply the current closer
-         * and leave unused literal markers (#443/#446/#447/#455/#458/#459).
-         * If inner same-sized runs are open, reserve exactly one matching
-         * closing group per inner owner before closing the outer (#409/#427).
-         *
-         * Keep this restricted to a terminal run and same marker length:
-         * general mixed-length/triple runs need CommonMark's full delimiter
-         * stack and modulo-3 rules, not a greedy fallback or tail rewrite. */
-        if(emphasis && !suffix_opener && run>count && p+run==n) {
-            bool can_open=false,can_close=false;
-            md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
-            if(can_close &&
-               (!inner_open || run==(inner_open+1u)*count))
-                return p+inner_open*count;
-        }
-        p += run - 1;
+        if(s[p]!=symbol) {++p;continue;}
+        size_t end=p+1u;
+        while(end<n && s[end]==symbol) ++end;
+        if(end-p==count) return p;
+        p=end;
     }
     return SIZE_MAX;
 }
