@@ -81,9 +81,23 @@ static const fixture cases[]={
     {"quote-marked-empty-not-interrupt","> foo\n> *\n",
      "<blockquote>\n<p>foo\n*</p>\n</blockquote>\n",-1,0u},
     {"quote-lazy-empty-not-interrupt","> foo\n*\n",
-     "<blockquote>\n<p>foo\n*</p>\n</blockquote>\n",-1,0u}
+     "<blockquote>\n<p>foo\n*</p>\n</blockquote>\n",-1,0u},
+    /* Marker-only indentation counts exactly one space after the marker,
+     * not all trailing whitespace on that otherwise empty source line. */
+    {"cm-279","-   \n  foo\n",
+     "<ul>\n<li>foo</li>\n</ul>\n",0,1u},
+    {"quoted-empty-marker-indent","> -   \n>   foo\n",
+     "<blockquote>\n<ul>\n<li>foo</li>\n</ul>\n</blockquote>\n",0,1u},
+    {"ordered-empty-marker-indent","1.    \n   foo\n",
+     "<ol>\n<li>foo</li>\n</ol>\n",0,1u},
+    {"empty-marker-blank-closes","-   \n\n  foo\n",
+     "<ul>\n<li></li>\n</ul>\n<p>foo</p>\n",0,1u},
+    {"empty-marker-later-loose","-   \n  foo\n\n  bar\n",
+     "<ul>\n<li>\n<p>foo</p>\n<p>bar</p>\n</li>\n</ul>\n",1,1u},
+    {"empty-marker-insufficient-indent","-   \n foo\n",
+     "<ul>\n<li></li>\n</ul>\n<p>foo</p>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==30u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==36u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {

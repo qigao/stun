@@ -484,8 +484,10 @@ static bool md_list_token(const char *s,md_line line,
     size_t total=marker_col+(marker_end-b);
     for(size_t p=marker_end;p<content;++p)
         total+=s[p]=='\t' ? 4u-(total%4u) : 1u;
-    /* Empty item still occupies one separating space after its marker. */
-    if(content==line.end && marker_end==line.end)
+    /* A marker-only item has no content on this line. Its continuation
+     * indentation is one column past the marker, independent of trailing
+     * whitespace. "-   \n  foo" keeps foo within the item (CommonMark #279). */
+    if(content==line.end)
         total=marker_col+(marker_end-b)+1u;
     *out=(md_list_marker_info){
         marker_col,total,content,start,marker,ordered
@@ -656,6 +658,10 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             if(body==line.begin && f->content_column) {
                 md_error(d,STUN_UI_INVALID_ARGUMENT);return true;
             }
+            /* A nonblank continuation makes the previously marker-only item
+             * nonempty. Only truly empty items are barred from attaching
+             * content after a following blank line. */
+            f->empty_item=false;
             /* A nested list is admitted after matching this item, never as
              * a new root list. Indentation four columns deeper instead
              * begins a literal code block. */
