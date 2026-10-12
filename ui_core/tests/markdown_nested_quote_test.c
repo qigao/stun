@@ -27,9 +27,19 @@ static const sample cases[]={
     {"partial-marker-interrupt",">>> foo\n> # Heading\n",
      "<blockquote>\n<blockquote>\n<blockquote>\n<p>foo</p>\n</blockquote>\n</blockquote>\n<h1>Heading</h1>\n</blockquote>\n",3,3},
     {"partial-marker-list",">>> foo\n> - bar\n",
-     "<blockquote>\n<blockquote>\n<blockquote>\n<p>foo</p>\n</blockquote>\n</blockquote>\n<ul>\n<li>bar</li>\n</ul>\n</blockquote>\n",3,3}
+     "<blockquote>\n<blockquote>\n<blockquote>\n<p>foo</p>\n</blockquote>\n</blockquote>\n<ul>\n<li>bar</li>\n</ul>\n</blockquote>\n",3,3},
+    {"cm292","> 1. > Blockquote\ncontinued here.\n",
+     "<blockquote>\n<ol>\n<li>\n<blockquote>\n<p>Blockquote\ncontinued here.</p>\n</blockquote>\n</li>\n</ol>\n</blockquote>\n",2,2},
+    {"cm293","> 1. > Blockquote\n> continued here.\n",
+     "<blockquote>\n<ol>\n<li>\n<blockquote>\n<p>Blockquote\ncontinued here.</p>\n</blockquote>\n</li>\n</ol>\n</blockquote>\n",2,2},
+    {"inner-quote-marked-heading-interrupt","> 1. > b\n> # Heading\n",
+     "<blockquote>\n<ol>\n<li>\n<blockquote>\n<p>b</p>\n</blockquote>\n</li>\n</ol>\n<h1>Heading</h1>\n</blockquote>\n",2,2},
+    {"inner-quote-unmarked-heading-interrupt","> 1. > b\n# Heading\n",
+     "<blockquote>\n<ol>\n<li>\n<blockquote>\n<p>b</p>\n</blockquote>\n</li>\n</ol>\n</blockquote>\n<h1>Heading</h1>\n",2,2},
+    {"inner-quote-blank-stops-lazy","> 1. > b\n\noutside\n",
+     "<blockquote>\n<ol>\n<li>\n<blockquote>\n<p>b</p>\n</blockquote>\n</li>\n</ol>\n</blockquote>\n<p>outside</p>\n",2,2}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==9u,"fixture count");
+_Static_assert(sizeof(cases)/sizeof(cases[0])==14u,"fixture count");
 static int verify(const sample *f) {
     stun_md_document *owner=NULL;
     const size_t input_size=strlen(f->source);
@@ -165,6 +175,18 @@ int main(void) {
     if(verify_list_owned_fence())return 1;
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(verify(&cases[i]))return 1;
+    /* The nested quote owns the lazy continuation. With exactly 7 nodes
+     * admitted for the first line, publishing its soft-break would exhaust
+     * the caller's node budget. No partially owned RichDoc may escape. */
+    static const char lazy_limited[]=
+        "> 1. > Blockquote\n> continued here.\n";
+    stun_md_document *limited_quote=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(lazy_limited,sizeof(lazy_limited)-1u,7u,
+                     sizeof(lazy_limited),&limited_quote)!=
+       STUN_UI_CAPACITY_EXCEEDED || limited_quote!=NULL) {
+        fprintf(stderr,"nested quoted list lazy budget rollback failed\n");
+        return 1;
+    }
     /* Every quoted fixture must reject exhausted node/source budgets without
      * publishing a partially constructed document to the caller. */
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
