@@ -281,13 +281,16 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_LIST_ITEM: {
         html_str(w,"<li>");
         /* A loose list does not give an empty item a phantom newline.
-         * Nonempty loose items and direct code blocks remain block-level. */
+         * A direct list or code child, however, starts on a new HTML line
+         * even when this outer list is tight (CommonMark #298/#299). */
         const bool has_child=id+1u<doc->block_count &&
                              doc->blocks[id+1u].parent_index==id;
         if(has_child &&
            (html_loose_item(w,id) ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_FENCE ||
-            doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_INDENTED))
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_INDENTED ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_LIST ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_ORDERED_LIST))
             html_str(w,"\n");
         break;
     }

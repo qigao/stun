@@ -524,7 +524,15 @@ static bool md_list_begin_fence(stun_md_document *d,md_list_frame *f,
     return true;
 }
 
-static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
+/* Recursive admission only follows list markers on the same physical
+ * line and is bounded by MD_LIST_MAX_DEPTH. The frame stack, not the C call
+ * stack, continues to own all subsequent source-line admission. */
+static bool md_list_open(stun_md_document *d,md_list_stack *stack,
+                         uint32_t parent,const md_list_marker_info *m,
+                         const char *s,size_t end);
+
+static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
+                                md_list_frame *f,
                                 const md_list_marker_info *m,
                                 const char *s,size_t end) {
     char state=0;
@@ -548,6 +556,22 @@ static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
     f->code_blank_lines=0u;
     f->fence_open=f->pending_blank=false;
     if(!f->empty_item) {
+        /* CommonMark permits list containers to nest on one source line:
+         * "- - foo" and "1. - 2. foo". Reuse the same bounded list-frame
+         * admission, with nested marker columns relative to this item. */
+        md_list_marker_info nested={0};
+        const md_line tail={content,end,end,false};
+        if(!task && md_list_token(s,tail,&nested) &&
+           !md_rule(s,content,end)) {
+            if(nested.column>SIZE_MAX-m->content_column ||
+               nested.content_column>SIZE_MAX-m->content_column) {
+                md_error(d,STUN_UI_CAPACITY_EXCEEDED);
+                return false;
+            }
+            nested.column+=m->content_column;
+            nested.content_column+=m->content_column;
+            return md_list_open(d,stack,f->item,&nested,s,end);
+        }
         /* A list marker may introduce a fenced block directly: "- ~~~".
          * Do not manufacture a paragraph containing the fence opener. */
         if(!task && md_list_begin_fence(d,f,s,content,end))
@@ -576,7 +600,7 @@ static bool md_list_open(stun_md_document *d,md_list_stack *stack,
     f->ordered=m->ordered;
     f->marker_column=m->column;
     f->list_base_column=m->column;
-    return md_list_append_item(d,f,m,s,end);
+    return md_list_append_item(d,stack,f,m,s,end);
 }
 
 static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
@@ -626,7 +650,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             if(f->ordered==marker.ordered && f->marker==marker.marker) {
                 if(f->pending_blank) md_mark_list_loose(d,f->list);
                 f->marker_column=marker.column;
-                (void)md_list_append_item(d,f,&marker,s,line.end);
+                (void)md_list_append_item(d,stack,f,&marker,s,line.end);
                 return true;
             }
             --stack->depth; /* differing marker families never coalesce */

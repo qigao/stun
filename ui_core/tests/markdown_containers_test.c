@@ -95,9 +95,21 @@ static const fixture cases[]={
     {"empty-marker-later-loose","-   \n  foo\n\n  bar\n",
      "<ul>\n<li>\n<p>foo</p>\n<p>bar</p>\n</li>\n</ul>\n",1,1u},
     {"empty-marker-insufficient-indent","-   \n foo\n",
-     "<ul>\n<li></li>\n</ul>\n<p>foo</p>\n",0,1u}
+     "<ul>\n<li></li>\n</ul>\n<p>foo</p>\n",0,1u},
+    {"cm-298","- - foo\n",
+     "<ul>\n<li>\n<ul>\n<li>foo</li>\n</ul>\n</li>\n</ul>\n",0,2u},
+    {"cm-299","1. - 2. foo\n",
+     "<ol>\n<li>\n<ul>\n<li>\n<ol start=\"2\">\n<li>foo</li>\n</ol>\n</li>\n</ul>\n</li>\n</ol>\n",0,3u},
+    {"quoted-inline-nested-list","> - - foo\n",
+     "<blockquote>\n<ul>\n<li>\n<ul>\n<li>foo</li>\n</ul>\n</li>\n</ul>\n</blockquote>\n",0,2u},
+    {"inline-nested-siblings","- - foo\n- - bar\n",
+     "<ul>\n<li>\n<ul>\n<li>foo</li>\n</ul>\n</li>\n<li>\n<ul>\n<li>bar</li>\n</ul>\n</li>\n</ul>\n",0,3u},
+    {"inline-nested-continuation","- - foo\n    bar\n",
+     "<ul>\n<li>\n<ul>\n<li>foo\nbar</li>\n</ul>\n</li>\n</ul>\n",0,2u},
+    {"inline-nested-empty","- -\n",
+     "<ul>\n<li>\n<ul>\n<li></li>\n</ul>\n</li>\n</ul>\n",0,2u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==36u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==42u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -191,6 +203,31 @@ int main(void) {
                      strlen(code_blanks)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
        d!=NULL) {
         fprintf(stderr,"indented code blank-node exhaustion must roll back\n");
+        return 1;
+    }
+    /* Inline marker chains are bounded by the same list-frame depth as
+     * multiline nesting; exceeding 32 frames must fail atomically. */
+    char inline_deep[128];
+    size_t inline_used=0u;
+    for(size_t i=0u;i<33u;++i) {
+        inline_deep[inline_used++]='-';
+        inline_deep[inline_used++]=' ';
+    }
+    inline_deep[inline_used++]='x';
+    inline_deep[inline_used++]='\n';
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(inline_deep,inline_used,512u,
+                     inline_used+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
+       d!=NULL) {
+        fprintf(stderr,"inline nesting overflow must roll back\n");
+        return 1;
+    }
+    const char *inline_limited="- - foo\n";
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(inline_limited,strlen(inline_limited),3u,
+                     strlen(inline_limited)+1u,&d)!=STUN_UI_CAPACITY_EXCEEDED ||
+       d!=NULL) {
+        fprintf(stderr,"inline nesting node exhaustion must roll back\n");
         return 1;
     }
     /* The container nesting limit is executable, not just documented:
