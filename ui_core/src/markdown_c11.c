@@ -1,4 +1,5 @@
 #include <stun/markdown_c11.h>
+#include <salts_unicode.h>
 
 #include <ctype.h>
 #include <stdint.h>
@@ -239,10 +240,45 @@ static size_t md_code_span_close(const char *s,size_t n,size_t begin,
  * or closer matters, and underscores inside a word cannot open or close.
  * Unicode whitespace/punctuation classification remains a separate #182
  * provider-backed task; do not invent a second Unicode character table. */
+/* Inline flanking has to classify the *adjacent scalar*, not its last
+ * UTF-8 byte. The only non-ASCII property requested here is Unicode 17
+ * White_Space from the released Salts::Unicode provider: there is no copied
+ * Unicode table or locale-sensitive fallback. Salts validates the borrowed
+ * scalar; an invalid UTF-8 fragment has no provable White_Space property.
+ *
+ * The previous scalar begins at most three continuation bytes to the left.
+ * The public Unicode scanner decodes/validates one scalar without allocation.
+ * All source/text lifetimes remain owned by the containing RichDoc. */
+static bool md_inline_whitespace_after(const char *s,size_t n,size_t at) {
+    if(at>=n) return true; /* end of span */
+    if((unsigned char)s[at]<0x80u) return md_space(s[at]);
+    size_t cursor=0u;
+    salts_unicode_scalar scalar={0};
+    const vstr borrowed=vstr_from_buf(s+at,n-at);
+    return salts_unicode_utf8_next(borrowed,&cursor,&scalar)==
+           SALTS_UNICODE_OK &&
+           (scalar.properties&SALTS_UNICODE_PROPERTY_WHITE_SPACE)!=0u;
+}
+
+static bool md_inline_whitespace_before(const char *s,size_t at) {
+    if(!at) return true; /* beginning of span */
+    const size_t last=at-1u;
+    if((unsigned char)s[last]<0x80u) return md_space(s[last]);
+    size_t first=last;
+    while(first>0u && at-first<=4u &&
+          ((unsigned char)s[first]&0xc0u)==0x80u) --first;
+    size_t cursor=0u;
+    salts_unicode_scalar scalar={0};
+    const vstr borrowed=vstr_from_buf(s+first,at-first);
+    return salts_unicode_utf8_next(borrowed,&cursor,&scalar)==
+           SALTS_UNICODE_OK && cursor==at-first &&
+           (scalar.properties&SALTS_UNICODE_PROPERTY_WHITE_SPACE)!=0u;
+}
+
 static void md_emph_flanking(const char *s,size_t n,size_t at,size_t run,
                              char marker,bool *can_open,bool *can_close) {
-    const bool left_space=at==0u || md_space(s[at-1u]);
-    const bool right_space=at+run>=n || md_space(s[at+run]);
+    const bool left_space=md_inline_whitespace_before(s,at);
+    const bool right_space=md_inline_whitespace_after(s,n,at+run);
     const bool left_punct=at>0u && md_ascii_punct(s[at-1u]);
     const bool right_punct=at+run<n && md_ascii_punct(s[at+run]);
     const bool left_flanking=!right_space &&
