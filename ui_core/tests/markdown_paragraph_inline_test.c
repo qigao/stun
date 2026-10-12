@@ -63,6 +63,43 @@ static int check_multiline(const char *source,const char *before,
     return 0;
 }
 
+/* #185: hard breaks stay inside the Emphasis/Strong owner after pairing
+ * across source LF/CRLF. Source-origin metadata is typed, bounded and owned,
+ * never reconstructed from semantic TEXT offsets. */
+static int check_crossline_hard(const char *source,uint8_t origin,
+                                 stun_ui_block_kind inline_owner) {
+    const size_t n=strlen(source);
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(source,n,128u,n+1u,&doc)==STUN_UI_OK);
+    CHECK(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+    CHECK(v.raw_markdown_bytes==n);
+    CHECK(memcmp(v.raw_markdown,source,n)==0);
+    CHECK(kind_count(v,STUN_UI_BLOCK_HARD_LINE_BREAK)==1u);
+    CHECK(kind_count(v,STUN_UI_BLOCK_LINE_BREAK)==0u);
+    CHECK(has_text(v,"foo"));
+    CHECK(has_text(v,"bar"));
+    bool owned=false;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        CHECK(node->parent_index<i);
+        if(node->kind!=STUN_UI_BLOCK_HARD_LINE_BREAK)continue;
+        CHECK(v.document.blocks[node->parent_index].kind==inline_owner);
+        const char *bytes=NULL;size_t size=SIZE_MAX;
+        CHECK(stun_ui_rich_document_metadata(&v,i,&bytes,&size)==STUN_UI_OK);
+        CHECK(size==sizeof(stun_ui_line_break_semantics));
+        stun_ui_line_break_semantics meta;
+        memcpy(&meta,bytes,sizeof(meta));
+        CHECK(meta.origin==origin);
+        CHECK(!meta.reserved[0]&&!meta.reserved[1]&&!meta.reserved[2]);
+        owned=true;
+    }
+    CHECK(owned);
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     CHECK(check_multiline(
         "**Gomphocarpus (*Gomphocarpus physocarpus*, syn.\n"
@@ -80,6 +117,23 @@ int main(void) {
                           STUN_UI_BLOCK_EMPHASIS)==0);
     CHECK(check_multiline("Foo *bar\nbaz*\n====\n","Foo ","baz",
                           1u,0u,STUN_UI_BLOCK_EMPHASIS)==0); /* #81 */
+    CHECK(check_multiline("  Foo *bar\nbaz*\t\n====\n","Foo ","baz",
+                          1u,0u,STUN_UI_BLOCK_EMPHASIS)==0); /* #82 */
+    CHECK(check_crossline_hard("*foo  \nbar*\n",
+                               STUN_UI_LINE_BREAK_TRAILING_SPACES,
+                               STUN_UI_BLOCK_EMPHASIS)==0); /* #638 */
+    CHECK(check_crossline_hard("*foo\\\nbar*\n",
+                               STUN_UI_LINE_BREAK_BACKSLASH,
+                               STUN_UI_BLOCK_EMPHASIS)==0); /* #639 */
+    CHECK(check_crossline_hard("**foo  \nbar**\n",
+                               STUN_UI_LINE_BREAK_TRAILING_SPACES,
+                               STUN_UI_BLOCK_STRONG)==0);
+    CHECK(check_crossline_hard("__foo\\\nbar__\n",
+                               STUN_UI_LINE_BREAK_BACKSLASH,
+                               STUN_UI_BLOCK_STRONG)==0);
+    CHECK(check_crossline_hard("*foo\\\r\nbar*\r\n",
+                               STUN_UI_LINE_BREAK_BACKSLASH,
+                               STUN_UI_BLOCK_EMPHASIS)==0);
 
     static const char *barriers[]={
         "*foo\n\nbar*\n",
@@ -110,7 +164,7 @@ int main(void) {
     CHECK(stun_md_parse(limited,sizeof(limited)-1u,5u,
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
-    puts("C11 Markdown root paragraph inline ownership: 6/6 positive, "
+    puts("C11 Markdown root paragraph inline ownership: 7/7 positive, "
          "7/7 block barriers and atomic budget rejection");
     return 0;
 }
