@@ -97,13 +97,43 @@ int main(void) {
             return 1;
         }
     }
+    /* The maximum permitted depth must succeed, not merely depth+1 fail. */
+    char boundary[160];size_t boundary_bytes=0u;
+    for(size_t i=0u;i<32u;++i) {
+        boundary[boundary_bytes++]='>';
+        boundary[boundary_bytes++]=' ';
+    }
+    boundary[boundary_bytes++]='x';
+    boundary[boundary_bytes++]='\n';
+    stun_md_document *accepted=NULL;
+    if(stun_md_parse(boundary,boundary_bytes,256u,boundary_bytes+1u,
+                     &accepted)!=STUN_UI_OK || !accepted) {
+        fprintf(stderr,"Depth 32 unexpectedly rejected\n");
+        return 1;
+    }
+    const stun_ui_rich_document_view accepted_view=
+        stun_md_document_view(accepted);
+    unsigned accepted_quotes=0u;
+    for(size_t i=1u;i<accepted_view.document.block_count;++i)
+        if(accepted_view.document.blocks[i].kind==STUN_UI_BLOCK_QUOTE)
+            ++accepted_quotes;
+    const int invalid_boundary=
+        stun_ui_rich_document_validate(&accepted_view,256u)!=STUN_UI_OK ||
+        accepted_view.raw_markdown_bytes!=boundary_bytes ||
+        memcmp(accepted_view.raw_markdown,boundary,boundary_bytes)!=0 ||
+        accepted_quotes!=32u;
+    stun_md_document_destroy(accepted);
+    if(invalid_boundary) {
+        fprintf(stderr,"Depth 32 ownership/count invalid\n");
+        return 1;
+    }
     char deep[160];size_t n=0u;
     for(size_t i=0;i<33u;++i){deep[n++]='>';deep[n++]=' ';}
     deep[n++]='x';deep[n++]='\n';
     stun_md_document *owner=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(deep,n,256u,n+1u,&owner)!=
        STUN_UI_CAPACITY_EXCEEDED || owner!=NULL)return 1;
-    printf("Native nested-quote fixtures %zu/%zu, node/source budgets and depth overflow PASS\n",
+    printf("Native nested-quote fixtures %zu/%zu, node/source budgets and depth 32/33 boundary PASS\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
     return 0;
 }
