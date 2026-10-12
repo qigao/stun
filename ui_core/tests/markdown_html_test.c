@@ -87,10 +87,24 @@ static const html_fixture cases[] = {
       "<p><code>a " TICK "b</code></p>\n" },
     { TICK " \n " TICK "\n",
       "<p><code>   </code></p>\n" },
+    /* #182: emphasis/link closers inside a valid code span are opaque.
+     * An unclosed backtick run remains literal and cannot hide a closer. */
+    { "*foo" TICK "*" TICK "\n",
+      "<p>*foo<code>*</code></p>\n" },                     /* #341 */
+    { "[not a " TICK "link](/foo" TICK ")\n",
+      "<p>[not a <code>link](/foo</code>)</p>\n" },        /* #342 */
+    { "*hello " TICK "a*b" TICK " world*\n",
+      "<p><em>hello <code>a*b</code> world</em></p>\n" },
+    { "[hello " TICK "x]y" TICK "](url)\n",
+      "<p><a href=\"url\">hello <code>x]y</code></a></p>\n" },
+    { "*foo" TICK TICK "bar*\n",
+      "<p><em>foo" TICK TICK "bar</em></p>\n" },
+    { "**hi " TICK "x*y" TICK " done**\n",
+      "<p><strong>hi <code>x*y</code> done</strong></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==36,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==42,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
