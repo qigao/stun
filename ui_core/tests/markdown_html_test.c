@@ -202,10 +202,29 @@ static const html_fixture cases[] = {
       "<p>a<em><strong>b</strong></em>c</p>\n" },
     { "***foo " TICK "a*b" TICK " bar***\n",
       "<p><em><strong>foo <code>a*b</code> bar</strong></em></p>\n" },
+    /* Official CommonMark 0.31.2 exact expected HTML (previously failing):
+     * #408/#413/#415–417/#431/#468/#470. Mixed units must neither
+     * steal a closer from an inner run nor violate the odd-match rule. */
+    { "__foo_ bar_\n",
+      "<p><em><em>foo</em> bar</em></p>\n" },             /* #408 */
+    { "***foo** bar*\n",
+      "<p><em><strong>foo</strong> bar</em></p>\n" },      /* #413 */
+    { "*foo**bar***\n",
+      "<p><em>foo<strong>bar</strong></em></p>\n" },       /* #415 */
+    { "foo***bar***baz\n",
+      "<p>foo<em><strong>bar</strong></em>baz</p>\n" },    /* #416 */
+    { "foo******bar*********baz\n",
+      "<p>foo<strong><strong><strong>bar</strong></strong></strong>***baz</p>\n" }, /* #417 */
+    { "**foo *bar***\n",
+      "<p><strong>foo <em>bar</em></strong></p>\n" },      /* #431 */
+    { "_____foo_____\n",
+      "<p><em><strong><strong>foo</strong></strong></em></p>\n" }, /* #468 */
+    { "*foo __bar *baz bim__ bam*\n",
+      "<p><em>foo <strong>bar *baz bim</strong> bam</em></p>\n" } /* #470 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==92,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==100,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
