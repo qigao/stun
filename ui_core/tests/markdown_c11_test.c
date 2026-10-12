@@ -314,12 +314,80 @@ static int test_gfm_task_items(void) {
     return 0;
 }
 
+/* #182: the decoded code-span payload belongs to one typed node, never
+ * recursively parses inner punctuation and never changes the raw source. */
+static int test_code_span_exact_runs_and_text(void) {
+    typedef struct {
+        const char *markdown;
+        const char *expected;
+        unsigned code_spans;
+    } code_fixture;
+    static const code_fixture samples[] = {
+        {TICK TICK " foo " TICK " bar " TICK TICK "\n",
+         "foo " TICK " bar",1u},                           /* #329 */
+        {TICK " " TICK TICK " " TICK "\n",
+         TICK TICK,1u},                                   /* #330 */
+        {TICK "  " TICK TICK "  " TICK "\n",
+         " " TICK TICK " ",1u},                            /* #331 */
+        {TICK "\xc2\xa0" "b" "\xc2\xa0" TICK "\n",
+         "\xc2\xa0" "b" "\xc2\xa0",1u},                     /* #333 */
+        {TICK "  " TICK "\n","  ",1u},                     /* #334 */
+        {TICK "foo\\" TICK "bar" TICK "\n","foo\\",1u},    /* #338 */
+        {TICK TICK "foo" TICK "bar" TICK TICK "\n",
+         "foo" TICK "bar",1u},                             /* #339 */
+        {TICK " foo " TICK TICK " bar " TICK "\n",
+         "foo " TICK TICK " bar",1u},                      /* #340 */
+        {TICK TICK TICK "foo" TICK TICK "\n",NULL,0u}    /* #347 */
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==9u,
+                   "code-span fixture count");
+    for(size_t i=0u;i<sizeof(samples)/sizeof(samples[0]);++i) {
+        const size_t n=strlen(samples[i].markdown);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(samples[i].markdown,n,128u,n+1u,&doc)==STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view view=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        CHECK(view.raw_markdown_bytes==n);
+        CHECK(memcmp(view.raw_markdown,samples[i].markdown,n)==0);
+        CHECK(kinds(view,STUN_UI_BLOCK_CODE_SPAN)==samples[i].code_spans);
+        if(samples[i].expected) {
+            const size_t want=strlen(samples[i].expected);
+            bool found=false;
+            for(size_t at=0u;at<view.document.block_count;++at) {
+                if(view.document.blocks[at].kind!=STUN_UI_BLOCK_CODE_SPAN)
+                    continue;
+                for(size_t j=at+1u;j<view.document.block_count;++j) {
+                    const stun_ui_block *node=&view.document.blocks[j];
+                    if(node->parent_index!=at ||
+                       node->kind!=STUN_UI_BLOCK_TEXT)continue;
+                    CHECK(node->byte_end>=node->byte_begin);
+                    CHECK(node->byte_end<=view.document.source_bytes);
+                    if(node->byte_end-node->byte_begin==want &&
+                       memcmp(view.document.source+node->byte_begin,
+                              samples[i].expected,want)==0)
+                        found=true;
+                }
+            }
+            CHECK(found);
+        }
+        stun_md_document_destroy(doc);
+    }
+    const char limited[]=TICK TICK " foo " TICK " bar " TICK TICK "\n";
+    stun_md_document *out=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited,sizeof(limited)-1u,3u,
+                        sizeof(limited),&out)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(out==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
     if(test_unclosed_fence_and_empty()) return 1;
     if(test_limit_and_failure_transaction()) return 1;
     if(test_deterministic_ids()) return 1;
+    if(test_code_span_exact_runs_and_text()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;
