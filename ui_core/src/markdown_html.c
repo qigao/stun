@@ -67,21 +67,31 @@ static bool html_ascii_equal(const char *bytes, size_t len, const char *key) {
     return true;
 }
 
-/* Treat an explicit URL scheme as a capability requiring admission. Reject
- * whitespace, raw control characters and unknown schemes; never emit a
- * javascript:, data: or vbscript: URL into an HTML attribute. */
+/* A fully DECODED destination must be validated from FIRST through LAST
+ * byte. Do not return early after "http:", '/' '?' or '#': HTML5 entities
+ * can create ASCII control characters late in a URL, even after a seemingly
+ * safe scheme or path separator. Early acceptance would permit those bytes
+ * inside a quoted href despite the documented fail-closed policy.
+ *
+ * A colon prior to a path/query/fragment separator declares an explicit
+ * scheme and must match the known allowlist. Other colons are relative URL
+ * payload. UTF-8 non-ASCII octets are percent encoded only AFTER admission.
+ */
 static bool html_safe_href(const char *s, size_t n) {
-    if (!s && n) return false;
-    for (size_t i=0;i<n;++i) {
+    if(!s && n)return false;
+    bool seen_separator=false;
+    size_t scheme_colon=SIZE_MAX;
+    for(size_t i=0u;i<n;++i) {
         const unsigned char c=(unsigned char)s[i];
-        if (c<=0x20 || c==0x7f) return false;
-        if (c=='/' || c=='?' || c=='#') return true;
-        if (c==':') return
-            html_ascii_equal(s,i,"https") ||
-            html_ascii_equal(s,i,"http") ||
-            html_ascii_equal(s,i,"mailto");
+        if(c<=0x20u || c==0x7Fu)return false;
+        if(c=='/' || c=='?' || c=='#')seen_separator=true;
+        if(c==':' && !seen_separator && scheme_colon==SIZE_MAX)
+            scheme_colon=i;
     }
-    return true; /* Relative link, or fragment-only handled above. */
+    return scheme_colon==SIZE_MAX ||
+           html_ascii_equal(s,scheme_colon,"https") ||
+           html_ascii_equal(s,scheme_colon,"http") ||
+           html_ascii_equal(s,scheme_colon,"mailto");
 }
 
 /* Emit an admitted decoded URL with UTF-8 octets percent-encoded.

@@ -151,6 +151,15 @@ int main(void) {
     CHECK(verify_safe_rejection("[x](java&#x73;cript:alert \"t\")\n")==0);
     CHECK(verify_safe_rejection("[x](data:text/html \"t\")\n")==0);
     CHECK(verify_safe_rejection("[x](safe \"a&#10;b\")\n")==0);
+    /* The whole decoded href must be admitted, not only its first scheme,
+     * separator or fragment. These inputs used to bypass early returns at
+     * '/', '?', '#', 'https:' and 'mailto:' with a late C0 scalar. */
+    CHECK(verify_safe_rejection("[x](/safe&#10;bad \"t\")\n")==0);
+    CHECK(verify_safe_rejection(
+        "[x](https://example.org/&#x09;bad \"t\")\n")==0);
+    CHECK(verify_safe_rejection("[x](foo?bad&#10;value)\n")==0);
+    CHECK(verify_safe_rejection("[x](#frag&#13;bad)\n")==0);
+    CHECK(verify_safe_rejection("[x](mailto:foo&#x0A;bar \"t\")\n")==0);
 
     /* The entity-produced quote cannot fabricate a syntactic link TITLE. */
     const char invalid[]="[a](url &quot;tit&quot;)\n";
@@ -169,7 +178,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 7/7 title/URL fixtures, 3 safety rejections, "
+    puts("C11 link metadata: 7/7 title/URL fixtures, 8 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }
