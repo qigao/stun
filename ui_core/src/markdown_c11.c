@@ -428,6 +428,7 @@ typedef struct md_list_frame {
     uint32_t list, item, paragraph, code, quote, quote_paragraph;
     md_fence fence;
     bool fence_open;
+    size_t code_blank_lines;
     size_t marker_column, content_column, list_base_column;
     char marker;
     bool ordered, pending_blank, empty_item;
@@ -507,6 +508,7 @@ static bool md_list_begin_fence(stun_md_document *d,md_list_frame *f,
     if(d->error!=STUN_UI_OK) return true;
     f->fence=(md_fence){marker,run,node};
     f->fence_open=true;
+    f->code_blank_lines=0u;
     f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
     return true;
 }
@@ -532,6 +534,7 @@ static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
     f->empty_item=content==end && !task;
     f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
     f->content_column=m->content_column;
+    f->code_blank_lines=0u;
     f->fence_open=f->pending_blank=false;
     if(!f->empty_item) {
         /* A list marker may introduce a fenced block directly: "- ~~~".
@@ -580,6 +583,10 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
          * deepest nested list closes before the next nonblank line. */
         for(size_t depth=0u;depth<stack->depth;++depth)
             stack->frames[depth].pending_blank=true;
+        /* Defer interior code blanks until a following indented line proves
+         * continuation. EOF or another block discards trailing blanks. */
+        md_list_frame *top=&stack->frames[stack->depth-1u];
+        if(top->code!=UINT32_MAX) ++top->code_blank_lines;
         return true;
     }
     const size_t indent=md_columns(s,line.begin,md_left(s,line.begin,line.end));
@@ -649,12 +656,30 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 (void)md_list_open(d,stack,f->item,&marker,s,line.end);
                 return true;
             }
+            const size_t inner_indent=indent-f->content_column;
+            if(f->pending_blank && f->code!=UINT32_MAX &&
+               inner_indent>=4u) {
+                /* Interior blank lines belong to the *same* indented code
+                 * node; they are not paragraph/list separators and must not
+                 * split one <pre><code> into two blocks. This also works for
+                 * quote-owned list frames because no raw prefix is replayed. */
+                while(f->code_blank_lines) {
+                    md_text(d,f->code,"\n",1u);
+                    if(d->error!=STUN_UI_OK) return true;
+                    --f->code_blank_lines;
+                }
+                f->pending_blank=false;
+                md_line inner=line;
+                inner.begin=body;
+                (void)md_code_line(d,f->code,inner,false);
+                return true;
+            }
             if(f->pending_blank) {
                 md_mark_list_loose(d,f->list);
                 f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
                 f->pending_blank=false;
+                f->code_blank_lines=0u;
             }
-            const size_t inner_indent=indent-f->content_column;
             const size_t inner_begin=md_left(s,body,line.end);
             if(inner_indent<=3u &&
                md_list_begin_fence(d,f,s,inner_begin,line.end))
