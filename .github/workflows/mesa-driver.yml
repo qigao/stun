@@ -41,6 +41,13 @@ env:
   UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
   LIBGL_ALWAYS_SOFTWARE: '1'
   GALLIUM_DRIVER: llvmpipe
+  # Compiler cache is an acceleration layer only: no object files or SDK
+  # runtime state bypasses our original CTest, sanitizer, and driver gates.
+  CCACHE_DIR: ${{ github.workspace }}/build/runtime-ccache
+  CCACHE_COMPILERCHECK: content
+  CCACHE_MAXSIZE: 512M
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
 
 jobs:
   mesa-lifecycle:
@@ -82,6 +89,16 @@ jobs:
           path: ~/.cache/pip
           key: stun-mesa-pip-ubuntu24-meson-1.5.2-mako-1.3.10-pyyaml-6.0.2-packaging-24.2-v1
 
+      - name: Restore bounded native compiler cache
+        id: compiler_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: stun-runtime-ccache-ubuntu24-v1-${{ env.MESA_VERSION }}-${{ env.VCPKG_PORT_BASELINE }}-${{ inputs.salts_sha }}-${{ inputs.salts_utils_sha }}-${{ github.sha }}
+          restore-keys: |
+            stun-runtime-ccache-ubuntu24-v1-${{ env.MESA_VERSION }}-${{ env.VCPKG_PORT_BASELINE }}-${{ inputs.salts_sha }}-${{ inputs.salts_utils_sha }}-
+            stun-runtime-ccache-ubuntu24-v1-${{ env.MESA_VERSION }}-${{ env.VCPKG_PORT_BASELINE }}-
+
       - name: Restore pinned Mesa source archive
         id: mesa_source_cache
         uses: actions/cache/restore@v4
@@ -116,13 +133,17 @@ jobs:
             "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
             > build/mesa-evidence/provenance.txt
           sudo apt-get update
-          sudo apt-get install -y ninja-build pkg-config bison flex llvm-20-dev \
+          sudo apt-get install -y ccache ninja-build pkg-config bison flex llvm-20-dev \
             autoconf autoconf-archive automake libtool \
             libdrm-dev libexpat1-dev libelf-dev zlib1g-dev libzstd-dev \
             xorg-dev libwayland-dev libxkbcommon-dev libglvnd-dev libx11-xcb-dev \
             libxcb-glx0-dev libxcb-dri2-0-dev libxcb-dri3-dev libxcb-present-dev \
             libxcb-randr0-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shm0-dev libxshmfence-dev \
             xvfb xauth mesa-utils
+          command -v ccache
+          ccache --version
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --zero-stats
           python3 -m venv "$RUNNER_TEMP/mesa-tools"
           "$RUNNER_TEMP/mesa-tools/bin/pip" install meson==1.5.2 Mako==1.3.10 PyYAML==6.0.2 packaging==24.2
           echo "$RUNNER_TEMP/mesa-tools/bin" >> "$GITHUB_PATH"
@@ -172,8 +193,8 @@ jobs:
           PY
           cat > "$RUNNER_TEMP/mesa-native.ini" <<'NATIVE'
           [binaries]
-          c = 'gcc'
-          cpp = 'g++'
+          c = ['ccache', 'gcc']
+          cpp = ['ccache', 'g++']
           llvm-config = '/usr/bin/llvm-config-20'
           NATIVE
           meson setup "$MESA_BUILD" "$MESA_SOURCE" \
@@ -1506,6 +1527,25 @@ jobs:
             cat "$EVIDENCE_DIR/desktop-evidence.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # Cache telemetry includes Mesa Meson + all CMake compiler-launcher
+      # invocations in this one runner. No semantic assertion depends on hits.
+      - name: Report compiler cache effectiveness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ccache >/dev/null 2>&1; then
+            mkdir -p build/mesa-evidence
+            ccache --show-stats | tee build/mesa-evidence/ccache-stats.txt
+            {
+              echo '### Native compiler cache'
+              echo 'Meson Mesa + installed Salts/FlexUI CMake builds; cache hits are performance evidence, not conformance.'
+              echo '~~~text'
+              cat build/mesa-evidence/ccache-stats.txt
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Preserve exact-head evidence even on failure
         if: ${{ always() && inputs.run_runtime && steps.desktop_paths.outcome == 'success' }}
         uses: actions/upload-artifact@v4
@@ -1513,6 +1553,7 @@ jobs:
           name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             build/desktop-evidence
+            build/mesa-evidence/ccache-stats.txt
             build/desktop-runtime/CMakeCache.txt
             build/desktop-runtime/compile_commands.json
             build/desktop-runtime/Testing/Temporary/LastTest.log
@@ -1535,3 +1576,10 @@ jobs:
           path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
           retention-days: 3
           if-no-files-found: error
+
+      - name: Save bounded native compiler cache
+        if: ${{ success() && steps.compiler_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
