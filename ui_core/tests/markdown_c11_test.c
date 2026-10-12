@@ -645,6 +645,60 @@ static int test_unicode_whitespace_emphasis(void) {
     return 0;
 }
 
+/* Terminal oversize delimiter runs may supply exactly one closer for the
+ * outer owner (leaving literal suffix markers), or two matched same-length
+ * closers in a nested owner chain. The raw source is never rewritten. */
+static int test_terminal_longer_emphasis_closers(void) {
+    typedef struct {
+        const char *input,*text,*unused;
+        stun_ui_block_kind kind;
+        size_t count;
+        bool nested;
+    } terminal_fixture;
+    static const terminal_fixture cases[]={
+        {"*foo**\n","foo","*",STUN_UI_BLOCK_EMPHASIS,1u,false}, /* #443 */
+        {"**foo***\n","foo","*",STUN_UI_BLOCK_STRONG,1u,false}, /* #446 */
+        {"*foo****\n","foo","***",STUN_UI_BLOCK_EMPHASIS,1u,false},/* #447 */
+        {"_foo__\n","foo","_",STUN_UI_BLOCK_EMPHASIS,1u,false}, /* #455 */
+        {"__foo___\n","foo","_",STUN_UI_BLOCK_STRONG,1u,false}, /* #458 */
+        {"_foo____\n","foo","___",STUN_UI_BLOCK_EMPHASIS,1u,false},/* #459 */
+        {"*foo *bar**\n","bar",NULL,STUN_UI_BLOCK_EMPHASIS,2u,true}, /* #409 */
+        {"**foo **bar****\n","bar",NULL,STUN_UI_BLOCK_STRONG,2u,true} /* #427 */
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==8u,
+                   "terminal closer AST fixture denominator");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        const size_t n=strlen(cases[i].input);
+        stun_md_document *d=NULL;
+        CHECK(stun_md_parse(cases[i].input,n,128u,n+1u,&d)==STUN_UI_OK);
+        CHECK(d!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(d);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==n);
+        CHECK(memcmp(v.raw_markdown,cases[i].input,n)==0);
+        CHECK(kinds(v,cases[i].kind)==cases[i].count);
+        CHECK(text_is(v,cases[i].text));
+        if(cases[i].unused) CHECK(text_is(v,cases[i].unused));
+        if(cases[i].nested) {
+            bool owned=false;
+            for(size_t k=1u;k<v.document.block_count;++k) {
+                const stun_ui_block *node=&v.document.blocks[k];
+                if(node->kind==cases[i].kind && node->parent_index<k &&
+                   v.document.blocks[node->parent_index].kind==cases[i].kind)
+                    owned=true;
+            }
+            CHECK(owned);
+        }
+        stun_md_document_destroy(d);
+    }
+    const char limited[]="*foo**\n";
+    stun_md_document *owner=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited,sizeof(limited)-1u,3u,
+                        sizeof(limited),&owner)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(owner==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -656,6 +710,7 @@ int main(void) {
     if(test_ascii_emphasis_flanking()) return 1;
     if(test_nested_emphasis_pairs()) return 1;
     if(test_unicode_whitespace_emphasis()) return 1;
+    if(test_terminal_longer_emphasis_closers()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;

@@ -297,6 +297,13 @@ static size_t md_match(const char *s, size_t n, size_t start,
                        char symbol, size_t count) {
     const bool emphasis=symbol=='*' || symbol=='_';
     const bool opaque_code=emphasis || symbol=='~' || symbol==']';
+    /* The candidate opener may be the SUFFIX of an earlier unmatched
+     * longer run. CommonMark permits that suffix to pair with an exact
+     * matching closer, but it must not claim an OVERSIZED terminal run:
+     * "**foo **bar baz**" belongs to the later "**bar baz**"
+     * (#471), not a fabricated "*foo ..." emphasis (#472 too). */
+    const bool suffix_opener=emphasis && start>count &&
+                             s[start-count-1u]==symbol;
     /* A bounded pairing depth lets nested SAME-LENGTH delimiter runs own
      * their nearer closers. An older opener remains literal when only the
      * inner opener can be closed (#471/#472); two closers admit nesting,
@@ -340,6 +347,21 @@ static size_t md_match(const char *s, size_t n, size_t start,
                 continue;
             }
             return p;
+        }
+        /* A longer *terminal* closing run may supply the current closer
+         * and leave unused literal markers (#443/#446/#447/#455/#458/#459).
+         * If inner same-sized runs are open, reserve exactly one matching
+         * closing group per inner owner before closing the outer (#409/#427).
+         *
+         * Keep this restricted to a terminal run and same marker length:
+         * general mixed-length/triple runs need CommonMark's full delimiter
+         * stack and modulo-3 rules, not a greedy fallback or tail rewrite. */
+        if(emphasis && !suffix_opener && run>count && p+run==n) {
+            bool can_open=false,can_close=false;
+            md_emph_flanking(s,n,p,run,symbol,&can_open,&can_close);
+            if(can_close &&
+               (!inner_open || run==(inner_open+1u)*count))
+                return p+inner_open*count;
         }
         p += run - 1;
     }
