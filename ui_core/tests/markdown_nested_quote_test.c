@@ -115,7 +115,53 @@ static int verify_list_owned_fence(void) {
     if(fail)fprintf(stderr,"List-owned fence ancestry/payload mismatch\n");
     return fail;
 }
+/* Verify that the existing list fence frame also works under a quote owner. */
+static int verify_quoted_list_fence(void) {
+    static const char source[]="> - item\n>   ~~~c\n>   abc\n>   ~~~\n";
+    stun_md_document *doc=NULL;
+    const size_t n=sizeof(source)-1u;
+    if(stun_md_parse(source,n,256u,n+1u,&doc)!=STUN_UI_OK || !doc)
+        return 1;
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    int failed=stun_ui_rich_document_validate(&v,256u)!=STUN_UI_OK ||
+               v.raw_markdown_bytes!=n ||
+               memcmp(v.raw_markdown,source,n)!=0;
+    unsigned fenced=0u,quote_lists=0u;
+    for(size_t i=1u;i<v.document.block_count&&!failed;++i) {
+        const stun_ui_block *b=&v.document.blocks[i];
+        if(b->kind==STUN_UI_BLOCK_LIST) {
+            const uint32_t parent=b->parent_index;
+            if(parent<i &&
+               v.document.blocks[parent].kind==STUN_UI_BLOCK_QUOTE)
+                ++quote_lists;
+        }
+        if(b->kind==STUN_UI_BLOCK_CODE_FENCE) {
+            ++fenced;
+            const uint32_t parent=b->parent_index;
+            if(parent>=i ||
+               v.document.blocks[parent].kind!=STUN_UI_BLOCK_LIST_ITEM)
+                failed=1;
+            else {
+                const uint32_t list=v.document.blocks[parent].parent_index;
+                if(list>=parent ||
+                   v.document.blocks[list].kind!=STUN_UI_BLOCK_LIST)
+                    failed=1;
+                else {
+                    const uint32_t quote=v.document.blocks[list].parent_index;
+                    if(quote>=list ||
+                       v.document.blocks[quote].kind!=STUN_UI_BLOCK_QUOTE)
+                        failed=1;
+                }
+            }
+        }
+    }
+    if(quote_lists!=1u || fenced!=1u) failed=1;
+    stun_md_document_destroy(doc);
+    if(failed)fprintf(stderr,"Quoted list fence ancestry mismatch\n");
+    return failed;
+}
 int main(void) {
+    if(verify_quoted_list_fence())return 1;
     if(verify_list_owned_fence())return 1;
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(verify(&cases[i]))return 1;
