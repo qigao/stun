@@ -1,0 +1,67 @@
+/* #181: quote/list ownership and byte-exact CommonMark HTML. */
+#include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+typedef struct {const char *id,*input,*html;unsigned quotes,lists;} fixture;
+static const fixture cases[]={
+  {"cm235","> - foo\n- bar\n","<blockquote>\n<ul>\n<li>foo</li>\n</ul>\n</blockquote>\n<ul>\n<li>bar</li>\n</ul>\n",1,2},
+  {"quoted-siblings","> - foo\n> - bar\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n</blockquote>\n",1,1},
+  {"quoted-ordered","> 1. one\n> 2. two\n","<blockquote>\n<ol>\n<li>one</li>\n<li>two</li>\n</ol>\n</blockquote>\n",1,1},
+  {"quoted-continuation","> - foo\n>   bar\n","<blockquote>\n<ul>\n<li>foo\nbar</li>\n</ul>\n</blockquote>\n",1,1},
+  {"quoted-interruption","> foo\n> - bar\n","<blockquote>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n</blockquote>\n",1,1},
+  {"ordered-noninterrupt","> foo\n> 2. bar\n","<blockquote>\n<p>foo\n2. bar</p>\n</blockquote>\n",1,0},
+  {"quote-to-root-paragraph","> - foo\n> - bar\nplain\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n</blockquote>\n<p>plain</p>\n",1,1}
+};
+_Static_assert(sizeof(cases)/sizeof(cases[0])==7u,"fixture denominator");
+static int check(const fixture *f){
+ stun_md_document *d=NULL;size_t n=strlen(f->input);
+ if(stun_md_parse(f->input,n,256u,n+1u,&d)!=STUN_UI_OK||!d)return 1;
+ const stun_ui_rich_document_view v=stun_md_document_view(d);
+ int failed=stun_ui_rich_document_validate(&v,256u)!=STUN_UI_OK ||
+            v.raw_markdown_bytes!=n || memcmp(v.raw_markdown,f->input,n)!=0;
+ unsigned quotes=0,lists=0;
+ for(size_t i=1;i<v.document.block_count && !failed;++i){
+  const stun_ui_block *node=&v.document.blocks[i];
+  if(node->kind==STUN_UI_BLOCK_QUOTE){++quotes; if(node->parent_index!=0)failed=1;}
+  if(node->kind==STUN_UI_BLOCK_LIST||node->kind==STUN_UI_BLOCK_ORDERED_LIST){
+   ++lists;
+   if(node->parent_index>=i)failed=1;
+   else if(strcmp(f->id,"cm235")==0){
+    const stun_ui_block_kind expected=lists==1?
+       STUN_UI_BLOCK_QUOTE:STUN_UI_BLOCK_DOCUMENT;
+    if(v.document.blocks[node->parent_index].kind!=expected)failed=1;
+   }else if(v.document.blocks[node->parent_index].kind!=STUN_UI_BLOCK_QUOTE)
+     failed=1;
+  }
+ }
+ if(quotes!=f->quotes||lists!=f->lists)failed=1;
+ size_t needed=0,actual=0;
+ if(!failed && stun_md_render_html(&v,256u,NULL,0u,&needed)!=STUN_UI_OK)failed=1;
+ if(!failed && needed!=strlen(f->html))failed=1;
+ if(!failed){
+  char *out=(char*)malloc(needed+2u);
+  if(!out)failed=1;
+  else{
+   memset(out,0xa5,needed+2u);
+   if(stun_md_render_html(&v,256u,out,needed,&actual)!=STUN_UI_CAPACITY_EXCEEDED
+      ||actual!=needed)failed=1;
+   for(size_t i=0;i<needed+2u;++i)if((unsigned char)out[i]!=0xa5u)failed=1;
+   if(!failed && (stun_md_render_html(&v,256u,out,needed+1u,&actual)!=STUN_UI_OK
+        ||actual!=needed||memcmp(out,f->html,needed+1u)!=0
+        ||(unsigned char)out[needed+1u]!=0xa5u))failed=1;
+   free(out);
+  }
+ }
+ stun_md_document_destroy(d);
+ if(failed)fprintf(stderr,"Quote/list fixture failed: %s\n",f->id);
+ return failed;
+}
+int main(void){
+ for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i)
+   if(check(&cases[i]))return 1;
+ puts("Quoted list ownership 7/7 PASS");
+ return 0;
+}
