@@ -325,10 +325,22 @@ static const html_fixture cases[] = {
     { "``` lang&#x41;\nbody\n```\n", "<pre><code class=\"language-langA\">body\n</code></pre>\n" }, /* Numeric fence language */
     { "&nGt;&nGt;&nLt;&nLt;\n", "<p>≫⃒≫⃒≪⃒≪⃒</p>\n" }, /* Named reference expansion capacity */
     { "&nGt;", "<p>≫⃒</p>\n" }, /* Named reference expansion at EOF */
+    { "[foo](/bar\\* \"ti\\*tle\")\n", "<p><a href=\"/bar*\" title=\"ti*tle\">foo</a></p>\n" }, /* #22 escaped punctuation destination/title */
+    { "[foo](/f&ouml;&ouml; \"f&ouml;&ouml;\")\n", "<p><a href=\"/f%C3%B6%C3%B6\" title=\"föö\">foo</a></p>\n" }, /* #32 entities in destination/title */
+    { "[a](url &quot;tit&quot;)\n", "<p>[a](url &quot;tit&quot;)</p>\n" }, /* #41 decoded quote cannot invent title syntax */
+    { "[é](https://example.org/ö)\n", "<p><a href=\"https://example.org/%C3%B6\">é</a></p>\n" }, /* percent encode non-ASCII href */
+    { "[&copy;](dest \"Title\")\n", "<p><a href=\"dest\" title=\"Title\">©</a></p>\n" }, /* decoded label and quoted title */
+    { "[x](/f\\&copy; \"a\")\n", "<p><a href=\"/f&amp;copy;\" title=\"a\">x</a></p>\n" }, /* escaped ampersand cannot decode href */
+    { "[x](/f%C3%B6)\n", "<p><a href=\"/f%C3%B6\">x</a></p>\n" }, /* already percent escaped path remains intact */
+    { "[x](dest \"say \\\"hi\\\"\")\n", "<p><a href=\"dest\" title=\"say &quot;hi&quot;\">x</a></p>\n" }, /* escaped quote inside title */
+    { "[x](dest 'title')\n", "<p><a href=\"dest\" title=\"title\">x</a></p>\n" }, /* single quoted title */
+    { "[x](dest \"\")\n", "<p><a href=\"dest\" title=\"\">x</a></p>\n" }, /* empty title explicitly retained */
+    { "[x](/f&#xF6; \"copy &copy;\")\n", "<p><a href=\"/f%C3%B6\" title=\"copy ©\">x</a></p>\n" }, /* numeric reference href UTF-8 percent */
+    { "[x]()\n", "<p><a href=\"\">x</a></p>\n" }, /* empty destination */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==160,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==172,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

@@ -84,6 +84,29 @@ static bool html_safe_href(const char *s, size_t n) {
     return true; /* Relative link, or fragment-only handled above. */
 }
 
+/* Emit an admitted decoded URL with UTF-8 octets percent-encoded.
+ * The safety gate checks the DECODED URL before this encoding step, so
+ * character-reference obfuscation cannot create an unsafe scheme. Keep
+ * original ASCII percent escapes and escape HTML-special attributes. */
+static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
+    static const char digits[]="0123456789ABCDEF";
+    for(size_t i=0u;i<n && w->error==STUN_UI_OK;++i) {
+        const unsigned char b=(unsigned char)s[i];
+        if(b>=0x80u) {
+            const char pct[3]={'%',digits[b>>4u],digits[b&0x0Fu]};
+            html_bytes(w,pct,sizeof(pct));
+        } else html_escaped(w,s+i,1u,true);
+    }
+}
+static bool html_safe_title(const char *s,size_t n) {
+    if(!s && n)return false;
+    for(size_t i=0u;i<n;++i) {
+        const unsigned char c=(unsigned char)s[i];
+        if(c<0x20u || c==0x7Fu)return false;
+    }
+    return true;
+}
+
 static bool html_metadata(stun_html_writer *w, size_t id,
                           const char **s, size_t *n) {
     if (stun_ui_rich_document_metadata(w->doc,id,s,n)!=STUN_UI_OK) {
@@ -238,15 +261,47 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_STRONG: html_str(w,"<strong>"); break;
     case STUN_UI_BLOCK_STRIKETHROUGH: html_str(w,"<del>"); break;
     case STUN_UI_BLOCK_CODE_SPAN: html_str(w,"<code>"); break;
-    case STUN_UI_BLOCK_LINK:
+    case STUN_UI_BLOCK_LINK: {
         if (!html_metadata(w,id,&meta,&meta_length)) return;
         if(!html_safe_href(meta,meta_length)) {
-            w->error=STUN_UI_INVALID_ARGUMENT; return;
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const char *title=NULL;
+        size_t title_length=0u;
+        bool has_title=false;
+        if(id+1u<doc->block_count &&
+           doc->blocks[id+1u].parent_index==id &&
+           doc->blocks[id+1u].kind==STUN_UI_BLOCK_LINK_TITLE) {
+            has_title=true;
+            if(!html_metadata(w,id+1u,&title,&title_length))return;
+            if(!html_safe_title(title,title_length)) {
+                w->error=STUN_UI_INVALID_ARGUMENT;return;
+            }
         }
         html_str(w,"<a href=\"");
-        html_escaped(w,meta,meta_length,true);
-        html_str(w,"\">");
+        html_link_href(w,meta,meta_length);
+        html_str(w,"\"");
+        if(has_title) {
+            html_str(w," title=\"");
+            html_escaped(w,title,title_length,true);
+            html_str(w,"\"");
+        }
+        html_str(w,">");
         break;
+    }
+    case STUN_UI_BLOCK_LINK_TITLE: {
+        /* This typed metadata child never renders as visible inline TEXT.
+         * Reject arbitrary parent placement or a second title silently
+         * supplied by an untrusted projected RichDoc. */
+        const uint32_t parent=node->parent_index;
+        if(parent>=id || id!=parent+1u ||
+           doc->blocks[parent].kind!=STUN_UI_BLOCK_LINK ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_CODE_INDENTED:
         html_str(w,"<pre><code>");
         break;

@@ -198,44 +198,53 @@ static void md_meta(stun_md_document *d, uint32_t node,
 }
 
 
-/* Fence info strings share the SAME CommonMark character-reference decoder
- * as normal inline text. Backslash-escaped ASCII punctuation produces only
- * a literal byte, never another chance to decode a just-created '&'.
- * Code fence BODY stays verbatim. Metadata is an owned, decoded byte arena
- * separate from raw Markdown and the semantic TEXT arena.
- *
- * Worst-case HTML5 two-scalar references can expand a five-byte name to
- * six UTF-8 bytes; bounded scratch is at most twice the raw info length. */
-static void md_fence_info_meta(stun_md_document *d,uint32_t node,
-                               const char *s,size_t n) {
-    if(node==UINT32_MAX || !n || d->error!=STUN_UI_OK)return;
+/* One bounded component decoder for fence-info strings and link destinations
+ * / titles. Only raw bytes undergo Markdown ASCII punctuation unescaping and
+ * HTML5 character reference decoding. Results are never reparsed as grammar.
+ * Two-scalar aliases can expand UTF-8 output beyond raw length; twice source
+ * bytes bounds the scratch and is checked before every write. */
+static bool md_decode_component(stun_md_document *d,const char *s,size_t n,
+                                 char **output,size_t *output_bytes) {
+    if(d->error!=STUN_UI_OK || !output || !output_bytes)return false;
     if(n>(SIZE_MAX-1u)/2u) {
-        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return;
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
     }
     const size_t cap=n*2u;
-    char *text=(char*)malloc(cap+1u);
-    if(!text) {md_error(d,STUN_UI_OUT_OF_MEMORY);return;}
+    char *scratch=(char*)malloc(cap+1u);
+    if(!scratch) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
     size_t used=0u;
     for(size_t p=0u;p<n && d->error==STUN_UI_OK;) {
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
-            text[used++]=s[p+1u];
-            p+=2u;
-            continue;
+            scratch[used++]=s[p+1u];
+            p+=2u;continue;
         }
         char decoded[8];
         size_t consumed=0u,written=0u;
         if(s[p]=='&' && stun_md_decode_character_reference(
-               s+p,n-p,&consumed,decoded,&written)) {
+                    s+p,n-p,&consumed,decoded,&written)) {
             if(written>cap-used) {
                 md_error(d,STUN_UI_CAPACITY_EXCEEDED);break;
             }
-            memcpy(text+used,decoded,written);
-            used+=written;p+=consumed;
-            continue;
+            memcpy(scratch+used,decoded,written);
+            used+=written;p+=consumed;continue;
         }
-        text[used++]=s[p++];
+        scratch[used++]=s[p++];
     }
-    if(d->error==STUN_UI_OK)md_meta(d,node,text,used);
+    if(d->error!=STUN_UI_OK) {free(scratch);return false;}
+    scratch[used]='\0'; /* the length remains authoritative */
+    *output=scratch;*output_bytes=used;
+    return true;
+}
+
+/* Fence info strings share this exact decoder with inline link metadata.
+ * The code fence BODY is strictly literal. All decoded metadata is copied
+ * into the document-owned arena before the scratch is released. */
+static void md_fence_info_meta(stun_md_document *d,uint32_t node,
+                               const char *s,size_t n) {
+    if(node==UINT32_MAX || !n || d->error!=STUN_UI_OK)return;
+    char *text=NULL;size_t bytes=0u;
+    if(!md_decode_component(d,s,n,&text,&bytes))return;
+    md_meta(d,node,text,bytes);
     free(text);
 }
 
@@ -382,6 +391,53 @@ static size_t md_match(const char *s, size_t n, size_t start,
     return SIZE_MAX;
 }
 
+/* Restricted inline link target admission. The destination and optional
+ * quoted title are identified in RAW Markdown before any entity expansion.
+ * A malformed title (including entity-produced quotes masquerading as
+ * syntax) is literal Markdown, never an admitted unsafe href. Nested
+ * parentheses and reference links remain separate CommonMark slices. */
+typedef struct md_link_parts {
+    size_t destination_begin,destination_end;
+    size_t title_begin,title_end;
+    bool has_title;
+} md_link_parts;
+
+static bool md_link_target_parts(const char *s,size_t begin,size_t end,
+                                  md_link_parts *out) {
+    if(!out || begin>end)return false;
+    size_t p=begin;
+    while(p<end && !md_space(s[p])) {
+        if(s[p]=='\\' && p+1u<end && md_ascii_punct(s[p+1u]))
+            p+=2u;
+        else ++p;
+    }
+    const size_t dest_end=p;
+    while(p<end && md_space(s[p]))++p;
+    md_link_parts result={
+        .destination_begin=begin,.destination_end=dest_end,
+        .title_begin=0u,.title_end=0u,.has_title=false
+    };
+    if(p<end) {
+        if(s[p]!='"' && s[p]!='\'')return false;
+        const char quote=s[p++];
+        const size_t title_start=p;
+        while(p<end && s[p]!=quote) {
+            if(s[p]=='\\' && p+1u<end &&
+               md_ascii_punct(s[p+1u]))p+=2u;
+            else ++p;
+        }
+        if(p==end)return false;
+        result.title_begin=title_start;
+        result.title_end=p;
+        result.has_title=true;
+        ++p;
+        while(p<end && md_space(s[p]))++p;
+        if(p!=end)return false;
+    }
+    *out=result;
+    return true;
+}
+
 /* CommonMark backtick delimiters close only on an EXACTLY equal-sized run.
  * Unlike emphasis/link matching, backslashes are ordinary literal payload
  * inside a code span, including when directly preceding a backtick. Skip
@@ -485,7 +541,11 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
             const size_t square=md_match(s,n,b,']',1u);
             if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
                 const size_t round=md_match(s,n,square+2u,')',1u);
-                if(round!=SIZE_MAX) {p=round+1u;continue;}
+                md_link_parts target={0};
+                if(round!=SIZE_MAX &&
+                   md_link_target_parts(s,square+2u,round,&target)) {
+                    p=round+1u;continue;
+                }
             }
         }
         if(s[p]=='~' && p+1u<n && s[p+1u]=='~') {
@@ -724,14 +784,43 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             const size_t square=md_match(s,n,b,']',1u);
             if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
                 const size_t round=md_match(s,n,square+2u,')',1u);
-                if(round!=SIZE_MAX) {
+                md_link_parts target={0};
+                if(round!=SIZE_MAX &&
+                   md_link_target_parts(s,square+2u,round,&target)) {
+                    /* Decode metadata before publishing nodes. An invalid
+                     * or unsafe decoded href still fails closed in the HTML
+                     * renderer; no URL filtering is delegated to the text
+                     * grammar or weakened by title syntax. */
+                    char *dest=NULL,*title=NULL;
+                    size_t dest_len=0u,title_len=0u;
+                    if(!md_decode_component(d,
+                            s+target.destination_begin,
+                            target.destination_end-
+                            target.destination_begin,&dest,&dest_len))
+                        break;
+                    if(target.has_title &&
+                       !md_decode_component(d,
+                            s+target.title_begin,
+                            target.title_end-target.title_begin,
+                            &title,&title_len)) {
+                        free(dest);break;
+                    }
                     md_text(d,owners[nested],s+text_start,p-text_start);
                     const uint32_t node=md_add(d,owners[nested],
                         image?STUN_UI_BLOCK_IMAGE:STUN_UI_BLOCK_LINK,0u);
-                    if(node==UINT32_MAX) break;
-                    md_meta(d,node,s+square+2u,round-(square+2u));
+                    if(node!=UINT32_MAX) {
+                        md_meta(d,node,dest,dest_len);
+                        if(target.has_title && !image) {
+                            const uint32_t title_node=md_add(
+                                d,node,STUN_UI_BLOCK_LINK_TITLE,0u);
+                            if(title_node!=UINT32_MAX)
+                                md_meta(d,title_node,title,title_len);
+                        }
+                    }
+                    free(title);free(dest);
+                    if(node==UINT32_MAX || d->error!=STUN_UI_OK)break;
                     if(!md_inline(d,node,s+b,square-b,
-                                  depth+nested+1u)) break;
+                                  depth+nested+1u))break;
                     p=round+1u;text_start=p;continue;
                 }
             }

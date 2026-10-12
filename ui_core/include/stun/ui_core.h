@@ -110,7 +110,9 @@ typedef enum stun_ui_block_kind {
     /* Appended: keep all existing public enum values stable. */
     STUN_UI_BLOCK_CODE_INDENTED,
     /* Distinct from the existing SOFT STUN_UI_BLOCK_LINE_BREAK node. */
-    STUN_UI_BLOCK_HARD_LINE_BREAK
+    STUN_UI_BLOCK_HARD_LINE_BREAK,
+    /* Optional decoded title child of STUN_UI_BLOCK_LINK; metadata-owned. */
+    STUN_UI_BLOCK_LINK_TITLE
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {
