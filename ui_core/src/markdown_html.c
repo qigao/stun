@@ -44,8 +44,10 @@ static void html_escaped(stun_html_writer *w,
         case '<': html_str(w,"&lt;"); break;
         case '>': html_str(w,"&gt;"); break;
         case '"':
-            if (attribute) html_str(w,"&quot;");
-            else html_bytes(w,s+i,1u);
+            /* cmark's HTML text contract escapes literal double quotes in
+             * text and code as well as in attributes (CommonMark #352).
+             * The same bounded writer/measurement path owns all output. */
+            html_str(w,"&quot;");
             break;
         default: html_bytes(w,s+i,1u); break;
         }
