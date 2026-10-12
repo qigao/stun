@@ -153,7 +153,7 @@ stun_ui_status stun_ui_document_visit(
  */
 /* Owned eight-byte metadata payload for list semantics. */
 typedef struct stun_ui_list_semantics {
-    uint32_t start; /* 0 for bullet, 1..999999999 for ordered */
+    uint32_t start; /* 0 for bullet, 0..999999999 for ordered */
     uint8_t marker; /* '-', '+', '*', '.', ')' */
     uint8_t loose; /* 0 tight; 1 loose */
     uint8_t reserved[2];

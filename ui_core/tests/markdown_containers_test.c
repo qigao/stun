@@ -37,6 +37,8 @@ static const fixture cases[]={
      "<p>The number of windows in my house is\n14.  The number of doors is 6.</p>\n",-1,0u},
     {"cm-305","The number of windows in my house is\n1.  The number of doors is 6.\n",
      "<p>The number of windows in my house is</p>\n<ol>\n<li>The number of doors is 6.</li>\n</ol>\n",0,1u},
+    {"ordered-zero","0. zero\n",
+     "<ol start=\"0\">\n<li>zero</li>\n</ol>\n",0,1u},
     {"nested-tight","- outer\n  - inner\n- next\n",
      "<ul>\n<li>outer\n<ul>\n<li>inner</li>\n</ul>\n</li>\n<li>next</li>\n</ul>\n",0,2u},
     {"tab-item","- alpha\n\tbeta\n",
@@ -44,7 +46,7 @@ static const fixture cases[]={
     {"unicode-loose","- \xe4\xb8\xad\xf0\x9f\x91\xa9\n\n  \xe6\x97\xa5\n",
      "<ul>\n<li>\n<p>\xe4\xb8\xad\xf0\x9f\x91\xa9</p>\n<p>\xe6\x97\xa5</p>\n</li>\n</ul>\n",1,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==12u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==13u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -74,7 +76,7 @@ static bool check_case(const fixture *f) {
             REQUIRE(info.reserved[0]==0u&&info.reserved[1]==0u);
             if(lists==0) loose=info.loose;
             if(node->kind==STUN_UI_BLOCK_ORDERED_LIST)
-                REQUIRE(info.start>=1u&&info.start<=999999999u);
+                REQUIRE(info.start<=999999999u);
             else REQUIRE(info.start==0u);
             ++lists;
         }
@@ -117,6 +119,22 @@ int main(void) {
                                              strlen(limited)+1u,&d);
     if(status!=STUN_UI_CAPACITY_EXCEEDED||d!=NULL) {
         fprintf(stderr,"node exhaustion must roll back exactly once\n");
+        return 1;
+    }
+    /* The container nesting limit is executable, not just documented:
+     * forcing a 33rd frame must fail atomically without returning a view. */
+    char deep[4096];
+    size_t used=0u;
+    for(size_t depth=0u;depth<34u;++depth) {
+        for(size_t j=0u;j<depth*2u;++j) deep[used++]=' ';
+        deep[used++]='-'; deep[used++]=' '; deep[used++]='x';
+        deep[used++]='\n';
+    }
+    deep[used]='\0';
+    d=(stun_md_document*)(uintptr_t)1u;
+    if(stun_md_parse(deep,used,2048u,used+1u,&d)!=
+       STUN_UI_CAPACITY_EXCEEDED||d!=NULL) {
+        fprintf(stderr,"container depth overflow must roll back\n");
         return 1;
     }
     printf("Native CommonMark list container subset: %zu/%zu passed\n",

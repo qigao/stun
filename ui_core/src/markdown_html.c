@@ -102,7 +102,7 @@ static bool html_list_meta(stun_html_writer *w,size_t id,
     memcpy(info,data,sizeof(*info));
     const bool ordered=node->kind==STUN_UI_BLOCK_ORDERED_LIST;
     if(info->loose>1u||info->reserved[0]||info->reserved[1]||
-       (ordered ? (info->start<1u||info->start>999999999u||
+       (ordered ? (info->start>999999999u||
                    (info->marker!='.'&&info->marker!=')'))
                 : (info->start!=0u||(info->marker!='-'&&
                        info->marker!='+'&&info->marker!='*')))) {

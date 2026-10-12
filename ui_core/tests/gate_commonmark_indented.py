@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Gate explicit CommonMark 0.31.2 official HTML IDs, never parse-only success.
 
-All 12 official indented-code section cases remain counted, while list cases
-#108/#109 (loose-list semantics) remain diagnostic and are not silent passes.
+All 12 official indented-code cases now gate strictly, including #108/#109
+whose loose/nested list semantics are supplied by the canonical C11 container
+frames. Numbered list precedence examples also gate without skip behavior.
 The full 652-case survey is a separate non-gating CI step.
 """
 from __future__ import annotations
@@ -19,9 +20,9 @@ from survey_commonmark_spec import (
 )
 
 SECTION_IDS = frozenset(range(107, 119))
-GATED_IDS = frozenset({48, 69, 107, 110, 111, 112, 113, 114,
-                       115, 116, 117, 118, 225})
-EXPECTED_GATES = 13
+GATED_IDS = frozenset({48, 69, 107, 108, 109, 110, 111, 112, 113, 114,
+                       115, 116, 117, 118, 225, 254, 256, 301, 302, 304, 305})
+EXPECTED_GATES = 21
 
 
 def main() -> int:
@@ -80,7 +81,7 @@ def main() -> int:
         "official_total": EXPECTED_EXAMPLES,
         "gate": {"passed": gate_passed, "total": EXPECTED_GATES},
         "indented_section": {"passed": section_passed, "total": 12},
-        "diagnostic_ids": [108, 109],
+        "diagnostic_ids": [],
         "cases": rows,
         "note": "Strict official HTML subset, not full CommonMark compliance",
     }
