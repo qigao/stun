@@ -155,7 +155,7 @@ semantics differ. `survey.gfm.table-code-pipe` makes that disagreement
 reproducible; its cmarkgfm HTML is available for investigation. Do not
 silently trust a single Python implementation for disputed GFM syntax.
 
-Executable CI: `unicode-runtime.yml` uses the **installed canonical Salts
+Executable CI: `runtime-conformance.yml` uses the **installed canonical Salts
 SDK** to build the C11 RichDoc dumper, then installs the latest available
 Python `mistune` and `cmarkgfm` tools in an isolated test-only virtual
 environment without exact package pins. The JSON report and human-readable
