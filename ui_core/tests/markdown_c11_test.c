@@ -790,6 +790,61 @@ static int test_triple_and_mixed_delimiter_runs(void) {
     return 0;
 }
 
+/* Official #473/#474/#521: delimiter runs inside a valid link label
+ * cannot close emphasis outside the link. Verify the typed owner, decoded
+ * label payload, borrowed metadata and failure-atomic node exhaustion. */
+static int test_link_label_delimiter_isolation(void) {
+    typedef struct {
+        const char *source,*label,*href,*literal;
+    } link_fixture;
+    static const link_fixture cases[]={
+        {"*[bar*](/url)\n","bar*","/url","*"},
+        {"_foo [bar_](/url)\n","bar_","/url","_foo "},
+        {"*[foo*](/uri)\n","foo*","/uri","*"}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "link delimiter boundary fixture denominator");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        const size_t bytes=strlen(cases[i].source);
+        stun_md_document *owner=NULL;
+        CHECK(stun_md_parse(cases[i].source,bytes,128u,
+                            bytes+1u,&owner)==STUN_UI_OK);
+        CHECK(owner!=NULL);
+        const stun_ui_rich_document_view view=stun_md_document_view(owner);
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        CHECK(view.raw_markdown_bytes==bytes);
+        CHECK(memcmp(view.raw_markdown,cases[i].source,bytes)==0);
+        CHECK(kinds(view,STUN_UI_BLOCK_LINK)==1u);
+        CHECK(kinds(view,STUN_UI_BLOCK_EMPHASIS)==0u);
+        CHECK(kinds(view,STUN_UI_BLOCK_STRONG)==0u);
+        CHECK(metadata_is(view,STUN_UI_BLOCK_LINK,cases[i].href));
+        CHECK(text_is(view,cases[i].literal));
+        bool link_owns_label=false;
+        for(size_t k=1u;k<view.document.block_count;++k) {
+            const stun_ui_block *node=&view.document.blocks[k];
+            if(node->kind!=STUN_UI_BLOCK_TEXT ||
+               node->parent_index>=k ||
+               view.document.blocks[node->parent_index].kind!=
+                   STUN_UI_BLOCK_LINK ||
+               node->byte_end<node->byte_begin ||
+               node->byte_end>view.document.source_bytes) continue;
+            const size_t size=strlen(cases[i].label);
+            if(node->byte_end-node->byte_begin==size &&
+               memcmp(view.document.source+node->byte_begin,
+                      cases[i].label,size)==0)
+                link_owns_label=true;
+        }
+        CHECK(link_owns_label);
+        stun_md_document_destroy(owner);
+    }
+    const char limited[]="*[bar*](/url)\n";
+    stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited,sizeof(limited)-1u,4u,
+                        sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(rejected==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -803,6 +858,7 @@ int main(void) {
     if(test_unicode_whitespace_emphasis()) return 1;
     if(test_terminal_longer_emphasis_closers()) return 1;
     if(test_triple_and_mixed_delimiter_runs()) return 1;
+    if(test_link_label_delimiter_isolation()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;
