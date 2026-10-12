@@ -1527,6 +1527,25 @@ jobs:
             cat "$EVIDENCE_DIR/desktop-evidence.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # Cache telemetry includes Mesa Meson + all CMake compiler-launcher
+      # invocations in this one runner. No semantic assertion depends on hits.
+      - name: Report compiler cache effectiveness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ccache >/dev/null 2>&1; then
+            mkdir -p build/mesa-evidence
+            ccache --show-stats | tee build/mesa-evidence/ccache-stats.txt
+            {
+              echo '### Native compiler cache'
+              echo 'Meson Mesa + installed Salts/FlexUI CMake builds; cache hits are performance evidence, not conformance.'
+              echo '~~~text'
+              cat build/mesa-evidence/ccache-stats.txt
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Preserve exact-head evidence even on failure
         if: ${{ always() && inputs.run_runtime && steps.desktop_paths.outcome == 'success' }}
         uses: actions/upload-artifact@v4
@@ -1534,6 +1553,7 @@ jobs:
           name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             build/desktop-evidence
+            build/mesa-evidence/ccache-stats.txt
             build/desktop-runtime/CMakeCache.txt
             build/desktop-runtime/compile_commands.json
             build/desktop-runtime/Testing/Temporary/LastTest.log
@@ -1556,25 +1576,6 @@ jobs:
           path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
           retention-days: 3
           if-no-files-found: error
-
-      # Cache telemetry includes Mesa Meson + all CMake compiler-launcher
-      # invocations in this one runner. No semantic assertion depends on hits.
-      - name: Report compiler cache effectiveness
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v ccache >/dev/null 2>&1; then
-            mkdir -p build/mesa-evidence
-            ccache --show-stats | tee build/mesa-evidence/ccache-stats.txt
-            {
-              echo '### Native compiler cache'
-              echo 'Meson Mesa + installed Salts/FlexUI CMake builds; cache hits are performance evidence, not conformance.'
-              echo '\x60\x60\x60text'
-              cat build/mesa-evidence/ccache-stats.txt
-              echo '\x60\x60\x60'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
 
       - name: Save bounded native compiler cache
         if: ${{ success() && steps.compiler_cache.outputs.cache-hit != 'true' }}
