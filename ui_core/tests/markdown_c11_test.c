@@ -699,6 +699,92 @@ static int test_terminal_longer_emphasis_closers(void) {
     return 0;
 }
 
+/* #182: the rule-of-three must preserve semantic node ancestry and raw
+ * Markdown bytes, not merely happen to render a matching HTML string. */
+static int test_triple_and_mixed_delimiter_runs(void) {
+    typedef struct {
+        const char *source,*inner_text;
+        size_t emphasis,strong;
+        stun_ui_block_kind outer,inner;
+    } pair_fixture;
+    static const pair_fixture samples[]={
+        {"***foo***\n","foo",1u,1u,
+         STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_STRONG},
+        {"___foo___\n","foo",1u,1u,
+         STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_STRONG},
+        {"***foo* bar**\n","foo",1u,1u,
+         STUN_UI_BLOCK_STRONG,STUN_UI_BLOCK_EMPHASIS},
+        {"*foo **bar***\n","bar",1u,1u,
+         STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_STRONG},
+        {"***foo**bar*\n","foo",1u,1u,
+         STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_STRONG},
+        {"*foo**bar*\n","foo**bar",1u,0u,
+         STUN_UI_BLOCK_EMPHASIS,STUN_UI_BLOCK_TEXT}
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==6u,
+                   "triple / mixed run native AST denominator");
+    for(size_t i=0u;i<sizeof(samples)/sizeof(samples[0]);++i) {
+        const size_t n=strlen(samples[i].source);
+        stun_md_document *owner=NULL;
+        CHECK(stun_md_parse(samples[i].source,n,128u,n+1u,&owner)==
+              STUN_UI_OK);
+        CHECK(owner!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(owner);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==n);
+        CHECK(memcmp(v.raw_markdown,samples[i].source,n)==0);
+        CHECK(kinds(v,STUN_UI_BLOCK_EMPHASIS)==samples[i].emphasis);
+        CHECK(kinds(v,STUN_UI_BLOCK_STRONG)==samples[i].strong);
+        CHECK(text_is(v,samples[i].inner_text));
+        bool correct_owner=false;
+        for(size_t j=1u;j<v.document.block_count;++j) {
+            const stun_ui_block *inner=&v.document.blocks[j];
+            if(inner->kind!=samples[i].inner || inner->parent_index>=j)
+                continue;
+            const stun_ui_block *outer=
+                &v.document.blocks[inner->parent_index];
+            if(outer->kind!=samples[i].outer) continue;
+            if(samples[i].inner==STUN_UI_BLOCK_TEXT) {
+                const size_t bytes=strlen(samples[i].inner_text);
+                correct_owner=inner->byte_end-inner->byte_begin==bytes &&
+                    !memcmp(v.document.source+inner->byte_begin,
+                            samples[i].inner_text,bytes);
+            } else {
+                for(size_t k=j+1u;k<v.document.block_count;++k) {
+                    const stun_ui_block *text=&v.document.blocks[k];
+                    if(text->kind==STUN_UI_BLOCK_TEXT &&
+                       text->parent_index==j &&
+                       text->byte_end-text->byte_begin==
+                           strlen(samples[i].inner_text) &&
+                       !memcmp(v.document.source+text->byte_begin,
+                               samples[i].inner_text,
+                               strlen(samples[i].inner_text)))
+                        correct_owner=true;
+                }
+            }
+        }
+        CHECK(correct_owner);
+        stun_md_document_destroy(owner);
+    }
+    const char bounded[]="***foo***\n";
+    stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(bounded,sizeof(bounded)-1u,4u,
+                        sizeof(bounded),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(rejected==NULL);
+    /* Explicitly bound worst-case delimiter searches without publishing an
+     * incomplete document; repeated unmatched opener candidates are hostile. */
+    char hostile[8192];
+    for(size_t i=0u;i<sizeof(hostile)-1u;++i)
+        hostile[i]=(i%2u)?' ':'*';
+    hostile[sizeof(hostile)-1u]='\n';
+    rejected=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(hostile,sizeof(hostile),16384u,
+                        sizeof(hostile)+1u,&rejected)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(rejected==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -711,6 +797,7 @@ int main(void) {
     if(test_nested_emphasis_pairs()) return 1;
     if(test_unicode_whitespace_emphasis()) return 1;
     if(test_terminal_longer_emphasis_closers()) return 1;
+    if(test_triple_and_mixed_delimiter_runs()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;
