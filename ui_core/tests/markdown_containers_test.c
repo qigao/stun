@@ -133,9 +133,23 @@ static const fixture cases[]={
     {"quoted-initial-code","> 1.     indented code\n>\n>    paragraph\n>\n>        more code\n",
      "<blockquote>\n<ol>\n<li>\n<pre><code>indented code\n</code></pre>\n<p>paragraph</p>\n<pre><code>more code\n</code></pre>\n</li>\n</ol>\n</blockquote>\n",1,1u},
     {"initial-code-trailing-blank","1.     code\n\n",
-     "<ol>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ol>\n",0,1u}
+     "<ol>\n<li>\n<pre><code>code\n</code></pre>\n</li>\n</ol>\n",0,1u},
+    {"cm-300","- # Foo\n- Bar\n  ---\n  baz\n",
+     "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n<li>\n<h2>Bar</h2>\nbaz</li>\n</ul>\n",0,1u},
+    {"list-atx-heading","- # H\n- text\n",
+     "<ul>\n<li>\n<h1>H</h1>\n</li>\n<li>text</li>\n</ul>\n",0,1u},
+    {"ordered-atx-heading","1. # T\n",
+     "<ol>\n<li>\n<h1>T</h1>\n</li>\n</ol>\n",0,1u},
+    {"root-thematic-control","- Foo\n---\n",
+     "<ul>\n<li>Foo</li>\n</ul>\n<hr />\n",0,1u},
+    {"nested-inline-atx-heading","- - # Foo\n",
+     "<ul>\n<li>\n<ul>\n<li>\n<h1>Foo</h1>\n</li>\n</ul>\n</li>\n</ul>\n",0,2u},
+    {"quoted-list-heading","> - # Foo\n> - Bar\n>   ---\n>   baz\n",
+     "<blockquote>\n<ul>\n<li>\n<h1>Foo</h1>\n</li>\n<li>\n<h2>Bar</h2>\nbaz</li>\n</ul>\n</blockquote>\n",0,1u},
+    {"list-setext-equals","- Foo\n  ===\n",
+     "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n</ul>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==52u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==59u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
