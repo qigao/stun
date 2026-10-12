@@ -587,7 +587,7 @@ jobs:
           if not core.is_file() or core.is_symlink():
               raise SystemExit(f"missing canonical published Core DSO: {core}")
           metadata=subprocess.check_output(["readelf","-d",str(core)],text=True)
-          sonames=re.findall(r"\\(SONAME\\).*?\\[([^\\]]+)\\]",metadata)
+          sonames=re.findall(r"\(SONAME\).*?\[([^\]]+)\]",metadata)
           if len(sonames)!=1 or not re.fullmatch(r"libsalts[.]so[.][0-9]+(?:[.][0-9]+)*",sonames[0]):
               raise SystemExit(f"invalid released Salts Core ELF SONAME: {sonames}")
           if not core.name.startswith(sonames[0]+"."):
