@@ -130,6 +130,44 @@ done:
     return failure;
 }
 
+/* Reference definitions belong only to root paragraph boundaries in this
+ * restricted slice. A lazy quote/list continuation and indented code line
+ * must NEVER be promoted into the document reference lookup table. */
+static int test_container_definition_fences(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const char *blocked[]={
+        "- item\n  [hidden]: /uri\n\n[hidden]\n",
+        "> quote\n[hidden]: /uri\n\n[hidden]\n",
+        "    [hidden]: /uri\n\n[hidden]\n"
+    };
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==3u,
+                   "reference-owner negative denominator");
+    for(size_t i=0u;i<3u;++i) {
+        const size_t n=strlen(blocked[i]);
+        VERIFY(stun_md_parse(blocked[i],n,128u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
+        VERIFY(v.raw_markdown_bytes==n);
+        VERIFY(!memcmp(v.raw_markdown,blocked[i],n));
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+    /* A true root blank boundary restores definition admission. */
+    const char root[]="- item\n\n[visible]: /uri\n\n[visible]\n";
+    const size_t size=sizeof(root)-1u;
+    VERIFY(stun_md_parse(root,size,128u,size+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+    VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
@@ -170,7 +208,8 @@ int main(void) {
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
-    if(test_unsafe() || test_fence())return 1;
+    if(test_unsafe() || test_fence() ||
+       test_container_definition_fences())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -195,6 +234,6 @@ int main(void) {
         return 1;
     }
     puts("C11 root references: 11/11 AST/HTML, forward/duplicate/case "
-         "binding, safe URL, fenced opacity and atomic bounded ownership");
+         "binding, safe URL, fenced/quote/list opacity and atomic bounded ownership");
     return 0;
 }

@@ -2113,6 +2113,7 @@ static void md_reference_collect_root(stun_md_document *d) {
     const char *s=d->raw;
     bool paragraph_started=false;
     bool fenced=false;
+    bool container_pending=false;
     md_fence fence={0u,0u,UINT32_MAX};
     for(size_t pos=0u;pos<d->raw_size && d->error==STUN_UI_OK;) {
         const md_line line=md_read_line(d,pos);
@@ -2125,7 +2126,9 @@ static void md_reference_collect_root(stun_md_document *d) {
             continue;
         }
         if(md_blank(s,line.begin,line.end)) {
-            paragraph_started=false;continue;
+            paragraph_started=false;
+            container_pending=false;
+            continue;
         }
         char marker=0;size_t count=0,ib=0,ie=0;
         if(columns<=3u &&
@@ -2136,8 +2139,17 @@ static void md_reference_collect_root(stun_md_document *d) {
         }
         bool ordered=false;size_t content=0u;
         if(columns>3u || s[begin]=='>' ||
-           md_list_marker(s,begin,line.end,&ordered,&content) ||
-           md_rule(s,begin,line.end)) {
+           md_list_marker(s,begin,line.end,&ordered,&content)) {
+            /* This restricted prepass cannot prove ownership transitions
+             * out of a list/quote/indented-code continuation. Suppress
+             * definitions until a real blank-line root boundary. Do NOT
+             * import an indented or lazy quote/list body as a root binding. */
+            paragraph_started=false;
+            container_pending=true;
+            continue;
+        }
+        if(container_pending)continue;
+        if(md_rule(s,begin,line.end)) {
             paragraph_started=false;continue;
         }
         size_t heading_begin=begin,heading_end=line.end;
