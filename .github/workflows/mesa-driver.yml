@@ -70,6 +70,22 @@ jobs:
         shell: bash
         run: echo "VCPKG_BINARY_CACHE=$RUNNER_TEMP/mesa-vcpkg-cache" >> "$GITHUB_ENV"
 
+      # NuGet requires Mono, but its CLI does not require the full IDE/SDK
+      # package set in mono-complete. Provision only the runtime before the
+      # canonical cache action; the action checks for mono and keeps its
+      # existing toolchain, NuGet provenance and cache contract unchanged.
+      - name: Prepare minimal Mono for canonical NuGet cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v mono >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              mono-runtime libmono-system-net-http4.0-cil \
+              libmono-system-security4.0-cil libmono-system-xml4.0-cil
+          fi
+          mono --version
+
       - name: Configure shared vcpkg cache and canonical tool
         uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
         with:
@@ -132,7 +148,8 @@ jobs:
             "$VCPKG_PORT_BASELINE" "$VCPKG_TOOL_REVISION" \
             "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
             > build/mesa-evidence/provenance.txt
-          sudo apt-get update
+          # The minimal Mono preflight already updated apt indices on this
+          # same runner. Avoid a second full apt-get update.
           sudo apt-get install -y ccache ninja-build pkg-config bison flex llvm-20-dev \
             autoconf autoconf-archive automake libtool \
             libdrm-dev libexpat1-dev libelf-dev zlib1g-dev libzstd-dev \
@@ -686,10 +703,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python_env="$RUNNER_TEMP/stun-cmarkgfm-html-oracle"
-          python3 -m venv "$python_env"
-          "$python_env/bin/python" -m pip install \
-            --disable-pip-version-check --no-cache-dir cmarkgfm
+          # Reuse the *same* test-only Python environment installed by the
+          # independent AST gate. Never create a second cmarkgfm environment.
+          python_env="$RUNNER_TEMP/stun-markdown-oracle"
+          test -x "$python_env/bin/python"
+          "$python_env/bin/python" -c 'import cmarkgfm, mistune'
           "$python_env/bin/python" ui_core/tests/survey_commonmark_spec.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
@@ -721,7 +739,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python_env="$RUNNER_TEMP/stun-cmarkgfm-html-oracle"
+          python_env="$RUNNER_TEMP/stun-markdown-oracle"
+          test -x "$python_env/bin/python"
           "$python_env/bin/python" ui_core/tests/gate_commonmark_indented.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
