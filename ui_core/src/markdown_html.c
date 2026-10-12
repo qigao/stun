@@ -226,7 +226,7 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_ORDERED_LIST: html_str(w,"<ol>\n"); break;
     case STUN_UI_BLOCK_LIST_ITEM: html_str(w,"<li>"); break;
     case STUN_UI_BLOCK_QUOTE: html_str(w,"<blockquote>\n"); break;
-    case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"<tr>"); break;
+    case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"<tr>\n"); break;
     case STUN_UI_BLOCK_TABLE_CELL:
         html_str(w,table_header?"<th>":"<td>");
         break;
@@ -271,7 +271,7 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_QUOTE: html_str(w,"</blockquote>\n"); break;
     case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"</tr>\n"); break;
     case STUN_UI_BLOCK_TABLE_CELL:
-        html_str(w,table_header?"</th>":"</td>");
+        html_str(w,table_header?"</th>\n":"</td>\n");
         break;
     default: w->error=STUN_UI_INVALID_ARGUMENT; return;
     }

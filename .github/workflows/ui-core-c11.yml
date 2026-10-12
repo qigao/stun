@@ -57,6 +57,7 @@ jobs:
           cc "${common[@]}" -fsyntax-only ui_core/tests/ui_core_test.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_c11_test.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_html_test.c
+          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_html_dump.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_c11_dump.c
           cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_golden_test.c
 
