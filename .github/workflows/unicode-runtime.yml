@@ -341,6 +341,19 @@ jobs:
           test -s "$EVIDENCE_DIR/markdown-cmarkgfm-html.json"
           git diff --exit-code
 
+      - name: Gate exact official CommonMark indented code examples
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_env="$RUNNER_TEMP/stun-cmarkgfm-html-oracle"
+          "$python_env/bin/python" ui_core/tests/gate_commonmark_indented.py \
+            --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
+            --spec tools/md/test/spec.txt \
+            --report "$EVIDENCE_DIR/markdown-indented-official-gate.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-indented-official-gate.log"
+          test -s "$EVIDENCE_DIR/markdown-indented-official-gate.json"
+          git diff --exit-code
+
       - name: Configure, link, and run the installed Unicode consumer
         shell: bash
         run: |
