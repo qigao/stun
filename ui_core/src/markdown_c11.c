@@ -478,7 +478,9 @@ static bool md_list_token(const char *s,md_line line,
         ++marker_end;
     } else ++marker_end;
     const size_t marker_col=md_columns(s,line.begin,b);
-    size_t total=md_columns(s,line.begin,content);
+    size_t total=marker_col+(marker_end-b);
+    for(size_t p=marker_end;p<content;++p)
+        total+=s[p]=='\t' ? 4u-(total%4u) : 1u;
     /* Empty item still occupies one separating space after its marker. */
     if(content==line.end && marker_end==line.end)
         total=marker_col+(marker_end-b)+1u;
