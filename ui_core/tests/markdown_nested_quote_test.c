@@ -108,7 +108,7 @@ int main(void) {
     stun_md_document *accepted=NULL;
     if(stun_md_parse(boundary,boundary_bytes,256u,boundary_bytes+1u,
                      &accepted)!=STUN_UI_OK || !accepted) {
-        fprintf(stderr,"Depth 32 unexpectedly rejected\\n");
+        fprintf(stderr,"Depth 32 unexpectedly rejected\n");
         return 1;
     }
     const stun_ui_rich_document_view accepted_view=
@@ -124,7 +124,7 @@ int main(void) {
         accepted_quotes!=32u;
     stun_md_document_destroy(accepted);
     if(invalid_boundary) {
-        fprintf(stderr,"Depth 32 ownership/count invalid\\n");
+        fprintf(stderr,"Depth 32 ownership/count invalid\n");
         return 1;
     }
     char deep[160];size_t n=0u;
