@@ -499,6 +499,56 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
 /* Emit the paired spans as typed nodes in source order. Node ownership is
  * explicit, with a bounded ancestor stack; escapes and code/link payloads
  * still follow their original single C11 producer. */
+typedef enum md_root_break {
+    MD_ROOT_BREAK_SOFT = 0,
+    MD_ROOT_BREAK_SPACES,
+    MD_ROOT_BREAK_BACKSLASH
+} md_root_break;
+
+static md_root_break md_root_line_content(const char *s,size_t begin,
+                                           size_t end,bool continues,
+                                           size_t *content_end) {
+    size_t trimmed=md_right(s,begin,end);
+    *content_end=trimmed; /* one trailing space/tab is not semantic TEXT */
+    if(!continues || trimmed==begin)return MD_ROOT_BREAK_SOFT;
+    /* CommonMark #633–#635: two or more literal ASCII spaces before LF.
+     * Tab-column hard-break interpretation remains a separate #185 slice. */
+    if(end-trimmed>=2u) {
+        bool only_spaces=true;
+        for(size_t i=trimmed;i<end;++i)
+            if(s[i]!=' ') {only_spaces=false;break;}
+        if(only_spaces)return MD_ROOT_BREAK_SPACES;
+    }
+    /* CommonMark #634/#637: ONLY an unescaped final backslash marks a hard
+     * break. Even-length trailing backslash runs retain literal backslashes. */
+    if(trimmed==end && s[end-1u]=='\\') {
+        size_t at=end;
+        while(at>begin && s[at-1u]=='\\')--at;
+        if((end-at)%2u!=0u) {
+            *content_end=end-1u;
+            return MD_ROOT_BREAK_BACKSLASH;
+        }
+    }
+    return MD_ROOT_BREAK_SOFT;
+}
+
+static bool md_root_emit_break(stun_md_document *d,uint32_t paragraph,
+                               md_root_break kind) {
+    const bool hard=kind!=MD_ROOT_BREAK_SOFT;
+    const uint32_t node=md_add(d,paragraph,hard?
+        STUN_UI_BLOCK_HARD_LINE_BREAK:STUN_UI_BLOCK_LINE_BREAK,0u);
+    if(node==UINT32_MAX)return false;
+    if(hard) {
+        const stun_ui_line_break_semantics info={
+            (uint8_t)(kind==MD_ROOT_BREAK_SPACES ?
+             STUN_UI_LINE_BREAK_TRAILING_SPACES :
+             STUN_UI_LINE_BREAK_BACKSLASH),{0u,0u,0u}
+        };
+        md_meta(d,node,(const char*)&info,sizeof(info));
+    }
+    return d->error==STUN_UI_OK;
+}
+
 static bool md_inline(stun_md_document *d, uint32_t parent,
                       const char *s, size_t n, unsigned depth) {
     if(depth>32u || n>SIZE_MAX/sizeof(md_emph_event)) {
@@ -535,14 +585,17 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             p+=events[p].open;
             text_start=p;continue;
         }
-        /* A paragraph-scoped inline source can contain normalized physical
-         * LF boundaries. Soft breaks belong to the CURRENT typed inline
-         * owner (including emphasis/strong), not a paragraph sibling.
-         * Explicit hard-break origin remains #185, not silently inferred. */
+        /* A single paragraph-scoped inline source can span physical LF
+         * boundaries. The same #185 source-origin classifier trims semantic
+         * whitespace/backslash BEFORE publishing TEXT, and publishes a
+         * hard or soft break under the actual nested Emphasis/Strong owner.
+         * Code spans are opaque and remain literal under this path. */
         if(s[p]=='\n') {
-            md_text(d,owners[nested],s+text_start,p-text_start);
-            if(md_add(d,owners[nested],STUN_UI_BLOCK_LINE_BREAK,0u)==
-               UINT32_MAX) break;
+            size_t content_end=p;
+            const md_root_break kind=md_root_line_content(
+                s,text_start,p,true,&content_end);
+            md_text(d,owners[nested],s+text_start,content_end-text_start);
+            if(!md_root_emit_break(d,owners[nested],kind))break;
             ++p;
             text_start=p;
             continue;
@@ -1537,11 +1590,8 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
     if(*paragraph!=UINT32_MAX || begin>=first.end ||
        memchr(s+begin,(char)0x60,first.end-begin)!=NULL)
         return false;
-    /* #185 owns trimming/typing whitespace and backslash before a physical
-     * LF (including ONE trailing space or tab, not merely two-space hard
-     * breaks). Do not normalize these until explicit hard/soft IR exists. */
-    if(s[first.end-1u]=='\\' || md_space(s[first.end-1u]))
-        return false;
+    /* #185 supplies explicit hard/soft origin even when the marker pair
+     * crosses spaces/backslash; keep the complete physical line in scratch. */
     md_line lines[MD_PARAGRAPH_LOOKAHEAD_LINES]={0};
     size_t begins[MD_PARAGRAPH_LOOKAHEAD_LINES]={0};
     lines[0]=first;begins[0]=begin;
@@ -1552,8 +1602,7 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
         const size_t at=md_left(s,next.begin,next.end);
         if(at!=next.begin || at==next.end ||
            md_root_code_span_interrupts(d,next) ||
-           memchr(s+at,(char)0x60,next.end-at)!=NULL ||
-           s[next.end-1u]=='\\' || md_space(s[next.end-1u]))
+           memchr(s+at,(char)0x60,next.end-at)!=NULL)
             break;
         if(bytes>=d->raw_size || next.end-at>d->raw_size-bytes-1u)
             break;
@@ -1561,7 +1610,15 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
         lines[count]=next;begins[count]=at;
         ++count;cursor=next.next;
     }
-    if(count<2u || bytes>=SIZE_MAX/sizeof(md_emph_event))return false;
+    if(count<2u)return false;
+    /* No trailing source whitespace is semantic text on the final physical
+     * line, including before a Setext underline (#82). Intermediate lines
+     * retain their suffix so LF admission can classify HARD vs SOFT. */
+    const size_t last_end=md_right(s,begins[count-1u],lines[count-1u].end);
+    const size_t removed=lines[count-1u].end-last_end;
+    if(removed>bytes)return false;
+    bytes-=removed;
+    if(!bytes || bytes>=SIZE_MAX/sizeof(md_emph_event))return false;
     char *joined=(char*)malloc(bytes+1u);
     md_emph_event *events=(md_emph_event*)calloc(bytes,sizeof(*events));
     if(!joined || !events) {
@@ -1572,7 +1629,8 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
     size_t used=0u;
     for(size_t i=0u;i<count;++i) {
         if(i) joined[used++]='\n';
-        const size_t len=lines[i].end-begins[i];
+        const size_t end=(i+1u==count)?last_end:lines[i].end;
+        const size_t len=end-begins[i];
         if(len) memcpy(joined+used,s+begins[i],len);
         used+=len;
     }
@@ -1615,12 +1673,6 @@ static bool md_root_paragraph_emphasis(stun_md_document *d,
  * origin BEFORE publishing decoded RichDoc text. A backward trim of the
  * shared text arena would invalidate borrowed byte spans and node owners.
  * Do not cross competing blocks, list/quote generations or blank lines. */
-typedef enum md_root_break {
-    MD_ROOT_BREAK_SOFT = 0,
-    MD_ROOT_BREAK_SPACES,
-    MD_ROOT_BREAK_BACKSLASH
-} md_root_break;
-
 static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
     if(!current.newline || current.next>=d->raw_size)return false;
     const md_line next=md_read_line(d,current.next);
@@ -1629,50 +1681,6 @@ static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
     /* An indented continuation is still a paragraph continuation when its
      * owner already exists. This preserves the existing paragraph precedence. */
     return !md_root_code_span_interrupts(d,next);
-}
-
-static md_root_break md_root_line_content(const char *s,size_t begin,
-                                           size_t end,bool continues,
-                                           size_t *content_end) {
-    size_t trimmed=md_right(s,begin,end);
-    *content_end=trimmed; /* one trailing space/tab is not semantic TEXT */
-    if(!continues || trimmed==begin)return MD_ROOT_BREAK_SOFT;
-    /* CommonMark #633–#635: two or more literal ASCII spaces before LF.
-     * Tab-column hard-break interpretation remains a separate #185 slice. */
-    if(end-trimmed>=2u) {
-        bool only_spaces=true;
-        for(size_t i=trimmed;i<end;++i)
-            if(s[i]!=' ') {only_spaces=false;break;}
-        if(only_spaces)return MD_ROOT_BREAK_SPACES;
-    }
-    /* CommonMark #634/#637: ONLY an unescaped final backslash marks a hard
-     * break. Even-length trailing backslash runs retain literal backslashes. */
-    if(trimmed==end && s[end-1u]=='\\') {
-        size_t at=end;
-        while(at>begin && s[at-1u]=='\\')--at;
-        if((end-at)%2u!=0u) {
-            *content_end=end-1u;
-            return MD_ROOT_BREAK_BACKSLASH;
-        }
-    }
-    return MD_ROOT_BREAK_SOFT;
-}
-
-static bool md_root_emit_break(stun_md_document *d,uint32_t paragraph,
-                               md_root_break kind) {
-    const bool hard=kind!=MD_ROOT_BREAK_SOFT;
-    const uint32_t node=md_add(d,paragraph,hard?
-        STUN_UI_BLOCK_HARD_LINE_BREAK:STUN_UI_BLOCK_LINE_BREAK,0u);
-    if(node==UINT32_MAX)return false;
-    if(hard) {
-        const stun_ui_line_break_semantics info={
-            (uint8_t)(kind==MD_ROOT_BREAK_SPACES ?
-             STUN_UI_LINE_BREAK_TRAILING_SPACES :
-             STUN_UI_LINE_BREAK_BACKSLASH),{0u,0u,0u}
-        };
-        md_meta(d,node,(const char*)&info,sizeof(info));
-    }
-    return d->error==STUN_UI_OK;
 }
 
 static void md_parse_blocks(stun_md_document *d) {
