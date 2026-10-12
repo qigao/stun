@@ -425,7 +425,7 @@ typedef struct md_list_marker_info {
     bool ordered;
 } md_list_marker_info;
 typedef struct md_list_frame {
-    uint32_t list, item, paragraph, code, quote;
+    uint32_t list, item, paragraph, code, quote, quote_paragraph;
     md_fence fence;
     bool fence_open;
     size_t marker_column, content_column, list_base_column;
@@ -507,7 +507,7 @@ static bool md_list_begin_fence(stun_md_document *d,md_list_frame *f,
     if(d->error!=STUN_UI_OK) return true;
     f->fence=(md_fence){marker,run,node};
     f->fence_open=true;
-    f->paragraph=f->code=f->quote=UINT32_MAX;
+    f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
     return true;
 }
 
@@ -530,7 +530,7 @@ static bool md_list_append_item(stun_md_document *d,md_list_frame *f,
      * an empty paragraph or permit an intervening blank to attach a
      * following top-level paragraph to it. */
     f->empty_item=content==end && !task;
-    f->paragraph=f->code=f->quote=UINT32_MAX;
+    f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
     f->content_column=m->content_column;
     f->fence_open=f->pending_blank=false;
     if(!f->empty_item) {
@@ -651,7 +651,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             }
             if(f->pending_blank) {
                 md_mark_list_loose(d,f->list);
-                f->paragraph=f->code=f->quote=UINT32_MAX;
+                f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
                 f->pending_blank=false;
             }
             const size_t inner_indent=indent-f->content_column;
@@ -675,16 +675,28 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 if(f->quote==UINT32_MAX) {
                     f->quote=md_add(d,f->item,STUN_UI_BLOCK_QUOTE,0u);
                     if(f->quote==UINT32_MAX) return true;
+                    f->quote_paragraph=UINT32_MAX;
                 }
                 const size_t qb=md_left(s,body+1u,line.end);
-                const uint32_t paragraph=md_add(d,f->quote,
-                                                  STUN_UI_BLOCK_PARAGRAPH,0u);
-                if(paragraph!=UINT32_MAX)
-                    (void)md_inline(d,paragraph,s+qb,line.end-qb,0u);
+                if(qb==line.end) {
+                    /* An explicitly empty '>' separates quote paragraphs;
+                     * it must not synthesize a blank <p></p> node. */
+                    f->quote_paragraph=UINT32_MAX;
+                } else {
+                    if(f->quote_paragraph==UINT32_MAX) {
+                        f->quote_paragraph=md_add(d,f->quote,
+                                                STUN_UI_BLOCK_PARAGRAPH,0u);
+                        if(f->quote_paragraph==UINT32_MAX) return true;
+                    } else if(md_add(d,f->quote_paragraph,
+                                     STUN_UI_BLOCK_LINE_BREAK,0u)==UINT32_MAX)
+                        return true;
+                    if(!md_inline(d,f->quote_paragraph,s+qb,
+                                  line.end-qb,0u)) return true;
+                }
                 f->paragraph=UINT32_MAX;
                 return true;
             }
-            f->quote=UINT32_MAX;
+            f->quote=f->quote_paragraph=UINT32_MAX;
             if(f->paragraph==UINT32_MAX) {
                 f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
                 if(f->paragraph==UINT32_MAX) return true;
