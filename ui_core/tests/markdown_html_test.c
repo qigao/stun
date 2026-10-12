@@ -221,14 +221,14 @@ static const html_fixture cases[] = {
       "<p><em><strong><strong>foo</strong></strong></em></p>\n" }, /* #468 */
     { "*foo __bar *baz bim__ bam*\n",
       "<p><em>foo <strong>bar *baz bim</strong> bam</em></p>\n" }, /* #470 */
-    /* Official #473/#474/#521: a link label is opaque to an outside
-     * delimiter run; neither side may steal the label's marker. */
-    { "*[bar*](/url)\\n",
-      "<p>*<a href=\\\"/url\\\">bar*</a></p>\\n" }, /* #473 */
-    { "_foo [bar_](/url)\\n",
-      "<p>_foo <a href=\\\"/url\\\">bar_</a></p>\\n" }, /* #474 */
-    { "*[foo*](/uri)\\n",
-      "<p>*<a href=\\\"/uri\\\">foo*</a></p>\\n" }, /* #521 */
+    /* Official #473/#474/#521: link labels cannot donate markers to
+     * outside emphasis runs. */
+    { "*[bar*](/url)\n",
+      "<p>*<a href=\"/url\">bar*</a></p>\n" }, /* #473 */
+    { "_foo [bar_](/url)\n",
+      "<p>_foo <a href=\"/url\">bar_</a></p>\n" }, /* #474 */
+    { "*[foo*](/uri)\n",
+      "<p>*<a href=\"/uri\">foo*</a></p>\n" }, /* #521 */
     { "", "" },
 };
 
