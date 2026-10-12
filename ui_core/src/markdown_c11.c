@@ -545,6 +545,20 @@ static bool md_list_open(stun_md_document *d,md_list_stack *stack,
                          uint32_t parent,const md_list_marker_info *m,
                          const char *s,size_t end);
 
+/* Use the same ATX grammar and owned IR for headings admitted directly
+ * within a list item; no competing inline parser is introduced. */
+static bool md_list_begin_atx(stun_md_document *d,md_list_frame *f,
+                              const char *s,size_t begin,size_t end) {
+    size_t text_begin=begin,text_end=end;
+    const unsigned level=md_atx(s,&text_begin,&text_end);
+    if(!level) return false;
+    const uint32_t heading=md_add(d,f->item,STUN_UI_BLOCK_HEADING,level);
+    if(heading!=UINT32_MAX)
+        (void)md_inline(d,heading,s+text_begin,text_end-text_begin,0u);
+    f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
+    return true;
+}
+
 static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
                                 md_list_frame *f,
                                 const md_list_marker_info *m,
@@ -595,8 +609,10 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
             nested.content_column+=m->content_column;
             return md_list_open(d,stack,f->item,&nested,s,end);
         }
-        /* A list marker may introduce a fenced block directly: "- ~~~".
-         * Do not manufacture a paragraph containing the fence opener. */
+        /* A list marker may introduce a heading or fenced block directly.
+         * Both retain their list-item parent instead of creating a paragraph. */
+        if(!task && md_list_begin_atx(d,f,s,content,end))
+            return d->error==STUN_UI_OK;
         if(!task && md_list_begin_fence(d,f,s,content,end))
             return d->error==STUN_UI_OK;
         f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
@@ -660,6 +676,22 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
     md_list_marker_info marker={0};
     const bool marker_found=md_list_token(s,line,&marker);
     const size_t line_begin=md_left(s,line.begin,line.end);
+    /* An underline indented within an existing item converts the active
+     * paragraph to a setext heading BEFORE the thematic-break precedence.
+     * An unindented "---" cannot be owned by the item and remains root HR. */
+    md_list_frame *active=&stack->frames[stack->depth-1u];
+    if(!active->fence_open && !active->pending_blank &&
+       active->paragraph!=UINT32_MAX &&
+       indent>=active->content_column &&
+       indent-active->content_column<=3u) {
+        const unsigned level=md_setext(s,line_begin,line.end);
+        if(level) {
+            d->nodes[active->paragraph].kind=STUN_UI_BLOCK_HEADING;
+            d->nodes[active->paragraph].heading_level=level;
+            active->paragraph=UINT32_MAX;
+            return true;
+        }
+    }
     /* Thematic breaks interrupt active list items (including '* * *').
      * They do not become a new list item merely because '*' is a marker. */
     if(indent<=3u && md_rule(s,line_begin,line.end) &&
@@ -760,6 +792,9 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 f->code_blank_lines=0u;
             }
             const size_t inner_begin=md_left(s,body,line.end);
+            if(inner_indent<=3u &&
+               md_list_begin_atx(d,f,s,inner_begin,line.end))
+                return true;
             if(inner_indent<=3u &&
                md_list_begin_fence(d,f,s,inner_begin,line.end))
                 return true;
