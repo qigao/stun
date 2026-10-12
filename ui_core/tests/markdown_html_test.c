@@ -272,10 +272,26 @@ static const html_fixture cases[] = {
     { "foo\\\\\nbaz\n", "<p>foo\\\nbaz</p>\n" },
     { "foo\\\n", "<p>foo\\</p>\n" },
     { "foo \nbaz\n", "<p>foo\nbaz</p>\n" },
+    /* #185 stacked cross-line lifetime: physical HARD source must remain
+     * inside the real inline owner; final Setext trailing tab is not text. */
+    { "  Foo *bar\nbaz*\t\n====\n",
+      "<h1>Foo <em>bar\nbaz</em></h1>\n" },                 /* #82 */
+    { "*foo  \nbar*\n",
+      "<p><em>foo<br />\nbar</em></p>\n" },                /* #638 */
+    { "*foo\\\nbar*\n",
+      "<p><em>foo<br />\nbar</em></p>\n" },                /* #639 */
+    { "**foo  \nbar**\n",
+      "<p><strong>foo<br />\nbar</strong></p>\n" },
+    { "__foo\\\nbar__\n",
+      "<p><strong>foo<br />\nbar</strong></p>\n" },
+    { "*foo \nbar*\n",
+      "<p><em>foo\nbar</em></p>\n" },
+    { "*foo\\\r\nbar*\r\n",
+      "<p><em>foo<br />\nbar</em></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==122,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==129,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
