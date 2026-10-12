@@ -308,8 +308,23 @@ static void html_node(stun_html_writer *w, size_t id,
         html_str(w,"<hr />\n");
         *next=id+1u; return;
     case STUN_UI_BLOCK_LINE_BREAK:
-        html_str(w,"\n"); /* soft line break; hard break IR is not yet distinct */
+        html_str(w,"\n"); /* soft: semantic LF, never a hard HTML break */
         *next=id+1u; return;
+    case STUN_UI_BLOCK_HARD_LINE_BREAK: {
+        if(!html_metadata(w,id,&meta,&meta_length)) return;
+        if(meta_length!=sizeof(stun_ui_line_break_semantics)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        stun_ui_line_break_semantics info;
+        memcpy(&info,meta,sizeof(info));
+        if((info.origin!=STUN_UI_LINE_BREAK_TRAILING_SPACES &&
+            info.origin!=STUN_UI_LINE_BREAK_BACKSLASH) ||
+           info.reserved[0] || info.reserved[1] || info.reserved[2]) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"<br />\n");
+        *next=id+1u;return;
+    }
     default:
         /* No silent HTML generation for unsupported Markdown semantics.
          * In particular: tasks, images, math, diagrams, entities, etc. */
