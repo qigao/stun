@@ -686,10 +686,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python_env="$RUNNER_TEMP/stun-cmarkgfm-html-oracle"
-          python3 -m venv "$python_env"
-          "$python_env/bin/python" -m pip install \
-            --disable-pip-version-check --no-cache-dir cmarkgfm
+          # Reuse the *same* test-only Python environment installed by the
+          # independent AST gate. Never create a second cmarkgfm environment.
+          python_env="$RUNNER_TEMP/stun-markdown-oracle"
+          test -x "$python_env/bin/python"
+          "$python_env/bin/python" -c 'import cmarkgfm, mistune'
           "$python_env/bin/python" ui_core/tests/survey_commonmark_spec.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
@@ -721,7 +722,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python_env="$RUNNER_TEMP/stun-cmarkgfm-html-oracle"
+          python_env="$RUNNER_TEMP/stun-markdown-oracle"
+          test -x "$python_env/bin/python"
           "$python_env/bin/python" ui_core/tests/gate_commonmark_indented.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
