@@ -4,6 +4,10 @@
 #include <stdint.h>
 
 #define TICK "\x60"
+#define NBSP "\xc2\xa0"
+#define EM_SPACE "\xe2\x80\x83"
+#define NNBSP "\xe2\x80\xaf"
+#define ZWSP "\xe2\x80\x8b"
 #define CHECK(expr) do { \
     if (!(expr)) { \
         fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #expr); \
@@ -579,6 +583,68 @@ static int test_nested_emphasis_pairs(void) {
     return 0;
 }
 
+/* #182: the canonical Salts::Unicode property must decide whether a
+ * Unicode scalar flanking an emphasis run is White_Space. Verify unchanged
+ * raw UTF-8, typed RichDoc ownership, and boundaries that are explicitly
+ * NOT White_Space (e.g. U+200B). No private classification table. */
+static int test_unicode_whitespace_emphasis(void) {
+    typedef struct {
+        const char *input,*text;
+        size_t emphasis;
+    } unicode_fixture;
+    static const unicode_fixture cases[]={
+        {"*" NBSP "a" NBSP "*\n","*" NBSP "a" NBSP "*",0u}, /* #353 */
+        {"a*" NBSP "b*\n","a*" NBSP "b*",0u},
+        {"*x" NBSP "*\n","*x" NBSP "*",0u},
+        {"*foo" NBSP "bar*\n","foo" NBSP "bar",1u},
+        {"**" NBSP "foo**\n","**" NBSP "foo**",0u},
+        {"_" NBSP "foo_\n","_" NBSP "foo_",0u},
+        {"*" EM_SPACE "a" EM_SPACE "*\n",
+         "*" EM_SPACE "a" EM_SPACE "*",0u},
+        {"*" NNBSP "a" NNBSP "*\n",
+         "*" NNBSP "a" NNBSP "*",0u},
+        {"*" ZWSP "a*\n",ZWSP "a",1u},
+        {"*中*\n","中",1u}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==10u,
+                   "Unicode whitespace source fixture count");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i) {
+        const size_t length=strlen(cases[i].input);
+        stun_md_document *owner=NULL;
+        CHECK(stun_md_parse(cases[i].input,length,128u,
+                            length+1u,&owner)==STUN_UI_OK);
+        CHECK(owner!=NULL);
+        const stun_ui_rich_document_view view=stun_md_document_view(owner);
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        CHECK(view.raw_markdown_bytes==length);
+        CHECK(memcmp(view.raw_markdown,cases[i].input,length)==0);
+        CHECK(kinds(view,STUN_UI_BLOCK_EMPHASIS)==cases[i].emphasis);
+        CHECK(kinds(view,STUN_UI_BLOCK_STRONG)==0u);
+        CHECK(text_is(view,cases[i].text));
+        if(cases[i].emphasis) {
+            bool child_owned=false;
+            for(size_t id=1u;id<view.document.block_count;++id) {
+                const stun_ui_block *node=&view.document.blocks[id];
+                if(node->kind!=STUN_UI_BLOCK_EMPHASIS ||
+                   node->parent_index>=id) continue;
+                if(view.document.blocks[node->parent_index].kind!=
+                   STUN_UI_BLOCK_PARAGRAPH) continue;
+                child_owned=true;
+            }
+            CHECK(child_owned);
+        }
+        stun_md_document_destroy(owner);
+    }
+    /* Failing to allocate the actual UTF-8 TEXT child must not expose a
+     * partially allocated paragraph/emphasis/Unicode boundary model. */
+    const char exhausted[]="*foo" NBSP "bar*\n";
+    stun_md_document *result=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(exhausted,sizeof(exhausted)-1u,3u,
+                        sizeof(exhausted),&result)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(result==NULL);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -589,6 +655,7 @@ int main(void) {
     if(test_code_span_delimiter_precedence()) return 1;
     if(test_ascii_emphasis_flanking()) return 1;
     if(test_nested_emphasis_pairs()) return 1;
+    if(test_unicode_whitespace_emphasis()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;

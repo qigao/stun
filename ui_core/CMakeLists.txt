@@ -13,7 +13,10 @@ target_compile_features(stun_ui_core PUBLIC c_std_11)
 target_include_directories(stun_ui_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-target_link_libraries(stun_ui_core PUBLIC Salts::CMeta)
+# UTF-8 whitespace in inline-flanking rules belongs to the canonical Unicode
+# provider. An installed Salts SDK without this component must fail configure;
+# never silently fall back to locale tables or a Stun-local Unicode copy.
+target_link_libraries(stun_ui_core PUBLIC Salts::CMeta Salts::Unicode)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

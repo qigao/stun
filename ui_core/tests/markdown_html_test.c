@@ -14,6 +14,12 @@
 } while (0)
 
 #define TICK "\x60"
+/* Explicit UTF-8 test bytes; production Unicode classification comes only
+ * from Salts::Unicode 17, never from this fixture vocabulary. */
+#define NBSP "\xc2\xa0"
+#define EM_SPACE "\xe2\x80\x83"
+#define NNBSP "\xe2\x80\xaf"
+#define ZWSP "\xe2\x80\x8b"
 typedef struct {
     const char *markdown;
     const char *html;
@@ -141,10 +147,32 @@ static const html_fixture cases[] = {
       "<p><em>x (<em>y</em>) z</em></p>\n" },
     { "**x (**y**) z**\n",
       "<p><strong>x (<strong>y</strong>) z</strong></p>\n" },
+    /* Unicode 17 White_Space is resolved through the published provider.
+     * #353 uses U+00A0; U+2003 and U+202F are extra positive controls,
+     * whereas U+200B is NOT Unicode White_Space. */
+    { "*" NBSP "a" NBSP "*\n",
+      "<p>*" NBSP "a" NBSP "*</p>\n" },              /* #353 */
+    { "a*" NBSP "b*\n",
+      "<p>a*" NBSP "b*</p>\n" },
+    { "*x" NBSP "*\n",
+      "<p>*x" NBSP "*</p>\n" },
+    { "*foo" NBSP "bar*\n",
+      "<p><em>foo" NBSP "bar</em></p>\n" },
+    { "**" NBSP "foo**\n",
+      "<p>**" NBSP "foo**</p>\n" },
+    { "_" NBSP "foo_\n",
+      "<p>_" NBSP "foo_</p>\n" },
+    { "*" EM_SPACE "a" EM_SPACE "*\n",
+      "<p>*" EM_SPACE "a" EM_SPACE "*</p>\n" },
+    { "*" NNBSP "a" NNBSP "*\n",
+      "<p>*" NNBSP "a" NNBSP "*</p>\n" },
+    { "*" ZWSP "a*\n",
+      "<p><em>" ZWSP "a</em></p>\n" },
+    { "*中*\n", "<p><em>中</em></p>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==63,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==73,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
