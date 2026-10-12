@@ -229,10 +229,36 @@ static const html_fixture cases[] = {
       "<p>_foo <a href=\"/url\">bar_</a></p>\n" }, /* #474 */
     { "*[foo*](/uri)\n",
       "<p>*<a href=\"/uri\">foo*</a></p>\n" }, /* #521 */
+    /* #182 root paragraph-scoped inline ownership: CommonMark 0.31.2
+     * #394/#405/#423/#432 must preserve typed SOFT breaks *inside* their
+     * nested emphasis/strong owners, never as paragraph-level siblings. */
+    { "**Gomphocarpus (*Gomphocarpus physocarpus*, syn.\n"
+      "*Asclepias physocarpa*)**\n",
+      "<p><strong>Gomphocarpus (<em>Gomphocarpus physocarpus</em>, syn.\n"
+      "<em>Asclepias physocarpa</em>)</strong></p>\n" }, /* #394 */
+    { "*foo\nbar*\n",
+      "<p><em>foo\nbar</em></p>\n" },                     /* #405 */
+    { "**foo\nbar**\n",
+      "<p><strong>foo\nbar</strong></p>\n" },             /* #423 */
+    { "**foo *bar **baz**\nbim* bop**\n",
+      "<p><strong>foo <em>bar <strong>baz</strong>\n"
+      "bim</em> bop</strong></p>\n" },                   /* #432 */
+    /* CRLF normalizes in the semantic inline source but stays unchanged in
+     * the separately owned original Markdown byte buffer. */
+    { "*foo\r\nbar*\r\n",
+      "<p><em>foo\nbar</em></p>\n" },
+    /* A blank line, heading or quote interrupts the paragraph: no marker
+     * may match across these real block boundaries. */
+    { "*foo\n\nbar*\n",
+      "<p>*foo</p>\n<p>bar*</p>\n" },
+    { "*foo\n# head\nbar*\n",
+      "<p>*foo</p>\n<h1>head</h1>\n<p>bar*</p>\n" },
+    { "*foo\n> quote*\n",
+      "<p>*foo</p>\n<blockquote>\n<p>quote*</p>\n</blockquote>\n" },
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==103,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==111,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
