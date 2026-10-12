@@ -52,3 +52,9 @@ add_executable(stun_markdown_nested_quote_test markdown_nested_quote_test.c)
 target_compile_features(stun_markdown_nested_quote_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_nested_quote_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_nested_quote_test COMMAND stun_markdown_nested_quote_test)
+
+# CommonMark #181: the quote owns nested lists; the root owns following lists.
+add_executable(stun_markdown_quoted_list_test markdown_quoted_list_test.c)
+target_compile_features(stun_markdown_quoted_list_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_quoted_list_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_quoted_list_test COMMAND stun_markdown_quoted_list_test)
