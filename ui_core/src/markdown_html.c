@@ -37,6 +37,7 @@ static void html_str(stun_html_writer *w, const char *str) {
 
 static void html_escaped(stun_html_writer *w,
                          const char *s, size_t len, bool attribute) {
+    (void)attribute; /* identical quote escaping for text and attributes */
     if (!s && len) { w->error = STUN_UI_INVALID_ARGUMENT; return; }
     for (size_t i=0;i<len && w->error==STUN_UI_OK;++i) {
         switch(s[i]) {
@@ -44,8 +45,10 @@ static void html_escaped(stun_html_writer *w,
         case '<': html_str(w,"&lt;"); break;
         case '>': html_str(w,"&gt;"); break;
         case '"':
-            if (attribute) html_str(w,"&quot;");
-            else html_bytes(w,s+i,1u);
+            /* cmark's HTML text contract escapes literal double quotes in
+             * text and code as well as in attributes (CommonMark #352).
+             * The same bounded writer/measurement path owns all output. */
+            html_str(w,"&quot;");
             break;
         default: html_bytes(w,s+i,1u); break;
         }

@@ -478,6 +478,45 @@ static int test_code_span_delimiter_precedence(void) {
     return 0;
 }
 
+/* #182: delimiter boundary decisions are IR-level ownership decisions.
+ * Rejected openers stay literal; word-internal underscores never invent a
+ * nested Emphasis node, and admitted outer emphasis retains its real text. */
+static int test_ascii_emphasis_flanking(void) {
+    typedef struct {
+        const char *markdown,*text;
+        size_t emphasis,strong;
+    } flanking_fixture;
+    static const flanking_fixture samples[]={
+        {"a*\"foo\"*\n","a*\"foo\"*",0u,0u},
+        {"a_\"foo\"_\n","a_\"foo\"_",0u,0u},
+        {"foo_bar_\n","foo_bar_",0u,0u},
+        {"5_6_78\n","5_6_78",0u,0u},
+        {"aa_\"bb\"_cc\n","aa_\"bb\"_cc",0u,0u},
+        {"_foo_bar\n","_foo_bar",0u,0u},
+        {"_foo_bar_baz_\n","foo_bar_baz",1u,0u},
+        {"a**\"foo\"**\n","a**\"foo\"**",0u,0u},
+        {"**foo **bar baz**\n","bar baz",0u,1u}, /* #471 */
+        {"*foo *bar baz*\n","bar baz",1u,0u}   /* #472 */
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==10u,
+                   "flanking ownership sample count");
+    for(size_t i=0u;i<sizeof(samples)/sizeof(samples[0]);++i) {
+        const size_t n=strlen(samples[i].markdown);
+        stun_md_document *d=NULL;
+        CHECK(stun_md_parse(samples[i].markdown,n,128u,n+1u,&d)==STUN_UI_OK);
+        CHECK(d!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(d);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==n);
+        CHECK(memcmp(v.raw_markdown,samples[i].markdown,n)==0);
+        CHECK(kinds(v,STUN_UI_BLOCK_EMPHASIS)==samples[i].emphasis);
+        CHECK(kinds(v,STUN_UI_BLOCK_STRONG)==samples[i].strong);
+        CHECK(text_is(v,samples[i].text));
+        stun_md_document_destroy(d);
+    }
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -486,6 +525,7 @@ int main(void) {
     if(test_deterministic_ids()) return 1;
     if(test_code_span_exact_runs_and_text()) return 1;
     if(test_code_span_delimiter_precedence()) return 1;
+    if(test_ascii_emphasis_flanking()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_task_items()) return 1;

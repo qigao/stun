@@ -101,10 +101,34 @@ static const html_fixture cases[] = {
       "<p><em>foo" TICK TICK "bar</em></p>\n" },
     { "**hi " TICK "x*y" TICK " done**\n",
       "<p><strong>hi <code>x*y</code> done</strong></p>\n" },
+    /* ASCII CommonMark flanking: adjacent punctuation cannot open from a
+     * word; underscores inside words cannot become emphasis delimiters. */
+    { "a*\"foo\"*\n", "<p>a*&quot;foo&quot;*</p>\n" },         /* #352 */
+    { "a_\"foo\"_\n", "<p>a_&quot;foo&quot;_</p>\n" },         /* #359 */
+    { "foo_bar_\n", "<p>foo_bar_</p>\n" },                /* #360 */
+    { "5_6_78\n", "<p>5_6_78</p>\n" },                   /* #361 */
+    { "пристаням_стремятся_\n",
+      "<p>пристаням_стремятся_</p>\n" },                 /* #362 */
+    { "aa_\"bb\"_cc\n", "<p>aa_&quot;bb&quot;_cc</p>\n" },  /* #363 */
+    { "*(*foo)\n", "<p>*(*foo)</p>\n" },                  /* #368 */
+    { "_(_foo)\n", "<p>_(_foo)</p>\n" },                  /* #372 */
+    { "_foo_bar\n", "<p>_foo_bar</p>\n" },                /* #374 */
+    { "_пристаням_стремятся\n",
+      "<p>_пристаням_стремятся</p>\n" },                 /* #375 */
+    { "_foo_bar_baz_\n",
+      "<p><em>foo_bar_baz</em></p>\n" },                 /* #376 */
+    { "a**\"foo\"**\n",
+      "<p>a**&quot;foo&quot;**</p>\n" },                         /* #380 */
+    /* A later delimiter immediately following whitespace may be a nearer
+     * opener; it must retain ownership of the final matching closer. */
+    { "**foo **bar baz**\n",
+      "<p>**foo <strong>bar baz</strong></p>\n" },       /* #471 */
+    { "*foo *bar baz*\n",
+      "<p>*foo <em>bar baz</em></p>\n" },                /* #472 */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==42,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==56,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
