@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict byte-exact gate for 639 qualified, test-only SPEC HTML examples.
+"""Strict byte-exact gate for 645 qualified, test-only SPEC HTML examples.
 
 This gate never reads or changes the 573-ID SafeApplicationHtml baseline.
 New matches remain diagnostic until a separately evidenced promotion.
@@ -25,10 +25,10 @@ def evaluate(survey: dict, baseline: dict) -> dict:
         baseline.get("commonmark_version") != "0.31.2" or
         survey.get("source") != baseline.get("source") or
         survey.get("total") != 652 or baseline.get("official_total") != 652 or
-        not isinstance(ids, list) or len(ids) != 639 or
+        not isinstance(ids, list) or len(ids) != 645 or
         any(type(n) is not int or n < 1 or n > 652 for n in ids) or
         ids != sorted(set(ids))):
-        raise InvalidEvidence("wrong policy, corpus or 639-ID baseline")
+        raise InvalidEvidence("wrong policy, corpus or 645-ID baseline")
 
     rows = survey.get("cases")
     if not isinstance(rows, list) or len(rows) != 652:
