@@ -474,6 +474,71 @@ static bool md_uri_autolink(const char *s,size_t n,size_t at,
 static bool md_email_autolink(const char *s,size_t n,size_t at,
                               size_t *out_close);
 
+/* Bounded same-line HTML open-tag lexing for delimiter opacity only.
+ * This is NOT RawHTML rendering, a second Markdown frontend, or a security
+ * sanitizer. SafeApplicationHtml still escapes every byte of this source.
+ * Accept only syntactically complete ASCII tags with quoted/unquoted
+ * attribute grammar; malformed/incomplete tags stay ordinary Markdown.
+ * Official #524/#536 require ']' within a quoted attribute to be opaque. */
+static bool md_tag_letter(unsigned char c) {
+    return (c>='A'&&c<='Z')||(c>='a'&&c<='z');
+}
+static bool md_tag_digit(unsigned char c) {
+    return c>='0'&&c<='9';
+}
+static bool md_tag_attr_start(unsigned char c) {
+    return md_tag_letter(c)||c=='_'||c==':';
+}
+static bool md_tag_attr_continue(unsigned char c) {
+    return md_tag_attr_start(c)||md_tag_digit(c)||c=='-'||c=='.';
+}
+static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
+    if(!s||at>=n||s[at]!='<'||at+1u>=n||
+       !md_tag_letter((unsigned char)s[at+1u]))return SIZE_MAX;
+    size_t p=at+2u;
+    while(p<n && (md_tag_letter((unsigned char)s[p])||
+                   md_tag_digit((unsigned char)s[p])||s[p]=='-'))++p;
+    for(;;) {
+        if(p>=n)return SIZE_MAX;
+        if(s[p]=='>')return p;
+        if(s[p]=='/'&&p+1u<n&&s[p+1u]=='>')return p+1u;
+        if(!md_space(s[p]))return SIZE_MAX;
+        while(p<n && md_space(s[p]))++p;
+        if(p>=n)return SIZE_MAX;
+        if(s[p]=='>')return p;
+        if(s[p]=='/'&&p+1u<n&&s[p+1u]=='>')return p+1u;
+        if(!md_tag_attr_start((unsigned char)s[p]))return SIZE_MAX;
+        ++p;
+        while(p<n&&md_tag_attr_continue((unsigned char)s[p]))++p;
+        while(p<n&&md_space(s[p]))++p;
+        if(p<n&&s[p]=='=') {
+            ++p;
+            while(p<n&&md_space(s[p]))++p;
+            if(p>=n)return SIZE_MAX;
+            const char quote=s[p];
+            if(quote=='"'||quote=='\'') {
+                ++p;
+                while(p<n&&s[p]!=quote) {
+                    if(s[p]=='\n'||s[p]=='\r'||s[p]=='\0')return SIZE_MAX;
+                    ++p;
+                }
+                if(p>=n)return SIZE_MAX;
+                ++p;
+            } else {
+                const size_t start=p;
+                while(p<n&&!md_space(s[p])&&s[p]!='>') {
+                    const char c=s[p];
+                    if(c=='<'||c=='"'||c=='\''||c=='='||
+                       c==(char)0x60||c=='\n'||c=='\r'||c=='\0')
+                        return SIZE_MAX;
+                    ++p;
+                }
+                if(p==start)return SIZE_MAX;
+            }
+        }
+    }
+}
+
 /* One bounded LINK-text bracket scanner for both inline targets and
  * reference links. Literal nested brackets are legal visible link text
  * (CommonMark #528), including adjacent closing "]]" from #559.
@@ -499,6 +564,8 @@ static size_t md_link_text_close(const char *s,size_t n,size_t begin) {
                md_email_autolink(s,n,p,&close)) {
                 p=close+1u;continue;
             }
+            close=md_opaque_html_tag_close(s,n,p);
+            if(close!=SIZE_MAX) {p=close+1u;continue;}
         }
         if(s[p]=='[') {
             if(depth>=32u)return SIZE_MAX;
@@ -706,6 +773,8 @@ static bool md_link_visible_has_active_link(const stun_md_document *d,
             if(md_uri_autolink(s,end,p,&close) ||
                md_email_autolink(s,end,p,&close))
                 return true; /* active LINK, even inside visible brackets */
+            close=md_opaque_html_tag_close(s,end,p);
+            if(close!=SIZE_MAX) {p=close+1u;continue;}
         }
         if(s[p]=='[' && (p==0u || s[p-1u]!='!' ||
                          (p>=2u && s[p-2u]=='\\'))) {
@@ -961,6 +1030,8 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
                 p=close+1u;
                 continue;
             }
+            close=md_opaque_html_tag_close(s,n,p);
+            if(close!=SIZE_MAX) {p=close+1u;continue;}
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
             p+=2u;continue;
@@ -1207,6 +1278,12 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
                 p=close+1u;
                 text_start=p;
                 continue;
+            }
+            close=md_opaque_html_tag_close(s,n,p);
+            if(close!=SIZE_MAX) {
+                /* Retain verbatim semantic TEXT; the safe HTML writer
+                 * escapes it later. No tags are published as HTML. */
+                p=close+1u;continue;
             }
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {

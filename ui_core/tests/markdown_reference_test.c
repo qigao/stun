@@ -1005,6 +1005,64 @@ done:
     return failure;
 }
 
+/* Complete quoted HTML tags are opaque only to Markdown delimiters.
+ * The production safe renderer MUST still escape raw markup, including
+ * potentially unsafe attributes; no RawHTML nodes or nested LINKs. */
+static int test_html_tag_delimiter_opacity(void) {
+    static const struct {
+        const char *source,*expected;
+        size_t links;
+    } cases[]={
+        {"[foo <bar attr=\"](baz)\">\n",
+         "<p>[foo &lt;bar attr=&quot;](baz)&quot;&gt;</p>\n",0u}, /* #524 */
+        {"[foo <bar attr=\"][ref]\">\n\n[ref]: /uri\n",
+         "<p>[foo &lt;bar attr=&quot;][ref]&quot;&gt;</p>\n",0u}, /* #536 */
+        {"[foo <bar attr=\"[ref]\">](/outer)\n\n[ref]: /uri\n",
+         "<p><a href=\"/outer\">foo &lt;bar attr=&quot;[ref]&quot;&gt;</a></p>\n",1u},
+        {"[foo <bar attr=\"](baz)\n",
+         "<p><a href=\"baz\">foo &lt;bar attr=&quot;</a></p>\n",1u},
+        {"[foo <bar attr='](baz)'>\n",
+         "<p>[foo &lt;bar attr='](baz)'&gt;</p>\n",0u}
+    };
+    int failure=0;stun_md_document *doc=NULL,*rejected=NULL;
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t n=strlen(cases[k].source);
+        VERIFY(stun_md_parse(cases[k].source,n,256u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==n &&
+               !memcmp(v.raw_markdown,cases[k].source,n));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==cases[k].links);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_IMAGE)==0u);
+        const size_t expected=strlen(cases[k].expected);
+        size_t required=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+        VERIFY(required==expected);
+        char out[256];memset(out,0x43,sizeof(out));
+        VERIFY(required+2u<sizeof(out));
+        VERIFY(stun_md_render_html(&v,256u,out,required,&required)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(required==expected);
+        for(size_t i=0u;i<sizeof(out);++i)
+            VERIFY((unsigned char)out[i]==0x43u);
+        VERIFY(stun_md_render_html(&v,256u,out,expected+1u,&required)==
+               STUN_UI_OK);
+        VERIFY(required==expected &&
+               !memcmp(out,cases[k].expected,expected+1u));
+        const size_t nodes=v.document.block_count;
+        VERIFY(nodes>1u);
+        stun_md_document_destroy(doc);doc=NULL;
+        VERIFY(stun_md_parse(cases[k].source,n,nodes-1u,n+1u,
+                             &rejected)==STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(rejected==NULL);
+    }
+done:
+    stun_md_document_destroy(rejected);
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]\n",
@@ -1108,7 +1166,8 @@ int main(void) {
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
-    if(test_nested_link_precedence() || test_unsafe() || test_fence() ||
+    if(test_html_tag_delimiter_opacity() ||
+       test_nested_link_precedence() || test_unsafe() || test_fence() ||
        test_container_definition_fences() ||
        test_list_blank_scope() || test_list_capacity_isolation() ||
        test_root_rule_owner_release() ||
