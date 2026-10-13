@@ -539,6 +539,11 @@ static bool md_tag_attr_start(unsigned char c) {
 static bool md_tag_attr_continue(unsigned char c) {
     return md_tag_attr_start(c)||md_tag_digit(c)||c=='-'||c=='.';
 }
+/* The scanner is shared by one-line and bounded joined-line candidates.
+ * This is only the HTML lexical whitespace rule, not Markdown indentation. */
+static bool md_tag_space(char c) {
+    return md_space(c)||c=='\n'||c=='\r';
+}
 static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
     if(!s||at>=n||s[at]!='<'||at+1u>=n||
        !md_tag_letter((unsigned char)s[at+1u]))return SIZE_MAX;
@@ -549,34 +554,34 @@ static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
         if(p>=n)return SIZE_MAX;
         if(s[p]=='>')return p;
         if(s[p]=='/'&&p+1u<n&&s[p+1u]=='>')return p+1u;
-        if(!md_space(s[p]))return SIZE_MAX;
-        while(p<n && md_space(s[p]))++p;
+        if(!md_tag_space(s[p]))return SIZE_MAX;
+        while(p<n && md_tag_space(s[p]))++p;
         if(p>=n)return SIZE_MAX;
         if(s[p]=='>')return p;
         if(s[p]=='/'&&p+1u<n&&s[p+1u]=='>')return p+1u;
         if(!md_tag_attr_start((unsigned char)s[p]))return SIZE_MAX;
         ++p;
         while(p<n&&md_tag_attr_continue((unsigned char)s[p]))++p;
-        while(p<n&&md_space(s[p]))++p;
+        while(p<n&&md_tag_space(s[p]))++p;
         if(p<n&&s[p]=='=') {
             ++p;
-            while(p<n&&md_space(s[p]))++p;
+            while(p<n&&md_tag_space(s[p]))++p;
             if(p>=n)return SIZE_MAX;
             const char quote=s[p];
             if(quote=='"'||quote=='\'') {
                 ++p;
                 while(p<n&&s[p]!=quote) {
-                    if(s[p]=='\n'||s[p]=='\r'||s[p]=='\0')return SIZE_MAX;
+                    if(s[p]=='\0')return SIZE_MAX;
                     ++p;
                 }
                 if(p>=n)return SIZE_MAX;
                 ++p;
             } else {
                 const size_t start=p;
-                while(p<n&&!md_space(s[p])&&s[p]!='>') {
+                while(p<n&&!md_tag_space(s[p])&&s[p]!='>') {
                     const char c=s[p];
                     if(c=='<'||c=='"'||c=='\''||c=='='||
-                       c==(char)0x60||c=='\n'||c=='\r'||c=='\0')
+                       c==(char)0x60||c=='\0')
                         return SIZE_MAX;
                     ++p;
                 }
@@ -611,9 +616,9 @@ static size_t md_inline_html_tag_close(const char *s,size_t n,size_t at) {
         if(at+5u<n && s[at+4u]=='-' && s[at+5u]=='>')
             return at+5u;
         for(p=at+4u;p+2u<n;++p) {
-            if(s[p]=='\n'||s[p]=='\r')return SIZE_MAX;
+            /* CommonMark 0.31.2 allows internal '--' and physical LF;
+             * only the first complete '-->' terminates the token. */
             if(s[p]=='-'&&s[p+1u]=='-'&&s[p+2u]=='>')return p+2u;
-            if(s[p]=='-'&&s[p+1u]=='-')return SIZE_MAX;
         }
         return SIZE_MAX;
     }
@@ -2912,6 +2917,80 @@ static bool md_root_multiline_inline_title(stun_md_document *d,
     return true;
 }
 
+/* Admit one bounded two-line ROOT inline HTML token by the SAME
+ * md_inline_html_tag_close / md_inline grammar. The scanner owns the LF
+ * INSIDE the typed RAW_HTML_INLINE node, so neither soft nor hard breaks
+ * are manufactured from attribute/comment source. Only a token closing
+ * at the next physical line's end (or with one trailing literal ')' after
+ * an invalid multiline LINK destination) is admitted. Other cases remain
+ * with canonical per-line parsing; this is not a second HTML parser
+ * or any change to the default safe renderer.
+ *
+ * Input is copied into transient LF-normalized scratch; published nodes own
+ * copied semantic bytes. Never borrow scratch or cross blank/container/block
+ * boundaries. The two-line limit bounds incomplete-candidate work. */
+static bool md_root_multiline_raw_html(stun_md_document *d,
+                                       uint32_t *paragraph,md_line first,
+                                       size_t begin,size_t *next_pos,
+                                       md_root_break *next_break) {
+    const char *s=d->raw;
+    if(*paragraph!=UINT32_MAX || begin>=first.end ||
+       !first.newline || first.next>=d->raw_size)return false;
+    const md_line second=md_read_line(d,first.next);
+    if(md_blank(s,second.begin,second.end) ||
+       md_root_code_span_interrupts(d,second))return false;
+    const size_t first_bytes=first.end-begin;
+    const size_t second_bytes=second.end-second.begin;
+    if(first_bytes>=d->raw_size ||
+       second_bytes>d->raw_size-first_bytes-1u)return false;
+    const size_t bytes=first_bytes+1u+second_bytes;
+    char *joined=(char*)malloc(bytes+1u);
+    if(!joined) {md_error(d,STUN_UI_OUT_OF_MEMORY);return true;}
+    memcpy(joined,s+begin,first_bytes);
+    joined[first_bytes]='\n';
+    memcpy(joined+first_bytes+1u,s+second.begin,second_bytes);
+    joined[bytes]='\0';
+    bool admitted=false;
+    /* Fixed lexical probe ceiling prevents quadratic rescans for a source
+     * consisting mostly of repeated malformed '<' prefixes. */
+    size_t html_probes=0u;
+    for(size_t p=0u;p<first_bytes;++p) {
+        if(joined[p]=='\\' && p+1u<first_bytes) {++p;continue;}
+        if(joined[p]=='\x60') {
+            size_t end=p+1u;
+            while(end<first_bytes && joined[end]=='\x60')++end;
+            const size_t close=md_code_span_close(
+                joined,first_bytes,end,end-p);
+            if(close!=SIZE_MAX) {p=close+(end-p)-1u;continue;}
+        }
+        if(joined[p]!='<')continue;
+        if(++html_probes>32u)break;
+        size_t autolink=SIZE_MAX;
+        if(md_uri_autolink(joined,bytes,p,&autolink) ||
+           md_email_autolink(joined,bytes,p,&autolink)) {
+            if(autolink<first_bytes)p=autolink;
+            continue;
+        }
+        const size_t close=md_inline_html_tag_close(joined,bytes,p);
+        if(close!=SIZE_MAX && close>=first_bytes &&
+           (close+1u==bytes ||
+            (close+2u==bytes && joined[close+1u]==')'))) {
+            admitted=true;break;
+        }
+        if(close!=SIZE_MAX && close<first_bytes)p=close;
+    }
+    if(!admitted) {free(joined);return false;}
+    const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0u);
+    if(node==UINT32_MAX) {free(joined);return true;}
+    *paragraph=node;
+    const bool ok=md_inline(d,node,joined,bytes,0u);
+    free(joined);
+    if(!ok)return true; /* failure discards all unpublished RichDoc nodes */
+    *next_pos=second.next;
+    *next_break=MD_ROOT_BREAK_SOFT;
+    return true;
+}
+
 /* Collect bounded ASCII root reference definitions. The scan is
  * BEFORE inline admission, so a later [ref]: ... can bind an earlier
  * [text][ref]. Definitions inside code fences, indented code, lists or
@@ -3658,6 +3737,13 @@ static void md_parse_blocks(stun_md_document *d) {
         if(paragraph==UINT32_MAX && lists.depth==0u && quotes.depth==0u &&
            md_root_multiline_inline_title(d,&paragraph,line,begin,
                                           &pos,&pending_break)) {
+            if(d->error!=STUN_UI_OK)return;
+            continue;
+        }
+        /* One typed multi-line HTML token; SAFE always escapes. */
+        if(paragraph==UINT32_MAX && lists.depth==0u && quotes.depth==0u &&
+           md_root_multiline_raw_html(d,&paragraph,line,begin,
+                                      &pos,&pending_break)) {
             if(d->error!=STUN_UI_OK)return;
             continue;
         }

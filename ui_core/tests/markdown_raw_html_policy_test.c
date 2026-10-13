@@ -120,6 +120,27 @@ static const raw_fixture fixtures[] = {
     {626u,"foo <!--> foo -->\n\nfoo <!---> foo -->\n",
      "<p>foo <!--> foo --&gt;</p>\n<p>foo <!---> foo --&gt;</p>\n",
      "<p>foo &lt;!--&gt; foo --&gt;</p>\n<p>foo &lt;!---&gt; foo --&gt;</p>\n",2u},
+    {615u,"<a  /><b2\ndata=\"foo\" >\n",
+     "<p><a  /><b2\ndata=\"foo\" ></p>\n",
+     "<p>&lt;a  /&gt;&lt;b2\ndata=&quot;foo&quot; &gt;</p>\n",2u},
+    {616u,"<a foo=\"bar\" bam = 'baz <em>\"</em>'\n_boolean zoop:33=zoop:33 />\n",
+     "<p><a foo=\"bar\" bam = 'baz <em>\"</em>'\n_boolean zoop:33=zoop:33 /></p>\n",
+     "<p>&lt;a foo=&quot;bar&quot; bam = 'baz &lt;em&gt;&quot;&lt;/em&gt;'\n_boolean zoop:33=zoop:33 /&gt;</p>\n",1u},
+    {625u,"foo <!-- this is a --\ncomment - with hyphens -->\n",
+     "<p>foo <!-- this is a --\ncomment - with hyphens --></p>\n",
+     "<p>foo &lt;!-- this is a --\ncomment - with hyphens --&gt;</p>\n",1u},
+    {642u,"<a href=\"foo  \nbar\">\n",
+     "<p><a href=\"foo  \nbar\"></p>\n",
+     "<p>&lt;a href=&quot;foo  \nbar&quot;&gt;</p>\n",1u},
+    {643u,"<a href=\"foo\\\nbar\">\n",
+     "<p><a href=\"foo\\\nbar\"></p>\n",
+     "<p>&lt;a href=&quot;foo\\\nbar&quot;&gt;</p>\n",1u},
+    {491u,"[link](<foo\nbar>)\n",
+     "<p>[link](<foo\nbar>)</p>\n",
+     "<p>[link](&lt;foo\nbar&gt;)</p>\n",1u},
+    {0u,"<a href=\"foo\r\nbar\">\r\n",
+     "<p><a href=\"foo\nbar\"></p>\n",
+     "<p>&lt;a href=&quot;foo\nbar&quot;&gt;</p>\n",1u},
     {0u,"foo <!--x> bar\n",
      "<p>foo &lt;!--x&gt; bar</p>\n",
      "<p>foo &lt;!--x&gt; bar</p>\n",0u}
@@ -263,10 +284,34 @@ static int test_type6_exact_admission(void) {
     return 0;
 }
 
+/* An escaped opener, a blank, or an interrupting list must not donate
+ * its next source line to the bounded inline HTML ownership path. */
+static int test_multiline_html_nonadmission(void) {
+    static const char *const rejected[]={
+        "\\<a href=\"foo\nbar\">\n",
+        "<a href=\"foo\n\nbar\">\n",
+        "<a href=\"foo\n- bar\">\n",
+        "foo <!-- unfinished\nstill not closed\n"
+    };
+    for(size_t k=0u;k<sizeof(rejected)/sizeof(rejected[0]);++k) {
+        const size_t bytes=strlen(rejected[k]);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(rejected[k],bytes,256u,bytes+1u,&doc)
+              ==STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(raw_nodes(v)==0u);
+        stun_md_document_destroy(doc);
+    }
+    return 0;
+}
+
 int main(void) {
     if(test_type6_exact_admission())return 1;
-    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==14u,
-                   "ten official cases and four security/invalid-input controls");
+    if(test_multiline_html_nonadmission())return 1;
+    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==21u,
+                   "sixteen official inline examples, one CRLF and four negatives");
     for(size_t i=0u;i<sizeof(fixtures)/sizeof(fixtures[0]);++i)
         if(verify(&fixtures[i])) {
             fprintf(stderr,"RAW HTML fixture %u failed\n",
@@ -286,7 +331,7 @@ int main(void) {
         187u,"Foo\n<a href=\"bar\">\nbaz\n","<p>Foo\n<a href=\"bar\">\nbaz</p>\n","<p>Foo\n&lt;a href=&quot;bar&quot;&gt;\nbaz</p>\n",1u
     };
     if(verify(&type7_noninterrupt))return 1;
-    puts("C11 typed RAW_HTML: ten official inline, twenty-eight official block "
+    puts("C11 typed RAW_HTML: sixteen official inline, twenty-eight official block "
          "spec outputs; unchanged SAFE rendering and atomic limits");
     return 0;
 }
