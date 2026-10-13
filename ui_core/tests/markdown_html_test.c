@@ -399,11 +399,19 @@ static const html_fixture cases[] = {
       "<blockquote>\n<p>quote</p>\n</blockquote>\n"
       "<pre><code>[shadow]: /blocked\n~~~\n[shadow]: /blocked\n</code></pre>\n"
       "<p><a href=\"/uri\">ref</a></p>\n" }, /* unequal shorter closer is opaque */
+    { "Root\n2. text\n===\n[id]: /uri\n\n[id]\n",
+      "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n" }, /* non-1 ordered marker cannot interrupt paragraph */
+    { "Root\n+\n===\n[id]: /uri\n\n[id]\n",
+      "<h1>Root\n+</h1>\n<p><a href=\"/uri\">id</a></p>\n" }, /* empty list marker stays paragraph text */
+    { "Root\n-\n[id]: /uri\n\n[id]\n",
+      "<h2>Root</h2>\n<p><a href=\"/uri\">id</a></p>\n" }, /* single '-' is Setext H2, not list */
+    { "Root\r\n2. text\r\n===\r\n[id]: /uri\r\n\r\n[id]\r\n",
+      "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n" }, /* CRLF ownership and source preservation */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==224,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==228,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

@@ -151,12 +151,14 @@ static int test_container_definition_fences(void) {
         "> quote\n> # inner\n> [hidden]: /uri\n\n[hidden]\n",
         "    # literal\n    [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
+        "Root\n1. real\n===\n[hidden]: /uri\n\n[hidden]\n",
+        "Root\n+ real\n===\n[hidden]: /uri\n\n[hidden]\n",
         "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
         "- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==14u,
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==16u,
                    "reference-owner negative denominator");
     for(size_t i=0u;i<sizeof(blocked)/sizeof(blocked[0]);++i) {
         const size_t n=strlen(blocked[i]);
@@ -524,9 +526,21 @@ int main(void) {
          "<hr />\n<p><a href=\"/root\">key</a></p>\n"},
         {"  * * *\r\n[key]: /root\r\n\r\n[key]\r\n",
          "/root",NULL,"key",
-         "<hr />\n<p><a href=\"/root\">key</a></p>\n"}
+         "<hr />\n<p><a href=\"/root\">key</a></p>\n"},
+        {"Root\n2. text\n===\n[id]: /uri\n\n[id]\n",
+         "/uri",NULL,"id",
+         "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n"},
+        {"Root\n+\n===\n[id]: /uri\n\n[id]\n",
+         "/uri",NULL,"id",
+         "<h1>Root\n+</h1>\n<p><a href=\"/uri\">id</a></p>\n"},
+        {"Root\n-\n[id]: /uri\n\n[id]\n",
+         "/uri",NULL,"id",
+         "<h2>Root</h2>\n<p><a href=\"/uri\">id</a></p>\n"},
+        {"Root\r\n2. text\r\n===\r\n[id]: /uri\r\n\r\n[id]\r\n",
+         "/uri",NULL,"id",
+         "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==17u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==21u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
@@ -560,7 +574,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 17/17 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 21/21 AST/HTML, forward/duplicate/case "
          "binding, safe URL, root-rule, ATX and fenced-code ownership");
     return 0;
 }

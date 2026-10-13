@@ -2164,6 +2164,13 @@ static void md_reference_collect_root(stun_md_document *d) {
             list_content_column=0u;
             continue;
         }
+        /* Setext underlines have precedence over list-marker admission
+         * for an existing ROOT paragraph, including a single '-' line.
+         * Keep this decision ahead of the list guard as in md_parse_blocks. */
+        if(!container_pending && paragraph_started && rule_setext) {
+            paragraph_started=false;
+            continue;
+        }
         char marker=0;size_t count=0,ib=0,ie=0;
         if(columns<=3u &&
            md_fence_start(s,begin,line.end,&marker,&count,&ib,&ie)) {
@@ -2178,8 +2185,14 @@ static void md_reference_collect_root(stun_md_document *d) {
             paragraph_started=false;continue;
         }
         md_list_marker_info list_marker={0};
+        /* An ordered marker other than '1.' or a marker without content
+         * cannot interrupt an existing ROOT paragraph. The canonical
+         * md_parse_blocks parser uses precisely this admission gate;
+         * do not turn its literal paragraph text into a phantom list. */
         const bool list_start=columns<=3u &&
-                              md_list_token(s,line,&list_marker);
+            md_list_token(s,line,&list_marker) &&
+            (!paragraph_started ||
+             md_list_interrupts_paragraph(&list_marker,line));
         if(columns>3u || s[begin]=='>' || list_start) {
             /* The outermost content column is sufficient for bounded
              * root-definition admission; nested list definitions remain
@@ -2206,15 +2219,6 @@ static void md_reference_collect_root(stun_md_document *d) {
             }
         }
         if(container_pending)continue;
-        /* A Setext underline ends its preceding root paragraph in the
-         * production block parser. The prepass must recognize that same
-         * boundary before admitting a following root definition. Invalid
-         * or standalone underlines never reset paragraph ownership. */
-        if(paragraph_started && columns<=3u &&
-           md_setext(s,begin,line.end)) {
-            paragraph_started=false;
-            continue;
-        }
         if(md_rule(s,begin,line.end)) {
             paragraph_started=false;continue;
         }
