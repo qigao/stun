@@ -606,7 +606,7 @@ static const html_fixture cases[] = {
     { "<javascript:alert>\n",
       "<p>&lt;javascript:alert&gt;</p>\n" }, /* no javascript URI admission */
     { "<script>alert(1)</script>\n",
-      "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n" }, /* RawHTML remains safe text */
+      "&lt;script&gt;alert(1)&lt;/script&gt;\n" }, /* Type-1 RAW_HTML_BLOCK, production still escaped; no <p> */
     { "<foo@bar.example.com>\n",
       "<p><a href=\"mailto:foo@bar.example.com\">foo@bar.example.com</a></p>\n" }, /* official #604 safe email */
     { "<foo+special@Bar.baz-bar0.com>\n",
