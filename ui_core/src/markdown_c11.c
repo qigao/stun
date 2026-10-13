@@ -233,6 +233,28 @@ static void md_raw_html_inline(stun_md_document *d,uint32_t parent,
     }
 }
 
+/* One owned RAW_HTML_BLOCK span per canonical root block. Preserve exact
+ * payload lines but normalize CRLF to LF, as CommonMark's input model does.
+ * The semantic text arena stays contiguous while this block owns input. */
+static bool md_raw_html_block_line(stun_md_document *d,uint32_t node,
+                                   md_line line,bool first) {
+    size_t begin=0u,end=0u;
+    if(!md_store(d,false,d->raw+line.begin,line.end-line.begin,
+                 &begin,&end))return false;
+    if(first)d->nodes[node].byte_begin=begin;
+    else if(begin!=d->nodes[node].byte_end) {
+        md_error(d,STUN_UI_INVALID_ARGUMENT);return false;
+    }
+    if(line.newline) {
+        size_t from=0u,to=0u;
+        if(!md_store(d,false,"\n",1u,&from,&to))return false;
+        if(from!=end) {md_error(d,STUN_UI_INVALID_ARGUMENT);return false;}
+        end=to;
+    }
+    d->nodes[node].byte_end=end;
+    return true;
+}
+
 static void md_meta(stun_md_document *d, uint32_t node,
                     const char *s, size_t n) {
     if (node == UINT32_MAX || !n) return;
@@ -614,6 +636,46 @@ static size_t md_inline_html_tag_close(const char *s,size_t n,size_t at) {
                   s[p]=='-'))++p;
     while(p<n && md_space(s[p]))++p;
     return p<n && s[p]=='>'?p:SIZE_MAX;
+}
+
+/* CommonMark type-6 HTML root blocks: the tag vocabulary is fixed by the
+ * specification. This is only block admission in the SAME C11 frontend;
+ * the existing inline tag scanner owns attributes and token semantics.
+ * A type-6 block may interrupt a root paragraph and ends at the next blank.
+ * No second markdown parser, DOM, or unsafe production renderer. */
+static bool md_raw_html_root_type6(const char *s,size_t begin,size_t end) {
+    if(begin>=end || s[begin]!='<')return false;
+    size_t p=begin+1u;
+    if(p<end && s[p]=='/')++p;
+    const size_t start=p;
+    while(p<end && (md_tag_letter((unsigned char)s[p]) ||
+                    md_tag_digit((unsigned char)s[p])))++p;
+    if(p==start || (p<end && s[p]!='>' && s[p]!='/' &&
+                   !md_space(s[p])))return false;
+    static const char *const names[]={
+        "address","article","aside","base","basefont","blockquote",
+        "body","caption","center","col","colgroup","dd","details",
+        "dialog","dir","div","dl","dt","fieldset","figcaption",
+        "figure","footer","form","frame","frameset","h1","h2","h3",
+        "h4","h5","h6","head","header","hr","html","iframe","legend",
+        "li","link","main","menu","menuitem","nav","noframes","ol",
+        "optgroup","option","output","p","param","search","section",
+        "source","summary","table","tbody","td","tfoot","th",
+        "thead","title","tr","track","ul"
+    };
+    const size_t bytes=p-start;
+    for(size_t i=0u;i<sizeof(names)/sizeof(names[0]);++i) {
+        const char *name=names[i];
+        if(strlen(name)!=bytes)continue;
+        bool match=true;
+        for(size_t j=0u;j<bytes;++j) {
+            const unsigned char c=(unsigned char)s[start+j];
+            const char low=(char)(c>='A'&&c<='Z'?c+('a'-'A'):c);
+            if(low!=name[j]) {match=false;break;}
+        }
+        if(match)return true;
+    }
+    return false;
 }
 
 /* One bounded LINK-text bracket scanner for both inline targets and
@@ -2942,6 +3004,7 @@ static void md_reference_collect_root(stun_md_document *d) {
     const char *s=d->raw;
     bool paragraph_started=false;
     bool fenced=false;
+    bool root_html_block_open=false;
     bool container_pending=false;
     /* Root-only admission guard, not a second nested-list grammar. Keep
      * the outer list content column across blank lines: a blank does not
@@ -2959,6 +3022,10 @@ static void md_reference_collect_root(stun_md_document *d) {
                 fenced=false;
             continue;
         }
+        if(root_html_block_open) {
+            if(!md_blank(s,line.begin,line.end))continue;
+            root_html_block_open=false;
+        }
         if(md_blank(s,line.begin,line.end)) {
             paragraph_started=false;
             container_pending=false;
@@ -2973,6 +3040,15 @@ static void md_reference_collect_root(stun_md_document *d) {
             if(columns>=list_content_column)container_pending=true;
             else list_content_column=0u;
             after_list_blank=false;
+        }
+        /* Type-6 root HTML prepass admission shares the exact block
+         * predicate with md_parse_blocks: definitions inside a raw block
+         * cannot donate references even after independent text lines. */
+        if(!container_pending && columns<=3u &&
+           md_raw_html_root_type6(s,begin,line.end)) {
+            root_html_block_open=true;
+            paragraph_started=false;
+            continue;
         }
         /* Root thematic breaks can interrupt a preceding list/quote/code
          * owner without a blank line. Release its conservative reference
@@ -3123,6 +3199,8 @@ static void md_parse_blocks(stun_md_document *d) {
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
     bool code_open=false;
+    bool html_block_open=false;
+    uint32_t html_block_node=UINT32_MAX;
     bool reference_continuation=false;
     /* The root opening fence may consume 0..3 ASCII indentation columns.
      * Remove at most those opening columns from each subsequent code line;
@@ -3144,6 +3222,16 @@ static void md_parse_blocks(stun_md_document *d) {
         for(size_t i=line.begin;i<indent_begin && indent<4u;++i)
             indent += s[i]=='\t' ? 4u-(indent%4u) : 1u;
         size_t begin=indent_begin, end=line.end;
+        if(html_block_open) {
+            if(md_blank(s,line.begin,line.end)) {
+                html_block_open=false;html_block_node=UINT32_MAX;
+                paragraph=UINT32_MAX;
+                continue; /* CommonMark type 6 ends BEFORE the blank. */
+            }
+            if(!md_raw_html_block_line(d,html_block_node,line,false))
+                return;
+            continue;
+        }
         /* Once a ROOT definition's opening line was consumed below, its
          * recorded continuation interval takes precedence over indentation
          * and apparent block markers. No CODE/TEXT nodes may leak from an
@@ -3258,6 +3346,20 @@ static void md_parse_blocks(stun_md_document *d) {
         }
         if (md_blank(s,line.begin,line.end)) {
             paragraph=UINT32_MAX;
+            continue;
+        }
+        /* The shared type-6 recognizer interrupts the existing root
+         * paragraph, emits owned HTML bytes without a parser fallback,
+         * and yields at the first blank line. Quoted/list content has
+         * already been consumed by its actual owner above. */
+        if(indent<=3u && lists.depth==0u && quotes.depth==0u &&
+           md_raw_html_root_type6(s,begin,end)) {
+            const uint32_t node=md_add(
+                d,0u,STUN_UI_BLOCK_RAW_HTML_BLOCK,0u);
+            if(node==UINT32_MAX ||
+               !md_raw_html_block_line(d,node,line,true))return;
+            html_block_node=node;html_block_open=true;
+            paragraph=UINT32_MAX;pending_break=MD_ROOT_BREAK_SOFT;
             continue;
         }
         /* Definitions are recorded by the bounded root prepass. Do not

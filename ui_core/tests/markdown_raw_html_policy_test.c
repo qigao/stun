@@ -118,6 +118,48 @@ static const raw_fixture fixtures[] = {
      "<p>x &lt;a foo=&quot;unclosed</p>\n",
      "<p>x &lt;a foo=&quot;unclosed</p>\n",0u}
 };
+/* Real ROOT HTML type-6 blocks use the same canonical block parser.
+ * The SAFE profile still escapes all raw HTML; SPEC emits only admitted
+ * literal source tokens. HTML code/fence/definition interactions remain
+ * bounded and may not create Reference bindings inside raw block content. */
+static const raw_fixture block_fixtures[]={
+    {149u,"<table>\n  <tr>\n    <td>\n           hi\n    </td>\n  </tr>\n</table>\n\nokay.\n",
+     "<table>\n  <tr>\n    <td>\n           hi\n    </td>\n  </tr>\n</table>\n<p>okay.</p>\n",
+     "&lt;table&gt;\n  &lt;tr&gt;\n    &lt;td&gt;\n           hi\n    &lt;/td&gt;\n  &lt;/tr&gt;\n&lt;/table&gt;\n<p>okay.</p>\n",0u},
+    {150u," <div>\n  *hello*\n         <foo><a>\n",
+     " <div>\n  *hello*\n         <foo><a>\n",
+     " &lt;div&gt;\n  *hello*\n         &lt;foo&gt;&lt;a&gt;\n",0u},
+    {151u,"</div>\n*foo*\n",
+     "</div>\n*foo*\n",
+     "&lt;/div&gt;\n*foo*\n",0u},
+    {160u,"<table><tr><td>\nfoo\n</td></tr></table>\n",
+     "<table><tr><td>\nfoo\n</td></tr></table>\n",
+     "&lt;table&gt;&lt;tr&gt;&lt;td&gt;\nfoo\n&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;\n",0u},
+    {185u,"Foo\n<div>\nbar\n</div>\n",
+     "<p>Foo</p>\n<div>\nbar\n</div>\n",
+     "<p>Foo</p>\n&lt;div&gt;\nbar\n&lt;/div&gt;\n",0u},
+    {190u,"<table>\n\n<tr>\n\n<td>\nHi\n</td>\n\n</tr>\n\n</table>\n",
+     "<table>\n<tr>\n<td>\nHi\n</td>\n</tr>\n</table>\n",
+     "&lt;table&gt;\n&lt;tr&gt;\n&lt;td&gt;\nHi\n&lt;/td&gt;\n&lt;/tr&gt;\n&lt;/table&gt;\n",0u},
+    {0u,"<div>\n[ref]: /evil\n\n[ref]\n",
+     "<div>\n[ref]: /evil\n<p>[ref]</p>\n",
+     "&lt;div&gt;\n[ref]: /evil\n<p>[ref]</p>\n",0u}
+};
+
+static int verify_block(const raw_fixture *f) {
+    if(verify(f))return 1;
+    const size_t n=strlen(f->source);
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(f->source,n,256u,n+1u,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    size_t blocks=0u;
+    for(size_t i=0u;i<v.document.block_count;++i)
+        blocks+=v.document.blocks[i].kind==STUN_UI_BLOCK_RAW_HTML_BLOCK;
+    CHECK(blocks>0u);
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==12u,
                    "nine official cases, one comment and two hostile/malformed tests");
@@ -127,7 +169,15 @@ int main(void) {
                     fixtures[i].official);
             return 1;
         }
-    puts("RAW_HTML_INLINE C11: nine official spec outputs, safe escaping, "
-         "caller-source mutation, hostile tokens, atomic node/buffer limits");
+    _Static_assert(sizeof(block_fixtures)/sizeof(block_fixtures[0])==7u,
+                   "six official type-6 blocks + definition opacity");
+    for(size_t i=0u;i<sizeof(block_fixtures)/sizeof(block_fixtures[0]);++i)
+        if(verify_block(&block_fixtures[i])) {
+            fprintf(stderr,"ROOT RAW_HTML_BLOCK official #%u failed\n",
+                    block_fixtures[i].official);
+            return 1;
+        }
+    puts("C11 typed RAW_HTML: nine official inline, six official block "
+         "spec outputs; unchanged SAFE rendering and atomic limits");
     return 0;
 }

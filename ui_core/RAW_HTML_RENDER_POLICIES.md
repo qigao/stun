@@ -35,8 +35,13 @@ failure, malformed tags, hostile script tokens and one-node-short budgets.
 
 ## Remaining work in the Raw HTML category
 
-- Implement seven HTML block types #148-#191 in the SAME existing canonical
-  block parser, with paragraph interruption and blank-line termination.
+- The root type-6 HTML block subset uses the SAME canonical block
+  parser, preserves owned raw source lines, interrupts root paragraphs
+  and ends on a blank. The corresponding root definition prepass calls
+  the same lexical predicate and cannot absorb references inside blocks.
+- Complete all remaining HTML block types #148-#191 in that SAME parser:
+  types 1-5 and 7, quote/list ownership, paragraph interruption,
+  blank-line termination and raw source preservation.
 - Support complete inline token grammar including multiline quoted tags
   #615/#616/#642/#643, multiline comments and other HTML token spans,
   plus interactions with emphasis, links, lists and code.
