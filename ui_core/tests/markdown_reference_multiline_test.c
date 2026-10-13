@@ -383,7 +383,7 @@ int main(void) {
       "<p>[<a href=\"/url\">a]</a>]</p>\n", "/url", NULL, "a]" },
     { "adjacent-close-unbound", "[[missing]]\n\n[other]: /url\n",
       "<p>[[missing]]</p>\n", NULL, NULL, NULL },
-    { "adjacent-close-code-span", "\`[[ref]]\`\n\n[ref]: /url\n",
+    { "adjacent-close-code-span", "`[[ref]]`\n\n[ref]: /url\n",
       "<p><code>[[ref]]</code></p>\n", NULL, NULL, NULL },
     { "raw-entity-key-not-decoded", "[visible][a&b]\n\n[a&amp;b]: /wrong\n", "<p>[visible][a&amp;b]</p>\n", NULL, NULL, NULL },
     { "escaped-first-definition-wins", "[a\\!]: /first 'one'\n[A\\!]: /second 'two'\n\n[a\\!]\n", "<p><a href=\"/first\" title=\"one\">a!</a></p>\n", "/first", "one", "a!" },
