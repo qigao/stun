@@ -730,6 +730,16 @@ done:
 
 int main(void) {
     static const reference_fixture cases[]={
+        {"[foo]:\n/url\n\n[foo]\n",
+         "/url",NULL,"foo",
+         "<p><a href=\"/url\">foo</a></p>\n"}, /* CommonMark #198 */
+        {"[foo]:  \r\n  /uri \"A &amp; B\"\r\n\r\n[foo]\r\n",
+         "/uri","A & B","foo",
+         "<p><a href=\"/uri\" title=\"A &amp; B\">foo</a></p>\n"},
+        {"[a][ref]\n\n[ref]:\n/uri\n",
+         "/uri",NULL,"a",
+         "<p><a href=\"/uri\">a</a></p>\n"},
+
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
          "/url","title","foo",
          "<p><a href=\"/url\" title=\"title\">foo</a></p>\n"}, /* #527 */
@@ -794,7 +804,7 @@ int main(void) {
          "/uri",NULL,"id",
          "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==21u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==24u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
@@ -831,7 +841,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 21/21 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 24/24 AST/HTML, forward/duplicate/case "
          "binding, safe URL, root-rule, ATX, fence and table ownership");
     return 0;
 }

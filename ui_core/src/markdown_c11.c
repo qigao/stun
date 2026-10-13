@@ -25,6 +25,7 @@ typedef struct md_reference_binding {
     size_t title_bytes;
     bool has_title;
     size_t source_line;
+    size_t source_last_line; /* inclusive, one optional ROOT continuation */
 } md_reference_binding;
 
 struct stun_md_document {
@@ -2305,15 +2306,16 @@ static bool md_reference_definition_line(
     size_t low=0u,high=d->reference_count;
     while(low<high) {
         const size_t mid=low+(high-low)/2u;
-        if(d->references[mid].source_line<begin)low=mid+1u;
+        if(d->references[mid].source_last_line<begin)low=mid+1u;
         else high=mid;
     }
     return low<d->reference_count &&
-           d->references[low].source_line==begin;
+           d->references[low].source_line<=begin &&
+           begin<=d->references[low].source_last_line;
 }
 
 static bool md_reference_collect_line(stun_md_document *d,md_line line,
-                                      size_t begin) {
+                                      size_t begin,size_t *after_definition) {
     const char *s=d->raw;
     if(begin>=line.end || s[begin]!='[')return false;
     const size_t close=md_match(s,line.end,begin+1u,']',1u);
@@ -2321,8 +2323,31 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
        s[close+1u]!=':')return false;
     char key[MD_REF_KEY_MAX+1u];
     if(!md_reference_key(s,begin+1u,close,key))return false;
-    const size_t target_begin=md_left(s,close+2u,line.end);
-    const size_t length=line.end-target_begin;
+    size_t target_begin=md_left(s,close+2u,line.end);
+    size_t target_end=line.end;
+    md_line last=line;
+    /* Scoped #198: the destination may occupy ONE immediately following
+     * nonblank root physical line when the definition's first line has no
+     * destination. A 4-column indented code line, blank separator, quote or
+     * list-owned line cannot donate a ROOT reference target. All destination
+     * syntax is still validated by the EXISTING md_link_target_parse below;
+     * this is line ownership lookahead, not a second link grammar. */
+    if(target_begin==line.end && line.next<d->raw_size) {
+        const md_line next=md_read_line(d,line.next);
+        const size_t candidate=md_left(s,next.begin,next.end);
+        if(candidate<next.end &&
+           md_columns(s,next.begin,candidate)<=3u &&
+           s[candidate]!='>' &&
+           !md_rule(s,candidate,next.end)) {
+            md_list_marker_info marker={0};
+            if(!md_list_token(s,next,&marker)) {
+                target_begin=candidate;
+                target_end=next.end;
+                last=next;
+            }
+        }
+    }
+    const size_t length=target_end-target_begin;
     if(!length || length>SIZE_MAX-3u)return false;
     char *scratch=(char*)malloc(length+3u);
     if(!scratch) {
@@ -2369,6 +2394,8 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
     item->title=title;item->title_bytes=title_len;
     item->has_title=parts.has_title;
     item->source_line=line.begin;
+    item->source_last_line=last.begin;
+    if(after_definition)*after_definition=last.next;
     free(scratch);
     return true;
 }
@@ -2530,8 +2557,10 @@ static void md_reference_collect_root(stun_md_document *d) {
         if(md_atx(s,&heading_begin,&heading_end)) {
             paragraph_started=false;continue;
         }
+        size_t after_definition=pos;
         if(!paragraph_started &&
-           md_reference_collect_line(d,line,begin)) {
+           md_reference_collect_line(d,line,begin,&after_definition)) {
+            pos=after_definition;
             paragraph_started=false;continue;
         }
         paragraph_started=true;

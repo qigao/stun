@@ -530,11 +530,21 @@ static const html_fixture cases[] = {
       "<p><a href=\"mailto:a*b@Bar.example.com\">a*b@Bar.example.com</a></p>\n" }, /* literal '*' belongs to email, not emphasis */
     { "**<x_y@bar.example.com>**\n",
       "<p><strong><a href=\"mailto:x_y@bar.example.com\">x_y@bar.example.com</a></strong></p>\n" }, /* only external '**' is a delimiter */
+    { "[foo]:\n/url\n\n[foo]\n",
+      "<p><a href=\"/url\">foo</a></p>\n" }, /* official CommonMark #198 */
+    { "[foo]:  \r\n  /uri \"A &amp; B\"\r\n\r\n[foo]\r\n",
+      "<p><a href=\"/uri\" title=\"A &amp; B\">foo</a></p>\n" }, /* CRLF and decoded HTML5 title */
+    { "[a][ref]\n\n[ref]:\n/uri\n",
+      "<p><a href=\"/uri\">a</a></p>\n" }, /* forward full reference */
+    { "[foo]:\n\n/url\n\n[foo]\n",
+      "<p>[foo]:</p>\n<p>/url</p>\n<p>[foo]</p>\n" }, /* blank cannot join a definition */
+    { "paragraph\n[foo]:\n/url\n\n[foo]\n",
+      "<p>paragraph\n[foo]:\n/url</p>\n<p>[foo]</p>\n" }, /* cannot interrupt a paragraph */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==277,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==282,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
