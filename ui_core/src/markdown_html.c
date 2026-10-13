@@ -239,7 +239,11 @@ static void html_image_alt_children(stun_html_writer *w,size_t parent,
             }
             ++at;continue;
         }
-        if(kind==STUN_UI_BLOCK_TEXT) {
+        /* A typed inline HTML token contributes its literal visible
+         * characters to IMAGE alt, not live markup or its attributes.
+         * Always HTML-escape the alt attribute even in SPEC mode. */
+        if(kind==STUN_UI_BLOCK_TEXT ||
+           kind==STUN_UI_BLOCK_RAW_HTML_INLINE) {
             html_text(w,&doc->blocks[at]);
             if(at+1u<doc->block_count &&
                doc->blocks[at+1u].parent_index==at)
