@@ -195,6 +195,18 @@ static const raw_fixture block_fixtures[]={
     {190u,"<table>\n\n<tr>\n\n<td>\nHi\n</td>\n\n</tr>\n\n</table>\n",
      "<table>\n<tr>\n<td>\nHi\n</td>\n</tr>\n</table>\n",
      "&lt;table&gt;\n&lt;tr&gt;\n&lt;td&gt;\nHi\n&lt;/td&gt;\n&lt;/tr&gt;\n&lt;/table&gt;\n",0u},
+    {174u,"> <div>\n> foo\n\nbar\n",
+     "<blockquote>\n<div>\nfoo\n</blockquote>\n<p>bar</p>\n",
+     "<blockquote>\n&lt;div&gt;\nfoo\n</blockquote>\n<p>bar</p>\n",0u},
+    {175u,"- <div>\n- foo\n",
+     "<ul>\n<li>\n<div>\n</li>\n<li>foo</li>\n</ul>\n",
+     "<ul>\n<li>\n&lt;div&gt;\n</li>\n<li>foo</li>\n</ul>\n",0u},
+    {0u,"> <script>\n> console.log(1)\n> </script>\n",
+     "<blockquote>\n<script>\nconsole.log(1)\n</script>\n</blockquote>\n",
+     "<blockquote>\n&lt;script&gt;\nconsole.log(1)\n&lt;/script&gt;\n</blockquote>\n",0u},
+    {0u,"- <script>\n  hi\n  </script>\n",
+     "<ul>\n<li>\n<script>\nhi\n</script>\n</li>\n</ul>\n",
+     "<ul>\n<li>\n&lt;script&gt;\nhi\n&lt;/script&gt;\n</li>\n</ul>\n",0u},
     {0u,"<div>\n[ref]: /evil\n\n[ref]\n",
      "<div>\n[ref]: /evil\n<p>[ref]</p>\n",
      "&lt;div&gt;\n[ref]: /evil\n<p>[ref]</p>\n",0u}
@@ -255,11 +267,11 @@ int main(void) {
                     fixtures[i].official);
             return 1;
         }
-    _Static_assert(sizeof(block_fixtures)/sizeof(block_fixtures[0])==25u,
-                   "six type-6, eighteen types 1-5/7, and opacity");
+    _Static_assert(sizeof(block_fixtures)/sizeof(block_fixtures[0])==29u,
+                   "root cases plus quote/list owned HTML blocks and opacity");
     for(size_t i=0u;i<sizeof(block_fixtures)/sizeof(block_fixtures[0]);++i)
         if(verify_block(&block_fixtures[i])) {
-            fprintf(stderr,"ROOT RAW_HTML_BLOCK official #%u failed\n",
+            fprintf(stderr,"OWNED RAW_HTML_BLOCK official #%u failed\n",
                     block_fixtures[i].official);
             return 1;
         }
@@ -268,7 +280,7 @@ int main(void) {
         187u,"Foo\n<a href=\"bar\">\nbaz\n","<p>Foo\n<a href=\"bar\">\nbaz</p>\n","<p>Foo\n&lt;a href=&quot;bar&quot;&gt;\nbaz</p>\n",1u
     };
     if(verify(&type7_noninterrupt))return 1;
-    puts("C11 typed RAW_HTML: nine official inline, twenty-four official block "
+    puts("C11 typed RAW_HTML: nine official inline, twenty-eight official block "
          "spec outputs; unchanged SAFE rendering and atomic limits");
     return 0;
 }
