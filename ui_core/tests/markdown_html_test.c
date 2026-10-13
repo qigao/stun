@@ -71,6 +71,26 @@ static const html_fixture cases[] = {
       "<p><a href=\"https://foo.bar.%60baz\">https://foo.bar.`baz</a>`</p>\n" }, /* official #346 */
     { "[link](</foo`bar>)\n",
       "<p><a href=\"/foo%60bar\">link</a></p>\n" }, /* single backtick in angle destination */
+    { "[![moon](moon.jpg)](/uri)\n",
+      "<p><a href=\"/uri\"><img src=\"moon.jpg\" alt=\"moon\" /></a></p>\n" }, /* official IMAGE #517 */
+    { "![[[foo](uri1)](uri2)](uri3)\n",
+      "<p><img src=\"uri3\" alt=\"[foo](uri2)\" /></p>\n" }, /* official IMAGE #520 */
+    { "[![moon](moon.jpg)][ref]\n\n[ref]: /uri\n",
+      "<p><a href=\"/uri\"><img src=\"moon.jpg\" alt=\"moon\" /></a></p>\n" }, /* official IMAGE #531 */
+    { "![foo](/url \"title\")\n",
+      "<p><img src=\"/url\" alt=\"foo\" title=\"title\" /></p>\n" }, /* official IMAGE #572 */
+    { "![foo *bar*]\n\n[foo *bar*]: train.jpg \"train & tracks\"\n",
+      "<p><img src=\"train.jpg\" alt=\"foo bar\" title=\"train &amp; tracks\" /></p>\n" }, /* official IMAGE #573 */
+    { "![foo ![bar](/url)](/url2)\n",
+      "<p><img src=\"/url2\" alt=\"foo bar\" /></p>\n" }, /* official IMAGE #574 */
+    { "![foo [bar](/url)](/url2)\n",
+      "<p><img src=\"/url2\" alt=\"foo bar\" /></p>\n" }, /* official IMAGE #575 */
+    { "![](/url)\n",
+      "<p><img src=\"/url\" alt=\"\" /></p>\n" }, /* official IMAGE #581 */
+    { "![foo][]\n\n[foo]: /url \"title\"\n",
+      "<p><img src=\"/url\" alt=\"foo\" title=\"title\" /></p>\n" }, /* official IMAGE #584 */
+    { "![foo]\n\n[foo]: /url \"title\"\n",
+      "<p><img src=\"/url\" alt=\"foo\" title=\"title\" /></p>\n" }, /* official IMAGE #588 */
     { "A [B](dest)\n", "<p>A <a href=\"dest\">B</a></p>\n" },
     { "[link [foo [bar]]](/uri)\n",
       "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n" }, /* official #512 */
@@ -690,7 +710,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==350,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==360,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
@@ -763,8 +783,10 @@ static int test_unsafe_unsupported(void) {
     const char image[]="![alt](https://example.org/x.png)\n";
     CHECK(stun_md_parse(image,sizeof(image)-1u,64,256,&doc)==STUN_UI_OK);
     v=stun_md_document_view(doc);
-    CHECK(stun_md_render_html(&v,64u,NULL,0u,&needed)==
-          STUN_UI_INVALID_ARGUMENT);
+    CHECK(stun_md_render_html(&v,64u,NULL,0u,&needed)==STUN_UI_OK);
+    const char image_html[]=
+        "<p><img src=\"https://example.org/x.png\" alt=\"alt\" /></p>\n";
+    CHECK(needed==sizeof(image_html)-1u);
     stun_md_document_destroy(doc);
 
     CHECK(stun_md_render_html(NULL,64u,NULL,0u,&needed)==

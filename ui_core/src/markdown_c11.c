@@ -817,7 +817,7 @@ static bool md_link_visible_has_active_link(const stun_md_document *d,
  * active inner LINK (CommonMark #532/#533). */
 static bool md_reference_inline_match(
     const stun_md_document *d,const char *s,size_t n,size_t at,
-    const md_reference_binding **binding,size_t *label_end,
+    bool image,const md_reference_binding **binding,size_t *label_end,
     size_t *token_end) {
     if(!d->reference_count || !binding || !label_end || !token_end ||
        at>=n || s[at]!='[')return false;
@@ -830,7 +830,8 @@ static bool md_reference_inline_match(
             const md_reference_binding *found=md_reference_lookup(
                 d,s,collapsed?at+1u:first+2u,collapsed?first:second);
             if(found) {
-                if(md_link_visible_has_active_link(d,s,at+1u,first))
+                if(!image &&
+                   md_link_visible_has_active_link(d,s,at+1u,first))
                     return false;
                 *binding=found;*label_end=first;*token_end=second+1u;
                 return true;
@@ -840,7 +841,8 @@ static bool md_reference_inline_match(
     }
     const md_reference_binding *found=
         md_reference_lookup(d,s,at+1u,first);
-    if(!found || md_link_visible_has_active_link(d,s,at+1u,first))
+    if(!found || (!image && md_link_visible_has_active_link(
+                      d,s,at+1u,first)))
         return false;
     *binding=found;*label_end=first;*token_end=first+1u;
     return true;
@@ -1065,11 +1067,13 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
                     p=round+1u;continue;
                 }
             }
-            if(s[p]=='[') {
+            {
+                const bool image=s[p]=='!';
                 const md_reference_binding *ref=NULL;
                 size_t label_end=0u,token_end=0u;
-                if(md_reference_inline_match(d,s,n,p,&ref,
-                                             &label_end,&token_end)) {
+                if(md_reference_inline_match(
+                       d,s,n,p+(image?1u:0u),image,&ref,
+                       &label_end,&token_end)) {
                     p=token_end;continue;
                 }
             }
@@ -1377,9 +1381,10 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
                         image?STUN_UI_BLOCK_IMAGE:STUN_UI_BLOCK_LINK,0u);
                     if(node!=UINT32_MAX) {
                         md_meta(d,node,dest,dest_len);
-                        if(target.has_title && !image) {
+                        if(target.has_title) {
                             const uint32_t title_node=md_add(
-                                d,node,STUN_UI_BLOCK_LINK_TITLE,0u);
+                                d,node,image?STUN_UI_BLOCK_IMAGE_TITLE:
+                                       STUN_UI_BLOCK_LINK_TITLE,0u);
                             if(title_node!=UINT32_MAX)
                                 md_meta(d,title_node,title,title_len);
                         }
@@ -1391,24 +1396,28 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
                     p=round+1u;text_start=p;continue;
                 }
             }
-            if(!image) {
+            {
                 const md_reference_binding *ref=NULL;
                 size_t first_end=0u,token_end=0u;
+                const size_t opener=p+(image?1u:0u);
                 if(md_reference_inline_match(
-                       d,s,n,p,&ref,&first_end,&token_end)) {
+                       d,s,n,opener,image,&ref,&first_end,&token_end)) {
                     md_text(d,owners[nested],s+text_start,p-text_start);
                     const uint32_t node=md_add(
-                        d,owners[nested],STUN_UI_BLOCK_LINK,0u);
+                        d,owners[nested],
+                        image?STUN_UI_BLOCK_IMAGE:STUN_UI_BLOCK_LINK,0u);
                     if(node==UINT32_MAX)break;
                     md_meta(d,node,ref->href,ref->href_bytes);
                     if(ref->has_title) {
                         const uint32_t title=md_add(
-                            d,node,STUN_UI_BLOCK_LINK_TITLE,0u);
+                            d,node,image?STUN_UI_BLOCK_IMAGE_TITLE:
+                                         STUN_UI_BLOCK_LINK_TITLE,0u);
                         if(title==UINT32_MAX)break;
                         md_meta(d,title,ref->title,ref->title_bytes);
                     }
                     if(d->error!=STUN_UI_OK)break;
-                    if(!md_inline(d,node,s+p+1u,first_end-p-1u,
+                    if(!md_inline(d,node,s+opener+1u,
+                                  first_end-opener-1u,
                                   depth+nested+1u))break;
                     p=token_end;
                     text_start=p;

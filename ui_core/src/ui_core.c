@@ -104,7 +104,7 @@ stun_ui_status stun_ui_rect_view_validate(
 
 static bool valid_block_kind(stun_ui_block_kind kind) {
     return kind >= STUN_UI_BLOCK_DOCUMENT &&
-           kind <= STUN_UI_BLOCK_LINK_TITLE;
+           kind <= STUN_UI_BLOCK_IMAGE_TITLE;
 }
 
 stun_ui_status stun_ui_document_validate(
@@ -126,6 +126,13 @@ stun_ui_status stun_ui_document_validate(
              (block->heading_level < 1 || block->heading_level > 6)) ||
             (block->kind != STUN_UI_BLOCK_HEADING &&
              block->heading_level != 0))
+            return STUN_UI_INVALID_ARGUMENT;
+        /* IMAGE_TITLE is metadata only, never visible content. */
+        if (block->kind == STUN_UI_BLOCK_IMAGE_TITLE &&
+            (i == 0 || block->parent_index != i-1u ||
+             view->blocks[i-1u].kind != STUN_UI_BLOCK_IMAGE ||
+             (i+1u < view->block_count &&
+              view->blocks[i+1u].parent_index == i)))
             return STUN_UI_INVALID_ARGUMENT;
         for (size_t j = 0; j < i; ++j) {
             if (view->blocks[j].stable_id == block->stable_id)

@@ -112,7 +112,9 @@ typedef enum stun_ui_block_kind {
     /* Distinct from the existing SOFT STUN_UI_BLOCK_LINE_BREAK node. */
     STUN_UI_BLOCK_HARD_LINE_BREAK,
     /* Optional decoded title child of STUN_UI_BLOCK_LINK; metadata-owned. */
-    STUN_UI_BLOCK_LINK_TITLE
+    STUN_UI_BLOCK_LINK_TITLE,
+    /* Decoded IMAGE title, always the first direct IMAGE child. */
+    STUN_UI_BLOCK_IMAGE_TITLE
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {

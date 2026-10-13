@@ -131,6 +131,16 @@ static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
         } else html_escaped(w,s+i,1u,true);
     }
 }
+/* IMAGE src uses a narrower policy than navigable href: mailto is
+ * never an image protocol. All decoded control bytes and unknown schemes
+ * are already rejected by the canonical full-byte href safety scan. */
+static bool html_safe_image_src(const char *s,size_t n) {
+    if(!html_safe_href(s,n))return false;
+    if(n>=7u && s[6]==':' && html_ascii_equal(s,6u,"mailto"))
+        return false;
+    return true;
+}
+
 static bool html_safe_title(const char *s,size_t n) {
     if(!s && n)return false;
     for(size_t i=0u;i<n;++i) {
@@ -200,6 +210,59 @@ static void html_text(stun_html_writer *w, const stun_ui_block *node) {
     }
     html_escaped(w,w->doc->document.source+node->byte_begin,
                  length,false);
+}
+
+/* IMAGE alt is flattened from its owned RichDoc descendants, never from
+ * serialized markup or source reparsing. LINK and nested IMAGE contribute
+ * their visible TEXT, never their URLs or titles. The same bounded walk
+ * runs during sizing and writing; failures remain output-atomic. */
+static void html_image_alt_children(stun_html_writer *w,size_t parent,
+                                    size_t *after,size_t depth) {
+    const stun_ui_document_view *doc=&w->doc->document;
+    if(parent>=doc->block_count || depth>STUN_HTML_MAX_DEPTH) {
+        w->error=STUN_UI_CAPACITY_EXCEEDED;return;
+    }
+    size_t at=parent+1u;
+    while(at<doc->block_count && w->error==STUN_UI_OK &&
+          doc->blocks[at].parent_index==parent) {
+        const stun_ui_block_kind kind=doc->blocks[at].kind;
+        if(kind==STUN_UI_BLOCK_IMAGE_TITLE ||
+           kind==STUN_UI_BLOCK_LINK_TITLE) {
+            const bool correct=(at==parent+1u) &&
+                (kind==STUN_UI_BLOCK_IMAGE_TITLE?
+                 doc->blocks[parent].kind==STUN_UI_BLOCK_IMAGE:
+                 doc->blocks[parent].kind==STUN_UI_BLOCK_LINK);
+            if(!correct || (at+1u<doc->block_count &&
+                            doc->blocks[at+1u].parent_index==at)) {
+                w->error=STUN_UI_INVALID_ARGUMENT;break;
+            }
+            ++at;continue;
+        }
+        if(kind==STUN_UI_BLOCK_TEXT) {
+            html_text(w,&doc->blocks[at]);
+            if(at+1u<doc->block_count &&
+               doc->blocks[at+1u].parent_index==at)
+                w->error=STUN_UI_INVALID_ARGUMENT;
+            ++at;continue;
+        }
+        if(kind==STUN_UI_BLOCK_LINE_BREAK ||
+           kind==STUN_UI_BLOCK_HARD_LINE_BREAK) {
+            html_str(w," ");++at;continue;
+        }
+        if(kind==STUN_UI_BLOCK_EMPHASIS ||
+           kind==STUN_UI_BLOCK_STRONG ||
+           kind==STUN_UI_BLOCK_STRIKETHROUGH ||
+           kind==STUN_UI_BLOCK_CODE_SPAN ||
+           kind==STUN_UI_BLOCK_LINK ||
+           kind==STUN_UI_BLOCK_IMAGE) {
+            size_t next=at;
+            html_image_alt_children(w,at,&next,depth+1u);
+            if(next<=at) {w->error=STUN_UI_INVALID_ARGUMENT;break;}
+            at=next;continue;
+        }
+        w->error=STUN_UI_INVALID_ARGUMENT;break;
+    }
+    *after=at;
 }
 
 static void html_node(stun_html_writer *w, size_t id,
@@ -325,6 +388,47 @@ static void html_node(stun_html_writer *w, size_t id,
         html_str(w,">");
         break;
     }
+    case STUN_UI_BLOCK_IMAGE: {
+        if(!html_metadata(w,id,&meta,&meta_length))return;
+        if(!html_safe_image_src(meta,meta_length)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const char *title=NULL;size_t title_length=0u;
+        bool has_title=false;
+        if(id+1u<doc->block_count &&
+           doc->blocks[id+1u].parent_index==id &&
+           doc->blocks[id+1u].kind==STUN_UI_BLOCK_IMAGE_TITLE) {
+            has_title=true;
+            if(!html_metadata(w,id+1u,&title,&title_length))return;
+            if(!html_safe_title(title,title_length)) {
+                w->error=STUN_UI_INVALID_ARGUMENT;return;
+            }
+        }
+        html_str(w,"<img src=\"");
+        html_link_href(w,meta,meta_length);
+        html_str(w,"\" alt=\"");
+        size_t child_end=id;
+        html_image_alt_children(w,id,&child_end,depth+1u);
+        if(w->error!=STUN_UI_OK || child_end<=id)return;
+        html_str(w,"\"");
+        if(has_title) {
+            html_str(w," title=\"");
+            html_escaped(w,title,title_length,true);
+            html_str(w,"\"");
+        }
+        html_str(w," />");
+        *next=child_end;return;
+    }
+    case STUN_UI_BLOCK_IMAGE_TITLE: {
+        const uint32_t parent=node->parent_index;
+        if(parent>=id || id!=parent+1u ||
+           doc->blocks[parent].kind!=STUN_UI_BLOCK_IMAGE ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_LINK_TITLE: {
         /* This typed metadata child never renders as visible inline TEXT.
          * Reject arbitrary parent placement or a second title silently
@@ -419,7 +523,7 @@ static void html_node(stun_html_writer *w, size_t id,
     }
     default:
         /* No silent HTML generation for unsupported Markdown semantics.
-         * In particular: tasks, images, math, diagrams, entities, etc. */
+         * In particular: tasks, math, diagrams, entities, etc. */
         w->error=STUN_UI_INVALID_ARGUMENT;
         return;
     }
