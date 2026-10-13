@@ -672,7 +672,7 @@ static const md_reference_binding *md_reference_lookup(
  * visible label after finding its balanced closer. Only real inline targets
  * or resolved references are active; images do not count as nested links.
  * All lookups borrow the parse-local reference table. */
-static bool md_reference_visible_has_link(const stun_md_document *d,
+static bool md_link_visible_has_active_link(const stun_md_document *d,
                                           const char *s,size_t begin,
                                           size_t end) {
     for(size_t p=begin;p<end;) {
@@ -730,7 +730,7 @@ static bool md_reference_inline_match(
             const md_reference_binding *found=md_reference_lookup(
                 d,s,collapsed?at+1u:first+2u,collapsed?first:second);
             if(found) {
-                if(md_reference_visible_has_link(d,s,at+1u,first))
+                if(md_link_visible_has_active_link(d,s,at+1u,first))
                     return false;
                 *binding=found;*label_end=first;*token_end=second+1u;
                 return true;
@@ -740,7 +740,7 @@ static bool md_reference_inline_match(
     }
     const md_reference_binding *found=
         md_reference_lookup(d,s,at+1u,first);
-    if(!found || md_reference_visible_has_link(d,s,at+1u,first))
+    if(!found || md_link_visible_has_active_link(d,s,at+1u,first))
         return false;
     *binding=found;*label_end=first;*token_end=first+1u;
     return true;
@@ -957,7 +957,9 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
                 size_t round=SIZE_MAX;
                 md_link_parts target={0};
                 if(md_link_target_parse(
-                       s,n,square+1u,&target,&round)) {
+                       s,n,square+1u,&target,&round) &&
+                   (s[p]=='!' || !md_link_visible_has_active_link(
+                       d,s,b,square))) {
                     p=round+1u;continue;
                 }
             }
@@ -1241,7 +1243,9 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
                 size_t round=SIZE_MAX;
                 md_link_parts target={0};
                 if(md_link_target_parse(
-                       s,n,square+1u,&target,&round)) {
+                       s,n,square+1u,&target,&round) &&
+                   (image || !md_link_visible_has_active_link(
+                       d,s,b,square))) {
                     /* Decode metadata before publishing nodes. An invalid
                      * or unsafe decoded href still fails closed in the HTML
                      * renderer; no URL filtering is delegated to the text
