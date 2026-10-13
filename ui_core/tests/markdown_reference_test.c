@@ -942,6 +942,62 @@ done:
     return failure;
 }
 
+/* Canonical nested visible labels and nested active LINK prohibition.
+ * Both official negative examples must create two sibling/paragraph-owned
+ * links, never a LINK descendant of another LINK. Keep independent HTML,
+ * ownership and output-buffer rollback checks. */
+static int test_nested_link_precedence(void) {
+    static const struct {
+        const char *source,*expected;
+    } cases[]={
+        {"[foo [bar](/uri)][ref]\n\n[ref]: /uri\n",
+         "<p>[foo <a href=\"/uri\">bar</a>]<a href=\"/uri\">ref</a></p>\n"},
+        {"[foo *bar [baz][ref]*][ref]\n\n[ref]: /uri\n",
+         "<p>[foo <em>bar <a href=\"/uri\">baz</a></em>]<a href=\"/uri\">ref</a></p>\n"}
+    };
+    int failure=0;stun_md_document *doc=NULL;
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const char *input=cases[k].source;
+        const size_t len=strlen(input);
+        VERIFY(stun_md_parse(input,len,256u,len+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==2u);
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            if(v.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
+            uint32_t owner=v.document.blocks[i].parent_index;
+            while(owner) {
+                VERIFY(v.document.blocks[owner].kind!=STUN_UI_BLOCK_LINK);
+                owner=v.document.blocks[owner].parent_index;
+            }
+        }
+        const size_t bytes=strlen(cases[k].expected);
+        size_t required=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+        VERIFY(required==bytes);
+        char output[256];memset(output,0x57,sizeof(output));
+        VERIFY(stun_md_render_html(&v,256u,output,required,&required)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(required==bytes);
+        for(size_t i=0u;i<sizeof(output);++i)
+            VERIFY((unsigned char)output[i]==0x57u);
+        VERIFY(stun_md_render_html(&v,256u,output,bytes+1u,&required)==
+               STUN_UI_OK);
+        VERIFY(required==bytes &&
+               !memcmp(output,cases[k].expected,bytes+1u));
+        const size_t nodes=v.document.block_count;
+        stun_md_document_destroy(doc);doc=NULL;
+        stun_md_document *rejected=NULL;
+        VERIFY(stun_md_parse(input,len,nodes-1u,len+1u,&rejected)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(rejected==NULL);
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]\n",
@@ -966,6 +1022,9 @@ int main(void) {
          "/uri",NULL,"a",
          "<p><a href=\"/uri\">a</a></p>\n"},
 
+        {"[link [foo [bar]]][ref]\n\n[ref]: /uri\n",
+         "/uri",NULL,"link [foo [bar]]",
+         "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n"}, /* #528 */
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
          "/url","title","foo",
          "<p><a href=\"/url\" title=\"title\">foo</a></p>\n"}, /* #527 */
@@ -1030,11 +1089,11 @@ int main(void) {
          "/uri",NULL,"id",
          "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==28u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==29u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
-    if(test_unsafe() || test_fence() ||
+    if(test_nested_link_precedence() || test_unsafe() || test_fence() ||
        test_container_definition_fences() ||
        test_list_blank_scope() || test_list_capacity_isolation() ||
        test_root_rule_owner_release() ||
@@ -1072,7 +1131,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 28/28 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 29/29 AST/HTML, forward/duplicate/case "
          "binding, safe URL, root-rule, ATX, fence and table ownership");
     return 0;
 }
