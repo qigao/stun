@@ -1769,6 +1769,8 @@ typedef struct md_list_marker_info {
 typedef struct md_list_frame {
     uint32_t list, item, paragraph, code, quote, quote_paragraph;
     md_fence fence;
+    unsigned html_kind; /* per-item canonical raw HTML block lifetime */
+    uint32_t html_node;
     bool fence_open;
     size_t code_blank_lines;
     size_t marker_column, content_column, list_base_column;
@@ -1963,6 +1965,7 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
      * following top-level paragraph to it. */
     f->empty_item=content==end && !task;
     f->paragraph=f->code=f->quote=f->quote_paragraph=UINT32_MAX;
+    f->html_kind=0u;f->html_node=UINT32_MAX;
     f->content_column=m->content_column;
     f->code_blank_lines=0u;
     f->fence_open=f->pending_blank=false;
@@ -2015,6 +2018,26 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
             return d->error==STUN_UI_OK;
         if(!task && md_list_append_quote(d,f,s,content,end))
             return d->error==STUN_UI_OK;
+        /* An item opener shares the canonical seven-type HTML classifier.
+         * The enclosing item owns the RAW_HTML_BLOCK; neither renderer
+         * policy is changed by this block-admission decision. */
+        const unsigned html_kind=task?0u:
+            md_raw_html_root_kind(s,content,end,false);
+        if(html_kind) {
+            const uint32_t html=md_add(
+                d,f->item,STUN_UI_BLOCK_RAW_HTML_BLOCK,0u);
+            const bool newline=end<d->raw_size &&
+                (s[end]=='\n' || (s[end]=='\r' &&
+                 end+1u<d->raw_size && s[end+1u]=='\n'));
+            const md_line owned={content,end,end,newline};
+            if(html==UINT32_MAX ||
+               !md_raw_html_block_line(d,html,owned,true))return false;
+            f->html_node=html;
+            f->html_kind=html_kind<=5u &&
+                md_raw_html_line_ends(html_kind,s,content,end)?
+                0u:html_kind;
+            return d->error==STUN_UI_OK;
+        }
         f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
         if(f->paragraph==UINT32_MAX) return false;
         if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
@@ -2074,6 +2097,14 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
          * continuation. EOF or another block discards trailing blanks. */
         md_list_frame *top=&stack->frames[stack->depth-1u];
         if(top->code!=UINT32_MAX) ++top->code_blank_lines;
+        if(top->html_kind) {
+            if(top->html_kind>5u) {
+                top->html_kind=0u;top->html_node=UINT32_MAX;
+            } else {
+                md_line blank=line;blank.begin=line.end;
+                (void)md_raw_html_block_line(d,top->html_node,blank,false);
+            }
+        }
         return true;
     }
     const size_t indent=md_columns(s,line.begin,md_left(s,line.begin,line.end));
@@ -2153,6 +2184,22 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             }
             --stack->depth; /* differing marker families never coalesce */
             continue;
+        }
+        if(f->html_kind && indent>=f->content_column) {
+            md_line owned=line;
+            owned.begin=md_skip_columns(
+                s,line.begin,line.end,f->content_column);
+            if(owned.begin==line.begin && f->content_column) {
+                md_error(d,STUN_UI_INVALID_ARGUMENT);return true;
+            }
+            if(!md_raw_html_block_line(d,f->html_node,owned,false))
+                return true;
+            const size_t content=md_left(s,owned.begin,line.end);
+            if(f->html_kind<=5u &&
+               md_raw_html_line_ends(f->html_kind,s,content,line.end)) {
+                f->html_kind=0u;f->html_node=UINT32_MAX;
+            }
+            return true;
         }
         if(f->fence_open) {
             if(indent<f->content_column) {
@@ -2420,6 +2467,8 @@ typedef struct md_quote_stack {
     uint32_t paragraph, code;
     md_fence fence;
     md_list_stack lists; /* bounded list frames owned by the active quote */
+    unsigned html_kind;
+    uint32_t html_node;
     bool lazy, fence_open;
 } md_quote_stack;
 
@@ -2483,6 +2532,7 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
         q->paragraph=q->code=UINT32_MAX;
         q->lists.depth=0u; /* no list state across quote generation/depth */
         q->fence_open=q->lazy=false;
+        q->html_kind=0u;q->html_node=UINT32_MAX;
     }
     const uint32_t parent=q->nodes[level-1u];
     const char *s=d->raw;
@@ -2491,6 +2541,21 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
     const size_t physical_content=md_source_visual_column_at(s,begin);
     const size_t indent=physical_content>=logical_quote ?
                         physical_content-logical_quote : 0u;
+    if(q->html_kind) {
+        if(q->html_kind>5u && md_blank(s,body,line.end)) {
+            q->html_kind=0u;q->html_node=UINT32_MAX;
+            q->paragraph=q->code=UINT32_MAX;q->lazy=false;
+            return true; /* type-6/7 terminates before the blank */
+        }
+        md_line owned=line;owned.begin=body;
+        if(!md_raw_html_block_line(d,q->html_node,owned,false))
+            return false;
+        if(q->html_kind<=5u &&
+           md_raw_html_line_ends(q->html_kind,s,begin,line.end)) {
+            q->html_kind=0u;q->html_node=UINT32_MAX;
+        }
+        return d->error==STUN_UI_OK;
+    }
     if(q->fence_open) {
         if(indent<=3u && md_fence_close(s,begin,line.end,q->fence)) {
             q->fence_open=false;
@@ -2571,6 +2636,23 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
         if(q->code==UINT32_MAX)return false;
         q->lazy=false;
         return md_quote_code_line(d,q->code,line,body);
+    }
+    if(indent<=3u && q->lists.depth==0u) {
+        const unsigned kind=md_raw_html_root_kind(
+            s,begin,line.end,q->paragraph!=UINT32_MAX);
+        if(kind) {
+            const uint32_t node=md_add(
+                d,parent,STUN_UI_BLOCK_RAW_HTML_BLOCK,0u);
+            md_line owned=line;owned.begin=body;
+            if(node==UINT32_MAX ||
+               !md_raw_html_block_line(d,node,owned,true))return false;
+            q->html_node=node;
+            q->html_kind=kind<=5u &&
+                md_raw_html_line_ends(kind,s,begin,line.end)?0u:kind;
+            q->paragraph=q->code=UINT32_MAX;
+            q->lazy=false;
+            return true;
+        }
     }
     if(q->paragraph==UINT32_MAX && indent<=3u &&
        md_container_reference_line(d,line,begin)) {
@@ -3422,6 +3504,7 @@ static void md_parse_blocks(stun_md_document *d) {
             quotes.paragraph=quotes.code=UINT32_MAX;
             quotes.lists.depth=0u;
             quotes.fence_open=quotes.lazy=false;
+            quotes.html_kind=0u;quotes.html_node=UINT32_MAX;
         }
         /* Keep interstitial blank lines pending until another indented line
          * proves that they are interior. On termination/EOF they vanish. */
