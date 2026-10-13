@@ -323,6 +323,62 @@ static bool md_code_line(stun_md_document *d, uint32_t parent,
     return true;
 }
 
+/* A TAB can span a list or quote boundary. Keep source byte offsets
+ * immutable while distinguishing the physical stop column from the single
+ * optional whitespace column that belongs to a container marker. */
+static size_t md_source_visual_column_at(const char *s,size_t at) {
+    size_t first=at,column=0u;
+    while(first && s[first-1u]!='\n')--first;
+    for(size_t p=first;p<at;++p)
+        column+=s[p]=='\t'?4u-(column%4u):1u;
+    return column;
+}
+static size_t md_logical_content_column_at(const char *s,size_t at) {
+    const size_t physical=md_source_visual_column_at(s,at);
+    if(at && s[at-1u]=='>')return physical;
+    if(at>=2u && md_space(s[at-1u]) && s[at-2u]=='>')
+        return md_source_visual_column_at(s,at-2u)+2u;
+    return physical;
+}
+
+/* Consume a precise visual-column code indent from raw source. If the
+ * last consumed TAB crosses the boundary, emit its residual columns as
+ * ASCII spaces in the ONE owned code TEXT node. CRLF/EOF normalize to LF. */
+static bool md_code_line_visual(stun_md_document *d,uint32_t parent,
+                                md_line line,size_t physical_column,
+                                size_t wanted_column) {
+    const char *s=d->raw;
+    size_t pos=line.begin,column=physical_column;
+    while(pos<line.end && column<wanted_column && md_space(s[pos])) {
+        column+=s[pos]=='\t'?4u-(column%4u):1u;
+        ++pos;
+    }
+    if(column<wanted_column) {
+        md_error(d,STUN_UI_INVALID_ARGUMENT);return false;
+    }
+    const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_TEXT,0u);
+    if(node==UINT32_MAX)return false;
+    size_t from=0u,to=0u,part_begin=0u,part_end=0u;
+    bool began=false;
+    size_t residue=column-wanted_column;
+    static const char spaces[]="    ";
+    while(residue && d->error==STUN_UI_OK) {
+        const size_t n=residue>4u?4u:residue;
+        if(!md_store(d,false,spaces,n,&part_begin,&part_end))
+            return false;
+        if(!began) {from=part_begin;began=true;}
+        residue-=n;
+    }
+    if(!md_store(d,false,s+pos,line.end-pos,&part_begin,&part_end))
+        return false;
+    if(!began)from=part_begin;
+    if(!md_store(d,false,"\n",1u,&part_begin,&to))
+        return false;
+    d->nodes[node].byte_begin=from;
+    d->nodes[node].byte_end=to;
+    return true;
+}
+
 /* Code spans are opaque to outer emphasis and link-label delimiter scans,
  * and close only on an EXACTLY equal-sized backtick run. */
 static size_t md_code_span_close(const char *s,size_t n,size_t begin,
@@ -1103,6 +1159,7 @@ typedef struct md_list_marker_info {
     uint32_t start;
     char marker;
     bool ordered;
+    bool expanded_tab_padding;
 } md_list_marker_info;
 typedef struct md_list_frame {
     uint32_t list, item, paragraph, code, quote, quote_paragraph;
@@ -1140,6 +1197,21 @@ static size_t md_skip_columns(const char *s,size_t begin,size_t end,
     return col>=wanted?p:begin;
 }
 
+/* List content columns are relative to the physical line's final owner
+ * (root or marked quote). Count TAB stops from original source positions. */
+static bool md_list_code_line(stun_md_document *d,md_list_frame *f,
+                              md_line line) {
+    const char *s=d->raw;
+    const size_t base=md_logical_content_column_at(s,line.begin);
+    if(f->content_column>SIZE_MAX-base ||
+       base+f->content_column>SIZE_MAX-4u) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    return md_code_line_visual(
+        d,f->code,line,md_source_visual_column_at(s,line.begin),
+        base+f->content_column+4u);
+}
+
 /* Admit a list marker, recording the marker's visual column, exact ordered
  * start, and the item content column. Marker type is part of list identity. */
 static bool md_list_token(const char *s,md_line line,
@@ -1164,27 +1236,27 @@ static bool md_list_token(const char *s,md_line line,
     size_t total=marker_col+(marker_end-b);
     for(size_t p=marker_end;p<content;++p)
         total+=s[p]=='\t' ? 4u-(total%4u) : 1u;
-    /* A marker-only item has no content on this line. Its continuation
-     * indentation is one column past the marker, independent of trailing
-     * whitespace. "-   \n  foo" keeps foo within the item (CommonMark #279).
-     * When FIVE OR MORE ASCII spaces separate a marker and actual content,
-     * only one belongs to the list marker. The remaining four-plus columns
-     * form an indented code block inside the item (#273/#274). Preserve the
-     * residual source bytes instead of discarding them as marker padding.
-     * The more general tab-expanded marker case remains separately scoped. */
+    /* Marker-only padding is one column. When 5+ DISPLAY columns
+     * separate a nonempty marker from its content, only one belongs to
+     * list syntax; the rest is code indentation. Tabs may cross that
+     * column and must retain their residual code-space ownership. */
+    const size_t marker_end_column=marker_col+(marker_end-b);
+    bool expanded_tab_padding=false;
     if(content==line.end) {
-        total=marker_col+(marker_end-b)+1u;
-    } else if(content-marker_end>4u) {
+        total=marker_end_column+1u;
+    } else if(total-marker_end_column>4u) {
         bool ascii_spaces=true;
         for(size_t p=marker_end;p<content;++p)
             if(s[p]!=' ') {ascii_spaces=false;break;}
-        if(ascii_spaces) {
-            total=marker_col+(marker_end-b)+1u;
-            content=marker_end+1u;
+        total=marker_end_column+1u;
+        if(ascii_spaces)content=marker_end+1u;
+        else {
+            content=marker_end;
+            expanded_tab_padding=true;
         }
     }
     *out=(md_list_marker_info){
-        marker_col,total,content,start,marker,ordered
+        marker_col,total,content,start,marker,ordered,expanded_tab_padding
     };
     return true;
 }
@@ -1293,10 +1365,19 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
         /* The excess marker separation belongs to an indented code block,
          * not a manufactured paragraph. Admit the first code line through
          * the same owned frame as later indented-code continuation lines. */
-        if(!task && md_columns(s,content,end)>=4u) {
+        if(!task &&
+           (m->expanded_tab_padding || md_columns(s,content,end)>=4u)) {
             f->code=md_add(d,f->item,STUN_UI_BLOCK_CODE_INDENTED,0u);
             if(f->code==UINT32_MAX) return false;
             const md_line initial={content,end,end,false};
+            if(m->expanded_tab_padding) {
+                const size_t physical=md_source_visual_column_at(s,content);
+                if(physical>SIZE_MAX-5u) {
+                    md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+                }
+                return md_code_line_visual(
+                    d,f->code,initial,physical,physical+5u);
+            }
             return md_code_line(d,f->code,initial,false);
         }
         /* CommonMark permits list containers to nest on one source line:
@@ -1491,9 +1572,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                 }
                 f->pending_blank=false;
                 md_list_claim_nested_blank(stack);
-                md_line inner=line;
-                inner.begin=body;
-                (void)md_code_line(d,f->code,inner,false);
+                (void)md_list_code_line(d,f,line);
                 return true;
             }
             if(f->pending_blank) {
@@ -1516,9 +1595,7 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                     f->code=md_add(d,f->item,STUN_UI_BLOCK_CODE_INDENTED,0u);
                     if(f->code==UINT32_MAX) return true;
                 }
-                md_line inner=line;
-                inner.begin=body;
-                (void)md_code_line(d,f->code,inner,false);
+                (void)md_list_code_line(d,f,line);
                 return true;
             }
             f->code=UINT32_MAX;
@@ -1729,6 +1806,23 @@ static size_t md_quote_prefix(const char *s,md_line line,size_t *body) {
     return depth;
 }
 
+/* After a quote marker consumes its optional ONE visual whitespace
+ * column, retain the remaining TAB columns as owned code indentation. */
+static bool md_quote_code_line(stun_md_document *d,uint32_t code,
+                               md_line line,size_t body) {
+    const char *s=d->raw;
+    const size_t logical=md_logical_content_column_at(s,body);
+    if(logical>SIZE_MAX-4u) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    const size_t start=body>line.begin && md_space(s[body-1u]) ?
+                       body-1u : body;
+    md_line inner=line;
+    inner.begin=start;
+    return md_code_line_visual(
+        d,code,inner,md_source_visual_column_at(s,start),logical+4u);
+}
+
 /* One explicitly owned stack of quote containers. All admitted blocks keep
  * their true parent in the pre-order RichDoc, with one document lifetime. */
 static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
@@ -1753,7 +1847,10 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
     const uint32_t parent=q->nodes[level-1u];
     const char *s=d->raw;
     const size_t begin=md_left(s,body,line.end);
-    const size_t indent=md_columns(s,body,begin);
+    const size_t logical_quote=md_logical_content_column_at(s,body);
+    const size_t physical_content=md_source_visual_column_at(s,begin);
+    const size_t indent=physical_content>=logical_quote ?
+                        physical_content-logical_quote : 0u;
     if(q->fence_open) {
         if(indent<=3u && md_fence_close(s,begin,line.end,q->fence)) {
             q->fence_open=false;
@@ -1777,11 +1874,8 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
         return d->error==STUN_UI_OK;
     if(d->error!=STUN_UI_OK)return false;
     if(q->code!=UINT32_MAX) {
-        if(indent>=4u) {
-            md_line code_line=line;
-            code_line.begin=body;
-            return md_code_line(d,q->code,code_line,false);
-        }
+        if(indent>=4u)
+            return md_quote_code_line(d,q->code,line,body);
         q->code=UINT32_MAX;
     }
     if(q->paragraph!=UINT32_MAX && indent<=3u) {
@@ -1835,10 +1929,8 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
     if(indent>=4u && q->paragraph==UINT32_MAX) {
         q->code=md_add(d,parent,STUN_UI_BLOCK_CODE_INDENTED,0u);
         if(q->code==UINT32_MAX)return false;
-        md_line code_line=line;
-        code_line.begin=body;
         q->lazy=false;
-        return md_code_line(d,q->code,code_line,false);
+        return md_quote_code_line(d,q->code,line,body);
     }
     if(q->paragraph==UINT32_MAX) {
         q->paragraph=md_add(d,parent,STUN_UI_BLOCK_PARAGRAPH,0u);

@@ -44,6 +44,11 @@ static const html_fixture cases[] = {
       "<blockquote>\n<pre><code>  foo\n</code></pre>\n</blockquote>\n" }, /* official CommonMark #6 */
     { "-\t\tfoo\n",
       "<ul>\n<li>\n<pre><code>  foo\n</code></pre>\n</li>\n</ul>\n" }, /* official CommonMark #7 */
+    { "> \tfoo\n",
+      "<blockquote>\n<p>foo</p>\n</blockquote>\n" }, /* tab at source col 2 is only two content columns */
+    { "-\tfoo\n",
+      "<ul>\n<li>foo</li>\n</ul>\n" }, /* single TAB is marker padding, not code */
+
 
     { " " TICK TICK TICK "\n aaa\naaa\n" TICK TICK TICK "\n",
       "<pre><code>aaa\naaa\n</code></pre>\n" }, /* CommonMark #131 one-space opening indent */
@@ -470,7 +475,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==245,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==247,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

@@ -49,6 +49,10 @@ static const fixture cases[]={
      "<blockquote>\n<pre><code>  foo\n</code></pre>\n</blockquote>\n",-1,0u},
     {"cm-007","-\t\tfoo\n",
      "<ul>\n<li>\n<pre><code>  foo\n</code></pre>\n</li>\n</ul>\n",0,1u},
+    {"quote-partial-tab-not-code","> \tfoo\n",
+     "<blockquote>\n<p>foo</p>\n</blockquote>\n",-1,0u},
+    {"marker-single-tab-padding","-\tfoo\n",
+     "<ul>\n<li>foo</li>\n</ul>\n",0,1u},
 
     {"unicode-loose","- \xe4\xb8\xad\xf0\x9f\x91\xa9\n\n  \xe6\x97\xa5\n",
      "<ul>\n<li>\n<p>\xe4\xb8\xad\xf0\x9f\x91\xa9</p>\n<p>\xe6\x97\xa5</p>\n</li>\n</ul>\n",1,1u},
@@ -156,7 +160,7 @@ static const fixture cases[]={
     {"list-setext-equals","- Foo\n  ===\n",
      "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n</ul>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==62u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==64u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
