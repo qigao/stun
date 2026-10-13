@@ -78,6 +78,11 @@ static const html_fixture cases[] = {
       "<p>[foo <em>[bar <a href=\"/uri\">baz</a>](/uri)</em>](/uri)</p>\n" }, /* official #519 */
     { "[link [foo [bar]]][ref]\n\n[ref]: /uri\n",
       "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n" }, /* official #528 */
+    { "[foo<https://example.com/?search=][ref]>\n\n[ref]: /uri\n",
+      "<p>[foo<a href=\"https://example.com/?search=%5D%5Bref%5D\">https://example.com/?search=][ref]</a></p>\n" }, /* official #538 */
+    { "[x <https://example.com/path>](/outer)\n",
+      "<p>[x <a href=\"https://example.com/path\">https://example.com/path</a>](/outer)</p>\n" }, /* nested angle autolink blocks outer LINK */
+
     { "[foo [bar](/uri)][ref]\n\n[ref]: /uri\n",
       "<p>[foo <a href=\"/uri\">bar</a>]<a href=\"/uri\">ref</a></p>\n" }, /* official #532 */
     { "[foo *bar [baz][ref]*][ref]\n\n[ref]: /uri\n",
@@ -644,7 +649,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==327,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==329,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
