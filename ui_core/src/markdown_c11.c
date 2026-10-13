@@ -2186,6 +2186,19 @@ static void md_reference_collect_root(stun_md_document *d) {
             container_pending=true;
             continue;
         }
+        /* The real root block parser recognizes ATX headings after a
+         * quote or indented code block even without a blank separator.
+         * Only release the conservative root-definition guard when no
+         * unresolved list item owns the line: list lazy-continuation rules
+         * are explicitly NOT reimplemented by this reference prepass. */
+        if(container_pending && !list_content_column && columns<=3u) {
+            size_t hb=begin,he=line.end;
+            if(md_atx(s,&hb,&he)) {
+                container_pending=false;
+                paragraph_started=false;
+                continue;
+            }
+        }
         if(container_pending)continue;
         /* A Setext underline ends its preceding root paragraph in the
          * production block parser. The prepass must recognize that same

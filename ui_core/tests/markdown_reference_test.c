@@ -148,13 +148,15 @@ static int test_container_definition_fences(void) {
          * root definition. Without the preceding continuation, a list
          * can terminate before the label and that would be a false XFAIL. */
         "- item\n  ---\n  continuation\n  [hidden]: /bad\n\n[hidden]\n",
+        "> quote\n> # inner\n> [hidden]: /uri\n\n[hidden]\n",
+        "    # literal\n    [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
         "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
         "- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==12u,
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==14u,
                    "reference-owner negative denominator");
     for(size_t i=0u;i<sizeof(blocked)/sizeof(blocked[0]);++i) {
         const size_t n=strlen(blocked[i]);
@@ -305,6 +307,67 @@ done:
     return failure;
 }
 
+/* A root-level ATX heading terminates an already open quote or
+ * indented code block. The following root ASCII definition is source-owned
+ * and its metadata is copied into the RichDoc before prepass teardown. */
+static int test_root_atx_owner_release(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const char *const cases[]={
+        "> quote\n# heading\n[ref]: /uri\n\n[ref]\n",
+        "    code\n# heading\n[ref]: /uri\n\n[ref]\n",
+        "> quote\r\n  ## heading\r\n[ref]: /uri\r\n\r\n[ref]\r\n"
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "ATX root owner evidence denominator");
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t bytes=strlen(cases[k]);
+        VERIFY(stun_md_parse(cases[k],bytes,256u,bytes+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==bytes);
+        VERIFY(!memcmp(v.raw_markdown,cases[k],bytes));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_HEADING)==1u);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+        bool copied=false;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *link=&v.document.blocks[i];
+            if(link->kind!=STUN_UI_BLOCK_LINK)continue;
+            VERIFY(link->parent_index<i);
+            const stun_ui_block *parent=&v.document.blocks[link->parent_index];
+            VERIFY(parent->kind==STUN_UI_BLOCK_PARAGRAPH);
+            VERIFY(parent->parent_index==0u);
+            const char *meta=NULL;size_t len=SIZE_MAX;
+            VERIFY(stun_ui_rich_document_metadata(
+                &v,i,&meta,&len)==STUN_UI_OK);
+            VERIFY(meta && len==4u && !memcmp(meta,"/uri",4u));
+            copied=true;
+        }
+        VERIFY(copied);
+        char html[512];memset(html,0x6b,sizeof(html));
+        size_t needed=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,256u,NULL,0u,&needed)==STUN_UI_OK);
+        VERIFY(needed+1u<sizeof(html));
+        size_t reported=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,256u,html,needed,&reported)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(reported==needed);
+        for(size_t i=0u;i<sizeof(html);++i)
+            VERIFY((unsigned char)html[i]==0x6bu);
+        VERIFY(stun_md_render_html(&v,256u,html,needed+1u,&reported)==
+               STUN_UI_OK);
+        VERIFY(reported==needed);
+        VERIFY(strstr(html,"<a href=\"/uri\">ref</a>")!=NULL);
+        VERIFY((unsigned char)html[needed+1u]==0x6bu);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
@@ -366,7 +429,8 @@ int main(void) {
     if(test_unsafe() || test_fence() ||
        test_container_definition_fences() ||
        test_list_blank_scope() || test_list_capacity_isolation() ||
-       test_root_rule_owner_release())return 1;
+       test_root_rule_owner_release() ||
+       test_root_atx_owner_release())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -391,6 +455,6 @@ int main(void) {
         return 1;
     }
     puts("C11 root references: 17/17 AST/HTML, forward/duplicate/case "
-         "binding, safe URL, blank-list/quote/fence and root-rule ownership");
+         "binding, safe URL, container, root-rule and ATX ownership");
     return 0;
 }
