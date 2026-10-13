@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gated no-regression check of 545 independently qualified official HTML IDs.
+"""Gated no-regression check of 546 independently qualified official HTML IDs.
 
 The full 652-case report remains diagnostic; every baseline ID must still
 render *exactly* the official CommonMark 0.31.2 expected HTML.
@@ -23,7 +23,7 @@ def main():
         baseline.get("commonmark_version")!="0.31.2" or
         data.get("source")!=baseline.get("source") or
         data.get("total")!=652 or baseline.get("official_total")!=652 or
-        not isinstance(ids,list) or len(ids)!=545 or
+        not isinstance(ids,list) or len(ids)!=546 or
         any(type(x) is not int or x<1 or x>652 for x in ids) or
         ids!=sorted(set(ids))):
         print("INFRA: immutable CommonMark baseline differs",file=sys.stderr)

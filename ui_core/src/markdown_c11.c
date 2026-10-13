@@ -2592,7 +2592,7 @@ static bool md_reference_collect_title(stun_md_document *d,md_line first,
  * via md_reference_key; the original source span, including CRLF/indent,
  * must fit MD_REF_KEY_MAX. Unicode folding and nested containers remain
  * independent work (#183/#540). */
-static bool md_reference_definition_label(const stun_md_document *d,
+static bool md_reference_definition_label(stun_md_document *d,
                                          md_line first,size_t begin,
                                          md_line *target_line,
                                          size_t *after_colon,
@@ -2621,7 +2621,7 @@ static bool md_reference_definition_label(const stun_md_document *d,
     const size_t second_begin=md_left(s,next.begin,next.end);
     if(second_begin>=next.end ||
        md_columns(s,next.begin,second_begin)>3u ||
-       md_root_code_span_interrupts((stun_md_document*)d,next))
+       md_root_code_span_interrupts(d,next))
         return false;
     const size_t second_close=md_reference_label_close(
         s,next.end,second_begin);

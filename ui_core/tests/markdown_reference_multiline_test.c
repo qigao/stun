@@ -383,14 +383,30 @@ static int check_root_label_boundary_rejections(void) {
         stun_md_document_destroy(doc);doc=NULL;
     }
     char source[512],first[128];
-    memset(first,'a',127u);first[127]='\0';
-    const int n=snprintf(source,sizeof(source),
-                         "[%s\n  b]: /url\n\n[x][%s b]\n",first,first);
+    /* The original raw bytes BETWEEN '[' and ']' count toward the 128
+     * byte ceiling: 121 + LF(1) + indent(2) + "last"(4) = exactly 128.
+     * The inline normalized key is also admissible, independently. */
+    memset(first,'a',121u);first[121]='\0';
+    int n=snprintf(source,sizeof(source),
+                   "[%s\n  last]: /uri\n\n[x][%s last]\n",first,first);
+    VERIFY(n>0 && (size_t)n<sizeof(source));
+    const reference_case exact={name,source,
+        "<p><a href=\"/uri\">x</a></p>\n","/uri",NULL,"x"};
+    VERIFY(check_case(&exact)==0);
+    /* 122 + LF(1) + indent(2) + "last"(4) = 129 RAW bytes and is
+     * unsupported even though the normalized inline key is <=128. */
+    memset(first,'a',122u);first[122]='\0';
+    n=snprintf(source,sizeof(source),
+               "[%s\n  last]: /uri\n\n[x][%s last]\n",first,first);
     VERIFY(n>0 && (size_t)n<sizeof(source));
     VERIFY(stun_md_parse(source,(size_t)n,512u,(size_t)n+1u,
                          &doc)==STUN_UI_OK);
     VERIFY(doc!=NULL);
-    VERIFY(count_kind(stun_md_document_view(doc),STUN_UI_BLOCK_LINK)==0u);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,512u)==STUN_UI_OK);
+    VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==0u);
+    VERIFY(v.raw_markdown_bytes==(size_t)n &&
+           !memcmp(v.raw_markdown,source,(size_t)n));
 done:
     stun_md_document_destroy(doc);
     return failure;
