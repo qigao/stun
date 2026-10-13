@@ -298,6 +298,38 @@ int main(void) {
         stun_md_document_destroy(negative);
     }
 
+    /* CommonMark #480/#481: delimiter runs OUTSIDE a recognized URI
+     * autolink must never close inside its literal LABEL. Failure to shield
+     * them previously made the C11 parse reject these documents entirely. */
+    static const char *const emph_shield[]={
+        "**a<https://foo.bar/?q=**>\n",
+        "__a<https://foo.bar/?q=__>\n"
+    };
+    _Static_assert(sizeof(emph_shield)/sizeof(emph_shield[0])==2u,
+                   "opaque URI delimiter negative/rollback denominator");
+    for(size_t k=0u;k<sizeof(emph_shield)/sizeof(emph_shield[0]);++k) {
+        stun_md_document *doc=NULL;
+        const size_t n=strlen(emph_shield[k]);
+        CHECK(stun_md_parse(emph_shield[k],n,128u,n+1u,&doc)==STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==n);
+        CHECK(!memcmp(v.raw_markdown,emph_shield[k],n));
+        CHECK(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+        CHECK(kind_count(v,STUN_UI_BLOCK_STRONG)==0u);
+        CHECK(kind_count(v,STUN_UI_BLOCK_EMPHASIS)==0u);
+        const size_t nodes=v.document.block_count;
+        CHECK(nodes>3u);
+        CHECK(v.document.blocks[nodes-1u].kind==STUN_UI_BLOCK_TEXT);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+        stun_md_document *limited=(stun_md_document*)(uintptr_t)1u;
+        CHECK(stun_md_parse(emph_shield[k],n,nodes-1u,n+1u,&limited)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(limited==NULL);
+    }
+
     /* Node budget exhaustion with a title must discard every partial node. */
     const char limited[]="[x](/f&ouml;&ouml; \"f&ouml;&ouml;\")\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;

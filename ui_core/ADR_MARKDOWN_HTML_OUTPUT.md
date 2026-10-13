@@ -91,3 +91,30 @@ passed or weakening the production renderer.
 - Unsupported raw HTML, Unicode label folding, images and unqualified nested
   Tab/container combinations remain separately tracked. No MarkdownWidget/
   Tango production parser cutover and no compatibility fallback.
+
+## 6. Safe URI Autolinks and inline delimiter precedence
+
+As qualified by [Runtime #38352467837](https://github.com/qigao/stun/actions/runs/38352467837)
+at source HEAD `2788123`, the C11 inline parser admits bounded HTTP, HTTPS
+and MAILTO angle URI autolinks as ordinary owned LINK + literal TEXT nodes.
+Their metadata is borrowed only during a live RichDoc lease, while
+SafeApplicationHtml remains the sole production renderer and validates every
+URL byte before percent/HTML encoding (including URL brackets). URI payload
+escapes and HTML entities are **not** recursively parsed as Markdown.
+
+The existing bounded emphasis delimiter-run scanner uses the **same**
+Autolink admission predicate to skip the complete opaque URI token; otherwise
+external emphasis markers can incorrectly pair with `**` / `__` inside the
+URI and reject an entire document. Official #480/#481 and a strict final
+LINK-label node-budget rollback now enforce this precedence.
+
+Official newly matching IDs are exactly **#20, #480, #481, #594, #595, #597,
+#600 and #603**. Immutable zero-regression gate advances **513→521** on this
+independently verified exact-HEAD evidence: Installed SDK C11 14/14, strict
+HTML 273/273, native LINK metadata 26/26, full 652-example diagnostic 521
+exact / 8 unsupported / 123 different, ASan/UBSan plus Mesa SUCCESS.
+
+CommonMark's arbitrary-scheme autolink grammar is NOT the production-safe URI
+policy. Unknown, unapproved or unsafe protocols remain escaped text, not
+silently permitted links; RawHTML, explicit XML/XHTML and test-only normative
+rendering remain separately scoped. No second Markdown parser or fallback.
