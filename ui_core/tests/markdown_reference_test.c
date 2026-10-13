@@ -142,13 +142,14 @@ static int test_container_definition_fences(void) {
         "    [hidden]: /uri\n\n[hidden]\n",
         "paragraph\n[hidden]: /uri\n\n[hidden]\n",
         "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n",
+        "- item\n    * * *\n    [hidden]: /bad\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
         "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
         "- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==10u,
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==11u,
                    "reference-owner negative denominator");
     for(size_t i=0u;i<sizeof(blocked)/sizeof(blocked[0]);++i) {
         const size_t n=strlen(blocked[i]);
@@ -295,9 +296,18 @@ int main(void) {
          "<h2>Setext</h2>\n<p><a href=\"/root\">key</a></p>\n"},
         {"Setext\r\n===\r\n[key]: /root\r\n\r\n[key]\r\n",
          "/root",NULL,"key",
-         "<h1>Setext</h1>\n<p><a href=\"/root\">key</a></p>\n"}
+         "<h1>Setext</h1>\n<p><a href=\"/root\">key</a></p>\n"},
+        {"* * *\n[key]: /root\n\n[key]\n",
+         "/root",NULL,"key",
+         "<hr />\n<p><a href=\"/root\">key</a></p>\n"},
+        {"- - -\n[key]: /root\n\n[key]\n",
+         "/root",NULL,"key",
+         "<hr />\n<p><a href=\"/root\">key</a></p>\n"},
+        {"  * * *\r\n[key]: /root\r\n\r\n[key]\r\n",
+         "/root",NULL,"key",
+         "<hr />\n<p><a href=\"/root\">key</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==14u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==17u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
@@ -327,7 +337,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 14/14 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 17/17 AST/HTML, forward/duplicate/case "
          "binding, safe URL, blank-list/quote/fence opacity and atomic bounded ownership");
     return 0;
 }

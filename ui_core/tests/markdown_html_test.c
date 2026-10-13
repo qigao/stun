@@ -374,11 +374,15 @@ static const html_fixture cases[] = {
     { "Setext\n===\n[ref]: /url\n\n[ref]\n", "<h1>Setext</h1>\n<p><a href=\"/url\">ref</a></p>\n" }, /* Setext H1 closes root paragraph before adjacent definition */
     { "Setext\n---\n[ref]: /url\n\n[ref]\n", "<h2>Setext</h2>\n<p><a href=\"/url\">ref</a></p>\n" }, /* Setext H2 takes precedence over thematic break */
     { "Setext\r\n===\r\n[ref]: /url\r\n\r\n[ref]\r\n", "<h1>Setext</h1>\n<p><a href=\"/url\">ref</a></p>\n" }, /* CRLF line offset and definition ownership */
+    { "* * *\n[key]: /uri\n\n[key]\n", "<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* root thematic star rule does not create list ownership */
+    { "- - -\n[key]: /uri\n\n[key]\n", "<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* root thematic dash rule takes list precedence */
+    { "  * * *\r\n[key]: /uri\r\n\r\n[key]\r\n", "<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* root indented thematic rule and CRLF */
+    { "paragraph\n- - -\n[key]: /uri\n\n[key]\n", "<p>paragraph</p>\n<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* rule interrupts root paragraph */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==210,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==214,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

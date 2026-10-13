@@ -2145,6 +2145,16 @@ static void md_reference_collect_root(stun_md_document *d) {
             else list_content_column=0u;
             after_list_blank=false;
         }
+        /* Keep the same thematic-break precedence as md_parse_blocks:
+         * "- - -" and "* * *" are ROOT rules, not list openers. A plain
+         * "---" beneath an active paragraph stays a Setext H2 underline.
+         * An existing container guard may never be released here. */
+        if(!container_pending && columns<=3u &&
+           md_rule(s,begin,line.end) &&
+           !(paragraph_started && md_setext(s,begin,line.end))) {
+            paragraph_started=false;
+            continue;
+        }
         char marker=0;size_t count=0,ib=0,ie=0;
         if(columns<=3u &&
            md_fence_start(s,begin,line.end,&marker,&count,&ib,&ie)) {
