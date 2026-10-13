@@ -68,6 +68,13 @@ static const html_fixture cases[] = {
     { "[x](/a&b \"A &amp; B\")\n",
       "<p><a href=\"/a&amp;b\" title=\"A &amp; B\">x</a></p>\n" }, /* URI + HTML5 attribute escaping, no double entity decode */
     { "A [B](dest)\n", "<p>A <a href=\"dest\">B</a></p>\n" },
+    { "[link [foo [bar]]][ref]\n\n[ref]: /uri\n",
+      "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n" }, /* official #528 */
+    { "[foo [bar](/uri)][ref]\n\n[ref]: /uri\n",
+      "<p>[foo <a href=\"/uri\">bar</a>]<a href=\"/uri\">ref</a></p>\n" }, /* official #532 */
+    { "[foo *bar [baz][ref]*][ref]\n\n[ref]: /uri\n",
+      "<p>[foo <em>bar <a href=\"/uri\">baz</a></em>]<a href=\"/uri\">ref</a></p>\n" }, /* official #533 */
+
     { "a " TICK "code" TICK " b\n",
       "<p>a <code>code</code> b</p>\n" },
     { "- Foo\n- * * *\n",
@@ -629,7 +636,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==320,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==323,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
