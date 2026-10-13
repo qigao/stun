@@ -1380,6 +1380,12 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
             }
             return md_code_line(d,f->code,initial,false);
         }
+        /* A list marker's CONTENT can be a thematic rule. Admit the typed
+         * RULE after literal-code precedence but before nested lists or
+         * paragraph text. A whole "- ---" source line is a root HR earlier
+         * in md_parse_blocks, and Setext precedence is unchanged. */
+        if(!task && md_rule(s,content,end))
+            return md_add(d,f->item,STUN_UI_BLOCK_RULE,0u)!=UINT32_MAX;
         /* CommonMark permits list containers to nest on one source line:
          * "- - foo" and "1. - 2. foo". Reuse the same bounded list-frame
          * admission, with nested marker columns relative to this item. */
@@ -1485,12 +1491,39 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             return true;
         }
     }
-    /* Thematic breaks interrupt active list items (including '* * *').
-     * They do not become a new list item merely because '*' is a marker. */
-    if(indent<=3u && md_rule(s,line_begin,line.end) &&
+    /* A thematic break after an item paragraph belongs to the nearest
+     * still-open item whose CONTENT columns match. Only a DEDENTED rule
+     * interrupts the entire list and becomes a root-level HR. Check
+     * Setext above first, so "---" in an item paragraph stays a heading.
+     * Existing md_rule is the sole grammar: no parallel container parser. */
+    if(md_rule(s,line_begin,line.end) &&
        !stack->frames[stack->depth-1u].fence_open) {
-        stack->depth=0u;
-        return false;
+        for(size_t depth=stack->depth;depth>0u;--depth) {
+            md_list_frame *owner=&stack->frames[depth-1u];
+            if(owner->fence_open ||
+               (owner->empty_item && owner->pending_blank) ||
+               indent<owner->content_column ||
+               indent-owner->content_column>3u)
+                continue;
+            stack->depth=depth;
+            if(owner->pending_blank) {
+                md_mark_list_loose(d,owner->list);
+                md_list_claim_nested_blank(stack);
+                owner->pending_blank=false;
+            }
+            const uint32_t rule=md_add(
+                d,owner->item,STUN_UI_BLOCK_RULE,0u);
+            if(rule==UINT32_MAX)return true;
+            owner->paragraph=owner->code=owner->quote=
+                owner->quote_paragraph=UINT32_MAX;
+            owner->empty_item=false;
+            owner->code_blank_lines=0u;
+            return true;
+        }
+        if(indent<=3u) {
+            stack->depth=0u;
+            return false;
+        }
     }
     while(stack->depth) {
         md_list_frame *f=&stack->frames[stack->depth-1u];

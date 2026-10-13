@@ -381,6 +381,7 @@ static void html_node(stun_html_writer *w, size_t id,
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_FENCE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_INDENTED ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_HEADING ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_RULE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_QUOTE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_LIST ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_ORDERED_LIST))
