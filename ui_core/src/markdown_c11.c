@@ -2335,10 +2335,20 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
     if(target_begin==line.end && line.next<d->raw_size) {
         const md_line next=md_read_line(d,line.next);
         const size_t candidate=md_left(s,next.begin,next.end);
+        /* A continuation target must not steal an actual opening block:
+         * fenced code, Setext underline, ATX heading, list marker or quote.
+         * The source-owner test below proves the unrecognized definition
+         * remains paragraph content while those blocks parse normally. */
+        char opener=0u;size_t run=0u,info_b=0u,info_e=0u;
+        size_t hb=candidate,he=next.end;
         if(candidate<next.end &&
            md_columns(s,next.begin,candidate)<=3u &&
-           s[candidate]!='>' &&
-           !md_rule(s,candidate,next.end)) {
+           s[candidate]!='>' && s[candidate]!='[' &&
+           !md_rule(s,candidate,next.end) &&
+           !md_setext(s,candidate,next.end) &&
+           !md_atx(s,&hb,&he) &&
+           !md_fence_start(s,candidate,next.end,
+                           &opener,&run,&info_b,&info_e)) {
             md_list_marker_info marker={0};
             if(!md_list_token(s,next,&marker)) {
                 target_begin=candidate;

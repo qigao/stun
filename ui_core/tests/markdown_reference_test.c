@@ -728,6 +728,85 @@ done:
     return failure;
 }
 
+/* Root [label]: must not consume the very next actual block marker as its
+ * URL target. Assert exact source bytes, no borrowed LINK and byte-exact
+ * safe HTML for fenced code, Setext and quoted blocks. */
+static int test_split_reference_block_barriers(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const struct {
+        const char *source,*html;
+    } samples[]={
+        {"[foo]:\n" TICK TICK TICK "\ncode\n" TICK TICK TICK
+         "\n\n[foo]\n",
+         "<p>[foo]:</p>\n<pre><code>code\n</code></pre>\n"
+         "<p>[foo]</p>\n"},
+        {"[foo]:\n===\n\n[foo]\n",
+         "<h1>[foo]:</h1>\n<p>[foo]</p>\n"},
+        {"[foo]:\n> /uri\n\n[foo]\n",
+         "<p>[foo]:</p>\n<blockquote>\n<p>/uri</p>\n"
+         "</blockquote>\n<p>[foo]</p>\n"}
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==3u,
+                   "split-definition block barrier cases");
+    for(size_t k=0u;k<3u;++k) {
+        const size_t n=strlen(samples[k].source);
+        VERIFY(stun_md_parse(samples[k].source,n,128u,n+1u,&doc)==
+               STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==n);
+        VERIFY(!memcmp(v.raw_markdown,samples[k].source,n));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
+        const size_t expected=strlen(samples[k].html);
+        size_t need=SIZE_MAX,reported=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,128u,NULL,0u,&need)==STUN_UI_OK);
+        VERIFY(need==expected);
+        char out[256];memset(out,0x56,sizeof(out));
+        VERIFY(need+2u<sizeof(out));
+        VERIFY(stun_md_render_html(&v,128u,out,need,&reported)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(reported==need);
+        for(size_t i=0u;i<sizeof(out);++i)
+            VERIFY((unsigned char)out[i]==0x56u);
+        VERIFY(stun_md_render_html(&v,128u,out,need+1u,&reported)==
+               STUN_UI_OK);
+        VERIFY(reported==need);
+        VERIFY(!memcmp(out,samples[k].html,need+1u));
+        VERIFY((unsigned char)out[need+1u]==0x56u);
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
+/* The final LINK TEXT allocation of a split definition must roll back the
+ * entire parse on node-budget exhaustion. No partially published RichDoc. */
+static int test_split_reference_capacity_rollback(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    const char sample[]="[foo]:\n/url\n\n[foo]\n";
+    const size_t n=sizeof(sample)-1u;
+    VERIFY(stun_md_parse(sample,n,128u,n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+    VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+    const size_t nodes=v.document.block_count;
+    VERIFY(nodes>=4u);
+    VERIFY(v.document.blocks[nodes-1u].kind==STUN_UI_BLOCK_TEXT);
+    stun_md_document_destroy(doc);doc=NULL;
+    stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+    VERIFY(stun_md_parse(sample,n,nodes-1u,n+1u,&rejected)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(rejected==NULL);
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[foo]:\n/url\n\n[foo]\n",
@@ -817,7 +896,9 @@ int main(void) {
        test_fence_definition_opacity() ||
        test_table_reference_owner() ||
        test_table_reference_capacity_isolation() ||
-       test_table_list_competition())return 1;
+       test_table_list_competition() ||
+       test_split_reference_block_barriers() ||
+       test_split_reference_capacity_rollback())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,

@@ -540,11 +540,19 @@ static const html_fixture cases[] = {
       "<p>[foo]:</p>\n<p>/url</p>\n<p>[foo]</p>\n" }, /* blank cannot join a definition */
     { "paragraph\n[foo]:\n/url\n\n[foo]\n",
       "<p>paragraph\n[foo]:\n/url</p>\n<p>[foo]</p>\n" }, /* cannot interrupt a paragraph */
+    { "[foo]:\n" TICK TICK TICK "\ncode\n" TICK TICK TICK
+      "\n\n[foo]\n",
+      "<p>[foo]:</p>\n<pre><code>code\n</code></pre>\n<p>[foo]</p>\n" }, /* fence is not a reference target */
+    { "[foo]:\n===\n\n[foo]\n",
+      "<h1>[foo]:</h1>\n<p>[foo]</p>\n" }, /* Setext is not a target */
+    { "[foo]:\n> /uri\n\n[foo]\n",
+      "<p>[foo]:</p>\n<blockquote>\n<p>/uri</p>\n</blockquote>\n"
+      "<p>[foo]</p>\n" }, /* quote cannot donate root destination */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==282,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==285,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
