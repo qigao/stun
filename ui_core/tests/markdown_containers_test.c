@@ -269,12 +269,27 @@ static bool test_partial_tab_code_ownership(void) {
             used+=n;
         }
         success=success && used==strlen(samples[k].code) &&
-                !memcmp(payload,samples[k].code,used);
+                !memcmp(payload,samples[k].code,used) &&
+                v.document.block_count>1u &&
+                v.document.blocks[v.document.block_count-1u].kind==
+                    STUN_UI_BLOCK_TEXT &&
+                v.document.blocks[v.document.block_count-1u].parent_index==
+                    code;
+        /* The final CODE TEXT allocation is the exact failing node when
+         * this bound is one below the successful owned document size. */
+        const size_t code_text_limited=v.document.block_count-1u;
         if(!success)
             fprintf(stderr,"native tab ownership failed: #%zu code '%s'\n",
                     k+5u,payload);
         stun_md_document_destroy(doc);
         if(!success)return false;
+        stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+        if(stun_md_parse(samples[k].markdown,bytes,code_text_limited,
+                         bytes+1u,&rejected)!=STUN_UI_CAPACITY_EXCEEDED ||
+           rejected!=NULL) {
+            fprintf(stderr,"tab code TEXT budget rollback failed #%zu\n",k+5u);
+            return false;
+        }
     }
     return true;
 }

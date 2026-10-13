@@ -3,10 +3,11 @@
 **Status:** Decided for the existing SafeApplicationHtml path; the proposed
 SpecConformanceHtml profile and typed RAW_HTML nodes are **not yet implemented**.
 **Scope:** Stun C11 Markdown / RichDoc (#181, #184, #172).
-**Evidence:** CommonMark 0.31.2, exact HEAD `df240a0`,
-[Runtime #38344397484](https://github.com/qigao/stun/actions/runs/38344397484)
-(14/14 installed C11 CTests; 242/242 HTML fixtures; 509/652 official exact
-matches, 8 unsupported, 135 differences; sanitizers and Mesa green).
+**Evidence:** CommonMark 0.31.2, exact HEAD `48432e3`,
+[Runtime #38346958887](https://github.com/qigao/stun/actions/runs/38346958887)
+(14/14 installed C11 CTests; 247/247 HTML fixtures; 512/652 official exact
+matches, 8 unsupported, 132 differences; sanitizers and Mesa green).
+Previous root-fence qualification: `df240a0`, Runtime #38344397484.
 
 ## 1. Parsing and whitespace are semantic decisions, not a global trim
 
@@ -23,8 +24,9 @@ Build separately owned semantic text spans in the typed RichDoc. Context matters
 - Indented code removes its own four visual columns. List and blockquote code
   must first match the container's content column; tabs advance to the next
   four-column stop. If a consumed tab overshoots a container boundary, its
-  remaining visual columns must not disappear. Official #5–7 still fail and
-  remain tracked by #181: do **not** paper over them using `trim()`.
+  remaining visual columns must survive as literal spaces within the owned
+  CODE TEXT span. Official #5–7 are now qualified by `48432e3` under #181;
+  other, more complex nested/tab cases require separate gates. **No trim.**
 - Code spans apply CommonMark's own newline and outer-space normalization;
   ordinary text and inline tokens retain independently owned semantics.
 - HTML serialization never modifies Markdown source or reparses it.
@@ -83,8 +85,9 @@ passed or weakening the production renderer.
 - Strict HTML fixture and owned AST/metadata/failure-atomic gates.
 - Full 652 official examples counted; only actual byte-for-byte matches
   enter the immutable nonregression allowlist.
-- The root fenced-code fix qualifies #131–133 in addition to the previous
-  506 official IDs; the allowlist advances to **509** on the evidence above.
-- Unsupported raw HTML, Unicode label folding, images and container Tab
-  semantics remain separately tracked. No MarkdownWidget/Tango production
-  parser cutover and no compatibility fallback.
+- Root fenced-code #131–133 advanced the qualified set **506→509**;
+  list/quote partial-TAB #5–7 now advances it **509→512** based on the exact
+  successful Runtime #38346958887 and unchanged official fixture fingerprint.
+- Unsupported raw HTML, Unicode label folding, images and unqualified nested
+  Tab/container combinations remain separately tracked. No MarkdownWidget/
+  Tango production parser cutover and no compatibility fallback.
