@@ -714,7 +714,7 @@ jobs:
           test -s "$EVIDENCE_DIR/markdown-cmarkgfm-html.json"
           git diff --exit-code
 
-      - name: Gate all 256 previously passing official CommonMark HTML examples
+      - name: Gate 573 qualified SAFE CommonMark official HTML examples
         if: ${{ inputs.run_runtime && success() }}
         shell: bash
         run: |
@@ -725,6 +725,20 @@ jobs:
             --out "$EVIDENCE_DIR/markdown-commonmark-nonregression.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-nonregression.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-nonregression.json"
+          git diff --exit-code
+
+      - name: Gate 592 qualified SPEC CommonMark official HTML examples
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s ui_core/tests -p 'test_gate_commonmark_spec_nonregression.py'
+          python3 ui_core/tests/gate_commonmark_spec_nonregression.py \
+            --survey "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json" \
+            --baseline ui_core/tests/commonmark_0_31_2_spec_baseline.json \
+            --out "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.log"
+          test -s "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.json"
           git diff --exit-code
 
       - name: Gate exact official CommonMark block-container HTML examples
