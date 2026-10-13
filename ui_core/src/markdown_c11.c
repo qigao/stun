@@ -562,9 +562,15 @@ static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
         if(!md_tag_attr_start((unsigned char)s[p]))return SIZE_MAX;
         ++p;
         while(p<n&&md_tag_attr_continue((unsigned char)s[p]))++p;
-        while(p<n&&md_tag_space(s[p]))++p;
-        if(p<n&&s[p]=='=') {
-            ++p;
+        /* A boolean attribute owns only its NAME. In particular,
+         * "<a _boolean zoop:33=zoop:33 />" has two attributes.
+         * Probe whitespace before '=' without swallowing the separator
+         * needed to admit the next attribute if '=' is absent. */
+        const size_t name_end=p;
+        size_t equals=p;
+        while(equals<n&&md_tag_space(s[equals]))++equals;
+        if(equals<n&&s[equals]=='=') {
+            p=equals+1u;
             while(p<n&&md_tag_space(s[p]))++p;
             if(p>=n)return SIZE_MAX;
             const char quote=s[p];
@@ -587,6 +593,8 @@ static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
                 }
                 if(p==start)return SIZE_MAX;
             }
+        } else {
+            p=name_end; /* preserve separating whitespace for next name */
         }
     }
 }

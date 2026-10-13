@@ -126,6 +126,12 @@ static const raw_fixture fixtures[] = {
     {616u,"<a foo=\"bar\" bam = 'baz <em>\"</em>'\n_boolean zoop:33=zoop:33 />\n",
      "<p><a foo=\"bar\" bam = 'baz <em>\"</em>'\n_boolean zoop:33=zoop:33 /></p>\n",
      "<p>&lt;a foo=&quot;bar&quot; bam = 'baz &lt;em&gt;&quot;&lt;/em&gt;'\n_boolean zoop:33=zoop:33 /&gt;</p>\n",1u},
+    {0u,"x <a disabled title=\"ok\"> y\n",
+     "<p>x <a disabled title=\"ok\"> y</p>\n",
+     "<p>x &lt;a disabled title=&quot;ok&quot;&gt; y</p>\n",1u},
+    {0u,"x <a disabled= > y\n",
+     "<p>x &lt;a disabled= &gt; y</p>\n",
+     "<p>x &lt;a disabled= &gt; y</p>\n",0u},
     {625u,"foo <!-- this is a --\ncomment - with hyphens -->\n",
      "<p>foo <!-- this is a --\ncomment - with hyphens --></p>\n",
      "<p>foo &lt;!-- this is a --\ncomment - with hyphens --&gt;</p>\n",1u},
@@ -310,8 +316,8 @@ static int test_multiline_html_nonadmission(void) {
 int main(void) {
     if(test_type6_exact_admission())return 1;
     if(test_multiline_html_nonadmission())return 1;
-    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==21u,
-                   "sixteen official inline examples, one CRLF and four negatives");
+    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==23u,
+                   "sixteen official inline, one CRLF, six grammar/security controls");
     for(size_t i=0u;i<sizeof(fixtures)/sizeof(fixtures[0]);++i)
         if(verify(&fixtures[i])) {
             fprintf(stderr,"RAW HTML fixture %u failed\n",
