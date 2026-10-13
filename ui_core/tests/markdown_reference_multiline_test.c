@@ -374,6 +374,17 @@ int main(void) {
     { "official-545", "[bar][foo\\!]\n\n[foo!]: /url\n", "<p>[bar][foo!]</p>\n", NULL, NULL, NULL },
     { "official-549", "[foo][ref\\[]\n\n[ref\\[]: /uri\n", "<p><a href=\"/uri\">foo</a></p>\n", "/uri", NULL, "foo" },
     { "official-550", "[bar\\\\]: /uri\n\n[bar\\\\]\n", "<p><a href=\"/uri\">bar\\</a></p>\n", "/uri", NULL, "bar\\" },
+    { "official-559", "[[*foo* bar]]\n\n[*foo* bar]: /url \"title\"\n",
+      "<p>[<a href=\"/url\" title=\"title\"><em>foo</em> bar</a>]</p>\n",
+      "/url", "title", "foo bar" },
+    { "adjacent-close-shortcut", "[[ref]]\n\n[ref]: /url\n",
+      "<p>[<a href=\"/url\">ref</a>]</p>\n", "/url", NULL, "ref" },
+    { "adjacent-close-escaped-label", "[[a\\]]]\n\n[a\\]]: /url\n",
+      "<p>[<a href=\"/url\">a]</a>]</p>\n", "/url", NULL, "a]" },
+    { "adjacent-close-unbound", "[[missing]]\n\n[other]: /url\n",
+      "<p>[[missing]]</p>\n", NULL, NULL, NULL },
+    { "adjacent-close-code-span", "\`[[ref]]\`\n\n[ref]: /url\n",
+      "<p><code>[[ref]]</code></p>\n", NULL, NULL, NULL },
     { "raw-entity-key-not-decoded", "[visible][a&b]\n\n[a&amp;b]: /wrong\n", "<p>[visible][a&amp;b]</p>\n", NULL, NULL, NULL },
     { "escaped-first-definition-wins", "[a\\!]: /first 'one'\n[A\\!]: /second 'two'\n\n[a\\!]\n", "<p><a href=\"/first\" title=\"one\">a!</a></p>\n", "/first", "one", "a!" },
     { "official-197", "[foo]: /url 'title\n\nwith blank line'\n\n[foo]\n", "<p>[foo]: /url 'title</p>\n<p>with blank line'</p>\n<p>[foo]</p>\n", NULL, NULL, NULL },
@@ -388,14 +399,14 @@ int main(void) {
     { "unescaped-nested-label-rejected", "[a[b]]: /wrong\n\n[a[b]]\n", "<p>[a[b]]: /wrong</p>\n<p>[a[b]]</p>\n", NULL, NULL, NULL },
     { "title-escaped-attribute-injection", "[foo]: /uri 'a\n&quot; onmouseover=&quot;alert(1)'\n\n[foo]\n", "<p><a href=\"/uri\" title=\"a\n&quot; onmouseover=&quot;alert(1)\">foo</a></p>\n", "/uri", "a\n\" onmouseover=\"alert(1)", "foo" },
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==26u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==31u,
                    "multiline/escaped reference fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(check_case(&cases[i]))return 1;
     if(check_safety() || check_budgets() || check_label_budget() ||
        check_adjacent_owners() || check_inline_label_owners() ||
        check_document_binding_isolation())return 1;
-    puts("C11 multiline/escaped references: 29/29 HTML/AST, raw ownership, "
+    puts("C11 multiline/escaped references: 34/34 HTML/AST, raw ownership, "
          "inline owners, document isolation, title/href security, line/map budgets and atomic rollback");
     return 0;
 }
