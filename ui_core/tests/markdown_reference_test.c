@@ -904,6 +904,44 @@ done:
     return failure;
 }
 
+/* The final owned LINK TEXT child of a split-title definition is an
+ * exact node-budget failure point, never a partially returned RichDoc.
+ * Test the angle-URL and the three adjacent root-definition path. */
+static int test_split_title_last_text_budget(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const char *const sources[]={
+        "[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]\n",
+        "[foo]: /foo-url \"foo\"\n[bar]: /bar-url\n"
+        "  \"bar\"\n[baz]: /baz-url\n\n[foo],\n[bar],\n[baz]\n"
+    };
+    _Static_assert(sizeof(sources)/sizeof(sources[0])==2u,
+                   "final split-title LINK TEXT budget cases");
+    for(size_t k=0u;k<2u;++k) {
+        const size_t n=strlen(sources[k]);
+        VERIFY(stun_md_parse(sources[k],n,128u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==n);
+        VERIFY(!memcmp(v.raw_markdown,sources[k],n));
+        const size_t count=v.document.block_count;
+        VERIFY(count>3u);
+        VERIFY(v.document.blocks[count-1u].kind==STUN_UI_BLOCK_TEXT);
+        const size_t parent=v.document.blocks[count-1u].parent_index;
+        VERIFY(parent<count-1u);
+        VERIFY(v.document.blocks[parent].kind==STUN_UI_BLOCK_LINK);
+        stun_md_document_destroy(doc);doc=NULL;
+        stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+        VERIFY(stun_md_parse(sources[k],n,count-1u,n+1u,&rejected)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(rejected==NULL);
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]\n",
@@ -1009,7 +1047,8 @@ int main(void) {
        test_split_reference_block_barriers() ||
        test_split_reference_capacity_rollback() ||
        test_adjacent_split_title_ownership() ||
-       test_split_title_rejection())return 1;
+       test_split_title_rejection() ||
+       test_split_title_last_text_budget())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,

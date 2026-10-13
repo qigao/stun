@@ -569,11 +569,14 @@ static const html_fixture cases[] = {
     { "[foo]: /uri\n\n\"title\"\n\n[foo]\n",
       "<p>&quot;title&quot;</p>\n<p><a href=\"/uri\">foo</a></p>\n" }, /* blank forbids title lookahead */
 
+    { "[foo]: /uri \"first\"\n\"second\"\n\n[foo]\n",
+      "<p>&quot;second&quot;</p>\n"
+      "<p><a href=\"/uri\" title=\"first\">foo</a></p>\n" }, /* inline title already owns its definition */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==293,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==294,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
