@@ -466,11 +466,20 @@ static size_t md_match(const char *s, size_t n, size_t start,
     return SIZE_MAX;
 }
 
+/* Shared URI/email predicates are defined below and used by the one inline
+ * emitter and both link-delimiter admission paths. Do not duplicate their
+ * scheme, bounds, or security semantics here. */
+static bool md_uri_autolink(const char *s,size_t n,size_t at,
+                            size_t *out_close);
+static bool md_email_autolink(const char *s,size_t n,size_t at,
+                              size_t *out_close);
+
 /* One bounded LINK-text bracket scanner for both inline targets and
  * reference links. Literal nested brackets are legal visible link text
  * (CommonMark #528), including adjacent closing "]]" from #559.
- * Code spans and backslash-escaped punctuation are opaque. A fixed nesting
- * ceiling rejects pathological input without allocating parser state. */
+ * Code spans, recognized angle autolinks and backslash-escaped punctuation
+ * are opaque. A fixed nesting ceiling rejects pathological input without
+ * allocating parser state (#538). */
 static size_t md_link_text_close(const char *s,size_t n,size_t begin) {
     unsigned depth=1u;
     for(size_t p=begin;p<n;) {
@@ -483,6 +492,13 @@ static size_t md_link_text_close(const char *s,size_t n,size_t begin) {
             const size_t closer=md_code_span_close(s,n,end,end-p);
             p=closer==SIZE_MAX?end:closer+(end-p);
             continue;
+        }
+        if(s[p]=='<') {
+            size_t close=SIZE_MAX;
+            if(md_uri_autolink(s,n,p,&close) ||
+               md_email_autolink(s,n,p,&close)) {
+                p=close+1u;continue;
+            }
         }
         if(s[p]=='[') {
             if(depth>=32u)return SIZE_MAX;
@@ -684,6 +700,12 @@ static bool md_link_visible_has_active_link(const stun_md_document *d,
             const size_t closer=md_code_span_close(s,end,next,next-p);
             p=closer==SIZE_MAX?next:closer+(next-p);
             continue;
+        }
+        if(s[p]=='<') {
+            size_t close=SIZE_MAX;
+            if(md_uri_autolink(s,end,p,&close) ||
+               md_email_autolink(s,end,p,&close))
+                return true; /* active LINK, even inside visible brackets */
         }
         if(s[p]=='[' && (p==0u || s[p-1u]!='!' ||
                          (p>=2u && s[p-2u]=='\\'))) {
