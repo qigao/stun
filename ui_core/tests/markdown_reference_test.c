@@ -958,7 +958,9 @@ static int test_nested_link_precedence(void) {
         {"[foo [bar](/uri)](/uri)\n",
          "<p>[foo <a href=\"/uri\">bar</a>](/uri)</p>\n",1u},
         {"[foo *[bar [baz](/uri)](/uri)*](/uri)\n",
-         "<p>[foo <em>[bar <a href=\"/uri\">baz</a>](/uri)</em>](/uri)</p>\n",1u}
+         "<p>[foo <em>[bar <a href=\"/uri\">baz</a>](/uri)</em>](/uri)</p>\n",1u},
+        {"[x <https://example.com/path>](/outer)\n",
+         "<p>[x <a href=\"https://example.com/path\">https://example.com/path</a>](/outer)</p>\n",1u}
     };
     int failure=0;stun_md_document *doc=NULL;
     for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
@@ -1027,6 +1029,10 @@ int main(void) {
          "/uri",NULL,"a",
          "<p><a href=\"/uri\">a</a></p>\n"},
 
+        {"[foo<https://example.com/?search=][ref]>\n\n[ref]: /uri\n",
+         "https://example.com/?search=][ref]",NULL,
+         "https://example.com/?search=][ref]",
+         "<p>[foo<a href=\"https://example.com/?search=%5D%5Bref%5D\">https://example.com/?search=][ref]</a></p>\n"}, /* #538 */
         {"[link [foo [bar]]][ref]\n\n[ref]: /uri\n",
          "/uri",NULL,"link [foo [bar]]",
          "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n"}, /* #528 */
@@ -1094,7 +1100,7 @@ int main(void) {
          "/uri",NULL,"id",
          "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==29u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==30u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
@@ -1136,7 +1142,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 29/29 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 30/30 AST/HTML, forward/duplicate/case "
          "binding, safe URL, root-rule, ATX, fence and table ownership");
     return 0;
 }
