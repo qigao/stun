@@ -679,8 +679,17 @@ static bool md_link_target_parse(const char *s,size_t n,size_t round_open,
     md_link_parts parts={0};
     if(!md_link_destination_scan(s,n,&p,&parts))return false;
     const size_t separator_start=p;
-    while(p<n && md_space(s[p]))++p;
+    size_t separator_lfs=0u;
+    /* CommonMark #510: after a complete destination, one physical LF
+     * may separate an inline title from its URI. This is shared grammar,
+     * but only a scoped ROOT paragraph lookahead can supply that LF. Do
+     * not admit split destinations (#490/#491) or a missing title. */
+    while(p<n && (md_space(s[p]) || s[p]=='\n')) {
+        if(s[p]=='\n' && ++separator_lfs>1u)return false;
+        ++p;
+    }
     if(p<n && s[p]==')') {
+        if(separator_lfs)return false;
         *out=parts;*round_close=p;return true;
     }
     bool incomplete=false;
@@ -2510,6 +2519,68 @@ static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
     return !md_root_code_span_interrupts(d,next);
 }
 
+/* Admit exactly a complete inline LINK whose destination ends on this
+ * ROOT paragraph's first physical line and whose quoted TITLE begins on
+ * the immediately adjacent second line (CommonMark #510). The same
+ * md_link_text_close/md_link_target_parse and md_inline grammar is used for
+ * recognition and publication; scratch is copied into owned RichDoc spans,
+ * never borrowed past this call. No list/quote/fence/blank crossing.
+ *
+ * A single CRLF is normalized to a semantic LF. The second line's actual
+ * hard/soft continuation origin remains owned by md_root_line_content.
+ * Other multiline inline grammars remain separately scoped. */
+static bool md_root_multiline_inline_title(stun_md_document *d,
+                                           uint32_t *paragraph,
+                                           md_line first,size_t begin,
+                                           size_t *next_pos,
+                                           md_root_break *next_break) {
+    const char *s=d->raw;
+    if(*paragraph!=UINT32_MAX || begin>=first.end || s[begin]!='[' ||
+       !first.newline || first.next>=d->raw_size)return false;
+    const size_t square_first=md_link_text_close(s,first.end,begin+1u);
+    if(square_first==SIZE_MAX || square_first+1u>=first.end ||
+       s[square_first+1u]!='(')return false;
+    const md_line second=md_read_line(d,first.next);
+    const size_t second_at=md_left(s,second.begin,second.end);
+    if(second_at>=second.end ||
+       md_columns(s,second.begin,second_at)>3u ||
+       md_root_code_span_interrupts(d,second))
+        return false;
+    const size_t first_bytes=first.end-begin;
+    const size_t second_end=md_right(s,second.begin,second.end);
+    const size_t second_bytes=second_end-second.begin;
+    if(first_bytes>=d->raw_size ||
+       second_bytes>d->raw_size-first_bytes-1u)return false;
+    const size_t bytes=first_bytes+1u+second_bytes;
+    char *joined=(char*)malloc(bytes+1u);
+    if(!joined) {md_error(d,STUN_UI_OUT_OF_MEMORY);return true;}
+    memcpy(joined,s+begin,first_bytes);
+    joined[first_bytes]='\n';
+    memcpy(joined+first_bytes+1u,s+second.begin,second_bytes);
+    joined[bytes]='\0';
+    const size_t square=md_link_text_close(joined,bytes,1u);
+    size_t round=SIZE_MAX;
+    md_link_parts parts={0};
+    const bool admitted=square!=SIZE_MAX && square<first_bytes &&
+        square+1u<first_bytes && joined[square+1u]=='(' &&
+        md_link_target_parse(joined,bytes,square+1u,&parts,&round) &&
+        round>first_bytes && parts.has_title &&
+        parts.title_begin>first_bytes &&
+        !md_link_visible_has_active_link(d,joined,1u,square);
+    if(!admitted) {free(joined);return false;}
+    const uint32_t node=md_add(d,0u,STUN_UI_BLOCK_PARAGRAPH,0u);
+    if(node==UINT32_MAX) {free(joined);return true;}
+    *paragraph=node;
+    const bool ok=md_inline(d,node,joined,bytes,0u);
+    free(joined);
+    if(!ok)return true; /* d->error prevents partial publication */
+    size_t ignored=0u;
+    *next_break=md_root_line_content(s,second.begin,second.end,
+        md_root_paragraph_continues(d,second),&ignored);
+    *next_pos=second.next;
+    return true;
+}
+
 /* Collect bounded ASCII root reference definitions. The scan is
  * BEFORE inline admission, so a later [ref]: ... can bind an earlier
  * [text][ref]. Definitions inside code fences, indented code, lists or
@@ -3151,6 +3222,15 @@ static void md_parse_blocks(stun_md_document *d) {
          * Consume them as ONE typed code node before emitting soft breaks. */
         if(md_root_multiline_code_span(d,&paragraph,line,begin,&pos)) {
             if(d->error!=STUN_UI_OK) return;
+            continue;
+        }
+        /* One two-line ROOT inline title candidate consumes both physical
+         * lines into one owned LINK, without manufacturing a soft break
+         * inside its href/title or competing with list/quote ownership. */
+        if(paragraph==UINT32_MAX && lists.depth==0u && quotes.depth==0u &&
+           md_root_multiline_inline_title(d,&paragraph,line,begin,
+                                          &pos,&pending_break)) {
+            if(d->error!=STUN_UI_OK)return;
             continue;
         }
         /* #182: allow matched runs across SOFT physical paragraph lines

@@ -455,6 +455,14 @@ static const html_fixture cases[] = {
     { "[link](foo\\)\\:)\n", "<p><a href=\"foo):\">link</a></p>\n" }, /* #500 escaped delimiter not grammar */
     { "[link](foo\\bar)\n", "<p><a href=\"foo%5Cbar\">link</a></p>\n" }, /* #502 raw backslash is percent encoded */
     { "[link](\"title\")\n", "<p><a href=\"%22title%22\">link</a></p>\n" }, /* #504 raw quote in URL is percent encoded */
+    { "[link](   /uri\n  \"title\"  )\n",
+      "<p><a href=\"/uri\" title=\"title\">link</a></p>\n" }, /* #510 */
+    { "[link]( /uri\r\n 'title' )\r\n",
+      "<p><a href=\"/uri\" title=\"title\">link</a></p>\n" },
+    { "[x]( /uri\n (note) )\n",
+      "<p><a href=\"/uri\" title=\"note\">x</a></p>\n" },
+    { "[x]( /uri\n \"T\" ) tail\n",
+      "<p><a href=\"/uri\" title=\"T\">x</a> tail</p>\n" },
     { "[link](/url \"title\")\n[link](/url 'title')\n[link](/url (title))\n", "<p><a href=\"/url\" title=\"title\">link</a>\n<a href=\"/url\" title=\"title\">link</a>\n<a href=\"/url\" title=\"title\">link</a></p>\n" }, /* #505 all 3 supported title delimiters */
     { "[link](/url \"title\")\n", "<p><a href=\"/url%C2%A0%22title%22\">link</a></p>\n" }, /* #507 Unicode NBSP not syntactic separator */
     { "[deep](((((((((((((((((((((((((((((((((x)))))))))))))))))))))))))))))))))\n", "<p><a href=\"((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))\">deep</a></p>\n" }, /* literal nested depth equals 32 */
@@ -682,7 +690,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==346,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==350,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

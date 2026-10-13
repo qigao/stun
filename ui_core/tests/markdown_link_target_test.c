@@ -206,6 +206,64 @@ int main(void) {
     for(size_t i=0u;i<sizeof(autolinks)/sizeof(autolinks[0]);++i)
         if(verify_link(&autolinks[i]))return 1;
 
+    /* Same C11 owner, destination/title grammar and safe renderer across
+     * exactly one root paragraph LF; no separate multiline LINK parser. */
+    static const link_fixture split_titles[]={
+        {"[link](   /uri\n  \"title\"  )\n",
+         "/uri","title","link",
+         "<p><a href=\"/uri\" title=\"title\">link</a></p>\n"}, /* #510 */
+        {"[link]( /uri\r\n 'title' )\r\n",
+         "/uri","title","link",
+         "<p><a href=\"/uri\" title=\"title\">link</a></p>\n"},
+        {"[x]( /uri\n (note) )\n",
+         "/uri","note","x",
+         "<p><a href=\"/uri\" title=\"note\">x</a></p>\n"},
+        {"[x]( /uri\n \"T\" ) tail\n",
+         "/uri","T","x",
+         "<p><a href=\"/uri\" title=\"T\">x</a> tail</p>\n"}
+    };
+    _Static_assert(sizeof(split_titles)/sizeof(split_titles[0])==4u,
+                   "root two-line inline-title fixture count");
+    for(size_t i=0u;i<sizeof(split_titles)/sizeof(split_titles[0]);++i)
+        if(verify_link(&split_titles[i]))return 1;
+    static const char *const blocked_inline[]={
+        "[link](foo\nbar)\n",          /* #490: split destination */
+        "[link](<foo\nbar>)\n",        /* #491: split angle destination */
+        "[link](/uri\n\n\"title\")\n", /* blank root boundary */
+        "[link](/uri\n# heading)\n",  /* competing root ATX */
+        "[link](/uri\n- item)\n",     /* list interrupts root */
+        "[link](/uri\n \"title\" junk)\n", /* malformed target */
+        "[link](/uri\n \"unterminated)\n", /* no valid title closer */
+        "> [link](/uri\n> \"title\")\n" /* quote-owned; no root borrowing */
+    };
+    _Static_assert(sizeof(blocked_inline)/sizeof(blocked_inline[0])==8u,
+                   "root inline-title negative admission count");
+    for(size_t i=0u;i<sizeof(blocked_inline)/sizeof(blocked_inline[0]);++i) {
+        const size_t len=strlen(blocked_inline[i]);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(blocked_inline[i],len,256u,len+1u,&doc)==
+              STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
+        CHECK(v.raw_markdown_bytes==len &&
+              !memcmp(v.raw_markdown,blocked_inline[i],len));
+        stun_md_document_destroy(doc);
+    }
+    const char budget_source[]="[link](   /uri\n  \"title\"  )\n";
+    stun_md_document *budget=NULL,*rejected=NULL;
+    CHECK(stun_md_parse(budget_source,sizeof(budget_source)-1u,
+                        256u,sizeof(budget_source),&budget)==STUN_UI_OK);
+    CHECK(budget!=NULL);
+    const size_t exact_nodes=stun_md_document_view(budget).document.block_count;
+    CHECK(exact_nodes>1u);
+    stun_md_document_destroy(budget);
+    CHECK(stun_md_parse(budget_source,sizeof(budget_source)-1u,
+                        exact_nodes-1u,sizeof(budget_source),&rejected)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(rejected==NULL);
+
     /* A syntactically malformed or unapproved scheme never manufactures
      * an unsafe LINK and must retain escaped text under SafeApplicationHtml. */
     static const struct {const char *source,*html;} opaque[]={
