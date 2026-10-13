@@ -4,8 +4,8 @@
   "source": "tools/md/test/spec.txt",
   "official_total": 652,
   "qualified_reference_master": "ea55f1f1b9d8fe942bf75075d08eff8b9156acf4",
-  "qualified_reference_head": "48432e3491da225159527f3f1db6402510f3cb2f",
-  "qualified_reference_run": 38346958887,
+  "qualified_reference_head": "9bab7fea6de0a69d6b6004974a540203da91b43c",
+  "qualified_reference_run": 38349175276,
   "official_fixture_sha256": "c784c98aa6f8a1db1292dfd883f3b6743f2ad66578f89fae1fc9223f208f7bfd",
   "qualified_official_ids": [
     1,
@@ -65,6 +65,7 @@
     58,
     59,
     60,
+    61,
     62,
     63,
     64,
@@ -521,5 +522,5 @@
     651,
     652
   ],
-  "preceding_qualified_reference_run": 38345185461
+  "preceding_qualified_reference_run": 38347504933
 }

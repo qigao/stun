@@ -153,6 +153,15 @@ static const fixture cases[]={
      "<ol>\n<li>\n<h1>T</h1>\n</li>\n</ol>\n",0,1u},
     {"cm-061","- Foo\n- * * *\n",
      "<ul>\n<li>Foo</li>\n<li>\n<hr />\n</li>\n</ul>\n",0,1u},
+    {"item-rule-loose-after-blank","- Foo\n\n  * * *\n",
+     "<ul>\n<li>\n<p>Foo</p>\n<hr />\n</li>\n</ul>\n",1,1u},
+    {"nested-outer-item-rule","- outer\n  - inner\n  * * *\n",
+     "<ul>\n<li>outer\n<ul>\n<li>inner</li>\n</ul>\n<hr />\n</li>\n</ul>\n",0,2u},
+    {"rule-then-list-sibling","- Foo\n  * * *\n- Bar\n",
+     "<ul>\n<li>Foo\n<hr />\n</li>\n<li>Bar</li>\n</ul>\n",0,1u},
+    {"quoted-list-rule-continuation","> - Foo\n>   * * *\n",
+     "<blockquote>\n<ul>\n<li>Foo\n<hr />\n</li>\n</ul>\n</blockquote>\n",-1,1u},
+
     {"root-item-rule","- * * *\n",
      "<ul>\n<li>\n<hr />\n</li>\n</ul>\n",0,1u},
     {"ordered-item-rule","1. * * *\n2. text\n",
@@ -179,7 +188,7 @@ static const fixture cases[]={
     {"list-setext-equals","- Foo\n  ===\n",
      "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n</ul>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==74u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==78u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -323,9 +332,13 @@ static bool test_thematic_item_ownership(void) {
         "1. * * *\n2. text\n",
         "> - * * *\n",
         "- Foo\n  * * *\n",
-        "10. Foo\n    * * *\n"
+        "10. Foo\n    * * *\n",
+        "- Foo\n\n  * * *\n",
+        "- outer\n  - inner\n  * * *\n",
+        "- Foo\n  * * *\n- Bar\n",
+        "> - Foo\n>   * * *\n"
     };
-    _Static_assert(sizeof(samples)/sizeof(samples[0])==6u,
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==10u,
                    "item rule owner denominator");
     for(size_t k=0u;k<sizeof(samples)/sizeof(samples[0]);++k) {
         stun_md_document *owned=NULL;
@@ -356,6 +369,44 @@ static bool test_thematic_item_ownership(void) {
     return true;
 }
 
+/* The newly admitted item RULE is an owned node, and exhausting its
+ * allocation must reject the complete document without a half-published
+ * RichDoc. Verify exact one-node-short capacity for direct, sibling and
+ * continuation admissions. */
+static bool test_item_rule_last_node_budget(void) {
+    static const char *const sources[]={
+        "- * * *\n",
+        "- Foo\n  * * *\n",
+        "- Foo\n- * * *\n",
+        "10. Foo\n    * * *\n"
+    };
+    _Static_assert(sizeof(sources)/sizeof(sources[0])==4u,
+                   "item RULE rollback denominator");
+    for(size_t k=0u;k<sizeof(sources)/sizeof(sources[0]);++k) {
+        const size_t n=strlen(sources[k]);
+        stun_md_document *doc=NULL;
+        if(stun_md_parse(sources[k],n,128u,n+1u,&doc)!=STUN_UI_OK ||
+           !doc)return false;
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        const size_t count=v.document.block_count;
+        const bool valid=stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK &&
+            count>1u &&
+            v.document.blocks[count-1u].kind==STUN_UI_BLOCK_RULE &&
+            v.document.blocks[count-1u].parent_index<count-1u &&
+            v.document.blocks[v.document.blocks[count-1u].parent_index].kind==
+                STUN_UI_BLOCK_LIST_ITEM;
+        stun_md_document_destroy(doc);
+        if(!valid)return false;
+        stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
+        if(stun_md_parse(sources[k],n,count-1u,n+1u,&rejected)!=
+           STUN_UI_CAPACITY_EXCEEDED || rejected!=NULL) {
+            fprintf(stderr,"item RULE node-budget rollback failed #%zu\n",k);
+            return false;
+        }
+    }
+    return true;
+}
+
 int main(void) {
     for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
         if(!check_case(&cases[i])) {
@@ -365,6 +416,7 @@ int main(void) {
     }
     if(!test_partial_tab_code_ownership())return 1;
     if(!test_thematic_item_ownership())return 1;
+    if(!test_item_rule_last_node_budget())return 1;
     const char *limited="- one\n\n  two\n";
     stun_md_document *d=(stun_md_document*)(uintptr_t)1u;
     const stun_ui_status status=stun_md_parse(limited,strlen(limited),2u,

@@ -72,6 +72,15 @@ static const html_fixture cases[] = {
       "<p>a <code>code</code> b</p>\n" },
     { "- Foo\n- * * *\n",
       "<ul>\n<li>Foo</li>\n<li>\n<hr />\n</li>\n</ul>\n" }, /* official CommonMark #61 */
+    { "- Foo\n\n  * * *\n",
+      "<ul>\n<li>\n<p>Foo</p>\n<hr />\n</li>\n</ul>\n" }, /* loose list item owns RULE after blank */
+    { "- outer\n  - inner\n  * * *\n",
+      "<ul>\n<li>outer\n<ul>\n<li>inner</li>\n</ul>\n<hr />\n</li>\n</ul>\n" }, /* nearest matching outer item owns RULE */
+    { "- Foo\n  * * *\n- Bar\n",
+      "<ul>\n<li>Foo\n<hr />\n</li>\n<li>Bar</li>\n</ul>\n" }, /* sibling after item rule */
+    { "> - Foo\n>   * * *\n",
+      "<blockquote>\n<ul>\n<li>Foo\n<hr />\n</li>\n</ul>\n</blockquote>\n" }, /* quote-owned list continuation rule */
+
     { "- * * *\n",
       "<ul>\n<li>\n<hr />\n</li>\n</ul>\n" }, /* standalone item-owned HR */
     { "1. * * *\n2. text\n",
@@ -493,7 +502,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==257,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==261,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
