@@ -68,6 +68,14 @@ target_link_libraries(stun_markdown_container_reference_test PRIVATE Stun::UICor
 add_test(NAME stun_markdown_container_reference_test
          COMMAND stun_markdown_container_reference_test)
 
+# #184: typed owned inline RAW_HTML and explicit spec/safe policy.
+add_executable(stun_markdown_raw_html_policy_test
+               markdown_raw_html_policy_test.c)
+target_compile_features(stun_markdown_raw_html_policy_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_raw_html_policy_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_raw_html_policy_test
+         COMMAND stun_markdown_raw_html_policy_test)
+
 add_executable(stun_markdown_golden_test markdown_golden_test.c)
 target_link_libraries(stun_markdown_golden_test PRIVATE Stun::UICore)
 target_compile_features(stun_markdown_golden_test PRIVATE c_std_11)

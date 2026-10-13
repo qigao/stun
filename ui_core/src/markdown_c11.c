@@ -219,6 +219,20 @@ static void md_text(stun_md_document *d, uint32_t parent,
     }
 }
 
+/* One owned verbatim semantic span: only the explicit renderer policy
+ * chooses whether RAW_HTML is escaped or emitted byte-for-byte. */
+static void md_raw_html_inline(stun_md_document *d,uint32_t parent,
+                               const char *s,size_t n) {
+    if(!n || d->error!=STUN_UI_OK)return;
+    const uint32_t node=md_add(d,parent,STUN_UI_BLOCK_RAW_HTML_INLINE,0u);
+    if(node==UINT32_MAX)return;
+    size_t first=0u,last=0u;
+    if(md_store(d,false,s,n,&first,&last)) {
+        d->nodes[node].byte_begin=first;
+        d->nodes[node].byte_end=last;
+    }
+}
+
 static void md_meta(stun_md_document *d, uint32_t node,
                     const char *s, size_t n) {
     if (node == UINT32_MAX || !n) return;
@@ -550,6 +564,23 @@ static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
     }
 }
 
+/* Closing tags share this conservative ASCII lexeme scan with the existing
+ * quoted-attribute opening-tag detector. Invalid/unclosed markup remains
+ * normal TEXT; no renderer-side parsing or unsafe fallback. */
+static size_t md_inline_html_tag_close(const char *s,size_t n,size_t at) {
+    size_t p=md_opaque_html_tag_close(s,n,at);
+    if(p!=SIZE_MAX)return p;
+    if(at>=n || s[at]!='<' || n-at<4u ||
+       s[at+1]!='/' ||
+       !md_tag_letter((unsigned char)s[at+2u]))return SIZE_MAX;
+    p=at+3u;
+    while(p<n && (md_tag_letter((unsigned char)s[p]) ||
+                  md_tag_digit((unsigned char)s[p]) ||
+                  s[p]=='-'))++p;
+    while(p<n && md_space(s[p]))++p;
+    return p<n && s[p]=='>'?p:SIZE_MAX;
+}
+
 /* One bounded LINK-text bracket scanner for both inline targets and
  * reference links. Literal nested brackets are legal visible link text
  * (CommonMark #528), including adjacent closing "]]" from #559.
@@ -575,7 +606,7 @@ static size_t md_link_text_close(const char *s,size_t n,size_t begin) {
                md_email_autolink(s,n,p,&close)) {
                 p=close+1u;continue;
             }
-            close=md_opaque_html_tag_close(s,n,p);
+            close=md_inline_html_tag_close(s,n,p);
             if(close!=SIZE_MAX) {p=close+1u;continue;}
         }
         if(s[p]=='[') {
@@ -1052,7 +1083,7 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
                 p=close+1u;
                 continue;
             }
-            close=md_opaque_html_tag_close(s,n,p);
+            close=md_inline_html_tag_close(s,n,p);
             if(close!=SIZE_MAX) {p=close+1u;continue;}
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
@@ -1303,11 +1334,12 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
                 text_start=p;
                 continue;
             }
-            close=md_opaque_html_tag_close(s,n,p);
+            close=md_inline_html_tag_close(s,n,p);
             if(close!=SIZE_MAX) {
-                /* Retain verbatim semantic TEXT; the safe HTML writer
-                 * escapes it later. No tags are published as HTML. */
-                p=close+1u;continue;
+                md_text(d,owners[nested],s+text_start,p-text_start);
+                md_raw_html_inline(d,owners[nested],s+p,close+1u-p);
+                if(d->error!=STUN_UI_OK)break;
+                p=close+1u;text_start=p;continue;
             }
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {

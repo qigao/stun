@@ -14,6 +14,7 @@ typedef struct stun_html_writer {
     size_t length;
     size_t capacity;
     stun_ui_status error;
+    stun_md_html_policy policy;
 } stun_html_writer;
 
 static void html_bytes(stun_html_writer *w, const char *bytes, size_t len) {
@@ -350,6 +351,23 @@ static void html_node(stun_html_writer *w, size_t id,
         { char digit=(char)('0'+node->heading_level); html_bytes(w,&digit,1u); }
         html_str(w,">");
         break;
+    case STUN_UI_BLOCK_RAW_HTML_INLINE:
+    case STUN_UI_BLOCK_RAW_HTML_BLOCK: {
+        if(node->byte_end<node->byte_begin ||
+           node->byte_end>doc->source_bytes ||
+           (!doc->source && node->byte_end!=node->byte_begin)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const size_t size=node->byte_end-node->byte_begin;
+        const char *raw=doc->source?doc->source+node->byte_begin:NULL;
+        if(w->policy==STUN_MD_HTML_SPEC_CONFORMANCE)
+            html_bytes(w,raw,size);
+        else html_escaped(w,raw,size,false);
+        if(id+1u<doc->block_count &&
+           doc->blocks[id+1u].parent_index==id)
+            w->error=STUN_UI_INVALID_ARGUMENT;
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_TEXT:
         html_text(w,node);
         if(id+1u<doc->block_count && doc->blocks[id+1u].parent_index==id)
@@ -569,17 +587,19 @@ static void html_node(stun_html_writer *w, size_t id,
     *next=child_end;
 }
 
-stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
-                                   size_t max_nodes,
-                                   char *buffer, size_t capacity,
-                                   size_t *required) {
-    if(!required || !view || (!buffer && capacity!=0u))
+stun_ui_status stun_md_render_html_with_policy(
+    const stun_ui_rich_document_view *view,size_t max_nodes,
+    stun_md_html_policy policy,char *buffer,size_t capacity,
+    size_t *required) {
+    if(!required || !view || (!buffer && capacity!=0u) ||
+       (policy!=STUN_MD_HTML_SAFE_APPLICATION &&
+        policy!=STUN_MD_HTML_SPEC_CONFORMANCE))
         return STUN_UI_INVALID_ARGUMENT;
     const stun_ui_status valid=stun_ui_rich_document_validate(view,max_nodes);
     if(valid!=STUN_UI_OK) return valid;
 
     /* Dry-run first: validation and exact byte count before any write. */
-    stun_html_writer measuring={view,NULL,0u,0u,STUN_UI_OK};
+    stun_html_writer measuring={view,NULL,0u,0u,STUN_UI_OK,policy};
     size_t next=0u;
     html_node(&measuring,0u,&next,0u,false);
     if(measuring.error!=STUN_UI_OK) return measuring.error;
@@ -591,11 +611,23 @@ stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
     if(measuring.length==SIZE_MAX || capacity<=measuring.length)
         return STUN_UI_CAPACITY_EXCEEDED;
 
-    stun_html_writer writing={view,buffer,0u,capacity-1u,STUN_UI_OK};
+    stun_html_writer writing={view,buffer,0u,capacity-1u,STUN_UI_OK,policy};
     html_node(&writing,0u,&next,0u,false);
     if(writing.error!=STUN_UI_OK || writing.length!=measuring.length ||
        next!=view->document.block_count)
         return STUN_UI_INVALID_ARGUMENT;
     buffer[writing.length]='\0';
     return STUN_UI_OK;
+}
+
+
+/* Public stable production entrypoint: always escapes untrusted markup.
+ * Spec conformance is never inferred from source syntax. */
+stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
+                                   size_t max_nodes,
+                                   char *buffer, size_t capacity,
+                                   size_t *required) {
+    return stun_md_render_html_with_policy(
+        view,max_nodes,STUN_MD_HTML_SAFE_APPLICATION,
+        buffer,capacity,required);
 }

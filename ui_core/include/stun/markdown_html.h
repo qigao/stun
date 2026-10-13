@@ -23,6 +23,19 @@ extern "C" {
  * STUN_UI_INVALID_ARGUMENT, never silently fall back to raw HTML output.
  * max_nodes caps validation/traversal effort and recursion depth is bounded.
  */
+/* Explicit opt-in SPEC_CONFORMANCE emits literal typed RAW_HTML tokens.
+ * It is intended for normative test output only; never use it with
+ * untrusted markup in a WebView. Production defaults to SAFE_APPLICATION. */
+typedef enum stun_md_html_policy {
+    STUN_MD_HTML_SAFE_APPLICATION = 0,
+    STUN_MD_HTML_SPEC_CONFORMANCE = 1
+} stun_md_html_policy;
+
+stun_ui_status stun_md_render_html_with_policy(
+    const stun_ui_rich_document_view *view,size_t max_nodes,
+    stun_md_html_policy policy,char *buffer,size_t capacity,
+    size_t *required);
+
 stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
                                    size_t max_nodes,
                                    char *buffer, size_t capacity,

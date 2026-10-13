@@ -114,7 +114,10 @@ typedef enum stun_ui_block_kind {
     /* Optional decoded title child of STUN_UI_BLOCK_LINK; metadata-owned. */
     STUN_UI_BLOCK_LINK_TITLE,
     /* Decoded IMAGE title, always the first direct IMAGE child. */
-    STUN_UI_BLOCK_IMAGE_TITLE
+    STUN_UI_BLOCK_IMAGE_TITLE,
+    /* Parser-owned literal HTML tokens; never implicit unsafe passthrough. */
+    STUN_UI_BLOCK_RAW_HTML_INLINE,
+    STUN_UI_BLOCK_RAW_HTML_BLOCK
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {
