@@ -526,11 +526,15 @@ static const html_fixture cases[] = {
       "<p><a href=\"mailto:foo@bar.example.com\">foo@bar.example.com</a></p>\n" }, /* official #604 safe email */
     { "<foo+special@Bar.baz-bar0.com>\n",
       "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>\n" }, /* official #605 plus/hyphen */
+    { "<a*b@Bar.example.com>\n",
+      "<p><a href=\"mailto:a*b@Bar.example.com\">a*b@Bar.example.com</a></p>\n" }, /* literal '*' belongs to email, not emphasis */
+    { "**<x_y@bar.example.com>**\n",
+      "<p><strong><a href=\"mailto:x_y@bar.example.com\">x_y@bar.example.com</a></strong></p>\n" }, /* only external '**' is a delimiter */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==275,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==277,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

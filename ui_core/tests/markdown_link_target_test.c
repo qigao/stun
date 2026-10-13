@@ -340,9 +340,14 @@ int main(void) {
         {"<foo+special@Bar.baz-bar0.com>\n",
          "mailto:foo+special@Bar.baz-bar0.com",NULL,
          "foo+special@Bar.baz-bar0.com",
-         "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>\n"}
-    };
-    _Static_assert(sizeof(emails)/sizeof(emails[0])==2u,
+         "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>\n"},
+        {"<a*b@Bar.example.com>\n",
+         "mailto:a*b@Bar.example.com",NULL,"a*b@Bar.example.com",
+         "<p><a href=\"mailto:a*b@Bar.example.com\">a*b@Bar.example.com</a></p>\n"},
+        {"**<x_y@bar.example.com>**\n",
+         "mailto:x_y@bar.example.com",NULL,"x_y@bar.example.com",
+         "<p><strong><a href=\"mailto:x_y@bar.example.com\">x_y@bar.example.com</a></strong></p>\n"},    };
+    _Static_assert(sizeof(emails)/sizeof(emails[0])==4u,
                    "owned email autolink fixture denominator");
     for(size_t i=0u;i<sizeof(emails)/sizeof(emails[0]);++i)
         if(verify_link(&emails[i]))return 1;
@@ -354,10 +359,12 @@ int main(void) {
         "<foo@@bar.example.com>\n",
         "<foo@-bar.example.com>\n",
         "<foo@bar..example.com>\n",
+        "<foo@bar-.example.com>\n",
+        "<foo@.example.com>\n",
         "foo@bar.example.com\n",
         "<javascript:alert>\n"
     };
-    _Static_assert(sizeof(email_rejections)/sizeof(email_rejections[0])==6u,
+    _Static_assert(sizeof(email_rejections)/sizeof(email_rejections[0])==8u,
                    "email autolink negative cases");
     for(size_t k=0u;k<sizeof(email_rejections)/sizeof(email_rejections[0]);++k) {
         stun_md_document *negative=NULL;
@@ -386,7 +393,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 28/28 targets, 10 safety rejections, "
+    puts("C11 link metadata: 30/30 targets, 10 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }

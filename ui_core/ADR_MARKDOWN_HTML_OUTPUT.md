@@ -118,3 +118,24 @@ CommonMark's arbitrary-scheme autolink grammar is NOT the production-safe URI
 policy. Unknown, unapproved or unsafe protocols remain escaped text, not
 silently permitted links; RawHTML, explicit XML/XHTML and test-only normative
 rendering remain separately scoped. No second Markdown parser or fallback.
+
+## 7. Safe email angle autolinks
+
+The scoped #183 fix 5c48949 passed exact-head Runtime #38354876530: installed
+SDK C11 14/14, strict HTML 275/275, owned LINK 28/28, existing
+official 521/521 zero regression, full CommonMark 523/652 exact,
+8 unsupported and 121 differing, with ASan/UBSan and Mesa SUCCESS.
+Official newly matching IDs are exactly #604 and #605; the permanent
+byte-exact allowlist is promoted to 523 only on these results.
+
+An admitted angle email is recognized with HTML5 local atoms and bounded
+ASCII DNS-style labels by the single C11 inline parser. The same email
+predicate shields its punctuation from the existing emphasis delimiter
+scanner. The owned LINK href is one contiguous arena metadata span with
+an implicit mailto: prefix; the literal label has no such visible prefix.
+
+The production SafeApplicationHtml renderer remains the final URL security
+authority. Escaped email local symbols (including \+), malformed domain
+labels and unapproved URL schemes remain literal text, not links.
+RawHTML, arbitrary-scheme autolinks, explicit XML/XHTML and normative
+test-only HTML remain distinct and unimplemented where previously noted.
