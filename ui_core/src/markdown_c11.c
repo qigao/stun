@@ -680,6 +680,48 @@ static bool md_uri_autolink(const char *s,size_t n,size_t at,
     return true;
 }
 
+
+/* Email autolinks follow HTML5 local-atom and bounded ASCII domain labels.
+ * URI and email are opaque to the single emphasis-delimiter scanner. */
+static bool md_email_local_atom(unsigned char c) {
+    if((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9'))
+        return true;
+    switch(c) {
+    case '.':case '!':case '#':case '$':case '%':case '&':case '\'':
+    case '*':case '+':case '/':case '=':case '?':case '^':case '_':
+    case 0x60:case '{':case '|':case '}':case '~':case '-':return true;
+    default:return false;
+    }
+}
+static bool md_email_domain_alnum(unsigned char c) {
+    return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||
+           (c>='0'&&c<='9');
+}
+static bool md_email_autolink(const char *s,size_t n,size_t at,
+                              size_t *out_close) {
+    if(!s||!out_close||at>=n||s[at]!='<')return false;
+    size_t p=at+1u,first=p;
+    while(p<n&&md_email_local_atom((unsigned char)s[p]))++p;
+    if(p==first||p>=n||s[p]!='@')return false;
+    ++p;
+    /* 1..63 ASCII bytes per DNS label; '-' is interior only. */
+    for(;;) {
+        if(p>=n||!md_email_domain_alnum((unsigned char)s[p]))
+            return false;
+        const size_t label=p++;
+        while(p<n&&(md_email_domain_alnum((unsigned char)s[p])||s[p]=='-')) {
+            if(p-label>=63u)return false;
+            ++p;
+        }
+        if(p-label>63u||s[p-1u]=='-')return false;
+        if(p<n&&s[p]=='.'){++p;continue;}
+        break;
+    }
+    if(p>=n||s[p]!='>')return false;
+    *out_close=p;
+    return true;
+}
+
 /* CommonMark backtick delimiters close only on an EXACTLY equal-sized run.
  * Unlike emphasis/link matching, backslashes are ordinary literal payload
  * inside a code span, including when directly preceding a backtick. Skip
@@ -775,7 +817,8 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
          * owned RichDoc (official CommonMark #480/#481). */
         if(s[p]=='<') {
             size_t close=SIZE_MAX;
-            if(md_uri_autolink(s,n,p,&close)) {
+            if(md_uri_autolink(s,n,p,&close) ||
+               md_email_autolink(s,n,p,&close)) {
                 p=close+1u;
                 continue;
             }
@@ -992,17 +1035,32 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             text_start=physical_line_start=p;
             continue;
         }
-        /* Angle URI is one opaque LINK rather than RawHTML or TEXT.
-         * Keep literal UTF-8 href and label owned until document teardown. */
+        /* URI and email angle tokens are opaque, owned LINK nodes.
+         * The implicit mailto: prefix is href metadata only. */
         if(s[p]=='<') {
             size_t close=SIZE_MAX;
-            if(md_uri_autolink(s,n,p,&close)) {
+            const bool uri=md_uri_autolink(s,n,p,&close);
+            const bool email=!uri&&md_email_autolink(s,n,p,&close);
+            if(uri||email) {
                 md_text(d,owners[nested],s+text_start,p-text_start);
                 const uint32_t link=md_add(
                     d,owners[nested],STUN_UI_BLOCK_LINK,0u);
                 if(link==UINT32_MAX)break;
                 const size_t bytes=close-p-1u;
-                md_meta(d,link,s+p+1u,bytes);
+                if(email) {
+                    /* Bounded contiguous metadata writes: no transient
+                     * global registry, heap string, or alternative parser.
+                     * Any failure rolls back this unpublished RichDoc. */
+                    size_t first=0u,middle=0u,tail=0u,end=0u;
+                    if(!md_store(d,true,"mailto:",7u,&first,&middle) ||
+                       !md_store(d,true,s+p+1u,bytes,&tail,&end))
+                        break;
+                    if(tail!=middle) {
+                        md_error(d,STUN_UI_INVALID_ARGUMENT);break;
+                    }
+                    d->node_metadata[link]=
+                        (stun_ui_block_metadata){first,end};
+                } else md_meta(d,link,s+p+1u,bytes);
                 md_text(d,link,s+p+1u,bytes);
                 if(d->error!=STUN_UI_OK)break;
                 p=close+1u;
