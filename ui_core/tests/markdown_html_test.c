@@ -38,6 +38,23 @@ static const html_fixture cases[] = {
       "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n" },
     { TICK TICK TICK "c\nint v;\n" TICK TICK TICK "\n",
       "<pre><code class=\"language-c\">int v;\n</code></pre>\n" },
+    { " " TICK TICK TICK "\n aaa\naaa\n" TICK TICK TICK "\n",
+      "<pre><code>aaa\naaa\n</code></pre>\n" }, /* CommonMark #131 one-space opening indent */
+    { "  " TICK TICK TICK "\naaa\n  aaa\naaa\n  " TICK TICK TICK "\n",
+      "<pre><code>aaa\naaa\naaa\n</code></pre>\n" }, /* CommonMark #132 two-space opening indent */
+    { "   " TICK TICK TICK "\n   aaa\n    aaa\n  aaa\n   "
+      TICK TICK TICK "\n",
+      "<pre><code>aaa\n aaa\naaa\n</code></pre>\n" }, /* CommonMark #133 preserve excess code indentation */
+    { "  ~~~\n abc\n    def\n  ~~~\n",
+      "<pre><code>abc\n  def\n</code></pre>\n" }, /* preserve residual spaces after limited dedent */
+    { "  ~~~\n\n x\n  ~~~\n",
+      "<pre><code>\nx\n</code></pre>\n" }, /* blank and partially indented payload */
+    { "  ~~~\n&copy;\n  &amp;\n  ~~~\n",
+      "<pre><code>&amp;copy;\n&amp;amp;\n</code></pre>\n" }, /* code content remains literal until HTML5 TEXT escaping */
+    { "A < B & C > D \"yes\"\n",
+      "<p>A &lt; B &amp; C &gt; D &quot;yes&quot;</p>\n" }, /* HTML text context escapes once */
+    { "[x](/a&b \"A &amp; B\")\n",
+      "<p><a href=\"/a&amp;b\" title=\"A &amp; B\">x</a></p>\n" }, /* URI + HTML5 attribute escaping, no double entity decode */
     { "A [B](dest)\n", "<p>A <a href=\"dest\">B</a></p>\n" },
     { "a " TICK "code" TICK " b\n",
       "<p>a <code>code</code> b</p>\n" },
@@ -446,7 +463,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==234,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==242,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

@@ -2292,6 +2292,10 @@ static void md_parse_blocks(stun_md_document *d) {
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
     bool code_open=false;
+    /* The root opening fence may consume 0..3 ASCII indentation columns.
+     * Remove at most those opening columns from each subsequent code line;
+     * never trim semantic trailing spaces or mutate the original raw bytes. */
+    size_t root_fence_indent=0u;
     md_quote_stack quotes={0};
     quotes.paragraph=quotes.code=UINT32_MAX;
     md_fence fence = {0,0,UINT32_MAX};
@@ -2313,9 +2317,18 @@ static void md_parse_blocks(stun_md_document *d) {
                 code_open=false;
                 continue;
             }
-            /* Preserve exact CRLF/LF bytes in fenced code payloads. */
-            const size_t size=line.next-line.begin;
-            md_text(d,fence.node,s+line.begin,size);
+            /* CommonMark #131-133: opening-fence indentation removes up
+             * to N initial ASCII spaces on each code line (N=0..3).
+             * Keep every additional space and the original line-ending
+             * bytes. Tabs have column-based semantics and are handled
+             * separately from this ASCII-only deduction. */
+            size_t content=line.begin,removed=0u;
+            while(content<line.end && removed<root_fence_indent &&
+                  s[content]==' ') {
+                ++content;
+                ++removed;
+            }
+            md_text(d,fence.node,s+content,line.next-content);
             continue;
         }
         if(md_list_consume(d,&lists,line)) continue;
@@ -2445,6 +2458,7 @@ static void md_parse_blocks(stun_md_document *d) {
             if (node==UINT32_MAX) return;
             md_fence_info_meta(d,node,s+info_b,info_e-info_b);
             fence=(md_fence){marker,run,node};
+            root_fence_indent=indent;
             code_open=true;
             paragraph=UINT32_MAX;
             continue;

@@ -1,4 +1,5 @@
 #include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -845,10 +846,103 @@ static int test_link_label_delimiter_isolation(void) {
     return 0;
 }
 
+/* This is a *source-column* dedent, not a generic trim: original raw
+ * Markdown stays intact and code TEXT keeps every residual space. Verify
+ * independently owned code child bytes and the final escaped HTML output. */
+static int test_root_fence_indent_semantics(void) {
+#define FENCE_VERIFY(expr) do { \
+    if(!(expr)) { \
+        fprintf(stderr,"%s:%d: failed: %s\n",__FILE__,__LINE__,#expr); \
+        failure=1;goto done; \
+    } \
+} while(0)
+    int failure=0;
+    stun_md_document *doc=NULL;
+    typedef struct fence_indent_fixture {
+        const char *source,*code,*html;
+    } fence_indent_fixture;
+    static const fence_indent_fixture cases[]={
+        {" " TICK TICK TICK "\n aaa\naaa\n" TICK TICK TICK "\n",
+         "aaa\naaa\n","<pre><code>aaa\naaa\n</code></pre>\n"},
+        {"  " TICK TICK TICK "\naaa\n  aaa\naaa\n  " TICK TICK TICK "\n",
+         "aaa\naaa\naaa\n","<pre><code>aaa\naaa\naaa\n</code></pre>\n"},
+        {"   " TICK TICK TICK "\n   aaa\n    aaa\n  aaa\n   "
+         TICK TICK TICK "\n",
+         "aaa\n aaa\naaa\n","<pre><code>aaa\n aaa\naaa\n</code></pre>\n"},
+        {"  ~~~\n abc\n    def\n  ~~~\n",
+         "abc\n  def\n","<pre><code>abc\n  def\n</code></pre>\n"},
+        {"  ~~~\n\n x\n  ~~~\n",
+         "\nx\n","<pre><code>\nx\n</code></pre>\n"},
+        {"  ~~~\n&copy;\n  &amp;\n  ~~~\n",
+         "&copy;\n&amp;\n",
+         "<pre><code>&amp;copy;\n&amp;amp;\n</code></pre>\n"}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==6u,
+                   "root fenced-code indent coverage");
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t n=strlen(cases[k].source);
+        FENCE_VERIFY(stun_md_parse(cases[k].source,n,128u,n+1u,&doc)==
+                     STUN_UI_OK);
+        FENCE_VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        FENCE_VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        FENCE_VERIFY(v.raw_markdown_bytes==n);
+        FENCE_VERIFY(!memcmp(v.raw_markdown,cases[k].source,n));
+        FENCE_VERIFY(kinds(v,STUN_UI_BLOCK_CODE_FENCE)==1u);
+        size_t fence_id=SIZE_MAX;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_CODE_FENCE)
+                fence_id=i;
+        }
+        FENCE_VERIFY(fence_id!=SIZE_MAX);
+        FENCE_VERIFY(v.document.blocks[fence_id].parent_index==0u);
+        char code[256]={0};
+        size_t used=0u;
+        for(size_t i=fence_id+1u;i<v.document.block_count;++i) {
+            const stun_ui_block *node=&v.document.blocks[i];
+            if(node->parent_index!=fence_id)continue;
+            FENCE_VERIFY(node->kind==STUN_UI_BLOCK_TEXT);
+            FENCE_VERIFY(node->byte_end>=node->byte_begin);
+            FENCE_VERIFY(node->byte_end<=v.document.source_bytes);
+            const size_t len=node->byte_end-node->byte_begin;
+            FENCE_VERIFY(used+len<sizeof(code));
+            memcpy(code+used,v.document.source+node->byte_begin,len);
+            used+=len;
+        }
+        FENCE_VERIFY(used==strlen(cases[k].code));
+        FENCE_VERIFY(!memcmp(code,cases[k].code,used));
+        size_t needed=SIZE_MAX,reported=SIZE_MAX;
+        FENCE_VERIFY(stun_md_render_html(
+            &v,128u,NULL,0u,&needed)==STUN_UI_OK);
+        const size_t expected=strlen(cases[k].html);
+        FENCE_VERIFY(needed==expected);
+        char html[512];
+        FENCE_VERIFY(needed+2u<sizeof(html));
+        memset(html,0x4a,sizeof(html));
+        FENCE_VERIFY(stun_md_render_html(&v,128u,html,needed,&reported)==
+                     STUN_UI_CAPACITY_EXCEEDED);
+        FENCE_VERIFY(reported==needed);
+        for(size_t i=0u;i<sizeof(html);++i)
+            FENCE_VERIFY((unsigned char)html[i]==0x4au);
+        FENCE_VERIFY(stun_md_render_html(
+            &v,128u,html,needed+1u,&reported)==STUN_UI_OK);
+        FENCE_VERIFY(reported==needed);
+        FENCE_VERIFY(!memcmp(html,cases[k].html,expected+1u));
+        FENCE_VERIFY((unsigned char)html[expected+1u]==0x4au);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+#undef FENCE_VERIFY
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
     if(test_unclosed_fence_and_empty()) return 1;
+    if(test_root_fence_indent_semantics()) return 1;
     if(test_limit_and_failure_transaction()) return 1;
     if(test_deterministic_ids()) return 1;
     if(test_code_span_exact_runs_and_text()) return 1;
