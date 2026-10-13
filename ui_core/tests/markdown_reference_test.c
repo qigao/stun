@@ -143,7 +143,11 @@ static int test_container_definition_fences(void) {
         "paragraph\n[hidden]: /uri\n\n[hidden]\n",
         "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n",
         "- item\n    * * *\n    [hidden]: /bad\n\n[hidden]\n",
-        "- item\n  ---\n  [hidden]: /bad\n\n[hidden]\n",
+        /* A Setext item heading followed by a real list paragraph:
+         * the continued [hidden]: line remains paragraph TEXT, not a
+         * root definition. Without the preceding continuation, a list
+         * can terminate before the label and that would be a false XFAIL. */
+        "- item\n  ---\n  continuation\n  [hidden]: /bad\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
         "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
