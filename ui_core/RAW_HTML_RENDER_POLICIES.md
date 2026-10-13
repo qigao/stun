@@ -35,13 +35,17 @@ failure, malformed tags, hostile script tokens and one-node-short budgets.
 
 ## Remaining work in the Raw HTML category
 
-- The root type-6 HTML block subset uses the SAME canonical block
-  parser, preserves owned raw source lines, interrupts root paragraphs
-  and ends on a blank. The corresponding root definition prepass calls
-  the same lexical predicate and cannot absorb references inside blocks.
-- Complete all remaining HTML block types #148-#191 in that SAME parser:
-  types 1-5 and 7, quote/list ownership, paragraph interruption,
-  blank-line termination and raw source preservation.
+- The canonical ROOT block parser now has a staged seven-type
+  CommonMark HTML classifier. Types 1-5 use exact same-line terminators
+  (closing pre/script/style/textarea tag, comment, PI, declaration, CDATA),
+  preserving intervening blank lines; types 6-7 end at a blank line.
+  Type 7 cannot interrupt an existing paragraph. HTML source is stored
+  only in document-owned RAW_HTML_BLOCK semantic ranges; the SAME
+  classifier suppresses false root reference definitions inside blocks.
+- This is a root-only candidate until exact-HEAD C11, Sanitizer/Mesa and
+  complete separate SAFE/SPEC oracle evidence pass. Remaining blocks
+  inside quote/list owners require canonical container integration,
+  without a second grammar or prepass that strips container markers.
 - Support complete inline token grammar including multiline quoted tags
   #615/#616/#642/#643, multiline comments and other HTML token spans,
   plus interactions with emphasis, links, lists and code.

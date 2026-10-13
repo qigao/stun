@@ -680,6 +680,92 @@ static bool md_raw_html_root_type6(const char *s,size_t begin,size_t end) {
     return false;
 }
 
+/* The canonical block tokenizer recognizes the CommonMark 0.31.2 seven
+ * raw-HTML start/end conditions, sharing the type-6 vocabulary above
+ * and the existing single-line inline tag scanner for type 7.
+ * 'type 7 cannot interrupt paragraphs' applies identically in the ROOT
+ * reference preflight and the owned block parser. */
+static bool md_html_ascii_equal(const char *s,size_t n,const char *word) {
+    const size_t count=strlen(word);
+    if(n<count)return false;
+    for(size_t i=0u;i<count;++i) {
+        const unsigned char b=(unsigned char)s[i];
+        const char lower=(char)(b>='A'&&b<='Z'?b+('a'-'A'):b);
+        if(lower!=word[i])return false;
+    }
+    return true;
+}
+static bool md_html_line_contains(const char *s,size_t begin,size_t end,
+                                  const char *pattern,bool folded) {
+    const size_t n=strlen(pattern);
+    if(end<begin || n>end-begin)return false;
+    for(size_t at=begin;at<=end-n;++at) {
+        if(folded) {
+            if(md_html_ascii_equal(s+at,end-at,pattern))return true;
+        } else if(!memcmp(s+at,pattern,n))return true;
+    }
+    return false;
+}
+static unsigned md_raw_html_root_kind(const char *s,size_t b,size_t e,
+                                     bool paragraph_open) {
+    if(b>=e || s[b]!='<' || e-b<2u)return 0u;
+    static const char *const first[]={
+        "pre","script","style","textarea"
+    };
+    for(size_t k=0u;k<sizeof(first)/sizeof(first[0]);++k) {
+        const size_t n=strlen(first[k]);
+        if(e-b>=n+1u && md_html_ascii_equal(s+b+1u,e-b-1u,first[k])) {
+            const size_t end=b+1u+n;
+            if(end==e || s[end]=='>' || md_space(s[end]))return 1u;
+        }
+    }
+    if(e-b>=4u && !memcmp(s+b,"<!--",4u))return 2u;
+    if(s[b+1u]=='?')return 3u;
+    if(e-b>=3u && s[b+1u]=='!' &&
+       ((s[b+2u]>='a'&&s[b+2u]<='z') ||
+        (s[b+2u]>='A'&&s[b+2u]<='Z')))return 4u;
+    if(e-b>=9u && !memcmp(s+b,"<![CDATA[",9u))return 5u;
+    if(md_raw_html_root_type6(s,b,e))return 6u;
+    if(paragraph_open)return 0u; /* type 7 may NOT interrupt a paragraph */
+    size_t at=b+1u;
+    if(at<e && s[at]=='/')++at;
+    if(at==e || !md_tag_letter((unsigned char)s[at]))return 0u;
+    const size_t name=at;
+    ++at;
+    while(at<e && (md_tag_letter((unsigned char)s[at]) ||
+                   md_tag_digit((unsigned char)s[at]) ||
+                   s[at]=='-'))++at;
+    for(size_t i=0u;i<sizeof(first)/sizeof(first[0]);++i)
+        if(at-name==strlen(first[i]) &&
+           md_html_ascii_equal(s+name,at-name,first[i]))
+            return 0u;
+    const size_t close=md_inline_html_tag_close(s,e,b);
+    if(close==SIZE_MAX || close+1u>e ||
+       !md_blank(s,close+1u,e))return 0u;
+    return 7u;
+}
+/* The fixed-string end condition is shared by ROOT reference scanning and
+ * actual block emission. For types 1-5 a same-line closer ends the block;
+ * for types 6-7 the next blank line ends it BEFORE being emitted. */
+static bool md_raw_html_line_ends(unsigned kind,const char *s,
+                                   size_t b,size_t e) {
+    switch(kind) {
+    case 1u: {
+        static const char *const ends[]={
+            "</pre>","</script>","</style>","</textarea>"
+        };
+        for(size_t i=0u;i<sizeof(ends)/sizeof(ends[0]);++i)
+            if(md_html_line_contains(s,b,e,ends[i],true))return true;
+        return false;
+    }
+    case 2u:return md_html_line_contains(s,b,e,"-->",false);
+    case 3u:return md_html_line_contains(s,b,e,"?>",false);
+    case 4u:return md_html_line_contains(s,b,e,">",false);
+    case 5u:return md_html_line_contains(s,b,e,"]]>",false);
+    default:return false;
+    }
+}
+
 /* One bounded LINK-text bracket scanner for both inline targets and
  * reference links. Literal nested brackets are legal visible link text
  * (CommonMark #528), including adjacent closing "]]" from #559.
@@ -3006,7 +3092,7 @@ static void md_reference_collect_root(stun_md_document *d) {
     const char *s=d->raw;
     bool paragraph_started=false;
     bool fenced=false;
-    bool root_html_block_open=false;
+    unsigned root_html_kind=0u;
     bool container_pending=false;
     /* Root-only admission guard, not a second nested-list grammar. Keep
      * the outer list content column across blank lines: a blank does not
@@ -3024,9 +3110,14 @@ static void md_reference_collect_root(stun_md_document *d) {
                 fenced=false;
             continue;
         }
-        if(root_html_block_open) {
+        if(root_html_kind) {
+            if(root_html_kind<=5u) {
+                if(md_raw_html_line_ends(root_html_kind,s,begin,line.end))
+                    root_html_kind=0u;
+                continue; /* includes blank lines for HTML types 1-5 */
+            }
             if(!md_blank(s,line.begin,line.end))continue;
-            root_html_block_open=false;
+            root_html_kind=0u; /* types 6/7 end BEFORE blank */
         }
         if(md_blank(s,line.begin,line.end)) {
             paragraph_started=false;
@@ -3043,12 +3134,15 @@ static void md_reference_collect_root(stun_md_document *d) {
             else list_content_column=0u;
             after_list_blank=false;
         }
-        /* Type-6 root HTML prepass admission shares the exact block
-         * predicate with md_parse_blocks: definitions inside a raw block
-         * cannot donate references even after independent text lines. */
-        if(!container_pending && columns<=3u &&
-           md_raw_html_root_type6(s,begin,line.end)) {
-            root_html_block_open=true;
+        /* One shared CommonMark HTML start/end gate suppresses reference
+         * definitions inside raw blocks; no detached HTML parser. */
+        const unsigned html_start=(!container_pending && columns<=3u)?
+            md_raw_html_root_kind(s,begin,line.end,paragraph_started):0u;
+        if(html_start) {
+            root_html_kind=html_start;
+            if(html_start<=5u &&
+               md_raw_html_line_ends(html_start,s,begin,line.end))
+                root_html_kind=0u;
             paragraph_started=false;
             continue;
         }
@@ -3201,7 +3295,7 @@ static void md_parse_blocks(stun_md_document *d) {
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
     bool code_open=false;
-    bool html_block_open=false;
+    unsigned html_block_kind=0u;
     uint32_t html_block_node=UINT32_MAX;
     bool reference_continuation=false;
     /* The root opening fence may consume 0..3 ASCII indentation columns.
@@ -3224,14 +3318,19 @@ static void md_parse_blocks(stun_md_document *d) {
         for(size_t i=line.begin;i<indent_begin && indent<4u;++i)
             indent += s[i]=='\t' ? 4u-(indent%4u) : 1u;
         size_t begin=indent_begin, end=line.end;
-        if(html_block_open) {
-            if(md_blank(s,line.begin,line.end)) {
-                html_block_open=false;html_block_node=UINT32_MAX;
+        if(html_block_kind) {
+            if(html_block_kind>5u && md_blank(s,line.begin,line.end)) {
+                html_block_kind=0u;html_block_node=UINT32_MAX;
                 paragraph=UINT32_MAX;
-                continue; /* CommonMark type 6 ends BEFORE the blank. */
+                continue; /* type 6/7 ends BEFORE the blank line */
             }
             if(!md_raw_html_block_line(d,html_block_node,line,false))
                 return;
+            if(html_block_kind<=5u &&
+               md_raw_html_line_ends(html_block_kind,s,begin,end)) {
+                html_block_kind=0u;html_block_node=UINT32_MAX;
+                paragraph=UINT32_MAX;
+            }
             continue;
         }
         /* Once a ROOT definition's opening line was consumed below, its
@@ -3350,17 +3449,20 @@ static void md_parse_blocks(stun_md_document *d) {
             paragraph=UINT32_MAX;
             continue;
         }
-        /* The shared type-6 recognizer interrupts the existing root
-         * paragraph, emits owned HTML bytes without a parser fallback,
-         * and yields at the first blank line. Quoted/list content has
-         * already been consumed by its actual owner above. */
-        if(indent<=3u && lists.depth==0u && quotes.depth==0u &&
-           md_raw_html_root_type6(s,begin,end)) {
+        /* Canonical raw-HTML block admission: types 1-6 interrupt root
+         * paragraphs, type 7 does not; the same classifier is used in
+         * reference preflight to preserve document-source ownership. */
+        const unsigned html_kind=(indent<=3u && lists.depth==0u &&
+                                 quotes.depth==0u)?
+            md_raw_html_root_kind(s,begin,end,paragraph!=UINT32_MAX):0u;
+        if(html_kind) {
             const uint32_t node=md_add(
                 d,0u,STUN_UI_BLOCK_RAW_HTML_BLOCK,0u);
             if(node==UINT32_MAX ||
                !md_raw_html_block_line(d,node,line,true))return;
-            html_block_node=node;html_block_open=true;
+            html_block_node=node;
+            html_block_kind=html_kind<=5u &&
+                md_raw_html_line_ends(html_kind,s,begin,end)?0u:html_kind;
             paragraph=UINT32_MAX;pending_break=MD_ROOT_BREAK_SOFT;
             continue;
         }

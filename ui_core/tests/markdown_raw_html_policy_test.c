@@ -123,6 +123,60 @@ static const raw_fixture fixtures[] = {
  * literal source tokens. HTML code/fence/definition interactions remain
  * bounded and may not create Reference bindings inside raw block content. */
 static const raw_fixture block_fixtures[]={
+    {162u,"<a href=\"foo\">\n*bar*\n</a>\n",
+     "<a href=\"foo\">\n*bar*\n</a>\n",
+     "&lt;a href=&quot;foo&quot;&gt;\n*bar*\n&lt;/a&gt;\n",0u}, /* CommonMark #162 */
+    {163u,"<Warning>\n*bar*\n</Warning>\n",
+     "<Warning>\n*bar*\n</Warning>\n",
+     "&lt;Warning&gt;\n*bar*\n&lt;/Warning&gt;\n",0u}, /* CommonMark #163 */
+    {164u,"<i class=\"foo\">\n*bar*\n</i>\n",
+     "<i class=\"foo\">\n*bar*\n</i>\n",
+     "&lt;i class=&quot;foo&quot;&gt;\n*bar*\n&lt;/i&gt;\n",0u}, /* CommonMark #164 */
+    {165u,"</ins>\n*bar*\n",
+     "</ins>\n*bar*\n",
+     "&lt;/ins&gt;\n*bar*\n",0u}, /* CommonMark #165 */
+    {166u,"<del>\n*foo*\n</del>\n",
+     "<del>\n*foo*\n</del>\n",
+     "&lt;del&gt;\n*foo*\n&lt;/del&gt;\n",0u}, /* CommonMark #166 */
+    {167u,"<del>\n\n*foo*\n\n</del>\n",
+     "<del>\n<p><em>foo</em></p>\n</del>\n",
+     "&lt;del&gt;\n<p><em>foo</em></p>\n&lt;/del&gt;\n",0u}, /* CommonMark #167 */
+    {169u,"<pre language=\"haskell\"><code>\nimport Text.HTML.TagSoup\n\nmain :: IO ()\nmain = print $ parseTags tags\n</code></pre>\nokay\n",
+     "<pre language=\"haskell\"><code>\nimport Text.HTML.TagSoup\n\nmain :: IO ()\nmain = print $ parseTags tags\n</code></pre>\n<p>okay</p>\n",
+     "&lt;pre language=&quot;haskell&quot;&gt;&lt;code&gt;\nimport Text.HTML.TagSoup\n\nmain :: IO ()\nmain = print $ parseTags tags\n&lt;/code&gt;&lt;/pre&gt;\n<p>okay</p>\n",0u}, /* CommonMark #169 */
+    {170u,"<script type=\"text/javascript\">\n// JavaScript example\n\ndocument.getElementById(\"demo\").innerHTML = \"Hello JavaScript!\";\n</script>\nokay\n",
+     "<script type=\"text/javascript\">\n// JavaScript example\n\ndocument.getElementById(\"demo\").innerHTML = \"Hello JavaScript!\";\n</script>\n<p>okay</p>\n",
+     "&lt;script type=&quot;text/javascript&quot;&gt;\n// JavaScript example\n\ndocument.getElementById(&quot;demo&quot;).innerHTML = &quot;Hello JavaScript!&quot;;\n&lt;/script&gt;\n<p>okay</p>\n",0u}, /* CommonMark #170 */
+    {171u,"<textarea>\n\n*foo*\n\n_bar_\n\n</textarea>\n",
+     "<textarea>\n\n*foo*\n\n_bar_\n\n</textarea>\n",
+     "&lt;textarea&gt;\n\n*foo*\n\n_bar_\n\n&lt;/textarea&gt;\n",0u}, /* CommonMark #171 */
+    {172u,"<style\n  type=\"text/css\">\nh1 {color:red;}\n\np {color:blue;}\n</style>\nokay\n",
+     "<style\n  type=\"text/css\">\nh1 {color:red;}\n\np {color:blue;}\n</style>\n<p>okay</p>\n",
+     "&lt;style\n  type=&quot;text/css&quot;&gt;\nh1 {color:red;}\n\np {color:blue;}\n&lt;/style&gt;\n<p>okay</p>\n",0u}, /* CommonMark #172 */
+    {173u,"<style\n  type=\"text/css\">\n\nfoo\n",
+     "<style\n  type=\"text/css\">\n\nfoo\n",
+     "&lt;style\n  type=&quot;text/css&quot;&gt;\n\nfoo\n",0u}, /* CommonMark #173 */
+    {176u,"<style>p{color:red;}</style>\n*foo*\n",
+     "<style>p{color:red;}</style>\n<p><em>foo</em></p>\n",
+     "&lt;style&gt;p{color:red;}&lt;/style&gt;\n<p><em>foo</em></p>\n",0u}, /* CommonMark #176 */
+    {177u,"<!-- foo -->*bar*\n*baz*\n",
+     "<!-- foo -->*bar*\n<p><em>baz</em></p>\n",
+     "&lt;!-- foo --&gt;*bar*\n<p><em>baz</em></p>\n",0u}, /* CommonMark #177 */
+    {178u,"<script>\nfoo\n</script>1. *bar*\n",
+     "<script>\nfoo\n</script>1. *bar*\n",
+     "&lt;script&gt;\nfoo\n&lt;/script&gt;1. *bar*\n",0u}, /* CommonMark #178 */
+    {179u,"<!-- Foo\n\nbar\n   baz -->\nokay\n",
+     "<!-- Foo\n\nbar\n   baz -->\n<p>okay</p>\n",
+     "&lt;!-- Foo\n\nbar\n   baz --&gt;\n<p>okay</p>\n",0u}, /* CommonMark #179 */
+    {180u,"<?php\n\n  echo '>';\n\n?>\nokay\n",
+     "<?php\n\n  echo '>';\n\n?>\n<p>okay</p>\n",
+     "&lt;?php\n\n  echo '&gt;';\n\n?&gt;\n<p>okay</p>\n",0u}, /* CommonMark #180 */
+    {181u,"<!DOCTYPE html>\n",
+     "<!DOCTYPE html>\n",
+     "&lt;!DOCTYPE html&gt;\n",0u}, /* CommonMark #181 */
+    {182u,"<![CDATA[\nfunction matchwo(a,b)\n{\n  if (a < b && a < 0) then {\n    return 1;\n\n  } else {\n\n    return 0;\n  }\n}\n]]>\nokay\n",
+     "<![CDATA[\nfunction matchwo(a,b)\n{\n  if (a < b && a < 0) then {\n    return 1;\n\n  } else {\n\n    return 0;\n  }\n}\n]]>\n<p>okay</p>\n",
+     "&lt;![CDATA[\nfunction matchwo(a,b)\n{\n  if (a &lt; b &amp;&amp; a &lt; 0) then {\n    return 1;\n\n  } else {\n\n    return 0;\n  }\n}\n]]&gt;\n<p>okay</p>\n",0u}, /* CommonMark #182 */
     {149u,"<table>\n  <tr>\n    <td>\n           hi\n    </td>\n  </tr>\n</table>\n\nokay.\n",
      "<table>\n  <tr>\n    <td>\n           hi\n    </td>\n  </tr>\n</table>\n<p>okay.</p>\n",
      "&lt;table&gt;\n  &lt;tr&gt;\n    &lt;td&gt;\n           hi\n    &lt;/td&gt;\n  &lt;/tr&gt;\n&lt;/table&gt;\n<p>okay.</p>\n",0u},
@@ -201,15 +255,20 @@ int main(void) {
                     fixtures[i].official);
             return 1;
         }
-    _Static_assert(sizeof(block_fixtures)/sizeof(block_fixtures[0])==7u,
-                   "six official type-6 blocks + definition opacity");
+    _Static_assert(sizeof(block_fixtures)/sizeof(block_fixtures[0])==25u,
+                   "six type-6, eighteen types 1-5/7, and opacity");
     for(size_t i=0u;i<sizeof(block_fixtures)/sizeof(block_fixtures[0]);++i)
         if(verify_block(&block_fixtures[i])) {
             fprintf(stderr,"ROOT RAW_HTML_BLOCK official #%u failed\n",
                     block_fixtures[i].official);
             return 1;
         }
-    puts("C11 typed RAW_HTML: nine official inline, six official block "
+    /* Type 7 complete tags cannot interrupt an already-open paragraph. */
+    const raw_fixture type7_noninterrupt={
+        187u,"Foo\n<a href=\"bar\">\nbaz\n","<p>Foo\n<a href=\"bar\">\nbaz</p>\n","<p>Foo\n&lt;a href=&quot;bar&quot;&gt;\nbaz</p>\n",1u
+    };
+    if(verify(&type7_noninterrupt))return 1;
+    puts("C11 typed RAW_HTML: nine official inline, twenty-four official block "
          "spec outputs; unchanged SAFE rendering and atomic limits");
     return 0;
 }
