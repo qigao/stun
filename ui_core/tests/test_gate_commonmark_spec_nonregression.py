@@ -23,17 +23,17 @@ class SpecGateTests(unittest.TestCase):
         self.baseline = {"render_policy": "SpecConformanceHtml",
                          "commonmark_version": "0.31.2", "source": "tools/md/test/spec.txt",
                          "official_total": 652, "official_fixture_sha256": digest,
-                         "qualified_official_ids": list(range(1, 637))}
+                         "qualified_official_ids": list(range(1, 639))}
         self.survey = {"render_policy": "SpecConformanceHtml",
                        "commonmark_version": "0.31.2", "source": "tools/md/test/spec.txt",
                        "total": 652, "native_matches_official": 652,
                        "native_unsupported": 0, "native_differences": 0, "cases": rows}
 
-    def test_retains_636_without_auto_promoting_16(self):
+    def test_retains_638_without_auto_promoting_14(self):
         before = copy.deepcopy((self.survey, self.baseline))
         result = evaluate(self.survey, self.baseline)
-        self.assertEqual(result["baseline_passed"], 636)
-        self.assertEqual(len(result["additional_official_matches"]), 16)
+        self.assertEqual(result["baseline_passed"], 638)
+        self.assertEqual(len(result["additional_official_matches"]), 14)
         self.assertEqual(result["regressions"], [])
         self.assertEqual((self.survey, self.baseline), before)
 
@@ -43,7 +43,7 @@ class SpecGateTests(unittest.TestCase):
         row["native_matches_official"] = False
         self.survey.update(native_matches_official=651, native_differences=1)
         result = evaluate(self.survey, self.baseline)
-        self.assertEqual(result["baseline_passed"], 635)
+        self.assertEqual(result["baseline_passed"], 637)
         self.assertEqual([r["id"] for r in result["regressions"]], [10])
 
     def test_safe_policy_cannot_pass_spec_gate(self):
@@ -68,7 +68,7 @@ class SpecGateTests(unittest.TestCase):
         row["native_matches_official"] = False
         self.survey.update(native_matches_official=651, native_unsupported=1)
         result = evaluate(self.survey, self.baseline)
-        self.assertEqual(result["baseline_passed"], 635)
+        self.assertEqual(result["baseline_passed"], 637)
         self.assertEqual(result["native_unsupported"], 1)
         row["native_matches_official"] = True
         with self.assertRaises(InvalidEvidence):
@@ -85,7 +85,7 @@ class SpecGateTests(unittest.TestCase):
             evaluate(self.survey, self.baseline)
 
     def test_unqualified_id_promotion_rejected(self):
-        self.baseline["qualified_official_ids"] = list(range(1, 638))
+        self.baseline["qualified_official_ids"] = list(range(1, 640))
         with self.assertRaises(InvalidEvidence):
             evaluate(self.survey, self.baseline)
 
