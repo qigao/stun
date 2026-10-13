@@ -650,17 +650,19 @@ static bool md_raw_html_root_type6(const char *s,size_t begin,size_t end) {
     const size_t start=p;
     while(p<end && (md_tag_letter((unsigned char)s[p]) ||
                     md_tag_digit((unsigned char)s[p])))++p;
-    if(p==start || (p<end && s[p]!='>' && s[p]!='/' &&
-                   !md_space(s[p])))return false;
+    if(p==start ||
+       (p<end && s[p]!='>' && !md_space(s[p]) &&
+        !(s[p]=='/' && p+1u<end && s[p+1u]=='>')))
+        return false;
     static const char *const names[]={
         "address","article","aside","base","basefont","blockquote",
         "body","caption","center","col","colgroup","dd","details",
         "dialog","dir","div","dl","dt","fieldset","figcaption",
         "figure","footer","form","frame","frameset","h1","h2","h3",
         "h4","h5","h6","head","header","hr","html","iframe","legend",
-        "li","link","main","menu","menuitem","nav","noframes","ol",
-        "optgroup","option","output","p","param","search","section",
-        "source","summary","table","tbody","td","tfoot","th",
+        "li","link","main","menu","nav","noframes","ol",
+        "optgroup","option","p","param","search","section",
+        "summary","table","tbody","td","tfoot","th",
         "thead","title","tr","track","ul"
     };
     const size_t bytes=p-start;

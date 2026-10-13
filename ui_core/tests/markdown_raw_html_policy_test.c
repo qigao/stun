@@ -160,7 +160,39 @@ static int verify_block(const raw_fixture *f) {
     return 0;
 }
 
+/* HTML block type-6 has an exact CommonMark 0.31.2 tag vocabulary
+ * and delimiter rule. Names outside that vocabulary, plus a raw slash
+ * that is not '/>', must remain inline/paragraph grammar and not swallow
+ * the next Markdown emphasis line as an HTML block. */
+static int test_type6_exact_admission(void) {
+    static const char *const nonblocks[]={
+        "<source>x\n*foo*\n",
+        "<output>x\n*foo*\n",
+        "<menuitem>x\n*foo*\n",
+        "<table/foo>x\n*foo*\n"
+    };
+    stun_md_document *doc=NULL;
+    for(size_t k=0u;k<sizeof(nonblocks)/sizeof(nonblocks[0]);++k) {
+        const char *input=nonblocks[k];size_t n=strlen(input);
+        CHECK(stun_md_parse(input,n,128u,n+1u,&doc)==STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        size_t raw_blocks=0u,emphasis=0u;
+        for(size_t i=0u;i<v.document.block_count;++i) {
+            raw_blocks+=v.document.blocks[i].kind==
+                        STUN_UI_BLOCK_RAW_HTML_BLOCK;
+            emphasis+=v.document.blocks[i].kind==
+                      STUN_UI_BLOCK_EMPHASIS;
+        }
+        CHECK(raw_blocks==0u && emphasis==1u);
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+    return 0;
+}
+
 int main(void) {
+    if(test_type6_exact_admission())return 1;
     _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==12u,
                    "nine official cases, one comment and two hostile/malformed tests");
     for(size_t i=0u;i<sizeof(fixtures)/sizeof(fixtures[0]);++i)
