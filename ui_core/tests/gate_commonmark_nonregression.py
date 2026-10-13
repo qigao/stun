@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 import sys
 
+from classify_commonmark_failures import classify_failures
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--survey",type=Path,required=True)
@@ -86,6 +88,18 @@ def main():
         "additional_official_matches":additional,
         "official_diagnostic_total":652
     }
+    # Classifications are remediation owners, never alternate pass rules.
+    # Persist the partition inside the existing CI artifact; no new workflow.
+    try:
+        ledger_path=Path(__file__).with_name("commonmark_failure_classes.json")
+        ledger=json.loads(ledger_path.read_text(encoding="utf-8"))
+        result["failure_classification"]=classify_failures(data,ledger)
+    except (OSError,ValueError,KeyError,TypeError) as error:
+        print(f"INFRA: failure classification: {error}",file=sys.stderr)
+        return 2
+    for category in result["failure_classification"]["categories"]:
+        print(f"Unpassed {category['key']}: {category['remaining']}; "
+              f"owner={category['owner']}")
     args.out.parent.mkdir(parents=True,exist_ok=True)
     args.out.write_text(json.dumps(result,indent=2)+"\n",encoding="utf-8")
     print(f"Prior official HTML equalities: {result['baseline_passed']}/{len(ids)};"
