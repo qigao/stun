@@ -15,7 +15,7 @@ target_compile_features(stun_markdown_entities_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_entities_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_entities_test COMMAND stun_markdown_entities_test)
 
-# #185: typed decoded link destinations and optional title metadata. Native
+# #183: typed decoded link destinations and optional title metadata. Native
 # C11 owner/URI/safety tests run under the installed-SDK sanitizer gate.
 add_executable(stun_markdown_link_target_test markdown_link_target_test.c)
 target_compile_features(stun_markdown_link_target_test PRIVATE c_std_11)
@@ -23,7 +23,7 @@ target_link_libraries(stun_markdown_link_target_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_link_target_test
          COMMAND stun_markdown_link_target_test)
 
-# #185: root single-line ASCII reference definitions; forward/first-win
+# #183: root single-line ASCII reference definitions; forward/first-win
 # source ownership and typed full/collapsed/shortcut LINK admission.
 add_executable(stun_markdown_reference_test markdown_reference_test.c)
 target_compile_features(stun_markdown_reference_test PRIVATE c_std_11)

@@ -139,11 +139,13 @@ static int test_container_definition_fences(void) {
     static const char *blocked[]={
         "- item\n  [hidden]: /uri\n\n[hidden]\n",
         "> quote\n[hidden]: /uri\n\n[hidden]\n",
-        "    [hidden]: /uri\n\n[hidden]\n"
+        "    [hidden]: /uri\n\n[hidden]\n",
+        "paragraph\n[hidden]: /uri\n\n[hidden]\n",
+        "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==3u,
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==5u,
                    "reference-owner negative denominator");
-    for(size_t i=0u;i<3u;++i) {
+    for(size_t i=0u;i<5u;++i) {
         const size_t n=strlen(blocked[i]);
         VERIFY(stun_md_parse(blocked[i],n,128u,n+1u,&doc)==STUN_UI_OK);
         VERIFY(doc!=NULL);
@@ -202,9 +204,18 @@ int main(void) {
          "<p><a href=\"/url1\">foo</a></p>\n"}, /* #566 */
         {"[x][id]\n\n[id]: /f&ouml; \"A &copy;\"\n",
          "/fö","A ©","x",
-         "<p><a href=\"/f%C3%B6\" title=\"A ©\">x</a></p>\n"}
+         "<p><a href=\"/f%C3%B6\" title=\"A ©\">x</a></p>\n"},
+        {"Setext\n===\n[key]: /root\n\n[key]\n",
+         "/root",NULL,"key",
+         "<h1>Setext</h1>\n<p><a href=\"/root\">key</a></p>\n"},
+        {"Setext\n---\n[key]: /root\n\n[key]\n",
+         "/root",NULL,"key",
+         "<h2>Setext</h2>\n<p><a href=\"/root\">key</a></p>\n"},
+        {"Setext\r\n===\r\n[key]: /root\r\n\r\n[key]\r\n",
+         "/root",NULL,"key",
+         "<h1>Setext</h1>\n<p><a href=\"/root\">key</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==11u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==14u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
@@ -233,7 +244,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 11/11 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 14/14 AST/HTML, forward/duplicate/case "
          "binding, safe URL, fenced/quote/list opacity and atomic bounded ownership");
     return 0;
 }

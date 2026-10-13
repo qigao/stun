@@ -2149,6 +2149,15 @@ static void md_reference_collect_root(stun_md_document *d) {
             continue;
         }
         if(container_pending)continue;
+        /* A Setext underline ends its preceding root paragraph in the
+         * production block parser. The prepass must recognize that same
+         * boundary before admitting a following root definition. Invalid
+         * or standalone underlines never reset paragraph ownership. */
+        if(paragraph_started && columns<=3u &&
+           md_setext(s,begin,line.end)) {
+            paragraph_started=false;
+            continue;
+        }
         if(md_rule(s,begin,line.end)) {
             paragraph_started=false;continue;
         }

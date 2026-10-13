@@ -371,11 +371,14 @@ static const html_fixture cases[] = {
     { "[foo]\n[bar]\n\n[bar]: /url \"title\"\n", "<p>[foo]\n<a href=\"/url\" title=\"title\">bar</a></p>\n" }, /* #543 separate reference shortcuts across LF */
     { "# [foo][bar]\n\n[bar]: /url\n", "<h1><a href=\"/url\">foo</a></h1>\n" }, /* simple reference text resolves in heading */
     { "[x][id]\n\n[id]: /f&ouml; \"A &copy;\"\n", "<p><a href=\"/f%C3%B6\" title=\"A ©\">x</a></p>\n" }, /* root reference inline punctuation and title */
+    { "Setext\n===\n[ref]: /url\n\n[ref]\n", "<h1>Setext</h1>\n<p><a href=\"/url\">ref</a></p>\n" }, /* Setext H1 closes root paragraph before adjacent definition */
+    { "Setext\n---\n[ref]: /url\n\n[ref]\n", "<h2>Setext</h2>\n<p><a href=\"/url\">ref</a></p>\n" }, /* Setext H2 takes precedence over thematic break */
+    { "Setext\r\n===\r\n[ref]: /url\r\n\r\n[ref]\r\n", "<h1>Setext</h1>\n<p><a href=\"/url\">ref</a></p>\n" }, /* CRLF line offset and definition ownership */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==207,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==210,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
