@@ -60,11 +60,19 @@ static int check_case(const reference_case *f) {
             else VERIFY(parent->kind==STUN_UI_BLOCK_PARAGRAPH ||
                         parent->kind==STUN_UI_BLOCK_STRONG);
         }
-        if(node->kind==STUN_UI_BLOCK_TEXT && parent->kind==STUN_UI_BLOCK_LINK) {
-            const size_t bytes=node->byte_end-node->byte_begin;
-            VERIFY(node->byte_end<=v.document.source_bytes);
-            VERIFY(bytes<=sizeof(visible)-used);
-            memcpy(visible+used,v.document.source+node->byte_begin,bytes);used+=bytes;
+        if(node->kind==STUN_UI_BLOCK_TEXT) {
+            /* Visible link text includes owned emphasis descendants. It is
+             * not necessarily a direct TEXT child of LINK (#554/#558). */
+            uint32_t owner=node->parent_index;
+            while(owner && v.document.blocks[owner].kind!=STUN_UI_BLOCK_LINK)
+                owner=v.document.blocks[owner].parent_index;
+            if(owner) {
+                const size_t bytes=node->byte_end-node->byte_begin;
+                VERIFY(node->byte_end<=v.document.source_bytes);
+                VERIFY(bytes<=sizeof(visible)-used);
+                memcpy(visible+used,v.document.source+node->byte_begin,bytes);
+                used+=bytes;
+            }
         }
     }
     if(f->visible) {
@@ -232,6 +240,125 @@ done:
     stun_md_document_destroy(doc);return failure;
 }
 
+
+/* All nine newly matching IDs are pinned by the permanent official gate.
+ * These three additionally prove typed delimiter ownership, independently
+ * of rendered HTML: emphasis stays INSIDE LINK and an outside '*' cannot
+ * pair with a literal trailing '*' that belongs to a reference label. */
+static const reference_case qualified_inline_cases[]={
+    {"official-554", "[*foo* bar][]\n\n[*foo* bar]: /url \"title\"\n",
+     "<p><a href=\"/url\" title=\"title\"><em>foo</em> bar</a></p>\n",
+     "/url", "title", "foo bar"},
+    {"official-558", "[*foo* bar]\n\n[*foo* bar]: /url \"title\"\n",
+     "<p><a href=\"/url\" title=\"title\"><em>foo</em> bar</a></p>\n",
+     "/url", "title", "foo bar"},
+    {"official-564", "[foo*]: /url\n\n*[foo*]\n",
+     "<p>*<a href=\"/url\">foo*</a></p>\n",
+     "/url", NULL, "foo*"}
+};
+
+static int check_inline_label_owners(void) {
+    const char *name="qualified-reference-inline-owners";
+    int failure=0;stun_md_document *doc=NULL;
+    _Static_assert(sizeof(qualified_inline_cases)/sizeof(qualified_inline_cases[0])==3u,
+                   "qualified inline reference denominator");
+    for(size_t k=0u;k<3u;++k) {
+        const reference_case *f=&qualified_inline_cases[k];
+        name=f->name;
+        VERIFY(check_case(f)==0);
+        const size_t n=strlen(f->source);
+        VERIFY(stun_md_parse(f->source,n,256u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(count_kind(v,STUN_UI_BLOCK_EMPHASIS)==(k<2u?1u:0u));
+        VERIFY(count_kind(v,STUN_UI_BLOCK_STRONG)==0u);
+        size_t emphasized=0u,inside=0u,outside=0u;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *node=&v.document.blocks[i];
+            VERIFY(node->parent_index<i);
+            const stun_ui_block *parent=&v.document.blocks[node->parent_index];
+            if(node->kind==STUN_UI_BLOCK_EMPHASIS)
+                VERIFY(parent->kind==STUN_UI_BLOCK_LINK);
+            if(node->kind!=STUN_UI_BLOCK_TEXT)continue;
+            const size_t bytes=node->byte_end-node->byte_begin;
+            const char *text=v.document.source+node->byte_begin;
+            if(parent->kind==STUN_UI_BLOCK_EMPHASIS) {
+                VERIFY(k<2u && bytes==3u && !memcmp(text,"foo",3u));
+                ++emphasized;
+            } else if(parent->kind==STUN_UI_BLOCK_LINK) {
+                const char *expected=k<2u?" bar":"foo*";
+                VERIFY(bytes==4u && !memcmp(text,expected,4u));
+                ++inside;
+            } else {
+                VERIFY(k==2u && parent->kind==STUN_UI_BLOCK_PARAGRAPH);
+                VERIFY(bytes==1u && text[0]=='*');
+                ++outside;
+            }
+        }
+        VERIFY(emphasized==(k<2u?1u:0u) && inside==1u);
+        VERIFY(outside==(k==2u?1u:0u));
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);return failure;
+}
+
+/* Concurrently live snapshots with the SAME normalized raw key must not
+ * borrow one another's table or scratch. A failed intervening parse and a
+ * later undefined reference also must not donate a binding to either one. */
+static int check_document_binding_isolation(void) {
+    const char *name="reference-document-binding-isolation";
+    int failure=0;
+    stun_md_document *first=NULL,*second=NULL,*rejected=NULL,*undefined=NULL;
+    const char one[]="[A\\!]: /one 'first\nline'\n\n[A\\!]\n";
+    const char two[]="[a\\!]: /two 'second'\n\n[a\\!]\n";
+    const char missing[]="[A\\!]\n";
+    const char expected_one[]="<p><a href=\"/one\" title=\"first\nline\">A!</a></p>\n";
+    const char expected_two[]="<p><a href=\"/two\" title=\"second\">a!</a></p>\n";
+    VERIFY(stun_md_parse(one,sizeof(one)-1u,128u,sizeof(one),&first)==STUN_UI_OK);
+    VERIFY(first!=NULL);
+    VERIFY(stun_md_parse(two,sizeof(two)-1u,128u,sizeof(two),&second)==STUN_UI_OK);
+    VERIFY(second!=NULL);
+    VERIFY(stun_md_parse(two,sizeof(two)-1u,2u,sizeof(two),&rejected)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(rejected==NULL);
+    const stun_ui_rich_document_view a=stun_md_document_view(first);
+    const stun_ui_rich_document_view b=stun_md_document_view(second);
+    VERIFY(stun_ui_rich_document_validate(&a,128u)==STUN_UI_OK);
+    VERIFY(stun_ui_rich_document_validate(&b,128u)==STUN_UI_OK);
+    char output[256];size_t required=SIZE_MAX;
+    VERIFY(stun_md_render_html(&b,128u,output,sizeof(output),&required)==STUN_UI_OK);
+    VERIFY(required==sizeof(expected_two)-1u &&
+           !memcmp(output,expected_two,sizeof(expected_two)));
+    stun_md_document_destroy(second);second=NULL;
+    VERIFY(stun_md_parse(missing,sizeof(missing)-1u,128u,sizeof(missing),
+                        &undefined)==STUN_UI_OK);
+    VERIFY(undefined!=NULL);
+    const stun_ui_rich_document_view u=stun_md_document_view(undefined);
+    VERIFY(stun_ui_rich_document_validate(&u,128u)==STUN_UI_OK);
+    VERIFY(count_kind(u,STUN_UI_BLOCK_LINK)==0u);
+    VERIFY(stun_md_render_html(&u,128u,output,sizeof(output),&required)==STUN_UI_OK);
+    VERIFY(required==sizeof("<p>[A!]</p>\n")-1u &&
+           !memcmp(output,"<p>[A!]</p>\n",required+1u));
+    stun_md_document_destroy(undefined);undefined=NULL;
+    /* Original borrowed view remains valid after all other owners drain. */
+    memset(output,0x67,sizeof(output));
+    VERIFY(stun_md_render_html(&a,128u,output,sizeof(expected_one)-1u,&required)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(required==sizeof(expected_one)-1u);
+    for(size_t i=0u;i<sizeof(output);++i)VERIFY((unsigned char)output[i]==0x67u);
+    VERIFY(stun_md_render_html(&a,128u,output,sizeof(output),&required)==STUN_UI_OK);
+    VERIFY(required==sizeof(expected_one)-1u &&
+           !memcmp(output,expected_one,sizeof(expected_one)));
+    VERIFY(a.raw_markdown_bytes==sizeof(one)-1u &&
+           !memcmp(a.raw_markdown,one,sizeof(one)-1u));
+done:
+    stun_md_document_destroy(undefined);stun_md_document_destroy(rejected);
+    stun_md_document_destroy(second);stun_md_document_destroy(first);
+    return failure;
+}
+
 int main(void) {
     static const reference_case cases[]={
     { "official-193", "   [foo]: \n      /url  \n           'the title'  \n\n[foo]\n", "<p><a href=\"/url\" title=\"the title\">foo</a></p>\n", "/url", "the title", "foo" },
@@ -266,8 +393,9 @@ int main(void) {
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(check_case(&cases[i]))return 1;
     if(check_safety() || check_budgets() || check_label_budget() ||
-       check_adjacent_owners())return 1;
-    puts("C11 multiline/escaped references: 26/26 HTML/AST, raw ownership, "
-         "title/href security, line/map budgets and atomic rollback");
+       check_adjacent_owners() || check_inline_label_owners() ||
+       check_document_binding_isolation())return 1;
+    puts("C11 multiline/escaped references: 29/29 HTML/AST, raw ownership, "
+         "inline owners, document isolation, title/href security, line/map budgets and atomic rollback");
     return 0;
 }
