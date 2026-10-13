@@ -949,11 +949,16 @@ done:
 static int test_nested_link_precedence(void) {
     static const struct {
         const char *source,*expected;
+        size_t expected_links;
     } cases[]={
         {"[foo [bar](/uri)][ref]\n\n[ref]: /uri\n",
-         "<p>[foo <a href=\"/uri\">bar</a>]<a href=\"/uri\">ref</a></p>\n"},
+         "<p>[foo <a href=\"/uri\">bar</a>]<a href=\"/uri\">ref</a></p>\n",2u},
         {"[foo *bar [baz][ref]*][ref]\n\n[ref]: /uri\n",
-         "<p>[foo <em>bar <a href=\"/uri\">baz</a></em>]<a href=\"/uri\">ref</a></p>\n"}
+         "<p>[foo <em>bar <a href=\"/uri\">baz</a></em>]<a href=\"/uri\">ref</a></p>\n",2u},
+        {"[foo [bar](/uri)](/uri)\n",
+         "<p>[foo <a href=\"/uri\">bar</a>](/uri)</p>\n",1u},
+        {"[foo *[bar [baz](/uri)](/uri)*](/uri)\n",
+         "<p>[foo <em>[bar <a href=\"/uri\">baz</a>](/uri)</em>](/uri)</p>\n",1u}
     };
     int failure=0;stun_md_document *doc=NULL;
     for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
@@ -963,7 +968,7 @@ static int test_nested_link_precedence(void) {
         VERIFY(doc!=NULL);
         const stun_ui_rich_document_view v=stun_md_document_view(doc);
         VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
-        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==2u);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==cases[k].expected_links);
         for(size_t i=1u;i<v.document.block_count;++i) {
             if(v.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
             uint32_t owner=v.document.blocks[i].parent_index;
