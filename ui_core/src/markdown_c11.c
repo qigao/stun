@@ -642,13 +642,41 @@ static const md_reference_binding *md_reference_lookup(
  * Resolve explicit second labels before looking for shortcut bindings.
  * The surrounding delimiter matcher and RichDoc emitter call this SAME
  * function so emphasis cannot borrow characters from a real link label. */
+/* A shortcut reference may be wrapped in literal brackets:
+ * [[*foo* bar]] must bind the INNER label and leave the outer brackets
+ * literal (CommonMark #559). The generic exact-run matcher intentionally
+ * skips a ]] run. In that case only, admit its FIRST closer with the same
+ * backslash and code-span opacity, bounded to the 128-byte ASCII slice.
+ * A nested unescaped '[' is not a root-ASCII label in this slice. */
+static size_t md_reference_adjacent_close(const char *s,size_t n,
+                                          size_t start) {
+    const size_t end=n-start>MD_REF_KEY_MAX?start+MD_REF_KEY_MAX:n;
+    for(size_t p=start;p<end;) {
+        if(s[p]=='\\' && p+1u<n) {p+=2u;continue;}
+        if(s[p]==(char)0x60) {
+            size_t next=p+1u;
+            while(next<n && s[next]==(char)0x60)++next;
+            const size_t closer=md_code_span_close(s,n,next,next-p);
+            p=closer==SIZE_MAX?next:closer+(next-p);
+            continue;
+        }
+        if(s[p]=='[' || s[p]=='\n' || s[p]=='\r')return SIZE_MAX;
+        if(s[p]==']')
+            return p+1u<n && s[p+1u]==']'?p:SIZE_MAX;
+        ++p;
+    }
+    return SIZE_MAX;
+}
+
 static bool md_reference_inline_match(
     const stun_md_document *d,const char *s,size_t n,size_t at,
     const md_reference_binding **binding,size_t *label_end,
     size_t *token_end) {
     if(!d->reference_count || !binding || !label_end || !token_end ||
        at>=n || s[at]!='[')return false;
-    const size_t first=md_match(s,n,at+1u,']',1u);
+    size_t first=md_match(s,n,at+1u,']',1u);
+    if(first==SIZE_MAX)
+        first=md_reference_adjacent_close(s,n,at+1u);
     if(first==SIZE_MAX)return false;
     if(first+1u<n && s[first+1u]=='[') {
         const size_t second=md_reference_label_close(s,n,first+2u);
