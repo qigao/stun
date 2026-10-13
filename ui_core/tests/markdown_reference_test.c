@@ -368,6 +368,110 @@ done:
     return failure;
 }
 
+/* Root fenced-code admission must end a prior quote/indented-code
+ * scope without granting reference definitions to the literal fence body.
+ * The same root-only prepass and owned RichDoc emitter are under test. */
+static int test_root_fence_owner_release(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    typedef struct fenced_case { const char *source,*html; } fenced_case;
+    static const fenced_case cases[]={
+        {"> quote\n" TICK TICK TICK "c\n[shadow]: /blocked\n"
+         TICK TICK TICK "\n[ref]: /uri\n\n[ref]\n",
+         "<blockquote>\n<p>quote</p>\n</blockquote>\n"
+         "<pre><code class=\"language-c\">[shadow]: /blocked\n</code></pre>\n"
+         "<p><a href=\"/uri\">ref</a></p>\n"},
+        {"    code\n~~~\n[shadow]: /blocked\n~~~\n[ref]: /uri\n\n[ref]\n",
+         "<pre><code>code\n</code></pre>\n"
+         "<pre><code>[shadow]: /blocked\n</code></pre>\n"
+         "<p><a href=\"/uri\">ref</a></p>\n"},
+        {"> quote\n~~~~\n[shadow]: /blocked\n~~~\n[shadow]: /blocked\n"
+         "~~~~\n[ref]: /uri\n\n[ref]\n",
+         "<blockquote>\n<p>quote</p>\n</blockquote>\n"
+         "<pre><code>[shadow]: /blocked\n~~~\n[shadow]: /blocked\n</code></pre>\n"
+         "<p><a href=\"/uri\">ref</a></p>\n"}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "root-fence owner positives");
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t n=strlen(cases[k].source);
+        VERIFY(stun_md_parse(cases[k].source,n,256u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==n);
+        VERIFY(!memcmp(v.raw_markdown,cases[k].source,n));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_CODE_FENCE)==1u);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+        bool copied=false;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *node=&v.document.blocks[i];
+            if(node->kind!=STUN_UI_BLOCK_LINK)continue;
+            VERIFY(node->parent_index<i);
+            const stun_ui_block *parent=&v.document.blocks[node->parent_index];
+            VERIFY(parent->kind==STUN_UI_BLOCK_PARAGRAPH);
+            VERIFY(parent->parent_index==0u);
+            const char *meta=NULL;size_t bytes=SIZE_MAX;
+            VERIFY(stun_ui_rich_document_metadata(
+                &v,i,&meta,&bytes)==STUN_UI_OK);
+            VERIFY(meta && bytes==4u && !memcmp(meta,"/uri",4u));
+            copied=true;
+        }
+        VERIFY(copied);
+        const size_t expected=strlen(cases[k].html);
+        char output[512];size_t required=SIZE_MAX;
+        VERIFY(expected+2u<sizeof(output));
+        VERIFY(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+        VERIFY(required==expected);
+        memset(output,0x73,sizeof(output));
+        size_t actual=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,256u,output,expected,&actual)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(actual==expected);
+        for(size_t i=0u;i<sizeof(output);++i)
+            VERIFY((unsigned char)output[i]==0x73u);
+        VERIFY(stun_md_render_html(&v,256u,output,expected+1u,&actual)==
+               STUN_UI_OK);
+        VERIFY(actual==expected);
+        VERIFY(!memcmp(output,cases[k].html,expected+1u));
+        VERIFY((unsigned char)output[expected+1u]==0x73u);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
+/* Closed and unclosed fences cannot donate root definitions. Even a
+ * quoted or list-owned fake definition remains inert after the fence. */
+static int test_fence_definition_opacity(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const char *const sources[]={
+        "> quote\n~~~\n[shadow]: /blocked\n~~~\n\n[shadow]\n",
+        "> quote\n~~~\n[shadow]: /blocked\n\n[shadow]\n",
+        "- item\n  ~~~\n  [shadow]: /blocked\n  ~~~\n\n[shadow]\n"
+    };
+    _Static_assert(sizeof(sources)/sizeof(sources[0])==3u,
+                   "fence-negative owner cases");
+    for(size_t k=0u;k<sizeof(sources)/sizeof(sources[0]);++k) {
+        const size_t n=strlen(sources[k]);
+        VERIFY(stun_md_parse(sources[k],n,256u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==n);
+        VERIFY(!memcmp(v.raw_markdown,sources[k],n));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
@@ -430,7 +534,9 @@ int main(void) {
        test_container_definition_fences() ||
        test_list_blank_scope() || test_list_capacity_isolation() ||
        test_root_rule_owner_release() ||
-       test_root_atx_owner_release())return 1;
+       test_root_atx_owner_release() ||
+       test_root_fence_owner_release() ||
+       test_fence_definition_opacity())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -455,6 +561,6 @@ int main(void) {
         return 1;
     }
     puts("C11 root references: 17/17 AST/HTML, forward/duplicate/case "
-         "binding, safe URL, container, root-rule and ATX ownership");
+         "binding, safe URL, root-rule, ATX and fenced-code ownership");
     return 0;
 }

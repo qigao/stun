@@ -385,11 +385,25 @@ static const html_fixture cases[] = {
     { "> quote\n# heading\n[ref]: /uri\n\n[ref]\n", "<blockquote>\n<p>quote</p>\n</blockquote>\n<h1>heading</h1>\n<p><a href=\"/uri\">ref</a></p>\n" }, /* root ATX after lazy-capable quote releases reference guard */
     { "    code\n# heading\n[ref]: /uri\n\n[ref]\n", "<pre><code>code\n</code></pre>\n<h1>heading</h1>\n<p><a href=\"/uri\">ref</a></p>\n" }, /* root ATX after indented code */
     { "> quote\r\n  ## heading\r\n[ref]: /uri\r\n\r\n[ref]\r\n", "<blockquote>\n<p>quote</p>\n</blockquote>\n<h2>heading</h2>\n<p><a href=\"/uri\">ref</a></p>\n" }, /* CRLF and <=3 root columns */
+    { "> quote\n" TICK TICK TICK "c\n[shadow]: /blocked\n"
+      TICK TICK TICK "\n[ref]: /uri\n\n[ref]\n",
+      "<blockquote>\n<p>quote</p>\n</blockquote>\n"
+      "<pre><code class=\"language-c\">[shadow]: /blocked\n</code></pre>\n"
+      "<p><a href=\"/uri\">ref</a></p>\n" }, /* root fence after quote, fake definition inert */
+    { "    code\n~~~\n[shadow]: /blocked\n~~~\n[ref]: /uri\n\n[ref]\n",
+      "<pre><code>code\n</code></pre>\n"
+      "<pre><code>[shadow]: /blocked\n</code></pre>\n"
+      "<p><a href=\"/uri\">ref</a></p>\n" }, /* tilde fence after indented code */
+    { "> quote\n~~~~\n[shadow]: /blocked\n~~~\n[shadow]: /blocked\n"
+      "~~~~\n[ref]: /uri\n\n[ref]\n",
+      "<blockquote>\n<p>quote</p>\n</blockquote>\n"
+      "<pre><code>[shadow]: /blocked\n~~~\n[shadow]: /blocked\n</code></pre>\n"
+      "<p><a href=\"/uri\">ref</a></p>\n" }, /* unequal shorter closer is opaque */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==221,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==224,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

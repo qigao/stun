@@ -2167,6 +2167,12 @@ static void md_reference_collect_root(stun_md_document *d) {
         char marker=0;size_t count=0,ib=0,ie=0;
         if(columns<=3u &&
            md_fence_start(s,begin,line.end,&marker,&count,&ib,&ie)) {
+            /* A root fence interrupts a quote or indented-code owner.
+             * The production block parser admits this same fence at the
+             * root, so its close must permit the next root definition.
+             * An unresolved list content column cannot be released here:
+             * list-lazy fence admission is deliberately out of scope. */
+            if(!list_content_column)container_pending=false;
             fenced=true;
             fence=(md_fence){marker,count,UINT32_MAX};
             paragraph_started=false;continue;
