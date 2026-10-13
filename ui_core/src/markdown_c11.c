@@ -466,6 +466,35 @@ static size_t md_match(const char *s, size_t n, size_t start,
     return SIZE_MAX;
 }
 
+/* One bounded LINK-text bracket scanner for both inline targets and
+ * reference links. Literal nested brackets are legal visible link text
+ * (CommonMark #528), including adjacent closing "]]" from #559.
+ * Code spans and backslash-escaped punctuation are opaque. A fixed nesting
+ * ceiling rejects pathological input without allocating parser state. */
+static size_t md_link_text_close(const char *s,size_t n,size_t begin) {
+    unsigned depth=1u;
+    for(size_t p=begin;p<n;) {
+        if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+            p+=2u;continue;
+        }
+        if(s[p]==(char)0x60) {
+            size_t end=p+1u;
+            while(end<n && s[end]==(char)0x60)++end;
+            const size_t closer=md_code_span_close(s,n,end,end-p);
+            p=closer==SIZE_MAX?end:closer+(end-p);
+            continue;
+        }
+        if(s[p]=='[') {
+            if(depth>=32u)return SIZE_MAX;
+            ++depth;
+        } else if(s[p]==']') {
+            if(--depth==0u)return p;
+        }
+        ++p;
+    }
+    return SIZE_MAX;
+}
+
 /* One raw-source link destination/title parser shared by delimiter
  * discovery and RichDoc emission. Do not use the first ')' as a closer:
  * CommonMark admits balanced destination parentheses and <...> targets
@@ -638,45 +667,61 @@ static const md_reference_binding *md_reference_lookup(
     return NULL;
 }
 
-/* One semantic admission path for full, collapsed and shortcut references.
- * Resolve explicit second labels before looking for shortcut bindings.
- * The surrounding delimiter matcher and RichDoc emitter call this SAME
- * function so emphasis cannot borrow characters from a real link label. */
-/* A shortcut reference may be wrapped in literal brackets:
- * [[*foo* bar]] must bind the INNER label and leave the outer brackets
- * literal (CommonMark #559). The generic exact-run matcher intentionally
- * skips a ]] run. In that case only, admit its FIRST closer with the same
- * backslash and code-span opacity, bounded to the 128-byte ASCII slice.
- * A nested unescaped '[' is not a root-ASCII label in this slice. */
-static size_t md_reference_adjacent_close(const char *s,size_t n,
-                                          size_t start) {
-    const size_t end=n-start>MD_REF_KEY_MAX?start+MD_REF_KEY_MAX:n;
-    for(size_t p=start;p<end;) {
-        if(s[p]=='\\' && p+1u<n) {p+=2u;continue;}
+/* A link containing another active LINK is forbidden, but nested literal
+ * square brackets are permitted. Check candidates strictly inside the
+ * visible label after finding its balanced closer. Only real inline targets
+ * or resolved references are active; images do not count as nested links.
+ * All lookups borrow the parse-local reference table. */
+static bool md_reference_visible_has_link(const stun_md_document *d,
+                                          const char *s,size_t begin,
+                                          size_t end) {
+    for(size_t p=begin;p<end;) {
+        if(s[p]=='\\' && p+1u<end &&
+           md_ascii_punct(s[p+1u])) {p+=2u;continue;}
         if(s[p]==(char)0x60) {
             size_t next=p+1u;
-            while(next<n && s[next]==(char)0x60)++next;
-            const size_t closer=md_code_span_close(s,n,next,next-p);
+            while(next<end && s[next]==(char)0x60)++next;
+            const size_t closer=md_code_span_close(s,end,next,next-p);
             p=closer==SIZE_MAX?next:closer+(next-p);
             continue;
         }
-        if(s[p]=='[' || s[p]=='\n' || s[p]=='\r')return SIZE_MAX;
-        if(s[p]==']')
-            return p+1u<n && s[p+1u]==']'?p:SIZE_MAX;
+        if(s[p]=='[' && (p==0u || s[p-1u]!='!' ||
+                         (p>=2u && s[p-2u]=='\\'))) {
+            const size_t inner=md_link_text_close(s,end,p+1u);
+            if(inner!=SIZE_MAX && inner<end) {
+                if(inner+1u<end && s[inner+1u]=='(') {
+                    md_link_parts parts={0};size_t round=SIZE_MAX;
+                    if(md_link_target_parse(s,end,inner+1u,&parts,&round)
+                       && round<end)return true;
+                }
+                if(inner+1u<end && s[inner+1u]=='[') {
+                    const size_t second=md_reference_label_close(
+                        s,end,inner+2u);
+                    if(second!=SIZE_MAX && second<end) {
+                        const bool collapsed=second==inner+2u;
+                        if(md_reference_lookup(
+                            d,s,collapsed?p+1u:inner+2u,
+                            collapsed?inner:second))return true;
+                    }
+                } else if(md_reference_lookup(d,s,p+1u,inner))
+                    return true;
+            }
+        }
         ++p;
     }
-    return SIZE_MAX;
+    return false;
 }
 
+/* Full, collapsed and shortcut reference matching is shared by delimiter
+ * opacity and RichDoc emission. Never bind an outer LINK around an already
+ * active inner LINK (CommonMark #532/#533). */
 static bool md_reference_inline_match(
     const stun_md_document *d,const char *s,size_t n,size_t at,
     const md_reference_binding **binding,size_t *label_end,
     size_t *token_end) {
     if(!d->reference_count || !binding || !label_end || !token_end ||
        at>=n || s[at]!='[')return false;
-    size_t first=md_match(s,n,at+1u,']',1u);
-    if(first==SIZE_MAX)
-        first=md_reference_adjacent_close(s,n,at+1u);
+    const size_t first=md_link_text_close(s,n,at+1u);
     if(first==SIZE_MAX)return false;
     if(first+1u<n && s[first+1u]=='[') {
         const size_t second=md_reference_label_close(s,n,first+2u);
@@ -685,6 +730,8 @@ static bool md_reference_inline_match(
             const md_reference_binding *found=md_reference_lookup(
                 d,s,collapsed?at+1u:first+2u,collapsed?first:second);
             if(found) {
+                if(md_reference_visible_has_link(d,s,at+1u,first))
+                    return false;
                 *binding=found;*label_end=first;*token_end=second+1u;
                 return true;
             }
@@ -693,7 +740,8 @@ static bool md_reference_inline_match(
     }
     const md_reference_binding *found=
         md_reference_lookup(d,s,at+1u,first);
-    if(!found)return false;
+    if(!found || md_reference_visible_has_link(d,s,at+1u,first))
+        return false;
     *binding=found;*label_end=first;*token_end=first+1u;
     return true;
 }
@@ -904,7 +952,7 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
         }
         if(s[p]=='[' || (s[p]=='!' && p+1u<n && s[p+1u]=='[')) {
             const size_t b=p+(s[p]=='!'?2u:1u);
-            const size_t square=md_match(s,n,b,']',1u);
+            const size_t square=md_link_text_close(s,n,b);
             if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
                 size_t round=SIZE_MAX;
                 md_link_parts target={0};
@@ -1188,7 +1236,7 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
         if(s[p]=='[' || (s[p]=='!' && p+1u<n && s[p+1u]=='[')) {
             const bool image=s[p]=='!';
             const size_t b=p+(image?2u:1u);
-            const size_t square=md_match(s,n,b,']',1u);
+            const size_t square=md_link_text_close(s,n,b);
             if(square!=SIZE_MAX && square+1u<n && s[square+1u]=='(') {
                 size_t round=SIZE_MAX;
                 md_link_parts target={0};
