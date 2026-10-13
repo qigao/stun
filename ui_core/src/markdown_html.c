@@ -125,7 +125,7 @@ static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
          * existing %HH syntax and URL structural punctuation stay intact.
          * This runs AFTER the full decoded href safety admission. */
         if(b>=0x80u || b==' ' || b=='\\' || b=='<' ||
-           b=='>' || b=='\"') {
+           b=='>' || b=='\"' || b=='[' || b==']') {
             const char pct[3]={'%',digits[b>>4u],digits[b&0x0Fu]};
             html_bytes(w,pct,sizeof(pct));
         } else html_escaped(w,s+i,1u,true);

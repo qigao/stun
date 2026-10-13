@@ -498,11 +498,31 @@ static const html_fixture cases[] = {
       "</tr>\n</thead>\n<tbody>\n<tr>\n<td>A</td>\n<td>B</td>\n"
       "</tr>\n</tbody>\n</table>\n<ol>\n<li>first</li>\n"
       "<li>second</li>\n</ol>\n<p><a href=\"/uri\">ref</a></p>\n" }, /* true table terminator becomes root list */
+    { "<https://example.com?find=\\*>\n",
+      "<p><a href=\"https://example.com?find=%5C*\">https://example.com?find=\\*</a></p>\n" }, /* official #20 */
+    { "<http://foo.bar.baz>\n",
+      "<p><a href=\"http://foo.bar.baz\">http://foo.bar.baz</a></p>\n" }, /* official #594 */
+    { "<https://foo.bar.baz/test?q=hello&id=22&boolean>\n",
+      "<p><a href=\"https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean\">https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean</a></p>\n" }, /* official #595 */
+    { "<MAILTO:FOO@BAR.BAZ>\n",
+      "<p><a href=\"MAILTO:FOO@BAR.BAZ\">MAILTO:FOO@BAR.BAZ</a></p>\n" }, /* official #597 */
+    { "<https://../>\n",
+      "<p><a href=\"https://../\">https://../</a></p>\n" }, /* official #600 */
+    { "<https://example.com/\\[\\>\n",
+      "<p><a href=\"https://example.com/%5C%5B%5C\">https://example.com/\\[\\</a></p>\n" }, /* official #603 */
+    { "<https://foo.bar/baz bim>\n",
+      "<p>&lt;https://foo.bar/baz bim&gt;</p>\n" }, /* official #602 is NOT an autolink */
+    { "<irc://foo.bar:2233/baz>\n",
+      "<p>&lt;irc://foo.bar:2233/baz&gt;</p>\n" }, /* non-allowlisted scheme stays safe literal */
+    { "<javascript:alert>\n",
+      "<p>&lt;javascript:alert&gt;</p>\n" }, /* no javascript URI admission */
+    { "<script>alert(1)</script>\n",
+      "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n" }, /* RawHTML remains safe text */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==261,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==271,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

@@ -166,6 +166,79 @@ int main(void) {
     for(size_t i=0u;i<sizeof(balanced)/sizeof(balanced[0]);++i)
         if(verify_link(&balanced[i]))return 1;
 
+    /* A safe angle URI is a typed LINK, with a literal TEXT label and a
+     * document-owned href. Its percent/HTML escaping is renderer-owned. */
+    static const link_fixture autolinks[]={
+        {"<https://example.com?find=\\*>\n",
+         "https://example.com?find=\\*",NULL,
+         "https://example.com?find=\\*",
+         "<p><a href=\"https://example.com?find=%5C*\">https://example.com?find=\\*</a></p>\n"},
+        {"<http://foo.bar.baz>\n",
+         "http://foo.bar.baz",NULL,"http://foo.bar.baz",
+         "<p><a href=\"http://foo.bar.baz\">http://foo.bar.baz</a></p>\n"},
+        {"<https://foo.bar.baz/test?q=hello&id=22&boolean>\n",
+         "https://foo.bar.baz/test?q=hello&id=22&boolean",NULL,
+         "https://foo.bar.baz/test?q=hello&id=22&boolean",
+         "<p><a href=\"https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean\">https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean</a></p>\n"},
+        {"<MAILTO:FOO@BAR.BAZ>\n",
+         "MAILTO:FOO@BAR.BAZ",NULL,"MAILTO:FOO@BAR.BAZ",
+         "<p><a href=\"MAILTO:FOO@BAR.BAZ\">MAILTO:FOO@BAR.BAZ</a></p>\n"},
+        {"<https://../>\n",
+         "https://../",NULL,"https://../",
+         "<p><a href=\"https://../\">https://../</a></p>\n"},
+        {"<https://example.com/\\[\\>\n",
+         "https://example.com/\\[\\",NULL,"https://example.com/\\[\\",
+         "<p><a href=\"https://example.com/%5C%5B%5C\">https://example.com/\\[\\</a></p>\n"}
+    };
+    _Static_assert(sizeof(autolinks)/sizeof(autolinks[0])==6u,
+                   "safe URI autolink owner/HTML denominator");
+    for(size_t i=0u;i<sizeof(autolinks)/sizeof(autolinks[0]);++i)
+        if(verify_link(&autolinks[i]))return 1;
+
+    /* A syntactically malformed or unapproved scheme never manufactures
+     * an unsafe LINK and must retain escaped text under SafeApplicationHtml. */
+    static const struct {const char *source,*html;} opaque[]={
+        {"<https://foo.bar/baz bim>\n",
+         "<p>&lt;https://foo.bar/baz bim&gt;</p>\n"},
+        {"<irc://foo.bar:2233/baz>\n",
+         "<p>&lt;irc://foo.bar:2233/baz&gt;</p>\n"},
+        {"<javascript:alert>\n",
+         "<p>&lt;javascript:alert&gt;</p>\n"},
+        {"<script>alert(1)</script>\n",
+         "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n"}
+    };
+    _Static_assert(sizeof(opaque)/sizeof(opaque[0])==4u,
+                   "URI/RawHTML safety negative denominator");
+    for(size_t k=0u;k<sizeof(opaque)/sizeof(opaque[0]);++k) {
+        const size_t n=strlen(opaque[k].source);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(opaque[k].source,n,128u,n+1u,&doc)==STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==n);
+        CHECK(!memcmp(v.raw_markdown,opaque[k].source,n));
+        CHECK(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,128u,NULL,0u,&required)==STUN_UI_OK);
+        CHECK(required==strlen(opaque[k].html));
+        char html[256]={0};size_t output=SIZE_MAX;
+        CHECK(required+1u<sizeof(html));
+        CHECK(stun_md_render_html(
+            &v,128u,html,required+1u,&output)==STUN_UI_OK);
+        CHECK(output==required);
+        CHECK(!memcmp(html,opaque[k].html,required+1u));
+        stun_md_document_destroy(doc);
+    }
+    /* The LINK label TEXT is the last node in a plain URI autolink.
+     * A one-node-short budget must reject the whole document atomically. */
+    const char limited_autolink[]="<https://example.org/a&b>\n";
+    stun_md_document *atomic=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(limited_autolink,sizeof(limited_autolink)-1u,
+                        3u,sizeof(limited_autolink),&atomic)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(atomic==NULL);
+
     /* An entity-expanded disallowed scheme must fail AFTER decoding, never
      * be normalized into an apparently safe ASCII URL. */
     CHECK(verify_safe_rejection("[x](java&#x73;cript:alert \"t\")\n")==0);
@@ -226,7 +299,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 18/18 targets, 10 safety rejections, "
+    puts("C11 link metadata: 24/24 targets, 10 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }

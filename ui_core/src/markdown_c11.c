@@ -629,6 +629,57 @@ static bool md_reference_inline_match(
     return true;
 }
 
+/* URI Autolinks use the existing owned LINK semantics. This bounded
+ * SafeApplicationHtml admission recognizes only http/https/mailto; the
+ * canonical HTML renderer remains the final URL security authority.
+ * Never parse Markdown escapes/entities in the URI's visible label. */
+static bool md_autolink_scheme(const char *s,size_t b,size_t e) {
+    static const char *const names[]={"http","https","mailto"};
+    for(size_t k=0u;k<sizeof(names)/sizeof(names[0]);++k) {
+        const char *name=names[k];
+        if(strlen(name)!=e-b)continue;
+        bool same=true;
+        for(size_t i=b;i<e;++i) {
+            const unsigned char c=(unsigned char)s[i];
+            const unsigned char lowered=c>='A'&&c<='Z'?
+                (unsigned char)(c-'A'+'a'):c;
+            if(lowered!=(unsigned char)name[i-b]) {same=false;break;}
+        }
+        if(same)return true;
+    }
+    return false;
+}
+static bool md_uri_autolink(const char *s,size_t n,size_t at,
+                            size_t *out_close) {
+    if(!s||!out_close||at>=n||s[at]!='<')return false;
+    const size_t b=at+1u;
+    if(b>=n)return false;
+    const unsigned char first=(unsigned char)s[b];
+    if(!((first>='A'&&first<='Z')||(first>='a'&&first<='z')))
+        return false;
+    size_t colon=b;
+    while(colon<n && colon-b<=32u) {
+        const unsigned char c=(unsigned char)s[colon];
+        const bool alpha=(c>='A'&&c<='Z')||(c>='a'&&c<='z');
+        const bool digit=c>='0'&&c<='9';
+        if(!alpha&&!digit&&c!='+'&&c!='-'&&c!='.')break;
+        ++colon;
+    }
+    if(colon>=n||s[colon]!=':'||colon-b<2u||
+       colon-b>32u||!md_autolink_scheme(s,b,colon))return false;
+    size_t close=colon+1u;
+    if(close>=n)return false;
+    const size_t start=close;
+    while(close<n && s[close]!='>') {
+        const unsigned char c=(unsigned char)s[close];
+        if(c<=0x20u||c==0x7fu||c=='<')return false;
+        ++close;
+    }
+    if(close>=n||close==start)return false;
+    *out_close=close;
+    return true;
+}
+
 /* CommonMark backtick delimiters close only on an EXACTLY equal-sized run.
  * Unlike emphasis/link matching, backslashes are ordinary literal payload
  * inside a code span, including when directly preceding a backtick. Skip
@@ -928,6 +979,24 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             ++p;
             text_start=physical_line_start=p;
             continue;
+        }
+        /* Angle URI is one opaque LINK rather than RawHTML or TEXT.
+         * Keep literal UTF-8 href and label owned until document teardown. */
+        if(s[p]=='<') {
+            size_t close=SIZE_MAX;
+            if(md_uri_autolink(s,n,p,&close)) {
+                md_text(d,owners[nested],s+text_start,p-text_start);
+                const uint32_t link=md_add(
+                    d,owners[nested],STUN_UI_BLOCK_LINK,0u);
+                if(link==UINT32_MAX)break;
+                const size_t bytes=close-p-1u;
+                md_meta(d,link,s+p+1u,bytes);
+                md_text(d,link,s+p+1u,bytes);
+                if(d->error!=STUN_UI_OK)break;
+                p=close+1u;
+                text_start=p;
+                continue;
+            }
         }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
             md_text(d,owners[nested],s+text_start,p-text_start);
