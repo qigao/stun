@@ -4,8 +4,8 @@
   "commonmark_version": "0.31.2",
   "source": "tools/md/test/spec.txt",
   "official_total": 652,
-  "qualified_reference_head": "9a34bc2db49e561cde9228ad9ddadf0aa9864bde",
-  "qualified_reference_run": 38480734251,
+  "qualified_reference_head": "55b53f1325cbbae3f636061f93022b84a1df4096",
+  "qualified_reference_run": 38482285247,
   "official_fixture_sha256": "c784c98aa6f8a1db1292dfd883f3b6743f2ad66578f89fae1fc9223f208f7bfd",
   "qualified_official_ids": [
     1,
@@ -622,6 +622,7 @@
     622,
     623,
     624,
+    626,
     627,
     628,
     629,
@@ -708,12 +709,13 @@
     614,
     617,
     623,
+    626,
     627,
     628,
     629,
     630,
     631
   ],
-  "preceding_qualified_reference_head": "9efabd68ed98944397ab8384bd0b0c50bbdf1f70",
-  "preceding_qualified_reference_run": 38478786406
+  "preceding_qualified_reference_head": "9a34bc2db49e561cde9228ad9ddadf0aa9864bde",
+  "preceding_qualified_reference_run": 38480734251
 }
