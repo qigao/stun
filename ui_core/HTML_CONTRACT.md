@@ -1,6 +1,9 @@
 # C11 RichDoc → HTML (bounded candidate)
 
 Relates to [#172](https://github.com/qigao/stun/issues/172) and [#167](https://github.com/qigao/stun/issues/167).
+For whitespace ownership, HTML5 vs XML distinctions, and the safe-vs-normative
+output-policy decision, see [ADR_MARKDOWN_HTML_OUTPUT.md](ADR_MARKDOWN_HTML_OUTPUT.md)
+(#181 / #184).
 
 This C11 renderer consumes **only** a validated `stun_ui_rich_document_view` from the single Stun C11 Markdown parser. It does not tokenize Markdown or create a second grammar; it has no GUI, Tango, Python or cmark-gfm production dependencies.
 
