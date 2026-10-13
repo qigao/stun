@@ -43,6 +43,13 @@ static const fixture cases[]={
      "<ul>\n<li>outer\n<ul>\n<li>inner</li>\n</ul>\n</li>\n<li>next</li>\n</ul>\n",0,2u},
     {"tab-item","- alpha\n\tbeta\n",
      "<ul>\n<li>alpha\nbeta</li>\n</ul>\n",0,1u},
+    {"cm-005","- foo\n\n\t\tbar\n",
+     "<ul>\n<li>\n<p>foo</p>\n<pre><code>  bar\n</code></pre>\n</li>\n</ul>\n",1,1u},
+    {"cm-006",">\t\tfoo\n",
+     "<blockquote>\n<pre><code>  foo\n</code></pre>\n</blockquote>\n",-1,0u},
+    {"cm-007","-\t\tfoo\n",
+     "<ul>\n<li>\n<pre><code>  foo\n</code></pre>\n</li>\n</ul>\n",0,1u},
+
     {"unicode-loose","- \xe4\xb8\xad\xf0\x9f\x91\xa9\n\n  \xe6\x97\xa5\n",
      "<ul>\n<li>\n<p>\xe4\xb8\xad\xf0\x9f\x91\xa9</p>\n<p>\xe6\x97\xa5</p>\n</li>\n</ul>\n",1,1u},
     /* Preserve already-successful CommonMark examples, not only new gates. */
@@ -149,7 +156,7 @@ static const fixture cases[]={
     {"list-setext-equals","- Foo\n  ===\n",
      "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n</ul>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==59u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==62u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -209,6 +216,65 @@ static bool check_case(const fixture *f) {
     return true;
 }
 
+/* A TAB crossing the item's/quote's content boundary is only partly
+ * consumed by that container. The remaining display columns must be emitted
+ * as literal spaces in the owned CODE_INDENTED child, never dropped or
+ * spliced back into the immutable raw Markdown input. */
+static bool test_partial_tab_code_ownership(void) {
+    static const struct {
+        const char *markdown,*code;
+        stun_ui_block_kind expected_parent;
+    } samples[]={
+        {"- foo\n\n\t\tbar\n","  bar\n",STUN_UI_BLOCK_LIST_ITEM},
+        {">\t\tfoo\n","  foo\n",STUN_UI_BLOCK_QUOTE},
+        {"-\t\tfoo\n","  foo\n",STUN_UI_BLOCK_LIST_ITEM}
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==3u,
+                   "official tab overhang native owner cases");
+    for(size_t k=0u;k<sizeof(samples)/sizeof(samples[0]);++k) {
+        stun_md_document *doc=NULL;
+        const size_t bytes=strlen(samples[k].markdown);
+        if(stun_md_parse(samples[k].markdown,bytes,128u,bytes+1u,&doc)!=
+           STUN_UI_OK || !doc) return false;
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        bool success=stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK &&
+            v.raw_markdown_bytes==bytes &&
+            !memcmp(v.raw_markdown,samples[k].markdown,bytes);
+        size_t code=SIZE_MAX;
+        for(size_t i=1u;success && i<v.document.block_count;++i)
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_CODE_INDENTED) {
+                if(code!=SIZE_MAX) success=false;
+                code=i;
+            }
+        success=success && code!=SIZE_MAX;
+        if(success) {
+            const size_t parent=v.document.blocks[code].parent_index;
+            success=parent<v.document.block_count &&
+                v.document.blocks[parent].kind==samples[k].expected_parent;
+        }
+        char payload[64]={0};size_t used=0u;
+        for(size_t i=code+1u;success && i<v.document.block_count;++i) {
+            const stun_ui_block *node=&v.document.blocks[i];
+            if(node->parent_index!=code)continue;
+            if(node->kind!=STUN_UI_BLOCK_TEXT ||
+               node->byte_end<node->byte_begin ||
+               node->byte_end>v.document.source_bytes) {success=false;break;}
+            const size_t n=node->byte_end-node->byte_begin;
+            if(n>=sizeof(payload)-used) {success=false;break;}
+            memcpy(payload+used,v.document.source+node->byte_begin,n);
+            used+=n;
+        }
+        success=success && used==strlen(samples[k].code) &&
+                !memcmp(payload,samples[k].code,used);
+        if(!success)
+            fprintf(stderr,"native tab ownership failed: #%zu code '%s'\n",
+                    k+5u,payload);
+        stun_md_document_destroy(doc);
+        if(!success)return false;
+    }
+    return true;
+}
+
 int main(void) {
     for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
         if(!check_case(&cases[i])) {
@@ -216,6 +282,7 @@ int main(void) {
             return 1;
         }
     }
+    if(!test_partial_tab_code_ownership())return 1;
     const char *limited="- one\n\n  two\n";
     stun_md_document *d=(stun_md_document*)(uintptr_t)1u;
     const stun_ui_status status=stun_md_parse(limited,strlen(limited),2u,

@@ -38,6 +38,13 @@ static const html_fixture cases[] = {
       "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n" },
     { TICK TICK TICK "c\nint v;\n" TICK TICK TICK "\n",
       "<pre><code class=\"language-c\">int v;\n</code></pre>\n" },
+    { "- foo\n\n\t\tbar\n",
+      "<ul>\n<li>\n<p>foo</p>\n<pre><code>  bar\n</code></pre>\n</li>\n</ul>\n" }, /* official CommonMark #5 */
+    { ">\t\tfoo\n",
+      "<blockquote>\n<pre><code>  foo\n</code></pre>\n</blockquote>\n" }, /* official CommonMark #6 */
+    { "-\t\tfoo\n",
+      "<ul>\n<li>\n<pre><code>  foo\n</code></pre>\n</li>\n</ul>\n" }, /* official CommonMark #7 */
+
     { " " TICK TICK TICK "\n aaa\naaa\n" TICK TICK TICK "\n",
       "<pre><code>aaa\naaa\n</code></pre>\n" }, /* CommonMark #131 one-space opening indent */
     { "  " TICK TICK TICK "\naaa\n  aaa\naaa\n  " TICK TICK TICK "\n",
@@ -463,7 +470,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==242,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==245,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
