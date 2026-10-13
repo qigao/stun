@@ -2184,6 +2184,46 @@ static void md_reference_collect_root(stun_md_document *d) {
             fence=(md_fence){marker,count,UINT32_MAX};
             paragraph_started=false;continue;
         }
+        /* The root block parser admits GFM header+delimiter lookahead
+         * BEFORE considering a list opener. A line like "- Name | Link"
+         * may be a TABLE header rather than a LIST item; suppressing all
+         * later root definitions as list continuation would drop a valid
+         * forward reference from both table cells and root paragraphs.
+         *
+         * Mirror the SAME bounded table scan and row-stop predicates used
+         * by md_parse_blocks. Only list-looking root headers require this
+         * ownership disambiguation: other table headers cannot introduce
+         * a phantom list guard. Literal table data rows, including
+         * "[shadow]: /bad" without pipes, never donate definitions. */
+        if(!paragraph_started && !container_pending &&
+           !list_content_column && columns<=3u && pos<d->raw_size) {
+            md_list_marker_info candidate={0};
+            if(md_list_token(s,line,&candidate)) {
+                const md_line sep=md_read_line(d,pos);
+                size_t header_columns=0u,delimiter_columns=0u;
+                if(md_table_scan(s,begin,line.end,false,true,
+                                 &header_columns) &&
+                   md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
+                                 true,true,&delimiter_columns) &&
+                   header_columns==delimiter_columns) {
+                    pos=sep.next;
+                    while(pos<d->raw_size) {
+                        const md_line row=md_read_line(d,pos);
+                        const size_t rb=md_left(s,row.begin,row.end);
+                        size_t row_columns=0u;
+                        if(rb-row.begin>3u ||
+                           md_blank(s,row.begin,row.end) ||
+                           md_table_starts_new_block(s,rb,row.end) ||
+                           !md_table_scan(s,rb,row.end,false,false,
+                                          &row_columns))
+                            break;
+                        pos=row.next;
+                    }
+                    paragraph_started=false;
+                    continue;
+                }
+            }
+        }
         md_list_marker_info list_marker={0};
         /* An ordered marker other than '1.' or a marker without content
          * cannot interrupt an existing ROOT paragraph. The canonical
