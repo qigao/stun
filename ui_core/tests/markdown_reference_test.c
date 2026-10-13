@@ -143,13 +143,14 @@ static int test_container_definition_fences(void) {
         "paragraph\n[hidden]: /uri\n\n[hidden]\n",
         "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n",
         "- item\n    * * *\n    [hidden]: /bad\n\n[hidden]\n",
+        "- item\n  ---\n  [hidden]: /bad\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
         "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
         "- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n",
         "- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==11u,
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==12u,
                    "reference-owner negative denominator");
     for(size_t i=0u;i<sizeof(blocked)/sizeof(blocked[0]);++i) {
         const size_t n=strlen(blocked[i]);
@@ -253,6 +254,53 @@ done:
     return failure;
 }
 
+/* A verified root thematic break releases an earlier container guard.
+ * These cases intentionally leave the list/quote/code without a blank line;
+ * document ownership and the emitted LINK's copied metadata must agree. */
+static int test_root_rule_owner_release(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const char *const sources[]={
+        "- item\n* * *\n[key]: /root\n\n[key]\n",
+        "- item\n---\n[key]: /root\n\n[key]\n",
+        "> quote\n* * *\n[key]: /root\n\n[key]\n",
+        "    code\n* * *\n[key]: /root\n\n[key]\n"
+    };
+    _Static_assert(sizeof(sources)/sizeof(sources[0])==4u,
+                   "root-rule release test count");
+    for(size_t k=0u;k<sizeof(sources)/sizeof(sources[0]);++k) {
+        const size_t n=strlen(sources[k]);
+        VERIFY(stun_md_parse(sources[k],n,256u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view view=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&view,256u)==STUN_UI_OK);
+        VERIFY(view.raw_markdown_bytes==n);
+        VERIFY(!memcmp(view.raw_markdown,sources[k],n));
+        VERIFY(kind_count(view,STUN_UI_BLOCK_RULE)==1u);
+        VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
+        bool copied=false;
+        for(size_t i=1u;i<view.document.block_count;++i) {
+            if(view.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
+            const char *meta=NULL;size_t bytes=SIZE_MAX;
+            VERIFY(stun_ui_rich_document_metadata(
+                &view,i,&meta,&bytes)==STUN_UI_OK);
+            VERIFY(meta!=NULL && bytes==5u && !memcmp(meta,"/root",5u));
+            copied=true;
+        }
+        VERIFY(copied);
+        char output[512];size_t required=SIZE_MAX;
+        VERIFY(stun_md_render_html(
+            &view,256u,output,sizeof(output),&required)==STUN_UI_OK);
+        VERIFY(required<sizeof(output));
+        VERIFY(strstr(output,"<a href=\"/root\">key</a>")!=NULL);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
@@ -313,7 +361,8 @@ int main(void) {
         if(test_reference(&cases[i]))return 1;
     if(test_unsafe() || test_fence() ||
        test_container_definition_fences() ||
-       test_list_blank_scope() || test_list_capacity_isolation())return 1;
+       test_list_blank_scope() || test_list_capacity_isolation() ||
+       test_root_rule_owner_release())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -338,6 +387,6 @@ int main(void) {
         return 1;
     }
     puts("C11 root references: 17/17 AST/HTML, forward/duplicate/case "
-         "binding, safe URL, blank-list/quote/fence opacity and atomic bounded ownership");
+         "binding, safe URL, blank-list/quote/fence and root-rule ownership");
     return 0;
 }

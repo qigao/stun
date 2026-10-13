@@ -2145,14 +2145,23 @@ static void md_reference_collect_root(stun_md_document *d) {
             else list_content_column=0u;
             after_list_blank=false;
         }
-        /* Keep the same thematic-break precedence as md_parse_blocks:
-         * "- - -" and "* * *" are ROOT rules, not list openers. A plain
-         * "---" beneath an active paragraph stays a Setext H2 underline.
-         * An existing container guard may never be released here. */
-        if(!container_pending && columns<=3u &&
-           md_rule(s,begin,line.end) &&
-           !(paragraph_started && md_setext(s,begin,line.end))) {
+        /* Root thematic breaks can interrupt a preceding list/quote/code
+         * owner without a blank line. Release its conservative reference
+         * guard only when the production block parser can prove ROOT
+         * ownership: spaced/star rules are unambiguous; a bare Setext
+         * underline inside a still-indented list item is NOT.
+         *
+         * A root paragraph's "---" is a Setext heading, not a rule.
+         * No nested definition grammar or list-owned binding is added. */
+        const unsigned rule_setext=columns<=3u?
+            md_setext(s,begin,line.end):0u;
+        if(columns<=3u && md_rule(s,begin,line.end) &&
+           !(paragraph_started && rule_setext) &&
+           (!container_pending || !list_content_column ||
+            columns<list_content_column || !rule_setext)) {
             paragraph_started=false;
+            container_pending=false;
+            list_content_column=0u;
             continue;
         }
         char marker=0;size_t count=0,ib=0,ie=0;

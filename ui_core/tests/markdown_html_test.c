@@ -378,11 +378,15 @@ static const html_fixture cases[] = {
     { "- - -\n[key]: /uri\n\n[key]\n", "<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* root thematic dash rule takes list precedence */
     { "  * * *\r\n[key]: /uri\r\n\r\n[key]\r\n", "<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* root indented thematic rule and CRLF */
     { "paragraph\n- - -\n[key]: /uri\n\n[key]\n", "<p>paragraph</p>\n<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* rule interrupts root paragraph */
+    { "- item\n* * *\n[key]: /uri\n\n[key]\n", "<ul>\n<li>item</li>\n</ul>\n<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* root rule immediately after list */
+    { "- item\n---\n[key]: /uri\n\n[key]\n", "<ul>\n<li>item</li>\n</ul>\n<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* dedented contiguous rule is not item Setext */
+    { "> quote\n* * *\n[key]: /uri\n\n[key]\n", "<blockquote>\n<p>quote</p>\n</blockquote>\n<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* rule interrupts quote without blank */
+    { "    code\n* * *\n[key]: /uri\n\n[key]\n", "<pre><code>code\n</code></pre>\n<hr />\n<p><a href=\"/uri\">key</a></p>\n" }, /* indented code ends before root rule */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==214,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==218,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
