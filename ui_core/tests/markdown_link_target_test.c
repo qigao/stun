@@ -252,7 +252,7 @@ int main(void) {
         stun_md_document_destroy(doc);
     }
     const char budget_source[]="[link](   /uri\n  \"title\"  )\n";
-    stun_md_document *budget=NULL,*rejected=NULL;
+    stun_md_document *budget=NULL,*budget_rejected=NULL;
     CHECK(stun_md_parse(budget_source,sizeof(budget_source)-1u,
                         256u,sizeof(budget_source),&budget)==STUN_UI_OK);
     CHECK(budget!=NULL);
@@ -260,9 +260,9 @@ int main(void) {
     CHECK(exact_nodes>1u);
     stun_md_document_destroy(budget);
     CHECK(stun_md_parse(budget_source,sizeof(budget_source)-1u,
-                        exact_nodes-1u,sizeof(budget_source),&rejected)==
+                        exact_nodes-1u,sizeof(budget_source),&budget_rejected)==
           STUN_UI_CAPACITY_EXCEEDED);
-    CHECK(rejected==NULL);
+    CHECK(budget_rejected==NULL);
 
     /* A syntactically malformed or unapproved scheme never manufactures
      * an unsafe LINK and must retain escaped text under SafeApplicationHtml. */
