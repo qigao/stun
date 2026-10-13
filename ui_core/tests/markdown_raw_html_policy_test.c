@@ -116,7 +116,13 @@ static const raw_fixture fixtures[] = {
      "<p>before &lt;script&gt;alert(1)&lt;/script&gt; after</p>\n",2u},
     {0u,"x <a foo=\"unclosed\n",
      "<p>x &lt;a foo=&quot;unclosed</p>\n",
-     "<p>x &lt;a foo=&quot;unclosed</p>\n",0u}
+     "<p>x &lt;a foo=&quot;unclosed</p>\n",0u},
+    {626u,"foo <!--> foo -->\n\nfoo <!---> foo -->\n",
+     "<p>foo <!--> foo --&gt;</p>\n<p>foo <!---> foo --&gt;</p>\n",
+     "<p>foo &lt;!--&gt; foo --&gt;</p>\n<p>foo &lt;!---&gt; foo --&gt;</p>\n",2u},
+    {0u,"foo <!--x> bar\n",
+     "<p>foo &lt;!--x&gt; bar</p>\n",
+     "<p>foo &lt;!--x&gt; bar</p>\n",0u}
 };
 /* Real ROOT HTML type-6 blocks use the same canonical block parser.
  * The SAFE profile still escapes all raw HTML; SPEC emits only admitted
@@ -259,8 +265,8 @@ static int test_type6_exact_admission(void) {
 
 int main(void) {
     if(test_type6_exact_admission())return 1;
-    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==12u,
-                   "nine official cases, one comment and two hostile/malformed tests");
+    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==14u,
+                   "ten official cases and four security/invalid-input controls");
     for(size_t i=0u;i<sizeof(fixtures)/sizeof(fixtures[0]);++i)
         if(verify(&fixtures[i])) {
             fprintf(stderr,"RAW HTML fixture %u failed\n",
@@ -280,7 +286,7 @@ int main(void) {
         187u,"Foo\n<a href=\"bar\">\nbaz\n","<p>Foo\n<a href=\"bar\">\nbaz</p>\n","<p>Foo\n&lt;a href=&quot;bar&quot;&gt;\nbaz</p>\n",1u
     };
     if(verify(&type7_noninterrupt))return 1;
-    puts("C11 typed RAW_HTML: nine official inline, twenty-eight official block "
+    puts("C11 typed RAW_HTML: ten official inline, twenty-eight official block "
          "spec outputs; unchanged SAFE rendering and atomic limits");
     return 0;
 }

@@ -604,7 +604,12 @@ static size_t md_inline_html_tag_close(const char *s,size_t n,size_t at) {
         return SIZE_MAX;
     }
     if(s[at+1u]=='!' && s[at+2u]=='-' && s[at+3u]=='-') {
-        if(at+4u<n && s[at+4u]=='>')return SIZE_MAX;
+        /* CommonMark #626: the short HTML-comment closers are complete
+         * RAW_HTML_INLINE tokens. Do not annex an unrelated later '-->'
+         * or change the default SAFE renderer's escaping policy. */
+        if(at+4u<n && s[at+4u]=='>')return at+4u;
+        if(at+5u<n && s[at+4u]=='-' && s[at+5u]=='>')
+            return at+5u;
         for(p=at+4u;p+2u<n;++p) {
             if(s[p]=='\n'||s[p]=='\r')return SIZE_MAX;
             if(s[p]=='-'&&s[p+1u]=='-'&&s[p+2u]=='>')return p+2u;
