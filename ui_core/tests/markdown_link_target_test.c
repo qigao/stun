@@ -149,6 +149,8 @@ int main(void) {
     /* #185 target grammar: balanced unescaped parentheses, angle mode,
      * escaped closers and no re-interpretation of Unicode NBSP. */
     static const link_fixture balanced[] = {
+        {"[link](</foo`bar>)\n","/foo`bar",NULL,"link",
+         "<p><a href=\"/foo%60bar\">link</a></p>\n"},
         {"[link](<>)\n","",NULL,"link","<p><a href=\"\">link</a></p>\n"},
         {"[link](</my uri>)\n","/my uri",NULL,"link","<p><a href=\"/my%20uri\">link</a></p>\n"},
         {"[a](<b)c>)\n","b)c",NULL,"a","<p><a href=\"b)c\">a</a></p>\n"},
@@ -161,7 +163,7 @@ int main(void) {
         {"[x](f(a(b)) \"info\")\n","f(a(b))","info","x","<p><a href=\"f(a(b))\" title=\"info\">x</a></p>\n"},
         {"[x](dest (hello world))\n","dest","hello world","x","<p><a href=\"dest\" title=\"hello world\">x</a></p>\n"},
     };
-    _Static_assert(sizeof(balanced)/sizeof(balanced[0])==11u,
+    _Static_assert(sizeof(balanced)/sizeof(balanced[0])==12u,
                    "balanced/angle target test denominator");
     for(size_t i=0u;i<sizeof(balanced)/sizeof(balanced[0]);++i)
         if(verify_link(&balanced[i]))return 1;
@@ -173,6 +175,9 @@ int main(void) {
          "https://example.com?find=\\*",NULL,
          "https://example.com?find=\\*",
          "<p><a href=\"https://example.com?find=%5C*\">https://example.com?find=\\*</a></p>\n"},
+        {"<https://foo.bar.`baz>`\n",
+         "https://foo.bar.`baz",NULL,"https://foo.bar.`baz",
+         "<p><a href=\"https://foo.bar.%60baz\">https://foo.bar.`baz</a>`</p>\n"}, /* CommonMark #346 */
         {"<http://foo.bar.baz>\n",
          "http://foo.bar.baz",NULL,"http://foo.bar.baz",
          "<p><a href=\"http://foo.bar.baz\">http://foo.bar.baz</a></p>\n"},
@@ -196,7 +201,7 @@ int main(void) {
          "https://example.com/\\[\\",NULL,"https://example.com/\\[\\",
          "<p><a href=\"https://example.com/%5C%5B%5C\">https://example.com/\\[\\</a></p>\n"}
     };
-    _Static_assert(sizeof(autolinks)/sizeof(autolinks[0])==8u,
+    _Static_assert(sizeof(autolinks)/sizeof(autolinks[0])==9u,
                    "safe URI autolink owner/HTML denominator");
     for(size_t i=0u;i<sizeof(autolinks)/sizeof(autolinks[0]);++i)
         if(verify_link(&autolinks[i]))return 1;

@@ -121,11 +121,11 @@ static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
     for(size_t i=0u;i<n && w->error==STUN_UI_OK;++i) {
         const unsigned char b=(unsigned char)s[i];
         /* CommonMark URI normalization percent-encodes decoded UTF-8,
-         * raw backslash, angle/quote delimiters and ASCII space, while
+         * raw backslash, angle/quote/backtick delimiters and ASCII space, while
          * existing %HH syntax and URL structural punctuation stay intact.
          * This runs AFTER the full decoded href safety admission. */
         if(b>=0x80u || b==' ' || b=='\\' || b=='<' ||
-           b=='>' || b=='\"' || b=='[' || b==']') {
+           b=='>' || b=='\"' || b=='[' || b==']' || b==0x60u) {
             const char pct[3]={'%',digits[b>>4u],digits[b&0x0Fu]};
             html_bytes(w,pct,sizeof(pct));
         } else html_escaped(w,s+i,1u,true);

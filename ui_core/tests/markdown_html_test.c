@@ -67,6 +67,10 @@ static const html_fixture cases[] = {
       "<p>A &lt; B &amp; C &gt; D &quot;yes&quot;</p>\n" }, /* HTML text context escapes once */
     { "[x](/a&b \"A &amp; B\")\n",
       "<p><a href=\"/a&amp;b\" title=\"A &amp; B\">x</a></p>\n" }, /* URI + HTML5 attribute escaping, no double entity decode */
+    { "<https://foo.bar.`baz>`\n",
+      "<p><a href=\"https://foo.bar.%60baz\">https://foo.bar.`baz</a>`</p>\n" }, /* official #346 */
+    { "[link](</foo`bar>)\n",
+      "<p><a href=\"/foo%60bar\">link</a></p>\n" }, /* single backtick in angle destination */
     { "A [B](dest)\n", "<p>A <a href=\"dest\">B</a></p>\n" },
     { "[link [foo [bar]]](/uri)\n",
       "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n" }, /* official #512 */
@@ -669,7 +673,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==339,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==341,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
