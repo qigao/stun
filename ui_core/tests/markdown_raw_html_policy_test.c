@@ -99,6 +99,18 @@ static const raw_fixture fixtures[] = {
      "<p>foo <a href=\"\\*\"></p>\n",
      "<p>foo &lt;a href=&quot;\\*&quot;&gt;</p>\n",
      1u},
+    {627u,"foo <?php echo $a; ?>\n",
+     "<p>foo <?php echo $a; ?></p>\n",
+     "<p>foo &lt;?php echo $a; ?&gt;</p>\n",1u},
+    {628u,"foo <!ELEMENT br EMPTY>\n",
+     "<p>foo <!ELEMENT br EMPTY></p>\n",
+     "<p>foo &lt;!ELEMENT br EMPTY&gt;</p>\n",1u},
+    {629u,"foo <![CDATA[>&<]]>\n",
+     "<p>foo <![CDATA[>&<]]></p>\n",
+     "<p>foo &lt;![CDATA[&gt;&amp;&lt;]]&gt;</p>\n",1u},
+    {0u,"foo <!-- simple -->\n",
+     "<p>foo <!-- simple --></p>\n",
+     "<p>foo &lt;!-- simple --&gt;</p>\n",1u},
     {0u,"before <script>alert(1)</script> after\n",
      "<p>before <script>alert(1)</script> after</p>\n",
      "<p>before &lt;script&gt;alert(1)&lt;/script&gt; after</p>\n",2u},
@@ -107,15 +119,15 @@ static const raw_fixture fixtures[] = {
      "<p>x &lt;a foo=&quot;unclosed</p>\n",0u}
 };
 int main(void) {
-    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==8u,
-                   "six official examples plus hostile/malformed controls");
+    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==12u,
+                   "nine official cases, one comment and two hostile/malformed tests");
     for(size_t i=0u;i<sizeof(fixtures)/sizeof(fixtures[0]);++i)
         if(verify(&fixtures[i])) {
             fprintf(stderr,"RAW HTML fixture %u failed\n",
                     fixtures[i].official);
             return 1;
         }
-    puts("RAW_HTML_INLINE C11: six official spec outputs, safe escaping, "
+    puts("RAW_HTML_INLINE C11: nine official spec outputs, safe escaping, "
          "caller-source mutation, hostile tokens, atomic node/buffer limits");
     return 0;
 }

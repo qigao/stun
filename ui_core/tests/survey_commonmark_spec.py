@@ -84,8 +84,12 @@ def first_diff(actual: bytes, expected: bytes) -> str | None:
             f"expected={expected[max(0,pos-24):pos+50].decode('utf-8','backslashreplace')!r}")
 
 
-def actual_html(binary: Path, source: str) -> tuple[str, bytes, str]:
-    proc = subprocess.run([str(binary)], input=source.encode("utf-8"),
+def actual_html(binary: Path, source: str, render_policy: str = "safe"
+                ) -> tuple[str, bytes, str]:
+    command=[str(binary)]
+    if render_policy == "spec":
+        command.append("--spec-html")
+    proc = subprocess.run(command, input=source.encode("utf-8"),
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           timeout=12, check=False)
     err = proc.stderr.decode("utf-8", "replace").strip()
@@ -112,6 +116,8 @@ def main() -> int:
     p.add_argument("--renderer", type=Path, required=True)
     p.add_argument("--spec", type=Path, required=True)
     p.add_argument("--report", type=Path, required=True)
+    p.add_argument("--render-policy", choices=("safe","spec"),
+                   default="safe", help="explicit C11 HTML render profile")
     args = p.parse_args()
     if not args.renderer.is_file():
         print(f"INFRASTRUCTURE ERROR: C11 HTML executable absent: {args.renderer}",
@@ -132,7 +138,8 @@ def main() -> int:
         reference_matches = reference == official
         reference_official_matches += int(reference_matches)
         try:
-            status, actual, detail = actual_html(args.renderer, example.markdown)
+            status, actual, detail = actual_html(args.renderer, example.markdown,
+                                                     args.render_policy)
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             print(f"RUNTIME FAILURE: CommonMark #{example.number} at "
                   f"line {example.start_line}: {exc}", file=sys.stderr)
@@ -171,6 +178,12 @@ def main() -> int:
         "conformance": "DIAGNOSTIC ONLY; all examples counted, mismatches do not pass",
         "cases": rows,
     }
+    if args.render_policy == "spec":
+        # Separate diagnostic only, NEVER feed into the production SAFE gate.
+        report["render_policy"] = "SpecConformanceHtml"
+        report["conformance"] = (
+            "TEST-ONLY explicit raw HTML rendering; no SAFE policy exemptions"
+        )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",
                            encoding="utf-8")

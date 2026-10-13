@@ -570,6 +570,41 @@ static size_t md_opaque_html_tag_close(const char *s,size_t n,size_t at) {
 static size_t md_inline_html_tag_close(const char *s,size_t n,size_t at) {
     size_t p=md_opaque_html_tag_close(s,n,at);
     if(p!=SIZE_MAX)return p;
+    if(!s || at>=n || s[at]!='<' || n-at<4u)return SIZE_MAX;
+    /* CDATA / comment / processing-instruction / declaration are
+     * opaque literal HTML only when a complete SAME-LINE token exists.
+     * Malformed openers remain Markdown TEXT with production escaping. */
+    if(n-at>=9u && !memcmp(s+at,"<![CDATA[",9u)) {
+        for(p=at+9u;p+2u<n;++p) {
+            if(s[p]=='\n'||s[p]=='\r')return SIZE_MAX;
+            if(s[p]==']'&&s[p+1u]==']'&&s[p+2u]=='>')return p+2u;
+        }
+        return SIZE_MAX;
+    }
+    if(s[at+1u]=='!' && s[at+2u]=='-' && s[at+3u]=='-') {
+        if(at+4u<n && s[at+4u]=='>')return SIZE_MAX;
+        for(p=at+4u;p+2u<n;++p) {
+            if(s[p]=='\n'||s[p]=='\r')return SIZE_MAX;
+            if(s[p]=='-'&&s[p+1u]=='-'&&s[p+2u]=='>')return p+2u;
+            if(s[p]=='-'&&s[p+1u]=='-')return SIZE_MAX;
+        }
+        return SIZE_MAX;
+    }
+    if(s[at+1u]=='?') {
+        for(p=at+2u;p+1u<n;++p) {
+            if(s[p]=='\n'||s[p]=='\r')return SIZE_MAX;
+            if(s[p]=='?'&&s[p+1u]=='>')return p+1u;
+        }
+        return SIZE_MAX;
+    }
+    if(s[at+1u]=='!' &&
+       s[at+2u]>='A'&&s[at+2u]<='Z') {
+        for(p=at+3u;p<n;++p) {
+            if(s[p]=='\n'||s[p]=='\r'||s[p]=='<')return SIZE_MAX;
+            if(s[p]=='>')return p;
+        }
+        return SIZE_MAX;
+    }
     if(at>=n || s[at]!='<' || n-at<4u ||
        s[at+1]!='/' ||
        !md_tag_letter((unsigned char)s[at+2u]))return SIZE_MAX;

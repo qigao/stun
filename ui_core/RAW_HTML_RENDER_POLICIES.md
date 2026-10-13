@@ -19,14 +19,16 @@ No automatic policy fallback, unsafe URL allowlist widening, or DOM execution.
 
 ## First slice
 
-Only syntactically complete single-physical-line HTML start/end tags are
-recognized in the one inline parser. Shared quoted-attribute delimiter
+Only syntactically complete single-physical-line HTML start/end tags,
+comments, processing instructions, declarations and CDATA are recognized
+in the one inline parser. Shared quoted-attribute delimiter
 opacity and the existing code-span/autolink priority are preserved. Invalid
 or incomplete tags remain ordinary safely escaped TEXT. Admitted tokens
 copy their exact source bytes into RichDoc before returning to the caller.
 
 Independent installed C11 fixtures compare the exact official HTML output
-for #613, #614, #617, #623, #630, #631 under the explicit SPEC policy.
+for #613, #614, #617, #623, #627, #628, #629, #630 and #631 under
+the explicit SPEC policy.
 Those same cases must keep previous escaped HTML under the default SAFE
 policy. Also reject invalid policy values, unchanged output after capacity
 failure, malformed tags, hostile script tokens and one-node-short budgets.
@@ -36,12 +38,12 @@ failure, malformed tags, hostile script tokens and one-node-short budgets.
 - Implement seven HTML block types #148-#191 in the SAME existing canonical
   block parser, with paragraph interruption and blank-line termination.
 - Support complete inline token grammar including multiline quoted tags
-  #615/#616/#642/#643, comments, processing instructions, declarations
-  and CDATA, plus interactions with emphasis, links, lists and code.
+  #615/#616/#642/#643, multiline comments and other HTML token spans,
+  plus interactions with emphasis, links, lists and code.
 - Emit RAW_HTML_BLOCK only from recognized block ownership; reject fake
   HTML declarations that are really escaped ordinary text.
 - Add separate full 652-case SPEC profile diagnostic/report and immutable
-  ID gate. The existing full 652-case SAFE survey, 573-ID strict baseline
+  ID gate. The SPEC report is non-gating until independently qualified. The existing full 652-case SAFE survey, 573-ID strict baseline
   and fixture digest stay unchanged. An explicit-policy exact match is
   not evidence that the production SAFE renderer should pass raw markup.
 - Require complete C11/installed SDK/sanitizer/FlexUI/Mesa validation,

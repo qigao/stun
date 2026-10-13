@@ -697,6 +697,16 @@ jobs:
             --report "$EVIDENCE_DIR/markdown-commonmark-652-survey.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-652-survey.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-652-survey.json"
+          # Explicit SPEC raw-HTML survey: 652-row independent diagnostic.
+          # Never replace the production-safe report or change its strict
+          # official-ID nonregression gate with these unsafe test-only bytes.
+          "$python_env/bin/python" ui_core/tests/survey_commonmark_spec.py \
+            --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
+            --spec tools/md/test/spec.txt \
+            --render-policy spec \
+            --report "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.log"
+          test -s "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json"
           "$python_env/bin/python" ui_core/tests/compare_cmarkgfm_html.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --report "$EVIDENCE_DIR/markdown-cmarkgfm-html.json" \
