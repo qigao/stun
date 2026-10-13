@@ -330,6 +330,55 @@ int main(void) {
         CHECK(limited==NULL);
     }
 
+    /* #183: email autolinks use the same document-owned LINK metadata and
+     * failure-atomic safe HTML emitter as URI autolinks. The implicit
+     * mailto: prefix is metadata only, not visible label text. */
+    static const link_fixture emails[]={
+        {"<foo@bar.example.com>\n",
+         "mailto:foo@bar.example.com",NULL,"foo@bar.example.com",
+         "<p><a href=\"mailto:foo@bar.example.com\">foo@bar.example.com</a></p>\n"},
+        {"<foo+special@Bar.baz-bar0.com>\n",
+         "mailto:foo+special@Bar.baz-bar0.com",NULL,
+         "foo+special@Bar.baz-bar0.com",
+         "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>\n"}
+    };
+    _Static_assert(sizeof(emails)/sizeof(emails[0])==2u,
+                   "owned email autolink fixture denominator");
+    for(size_t i=0u;i<sizeof(emails)/sizeof(emails[0]);++i)
+        if(verify_link(&emails[i]))return 1;
+
+    /* Do not synthesize email links from escaped punctuation, multiple @,
+     * malformed domain labels or URL-like text lacking a bracket pair. */
+    static const char *const email_rejections[]={
+        "<foo\\+@bar.example.com>\n",
+        "<foo@@bar.example.com>\n",
+        "<foo@-bar.example.com>\n",
+        "<foo@bar..example.com>\n",
+        "foo@bar.example.com\n",
+        "<javascript:alert>\n"
+    };
+    _Static_assert(sizeof(email_rejections)/sizeof(email_rejections[0])==6u,
+                   "email autolink negative cases");
+    for(size_t k=0u;k<sizeof(email_rejections)/sizeof(email_rejections[0]);++k) {
+        stun_md_document *negative=NULL;
+        const size_t bytes=strlen(email_rejections[k]);
+        CHECK(stun_md_parse(email_rejections[k],bytes,128u,bytes+1u,
+                            &negative)==STUN_UI_OK);
+        CHECK(negative!=NULL);
+        const stun_ui_rich_document_view view=stun_md_document_view(negative);
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        CHECK(kind_count(view,STUN_UI_BLOCK_LINK)==0u);
+        CHECK(view.raw_markdown_bytes==bytes);
+        CHECK(!memcmp(view.raw_markdown,email_rejections[k],bytes));
+        stun_md_document_destroy(negative);
+    }
+    const char bounded_email[]="<foo@bar.example.com>\n";
+    stun_md_document *email_limited=(stun_md_document*)(uintptr_t)1u;
+    CHECK(stun_md_parse(bounded_email,sizeof(bounded_email)-1u,3u,
+                        sizeof(bounded_email),&email_limited)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(email_limited==NULL);
+
     /* Node budget exhaustion with a title must discard every partial node. */
     const char limited[]="[x](/f&ouml;&ouml; \"f&ouml;&ouml;\")\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
@@ -337,7 +386,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 26/26 targets, 10 safety rejections, "
+    puts("C11 link metadata: 28/28 targets, 10 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }

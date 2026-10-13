@@ -522,11 +522,15 @@ static const html_fixture cases[] = {
       "<p>&lt;javascript:alert&gt;</p>\n" }, /* no javascript URI admission */
     { "<script>alert(1)</script>\n",
       "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n" }, /* RawHTML remains safe text */
+    { "<foo@bar.example.com>\n",
+      "<p><a href=\"mailto:foo@bar.example.com\">foo@bar.example.com</a></p>\n" }, /* official #604 safe email */
+    { "<foo+special@Bar.baz-bar0.com>\n",
+      "<p><a href=\"mailto:foo+special@Bar.baz-bar0.com\">foo+special@Bar.baz-bar0.com</a></p>\n" }, /* official #605 plus/hyphen */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==273,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==275,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
