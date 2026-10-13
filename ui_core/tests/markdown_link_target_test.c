@@ -180,6 +180,12 @@ int main(void) {
          "https://foo.bar.baz/test?q=hello&id=22&boolean",NULL,
          "https://foo.bar.baz/test?q=hello&id=22&boolean",
          "<p><a href=\"https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean\">https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean</a></p>\n"},
+        {"**a<https://foo.bar/?q=**>\n",
+         "https://foo.bar/?q=**",NULL,"https://foo.bar/?q=**",
+         "<p>**a<a href=\"https://foo.bar/?q=**\">https://foo.bar/?q=**</a></p>\n"},
+        {"__a<https://foo.bar/?q=__>\n",
+         "https://foo.bar/?q=__",NULL,"https://foo.bar/?q=__",
+         "<p>__a<a href=\"https://foo.bar/?q=__\">https://foo.bar/?q=__</a></p>\n"},
         {"<MAILTO:FOO@BAR.BAZ>\n",
          "MAILTO:FOO@BAR.BAZ",NULL,"MAILTO:FOO@BAR.BAZ",
          "<p><a href=\"MAILTO:FOO@BAR.BAZ\">MAILTO:FOO@BAR.BAZ</a></p>\n"},
@@ -190,7 +196,7 @@ int main(void) {
          "https://example.com/\\[\\",NULL,"https://example.com/\\[\\",
          "<p><a href=\"https://example.com/%5C%5B%5C\">https://example.com/\\[\\</a></p>\n"}
     };
-    _Static_assert(sizeof(autolinks)/sizeof(autolinks[0])==6u,
+    _Static_assert(sizeof(autolinks)/sizeof(autolinks[0])==8u,
                    "safe URI autolink owner/HTML denominator");
     for(size_t i=0u;i<sizeof(autolinks)/sizeof(autolinks[0]);++i)
         if(verify_link(&autolinks[i]))return 1;
@@ -299,7 +305,7 @@ int main(void) {
                         sizeof(limited),&rejected)==STUN_UI_CAPACITY_EXCEEDED);
     CHECK(rejected==NULL);
 
-    puts("C11 link metadata: 24/24 targets, 10 safety rejections, "
+    puts("C11 link metadata: 26/26 targets, 10 safety rejections, "
          "invalid syntax literal and atomic node-budget rollback");
     return 0;
 }

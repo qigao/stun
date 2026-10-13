@@ -768,6 +768,18 @@ static bool md_emph_pairs(stun_md_document *d,const char *s,size_t n,
     if(!runs) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
     size_t count=0u;
     for(size_t p=0u;p<n;) {
+        /* URI autolinks bind tighter than emphasis delimiters. The URI
+         * label's ** / __ / escaped punctuation is opaque to the same
+         * run collector that builds emphasis events; otherwise unmatched
+         * external runs could close inside LINK text and invalidate the
+         * owned RichDoc (official CommonMark #480/#481). */
+        if(s[p]=='<') {
+            size_t close=SIZE_MAX;
+            if(md_uri_autolink(s,n,p,&close)) {
+                p=close+1u;
+                continue;
+            }
+        }
         if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
             p+=2u;continue;
         }

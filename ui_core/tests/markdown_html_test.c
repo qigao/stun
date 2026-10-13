@@ -500,6 +500,10 @@ static const html_fixture cases[] = {
       "<li>second</li>\n</ol>\n<p><a href=\"/uri\">ref</a></p>\n" }, /* true table terminator becomes root list */
     { "<https://example.com?find=\\*>\n",
       "<p><a href=\"https://example.com?find=%5C*\">https://example.com?find=\\*</a></p>\n" }, /* official #20 */
+    { "**a<https://foo.bar/?q=**>\n",
+      "<p>**a<a href=\"https://foo.bar/?q=**\">https://foo.bar/?q=**</a></p>\n" }, /* official #480: autolink shields ** from emphasis */
+    { "__a<https://foo.bar/?q=__>\n",
+      "<p>__a<a href=\"https://foo.bar/?q=__\">https://foo.bar/?q=__</a></p>\n" }, /* official #481 */
     { "<http://foo.bar.baz>\n",
       "<p><a href=\"http://foo.bar.baz\">http://foo.bar.baz</a></p>\n" }, /* official #594 */
     { "<https://foo.bar.baz/test?q=hello&id=22&boolean>\n",
@@ -522,7 +526,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==271,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==273,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
