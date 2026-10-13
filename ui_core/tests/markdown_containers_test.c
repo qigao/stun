@@ -151,6 +151,25 @@ static const fixture cases[]={
      "<ul>\n<li>\n<h1>H</h1>\n</li>\n<li>text</li>\n</ul>\n",0,1u},
     {"ordered-atx-heading","1. # T\n",
      "<ol>\n<li>\n<h1>T</h1>\n</li>\n</ol>\n",0,1u},
+    {"cm-061","- Foo\n- * * *\n",
+     "<ul>\n<li>Foo</li>\n<li>\n<hr />\n</li>\n</ul>\n",0,1u},
+    {"root-item-rule","- * * *\n",
+     "<ul>\n<li>\n<hr />\n</li>\n</ul>\n",0,1u},
+    {"ordered-item-rule","1. * * *\n2. text\n",
+     "<ol>\n<li>\n<hr />\n</li>\n<li>text</li>\n</ol>\n",0,1u},
+    {"quoted-item-rule","> - * * *\n",
+     "<blockquote>\n<ul>\n<li>\n<hr />\n</li>\n</ul>\n</blockquote>\n",-1,1u},
+    {"item-continuation-rule","- Foo\n  * * *\n",
+     "<ul>\n<li>Foo\n<hr />\n</li>\n</ul>\n",0,1u},
+    {"ordered-continuation-rule","10. Foo\n    * * *\n",
+     "<ol start=\"10\">\n<li>Foo\n<hr />\n</li>\n</ol>\n",0,1u},
+    {"item-setext-not-rule","- Foo\n  ---\n",
+     "<ul>\n<li>\n<h2>Foo</h2>\n</li>\n</ul>\n",0,1u},
+    {"dedented-root-rule","- Foo\n* * *\n",
+     "<ul>\n<li>Foo</li>\n</ul>\n<hr />\n",0,1u},
+    {"thematic-before-list","- ---\n","<hr />\n",-1,0u},
+    {"inline-emphasis-not-rule","- *a*\n",
+     "<ul>\n<li><em>a</em></li>\n</ul>\n",0,1u},
     {"root-thematic-control","- Foo\n---\n",
      "<ul>\n<li>Foo</li>\n</ul>\n<hr />\n",0,1u},
     {"nested-inline-atx-heading","- - # Foo\n",
@@ -160,7 +179,7 @@ static const fixture cases[]={
     {"list-setext-equals","- Foo\n  ===\n",
      "<ul>\n<li>\n<h1>Foo</h1>\n</li>\n</ul>\n",0,1u}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==64u,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==74u,
                "Scoped list container fixture denominator changed");
 
 static bool check_case(const fixture *f) {
@@ -294,6 +313,49 @@ static bool test_partial_tab_code_ownership(void) {
     return true;
 }
 
+/* A list-line HR is a list ITEM child, never a root rule or paragraph.
+ * Verify the actual typed owner (not just HTML output) and raw bytes on
+ * root, ordered, quoted, and subsequent item lines. */
+static bool test_thematic_item_ownership(void) {
+    static const char *const samples[]={
+        "- Foo\n- * * *\n",
+        "- * * *\n",
+        "1. * * *\n2. text\n",
+        "> - * * *\n",
+        "- Foo\n  * * *\n",
+        "10. Foo\n    * * *\n"
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==6u,
+                   "item rule owner denominator");
+    for(size_t k=0u;k<sizeof(samples)/sizeof(samples[0]);++k) {
+        stun_md_document *owned=NULL;
+        const size_t size=strlen(samples[k]);
+        if(stun_md_parse(samples[k],size,256u,size+1u,&owned)!=STUN_UI_OK ||
+           !owned)return false;
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        bool ok=stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK &&
+            v.raw_markdown_bytes==size &&
+            !memcmp(v.raw_markdown,samples[k],size);
+        size_t rule_count=0u;
+        for(size_t i=1u;ok && i<v.document.block_count;++i) {
+            const stun_ui_block *b=&v.document.blocks[i];
+            if(b->kind!=STUN_UI_BLOCK_RULE)continue;
+            ++rule_count;
+            if(b->parent_index>=i ||
+               v.document.blocks[b->parent_index].kind!=
+                   STUN_UI_BLOCK_LIST_ITEM)
+                ok=false;
+        }
+        ok=ok && rule_count==1u;
+        stun_md_document_destroy(owned);
+        if(!ok) {
+            fprintf(stderr,"thematic rule owner mismatch case %zu\n",k);
+            return false;
+        }
+    }
+    return true;
+}
+
 int main(void) {
     for(size_t i=0;i<sizeof(cases)/sizeof(cases[0]);++i) {
         if(!check_case(&cases[i])) {
@@ -302,6 +364,7 @@ int main(void) {
         }
     }
     if(!test_partial_tab_code_ownership())return 1;
+    if(!test_thematic_item_ownership())return 1;
     const char *limited="- one\n\n  two\n";
     stun_md_document *d=(stun_md_document*)(uintptr_t)1u;
     const stun_ui_status status=stun_md_parse(limited,strlen(limited),2u,

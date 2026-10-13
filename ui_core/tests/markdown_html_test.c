@@ -70,6 +70,24 @@ static const html_fixture cases[] = {
     { "A [B](dest)\n", "<p>A <a href=\"dest\">B</a></p>\n" },
     { "a " TICK "code" TICK " b\n",
       "<p>a <code>code</code> b</p>\n" },
+    { "- Foo\n- * * *\n",
+      "<ul>\n<li>Foo</li>\n<li>\n<hr />\n</li>\n</ul>\n" }, /* official CommonMark #61 */
+    { "- * * *\n",
+      "<ul>\n<li>\n<hr />\n</li>\n</ul>\n" }, /* standalone item-owned HR */
+    { "1. * * *\n2. text\n",
+      "<ol>\n<li>\n<hr />\n</li>\n<li>text</li>\n</ol>\n" }, /* ordered item-owned HR */
+    { "> - * * *\n",
+      "<blockquote>\n<ul>\n<li>\n<hr />\n</li>\n</ul>\n</blockquote>\n" }, /* quote-owned list item HR */
+    { "- Foo\n  * * *\n",
+      "<ul>\n<li>Foo\n<hr />\n</li>\n</ul>\n" }, /* same item subsequent rule */
+    { "10. Foo\n    * * *\n",
+      "<ol start=\"10\">\n<li>Foo\n<hr />\n</li>\n</ol>\n" }, /* item-relative >3 root indent */
+    { "- Foo\n  ---\n",
+      "<ul>\n<li>\n<h2>Foo</h2>\n</li>\n</ul>\n" }, /* Setext before thematic rule */
+    { "- Foo\n* * *\n",
+      "<ul>\n<li>Foo</li>\n</ul>\n<hr />\n" }, /* dedented root HR closes list */
+    { "- ---\n", "<hr />\n" }, /* entire line thematic rule beats list opener */
+    { "- *a*\n", "<ul>\n<li><em>a</em></li>\n</ul>\n" }, /* inline emphasis, not rule */
     { "---\n", "<hr />\n" },
     { "first\n===\n", "<h1>first</h1>\n" },
     { "first\nsecond\n", "<p>first\nsecond</p>\n" },
@@ -475,7 +493,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==247,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==257,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
