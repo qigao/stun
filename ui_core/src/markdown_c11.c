@@ -2515,7 +2515,7 @@ static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
  * [text][ref]. Definitions inside code fences, indented code, lists or
  * quotes are NOT recognized by this restricted root-only slice. This
  * prepass has no AST side effects and cannot reinterpret decoded entities
- * as syntax. Unicode/multiline label folding remains separate.
+ * as syntax. Unicode folding and labels spanning more than one LF remain separate.
  *
  * Definition entries also record exact source-line offsets to suppress
  * their block output; duplicates are consumed but lookup selects the FIRST.
@@ -2585,17 +2585,74 @@ static bool md_reference_collect_title(stun_md_document *d,md_line first,
     free(scratch);return false;
 }
 
+/* Admit exactly one physical LF in a ROOT ASCII definition label.
+ * Only the block prepass calls this: inline reference labels still use
+ * their existing single-line matcher. Preserve the raw UTF-8 owner and
+ * normalize just ASCII horizontal whitespace + the physical line break
+ * via md_reference_key; the original source span, including CRLF/indent,
+ * must fit MD_REF_KEY_MAX. Unicode folding and nested containers remain
+ * independent work (#183/#540). */
+static bool md_reference_definition_label(const stun_md_document *d,
+                                         md_line first,size_t begin,
+                                         md_line *target_line,
+                                         size_t *after_colon,
+                                         char key[MD_REF_KEY_MAX+1u]) {
+    const char *s=d->raw;
+    const size_t close=md_reference_label_close(s,first.end,begin+1u);
+    if(close!=SIZE_MAX) {
+        if(close+1u>=first.end || s[close+1u]!=':' ||
+           !md_reference_key(s,begin+1u,close,key))return false;
+        *target_line=first;*after_colon=close+2u;
+        return true;
+    }
+    if(!first.newline || first.next>=d->raw_size ||
+       first.end<=begin+1u)return false;
+    /* Reject malformed syntax, nested brackets, non-ASCII labels and
+     * incomplete escape pairs before borrowing a continuation line. */
+    for(size_t p=begin+1u;p<first.end;) {
+        const unsigned char c=(unsigned char)s[p];
+        if(c=='\\' && p+1u<first.end &&
+           md_ascii_punct(s[p+1u])) {p+=2u;continue;}
+        if(c=='[' || c==']' || c>=0x80u ||
+           (c<0x20u && c!='\t'))return false;
+        ++p;
+    }
+    const md_line next=md_read_line(d,first.next);
+    const size_t second_begin=md_left(s,next.begin,next.end);
+    if(second_begin>=next.end ||
+       md_columns(s,next.begin,second_begin)>3u ||
+       md_root_code_span_interrupts((stun_md_document*)d,next))
+        return false;
+    const size_t second_close=md_reference_label_close(
+        s,next.end,second_begin);
+    if(second_close==SIZE_MAX || second_close+1u>=next.end ||
+       s[second_close+1u]!=':')return false;
+    const size_t first_part=first.end-(begin+1u);
+    const size_t second_part=second_close-second_begin;
+    if(second_close-(begin+1u)>MD_REF_KEY_MAX ||
+       first_part>=MD_REF_KEY_MAX ||
+       second_part>MD_REF_KEY_MAX-first_part-1u)return false;
+    char scratch[MD_REF_KEY_MAX+1u];
+    memcpy(scratch,s+begin+1u,first_part);
+    scratch[first_part]=' ';
+    memcpy(scratch+first_part+1u,s+second_begin,second_part);
+    if(!md_reference_key(scratch,0u,first_part+1u+second_part,key))
+        return false;
+    *target_line=next;*after_colon=second_close+2u;
+    return true;
+}
+
 static bool md_reference_collect_line(stun_md_document *d,md_line line,
                                       size_t begin,size_t *after_definition) {
     const char *s=d->raw;
     if(begin>=line.end || s[begin]!='[')return false;
-    const size_t close=md_reference_label_close(s,line.end,begin+1u);
-    if(close==SIZE_MAX || close+1u>=line.end || s[close+1u]!=':')
-        return false;
     char key[MD_REF_KEY_MAX+1u];
-    if(!md_reference_key(s,begin+1u,close,key))return false;
-    size_t target_begin=md_left(s,close+2u,line.end);
-    md_line last=line;
+    md_line target_line=line;
+    size_t after_colon=0u;
+    if(!md_reference_definition_label(d,line,begin,&target_line,
+                                      &after_colon,key))return false;
+    size_t target_begin=md_left(s,after_colon,target_line.end);
+    md_line last=target_line;
     /* Only the OPENING definition has a <=3-column indentation limit.
      * A destination continuation may be deeply indented (#193), but a
      * blank or an actual interrupting root block cannot donate its bytes. */

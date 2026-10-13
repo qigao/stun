@@ -359,8 +359,54 @@ done:
     return failure;
 }
 
+/* Candidate two-line labels may never borrow blank lines, competing root
+ * containers, indented code or an over-budget key. A rejected definition
+ * must leave later ordinary text and unrelated bindings untouched. */
+static int check_root_label_boundary_rejections(void) {
+    const char *name="root-multiline-label-negative-admission";
+    static const char *const inputs[]={
+        "[Foo\n\nbar]: /url\n\n[Baz][Foo bar]\n",
+        "[Foo\n> bar]: /url\n\n[Baz][Foo bar]\n",
+        "[Foo\n    bar]: /url\n\n[Baz][Foo bar]\n",
+        "[Foo\n[bar]: /url\n\n[Baz][Foo bar]\n"
+    };
+    int failure=0;stun_md_document *doc=NULL;
+    for(size_t k=0u;k<sizeof(inputs)/sizeof(inputs[0]);++k) {
+        const size_t n=strlen(inputs[k]);
+        VERIFY(stun_md_parse(inputs[k],n,512u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,512u)==STUN_UI_OK);
+        VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==0u);
+        VERIFY(v.raw_markdown_bytes==n &&
+               !memcmp(v.raw_markdown,inputs[k],n));
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+    char source[512],first[128];
+    memset(first,'a',127u);first[127]='\0';
+    const int n=snprintf(source,sizeof(source),
+                         "[%s\n  b]: /url\n\n[x][%s b]\n",first,first);
+    VERIFY(n>0 && (size_t)n<sizeof(source));
+    VERIFY(stun_md_parse(source,(size_t)n,512u,(size_t)n+1u,
+                         &doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    VERIFY(count_kind(stun_md_document_view(doc),STUN_UI_BLOCK_LINK)==0u);
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_case cases[]={
+    { "official-541", "[Foo\n  bar]: /url\n\n[Baz][Foo bar]\n",
+      "<p><a href=\"/url\">Baz</a></p>\n", "/url", NULL, "Baz" },
+    { "root-label-CRLF-title", "  [FoO\r\n   Bar]: /uri 'ok'\r\n\r\n[Baz][foo bar]\r\n",
+      "<p><a href=\"/uri\" title=\"ok\">Baz</a></p>\n",
+      "/uri", "ok", "Baz" },
+    { "root-label-first-wins", "[Foo\n bar]: /first\n[foo bar]: /second\n\n[x][Foo bar]\n",
+      "<p><a href=\"/first\">x</a></p>\n", "/first", NULL, "x" },
+    { "root-label-escaped-case", "[foo\\!\n BAR]: /x\n\n[x][Foo\\! Bar]\n",
+      "<p><a href=\"/x\">x</a></p>\n", "/x", NULL, "x" },
     { "official-193", "   [foo]: \n      /url  \n           'the title'  \n\n[foo]\n", "<p><a href=\"/url\" title=\"the title\">foo</a></p>\n", "/url", "the title", "foo" },
     { "official-194", "[Foo*bar\\]]:my_(url) 'title (with parens)'\n\n[Foo*bar\\]]\n", "<p><a href=\"my_(url)\" title=\"title (with parens)\">Foo*bar]</a></p>\n", "my_(url)", "title (with parens)", "Foo*bar]" },
     { "official-196", "[foo]: /url '\ntitle\nline1\nline2\n'\n\n[foo]\n", "<p><a href=\"/url\" title=\"\ntitle\nline1\nline2\n\">foo</a></p>\n", "/url", "\ntitle\nline1\nline2\n", "foo" },
@@ -399,14 +445,15 @@ int main(void) {
     { "unescaped-nested-label-rejected", "[a[b]]: /wrong\n\n[a[b]]\n", "<p>[a[b]]: /wrong</p>\n<p>[a[b]]</p>\n", NULL, NULL, NULL },
     { "title-escaped-attribute-injection", "[foo]: /uri 'a\n&quot; onmouseover=&quot;alert(1)'\n\n[foo]\n", "<p><a href=\"/uri\" title=\"a\n&quot; onmouseover=&quot;alert(1)\">foo</a></p>\n", "/uri", "a\n\" onmouseover=\"alert(1)", "foo" },
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==31u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==35u,
                    "multiline/escaped reference fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(check_case(&cases[i]))return 1;
-    if(check_safety() || check_budgets() || check_label_budget() ||
+    if(check_root_label_boundary_rejections() ||
+       check_safety() || check_budgets() || check_label_budget() ||
        check_adjacent_owners() || check_inline_label_owners() ||
        check_document_binding_isolation())return 1;
-    puts("C11 multiline/escaped references: 34/34 HTML/AST, raw ownership, "
+    puts("C11 multiline/escaped references: 38/38 HTML/AST, raw ownership, "
          "inline owners, document isolation, title/href security, line/map budgets and atomic rollback");
     return 0;
 }

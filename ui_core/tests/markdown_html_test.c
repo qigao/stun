@@ -88,6 +88,14 @@ static const html_fixture cases[] = {
       "<p><a href=\"baz\">foo &lt;bar attr=&quot;</a></p>\n" },
     { "[foo <bar attr='](baz)'>\n",
       "<p>[foo &lt;bar attr='](baz)'&gt;</p>\n" },
+    { "[Foo\n  bar]: /url\n\n[Baz][Foo bar]\n",
+      "<p><a href=\"/url\">Baz</a></p>\n" }, /* official #541 */
+    { "  [FoO\r\n   Bar]: /uri 'ok'\r\n\r\n[Baz][foo bar]\r\n",
+      "<p><a href=\"/uri\" title=\"ok\">Baz</a></p>\n" },
+    { "[Foo\n bar]: /first\n[foo bar]: /second\n\n[x][Foo bar]\n",
+      "<p><a href=\"/first\">x</a></p>\n" },
+    { "[foo\\!\n BAR]: /x\n\n[x][Foo\\! Bar]\n",
+      "<p><a href=\"/x\">x</a></p>\n" },
     { "[foo<https://example.com/?search=](uri)>\n",
       "<p>[foo<a href=\"https://example.com/?search=%5D(uri)\">https://example.com/?search=](uri)</a></p>\n" }, /* official #526 */
     { "[foo<https://example.com/?search=][ref]>\n\n[ref]: /uri\n",
@@ -661,7 +669,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==335,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==339,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
