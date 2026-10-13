@@ -368,7 +368,11 @@ static int check_root_label_boundary_rejections(void) {
         "[Foo\n\nbar]: /url\n\n[Baz][Foo bar]\n",
         "[Foo\n> bar]: /url\n\n[Baz][Foo bar]\n",
         "[Foo\n    bar]: /url\n\n[Baz][Foo bar]\n",
-        "[Foo\n[bar]: /url\n\n[Baz][Foo bar]\n"
+        "[Foo\n[bar]: /url\n\n[Baz][Foo bar]\n",
+        "[\nfoo\n\n]: /uri\n\n[x][foo]\n",
+        "[\n> foo\n]: /uri\n\n[x][foo]\n",
+        "[\nfoo\n    ]: /uri\n\n[x][foo]\n",
+        "[\nfoo\nbar\n]: /uri\n\n[x][foo bar]\n"
     };
     int failure=0;stun_md_document *doc=NULL;
     for(size_t k=0u;k<sizeof(inputs)/sizeof(inputs[0]);++k) {
@@ -407,6 +411,26 @@ static int check_root_label_boundary_rejections(void) {
     VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==0u);
     VERIFY(v.raw_markdown_bytes==(size_t)n &&
            !memcmp(v.raw_markdown,source,(size_t)n));
+    stun_md_document_destroy(doc);doc=NULL;
+    /* 123 ASCII + LF + foo + LF = 128 original label bytes, while 124
+     * makes 129; the normalized inline key is <=128 in both cases. */
+    memset(first,'a',123u);first[123]='\0';
+    n=snprintf(source,sizeof(source),
+               "[%s\nfoo\n]: /uri\n\n[x][%s foo]\n",first,first);
+    VERIFY(n>0 && (size_t)n<sizeof(source));
+    const reference_case two_lf_exact={name,source,
+        "<p><a href=\"/uri\">x</a></p>\n","/uri",NULL,"x"};
+    VERIFY(check_case(&two_lf_exact)==0);
+    memset(first,'a',124u);first[124]='\0';
+    n=snprintf(source,sizeof(source),
+               "[%s\nfoo\n]: /uri\n\n[x][%s foo]\n",first,first);
+    VERIFY(n>0 && (size_t)n<sizeof(source));
+    VERIFY(stun_md_parse(source,(size_t)n,512u,(size_t)n+1u,
+                         &doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view two_lf=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&two_lf,512u)==STUN_UI_OK);
+    VERIFY(count_kind(two_lf,STUN_UI_BLOCK_LINK)==0u);
 done:
     stun_md_document_destroy(doc);
     return failure;
@@ -414,6 +438,16 @@ done:
 
 int main(void) {
     static const reference_case cases[]={
+    { "official-208", "[\nfoo\n]: /url\nbar\n",
+      "<p>bar</p>\n", NULL, NULL, NULL },
+    { "two-LF-forward-reference", "[\nfoo\n]: /url\n\n[x][foo]\n",
+      "<p><a href=\"/url\">x</a></p>\n", "/url", NULL, "x" },
+    { "two-LF-CRLF-title", "[\r\n FoO\r\n ]: /uri 'T'\r\n\r\n[x][foo]\r\n",
+      "<p><a href=\"/uri\" title=\"T\">x</a></p>\n", "/uri", "T", "x" },
+    { "two-LF-split-URL", "[\nfoo\n]:\n /url\n\n[x][foo]\n",
+      "<p><a href=\"/url\">x</a></p>\n", "/url", NULL, "x" },
+    { "two-LF-duplicate-first-wins", "[\nfoo\n]: /first\n[foo]: /second\n\n[x][foo]\n",
+      "<p><a href=\"/first\">x</a></p>\n", "/first", NULL, "x" },
     { "official-541", "[Foo\n  bar]: /url\n\n[Baz][Foo bar]\n",
       "<p><a href=\"/url\">Baz</a></p>\n", "/url", NULL, "Baz" },
     { "root-label-CRLF-title", "  [FoO\r\n   Bar]: /uri 'ok'\r\n\r\n[Baz][foo bar]\r\n",
@@ -461,7 +495,7 @@ int main(void) {
     { "unescaped-nested-label-rejected", "[a[b]]: /wrong\n\n[a[b]]\n", "<p>[a[b]]: /wrong</p>\n<p>[a[b]]</p>\n", NULL, NULL, NULL },
     { "title-escaped-attribute-injection", "[foo]: /uri 'a\n&quot; onmouseover=&quot;alert(1)'\n\n[foo]\n", "<p><a href=\"/uri\" title=\"a\n&quot; onmouseover=&quot;alert(1)\">foo</a></p>\n", "/uri", "a\n\" onmouseover=\"alert(1)", "foo" },
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==35u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==40u,
                    "multiline/escaped reference fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(check_case(&cases[i]))return 1;
@@ -469,7 +503,7 @@ int main(void) {
        check_safety() || check_budgets() || check_label_budget() ||
        check_adjacent_owners() || check_inline_label_owners() ||
        check_document_binding_isolation())return 1;
-    puts("C11 multiline/escaped references: 38/38 HTML/AST, raw ownership, "
+    puts("C11 multiline/escaped references: 43/43 HTML/AST, raw ownership, "
          "inline owners, document isolation, title/href security, line/map budgets and atomic rollback");
     return 0;
 }

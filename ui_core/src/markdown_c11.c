@@ -2515,7 +2515,7 @@ static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
  * [text][ref]. Definitions inside code fences, indented code, lists or
  * quotes are NOT recognized by this restricted root-only slice. This
  * prepass has no AST side effects and cannot reinterpret decoded entities
- * as syntax. Unicode folding and labels spanning more than one LF remain separate.
+ * as syntax. Unicode full case folding and labels spanning more than two LFs remain separate.
  *
  * Definition entries also record exact source-line offsets to suppress
  * their block output; duplicates are consumed but lookup selects the FIRST.
@@ -2585,13 +2585,12 @@ static bool md_reference_collect_title(stun_md_document *d,md_line first,
     free(scratch);return false;
 }
 
-/* Admit exactly one physical LF in a ROOT ASCII definition label.
- * Only the block prepass calls this: inline reference labels still use
- * their existing single-line matcher. Preserve the raw UTF-8 owner and
- * normalize just ASCII horizontal whitespace + the physical line break
- * via md_reference_key; the original source span, including CRLF/indent,
- * must fit MD_REF_KEY_MAX. Unicode folding and nested containers remain
- * independent work (#183/#540). */
+/* Admit a ROOT ASCII link-reference label across at most two physical LFs.
+ * The block prepass alone consumes this bounded source interval; inline
+ * references keep using md_reference_key on their literal single-line label.
+ * Original bytes (including CRLF and indentation) must fit 128 raw bytes.
+ * Continue to borrow only the immutable source; no secondary table, Unicode
+ * fold substitute, or nested-container definition grammar (#208 / #183). */
 static bool md_reference_definition_label(stun_md_document *d,
                                          md_line first,size_t begin,
                                          md_line *target_line,
@@ -2605,41 +2604,56 @@ static bool md_reference_definition_label(stun_md_document *d,
         *target_line=first;*after_colon=close+2u;
         return true;
     }
-    if(!first.newline || first.next>=d->raw_size ||
-       first.end<=begin+1u)return false;
-    /* Reject malformed syntax, nested brackets, non-ASCII labels and
-     * incomplete escape pairs before borrowing a continuation line. */
-    for(size_t p=begin+1u;p<first.end;) {
-        const unsigned char c=(unsigned char)s[p];
-        if(c=='\\' && p+1u<first.end &&
-           md_ascii_punct(s[p+1u])) {p+=2u;continue;}
-        if(c=='[' || c==']' || c>=0x80u ||
-           (c<0x20u && c!='\t'))return false;
-        ++p;
-    }
-    const md_line next=md_read_line(d,first.next);
-    const size_t second_begin=md_left(s,next.begin,next.end);
-    if(second_begin>=next.end ||
-       md_columns(s,next.begin,second_begin)>3u ||
-       md_root_code_span_interrupts(d,next))
-        return false;
-    const size_t second_close=md_reference_label_close(
-        s,next.end,second_begin);
-    if(second_close==SIZE_MAX || second_close+1u>=next.end ||
-       s[second_close+1u]!=':')return false;
-    const size_t first_part=first.end-(begin+1u);
-    const size_t second_part=second_close-second_begin;
-    if(second_close-(begin+1u)>MD_REF_KEY_MAX ||
-       first_part>=MD_REF_KEY_MAX ||
-       second_part>MD_REF_KEY_MAX-first_part-1u)return false;
     char scratch[MD_REF_KEY_MAX+1u];
-    memcpy(scratch,s+begin+1u,first_part);
-    scratch[first_part]=' ';
-    memcpy(scratch+first_part+1u,s+second_begin,second_part);
-    if(!md_reference_key(scratch,0u,first_part+1u+second_part,key))
-        return false;
-    *target_line=next;*after_colon=second_close+2u;
-    return true;
+    size_t used=0u;
+    md_line current=first;
+    for(size_t line_index=0u;line_index<3u;++line_index) {
+        size_t from=begin+1u;
+        if(line_index) {
+            if(!current.newline || current.next>=d->raw_size)return false;
+            current=md_read_line(d,current.next);
+            from=md_left(s,current.begin,current.end);
+            if(from>=current.end ||
+               md_columns(s,current.begin,from)>3u ||
+               md_root_code_span_interrupts(d,current))return false;
+        }
+        if(from>current.end)return false;
+        const size_t closer=md_reference_label_close(
+            s,current.end,from);
+        if(closer!=SIZE_MAX &&
+           (closer+1u>=current.end || s[closer+1u]!=':'))
+            return false;
+        const size_t until=closer==SIZE_MAX?current.end:closer;
+        if(until<(begin+1u) ||
+           until-(begin+1u)>MD_REF_KEY_MAX)
+            return false;
+        /* Invalid literal syntax cannot donate a later root continuation.
+         * Escape pairs remain raw key bytes for md_reference_key; UTF-8
+         * folding is separately owned by Salts::Unicode (#1192). */
+        for(size_t at=from;at<until;) {
+            const unsigned char c=(unsigned char)s[at];
+            if(c=='\\' && at+1u<until &&
+               md_ascii_punct(s[at+1u])) {at+=2u;continue;}
+            if(c=='[' || c==']' || c>=0x80u ||
+               (c<0x20u && c!='\t'))return false;
+            ++at;
+        }
+        const size_t bytes=until-from;
+        if(used>MD_REF_KEY_MAX || bytes>MD_REF_KEY_MAX-used)
+            return false;
+        if(bytes)memcpy(scratch+used,s+from,bytes);
+        used+=bytes;
+        if(closer!=SIZE_MAX) {
+            if(!md_reference_key(scratch,0u,used,key))
+                return false;
+            *target_line=current;*after_colon=closer+2u;
+            return true;
+        }
+        if(line_index==2u || used>=MD_REF_KEY_MAX ||
+           !current.newline)return false;
+        scratch[used++]=' '; /* canonical physical LF */
+    }
+    return false;
 }
 
 static bool md_reference_collect_line(stun_md_document *d,md_line line,
@@ -2656,8 +2670,8 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
     /* Only the OPENING definition has a <=3-column indentation limit.
      * A destination continuation may be deeply indented (#193), but a
      * blank or an actual interrupting root block cannot donate its bytes. */
-    if(target_begin==line.end && line.next<d->raw_size) {
-        const md_line next=md_read_line(d,line.next);
+    if(target_begin==target_line.end && target_line.next<d->raw_size) {
+        const md_line next=md_read_line(d,target_line.next);
         const size_t candidate=md_left(s,next.begin,next.end);
         if(candidate<next.end && s[candidate]!='[' &&
            !md_root_code_span_interrupts(d,next)) {
