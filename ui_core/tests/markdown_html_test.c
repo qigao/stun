@@ -423,11 +423,30 @@ static const html_fixture cases[] = {
       "<tbody>\n<tr>\n<td>[shadow]: /blocked</td>\n</tr>\n</tbody>\n"
       "</table>\n<h1>Root</h1>\n"
       "<p>[shadow] <a href=\"/uri\">ref</a></p>\n" }, /* ATX ends table and restores root-definition admission */
+    { "- Name | Link\n| --- | --- |\n[shadow]: /blocked\n"
+      "| A | [go][ref] |\n# Root\n[ref]: /uri\n\n[shadow] [go][ref]\n",
+      "<table>\n<thead>\n<tr>\n<th>- Name</th>\n<th>Link</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n<td>[shadow]: /blocked</td>\n"
+      "<td></td>\n</tr>\n<tr>\n<td>A</td>\n"
+      "<td><a href=\"/uri\">go</a></td>\n</tr>\n</tbody>\n</table>\n"
+      "<h1>Root</h1>\n<p>[shadow] <a href=\"/uri\">go</a></p>\n" }, /* list-looking GFM header beats list admission */
+    { "1. Item | Link\n| --- | --- |\n| A | [go][ref] |\n"
+      "# Root\n[ref]: /uri\n\n[go][ref]\n",
+      "<table>\n<thead>\n<tr>\n<th>1. Item</th>\n<th>Link</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n<td>A</td>\n"
+      "<td><a href=\"/uri\">go</a></td>\n</tr>\n</tbody>\n</table>\n"
+      "<h1>Root</h1>\n<p><a href=\"/uri\">go</a></p>\n" }, /* ordered-looking header stays a table */
+    { "| Key | Value |\n| --- | --- |\n| A | B |\n"
+      "1. first\n2. second\n\n[ref]: /uri\n\n[ref]\n",
+      "<table>\n<thead>\n<tr>\n<th>Key</th>\n<th>Value</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n<td>A</td>\n<td>B</td>\n"
+      "</tr>\n</tbody>\n</table>\n<ol>\n<li>first</li>\n"
+      "<li>second</li>\n</ol>\n<p><a href=\"/uri\">ref</a></p>\n" }, /* true table terminator becomes root list */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==231,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==234,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
