@@ -474,6 +474,166 @@ done:
     return failure;
 }
 
+/* GFM tables are parsed by the existing block parser. Their one-column
+ * pipe-optional DATA rows cannot donate ASCII reference definitions, while
+ * a definition after a real root boundary can still bind a table-cell link.
+ * Require copied href ownership in the final RichDoc, not raw source state. */
+static int test_table_reference_owner(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    typedef struct table_fixture {
+        const char *source,*html;
+        size_t links,table_links;
+    } table_fixture;
+    static const table_fixture cases[]={
+        {"| Column |\n| --- |\n[shadow]: /blocked\n\n"
+         "[ref]: /uri \"T\"\n\n[shadow] [ref]\n",
+         "<table>\n<thead>\n<tr>\n<th>Column</th>\n</tr>\n</thead>\n"
+         "<tbody>\n<tr>\n<td>[shadow]: /blocked</td>\n</tr>\n</tbody>\n"
+         "</table>\n<p>[shadow] <a href=\"/uri\" title=\"T\">ref</a></p>\n",
+         1u,0u},
+        {"| Item | Link |\n| --- | --- |\n| A | [go][ref] |\n\n"
+         "[ref]: /uri\n\n[go][ref]\n",
+         "<table>\n<thead>\n<tr>\n<th>Item</th>\n<th>Link</th>\n"
+         "</tr>\n</thead>\n<tbody>\n<tr>\n<td>A</td>\n"
+         "<td><a href=\"/uri\">go</a></td>\n</tr>\n</tbody>\n"
+         "</table>\n<p><a href=\"/uri\">go</a></p>\n",
+         2u,1u},
+        {"| Column |\n| --- |\n[shadow]: /blocked\n"
+         "# Root\n[ref]: /uri\n\n[shadow] [ref]\n",
+         "<table>\n<thead>\n<tr>\n<th>Column</th>\n</tr>\n</thead>\n"
+         "<tbody>\n<tr>\n<td>[shadow]: /blocked</td>\n</tr>\n</tbody>\n"
+         "</table>\n<h1>Root</h1>\n"
+         "<p>[shadow] <a href=\"/uri\">ref</a></p>\n",
+         1u,0u}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "table/root reference owner denominator");
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t bytes=strlen(cases[k].source);
+        VERIFY(stun_md_parse(cases[k].source,bytes,256u,bytes+1u,&doc)==
+               STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==bytes);
+        VERIFY(!memcmp(v.raw_markdown,cases[k].source,bytes));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_TABLE)==1u);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==cases[k].links);
+        size_t link_count=0u,cell_links=0u;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *node=&v.document.blocks[i];
+            if(node->kind!=STUN_UI_BLOCK_LINK)continue;
+            VERIFY(node->parent_index<i);
+            const stun_ui_block *owner=&v.document.blocks[node->parent_index];
+            VERIFY(owner->kind==STUN_UI_BLOCK_PARAGRAPH ||
+                   owner->kind==STUN_UI_BLOCK_TABLE_CELL);
+            if(owner->kind==STUN_UI_BLOCK_TABLE_CELL) {
+                VERIFY(owner->parent_index<node->parent_index);
+                const stun_ui_block *row=&v.document.blocks[owner->parent_index];
+                VERIFY(row->kind==STUN_UI_BLOCK_TABLE_ROW);
+                ++cell_links;
+            } else VERIFY(owner->parent_index==0u);
+            const char *meta=NULL;size_t size=SIZE_MAX;
+            VERIFY(stun_ui_rich_document_metadata(
+                &v,i,&meta,&size)==STUN_UI_OK);
+            VERIFY(meta && size==4u && !memcmp(meta,"/uri",4u));
+            ++link_count;
+        }
+        VERIFY(link_count==cases[k].links);
+        VERIFY(cell_links==cases[k].table_links);
+        const size_t expected=strlen(cases[k].html);
+        char html[1024];memset(html,0x6a,sizeof(html));
+        size_t required=SIZE_MAX;
+        VERIFY(expected+2u<sizeof(html));
+        VERIFY(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+        VERIFY(required==expected);
+        size_t reported=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,256u,html,expected,&reported)==
+               STUN_UI_CAPACITY_EXCEEDED);
+        VERIFY(reported==expected);
+        for(size_t i=0u;i<sizeof(html);++i)
+            VERIFY((unsigned char)html[i]==0x6au);
+        VERIFY(stun_md_render_html(&v,256u,html,expected+1u,&reported)==
+               STUN_UI_OK);
+        VERIFY(reported==expected);
+        VERIFY(!memcmp(html,cases[k].html,expected+1u));
+        VERIFY((unsigned char)html[expected+1u]==0x6au);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
+/* A 129-row one-column table with fake [key]: /uri rows must not consume
+ * any of the 128 parse-local ROOT reference slots. Prove both the native
+ * table row ancestry and the independent output capacity failure atomicity. */
+static int test_table_reference_capacity_isolation(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    char source[8192];
+    const char prefix[]="| Key |\n| --- |\n";
+    size_t used=sizeof(prefix)-1u;
+    memcpy(source,prefix,used);
+    for(size_t i=0u;i<129u;++i) {
+        char line[40];
+        const int n=snprintf(line,sizeof(line),"[k%zu]: /blocked\n",i);
+        VERIFY(n>0 && (size_t)n<sizeof(line));
+        VERIFY(used+(size_t)n<sizeof(source));
+        memcpy(source+used,line,(size_t)n);
+        used+=(size_t)n;
+    }
+    const char suffix[]="\n[real]: /uri\n\n[k0] [real]\n";
+    VERIFY(used+sizeof(suffix)-1u<sizeof(source));
+    memcpy(source+used,suffix,sizeof(suffix)-1u);
+    used+=sizeof(suffix)-1u;
+    VERIFY(stun_md_parse(source,used,1024u,used+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,1024u)==STUN_UI_OK);
+    VERIFY(v.raw_markdown_bytes==used);
+    VERIFY(!memcmp(v.raw_markdown,source,used));
+    VERIFY(kind_count(v,STUN_UI_BLOCK_TABLE)==1u);
+    VERIFY(kind_count(v,STUN_UI_BLOCK_TABLE_ROW)==130u);
+    VERIFY(kind_count(v,STUN_UI_BLOCK_TABLE_CELL)==130u);
+    VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+    bool found=false;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        if(v.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
+        const stun_ui_block *node=&v.document.blocks[i];
+        VERIFY(v.document.blocks[node->parent_index].kind==
+               STUN_UI_BLOCK_PARAGRAPH);
+        const char *meta=NULL;size_t length=SIZE_MAX;
+        VERIFY(stun_ui_rich_document_metadata(
+            &v,i,&meta,&length)==STUN_UI_OK);
+        VERIFY(meta && length==4u && !memcmp(meta,"/uri",4u));
+        found=true;
+    }
+    VERIFY(found);
+    char html[16384];memset(html,0x59,sizeof(html));
+    size_t required=SIZE_MAX,reported=SIZE_MAX;
+    VERIFY(stun_md_render_html(&v,1024u,NULL,0u,&required)==STUN_UI_OK);
+    VERIFY(required+2u<sizeof(html));
+    VERIFY(stun_md_render_html(&v,1024u,html,required,&reported)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(reported==required);
+    for(size_t i=0u;i<sizeof(html);++i)
+        VERIFY((unsigned char)html[i]==0x59u);
+    VERIFY(stun_md_render_html(&v,1024u,html,required+1u,&reported)==
+           STUN_UI_OK);
+    VERIFY(reported==required);
+    VERIFY(strstr(html,"<td>[k0]: /blocked</td>")!=NULL);
+    VERIFY(strstr(html,"<td>[k128]: /blocked</td>")!=NULL);
+    VERIFY(strstr(html,"<p>[k0] <a href=\"/uri\">real</a></p>")!=NULL);
+    VERIFY(strstr(html,"href=\"/blocked\"")==NULL);
+    VERIFY((unsigned char)html[required+1u]==0x59u);
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
         {"[foo][bar]\n\n[bar]: /url \"title\"\n",
@@ -550,7 +710,9 @@ int main(void) {
        test_root_rule_owner_release() ||
        test_root_atx_owner_release() ||
        test_root_fence_owner_release() ||
-       test_fence_definition_opacity())return 1;
+       test_fence_definition_opacity() ||
+       test_table_reference_owner() ||
+       test_table_reference_capacity_isolation())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -575,6 +737,6 @@ int main(void) {
         return 1;
     }
     puts("C11 root references: 21/21 AST/HTML, forward/duplicate/case "
-         "binding, safe URL, root-rule, ATX and fenced-code ownership");
+         "binding, safe URL, root-rule, ATX, fence and table ownership");
     return 0;
 }

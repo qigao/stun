@@ -407,11 +407,27 @@ static const html_fixture cases[] = {
       "<h2>Root</h2>\n<p><a href=\"/uri\">id</a></p>\n" }, /* single '-' is Setext H2, not list */
     { "Root\r\n2. text\r\n===\r\n[id]: /uri\r\n\r\n[id]\r\n",
       "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n" }, /* CRLF ownership and source preservation */
+    { "| Column |\n| --- |\n[shadow]: /blocked\n\n[ref]: /uri \"T\"\n\n[shadow] [ref]\n",
+      "<table>\n<thead>\n<tr>\n<th>Column</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>[shadow]: /blocked</td>\n</tr>\n</tbody>\n</table>\n"
+      "<p>[shadow] <a href=\"/uri\" title=\"T\">ref</a></p>\n" }, /* no-pipe body cell cannot donate a definition */
+    { "| Item | Link |\n| --- | --- |\n| A | [go][ref] |\n\n"
+      "[ref]: /uri\n\n[go][ref]\n",
+      "<table>\n<thead>\n<tr>\n<th>Item</th>\n<th>Link</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n<td>A</td>\n"
+      "<td><a href=\"/uri\">go</a></td>\n</tr>\n</tbody>\n</table>\n"
+      "<p><a href=\"/uri\">go</a></p>\n" }, /* forward ref metadata is copied into table cell and root owners */
+    { "| Column |\n| --- |\n[shadow]: /blocked\n"
+      "# Root\n[ref]: /uri\n\n[shadow] [ref]\n",
+      "<table>\n<thead>\n<tr>\n<th>Column</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>[shadow]: /blocked</td>\n</tr>\n</tbody>\n"
+      "</table>\n<h1>Root</h1>\n"
+      "<p>[shadow] <a href=\"/uri\">ref</a></p>\n" }, /* ATX ends table and restores root-definition admission */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==228,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==231,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
