@@ -274,7 +274,7 @@ int main(void) {
         {"<javascript:alert>\n",
          "<p>&lt;javascript:alert&gt;</p>\n"},
         {"<script>alert(1)</script>\n",
-         "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>\n"}
+         "&lt;script&gt;alert(1)&lt;/script&gt;\n"} /* type-1 raw BLOCK, escaped */
     };
     _Static_assert(sizeof(opaque)/sizeof(opaque[0])==4u,
                    "URI/RawHTML safety negative denominator");
