@@ -2114,6 +2114,11 @@ static void md_reference_collect_root(stun_md_document *d) {
     bool paragraph_started=false;
     bool fenced=false;
     bool container_pending=false;
+    /* Root-only admission guard, not a second nested-list grammar. Keep
+     * the outer list content column across blank lines: a blank does not
+     * terminate a list item when the next line remains content-indented. */
+    size_t list_content_column=0u;
+    bool after_list_blank=false;
     md_fence fence={0u,0u,UINT32_MAX};
     for(size_t pos=0u;pos<d->raw_size && d->error==STUN_UI_OK;) {
         const md_line line=md_read_line(d,pos);
@@ -2128,7 +2133,17 @@ static void md_reference_collect_root(stun_md_document *d) {
         if(md_blank(s,line.begin,line.end)) {
             paragraph_started=false;
             container_pending=false;
+            after_list_blank=list_content_column!=0u;
             continue;
+        }
+        if(after_list_blank) {
+            /* The real list parser matches the existing item's content
+             * column even after a blank. Never donate a continuation's
+             * [label]: syntax to the ROOT reference table. Dedenting below
+             * that column proves that this restricted root list has ended. */
+            if(columns>=list_content_column)container_pending=true;
+            else list_content_column=0u;
+            after_list_blank=false;
         }
         char marker=0;size_t count=0,ib=0,ie=0;
         if(columns<=3u &&
@@ -2137,13 +2152,17 @@ static void md_reference_collect_root(stun_md_document *d) {
             fence=(md_fence){marker,count,UINT32_MAX};
             paragraph_started=false;continue;
         }
-        bool ordered=false;size_t content=0u;
-        if(columns>3u || s[begin]=='>' ||
-           md_list_marker(s,begin,line.end,&ordered,&content)) {
-            /* This restricted prepass cannot prove ownership transitions
-             * out of a list/quote/indented-code continuation. Suppress
-             * definitions until a real blank-line root boundary. Do NOT
-             * import an indented or lazy quote/list body as a root binding. */
+        md_list_marker_info list_marker={0};
+        const bool list_start=columns<=3u &&
+                              md_list_token(s,line,&list_marker);
+        if(columns>3u || s[begin]=='>' || list_start) {
+            /* The outermost content column is sufficient for bounded
+             * root-definition admission; nested list definitions remain
+             * deferred. A new dedented list marker starts a new guard. */
+            if(list_start &&
+               (!list_content_column ||
+                list_marker.column<list_content_column))
+                list_content_column=list_marker.content_column;
             paragraph_started=false;
             container_pending=true;
             continue;

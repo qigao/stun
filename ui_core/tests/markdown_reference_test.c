@@ -141,11 +141,16 @@ static int test_container_definition_fences(void) {
         "> quote\n[hidden]: /uri\n\n[hidden]\n",
         "    [hidden]: /uri\n\n[hidden]\n",
         "paragraph\n[hidden]: /uri\n\n[hidden]\n",
-        "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n"
+        "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n",
+        "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
+        "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
+        "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
+        "- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n",
+        "- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==5u,
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==10u,
                    "reference-owner negative denominator");
-    for(size_t i=0u;i<5u;++i) {
+    for(size_t i=0u;i<sizeof(blocked)/sizeof(blocked[0]);++i) {
         const size_t n=strlen(blocked[i]);
         VERIFY(stun_md_parse(blocked[i],n,128u,n+1u,&doc)==STUN_UI_OK);
         VERIFY(doc!=NULL);
@@ -157,14 +162,91 @@ static int test_container_definition_fences(void) {
         stun_md_document_destroy(doc);
         doc=NULL;
     }
-    /* A true root blank boundary restores definition admission. */
-    const char root[]="- item\n\n[visible]: /uri\n\n[visible]\n";
-    const size_t size=sizeof(root)-1u;
-    VERIFY(stun_md_parse(root,size,128u,size+1u,&doc)==STUN_UI_OK);
+    /* Actual dedentation after a blank restores root definition admission,
+     * including the three-space root boundary of a '10.' list item. */
+    static const char *roots[]={
+        "- item\n\n[visible]: /uri\n\n[visible]\n",
+        "10. item\n\n   [visible]: /uri\n\n[visible]\n"
+    };
+    for(size_t i=0u;i<sizeof(roots)/sizeof(roots[0]);++i) {
+        const size_t size=strlen(roots[i]);
+        VERIFY(stun_md_parse(roots[i],size,128u,size+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view view=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
+        stun_md_document_destroy(doc);
+        doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
+/* Admission denial applies to metadata too: an indented list item
+ * cannot override a later unindented root binding after a second blank. */
+static int test_list_blank_scope(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    const char source[]=
+        "- item\n\n  [hidden]: /bad\n\n[visible]: /good\n\n[hidden] [visible]\n";
+    const size_t n=sizeof(source)-1u;
+    VERIFY(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&view,256u)==STUN_UI_OK);
+    VERIFY(view.raw_markdown_bytes==n);
+    VERIFY(!memcmp(view.raw_markdown,source,n));
+    VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
+    bool saw_good=false;
+    for(size_t i=1u;i<view.document.block_count;++i) {
+        if(view.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
+        const char *meta=NULL;size_t size=SIZE_MAX;
+        VERIFY(stun_ui_rich_document_metadata(
+            &view,i,&meta,&size)==STUN_UI_OK);
+        VERIFY(size==5u && !memcmp(meta,"/good",5u));
+        saw_good=true;
+    }
+    VERIFY(saw_good);
+    char html[512];size_t required=SIZE_MAX;
+    VERIFY(stun_md_render_html(&view,256u,html,sizeof(html),&required)==
+           STUN_UI_OK);
+    VERIFY(required<sizeof(html));
+    VERIFY(strstr(html,"<a href=\"/good\">visible</a>")!=NULL);
+    VERIFY(strstr(html,"href=\"/bad\"")==NULL);
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
+/* 129 apparent labels INSIDE a list must not exhaust the 128-entry
+ * ROOT-definition quota. Real root definitions still hit the quota in
+ * the independent opposite-direction capacity test below. */
+static int test_list_capacity_isolation(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    char source[8192];
+    const char prefix[]="- item\n\n";
+    size_t used=sizeof(prefix)-1u;
+    memcpy(source,prefix,used);
+    for(size_t i=0u;i<129u;++i) {
+        char line[32];
+        const int n=snprintf(line,sizeof(line),"  [k%zu]: /uri\n",i);
+        VERIFY(n>0 && (size_t)n<sizeof(line));
+        VERIFY(used+(size_t)n<sizeof(source));
+        memcpy(source+used,line,(size_t)n);
+        used+=(size_t)n;
+    }
+    const char suffix[]="\n[k0]\n";
+    VERIFY(used+sizeof(suffix)-1u<sizeof(source));
+    memcpy(source+used,suffix,sizeof(suffix)-1u);
+    used+=sizeof(suffix)-1u;
+    VERIFY(stun_md_parse(source,used,1024u,used+1u,&doc)==STUN_UI_OK);
     VERIFY(doc!=NULL);
     const stun_ui_rich_document_view view=stun_md_document_view(doc);
-    VERIFY(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
-    VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
+    VERIFY(stun_ui_rich_document_validate(&view,1024u)==STUN_UI_OK);
+    VERIFY(view.raw_markdown_bytes==used);
+    VERIFY(!memcmp(view.raw_markdown,source,used));
+    VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==0u);
 done:
     stun_md_document_destroy(doc);
     return failure;
@@ -220,7 +302,8 @@ int main(void) {
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
     if(test_unsafe() || test_fence() ||
-       test_container_definition_fences())return 1;
+       test_container_definition_fences() ||
+       test_list_blank_scope() || test_list_capacity_isolation())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -245,6 +328,6 @@ int main(void) {
         return 1;
     }
     puts("C11 root references: 14/14 AST/HTML, forward/duplicate/case "
-         "binding, safe URL, fenced/quote/list opacity and atomic bounded ownership");
+         "binding, safe URL, blank-list/quote/fence opacity and atomic bounded ownership");
     return 0;
 }
