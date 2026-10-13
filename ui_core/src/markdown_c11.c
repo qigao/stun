@@ -2373,6 +2373,54 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
         scratch,length+2u,0u,&parts,&close_paren) &&
         close_paren==length+1u;
     if(!valid) {free(scratch);return false;}
+    /* Narrow multi-physical-line reference TITLE admission: once the
+     * existing canonical target parser has validated a complete URL with
+     * no inline title, it may borrow exactly ONE adjacent <=3-column root
+     * physical line containing a complete quote/paren title. Construct a
+     * bounded synthetic separator and ask THE SAME md_link_target_parse
+     * to validate the destination + title; no second title grammar,
+     * arbitrary multiline content, new containers or fallback paths.
+     *
+     * Reject malformed or blank-separated titles WITHOUT consuming them.
+     * Later definitions must remain visible to the root prepass. */
+    if(!parts.has_title && last.next<d->raw_size) {
+        const md_line candidate_line=md_read_line(d,last.next);
+        const size_t candidate=md_left(
+            s,candidate_line.begin,candidate_line.end);
+        if(candidate<candidate_line.end &&
+           md_columns(s,candidate_line.begin,candidate)<=3u &&
+           (s[candidate]=='"' || s[candidate]=='\'' ||
+            s[candidate]=='(')) {
+            const size_t extra=candidate_line.end-candidate;
+            if(extra>SIZE_MAX-length-4u) {
+                md_error(d,STUN_UI_CAPACITY_EXCEEDED);
+                free(scratch);return true;
+            }
+            char *joined=(char*)malloc(length+extra+4u);
+            if(!joined) {
+                md_error(d,STUN_UI_OUT_OF_MEMORY);
+                free(scratch);return true;
+            }
+            joined[0]='(';
+            memcpy(joined+1u,s+target_begin,length);
+            joined[length+1u]=' ';
+            memcpy(joined+length+2u,s+candidate,extra);
+            joined[length+extra+2u]=')';
+            joined[length+extra+3u]='\0';
+            md_link_parts joined_parts={0};
+            size_t joined_close=SIZE_MAX;
+            if(md_link_target_parse(
+                   joined,length+extra+3u,0u,
+                   &joined_parts,&joined_close) &&
+               joined_close==length+extra+2u &&
+               joined_parts.has_title) {
+                free(scratch);
+                scratch=joined;
+                parts=joined_parts;
+                last=candidate_line;
+            } else free(joined);
+        }
+    }
     if(d->reference_count>=MD_REF_MAX) {
         md_error(d,STUN_UI_CAPACITY_EXCEEDED);free(scratch);return true;
     }

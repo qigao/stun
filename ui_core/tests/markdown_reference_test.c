@@ -807,8 +807,117 @@ done:
     return failure;
 }
 
+/* A third quoted definition must not be consumed by a preceding
+ * two-line URL+title owner (#217). Verify all three hrefs and only the
+ * first two title child metadata in the document-owned RichDoc. */
+static int test_adjacent_split_title_ownership(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    const char sample[]="[foo]: /foo-url \"foo\"\n[bar]: /bar-url\n"
+                        "  \"bar\"\n[baz]: /baz-url\n\n"
+                        "[foo],\n[bar],\n[baz]\n";
+    const char expected[]="<p><a href=\"/foo-url\" title=\"foo\">foo</a>,\n"
+                          "<a href=\"/bar-url\" title=\"bar\">bar</a>,\n"
+                          "<a href=\"/baz-url\">baz</a></p>\n";
+    const size_t n=sizeof(sample)-1u;
+    VERIFY(stun_md_parse(sample,n,256u,n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    VERIFY(v.raw_markdown_bytes==n);
+    VERIFY(!memcmp(v.raw_markdown,sample,n));
+    VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==3u);
+    VERIFY(kind_count(v,STUN_UI_BLOCK_LINK_TITLE)==2u);
+    const char *const urls[]={"/foo-url","/bar-url","/baz-url"};
+    const char *const titles[]={"foo","bar"};
+    size_t link=0u,title=0u;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        if(node->kind!=STUN_UI_BLOCK_LINK &&
+           node->kind!=STUN_UI_BLOCK_LINK_TITLE)continue;
+        VERIFY(node->parent_index<i);
+        const char *meta=NULL;size_t bytes=SIZE_MAX;
+        VERIFY(stun_ui_rich_document_metadata(
+            &v,i,&meta,&bytes)==STUN_UI_OK);
+        if(node->kind==STUN_UI_BLOCK_LINK) {
+            VERIFY(link<3u);
+            VERIFY(bytes==strlen(urls[link]));
+            VERIFY(meta && !memcmp(meta,urls[link],bytes));
+            VERIFY(v.document.blocks[node->parent_index].kind==
+                   STUN_UI_BLOCK_PARAGRAPH);
+            ++link;
+        } else {
+            VERIFY(title<2u);
+            VERIFY(bytes==strlen(titles[title]));
+            VERIFY(meta && !memcmp(meta,titles[title],bytes));
+            VERIFY(v.document.blocks[node->parent_index].kind==
+                   STUN_UI_BLOCK_LINK);
+            ++title;
+        }
+    }
+    VERIFY(link==3u && title==2u);
+    size_t need=SIZE_MAX,reported=SIZE_MAX;
+    VERIFY(stun_md_render_html(&v,256u,NULL,0u,&need)==STUN_UI_OK);
+    VERIFY(need==sizeof(expected)-1u);
+    char out[512];memset(out,0x75,sizeof(out));
+    VERIFY(stun_md_render_html(&v,256u,out,need,&reported)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(reported==need);
+    for(size_t i=0u;i<sizeof(out);++i)
+        VERIFY((unsigned char)out[i]==0x75u);
+    VERIFY(stun_md_render_html(&v,256u,out,need+1u,&reported)==
+           STUN_UI_OK);
+    VERIFY(reported==need);
+    VERIFY(!memcmp(out,expected,need+1u));
+    VERIFY((unsigned char)out[need+1u]==0x75u);
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
+/* Unfinished or separated title lines remain normal root paragraphs.
+ * They must not change the preceding LINK's optional TITLE metadata. */
+static int test_split_title_rejection(void) {
+    int failure=0;
+    stun_md_document *doc=NULL;
+    static const char *const cases[]={
+        "[foo]: /uri\n\"unterminated\n\n[foo]\n",
+        "[foo]: /uri\n- item\n\n[foo]\n",
+        "[foo]: /uri\n\n\"title\"\n\n[foo]\n"
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "root title-negative control count");
+    for(size_t k=0u;k<3u;++k) {
+        const size_t n=strlen(cases[k]);
+        VERIFY(stun_md_parse(cases[k],n,128u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        VERIFY(v.raw_markdown_bytes==n);
+        VERIFY(!memcmp(v.raw_markdown,cases[k],n));
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK_TITLE)==0u);
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);
+    return failure;
+}
+
 int main(void) {
     static const reference_fixture cases[]={
+        {"[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]\n",
+         "my url","title","Foo bar",
+         "<p><a href=\"my%20url\" title=\"title\">Foo bar</a></p>\n"},
+        {"[foo]: /uri\r\n  \"A &amp; B\"\r\n\r\n[foo]\r\n",
+         "/uri","A & B","foo",
+         "<p><a href=\"/uri\" title=\"A &amp; B\">foo</a></p>\n"},
+        {"[foo]: /uri\n   (title)\n\n[foo]\n",
+         "/uri","title","foo",
+         "<p><a href=\"/uri\" title=\"title\">foo</a></p>\n"},
+        {"[foo]: /uri\n\"title\"\n\n[foo]\n",
+         "/uri","title","foo",
+         "<p><a href=\"/uri\" title=\"title\">foo</a></p>\n"},
         {"[foo]:\n/url\n\n[foo]\n",
          "/url",NULL,"foo",
          "<p><a href=\"/url\">foo</a></p>\n"}, /* CommonMark #198 */
@@ -883,7 +992,7 @@ int main(void) {
          "/uri",NULL,"id",
          "<h1>Root\n2. text</h1>\n<p><a href=\"/uri\">id</a></p>\n"}
     };
-    _Static_assert(sizeof(cases)/sizeof(cases[0])==24u,
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==28u,
                    "reference AST/HTML fixture denominator");
     for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
         if(test_reference(&cases[i]))return 1;
@@ -898,7 +1007,9 @@ int main(void) {
        test_table_reference_capacity_isolation() ||
        test_table_list_competition() ||
        test_split_reference_block_barriers() ||
-       test_split_reference_capacity_rollback())return 1;
+       test_split_reference_capacity_rollback() ||
+       test_adjacent_split_title_ownership() ||
+       test_split_title_rejection())return 1;
     const char limited[]="[foo][bar]\n\n[bar]: /url \"title\"\n";
     stun_md_document *rejected=(stun_md_document*)(uintptr_t)1u;
     if(stun_md_parse(limited,sizeof(limited)-1u,3u,
@@ -922,7 +1033,7 @@ int main(void) {
         fprintf(stderr,"reference admission must be bounded\n");
         return 1;
     }
-    puts("C11 root references: 24/24 AST/HTML, forward/duplicate/case "
+    puts("C11 root references: 28/28 AST/HTML, forward/duplicate/case "
          "binding, safe URL, root-rule, ATX, fence and table ownership");
     return 0;
 }

@@ -548,11 +548,32 @@ static const html_fixture cases[] = {
     { "[foo]:\n> /uri\n\n[foo]\n",
       "<p>[foo]:</p>\n<blockquote>\n<p>/uri</p>\n</blockquote>\n"
       "<p>[foo]</p>\n" }, /* quote cannot donate root destination */
+    { "[Foo bar]:\n<my url>\n'title'\n\n[Foo bar]\n",
+      "<p><a href=\"my%20url\" title=\"title\">Foo bar</a></p>\n" }, /* official #195 */
+    { "[foo]: /foo-url \"foo\"\n[bar]: /bar-url\n  \"bar\"\n"
+      "[baz]: /baz-url\n\n[foo],\n[bar],\n[baz]\n",
+      "<p><a href=\"/foo-url\" title=\"foo\">foo</a>,\n"
+      "<a href=\"/bar-url\" title=\"bar\">bar</a>,\n"
+      "<a href=\"/baz-url\">baz</a></p>\n" }, /* official #217 */
+    { "[foo]: /uri\r\n  \"A &amp; B\"\r\n\r\n[foo]\r\n",
+      "<p><a href=\"/uri\" title=\"A &amp; B\">foo</a></p>\n" }, /* CRLF and decoded HTML5 title */
+    { "[foo]: /uri\n   (title)\n\n[foo]\n",
+      "<p><a href=\"/uri\" title=\"title\">foo</a></p>\n" }, /* root 3-column parentheses */
+    { "[foo]: /uri\n\"title\"\n\n[foo]\n",
+      "<p><a href=\"/uri\" title=\"title\">foo</a></p>\n" }, /* unindented quoted title */
+    { "[foo]: /uri\n\"unterminated\n\n[foo]\n",
+      "<p>&quot;unterminated</p>\n<p><a href=\"/uri\">foo</a></p>\n" }, /* malformed title remains paragraph */
+    { "[foo]: /uri\n- item\n\n[foo]\n",
+      "<ul>\n<li>item</li>\n</ul>\n"
+      "<p><a href=\"/uri\">foo</a></p>\n" }, /* list opener cannot be title */
+    { "[foo]: /uri\n\n\"title\"\n\n[foo]\n",
+      "<p>&quot;title&quot;</p>\n<p><a href=\"/uri\">foo</a></p>\n" }, /* blank forbids title lookahead */
+
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==285,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==293,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
