@@ -44,6 +44,8 @@ struct stun_md_document {
     size_t node_limit;
     md_reference_binding *references;
     size_t reference_count;
+    bool collecting_container_definitions;
+    bool discovered_container_definition;
     stun_ui_status error;
 };
 
@@ -53,6 +55,15 @@ typedef struct md_line {
     size_t next;
     bool newline;
 } md_line;
+
+/* Container references are admitted by the SAME canonical quote/list
+ * block traversal, never by stripping '>' or guessing a second grammar. */
+static bool md_reference_definition_line(const stun_md_document *d,size_t begin);
+static bool md_reference_collect_line(stun_md_document *d,md_line line,
+                                      size_t begin,size_t *after_definition,
+                                      bool container);
+static bool md_container_reference_line(stun_md_document *d,md_line line,
+                                        size_t begin);
 
 typedef struct md_fence {
     char marker;
@@ -2011,11 +2022,13 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             f->code=UINT32_MAX;
             if(md_list_append_quote(d,f,s,body,line.end)) return true;
             f->quote=f->quote_paragraph=UINT32_MAX;
+            const size_t text_begin=md_left(s,body,line.end);
+            if(f->paragraph==UINT32_MAX &&
+               md_container_reference_line(d,line,text_begin))return true;
             if(f->paragraph==UINT32_MAX) {
                 f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
                 if(f->paragraph==UINT32_MAX) return true;
             } else (void)md_add(d,f->paragraph,STUN_UI_BLOCK_LINE_BREAK,0u);
-            const size_t text_begin=md_left(s,body,line.end);
             (void)md_inline(d,f->paragraph,s+text_begin,
                             line.end-text_begin,0u);
             return true;
@@ -2341,6 +2354,11 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
         if(q->code==UINT32_MAX)return false;
         q->lazy=false;
         return md_quote_code_line(d,q->code,line,body);
+    }
+    if(q->paragraph==UINT32_MAX && indent<=3u &&
+       md_container_reference_line(d,line,begin)) {
+        q->lazy=false;
+        return d->error==STUN_UI_OK;
     }
     if(q->paragraph==UINT32_MAX) {
         q->paragraph=md_add(d,parent,STUN_UI_BLOCK_PARAGRAPH,0u);
@@ -2737,20 +2755,26 @@ static bool md_reference_definition_label(stun_md_document *d,
 }
 
 static bool md_reference_collect_line(stun_md_document *d,md_line line,
-                                      size_t begin,size_t *after_definition) {
+                                      size_t begin,size_t *after_definition,
+                                      bool container) {
     const char *s=d->raw;
     if(begin>=line.end || s[begin]!='[')return false;
     char key[MD_REF_KEY_MAX+1u];
     md_line target_line=line;
     size_t after_colon=0u;
+    if(container &&
+       (md_reference_label_close(s,line.end,begin+1u)==SIZE_MAX))
+        return false;
     if(!md_reference_definition_label(d,line,begin,&target_line,
                                       &after_colon,key))return false;
+    if(container && target_line.begin!=line.begin)return false;
     size_t target_begin=md_left(s,after_colon,target_line.end);
     md_line last=target_line;
     /* Only the OPENING definition has a <=3-column indentation limit.
      * A destination continuation may be deeply indented (#193), but a
      * blank or an actual interrupting root block cannot donate its bytes. */
-    if(target_begin==target_line.end && target_line.next<d->raw_size) {
+    if(!container && target_begin==target_line.end &&
+       target_line.next<d->raw_size) {
         const md_line next=md_read_line(d,target_line.next);
         const size_t candidate=md_left(s,next.begin,next.end);
         if(candidate<next.end && s[candidate]!='[' &&
@@ -2771,11 +2795,19 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
     if(at<last.end) {
         /* An invalid/unclosed same-line title invalidates the definition;
          * never keep only its destination (official #197/#209). */
-        if(at==destination_stop ||
-           !md_reference_collect_title(d,last,at,&last,&title,&title_len))
+        if(at==destination_stop)return false;
+        if(container) {
+            size_t cursor=at;
+            md_link_parts scoped={0};bool incomplete=false;
+            if(!md_link_title_scan(s,last.end,&cursor,&scoped,false,
+                                   &incomplete) ||
+               !md_blank(s,cursor,last.end))
+                return false;
+        }
+        if(!md_reference_collect_title(d,last,at,&last,&title,&title_len))
             return false;
         has_title=true;
-    } else if(last.next<d->raw_size) {
+    } else if(!container && last.next<d->raw_size) {
         const md_line next=md_read_line(d,last.next);
         const size_t candidate=md_left(s,next.begin,next.end);
         if(candidate<next.end &&
@@ -2803,13 +2835,39 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
             free(title);free(href);return true;
         }
     }
-    md_reference_binding *item=&d->references[d->reference_count++];
+    /* Root definitions were collected first; newly admitted container
+     * definitions must be inserted by SOURCE offset so first definition
+     * wins even when it lived in a quote/list before the root binding.
+     * This also keeps the definition-line binary search valid. */
+    size_t index=d->reference_count;
+    while(index && d->references[index-1u].source_line>line.begin)
+        --index;
+    if(index<d->reference_count)
+        memmove(d->references+index+1u,d->references+index,
+                (d->reference_count-index)*sizeof(*d->references));
+    ++d->reference_count;
+    md_reference_binding *item=&d->references[index];
     memcpy(item->key,key,strlen(key)+1u);
     item->href=href;item->href_bytes=href_len;
     item->title=title;item->title_bytes=title_len;
     item->has_title=has_title;
     item->source_line=line.begin;item->source_last_line=last.begin;
     if(after_definition)*after_definition=last.next;
+    return true;
+}
+
+/* Called ONLY after existing quote/list owner has established this line's
+ * content column and paragraph/fence precedence. In discovery, collect
+ * its metadata into the SAME document table. During emission, suppress
+ * only source intervals already admitted by discovery. */
+static bool md_container_reference_line(stun_md_document *d,md_line line,
+                                        size_t begin) {
+    if(md_reference_definition_line(d,line.begin))return true;
+    if(!d->collecting_container_definitions || begin>=line.end ||
+       d->raw[begin]!='[')return false;
+    size_t after=line.next;
+    if(!md_reference_collect_line(d,line,begin,&after,true))return false;
+    if(d->error==STUN_UI_OK)d->discovered_container_definition=true;
     return true;
 }
 
@@ -2972,7 +3030,7 @@ static void md_reference_collect_root(stun_md_document *d) {
         }
         size_t after_definition=pos;
         if(!paragraph_started &&
-           md_reference_collect_line(d,line,begin,&after_definition)) {
+           md_reference_collect_line(d,line,begin,&after_definition,false)) {
             pos=after_definition;
             paragraph_started=false;continue;
         }
@@ -3331,7 +3389,22 @@ stun_ui_status stun_md_parse(const char *input,size_t length,
         return error;
     }
     md_reference_collect_root(d);
-    if(d->error==STUN_UI_OK)md_parse_blocks(d);
+    if(d->error==STUN_UI_OK) {
+        /* Discovery and final emission use the SAME canonical block parser.
+         * Only a document containing a real container definition is
+         * replayed. Nothing from discovery is exposed to callers: reset
+         * owned IR arenas, preserve bounded refs, then publish once. */
+        d->collecting_container_definitions=true;
+        md_parse_blocks(d);
+        d->collecting_container_definitions=false;
+        if(d->error==STUN_UI_OK && d->discovered_container_definition) {
+            d->node_count=d->text_size=d->metadata_size=0u;
+            d->text[0]=d->metadata[0]='\0';
+            if(md_add(d,STUN_UI_PARENT_NONE,
+                      STUN_UI_BLOCK_DOCUMENT,0u)!=UINT32_MAX)
+                md_parse_blocks(d);
+        }
+    }
     /* Parse-local binding state is discarded before the public RichDoc
      * snapshot is validated or returned. No raw runtime binding persists. */
     md_reference_clear(d);

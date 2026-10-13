@@ -59,6 +59,15 @@ target_compile_features(stun_markdown_image_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_image_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_image_test COMMAND stun_markdown_image_test)
 
+# #225: existing quote/list block ownership admits references into the
+# same bounded document table, preserving source order and failure atomicity.
+add_executable(stun_markdown_container_reference_test
+               markdown_container_reference_test.c)
+target_compile_features(stun_markdown_container_reference_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_container_reference_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_container_reference_test
+         COMMAND stun_markdown_container_reference_test)
+
 add_executable(stun_markdown_golden_test markdown_golden_test.c)
 target_link_libraries(stun_markdown_golden_test PRIVATE Stun::UICore)
 target_compile_features(stun_markdown_golden_test PRIVATE c_std_11)

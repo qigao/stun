@@ -91,6 +91,10 @@ static const html_fixture cases[] = {
       "<p><img src=\"/url\" alt=\"foo\" title=\"title\" /></p>\n" }, /* official IMAGE #584 */
     { "![foo]\n\n[foo]: /url \"title\"\n",
       "<p><img src=\"/url\" alt=\"foo\" title=\"title\" /></p>\n" }, /* official IMAGE #588 */
+    { "[foo]\n\n> [foo]: /url\n",
+      "<p><a href=\"/url\">foo</a></p>\n<blockquote>\n</blockquote>\n" }, /* official #218 */
+    { "- a\n- b\n\n  [ref]: /url\n- d\n",
+      "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n<li>\n<p>d</p>\n</li>\n</ul>\n" }, /* official #317 */
     { "A [B](dest)\n", "<p>A <a href=\"dest\">B</a></p>\n" },
     { "[link [foo [bar]]](/uri)\n",
       "<p><a href=\"/uri\">link [foo [bar]]</a></p>\n" }, /* official #512 */
@@ -710,7 +714,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==360,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==362,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

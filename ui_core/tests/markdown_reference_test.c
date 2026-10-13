@@ -130,36 +130,25 @@ done:
     return failure;
 }
 
-/* Reference definitions belong only to root paragraph boundaries in this
- * restricted slice. A lazy quote/list continuation and indented code line
- * must NEVER be promoted into the document reference lookup table. */
+/* Canonical quote/list owners may admit definitions at real block
+ * boundaries, but lazy continuation, fenced/indented code and active
+ * paragraph text remain semantically opaque. Earlier root-only exclusions
+ * that were contrary to CommonMark are now positive ownership gates. */
 static int test_container_definition_fences(void) {
-    int failure=0;
-    stun_md_document *doc=NULL;
-    static const char *blocked[]={
+    int failure=0;stun_md_document *doc=NULL;
+    static const char *const blocked[]={
         "- item\n  [hidden]: /uri\n\n[hidden]\n",
         "> quote\n[hidden]: /uri\n\n[hidden]\n",
         "    [hidden]: /uri\n\n[hidden]\n",
         "paragraph\n[hidden]: /uri\n\n[hidden]\n",
         "paragraph\n== invalid\n[hidden]: /uri\n\n[hidden]\n",
-        "- item\n    * * *\n    [hidden]: /bad\n\n[hidden]\n",
-        /* A Setext item heading followed by a real list paragraph:
-         * the continued [hidden]: line remains paragraph TEXT, not a
-         * root definition. Without the preceding continuation, a list
-         * can terminate before the label and that would be a false XFAIL. */
         "- item\n  ---\n  continuation\n  [hidden]: /bad\n\n[hidden]\n",
-        "> quote\n> # inner\n> [hidden]: /uri\n\n[hidden]\n",
         "    # literal\n    [hidden]: /uri\n\n[hidden]\n",
-        "- item\n\n  [hidden]: /uri\n\n[hidden]\n",
         "Root\n1. real\n===\n[hidden]: /uri\n\n[hidden]\n",
-        "Root\n+ real\n===\n[hidden]: /uri\n\n[hidden]\n",
-        "1. item\n\n   [hidden]: /uri\n\n[hidden]\n",
-        "- item\n\n\t[hidden]: /uri\n\n[hidden]\n",
-        "- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n",
-        "- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n"
+        "Root\n+ real\n===\n[hidden]: /uri\n\n[hidden]\n"
     };
-    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==16u,
-                   "reference-owner negative denominator");
+    _Static_assert(sizeof(blocked)/sizeof(blocked[0])==9u,
+                   "real container-opaque negative denominator");
     for(size_t i=0u;i<sizeof(blocked)/sizeof(blocked[0]);++i) {
         const size_t n=strlen(blocked[i]);
         VERIFY(stun_md_parse(blocked[i],n,128u,n+1u,&doc)==STUN_UI_OK);
@@ -167,96 +156,136 @@ static int test_container_definition_fences(void) {
         const stun_ui_rich_document_view v=stun_md_document_view(doc);
         VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
         VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==0u);
-        VERIFY(v.raw_markdown_bytes==n);
-        VERIFY(!memcmp(v.raw_markdown,blocked[i],n));
-        stun_md_document_destroy(doc);
-        doc=NULL;
+        VERIFY(v.raw_markdown_bytes==n &&
+               !memcmp(v.raw_markdown,blocked[i],n));
+        stun_md_document_destroy(doc);doc=NULL;
     }
-    /* Actual dedentation after a blank restores root definition admission,
-     * including the three-space root boundary of a '10.' list item. */
-    static const char *roots[]={
+    static const struct {
+        const char *source,*href;
+    } owner_definitions[]={
+        {"- item\n    * * *\n    [hidden]: /bad\n\n[hidden]\n","/bad"},
+        {"> quote\n> # inner\n> [hidden]: /uri\n\n[hidden]\n","/uri"},
+        {"- item\n\n  [hidden]: /uri\n\n[hidden]\n","/uri"},
+        {"1. item\n\n   [hidden]: /uri\n\n[hidden]\n","/uri"},
+        {"- item\n\n\t[hidden]: /uri\n\n[hidden]\n","/uri"},
+        {"- outer\n\n  - inner\n\n    [hidden]: /uri\n\n[hidden]\n","/uri"},
+        {"- item\n\n  [hidden]: /uri\n\n  continuation\n\n[hidden]\n","/uri"}
+    };
+    _Static_assert(sizeof(owner_definitions)/sizeof(owner_definitions[0])
+                   ==7u,"normative quote/list binding denominator");
+    for(size_t i=0u;i<sizeof(owner_definitions)/
+                         sizeof(owner_definitions[0]);++i) {
+        const char *source=owner_definitions[i].source;
+        const size_t n=strlen(source);
+        VERIFY(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+        bool found=false;
+        for(size_t j=1u;j<v.document.block_count;++j) {
+            if(v.document.blocks[j].kind!=STUN_UI_BLOCK_LINK)continue;
+            const char *href=NULL;size_t bytes=SIZE_MAX;
+            VERIFY(stun_ui_rich_document_metadata(&v,j,&href,&bytes)
+                   ==STUN_UI_OK);
+            VERIFY(bytes==strlen(owner_definitions[i].href) &&
+                   !memcmp(href,owner_definitions[i].href,bytes));
+            found=true;
+        }
+        VERIFY(found);
+        VERIFY(v.raw_markdown_bytes==n &&
+               !memcmp(v.raw_markdown,source,n));
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+    /* Root dedent after a blank still releases the active container. */
+    static const char *const roots[]={
         "- item\n\n[visible]: /uri\n\n[visible]\n",
         "10. item\n\n   [visible]: /uri\n\n[visible]\n"
     };
     for(size_t i=0u;i<sizeof(roots)/sizeof(roots[0]);++i) {
-        const size_t size=strlen(roots[i]);
-        VERIFY(stun_md_parse(roots[i],size,128u,size+1u,&doc)==STUN_UI_OK);
+        const size_t n=strlen(roots[i]);
+        VERIFY(stun_md_parse(roots[i],n,128u,n+1u,&doc)==STUN_UI_OK);
         VERIFY(doc!=NULL);
-        const stun_ui_rich_document_view view=stun_md_document_view(doc);
-        VERIFY(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
-        VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
-        stun_md_document_destroy(doc);
-        doc=NULL;
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+        stun_md_document_destroy(doc);doc=NULL;
     }
 done:
     stun_md_document_destroy(doc);
     return failure;
 }
 
-/* Admission denial applies to metadata too: an indented list item
- * cannot override a later unindented root binding after a second blank. */
+/* List-owned and root definitions share one document map; both become
+ * visible to later root references, preserving their individual hrefs. */
 static int test_list_blank_scope(void) {
-    int failure=0;
-    stun_md_document *doc=NULL;
+    int failure=0;stun_md_document *doc=NULL;
     const char source[]=
         "- item\n\n  [hidden]: /bad\n\n[visible]: /good\n\n[hidden] [visible]\n";
     const size_t n=sizeof(source)-1u;
     VERIFY(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_OK);
-    const stun_ui_rich_document_view view=stun_md_document_view(doc);
-    VERIFY(stun_ui_rich_document_validate(&view,256u)==STUN_UI_OK);
-    VERIFY(view.raw_markdown_bytes==n);
-    VERIFY(!memcmp(view.raw_markdown,source,n));
-    VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==1u);
-    bool saw_good=false;
-    for(size_t i=1u;i<view.document.block_count;++i) {
-        if(view.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
-        const char *meta=NULL;size_t size=SIZE_MAX;
-        VERIFY(stun_ui_rich_document_metadata(
-            &view,i,&meta,&size)==STUN_UI_OK);
-        VERIFY(size==5u && !memcmp(meta,"/good",5u));
-        saw_good=true;
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    VERIFY(v.raw_markdown_bytes==n && !memcmp(v.raw_markdown,source,n));
+    VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==2u);
+    bool saw_bad=false,saw_good=false;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        if(v.document.blocks[i].kind!=STUN_UI_BLOCK_LINK)continue;
+        const char *href=NULL;size_t bytes=SIZE_MAX;
+        VERIFY(stun_ui_rich_document_metadata(&v,i,&href,&bytes)
+               ==STUN_UI_OK);
+        if(bytes==4u && !memcmp(href,"/bad",4u))saw_bad=true;
+        else if(bytes==5u && !memcmp(href,"/good",5u))saw_good=true;
+        else VERIFY(false);
     }
-    VERIFY(saw_good);
+    VERIFY(saw_bad && saw_good);
     char html[512];size_t required=SIZE_MAX;
-    VERIFY(stun_md_render_html(&view,256u,html,sizeof(html),&required)==
+    VERIFY(stun_md_render_html(&v,256u,html,sizeof(html),&required)==
            STUN_UI_OK);
     VERIFY(required<sizeof(html));
+    VERIFY(strstr(html,"<a href=\"/bad\">hidden</a>")!=NULL);
     VERIFY(strstr(html,"<a href=\"/good\">visible</a>")!=NULL);
-    VERIFY(strstr(html,"href=\"/bad\"")==NULL);
 done:
     stun_md_document_destroy(doc);
     return failure;
 }
 
-/* 129 apparent labels INSIDE a list must not exhaust the 128-entry
- * ROOT-definition quota. Real root definitions still hit the quota in
- * the independent opposite-direction capacity test below. */
+/* Real list definitions must obey the SAME 128-entry global map budget;
+ * 129 unique list definitions fail atomically rather than being silently
+ * treated as inert root-only syntax. Exact 128 entries still bind. */
 static int test_list_capacity_isolation(void) {
-    int failure=0;
-    stun_md_document *doc=NULL;
+    int failure=0;stun_md_document *doc=NULL;
     char source[8192];
-    const char prefix[]="- item\n\n";
-    size_t used=sizeof(prefix)-1u;
-    memcpy(source,prefix,used);
-    for(size_t i=0u;i<129u;++i) {
-        char line[32];
-        const int n=snprintf(line,sizeof(line),"  [k%zu]: /uri\n",i);
-        VERIFY(n>0 && (size_t)n<sizeof(line));
-        VERIFY(used+(size_t)n<sizeof(source));
-        memcpy(source+used,line,(size_t)n);
-        used+=(size_t)n;
+    const char prefix[]="- item\n\n",suffix[]="\n[k0]\n";
+    for(size_t count=128u;count<=129u;++count) {
+        size_t used=sizeof(prefix)-1u;
+        memcpy(source,prefix,used);
+        for(size_t i=0u;i<count;++i) {
+            char line[32];
+            const int n=snprintf(line,sizeof(line),"  [k%zu]: /uri\n",i);
+            VERIFY(n>0 && (size_t)n<sizeof(line));
+            VERIFY(used+(size_t)n<sizeof(source));
+            memcpy(source+used,line,(size_t)n);used+=(size_t)n;
+        }
+        VERIFY(used+sizeof(suffix)-1u<sizeof(source));
+        memcpy(source+used,suffix,sizeof(suffix)-1u);
+        used+=sizeof(suffix)-1u;
+        const stun_ui_status status=
+            stun_md_parse(source,used,1024u,used+1u,&doc);
+        if(count==129u) {
+            VERIFY(status==STUN_UI_CAPACITY_EXCEEDED);
+            VERIFY(doc==NULL);
+        } else {
+            VERIFY(status==STUN_UI_OK && doc!=NULL);
+            const stun_ui_rich_document_view v=stun_md_document_view(doc);
+            VERIFY(stun_ui_rich_document_validate(&v,1024u)==STUN_UI_OK);
+            VERIFY(v.raw_markdown_bytes==used &&
+                   !memcmp(v.raw_markdown,source,used));
+            VERIFY(kind_count(v,STUN_UI_BLOCK_LINK)==1u);
+            stun_md_document_destroy(doc);doc=NULL;
+        }
     }
-    const char suffix[]="\n[k0]\n";
-    VERIFY(used+sizeof(suffix)-1u<sizeof(source));
-    memcpy(source+used,suffix,sizeof(suffix)-1u);
-    used+=sizeof(suffix)-1u;
-    VERIFY(stun_md_parse(source,used,1024u,used+1u,&doc)==STUN_UI_OK);
-    VERIFY(doc!=NULL);
-    const stun_ui_rich_document_view view=stun_md_document_view(doc);
-    VERIFY(stun_ui_rich_document_validate(&view,1024u)==STUN_UI_OK);
-    VERIFY(view.raw_markdown_bytes==used);
-    VERIFY(!memcmp(view.raw_markdown,source,used));
-    VERIFY(kind_count(view,STUN_UI_BLOCK_LINK)==0u);
 done:
     stun_md_document_destroy(doc);
     return failure;
