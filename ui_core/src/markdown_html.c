@@ -135,7 +135,10 @@ static bool html_safe_title(const char *s,size_t n) {
     if(!s && n)return false;
     for(size_t i=0u;i<n;++i) {
         const unsigned char c=(unsigned char)s[i];
-        if(c<0x20u || c==0x7Fu)return false;
+        /* LF and TAB are safe payload in a quoted HTML5 title attribute.
+         * The Markdown collector normalizes physical CRLF to LF; all other
+         * C0/DEL bytes remain rejected. This does NOT relax href admission. */
+        if((c<0x20u && c!='\n' && c!='\t') || c==0x7Fu)return false;
     }
     return true;
 }

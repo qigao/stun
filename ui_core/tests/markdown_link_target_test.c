@@ -249,7 +249,15 @@ int main(void) {
      * be normalized into an apparently safe ASCII URL. */
     CHECK(verify_safe_rejection("[x](java&#x73;cript:alert \"t\")\n")==0);
     CHECK(verify_safe_rejection("[x](data:text/html \"t\")\n")==0);
-    CHECK(verify_safe_rejection("[x](safe \"a&#10;b\")\n")==0);
+    /* Titles are quoted HTML5 text, not URLs. LF/TAB are safe payload;
+     * CR and other C0/DEL controls must still fail without output. */
+    const link_fixture title_whitespace={
+        "[x](safe \"a&#10;b&#9;c\")\n","safe","a\nb\tc","x",
+        "<p><a href=\"safe\" title=\"a\nb\tc\">x</a></p>\n"};
+    CHECK(verify_link(&title_whitespace)==0);
+    CHECK(verify_safe_rejection("[x](safe \"a&#1;b\")\n")==0);
+    CHECK(verify_safe_rejection("[x](safe \"a&#13;b\")\n")==0);
+    CHECK(verify_safe_rejection("[x](safe \"a&#127;b\")\n")==0);
     /* The whole decoded href must be admitted, not only its first scheme,
      * separator or fragment. These inputs used to bypass early returns at
      * '/', '?', '#', 'https:' and 'mailto:' with a late C0 scalar. */

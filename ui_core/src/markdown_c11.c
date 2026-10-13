@@ -13,10 +13,10 @@
  */
 /* Parse-local root reference-definition bindings, never exposed through
  * RichDoc or persisted as runtime state. First normalized label wins.
- * Restrict this slice to bounded ASCII alphanumeric/whitespace labels:
- * full Unicode Default Case Folding and escaped-label equivalence are
- * tracked separately, not implemented via a locale or Stun fallback. */
-enum { MD_REF_MAX=128u, MD_REF_KEY_MAX=128u };
+ * Restrict this slice to bounded ASCII labels, retaining raw escape spelling.
+ * Full Unicode Default Case Folding remains tracked separately; never
+ * substitute locale tables or decode a key as inline content. */
+enum { MD_REF_MAX=128u, MD_REF_KEY_MAX=128u, MD_REF_TITLE_LINES_MAX=64u };
 typedef struct md_reference_binding {
     char key[MD_REF_KEY_MAX+1u];
     char *href;
@@ -25,7 +25,7 @@ typedef struct md_reference_binding {
     size_t title_bytes;
     bool has_title;
     size_t source_line;
-    size_t source_last_line; /* inclusive, one optional ROOT continuation */
+    size_t source_last_line; /* inclusive, all validated ROOT continuations */
 } md_reference_binding;
 
 struct stun_md_document {
@@ -476,37 +476,29 @@ static size_t md_match(const char *s, size_t n, size_t start,
  * All scans remain within n owned source bytes. Unbracketed parentheses
  * nesting is bounded to 32 levels; malformed/over-depth syntax remains
  * literal input rather than inventing partial LINK/URI ownership.
- * Reference links and complex bracket labels belong to a separate slice. */
+ * Root reference definitions reuse these same destination/title scanners. */
 typedef struct md_link_parts {
     size_t destination_begin,destination_end;
     size_t title_begin,title_end;
     bool has_title;
 } md_link_parts;
 
-static bool md_link_target_parse(const char *s,size_t n,size_t round_open,
-                                 md_link_parts *out,size_t *round_close) {
-    if(!s || !out || !round_close || round_open>=n ||
-       s[round_open]!='(')return false;
-    size_t p=round_open+1u;
-    while(p<n && md_space(s[p]))++p;
-    const bool angle=p<n && s[p]=='<';
-    size_t begin=p,end=p;
-
-    if(angle) {
-        /* In an angle destination the first UNESCAPED '>' owns the end;
-         * literal ')' and ASCII spaces are ordinary destination bytes.
-         * A newline or a nested raw '<' cannot enter angle syntax. */
+/* Destination and title scanners are shared by inline targets and root
+ * definitions. The definition collector supplies physical-line ownership;
+ * neither scanner reparses decoded metadata or publishes partial nodes. */
+static bool md_link_destination_scan(const char *s,size_t n,size_t *at,
+                                     md_link_parts *parts) {
+    size_t p=*at,begin=p,end=p;
+    if(p<n && s[p]=='<') {
         begin=++p;
         while(p<n && s[p]!='>') {
             if(s[p]=='\n' || s[p]=='\r' || s[p]=='<')return false;
-            if(s[p]=='\\' && p+1u<n &&
-               md_ascii_punct(s[p+1u]))p+=2u;
+            if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u]))p+=2u;
             else ++p;
         }
-        if(p>=n || s[p]!='>')return false;
+        if(p>=n)return false;
         end=p++;
     } else {
-        begin=p;
         unsigned depth=0u;
         while(p<n) {
             const char ch=s[p];
@@ -524,40 +516,83 @@ static bool md_link_target_parse(const char *s,size_t n,size_t round_open,
             }
             ++p;
         }
-        if(depth || p>=n)return false;
+        if(depth)return false;
         end=p;
     }
+    parts->destination_begin=begin;parts->destination_end=end;
+    *at=p;
+    return true;
+}
 
+/* Only an unclosed title reports incomplete. Invalid nesting, blank lines
+ * and trailing garbage are not requests to consume more physical lines.
+ * Inline admission remains single-line; root definitions explicitly opt in
+ * after their collector has checked the canonical root block boundary. */
+static bool md_link_title_scan(const char *s,size_t n,size_t *at,
+                               md_link_parts *parts,bool multiline,
+                               bool *incomplete) {
+    *incomplete=false;
+    size_t p=*at;
+    if(p>=n)return false;
+    const char quote=s[p++];
+    if(quote!='"' && quote!='\'' && quote!='(')return false;
+    const char closer=quote=='('?')':quote;
+    const size_t begin=p;
+    while(p<n && s[p]!=closer) {
+        if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+            p+=2u;continue;
+        }
+        if(quote=='(' && s[p]=='(')return false;
+        if(s[p]=='\n' || s[p]=='\r') {
+            if(!multiline)return false;
+            size_t next=p+1u;
+            if(s[p]=='\r' && next<n && s[next]=='\n')++next;
+            while(next<n && md_space(s[next]))++next;
+            if(next<n && (s[next]=='\n' || s[next]=='\r'))return false;
+        }
+        ++p;
+    }
+    if(p>=n) {*incomplete=true;return false;}
+    parts->title_begin=begin;parts->title_end=p;
+    parts->has_title=true;*at=p+1u;
+    return true;
+}
+
+static bool md_link_target_parse(const char *s,size_t n,size_t round_open,
+                                 md_link_parts *out,size_t *round_close) {
+    if(!s || !out || !round_close || round_open>=n ||
+       s[round_open]!='(')return false;
+    size_t p=round_open+1u;
+    while(p<n && md_space(s[p]))++p;
+    md_link_parts parts={0};
+    if(!md_link_destination_scan(s,n,&p,&parts))return false;
     const size_t separator_start=p;
     while(p<n && md_space(s[p]))++p;
-    const bool separated=p>separator_start;
-    md_link_parts parts={
-        .destination_begin=begin,.destination_end=end,
-        .title_begin=0u,.title_end=0u,.has_title=false
-    };
     if(p<n && s[p]==')') {
         *out=parts;*round_close=p;return true;
     }
-    if(!separated || p>=n)return false;
-    const char quote=s[p];
-    if(quote!='"' && quote!='\'' && quote!='(')return false;
-    ++p;
-    const size_t title_begin=p;
-    const char closer=quote=='('?')':quote;
-    while(p<n && s[p]!=closer) {
-        if(s[p]=='\n' || s[p]=='\r')return false;
-        if(s[p]=='\\' && p+1u<n &&
-           md_ascii_punct(s[p+1u]))p+=2u;
-        else ++p;
-    }
-    if(p>=n)return false;
-    parts.title_begin=title_begin;
-    parts.title_end=p++;
-    parts.has_title=true;
+    bool incomplete=false;
+    if(p==separator_start ||
+       !md_link_title_scan(s,n,&p,&parts,false,&incomplete))return false;
     while(p<n && md_space(s[p]))++p;
     if(p>=n || s[p]!=')')return false;
     *out=parts;*round_close=p;
     return true;
+}
+
+/* Reference labels are raw syntax, not link TEXT: backticks do not hide a
+ * bracket, and an escaped bracket is never a delimiter. Keys retain every
+ * escape byte, so [foo\\!] does NOT match [foo!]. */
+static size_t md_reference_label_close(const char *s,size_t n,size_t begin) {
+    for(size_t p=begin;p<n && p-begin<=MD_REF_KEY_MAX;) {
+        if(s[p]=='\\' && p+1u<n && md_ascii_punct(s[p+1u])) {
+            p+=2u;continue;
+        }
+        if(s[p]==']')return p;
+        if(s[p]=='[' || s[p]=='\n' || s[p]=='\r')return SIZE_MAX;
+        ++p;
+    }
+    return SIZE_MAX;
 }
 
 /* Label normalization operates on the bounded, literal ASCII subset:
@@ -573,7 +608,8 @@ static bool md_reference_key(const char *s,size_t b,size_t e,
         if(c==' ' || c=='\t') {if(used)gap=true;continue;}
         const bool alpha=(c>='A'&&c<='Z')||(c>='a'&&c<='z');
         const bool digit=c>='0'&&c<='9';
-        if(!alpha && !digit)return false;
+        if(!alpha && !digit && !md_ascii_punct((char)c))return false;
+        if(c=='[' || c==']')return false;
         if(gap) {
             if(used>=MD_REF_KEY_MAX)return false;
             key[used++]=' ';
@@ -581,6 +617,10 @@ static bool md_reference_key(const char *s,size_t b,size_t e,
         }
         if(used>=MD_REF_KEY_MAX)return false;
         key[used++]=(char)((c>='A'&&c<='Z')?c+('a'-'A'):c);
+        if(c=='\\' && i+1u<e && md_ascii_punct(s[i+1u])) {
+            if(used>=MD_REF_KEY_MAX)return false;
+            key[used++]=s[++i]; /* raw escape spelling is part of the key */
+        }
     }
     if(!used)return false;
     key[used]='\0';
@@ -611,7 +651,7 @@ static bool md_reference_inline_match(
     const size_t first=md_match(s,n,at+1u,']',1u);
     if(first==SIZE_MAX)return false;
     if(first+1u<n && s[first+1u]=='[') {
-        const size_t second=md_match(s,n,first+2u,']',1u);
+        const size_t second=md_reference_label_close(s,n,first+2u);
         if(second!=SIZE_MAX) {
             const bool collapsed=second==first+2u;
             const md_reference_binding *found=md_reference_lookup(
@@ -2291,12 +2331,12 @@ static bool md_root_paragraph_continues(stun_md_document *d,md_line current) {
     return !md_root_code_span_interrupts(d,next);
 }
 
-/* Collect only single-line ASCII root reference definitions. The scan is
+/* Collect bounded ASCII root reference definitions. The scan is
  * BEFORE inline admission, so a later [ref]: ... can bind an earlier
  * [text][ref]. Definitions inside code fences, indented code, lists or
  * quotes are NOT recognized by this restricted root-only slice. This
  * prepass has no AST side effects and cannot reinterpret decoded entities
- * as syntax. Tables/complex reference label folding remain separate.
+ * as syntax. Unicode/multiline label folding remains separate.
  *
  * Definition entries also record exact source-line offsets to suppress
  * their block output; duplicates are consumed but lookup selects the FIRST.
@@ -2314,147 +2354,132 @@ static bool md_reference_definition_line(
            begin<=d->references[low].source_last_line;
 }
 
+/* Accumulate only a candidate title, not an arbitrary paragraph or second
+ * grammar. The shared scanner distinguishes unclosed from invalid syntax.
+ * Normalize CRLF to LF and remove structural continuation indentation;
+ * retain all title payload/trailing spaces and raw document bytes.
+ * Scratch is bounded by source bytes; at most 64 physical lines are read. */
+static bool md_reference_collect_title(stun_md_document *d,md_line first,
+                                       size_t begin,md_line *last,
+                                       char **title,size_t *title_bytes) {
+    const char *s=d->raw;
+    size_t used=first.end-begin,capacity=used;
+    char *scratch=(char*)malloc(capacity+1u);
+    if(!scratch) {md_error(d,STUN_UI_OUT_OF_MEMORY);return false;}
+    memcpy(scratch,s+begin,used);
+    md_line current=first;
+    for(size_t lines=1u;;++lines) {
+        size_t at=0u;md_link_parts parts={0};bool incomplete=false;
+        if(md_link_title_scan(scratch,used,&at,&parts,true,&incomplete)) {
+            if(!md_blank(scratch,at,used))break;
+            const bool ok=md_decode_component(d,scratch+parts.title_begin,
+                parts.title_end-parts.title_begin,title,title_bytes);
+            if(ok)*last=current;
+            free(scratch);return ok;
+        }
+        if(!incomplete || !current.newline || current.next>=d->raw_size)
+            break;
+        const md_line next=md_read_line(d,current.next);
+        if(md_root_code_span_interrupts(d,next))break;
+        if(lines>=MD_REF_TITLE_LINES_MAX) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);break;
+        }
+        const size_t content=md_left(s,next.begin,next.end);
+        const size_t extra=next.end-content;
+        if(used>=d->raw_size || extra>d->raw_size-used-1u) {
+            md_error(d,STUN_UI_CAPACITY_EXCEEDED);break;
+        }
+        const size_t required=used+1u+extra;
+        if(required>capacity) {
+            size_t grown=capacity;
+            if(grown<d->raw_size/2u)grown=grown*2u+1u;
+            else grown=d->raw_size;
+            if(grown<required)grown=required;
+            char *data=(char*)realloc(scratch,grown+1u);
+            if(!data) {md_error(d,STUN_UI_OUT_OF_MEMORY);break;}
+            scratch=data;capacity=grown;
+        }
+        scratch[used++]='\n';
+        memcpy(scratch+used,s+content,extra);used+=extra;
+        current=next;
+    }
+    free(scratch);return false;
+}
+
 static bool md_reference_collect_line(stun_md_document *d,md_line line,
                                       size_t begin,size_t *after_definition) {
     const char *s=d->raw;
     if(begin>=line.end || s[begin]!='[')return false;
-    const size_t close=md_match(s,line.end,begin+1u,']',1u);
-    if(close==SIZE_MAX || close+1u>=line.end ||
-       s[close+1u]!=':')return false;
+    const size_t close=md_reference_label_close(s,line.end,begin+1u);
+    if(close==SIZE_MAX || close+1u>=line.end || s[close+1u]!=':')
+        return false;
     char key[MD_REF_KEY_MAX+1u];
     if(!md_reference_key(s,begin+1u,close,key))return false;
     size_t target_begin=md_left(s,close+2u,line.end);
-    size_t target_end=line.end;
     md_line last=line;
-    /* Scoped #198: the destination may occupy ONE immediately following
-     * nonblank root physical line when the definition's first line has no
-     * destination. A 4-column indented code line, blank separator, quote or
-     * list-owned line cannot donate a ROOT reference target. All destination
-     * syntax is still validated by the EXISTING md_link_target_parse below;
-     * this is line ownership lookahead, not a second link grammar. */
+    /* Only the OPENING definition has a <=3-column indentation limit.
+     * A destination continuation may be deeply indented (#193), but a
+     * blank or an actual interrupting root block cannot donate its bytes. */
     if(target_begin==line.end && line.next<d->raw_size) {
         const md_line next=md_read_line(d,line.next);
         const size_t candidate=md_left(s,next.begin,next.end);
-        /* A continuation target must not steal an actual opening block:
-         * fenced code, Setext underline, ATX heading, list marker or quote.
-         * The source-owner test below proves the unrecognized definition
-         * remains paragraph content while those blocks parse normally. */
-        char opener=0u;size_t run=0u,info_b=0u,info_e=0u;
-        size_t hb=candidate,he=next.end;
-        if(candidate<next.end &&
-           md_columns(s,next.begin,candidate)<=3u &&
-           s[candidate]!='>' && s[candidate]!='[' &&
-           !md_rule(s,candidate,next.end) &&
-           !md_setext(s,candidate,next.end) &&
-           !md_atx(s,&hb,&he) &&
-           !md_fence_start(s,candidate,next.end,
-                           &opener,&run,&info_b,&info_e)) {
-            md_list_marker_info marker={0};
-            if(!md_list_token(s,next,&marker)) {
-                target_begin=candidate;
-                target_end=next.end;
-                last=next;
-            }
+        if(candidate<next.end && s[candidate]!='[' &&
+           !md_root_code_span_interrupts(d,next)) {
+            target_begin=candidate;last=next;
         }
     }
-    const size_t length=target_end-target_begin;
-    if(!length || length>SIZE_MAX-3u)return false;
-    char *scratch=(char*)malloc(length+3u);
-    if(!scratch) {
-        md_error(d,STUN_UI_OUT_OF_MEMORY);return false;
-    }
-    scratch[0]='(';
-    memcpy(scratch+1u,s+target_begin,length);
-    scratch[length+1u]=')';
-    scratch[length+2u]='\0';
+    if(target_begin>=last.end)return false;
     md_link_parts parts={0};
-    size_t close_paren=SIZE_MAX;
-    const bool valid=md_link_target_parse(
-        scratch,length+2u,0u,&parts,&close_paren) &&
-        close_paren==length+1u;
-    if(!valid) {free(scratch);return false;}
-    /* Narrow multi-physical-line reference TITLE admission: once the
-     * existing canonical target parser has validated a complete URL with
-     * no inline title, it may borrow exactly ONE adjacent <=3-column root
-     * physical line containing a complete quote/paren title. Construct a
-     * bounded synthetic separator and ask THE SAME md_link_target_parse
-     * to validate the destination + title; no second title grammar,
-     * arbitrary multiline content, new containers or fallback paths.
-     *
-     * Reject malformed or blank-separated titles WITHOUT consuming them.
-     * Later definitions must remain visible to the root prepass. */
-    if(!parts.has_title && last.next<d->raw_size) {
-        const md_line candidate_line=md_read_line(d,last.next);
-        const size_t candidate=md_left(
-            s,candidate_line.begin,candidate_line.end);
-        if(candidate<candidate_line.end &&
-           md_columns(s,candidate_line.begin,candidate)<=3u &&
-           (s[candidate]=='"' || s[candidate]=='\'' ||
-            s[candidate]=='(')) {
-            const size_t extra=candidate_line.end-candidate;
-            if(extra>SIZE_MAX-length-4u) {
-                md_error(d,STUN_UI_CAPACITY_EXCEEDED);
-                free(scratch);return true;
-            }
-            char *joined=(char*)malloc(length+extra+4u);
-            if(!joined) {
-                md_error(d,STUN_UI_OUT_OF_MEMORY);
-                free(scratch);return true;
-            }
-            joined[0]='(';
-            memcpy(joined+1u,s+target_begin,length);
-            joined[length+1u]=' ';
-            memcpy(joined+length+2u,s+candidate,extra);
-            joined[length+extra+2u]=')';
-            joined[length+extra+3u]='\0';
-            md_link_parts joined_parts={0};
-            size_t joined_close=SIZE_MAX;
-            if(md_link_target_parse(
-                   joined,length+extra+3u,0u,
-                   &joined_parts,&joined_close) &&
-               joined_close==length+extra+2u &&
-               joined_parts.has_title) {
-                free(scratch);
-                scratch=joined;
-                parts=joined_parts;
-                last=candidate_line;
-            } else free(joined);
+    size_t at=target_begin;
+    if(!md_link_destination_scan(s,last.end,&at,&parts) ||
+       (parts.destination_begin==parts.destination_end &&
+        s[target_begin]!='<'))return false;
+    const size_t destination_stop=at;
+    at=md_left(s,at,last.end);
+    char *title=NULL;size_t title_len=0u;
+    bool has_title=false;
+    if(at<last.end) {
+        /* An invalid/unclosed same-line title invalidates the definition;
+         * never keep only its destination (official #197/#209). */
+        if(at==destination_stop ||
+           !md_reference_collect_title(d,last,at,&last,&title,&title_len))
+            return false;
+        has_title=true;
+    } else if(last.next<d->raw_size) {
+        const md_line next=md_read_line(d,last.next);
+        const size_t candidate=md_left(s,next.begin,next.end);
+        if(candidate<next.end &&
+           (s[candidate]=='"' || s[candidate]=='\'' || s[candidate]=='(')) {
+            /* A failed OPTIONAL next-line title leaves the valid URL and
+             * every unconsumed line intact (official #210). */
+            has_title=md_reference_collect_title(
+                d,next,candidate,&last,&title,&title_len);
+            if(d->error!=STUN_UI_OK) {free(title);return true;}
         }
     }
     if(d->reference_count>=MD_REF_MAX) {
-        md_error(d,STUN_UI_CAPACITY_EXCEEDED);free(scratch);return true;
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);free(title);return true;
     }
-    char *href=NULL,*title=NULL;
-    size_t href_len=0u,title_len=0u;
-    if(!md_decode_component(
-           d,scratch+parts.destination_begin,
-           parts.destination_end-parts.destination_begin,
-           &href,&href_len)) {
-        free(scratch);return true;
-    }
-    if(parts.has_title &&
-       !md_decode_component(d,scratch+parts.title_begin,
-                            parts.title_end-parts.title_begin,
-                            &title,&title_len)) {
-        free(href);free(scratch);return true;
+    char *href=NULL;size_t href_len=0u;
+    if(!md_decode_component(d,s+parts.destination_begin,
+            parts.destination_end-parts.destination_begin,&href,&href_len)) {
+        free(title);return true;
     }
     if(!d->references) {
         d->references=(md_reference_binding*)calloc(
             MD_REF_MAX,sizeof(*d->references));
         if(!d->references) {
             md_error(d,STUN_UI_OUT_OF_MEMORY);
-            free(title);free(href);free(scratch);return true;
+            free(title);free(href);return true;
         }
     }
     md_reference_binding *item=&d->references[d->reference_count++];
     memcpy(item->key,key,strlen(key)+1u);
     item->href=href;item->href_bytes=href_len;
     item->title=title;item->title_bytes=title_len;
-    item->has_title=parts.has_title;
-    item->source_line=line.begin;
-    item->source_last_line=last.begin;
+    item->has_title=has_title;
+    item->source_line=line.begin;item->source_last_line=last.begin;
     if(after_definition)*after_definition=last.next;
-    free(scratch);
     return true;
 }
 
@@ -2643,6 +2668,7 @@ static void md_parse_blocks(stun_md_document *d) {
     size_t pending_code_blank = SIZE_MAX;
     md_list_stack lists={0};
     bool code_open=false;
+    bool reference_continuation=false;
     /* The root opening fence may consume 0..3 ASCII indentation columns.
      * Remove at most those opening columns from each subsequent code line;
      * never trim semantic trailing spaces or mutate the original raw bytes. */
@@ -2663,6 +2689,13 @@ static void md_parse_blocks(stun_md_document *d) {
         for(size_t i=line.begin;i<indent_begin && indent<4u;++i)
             indent += s[i]=='\t' ? 4u-(indent%4u) : 1u;
         size_t begin=indent_begin, end=line.end;
+        /* Once a ROOT definition's opening line was consumed below, its
+         * recorded continuation interval takes precedence over indentation
+         * and apparent block markers. No CODE/TEXT nodes may leak from an
+         * already validated title or destination continuation (#193/#196). */
+        if(reference_continuation &&
+           md_reference_definition_line(d,line.begin))continue;
+        reference_continuation=false;
         if (code_open) {
             if (indent<=3 && md_fence_close(s,begin,end,fence)) {
                 code_open=false;
@@ -2778,6 +2811,7 @@ static void md_parse_blocks(stun_md_document *d) {
         if(paragraph==UINT32_MAX && lists.depth==0u && indent<=3u &&
            md_reference_definition_line(d,line.begin)) {
             pending_break=MD_ROOT_BREAK_SOFT;
+            reference_continuation=true;
             continue;
         }
         /* Four indentation columns select literal code before checking ATX,

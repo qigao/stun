@@ -139,3 +139,41 @@ authority. Escaped email local symbols (including \+), malformed domain
 labels and unapproved URL schemes remain literal text, not links.
 RawHTML, arbitrary-scheme autolinks, explicit XML/XHTML and normative
 test-only HTML remain distinct and unimplemented where previously noted.
+
+## Root reference continuation and title whitespace (#183)
+
+The root definition's **opening line** retains its zero-to-three-column
+admission limit. Its validated destination/title continuations may have deeper
+indentation. The same source interval recorded by the bounded reference map
+owns all consumed lines; the block emitter must not reinterpret a continuation
+as indented code, a second definition or ordinary text. Root list/quote/fence
+admission still uses the existing canonical block predicates.
+
+Destination and title scanners are shared with inline links, not reimplemented
+as a second reference grammar. Root titles may span at most **64 physical lines**
+including their opener/closer, without a blank or competing root block. Structural
+continuation indentation is removed, physical CRLF is normalized to LF, and
+payload/trailing spaces remain unchanged. Scratch is bounded by source bytes;
+exceeding the line limit fails the entire parse with CAPACITY_EXCEEDED. The
+existing 128-entry reference map and 128-raw-byte ASCII label limits remain.
+
+ASCII reference keys now admit punctuation and escaped brackets. They retain
+raw escape/entity spelling: `[foo\!]` must not match `[foo!]`, and `[a&amp;b]`
+must not match `[a&b]`. Only ASCII case and horizontal whitespace are normalized;
+Unicode folding and multiline labels remain separate work.
+
+**HTML5 title and href policies are distinct.** A double-quoted title may safely
+contain LF and TAB payload, including decoded character references; quote,
+ampersand and angle characters are escaped exactly once. CR and all other
+C0/DEL controls remain rejected. The former blanket title-LF negative test is
+replaced by an exact owned-metadata/HTML positive plus CR/C0/DEL negatives.
+No href policy changed: LF/TAB/CR and unsafe decoded URL schemes still fail
+before output. The renderer receives typed metadata and never parses Markdown.
+
+Acceptance includes exact official #193/#194/#196, CRLF/deep indentation,
+escape parity, first-definition wins, malformed/blank/competing-block controls,
+adjacent definition ownership, raw-input mutation, exact-node-budget rollback,
+output-buffer atomicity and line/map/key limits. The permanent 526-ID allowlist
+is intentionally not promoted in this source change; full 652-row evidence and
+exact-HEAD installed-SDK sanitizers/desktop CI remain required. No production
+MarkdownWidget/Tango parser cutover or PR merge is part of this repair.

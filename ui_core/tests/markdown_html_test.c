@@ -572,11 +572,64 @@ static const html_fixture cases[] = {
     { "[foo]: /uri \"first\"\n\"second\"\n\n[foo]\n",
       "<p>&quot;second&quot;</p>\n"
       "<p><a href=\"/uri\" title=\"first\">foo</a></p>\n" }, /* inline title already owns its definition */
+    /* #183: official #193/#194/#196 and independent boundary controls. */
+    { "   [foo]: \n      /url  \n           'the title'  \n\n[foo]\n",
+      "<p><a href=\"/url\" title=\"the title\">foo</a></p>\n" }, /* official-193 */
+    { "[Foo*bar\\]]:my_(url) 'title (with parens)'\n\n[Foo*bar\\]]\n",
+      "<p><a href=\"my_(url)\" title=\"title (with parens)\">Foo*bar]</a></p>\n" }, /* official-194 */
+    { "[foo]: /url '\ntitle\nline1\nline2\n'\n\n[foo]\n",
+      "<p><a href=\"/url\" title=\"\ntitle\nline1\nline2\n\">foo</a></p>\n" }, /* official-196 */
+    { "   [foo]:\r\n\t /url \t\r\n\t\t'title' \t\r\n\r\n[foo]\r\n",
+      "<p><a href=\"/url\" title=\"title\">foo</a></p>\n" }, /* deep-CRLF-tab-owner */
+    { "[foo]: /uri 'A &amp; B  \r\n    x\ty\r\n  z'\r\n\r\n[foo]\r\n",
+      "<p><a href=\"/uri\" title=\"A &amp; B  \nx\ty\nz\">foo</a></p>\n" }, /* multiline-CRLF-payload */
+    { "[foo]: /uri\n    'first\n     second'\n\n[foo]\n",
+      "<p><a href=\"/uri\" title=\"first\nsecond\">foo</a></p>\n" }, /* optional-deep-multiline-title */
+    { "[foo]: /uri (a\\(\n b\\))\n\n[foo]\n",
+      "<p><a href=\"/uri\" title=\"a(\nb)\">foo</a></p>\n" }, /* parenthesized-multiline-title */
+    { "[visible][ FOO*BAR\\] ]\n\n[foo*bar\\]]: /uri 'ok'\n",
+      "<p><a href=\"/uri\" title=\"ok\">visible</a></p>\n" }, /* escaped-explicit-casefold */
+    { "[Foo*bar\\]][]\n\n[foo*bar\\]]: /uri\n",
+      "<p><a href=\"/uri\">Foo*bar]</a></p>\n" }, /* escaped-collapsed */
+    { "**[Foo*bar\\]]**\n\n[Foo*bar\\]]: /uri\n",
+      "<p><strong><a href=\"/uri\">Foo*bar]</a></strong></p>\n" }, /* escaped-delimiter-opacity */
+    { "[bar][foo\\!]\n\n[foo!]: /url\n",
+      "<p>[bar][foo!]</p>\n" }, /* official-545 */
+    { "[foo][ref\\[]\n\n[ref\\[]: /uri\n",
+      "<p><a href=\"/uri\">foo</a></p>\n" }, /* official-549 */
+    { "[bar\\\\]: /uri\n\n[bar\\\\]\n",
+      "<p><a href=\"/uri\">bar\\</a></p>\n" }, /* official-550 */
+    { "[visible][a&b]\n\n[a&amp;b]: /wrong\n",
+      "<p>[visible][a&amp;b]</p>\n" }, /* raw-entity-key-not-decoded */
+    { "[a\\!]: /first 'one'\n[A\\!]: /second 'two'\n\n[a\\!]\n",
+      "<p><a href=\"/first\" title=\"one\">a!</a></p>\n" }, /* escaped-first-definition-wins */
+    { "[foo]: /url 'title\n\nwith blank line'\n\n[foo]\n",
+      "<p>[foo]: /url 'title</p>\n<p>with blank line'</p>\n<p>[foo]</p>\n" }, /* official-197 */
+    { "[foo]: /url \"title\" ok\n",
+      "<p>[foo]: /url &quot;title&quot; ok</p>\n" }, /* official-209 */
+    { "[foo]: /url 'never\nends\n\n[foo]\n",
+      "<p>[foo]: /url 'never\nends</p>\n<p>[foo]</p>\n" }, /* same-line-unclosed */
+    { "[foo]: /url\n\"title\" junk\n\n[foo]\n",
+      "<p>&quot;title&quot; junk</p>\n<p><a href=\"/url\">foo</a></p>\n" }, /* optional-title-garbage-keeps-url */
+    { "[foo]: /url\n'never\n\n[foo]\n",
+      "<p>'never</p>\n<p><a href=\"/url\">foo</a></p>\n" }, /* optional-unclosed-keeps-url */
+    { "[foo]: /url 'never\n# boundary\nclose'\n\n[foo]\n",
+      "<p>[foo]: /url 'never</p>\n<h1>boundary</h1>\n<p>close'</p>\n<p>[foo]</p>\n" }, /* title-root-heading-barrier */
+    { "[foo]: /url 'never\n```\nclose'\n```\n\n[foo]\n",
+      "<p>[foo]: /url 'never</p>\n<pre><code>close'\n</code></pre>\n<p>[foo]</p>\n" }, /* title-root-fence-barrier */
+    { "    [foo]: /url 'title'\n\n[foo]\n",
+      "<pre><code>[foo]: /url 'title'\n</code></pre>\n<p>[foo]</p>\n" }, /* opening-indented-code-not-reference */
+    { "[foo]:\n\n    /url\n\n[foo]\n",
+      "<p>[foo]:</p>\n<pre><code>/url\n</code></pre>\n<p>[foo]</p>\n" }, /* blank-destination-barrier */
+    { "[a[b]]: /wrong\n\n[a[b]]\n",
+      "<p>[a[b]]: /wrong</p>\n<p>[a[b]]</p>\n" }, /* unescaped-nested-label-rejected */
+    { "[foo]: /uri 'a\n&quot; onmouseover=&quot;alert(1)'\n\n[foo]\n",
+      "<p><a href=\"/uri\" title=\"a\n&quot; onmouseover=&quot;alert(1)\">foo</a></p>\n" }, /* title-escaped-attribute-injection */
     { "[unused]: /url\n", "" }, /* unused root definition does not emit paragraph */
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==294,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==320,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

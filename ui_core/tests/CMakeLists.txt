@@ -23,12 +23,21 @@ target_link_libraries(stun_markdown_link_target_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_link_target_test
          COMMAND stun_markdown_link_target_test)
 
-# #183: root single-line ASCII reference definitions; forward/first-win
+# #183: bounded root ASCII reference definitions; forward/first-win
 # source ownership and typed full/collapsed/shortcut LINK admission.
 add_executable(stun_markdown_reference_test markdown_reference_test.c)
 target_compile_features(stun_markdown_reference_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_reference_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_reference_test COMMAND stun_markdown_reference_test)
+
+# #183: official multiline/escaped root definitions, exact source intervals,
+# LINK/TITLE ownership, URL security and bounded failure-atomic rollback.
+add_executable(stun_markdown_reference_multiline_test markdown_reference_multiline_test.c)
+target_compile_features(stun_markdown_reference_multiline_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_reference_multiline_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_reference_multiline_test
+         COMMAND stun_markdown_reference_multiline_test)
+
 
 # #182/#185: strict C11 root paragraph cross-line inline owner and rollback.
 add_executable(stun_markdown_paragraph_inline_test markdown_paragraph_inline_test.c)

@@ -1,0 +1,273 @@
+#include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Official CommonMark 0.31.2 examples retain their exact Markdown/HTML.
+ * https://spec.commonmark.org/0.31.2/#link-reference-definitions
+ * Spec fixtures are CC BY-SA 4.0 (John MacFarlane and contributors).
+ * No runtime expected output is obtained from the implementation under test. */
+typedef struct reference_case {
+    const char *name,*source,*html,*href,*title,*visible;
+} reference_case;
+
+#define VERIFY(expr) do { if(!(expr)) { \
+    fprintf(stderr,"%s:%d: %s: %s\n",__FILE__,__LINE__,name,#expr); \
+    failure=1;goto done; } } while(0)
+
+static size_t count_kind(stun_ui_rich_document_view v,stun_ui_block_kind kind) {
+    size_t count=0u;
+    for(size_t i=0u;i<v.document.block_count;++i)
+        count+=(v.document.blocks[i].kind==kind);
+    return count;
+}
+
+static int check_case(const reference_case *f) {
+    const char *name=f->name;
+    int failure=0;
+    stun_md_document *doc=NULL,*rejected=NULL;
+    char *input=NULL;
+    const size_t n=strlen(f->source);
+    input=(char*)malloc(n+1u);VERIFY(input!=NULL);
+    memcpy(input,f->source,n+1u);
+    VERIFY(stun_md_parse(input,n,256u,n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    /* All syntax, text and metadata must survive mutation/free of input. */
+    memset(input,0x6f,n);free(input);input=NULL;
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    VERIFY(v.raw_markdown_bytes==n && !memcmp(v.raw_markdown,f->source,n));
+    VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==(f->href?1u:0u));
+    VERIFY(count_kind(v,STUN_UI_BLOCK_LINK_TITLE)==(f->title?1u:0u));
+    char visible[256];size_t used=0u;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        VERIFY(node->parent_index<i);
+        const stun_ui_block *parent=&v.document.blocks[node->parent_index];
+        if(node->kind==STUN_UI_BLOCK_LINK ||
+           node->kind==STUN_UI_BLOCK_LINK_TITLE) {
+            const char *meta=NULL;size_t bytes=SIZE_MAX;
+            const char *expected=node->kind==STUN_UI_BLOCK_LINK?
+                                 f->href:f->title;
+            VERIFY(expected!=NULL);
+            VERIFY(stun_ui_rich_document_metadata(&v,i,&meta,&bytes)==STUN_UI_OK);
+            VERIFY(bytes==strlen(expected));
+            VERIFY(!bytes || (meta && !memcmp(meta,expected,bytes)));
+            if(node->kind==STUN_UI_BLOCK_LINK_TITLE)
+                VERIFY(parent->kind==STUN_UI_BLOCK_LINK && node->parent_index+1u==i);
+            else VERIFY(parent->kind==STUN_UI_BLOCK_PARAGRAPH ||
+                        parent->kind==STUN_UI_BLOCK_STRONG);
+        }
+        if(node->kind==STUN_UI_BLOCK_TEXT && parent->kind==STUN_UI_BLOCK_LINK) {
+            const size_t bytes=node->byte_end-node->byte_begin;
+            VERIFY(node->byte_end<=v.document.source_bytes);
+            VERIFY(bytes<=sizeof(visible)-used);
+            memcpy(visible+used,v.document.source+node->byte_begin,bytes);used+=bytes;
+        }
+    }
+    if(f->visible) {
+        VERIFY(used==strlen(f->visible));
+        VERIFY(!memcmp(visible,f->visible,used));
+    }
+    size_t required=SIZE_MAX,actual=SIZE_MAX;
+    VERIFY(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+    VERIFY(required==strlen(f->html));
+    char output[1024];VERIFY(required+2u<sizeof(output));
+    memset(output,0x53,sizeof(output));
+    VERIFY(stun_md_render_html(&v,256u,output,required,&actual)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(actual==required);
+    for(size_t i=0u;i<sizeof(output);++i)VERIFY((unsigned char)output[i]==0x53u);
+    VERIFY(stun_md_render_html(&v,256u,output,required+1u,&actual)==STUN_UI_OK);
+    VERIFY(actual==required && !memcmp(output,f->html,required+1u));
+    VERIFY((unsigned char)output[required+1u]==0x53u);
+    /* Exact node limit succeeds; one node short never publishes a document. */
+    const size_t nodes=v.document.block_count;
+    VERIFY(nodes>1u);
+    stun_md_document_destroy(doc);doc=NULL;
+    VERIFY(stun_md_parse(f->source,n,nodes,n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    VERIFY(stun_md_parse(f->source,n,nodes-1u,n+1u,&rejected)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(rejected==NULL);
+done:
+    free(input);stun_md_document_destroy(rejected);stun_md_document_destroy(doc);
+    return failure;
+}
+
+static int check_safety(void) {
+    const char *name="title-vs-href-security";
+    int failure=0;stun_md_document *doc=NULL;
+    const char *const rejected[]={
+        "[x]: java&#x73;cript:alert 'a\nb'\n\n[x]\n",
+        "[x]: /safe&#10;bad 'a\nb'\n\n[x]\n",
+        "[x]: /safe 'a\n&#1;b'\n\n[x]\n",
+        "[x]: /safe 'a\n&#13;b'\n\n[x]\n",
+        "[x]: /safe 'a\n&#127;b'\n\n[x]\n"
+    };
+    for(size_t k=0u;k<sizeof(rejected)/sizeof(rejected[0]);++k) {
+        const size_t n=strlen(rejected[k]);
+        VERIFY(stun_md_parse(rejected[k],n,128u,n+1u,&doc)==STUN_UI_OK);
+        VERIFY(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==1u);
+        char output[256];memset(output,0x68,sizeof(output));size_t need=SIZE_MAX;
+        VERIFY(stun_md_render_html(&v,128u,output,sizeof(output),&need)==
+               STUN_UI_INVALID_ARGUMENT);
+        for(size_t i=0u;i<sizeof(output);++i)
+            VERIFY((unsigned char)output[i]==0x68u);
+        stun_md_document_destroy(doc);doc=NULL;
+    }
+done:
+    stun_md_document_destroy(doc);return failure;
+}
+
+static int check_budgets(void) {
+    const char *name="bounded-title-and-reference-capacity";
+    int failure=0;stun_md_document *doc=NULL;
+    char source[8192];size_t n=0u;
+    /* 64 title physical lines, including opener and closer, are accepted. */
+    const char start[]="[foo]: /url 'start\n";
+    memcpy(source,start,sizeof(start)-1u);n=sizeof(start)-1u;
+    for(size_t i=0u;i<62u;++i) {memcpy(source+n,"x\n",2u);n+=2u;}
+    memcpy(source+n,"'\n\n[foo]\n",9u);n+=9u;
+    VERIFY(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    VERIFY(count_kind(stun_md_document_view(doc),STUN_UI_BLOCK_LINK_TITLE)==1u);
+    stun_md_document_destroy(doc);doc=NULL;
+    /* One additional title line is a resource error, not a literal fallback. */
+    n=sizeof(start)-1u;
+    for(size_t i=0u;i<63u;++i) {memcpy(source+n,"x\n",2u);n+=2u;}
+    memcpy(source+n,"'\n\n[foo]\n",9u);n+=9u;
+    VERIFY(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(doc==NULL);
+    /* The last of 129 multiline definitions must atomically exhaust the
+     * existing 128-entry map; no separate continuation registry exists. */
+    n=0u;
+    for(size_t i=0u;i<129u;++i) {
+        const int wrote=snprintf(source+n,sizeof(source)-n,
+                                 "[r%zu]: /url 'a\nb'\n",i);
+        VERIFY(wrote>0 && (size_t)wrote<sizeof(source)-n);n+=(size_t)wrote;
+    }
+    VERIFY(stun_md_parse(source,n,1024u,n+1u,&doc)==STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(doc==NULL);
+done:
+    stun_md_document_destroy(doc);return failure;
+}
+
+static int check_label_budget(void) {
+    const char *name="escaped-label-exact-byte-budget";
+    int failure=0;stun_md_document *doc=NULL;
+    char label[130],visible[130],source[512],html[512];
+    memset(label,'a',126u);label[126]='\\';label[127]=']';label[128]='\0';
+    memset(visible,'a',126u);visible[126]=']';visible[127]='\0';
+    int n=snprintf(source,sizeof(source),"[%s]: /uri\n\n[%s]\n",label,label);
+    VERIFY(n>0 && (size_t)n<sizeof(source));
+    int h=snprintf(html,sizeof(html),"<p><a href=\"/uri\">%s</a></p>\n",visible);
+    VERIFY(h>0 && (size_t)h<sizeof(html));
+    const reference_case exact={name,source,html,"/uri",NULL,visible};
+    VERIFY(check_case(&exact)==0);
+    /* The fixed raw-key ceiling includes both bytes of an escape. A
+     * 129-byte label remains unsupported literal syntax, never truncated
+     * to impersonate an admitted 128-byte key. */
+    memset(label,'a',127u);label[127]='\\';label[128]=']';label[129]='\0';
+    n=snprintf(source,sizeof(source),"[%s]: /uri\n\n[%s]\n",label,label);
+    VERIFY(n>0 && (size_t)n<sizeof(source));
+    VERIFY(stun_md_parse(source,(size_t)n,256u,(size_t)n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==0u);
+    VERIFY(v.raw_markdown_bytes==(size_t)n && !memcmp(v.raw_markdown,source,(size_t)n));
+done:
+    stun_md_document_destroy(doc);return failure;
+}
+
+static int check_adjacent_owners(void) {
+    const char *name="multiline-title-adjacent-definition-owner";
+    int failure=0;stun_md_document *doc=NULL;
+    const char source[]="[foo]: /first 'a\n[shadow]: /bad\nb'\n"
+        "[bar]: /second\n    'second'\n\n[foo] [bar] [shadow]\n";
+    const char html[]="<p><a href=\"/first\" title=\"a\n[shadow]: /bad\nb\">foo</a> "
+        "<a href=\"/second\" title=\"second\">bar</a> [shadow]</p>\n";
+    const char *const urls[]={"/first","/second"};
+    const char *const titles[]={"a\n[shadow]: /bad\nb","second"};
+    const size_t n=sizeof(source)-1u;
+    VERIFY(stun_md_parse(source,n,256u,n+1u,&doc)==STUN_UI_OK);
+    VERIFY(doc!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    VERIFY(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    VERIFY(v.raw_markdown_bytes==n && !memcmp(v.raw_markdown,source,n));
+    VERIFY(count_kind(v,STUN_UI_BLOCK_LINK)==2u);
+    VERIFY(count_kind(v,STUN_UI_BLOCK_LINK_TITLE)==2u);
+    VERIFY(count_kind(v,STUN_UI_BLOCK_CODE_INDENTED)==0u);
+    size_t link=0u,title=0u;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        const char *meta=NULL;size_t bytes=0u;
+        if(node->kind!=STUN_UI_BLOCK_LINK && node->kind!=STUN_UI_BLOCK_LINK_TITLE)
+            continue;
+        VERIFY(node->parent_index<i);
+        VERIFY(stun_ui_rich_document_metadata(&v,i,&meta,&bytes)==STUN_UI_OK);
+        const char *expected=NULL;
+        if(node->kind==STUN_UI_BLOCK_LINK) {
+            VERIFY(link<2u);expected=urls[link++];
+            VERIFY(v.document.blocks[node->parent_index].kind==STUN_UI_BLOCK_PARAGRAPH);
+        } else {
+            VERIFY(title<2u);expected=titles[title++];
+            VERIFY(v.document.blocks[node->parent_index].kind==STUN_UI_BLOCK_LINK);
+        }
+        VERIFY(bytes==strlen(expected) && meta && !memcmp(meta,expected,bytes));
+    }
+    size_t required=SIZE_MAX;char output[512];memset(output,0x49,sizeof(output));
+    VERIFY(stun_md_render_html(&v,256u,output,sizeof(html)-1u,&required)==
+           STUN_UI_CAPACITY_EXCEEDED);
+    VERIFY(required==sizeof(html)-1u);
+    for(size_t i=0u;i<sizeof(output);++i)VERIFY((unsigned char)output[i]==0x49u);
+    VERIFY(stun_md_render_html(&v,256u,output,sizeof(output),&required)==STUN_UI_OK);
+    VERIFY(required==sizeof(html)-1u && !memcmp(output,html,sizeof(html)));
+done:
+    stun_md_document_destroy(doc);return failure;
+}
+
+int main(void) {
+    static const reference_case cases[]={
+    { "official-193", "   [foo]: \n      /url  \n           'the title'  \n\n[foo]\n", "<p><a href=\"/url\" title=\"the title\">foo</a></p>\n", "/url", "the title", "foo" },
+    { "official-194", "[Foo*bar\\]]:my_(url) 'title (with parens)'\n\n[Foo*bar\\]]\n", "<p><a href=\"my_(url)\" title=\"title (with parens)\">Foo*bar]</a></p>\n", "my_(url)", "title (with parens)", "Foo*bar]" },
+    { "official-196", "[foo]: /url '\ntitle\nline1\nline2\n'\n\n[foo]\n", "<p><a href=\"/url\" title=\"\ntitle\nline1\nline2\n\">foo</a></p>\n", "/url", "\ntitle\nline1\nline2\n", "foo" },
+    { "deep-CRLF-tab-owner", "   [foo]:\r\n\t /url \t\r\n\t\t'title' \t\r\n\r\n[foo]\r\n", "<p><a href=\"/url\" title=\"title\">foo</a></p>\n", "/url", "title", "foo" },
+    { "multiline-CRLF-payload", "[foo]: /uri 'A &amp; B  \r\n    x\ty\r\n  z'\r\n\r\n[foo]\r\n", "<p><a href=\"/uri\" title=\"A &amp; B  \nx\ty\nz\">foo</a></p>\n", "/uri", "A & B  \nx\ty\nz", "foo" },
+    { "optional-deep-multiline-title", "[foo]: /uri\n    'first\n     second'\n\n[foo]\n", "<p><a href=\"/uri\" title=\"first\nsecond\">foo</a></p>\n", "/uri", "first\nsecond", "foo" },
+    { "parenthesized-multiline-title", "[foo]: /uri (a\\(\n b\\))\n\n[foo]\n", "<p><a href=\"/uri\" title=\"a(\nb)\">foo</a></p>\n", "/uri", "a(\nb)", "foo" },
+    { "escaped-explicit-casefold", "[visible][ FOO*BAR\\] ]\n\n[foo*bar\\]]: /uri 'ok'\n", "<p><a href=\"/uri\" title=\"ok\">visible</a></p>\n", "/uri", "ok", "visible" },
+    { "escaped-collapsed", "[Foo*bar\\]][]\n\n[foo*bar\\]]: /uri\n", "<p><a href=\"/uri\">Foo*bar]</a></p>\n", "/uri", NULL, "Foo*bar]" },
+    { "escaped-delimiter-opacity", "**[Foo*bar\\]]**\n\n[Foo*bar\\]]: /uri\n", "<p><strong><a href=\"/uri\">Foo*bar]</a></strong></p>\n", "/uri", NULL, "Foo*bar]" },
+    { "official-545", "[bar][foo\\!]\n\n[foo!]: /url\n", "<p>[bar][foo!]</p>\n", NULL, NULL, NULL },
+    { "official-549", "[foo][ref\\[]\n\n[ref\\[]: /uri\n", "<p><a href=\"/uri\">foo</a></p>\n", "/uri", NULL, "foo" },
+    { "official-550", "[bar\\\\]: /uri\n\n[bar\\\\]\n", "<p><a href=\"/uri\">bar\\</a></p>\n", "/uri", NULL, "bar\\" },
+    { "raw-entity-key-not-decoded", "[visible][a&b]\n\n[a&amp;b]: /wrong\n", "<p>[visible][a&amp;b]</p>\n", NULL, NULL, NULL },
+    { "escaped-first-definition-wins", "[a\\!]: /first 'one'\n[A\\!]: /second 'two'\n\n[a\\!]\n", "<p><a href=\"/first\" title=\"one\">a!</a></p>\n", "/first", "one", "a!" },
+    { "official-197", "[foo]: /url 'title\n\nwith blank line'\n\n[foo]\n", "<p>[foo]: /url 'title</p>\n<p>with blank line'</p>\n<p>[foo]</p>\n", NULL, NULL, NULL },
+    { "official-209", "[foo]: /url \"title\" ok\n", "<p>[foo]: /url &quot;title&quot; ok</p>\n", NULL, NULL, NULL },
+    { "same-line-unclosed", "[foo]: /url 'never\nends\n\n[foo]\n", "<p>[foo]: /url 'never\nends</p>\n<p>[foo]</p>\n", NULL, NULL, NULL },
+    { "optional-title-garbage-keeps-url", "[foo]: /url\n\"title\" junk\n\n[foo]\n", "<p>&quot;title&quot; junk</p>\n<p><a href=\"/url\">foo</a></p>\n", "/url", NULL, "foo" },
+    { "optional-unclosed-keeps-url", "[foo]: /url\n'never\n\n[foo]\n", "<p>'never</p>\n<p><a href=\"/url\">foo</a></p>\n", "/url", NULL, "foo" },
+    { "title-root-heading-barrier", "[foo]: /url 'never\n# boundary\nclose'\n\n[foo]\n", "<p>[foo]: /url 'never</p>\n<h1>boundary</h1>\n<p>close'</p>\n<p>[foo]</p>\n", NULL, NULL, NULL },
+    { "title-root-fence-barrier", "[foo]: /url 'never\n```\nclose'\n```\n\n[foo]\n", "<p>[foo]: /url 'never</p>\n<pre><code>close'\n</code></pre>\n<p>[foo]</p>\n", NULL, NULL, NULL },
+    { "opening-indented-code-not-reference", "    [foo]: /url 'title'\n\n[foo]\n", "<pre><code>[foo]: /url 'title'\n</code></pre>\n<p>[foo]</p>\n", NULL, NULL, NULL },
+    { "blank-destination-barrier", "[foo]:\n\n    /url\n\n[foo]\n", "<p>[foo]:</p>\n<pre><code>/url\n</code></pre>\n<p>[foo]</p>\n", NULL, NULL, NULL },
+    { "unescaped-nested-label-rejected", "[a[b]]: /wrong\n\n[a[b]]\n", "<p>[a[b]]: /wrong</p>\n<p>[a[b]]</p>\n", NULL, NULL, NULL },
+    { "title-escaped-attribute-injection", "[foo]: /uri 'a\n&quot; onmouseover=&quot;alert(1)'\n\n[foo]\n", "<p><a href=\"/uri\" title=\"a\n&quot; onmouseover=&quot;alert(1)\">foo</a></p>\n", "/uri", "a\n\" onmouseover=\"alert(1)", "foo" },
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==26u,
+                   "multiline/escaped reference fixture denominator");
+    for(size_t i=0u;i<sizeof(cases)/sizeof(cases[0]);++i)
+        if(check_case(&cases[i]))return 1;
+    if(check_safety() || check_budgets() || check_label_budget() ||
+       check_adjacent_owners())return 1;
+    puts("C11 multiline/escaped references: 26/26 HTML/AST, raw ownership, "
+         "title/href security, line/map budgets and atomic rollback");
+    return 0;
+}
