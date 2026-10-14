@@ -104,7 +104,7 @@ stun_ui_status stun_ui_rect_view_validate(
 
 static bool valid_block_kind(stun_ui_block_kind kind) {
     return kind >= STUN_UI_BLOCK_DOCUMENT &&
-           kind <= STUN_UI_BLOCK_RAW_HTML_BLOCK;
+           kind <= STUN_UI_BLOCK_URI_AUTOLINK;
 }
 
 stun_ui_status stun_ui_document_validate(
@@ -135,7 +135,8 @@ stun_ui_status stun_ui_document_validate(
               view->blocks[i+1u].parent_index == i)))
             return STUN_UI_INVALID_ARGUMENT;
         if ((block->kind==STUN_UI_BLOCK_RAW_HTML_INLINE ||
-             block->kind==STUN_UI_BLOCK_RAW_HTML_BLOCK) &&
+             block->kind==STUN_UI_BLOCK_RAW_HTML_BLOCK ||
+             block->kind==STUN_UI_BLOCK_URI_AUTOLINK) &&
             i+1u<view->block_count &&
             view->blocks[i+1u].parent_index==i)
             return STUN_UI_INVALID_ARGUMENT;

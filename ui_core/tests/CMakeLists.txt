@@ -23,6 +23,13 @@ target_link_libraries(stun_markdown_link_target_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_link_target_test
          COMMAND stun_markdown_link_target_test)
 
+# #183/#184: URI autolink grammar is scheme-neutral; the existing SAFE
+# HTML writer never emits an unapproved scheme as an active anchor.
+add_executable(stun_markdown_uri_policy_test markdown_uri_policy_test.c)
+target_compile_features(stun_markdown_uri_policy_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_uri_policy_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_uri_policy_test COMMAND stun_markdown_uri_policy_test)
+
 # #183: bounded root ASCII reference definitions; forward/first-win
 # source ownership and typed full/collapsed/shortcut LINK admission.
 add_executable(stun_markdown_reference_test markdown_reference_test.c)

@@ -64,3 +64,24 @@ failure, malformed tags, hostile script tokens and one-node-short budgets.
 No alternative markdown frontend, runtime persistence, silent fallback,
 unbounded HTML DOM, external network fetch, automatic retry, or alteration
 of the public SafeApplicationHtml default.
+
+## URI autolink syntax versus production navigation policy (#183/#184)
+
+The same bounded C11 scanner now recognizes CommonMark's 2..32-byte ASCII
+scheme grammar independently of whether a scheme is approved for navigation.
+An existing LINK node is still produced for approved HTTP/HTTPS/mailto
+autolinks and the renderer's decoded-URL security checks are unchanged.
+Other syntactically valid URI autolinks are represented by the appended,
+leaf-only URI_AUTOLINK RichDoc kind with immutable owned visible text and
+matching metadata. No alternate parser, fallback path or new runtime state.
+
+The default SAFE policy renders such an unapproved token as escaped literal
+angle text rather than a clickable link. Explicit, trusted SPEC conformance
+may serialize it as an anchor, even for an otherwise unsafe scheme; this
+output is **never safe for untrusted WebView content**. Standalone Markdown
+LINK/IMAGE href and src checking continue to fail closed. A forged leaf,
+mismatched metadata, child node or control byte is rejected before output.
+
+Official #596/#598/#599/#601 are qualified independently of Unicode's
+#206/#354/#540 and only after full exact-HEAD installed C11, sanitizer,
+production FlexUI/Mesa, and separate SAFE/SPEC 652-row evidence.

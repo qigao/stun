@@ -243,7 +243,8 @@ static void html_image_alt_children(stun_html_writer *w,size_t parent,
          * characters to IMAGE alt, not live markup or its attributes.
          * Always HTML-escape the alt attribute even in SPEC mode. */
         if(kind==STUN_UI_BLOCK_TEXT ||
-           kind==STUN_UI_BLOCK_RAW_HTML_INLINE) {
+           kind==STUN_UI_BLOCK_RAW_HTML_INLINE ||
+           kind==STUN_UI_BLOCK_URI_AUTOLINK) {
             html_text(w,&doc->blocks[at]);
             if(at+1u<doc->block_count &&
                doc->blocks[at+1u].parent_index==at)
@@ -370,6 +371,42 @@ static void html_node(stun_html_writer *w, size_t id,
         if(id+1u<doc->block_count &&
            doc->blocks[id+1u].parent_index==id)
             w->error=STUN_UI_INVALID_ARGUMENT;
+        *next=id+1u;return;
+    }
+    case STUN_UI_BLOCK_URI_AUTOLINK: {
+        /* The parser records the undecoded literal URI in BOTH owned
+         * semantic text and metadata. The SAFE output remains the escaped
+         * angle token, never a clickable unsafe destination. Only the
+         * explicitly selected trusted SPEC profile may emit an anchor. */
+        if(!html_metadata(w,id,&meta,&meta_length))return;
+        if(node->byte_end<=node->byte_begin ||
+           node->byte_end>doc->source_bytes || !doc->source ||
+           !meta || meta_length!=node->byte_end-node->byte_begin ||
+           memcmp(meta,doc->source+node->byte_begin,meta_length) ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const char *raw=doc->source+node->byte_begin;
+        /* Reject forged embedded controls even for explicit SPEC. The
+         * canonical C11 autolink lexer already enforces this on admission. */
+        for(size_t i=0u;i<meta_length;++i) {
+            const unsigned char c=(unsigned char)raw[i];
+            if(c<=0x20u||c==0x7fu||c=='<'||c=='>') {
+                w->error=STUN_UI_INVALID_ARGUMENT;return;
+            }
+        }
+        if(w->policy==STUN_MD_HTML_SPEC_CONFORMANCE) {
+            html_str(w,"<a href=\"");
+            html_link_href(w,meta,meta_length);
+            html_str(w,"\">");
+            html_escaped(w,raw,meta_length,false);
+            html_str(w,"</a>");
+        } else {
+            html_str(w,"&lt;");
+            html_escaped(w,raw,meta_length,false);
+            html_str(w,"&gt;");
+        }
         *next=id+1u;return;
     }
     case STUN_UI_BLOCK_TEXT:

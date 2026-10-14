@@ -1093,10 +1093,11 @@ static bool md_reference_inline_match(
     return true;
 }
 
-/* URI Autolinks use the existing owned LINK semantics. This bounded
- * SafeApplicationHtml admission recognizes only http/https/mailto; the
- * canonical HTML renderer remains the final URL security authority.
- * Never parse Markdown escapes/entities in the URI's visible label. */
+/* URI autolink SCHEME SYNTAX is independent of the production scheme
+ * allowlist. Approved schemes remain owned LINK nodes. Other syntactically
+ * valid schemes use an explicit URI_AUTOLINK leaf: SAFE escapes its original
+ * angle source; only test-only SPEC emits an anchor. Never normalize or
+ * decode the literal visible URI as Markdown syntax. */
 static bool md_autolink_scheme(const char *s,size_t b,size_t e) {
     static const char *const names[]={"http","https","mailto"};
     for(size_t k=0u;k<sizeof(names)/sizeof(names[0]);++k) {
@@ -1130,7 +1131,7 @@ static bool md_uri_autolink(const char *s,size_t n,size_t at,
         ++colon;
     }
     if(colon>=n||s[colon]!=':'||colon-b<2u||
-       colon-b>32u||!md_autolink_scheme(s,b,colon))return false;
+       colon-b>32u)return false;
     size_t close=colon+1u;
     if(close>=n)return false;
     const size_t start=close;
@@ -1513,10 +1514,31 @@ static bool md_inline(stun_md_document *d, uint32_t parent,
             const bool email=!uri&&md_email_autolink(s,n,p,&close);
             if(uri||email) {
                 md_text(d,owners[nested],s+text_start,p-text_start);
+                const size_t bytes=close-p-1u;
+                /* A non-approved but valid RFC-style scheme is still
+                 * opaque Markdown syntax. Do not manufacture a navigable
+                 * LINK for a production consumer: preserve owned literal
+                 * bytes in a dedicated leaf, letting SAFE escape it. */
+                size_t colon=p+1u;
+                if(uri)while(colon<close && s[colon]!=':')++colon;
+                const bool approved=email ||
+                    (uri && md_autolink_scheme(s,p+1u,colon));
+                if(!approved) {
+                    const uint32_t node=md_add(
+                        d,owners[nested],STUN_UI_BLOCK_URI_AUTOLINK,0u);
+                    if(node==UINT32_MAX)break;
+                    md_meta(d,node,s+p+1u,bytes);
+                    size_t first=0u,last=0u;
+                    if(md_store(d,false,s+p+1u,bytes,&first,&last)) {
+                        d->nodes[node].byte_begin=first;
+                        d->nodes[node].byte_end=last;
+                    }
+                    if(d->error!=STUN_UI_OK)break;
+                    p=close+1u;text_start=p;continue;
+                }
                 const uint32_t link=md_add(
                     d,owners[nested],STUN_UI_BLOCK_LINK,0u);
                 if(link==UINT32_MAX)break;
-                const size_t bytes=close-p-1u;
                 if(email) {
                     /* Bounded contiguous metadata writes: no transient
                      * global registry, heap string, or alternative parser.

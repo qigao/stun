@@ -117,7 +117,12 @@ typedef enum stun_ui_block_kind {
     STUN_UI_BLOCK_IMAGE_TITLE,
     /* Parser-owned literal HTML tokens; never implicit unsafe passthrough. */
     STUN_UI_BLOCK_RAW_HTML_INLINE,
-    STUN_UI_BLOCK_RAW_HTML_BLOCK
+    STUN_UI_BLOCK_RAW_HTML_BLOCK,
+    /* A CommonMark URI autolink outside the production scheme allowlist.
+     * Leaf with an owned visible-URI span plus matching metadata; the
+     * default SAFE HTML writer always escapes its enclosing angle token.
+     * Only explicit trusted SPEC_CONFORMANCE emits an anchor element. */
+    STUN_UI_BLOCK_URI_AUTOLINK
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {
