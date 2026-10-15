@@ -1034,6 +1034,67 @@ static int test_gfm_forged_table_shape_fails_closed(void) {
     return 0;
 }
 
+/* #186: a projected RichDoc may forge fewer/more TABLE_CELL children
+ * than the parser's per-column alignment vector. The HTML writer has a
+ * strict row-close equality check and a bounds check before each cell.
+ * Either malformed shape is rejected before any caller-visible byte is
+ * produced, including within the measured-output query path. */
+static int test_gfm_forged_row_cardinality_fails_closed(void) {
+    static const char source[]=
+        "| A | B |\n| --- | --- |\n| x | y |\n";
+    stun_md_document *owned=NULL;
+    CHECK(stun_md_parse(source,sizeof(source)-1u,128u,sizeof(source),
+                        &owned)==STUN_UI_OK);
+    const stun_ui_rich_document_view canonical=stun_md_document_view(owned);
+    CHECK(stun_ui_rich_document_validate(&canonical,128u)==STUN_UI_OK);
+    const size_t count=canonical.document.block_count;
+    size_t row=SIZE_MAX,first_cell=SIZE_MAX,second_cell=SIZE_MAX;
+    size_t first_text=SIZE_MAX;
+    for(size_t i=1u;i<count;++i) {
+        const stun_ui_block *node=&canonical.document.blocks[i];
+        if(node->kind==STUN_UI_BLOCK_TABLE_ROW && row==SIZE_MAX)row=i;
+        if(row!=SIZE_MAX && node->kind==STUN_UI_BLOCK_TABLE_CELL &&
+           node->parent_index==row) {
+            if(first_cell==SIZE_MAX)first_cell=i;
+            else if(second_cell==SIZE_MAX)second_cell=i;
+        }
+        if(first_cell!=SIZE_MAX && first_text==SIZE_MAX &&
+           node->kind==STUN_UI_BLOCK_TEXT &&
+           node->parent_index==first_cell)first_text=i;
+    }
+    CHECK(row!=SIZE_MAX && first_cell!=SIZE_MAX &&
+          second_cell!=SIZE_MAX && first_text!=SIZE_MAX);
+    stun_ui_block *copy=(stun_ui_block*)malloc(count*sizeof(*copy));
+    CHECK(copy!=NULL);
+    for(size_t mode=0u;mode<2u;++mode) {
+        memcpy(copy,canonical.document.blocks,count*sizeof(*copy));
+        if(mode==0u) {
+            /* Too few TABLE_CELL children: ROW close must reject. */
+            copy[second_cell].kind=STUN_UI_BLOCK_TEXT;
+        } else {
+            /* Too many TABLE_CELL children: index overflow must reject. */
+            copy[first_text].kind=STUN_UI_BLOCK_TABLE_CELL;
+            copy[first_text].parent_index=(uint32_t)row;
+        }
+        stun_ui_rich_document_view forged=canonical;
+        forged.document.blocks=copy;
+        unsigned char output[2048];memset(output,0xe5,sizeof(output));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&forged,128u,(char*)output,
+                                  sizeof(output),&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(output);++i)
+            CHECK(output[i]==0xe5);
+        CHECK(stun_md_render_html(&forged,128u,NULL,0u,&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+    }
+    free(copy);
+    stun_md_document_destroy(owned);
+    return 0;
+}
+
 static int test_gfm_forged_ancestry_fails_closed(void) {
     typedef struct {
         const char *markdown;
@@ -1320,6 +1381,7 @@ int main(void) {
     if(test_gfm_metadata_fails_closed()) return 1;
     if(test_gfm_forged_table_shape_fails_closed()) return 1;
     if(test_gfm_forged_ancestry_fails_closed()) return 1;
+    if(test_gfm_forged_row_cardinality_fails_closed()) return 1;
     if(test_gfm_forged_container_chain_fails_closed()) return 1;
     if(test_gfm_nested_unsafe_url_atomicity()) return 1;
     if(test_unsafe_unsupported()) return 1;
