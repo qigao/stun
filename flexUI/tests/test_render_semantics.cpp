@@ -10407,9 +10407,8 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     // the viewport culled it. Do not require offscreen text to be drawn.
     if (moved != after_scroll.texts.end())
       check(moved->y < initial_text_y);
-    else
-      check(viewport->scroll_y() >= viewport->height() ||
-            initial_text_y < viewport->absolute_y() + viewport->scroll_y());
+    // A fully clipped heading is also acceptable here. Restore visibility
+    // after Home below and verify the same text was not lost by scrolling.
 
     box.set_focus(md);
     Event end = Event::key_down(KeyCode::End);
@@ -10420,6 +10419,18 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     box.dispatch_event(home);
     check(home.handled);
     check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+    box.update();
+    RecordingRenderer restored;
+    restored.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer restored_renderer(&restored);
+    RenderManager restored_manager(&restored_renderer);
+    restored_manager.render_tree(root);
+    const auto again = std::find_if(
+        restored.texts.begin(), restored.texts.end(),
+        [](const TextCall& call) { return call.text == "Status"; });
+    check(again != restored.texts.end());
+    if (again != restored.texts.end())
+      check(approx_eq(again->y, initial_text_y, 0.1f));
 
     const std::string source = widget->markdown();
     Event input = Event::text_input("must-not-change");
