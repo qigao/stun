@@ -224,6 +224,24 @@ static const html_fixture cases[] = {
       "<td align=\"center\"></td>\n"
       "<td align=\"right\"></td>\n"
       "</tr>\n</tbody>\n</table>\n" },
+    /* #186 regression: a two-backslash run still shields the final pipe
+     * at TABLE admission; normalized owned inline text drops the escape. */
+    { "| Name | Value |\n| --- | --- |\n| a\\\\|b | tail |\n",
+      "<table>\n<thead>\n<tr>\n<th>Name</th>\n<th>Value</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td>a|b</td>\n<td>tail</td>\n"
+      "</tr>\n</tbody>\n</table>\n" },
+    /* A bare task bracket sequence with NO trailing whitespace is ordinary
+     * LIST_ITEM text, not a CHECKBOX; checked and unchecked both apply. */
+    { "- [ ]\n- [x]\n",
+      "<ul>\n<li>[ ]</li>\n<li>[x]</li>\n</ul>\n" },
+    /* Loose-list paragraphs need the literal task-marker separator before
+     * the newline, even though the checkbox itself is an inert element. */
+    { "- [x] shipped\n\n- [ ] pending\n",
+      "<ul>\n<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> \n"
+      "<p>shipped</p>\n</li>\n"
+      "<li><input type=\"checkbox\" disabled=\"\" /> \n"
+      "<p>pending</p>\n</li>\n</ul>\n" },
     /* #186: only typed CHECKBOX nodes may emit inert fixed markup. */
     { "- [x] shipped\n- [ ] pending\n",
       "<ul>\n<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> shipped</li>\n"
@@ -763,7 +781,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==369,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==372,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
