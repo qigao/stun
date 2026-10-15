@@ -940,6 +940,87 @@ static int test_gfm_metadata_fails_closed(void) {
  * parent-child relationships before touching caller output. The copied
  * block array deliberately retains valid IDs and parent<index so only the
  * typed semantic ownership check can catch these malicious views. */
+/* #186: a TABLE vector is exactly one alignment byte per physical
+ * column. A caller can borrow/forge RichDoc spans without modifying parser
+ * storage; neither a truncated vector, an expanded vector nor a detached
+ * TABLE_CELL can produce partial HTML. Every rejection must occur in the
+ * dry-run, with an untouched buffer and untouched length output. */
+static int test_gfm_forged_table_shape_fails_closed(void) {
+    static const char source[]=
+        "| A | B |\n| :--- | ---: |\n| a | b |\n";
+    stun_md_document *owned=NULL;
+    CHECK(stun_md_parse(source,sizeof(source)-1u,128u,sizeof(source),
+                        &owned)==STUN_UI_OK);
+    const stun_ui_rich_document_view original=stun_md_document_view(owned);
+    CHECK(stun_ui_rich_document_validate(&original,128u)==STUN_UI_OK);
+    size_t table=SIZE_MAX,first_cell=SIZE_MAX;
+    for(size_t i=1u;i<original.document.block_count;++i) {
+        if(original.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+        if(original.document.blocks[i].kind==STUN_UI_BLOCK_TABLE_CELL &&
+           first_cell==SIZE_MAX)first_cell=i;
+    }
+    CHECK(table!=SIZE_MAX && first_cell!=SIZE_MAX);
+    const stun_ui_block_metadata span=original.block_metadata[table];
+    CHECK(span.byte_end-span.byte_begin==2u);
+    size_t need=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,128u,NULL,0u,&need)==STUN_UI_OK);
+    CHECK(need>0u && need<512u);
+
+    /* Shortened and expanded metadata vectors must each fail the same
+     * two-pass renderer; no alignment is inferred from cell contents. */
+    for(size_t variant=0u;variant<2u;++variant) {
+        stun_ui_rich_document_view forged=original;
+        stun_ui_block_metadata *meta=(stun_ui_block_metadata*)malloc(
+            original.block_metadata_count*sizeof(*meta));
+        CHECK(meta!=NULL);
+        memcpy(meta,original.block_metadata,
+               original.block_metadata_count*sizeof(*meta));
+        char *arena=(char*)malloc(original.metadata_bytes+1u);
+        CHECK(arena!=NULL);
+        if(original.metadata_bytes)
+            memcpy(arena,original.metadata,original.metadata_bytes);
+        arena[original.metadata_bytes]=0;
+        forged.block_metadata=meta;
+        forged.metadata=arena;
+        if(variant==0u) {
+            meta[table].byte_end=span.byte_begin+1u;
+        } else {
+            meta[table].byte_end=span.byte_end+1u;
+            forged.metadata_bytes=original.metadata_bytes+1u;
+        }
+        unsigned char bytes[512];memset(bytes,0x92,sizeof(bytes));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&forged,128u,(char*)bytes,
+                                  sizeof(bytes),&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(bytes);++i)CHECK(bytes[i]==0x92);
+        free(arena);free(meta);
+    }
+    /* Reparenting a TABLE_CELL into TABLE preserves its generic preorder,
+     * but the typed TABLE/ROW/CELL topology must be rejected. */
+    {
+        stun_ui_rich_document_view forged=original;
+        stun_ui_block *nodes=(stun_ui_block*)malloc(
+            original.document.block_count*sizeof(*nodes));
+        CHECK(nodes!=NULL);
+        memcpy(nodes,original.document.blocks,
+               original.document.block_count*sizeof(*nodes));
+        nodes[first_cell].parent_index=(uint32_t)table;
+        forged.document.blocks=nodes;
+        unsigned char bytes[512];memset(bytes,0x92,sizeof(bytes));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&forged,128u,(char*)bytes,
+                                  sizeof(bytes),&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(bytes);++i)CHECK(bytes[i]==0x92);
+        free(nodes);
+    }
+    stun_md_document_destroy(owned);
+    return 0;
+}
+
 static int test_gfm_forged_ancestry_fails_closed(void) {
     typedef struct {
         const char *markdown;
@@ -1224,6 +1305,7 @@ int main(void) {
         }
     }
     if(test_gfm_metadata_fails_closed()) return 1;
+    if(test_gfm_forged_table_shape_fails_closed()) return 1;
     if(test_gfm_forged_ancestry_fails_closed()) return 1;
     if(test_gfm_forged_container_chain_fails_closed()) return 1;
     if(test_gfm_nested_unsafe_url_atomicity()) return 1;
