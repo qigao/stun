@@ -492,6 +492,71 @@ static int test_gfm_list_table_ownership(void) {
 /* #186: true TASK_ITEM -> TABLE and nested LIST_ITEM -> TABLE ownership
  * on the one C11 block parser. Source and checkbox metadata remain owned
  * by the same immutable document; count/write HTML stays transactional. */
+/* #186: an existing list-owned paragraph may be followed without an
+ * intervening blank by a canonical two-line GFM TABLE header/delimiter.
+ * The already-owned paragraph keeps its earlier inline children; the
+ * TABLE becomes a new sibling under the SAME list item. A root line
+ * beginning with a valid "- " marker is a LIST opener, not root TABLE. */
+static int test_gfm_paragraph_to_list_table(void) {
+    const char *inputs[] = {
+        "- intro\n  | A | B |\n  | --- | --- |\n  | x | y |\n",
+        "> - intro\n>   | A | B |\n>   | --- | --- |\n"
+        ">   | x | y |\n",
+        "- intro\n  continued\n  | A | B |\n"
+        "  | --- | --- |\n  | x | y |\n",
+        "- left | right\n  --- | ---\n  x | y\n"
+    };
+    for(size_t k=0u;k<sizeof(inputs)/sizeof(inputs[0]);++k) {
+        const size_t bytes=strlen(inputs[k]);
+        stun_md_document *owner=NULL;
+        CHECK(stun_md_parse(inputs[k],bytes,256u,1024u,&owner)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owner);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_PARAGRAPH)==(k==3u?0u:1u));
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==(k==1u?1u:0u));
+        size_t table=SIZE_MAX,item=SIZE_MAX,list=SIZE_MAX;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            switch(v.document.blocks[i].kind) {
+            case STUN_UI_BLOCK_TABLE: table=i;break;
+            case STUN_UI_BLOCK_LIST_ITEM: item=i;break;
+            case STUN_UI_BLOCK_LIST: list=i;break;
+            default: break;
+            }
+        }
+        CHECK(table!=SIZE_MAX && item!=SIZE_MAX && list!=SIZE_MAX);
+        CHECK(v.document.blocks[table].parent_index==item);
+        CHECK(v.document.blocks[item].parent_index==list);
+        CHECK(v.document.blocks[list].parent_index==
+              (k==1u?1u:0u));
+        if(k<3u)CHECK(text_is(v,"intro"));
+        if(k==2u)CHECK(text_is(v,"continued"));
+        CHECK(text_is(v,k==3u?"left":"A"));
+        CHECK(text_is(v,"x"));
+        CHECK(text_is(v,"y"));
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,inputs[k],bytes)==0);
+        size_t need=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,NULL,0u,&need)==STUN_UI_OK);
+        CHECK(need>0u && need<1024u);
+        unsigned char bytes_out[1024];
+        memset(bytes_out,0x7b,sizeof(bytes_out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,(char*)bytes_out,need,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        for(size_t i=0u;i<sizeof(bytes_out);++i)
+            CHECK(bytes_out[i]==0x7b);
+        CHECK(stun_md_render_html(&v,256u,(char*)bytes_out,
+                                  sizeof(bytes_out),&required)==STUN_UI_OK);
+        CHECK(strstr((char*)bytes_out,"<table>\n<thead>")!=NULL);
+        stun_md_document_destroy(owner);
+    }
+    return 0;
+}
+
 static int test_gfm_composed_list_table_ownership(void) {
     const char *inputs[] = {
         "- [x] parent\n\n  | A | B |\n  | --- | --- |\n"
@@ -1301,6 +1366,7 @@ int main(void) {
     if(test_gfm_explicit_quote_table_ownership()) return 1;
     if(test_gfm_list_table_ownership()) return 1;
     if(test_gfm_composed_list_table_ownership()) return 1;
+    if(test_gfm_paragraph_to_list_table()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
