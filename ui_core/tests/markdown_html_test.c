@@ -904,6 +904,42 @@ static int test_gfm_forged_ancestry_fails_closed(void) {
         free(copy);
         stun_md_document_destroy(owned);
     }
+    /* A TABLE is root-owned by this bounded GFM parser. A caller may forge
+     * an otherwise-valid generic RichDoc preorder by making it a direct
+     * PARAGRAPH child; the renderer must reject it before output. */
+    {
+        static const char source[]=
+            "intro\n\n| A | B |\n| --- | --- |\n| a | b |\n";
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(source,sizeof(source)-1u,128u,sizeof(source),
+                            &owned)==STUN_UI_OK);
+        stun_ui_rich_document_view view=stun_md_document_view(owned);
+        const size_t count=view.document.block_count;
+        stun_ui_block *copy=(stun_ui_block*)malloc(count*sizeof(*copy));
+        CHECK(copy!=NULL);
+        memcpy(copy,view.document.blocks,count*sizeof(*copy));
+        size_t paragraph=SIZE_MAX,table=SIZE_MAX;
+        for(size_t i=1u;i<count;++i) {
+            if(copy[i].kind==STUN_UI_BLOCK_PARAGRAPH && paragraph==SIZE_MAX)
+                paragraph=i;
+            if(copy[i].kind==STUN_UI_BLOCK_TABLE && table==SIZE_MAX)
+                table=i;
+        }
+        CHECK(paragraph!=SIZE_MAX && table>paragraph && table<count);
+        copy[table].parent_index=(uint32_t)paragraph;
+        view.document.blocks=copy;
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        unsigned char out[512];
+        memset(out,0xc7,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&view,128u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(out);++i)
+            CHECK(out[i]==0xc7);
+        free(copy);
+        stun_md_document_destroy(owned);
+    }
     return 0;
 }
 

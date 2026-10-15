@@ -297,6 +297,12 @@ static void html_children(stun_html_writer *w, size_t id,
 static void html_table(stun_html_writer *w, size_t id,
                        size_t *next, size_t depth) {
     const stun_ui_document_view *doc=&w->doc->document;
+    /* The current canonical TABLE parser admits root tables only.
+     * Generic RichDoc preorder validation is not a semantic parent check:
+     * reject a forged TABLE underneath PARAGRAPH/LIST/inline content. */
+    if(id==0u || doc->blocks[id].parent_index!=0u) {
+        w->error=STUN_UI_INVALID_ARGUMENT;return;
+    }
     const char *metadata=NULL;size_t columns=0u;
     if(!html_metadata(w,id,&metadata,&columns))return;
     /* The canonical parser publishes exactly one byte per column. Never
