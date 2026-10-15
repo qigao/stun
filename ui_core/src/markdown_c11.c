@@ -3410,9 +3410,9 @@ static void md_reference_collect_root(stun_md_document *d) {
                 const md_line sep=md_read_line(d,pos);
                 size_t header_columns=0u,delimiter_columns=0u;
                 if(md_table_scan(s,begin,line.end,false,true,
-                                 &header_columns) &&
+                                 &header_columns,NULL,0u) &&
                    md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
-                                 true,true,&delimiter_columns) &&
+                                 true,true,&delimiter_columns,NULL,0u) &&
                    header_columns==delimiter_columns) {
                     pos=sep.next;
                     while(pos<d->raw_size) {
@@ -3423,7 +3423,7 @@ static void md_reference_collect_root(stun_md_document *d) {
                            md_blank(s,row.begin,row.end) ||
                            md_table_starts_new_block(s,rb,row.end) ||
                            !md_table_scan(s,rb,row.end,false,false,
-                                          &row_columns))
+                                          &row_columns,NULL,0u))
                             break;
                         pos=row.next;
                     }
