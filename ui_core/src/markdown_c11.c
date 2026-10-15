@@ -1942,9 +1942,17 @@ static bool md_list_begin_fence(stun_md_document *d,md_list_frame *f,
 /* Recursive admission only follows list markers on the same physical
  * line and is bounded by MD_LIST_MAX_DEPTH. The frame stack, not the C call
  * stack, continues to own all subsequent source-line admission. */
+/* One typed GFM TABLE admission shared by root/quote/list owners.
+ * Item content columns are relative to their owning root or quoted line;
+ * 0 means no list owner. The cursor is advanced only on actual admission. */
+static bool md_table_admit(stun_md_document *d,uint32_t parent,
+                           md_line header,size_t header_begin,
+                           size_t *next_pos,size_t quote_depth,
+                           size_t item_column);
 static bool md_list_open(stun_md_document *d,md_list_stack *stack,
                          uint32_t parent,const md_list_marker_info *m,
-                         const char *s,size_t end);
+                         const char *s,size_t end,size_t *next_pos,
+                         size_t quote_depth);
 
 /* Use the same ATX grammar and owned IR for headings admitted directly
  * within a list item; no competing inline parser is introduced. */
@@ -1989,7 +1997,8 @@ static bool md_list_append_quote(stun_md_document *d,md_list_frame *f,
 static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
                                 md_list_frame *f,
                                 const md_list_marker_info *m,
-                                const char *s,size_t end) {
+                                const char *s,size_t end,
+                                size_t *next_pos,size_t quote_depth) {
     char state=0;
     size_t content=m->content_offset;
     const bool task=md_task_marker(s,content,end,&state,&content);
@@ -2050,7 +2059,8 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
             }
             nested.column+=m->content_column;
             nested.content_column+=m->content_column;
-            return md_list_open(d,stack,f->item,&nested,s,end);
+            return md_list_open(d,stack,f->item,&nested,s,end,
+                                next_pos,quote_depth);
         }
         /* A list marker may introduce a heading or fenced block directly.
          * Both retain their list-item parent instead of creating a paragraph. */
@@ -2080,6 +2090,15 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
                 0u:html_kind;
             return d->error==STUN_UI_OK;
         }
+        /* An item-opener can itself be a GFM table header. Its delimiter
+         * belongs to this ITEM only if the next physical line matches this
+         * item's content column and (when quoted) the exact quote depth. */
+        if(!task && next_pos && content<end) {
+            const md_line header={content,end,end,false};
+            if(md_table_admit(d,f->item,header,content,next_pos,
+                              quote_depth,m->content_column))
+                return d->error==STUN_UI_OK;
+        }
         f->paragraph=md_add(d,f->item,STUN_UI_BLOCK_PARAGRAPH,0u);
         if(f->paragraph==UINT32_MAX) return false;
         if(!md_inline(d,f->paragraph,s+content,end-content,0u)) return false;
@@ -2089,7 +2108,8 @@ static bool md_list_append_item(stun_md_document *d,md_list_stack *stack,
 
 static bool md_list_open(stun_md_document *d,md_list_stack *stack,
                          uint32_t parent,const md_list_marker_info *m,
-                         const char *s,size_t end) {
+                         const char *s,size_t end,size_t *next_pos,
+                         size_t quote_depth) {
     if(stack->depth>=MD_LIST_MAX_DEPTH) {
         md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
     }
@@ -2104,7 +2124,7 @@ static bool md_list_open(stun_md_document *d,md_list_stack *stack,
     f->ordered=m->ordered;
     f->marker_column=m->column;
     f->list_base_column=m->column;
-    return md_list_append_item(d,stack,f,m,s,end);
+    return md_list_append_item(d,stack,f,m,s,end,next_pos,quote_depth);
 }
 
 /* A blank line first belongs to every still-open candidate container. If a
@@ -2121,7 +2141,8 @@ static bool md_quote_lazy_interrupts(const char *s,md_line line,
                                      size_t begin);
 
 static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
-                            md_line line) {
+                            md_line line,size_t *next_pos,
+                            size_t quote_depth) {
     if(!stack->depth) return false;
     const char *s=d->raw;
     if(stack->frames[stack->depth-1u].fence_open &&
@@ -2221,7 +2242,8 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                     md_list_claim_nested_blank(stack);
                 }
                 f->marker_column=marker.column;
-                (void)md_list_append_item(d,stack,f,&marker,s,line.end);
+                (void)md_list_append_item(d,stack,f,&marker,s,line.end,
+                                          next_pos,quote_depth);
                 return true;
             }
             --stack->depth; /* differing marker families never coalesce */
@@ -2282,7 +2304,8 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
                     md_mark_list_loose(d,f->list);
                     md_list_claim_nested_blank(stack);
                 }
-                (void)md_list_open(d,stack,f->item,&marker,s,line.end);
+                (void)md_list_open(d,stack,f->item,&marker,s,line.end,
+                                   next_pos,quote_depth);
                 return true;
             }
             const size_t inner_indent=indent-f->content_column;
@@ -2329,6 +2352,14 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             if(md_list_append_quote(d,f,s,body,line.end)) return true;
             f->quote=f->quote_paragraph=UINT32_MAX;
             const size_t text_begin=md_left(s,body,line.end);
+            /* A new list-owned GFM header is admitted only at an actual
+             * block boundary (including after a blank), never by
+             * reinterpreting an open paragraph or lazy continuation. */
+            if(f->paragraph==UINT32_MAX && inner_indent<=3u &&
+               next_pos && md_table_admit(d,f->item,line,text_begin,
+                                         next_pos,quote_depth,
+                                         f->content_column))
+                return true;
             if(f->paragraph==UINT32_MAX &&
                md_container_reference_line(d,line,text_begin))return true;
             if(f->paragraph==UINT32_MAX) {
@@ -2570,8 +2601,9 @@ static size_t md_quote_prefix(const char *s,md_line line,size_t *body) {
  * admission and never persists a second parser or an unowned scratch view. */
 static bool md_table_admit(stun_md_document *d,uint32_t parent,
                            md_line header,size_t header_begin,
-                           size_t *next_pos,size_t quote_depth) {
-    if(*next_pos>=d->raw_size)return false;
+                           size_t *next_pos,size_t quote_depth,
+                           size_t item_column) {
+    if(!next_pos || *next_pos>=d->raw_size)return false;
     const char *s=d->raw;
     const md_line delimiter=md_read_line(d,*next_pos);
     size_t delimiter_body=delimiter.begin;
@@ -2579,8 +2611,11 @@ static bool md_table_admit(stun_md_document *d,uint32_t parent,
        md_quote_prefix(s,delimiter,&delimiter_body)!=quote_depth)
         return false;
     const size_t sep_begin=md_left(s,delimiter_body,delimiter.end);
-    if(quote_depth && md_columns(s,delimiter_body,sep_begin)>3u)
-        return false;
+    const size_t sep_indent=md_columns(s,delimiter_body,sep_begin);
+    if(item_column) {
+        if(sep_indent<item_column || sep_indent-item_column>3u)
+            return false;
+    } else if(quote_depth && sep_indent>3u) return false;
     size_t columns=0u,delimiter_columns=0u;
     if(!md_table_scan(s,header_begin,header.end,false,true,
                       &columns,NULL,0u) ||
@@ -2614,8 +2649,13 @@ static bool md_table_admit(stun_md_document *d,uint32_t parent,
         if(quote_depth &&
            md_quote_prefix(s,row,&row_body)!=quote_depth)break;
         const size_t row_begin=md_left(s,row_body,row.end);
+        const size_t row_indent=md_columns(s,row_body,row_begin);
         size_t row_columns=0u;
-        if(row_begin-row_body>3u || md_blank(s,row_body,row.end) ||
+        if((item_column ?
+            (row_indent<item_column ||
+             row_indent-item_column>3u) :
+            (row_indent>3u)) ||
+           md_blank(s,row_body,row.end) ||
            md_table_starts_new_block(s,row_begin,row.end) ||
            !md_table_scan(s,row_begin,row.end,false,false,
                           &row_columns,NULL,0u))
@@ -2703,12 +2743,14 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
     md_line inner=line;
     inner.begin=body; /* all list columns relative to the quote content */
     if(md_blank(s,body,line.end)) {
-        if(q->lists.depth) (void)md_list_consume(d,&q->lists,inner);
+        if(q->lists.depth) (void)md_list_consume(d,&q->lists,inner,
+                                                   next_pos,level);
         q->paragraph=q->code=UINT32_MAX;
         q->lazy=false;
         return d->error==STUN_UI_OK;
     }
-    if(q->lists.depth && md_list_consume(d,&q->lists,inner))
+    if(q->lists.depth && md_list_consume(d,&q->lists,inner,
+                                            next_pos,level))
         return d->error==STUN_UI_OK;
     if(d->error!=STUN_UI_OK)return false;
     if(q->code!=UINT32_MAX) {
@@ -2756,7 +2798,7 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
      * from a lazy paragraph continuation or an unmatched quote delimiter. */
     if(indent<=3u && q->paragraph==UINT32_MAX &&
        q->lists.depth==0u &&
-       md_table_admit(d,parent,line,begin,next_pos,level)) {
+       md_table_admit(d,parent,line,begin,next_pos,level,0u)) {
         q->paragraph=q->code=UINT32_MAX;
         q->lazy=false;
         return d->error==STUN_UI_OK;
@@ -2768,7 +2810,8 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
        (q->paragraph==UINT32_MAX ||
         md_list_interrupts_paragraph(&item,inner)) &&
        !md_rule(s,begin,line.end)) {
-        if(!md_list_open(d,&q->lists,parent,&item,s,line.end))
+        if(!md_list_open(d,&q->lists,parent,&item,s,line.end,
+                         next_pos,level))
             return false;
         q->paragraph=q->code=UINT32_MAX;
         q->lazy=false;
@@ -3658,7 +3701,7 @@ static void md_parse_blocks(stun_md_document *d) {
             md_text(d,fence.node,s+content,line.next-content);
             continue;
         }
-        if(md_list_consume(d,&lists,line)) continue;
+        if(md_list_consume(d,&lists,line,&pos,0u)) continue;
         if(d->error!=STUN_UI_OK) return;
         /* A root quote container is matched before admitting root blocks.
          * Lazy lines may continue only the last quoted paragraph and never
@@ -3705,7 +3748,7 @@ static void md_parse_blocks(stun_md_document *d) {
                    !top->pending_blank &&
                    !md_blank(s,line.begin,line.end) &&
                    !md_quote_lazy_interrupts(s,line,begin)) {
-                    if(md_list_consume(d,&quotes.lists,line)) continue;
+                    if(md_list_consume(d,&quotes.lists,line,NULL,0u)) continue;
                     if(d->error!=STUN_UI_OK) return;
                 }
             }
@@ -3825,7 +3868,7 @@ static void md_parse_blocks(stun_md_document *d) {
          * retains the established paragraph, list and indentation gates. */
         if(indent<=3u && paragraph==UINT32_MAX &&
            lists.depth==0u &&
-           md_table_admit(d,0u,line,begin,&pos,0u)) {
+           md_table_admit(d,0u,line,begin,&pos,0u,0u)) {
             if(d->error!=STUN_UI_OK)return;
             paragraph=UINT32_MAX;
             continue;
@@ -3835,7 +3878,7 @@ static void md_parse_blocks(stun_md_document *d) {
            (paragraph==UINT32_MAX ||
             md_list_interrupts_paragraph(&top_marker,line)) &&
            !md_rule(s,begin,end)) {
-            if(!md_list_open(d,&lists,0u,&top_marker,s,end)) return;
+            if(!md_list_open(d,&lists,0u,&top_marker,s,end,&pos,0u)) return;
             paragraph=UINT32_MAX;
             continue;
         }
