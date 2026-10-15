@@ -74,6 +74,33 @@ CASES: tuple[Case, ...] = (
          "| b **\\|** im |\n", "gfm"),
     Case("gfm.task", "- [x] completed\n- [ ] remaining\n", "gfm"),
     Case("gfm.task-ordered", "3. [X] done\n4. [ ] later\n", "gfm"),
+    # GFM spec §4.10 Examples 198-205 and §5.3 Examples 279-280.
+    # Exact-byte HTML parity is with the installed independent cmark-gfm
+    # reference; official tasklist examples use a different HTML attribute
+    # ordering, so normative semantic equivalence is not mislabeled as
+    # official-example literal serialization. These are GFM-only gates.
+    Case("gfm.official-198",
+         "| foo | bar |\n| --- | --- |\n| baz | bim |\n", "gfm"),
+    Case("gfm.official-199",
+         "| abc | defghi |\n:-: | -----------:\nbar | baz\n", "gfm"),
+    Case("gfm.official-200",
+         "| f\\|oo  |\n| ------ |\n| b " "\x60" "\\|" "\x60" " az |\n"
+         "| b **\\|** im |\n", "gfm"),
+    Case("gfm.official-201",
+         "| abc | def |\n| --- | --- |\n| bar | baz |\n> bar\n", "gfm"),
+    Case("gfm.official-202",
+         "| abc | def |\n| --- | --- |\n| bar | baz |\nbar\n\nbar\n", "gfm"),
+    Case("gfm.official-203",
+         "| abc | def |\n| --- |\n| bar |\n", "gfm"),
+    Case("gfm.official-204",
+         "| abc | def |\n| --- | --- |\n| bar |\n"
+         "| bar | baz | boo |\n", "gfm"),
+    Case("gfm.official-205",
+         "| abc | def |\n| --- | --- |\n", "gfm"),
+    Case("gfm.official-279",
+         "- [ ] foo\n- [x] bar\n", "gfm"),
+    Case("gfm.official-280",
+         "- [x] foo\n  - [ ] bar\n  - [x] baz\n- [ ] bim\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
@@ -123,9 +150,19 @@ def main() -> int:
     if not CASES:
         print("INFRASTRUCTURE ERROR: no test fixtures", file=sys.stderr)
         return 2
+    official_ids = tuple(
+        c.case_id.split("-", 1)[1] for c in CASES
+        if c.case_id.startswith("gfm.official-") and c.gate
+    )
+    expected_ids = tuple(map(str, list(range(198, 206)) + [279, 280]))
+    if official_ids != expected_ids:
+        print("INFRASTRUCTURE ERROR: GFM official case identity drift:"
+              f" {official_ids!r} != {expected_ids!r}", file=sys.stderr)
+        return 2
 
     results: list[dict] = []
     gated_total = gated_passed = survey_total = survey_matched = 0
+    gfm_official_total = gfm_official_passed = 0
     for case in CASES:
         record: dict = {
             "id": case.case_id, "profile": case.profile,
@@ -150,6 +187,9 @@ def main() -> int:
         if case.gate:
             gated_total += 1
             gated_passed += int(record["matched"])
+            if case.case_id.startswith("gfm.official-"):
+                gfm_official_total += 1
+                gfm_official_passed += int(record["matched"])
         else:
             survey_total += 1
             survey_matched += int(record["matched"])
@@ -164,6 +204,11 @@ def main() -> int:
         "test": "C11 RichDoc HTML -> independent cmarkgfm exact-byte comparison",
         "cmarkgfm_version": metadata.version("cmarkgfm"),
         "gate": {"passed": gated_passed, "total": gated_total},
+        "gfm_official_subset": {"passed": gfm_official_passed,
+                                "total": gfm_official_total,
+                                "ids": list(expected_ids),
+                                "reference": "cmarkgfm HTML byte equality",
+                                "official_html_note": "HTML attribute serialization may differ from the published GFM prose examples"},
         "survey": {"matched": survey_matched, "total": survey_total},
         "cases": results,
         "note": "Strict GFM/CommonMark HTML subset comparison; not complete normative"
