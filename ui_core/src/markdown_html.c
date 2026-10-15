@@ -307,6 +307,18 @@ static void html_table(stun_html_writer *w, size_t id,
         doc->blocks[owner].kind!=STUN_UI_BLOCK_TASK_ITEM)) {
         w->error=STUN_UI_INVALID_ARGUMENT;return;
     }
+    /* A LIST_ITEM/TASK_ITEM is itself owned by exactly one LIST/ORDERED_LIST.
+     * Generic RichDoc preorder validation does not guarantee this second
+     * edge. Reject forged one-hop ancestors before emitting table markup. */
+    if(owner && (doc->blocks[owner].kind==STUN_UI_BLOCK_LIST_ITEM ||
+                 doc->blocks[owner].kind==STUN_UI_BLOCK_TASK_ITEM)) {
+        const uint32_t list=doc->blocks[owner].parent_index;
+        if(list>=owner ||
+           (doc->blocks[list].kind!=STUN_UI_BLOCK_LIST &&
+            doc->blocks[list].kind!=STUN_UI_BLOCK_ORDERED_LIST)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+    }
     const char *metadata=NULL;size_t columns=0u;
     if(!html_metadata(w,id,&metadata,&columns))return;
     /* The canonical parser publishes exactly one byte per column. Never
