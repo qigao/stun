@@ -615,6 +615,93 @@ static int test_gfm_composed_list_table_ownership(void) {
     return 0;
 }
 
+/* #186: a root definition physically AFTER LIST/TABLE data must be
+ * registered in the canonical bounded prepass before the earlier table
+ * cell is parsed. A fake [shadow]: record in TABLE data is never binding
+ * syntax. Both nested list ownership and explicit ROOT heading release
+ * retain the original source and transactional output contract. */
+static int test_gfm_list_table_forward_reference_contract(void) {
+    const char *inputs[]={
+        "- | Item | Link |\n  | --- | --- |\n"
+        "  | row | [go][ref] |\n# Root\n"
+        "[ref]: /uri\n\n[go][ref]\n",
+        "- outer\n  - | Item | Link |\n    | --- | --- |\n"
+        "    | row | [go][ref] |\n# Root\n"
+        "[ref]: /uri\n\n[go][ref]\n",
+        "- | Item | Link |\n  | --- | --- |\n"
+        "  [shadow]: /blocked\n"
+        "  | row | [go][real] |\n# Root\n"
+        "[real]: /uri\n\n[shadow] [go][real]\n"
+    };
+    _Static_assert(sizeof(inputs)/sizeof(inputs[0])==3u,
+                   "GFM forward-reference owner fixture denominator");
+    for(size_t k=0u;k<3u;++k) {
+        const size_t bytes=strlen(inputs[k]);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(inputs[k],bytes,256u,bytes+1u,
+                            &owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LINK)==2u);
+        CHECK(v.raw_markdown_bytes==bytes);
+        CHECK(memcmp(v.raw_markdown,inputs[k],bytes)==0);
+        size_t table_cell_links=0u,root_paragraph_links=0u;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *node=&v.document.blocks[i];
+            if(node->kind!=STUN_UI_BLOCK_LINK)continue;
+            CHECK(node->parent_index<i);
+            const stun_ui_block *parent=&v.document.blocks[node->parent_index];
+            if(parent->kind==STUN_UI_BLOCK_TABLE_CELL) ++table_cell_links;
+            if(parent->kind==STUN_UI_BLOCK_PARAGRAPH &&
+               parent->parent_index==0u)++root_paragraph_links;
+            const char *meta=NULL;size_t n=SIZE_MAX;
+            CHECK(stun_ui_rich_document_metadata(&v,i,&meta,&n)==STUN_UI_OK);
+            CHECK(n==4u && meta && memcmp(meta,"/uri",4u)==0);
+        }
+        CHECK(table_cell_links==1u && root_paragraph_links==1u);
+        size_t need=SIZE_MAX;
+        const int render_status=stun_md_render_html(
+            &v,256u,NULL,0u,&need);
+        if(render_status!=STUN_UI_OK) {
+            fprintf(stderr,"GFM owner case %zu: count status %d; blocks %zu\n",
+                    k,render_status,v.document.block_count);
+            for(size_t i=0u;i<v.document.block_count;++i) {
+                const stun_ui_block *n=&v.document.blocks[i];
+                fprintf(stderr,"  node %zu kind=%u owner=%u\n",i,
+                        (unsigned)n->kind,(unsigned)n->parent_index);
+            }
+        }
+        CHECK(render_status==STUN_UI_OK);
+        CHECK(need>0u && need<2048u);
+        unsigned char html[2048];
+        memset(html,0x76,sizeof(html));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,(char*)html,need,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==need);
+        for(size_t i=0u;i<sizeof(html);++i)CHECK(html[i]==0x76);
+        CHECK(stun_md_render_html(&v,256u,(char*)html,sizeof(html),
+                                  &required)==STUN_UI_OK);
+        CHECK(strstr((char*)html,
+            "<td><a href=\"/uri\">go</a></td>")!=NULL);
+        CHECK(strstr((char*)html,
+            "<p><a href=\"/uri\">go</a></p>")!=NULL);
+        if(k==2u) {
+            CHECK(strstr((char*)html,
+                "<td>[shadow]: /blocked</td>")!=NULL);
+            CHECK(strstr((char*)html,
+                "href=\"/blocked\"")==NULL);
+        }
+        stun_md_document_destroy(owned);
+        owned=(stun_md_document*)(uintptr_t)0x1;
+        CHECK(stun_md_parse(inputs[k],bytes,8u,bytes+1u,&owned)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(owned==NULL);
+    }
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1367,6 +1454,7 @@ int main(void) {
     if(test_gfm_list_table_ownership()) return 1;
     if(test_gfm_composed_list_table_ownership()) return 1;
     if(test_gfm_paragraph_to_list_table()) return 1;
+    if(test_gfm_list_table_forward_reference_contract()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
