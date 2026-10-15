@@ -257,6 +257,15 @@ CASES: tuple[Case, ...] = (
     Case("gfm.nested-ordered-list-table",
          "- outer\n  2. | A | B |\n     | --- | --- |\n"
          "     | x | y |\n", "gfm"),
+    # #186: CommonMark ordered-list interruption must be respected inside
+    # an already-open LIST_ITEM paragraph. '2.' needs a blank boundary;
+    # '1.' can interrupt, and '2.' can begin a list after a blank.
+    Case("gfm.nested-ordered-one-interrupts-paragraph",
+         "- outer\n  1. | A | B |\n     | --- | --- |\n"
+         "     | x | y |\n", "gfm"),
+    Case("gfm.nested-ordered-two-after-blank",
+         "- outer\n\n  2. | A | B |\n     | --- | --- |\n"
+         "     | x | y |\n", "gfm"),
     Case("gfm.task-item-two-tables",
          "- [x] done\n\n  | A | B |\n  | --- | --- |\n"
          "  | a | b |\n\n  | C | D |\n  | --- | --- |\n"
