@@ -2296,10 +2296,17 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
              * content after a following blank line. */
             f->empty_item=false;
             /* A nested list is admitted after matching this item, never as
-             * a new root list. Indentation four columns deeper instead
-             * begins a literal code block. */
+             * a new root list. It must ALSO obey CommonMark paragraph
+             * interruption: an ordered marker beginning at 2 (or later)
+             * cannot interrupt this item's active paragraph. A pending
+             * blank has already ended that paragraph, so it can admit any
+             * valid list start. The existing md_list_interrupts_paragraph
+             * is the only grammar, not a table-specific workaround.
+             * Indentation four columns deeper remains literal code. */
             if(marker_found && marker.column>=f->content_column &&
-               marker.column<=f->content_column+3u) {
+               marker.column<=f->content_column+3u &&
+               (f->paragraph==UINT32_MAX || f->pending_blank ||
+                md_list_interrupts_paragraph(&marker,line))) {
                 if(f->pending_blank) {
                     md_mark_list_loose(d,f->list);
                     md_list_claim_nested_blank(stack);
