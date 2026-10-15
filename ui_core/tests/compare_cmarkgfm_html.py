@@ -155,6 +155,18 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quote-table-unmarked-row",
          "> | A | B |\n> | --- | --- |\n> | a | b |\n"
          "| c | d |\n", "gfm"),
+    # #186: separated LIST_ITEM table bodies must preserve exact content
+    # indentation and explicit QUOTE ownership, without reparsing in HTML.
+    Case("gfm.list-table-separated",
+         "- intro\n\n  | H | V |\n  | :--- | ---: |\n"
+         "  | a\\|b | **yes** |\n", "gfm"),
+    Case("gfm.quote-list-table",
+         "> - intro\n>\n>   | H | V |\n>   | --- | --- |\n"
+         ">   | x |\n", "gfm"),
+    Case("gfm.nested-list-table",
+         "- outer\n  - inner\n\n"
+         "    | H | V |\n    | --- | --- |\n"
+         "    | x | y |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
