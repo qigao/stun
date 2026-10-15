@@ -31,6 +31,22 @@ class Case:
     normative_expected_html: str | None = None
 
 
+# #186: deterministic 16-column × 16-body-row reference payload, exactly
+# mirroring the root/double-quote source constructed in the native C11
+# bounded-ownership stress test. Neither width nor height is generated from
+# untrusted input, and no additional Markdown frontend is introduced.
+GFM_WIDE_TABLE_16 = (
+    "".join(f" | h{col}" for col in range(16)) + " |\n"
+    + "".join(" | :---" for _ in range(16)) + " |\n"
+    + "".join(
+        "".join(f" | v{row}_{col}" for col in range(16)) + " |\n"
+        for row in range(16)
+    )
+)
+GFM_WIDE_DOUBLE_QUOTE_16 = "".join(
+    "> > " + line + "\n" for line in GFM_WIDE_TABLE_16.splitlines()
+)
+
 CASES: tuple[Case, ...] = (
     Case("cm.atx", "## Hello\n"),
     Case("cm.strong", "Normal **Bold** text\n"),
@@ -388,6 +404,10 @@ CASES: tuple[Case, ...] = (
          "- outer\n  - inner\n\n"
          "    | H | V |\n    | --- | --- |\n"
          "    | x | y |\n", "gfm"),
+    Case("gfm.wide-table-16-columns-16-rows",
+         GFM_WIDE_TABLE_16, "gfm"),
+    Case("gfm.double-quote-wide-table-16-columns-16-rows",
+         GFM_WIDE_DOUBLE_QUOTE_16, "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
