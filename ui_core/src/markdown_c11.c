@@ -2674,6 +2674,35 @@ static bool md_table_admit(stun_md_document *d,uint32_t parent,
     return true;
 }
 
+/* The same raw header may look like a root TABLE and a LIST opener.
+ * Give it to the LIST only when the delimiter is indented into that
+ * marker's actual content columns AND the sliced item header matches the
+ * same delimiter column count. An unindented/dedented delimiter remains
+ * root TABLE-owned. This single check is reused during ROOT reference
+ * preflight; it is not a second parser or an HTML-only inference. */
+static bool md_table_header_owned_by_list(stun_md_document *d,
+                                          md_line header,
+                                          size_t next_pos) {
+    if(next_pos>=d->raw_size)return false;
+    const char *s=d->raw;
+    md_list_marker_info marker={0};
+    if(!md_list_token(s,header,&marker) ||
+       marker.content_offset>=header.end)
+        return false;
+    const md_line separator=md_read_line(d,next_pos);
+    const size_t delimiter_begin=md_left(s,separator.begin,separator.end);
+    const size_t indent=md_columns(s,separator.begin,delimiter_begin);
+    if(indent<marker.content_column ||
+       indent-marker.content_column>3u)
+        return false;
+    size_t header_columns=0u,delimiter_columns=0u;
+    return md_table_scan(s,marker.content_offset,header.end,false,true,
+                         &header_columns,NULL,0u) &&
+           md_table_scan(s,delimiter_begin,separator.end,true,true,
+                         &delimiter_columns,NULL,0u) &&
+           header_columns==delimiter_columns;
+}
+
 /* After a quote marker consumes its optional ONE visual whitespace
  * column, retain the remaining TAB columns as owned code indentation. */
 static bool md_quote_code_line(stun_md_document *d,uint32_t code,
@@ -3534,12 +3563,47 @@ static void md_reference_collect_root(stun_md_document *d) {
             fence=(md_fence){marker,count,UINT32_MAX};
             paragraph_started=false;continue;
         }
-        /* Canonical block precedence recognizes a valid LIST opener
-         * before TABLE admission. The previous list-looking ROOT table
-         * shortcut was not equivalent: a "- left | right" item-header
-         * must retain LIST ancestry and cannot donate its following
-         * content/definitions to the document root. Root definitions
-         * after a real list are handled only after its owner terminates. */
+        /* The root block parser admits GFM header+delimiter lookahead
+         * BEFORE considering a list opener. A line like "- Name | Link"
+         * may be a TABLE header rather than a LIST item; suppressing all
+         * later root definitions as list continuation would drop a valid
+         * forward reference from both table cells and root paragraphs.
+         *
+         * Mirror the SAME bounded table scan and row-stop predicates used
+         * by md_parse_blocks. Only list-looking root headers require this
+         * ownership disambiguation: other table headers cannot introduce
+         * a phantom list guard. Literal table data rows, including
+         * "[shadow]: /bad" without pipes, never donate definitions. */
+        if(!paragraph_started && !container_pending &&
+           !list_content_column && columns<=3u && pos<d->raw_size) {
+            md_list_marker_info candidate={0};
+            if(md_list_token(s,line,&candidate) &&
+               !md_table_header_owned_by_list(d,line,pos)) {
+                const md_line sep=md_read_line(d,pos);
+                size_t header_columns=0u,delimiter_columns=0u;
+                if(md_table_scan(s,begin,line.end,false,true,
+                                 &header_columns,NULL,0u) &&
+                   md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
+                                 true,true,&delimiter_columns,NULL,0u) &&
+                   header_columns==delimiter_columns) {
+                    pos=sep.next;
+                    while(pos<d->raw_size) {
+                        const md_line row=md_read_line(d,pos);
+                        const size_t rb=md_left(s,row.begin,row.end);
+                        size_t row_columns=0u;
+                        if(rb-row.begin>3u ||
+                           md_blank(s,row.begin,row.end) ||
+                           md_table_starts_new_block(s,rb,row.end) ||
+                           !md_table_scan(s,rb,row.end,false,false,
+                                          &row_columns,NULL,0u))
+                            break;
+                        pos=row.next;
+                    }
+                    paragraph_started=false;
+                    continue;
+                }
+            }
+        }
         md_list_marker_info list_marker={0};
         /* An ordered marker other than '1.' or a marker without content
          * cannot interrupt an existing ROOT paragraph. The canonical
@@ -3837,26 +3901,22 @@ static void md_parse_blocks(stun_md_document *d) {
                 continue;
             }
         }
-        /* A valid LIST marker owns its first line BEFORE a root GFM table
-         * lookahead. Thus "- left | right" is a LIST_ITEM header whose
-         * indented delimiter may produce its own child TABLE, not a
-         * document-root table whose first cell is "- left". Both paths
-         * reuse md_table_admit and the same bounded RichDoc arenas. */
+        /* The same bounded root/quote TABLE grammar; root admission
+         * retains the established paragraph, list and indentation gates. */
+        if(indent<=3u && paragraph==UINT32_MAX &&
+           lists.depth==0u &&
+           !md_table_header_owned_by_list(d,line,pos) &&
+           md_table_admit(d,0u,line,begin,&pos,0u,0u)) {
+            if(d->error!=STUN_UI_OK)return;
+            paragraph=UINT32_MAX;
+            continue;
+        }
         md_list_marker_info top_marker={0};
         if(indent<=3 && md_list_token(s,line,&top_marker) &&
            (paragraph==UINT32_MAX ||
             md_list_interrupts_paragraph(&top_marker,line)) &&
            !md_rule(s,begin,end)) {
             if(!md_list_open(d,&lists,0u,&top_marker,s,end,&pos,0u)) return;
-            paragraph=UINT32_MAX;
-            continue;
-        }
-        /* Standalone root tables are admitted only once LIST ownership
-         * has been ruled out, preserving strict block precedence. */
-        if(indent<=3u && paragraph==UINT32_MAX &&
-           lists.depth==0u &&
-           md_table_admit(d,0u,line,begin,&pos,0u,0u)) {
-            if(d->error!=STUN_UI_OK)return;
             paragraph=UINT32_MAX;
             continue;
         }
