@@ -359,6 +359,21 @@ CASES: tuple[Case, ...] = (
          "> - foo\n> - bar\nplain\n", "gfm"),
     Case("gfm.quote-list-second-item-blank-root",
          "> - foo\n> - bar\n\nplain\n", "gfm"),
+    # #186: a root TABLE delimiter cannot be indented 4+ physical columns
+    # (or a four-column tab); the same code indent that is legal INSIDE an
+    # item must not accidentally allow ROOT table admission.
+    Case("gfm.root-table-four-space-delimiter-rejected",
+         "| A | B |\n    | --- | --- |\n"
+         "| x | y |\n", "gfm"),
+    Case("gfm.root-table-tab-delimiter-rejected",
+         "| A | B |\n\t| --- | --- |\n"
+         "| x | y |\n", "gfm"),
+    Case("gfm.list-table-four-space-delimiter-admitted",
+         "- | A | B |\n    | --- | --- |\n"
+         "    | x | y |\n", "gfm"),
+    Case("gfm.quote-table-four-space-delimiter-rejected",
+         "> | A | B |\n>     | --- | --- |\n"
+         "> | x | y |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
