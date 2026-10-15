@@ -10712,4 +10712,144 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
       box.update();
     }
   }
+
+  // #186: unlike the fixed-size scroll tests, this keeps MarkdownWidget
+  // height:auto. The number of real parsed paragraph children changes the
+  // content extent, and LayoutManager must clamp an old oversized scroll
+  // offset after shrinking, without a stale paint command or second parser.
+  it("clamps intrinsic Markdown height changes and renders Unicode at Home") {
+    Box box(nullptr);
+    auto* root = box.create("div", "md-autosize-root-186");
+    auto* viewport = box.create("div", "md-autosize-viewport-186");
+    const std::string tall =
+        "Alpha stage one.\n\nBravo stage two.\n\nCharlie stage three.\n\n"
+        "Delta stage four.\n\nEcho stage five.\n\nFoxtrot stage six.\n\n"
+        "Golf stage seven.\n\nHotel stage eight.\n";
+    const std::string short_unicode = "日本語 café 😀 東京 花火 rivers valley\n";
+    const std::string medium =
+        "Middle one.\n\nMiddle two.\n\nMiddle three.\n\nMiddle four.\n";
+    auto* md=box.create_widget<MarkdownWidget>(
+        "div", "md-autosize-doc-186", tall);
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(280.0f, 170.0f);
+    box.load_css(R"(
+      #md-autosize-root-186 {
+        width: 220px; height: 160px; display: flex;
+        flex-direction: column;
+      }
+      #md-autosize-viewport-186 {
+        width: 140px; height: 82px; display: block; overflow-y: auto;
+      }
+      #md-autosize-doc-186 {
+        width: 128px; height: auto; display: block;
+      }
+      .md-p {
+        width: 112px; height: 40px; font-size: 14px;
+      }
+    )");
+
+    auto* widget=static_cast<MarkdownWidget*>(md->widget);
+    check(widget!=nullptr);
+    widget->update(0.0f,*md);
+    box.update();
+    check(md->child_count()==8u);
+    check(viewport->is_scroll_container());
+    check(approx_eq(viewport->height(),82.0f,0.01f));
+    check(md->height()>viewport->height());
+    const float tall_max=viewport->max_scroll_y();
+    check(tall_max>80.0f);
+    if(tall_max<=80.0f) return;
+    check(viewport->set_scroll_offset(0.0f,tall_max));
+    box.update();
+    check(approx_eq(viewport->scroll_y(),tall_max,0.01f));
+
+    // Shrink below the viewport. The old scroll offset must be forced to
+    // zero by the actual layout pass; it must not survive as stale state.
+    widget->set_markdown(short_unicode);
+    widget->update(0.0f,*md);
+    box.update();
+    check(widget->markdown()==short_unicode);
+    check(md->child_count()==1u);
+    check(md->height()<viewport->height());
+    check(approx_eq(viewport->max_scroll_y(),0.0f,0.1f));
+    check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
+    if(md->child_count()!=1u) return;
+    auto* paragraph=static_cast<Element*>(md->children()[0]);
+    check(paragraph->has_class(Symbol("md-p")));
+    check(paragraph->text()=="日本語 café 😀 東京 花火 rivers valley");
+    const auto unicode_lines=layout_text_block(
+        paragraph->computed_style,paragraph->text(),0.0f,0.0f,
+        paragraph->width(),std::max(paragraph->height(),90.0f),
+        Color{},TextVerticalAlign::Top);
+    check(unicode_lines.lines.size()>=2u);
+    for(const auto& line:unicode_lines.lines) {
+      check(std::isfinite(line.width));
+      check(line.width>=0.0f);
+      check(line.width<=paragraph->width()+1.0f);
+    }
+    RecordingRenderer short_frame;
+    short_frame.begin_frame(800.0f,600.0f,1.0f);
+    Renderer short_renderer(&short_frame);
+    RenderManager short_manager(&short_renderer);
+    short_manager.render_tree(root);
+    check(std::none_of(
+        short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("Hotel")!=std::string::npos;
+        }));
+    check(std::any_of(
+        short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+
+    // Regrow to a medium auto-sized document. A previously clamped offset
+    // must remain zero until scrolling is explicitly requested.
+    widget->set_markdown(medium);
+    widget->update(0.0f,*md);
+    box.update();
+    check(widget->markdown()==medium);
+    check(md->child_count()==4u);
+    check(viewport->max_scroll_y()>0.0f);
+    check(viewport->max_scroll_y()<tall_max);
+    check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
+    const float retained=std::min(24.0f,viewport->max_scroll_y());
+    check(retained>0.0f);
+    check(viewport->set_scroll_offset(0.0f,retained));
+    box.update();
+
+    // A taller document should permit the same offset without resetting it
+    // or keeping the previous text in the recorded frame.
+    widget->set_markdown(tall);
+    widget->update(0.0f,*md);
+    box.update();
+    check(md->child_count()==8u);
+    check(approx_eq(viewport->scroll_y(),retained,0.1f));
+    check(viewport->max_scroll_y()>retained);
+    check(widget->markdown()==tall);
+    check(viewport->set_scroll_offset(0.0f,0.0f));
+    box.update();
+    RecordingRenderer tall_frame;
+    tall_frame.begin_frame(800.0f,600.0f,1.0f);
+    Renderer tall_renderer(&tall_frame);
+    RenderManager tall_manager(&tall_renderer);
+    tall_manager.render_tree(root);
+    check(std::any_of(
+        tall_frame.texts.begin(),tall_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("Alpha")!=std::string::npos;
+        }));
+    check(std::none_of(
+        tall_frame.texts.begin(),tall_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+
+    Event input=Event::text_input("read-only");
+    box.dispatch_event(input);
+    check(!input.handled);
+    check(widget->markdown()==tall);
+  }
 }
