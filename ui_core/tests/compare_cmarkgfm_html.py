@@ -19,7 +19,10 @@ import subprocess
 import sys
 
 import cmarkgfm
-from gfm_combinations import EXPECTED_COUNT, generated_cases, manifest_sha256
+from gfm_combinations import (
+    BASELINE_COUNT, BASELINE_SHA256, EXPECTED_COUNT,
+    generated_cases, manifest_sha256,
+)
 
 
 @dataclass(frozen=True)
@@ -577,8 +580,13 @@ def main() -> int:
             "passed": matrix_gate_passed, "total": matrix_gate_total,
             "expected_total": EXPECTED_COUNT,
             "source_manifest_sha256": manifest_sha256(_GFM_MATRIX),
+            "retained_baseline": {
+                "total": BASELINE_COUNT,
+                "source_manifest_sha256": BASELINE_SHA256,
+            },
+            "extension_cases": EXPECTED_COUNT - BASELINE_COUNT,
             "dimensions": {
-                "owners": 10, "tables": 4, "eol_styles": 2, "eof_forms": 2,
+                "owners": 15, "tables": 6, "eol_styles": 2, "eof_forms": 2,
             },
             "oracle": "strict independent cmark-gfm HTML byte equality",
         },
