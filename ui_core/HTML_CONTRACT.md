@@ -17,6 +17,23 @@ Unsupported semantic types intentionally produce `STUN_UI_INVALID_ARGUMENT`: ima
 
 The IR currently lacks loose-vs-tight list facts, hard-vs-soft line break distinctions, GFM table alignment, and ordered-list starting index; therefore **this renderer does not claim full CommonMark/GFM conformance**. These fields must be supplied by the canonical parser/typed RichDoc, not guessed by the renderer.
 
+## GFM extension slice (#186, Draft #226)
+
+The C11 TABLE node owns a bounded byte vector of length equal to the header
+column count: `STUN_UI_TABLE_ALIGN_NONE/LEFT/CENTER/RIGHT` come directly from
+the validated delimiter cells. Header and padded/truncated body rows consume
+this same vector. Invalid metadata/row length fails the dry-run HTML pass
+without partially writing a buffer. Task items reuse the existing typed
+`TASK_ITEM -> CHECKBOX` ownership, and emit a **fixed disabled** input element;
+only the metadata byte `x` or space can determine the checked attribute.
+
+These are candidate GFM extensions, not CommonMark official-652 cases. The
+independent cmark-gfm GFM table/task HTML cases and Mistune alignment AST
+cases have their own positive gates, without weakening the official 573 SAFE
+or 649 SPEC CommonMark no-regression gates. Nested GFM combinations and a
+complete versioned GFM extension corpus remain follow-up work. MarkdownWidget
+and Tango are not switched on this branch.
+
 ## Verification
 
 `stun_markdown_html_test` is a real strict C11 executable using the installed `Stun::UICore`, checked by the existing installed-Salts SDK ASan/UBSan workflow. It asserts 17 exact HTML golden outputs, atomic capacity rejection, safe link admission, and unsupported image handling.
