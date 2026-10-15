@@ -691,8 +691,15 @@ static int test_gfm_list_table_forward_reference_contract(void) {
                                   &required)==STUN_UI_OK);
         CHECK(strstr((char*)html,
             "<td><a href=\"/uri\">go</a></td>")!=NULL);
-        CHECK(strstr((char*)html,
-            "<p><a href=\"/uri\">go</a></p>")!=NULL);
+        if(k<2u) {
+            CHECK(strstr((char*)html,
+                "<p><a href=\"/uri\">go</a></p>")!=NULL);
+        } else {
+            /* [shadow] is unbound literal text before the valid link;
+             * it must NOT vanish or be mistaken for a link destination. */
+            CHECK(strstr((char*)html,
+                "<p>[shadow] <a href=\"/uri\">go</a></p>")!=NULL);
+        }
         if(k==2u) {
             CHECK(strstr((char*)html,
                 "<td>[shadow]: /blocked</td>")!=NULL);
