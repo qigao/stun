@@ -330,9 +330,22 @@ CASES: tuple[Case, ...] = (
          "    | x | y |\n\n"
          "    | C | D |\n    | ---: | :---: |\n"
          "    | u | v |\n", "gfm"),
+    # Like the already-qualified quoted unordered TASK/TABLE, cmark-gfm
+    # 2025.10.22 serializes a loose ordered quoted task's [x] as literal
+    # paragraph text. GFM §5.3 still defines a TASK by the first paragraph
+    # marker; keep the fixed disabled CHECKBOX HTML as a strict positive
+    # normative oracle and record the cmark-gfm byte discrepancy separately.
     Case("gfm.quote-task-table-ordered-nested",
          "> 4. [x] parent\n>\n>    | A | B |\n"
-         ">    | --- | --- |\n>    | x | y |\n", "gfm"),
+         ">    | --- | --- |\n>    | x | y |\n", "gfm",
+         normative_expected_html=(
+             "<blockquote>\n<ol start=\"4\">\n"
+             "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> \n"
+             "<p>parent</p>\n<table>\n<thead>\n<tr>\n"
+             "<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n"
+             "<tbody>\n<tr>\n<td>x</td>\n<td>y</td>\n"
+             "</tr>\n</tbody>\n</table>\n</li>\n</ol>\n"
+             "</blockquote>\n")),
     Case("gfm.list-table-empty-cells",
          "- | A | B | C |\n  | --- | --- | --- |\n"
          "  | x |\n  | | y | |\n", "gfm"),
@@ -404,10 +417,14 @@ def main() -> int:
         print("INFRASTRUCTURE ERROR: GFM official case identity drift:"
               f" {official_ids!r} != {expected_ids!r}", file=sys.stderr)
         return 2
-    # One explicitly pinned normative exception, never an ad hoc skip.
+    # Exactly two pinned positive GFM §5.3 task-semantics exceptions,
+    # never XFAILs or skips. The report preserves cmark-gfm raw reference
+    # bytes and separate counts, so differences are not misreported as
+    # independent cmark-gfm passes.
     normative_ids = tuple(c.case_id for c in CASES
                           if c.normative_expected_html is not None)
-    if normative_ids != ("gfm.quoted-task-table",):
+    if normative_ids != ("gfm.quoted-task-table",
+                         "gfm.quote-task-table-ordered-nested"):
         print("INFRASTRUCTURE ERROR: unexpected GFM normative-oracle override:"
               f" {normative_ids!r}", file=sys.stderr)
         return 2
