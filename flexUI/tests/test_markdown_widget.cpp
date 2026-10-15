@@ -158,6 +158,60 @@ spec("MarkdownWidget Parsing") {
             check(table->has_class(Symbol("md-table")));
         }
     }
+
+    // #186 consumer isolation: the current MarkdownWidget still uses the
+    // existing C++ md::parse, not the candidate C11 grammar. Exercise real
+    // update/empty/rebuild transitions without a second runtime owner.
+    it("GFM repeated task table heading and empty updates remain bounded") {
+        static const char* const sources[] = {
+            "| H | V |\n| --- | --- |\n| a | b |\n",
+            "- [x] done\n- [ ] later\n",
+            "# Heading\n",
+            ""
+        };
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-cycle-186", sources[0]);
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        check(md->parent_elem() == root);
+        for (size_t round = 0; round < 32; ++round) {
+            const size_t kind = round % 4u;
+            widget->set_markdown(sources[kind]);
+            widget->update(0.0f, *md);
+            check(widget->markdown() == sources[kind]);
+            const size_t expected = kind == 3u ? 0u : 1u;
+            check(md->child_count() == expected);
+            if (expected && md->child_count() == 1u) {
+                auto* child = static_cast<Element*>(md->children()[0]);
+                if (kind == 0u) {
+                    check(child->has_class(Symbol("md-table")));
+                    check(child->child_count() == 2u);
+                } else if (kind == 1u) {
+                    check(child->has_class(Symbol("md-ul")));
+                    check(child->child_count() == 2u);
+                    if (child->child_count() == 2u) {
+                        auto* a=static_cast<Element*>(child->children()[0]);
+                        auto* b=static_cast<Element*>(child->children()[1]);
+                        check(a->has_class(Symbol("md-task-item")));
+                        check(b->has_class(Symbol("md-task-item")));
+                    }
+                } else {
+                    check(child->has_class(Symbol("h1")));
+                    check(child->text() == "Heading");
+                }
+            }
+            // An identical input is a no-op, never a second AST publication.
+            const auto* current = md->child_count()
+                ? md->children()[0] : nullptr;
+            widget->set_markdown(sources[kind]);
+            widget->update(0.0f, *md);
+            check(md->child_count() == expected);
+            if (expected && md->child_count() == 1u)
+                check(md->children()[0] == current);
+            check(md->parent_elem() == root);
+        }
+    }
 }
 
 
