@@ -715,6 +715,63 @@ static int test_gfm_list_table_forward_reference_contract(void) {
     return 0;
 }
 
+/* #186: an indented "2." does NOT interrupt the active paragraph in
+ * the containing LIST_ITEM. An initial "1." does, and a prior blank
+ * releases the paragraph so "2." may start a real nested ordered list.
+ * This is CommonMark list grammar, shared with GFM TABLE admission. */
+static int test_gfm_nested_ordered_interrupt_guard(void) {
+    static const struct {
+        const char *source;
+        size_t tables,ordered;
+        bool start_two;
+    } cases[] = {
+        {"- outer\n  2. | A | B |\n     | --- | --- |\n"
+         "     | x | y |\n",0u,0u,false},
+        {"- outer\n  1. | A | B |\n     | --- | --- |\n"
+         "     | x | y |\n",1u,1u,false},
+        {"- outer\n\n  2. | A | B |\n     | --- | --- |\n"
+         "     | x | y |\n",1u,1u,true}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "Nested GFM table ordered interrupt denominator");
+    for(size_t k=0u;k<3u;++k) {
+        const size_t bytes=strlen(cases[k].source);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(cases[k].source,bytes,256u,bytes+1u,
+                            &owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==cases[k].tables);
+        CHECK(kinds(v,STUN_UI_BLOCK_ORDERED_LIST)==cases[k].ordered);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1u);
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,cases[k].source,bytes)==0);
+        size_t need=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,NULL,0u,&need)==STUN_UI_OK);
+        CHECK(need>0u && need<4096u);
+        unsigned char output[4096];
+        memset(output,0xe1,sizeof(output));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,(char*)output,need,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==need);
+        for(size_t i=0u;i<sizeof(output);++i)
+            CHECK(output[i]==0xe1);
+        CHECK(stun_md_render_html(&v,256u,(char*)output,
+                                  sizeof(output),&required)==STUN_UI_OK);
+        if(k==0u) {
+            CHECK(strstr((char*)output,"2. | A | B |")!=NULL);
+            CHECK(strstr((char*)output,"<table>")==NULL);
+        } else {
+            CHECK(strstr((char*)output,"<table>\n<thead>")!=NULL);
+            if(cases[k].start_two)
+                CHECK(strstr((char*)output,"<ol start=\"2\">")!=NULL);
+        }
+        stun_md_document_destroy(owned);
+    }
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1467,6 +1524,7 @@ int main(void) {
     if(test_gfm_list_table_ownership()) return 1;
     if(test_gfm_composed_list_table_ownership()) return 1;
     if(test_gfm_paragraph_to_list_table()) return 1;
+    if(test_gfm_nested_ordered_interrupt_guard()) return 1;
     if(test_gfm_list_table_forward_reference_contract()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
