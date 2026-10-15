@@ -27,6 +27,14 @@ without partially writing a buffer. Task items reuse the existing typed
 `TASK_ITEM -> CHECKBOX` ownership, and emit a **fixed disabled** input element;
 only the metadata byte `x` or space can determine the checked attribute.
 
+GFM 4.10 parses table-cell boundaries before inline spans. A raw
+unescaped `|` splits a row even when it appears between backticks, while
+`\\|` is admitted as literal cell content. The cell's escaping backslash
+is removed in a bounded parse-local copy before inline scanning (including
+inside backtick spans); the original Markdown bytes are immutable. Official
+GFM Table Example 200 and both escaped/unescaped code-span-pipe cases are
+covered by native and independent HTML goldens.
+
 These are candidate GFM extensions, not CommonMark official-652 cases. The
 independent cmark-gfm GFM table/task HTML cases and Mistune alignment AST
 cases have their own positive gates, without weakening the official 573 SAFE
