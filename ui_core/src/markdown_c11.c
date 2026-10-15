@@ -2120,8 +2120,15 @@ static void md_list_claim_nested_blank(md_list_stack *stack) {
 static bool md_quote_lazy_interrupts(const char *s,md_line line,
                                      size_t begin);
 
+/* Canonical TABLE admission is shared by root, QUOTE and LIST_ITEM.
+ * Its bounded definition follows the quote-prefix lexer below. */
+static bool md_table_admit(stun_md_document *d,uint32_t parent,
+                           md_line header,size_t header_begin,
+                           size_t *next_pos,size_t quote_depth,
+                           size_t content_column);
 static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
-                            md_line line) {
+                            md_line line,size_t *next_pos,
+                            size_t quote_depth) {
     if(!stack->depth) return false;
     const char *s=d->raw;
     if(stack->frames[stack->depth-1u].fence_open &&
@@ -2329,6 +2336,14 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
             if(md_list_append_quote(d,f,s,body,line.end)) return true;
             f->quote=f->quote_paragraph=UINT32_MAX;
             const size_t text_begin=md_left(s,body,line.end);
+            /* List-owned TABLEs start only at bounded item-block
+             * boundaries, never by reinterpreting a live paragraph.
+             * The original item content column applies to every following
+             * delimiter/row; quote prefixes must match explicit depth. */
+            if(inner_indent<=3u && f->paragraph==UINT32_MAX &&
+               md_table_admit(d,f->item,line,text_begin,next_pos,
+                              quote_depth,f->content_column))
+                return true;
             if(f->paragraph==UINT32_MAX &&
                md_container_reference_line(d,line,text_begin))return true;
             if(f->paragraph==UINT32_MAX) {
@@ -2570,16 +2585,27 @@ static size_t md_quote_prefix(const char *s,md_line line,size_t *body) {
  * admission and never persists a second parser or an unowned scratch view. */
 static bool md_table_admit(stun_md_document *d,uint32_t parent,
                            md_line header,size_t header_begin,
-                           size_t *next_pos,size_t quote_depth) {
-    if(*next_pos>=d->raw_size)return false;
+                           size_t *next_pos,size_t quote_depth,
+                           size_t content_column) {
+    /* SIZE_MAX disables TABLE admission from an unmarked lazy quote line. */
+    if(*next_pos>=d->raw_size || quote_depth==SIZE_MAX)return false;
     const char *s=d->raw;
     const md_line delimiter=md_read_line(d,*next_pos);
     size_t delimiter_body=delimiter.begin;
     if(quote_depth &&
        md_quote_prefix(s,delimiter,&delimiter_body)!=quote_depth)
         return false;
+    /* Remove the exact owning item's content indentation only AFTER
+     * matching the physical QUOTE prefix; never borrow root/dedented or
+     * next-list-item delimiters as if they belonged to this item. */
+    if(content_column) {
+        const size_t body=md_skip_columns(s,delimiter_body,
+                                          delimiter.end,content_column);
+        if(body==delimiter_body)return false;
+        delimiter_body=body;
+    }
     const size_t sep_begin=md_left(s,delimiter_body,delimiter.end);
-    if(quote_depth && md_columns(s,delimiter_body,sep_begin)>3u)
+    if(md_columns(s,delimiter_body,sep_begin)>3u)
         return false;
     size_t columns=0u,delimiter_columns=0u;
     if(!md_table_scan(s,header_begin,header.end,false,true,
@@ -2613,6 +2639,12 @@ static bool md_table_admit(stun_md_document *d,uint32_t parent,
         size_t row_body=row.begin;
         if(quote_depth &&
            md_quote_prefix(s,row,&row_body)!=quote_depth)break;
+        if(content_column) {
+            const size_t body=md_skip_columns(s,row_body,row.end,
+                                              content_column);
+            if(body==row_body)break;
+            row_body=body;
+        }
         const size_t row_begin=md_left(s,row_body,row.end);
         size_t row_columns=0u;
         if(row_begin-row_body>3u || md_blank(s,row_body,row.end) ||
@@ -2703,12 +2735,14 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
     md_line inner=line;
     inner.begin=body; /* all list columns relative to the quote content */
     if(md_blank(s,body,line.end)) {
-        if(q->lists.depth) (void)md_list_consume(d,&q->lists,inner);
+        if(q->lists.depth) (void)md_list_consume(d,&q->lists,inner,
+                                                   next_pos,level);
         q->paragraph=q->code=UINT32_MAX;
         q->lazy=false;
         return d->error==STUN_UI_OK;
     }
-    if(q->lists.depth && md_list_consume(d,&q->lists,inner))
+    if(q->lists.depth &&
+       md_list_consume(d,&q->lists,inner,next_pos,level))
         return d->error==STUN_UI_OK;
     if(d->error!=STUN_UI_OK)return false;
     if(q->code!=UINT32_MAX) {
@@ -2756,7 +2790,7 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
      * from a lazy paragraph continuation or an unmatched quote delimiter. */
     if(indent<=3u && q->paragraph==UINT32_MAX &&
        q->lists.depth==0u &&
-       md_table_admit(d,parent,line,begin,next_pos,level)) {
+       md_table_admit(d,parent,line,begin,next_pos,level,0u)) {
         q->paragraph=q->code=UINT32_MAX;
         q->lazy=false;
         return d->error==STUN_UI_OK;
@@ -3658,7 +3692,7 @@ static void md_parse_blocks(stun_md_document *d) {
             md_text(d,fence.node,s+content,line.next-content);
             continue;
         }
-        if(md_list_consume(d,&lists,line)) continue;
+        if(md_list_consume(d,&lists,line,&pos,0u)) continue;
         if(d->error!=STUN_UI_OK) return;
         /* A root quote container is matched before admitting root blocks.
          * Lazy lines may continue only the last quoted paragraph and never
@@ -3705,7 +3739,9 @@ static void md_parse_blocks(stun_md_document *d) {
                    !top->pending_blank &&
                    !md_blank(s,line.begin,line.end) &&
                    !md_quote_lazy_interrupts(s,line,begin)) {
-                    if(md_list_consume(d,&quotes.lists,line)) continue;
+                    /* Lazy unmarked continuation is not an admissible TABLE opener. */
+                    if(md_list_consume(d,&quotes.lists,line,&pos,
+                                       SIZE_MAX)) continue;
                     if(d->error!=STUN_UI_OK) return;
                 }
             }
@@ -3825,7 +3861,7 @@ static void md_parse_blocks(stun_md_document *d) {
          * retains the established paragraph, list and indentation gates. */
         if(indent<=3u && paragraph==UINT32_MAX &&
            lists.depth==0u &&
-           md_table_admit(d,0u,line,begin,&pos,0u)) {
+           md_table_admit(d,0u,line,begin,&pos,0u,0u)) {
             if(d->error!=STUN_UI_OK)return;
             paragraph=UINT32_MAX;
             continue;
