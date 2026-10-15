@@ -10443,7 +10443,7 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     // been restored to Home. The previous draw must disappear, the new one
     // must be measurable/rendered, and repeated identical source must not
     // recreate owned elements. No candidate C11 grammar is used here.
-    const std::string updated_markdown = "# Updated\\n\\nbeta\\n";
+    const std::string updated_markdown = "# Updated\n\nbeta\n";
     widget->set_markdown(updated_markdown);
     widget->update(0.0f, *md);
     box.update();
