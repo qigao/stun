@@ -2360,26 +2360,15 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
     return false;
 }
 
-/* GFM pipe-table subset. Escaped pipes and backtick code spans do not
- * separate cells. Header/delimiter column counts must agree.
- * A table is admitted only after two-line lookahead succeeds. */
+/* GFM pipe-table subset. A raw unescaped pipe separates cells even inside
+ * backtick spans: block-level table cells precede inline code-span parsing.
+ * A backslash-escaped pipe remains cell content and the table preprocessor
+ * consumes its escaping backslash BEFORE inline semantics (GFM Example 200).
+ * Header/delimiter counts must match; two-line admission stays bounded. */
 static bool md_table_unescaped(const char *s, size_t pos, size_t begin) {
     size_t slashes = 0;
     for (size_t p=pos; p>begin && s[p-1]=='\\'; --p) ++slashes;
     return (slashes % 2u)==0u;
-}
-
-/* Skip a valid fenced inline-code run (including multi-backtick runs).
- * Unclosed runs are ordinary text. The caller processes the next candidate
- * separator after the returned byte. */
-static size_t md_table_skip_code(const char *s, size_t begin,
-                                 size_t end, size_t pos) {
-    if (pos >= end || s[pos] != (char)0x60 ||
-        !md_table_unescaped(s,pos,begin)) return pos;
-    size_t run = 1;
-    while (pos+run<end && s[pos+run]==(char)0x60) ++run;
-    const size_t close=md_match(s,end,pos+run,(char)0x60,run);
-    return close==SIZE_MAX ? pos+run-1 : close+run-1;
 }
 
 static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end,
@@ -2417,10 +2406,6 @@ static bool md_table_scan(const char *s, size_t begin, size_t end,
     }
     size_t cell_begin=begin, cells=0;
     for (size_t p=begin;p<=end;++p) {
-        if(p<end && s[p]==(char)0x60) {
-            p=md_table_skip_code(s,begin,end,p);
-            continue;
-        }
         const bool boundary = p==end ||
             (s[p]=='|' && md_table_unescaped(s,p,begin));
         if (!boundary) continue;
@@ -2438,6 +2423,32 @@ static bool md_table_scan(const char *s, size_t begin, size_t end,
     return cells>0 && (!require_pipe || pipe);
 }
 
+/* A validated table cell owns only normalized inline bytes. Remove the
+ * escaping backslash of GFM '\\|' while COPYING the cell into a bounded
+ * temporary buffer: inside a code span the regular CommonMark inline scanner
+ * otherwise treats that backslash as literal and would print an extra '\\'.
+ * The original document input stays immutable and no scratch is published. */
+static bool md_table_cell_inline(stun_md_document *d,uint32_t cell,
+                                 const char *s,size_t begin,size_t end) {
+    if(end<begin || end-begin==SIZE_MAX) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
+    }
+    const size_t bytes=end-begin;
+    char *scratch=(char*)malloc(bytes+1u);
+    if(!scratch) {
+        md_error(d,STUN_UI_OUT_OF_MEMORY);return false;
+    }
+    size_t written=0u;
+    for(size_t p=begin;p<end;++p) {
+        if(s[p]=='\\' && p+1u<end && s[p+1u]=='|') ++p;
+        scratch[written++]=s[p];
+    }
+    scratch[written]='\0';
+    const bool ok=md_inline(d,cell,scratch,written,0u);
+    free(scratch);
+    return ok;
+}
+
 static bool md_table_row(stun_md_document *d, uint32_t table,
                          const char *s, size_t begin, size_t end,
                          size_t expected_columns) {
@@ -2450,10 +2461,6 @@ static bool md_table_row(stun_md_document *d, uint32_t table,
         md_table_unescaped(s,end-1,begin)) --end;
     size_t cell_begin=begin, cells=0;
     for(size_t p=begin;p<=end && d->error==STUN_UI_OK;++p) {
-        if(p<end && s[p]==(char)0x60) {
-            p=md_table_skip_code(s,begin,end,p);
-            continue;
-        }
         const bool boundary=p==end ||
             (s[p]=='|' && md_table_unescaped(s,p,begin));
         if(!boundary) continue;
@@ -2462,7 +2469,7 @@ static bool md_table_row(stun_md_document *d, uint32_t table,
             if(cell==UINT32_MAX) return false;
             const size_t cell_start=md_left(s,cell_begin,p);
             const size_t cell_end=md_right(s,cell_start,p);
-            if(!md_inline(d,cell,s+cell_start,cell_end-cell_start,0u))
+            if(!md_table_cell_inline(d,cell,s,cell_start,cell_end))
                 return false;
         }
         ++cells;
