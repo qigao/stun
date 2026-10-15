@@ -314,8 +314,38 @@ static int test_gfm_even_backslash_cell_ownership(void) {
     CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
     CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
     CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
-    CHECK(text_is(v,"a|b"));
+    /* Inline escaping may publish several owned TEXT leaves (a, |, b),
+     * not a single coalesced leaf. Validate the semantic cell content
+     * and immediate TABLE_CELL ancestry rather than TEXT fragmentation. */
+    size_t row=SIZE_MAX,cell=SIZE_MAX,rows=0u;
+    for(size_t i=0u;i<v.document.block_count;++i) {
+        if(v.document.blocks[i].kind==STUN_UI_BLOCK_TABLE_ROW) {
+            ++rows;
+            if(rows==2u) row=i;
+        } else if(row!=SIZE_MAX && cell==SIZE_MAX &&
+                  v.document.blocks[i].kind==STUN_UI_BLOCK_TABLE_CELL &&
+                  v.document.blocks[i].parent_index==row) {
+            cell=i;
+        }
+    }
+    CHECK(rows==2u && cell!=SIZE_MAX);
+    static const char expected[]="a|b";
+    size_t used=0u;
+    for(size_t i=cell+1u;i<v.document.block_count &&
+        v.document.blocks[i].parent_index==cell;++i) {
+        const stun_ui_block *leaf=&v.document.blocks[i];
+        CHECK(leaf->kind==STUN_UI_BLOCK_TEXT);
+        const size_t n=leaf->byte_end-leaf->byte_begin;
+        CHECK(used<=sizeof(expected)-1u && 
+              n<=sizeof(expected)-1u-used);
+        CHECK(memcmp(v.document.source+leaf->byte_begin,
+                     expected+used,n)==0);
+        used+=n;
+    }
+    CHECK(used==sizeof(expected)-1u);
     CHECK(text_is(v,"tail"));
+    CHECK(v.raw_markdown_bytes==sizeof(markdown)-1u &&
+          memcmp(v.raw_markdown,markdown,sizeof(markdown)-1u)==0);
     stun_md_document_destroy(doc);
     return 0;
 }
