@@ -3625,15 +3625,21 @@ static void md_reference_collect_root(stun_md_document *d) {
             container_pending=true;
             continue;
         }
-        /* The real root block parser recognizes ATX headings after a
-         * quote or indented code block even without a blank separator.
-         * Only release the conservative root-definition guard when no
-         * unresolved list item owns the line: list lazy-continuation rules
-         * are explicitly NOT reimplemented by this reference prepass. */
-        if(container_pending && !list_content_column && columns<=3u) {
+        /* A dedented ATX heading is a proven ROOT block boundary, even
+         * when a preceding LIST owner is still conservatively tracked by
+         * the reference prepass. It cannot be a list continuation if the
+         * marker's visual column is below the active item content column.
+         * Keep indented headings within the list, never donating those
+         * local [label]: lines to the document-root definition table.
+         * This is the same caller-driven list-content test as production
+         * md_list_consume; no independent nested-list parser is created. */
+        if(container_pending && columns<=3u &&
+           (!list_content_column || columns<list_content_column)) {
             size_t hb=begin,he=line.end;
             if(md_atx(s,&hb,&he)) {
                 container_pending=false;
+                list_content_column=0u;
+                after_list_blank=false;
                 paragraph_started=false;
                 continue;
             }
