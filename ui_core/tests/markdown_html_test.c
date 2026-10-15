@@ -187,7 +187,7 @@ static const html_fixture cases[] = {
     /* #186: one document-owned column alignment vector; both header and
      * uneven body rows consume it, including escaped pipes/code spans. */
     { "| Left | Center | Right |\n| :--- | :---: | ---: |\n"
-      "| a\\|b | " TICK "x|y" TICK " | z |\n",
+      "| a\\|b | " TICK "x\\|y" TICK " | z |\n",
       "<table>\n<thead>\n<tr>\n"
       "<th align=\"left\">Left</th>\n"
       "<th align=\"center\">Center</th>\n"
@@ -196,6 +196,23 @@ static const html_fixture cases[] = {
       "<td align=\"left\">a|b</td>\n"
       "<td align=\"center\"><code>x|y</code></td>\n"
       "<td align=\"right\">z</td>\n"
+      "</tr>\n</tbody>\n</table>\n" },
+
+    /* GFM 4.10 Example 200: escaped pipes remain literal even inside
+     * code/strong spans; the TABLE parser removes only that pipe escape. */
+    { "| f\\|oo |\n| ------ |\n"
+      "| b " TICK "\\|" TICK " az |\n"
+      "| b **\\|** im |\n",
+      "<table>\n<thead>\n<tr>\n<th>f|oo</th>\n</tr>\n"
+      "</thead>\n<tbody>\n<tr>\n"
+      "<td>b <code>|</code> az</td>\n</tr>\n<tr>\n"
+      "<td>b <strong>|</strong> im</td>\n</tr>\n"
+      "</tbody>\n</table>\n" },
+    /* Raw unescaped pipes split columns even inside source backtick runs. */
+    { "| A | B |\n| --- | --- |\n| " TICK "x|y" TICK " | z |\n",
+      "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td>" TICK "x</td>\n<td>y" TICK "</td>\n"
       "</tr>\n</tbody>\n</table>\n" },
     { "| A | B | C |\n| :--- | :---: | ---: |\n| one |\n",
       "<table>\n<thead>\n<tr>\n"
@@ -746,7 +763,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==367,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==369,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
