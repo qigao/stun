@@ -643,7 +643,13 @@ static int test_gfm_list_table_forward_reference_contract(void) {
         const stun_ui_rich_document_view v=stun_md_document_view(owned);
         CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
         CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_HEADING)==1u);
         CHECK(kinds(v,STUN_UI_BLOCK_LINK)==2u);
+        /* The dedented ATX opener is a ROOT sibling, never a lazy
+         * continuation owned by the enclosing LIST_ITEM paragraph. */
+        for(size_t i=1u;i<v.document.block_count;++i)
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_HEADING)
+                CHECK(v.document.blocks[i].parent_index==0u);
         CHECK(v.raw_markdown_bytes==bytes);
         CHECK(memcmp(v.raw_markdown,inputs[k],bytes)==0);
         size_t table_cell_links=0u,root_paragraph_links=0u;
