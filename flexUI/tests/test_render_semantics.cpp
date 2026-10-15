@@ -26,6 +26,7 @@
 #include <flexUI/widgets/listview_widget.h>
 #include <flexUI/widgets/modal_widget.h>
 #include <flexUI/widgets/menu_widget.h>
+#include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/widgets/notification_widget.h>
 #include <flexUI/widgets/panel_widget.h>
 #include <flexUI/widgets/pagination_widget.h>
@@ -10301,5 +10302,126 @@ spec("AvatarWidget keeps initials when image url is empty") {
     check(backend.svgs.empty());
     check_false(backend.texts.empty());
     check(backend.texts.front().text == "BJ");
+  }
+}
+
+
+// #186: Exercise the unchanged production MarkdownWidget/md::parse through
+// the *real* Box layout, shared text measurement, renderer and event routing.
+// The candidate C11 parser remains isolated in the existing oracle/Tango
+// tests, not a live fallback or an additional UI grammar.
+spec("MarkdownWidget UI layout and read-only scroll contracts") {
+  it("lays out rendered text and scrolls without modifying Markdown") {
+    Box box(nullptr);
+    auto* root = box.create("div", "md-root-186");
+    auto* viewport = box.create("div", "md-scroll-186");
+    auto* md = box.create_widget<MarkdownWidget>(
+        "div", "md-document-186", "# Status\n\nalpha\n");
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(260.0f, 180.0f);
+
+    box.load_css(R"(
+      #md-root-186 {
+        width: 240px;
+        height: 150px;
+        display: flex;
+        flex-direction: column;
+      }
+      #md-scroll-186 {
+        width: 170px;
+        height: 64px;
+        overflow-y: auto;
+        display: block;
+      }
+      #md-document-186 {
+        width: 150px;
+        min-height: 240px;
+        height: 240px;
+      }
+      .md-header {
+        width: 150px;
+        height: 34px;
+        font-size: 16px;
+      }
+      .md-p {
+        width: 150px;
+        height: 30px;
+        font-size: 14px;
+      }
+    )");
+
+    auto* widget = static_cast<MarkdownWidget*>(md->widget);
+    check(widget != nullptr);
+    widget->update(0.0f, *md);
+    box.update();
+
+    check(md->child_count() == 2u);
+    check(std::isfinite(md->width()) && md->width() > 0.0f);
+    check(std::isfinite(md->height()) && md->height() > 0.0f);
+    check(approx_eq(viewport->height(), 64.0f, 0.01f));
+    check(viewport->is_scroll_container());
+    check(viewport->max_scroll_y() > 0.0f);
+
+    if (md->child_count() != 2u) return;
+    auto* heading = static_cast<Element*>(md->children()[0]);
+    check(heading->has_class(Symbol("md-header")));
+    check(heading->text() == "Status");
+    check(heading->width() > 0.0f);
+    check(approximate_text_width(heading->computed_style, heading->text()) > 0.0f);
+    const auto measured = layout_text_block(
+        heading->computed_style, heading->text(),
+        0.0f, 0.0f, heading->width(), std::max(heading->height(), 34.0f),
+        Color{}, TextVerticalAlign::Top);
+    check(!measured.lines.empty());
+
+    RecordingRenderer before_scroll;
+    before_scroll.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer before_renderer(&before_scroll);
+    RenderManager before_manager(&before_renderer);
+    before_manager.render_tree(root);
+    const auto first = std::find_if(
+        before_scroll.texts.begin(), before_scroll.texts.end(),
+        [](const TextCall& call) { return call.text == "Status"; });
+    check(first != before_scroll.texts.end());
+    if (first == before_scroll.texts.end()) return;
+    const float initial_text_y = first->y;
+
+    Event wheel = Event::mouse_wheel(10.0f, 10.0f, 0.0f, -1.0f);
+    box.dispatch_event(wheel);
+    check(wheel.handled);
+    check(viewport->scroll_y() > 0.0f);
+    box.update();
+
+    RecordingRenderer after_scroll;
+    after_scroll.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer after_renderer(&after_scroll);
+    RenderManager after_manager(&after_renderer);
+    after_manager.render_tree(root);
+    const auto moved = std::find_if(
+        after_scroll.texts.begin(), after_scroll.texts.end(),
+        [](const TextCall& call) { return call.text == "Status"; });
+    check(moved != after_scroll.texts.end());
+    if (moved != after_scroll.texts.end()) {
+      check(moved->y < initial_text_y);
+    }
+
+    box.set_focus(md);
+    Event end = Event::key_down(KeyCode::End);
+    box.dispatch_event(end);
+    check(end.handled);
+    check(approx_eq(viewport->scroll_y(), viewport->max_scroll_y(), 0.01f));
+    Event home = Event::key_down(KeyCode::Home);
+    box.dispatch_event(home);
+    check(home.handled);
+    check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+
+    const std::string source = widget->markdown();
+    Event input = Event::text_input("must-not-change");
+    box.dispatch_event(input);
+    check(!input.handled);
+    check(widget->markdown() == source);
+    check(heading->text() == "Status");
   }
 }
