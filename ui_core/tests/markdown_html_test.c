@@ -838,6 +838,57 @@ static int test_gfm_metadata_fails_closed(void) {
     return 0;
 }
 
+
+/* #186: the public RichDoc validator checks generic preorder, while the
+ * renderer must ALSO reject forged TABLE_ROW/CELL and TASK_ITEM/CHECKBOX
+ * parent-child relationships before touching caller output. The copied
+ * block array deliberately retains valid IDs and parent<index so only the
+ * typed semantic ownership check can catch these malicious views. */
+static int test_gfm_forged_ancestry_fails_closed(void) {
+    typedef struct {
+        const char *markdown;
+        stun_ui_block_kind forged_kind;
+    } case_t;
+    static const case_t cases[] = {
+        {"| A | B |\n| --- | --- |\n| a | b |\n", STUN_UI_BLOCK_TABLE_ROW},
+        {"| A | B |\n| --- | --- |\n| a | b |\n", STUN_UI_BLOCK_TABLE_CELL},
+        {"- [x] checked\n", STUN_UI_BLOCK_TASK_ITEM},
+        {"- [ ] pending\n", STUN_UI_BLOCK_CHECKBOX}
+    };
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t bytes=strlen(cases[k].markdown);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(cases[k].markdown,bytes,128u,bytes+1u,
+                            &owned)==STUN_UI_OK);
+        stun_ui_rich_document_view view=stun_md_document_view(owned);
+        const size_t count=view.document.block_count;
+        stun_ui_block *copy=(stun_ui_block*)malloc(
+            count*sizeof(stun_ui_block));
+        CHECK(copy!=NULL);
+        memcpy(copy,view.document.blocks,count*sizeof(stun_ui_block));
+        size_t target=SIZE_MAX;
+        for(size_t i=1u;i<count;++i)
+            if(copy[i].kind==cases[k].forged_kind) {
+                target=i;break;
+            }
+        CHECK(target!=SIZE_MAX && target>1u);
+        copy[target].parent_index=0u;
+        view.document.blocks=copy;
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        unsigned char out[512];
+        memset(out,0xc7,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&view,128u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(out);++i)
+            CHECK(out[i]==0xc7);
+        free(copy);
+        stun_md_document_destroy(owned);
+    }
+    return 0;
+}
+
 static int test_unsafe_unsupported(void) {
     /* Balanced-parenthesis destinations are not implemented by the C11 parser
      * yet. Use a syntactically admitted link to test the actual HTML URL gate. */
@@ -895,6 +946,7 @@ int main(void) {
         }
     }
     if(test_gfm_metadata_fails_closed()) return 1;
+    if(test_gfm_forged_ancestry_fails_closed()) return 1;
     if(test_unsafe_unsupported()) return 1;
     printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
