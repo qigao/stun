@@ -1471,6 +1471,108 @@ static int test_gfm_mixed_metadata_adversaries(void) {
     return 0;
 }
 
+/* #186: adversarial deep owner chains must not pass merely because all
+ * indices, kinds and span boundaries satisfy the generic public RichDoc
+ * validation. The canonical parse is immutable and remains renderable after
+ * all eight borrowed-graph mutations. No second Markdown parse is used to
+ * decide whether a forged ancestor is legal. */
+static int test_gfm_deep_illegal_owners_fail_closed(void) {
+    static const char source[]=
+        "intro\n\n"
+        "> - [x] shipped\n>\n"
+        ">   | A | B |\n>   | :--- | ---: |\n"
+        ">   | left | right |\n";
+    enum { MAX_NODES=256, MODES=8, GUARD=2048 };
+    stun_md_document *owned=NULL;
+    CHECK(stun_md_parse(source,sizeof(source)-1u,MAX_NODES,
+                        sizeof(source),&owned)==STUN_UI_OK);
+    const stun_ui_rich_document_view original=stun_md_document_view(owned);
+    CHECK(stun_ui_rich_document_validate(&original,MAX_NODES)==STUN_UI_OK);
+    size_t paragraph=SIZE_MAX,quote=SIZE_MAX,list=SIZE_MAX;
+    size_t item=SIZE_MAX,checkbox=SIZE_MAX,table=SIZE_MAX;
+    size_t row=SIZE_MAX,cell=SIZE_MAX;
+    for(size_t i=1u;i<original.document.block_count;++i) {
+        const stun_ui_block_kind kind=original.document.blocks[i].kind;
+        if(kind==STUN_UI_BLOCK_PARAGRAPH && paragraph==SIZE_MAX)
+            paragraph=i;
+        if(kind==STUN_UI_BLOCK_QUOTE && quote==SIZE_MAX)quote=i;
+        if(kind==STUN_UI_BLOCK_LIST && list==SIZE_MAX)list=i;
+        if(kind==STUN_UI_BLOCK_TASK_ITEM && item==SIZE_MAX)item=i;
+        if(kind==STUN_UI_BLOCK_CHECKBOX && checkbox==SIZE_MAX)
+            checkbox=i;
+        if(kind==STUN_UI_BLOCK_TABLE && table==SIZE_MAX)table=i;
+        if(kind==STUN_UI_BLOCK_TABLE_ROW && row==SIZE_MAX)row=i;
+        if(kind==STUN_UI_BLOCK_TABLE_CELL && cell==SIZE_MAX)cell=i;
+    }
+    CHECK(paragraph<quote && quote<list && list<item &&
+          item<checkbox && checkbox<table && table<row && row<cell);
+    CHECK(original.document.blocks[quote].parent_index==0u);
+    CHECK(original.document.blocks[list].parent_index==quote);
+    CHECK(original.document.blocks[item].parent_index==list);
+    CHECK(original.document.blocks[checkbox].parent_index==item);
+    CHECK(original.document.blocks[table].parent_index==item);
+    CHECK(original.document.blocks[row].parent_index==table);
+    CHECK(original.document.blocks[cell].parent_index==row);
+
+    size_t needed=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,MAX_NODES,NULL,0u,
+                              &needed)==STUN_UI_OK);
+    CHECK(needed>0u && needed<GUARD);
+    unsigned char baseline[GUARD];
+    memset(baseline,0xcd,sizeof(baseline));
+    size_t full=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,MAX_NODES,(char*)baseline,
+                              sizeof(baseline),&full)==STUN_UI_OK);
+    CHECK(full==needed);
+    const size_t count=original.document.block_count;
+    CHECK(count<MAX_NODES);
+    for(size_t mode=0u;mode<MODES;++mode) {
+        stun_ui_block copy[MAX_NODES];
+        memcpy(copy,original.document.blocks,count*sizeof(*copy));
+        switch(mode) {
+        case 0u: copy[quote].parent_index=(uint32_t)paragraph;break;
+        case 1u: copy[list].parent_index=(uint32_t)paragraph;break;
+        case 2u: copy[item].parent_index=(uint32_t)quote;break;
+        case 3u: copy[checkbox].parent_index=(uint32_t)list;break;
+        case 4u: copy[table].parent_index=(uint32_t)list;break;
+        case 5u: copy[table].parent_index=(uint32_t)paragraph;break;
+        case 6u: copy[row].parent_index=(uint32_t)item;break;
+        case 7u: copy[cell].parent_index=(uint32_t)item;break;
+        default:return 1;
+        }
+        stun_ui_rich_document_view forged=original;
+        forged.document.blocks=copy;
+        CHECK(stun_ui_rich_document_validate(&forged,MAX_NODES)==STUN_UI_OK);
+        unsigned char out[GUARD];
+        memset(out,0x94,sizeof(out));
+        size_t required=SIZE_MAX;
+        const stun_ui_status status=stun_md_render_html(
+            &forged,MAX_NODES,(char*)out,sizeof(out),&required);
+        if(status!=STUN_UI_INVALID_ARGUMENT) {
+            fprintf(stderr,"GFM deep owner mutation=%zu status=%d\n",
+                    mode,(int)status);
+            stun_md_document_destroy(owned);
+            return 1;
+        }
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0x94u);
+        CHECK(stun_md_render_html(&forged,MAX_NODES,NULL,0u,
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        CHECK(original.raw_markdown_bytes==sizeof(source)-1u);
+        CHECK(!memcmp(original.raw_markdown,source,sizeof(source)-1u));
+    }
+    unsigned char unchanged[GUARD];
+    memset(unchanged,0xcd,sizeof(unchanged));
+    size_t again=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,MAX_NODES,(char*)unchanged,
+                              sizeof(unchanged),&again)==STUN_UI_OK);
+    CHECK(again==needed && !memcmp(unchanged,baseline,needed+1u));
+    stun_md_document_destroy(owned);
+    puts("GFM forged deep quote/list/task/table ancestors: 8/8 rejected");
+    return 0;
+}
+
 static int test_unsafe_unsupported(void) {
     /* Balanced-parenthesis destinations are not implemented by the C11 parser
      * yet. Use a syntactically admitted link to test the actual HTML URL gate. */
@@ -1534,6 +1636,7 @@ int main(void) {
     if(test_gfm_forged_container_chain_fails_closed()) return 1;
     if(test_gfm_nested_unsafe_url_atomicity()) return 1;
     if(test_gfm_mixed_metadata_adversaries()) return 1;
+    if(test_gfm_deep_illegal_owners_fail_closed()) return 1;
     if(test_unsafe_unsupported()) return 1;
     printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
