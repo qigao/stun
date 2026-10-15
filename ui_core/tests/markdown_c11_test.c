@@ -489,6 +489,67 @@ static int test_gfm_list_table_ownership(void) {
     return 0;
 }
 
+/* #186: true TASK_ITEM -> TABLE and nested LIST_ITEM -> TABLE ownership
+ * on the one C11 block parser. Source and checkbox metadata remain owned
+ * by the same immutable document; count/write HTML stays transactional. */
+static int test_gfm_composed_list_table_ownership(void) {
+    const char *inputs[] = {
+        "- [x] parent\n\n  | A | B |\n  | --- | --- |\n"
+        "  | a | b |\n",
+        "> - [x] parent\n>\n>   | A | B |\n"
+        ">   | --- | --- |\n>   | a | b |\n",
+        "- parent\n  - | A | B |\n    | --- | --- |\n"
+        "    | a | b |\n",
+        "> - outer\n>   - | A | B |\n"
+        ">     | --- | --- |\n>     | a | b |\n"
+    };
+    for(size_t k=0u;k<sizeof(inputs)/sizeof(inputs[0]);++k) {
+        const size_t bytes=strlen(inputs[k]);
+        stun_md_document *owner=NULL;
+        CHECK(stun_md_parse(inputs[k],bytes,256u,1024u,&owner)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owner);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==(k<2u?1u:2u));
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==((k==1u||k==3u)?1u:0u));
+        size_t table=SIZE_MAX;
+        for(size_t i=1u;i<v.document.block_count;++i)
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+        CHECK(table!=SIZE_MAX);
+        const uint32_t item=v.document.blocks[table].parent_index;
+        CHECK(item>0u && item<table);
+        CHECK(v.document.blocks[item].kind==
+              (k<2u?STUN_UI_BLOCK_TASK_ITEM:STUN_UI_BLOCK_LIST_ITEM));
+        const uint32_t list=v.document.blocks[item].parent_index;
+        CHECK(list>0u && list<item &&
+              v.document.blocks[list].kind==STUN_UI_BLOCK_LIST);
+        if(k<2u) {
+            CHECK(item+1u<table &&
+                  v.document.blocks[item+1u].kind==STUN_UI_BLOCK_CHECKBOX &&
+                  v.document.blocks[item+1u].parent_index==item);
+        }
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,inputs[k],bytes)==0);
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,NULL,0u,&required)==STUN_UI_OK);
+        CHECK(required>0u && required<2048u);
+        unsigned char html[2048];
+        memset(html,0x8c,sizeof(html));
+        CHECK(stun_md_render_html(&v,256u,(char*)html,required,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        for(size_t i=0u;i<sizeof(html);++i)CHECK(html[i]==0x8c);
+        CHECK(stun_md_render_html(&v,256u,(char*)html,sizeof(html),
+                                  &required)==STUN_UI_OK);
+        CHECK(strstr((char*)html,"<table>\n<thead>")!=NULL);
+        if(k<2u)
+            CHECK(strstr((char*)html,"<input type=\"checkbox\" checked=\"\" disabled=\"\" />")!=NULL);
+        stun_md_document_destroy(owner);
+    }
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1239,6 +1300,7 @@ int main(void) {
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
     if(test_gfm_list_table_ownership()) return 1;
+    if(test_gfm_composed_list_table_ownership()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
