@@ -200,6 +200,25 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quoted-nested-list-table",
          "> - outer\n>   - | A | B |\n"
          ">     | --- | --- |\n>     | a | b |\n", "gfm"),
+    # #186: distinguish an already-open LIST paragraph from a *new* GFM
+    # TABLE header; cmark-gfm is the strict byte oracle, not a guess that
+    # any pipe line must interrupt ordinary paragraph continuations.
+    Case("gfm.list-paragraph-then-table-no-blank",
+         "- intro\n  | A | B |\n  | --- | --- |\n"
+         "  | x | y |\n", "gfm"),
+    Case("gfm.quote-list-paragraph-then-table-no-blank",
+         "> - intro\n>   | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n", "gfm"),
+    Case("gfm.list-multiline-paragraph-then-table",
+         "- intro\n  continued\n  | A | B |\n  | --- | --- |\n"
+         "  | x | y |\n", "gfm"),
+    Case("gfm.list-inline-header-no-leading-pipe",
+         "- left | right\n  --- | ---\n  x | y\n", "gfm"),
+    Case("gfm.list-table-after-fenced-block",
+         "- " "\x60\x60\x60" "\n  code\n  " "\x60\x60\x60" "\n"
+         "  | A | B |\n  | --- | --- |\n  | x | y |\n", "gfm"),
+    Case("gfm.list-mismatched-table-delimiter",
+         "- | A | B |\n  | --- |\n  | x | y |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
