@@ -3763,6 +3763,27 @@ static void md_parse_blocks(stun_md_document *d) {
         size_t quote_body=line.begin;
         const size_t quote_depth=md_quote_prefix(s,line,&quote_body);
         if(quote_depth) {
+            /* A reduced number of explicit '>' markers may lazily continue
+             * an already-open LIST_ITEM paragraph in the deepest quote.
+             * Reuse the same bounded list frame with NO read-ahead cursor:
+             * lazy source is text, never a new TABLE/list/fence owner. */
+            if(quote_depth<quotes.depth && quotes.lists.depth &&
+               !quotes.fence_open &&
+               !md_blank(s,quote_body,line.end)) {
+                md_line inner=line;
+                inner.begin=quote_body;
+                const size_t content=md_left(s,quote_body,line.end);
+                md_list_frame *top=
+                    &quotes.lists.frames[quotes.lists.depth-1u];
+                if(!top->pending_blank &&
+                   (top->paragraph!=UINT32_MAX ||
+                    top->quote_paragraph!=UINT32_MAX) &&
+                   !md_quote_lazy_interrupts(s,inner,content)) {
+                    if(md_list_consume(d,&quotes.lists,inner,NULL,0u))
+                        continue;
+                    if(d->error!=STUN_UI_OK)return;
+                }
+            }
             /* A continuing nested quote paragraph may omit any number of
              * innermost markers. Match already-open quote containers
              * before closing them; block starts and blanks are not lazy. */
@@ -3792,13 +3813,14 @@ static void md_parse_blocks(stun_md_document *d) {
             continue;
         }
         if(quotes.depth) {
-            /* A missing OUTER '>' can lazily continue the deepest paragraph
-             * of a list-owned INNER quote, but not a generic list paragraph.
-             * This is bounded by the existing active quote/list generations. */
+            /* A missing OUTER '>' lazily continues an already-open paragraph
+             * owned by a quoted LIST_ITEM or its inner QUOTE. No blank,
+             * new block opener or read-ahead TABLE admission is permitted. */
             if(quotes.lists.depth) {
                 md_list_frame *top=
                     &quotes.lists.frames[quotes.lists.depth-1u];
-                if(top->quote_paragraph!=UINT32_MAX &&
+                if((top->quote_paragraph!=UINT32_MAX ||
+                    top->paragraph!=UINT32_MAX) &&
                    !top->pending_blank &&
                    !md_blank(s,line.begin,line.end) &&
                    !md_quote_lazy_interrupts(s,line,begin)) {

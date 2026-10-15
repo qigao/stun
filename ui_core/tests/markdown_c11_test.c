@@ -898,6 +898,70 @@ static int test_gfm_mixed_quote_list_table_ownership(void) {
     return 0;
 }
 
+/* #186: missing quote markers are valid *lazy paragraph text* within
+ * an already-open, quoted LIST_ITEM. Partial markers must retain the
+ * deepest real quote/list owner. Lazy text cannot start TABLE admission:
+ * only a later explicitly marked header+delimiter may own a TABLE. */
+static int test_gfm_quote_list_lazy_text_ownership(void) {
+    static const struct {
+        const char *source;
+        size_t quotes,tables;
+    } cases[]={
+        {"> - alpha\nbeta\n",1u,0u},
+        {"> > - alpha\n> beta\n",2u,0u},
+        {"> - alpha\nbeta\n"
+         ">   | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n",1u,1u}
+    };
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t bytes=strlen(cases[k].source);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(cases[k].source,bytes,160u,bytes+1u,
+                            &doc)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,160u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==cases[k].quotes);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST_ITEM)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==cases[k].tables);
+        CHECK(text_is(v,"alpha") && text_is(v,"beta"));
+        bool beta_owned=false;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *b=&v.document.blocks[i];
+            if(b->kind!=STUN_UI_BLOCK_TEXT ||
+               b->byte_end<b->byte_begin ||
+               b->byte_end>v.document.source_bytes)continue;
+            if(b->byte_end-b->byte_begin==4u &&
+               memcmp(v.document.source+b->byte_begin,"beta",4u)==0) {
+                const uint32_t para=b->parent_index;
+                CHECK(para<i &&
+                      v.document.blocks[para].kind==STUN_UI_BLOCK_PARAGRAPH);
+                const uint32_t item=v.document.blocks[para].parent_index;
+                CHECK(item<para &&
+                      v.document.blocks[item].kind==STUN_UI_BLOCK_LIST_ITEM);
+                beta_owned=true;
+            }
+        }
+        CHECK(beta_owned);
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,cases[k].source,bytes)==0);
+        size_t needed=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,160u,NULL,0u,&needed)==STUN_UI_OK);
+        CHECK(needed>0u && needed<2048u);
+        unsigned char out[2048];memset(out,0x8a,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,160u,(char*)out,needed,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==needed);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0x8a);
+        CHECK(stun_md_render_html(&v,160u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_OK);
+        CHECK(strstr((char*)out,"alpha\nbeta")!=NULL);
+        stun_md_document_destroy(doc);
+    }
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1653,6 +1717,7 @@ int main(void) {
     if(test_gfm_paragraph_to_list_table()) return 1;
     if(test_gfm_nested_ordered_interrupt_guard()) return 1;
     if(test_gfm_mixed_quote_list_table_ownership()) return 1;
+    if(test_gfm_quote_list_lazy_text_ownership()) return 1;
     if(test_gfm_list_table_forward_reference_contract()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
