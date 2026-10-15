@@ -281,6 +281,20 @@ static const html_fixture cases[] = {
       "<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n"
       "</tr>\n</tbody>\n</table>\n</li>\n</ul>\n"
       "</blockquote>\n" },
+    /* #186: a preceding tight LIST_ITEM paragraph remains a sibling
+     * before the GFM TABLE, even without a blank separator. */
+    { "- intro\n  | A | B |\n  | --- | --- |\n  | x | y |\n",
+      "<ul>\n<li>intro\n<table>\n<thead>\n<tr>\n"
+      "<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>x</td>\n<td>y</td>\n"
+      "</tr>\n</tbody>\n</table>\n</li>\n</ul>\n" },
+    /* A valid list opener wins before a root TABLE header even when the
+     * marker line itself contains an unescaped pipe. */
+    { "- left | right\n  --- | ---\n  x | y\n",
+      "<ul>\n<li>\n<table>\n<thead>\n<tr>\n"
+      "<th>left</th>\n<th>right</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>x</td>\n<td>y</td>\n"
+      "</tr>\n</tbody>\n</table>\n</li>\n</ul>\n" },
     /* GFM tables terminate before raw HTML blocks. The SAFE writer must
      * still escape raw markup; SPEC is a separately opt-in test policy. */
     { "| H | V |\n| --- | --- |\n| a | b |\n<div>\nraw\n</div>\n",
@@ -845,7 +859,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==380,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==382,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
