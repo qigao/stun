@@ -2382,20 +2382,27 @@ static size_t md_table_skip_code(const char *s, size_t begin,
     return close==SIZE_MAX ? pos+run-1 : close+run-1;
 }
 
-static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end) {
+static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end,
+                                    uint8_t *out_alignment) {
     begin=md_left(s,begin,end);
     end=md_right(s,begin,end);
-    if (begin<end && s[begin]==':') ++begin;
-    if (end>begin && s[end-1]==':') --end;
-    if (begin==end) return false;
-    for (size_t i=begin;i<end;++i)
-        if (s[i]!='-') return false;
+    const bool left=begin<end && s[begin]==':';
+    if(left)++begin;
+    const bool right=end>begin && s[end-1]==':';
+    if(right)--end;
+    if(begin==end)return false;
+    for(size_t i=begin;i<end;++i)
+        if(s[i]!='-')return false;
+    if(out_alignment) *out_alignment=(uint8_t)(
+        left ? (right ? STUN_UI_TABLE_ALIGN_CENTER : STUN_UI_TABLE_ALIGN_LEFT)
+             : (right ? STUN_UI_TABLE_ALIGN_RIGHT : STUN_UI_TABLE_ALIGN_NONE));
     return true;
 }
 
 static bool md_table_scan(const char *s, size_t begin, size_t end,
                           bool delimiter, bool require_pipe,
-                          size_t *out_columns) {
+                          size_t *out_columns, uint8_t *alignments,
+                          size_t alignment_capacity) {
     if (begin>=end || !out_columns) return false;
     begin=md_left(s,begin,end);
     end=md_right(s,begin,end);
@@ -2418,8 +2425,12 @@ static bool md_table_scan(const char *s, size_t begin, size_t end,
             (s[p]=='|' && md_table_unescaped(s,p,begin));
         if (!boundary) continue;
         pipe |= p<end;
-        if (delimiter && !md_table_delimiter_cell(s,cell_begin,p))
-            return false;
+        if(delimiter) {
+            uint8_t align=STUN_UI_TABLE_ALIGN_NONE;
+            if(!md_table_delimiter_cell(s,cell_begin,p,&align) ||
+               (alignments && cells>=alignment_capacity))return false;
+            if(alignments)alignments[cells]=align;
+        }
         ++cells;
         cell_begin=p+1;
     }
@@ -3722,12 +3733,29 @@ static void md_parse_blocks(stun_md_document *d) {
             lists.depth==0u && pos<d->raw_size) {
             const md_line sep=md_read_line(d,pos);
             size_t columns=0, delimiter_columns=0;
-            if (md_table_scan(s,begin,end,false,true,&columns) &&
+            if (md_table_scan(s,begin,end,false,true,&columns,NULL,0u) &&
                 md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
-                              true,true,&delimiter_columns) &&
+                              true,true,&delimiter_columns,NULL,0u) &&
                 columns==delimiter_columns) {
+                /* One document-owned alignment byte per parsed column;
+                 * reject node budgets before allocating the scratch vector. */
+                if(columns>d->node_limit) {
+                    md_error(d,STUN_UI_CAPACITY_EXCEEDED);return;
+                }
+                uint8_t *alignments=(uint8_t*)malloc(columns);
+                if(!alignments) {md_error(d,STUN_UI_OUT_OF_MEMORY);return;}
+                size_t verified=0u;
+                if(!md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
+                                  true,true,&verified,alignments,columns) ||
+                   verified!=columns) {
+                    free(alignments);
+                    md_error(d,STUN_UI_INVALID_ARGUMENT);return;
+                }
                 const uint32_t table=md_add(d,0u,STUN_UI_BLOCK_TABLE,0u);
-                if(table==UINT32_MAX) return;
+                if(table==UINT32_MAX) {free(alignments);return;}
+                md_meta(d,table,(const char*)alignments,columns);
+                free(alignments);
+                if(d->error!=STUN_UI_OK)return;
                 if(!md_table_row(d,table,s,begin,end,columns)) return;
                 pos=sep.next;
                 while(pos<d->raw_size && d->error==STUN_UI_OK) {
@@ -3736,7 +3764,7 @@ static void md_parse_blocks(stun_md_document *d) {
                     size_t row_columns=0;
                     if(row_begin-row.begin>3 || md_blank(s,row.begin,row.end) ||
                        md_table_starts_new_block(s,row_begin,row.end) ||
-                       !md_table_scan(s,row_begin,row.end,false,false,&row_columns))
+                       !md_table_scan(s,row_begin,row.end,false,false,&row_columns,NULL,0u))
                         break;
                     if(!md_table_row(d,table,s,row_begin,row.end,columns))
                         return;
