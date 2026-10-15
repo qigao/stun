@@ -297,12 +297,14 @@ static void html_children(stun_html_writer *w, size_t id,
 static void html_table(stun_html_writer *w, size_t id,
                        size_t *next, size_t depth) {
     const stun_ui_document_view *doc=&w->doc->document;
-    /* Canonical TABLE admission is root-owned or a direct child of a
-     * real QUOTE, never a PARAGRAPH, LIST_ITEM or arbitrary inline owner.
-     * The public generic RichDoc preorder check alone is insufficient. */
+    /* TABLE may be root-, QUOTE- or LIST_ITEM/TASK_ITEM-owned, but never
+     * a child of PARAGRAPH, LIST, or inline nodes. The independent RichDoc
+     * preorder validator does not enforce this typed ownership contract. */
     const uint32_t owner=doc->blocks[id].parent_index;
     if(id==0u || owner>=id ||
-       (owner!=0u && doc->blocks[owner].kind!=STUN_UI_BLOCK_QUOTE)) {
+       (owner!=0u && doc->blocks[owner].kind!=STUN_UI_BLOCK_QUOTE &&
+        doc->blocks[owner].kind!=STUN_UI_BLOCK_LIST_ITEM &&
+        doc->blocks[owner].kind!=STUN_UI_BLOCK_TASK_ITEM)) {
         w->error=STUN_UI_INVALID_ARGUMENT;return;
     }
     const char *metadata=NULL;size_t columns=0u;
@@ -621,6 +623,7 @@ static void html_node(stun_html_writer *w, size_t id,
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_RULE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_QUOTE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_RAW_HTML_BLOCK ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_TABLE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_LIST ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_ORDERED_LIST))
             html_str(w,"\n");
