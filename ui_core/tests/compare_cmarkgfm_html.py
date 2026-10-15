@@ -246,6 +246,31 @@ CASES: tuple[Case, ...] = (
          "> - outer\n>   - | A | B |\n"
          ">     | --- | --- |\n>     | x | y |\n"
          "After\n", "gfm"),
+    # #186: bounded LIST/TASK/QUOTE GFM TABLE integration stress.
+    # All cases use the independent byte-for-byte cmark-gfm oracle.
+    # Extension-only results never enter the official CommonMark-652 gate.
+    Case("gfm.ordered-list-table-start-seven",
+         "7. | Name | Qty |\n   | :--- | ---: |\n"
+         "   | tea | 2 |\n", "gfm"),
+    Case("gfm.plus-marker-list-table",
+         "+ | A | B |\n  | --- | --- |\n  | x | y |\n", "gfm"),
+    Case("gfm.nested-ordered-list-table",
+         "- outer\n  2. | A | B |\n     | --- | --- |\n"
+         "     | x | y |\n", "gfm"),
+    Case("gfm.task-item-two-tables",
+         "- [x] done\n\n  | A | B |\n  | --- | --- |\n"
+         "  | a | b |\n\n  | C | D |\n  | --- | --- |\n"
+         "  | c | d |\n", "gfm"),
+    Case("gfm.quoted-list-table-sibling",
+         "> - | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n> - second\n", "gfm"),
+    Case("gfm.list-table-fence-interruption",
+         "- | A | B |\n  | --- | --- |\n"
+         "  | x | y |\n  " "\x60\x60\x60" "\n"
+         "  | a | b |\n  " "\x60\x60\x60" "\n", "gfm"),
+    Case("gfm.list-table-then-heading",
+         "- | A | B |\n  | --- | --- |\n"
+         "  # done\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
