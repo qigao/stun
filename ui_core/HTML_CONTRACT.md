@@ -13,9 +13,17 @@ This C11 renderer consumes **only** a validated `stun_ui_rich_document_view` fro
 
 The first production-quality subset covers paragraphs, headings, emphasis/strong/del, code spans/fences, blockquotes, lists, safe links, soft breaks, rules and plain GFM tables. The source's UTF-8 bytes (including Emoji) remain unchanged except normal HTML text/attribute escaping.
 
-Unsupported semantic types intentionally produce `STUN_UI_INVALID_ARGUMENT`: images, task checkboxes, diagrams, math, entity-specific transforms, footnotes, definition lists and unmodeled hard line breaks do **not** silently fall back to raw HTML. Unsafe URL schemes are rejected rather than emitted into `href`.
+Semantic types without a qualified renderer must fail closed rather than
+fall back to raw HTML (e.g. math, diagrams and definition lists). Typed IMAGE,
+hard line breaks and task CHECKBOX semantics have explicit bounded rendering
+paths; active link/image protocols still require a separate safe URI check.
+Untrusted HTML remains escaped under the SAFE policy.
 
-The IR currently lacks loose-vs-tight list facts, hard-vs-soft line break distinctions, GFM table alignment, and ordered-list starting index; therefore **this renderer does not claim full CommonMark/GFM conformance**. These fields must be supplied by the canonical parser/typed RichDoc, not guessed by the renderer.
+The RichDoc now carries typed loose/tight list data, hard/soft line breaks,
+ordered starts, and GFM table alignment. **This is not a full CommonMark/GFM
+conformance claim**: remaining Unicode semantics, nested GFM admission and
+complete extension suites are separately gated. The renderer never infers
+these semantic facts from raw Markdown.
 
 ## GFM extension slice (#186, Draft #226)
 
@@ -44,7 +52,8 @@ and Tango are not switched on this branch.
 
 ## Verification
 
-`stun_markdown_html_test` is a real strict C11 executable using the installed `Stun::UICore`, checked by the existing installed-Salts SDK ASan/UBSan workflow. It asserts 17 exact HTML golden outputs, atomic capacity rejection, safe link admission, and unsupported image handling.
+`stun_markdown_html_test` is a real strict C11 executable using the installed `Stun::UICore`, checked by the existing installed-Salts SDK ASan/UBSan workflow. It asserts a growing, explicitly counted C11 HTML golden subset, atomic
+capacity rejection, safe image/link admission and typed GFM task/table HTML.
 
 The next gate must **also** compare actual C11-produced HTML against independent `cmarkgfm` HTML on a complete, versioned sample suite. Mistune AST parity alone is not an HTML conformance proof, and our test-only HTML examples do not replace that independent oracle.
 
@@ -57,11 +66,10 @@ and stderr, never fallback to C++ or a Python parser.
 
 `ui_core/tests/compare_cmarkgfm_html.py` independently processes the *same*
 input through Python `cmarkgfm`: CommonMark examples use `markdown_to_html`,
-GFM examples use `github_flavored_markdown_to_html`. It asserts **exact HTML
-bytes**, including whitespace, escaping and structural tags, for an
-explicit 17-case support subset. The separate diagnostic survey records
-unsupported/reference-link/table-alignment/task/HTML-entity differences
-without counting them as passes or bypassing failure in a supported case.
+GFM examples use `github_flavored_markdown_to_html`. It asserts **exact HTML bytes**, including whitespace, escaping and
+structural tags, for an explicit, versioned supported subset. GFM extension
+Examples 198–205 and 279–280 have their own independent ten-ID subgate;
+unsupported cases remain separately counted and never silently promoted.
 
 The existing Unicode runtime installed-Salts SDK gate compiles the C11
 executable with its ASan/UBSan settings and runs the Python oracle inside
