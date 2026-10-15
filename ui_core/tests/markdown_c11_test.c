@@ -418,6 +418,77 @@ static int test_gfm_explicit_quote_table_ownership(void) {
     return 0;
 }
 
+/* #186: admitted GFM LIST_ITEM tables use the SAME typed TABLE owner and
+ * alignment metadata as ROOT/QUOTE tables. Check nested ownership, retained
+ * source bytes, actual HTML emission and bounded failure rollback. */
+static int test_gfm_list_table_ownership(void) {
+    const char *sources[] = {
+        "- | A | B |\n  | :--- | ---: |\n  | a\\|b | 7 |\n",
+        "> - | A | B |\n>   | :--- | ---: |\n>   | a\\|b | 7 |\n",
+        "- intro\n\n  | A | B |\n  | :--- | ---: |\n"
+        "  | a\\|b | 7 |\n"
+    };
+    for(size_t k=0u;k<sizeof(sources)/sizeof(sources[0]);++k) {
+        const size_t bytes=strlen(sources[k]);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(sources[k],bytes,256u,1024u,&owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==(k==1u?1u:0u));
+        size_t list=SIZE_MAX,item=SIZE_MAX,table=SIZE_MAX;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            switch(v.document.blocks[i].kind) {
+            case STUN_UI_BLOCK_LIST: list=i;break;
+            case STUN_UI_BLOCK_LIST_ITEM: item=i;break;
+            case STUN_UI_BLOCK_TABLE: table=i;break;
+            default: break;
+            }
+        }
+        CHECK(list!=SIZE_MAX && item!=SIZE_MAX && table!=SIZE_MAX);
+        CHECK(v.document.blocks[item].parent_index==list);
+        CHECK(v.document.blocks[table].parent_index==item);
+        if(k==1u) {
+            const uint32_t quote=v.document.blocks[list].parent_index;
+            CHECK(quote>0u && quote<list &&
+                  v.document.blocks[quote].kind==STUN_UI_BLOCK_QUOTE);
+        } else CHECK(v.document.blocks[list].parent_index==0u);
+        const char *align=NULL;size_t align_bytes=0u;
+        CHECK(stun_ui_rich_document_metadata(&v,table,&align,
+                                             &align_bytes)==STUN_UI_OK);
+        CHECK(align && align_bytes==2u);
+        CHECK((uint8_t)align[0]==STUN_UI_TABLE_ALIGN_LEFT);
+        CHECK((uint8_t)align[1]==STUN_UI_TABLE_ALIGN_RIGHT);
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,sources[k],bytes)==0);
+        unsigned char out[2048];memset(out,0xb4,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,(char*)out,1u,&required)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0xb4);
+        CHECK(stun_md_render_html(&v,256u,(char*)out,
+                                  sizeof(out),&required)==STUN_UI_OK);
+        CHECK(strstr((char*)out,"<table>\n<thead>")!=NULL);
+        CHECK(strstr((char*)out,"<td align=\"left\">a|b</td>")!=NULL);
+        stun_md_document_destroy(owned);
+    }
+    /* Dedented delimiter may not attach to an open ITEM table header. */
+    const char invalid[]="- | A | B |\n| --- | --- |\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(invalid,sizeof(invalid)-1u,256u,256u,
+                        &doc)==STUN_UI_OK);
+    CHECK(kinds(stun_md_document_view(doc),STUN_UI_BLOCK_TABLE)==0u);
+    stun_md_document_destroy(doc);
+    doc=(stun_md_document*)(uintptr_t)0x1;
+    CHECK(stun_md_parse(sources[0],strlen(sources[0]),5u,1024u,
+                        &doc)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(doc==NULL);
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1167,6 +1238,7 @@ int main(void) {
     if(test_gfm_table_alignment_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
+    if(test_gfm_list_table_ownership()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
