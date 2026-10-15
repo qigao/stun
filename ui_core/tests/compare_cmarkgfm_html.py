@@ -130,6 +130,31 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quote-table-then-paragraph",
          "> | Key | Value |\n> | --- | --- |\n"
          "> | a | b |\n>\n> After\n", "gfm"),
+    # #186: explicit QUOTE-owned table admission; verify complete
+    # container ownership / source-boundary transitions independently
+    # against cmark-gfm byte-for-byte, without a second parser.
+    Case("gfm.quote-table-crlf",
+         "> | L | R |\r\n> | :--- | ---: |\r\n"
+         "> | a\\|b | z |\r\n", "gfm"),
+    Case("gfm.quote-table-no-final-lf",
+         "> | L | R |\n> | --- | --- |\n> | x | y |", "gfm"),
+    Case("gfm.quote-table-root-dedent",
+         "> | L | R |\n> | --- | --- |\n> | x | y |\n"
+         "Outside\n", "gfm"),
+    Case("gfm.quote-table-then-nested-quote",
+         "> | L | R |\n> | --- | --- |\n> | x | y |\n"
+         "> > nested\n", "gfm"),
+    Case("gfm.quote-two-tables-separated",
+         "> | A | B |\n> | --- | --- |\n> | a | b |\n>\n"
+         "> | C | D |\n> | --- | --- |\n> | c | d |\n", "gfm"),
+    Case("gfm.quote-table-after-fence",
+         "> \`\`\`\n> | A | B |\n> | --- | --- |\n"
+         "> \`\`\`\n> | C | D |\n> | --- | --- |\n> | c | d |\n", "gfm"),
+    Case("gfm.quote-table-unmarked-delimiter",
+         "> | A | B |\n| --- | --- |\n", "gfm"),
+    Case("gfm.quote-table-unmarked-row",
+         "> | A | B |\n> | --- | --- |\n> | a | b |\n"
+         "| c | d |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
