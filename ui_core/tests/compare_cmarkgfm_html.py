@@ -62,15 +62,16 @@ CASES: tuple[Case, ...] = (
     Case("gfm.table-escaped-uneven",
          "| A | B | C |\n| :--- | :---: | ---: |\n"
          "| a\\|b | middle | z |\n| short |\n", "gfm"),
-    # cmarkgfm 2025.10.22 currently splits a pipe inside an inline code
-    # span into two table cells; Stun correctly keeps it opaque, and Mistune
-    # independently differs. Record both actual byte outputs in a survey;
-    # do not weaken the C11 owned-code-span fixture or claim an exact oracle
-    # match when the comparison engines disagree about this extension.
-    Case("survey.gfm.table-code-pipe",
+    # Normative GFM cell boundaries are recognized BEFORE inline spans:
+    # an UNescaped pipe splits cells even inside backticks. Example 200
+    # independently covers the escaped form which must remain one cell.
+    Case("gfm.table-code-pipe-and-uneven",
          "| A | B | C |\n| :--- | :---: | ---: |\n"
-         "| a\\|b | " "\x60" "x|y" "\x60" " | z |\n| short |\n",
-         "gfm", False, "Known cmark-gfm code-span-pipe split; review separately"),
+         "| a\\|b | " "\x60" "x|y" "\x60" " | z |\n| short |\n", "gfm"),
+    Case("gfm.table-escaped-code-pipe-example-200",
+         "| f\\|oo |\n| ------ |\n"
+         "| b " "\x60" "\\|" "\x60" " az |\n"
+         "| b **\\|** im |\n", "gfm"),
     Case("gfm.task", "- [x] completed\n- [ ] remaining\n", "gfm"),
     Case("gfm.task-ordered", "3. [X] done\n4. [ ] later\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
