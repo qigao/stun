@@ -1,6 +1,7 @@
 #include <stun/markdown_c11.h>
 #include <stun/markdown_html.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 
