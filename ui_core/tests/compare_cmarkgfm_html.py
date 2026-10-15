@@ -219,6 +219,33 @@ CASES: tuple[Case, ...] = (
          "  | A | B |\n  | --- | --- |\n  | x | y |\n", "gfm"),
     Case("gfm.list-mismatched-table-delimiter",
          "- | A | B |\n  | --- |\n  | x | y |\n", "gfm"),
+    # #186: an independently resolved root reference MUST remain available
+    # inside list/quote-owned typed TABLE_CELL text. A table data row that
+    # happens to look like a [label]: definition MUST NOT create one.
+    Case("gfm.list-table-forward-root-reference",
+         "- | Item | Link |\n  | --- | --- |\n"
+         "  | row | [go][ref] |\n# Root\n"
+         "[ref]: /uri\n\n[go][ref]\n", "gfm"),
+    Case("gfm.quoted-list-table-forward-root-reference",
+         "> - | Item | Link |\n>   | --- | --- |\n"
+         ">   | row | [go][ref] |\n# Root\n"
+         "[ref]: /uri\n\n[go][ref]\n", "gfm"),
+    Case("gfm.nested-list-table-forward-root-reference",
+         "- outer\n  - | Item | Link |\n    | --- | --- |\n"
+         "    | row | [go][ref] |\n# Root\n"
+         "[ref]: /uri\n\n[go][ref]\n", "gfm"),
+    Case("gfm.list-table-fake-definition-row",
+         "- | Item | Link |\n  | --- | --- |\n"
+         "  [shadow]: /blocked\n"
+         "  | row | [go][real] |\n# Root\n"
+         "[real]: /uri\n\n[shadow] [go][real]\n", "gfm"),
+    Case("gfm.list-table-crlf-tab-owned",
+         "- | A | B |\r\n\t| --- | --- |\r\n"
+         "\t| x | y |\r\n", "gfm"),
+    Case("gfm.quoted-nested-list-table-dedent-root",
+         "> - outer\n>   - | A | B |\n"
+         ">     | --- | --- |\n>     | x | y |\n"
+         "After\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
