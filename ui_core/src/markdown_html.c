@@ -297,10 +297,12 @@ static void html_children(stun_html_writer *w, size_t id,
 static void html_table(stun_html_writer *w, size_t id,
                        size_t *next, size_t depth) {
     const stun_ui_document_view *doc=&w->doc->document;
-    /* The current canonical TABLE parser admits root tables only.
-     * Generic RichDoc preorder validation is not a semantic parent check:
-     * reject a forged TABLE underneath PARAGRAPH/LIST/inline content. */
-    if(id==0u || doc->blocks[id].parent_index!=0u) {
+    /* Canonical TABLE admission is root-owned or a direct child of a
+     * real QUOTE, never a PARAGRAPH, LIST_ITEM or arbitrary inline owner.
+     * The public generic RichDoc preorder check alone is insufficient. */
+    const uint32_t owner=doc->blocks[id].parent_index;
+    if(id==0u || owner>=id ||
+       (owner!=0u && doc->blocks[owner].kind!=STUN_UI_BLOCK_QUOTE)) {
         w->error=STUN_UI_INVALID_ARGUMENT;return;
     }
     const char *metadata=NULL;size_t columns=0u;

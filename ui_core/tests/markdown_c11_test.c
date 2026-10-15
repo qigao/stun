@@ -350,6 +350,74 @@ static int test_gfm_even_backslash_cell_ownership(void) {
     return 0;
 }
 
+
+/* #186: quoted GFM tables use the same canonical TABLE_ROW/CELL parser
+ * but are owned by the innermost explicitly marked QUOTE. A partial or
+ * unquoted delimiter cannot donate a TABLE or a detached metadata vector. */
+static int test_gfm_explicit_quote_table_ownership(void) {
+    const char sample[]=
+        "> > | Name | Count |\n"
+        "> > | :--- | ---: |\n"
+        "> > | a\\|b | 7 |\n"
+        "> >\n"
+        "> > After\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1u,128u,512u,
+                        &doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+    CHECK(kinds(view,STUN_UI_BLOCK_QUOTE)==2u);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE)==1u);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_ROW)==2u);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_CELL)==4u);
+    size_t table=SIZE_MAX,inner=SIZE_MAX,outer=SIZE_MAX;
+    for(size_t i=1u;i<view.document.block_count;++i) {
+        const stun_ui_block *node=&view.document.blocks[i];
+        if(node->kind==STUN_UI_BLOCK_QUOTE) {
+            if(outer==SIZE_MAX)outer=i;
+            else if(inner==SIZE_MAX)inner=i;
+        }
+        if(node->kind==STUN_UI_BLOCK_TABLE)table=i;
+    }
+    CHECK(outer!=SIZE_MAX && inner!=SIZE_MAX && table!=SIZE_MAX);
+    CHECK(view.document.blocks[outer].parent_index==0u);
+    CHECK(view.document.blocks[inner].parent_index==outer);
+    CHECK(view.document.blocks[table].parent_index==inner);
+    const char *metadata=NULL;size_t size=SIZE_MAX;
+    CHECK(stun_ui_rich_document_metadata(&view,table,&metadata,&size)==
+          STUN_UI_OK);
+    CHECK(metadata!=NULL && size==2u);
+    CHECK((uint8_t)metadata[0]==STUN_UI_TABLE_ALIGN_LEFT);
+    CHECK((uint8_t)metadata[1]==STUN_UI_TABLE_ALIGN_RIGHT);
+    CHECK(view.raw_markdown_bytes==sizeof(sample)-1u);
+    CHECK(memcmp(view.raw_markdown,sample,sizeof(sample)-1u)==0);
+    unsigned char out[1024];memset(out,0xA5,sizeof(out));
+    size_t required=SIZE_MAX;
+    CHECK(stun_md_render_html(&view,128u,(char*)out,sizeof(out),
+                              &required)==STUN_UI_OK);
+    CHECK(strstr((char*)out,"<blockquote>\n<blockquote>\n<table>\n")!=NULL);
+    CHECK(strstr((char*)out,"<td align=\"left\">a|b</td>")!=NULL);
+    memset(out,0xA5,sizeof(out));
+    CHECK(stun_md_render_html(&view,128u,(char*)out,1u,&required)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0xA5);
+    stun_md_document_destroy(doc);
+
+    /* A quoted header followed by a root delimiter must not accidentally
+     * establish a QUOTE TABLE; all source bytes remain parser-owned. */
+    const char rejected[]="> | A | B |\n| --- | --- |\n";
+    CHECK(stun_md_parse(rejected,sizeof(rejected)-1u,128u,512u,
+                        &doc)==STUN_UI_OK);
+    CHECK(kinds(stun_md_document_view(doc),STUN_UI_BLOCK_TABLE)==0u);
+    stun_md_document_destroy(doc);
+
+    doc=(stun_md_document*)(uintptr_t)0x1;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1u,6u,512u,
+                        &doc)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(doc==NULL);
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1098,6 +1166,7 @@ int main(void) {
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
+    if(test_gfm_explicit_quote_table_ownership()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");

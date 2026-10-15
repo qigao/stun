@@ -2557,6 +2557,71 @@ static size_t md_quote_prefix(const char *s,md_line line,size_t *body) {
     return depth;
 }
 
+/* Reuse the SAME bounded table scanner, cell normalization and typed owner
+ * for root tables and tables in explicitly marked quote containers. A quoted
+ * delimiter/row must carry the exact active quote depth; never borrow a
+ * lazy/unmarked line, a nested list, or a competing container as table data.
+ * This routine advances next_pos only after a complete header+delimiter
+ * admission and never persists a second parser or an unowned scratch view. */
+static bool md_table_admit(stun_md_document *d,uint32_t parent,
+                           md_line header,size_t header_begin,
+                           size_t *next_pos,size_t quote_depth) {
+    if(*next_pos>=d->raw_size)return false;
+    const char *s=d->raw;
+    const md_line delimiter=md_read_line(d,*next_pos);
+    size_t delimiter_body=delimiter.begin;
+    if(quote_depth &&
+       md_quote_prefix(s,delimiter,&delimiter_body)!=quote_depth)
+        return false;
+    const size_t sep_begin=md_left(s,delimiter_body,delimiter.end);
+    if(quote_depth && md_columns(s,delimiter_body,sep_begin)>3u)
+        return false;
+    size_t columns=0u,delimiter_columns=0u;
+    if(!md_table_scan(s,header_begin,header.end,false,true,
+                      &columns,NULL,0u) ||
+       !md_table_scan(s,sep_begin,delimiter.end,true,true,
+                      &delimiter_columns,NULL,0u) ||
+       columns!=delimiter_columns)
+        return false;
+    if(columns>d->node_limit) {
+        md_error(d,STUN_UI_CAPACITY_EXCEEDED);return true;
+    }
+    uint8_t *alignments=(uint8_t*)malloc(columns);
+    if(!alignments) {md_error(d,STUN_UI_OUT_OF_MEMORY);return true;}
+    size_t verified=0u;
+    if(!md_table_scan(s,sep_begin,delimiter.end,true,true,
+                      &verified,alignments,columns) ||
+       verified!=columns) {
+        free(alignments);
+        md_error(d,STUN_UI_INVALID_ARGUMENT);return true;
+    }
+    const uint32_t table=md_add(d,parent,STUN_UI_BLOCK_TABLE,0u);
+    if(table==UINT32_MAX) {free(alignments);return true;}
+    md_meta(d,table,(const char*)alignments,columns);
+    free(alignments);
+    if(d->error!=STUN_UI_OK ||
+       !md_table_row(d,table,s,header_begin,header.end,columns))
+        return true;
+    *next_pos=delimiter.next;
+    while(*next_pos<d->raw_size && d->error==STUN_UI_OK) {
+        const md_line row=md_read_line(d,*next_pos);
+        size_t row_body=row.begin;
+        if(quote_depth &&
+           md_quote_prefix(s,row,&row_body)!=quote_depth)break;
+        const size_t row_begin=md_left(s,row_body,row.end);
+        size_t row_columns=0u;
+        if(row_begin-row_body>3u || md_blank(s,row_body,row.end) ||
+           md_table_starts_new_block(s,row_begin,row.end) ||
+           !md_table_scan(s,row_begin,row.end,false,false,
+                          &row_columns,NULL,0u))
+            break;
+        if(!md_table_row(d,table,s,row_begin,row.end,columns))
+            return true;
+        *next_pos=row.next;
+    }
+    return true;
+}
+
 /* After a quote marker consumes its optional ONE visual whitespace
  * column, retain the remaining TAB columns as owned code indentation. */
 static bool md_quote_code_line(stun_md_document *d,uint32_t code,
@@ -2577,7 +2642,8 @@ static bool md_quote_code_line(stun_md_document *d,uint32_t code,
 /* One explicitly owned stack of quote containers. All admitted blocks keep
  * their true parent in the pre-order RichDoc, with one document lifetime. */
 static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
-                          md_line line,size_t level,size_t body) {
+                          md_line line,size_t level,size_t body,
+                          size_t *next_pos) {
     if(level>MD_QUOTE_MAX_DEPTH) {
         md_error(d,STUN_UI_CAPACITY_EXCEEDED);return false;
     }
@@ -2679,6 +2745,16 @@ static bool md_quote_line(stun_md_document *d,md_quote_stack *q,
             q->paragraph=UINT32_MAX;q->lazy=false;
             return md_inline(d,node,s+hbegin,hend-hbegin,0u);
         }
+    }
+    /* Tables belong to the innermost explicit quote owner. List-owned
+     * table admission is a separate slice and is deliberately not inferred
+     * from a lazy paragraph continuation or an unmatched quote delimiter. */
+    if(indent<=3u && q->paragraph==UINT32_MAX &&
+       q->lists.depth==0u &&
+       md_table_admit(d,parent,line,begin,next_pos,level)) {
+        q->paragraph=q->code=UINT32_MAX;
+        q->lazy=false;
+        return d->error==STUN_UI_OK;
     }
     /* An admitted quote list belongs to this quote node, not the document.
      * A numbered marker >1 never interrupts an existing paragraph. */
@@ -3609,7 +3685,8 @@ static void md_parse_blocks(stun_md_document *d) {
                 pending_code_blank=SIZE_MAX;
             }
             paragraph=UINT32_MAX;
-            if(!md_quote_line(d,&quotes,line,quote_depth,quote_body)) return;
+            if(!md_quote_line(d,&quotes,line,quote_depth,quote_body,
+                              &pos)) return;
             continue;
         }
         if(quotes.depth) {
@@ -3739,51 +3816,14 @@ static void md_parse_blocks(stun_md_document *d) {
                 continue;
             }
         }
-        /* Start a table only at a new block boundary. */
-        if (indent<=3 && paragraph==UINT32_MAX &&
-            lists.depth==0u && pos<d->raw_size) {
-            const md_line sep=md_read_line(d,pos);
-            size_t columns=0, delimiter_columns=0;
-            if (md_table_scan(s,begin,end,false,true,&columns,NULL,0u) &&
-                md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
-                              true,true,&delimiter_columns,NULL,0u) &&
-                columns==delimiter_columns) {
-                /* One document-owned alignment byte per parsed column;
-                 * reject node budgets before allocating the scratch vector. */
-                if(columns>d->node_limit) {
-                    md_error(d,STUN_UI_CAPACITY_EXCEEDED);return;
-                }
-                uint8_t *alignments=(uint8_t*)malloc(columns);
-                if(!alignments) {md_error(d,STUN_UI_OUT_OF_MEMORY);return;}
-                size_t verified=0u;
-                if(!md_table_scan(s,md_left(s,sep.begin,sep.end),sep.end,
-                                  true,true,&verified,alignments,columns) ||
-                   verified!=columns) {
-                    free(alignments);
-                    md_error(d,STUN_UI_INVALID_ARGUMENT);return;
-                }
-                const uint32_t table=md_add(d,0u,STUN_UI_BLOCK_TABLE,0u);
-                if(table==UINT32_MAX) {free(alignments);return;}
-                md_meta(d,table,(const char*)alignments,columns);
-                free(alignments);
-                if(d->error!=STUN_UI_OK)return;
-                if(!md_table_row(d,table,s,begin,end,columns)) return;
-                pos=sep.next;
-                while(pos<d->raw_size && d->error==STUN_UI_OK) {
-                    const md_line row=md_read_line(d,pos);
-                    const size_t row_begin=md_left(s,row.begin,row.end);
-                    size_t row_columns=0;
-                    if(row_begin-row.begin>3 || md_blank(s,row.begin,row.end) ||
-                       md_table_starts_new_block(s,row_begin,row.end) ||
-                       !md_table_scan(s,row_begin,row.end,false,false,&row_columns,NULL,0u))
-                        break;
-                    if(!md_table_row(d,table,s,row_begin,row.end,columns))
-                        return;
-                    pos=row.next;
-                }
-                paragraph=UINT32_MAX;
-                continue;
-            }
+        /* The same bounded root/quote TABLE grammar; root admission
+         * retains the established paragraph, list and indentation gates. */
+        if(indent<=3u && paragraph==UINT32_MAX &&
+           lists.depth==0u &&
+           md_table_admit(d,0u,line,begin,&pos,0u)) {
+            if(d->error!=STUN_UI_OK)return;
+            paragraph=UINT32_MAX;
+            continue;
         }
         md_list_marker_info top_marker={0};
         if(indent<=3 && md_list_token(s,line,&top_marker) &&

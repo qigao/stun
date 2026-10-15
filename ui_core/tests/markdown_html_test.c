@@ -251,6 +251,26 @@ static const html_fixture cases[] = {
       "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> upper</li>\n"
       "<li><input type=\"checkbox\" disabled=\"\" /> lower</li>\n</ol>\n" },
     { "- [x]done\n", "<ul>\n<li>[x]done</li>\n</ul>\n" },
+
+    /* #186: exact-depth quote tables share root GFM alignment and escaped
+     * pipe semantics while preserving their genuine QUOTE owner. */
+    { "> | H | N |\n> | :--- | ---: |\n> | a\\|b | **bold** |\n",
+      "<blockquote>\n<table>\n<thead>\n<tr>\n"
+      "<th align=\"left\">H</th>\n<th align=\"right\">N</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td align=\"left\">a|b</td>\n"
+      "<td align=\"right\"><strong>bold</strong></td>\n"
+      "</tr>\n</tbody>\n</table>\n</blockquote>\n" },
+    { "> > | A | B |\n> > | --- | --- |\n> > | x |\n",
+      "<blockquote>\n<blockquote>\n<table>\n<thead>\n<tr>\n"
+      "<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>x</td>\n<td></td>\n"
+      "</tr>\n</tbody>\n</table>\n</blockquote>\n</blockquote>\n" },
+    { "> | Key | Value |\n> | --- | --- |\n> | a | b |\n>\n> After\n",
+      "<blockquote>\n<table>\n<thead>\n<tr>\n"
+      "<th>Key</th>\n<th>Value</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n"
+      "</tr>\n</tbody>\n</table>\n<p>After</p>\n</blockquote>\n" },
     /* CommonMark 0.31.2 #329–#331, #338–#340, #347; code-span
      * contents are literal UTF-8, with exact-run and edge-space rules. */
     { TICK TICK " foo " TICK " bar " TICK TICK "\n",
@@ -781,7 +801,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==372,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==375,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {

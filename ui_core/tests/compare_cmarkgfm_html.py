@@ -120,6 +120,16 @@ CASES: tuple[Case, ...] = (
          "- [x] **bold** " "\x60" "code" "\x60" " and [link](/go)\n", "gfm"),
     Case("gfm.task-invalid-markers",
          "- [x]done\n- [y] not task\n- \\[x] escaped\n", "gfm"),
+    # Quoted GFM TABLEs: exact explicit quote-depth matching only. The same
+    # cmark-gfm HTML byte oracle guards root and nested GFM table rendering.
+    Case("gfm.quote-table-align",
+         "> | H | N |\n> | :--- | ---: |\n"
+         "> | a\\|b | **bold** |\n", "gfm"),
+    Case("gfm.nested-quote-table",
+         "> > | A | B |\n> > | --- | --- |\n> > | x |\n", "gfm"),
+    Case("gfm.quote-table-then-paragraph",
+         "> | Key | Value |\n> | --- | --- |\n"
+         "> | a | b |\n>\n> After\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
