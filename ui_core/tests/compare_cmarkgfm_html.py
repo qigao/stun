@@ -297,6 +297,28 @@ CASES: tuple[Case, ...] = (
     Case("gfm.nested-quote-table-outer-heading",
          "> > | A | B |\n> > | --- | --- |\n"
          "> > | x | y |\n> # Outer\n", "gfm"),
+    # #186: a ListItem paragraph inside explicit QUOTE may receive
+    # unmarked lazy continuation text. Such a line may NEVER initiate a
+    # new TABLE, and a block/blank/competing marker ends its ownership.
+    # cmark-gfm remains a fully independent strict HTML byte oracle.
+    Case("gfm.quote-list-unmarked-lazy-paragraph",
+         "> - alpha\nbeta\n", "gfm"),
+    Case("gfm.quote-list-unmarked-lazy-then-table",
+         "> - alpha\nbeta\n"
+         ">   | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n", "gfm"),
+    Case("gfm.quote-list-unmarked-atx-closes",
+         "> - alpha\n# Root\n", "gfm"),
+    Case("gfm.quote-list-lazy-blank-barrier",
+         "> - alpha\n>\nbeta\n", "gfm"),
+    Case("gfm.quote-list-unmarked-root-list-break",
+         "> - alpha\n- root\n", "gfm"),
+    Case("gfm.double-quote-list-partial-lazy-marker",
+         "> > - alpha\n> beta\n", "gfm"),
+    Case("gfm.quote-list-unmarked-table-delimiter-rejected",
+         "> - | A | B |\n"
+         "  | --- | --- |\n"
+         ">   | x | y |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
