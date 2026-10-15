@@ -428,7 +428,6 @@ static int test_gfm_wide_table_capacity(void) {
     enum { COLUMNS=16, DATA_ROWS=5 };
     char source[4096];size_t used=0u;
     for(size_t row=0u;row<DATA_ROWS+2u;++row) {
-        if(row==DATA_ROWS+1u)break;
         for(size_t col=0u;col<COLUMNS;++col) {
             const char *part=row==0u?"| head":
                              row==1u?"| ---":"| item";
