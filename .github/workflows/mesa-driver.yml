@@ -1233,7 +1233,11 @@ jobs:
           commands = json.loads((production / 'compile_commands.json').read_text())
           for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
                          'flexUI/src/textedit.cpp', 'flex/modules/render/stb_sprintf.cpp',
-                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp'):
+                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp',
+                         'flexUI/src/widgets/markdown_widget.cpp',
+                         'tools/md/src/md_parser_driver.cpp',
+                         'tools/md/src/md_inline_parser.cpp',
+                         'tools/md/src/md_block_processor.cpp'):
               matches = [entry for entry in commands if entry['file'].endswith(suffix)]
               assert len(matches) == 1, suffix
               assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
