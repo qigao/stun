@@ -374,6 +374,20 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quote-table-four-space-delimiter-rejected",
          "> | A | B |\n>     | --- | --- |\n"
          "> | x | y |\n", "gfm"),
+    # #186/#227 overlap reconciliation: retain these three *independent*
+    # isolated cmark-gfm regression inputs from Draft #227 on the more
+    # complete parent #226 without cherry-picking its duplicate C11
+    # TABLE admission or altering either PR's branch history.
+    Case("gfm.list-table-separated",
+         "- intro\n\n  | H | V |\n  | :--- | ---: |\n"
+         "  | a\\|b | **yes** |\n", "gfm"),
+    Case("gfm.quote-list-table",
+         "> - intro\n>\n>   | H | V |\n>   | --- | --- |\n"
+         ">   | x |\n", "gfm"),
+    Case("gfm.child227-nested-list-table-separated",
+         "- outer\n  - inner\n\n"
+         "    | H | V |\n    | --- | --- |\n"
+         "    | x | y |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
