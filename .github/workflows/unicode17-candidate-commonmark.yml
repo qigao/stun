@@ -52,6 +52,53 @@ jobs:
           printf 'Stun exact=%s\nSalts post-merge QA exact=43ae2cc4577b6a2e6fa7ab8f5ed9a1c950902b86\n' \
             "$(git rev-parse HEAD)"
 
+      - name: Fetch exact post-merge Salts tag-equivalent QA NuGet
+        uses: actions/download-artifact@v4
+        with:
+          repository: qigao/salts
+          run-id: 38775178582
+          name: salts-native-nuget
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/salts-unicode17-package
+
+      - name: Require six-RID actual archive ABI and reject QA-as-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="$RUNNER_TEMP/salts-unicode17-package/Salts.Native.2.3.0.nupkg"
+          test -f "$package"
+          command -v nm
+          if ! command -v llvm-objdump; then
+            sudo apt-get update
+            sudo apt-get install -y llvm
+          fi
+          python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+            --package "$package" \
+            --version 2.3.0 \
+            --source-sha 414f43362d95fa9c04a520a6be1c28a5e6a8a1fd \
+            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
+            --report build/salts-unicode17-qa-archive-proof.json
+          # The unsigned/unpublished QA candidate MUST NEVER pass a real
+          # rc.17 release attestation, even when native ABI is correct.
+          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+            --package "$package" --version 2.3.0-rc.17 \
+            --source-sha 6d6fd387cb245be8d7b0d866f9babad026a26832 \
+            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
+            > build/reject-false-release.log 2>&1; then
+            echo "ERROR: QA package unexpectedly accepted as released rc.17" >&2
+            exit 1
+          fi
+          grep -Fq "NuGet version mismatch" build/reject-false-release.log
+          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+            --package "$package" --version 2.3.0 \
+            --source-sha 6d6fd387cb245be8d7b0d866f9babad026a26832 \
+            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
+            > build/reject-false-source.log 2>&1; then
+            echo "ERROR: QA package unexpectedly accepted as source from master" >&2
+            exit 1
+          fi
+          grep -Fq "NuGet RepositoryCommit differs" build/reject-false-source.log
+
       - name: Build strict installed-SDK C11 under ASan and UBSan
         shell: bash
         run: |
@@ -128,6 +175,7 @@ jobs:
         with:
           name: stun-unicode17-qa-commonmark
           path: |
+            build/salts-unicode17-qa-archive-proof.json
             build/unicode17-qa/spec-652.json
             build/unicode17-qa/safe-652.json
             build/unicode17-qa/gfm-independent.json
