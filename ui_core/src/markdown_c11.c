@@ -16,9 +16,10 @@
  * Restrict this slice to bounded ASCII labels, retaining raw escape spelling.
  * Full Unicode Default Case Folding remains tracked separately; never
  * substitute locale tables or decode a key as inline content. */
-enum { MD_REF_MAX=128u, MD_REF_KEY_MAX=128u, MD_REF_TITLE_LINES_MAX=64u };
+enum { MD_REF_MAX=128u, MD_REF_KEY_MAX=128u,
+       MD_REF_FOLD_MAX=512u, MD_REF_TITLE_LINES_MAX=64u };
 typedef struct md_reference_binding {
-    char key[MD_REF_KEY_MAX+1u];
+    char key[MD_REF_FOLD_MAX+1u];
     char *href;
     size_t href_bytes;
     char *title;
@@ -432,10 +433,8 @@ static bool md_code_line_visual(stun_md_document *d,uint32_t parent,
 static size_t md_code_span_close(const char *s,size_t n,size_t begin,
                                  size_t marker_size);
 
-/* ASCII CommonMark left/right flanking: punctuation adjacent to an opener
- * or closer matters, and underscores inside a word cannot open or close.
- * Unicode whitespace/punctuation classification remains a separate #182
- * provider-backed task; do not invent a second Unicode character table. */
+/* CommonMark left/right flanking uses Unicode P-or-S properties for adjacent
+ * scalars. Salts Unicode 17 owns the property data; Stun has no local table. */
 /* Inline flanking has to classify the *adjacent scalar*, not its last
  * UTF-8 byte. The only non-ASCII property requested here is Unicode 17
  * White_Space from the released Salts::Unicode provider: there is no copied
@@ -473,12 +472,43 @@ static bool md_inline_whitespace_before(const char *s,size_t at) {
            (scalar.properties&SALTS_UNICODE_PROPERTY_WHITE_SPACE)!=0u;
 }
 
+/* Query only the immediately adjacent scalar. The UTF-8 scanner validates
+ * the borrowed slice; malformed sequences never acquire punctuation status.
+ * ASCII retains its existing punctuation semantics. */
+static bool md_inline_punct_after(const char *s,size_t n,size_t at) {
+    if(at>=n)return false;
+    if((unsigned char)s[at]<0x80u)return md_ascii_punct(s[at]);
+    salts_unicode_scalar scalar={0};
+    size_t cursor=0u;
+    if(salts_unicode_utf8_next(vstr_from_buf(s+at,n-at),&cursor,
+                               &scalar)!=SALTS_UNICODE_OK)return false;
+    int result=0;
+    return salts_unicode_is_punctuation_or_symbol(scalar.value,&result)==
+           SALTS_UNICODE_OK && result!=0;
+}
+static bool md_inline_punct_before(const char *s,size_t at) {
+    if(!at)return false;
+    const size_t last=at-1u;
+    if((unsigned char)s[last]<0x80u)return md_ascii_punct(s[last]);
+    size_t first=last;
+    while(first>0u && at-first<4u &&
+          ((unsigned char)s[first]&0xc0u)==0x80u)--first;
+    salts_unicode_scalar scalar={0};
+    size_t cursor=0u;
+    if(salts_unicode_utf8_next(vstr_from_buf(s+first,at-first),
+                               &cursor,&scalar)!=SALTS_UNICODE_OK ||
+       cursor!=at-first)return false;
+    int result=0;
+    return salts_unicode_is_punctuation_or_symbol(scalar.value,&result)==
+           SALTS_UNICODE_OK && result!=0;
+}
+
 static void md_emph_flanking(const char *s,size_t n,size_t at,size_t run,
                              char marker,bool *can_open,bool *can_close) {
     const bool left_space=md_inline_whitespace_before(s,at);
     const bool right_space=md_inline_whitespace_after(s,n,at+run);
-    const bool left_punct=at>0u && md_ascii_punct(s[at-1u]);
-    const bool right_punct=at+run<n && md_ascii_punct(s[at+run]);
+    const bool left_punct=md_inline_punct_before(s,at);
+    const bool right_punct=md_inline_punct_after(s,n,at+run);
     const bool left_flanking=!right_space &&
         (!right_punct || left_space || left_punct);
     const bool right_flanking=!left_space &&
@@ -961,42 +991,58 @@ static size_t md_reference_label_close(const char *s,size_t n,size_t begin) {
     return SIZE_MAX;
 }
 
-/* Label normalization operates on the bounded, literal ASCII subset:
- * trim/collapse horizontal whitespace and ASCII case-fold. Never claim
- * Unicode case folding by silently borrowing locale-dependent C routines.
- * Only recognized reference keys are allowed to create LINK nodes. */
+/* Preserve source label bytes, collapse ASCII horizontal whitespace, then
+ * apply the single provider-owned Unicode 17 Default Full Case Folding.
+ * A raw label stays <=128 bytes; its folded expansion has a separate bounded
+ * 512-byte owner slot. Never use locale transforms or a private Unicode table.
+ * Both measure and write are fully validated and failure-atomic. */
 static bool md_reference_key(const char *s,size_t b,size_t e,
-                             char key[MD_REF_KEY_MAX+1u]) {
+                             char key[MD_REF_FOLD_MAX+1u]) {
     if(b>=e || e-b>MD_REF_KEY_MAX)return false;
-    size_t used=0u;bool gap=false;
+    char canonical[MD_REF_KEY_MAX+1u];
+    size_t used=0u;
+    bool gap=false;
     for(size_t i=b;i<e;++i) {
-        const unsigned char c=(unsigned char)s[i];
-        if(c==' ' || c=='\t') {if(used)gap=true;continue;}
-        const bool alpha=(c>='A'&&c<='Z')||(c>='a'&&c<='z');
-        const bool digit=c>='0'&&c<='9';
-        if(!alpha && !digit && !md_ascii_punct((char)c))return false;
-        if(c=='[' || c==']')return false;
+        const unsigned char ch=(unsigned char)s[i];
+        if(ch==' ' || ch=='\t') {
+            if(used)gap=true;
+            continue;
+        }
+        /* UTF-8 bytes are admitted only after the full Salts folding scan.
+         * Keep the prior raw Markdown ASCII-escape spelling contract. */
+        if(ch<0x80u &&
+           !( (ch>='A'&&ch<='Z') || (ch>='a'&&ch<='z') ||
+              (ch>='0'&&ch<='9') || md_ascii_punct((char)ch)))
+            return false;
+        if(ch=='[' || ch==']')return false;
         if(gap) {
             if(used>=MD_REF_KEY_MAX)return false;
-            key[used++]=' ';
+            canonical[used++]=' ';
             gap=false;
         }
         if(used>=MD_REF_KEY_MAX)return false;
-        key[used++]=(char)((c>='A'&&c<='Z')?c+('a'-'A'):c);
-        if(c=='\\' && i+1u<e && md_ascii_punct(s[i+1u])) {
+        canonical[used++]=(char)ch;
+        if(ch=='\\' && i+1u<e && md_ascii_punct(s[i+1u])) {
             if(used>=MD_REF_KEY_MAX)return false;
-            key[used++]=s[++i]; /* raw escape spelling is part of the key */
+            canonical[used++]=s[++i];
         }
     }
     if(!used)return false;
-    key[used]='\0';
+    const vstr borrowed=vstr_from_buf(canonical,used);
+    size_t folded=SIZE_MAX;
+    if(salts_unicode_case_fold(borrowed,NULL,0u,&folded)!=SALTS_UNICODE_OK ||
+       !folded || folded>MD_REF_FOLD_MAX)return false;
+    size_t written=SIZE_MAX;
+    if(salts_unicode_case_fold(borrowed,key,MD_REF_FOLD_MAX,&written)!=
+       SALTS_UNICODE_OK || written!=folded)return false;
+    key[written]='\0';
     return true;
 }
 
 static const md_reference_binding *md_reference_lookup(
     const stun_md_document *d,const char *s,size_t begin,size_t end) {
     if(!d->reference_count)return NULL;
-    char key[MD_REF_KEY_MAX+1u];
+    char key[MD_REF_FOLD_MAX+1u];
     if(!md_reference_key(s,begin,end,key))return NULL;
     for(size_t i=0u;i<d->reference_count;++i)
         if(!strcmp(d->references[i].key,key))
@@ -3295,7 +3341,7 @@ static bool md_reference_collect_title(stun_md_document *d,md_line first,
     free(scratch);return false;
 }
 
-/* Admit a ROOT ASCII link-reference label across at most two physical LFs.
+/* Admit a ROOT bounded UTF-8 link-reference label across at most two physical LFs.
  * The block prepass alone consumes this bounded source interval; inline
  * references keep using md_reference_key on their literal single-line label.
  * Original bytes (including CRLF and indentation) must fit 128 raw bytes.
@@ -3305,7 +3351,7 @@ static bool md_reference_definition_label(stun_md_document *d,
                                          md_line first,size_t begin,
                                          md_line *target_line,
                                          size_t *after_colon,
-                                         char key[MD_REF_KEY_MAX+1u]) {
+                                         char key[MD_REF_FOLD_MAX+1u]) {
     const char *s=d->raw;
     const size_t close=md_reference_label_close(s,first.end,begin+1u);
     if(close!=SIZE_MAX) {
@@ -3344,7 +3390,7 @@ static bool md_reference_definition_label(stun_md_document *d,
             const unsigned char c=(unsigned char)s[at];
             if(c=='\\' && at+1u<until &&
                md_ascii_punct(s[at+1u])) {at+=2u;continue;}
-            if(c=='[' || c==']' || c>=0x80u ||
+            if(c=='[' || c==']' ||
                (c<0x20u && c!='\t'))return false;
             ++at;
         }
@@ -3371,7 +3417,7 @@ static bool md_reference_collect_line(stun_md_document *d,md_line line,
                                       bool container) {
     const char *s=d->raw;
     if(begin>=line.end || s[begin]!='[')return false;
-    char key[MD_REF_KEY_MAX+1u];
+    char key[MD_REF_FOLD_MAX+1u];
     md_line target_line=line;
     size_t after_colon=0u;
     if(container &&
