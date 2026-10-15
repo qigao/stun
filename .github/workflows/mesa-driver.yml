@@ -1219,7 +1219,7 @@ jobs:
           assert not any(list(tango_cases[0].iter(tag))
                          for tag in ('failure', 'error', 'skipped'))
           tango_log = (evidence / 'tango-candidate-ctest.log').read_text()
-          assert 'Tango C11 candidate consumer: 2/2 isolated cases passed' in tango_log
+          assert 'Tango C11 candidate consumer: 4/4 isolated cases passed' in tango_log
 
           installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
                              'Services': 'flexui_installed_services_consumer',
@@ -1293,7 +1293,7 @@ jobs:
                           assert value in command_text, (component, key, 'missing from actual link command')
           result = {'production_ctest_passed': len(tests),
                     'tango_c11_candidate_ctest_passed': 1,
-                    'tango_c11_candidate_cases_passed': 2,
+                    'tango_c11_candidate_cases_passed': 4,
                     'installed_ctest_passed': len(installed_tests),
                     'tinytest': totals, 'core_runtime_providers': providers,
                     'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
