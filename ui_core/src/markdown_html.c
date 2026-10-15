@@ -15,6 +15,9 @@ typedef struct stun_html_writer {
     size_t capacity;
     stun_ui_status error;
     stun_md_html_policy policy;
+    const uint8_t *table_alignment; /* borrowed TABLE metadata, scoped */
+    size_t table_columns;
+    size_t table_column;
 } stun_html_writer;
 
 static void html_bytes(stun_html_writer *w, const char *bytes, size_t len) {
@@ -294,10 +297,30 @@ static void html_children(stun_html_writer *w, size_t id,
 static void html_table(stun_html_writer *w, size_t id,
                        size_t *next, size_t depth) {
     const stun_ui_document_view *doc=&w->doc->document;
+    const char *metadata=NULL;size_t columns=0u;
+    if(!html_metadata(w,id,&metadata,&columns))return;
+    /* The canonical parser publishes exactly one byte per column. Never
+     * infer GFM alignment by reparsing text or trusting a child attribute. */
+    if(!columns || !metadata || columns>doc->block_count) {
+        w->error=STUN_UI_INVALID_ARGUMENT;return;
+    }
+    for(size_t i=0u;i<columns;++i)
+        if((unsigned char)metadata[i]>STUN_UI_TABLE_ALIGN_RIGHT) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+    const uint8_t *saved_alignment=w->table_alignment;
+    const size_t saved_columns=w->table_columns;
+    const size_t saved_column=w->table_column;
+    w->table_alignment=(const uint8_t*)metadata;
+    w->table_columns=columns;
+    w->table_column=0u;
     size_t at=id+1u;
     if (at>=doc->block_count || doc->blocks[at].parent_index!=id ||
         doc->blocks[at].kind!=STUN_UI_BLOCK_TABLE_ROW) {
         w->error=STUN_UI_INVALID_ARGUMENT;
+        w->table_alignment=saved_alignment;
+        w->table_columns=saved_columns;
+        w->table_column=saved_column;
         return;
     }
     html_str(w,"<table>\n<thead>\n");
@@ -319,6 +342,9 @@ static void html_table(stun_html_writer *w, size_t id,
     }
     if(has_body) html_str(w,"</tbody>\n");
     html_str(w,"</table>\n");
+    w->table_alignment=saved_alignment;
+    w->table_columns=saved_columns;
+    w->table_column=saved_column;
     *next=at;
 }
 
@@ -535,6 +561,35 @@ static void html_node(stun_html_writer *w, size_t id,
         }
         html_str(w,">\n");break;
     }
+    case STUN_UI_BLOCK_TASK_ITEM:
+        /* A checked-state leaf must be the first direct TASK_ITEM child. */
+        if(id+1u>=doc->block_count ||
+           doc->blocks[id+1u].parent_index!=id ||
+           doc->blocks[id+1u].kind!=STUN_UI_BLOCK_CHECKBOX) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"<li>");break;
+    case STUN_UI_BLOCK_CHECKBOX: {
+        const uint32_t parent=node->parent_index;
+        if(parent>=id || id!=parent+1u ||
+           doc->blocks[parent].kind!=STUN_UI_BLOCK_TASK_ITEM ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id) ||
+           !html_metadata(w,id,&meta,&meta_length)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        if(meta_length!=1u || !meta || (meta[0]!='x' && meta[0]!=' ')) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"<input type=\"checkbox\"");
+        if(meta[0]=='x')html_str(w," checked=\"\"");
+        html_str(w," disabled=\"\" />");
+        const bool sibling=id+1u<doc->block_count &&
+                           doc->blocks[id+1u].parent_index==parent;
+        if(sibling && html_loose_item(w,parent))html_str(w,"\n");
+        else html_str(w," ");
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_LIST_ITEM: {
         html_str(w,"<li>");
         /* A loose list does not give an empty item a phantom newline.
@@ -556,10 +611,27 @@ static void html_node(stun_html_writer *w, size_t id,
         break;
     }
     case STUN_UI_BLOCK_QUOTE: html_str(w,"<blockquote>\n"); break;
-    case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"<tr>\n"); break;
-    case STUN_UI_BLOCK_TABLE_CELL:
-        html_str(w,table_header?"<th>":"<td>");
-        break;
+    case STUN_UI_BLOCK_TABLE_ROW:
+        if(!w->table_alignment) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        w->table_column=0u;
+        html_str(w,"<tr>\n");break;
+    case STUN_UI_BLOCK_TABLE_CELL: {
+        if(!w->table_alignment || w->table_column>=w->table_columns) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const uint8_t align=w->table_alignment[w->table_column++];
+        html_str(w,table_header?"<th":"<td");
+        switch(align) {
+        case STUN_UI_TABLE_ALIGN_NONE: break;
+        case STUN_UI_TABLE_ALIGN_LEFT: html_str(w," align=\"left\"");break;
+        case STUN_UI_TABLE_ALIGN_CENTER: html_str(w," align=\"center\"");break;
+        case STUN_UI_TABLE_ALIGN_RIGHT: html_str(w," align=\"right\"");break;
+        default: w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,">");break;
+    }
     case STUN_UI_BLOCK_RULE:
         html_str(w,"<hr />\n");
         *next=id+1u; return;
@@ -618,9 +690,14 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_CODE_INDENTED: html_str(w,"</code></pre>\n"); break;
     case STUN_UI_BLOCK_LIST: html_str(w,"</ul>\n"); break;
     case STUN_UI_BLOCK_ORDERED_LIST: html_str(w,"</ol>\n"); break;
-    case STUN_UI_BLOCK_LIST_ITEM: html_str(w,"</li>\n"); break;
+    case STUN_UI_BLOCK_LIST_ITEM:
+    case STUN_UI_BLOCK_TASK_ITEM: html_str(w,"</li>\n");break;
     case STUN_UI_BLOCK_QUOTE: html_str(w,"</blockquote>\n"); break;
-    case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"</tr>\n"); break;
+    case STUN_UI_BLOCK_TABLE_ROW:
+        if(w->table_column!=w->table_columns) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"</tr>\n");break;
     case STUN_UI_BLOCK_TABLE_CELL:
         html_str(w,table_header?"</th>\n":"</td>\n");
         break;
@@ -641,7 +718,7 @@ stun_ui_status stun_md_render_html_with_policy(
     if(valid!=STUN_UI_OK) return valid;
 
     /* Dry-run first: validation and exact byte count before any write. */
-    stun_html_writer measuring={view,NULL,0u,0u,STUN_UI_OK,policy};
+    stun_html_writer measuring={view,NULL,0u,0u,STUN_UI_OK,policy,NULL,0u,0u};
     size_t next=0u;
     html_node(&measuring,0u,&next,0u,false);
     if(measuring.error!=STUN_UI_OK) return measuring.error;
@@ -653,7 +730,8 @@ stun_ui_status stun_md_render_html_with_policy(
     if(measuring.length==SIZE_MAX || capacity<=measuring.length)
         return STUN_UI_CAPACITY_EXCEEDED;
 
-    stun_html_writer writing={view,buffer,0u,capacity-1u,STUN_UI_OK,policy};
+    stun_html_writer writing={view,buffer,0u,capacity-1u,STUN_UI_OK,policy,
+                              NULL,0u,0u};
     html_node(&writing,0u,&next,0u,false);
     if(writing.error!=STUN_UI_OK || writing.length!=measuring.length ||
        next!=view->document.block_count)
