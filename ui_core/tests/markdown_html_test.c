@@ -1322,6 +1322,155 @@ static int test_gfm_forged_container_chain_fails_closed(void) {
     return 0;
 }
 
+/* #186: a borrowed RichDoc can be forged without touching the canonical
+ * parser's owned arena. Exercise malformed metadata AND valid generic
+ * preorder with invalid typed TASK/TABLE ownership across root, QUOTE and
+ * ordered QUOTE. Every failure must leave BOTH output and required untouched.
+ * Re-rendering the original after 16 corruptions proves caller isolation. */
+static int test_gfm_mixed_metadata_adversaries(void) {
+    static const char *const sources[] = {
+        "- [x] parent\n\n"
+        "  | A | B |\n  | :--- | ---: |\n  | left | right |\n",
+        "> - [x] parent\n>\n"
+        ">   | A | B |\n>   | :--- | ---: |\n>   | left | right |\n",
+        "> 4. [ ] parent\n>\n"
+        ">    | A | B |\n>    | :--- | ---: |\n"
+        ">    | left | right |\n"
+    };
+    enum { MODES=16, MAX_BLOCKS=256, MAX_METADATA=256, MAX_HTML=4096 };
+    _Static_assert(sizeof(sources)/sizeof(sources[0])==3u,
+                   "GFM mixed metadata source denominator");
+    for(size_t k=0u;k<3u;++k) {
+        const size_t n=strlen(sources[k]);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(sources[k],n,MAX_BLOCKS,n+1u,&doc)==STUN_UI_OK);
+        const stun_ui_rich_document_view original=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&original,MAX_BLOCKS)==STUN_UI_OK);
+        const size_t count=original.document.block_count;
+        CHECK(count>5u && count<MAX_BLOCKS);
+        CHECK(original.metadata_bytes>2u &&
+              original.metadata_bytes<MAX_METADATA);
+        CHECK(original.raw_markdown_bytes==n &&
+              memcmp(original.raw_markdown,sources[k],n)==0);
+        size_t item=SIZE_MAX,check=SIZE_MAX,table=SIZE_MAX;
+        size_t row=SIZE_MAX,cell=SIZE_MAX,paragraph=SIZE_MAX;
+        for(size_t i=1u;i<count;++i) {
+            const stun_ui_block_kind kind=original.document.blocks[i].kind;
+            if(kind==STUN_UI_BLOCK_TASK_ITEM)item=i;
+            if(kind==STUN_UI_BLOCK_CHECKBOX)check=i;
+            if(kind==STUN_UI_BLOCK_TABLE)table=i;
+            if(kind==STUN_UI_BLOCK_TABLE_ROW && row==SIZE_MAX)row=i;
+            if(kind==STUN_UI_BLOCK_TABLE_CELL && cell==SIZE_MAX)cell=i;
+            if(kind==STUN_UI_BLOCK_PARAGRAPH && paragraph==SIZE_MAX)
+                paragraph=i;
+        }
+        CHECK(item!=SIZE_MAX && check!=SIZE_MAX && table!=SIZE_MAX);
+        CHECK(row!=SIZE_MAX && cell!=SIZE_MAX && paragraph!=SIZE_MAX);
+        CHECK(check==item+1u && paragraph<table);
+        const stun_ui_block_metadata tm=original.block_metadata[table];
+        const stun_ui_block_metadata cm=original.block_metadata[check];
+        CHECK(tm.byte_end-tm.byte_begin==2u);
+        CHECK(cm.byte_end-cm.byte_begin==1u);
+        CHECK(tm.byte_end<=original.metadata_bytes &&
+              cm.byte_end<=original.metadata_bytes);
+        size_t expected=SIZE_MAX;
+        CHECK(stun_md_render_html(&original,MAX_BLOCKS,NULL,0u,
+                                  &expected)==STUN_UI_OK);
+        CHECK(expected>0u && expected<MAX_HTML);
+        unsigned char baseline[MAX_HTML], after[MAX_HTML];
+        memset(baseline,0xb1,sizeof(baseline));
+        size_t rendered=SIZE_MAX;
+        CHECK(stun_md_render_html(&original,MAX_BLOCKS,(char*)baseline,
+                                  sizeof(baseline),&rendered)==STUN_UI_OK);
+        CHECK(rendered==expected);
+
+        for(size_t mode=0u;mode<MODES;++mode) {
+            stun_ui_block nodes[MAX_BLOCKS];
+            stun_ui_block_metadata spans[MAX_BLOCKS];
+            char metadata[MAX_METADATA];
+            memcpy(nodes,original.document.blocks,count*sizeof(*nodes));
+            memcpy(spans,original.block_metadata,count*sizeof(*spans));
+            memcpy(metadata,original.metadata,original.metadata_bytes);
+            stun_ui_rich_document_view forged=original;
+            forged.document.blocks=nodes;
+            forged.block_metadata=spans;
+            forged.metadata=metadata;
+            switch(mode) {
+            case 0u:
+                metadata[tm.byte_begin]=(char)0xff;break;
+            case 1u:
+                spans[table].byte_end=spans[table].byte_begin;break;
+            case 2u:
+                spans[table].byte_end=spans[table].byte_begin+1u;break;
+            case 3u:
+                metadata[cm.byte_begin]='?';break;
+            case 4u:
+                spans[check].byte_end=spans[check].byte_begin;break;
+            case 5u:
+                spans[check]=spans[table];break;
+            case 6u:
+                nodes[check].parent_index=nodes[item].parent_index;break;
+            case 7u:
+                nodes[item].parent_index=0u;break;
+            case 8u:
+                nodes[table].parent_index=(uint32_t)paragraph;break;
+            case 9u:
+                nodes[cell].parent_index=(uint32_t)table;break;
+            case 10u:
+                spans[table].byte_end=SIZE_MAX;break;
+            case 11u:
+                forged.block_metadata_count=count-1u;break;
+            case 12u:
+                forged.metadata=NULL;break;
+            case 13u:
+                forged.raw_markdown=NULL;break;
+            case 14u:
+                nodes[table].parent_index=nodes[item].parent_index;break;
+            case 15u:
+                nodes[check].kind=STUN_UI_BLOCK_TEXT;break;
+            default: return 1;
+            }
+            unsigned char guarded[MAX_HTML];
+            memset(guarded,0xa6,sizeof(guarded));
+            size_t need=SIZE_MAX;
+            const stun_ui_status status=stun_md_render_html(
+                &forged,MAX_BLOCKS,(char*)guarded,sizeof(guarded),&need);
+            if(status!=STUN_UI_INVALID_ARGUMENT) {
+                fprintf(stderr,"mixed GFM adversary source=%zu mode=%zu status=%d\n",
+                        k,mode,(int)status);
+                stun_md_document_destroy(doc);
+                return 1;
+            }
+            CHECK(need==SIZE_MAX);
+            for(size_t j=0u;j<sizeof(guarded);++j)
+                CHECK(guarded[j]==0xa6);
+            need=SIZE_MAX;
+            CHECK(stun_md_render_html(&forged,MAX_BLOCKS,NULL,0u,
+                                      &need)==STUN_UI_INVALID_ARGUMENT);
+            CHECK(need==SIZE_MAX);
+            CHECK(original.raw_markdown_bytes==n &&
+                  memcmp(original.raw_markdown,sources[k],n)==0);
+        }
+        unsigned char guarded[MAX_HTML];
+        memset(guarded,0xa6,sizeof(guarded));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&original,count-1u,(char*)guarded,
+                                  sizeof(guarded),&required)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==SIZE_MAX);
+        for(size_t j=0u;j<sizeof(guarded);++j)CHECK(guarded[j]==0xa6);
+
+        memset(after,0xb1,sizeof(after));
+        size_t again=SIZE_MAX;
+        CHECK(stun_md_render_html(&original,MAX_BLOCKS,(char*)after,
+                                  sizeof(after),&again)==STUN_UI_OK);
+        CHECK(again==expected && !memcmp(after,baseline,expected+1u));
+        stun_md_document_destroy(doc);
+    }
+    puts("GFM mixed RichDoc adversaries: 48/48 invalid views refused atomically");
+    return 0;
+}
+
 static int test_unsafe_unsupported(void) {
     /* Balanced-parenthesis destinations are not implemented by the C11 parser
      * yet. Use a syntactically admitted link to test the actual HTML URL gate. */
@@ -1384,6 +1533,7 @@ int main(void) {
     if(test_gfm_forged_row_cardinality_fails_closed()) return 1;
     if(test_gfm_forged_container_chain_fails_closed()) return 1;
     if(test_gfm_nested_unsafe_url_atomicity()) return 1;
+    if(test_gfm_mixed_metadata_adversaries()) return 1;
     if(test_unsafe_unsupported()) return 1;
     printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
