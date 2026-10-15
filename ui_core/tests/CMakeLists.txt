@@ -149,3 +149,12 @@ if(TARGET tango)
     add_test(NAME stun_markdown_tango_candidate_test
              COMMAND stun_markdown_tango_candidate_test)
 endif()
+
+# Joint Salts #1209 Unicode 17 candidate ABI only; no released-SDK fallback.
+# This experimental branch is deliberately isolated from the 223/226 gates.
+add_executable(stun_markdown_unicode17_candidate_test
+               markdown_unicode17_candidate_test.c)
+target_compile_features(stun_markdown_unicode17_candidate_test PRIVATE c_std_11)
+target_link_libraries(stun_markdown_unicode17_candidate_test PRIVATE Stun::UICore)
+add_test(NAME stun_markdown_unicode17_candidate_test
+         COMMAND stun_markdown_unicode17_candidate_test)
