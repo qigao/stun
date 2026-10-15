@@ -303,6 +303,55 @@ static int test_gfm_table_alignment_ownership(void) {
 
 /* #186: GFM table escape shields the pipe even when preceded by
  * another backslash; normalize into the same owned semantic cell. */
+/* #186: table delimiter ownership is measured in visual columns.
+ * ROOT or direct QUOTE may admit 0..3 columns, but four physical spaces
+ * or a full-width leading TAB cannot be a TABLE delimiter. The same
+ * delimiter indented to the actual LIST_ITEM content column IS legal.
+ * No alternate scanner, source mutation or partial output on rejection. */
+static int test_gfm_delimiter_column_ownership(void) {
+    static const struct {
+        const char *source;
+        size_t tables;
+    } samples[] = {
+        {"| A | B |\n    | --- | --- |\n| x | y |\n",0u},
+        {"| A | B |\n\t| --- | --- |\n| x | y |\n",0u},
+        {"- | A | B |\n    | --- | --- |\n"
+         "    | x | y |\n",1u},
+        {"> | A | B |\n>     | --- | --- |\n"
+         "> | x | y |\n",0u}
+    };
+    _Static_assert(sizeof(samples)/sizeof(samples[0])==4u,
+                   "GFM 0..3 delimiter-column fixture denominator");
+    for(size_t k=0u;k<4u;++k) {
+        const size_t bytes=strlen(samples[k].source);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(samples[k].source,bytes,256u,bytes+1u,
+                            &owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view view=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&view,256u)==STUN_UI_OK);
+        CHECK(kinds(view,STUN_UI_BLOCK_TABLE)==samples[k].tables);
+        CHECK(view.raw_markdown_bytes==bytes);
+        CHECK(memcmp(view.raw_markdown,samples[k].source,bytes)==0);
+        size_t needed=SIZE_MAX;
+        CHECK(stun_md_render_html(&view,256u,NULL,0u,&needed)==STUN_UI_OK);
+        CHECK(needed>0u && needed<2048u);
+        unsigned char output[2048];
+        memset(output,0x8f,sizeof(output));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&view,256u,(char*)output,needed,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==needed);
+        for(size_t i=0u;i<sizeof(output);++i)CHECK(output[i]==0x8f);
+        CHECK(stun_md_render_html(&view,256u,(char*)output,
+                                  sizeof(output),&required)==STUN_UI_OK);
+        if(samples[k].tables)
+            CHECK(strstr((char*)output,"<table>\n<thead>")!=NULL);
+        else CHECK(strstr((char*)output,"<table>")==NULL);
+        stun_md_document_destroy(owned);
+    }
+    return 0;
+}
+
 static int test_gfm_even_backslash_cell_ownership(void) {
     const char markdown[]=
         "| Name | Value |\n"
@@ -1709,6 +1758,7 @@ int main(void) {
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
+    if(test_gfm_delimiter_column_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
     if(test_gfm_list_table_ownership()) return 1;
