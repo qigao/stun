@@ -101,6 +101,25 @@ CASES: tuple[Case, ...] = (
          "- [ ] foo\n- [x] bar\n", "gfm"),
     Case("gfm.official-280",
          "- [x] foo\n  - [ ] bar\n  - [x] baz\n- [ ] bim\n", "gfm"),
+    # #186 second GFM admission/security slice: parity of backslash runs,
+    # nested vs loose task ownership, invalid markers, and inline content.
+    # These are extension-specific cmark-gfm byte gates, not CommonMark
+    # official 652 identities or published official GFM numbered examples.
+    Case("gfm.table-odd-backslash-run",
+         "| Name | Value |\n| --- | --- |\n"
+         + r"| a\\\|b | tail |" + "\n", "gfm"),
+    Case("gfm.table-even-backslash-run",
+         "| Name | Value |\n| --- | --- |\n"
+         + r"| a\\|b | tail |" + "\n", "gfm"),
+    Case("gfm.task-empty-marker", "- [ ]\n- [x]\n", "gfm"),
+    Case("gfm.task-loose-list",
+         "- [x] shipped\n\n- [ ] pending\n", "gfm"),
+    Case("gfm.task-nested-ordered",
+         "- [x] parent\n  1. [ ] nested\n  2. [X] done\n- [ ] tail\n", "gfm"),
+    Case("gfm.task-inline-rich-text",
+         "- [x] **bold** " "\x60" "code" "\x60" " and [link](/go)\n", "gfm"),
+    Case("gfm.task-invalid-markers",
+         "- [x]done\n- [y] not task\n- \\[x] escaped\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
