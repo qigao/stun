@@ -1081,7 +1081,7 @@ jobs:
           ports="$EXTERNAL_PORTS_ROOT/flexui"
           tests=(
             test_text_util_unicode test_render_semantics test_widget_contracts
-            test_markdown_widget stun_markdown_tango_candidate_test
+            test_markdown_widget
             test_textedit_flexui test_plugin_abi test_service_registry
             test_plugin_host test_plugin_manifest test_desktop_application
             test_gcanvas_input test_gcanvas_application_input
@@ -1118,6 +1118,15 @@ jobs:
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$EVIDENCE_DIR/production-results.xml" \
             2>&1 | tee "$EVIDENCE_DIR/production-ctest.log"
+          # #186: Tango C11 candidate is a regular CTest, not a TinyTest
+          # binary. Its mandatory denominator is kept separate.
+          cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
+          ctest --test-dir "$production_build" -R '^stun_markdown_tango_candidate_test$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tango-candidate-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-ctest.log"
           cmake --install "$production_build" --component FlexUIPlugin \
             2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
           cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
@@ -1203,6 +1212,15 @@ jobs:
           assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
           totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
 
+          tango_cases = list(ET.parse(
+              evidence / 'tango-candidate-results.xml').getroot().iter('testcase'))
+          assert len(tango_cases) == 1
+          assert tango_cases[0].attrib['name'] == 'stun_markdown_tango_candidate_test'
+          assert not any(list(tango_cases[0].iter(tag))
+                         for tag in ('failure', 'error', 'skipped'))
+          tango_log = (evidence / 'tango-candidate-ctest.log').read_text()
+          assert 'Tango C11 candidate consumer: 2/2 isolated cases passed' in tango_log
+
           installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
                              'Services': 'flexui_installed_services_consumer',
                              'host': 'flexui_plugin_install_consumer'}
@@ -1219,6 +1237,13 @@ jobs:
               matches = [entry for entry in commands if entry['file'].endswith(suffix)]
               assert len(matches) == 1, suffix
               assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
+
+          for suffix in ('ui_core/tests/markdown_tango_candidate_test.c',
+                         'ui_core/src/markdown_c11.c', 'tango/src/tui_widgets.c'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in
+                         ('-fsanitize=address', '-fsanitize=undefined')), suffix
 
           binaries = {name: production / 'bin' / name for name in tests}
           binaries['installed_sdk'] = workspace / 'build/flexui-installed-PluginSDK/flexui_installed_sdk_consumer'
@@ -1266,7 +1291,10 @@ jobs:
                       assert path.is_relative_to(prefix), (component, key, path)
                       if key not in ('FlexUIConfig', 'Includes'):
                           assert value in command_text, (component, key, 'missing from actual link command')
-          result = {'production_ctest_passed': len(tests), 'installed_ctest_passed': len(installed_tests),
+          result = {'production_ctest_passed': len(tests),
+                    'tango_c11_candidate_ctest_passed': 1,
+                    'tango_c11_candidate_cases_passed': 2,
+                    'installed_ctest_passed': len(installed_tests),
                     'tinytest': totals, 'core_runtime_providers': providers,
                     'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
           (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
