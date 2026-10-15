@@ -252,6 +252,21 @@ static const html_fixture cases[] = {
       "<li><input type=\"checkbox\" disabled=\"\" /> lower</li>\n</ol>\n" },
     { "- [x]done\n", "<ul>\n<li>[x]done</li>\n</ul>\n" },
 
+    /* GFM tables terminate before raw HTML blocks. The SAFE writer must
+     * still escape raw markup; SPEC is a separately opt-in test policy. */
+    { "| H | V |\n| --- | --- |\n| a | b |\n<div>\nraw\n</div>\n",
+      "<table>\n<thead>\n<tr>\n<th>H</th>\n<th>V</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td>a</td>\n<td>b</td>\n"
+      "</tr>\n</tbody>\n</table>\n"
+      "&lt;div&gt;\nraw\n&lt;/div&gt;\n" },
+    { "> | H | V |\n> | --- | --- |\n> | a | b |\n"
+      "> <div>\n> raw\n> </div>\n",
+      "<blockquote>\n<table>\n<thead>\n<tr>\n"
+      "<th>H</th>\n<th>V</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n"
+      "</tr>\n</tbody>\n</table>\n"
+      "&lt;div&gt;\nraw\n&lt;/div&gt;\n</blockquote>\n" },
     /* #186: exact-depth quote tables share root GFM alignment and escaped
      * pipe semantics while preserving their genuine QUOTE owner. */
     { "> | H | N |\n> | :--- | ---: |\n> | a\\|b | **bold** |\n",
@@ -801,7 +816,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==375,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==377,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
