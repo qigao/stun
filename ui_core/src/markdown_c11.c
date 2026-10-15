@@ -1789,7 +1789,9 @@ static bool md_task_marker(const char *s, size_t start, size_t end,
     const char mark=s[start+1];
     if(mark!=' ' && mark!='\t' && mark!='x' && mark!='X') return false;
     const size_t after=start+3u;
-    if(after<end && !md_space(s[after])) return false;
+    /* A bare '[x]' or '[ ]' without whitespace AFTER the closing ] is
+     * ordinary list text, not a GFM task marker. */
+    if(after==end || !md_space(s[after])) return false;
     *state=(mark=='x'||mark=='X') ? 'x' : ' ';
     *content=md_left(s,after,end);
     return true;
@@ -2366,9 +2368,11 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
  * consumes its escaping backslash BEFORE inline semantics (GFM Example 200).
  * Header/delimiter counts must match; two-line admission stays bounded. */
 static bool md_table_unescaped(const char *s, size_t pos, size_t begin) {
-    size_t slashes = 0;
-    for (size_t p=pos; p>begin && s[p-1]=='\\'; --p) ++slashes;
-    return (slashes % 2u)==0u;
+    /* GFM table pipes use a raw preceding backslash as the shield even when
+     * another backslash precedes it. Do not apply CommonMark inline escape
+     * parity before TABLE boundary classification: that happens only after
+     * the bounded per-cell raw '\\|' prepass. */
+    return pos==begin || s[pos-1u]!='\\';
 }
 
 static bool md_table_delimiter_cell(const char *s, size_t begin, size_t end,
