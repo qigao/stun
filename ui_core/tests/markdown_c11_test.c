@@ -418,6 +418,74 @@ static int test_gfm_explicit_quote_table_ownership(void) {
     return 0;
 }
 
+
+/* #186: separated list-owned TABLE has one canonical list-item owner even
+ * under a real QUOTE. Row and alignment metadata never become root state.
+ * Out-of-capacity rendering does not write a partial HTML buffer. */
+static int test_gfm_list_owned_tables(void) {
+    typedef struct {const char *markdown;size_t quotes,items;} case_t;
+    static const case_t cases[]={
+        {"- intro\n\n  | H | V |\n  | :--- | ---: |\n"
+         "  | a\\|b | **yes** |\n",0u,1u},
+        {"> - intro\n>\n>   | H | V |\n>   | --- | --- |\n"
+         ">   | x |\n",1u,1u},
+        {"- outer\n  - inner\n\n"
+         "    | H | V |\n    | --- | --- |\n"
+         "    | x | y |\n",0u,2u}
+    };
+    for(size_t k=0u;k<sizeof(cases)/sizeof(cases[0]);++k) {
+        const size_t n=strlen(cases[k].markdown);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(cases[k].markdown,n,192u,n+16u,
+                            &owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,192u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==cases[k].quotes);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST_ITEM)==cases[k].items);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
+        size_t table=SIZE_MAX;
+        for(size_t i=0u;i<v.document.block_count;++i)
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+        CHECK(table!=SIZE_MAX);
+        const uint32_t owner=v.document.blocks[table].parent_index;
+        CHECK(owner>0u && owner<table &&
+              v.document.blocks[owner].kind==STUN_UI_BLOCK_LIST_ITEM);
+        CHECK(v.raw_markdown_bytes==n &&
+              memcmp(v.raw_markdown,cases[k].markdown,n)==0);
+        const char *meta=NULL;size_t bytes=SIZE_MAX;
+        CHECK(stun_ui_rich_document_metadata(&v,table,&meta,&bytes)==
+              STUN_UI_OK);
+        CHECK(meta!=NULL && bytes==2u);
+        unsigned char out[1024];
+        memset(out,0xA5,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,192u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_OK);
+        CHECK(required>0u && required<sizeof(out));
+        CHECK(strstr((char*)out,"<table>\n<thead>\n")!=NULL);
+        memset(out,0xA5,sizeof(out));
+        CHECK(stun_md_render_html(&v,192u,(char*)out,1u,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0xA5);
+        stun_md_document_destroy(owned);
+    }
+    /* An unindented delimiter cannot belong to an existing list item. */
+    static const char not_owned[]=
+        "- intro\n\n  | H | V |\n| --- | --- |\n";
+    stun_md_document *owned=NULL;
+    CHECK(stun_md_parse(not_owned,sizeof(not_owned)-1u,128u,512u,
+                        &owned)==STUN_UI_OK);
+    CHECK(kinds(stun_md_document_view(owned),STUN_UI_BLOCK_TABLE)==0u);
+    stun_md_document_destroy(owned);
+    owned=(stun_md_document*)(uintptr_t)0x1;
+    CHECK(stun_md_parse(cases[0].markdown,strlen(cases[0].markdown),
+                        6u,512u,&owned)==STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(owned==NULL);
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1167,6 +1235,7 @@ int main(void) {
     if(test_gfm_table_alignment_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
+    if(test_gfm_list_owned_tables()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
