@@ -269,6 +269,18 @@ static const html_fixture cases[] = {
       "</tr>\n</thead>\n<tbody>\n<tr>\n"
       "<td>x</td>\n<td>y</td>\n</tr>\n</tbody>\n"
       "</table>\n</li>\n</ul>\n</blockquote>\n" },
+    /* GFM §5.3 still identifies the first paragraph's TASK marker in a
+     * loose QUOTE-owned list. cmark-gfm 2025.10.22 leaves this marker literal;
+     * the independent byte oracle reports the divergence separately. */
+    { "> - [x] parent\n>\n>   | A | B |\n"
+      ">   | --- | --- |\n>   | a | b |\n",
+      "<blockquote>\n<ul>\n"
+      "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> \n"
+      "<p>parent</p>\n<table>\n<thead>\n<tr>\n"
+      "<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n"
+      "</tr>\n</tbody>\n</table>\n</li>\n</ul>\n"
+      "</blockquote>\n" },
     /* GFM tables terminate before raw HTML blocks. The SAFE writer must
      * still escape raw markup; SPEC is a separately opt-in test policy. */
     { "| H | V |\n| --- | --- |\n| a | b |\n<div>\nraw\n</div>\n",
@@ -833,7 +845,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==379,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==380,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
@@ -956,7 +968,9 @@ static int test_gfm_forged_ancestry_fails_closed(void) {
         free(copy);
         stun_md_document_destroy(owned);
     }
-    /* A TABLE is root-owned by this bounded GFM parser. A caller may forge
+    /* A ROOT TABLE may be forged beneath an unrelated PARAGRAPH even when
+     * the generic RichDoc preorder remains valid; refuse such owners. */
+    /* A caller may forge
      * an otherwise-valid generic RichDoc preorder by making it a direct
      * PARAGRAPH child; the renderer must reject it before output. */
     {
@@ -989,6 +1003,39 @@ static int test_gfm_forged_ancestry_fails_closed(void) {
         CHECK(required==SIZE_MAX);
         for(size_t i=0u;i<sizeof(out);++i)
             CHECK(out[i]==0xc7);
+        free(copy);
+        stun_md_document_destroy(owned);
+    }
+    /* Canonical list TABLE owner is itself in a typed LIST; forging its
+     * ITEM parent to DOCUMENT must fail without a caller-visible write. */
+    {
+        static const char source[]=
+            "- | A | B |\n  | --- | --- |\n  | a | b |\n";
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(source,sizeof(source)-1u,128u,sizeof(source),
+                            &owned)==STUN_UI_OK);
+        stun_ui_rich_document_view view=stun_md_document_view(owned);
+        const size_t count=view.document.block_count;
+        stun_ui_block *copy=(stun_ui_block*)malloc(count*sizeof(*copy));
+        CHECK(copy!=NULL);
+        memcpy(copy,view.document.blocks,count*sizeof(*copy));
+        size_t item=SIZE_MAX,table=SIZE_MAX;
+        for(size_t i=1u;i<count;++i) {
+            if(copy[i].kind==STUN_UI_BLOCK_LIST_ITEM && item==SIZE_MAX)
+                item=i;
+            if(copy[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+        }
+        CHECK(item!=SIZE_MAX && table>item);
+        CHECK(copy[table].parent_index==item);
+        copy[item].parent_index=0u;
+        view.document.blocks=copy;
+        CHECK(stun_ui_rich_document_validate(&view,128u)==STUN_UI_OK);
+        unsigned char out[512];memset(out,0xc7,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&view,128u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0xc7);
         free(copy);
         stun_md_document_destroy(owned);
     }
