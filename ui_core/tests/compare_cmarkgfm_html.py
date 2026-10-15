@@ -19,6 +19,7 @@ import subprocess
 import sys
 
 import cmarkgfm
+from gfm_combinations import EXPECTED_COUNT, generated_cases, manifest_sha256
 
 
 @dataclass(frozen=True)
@@ -414,6 +415,17 @@ CASES: tuple[Case, ...] = (
          note="Raw HTML not supported; unsafe output must not be passed through"),
 )
 
+# #186: strict additive Cartesian cases. No new parser, hidden survey
+# downgrade, or change to the 652 immutable CommonMark fixture identities.
+_GFM_MATRIX = generated_cases()
+CASES = CASES + tuple(
+    Case(item.case_id, item.markdown, "gfm", note=(
+        f"matrix owner={item.owner} table={item.table} "
+        f"eol={item.eol} tail={item.tail}"
+    ))
+    for item in _GFM_MATRIX
+)
+
 
 def reference_html(case: Case) -> bytes:
     fn = (cmarkgfm.markdown_to_html if case.profile == "commonmark"
@@ -457,6 +469,12 @@ def main() -> int:
     if not CASES:
         print("INFRASTRUCTURE ERROR: no test fixtures", file=sys.stderr)
         return 2
+    ids = tuple(c.case_id for c in CASES)
+    if (len(ids) != len(set(ids)) or len(_GFM_MATRIX) != EXPECTED_COUNT
+            or any(not c.gate for c in CASES if c.case_id.startswith("gfm.mx."))):
+        print("INFRASTRUCTURE ERROR: GFM matrix denominator, gate or ID drift",
+              file=sys.stderr)
+        return 2
     official_ids = tuple(
         c.case_id.split("-", 1)[1] for c in CASES
         if c.case_id.startswith("gfm.official-") and c.gate
@@ -482,6 +500,7 @@ def main() -> int:
     gated_total = gated_passed = survey_total = survey_matched = 0
     gfm_official_total = gfm_official_passed = 0
     cmark_gate_total = cmark_gate_passed = 0
+    matrix_gate_total = matrix_gate_passed = 0
     normative_gate_total = normative_gate_passed = 0
     for case in CASES:
         record: dict = {
@@ -523,6 +542,9 @@ def main() -> int:
             else:
                 cmark_gate_total += 1
                 cmark_gate_passed += int(record["matched"])
+            if case.case_id.startswith("gfm.mx."):
+                matrix_gate_total += 1
+                matrix_gate_passed += int(record["matched"])
             if case.case_id.startswith("gfm.official-"):
                 gfm_official_total += 1
                 gfm_official_passed += int(record["matched"])
@@ -551,6 +573,15 @@ def main() -> int:
                                 "ids": list(expected_ids),
                                 "reference": "cmarkgfm HTML byte equality",
                                 "official_html_note": "HTML attribute serialization may differ from the published GFM prose examples"},
+        "gfm_composition_matrix": {
+            "passed": matrix_gate_passed, "total": matrix_gate_total,
+            "expected_total": EXPECTED_COUNT,
+            "source_manifest_sha256": manifest_sha256(_GFM_MATRIX),
+            "dimensions": {
+                "owners": 10, "tables": 4, "eol_styles": 2, "eof_forms": 2,
+            },
+            "oracle": "strict independent cmark-gfm HTML byte equality",
+        },
         "survey": {"matched": survey_matched, "total": survey_total},
         "cases": results,
         "note": "Strict oracle profiles are reported separately: all but the one"
@@ -562,6 +593,8 @@ def main() -> int:
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"RESULT: GFM composition matrix {matrix_gate_passed}/{matrix_gate_total} "
+          f"sha256={manifest_sha256(_GFM_MATRIX)}")
     print(f"RESULT: independent cmarkgfm HTML {cmark_gate_passed}/{cmark_gate_total}, "
           f"normative GFM task {normative_gate_passed}/{normative_gate_total}, "
           f"combined strict {gated_passed}/{gated_total}, "
