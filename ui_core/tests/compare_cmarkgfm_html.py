@@ -280,6 +280,23 @@ CASES: tuple[Case, ...] = (
     Case("gfm.list-table-then-heading",
          "- | A | B |\n  | --- | --- |\n"
          "  # done\n", "gfm"),
+    # #186: explicitly marked nested QUOTE/LIST TABLE ownership and
+    # table-stop boundaries; keep the cmark-gfm byte oracle authoritative.
+    Case("gfm.double-quote-list-table",
+         "> > - | A | B |\n> >   | --- | --- |\n"
+         "> >   | x | y |\n", "gfm"),
+    Case("gfm.quote-list-two-tables-blank",
+         "> - | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n>\n"
+         ">   | C | D |\n>   | --- | --- |\n"
+         ">   | u | v |\n", "gfm"),
+    Case("gfm.quote-list-unmarked-row-stops-table",
+         "> - | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n"
+         "| root | text |\n", "gfm"),
+    Case("gfm.nested-quote-table-outer-heading",
+         "> > | A | B |\n> > | --- | --- |\n"
+         "> > | x | y |\n> # Outer\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,

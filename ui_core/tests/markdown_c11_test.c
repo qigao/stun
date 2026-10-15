@@ -772,6 +772,67 @@ static int test_gfm_nested_ordered_interrupt_guard(void) {
     return 0;
 }
 
+
+/* #186: exact explicit QUOTE prefix depth gives nested list tables one
+ * bounded real owner, and a blank allows a second sibling TABLE in the
+ * same list item. The original source remains immutable and HTML capacity
+ * errors never mutate caller output. */
+static int test_gfm_mixed_quote_list_table_ownership(void) {
+    static const struct {
+        const char *source;
+        size_t quotes, tables, rows;
+    } fixtures[]={
+        {"> > - | A | B |\n> >   | --- | --- |\n"
+         "> >   | x | y |\n",2u,1u,2u},
+        {"> - | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n>\n"
+         ">   | C | D |\n>   | --- | --- |\n"
+         ">   | u | v |\n",1u,2u,4u}
+    };
+    _Static_assert(sizeof(fixtures)/sizeof(fixtures[0])==2u,
+                   "Nested GFM quote-list table test denominator");
+    for(size_t k=0u;k<2u;++k) {
+        const size_t bytes=strlen(fixtures[k].source);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(fixtures[k].source,bytes,192u,bytes+1u,
+                            &owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,192u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==fixtures[k].quotes);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST_ITEM)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==fixtures[k].tables);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==fixtures[k].rows);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==2u*fixtures[k].rows);
+        size_t item=SIZE_MAX,tables=0u;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *b=&v.document.blocks[i];
+            if(b->kind==STUN_UI_BLOCK_LIST_ITEM)item=i;
+            if(b->kind==STUN_UI_BLOCK_TABLE) {
+                CHECK(item!=SIZE_MAX && b->parent_index==item);
+                ++tables;
+            }
+        }
+        CHECK(tables==fixtures[k].tables);
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,fixtures[k].source,bytes)==0);
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,192u,NULL,0u,&required)==STUN_UI_OK);
+        CHECK(required>0u && required<2048u);
+        unsigned char out[2048];memset(out,0x9a,sizeof(out));
+        size_t short_required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,192u,(char*)out,required,
+                                  &short_required)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(short_required==required);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0x9a);
+        CHECK(stun_md_render_html(&v,192u,(char*)out,sizeof(out),
+                                  &short_required)==STUN_UI_OK);
+        CHECK(strstr((char*)out,"<table>\n<thead>\n")!=NULL);
+        stun_md_document_destroy(owned);
+    }
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1525,6 +1586,7 @@ int main(void) {
     if(test_gfm_composed_list_table_ownership()) return 1;
     if(test_gfm_paragraph_to_list_table()) return 1;
     if(test_gfm_nested_ordered_interrupt_guard()) return 1;
+    if(test_gfm_mixed_quote_list_table_ownership()) return 1;
     if(test_gfm_list_table_forward_reference_contract()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
