@@ -354,6 +354,61 @@ static int test_gfm_task_items(void) {
     return 0;
 }
 
+/* #186/GFM Example 280: nested task groups remain children of the real
+ * list-item owner. The Checkbox is always the first direct item child and
+ * carries a one-byte checked fact, not application-owned mutable state. */
+static int test_gfm_nested_task_ownership(void) {
+    const char sample[] =
+        "- [x] foo\n"
+        "  - [ ] bar\n"
+        "  - [x] baz\n"
+        "- [ ] bim\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1u,256u,512u,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+    CHECK(kinds(v,STUN_UI_BLOCK_LIST)==2u);
+    CHECK(kinds(v,STUN_UI_BLOCK_TASK_ITEM)==4u);
+    CHECK(kinds(v,STUN_UI_BLOCK_CHECKBOX)==4u);
+    size_t nested_lists=0u,checked=0u,unchecked=0u;
+    for(size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *node=&v.document.blocks[i];
+        if(node->kind==STUN_UI_BLOCK_LIST) {
+            const uint32_t parent=node->parent_index;
+            if(parent!=0u) {
+                CHECK(parent<i);
+                CHECK(v.document.blocks[parent].kind==STUN_UI_BLOCK_TASK_ITEM);
+                ++nested_lists;
+            }
+        }
+        if(node->kind!=STUN_UI_BLOCK_CHECKBOX) continue;
+        const uint32_t parent=node->parent_index;
+        CHECK(parent<i && i==parent+1u);
+        CHECK(v.document.blocks[parent].kind==STUN_UI_BLOCK_TASK_ITEM);
+        const char *metadata=NULL;size_t bytes=0u;
+        CHECK(stun_ui_rich_document_metadata(&v,i,&metadata,&bytes)==STUN_UI_OK);
+        CHECK(metadata!=NULL && bytes==1u);
+        if(metadata[0]=='x')++checked;
+        else { CHECK(metadata[0]==' ');++unchecked; }
+    }
+    CHECK(nested_lists==1u && checked==2u && unchecked==2u);
+    size_t need=SIZE_MAX;
+    CHECK(stun_md_render_html(&v,256u,NULL,0u,&need)==STUN_UI_OK);
+    CHECK(need>0u && need<1024u);
+    char html[1024];memset(html,0x5a,sizeof(html));
+    size_t required=SIZE_MAX;
+    CHECK(stun_md_render_html(&v,256u,html,need,&required)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(required==need);
+    for(size_t i=0u;i<sizeof(html);++i)CHECK((unsigned char)html[i]==0x5a);
+    CHECK(stun_md_render_html(&v,256u,html,need+1u,&required)==STUN_UI_OK);
+    CHECK(required==need);
+    CHECK(strstr(html,"<ul>")!=NULL && strstr(html,"</ul>")!=NULL);
+    CHECK(strstr(html,"<input type=\\"checkbox\\" checked=\\"\\" disabled=\\"\\" />")!=NULL);
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 /* #182: the decoded code-span payload belongs to one typed node, never
  * recursively parses inner punctuation and never changes the raw source. */
 static int test_code_span_exact_runs_and_text(void) {
@@ -992,6 +1047,7 @@ int main(void) {
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
     if(test_gfm_task_items()) return 1;
+    if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
     return 0;
 }
