@@ -1,0 +1,118 @@
+name: Unicode 17 candidate CommonMark (isolated ABI proof)
+
+# Experimental Stun branch consumes only the already-qualified *unpublished*
+# Salts #1209 exact QA SDK. Never substitute a released SDK or ship its symbols.
+on:
+  push:
+    branches:
+      - draft/markdown-unicode17-abi-consumer-206-354-540
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installed-c11-652:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:fast_unwind_on_malloc=0
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout exact experimental Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download exact unpublished Salts joint-ABI QA SDK
+        uses: actions/download-artifact@v4
+        with:
+          repository: qigao/salts
+          run-id: 38510514822
+          name: salts-sdk-linux-x64
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/salts-unicode17-qa
+
+      - name: Fail closed on provenance or missing Unicode ABI
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/salts-unicode17-qa/linux-x64"
+          test -f "$sdk/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$sdk/salts-sdk-manifest.txt"
+          grep -Fx 'commit=4b19fa68b7993408878d9602e4cf50f24d977f6d' \
+            "$sdk/salts-sdk-manifest.txt"
+          header="$sdk/include/unicode/salts_unicode.h"
+          test -f "$header"
+          grep -F 'salts_unicode_is_punctuation_or_symbol(' "$header"
+          grep -F 'salts_unicode_case_fold(' "$header"
+          test -f "$sdk/lib/libsalts_unicode.a"
+          echo "SALTS_QA_ROOT=$sdk" >> "$GITHUB_ENV"
+          printf 'Stun exact=%s\nSalts joint unpublished exact=4b19fa68b7993408878d9602e4cf50f24d977f6d\n' \
+            "$(git rev-parse HEAD)"
+
+      - name: Build strict installed-SDK C11 under ASan and UBSan
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S ui_core -B build/unicode17-qa -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc \
+            "-DCMAKE_PREFIX_PATH=$SALTS_QA_ROOT" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON -DBUILD_TESTING=ON \
+            '-DCMAKE_C_FLAGS=-std=c11 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer'
+          cmake --build build/unicode17-qa --parallel 2
+          ctest --test-dir build/unicode17-qa --no-tests=error \
+            --output-on-failure --timeout 120
+
+      - name: Independent 652-row official CommonMark SPEC and SAFE diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/stun-unicode17-oracle"
+          py="$RUNNER_TEMP/stun-unicode17-oracle/bin/python"
+          "$py" -m pip install --disable-pip-version-check --no-cache-dir cmarkgfm mistune
+          "$py" -m pip freeze
+          renderer="$GITHUB_WORKSPACE/build/unicode17-qa/tests/stun_markdown_html_dump"
+          "$py" ui_core/tests/survey_commonmark_spec.py \
+            --renderer "$renderer" --spec tools/md/test/spec.txt \
+            --render-policy spec --report build/unicode17-qa/spec-652.json
+          "$py" ui_core/tests/survey_commonmark_spec.py \
+            --renderer "$renderer" --spec tools/md/test/spec.txt \
+            --report build/unicode17-qa/safe-652.json
+          "$py" ui_core/tests/compare_cmarkgfm_html.py \
+            --renderer "$renderer" --report build/unicode17-qa/gfm-independent.json
+          "$py" - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path("ui_core/tests")
+          b=json.loads((root/"commonmark_0_31_2_spec_baseline.json").read_text())
+          s=json.loads(Path("build/unicode17-qa/spec-652.json").read_text())
+          rows=s["cases"]
+          assert len(rows)==652
+          digest=hashlib.sha256(json.dumps(
+              [(r["id"],r["markdown"],r["official_expected_html"]) for r in rows],
+              ensure_ascii=False,separators=(",",":")
+          ).encode("utf-8")).hexdigest()
+          assert digest==b["official_fixture_sha256"], "official corpus changed"
+          actual={int(r["id"][-4:]) for r in rows if r["native_matches_official"]}
+          baseline=set(b["qualified_official_ids"])
+          lost=sorted(baseline-actual)
+          gained=sorted(actual-baseline)
+          print(f"SPEC exact={len(actual)}/652 baseline={len(baseline)} lost={lost} gained={gained}")
+          assert not lost, f"prior SPEC regressions: {lost}"
+          assert gained==[206,354,540], f"unqualified/new cases: {gained}"
+          assert len(actual)==652, f"still missing: {sorted(set(range(1,653))-actual)}"
+          PY
+
+      - name: Upload raw candidate proof and both policy surveys
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stun-unicode17-qa-commonmark
+          path: |
+            build/unicode17-qa/spec-652.json
+            build/unicode17-qa/safe-652.json
+            build/unicode17-qa/gfm-independent.json
+            build/unicode17-qa/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
