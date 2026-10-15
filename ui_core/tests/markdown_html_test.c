@@ -184,6 +184,38 @@ static const html_fixture cases[] = {
       "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n</tr>\n"
       "</thead>\n<tbody>\n<tr>\n<td>one</td>\n<td>two</td>\n</tr>\n"
       "</tbody>\n</table>\n" },
+    /* #186: one document-owned column alignment vector; both header and
+     * uneven body rows consume it, including escaped pipes/code spans. */
+    { "| Left | Center | Right |\n| :--- | :---: | ---: |\n"
+      "| a\\|b | " TICK "x|y" TICK " | z |\n",
+      "<table>\n<thead>\n<tr>\n"
+      "<th align=\"left\">Left</th>\n"
+      "<th align=\"center\">Center</th>\n"
+      "<th align=\"right\">Right</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td align=\"left\">a|b</td>\n"
+      "<td align=\"center\"><code>x|y</code></td>\n"
+      "<td align=\"right\">z</td>\n"
+      "</tr>\n</tbody>\n</table>\n" },
+    { "| A | B | C |\n| :--- | :---: | ---: |\n| one |\n",
+      "<table>\n<thead>\n<tr>\n"
+      "<th align=\"left\">A</th>\n"
+      "<th align=\"center\">B</th>\n"
+      "<th align=\"right\">C</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td align=\"left\">one</td>\n"
+      "<td align=\"center\"></td>\n"
+      "<td align=\"right\"></td>\n"
+      "</tr>\n</tbody>\n</table>\n" },
+    /* #186: only typed CHECKBOX nodes may emit inert fixed markup. */
+    { "- [x] shipped\n- [ ] pending\n",
+      "<ul>\n<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> shipped</li>\n"
+      "<li><input type=\"checkbox\" disabled=\"\" /> pending</li>\n</ul>\n" },
+    { "3. [X] upper\n4. [ ] lower\n",
+      "<ol start=\"3\">\n"
+      "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> upper</li>\n"
+      "<li><input type=\"checkbox\" disabled=\"\" /> lower</li>\n</ol>\n" },
+    { "- [x]done\n", "<ul>\n<li>[x]done</li>\n</ul>\n" },
     /* CommonMark 0.31.2 #329–#331, #338–#340, #347; code-span
      * contents are literal UTF-8, with exact-run and edge-space rules. */
     { TICK TICK " foo " TICK " bar " TICK TICK "\n",
@@ -714,7 +746,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==362,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==367,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
