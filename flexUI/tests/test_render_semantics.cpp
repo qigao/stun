@@ -10477,5 +10477,79 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
       if (md->child_count() == 2u)
         check(md->children()[0] == same_heading);
     }
+
+    // #186: scrolling, parsing and rendering must stay on the same live Box
+    // owner when a document is replaced *while its old heading is clipped*.
+    // Verify the restored new heading, no stale render command, bounded
+    // scrolling, and read-only input over multiple actual UI frames.
+    static constexpr const char* documents[] = {
+        "# First\n\nalpha\n",
+        "# Second\n\nbeta\n"
+    };
+    static constexpr const char* titles[] = {"First", "Second"};
+    static constexpr size_t cycles = 12u;
+    for (size_t cycle = 0u; cycle < cycles; ++cycle) {
+      const size_t index = cycle % 2u;
+      Event scroll = Event::mouse_wheel(10.0f, 10.0f, 0.0f, -1.0f);
+      box.dispatch_event(scroll);
+      check(scroll.handled);
+      check(viewport->scroll_y() > 0.0f);
+      check(viewport->scroll_y() <= viewport->max_scroll_y());
+      box.update();
+
+      widget->set_markdown(documents[index]);
+      widget->update(0.0f, *md);
+      box.update();
+      check(widget->markdown() == documents[index]);
+      check(md->child_count() == 2u);
+      check(viewport->scroll_y() >= 0.0f);
+      check(viewport->scroll_y() <= viewport->max_scroll_y());
+
+      RecordingRenderer during_scroll;
+      during_scroll.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer during_renderer(&during_scroll);
+      RenderManager during_manager(&during_renderer);
+      during_manager.render_tree(root);
+      const auto old_title = (index == 0u) ? "Second" : "First";
+      check(std::none_of(
+          during_scroll.texts.begin(), during_scroll.texts.end(),
+          [old_title](const TextCall& call) { return call.text == old_title; }));
+
+      Event back_to_home = Event::key_down(KeyCode::Home);
+      box.dispatch_event(back_to_home);
+      check(back_to_home.handled);
+      check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+      box.update();
+      RecordingRenderer recovered;
+      recovered.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer recovered_renderer(&recovered);
+      RenderManager recovered_manager(&recovered_renderer);
+      recovered_manager.render_tree(root);
+      const auto title = std::find_if(
+          recovered.texts.begin(), recovered.texts.end(),
+          [index](const TextCall& call) {
+            return call.text == titles[index];
+          });
+      check(title != recovered.texts.end());
+      check(std::none_of(
+          recovered.texts.begin(), recovered.texts.end(),
+          [old_title](const TextCall& call) { return call.text == old_title; }));
+      if (title != recovered.texts.end())
+        check(std::isfinite(title->y));
+
+      if (md->child_count() == 2u) {
+        const auto* reused = md->children()[0];
+        widget->set_markdown(documents[index]);
+        widget->update(0.0f, *md);
+        box.update();
+        check(md->child_count() == 2u);
+        if (md->child_count() == 2u)
+          check(md->children()[0] == reused);
+      }
+      Event rejected_input = Event::text_input("inert");
+      box.dispatch_event(rejected_input);
+      check(!rejected_input.handled);
+      check(widget->markdown() == documents[index]);
+    }
   }
 }
