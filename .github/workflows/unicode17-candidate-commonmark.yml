@@ -1,7 +1,7 @@
 name: Unicode 17 candidate CommonMark (isolated ABI proof)
 
 # Experimental Stun branch consumes only the already-qualified *unpublished*
-# Salts #1209 exact QA SDK. Never substitute a released SDK or ship its symbols.
+# Salts #1227 post-merge exact QA SDK (based on master 6d6fd38). Never substitute a released SDK or ship QA artifacts.
 on:
   push:
     branches:
@@ -25,11 +25,11 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Download exact unpublished Salts joint-ABI QA SDK
+      - name: Download exact post-merge Salts Unicode QA SDK
         uses: actions/download-artifact@v4
         with:
           repository: qigao/salts
-          run-id: 38510514822
+          run-id: 38770350872
           name: salts-sdk-linux-x64
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/salts-unicode17-qa
@@ -41,7 +41,7 @@ jobs:
           sdk="$RUNNER_TEMP/salts-unicode17-qa/linux-x64"
           test -f "$sdk/lib/cmake/Salts/SaltsConfig.cmake"
           test -f "$sdk/salts-sdk-manifest.txt"
-          grep -Fx 'commit=4b19fa68b7993408878d9602e4cf50f24d977f6d' \
+          grep -Fx 'commit=43ae2cc4577b6a2e6fa7ab8f5ed9a1c950902b86' \
             "$sdk/salts-sdk-manifest.txt"
           header="$sdk/include/unicode/salts_unicode.h"
           test -f "$header"
@@ -49,7 +49,7 @@ jobs:
           grep -F 'salts_unicode_case_fold(' "$header"
           test -f "$sdk/lib/libsalts_unicode.a"
           echo "SALTS_QA_ROOT=$sdk" >> "$GITHUB_ENV"
-          printf 'Stun exact=%s\nSalts joint unpublished exact=4b19fa68b7993408878d9602e4cf50f24d977f6d\n' \
+          printf 'Stun exact=%s\nSalts post-merge QA exact=43ae2cc4577b6a2e6fa7ab8f5ed9a1c950902b86\n' \
             "$(git rev-parse HEAD)"
 
       - name: Build strict installed-SDK C11 under ASan and UBSan
