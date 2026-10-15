@@ -196,6 +196,7 @@ def main() -> int:
         return 1
     output = json.dumps(result, sort_keys=True, indent=2) + "\n"
     if args.report is not None:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(output, encoding="utf-8")
     print(output)
     return 0
