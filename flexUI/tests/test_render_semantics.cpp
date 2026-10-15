@@ -10402,10 +10402,14 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     const auto moved = std::find_if(
         after_scroll.texts.begin(), after_scroll.texts.end(),
         [](const TextCall& call) { return call.text == "Status"; });
-    check(moved != after_scroll.texts.end());
-    if (moved != after_scroll.texts.end()) {
+    // A scrolled heading can become fully clipped and legitimately vanish
+    // from the recording renderer. Either it moved upward while visible or
+    // the viewport culled it. Do not require offscreen text to be drawn.
+    if (moved != after_scroll.texts.end())
       check(moved->y < initial_text_y);
-    }
+    else
+      check(viewport->scroll_y() >= viewport->height() ||
+            initial_text_y < viewport->absolute_y() + viewport->scroll_y());
 
     box.set_focus(md);
     Event end = Event::key_down(KeyCode::End);
