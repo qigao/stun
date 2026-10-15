@@ -155,6 +155,23 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quote-table-unmarked-row",
          "> | A | B |\n> | --- | --- |\n> | a | b |\n"
          "| c | d |\n", "gfm"),
+    # #186: list-owned TABLE admission. A real list/quote owner must
+    # retain typed TABLE metadata; no root table or detached parser pass.
+    Case("gfm.list-table-marker-header",
+         "- | Name | Qty |\n  | :--- | ---: |\n"
+         "  | apple | 2 |\n", "gfm"),
+    Case("gfm.list-table-then-sibling",
+         "- | A | B |\n  | --- | --- |\n  | x | y |\n"
+         "- second\n", "gfm"),
+    Case("gfm.list-table-after-blank",
+         "- intro\n\n  | A | B |\n  | --- | --- |\n"
+         "  | x | y |\n", "gfm"),
+    Case("gfm.quoted-list-table",
+         "> - | A | B |\n>   | :--- | ---: |\n"
+         ">   | x | y |\n", "gfm"),
+    Case("gfm.quoted-list-table-dedent",
+         "> - | A | B |\n>   | --- | --- |\n"
+         ">   | x | y |\n> after\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
