@@ -781,6 +781,46 @@ static int test_golden(const html_fixture *f) {
     return 0;
 }
 
+/* #186: malformed public RichDoc metadata is rejected BEFORE writing any
+ * HTML. The parser owns the bytes; these copies exercise an untrusted view,
+ * without corrupting the successfully parsed document itself. */
+static int test_gfm_metadata_fails_closed(void) {
+    const char *inputs[] = {
+        "| A | B |\n| :--- | ---: |\n| a | b |\n",
+        "- [x] ready\n"
+    };
+    const stun_ui_block_kind targets[] = {
+        STUN_UI_BLOCK_TABLE, STUN_UI_BLOCK_CHECKBOX
+    };
+    for(size_t which=0u;which<2u;++which) {
+        stun_md_document *doc=NULL;
+        const size_t n=strlen(inputs[which]);
+        CHECK(stun_md_parse(inputs[which],n,128u,n+1u,&doc)==STUN_UI_OK);
+        stun_ui_rich_document_view view=stun_md_document_view(doc);
+        size_t target=SIZE_MAX;
+        for(size_t i=0u;i<view.document.block_count;++i)
+            if(view.document.blocks[i].kind==targets[which])target=i;
+        CHECK(target!=SIZE_MAX);
+        const stun_ui_block_metadata span=view.block_metadata[target];
+        CHECK(span.byte_begin<span.byte_end &&
+              span.byte_end<=view.metadata_bytes);
+        char *owned=(char*)malloc(view.metadata_bytes);
+        CHECK(owned!=NULL);
+        memcpy(owned,view.metadata,view.metadata_bytes);
+        owned[span.byte_begin]=which==0u?(char)0xff:'?';
+        view.metadata=owned;
+        unsigned char out[512];memset(out,0xa5,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&view,128u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0xa5);
+        free(owned);
+        stun_md_document_destroy(doc);
+    }
+    return 0;
+}
+
 static int test_unsafe_unsupported(void) {
     /* Balanced-parenthesis destinations are not implemented by the C11 parser
      * yet. Use a syntactically admitted link to test the actual HTML URL gate. */
@@ -837,6 +877,7 @@ int main(void) {
             return 1;
         }
     }
+    if(test_gfm_metadata_fails_closed()) return 1;
     if(test_unsafe_unsupported()) return 1;
     printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
