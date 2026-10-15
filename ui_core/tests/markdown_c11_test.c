@@ -178,7 +178,7 @@ static int test_gfm_tables(void) {
     const char markdown[] =
         "| Name | Value |\n"
         "| :--- | ---: |\n"
-        "| 中😀 | " TICK "a|b" TICK " |\n"
+        "| 中😀 | " TICK "a\\|b" TICK " |\n"
         "| a\\|b | **bold** |\n"
         "\n"
         "After table.\n";
@@ -231,7 +231,7 @@ static int test_gfm_table_termination_and_uneven_rows(void) {
     const char sample[] =
         "| First | Second |\n"
         "| --- | :---: |\n"
-        "| " TICK TICK "a|b" TICK TICK " | Value |\n"
+        "| " TICK TICK "a\\|b" TICK TICK " | Value |\n"
         "alone\n"
         "| final | extra | ignored |\n"
         "||\n"
