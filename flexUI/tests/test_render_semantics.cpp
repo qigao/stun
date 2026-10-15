@@ -10714,7 +10714,7 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
   }
 
   // #186: unlike the fixed-size scroll tests, this keeps MarkdownWidget
-  // height:auto. The number of real parsed paragraph children changes the
+  // height:auto. The number of real parsed heading children changes the
   // content extent, and LayoutManager must clamp an old oversized scroll
   // offset after shrinking, without a stale paint command or second parser.
   it("clamps intrinsic Markdown height changes and renders Unicode at Home") {
@@ -10722,12 +10722,12 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     auto* root = box.create("div", "md-autosize-root-186");
     auto* viewport = box.create("div", "md-autosize-viewport-186");
     const std::string tall =
-        "Alpha stage one.\n\nBravo stage two.\n\nCharlie stage three.\n\n"
-        "Delta stage four.\n\nEcho stage five.\n\nFoxtrot stage six.\n\n"
-        "Golf stage seven.\n\nHotel stage eight.\n";
-    const std::string short_unicode = "日本語 café 😀 東京 花火 rivers valley\n";
+        "# Alpha stage one.\n\n# Bravo stage two.\n\n# Charlie stage three.\n\n"
+        "# Delta stage four.\n\n# Echo stage five.\n\n# Foxtrot stage six.\n\n"
+        "# Golf stage seven.\n\n# Hotel stage eight.\n";
+    const std::string short_unicode = "# 日本語 café 😀 東京 花火 rivers valley\n";
     const std::string medium =
-        "Middle one.\n\nMiddle two.\n\nMiddle three.\n\nMiddle four.\n";
+        "# Middle one.\n\n# Middle two.\n\n# Middle three.\n\n# Middle four.\n";
     auto* md=box.create_widget<MarkdownWidget>(
         "div", "md-autosize-doc-186", tall);
     root->append(viewport);
@@ -10745,7 +10745,7 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
       #md-autosize-doc-186 {
         width: 128px; height: auto; display: block;
       }
-      .md-p {
+      .md-header {
         width: 112px; height: 40px; font-size: 14px;
       }
     )");
@@ -10776,18 +10776,18 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     check(approx_eq(viewport->max_scroll_y(),0.0f,0.1f));
     check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
     if(md->child_count()!=1u) return;
-    auto* paragraph=static_cast<Element*>(md->children()[0]);
-    check(paragraph->has_class(Symbol("md-p")));
-    check(paragraph->text()=="日本語 café 😀 東京 花火 rivers valley");
+    auto* heading=static_cast<Element*>(md->children()[0]);
+    check(heading->has_class(Symbol("md-header")));
+    check(heading->text()=="日本語 café 😀 東京 花火 rivers valley");
     const auto unicode_lines=layout_text_block(
-        paragraph->computed_style,paragraph->text(),0.0f,0.0f,
-        paragraph->width(),std::max(paragraph->height(),90.0f),
+        heading->computed_style,heading->text(),0.0f,0.0f,
+        heading->width(),std::max(heading->height(),90.0f),
         Color{},TextVerticalAlign::Top);
     check(unicode_lines.lines.size()>=2u);
     for(const auto& line:unicode_lines.lines) {
       check(std::isfinite(line.width));
       check(line.width>=0.0f);
-      check(line.width<=paragraph->width()+1.0f);
+      check(line.width<=heading->width()+1.0f);
     }
     RecordingRenderer short_frame;
     short_frame.begin_frame(800.0f,600.0f,1.0f);
