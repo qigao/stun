@@ -562,6 +562,12 @@ static void html_node(stun_html_writer *w, size_t id,
         html_str(w,">\n");break;
     }
     case STUN_UI_BLOCK_TASK_ITEM:
+        /* Require real list ownership, not merely a printable CHECKBOX. */
+        if(node->parent_index>=id ||
+           (doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_LIST &&
+            doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_ORDERED_LIST)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
         /* A checked-state leaf must be the first direct TASK_ITEM child. */
         if(id+1u>=doc->block_count ||
            doc->blocks[id+1u].parent_index!=id ||
@@ -612,13 +618,16 @@ static void html_node(stun_html_writer *w, size_t id,
     }
     case STUN_UI_BLOCK_QUOTE: html_str(w,"<blockquote>\n"); break;
     case STUN_UI_BLOCK_TABLE_ROW:
-        if(!w->table_alignment) {
+        if(!w->table_alignment || node->parent_index>=id ||
+           doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_TABLE) {
             w->error=STUN_UI_INVALID_ARGUMENT;return;
         }
         w->table_column=0u;
         html_str(w,"<tr>\n");break;
     case STUN_UI_BLOCK_TABLE_CELL: {
-        if(!w->table_alignment || w->table_column>=w->table_columns) {
+        if(!w->table_alignment || w->table_column>=w->table_columns ||
+           node->parent_index>=id ||
+           doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_TABLE_ROW) {
             w->error=STUN_UI_INVALID_ARGUMENT;return;
         }
         const uint8_t align=w->table_alignment[w->table_column++];
