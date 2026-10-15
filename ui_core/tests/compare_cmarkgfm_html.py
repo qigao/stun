@@ -339,6 +339,13 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quote-list-table-data-pipe-backslashes",
          "> - | A | B |\n>   | --- | --- |\n"
          + r">   | a\\|b | \| |" + "\n", "gfm"),
+    # CommonMark lazy continuation vs actual blank barrier, identical
+    # to the native quoted-list owner control; cmark-gfm is authoritative
+    # for exact HTML bytes, neither fixture is downgraded to a survey.
+    Case("gfm.quote-list-second-item-lazy",
+         "> - foo\n> - bar\nplain\n", "gfm"),
+    Case("gfm.quote-list-second-item-blank-root",
+         "> - foo\n> - bar\n\nplain\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
