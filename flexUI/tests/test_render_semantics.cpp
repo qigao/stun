@@ -10438,5 +10438,44 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     check(!input.handled);
     check(widget->markdown() == source);
     check(heading->text() == "Status");
+
+    // #186: update through the real production widget after scrolling has
+    // been restored to Home. The previous draw must disappear, the new one
+    // must be measurable/rendered, and repeated identical source must not
+    // recreate owned elements. No candidate C11 grammar is used here.
+    const std::string updated_markdown = "# Updated\\n\\nbeta\\n";
+    widget->set_markdown(updated_markdown);
+    widget->update(0.0f, *md);
+    box.update();
+    check(widget->markdown() == updated_markdown);
+    check(md->child_count() == 2u);
+    if (md->child_count() == 2u) {
+      auto* updated_heading = static_cast<Element*>(md->children()[0]);
+      check(updated_heading->has_class(Symbol("md-header")));
+      check(updated_heading->text() == "Updated");
+      check(approximate_text_width(updated_heading->computed_style,
+                                   updated_heading->text()) > 0.0f);
+      RecordingRenderer updated_backend;
+      updated_backend.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer updated_renderer(&updated_backend);
+      RenderManager updated_manager(&updated_renderer);
+      updated_manager.render_tree(root);
+      const auto current = std::find_if(
+          updated_backend.texts.begin(), updated_backend.texts.end(),
+          [](const TextCall& call) { return call.text == "Updated"; });
+      const auto stale = std::find_if(
+          updated_backend.texts.begin(), updated_backend.texts.end(),
+          [](const TextCall& call) { return call.text == "Status"; });
+      check(current != updated_backend.texts.end());
+      check(stale == updated_backend.texts.end());
+      check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+      const Element* const same_heading = updated_heading;
+      widget->set_markdown(updated_markdown);
+      widget->update(0.0f, *md);
+      box.update();
+      check(md->child_count() == 2u);
+      if (md->child_count() == 2u)
+        check(md->children()[0] == same_heading);
+    }
   }
 }
