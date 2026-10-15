@@ -133,3 +133,19 @@ add_executable(stun_markdown_quoted_list_test markdown_quoted_list_test.c)
 target_compile_features(stun_markdown_quoted_list_test PRIVATE c_std_11)
 target_link_libraries(stun_markdown_quoted_list_test PRIVATE Stun::UICore)
 add_test(NAME stun_markdown_quoted_list_test COMMAND stun_markdown_quoted_list_test)
+
+
+# #186 consumer isolation: top-level builds provide the real Tango C99
+# implementation alongside the candidate C11 RichDoc. The standalone
+# installed-Salts C11 conformance build does not contain Tango and must not
+# invent a fallback or pull in a second terminal implementation.
+# This is NOT a production MarkdownWidget/Tango parser cutover.
+if(TARGET tango)
+    add_executable(stun_markdown_tango_candidate_test
+                   markdown_tango_candidate_test.c)
+    target_compile_features(stun_markdown_tango_candidate_test PRIVATE c_std_11)
+    target_link_libraries(stun_markdown_tango_candidate_test
+                          PRIVATE Stun::UICore tango)
+    add_test(NAME stun_markdown_tango_candidate_test
+             COMMAND stun_markdown_tango_candidate_test)
+endif()
