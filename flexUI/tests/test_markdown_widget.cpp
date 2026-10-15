@@ -81,6 +81,83 @@ spec("MarkdownWidget Parsing") {
         check(s3->has_class(Symbol("md-em")));
         check(s3->text() == "Emphasis");
     }
+
+    // #186: retain the existing production C++ md::parse consumer while
+    // evaluating the C11 replacement in a separate RichDoc/Tango harness.
+    // This verifies the *real* MarkdownWidget element hierarchy, not HTML.
+    it("GFM task items preserve checkbox state in the existing widget") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md", "- [x] shipped\n- [ ] pending\n");
+        root->append(md);
+        md->widget->update(0.0f, *md);
+
+        check(md->child_count() == 1);
+        if (md->child_count() == 1) {
+            auto* list = static_cast<Element*>(md->children()[0]);
+            check(list->has_class(Symbol("md-ul")));
+            check(list->child_count() == 2);
+            if (list->child_count() == 2) {
+                auto* checked = static_cast<Element*>(list->children()[0]);
+                auto* unchecked = static_cast<Element*>(list->children()[1]);
+                check(checked->has_class(Symbol("md-task-item")));
+                check(unchecked->has_class(Symbol("md-task-item")));
+                check(checked->child_count() >= 1);
+                check(unchecked->child_count() >= 1);
+                if (checked->child_count() >= 1 &&
+                    unchecked->child_count() >= 1) {
+                    auto* checked_box =
+                        static_cast<Element*>(checked->children()[0]);
+                    auto* unchecked_box =
+                        static_cast<Element*>(unchecked->children()[0]);
+                    check(checked_box->has_class(Symbol("md-checkbox")));
+                    check(unchecked_box->has_class(Symbol("md-checkbox")));
+                    check(checked_box->text() == "[x] ");
+                    check(unchecked_box->text() == "[ ] ");
+                }
+            }
+        }
+    }
+
+    it("GFM table projection and source replacement retain one widget owner") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md", "| H | V |\n| --- | --- |\n| a | b |\n");
+        root->append(md);
+        md->widget->update(0.0f, *md);
+
+        check(md->child_count() == 1);
+        if (md->child_count() == 1) {
+            auto* table = static_cast<Element*>(md->children()[0]);
+            check(table->has_class(Symbol("md-table")));
+            check(table->child_count() == 2);
+            if (table->child_count() == 2) {
+                for (const auto* row : table->children()) {
+                    const auto* element = static_cast<const Element*>(row);
+                    check(element->has_class(Symbol("md-tr")));
+                    check(element->child_count() == 2);
+                }
+            }
+        }
+
+        // Existing widget update, not a C11 parser cutover: old children
+        // must no longer be visible, and repeated parsing releases its
+        // arena-allocated C++ AST via the single ParseContext destructor.
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        widget->set_markdown("- [ ] pending\n");
+        md->widget->update(0.0f, *md);
+        check(md->child_count() == 1);
+        if (md->child_count() == 1) {
+            auto* list = static_cast<Element*>(md->children()[0]);
+            check(list->has_class(Symbol("md-ul")));
+            check(list->child_count() == 1);
+        }
+        widget->set_markdown("| H | V |\n| --- | --- |\n| c | d |\n");
+        md->widget->update(0.0f, *md);
+        check(md->child_count() == 1);
+        if (md->child_count() == 1) {
+            auto* table = static_cast<Element*>(md->children()[0]);
+            check(table->has_class(Symbol("md-table")));
+        }
+    }
 }
 
 
