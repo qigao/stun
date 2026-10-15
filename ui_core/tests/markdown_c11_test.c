@@ -1011,6 +1011,88 @@ static int test_gfm_quote_list_lazy_text_ownership(void) {
     return 0;
 }
 
+/* #186: proportional GFM TABLE ownership and capacity must remain bounded
+ * even when an adversary supplies many wide data rows. Exercise identical
+ * admission under DOCUMENT and two explicit QUOTE frames, never a second
+ * grammar or borrowed scratch pointer surviving source normalization. */
+static int test_gfm_wide_table_budget(void) {
+    enum { COLS=16, DATA_ROWS=16, TOTAL_ROWS=DATA_ROWS+1 };
+    for(size_t scope=0u;scope<2u;++scope) {
+        char markdown[8192];
+        size_t used=0u;
+        for(size_t line=0u;line<DATA_ROWS+2u;++line) {
+            if(scope) {
+                static const char prefix[]="> > ";
+                CHECK(used+sizeof(prefix)-1u<sizeof(markdown));
+                memcpy(markdown+used,prefix,sizeof(prefix)-1u);
+                used+=sizeof(prefix)-1u;
+            }
+            for(size_t column=0u;column<COLS;++column) {
+                char cell[64];
+                const int n=line==0u ?
+                    snprintf(cell,sizeof(cell)," | h%zu",column) :
+                    (line==1u ?
+                     snprintf(cell,sizeof(cell)," | :---") :
+                     snprintf(cell,sizeof(cell)," | v%zu_%zu",
+                              line-2u,column));
+                CHECK(n>0 && (size_t)n<sizeof(cell));
+                CHECK((size_t)n<sizeof(markdown)-used);
+                memcpy(markdown+used,cell,(size_t)n);
+                used+=(size_t)n;
+            }
+            CHECK(used+3u<sizeof(markdown));
+            memcpy(markdown+used," |\n",3u);
+            used+=3u;
+        }
+        markdown[used]='\0';
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(markdown,used,2048u,used+1u,&owned)==
+              STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,2048u)==STUN_UI_OK);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==TOTAL_ROWS);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==COLS*TOTAL_ROWS);
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==(scope?2u:0u));
+        CHECK(v.raw_markdown_bytes==used &&
+              memcmp(v.raw_markdown,markdown,used)==0);
+        size_t table=SIZE_MAX,inner=SIZE_MAX;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_QUOTE)inner=i;
+        }
+        CHECK(table!=SIZE_MAX);
+        CHECK(v.document.blocks[table].parent_index==
+              (scope?(uint32_t)inner:0u));
+        const char *metadata=NULL;size_t bytes=SIZE_MAX;
+        CHECK(stun_ui_rich_document_metadata(&v,table,
+                                              &metadata,&bytes)==STUN_UI_OK);
+        CHECK(bytes==COLS && metadata!=NULL);
+        for(size_t i=0u;i<bytes;++i)
+            CHECK((unsigned char)metadata[i]==STUN_UI_TABLE_ALIGN_LEFT);
+        size_t need=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,2048u,NULL,0u,&need)==STUN_UI_OK);
+        CHECK(need>0u && need<32768u);
+        unsigned char html[32768];
+        memset(html,0x91,sizeof(html));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,2048u,(char*)html,need,
+                                  &required)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==need);
+        for(size_t i=0u;i<sizeof(html);++i)CHECK(html[i]==0x91);
+        CHECK(stun_md_render_html(&v,2048u,(char*)html,sizeof(html),
+                                  &required)==STUN_UI_OK);
+        CHECK(required==need && strstr((char*)html,"<table>\n")!=NULL);
+        CHECK(strstr((char*)html,"v15_15")!=NULL);
+        stun_md_document_destroy(owned);
+        owned=(stun_md_document*)(uintptr_t)0x1;
+        CHECK(stun_md_parse(markdown,used,32u,used+1u,&owned)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(owned==NULL);
+    }
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -1758,6 +1840,7 @@ int main(void) {
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
+    if(test_gfm_wide_table_budget()) return 1;
     if(test_gfm_delimiter_column_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
