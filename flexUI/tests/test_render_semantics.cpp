@@ -10552,4 +10552,164 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
       check(widget->markdown() == documents[index]);
     }
   }
+
+  // #186: wrap long native MarkdownWidget paragraphs through the production
+  // CSS/layout/text renderer, not via the candidate C11 parser or an HTML
+  // surrogate. While the content box has the same fixed geometry, a source
+  // update retains its valid scroll position and cannot replay old text.
+  it("wraps long paragraphs and preserves bounded scroll across source updates") {
+    Box box(nullptr);
+    auto* root = box.create("div", "md-wrap-root-186");
+    auto* viewport = box.create("div", "md-wrap-viewport-186");
+
+    const std::string alpha =
+        "alpha bravo charlie delta echo foxtrot golf hotel india juliet "
+        "kilo lima mike november oscar papa quebec romeo sierra tango "
+        "uniform victor whiskey xray yankee zulu alpha bravo charlie delta";
+    const std::string omega =
+        "omega cinder copper solar river meadow forest pebble tulip maple "
+        "garden winter summer spring autumn canyon valley harbor ocean "
+        "island planet comet nebula rocket orange purple silver golden";
+    auto* md = box.create_widget<MarkdownWidget>(
+        "div", "md-wrap-doc-186", alpha + "\n");
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(300.0f, 180.0f);
+    box.load_css(R"(
+      #md-wrap-root-186 {
+        width: 220px;
+        height: 160px;
+        display: flex;
+        flex-direction: column;
+      }
+      #md-wrap-viewport-186 {
+        width: 140px;
+        height: 90px;
+        overflow-y: auto;
+        display: block;
+      }
+      #md-wrap-doc-186 {
+        width: 120px;
+        height: 360px;
+        min-height: 360px;
+      }
+      .md-p {
+        width: 112px;
+        height: 210px;
+        font-size: 14px;
+      }
+    )");
+
+    auto* widget = static_cast<MarkdownWidget*>(md->widget);
+    check(widget != nullptr);
+    widget->update(0.0f, *md);
+    box.update();
+    check(viewport->is_scroll_container());
+    check(viewport->max_scroll_y() > 0.0f);
+    check(md->child_count() == 1u);
+    if (md->child_count() != 1u) return;
+    auto* paragraph = static_cast<Element*>(md->children()[0]);
+    check(paragraph->has_class(Symbol("md-p")));
+    check(paragraph->text() == alpha);
+    check(std::isfinite(paragraph->width()));
+    check(paragraph->width() > 0.0f);
+
+    const auto wrapped = layout_text_block(
+        paragraph->computed_style, paragraph->text(), 0.0f, 0.0f,
+        paragraph->width(), std::max(paragraph->height(), 210.0f),
+        Color{}, TextVerticalAlign::Top);
+    check(wrapped.lines.size() >= 4u);
+    for (size_t i = 0; i < wrapped.lines.size(); ++i) {
+      check(!wrapped.lines[i].text.empty());
+      check(std::isfinite(wrapped.lines[i].width));
+      check(wrapped.lines[i].width <= paragraph->width() + 1.0f);
+      if (i != 0u)
+        check(wrapped.lines[i].baseline_y > wrapped.lines[i-1u].baseline_y);
+    }
+
+    RecordingRenderer initial;
+    initial.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer initial_renderer(&initial);
+    RenderManager initial_manager(&initial_renderer);
+    initial_manager.render_tree(root);
+    check(std::any_of(initial.texts.begin(), initial.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("alpha") != std::string::npos;
+        }));
+
+    const float retained_scroll = std::min(28.0f, viewport->max_scroll_y());
+    check(retained_scroll > 0.0f);
+    check(viewport->set_scroll_offset(0.0f, retained_scroll));
+    box.update();
+
+    // Repeat changes to exercise the real old-Node destruction, the same
+    // viewport's scroll metrics and the newer wrapping/painting path.
+    for (size_t iteration=0u; iteration<8u; ++iteration) {
+      const bool use_omega = iteration % 2u == 0u;
+      const std::string& text = use_omega ? omega : alpha;
+      const std::string& old_text = use_omega ? alpha : omega;
+      widget->set_markdown(text + "\n");
+      widget->update(0.0f, *md);
+      box.update();
+      check(md->child_count() == 1u);
+      if (md->child_count() != 1u) return;
+      paragraph = static_cast<Element*>(md->children()[0]);
+      check(paragraph->has_class(Symbol("md-p")));
+      check(paragraph->text() == text);
+      check(std::isfinite(paragraph->width()) &&
+            paragraph->width() > 0.0f);
+      check(approx_eq(viewport->scroll_y(), retained_scroll, 0.01f));
+      check(viewport->scroll_y() <= viewport->max_scroll_y());
+
+      const auto rewrapped = layout_text_block(
+          paragraph->computed_style, paragraph->text(), 0.0f, 0.0f,
+          paragraph->width(), std::max(paragraph->height(), 210.0f),
+          Color{}, TextVerticalAlign::Top);
+      check(rewrapped.lines.size() >= 4u);
+
+      RecordingRenderer scrolled;
+      scrolled.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer scrolled_renderer(&scrolled);
+      RenderManager scrolled_manager(&scrolled_renderer);
+      scrolled_manager.render_tree(root);
+      const std::string old_marker=old_text.substr(0,5);
+      check(std::none_of(scrolled.texts.begin(), scrolled.texts.end(),
+          [&old_marker](const TextCall& call) {
+            return call.text.find(old_marker) != std::string::npos;
+          }));
+
+      check(viewport->set_scroll_offset(0.0f, 0.0f));
+      box.update();
+      RecordingRenderer recovered;
+      recovered.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer recovered_renderer(&recovered);
+      RenderManager recovered_manager(&recovered_renderer);
+      recovered_manager.render_tree(root);
+      const std::string marker=text.substr(0,5);
+      check(std::any_of(recovered.texts.begin(), recovered.texts.end(),
+          [&marker](const TextCall& call) {
+            return call.text.find(marker) != std::string::npos;
+          }));
+      check(std::none_of(recovered.texts.begin(), recovered.texts.end(),
+          [&old_marker](const TextCall& call) {
+            return call.text.find(old_marker) != std::string::npos;
+          }));
+
+      const Element* same_paragraph = paragraph;
+      widget->set_markdown(text + "\n");
+      widget->update(0.0f, *md);
+      box.update();
+      check(md->child_count() == 1u);
+      if (md->child_count() == 1u)
+        check(md->children()[0] == same_paragraph);
+      check(widget->markdown() == text + "\n");
+      Event input=Event::text_input("read-only");
+      box.dispatch_event(input);
+      check(!input.handled);
+      check(widget->markdown() == text + "\n");
+      check(viewport->set_scroll_offset(0.0f, retained_scroll));
+      box.update();
+    }
+  }
 }
