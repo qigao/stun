@@ -45,7 +45,8 @@ static bool copy_text(const stun_ui_rich_document_view *v, size_t index,
 }
 
 static int run_case(const char *source, bool expected_checked,
-                    const char *expected_label) {
+                    const char *expected_label, unsigned expected_quotes,
+                    bool expected_ordered) {
     int failed=0;
     stun_md_document *document=NULL;
     tui_buffer_t *screen=NULL;
@@ -58,12 +59,15 @@ static int run_case(const char *source, bool expected_checked,
     REQUIRE(memcmp(v.raw_markdown,source,length)==0);
 
     size_t task_count=0u,checkbox_count=0u,table_count=0u;
+    size_t quote_count=0u, ordered_count=0u;
     size_t data_row=SIZE_MAX;
     unsigned row_count=0u;
     bool checked=false;
     char label[40]={0};
     for (size_t i=1u;i<v.document.block_count;++i) {
         const stun_ui_block *b=&v.document.blocks[i];
+        if (b->kind==STUN_UI_BLOCK_QUOTE) ++quote_count;
+        if (b->kind==STUN_UI_BLOCK_ORDERED_LIST) ++ordered_count;
         if (b->kind==STUN_UI_BLOCK_TASK_ITEM) ++task_count;
         if (b->kind==STUN_UI_BLOCK_CHECKBOX) {
             ++checkbox_count;
@@ -96,6 +100,8 @@ static int run_case(const char *source, bool expected_checked,
         }
     }
     REQUIRE(task_count==1u && checkbox_count==1u && table_count==1u);
+    REQUIRE(quote_count==expected_quotes);
+    REQUIRE(ordered_count==(expected_ordered?1u:0u));
     REQUIRE(row_count==2u && data_row!=SIZE_MAX);
     REQUIRE(checked==expected_checked);
     REQUIRE(strcmp(label,expected_label)==0);
@@ -156,8 +162,22 @@ int main(void) {
     static const char unchecked[] =
         "- [ ] pending\n\n"
         "  | A | B |\n  | :--- | ---: |\n  | left | right |\n";
-    if (run_case(checked,true,"shipped") ||
-        run_case(unchecked,false,"pending")) return 1;
-    puts("Tango C11 candidate consumer: 2/2 isolated cases passed");
+    /* Quoted TASK markers are recognized in the first LIST_ITEM paragraph,
+     * even though cmark-gfm differs from the GFM §5.3 normative oracle
+     * for some loose quoted lists. The C11 typed checkbox is the authority
+     * for the test-only Tango consumer (never a second Markdown parse). */
+    static const char quoted_checked[] =
+        "> - [x] shipped\n>\n"
+        ">   | A | B |\n>   | :--- | ---: |\n>   | left | right |\n";
+    static const char quoted_ordered_unchecked[] =
+        "> 4. [ ] pending\n>\n"
+        ">    | A | B |\n>    | :--- | ---: |\n"
+        ">    | left | right |\n";
+    if (run_case(checked,true,"shipped",0u,false) ||
+        run_case(unchecked,false,"pending",0u,false) ||
+        run_case(quoted_checked,true,"shipped",1u,false) ||
+        run_case(quoted_ordered_unchecked,false,"pending",1u,true))
+        return 1;
+    puts("Tango C11 candidate consumer: 4/4 isolated cases passed");
     return 0;
 }
