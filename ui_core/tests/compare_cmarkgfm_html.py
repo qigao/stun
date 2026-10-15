@@ -172,6 +172,20 @@ CASES: tuple[Case, ...] = (
     Case("gfm.quoted-list-table-dedent",
          "> - | A | B |\n>   | --- | --- |\n"
          ">   | x | y |\n> after\n", "gfm"),
+    # #186: GFM TASK_ITEM and nested list TABLE compositions. The list,
+    # quote and table must share the existing bounded C11 block owners.
+    Case("gfm.task-table-after-blank",
+         "- [x] parent\n\n  | A | B |\n  | --- | --- |\n"
+         "  | a | b |\n", "gfm"),
+    Case("gfm.quoted-task-table",
+         "> - [x] parent\n>\n>   | A | B |\n"
+         ">   | --- | --- |\n>   | a | b |\n", "gfm"),
+    Case("gfm.nested-list-table",
+         "- parent\n  - | A | B |\n    | --- | --- |\n"
+         "    | a | b |\n", "gfm"),
+    Case("gfm.quoted-nested-list-table",
+         "> - outer\n>   - | A | B |\n"
+         ">     | --- | --- |\n>     | a | b |\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
