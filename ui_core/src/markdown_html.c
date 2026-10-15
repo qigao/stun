@@ -592,8 +592,10 @@ static void html_node(stun_html_writer *w, size_t id,
         html_str(w," disabled=\"\" />");
         const bool sibling=id+1u<doc->block_count &&
                            doc->blocks[id+1u].parent_index==parent;
+        /* Preserve the literal separator after a task marker even when
+         * a loose-list paragraph starts on the following HTML line. */
+        html_str(w," ");
         if(sibling && html_loose_item(w,parent))html_str(w,"\n");
-        else html_str(w," ");
         *next=id+1u;return;
     }
     case STUN_UI_BLOCK_LIST_ITEM: {
