@@ -300,6 +300,26 @@ static int test_gfm_table_alignment_ownership(void) {
     return 0;
 }
 
+/* #186: GFM table escape shields the pipe even when preceded by
+ * another backslash; normalize into the same owned semantic cell. */
+static int test_gfm_even_backslash_cell_ownership(void) {
+    const char markdown[]=
+        "| Name | Value |\n"
+        "| --- | --- |\n"
+        "| a\\\\|b | tail |\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(markdown,sizeof(markdown)-1u,128u,256u,
+                        &doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view v=stun_md_document_view(doc);
+    CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+    CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
+    CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
+    CHECK(text_is(v,"a|b"));
+    CHECK(text_is(v,"tail"));
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -313,9 +333,9 @@ static int test_gfm_task_items(void) {
     CHECK(stun_md_parse(markdown,sizeof(markdown)-1,128,2048,&doc)==STUN_UI_OK);
     const stun_ui_rich_document_view v=stun_md_document_view(doc);
     CHECK(stun_ui_rich_document_validate(&v,128)==STUN_UI_OK);
-    CHECK(kinds(v,STUN_UI_BLOCK_TASK_ITEM)==5);
-    CHECK(kinds(v,STUN_UI_BLOCK_CHECKBOX)==5);
-    CHECK(kinds(v,STUN_UI_BLOCK_LIST_ITEM)==2);
+    CHECK(kinds(v,STUN_UI_BLOCK_TASK_ITEM)==4);
+    CHECK(kinds(v,STUN_UI_BLOCK_CHECKBOX)==4);
+    CHECK(kinds(v,STUN_UI_BLOCK_LIST_ITEM)==3);
     CHECK(kinds(v,STUN_UI_BLOCK_ORDERED_LIST)==1);
     CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1);
     CHECK(metadata_is(v,STUN_UI_BLOCK_CHECKBOX,"x"));
@@ -326,6 +346,7 @@ static int test_gfm_task_items(void) {
     CHECK(text_is(v,"[x]invalid marker"));
     CHECK(text_is(v,"[y] invalid glyph"));
     CHECK(text_is(v,"ordered"));
+    CHECK(text_is(v,"[ ]"));
 
     size_t checked=0,unchecked=0;
     for(size_t i=0;i<v.document.block_count;++i) {
@@ -341,7 +362,7 @@ static int test_gfm_task_items(void) {
         else { CHECK(bytes[0]==' '); ++unchecked; }
     }
     CHECK(checked==3);
-    CHECK(unchecked==2);
+    CHECK(unchecked==1);
     stun_md_document_destroy(doc);
 
     /* The state is derived from source; no mutable checkbox registry exists. */
@@ -1046,6 +1067,7 @@ int main(void) {
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
+    if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_task_items()) return 1;
     if(test_gfm_nested_task_ownership()) return 1;
     puts("C11 Markdown parser: all native tests passed");
