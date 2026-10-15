@@ -319,6 +319,26 @@ CASES: tuple[Case, ...] = (
          "> - | A | B |\n"
          "  | --- | --- |\n"
          ">   | x | y |\n", "gfm"),
+    # #186: code-span pipe escapes, two independent header schemas and
+    # empty-cell padding inside genuine nested GFM table owners. All bytes
+    # are compared with the independent cmark-gfm engine.
+    Case("gfm.quote-list-escaped-code-pipe",
+         "> - | A | B |\n>   | :--- | ---: |\n"
+         ">   | " "\x60" "a\\|b" "\x60" " | c |\n", "gfm"),
+    Case("gfm.nested-list-two-table-alignments",
+         "- outer\n  - | A | B |\n    | :--- | ---: |\n"
+         "    | x | y |\n\n"
+         "    | C | D |\n    | ---: | :---: |\n"
+         "    | u | v |\n", "gfm"),
+    Case("gfm.quote-task-table-ordered-nested",
+         "> 4. [x] parent\n>\n>    | A | B |\n"
+         ">    | --- | --- |\n>    | x | y |\n", "gfm"),
+    Case("gfm.list-table-empty-cells",
+         "- | A | B | C |\n  | --- | --- | --- |\n"
+         "  | x |\n  | | y | |\n", "gfm"),
+    Case("gfm.quote-list-table-data-pipe-backslashes",
+         "> - | A | B |\n>   | --- | --- |\n"
+         + r">   | a\\|b | \| |" + "\n", "gfm"),
     Case("survey.cm.image", "![alt](image.png)\n", gate=False,
          note="C11 renderer rejects unsupported image semantics"),
     Case("survey.cm.raw-html", "<script>unsafe()</script>\n", gate=False,
