@@ -1110,6 +1110,63 @@ static int test_gfm_nested_unsafe_url_atomicity(void) {
     return 0;
 }
 
+/* #186: forged TABLE grandparent ownership must fail even when generic
+ * preorder is valid and TABLE's immediate QUOTE or ITEM->LIST is legal.
+ * The dry-run rejects before writing any caller bytes or output count. */
+static int test_gfm_forged_container_chain_fails_closed(void) {
+    static const struct {
+        const char *source;
+        stun_ui_block_kind container;
+    } samples[] = {
+        {"intro\n\n> | A | B |\n> | --- | --- |\n> | a | b |\n",
+         STUN_UI_BLOCK_QUOTE},
+        {"intro\n\n- | A | B |\n  | --- | --- |\n  | a | b |\n",
+         STUN_UI_BLOCK_LIST}
+    };
+    for(size_t k=0u;k<sizeof(samples)/sizeof(samples[0]);++k) {
+        const size_t n=strlen(samples[k].source);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(samples[k].source,n,128u,n+1u,
+                            &owned)==STUN_UI_OK);
+        stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        size_t baseline=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,128u,NULL,0u,&baseline)==STUN_UI_OK);
+        CHECK(baseline>0u && baseline<512u);
+        const size_t count=v.document.block_count;
+        stun_ui_block *copy=(stun_ui_block*)malloc(count*sizeof(*copy));
+        CHECK(copy!=NULL);
+        memcpy(copy,v.document.blocks,count*sizeof(*copy));
+        size_t para=SIZE_MAX,container=SIZE_MAX,table=SIZE_MAX;
+        for(size_t i=1u;i<count;++i) {
+            if(copy[i].kind==STUN_UI_BLOCK_PARAGRAPH && para==SIZE_MAX)
+                para=i;
+            if(copy[i].kind==samples[k].container &&
+               container==SIZE_MAX)container=i;
+            if(copy[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+        }
+        CHECK(para!=SIZE_MAX && container>para &&
+              table>container && table<count);
+        CHECK(copy[container].parent_index==0u);
+        copy[container].parent_index=(uint32_t)para;
+        v.document.blocks=copy;
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        unsigned char out[512];
+        memset(out,0x9b,sizeof(out));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,128u,(char*)out,sizeof(out),
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(out);++i)CHECK(out[i]==0x9b);
+        CHECK(stun_md_render_html(&v,128u,NULL,0u,&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        free(copy);
+        stun_md_document_destroy(owned);
+    }
+    return 0;
+}
+
 static int test_unsafe_unsupported(void) {
     /* Balanced-parenthesis destinations are not implemented by the C11 parser
      * yet. Use a syntactically admitted link to test the actual HTML URL gate. */
@@ -1168,6 +1225,7 @@ int main(void) {
     }
     if(test_gfm_metadata_fails_closed()) return 1;
     if(test_gfm_forged_ancestry_fails_closed()) return 1;
+    if(test_gfm_forged_container_chain_fails_closed()) return 1;
     if(test_gfm_nested_unsafe_url_atomicity()) return 1;
     if(test_unsafe_unsupported()) return 1;
     printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",

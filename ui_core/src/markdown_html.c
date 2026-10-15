@@ -294,30 +294,47 @@ static void html_children(stun_html_writer *w, size_t id,
     *next=at;
 }
 
+/* Check all semantic ancestors of TABLE in an untrusted RichDoc.  A
+ * forged LIST under PARAGRAPH can retain valid immediate TABLE->ITEM->LIST
+ * edges and generic preorder IDs. The parser's actual TABLE containers
+ * are only DOCUMENT, QUOTE and LIST_ITEM/TASK_ITEM chains. */
+static bool html_table_owner_chain(const stun_ui_document_view *doc,
+                                   size_t table) {
+    size_t child=table;
+    for(size_t hops=0u;child>0u && hops<doc->block_count;++hops) {
+        const uint32_t parent=doc->blocks[child].parent_index;
+        if(parent>=child)return false;
+        const stun_ui_block_kind kind=doc->blocks[child].kind;
+        const stun_ui_block_kind owner=doc->blocks[parent].kind;
+        switch(kind) {
+        case STUN_UI_BLOCK_TABLE:
+        case STUN_UI_BLOCK_QUOTE:
+        case STUN_UI_BLOCK_LIST:
+        case STUN_UI_BLOCK_ORDERED_LIST:
+            if(owner!=STUN_UI_BLOCK_DOCUMENT &&
+               owner!=STUN_UI_BLOCK_QUOTE &&
+               owner!=STUN_UI_BLOCK_LIST_ITEM &&
+               owner!=STUN_UI_BLOCK_TASK_ITEM)return false;
+            break;
+        case STUN_UI_BLOCK_LIST_ITEM:
+        case STUN_UI_BLOCK_TASK_ITEM:
+            if(owner!=STUN_UI_BLOCK_LIST &&
+               owner!=STUN_UI_BLOCK_ORDERED_LIST)return false;
+            break;
+        default:return false;
+        }
+        if(parent==0u)return owner==STUN_UI_BLOCK_DOCUMENT;
+        child=parent;
+    }
+    return false;
+}
+
 static void html_table(stun_html_writer *w, size_t id,
                        size_t *next, size_t depth) {
     const stun_ui_document_view *doc=&w->doc->document;
-    /* Canonical TABLE admission belongs to the document, an explicit
-     * QUOTE, or a real LIST_ITEM/TASK_ITEM frame. Never accept PARAGRAPH,
-     * TABLE_CELL or arbitrary inline ownership in a supplied RichDoc. */
-    const uint32_t owner=doc->blocks[id].parent_index;
-    if(id==0u || owner>=id ||
-       (owner!=0u && doc->blocks[owner].kind!=STUN_UI_BLOCK_QUOTE &&
-        doc->blocks[owner].kind!=STUN_UI_BLOCK_LIST_ITEM &&
-        doc->blocks[owner].kind!=STUN_UI_BLOCK_TASK_ITEM)) {
+    /* Validate the entire typed owner chain before HTML sizing/writing. */
+    if(!html_table_owner_chain(doc,id)) {
         w->error=STUN_UI_INVALID_ARGUMENT;return;
-    }
-    /* A LIST_ITEM/TASK_ITEM is itself owned by exactly one LIST/ORDERED_LIST.
-     * Generic RichDoc preorder validation does not guarantee this second
-     * edge. Reject forged one-hop ancestors before emitting table markup. */
-    if(owner && (doc->blocks[owner].kind==STUN_UI_BLOCK_LIST_ITEM ||
-                 doc->blocks[owner].kind==STUN_UI_BLOCK_TASK_ITEM)) {
-        const uint32_t list=doc->blocks[owner].parent_index;
-        if(list>=owner ||
-           (doc->blocks[list].kind!=STUN_UI_BLOCK_LIST &&
-            doc->blocks[list].kind!=STUN_UI_BLOCK_ORDERED_LIST)) {
-            w->error=STUN_UI_INVALID_ARGUMENT;return;
-        }
     }
     const char *metadata=NULL;size_t columns=0u;
     if(!html_metadata(w,id,&metadata,&columns))return;
