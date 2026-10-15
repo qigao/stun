@@ -252,6 +252,23 @@ static const html_fixture cases[] = {
       "<li><input type=\"checkbox\" disabled=\"\" /> lower</li>\n</ol>\n" },
     { "- [x]done\n", "<ul>\n<li>[x]done</li>\n</ul>\n" },
 
+    /* #186: a marker-line TABLE is owned by the surrounding LIST_ITEM,
+     * not by DOCUMENT or the list itself. This is a tight list. */
+    { "- | Name | Qty |\n  | :--- | ---: |\n  | apple | 2 |\n",
+      "<ul>\n<li>\n<table>\n<thead>\n<tr>\n"
+      "<th align=\"left\">Name</th>\n"
+      "<th align=\"right\">Qty</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td align=\"left\">apple</td>\n"
+      "<td align=\"right\">2</td>\n</tr>\n</tbody>\n"
+      "</table>\n</li>\n</ul>\n" },
+    /* The same canonical TABLE admission is reachable in the active
+     * QUOTE-owned list frame, with exact quote depth on all table rows. */
+    { "> - | A | B |\n>   | --- | --- |\n>   | x | y |\n",
+      "<blockquote>\n<ul>\n<li>\n<table>\n"
+      "<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n"
+      "</tr>\n</thead>\n<tbody>\n<tr>\n"
+      "<td>x</td>\n<td>y</td>\n</tr>\n</tbody>\n"
+      "</table>\n</li>\n</ul>\n</blockquote>\n" },
     /* GFM tables terminate before raw HTML blocks. The SAFE writer must
      * still escape raw markup; SPEC is a separately opt-in test policy. */
     { "| H | V |\n| --- | --- |\n| a | b |\n<div>\nraw\n</div>\n",
@@ -816,7 +833,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==377,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==379,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
