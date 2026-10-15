@@ -2387,8 +2387,12 @@ static bool md_list_consume(stun_md_document *d,md_list_stack *stack,
            (!marker_found || marker.column>3u) &&
            continuation!=UINT32_MAX && !md_rule(s,line.begin,line.end) &&
            s[line_begin]!='>' &&
-           (f->quote_paragraph==UINT32_MAX ||
-            !md_quote_lazy_interrupts(s,line,line_begin))) {
+           /* Lazy continuation can never consume a new ATX/fence/rule/list
+            * opener, whether its paragraph is a LIST_ITEM or an inner
+            * QUOTE. Reuse the existing bounded interruption classifier:
+            * an unindented '# Root' after nested list/table closes the
+            * list owner and releases true ROOT reference definitions. */
+           !md_quote_lazy_interrupts(s,line,line_begin)) {
             if(md_add(d,continuation,STUN_UI_BLOCK_LINE_BREAK,0u)
                ==UINT32_MAX) return true;
             (void)md_inline(d,continuation,s+line_begin,
