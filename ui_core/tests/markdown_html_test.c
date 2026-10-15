@@ -281,6 +281,19 @@ static const html_fixture cases[] = {
       "<tbody>\n<tr>\n<td>a</td>\n<td>b</td>\n"
       "</tr>\n</tbody>\n</table>\n</li>\n</ul>\n"
       "</blockquote>\n" },
+    /* GFM §5.3 also recognizes a quoted loose ORDERED task at start 4,
+     * despite cmark-gfm 2025.10.22 preserving literal '[x]' here.
+     * Its independent reference output is reported as a known difference;
+     * the normative fixed-disabled checkbox HTML stays a strict Golden. */
+    { "> 4. [x] parent\n>\n>    | A | B |\n"
+      ">    | --- | --- |\n>    | x | y |\n",
+      "<blockquote>\n<ol start=\"4\">\n"
+      "<li><input type=\"checkbox\" checked=\"\" disabled=\"\" /> \n"
+      "<p>parent</p>\n<table>\n<thead>\n<tr>\n"
+      "<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n"
+      "<tbody>\n<tr>\n<td>x</td>\n<td>y</td>\n"
+      "</tr>\n</tbody>\n</table>\n</li>\n</ol>\n"
+      "</blockquote>\n" },
     /* #186: a preceding tight LIST_ITEM paragraph remains a sibling
      * before the GFM TABLE, even without a blank separator. */
     { "- intro\n  | A | B |\n  | --- | --- |\n  | x | y |\n",
@@ -859,7 +872,7 @@ static const html_fixture cases[] = {
     { "", "" },
 };
 
-_Static_assert(sizeof(cases)/sizeof(cases[0])==382,
+_Static_assert(sizeof(cases)/sizeof(cases[0])==383,
                "Explicit HTML fixture denominator changed");
 
 static int test_golden(const html_fixture *f) {
