@@ -421,6 +421,71 @@ static int test_gfm_explicit_quote_table_ownership(void) {
 /* #186: admitted GFM LIST_ITEM tables use the SAME typed TABLE owner and
  * alignment metadata as ROOT/QUOTE tables. Check nested ownership, retained
  * source bytes, actual HTML emission and bounded failure rollback. */
+/* #186: bounded 16-column GFM metadata and six owned TABLE_ROW nodes.
+ * No dynamic/renderer-side column inference; parser admission under a
+ * smaller node budget must roll back the complete owner and output NULL. */
+static int test_gfm_wide_table_capacity(void) {
+    enum { COLUMNS=16, DATA_ROWS=5 };
+    char source[4096];size_t used=0u;
+    for(size_t row=0u;row<DATA_ROWS+2u;++row) {
+        if(row==DATA_ROWS+1u)break;
+        for(size_t col=0u;col<COLUMNS;++col) {
+            const char *part=row==0u?"| head":
+                             row==1u?"| ---":"| item";
+            const size_t length=strlen(part);
+            CHECK(used+length+3u<sizeof(source));
+            memcpy(source+used,part,length);used+=length;
+        }
+        const char ending[]=" |\n";
+        memcpy(source+used,ending,sizeof(ending)-1u);
+        used+=sizeof(ending)-1u;
+    }
+    source[used]='\0';
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(source,used,256u,used+1u,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&view,256u)==STUN_UI_OK);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE)==1u);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_ROW)==(size_t)(DATA_ROWS+1u));
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_CELL)==
+          (size_t)(COLUMNS*(DATA_ROWS+1u)));
+    size_t table=SIZE_MAX;
+    for(size_t i=1u;i<view.document.block_count;++i)
+        if(view.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+    CHECK(table!=SIZE_MAX);
+    const char *metadata=NULL;size_t meta_bytes=SIZE_MAX;
+    CHECK(stun_ui_rich_document_metadata(&view,table,&metadata,
+                                         &meta_bytes)==STUN_UI_OK);
+    CHECK(metadata && meta_bytes==COLUMNS);
+    for(size_t i=0u;i<meta_bytes;++i)
+        CHECK((uint8_t)metadata[i]==STUN_UI_TABLE_ALIGN_NONE);
+    CHECK(view.raw_markdown_bytes==used &&
+          memcmp(view.raw_markdown,source,used)==0);
+    size_t need=SIZE_MAX;
+    CHECK(stun_md_render_html(&view,256u,NULL,0u,&need)==STUN_UI_OK);
+    CHECK(need>0u && need<16384u);
+    char *out=(char*)malloc(need+2u);
+    CHECK(out!=NULL);
+    memset(out,0xa4,need+2u);
+    size_t required=SIZE_MAX;
+    CHECK(stun_md_render_html(&view,256u,out,need,&required)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(required==need);
+    for(size_t i=0u;i<need+2u;++i)CHECK((unsigned char)out[i]==0xa4u);
+    CHECK(stun_md_render_html(&view,256u,out,need+1u,&required)==STUN_UI_OK);
+    CHECK(required==need);
+    CHECK(strstr(out,"<table>\n<thead>")!=NULL);
+    free(out);
+    stun_md_document_destroy(doc);
+
+    /* Capacity denial must not expose partially owned TABLE/ROW/CELL data. */
+    doc=(stun_md_document*)(uintptr_t)0x1;
+    CHECK(stun_md_parse(source,used,64u,used+1u,&doc)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(doc==NULL);
+    return 0;
+}
+
 static int test_gfm_list_table_ownership(void) {
     const char *sources[] = {
         "- | A | B |\n  | :--- | ---: |\n  | a\\|b | 7 |\n",
@@ -1583,6 +1648,7 @@ int main(void) {
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
     if(test_gfm_list_table_ownership()) return 1;
+    if(test_gfm_wide_table_capacity()) return 1;
     if(test_gfm_composed_list_table_ownership()) return 1;
     if(test_gfm_paragraph_to_list_table()) return 1;
     if(test_gfm_nested_ordered_interrupt_guard()) return 1;
