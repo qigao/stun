@@ -148,8 +148,8 @@ CASES: tuple[Case, ...] = (
          "> | A | B |\n> | --- | --- |\n> | a | b |\n>\n"
          "> | C | D |\n> | --- | --- |\n> | c | d |\n", "gfm"),
     Case("gfm.quote-table-after-fence",
-         "> \`\`\`\n> | A | B |\n> | --- | --- |\n"
-         "> \`\`\`\n> | C | D |\n> | --- | --- |\n> | c | d |\n", "gfm"),
+         "> ```\n> | A | B |\n> | --- | --- |\n"
+         "> ```\n> | C | D |\n> | --- | --- |\n> | c | d |\n", "gfm"),
     Case("gfm.quote-table-unmarked-delimiter",
          "> | A | B |\n| --- | --- |\n", "gfm"),
     Case("gfm.quote-table-unmarked-row",
