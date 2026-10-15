@@ -404,7 +404,7 @@ static int test_gfm_nested_task_ownership(void) {
     CHECK(stun_md_render_html(&v,256u,html,need+1u,&required)==STUN_UI_OK);
     CHECK(required==need);
     CHECK(strstr(html,"<ul>")!=NULL && strstr(html,"</ul>")!=NULL);
-    CHECK(strstr(html,"<input type=\\"checkbox\\" checked=\\"\\" disabled=\\"\\" />")!=NULL);
+    CHECK(strstr(html,"<input type=\"checkbox\" checked=\"\" disabled=\"\" />")!=NULL);
     stun_md_document_destroy(doc);
     return 0;
 }
