@@ -103,6 +103,23 @@ jobs:
           assert not lost, f"prior SPEC regressions: {lost}"
           assert gained==[206,354,540], f"unqualified/new cases: {gained}"
           assert len(actual)==652, f"still missing: {sorted(set(range(1,653))-actual)}"
+          sb=json.loads((root/"commonmark_0_31_2_baseline.json").read_text())
+          safe=json.loads(Path("build/unicode17-qa/safe-652.json").read_text())
+          sr=safe["cases"]
+          assert len(sr)==652
+          safe_digest=hashlib.sha256(json.dumps(
+              [(r["id"],r["markdown"],r["official_expected_html"]) for r in sr],
+              ensure_ascii=False,separators=(",",":")
+          ).encode("utf-8")).hexdigest()
+          assert safe_digest==sb["official_fixture_sha256"]==digest, "SAFE corpus drift"
+          safe_actual={int(r["id"][-4:]) for r in sr if r["native_matches_official"]}
+          safe_baseline=set(sb["qualified_official_ids"])
+          safe_lost=sorted(safe_baseline-safe_actual)
+          safe_gained=sorted(safe_actual-safe_baseline)
+          print(f"SAFE exact={len(safe_actual)}/652 baseline={len(safe_baseline)} lost={safe_lost} gained={safe_gained}")
+          assert not safe_lost, f"prior SAFE regressions: {safe_lost}"
+          assert safe_gained==[206,354,540], f"SAFE additional matches: {safe_gained}"
+          assert len(safe_actual)==576
           PY
 
       - name: Upload raw candidate proof and both policy surveys
