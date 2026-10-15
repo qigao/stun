@@ -2491,6 +2491,11 @@ static bool md_table_row(stun_md_document *d, uint32_t table,
  * a pipe still supplies a one-column data row (padded to header width). */
 static bool md_table_starts_new_block(const char *s, size_t b, size_t e) {
     if (b>=e || s[b]=='>') return true;
+    /* #186: an actual block-level HTML opener terminates a GFM table;
+     * otherwise it would incorrectly become a DATA cell. Reuse the SAME
+     * CommonMark type-1..7 admission classifier as the surrounding block
+     * parser, never a private HTML vocabulary or a renderer-side guess. */
+    if (md_raw_html_root_kind(s,b,e,false)) return true;
     if (md_rule(s,b,e)) return true;
     size_t hb=b,he=e;
     if (md_atx(s,&hb,&he)) return true;
