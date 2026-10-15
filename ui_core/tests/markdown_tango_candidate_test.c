@@ -4,6 +4,7 @@
  * immutable source and metadata until the consumer returns.
  */
 #include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
 #include <tui.h>
 
 #include <stdbool.h>
@@ -51,6 +52,16 @@ static int run_case(const char *source, bool expected_checked,
     stun_md_document *document=NULL;
     tui_buffer_t *screen=NULL;
     const size_t length=strlen(source);
+    /* A cancelled/inadmissible C11 parse must publish no new owner.
+     * This is an external consumer boundary, not a hidden fallback path. */
+    stun_md_document *denied=(stun_md_document *)(uintptr_t)1u;
+    REQUIRE(stun_md_parse(source,length,1u,length+1u,&denied)==
+            STUN_UI_CAPACITY_EXCEEDED);
+    REQUIRE(denied==NULL);
+    denied=(stun_md_document *)(uintptr_t)1u;
+    REQUIRE(stun_md_parse(source,length,512u,length-1u,&denied)==
+            STUN_UI_CAPACITY_EXCEEDED);
+    REQUIRE(denied==NULL);
     REQUIRE(stun_md_parse(source,length,512u,length+1u,&document)==STUN_UI_OK);
     REQUIRE(document!=NULL);
     const stun_ui_rich_document_view v=stun_md_document_view(document);
@@ -106,6 +117,23 @@ static int run_case(const char *source, bool expected_checked,
     REQUIRE(checked==expected_checked);
     REQUIRE(strcmp(label,expected_label)==0);
 
+    /* HTML measurement succeeds but any undersized consumer output buffer
+     * must remain untouched. The real Tango path below uses the same typed
+     * view, never HTML as a substitute Markdown grammar. */
+    size_t html_bytes=SIZE_MAX, capacity_result=SIZE_MAX;
+    REQUIRE(stun_md_render_html(&v,512u,NULL,0u,&html_bytes)==STUN_UI_OK);
+    REQUIRE(html_bytes>0u && html_bytes<2048u);
+    unsigned char html[2048];
+    memset(html,0xd5,sizeof(html));
+    REQUIRE(stun_md_render_html(&v,512u,(char*)html,html_bytes,
+                                &capacity_result)==STUN_UI_CAPACITY_EXCEEDED);
+    REQUIRE(capacity_result==html_bytes);
+    for(size_t k=0;k<sizeof(html);++k) REQUIRE(html[k]==0xd5u);
+    REQUIRE(stun_md_render_html(&v,512u,(char*)html,sizeof(html),
+                                &capacity_result)==STUN_UI_OK);
+    REQUIRE(capacity_result==html_bytes);
+    REQUIRE(html[html_bytes]=='\0');
+
     /* Inspect typed data cells instead of reparsing the Markdown. */
     char cells[2][40]={{0}};
     unsigned column=0u;
@@ -149,6 +177,18 @@ static int run_case(const char *source, bool expected_checked,
     REQUIRE(v.raw_markdown_bytes==length);
     REQUIRE(memcmp(v.raw_markdown,source,length)==0);
 
+    /* After transfer into real Tango cells the C11 owner may be released;
+     * no borrowed RichDoc pointer escapes this synchronous projection. */
+    stun_md_document_destroy(document);
+    document=NULL;
+    REQUIRE(tui_buffer_at_const(screen,0,0)!=NULL);
+    REQUIRE(tui_buffer_at_const(screen,0,0)->ch==
+            (expected_checked?0x2611u:0x2610u));
+    for(size_t i=0u;i<(size_t)written;++i) {
+        const tui_cell_t *cell=tui_buffer_at_const(screen,(int)i,1);
+        REQUIRE(cell!=NULL && cell->ch==(unsigned char)rendered_row[i]);
+    }
+
 cleanup:
     if (screen) tui_buffer_destroy(screen);
     stun_md_document_destroy(document);
@@ -173,11 +213,17 @@ int main(void) {
         "> 4. [ ] pending\n>\n"
         ">    | A | B |\n>    | :--- | ---: |\n"
         ">    | left | right |\n";
-    if (run_case(checked,true,"shipped",0u,false) ||
-        run_case(unchecked,false,"pending",0u,false) ||
-        run_case(quoted_checked,true,"shipped",1u,false) ||
-        run_case(quoted_ordered_unchecked,false,"pending",1u,true))
-        return 1;
-    puts("Tango C11 candidate consumer: 4/4 isolated cases passed");
+    /* Exercise explicit owner teardown/recreation under Sanitizers. Each
+     * iteration verifies budget rejection, output rollback, independent C11
+     * owner drain, and persistence of synchronous Tango cell copies. */
+    enum { REPEATS=16u, SOURCES=4u };
+    for(unsigned round=0u;round<REPEATS;++round) {
+        if (run_case(checked,true,"shipped",0u,false) ||
+            run_case(unchecked,false,"pending",0u,false) ||
+            run_case(quoted_checked,true,"shipped",1u,false) ||
+            run_case(quoted_ordered_unchecked,false,"pending",1u,true))
+            return 1;
+    }
+    puts("Tango C11 candidate consumer: 64/64 lifecycle cases passed (4 sources x 16 repeats)");
     return 0;
 }
