@@ -265,6 +265,41 @@ static int test_gfm_table_termination_and_uneven_rows(void) {
     return 0;
 }
 
+/* #186: the delimiter row publishes the column alignment vector on
+ * the TABLE node (never inferred by the HTML renderer from inline text).
+ * Subsequent short rows still inherit all column alignments. */
+static int test_gfm_table_alignment_ownership(void) {
+    const char sample[]=
+        "| A | B | C | D |\n"
+        "| :--- | :---: | ---: | --- |\n"
+        "| first | second |\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1u,128u,512u,&doc)==STUN_UI_OK);
+    const stun_ui_rich_document_view view=stun_md_document_view(doc);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE)==1u);
+    size_t table=SIZE_MAX;
+    for(size_t i=0u;i<view.document.block_count;++i)
+        if(view.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)table=i;
+    CHECK(table!=SIZE_MAX);
+    const char *metadata=NULL;size_t bytes=0u;
+    CHECK(stun_ui_rich_document_metadata(&view,table,&metadata,&bytes)==STUN_UI_OK);
+    CHECK(metadata!=NULL && bytes==4u);
+    const uint8_t expected[4]={STUN_UI_TABLE_ALIGN_LEFT,
+        STUN_UI_TABLE_ALIGN_CENTER,STUN_UI_TABLE_ALIGN_RIGHT,
+        STUN_UI_TABLE_ALIGN_NONE};
+    CHECK(memcmp(metadata,expected,sizeof(expected))==0);
+    CHECK(kinds(view,STUN_UI_BLOCK_TABLE_CELL)==8u);
+    stun_md_document_destroy(doc);
+
+    /* A TABLE with more columns than the admitted node budget must fail
+     * before any unbounded alignment scratch allocation or RichDoc publish. */
+    doc=(stun_md_document*)(uintptr_t)0x1;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1u,3u,512u,&doc)==
+          STUN_UI_CAPACITY_EXCEEDED);
+    CHECK(doc==NULL);
+    return 0;
+}
+
 static int test_gfm_task_items(void) {
     const char markdown[] =
         "- [x] shipped\n"
@@ -955,6 +990,7 @@ int main(void) {
     if(test_link_label_delimiter_isolation()) return 1;
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
+    if(test_gfm_table_alignment_ownership()) return 1;
     if(test_gfm_task_items()) return 1;
     puts("C11 Markdown parser: all native tests passed");
     return 0;
