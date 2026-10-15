@@ -1056,6 +1056,60 @@ static int test_gfm_forged_ancestry_fails_closed(void) {
     return 0;
 }
 
+/* #186: unsafe URL admission must fail the entire transactional HTML
+ * render even when the LINK sits in a TABLE_CELL beneath a LIST/QUOTE or
+ * after a preceding fixed disabled CHECKBOX. No HTML already measured can
+ * leak to the caller and no link scheme can bypass the common URL policy. */
+static int test_gfm_nested_unsafe_url_atomicity(void) {
+    static const char *const inputs[] = {
+        "| A | B |\n| --- | --- |\n"
+        "| x | [bad](javascript:alert) |\n",
+        "- | A | B |\n  | --- | --- |\n"
+        "  | x | [bad](javascript:alert) |\n",
+        "> - | A | B |\n>   | --- | --- |\n"
+        ">   | x | [bad](data:text/html) |\n",
+        "- [x] [bad](javascript:alert)\n",
+        "- [x] safe\n\n  | A | B |\n  | --- | --- |\n"
+        "  | x | [bad](javascript:alert) |\n"
+    };
+    _Static_assert(sizeof(inputs)/sizeof(inputs[0])==5u,
+                   "GFM unsafe nested URL fixture denominator");
+    for(size_t k=0u;k<sizeof(inputs)/sizeof(inputs[0]);++k) {
+        const size_t bytes=strlen(inputs[k]);
+        stun_md_document *owned=NULL;
+        CHECK(stun_md_parse(inputs[k],bytes,128u,bytes+1u,
+                            &owned)==STUN_UI_OK);
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,128u)==STUN_UI_OK);
+        bool link_found=false;
+        for(size_t i=1u;i<v.document.block_count;++i)
+            if(v.document.blocks[i].kind==STUN_UI_BLOCK_LINK)
+                link_found=true;
+        CHECK(link_found); /* Exercise URL rejection, not literal fallback. */
+        if(k==0u || k==1u || k==2u || k==4u) {
+            bool table_found=false;
+            for(size_t i=1u;i<v.document.block_count;++i)
+                if(v.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)
+                    table_found=true;
+            CHECK(table_found);
+        }
+        unsigned char output[4096];
+        memset(output,0x8d,sizeof(output));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,128u,(char*)output,
+                                  sizeof(output),&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(output);++i)
+            CHECK(output[i]==0x8d);
+        CHECK(stun_md_render_html(&v,128u,NULL,0u,&required)==
+              STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        stun_md_document_destroy(owned);
+    }
+    return 0;
+}
+
 static int test_unsafe_unsupported(void) {
     /* Balanced-parenthesis destinations are not implemented by the C11 parser
      * yet. Use a syntactically admitted link to test the actual HTML URL gate. */
@@ -1114,6 +1168,7 @@ int main(void) {
     }
     if(test_gfm_metadata_fails_closed()) return 1;
     if(test_gfm_forged_ancestry_fails_closed()) return 1;
+    if(test_gfm_nested_unsafe_url_atomicity()) return 1;
     if(test_unsafe_unsupported()) return 1;
     printf("Stun C11 RichDoc HTML: %zu/%zu bounded subset fixtures passed\n",
            sizeof(cases)/sizeof(cases[0]),sizeof(cases)/sizeof(cases[0]));
