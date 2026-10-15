@@ -2633,7 +2633,13 @@ static bool md_table_admit(stun_md_document *d,uint32_t parent,
     if(item_column) {
         if(sep_indent<item_column || sep_indent-item_column>3u)
             return false;
-    } else if(quote_depth && sep_indent>3u) return false;
+    } else if(sep_indent>3u) {
+        /* Root and direct-QUOTE tables obey CommonMark's 0..3 visual
+         * indentation limit for a delimiter. Four spaces (or a TAB at
+         * column zero) are code indentation, not TABLE admission.
+         * LIST_ITEM tables intentionally use their own content column. */
+        return false;
+    }
     size_t columns=0u,delimiter_columns=0u;
     if(!md_table_scan(s,header_begin,header.end,false,true,
                       &columns,NULL,0u) ||
