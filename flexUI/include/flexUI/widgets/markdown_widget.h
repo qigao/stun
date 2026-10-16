@@ -46,6 +46,10 @@ private:
     const std::size_t max_render_elements_;
     // Borrowed identities only; Box remains the sole Element owner.
     std::vector<Element*> published_projection_;
+    // At most one detached projection may await a callback-safe Box drain.
+    // If retirement fails, further parse/publish work is blocked until it
+    // succeeds; the renderer cannot accumulate unbounded orphaned Elements.
+    std::vector<Element*> pending_retirement_;
 };
 
 } // namespace flexUI

@@ -822,6 +822,60 @@ spec("MarkdownWidget Parsing") {
         }
     }
 
+    it("keeps deferred retirement bounded when FocusOut callbacks throw") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-c11-focus-throw-231", "# 初期 🌱\n");
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        auto* old_focus = md->child_at(0u);
+        const std::size_t steady_count = box->owned_element_count();
+        box->set_focus(old_focus);
+        std::size_t focus_out_attempts = 0u;
+        box->set_framework_event_callback([&](Element&, const Event& event) {
+            if (event.type == EventType::FocusOut) {
+                ++focus_out_attempts;
+                throw std::runtime_error("injected FocusOut callback failure");
+            }
+        });
+
+        widget->set_markdown("# 可见内容 ✅\n");
+        widget->update(0.0f, *md);
+        check(focus_out_attempts == 1u);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) {
+            box->set_framework_event_callback({});
+            return;
+        }
+        auto* visible = md->child_at(0u);
+        check(visible->text() == "可见内容 ✅");
+        check(box->owned_element_count() == steady_count + 1u);
+
+        // Even repeated source changes cannot admit another projection
+        // while an old detached subtree is still held by Box.
+        widget->set_markdown("# 延后处理 🏯\n");
+        for (std::size_t n = 0u; n < 8u; ++n) {
+            widget->update(0.0f, *md);
+            check(md->child_count() == 1u);
+            if (md->child_count() != 1u) break;
+            check(md->child_at(0u) == visible);
+            check(box->owned_element_count() == steady_count + 1u);
+        }
+        check(focus_out_attempts > 1u);
+
+        box->set_framework_event_callback({});
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u)
+            check(md->child_at(0u)->text() == "延后处理 🏯");
+        check(box->owned_element_count() == steady_count);
+        check(box->focused_element() == nullptr);
+    }
+
     // #186 / #231: repeated source updates must preserve the sole C11
     // parser and the existing Box-owned presentation lifecycle.
     it("GFM repeated task table heading and empty updates remain bounded") {

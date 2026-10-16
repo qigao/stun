@@ -461,7 +461,8 @@ void MarkdownWidget::set_markdown(const std::string& markdown) {
 }
 
 void MarkdownWidget::rebuild_elements(Element& elem) {
-    if (!needs_rebuild_ || !elem.owner_box_ || rebuilding_) return;
+    if (!elem.owner_box_ || rebuilding_ ||
+        (!needs_rebuild_ && pending_retirement_.empty())) return;
     // Focus-out during retirement can synchronously invoke application
     // callbacks. Defer any reentrant update to the next outer UI update.
     rebuilding_ = true;
@@ -469,6 +470,15 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
         bool& flag;
         ~RebuildExit() { flag = false; }
     } reset{rebuilding_};
+    // FocusOut/application callbacks may throw during Box retirement.
+    // Hold one pending batch and refuse new projections until that batch can
+    // be drained safely; retry on the next owner-driven widget update.
+    if (!pending_retirement_.empty()) {
+        if (!elem.owner_box_->retire_detached_elements(pending_retirement_))
+            return;
+        pending_retirement_.clear();
+    }
+    if (!needs_rebuild_) return;
     /* No-fallback C11 admission. Keep the previous element tree if the next
      * source is over budget or invalid; never publish a partially built AST.
      * The widget remains marked for update rather than adopting old grammar. */
@@ -506,7 +516,8 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
     } catch (const std::exception&) {
         // Adoption succeeded but publication did not: explicitly reclaim the
         // detached batch to avoid persistent orphan nodes in the Box.
-        (void)elem.owner_box_->retire_detached_elements(next_projection);
+        if (!elem.owner_box_->retire_detached_elements(next_projection))
+            pending_retirement_ = std::move(next_projection);
         return;
     }
 
@@ -521,7 +532,8 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
     // first clears focus/capture, animation, style, and container caches.
     std::vector<Element*> previous = std::move(published_projection_);
     published_projection_ = std::move(next_projection);
-    (void)elem.owner_box_->retire_detached_elements(previous);
+    if (!elem.owner_box_->retire_detached_elements(previous))
+        pending_retirement_ = std::move(previous);
 }
 
 void MarkdownWidget::emit_render_commands(const Element&, RenderCommandList&) {}
