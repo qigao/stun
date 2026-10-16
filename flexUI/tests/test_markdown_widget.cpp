@@ -5,6 +5,7 @@
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
 #include <flex/bridge/renderer.h>
+#include <stdexcept>
 #include <unordered_set>
 
 using namespace flexUI;
@@ -301,6 +302,48 @@ spec("MarkdownWidget Parsing") {
         widget->update(0.0f,*md);
         check(md->child_count()==3u);
         check(widget->markdown()==markdown);
+    }
+
+    it("replaces a validated Element child set without a partial tree") {
+        auto* host = box->create("div", "md-atomic-child-host-231");
+        root->append(host);
+        auto* a = box->create("span");
+        auto* b = box->create("span");
+        auto* c = box->create("span");
+        host->replace_children({a, b});
+        check(host->child_count() == 2u);
+        check(a->parent_elem() == host);
+        check(b->parent_elem() == host);
+
+        bool rejected = false;
+        try {
+            host->replace_children({c, c});
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        check(rejected);
+        check(host->child_count() == 2u);
+        check(host->child_at(0) == a);
+        check(host->child_at(1) == b);
+        check(c->parent_elem() == nullptr);
+
+        rejected = false;
+        try {
+            host->replace_children({host});
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        check(rejected);
+        check(host->child_at(0) == a);
+        check(host->child_at(1) == b);
+
+        host->replace_children({b, c});
+        check(host->child_count() == 2u);
+        check(host->child_at(0) == b);
+        check(host->child_at(1) == c);
+        check(a->parent_elem() == nullptr);
+        check(b->parent_elem() == host);
+        check(c->parent_elem() == host);
     }
 
     // #231: even if the parser accepts the input, a later projection
