@@ -1618,6 +1618,35 @@ void Box::set_variable(const std::string& name, const std::string& value) {
   }
 }
 
+void Box::adopt_detached_elements(std::vector<std::unique_ptr<Element>>&& staged) {
+  // Every staged element must be an id-less application element whose parent,
+  // if any, belongs to this batch. All validation/allocation occurs before
+  // moving a single owning pointer into the Box.
+  std::unordered_set<Element*> batch;
+  batch.reserve(staged.size());
+  for (const auto& element : staged) {
+    if (!element || element->owner_box_ || element->is_widget_owned() ||
+        element->widget || !element->id().empty() ||
+        !batch.insert(element.get()).second) {
+      throw std::invalid_argument("invalid detached Element admission");
+    }
+  }
+  for (const auto& element : staged) {
+    Element* parent = element->parent_elem();
+    if (parent && !batch.count(parent)) {
+      throw std::invalid_argument("detached Element has foreign parent");
+    }
+  }
+  if (staged.size() > elements_.max_size() - elements_.size()) {
+    throw std::length_error("detached Element batch exceeds Box capacity");
+  }
+  elements_.reserve(elements_.size() + staged.size());
+  for (auto& element : staged) {
+    element->owner_box_ = this;
+    elements_.push_back(std::move(element));
+  }
+}
+
 Element* Box::create(const std::string& tag, const std::string& id) {
   auto elem = std::make_unique<Element>();
   elem->set_tag(tag);
