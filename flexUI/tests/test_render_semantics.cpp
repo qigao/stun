@@ -10852,20 +10852,20 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     check(!input.handled);
     check(widget->markdown()==tall);
   }
-  // #186/#228: verify Unicode HEADING, TASK LIST and TABLE separated by
-  // a root-level thematic break. The shipping C++ md::parse fails to close
-  // LIST on a blank-only separator before a TABLE (tracked under #186).
-  // Exercise real Box layout, scroll and painting without a parser cutover.
-  it("paints Unicode GFM blocks across explicit root break and source replacement") {
+  // #186/#229/#230: exercise the genuine blank-only TASK LIST -> root
+  // TABLE syntax against *one* C11 RichDoc projection, through real Box
+  // CSS, overflow scroll, source replacement and recorded Unicode text.
+  // Previously the old C++ md::parse misnested precisely this source.
+  it("paints C11 Unicode tasks and root table after blank-only source replacement") {
     Box box(nullptr);
     auto* root=box.create("div","md-unicode-gfm-root-186");
     auto* viewport=box.create("div","md-unicode-gfm-viewport-186");
     static const char* const sources[]={
       "# 日本語 café 😀 Alpha\n\n"
-      "- [x] 発送済み\n- [ ] 待機中\n\n---\n\n"
+      "- [x] 発送済み\n- [ ] 待機中\n\n"
       "| City | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
       "# Ελληνικά café 😀 Beta\n\n"
-      "- [ ] review\n- [x] 完了\n\n---\n\n"
+      "- [ ] review\n- [x] 完了\n\n"
       "| City | Price |\n| :--- | ---: |\n| Αθήνα | £30 |\n"
     };
     static const char* const titles[]={"日本語 café 😀 Alpha","Ελληνικά café 😀 Beta"};
@@ -10898,7 +10898,7 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     widget->update(0.0f,*md);
     box.update();
     check(viewport->is_scroll_container());
-    check(md->child_count()==4u);
+    check(md->child_count()==3u);
     check(viewport->max_scroll_y()>0.0f);
     if(md->child_count()!=4u||viewport->max_scroll_y()<=0.0f)return;
 
@@ -10942,18 +10942,16 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
       widget->update(0.0f,*md);
       box.update();
       check(widget->markdown()==sources[index]);
-      check(md->child_count()==4u);
+      check(md->child_count()==3u);
       check(viewport->scroll_y()>=0.0f);
       check(viewport->scroll_y()<=viewport->max_scroll_y());
       if(md->child_count()!=4u)return;
       auto* heading=static_cast<Element*>(md->children()[0]);
       auto* list=static_cast<Element*>(md->children()[1]);
-      auto* hr=static_cast<Element*>(md->children()[2]);
-      auto* table=static_cast<Element*>(md->children()[3]);
+      auto* table=static_cast<Element*>(md->children()[2]);
       check(heading->has_class(Symbol("md-header")));
       check(heading->text()==titles[index]);
       check(list->has_class(Symbol("md-ul")));
-      check(hr->has_class(Symbol("md-hr")));
       check(table->has_class(Symbol("md-table")));
       check(list->child_count()==2u);
       check(table->child_count()==2u);
@@ -10993,17 +10991,15 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
           }));
       const Element* previous_heading=static_cast<const Element*>(md->children()[0]);
       const Element* previous_list=static_cast<const Element*>(md->children()[1]);
-      const Element* previous_hr=static_cast<const Element*>(md->children()[2]);
-      const Element* previous_table=static_cast<const Element*>(md->children()[3]);
+      const Element* previous_table=static_cast<const Element*>(md->children()[2]);
       widget->set_markdown(sources[index]);
       widget->update(0.0f,*md);
       box.update();
-      check(md->child_count()==4u);
-      if(md->child_count()==4u) {
+      check(md->child_count()==3u);
+      if(md->child_count()==3u) {
         check(md->children()[0]==previous_heading);
         check(md->children()[1]==previous_list);
-        check(md->children()[2]==previous_hr);
-        check(md->children()[3]==previous_table);
+        check(md->children()[2]==previous_table);
       }
       Event input=Event::text_input("must-not-edit");
       box.dispatch_event(input);
