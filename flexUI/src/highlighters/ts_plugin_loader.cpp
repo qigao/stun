@@ -90,13 +90,13 @@ static std::filesystem::path executable_dir() {
 }
 
 bool load_ts_plugin(const std::string& path) {
-    PluginHandle handle = PLUGIN_LOAD(path.c_str());
-    if (!handle) return false;
-    // From here on, one RAII lease owns the handle even if the registry
-    // allocation throws. Never persist an unowned function pointer.
+    // Allocate the owner before loading the DSO so a bad_alloc cannot leak
+    // a library handle between PLUGIN_LOAD and shared_ptr construction.
     auto plugin = std::make_shared<LoadedPlugin>();
-    plugin->handle = handle;
-    auto get_info = (const TSPluginInfo* (*)())PLUGIN_SYM(handle, "ts_plugin_info");
+    plugin->handle = PLUGIN_LOAD(path.c_str());
+    if (!plugin->handle) return false;
+    auto get_info = (const TSPluginInfo* (*)())PLUGIN_SYM(
+        plugin->handle, "ts_plugin_info");
     if (!get_info) return false;
     const TSPluginInfo* info = get_info();
     if (!info || !info->name || !info->highlight || !info->free_result)
