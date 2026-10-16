@@ -1,7 +1,8 @@
 /*
  * flexUI - MarkdownWidget
  *
- * Markdown renderer using md4c and flexUI element hierarchy.
+ * Stun C11 Markdown RichDoc -> FlexUI element projection.
+ * The C11 parser is the only Markdown grammar authority; no C++ fallback.
  */
 
 #ifndef FLEXUI_MARKDOWN_WIDGET_H
