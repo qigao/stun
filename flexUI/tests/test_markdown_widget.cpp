@@ -513,6 +513,107 @@ spec("MarkdownWidget Parsing") {
         }
     }
 
+    it("keeps Unicode GFM task/table roots through scrolling and layout changes") {
+        Box live(nullptr);
+        auto* root = live.create("div", "live-md-root-231");
+        auto* scroll = live.create("div", "live-md-scroll-231");
+        static const char* const sources[] = {
+            "# 日本語 café 😀 Alpha\n\n"
+            "- [x] 発送済み\n- [ ] 待機中\n\n"
+            "| City | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
+            "# Ελληνικά café 😀 Beta\n\n"
+            "- [ ] review\n- [x] 完了\n\n"
+            "| City | Price |\n| :--- | ---: |\n| Αθήνα | £30 |\n"
+        };
+        auto* host = live.create_widget<MarkdownWidget>(
+            "div", "live-md-widget-231", sources[0]);
+        auto* spacer = live.create("div", "live-md-spacer-231");
+        root->append(scroll);
+        scroll->append(host);
+        scroll->append(spacer);
+        live.set_root(root);
+        live.set_viewport(320.0f, 180.0f);
+        live.load_css(R"(
+          #live-md-scroll-231 {
+            overflow-y: scroll;
+            width: 220px;
+            height: 70px;
+          }
+          #live-md-widget-231 { width: 220px; }
+          #live-md-spacer-231 { width: 220px; height: 280px; }
+        )");
+        auto* widget = static_cast<MarkdownWidget*>(host->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *host);
+        live.update();
+        check(scroll->can_scroll_y());
+        if (!scroll->can_scroll_y()) return;
+        const std::size_t steady_elements = live.owned_element_count();
+        live.set_focus(scroll);
+
+        for (std::size_t round = 0u; round < 10u; ++round) {
+            const std::size_t selected = round % 2u;
+            widget->set_markdown(sources[selected]);
+            widget->update(0.0f, *host);
+            live.set_viewport(round % 2u ? 260.0f : 320.0f, 180.0f);
+            live.update();
+            check(host->child_count() == 3u);
+            if (host->child_count() != 3u) return;
+            auto* heading = host->child_at(0u);
+            auto* tasks = host->child_at(1u);
+            auto* table = host->child_at(2u);
+            check(heading->has_class(Symbol("md-header")));
+            check(heading->text() == (selected ? "Ελληνικά café 😀 Beta" :
+                                                "日本語 café 😀 Alpha"));
+            check(tasks->has_class(Symbol("md-ul")));
+            check(table->has_class(Symbol("md-table")));
+            check(tasks->child_count() == 2u);
+            check(table->child_count() == 2u);
+            if (tasks->child_count() == 2u) {
+                auto* task = tasks->child_at(0u);
+                check(task->has_class(Symbol("md-task-item")));
+                if (task->child_count()) {
+                    auto* checkmark = task->child_at(0u);
+                    check(checkmark->has_class(Symbol("md-checkbox")));
+                    check(checkmark->text() == (selected ? "[ ] " : "[x] "));
+                }
+            }
+            if (table->child_count() == 2u) {
+                auto* header_row = table->child_at(0u);
+                check(header_row->child_count() == 2u);
+                if (header_row->child_count() == 2u) {
+                    auto* price = header_row->child_at(1u);
+                    check(price->has_class(Symbol("md-align-right")));
+                    check(price->computed_style != nullptr);
+                    if (price->computed_style)
+                        check(price->computed_style->text_align == TextAlign::Right);
+                }
+            }
+            Event end = Event::key_down(KeyCode::End);
+            live.dispatch_event(end);
+            check(end.handled);
+            check(scroll->scroll_y() >= scroll->max_scroll_y() - 0.1f);
+            live.update();
+            Event home = Event::key_down(KeyCode::Home);
+            live.dispatch_event(home);
+            check(home.handled);
+            check(scroll->scroll_y() <= 0.1f);
+            live.update();
+            check(live.owned_element_count() == steady_elements);
+            check(live.focused_element() == scroll);
+        }
+
+        auto* visible_heading = host->child_at(0u);
+        widget->set_markdown(std::string(1024u * 1024u, 'x'));
+        widget->update(0.0f, *host);
+        live.update();
+        check(host->child_count() == 3u);
+        if (host->child_count() == 3u)
+            check(host->child_at(0u) == visible_heading);
+        check(live.owned_element_count() == steady_elements);
+    }
+
     // #186 / #231: repeated source updates must preserve the sole C11
     // parser and the existing Box-owned presentation lifecycle.
     it("GFM repeated task table heading and empty updates remain bounded") {
