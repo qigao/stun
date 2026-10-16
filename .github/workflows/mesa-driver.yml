@@ -714,6 +714,21 @@ jobs:
           test -s "$EVIDENCE_DIR/markdown-cmarkgfm-html.json"
           git diff --exit-code
 
+      - name: Freeze independent GFM root list-to-table semantics (#229)
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_env="$RUNNER_TEMP/stun-markdown-oracle"
+          test -x "$python_env/bin/python"
+          "$python_env/bin/python" -c 'import cmarkgfm'
+          "$python_env/bin/python" ui_core/tests/oracle_legacy_list_table.py \
+            --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
+            --report "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.log"
+          test -s "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.json"
+          git diff --exit-code
+
       - name: Gate 573 qualified SAFE CommonMark official HTML examples
         if: ${{ inputs.run_runtime && success() }}
         shell: bash

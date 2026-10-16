@@ -145,6 +145,9 @@ jobs:
             --report build/unicode17-qa/safe-652.json
           "$py" ui_core/tests/compare_cmarkgfm_html.py \
             --renderer "$renderer" --report build/unicode17-qa/gfm-independent.json
+          "$py" ui_core/tests/oracle_legacy_list_table.py \
+            --renderer "$renderer" \
+            --report build/unicode17-qa/gfm-root-list-table-229.json
           "$py" - <<'PY'
           import hashlib,json
           from pathlib import Path
@@ -195,5 +198,6 @@ jobs:
             build/unicode17-qa/spec-652.json
             build/unicode17-qa/safe-652.json
             build/unicode17-qa/gfm-independent.json
+            build/unicode17-qa/gfm-root-list-table-229.json
             build/unicode17-qa/Testing/Temporary/LastTest.log
           if-no-files-found: warn
