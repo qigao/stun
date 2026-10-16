@@ -230,11 +230,10 @@ jobs:
             "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
-          cmake --build build/ui-core-windows --config Release --parallel 2 \
-            --target stun_markdown_c11_test stun_markdown_html_test \
-              stun_markdown_containers_test stun_markdown_quote_test \
-              stun_markdown_nested_quote_test stun_markdown_quoted_list_test \
-              stun_markdown_raw_html_policy_test
+          # Standalone Stun::UICore has 20 CTests. Build all genuine native
+          # C11 targets, not only the seven earlier smoke tests. Tango is
+          # intentionally absent: no second Markdown parser or fallback.
+          cmake --build build/ui-core-windows --config Release --parallel 2
 
       - name: Execute native parser ownership and SAFE HTML tests
         shell: bash
@@ -243,7 +242,7 @@ jobs:
           sdk="$PWD/build/salts-native-release/sdk/windows-x64"
           export PATH="$sdk/bin:$PATH"
           ctest --test-dir build/ui-core-windows -C Release \
-            -R '^stun_markdown_(c11|html|containers|quote|nested_quote|quoted_list|raw_html_policy)_test$' \
+            -R '^(stun_ui_core_test|stun_markdown_[a-z0-9_]+_test)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$(cygpath -w "$PWD/build/windows-native-c11-results.xml")" \
             2>&1 | tee build/windows-native-c11.log
@@ -251,16 +250,33 @@ jobs:
           import xml.etree.ElementTree as ET
           cases = list(ET.parse("build/windows-native-c11-results.xml").getroot().iter("testcase"))
           expected = {
-              "stun_markdown_c11_test", "stun_markdown_html_test",
-              "stun_markdown_containers_test", "stun_markdown_quote_test",
-              "stun_markdown_nested_quote_test", "stun_markdown_quoted_list_test",
-              "stun_markdown_raw_html_policy_test"
+              "stun_ui_core_test",
+              "stun_markdown_c11_test",
+              "stun_markdown_entities_test",
+              "stun_markdown_link_target_test",
+              "stun_markdown_uri_policy_test",
+              "stun_markdown_reference_test",
+              "stun_markdown_reference_multiline_test",
+              "stun_markdown_paragraph_inline_test",
+              "stun_markdown_break_semantics_test",
+              "stun_markdown_image_test",
+              "stun_markdown_container_reference_test",
+              "stun_markdown_raw_html_policy_test",
+              "stun_markdown_golden_test",
+              "stun_markdown_html_test",
+              "stun_markdown_indented_test",
+              "stun_markdown_containers_test",
+              "stun_markdown_quote_test",
+              "stun_markdown_nested_quote_test",
+              "stun_markdown_quoted_list_test",
+              "stun_markdown_unicode17_candidate_test"
           }
-          assert len(cases) == len(expected)
+          assert len(expected) == 20
+          assert len(cases) == 20, (len(cases), [c.attrib['name'] for c in cases])
           assert {c.attrib["name"] for c in cases} == expected
           assert not any(list(c.iter(tag)) for c in cases for tag in
                          ("failure", "error", "skipped"))
-          print("Windows x64 real C11 parser/HTML/ownership CTests: 7/7")
+          print("Windows x64 full standalone Stun C11 CTests: 20/20")
           PY
 
 
@@ -333,11 +349,9 @@ jobs:
             "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
-          cmake --build build/ui-core-macos --parallel 2 \
-            --target stun_markdown_c11_test stun_markdown_html_test \
-              stun_markdown_containers_test stun_markdown_quote_test \
-              stun_markdown_nested_quote_test stun_markdown_quoted_list_test \
-              stun_markdown_raw_html_policy_test
+          # Build all 20 native C11 conformance tests against immutable
+          # published macos-arm64 Salts SDK. No Tango dependency.
+          cmake --build build/ui-core-macos --parallel 2
 
       - name: Execute real macOS parser/HTML/ownership conformance
         shell: bash
@@ -346,7 +360,7 @@ jobs:
           sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
           export DYLD_LIBRARY_PATH="$sdk/lib:$sdk/bin:${DYLD_LIBRARY_PATH:-}"
           ctest --test-dir build/ui-core-macos -C Release \
-            -R '^stun_markdown_(c11|html|containers|quote|nested_quote|quoted_list|raw_html_policy)_test$' \
+            -R '^(stun_ui_core_test|stun_markdown_[a-z0-9_]+_test)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$PWD/build/macos-native-c11-results.xml" \
             2>&1 | tee build/macos-native-c11.log
@@ -355,14 +369,31 @@ jobs:
           from pathlib import Path
           cases = list(ET.parse("build/macos-native-c11-results.xml").getroot().iter("testcase"))
           expected = {
-              "stun_markdown_c11_test", "stun_markdown_html_test",
-              "stun_markdown_containers_test", "stun_markdown_quote_test",
-              "stun_markdown_nested_quote_test", "stun_markdown_quoted_list_test",
-              "stun_markdown_raw_html_policy_test"
+              "stun_ui_core_test",
+              "stun_markdown_c11_test",
+              "stun_markdown_entities_test",
+              "stun_markdown_link_target_test",
+              "stun_markdown_uri_policy_test",
+              "stun_markdown_reference_test",
+              "stun_markdown_reference_multiline_test",
+              "stun_markdown_paragraph_inline_test",
+              "stun_markdown_break_semantics_test",
+              "stun_markdown_image_test",
+              "stun_markdown_container_reference_test",
+              "stun_markdown_raw_html_policy_test",
+              "stun_markdown_golden_test",
+              "stun_markdown_html_test",
+              "stun_markdown_indented_test",
+              "stun_markdown_containers_test",
+              "stun_markdown_quote_test",
+              "stun_markdown_nested_quote_test",
+              "stun_markdown_quoted_list_test",
+              "stun_markdown_unicode17_candidate_test"
           }
-          assert len(cases) == len(expected)
+          assert len(expected) == 20
+          assert len(cases) == 20, (len(cases), [c.attrib['name'] for c in cases])
           assert {c.attrib["name"] for c in cases} == expected
           assert not any(list(c.iter(t)) for c in cases for t in
                          ("failure", "error", "skipped"))
-          print("macOS ARM64 native C11 parser/HTML/ownership CTests: 7/7")
+          print("macOS ARM64 full standalone Stun C11 CTests: 20/20")
           PY
