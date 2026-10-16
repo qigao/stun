@@ -125,6 +125,11 @@ public:
 
   // 元素创建
   Element *create(const std::string &tag, const std::string &id = "");
+  // Takes ownership of a prevalidated detached Element forest. The caller
+  // stages elements without involving the live tree, then publishes its
+  // detached roots using Element::replace_children(). On admission failure,
+  // the caller retains and destroys the staged nodes.
+  void adopt_detached_elements(std::vector<std::unique_ptr<Element>> &&elements);
   Element *create_with_widget(const std::string &tag, std::unique_ptr<Widget> widget,
                               const std::string &id = "");
   // Takes ownership of widget. Prefer the unique_ptr overload in new code.
