@@ -131,8 +131,8 @@ jobs:
             ui_core/tests/markdown_nested_quote_test.c
             ui_core/tests/markdown_quoted_list_test.c
           )
-          for file in ""${files[@]}""; do
-            clang ""${common[@]}"" -fsyntax-only "$file"
+          for file in "${files[@]}"; do
+            clang "${common[@]}" -fsyntax-only "$file"
           done
           # Separate C++17 consumer checks exported C11 declarations and
           # signatures. No old C++ Markdown parser or fallback is used.
