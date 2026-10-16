@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -115,15 +117,33 @@ void add_content(Element* target, const std::string& value) {
     if (!value.empty()) target->set_text(value);
 }
 
+/* The owned staged forest is detached from the visible Box tree until
+ * the entire C11 projection succeeds. Failed projections destroy these
+ * unique_ptrs instead of accumulating orphaned Box::create() nodes. */
+struct Projection {
+    std::vector<std::unique_ptr<Element>> elements;
+    std::vector<Element*> roots;
+};
+
+Element* staged_create(Projection& result, const std::string& tag,
+                       size_t limit) {
+    if (result.elements.size() >= limit)
+        throw std::length_error("MarkdownWidget projection capacity exceeded");
+    auto element = std::make_unique<Element>();
+    element->set_tag(tag);
+    Element* ptr = element.get();
+    result.elements.push_back(std::move(element));
+    return ptr;
+}
+
 /* Rendering is an owned projection, NOT a second Markdown parser. The
  * semantic source indexes the immutable decoded C11 text arena, never the
  * raw UTF-8 Markdown. Store only copied std::strings in each Element. */
 void project(const stun_ui_rich_document_view& view,
-             Element& root, Box& box) {
+             Projection& result, size_t limit) {
     const size_t count = view.document.block_count;
     std::vector<Element*> owners(count, nullptr);
     std::vector<size_t> child_count(count, 0u);
-    owners[0] = &root;
     for (size_t i = 1; i < count; ++i) {
         const uint32_t parent = view.document.blocks[i].parent_index;
         if (!is_metadata_leaf(view.document.blocks[i].kind)) ++child_count[parent];
@@ -131,7 +151,8 @@ void project(const stun_ui_rich_document_view& view,
     for (size_t i = 1; i < count; ++i) {
         const stun_ui_block& block = view.document.blocks[i];
         Element* parent = owners[block.parent_index];
-        if (!parent) continue; // only leaf metadata's descendants (if any)
+        if (block.parent_index != 0u && !parent)
+            throw std::logic_error("invalid RichDoc projection ancestry");
         const stun_ui_block_kind kind = block.kind;
         if (is_metadata_leaf(kind)) continue;
         Element* elem = nullptr;
@@ -146,11 +167,10 @@ void project(const stun_ui_rich_document_view& view,
             owners[i] = parent;
             continue;
         }
-        const char* tag = "div";
         switch (kind) {
         case STUN_UI_BLOCK_HEADING: {
             char heading_tag[4] = {'h', char('0' + block.heading_level), '\0', '\0'};
-            elem = box.create(heading_tag);
+            elem = staged_create(result, heading_tag, limit);
             elem->add_class("md-header");
             elem->add_class(heading_tag);
             break;
@@ -159,82 +179,82 @@ void project(const stun_ui_rich_document_view& view,
         case STUN_UI_BLOCK_ENTITY:
         case STUN_UI_BLOCK_RAW_HTML_INLINE:
         case STUN_UI_BLOCK_URI_AUTOLINK:
-            elem = box.create("span");
+            elem = staged_create(result, "span", limit);
             add_content(elem, semantic(view, block));
             break;
         case STUN_UI_BLOCK_PARAGRAPH:
-            elem = box.create("div"); elem->add_class("md-p"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-p"); break;
         case STUN_UI_BLOCK_LIST:
-            elem = box.create("div"); elem->add_class("md-ul"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-ul"); break;
         case STUN_UI_BLOCK_ORDERED_LIST:
-            elem = box.create("div"); elem->add_class("md-ol"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-ol"); break;
         case STUN_UI_BLOCK_LIST_ITEM:
         case STUN_UI_BLOCK_TASK_ITEM:
-            elem = box.create("div"); elem->add_class("md-li");
+            elem = staged_create(result, "div", limit); elem->add_class("md-li");
             if (kind == STUN_UI_BLOCK_TASK_ITEM) elem->add_class("md-task-item");
             break;
         case STUN_UI_BLOCK_CHECKBOX: {
             const char* data = nullptr; size_t size = 0;
             (void)stun_ui_rich_document_metadata(&view, i, &data, &size);
-            elem = box.create("span");
+            elem = staged_create(result, "span", limit);
             elem->add_class("md-checkbox");
             elem->set_text(data[0] == 'x' ? "[x] " : "[ ] ");
             break;
         }
         case STUN_UI_BLOCK_QUOTE:
-            elem = box.create("div"); elem->add_class("md-quote"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-quote"); break;
         case STUN_UI_BLOCK_TABLE:
-            elem = box.create("div"); elem->add_class("md-table"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-table"); break;
         case STUN_UI_BLOCK_TABLE_ROW:
-            elem = box.create("div"); elem->add_class("md-tr"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-tr"); break;
         case STUN_UI_BLOCK_TABLE_CELL:
-            elem = box.create("div"); elem->add_class("md-td"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-td"); break;
         case STUN_UI_BLOCK_EMPHASIS:
-            elem = box.create("span"); elem->add_class("md-em"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-em"); break;
         case STUN_UI_BLOCK_STRONG:
-            elem = box.create("span"); elem->add_class("md-strong"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-strong"); break;
         case STUN_UI_BLOCK_STRIKETHROUGH:
-            elem = box.create("span"); elem->add_class("md-del"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-del"); break;
         case STUN_UI_BLOCK_UNDERLINE:
-            elem = box.create("span"); elem->add_class("md-u"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-u"); break;
         case STUN_UI_BLOCK_LINK:
-            elem = box.create("span"); elem->add_class("md-a"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-a"); break;
         case STUN_UI_BLOCK_IMAGE:
-            elem = box.create("span"); elem->add_class("md-img"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-img"); break;
         case STUN_UI_BLOCK_CODE_FENCE:
         case STUN_UI_BLOCK_CODE_INDENTED:
-            elem = box.create("div"); elem->add_class("md-code-block"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-code-block"); break;
         case STUN_UI_BLOCK_CODE_SPAN:
-            elem = box.create("span"); elem->add_class("md-code"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-code"); break;
         case STUN_UI_BLOCK_RULE:
-            elem = box.create("div"); elem->add_class("md-hr"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-hr"); break;
         case STUN_UI_BLOCK_LINE_BREAK:
         case STUN_UI_BLOCK_HARD_LINE_BREAK:
-            elem = box.create("div"); elem->add_class("md-br"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-br"); break;
         case STUN_UI_BLOCK_MATH:
-            elem = box.create("span"); elem->add_class("md-math"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-math"); break;
         case STUN_UI_BLOCK_MATH_BLOCK:
-            elem = box.create("div"); elem->add_class("md-math-block"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-math-block"); break;
         case STUN_UI_BLOCK_HIGHLIGHT:
-            elem = box.create("span"); elem->add_class("md-highlight"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-highlight"); break;
         case STUN_UI_BLOCK_SUPERSCRIPT:
-            elem = box.create("span"); elem->add_class("md-sup"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-sup"); break;
         case STUN_UI_BLOCK_SUBSCRIPT:
-            elem = box.create("span"); elem->add_class("md-sub"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-sub"); break;
         case STUN_UI_BLOCK_FOOTNOTE:
-            elem = box.create("span"); elem->add_class("md-footnote"); break;
+            elem = staged_create(result, "span", limit); elem->add_class("md-footnote"); break;
         case STUN_UI_BLOCK_FOOTNOTE_DEF:
-            elem = box.create("div"); elem->add_class("md-footnote-def"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-footnote-def"); break;
         case STUN_UI_BLOCK_DEFINITION_LIST:
-            elem = box.create("div"); elem->add_class("md-def-list"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-def-list"); break;
         case STUN_UI_BLOCK_DEFINITION_TERM:
-            elem = box.create("div"); elem->add_class("md-def-term"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-def-term"); break;
         case STUN_UI_BLOCK_DEFINITION_DESC:
-            elem = box.create("div"); elem->add_class("md-def-desc"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-def-desc"); break;
         case STUN_UI_BLOCK_DIAGRAM:
-            elem = box.create("div"); elem->add_class("md-diagram"); break;
+            elem = staged_create(result, "div", limit); elem->add_class("md-diagram"); break;
         case STUN_UI_BLOCK_RAW_HTML_BLOCK:
-            elem = box.create("div"); elem->add_class("md-raw-html");
+            elem = staged_create(result, "div", limit); elem->add_class("md-raw-html");
             add_content(elem, semantic(view, block));
             break;
         case STUN_UI_BLOCK_DOCUMENT:
@@ -243,7 +263,10 @@ void project(const stun_ui_rich_document_view& view,
             break; // preflight and leaf handling already covered
         }
         if (elem) {
-            parent->append(elem);
+            if (block.parent_index == 0u)
+                result.roots.push_back(elem);
+            else if (parent->append(elem) != elem)
+                throw std::logic_error("detached projection append rejected");
             owners[i] = elem;
         }
     }
@@ -251,8 +274,10 @@ void project(const stun_ui_rich_document_view& view,
 
 } // namespace
 
-MarkdownWidget::MarkdownWidget(const std::string& markdown)
-    : markdown_(markdown) {}
+MarkdownWidget::MarkdownWidget(const std::string& markdown,
+                               std::size_t max_render_elements)
+    : markdown_(markdown),
+      max_render_elements_(std::min(max_render_elements, kMaxMarkdownNodes)) {}
 
 void MarkdownWidget::set_markdown(const std::string& markdown) {
     if (markdown_ == markdown) return;
@@ -271,17 +296,28 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
         markdown_.data(), markdown_.size(),
         kMaxMarkdownNodes, markdown_.size() + 1u, &document);
     if (status != STUN_UI_OK || !document) return;
+    // C11 document remains borrowed only during preflight/projection.
+    std::unique_ptr<stun_md_document, decltype(&stun_md_document_destroy)>
+        owned_document(document, &stun_md_document_destroy);
     const auto view = stun_md_document_view(document);
-    if (!preflight(view)) {
-        stun_md_document_destroy(document);
+    if (!preflight(view)) return;
+
+    Projection staged;
+    try {
+        project(view, staged, max_render_elements_);
+        // Box reserves and validates the complete detached forest before
+        // taking ownership. No live child is removed in this phase.
+        elem.owner_box_->adopt_detached_elements(std::move(staged.elements));
+    } catch (const std::exception&) {
+        // Keep existing children, source, and retry state. No fallback parser.
         return;
     }
+
+    // Exactly one live tree publication, after successful projection.
+    elem.replace_children(staged.roots);
+    elem.set_text("");
     if (elem.computed_style)
         elem.computed_style->flex_direction = FlexDirection::Column;
-    elem.clear_children();
-    elem.set_text("");
-    project(view, elem, *elem.owner_box_);
-    stun_md_document_destroy(document);
     needs_rebuild_ = false;
     elem.mark_style_dirty();
 }
