@@ -156,3 +156,103 @@ jobs:
             -fsyntax-only c11_public_consumer.cpp
           rm c11_public_consumer.cpp
           git diff --exit-code
+
+
+  c11-windows-released-sdk-runtime:
+    name: C11 native runtime / Windows x64 released Salts
+    needs: sdk-releases
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Stun candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Restore immutable tagged Salts.Native release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALTS_TAG: ${{ needs.sdk-releases.outputs.salts_release }}
+          SALTS_COMMIT: ${{ needs.sdk-releases.outputs.salts_sha }}
+        run: |
+          set -euo pipefail
+          version="${SALTS_TAG#v}"
+          test "$SALTS_TAG" != "$version"
+          package="Salts.Native.$version.nupkg"
+          mkdir -p build/salts-native-release
+          gh release download "$SALTS_TAG" --repo qigao/salts \
+            --pattern "$package" --pattern "SHA256SUMS" \
+            --dir build/salts-native-release
+          (
+            cd build/salts-native-release
+            sha256sum -c SHA256SUMS
+          )
+          python - <<'PY'
+          import os, pathlib, zipfile
+          tag = os.environ["SALTS_TAG"]
+          version = tag[1:]
+          path = pathlib.Path("build/salts-native-release") / ("Salts.Native." + version + ".nupkg")
+          out = pathlib.Path("build/salts-native-release")
+          with zipfile.ZipFile(path) as package:
+              members = [s for s in package.namelist() if s.startswith("sdk/windows-x64/")]
+              assert members and all(".." not in pathlib.PurePosixPath(p).parts for p in members)
+              required = "sdk/windows-x64/salts-sdk-manifest.txt"
+              assert required in members, "tagged package missing windows-x64 SDK"
+              manifest = dict(line.split("=", 1) for line in
+                  package.read(required).decode("utf-8-sig").splitlines() if "=" in line)
+              assert manifest["version"] == version
+              assert manifest["commit"] == os.environ["SALTS_COMMIT"]
+              assert manifest["profile"] == "release"
+              assert any(p.endswith("/lib/cmake/Salts/SaltsConfig.cmake") for p in members)
+              assert any(p.endswith("/include/salts_unicode.h") for p in members)
+              package.extractall(out, members)
+          print("Accepted tagged Release SDK Windows x64 with exact provenance")
+          PY
+
+      - name: Build native Stun C11 parser against installed Salts SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/windows-x64"
+          test -d "$sdk/lib/cmake/Salts"
+          cmake -S ui_core -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
+            -DBUILD_TESTING=ON \
+            "-DCMAKE_PREFIX_PATH=$(cygpath -w "$sdk")" \
+            "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake --build build/ui-core-windows --config Release --parallel 2 \
+            --target stun_markdown_c11_test stun_markdown_html_test \
+              stun_markdown_containers_test stun_markdown_quote_test \
+              stun_markdown_nested_quote_test stun_markdown_quoted_list_test \
+              stun_markdown_raw_html_policy_test
+
+      - name: Execute native parser ownership and SAFE HTML tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/windows-x64"
+          export PATH="$sdk/bin:$PATH"
+          ctest --test-dir build/ui-core-windows -C Release \
+            -R '^stun_markdown_(c11|html|containers|quote|nested_quote|quoted_list|raw_html_policy)_test$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit build/windows-native-c11-results.xml \
+            2>&1 | tee build/windows-native-c11.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = list(ET.parse("build/windows-native-c11-results.xml").getroot().iter("testcase"))
+          expected = {
+              "stun_markdown_c11_test", "stun_markdown_html_test",
+              "stun_markdown_containers_test", "stun_markdown_quote_test",
+              "stun_markdown_nested_quote_test", "stun_markdown_quoted_list_test",
+              "stun_markdown_raw_html_policy_test"
+          }
+          assert len(cases) == len(expected)
+          assert {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(tag)) for c in cases for tag in
+                         ("failure", "error", "skipped"))
+          print("Windows x64 real C11 parser/HTML/ownership CTests: 7/7")
+          PY
