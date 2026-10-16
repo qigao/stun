@@ -19,4 +19,9 @@ static void free_result(TSHighlightResult* result) {
 static const TSPluginInfo plugin = {
     "contract", "1.0.0", highlight, free_result
 };
-TS_PLUGIN_EXPORT const TSPluginInfo* ts_plugin_info(void) { return &plugin; }
+#if defined(_WIN32)
+#define TS_CONTRACT_EXPORT __declspec(dllexport)
+#else
+#define TS_CONTRACT_EXPORT __attribute__((visibility("default")))
+#endif
+TS_CONTRACT_EXPORT const TSPluginInfo* ts_plugin_info(void) { return &plugin; }
