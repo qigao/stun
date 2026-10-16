@@ -91,7 +91,7 @@ bool load_ts_plugin(const std::string& path) {
     }
 
     const TSPluginInfo* info = get_info();
-    if (!info || !info->name || !info->highlight) {
+    if (!info || !info->name || !info->highlight || !info->free_result) {
         PLUGIN_UNLOAD(handle);
         return false;
     }
