@@ -27,6 +27,10 @@ namespace {
 
 constexpr size_t kMaxMarkdownBytes = 1024u * 1024u;
 constexpr size_t kMaxMarkdownNodes = 16384u;
+// Renderer-only providers do not receive an unbounded source or unlimited
+// byte-range hints. Larger code blocks still display all C11-owned text.
+constexpr size_t kMaxHighlightBytes = 64u * 1024u;
+constexpr size_t kMaxHighlightTokens = 1024u;
 
 std::string semantic(const stun_ui_rich_document_view& view,
                      const stun_ui_block& block) {
@@ -180,7 +184,7 @@ void project_code_text(Element* code_block, Projection& result, size_t limit,
     // An optional Tree-sitter highlighter may tokenize C11-owned code text,
     // but cannot become a Markdown parser. Invalid/unavailable highlights
     // retain the exact same visible code as plain presentation.
-    if (!language.empty() && source.size() <= kMaxMarkdownBytes) {
+    if (!language.empty() && source.size() <= kMaxHighlightBytes) {
         try {
             if (auto* highlighter = HighlighterFactory::instance().get(language))
                 tokens = highlighter->highlight(source);
@@ -189,7 +193,13 @@ void project_code_text(Element* code_block, Projection& result, size_t limit,
         }
     }
     size_t prev = 0u;
-    if (tokens.size() > limit) tokens.clear();
+    // Optional highlighter complexity must never consume the Widget's entire
+    // bounded Element quota and reject otherwise printable C11-owned code.
+    // Plain text is always the semantic fallback; not a Markdown fallback.
+    const size_t remaining = limit - result.elements.size();
+    if (tokens.size() > kMaxHighlightTokens ||
+        tokens.size() > remaining / 3u)
+        tokens.clear();
     for (const auto& token : tokens) {
         if (token.length == 0u || token.start < prev ||
             token.start > source.size() ||

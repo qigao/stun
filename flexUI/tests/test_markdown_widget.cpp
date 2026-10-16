@@ -6,6 +6,7 @@
 #include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/syntax_highlighter.h>
 #include <flex/bridge/renderer.h>
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
@@ -31,6 +32,40 @@ public:
         return {{HighlightType::Keyword, text.size() + 1u, 3u}};
     }
     const char* language() const override { return "stun-c11-invalid"; }
+};
+class C11Utf8SplitHighlighter final : public SyntaxHighlighter {
+public:
+    std::vector<HighlightToken> highlight(std::string_view text) override {
+        const size_t at = text.find("é");
+        if (at == std::string_view::npos) return {};
+        // Start is valid but the end falls in the UTF-8 continuation byte.
+        return {{HighlightType::Keyword, at, 1u}};
+    }
+    const char* language() const override { return "stun-c11-split"; }
+};
+class C11FloodHighlighter final : public SyntaxHighlighter {
+public:
+    std::vector<HighlightToken> highlight(std::string_view text) override {
+        const size_t count = std::min(text.size(), size_t{1200});
+        std::vector<HighlightToken> result;
+        result.reserve(count);
+        for (size_t i = 0u; i < count; ++i)
+            result.push_back({HighlightType::Keyword, i, 1u});
+        return result;
+    }
+    const char* language() const override { return "stun-c11-flood"; }
+};
+class C11CountingHighlighter final : public SyntaxHighlighter {
+public:
+    explicit C11CountingHighlighter(std::shared_ptr<size_t> calls)
+        : calls_(std::move(calls)) {}
+    std::vector<HighlightToken> highlight(std::string_view) override {
+        ++*calls_;
+        return {};
+    }
+    const char* language() const override { return "stun-c11-counted"; }
+private:
+    std::shared_ptr<size_t> calls_;
 };
 std::string code_line_text(const Element* line) {
     std::string answer = line->text();
@@ -448,13 +483,14 @@ spec("MarkdownWidget Parsing") {
         box->set_mouse_capture(retired);
 
         for (std::size_t round = 0; round < 64u; ++round) {
-            widget->set_markdown(round % 2u ? "# 完成 ✅\n" : "# 更新 🏯\n");
+            const bool odd = (round & 1u) != 0u;
+            widget->set_markdown(odd ? "# 完成 ✅\n" : "# 更新 🏯\n");
             widget->update(0.0f, *md);
             check(md->child_count() == 1u);
             if (md->child_count() != 1u) return;
             auto* heading = static_cast<Element*>(md->children()[0]);
             check(heading->has_class(Symbol("md-header")));
-            check(heading->text() == (round % 2u ? "完成 ✅" : "更新 🏯"));
+            check(heading->text() == (odd ? "完成 ✅" : "更新 🏯"));
             check(box->owned_element_count() == owner_count);
             check(box->focused_element() == nullptr);
             check(box->capturing_element() == nullptr);
@@ -717,6 +753,73 @@ spec("MarkdownWidget Parsing") {
         if (md->child_count() == 1u)
             check(md->child_at(0u)->text() == "下一段 ✅");
         check(box->owned_element_count() <= stable_count);
+    }
+
+    it("bounds optional highlighter tokens and preserves UTF-8 code bytes") {
+        auto& factory = HighlighterFactory::instance();
+        factory.register_highlighter(
+            "stun-c11-split", std::make_unique<C11Utf8SplitHighlighter>());
+        factory.register_highlighter(
+            "stun-c11-flood", std::make_unique<C11FloodHighlighter>());
+        auto calls = std::make_shared<size_t>(0u);
+        factory.register_highlighter(
+            "stun-c11-counted", std::make_unique<C11CountingHighlighter>(calls));
+
+        const std::string utf8_source =
+            "\x60\x60\x60stun-c11-split\nreturn café😀;\n\x60\x60\x60\n";
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-c11-hl-limits-231", utf8_source);
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        auto* block = md->child_at(0u);
+        check(block->child_count() >= 1u);
+        if (block->child_count() == 0u) return;
+        auto* line = block->child_at(0u);
+        check(code_line_text(line) == "return café😀;");
+        for (auto* node : line->children())
+            check(!static_cast<Element*>(node)->has_class(Symbol("hl-keyword")));
+
+        const std::string sequence(1200u, 'a');
+        widget->set_markdown(
+            "\x60\x60\x60stun-c11-flood\n" + sequence +
+            "\n\x60\x60\x60\n");
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        block = md->child_at(0u);
+        check(block->child_count() >= 1u);
+        if (block->child_count() == 0u) return;
+        line = block->child_at(0u);
+        check(code_line_text(line) == sequence);
+        check(line->child_count() == 1u);
+        if (line->child_count() == 1u)
+            check(!line->child_at(0u)->has_class(Symbol("hl-keyword")));
+
+        widget->set_markdown(
+            "\x60\x60\x60stun-c11-counted\nreturn café😀;\n\x60\x60\x60\n");
+        widget->update(0.0f, *md);
+        check(*calls == 1u);
+
+        // C11 still parses the entire bounded code block. The optional
+        // presentation plugin must not inspect >64 KiB of code in one call.
+        const std::string long_line(64u * 1024u + 17u, 'z');
+        widget->set_markdown(
+            "\x60\x60\x60stun-c11-counted\n" + long_line +
+            "\n\x60\x60\x60\n");
+        widget->update(0.0f, *md);
+        check(*calls == 1u);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u) {
+            block = md->child_at(0u);
+            check(block->child_count() >= 1u);
+            if (block->child_count() >= 1u)
+                check(code_line_text(block->child_at(0u)) == long_line);
+        }
     }
 
     // #186 / #231: repeated source updates must preserve the sole C11
