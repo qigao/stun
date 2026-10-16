@@ -539,8 +539,8 @@ static int test_gfm_list_table_ownership(void) {
     const char *sources[] = {
         "- | A | B |\n  | :--- | ---: |\n  | a\\|b | 7 |\n",
         "> - | A | B |\n>   | :--- | ---: |\n>   | a\\|b | 7 |\n",
-        "- intro\n\n  | A | B |\n  | :--- | ---: |\n"
-        "  | a\\|b | 7 |\n"
+        ("- intro\n\n  | A | B |\n  | :--- | ---: |\n"
+         "  | a\\|b | 7 |\n")
     };
     for(size_t k=0u;k<sizeof(sources)/sizeof(sources[0]);++k) {
         const size_t bytes=strlen(sources[k]);
