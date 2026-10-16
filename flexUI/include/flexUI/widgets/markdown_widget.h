@@ -42,6 +42,7 @@ private:
 
     std::string markdown_;
     bool needs_rebuild_ = true;
+    bool rebuilding_ = false;
     const std::size_t max_render_elements_;
     // Borrowed identities only; Box remains the sole Element owner.
     std::vector<Element*> published_projection_;

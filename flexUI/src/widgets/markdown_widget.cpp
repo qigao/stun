@@ -297,7 +297,14 @@ void MarkdownWidget::set_markdown(const std::string& markdown) {
 }
 
 void MarkdownWidget::rebuild_elements(Element& elem) {
-    if (!needs_rebuild_ || !elem.owner_box_) return;
+    if (!needs_rebuild_ || !elem.owner_box_ || rebuilding_) return;
+    // Focus-out during retirement can synchronously invoke application
+    // callbacks. Defer any reentrant update to the next outer UI update.
+    rebuilding_ = true;
+    struct RebuildExit {
+        bool& flag;
+        ~RebuildExit() { flag = false; }
+    } reset{rebuilding_};
     /* No-fallback C11 admission. Keep the previous element tree if the next
      * source is over budget or invalid; never publish a partially built AST.
      * The widget remains marked for update rather than adopting old grammar. */

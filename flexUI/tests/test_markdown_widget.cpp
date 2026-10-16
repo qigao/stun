@@ -421,6 +421,48 @@ spec("MarkdownWidget Parsing") {
         check(box->owned_element_count() + 1u == owner_count);
     }
 
+    it("defers reentrant Markdown updates from focus-out during retirement") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-c11-reenter-231", "# 初期 📘\n");
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        const auto steady_count = box->owned_element_count();
+        auto* first = static_cast<Element*>(md->children()[0]);
+        box->set_focus(first);
+
+        bool callback_seen = false;
+        box->set_framework_event_callback(
+            [&](Element&, const Event&) {
+                if (callback_seen) return;
+                callback_seen = true;
+                widget->set_markdown("# 回调延后 ✅\n");
+                // Must be rejected while the owner is retiring the old tree.
+                widget->update(0.0f, *md);
+            });
+        widget->set_markdown("# 中间内容 📝\n");
+        widget->update(0.0f, *md);
+        box->set_framework_event_callback({});
+
+        check(callback_seen);
+        check(box->owned_element_count() == steady_count);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u)
+            check(static_cast<Element*>(md->children()[0])->text() == "中间内容 📝");
+        check(widget->markdown() == "# 回调延后 ✅\n");
+
+        // A subsequent non-reentrant update consumes the deferred source.
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u)
+            check(static_cast<Element*>(md->children()[0])->text() == "回调延后 ✅");
+        check(box->owned_element_count() == steady_count);
+    }
+
     // #186 / #231: repeated source updates must preserve the sole C11
     // parser and the existing Box-owned presentation lifecycle.
     it("GFM repeated task table heading and empty updates remain bounded") {

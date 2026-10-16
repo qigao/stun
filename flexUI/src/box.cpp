@@ -1678,9 +1678,19 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
     }
     if (roots.empty()) return false;
 
-    // All validation is complete. Detach event/focus/capture and runtime
-    // effects while the old forest is still alive but no longer visible.
+    // Focus-out callbacks may run application code. Deactivate while every
+    // Element remains owned, then verify the subtree again before deletion.
     for (Element* root : roots) deactivate_subtree(root);
+    for (Element* element : candidates) {
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || !element->id().empty()) return false;
+      Element* parent = element->parent_elem();
+      if (parent && !batch.count(parent)) return false;
+      for (auto* child : element->children()) {
+        auto* contained = dynamic_cast<Element*>(child);
+        if (!contained || !batch.count(contained)) return false;
+      }
+    }
     for (Element* element : candidates) {
       styled_elements_.erase(reinterpret_cast<std::uintptr_t>(element));
       container_widths_.erase(element);
