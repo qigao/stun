@@ -73,3 +73,86 @@ jobs:
       - name: Verify clean source tree
         shell: bash
         run: git diff --exit-code
+
+
+  c11-macos-windows-headers:
+    name: C11 SDK compile / ${{ matrix.os }}
+    needs: sdk-releases
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022]
+    steps:
+      - name: Checkout exact Stun candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout released Salts 2.3 headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
+          path: .ci/salts
+          persist-credentials: false
+
+      - name: Validate C11 compiler and published SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang --version
+          clang++ --version
+          test -d .ci/salts/cmeta/include
+
+      - name: Compile sole C11 parser/renderer and public consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c11 -Wall -Wextra -Wpedantic -Werror
+            -Iui_core/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+          )
+          files=(
+            ui_core/src/ui_core.c
+            ui_core/src/markdown_c11.c
+            ui_core/src/markdown_html.c
+            ui_core/tests/markdown_c11_test.c
+            ui_core/tests/markdown_html_test.c
+            ui_core/tests/markdown_containers_test.c
+            ui_core/tests/markdown_quote_test.c
+            ui_core/tests/markdown_nested_quote_test.c
+            ui_core/tests/markdown_quoted_list_test.c
+          )
+          for file in ""${files[@]}""; do
+            clang ""${common[@]}"" -fsyntax-only "$file"
+          done
+          # Separate C++17 consumer checks exported C11 declarations and
+          # signatures. No old C++ Markdown parser or fallback is used.
+          printf '%s\n' \
+            '#include <stun/markdown_c11.h>' \
+            '#include <type_traits>' \
+            'static_assert(std::is_pointer<stun_md_document*>::value, "C11 document pointer");' \
+            'void consume(const char* b, size_t n) {' \
+            '  stun_md_document* doc = nullptr;' \
+            '  (void)stun_md_parse(b, n, 32u, n + 1u, &doc);' \
+            '  stun_md_document_destroy(doc);' \
+            '}' > c11_public_consumer.cpp
+          clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -Iui_core/include \
+            -isystem .ci/salts/cmeta/include \
+            -isystem .ci/salts/unicode/include \
+            -isystem .ci/salts/utils/include \
+            -isystem .ci/salts/utils/parser \
+            -isystem .ci/salts/platform/include \
+            -isystem .ci/salts/concurrency/include \
+            -fsyntax-only c11_public_consumer.cpp
+          rm c11_public_consumer.cpp
+          git diff --exit-code
