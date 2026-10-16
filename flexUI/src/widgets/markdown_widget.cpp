@@ -9,6 +9,7 @@
 #include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/syntax_highlighter.h>
 #include <stun/markdown_c11.h>
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace flexUI {
@@ -147,6 +149,106 @@ Element* staged_create(Projection& result, const std::string& tag,
     return ptr;
 }
 
+// Syntax highlighting is presentation over already-accepted C11 code
+// TEXT. Neither the highlighter nor its hint may add Markdown grammar.
+std::string fence_language(const stun_ui_rich_document_view& view, size_t id) {
+    const char* value = nullptr;
+    size_t length = 0u;
+    if (stun_ui_rich_document_metadata(&view, id, &value, &length) != STUN_UI_OK)
+        throw std::logic_error("invalid C11 code fence metadata");
+    if (!value || !length) return {};
+    size_t n = 0u;
+    while (n < length && value[n] != ' ' && value[n] != '\t') ++n;
+    if (!n || n > 48u) return {};
+    for (size_t i = 0; i < n; ++i) {
+        const char c = value[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '+'))
+            return {};
+    }
+    return std::string(value, n);
+}
+
+bool utf8_boundary(std::string_view code, size_t offset) {
+    return offset == 0u || offset == code.size() ||
+        (static_cast<unsigned char>(code[offset]) & 0xc0u) != 0x80u;
+}
+
+void project_code_text(Element* code_block, Projection& result, size_t limit,
+                       const std::string& source, const std::string& language) {
+    std::vector<HighlightToken> tokens;
+    // An optional Tree-sitter highlighter may tokenize C11-owned code text,
+    // but cannot become a Markdown parser. Invalid/unavailable highlights
+    // retain the exact same visible code as plain presentation.
+    if (!language.empty() && source.size() <= kMaxMarkdownBytes) {
+        try {
+            if (auto* highlighter = HighlighterFactory::instance().get(language))
+                tokens = highlighter->highlight(source);
+        } catch (const std::exception&) {
+            tokens.clear();
+        }
+    }
+    size_t prev = 0u;
+    if (tokens.size() > limit) tokens.clear();
+    for (const auto& token : tokens) {
+        if (token.length == 0u || token.start < prev ||
+            token.start > source.size() ||
+            token.length > source.size() - token.start ||
+            !utf8_boundary(source, token.start) ||
+            !utf8_boundary(source, token.start + token.length)) {
+            tokens.clear();
+            break;
+        }
+        prev = token.start + token.length;
+    }
+
+    Element* line = nullptr;
+    const auto ensure_line = [&]() -> Element* {
+        if (!line) {
+            line = staged_create(result, "div", limit);
+            line->add_class("md-code-line");
+            if (code_block->append(line) != line)
+                throw std::logic_error("detached code line rejected");
+        }
+        return line;
+    };
+    const auto emit = [&](size_t from, size_t to, HighlightType type) {
+        while (from < to) {
+            Element* current = ensure_line();
+            const size_t newline = source.find('\n', from);
+            const size_t end = newline == std::string::npos
+                ? to : std::min(newline, to);
+            if (end > from) {
+                Element* part = staged_create(result, "span", limit);
+                if (type != HighlightType::Plain)
+                    part->add_class(highlight_class(type));
+                part->set_text(source.substr(from, end - from));
+                if (current->append(part) != part)
+                    throw std::logic_error("detached code span rejected");
+            }
+            if (end < to && source[end] == '\n') {
+                line = nullptr;
+                from = end + 1u;
+            } else {
+                from = end;
+            }
+        }
+    };
+
+    if (source.empty()) {
+        (void)ensure_line();
+        return;
+    }
+    size_t cursor = 0u;
+    for (const auto& token : tokens) {
+        if (token.start > cursor)
+            emit(cursor, token.start, HighlightType::Plain);
+        emit(token.start, token.start + token.length, token.type);
+        cursor = token.start + token.length;
+    }
+    if (cursor < source.size()) emit(cursor, source.size(), HighlightType::Plain);
+}
+
 /* Rendering is an owned projection, NOT a second Markdown parser. The
  * semantic source indexes the immutable decoded C11 text arena, never the
  * raw UTF-8 Markdown. Store only copied std::strings in each Element. */
@@ -158,6 +260,7 @@ void project(const stun_ui_rich_document_view& view,
     // Column order is a property of each typed TABLE_ROW, not Markdown
     // punctuation. Consume the parent TABLE's immutable C11 alignment bytes.
     std::vector<size_t> row_columns(count, 0u);
+    std::vector<std::string> code_languages(count);
     for (size_t i = 1; i < count; ++i) {
         const uint32_t parent = view.document.blocks[i].parent_index;
         if (!is_metadata_leaf(view.document.blocks[i].kind)) ++child_count[parent];
@@ -190,6 +293,16 @@ void project(const stun_ui_rich_document_view& view,
             break;
         }
         case STUN_UI_BLOCK_TEXT:
+            if (view.document.blocks[block.parent_index].kind ==
+                    STUN_UI_BLOCK_CODE_FENCE ||
+                view.document.blocks[block.parent_index].kind ==
+                    STUN_UI_BLOCK_CODE_INDENTED) {
+                project_code_text(parent, result, limit, semantic(view, block),
+                                  code_languages[block.parent_index]);
+                owners[i] = parent;
+                continue;
+            }
+            [[fallthrough]];
         case STUN_UI_BLOCK_ENTITY:
         case STUN_UI_BLOCK_RAW_HTML_INLINE:
         case STUN_UI_BLOCK_URI_AUTOLINK:
@@ -266,8 +379,16 @@ void project(const stun_ui_rich_document_view& view,
         case STUN_UI_BLOCK_IMAGE:
             elem = staged_create(result, "span", limit); elem->add_class("md-img"); break;
         case STUN_UI_BLOCK_CODE_FENCE:
+            code_languages[i] = fence_language(view, i);
+            elem = staged_create(result, "div", limit);
+            elem->add_class("md-code-block");
+            if (!code_languages[i].empty())
+                elem->add_class("lang-" + code_languages[i]);
+            break;
         case STUN_UI_BLOCK_CODE_INDENTED:
-            elem = staged_create(result, "div", limit); elem->add_class("md-code-block"); break;
+            elem = staged_create(result, "div", limit);
+            elem->add_class("md-code-block");
+            break;
         case STUN_UI_BLOCK_CODE_SPAN:
             elem = staged_create(result, "span", limit); elem->add_class("md-code"); break;
         case STUN_UI_BLOCK_RULE:

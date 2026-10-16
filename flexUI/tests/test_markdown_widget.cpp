@@ -4,11 +4,41 @@
 #include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
+#include <flexUI/syntax_highlighter.h>
 #include <flex/bridge/renderer.h>
+#include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_set>
 
 using namespace flexUI;
+
+// Test-only render highlighters: the authoritative grammar has already been
+// parsed by Stun C11. These produce only byte-range presentation hints.
+namespace {
+class C11FixtureHighlighter final : public SyntaxHighlighter {
+public:
+    std::vector<HighlightToken> highlight(std::string_view text) override {
+        const auto pos = text.find("return");
+        if (pos == std::string_view::npos) return {};
+        return {{HighlightType::Keyword, pos, 6u}};
+    }
+    const char* language() const override { return "stun-c11-fixture"; }
+};
+class C11InvalidHighlighter final : public SyntaxHighlighter {
+public:
+    std::vector<HighlightToken> highlight(std::string_view text) override {
+        return {{HighlightType::Keyword, text.size() + 1u, 3u}};
+    }
+    const char* language() const override { return "stun-c11-invalid"; }
+};
+std::string code_line_text(const Element* line) {
+    std::string answer = line->text();
+    for (auto* node : line->children())
+        answer += static_cast<const Element*>(node)->text();
+    return answer;
+}
+} // namespace
 
 spec("MarkdownWidget Parsing") {
     // We need a dummy renderer for Box
@@ -612,6 +642,81 @@ spec("MarkdownWidget Parsing") {
         if (host->child_count() == 3u)
             check(host->child_at(0u) == visible_heading);
         check(live.owned_element_count() == steady_elements);
+    }
+
+    it("renders fenced C11-owned Unicode code with optional syntax tokens") {
+        HighlighterFactory::instance().register_highlighter(
+            "stun-c11-fixture", std::make_unique<C11FixtureHighlighter>());
+        HighlighterFactory::instance().register_highlighter(
+            "stun-c11-invalid", std::make_unique<C11InvalidHighlighter>());
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-c11-highlight-231",
+            "\x60\x60\x60stun-c11-fixture\nint value = 7;\nreturn café😀;\n\x60\x60\x60\n");
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        auto* code = md->child_at(0u);
+        check(code->has_class(Symbol("md-code-block")));
+        check(code->has_class(Symbol("lang-stun-c11-fixture")));
+        check(code->child_count() >= 2u);
+        if (code->child_count() >= 2u) {
+            auto* a = code->child_at(0u);
+            auto* b = code->child_at(1u);
+            check(a->has_class(Symbol("md-code-line")));
+            check(b->has_class(Symbol("md-code-line")));
+            check(code_line_text(a) == "int value = 7;");
+            check(code_line_text(b) == "return café😀;");
+            bool keyword = false;
+            for (auto* node : b->children()) {
+                auto* span = static_cast<Element*>(node);
+                if (span->has_class(Symbol("hl-keyword")) &&
+                    span->text() == "return")
+                    keyword = true;
+            }
+            check(keyword);
+        }
+        const auto stable_count = box->owned_element_count();
+        // An out-of-bounds UTF-8 byte offset must never slice RichDoc text.
+        widget->set_markdown(
+            "\x60\x60\x60stun-c11-invalid\nreturn café😀;\n\x60\x60\x60\n");
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u) {
+            code = md->child_at(0u);
+            check(code->child_count() >= 1u);
+            if (code->child_count() >= 1u) {
+                auto* line = code->child_at(0u);
+                check(code_line_text(line) == "return café😀;");
+                bool keyword = false;
+                for (auto* node : line->children())
+                    keyword |= static_cast<Element*>(node)->has_class(
+                        Symbol("hl-keyword"));
+                check(!keyword);
+            }
+        }
+        // Missing renderer highlighter means plain code, NOT a new parser.
+        widget->set_markdown(
+            "\x60\x60\x60stun-unknown-language\nreturn café😀;\n\x60\x60\x60\n");
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u) {
+            code = md->child_at(0u);
+            check(code->has_class(Symbol("md-code-block")));
+            check(code->child_count() >= 1u);
+            if (code->child_count() >= 1u)
+                check(code_line_text(code->child_at(0u)) == "return café😀;");
+        }
+        // No persistence of C11's borrowed code text or metadata.
+        widget->set_markdown("# 下一段 ✅\n");
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u)
+            check(md->child_at(0u)->text() == "下一段 ✅");
+        check(box->owned_element_count() <= stable_count);
     }
 
     // #186 / #231: repeated source updates must preserve the sole C11
