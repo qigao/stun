@@ -245,7 +245,7 @@ jobs:
           ctest --test-dir build/ui-core-windows -C Release \
             -R '^stun_markdown_(c11|html|containers|quote|nested_quote|quoted_list|raw_html_policy)_test$' \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
-            --output-junit build/windows-native-c11-results.xml \
+            --output-junit "$(cygpath -w "$PWD/build/windows-native-c11-results.xml")" \
             2>&1 | tee build/windows-native-c11.log
           python - <<'PY'
           import xml.etree.ElementTree as ET
