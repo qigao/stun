@@ -8,6 +8,7 @@
 #define FLEXUI_MARKDOWN_WIDGET_H
 
 #include "../widget.h"
+#include <cstddef>
 #include <string>
 
 namespace flexUI {
@@ -20,7 +21,10 @@ namespace flexUI {
  */
 class MarkdownWidget : public Widget {
 public:
-    explicit MarkdownWidget(const std::string& markdown = "");
+    static constexpr std::size_t kDefaultMaxRenderElements = 16384u;
+    explicit MarkdownWidget(
+        const std::string& markdown = "",
+        std::size_t max_render_elements = kDefaultMaxRenderElements);
 
     // Widget interface
     void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
@@ -37,6 +41,7 @@ private:
 
     std::string markdown_;
     bool needs_rebuild_ = true;
+    const std::size_t max_render_elements_;
 };
 
 } // namespace flexUI
