@@ -10852,4 +10852,184 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     check(!input.handled);
     check(widget->markdown()==tall);
   }
+  // #186/#228 test-only: verify a Unicode heading, GFM task list and GFM
+  // table as legally separate sibling blocks inside the existing MarkdownWidget.
+  // This uses real Box CSS/layout, overflow scrolling, recorded draw commands
+  // and the shipping C++ md::parse; it does not switch to the C11 candidate.
+  it("paints Unicode GFM sibling table and task after scroll source replacement") {
+    Box box(nullptr);
+    auto* root=box.create("div","md-unicode-gfm-root-186");
+    auto* viewport=box.create("div","md-unicode-gfm-viewport-186");
+    static const char* const sources[]={
+      "# 日本語 café 😀 Alpha\n\n"
+      "- [x] 発送済み\n- [ ] 待機中\n\n"
+      "| City | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
+      "# Ελληνικά café 😀 Beta\n\n"
+      "- [ ] review\n- [x] 完了\n\n"
+      "| City | Price |\n| :--- | ---: |\n| Αθήνα | £30 |\n"
+    };
+    static const char* const titles[]={"日本語 café 😀 Alpha","Ελληνικά café 😀 Beta"};
+    static const char* const markers[]={"日本語","Ελληνικά"};
+    auto* md=box.create_widget<MarkdownWidget>(
+        "div","md-unicode-gfm-doc-186",sources[0]);
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(280.0f,170.0f);
+    box.load_css(R"(
+      #md-unicode-gfm-root-186 {
+        width: 220px; height: 160px; display: flex;
+        flex-direction: column;
+      }
+      #md-unicode-gfm-viewport-186 {
+        width: 140px; height: 82px;
+        display: block; overflow-y: auto;
+      }
+      #md-unicode-gfm-doc-186 {
+        width: 128px; height: auto; display: block;
+      }
+      .md-header { width: 112px; height: 40px; font-size: 14px; }
+      .md-ul { width: 118px; min-height: 100px; }
+      .md-table { width: 118px; min-height: 104px; }
+    )");
+    auto* widget=static_cast<MarkdownWidget*>(md->widget);
+    check(widget!=nullptr);
+    if(widget==nullptr)return;
+    widget->update(0.0f,*md);
+    box.update();
+    check(viewport->is_scroll_container());
+    check(md->child_count()==3u);
+    check(viewport->max_scroll_y()>0.0f);
+    if(md->child_count()!=3u||viewport->max_scroll_y()<=0.0f)return;
+
+    // The first heading's composed Unicode text must be measurable and
+    // actually painted at Home, not just present as a parser or HTML node.
+    auto* original=static_cast<Element*>(md->children()[0]);
+    check(original->has_class(Symbol("md-header")));
+    check(original->text()==titles[0]);
+    check(original->width()>0.0f);
+    const auto measured=layout_text_block(
+        original->computed_style,original->text(),
+        0.0f,0.0f,original->width(),std::max(40.0f,original->height()),
+        Color{},TextVerticalAlign::Top);
+    check(!measured.lines.empty());
+    for(const auto& line:measured.lines) {
+      check(std::isfinite(line.width));
+      check(line.width>=0.0f);
+      check(line.width<=original->width()+1.0f);
+    }
+    RecordingRenderer before;
+    before.begin_frame(800.0f,600.0f,1.0f);
+    Renderer before_renderer(&before);
+    RenderManager before_manager(&before_renderer);
+    before_manager.render_tree(root);
+    check(std::any_of(before.texts.begin(),before.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+
+    for(size_t round=0u;round<8u;++round) {
+      const size_t index=(round+1u)%2u;
+      const size_t old_index=1u-index;
+      // Scroll with a real overflow container, then replace the entire AST
+      // while the old heading can legitimately be clipped out of the frame.
+      const float amount=std::min(32.0f,viewport->max_scroll_y());
+      check(amount>0.0f);
+      check(viewport->set_scroll_offset(0.0f,amount));
+      box.update();
+      check(viewport->scroll_y()>0.0f);
+      widget->set_markdown(sources[index]);
+      widget->update(0.0f,*md);
+      box.update();
+      check(widget->markdown()==sources[index]);
+      check(md->child_count()==3u);
+      check(viewport->scroll_y()>=0.0f);
+      check(viewport->scroll_y()<=viewport->max_scroll_y());
+      if(md->child_count()!=3u)return;
+      auto* heading=static_cast<Element*>(md->children()[0]);
+      auto* list=static_cast<Element*>(md->children()[1]);
+      auto* table=static_cast<Element*>(md->children()[2]);
+      check(heading->has_class(Symbol("md-header")));
+      check(heading->text()==titles[index]);
+      check(list->has_class(Symbol("md-ul")));
+      check(table->has_class(Symbol("md-table")));
+      check(list->child_count()==2u);
+      check(table->child_count()==2u);
+      if(list->child_count()==2u) {
+        auto* a=static_cast<Element*>(list->children()[0]);
+        auto* b=static_cast<Element*>(list->children()[1]);
+        check(a->has_class(Symbol("md-task-item")));
+        check(b->has_class(Symbol("md-task-item")));
+      }
+
+      RecordingRenderer scrolled;
+      scrolled.begin_frame(800.0f,600.0f,1.0f);
+      Renderer scrolled_renderer(&scrolled);
+      RenderManager scrolled_manager(&scrolled_renderer);
+      scrolled_manager.render_tree(root);
+      check(std::none_of(scrolled.texts.begin(),scrolled.texts.end(),
+          [old_index](const TextCall& call) {
+            return call.text.find(markers[old_index])!=std::string::npos;
+          }));
+
+      // Recover Home and inspect the *drawn* Unicode heading, with no stale
+      // previous source commands. Repeating identical source is a no-op.
+      check(viewport->set_scroll_offset(0.0f,0.0f));
+      box.update();
+      RecordingRenderer recovered;
+      recovered.begin_frame(800.0f,600.0f,1.0f);
+      Renderer recovered_renderer(&recovered);
+      RenderManager recovered_manager(&recovered_renderer);
+      recovered_manager.render_tree(root);
+      check(std::any_of(recovered.texts.begin(),recovered.texts.end(),
+          [index](const TextCall& call) {
+            return call.text.find(markers[index])!=std::string::npos;
+          }));
+      check(std::none_of(recovered.texts.begin(),recovered.texts.end(),
+          [old_index](const TextCall& call) {
+            return call.text.find(markers[old_index])!=std::string::npos;
+          }));
+      const Element* previous_heading=md->children()[0];
+      const Element* previous_list=md->children()[1];
+      const Element* previous_table=md->children()[2];
+      widget->set_markdown(sources[index]);
+      widget->update(0.0f,*md);
+      box.update();
+      check(md->child_count()==3u);
+      if(md->child_count()==3u) {
+        check(md->children()[0]==previous_heading);
+        check(md->children()[1]==previous_list);
+        check(md->children()[2]==previous_table);
+      }
+      Event input=Event::text_input("must-not-edit");
+      box.dispatch_event(input);
+      check(!input.handled);
+      check(widget->markdown()==sources[index]);
+    }
+
+    // A short Unicode-only heading must evict obsolete task/table children
+    // and clamp an oversized old scroll offset to zero.
+    check(viewport->set_scroll_offset(
+        0.0f,std::min(64.0f,viewport->max_scroll_y())));
+    widget->set_markdown("# 日本語 short\n");
+    widget->update(0.0f,*md);
+    box.update();
+    check(md->child_count()==1u);
+    check(viewport->max_scroll_y()==0.0f);
+    check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
+    RecordingRenderer short_frame;
+    short_frame.begin_frame(800.0f,600.0f,1.0f);
+    Renderer short_renderer(&short_frame);
+    RenderManager short_manager(&short_renderer);
+    short_manager.render_tree(root);
+    check(std::any_of(short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+    check(std::none_of(short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("Ελληνικά")!=std::string::npos;
+        }));
+  }
+
 }
