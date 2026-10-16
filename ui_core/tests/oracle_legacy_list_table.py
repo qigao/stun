@@ -7,9 +7,10 @@ break is a distinct legal control and currently works. This independent
 cmark-gfm oracle freezes normative root ownership without modifying the C++
 parser, accepting its bad output as correct, or introducing a runtime fallback.
 
-Use the already-installed cmarkgfm Python environment from #186. Any C11 HTML
-result is reported as a diagnostic only, not silently promoted into the fixed
-468-case independent strict-GFM conformance baseline.
+Use the already-installed cmarkgfm Python environment from #186. Both
+independent normative root-ownership semantics and, when --renderer is given,
+the actual C11 HTML byte output are STRICT 5/5 gates. Their separate scope is
+never silently folded into or used to weaken the pinned 468-case GFM baseline.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ import cmarkgfm
 
 _VOID = frozenset(("area", "base", "br", "col", "embed", "hr", "img",
                    "input", "link", "meta", "param", "source", "track", "wbr"))
+EXPECTED_SOURCE_MANIFEST_SHA256 = "513f381d284cca78f48611992bb591eae640dbf6cc19b3fbfa8e821dd962e207"
 _SOURCE_COMMON = ("- [x] {done}\n- [ ] {pending}\n\n{separator}"
                   "| City | Price |\n| :--- | ---: |\n| {city} | {price} |\n")
 
@@ -171,7 +173,7 @@ def native_output(renderer: Path, markdown: str) -> tuple[bytes | None, str]:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--report", type=Path, required=True)
-    p.add_argument("--renderer", type=Path, help="Optional C11 HTML diagnostic; not a strict gate")
+    p.add_argument("--renderer", type=Path, help="Optional C11 HTML strict byte oracle")
     args = p.parse_args()
     if args.renderer is not None and not args.renderer.is_file():
         print("INFRASTRUCTURE ERROR: missing C11 diagnostic renderer", file=sys.stderr)
@@ -181,40 +183,59 @@ def main() -> int:
         assert len(ids) == 5 and len(set(ids)) == 5
         assert sum(f.upstream_legacy_gap for f in FIXTURES) == 3
         report: list[dict[str, object]] = []
+        native_passed = 0
         for fixture in FIXTURES:
             independent_html = cmarkgfm.github_flavored_markdown_to_html(
                 fixture.markdown)
             item = {"id": fixture.id, **inspect(fixture, independent_html)}
             if args.renderer is not None:
                 native, status = native_output(args.renderer, fixture.markdown)
-                item["c11_diagnostic"] = {
+                byte_matches = native == independent_html.encode("utf-8")
+                if not byte_matches:
+                    first = -1
+                    if native is not None:
+                        first = next((
+                            k for k in range(min(len(native), len(independent_html.encode("utf-8"))))
+                            if native[k] != independent_html.encode("utf-8")[k]
+                        ), min(len(native), len(independent_html.encode("utf-8"))))
+                    raise AssertionError(
+                        f"{fixture.id}: native HTML diverges from independent cmark-gfm "
+                        f"at byte {first}, status={status}"
+                    )
+                native_passed += 1
+                item["c11_strict"] = {
                     "status": status,
-                    "byte_matches_oracle": (
-                        native == independent_html.encode("utf-8")
-                        if native is not None else False
-                    ),
+                    "byte_matches_oracle": True,
+                    "html_sha256": hashlib.sha256(native).hexdigest(),
                 }
             report.append(item)
         manifest = json.dumps(
             [(f.id, f.markdown) for f in FIXTURES],
             ensure_ascii=False, separators=(",", ":"),
         ).encode("utf-8")
+        manifest_digest = hashlib.sha256(manifest).hexdigest()
+        assert manifest_digest == EXPECTED_SOURCE_MANIFEST_SHA256, (
+            "fixed #229 fixture corpus changed without independent review"
+        )
         result = {
             "oracle": "independent cmark-gfm HTML root ownership",
             "test_only": True,
             "not_an_old_cpp_parser_fix": True,
             "fixtures": 5,
             "normative_passed": len(report),
+            "c11_strict_passed": native_passed,
+            "c11_strict_total": len(FIXTURES) if args.renderer is not None else 0,
             "blank_separator_positive_root_expected": 3,
             "explicit_hr_controls": 2,
-            "source_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+            "source_manifest_sha256": manifest_digest,
             "cases": report,
         }
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n",
                                encoding="utf-8")
         print("RESULT: independent #229 GFM root owner oracle "
-              f"{len(report)}/5 (blank 3, thematic-break 2); "
+              f"{len(report)}/5 (blank 3, thematic-break 2), "
+              f"C11 strict HTML {native_passed}/{result['c11_strict_total']}; "
               f"source_manifest_sha256={result['source_manifest_sha256']}")
         return 0
     except (AssertionError, ValueError) as exc:
