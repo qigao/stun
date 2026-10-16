@@ -262,3 +262,107 @@ jobs:
                          ("failure", "error", "skipped"))
           print("Windows x64 real C11 parser/HTML/ownership CTests: 7/7")
           PY
+
+
+  c11-macos-released-sdk-runtime:
+    name: C11 native runtime / macOS ARM64 released Salts
+    needs: sdk-releases
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Stun candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Restore canonical tagged Salts.Native macOS ARM64 SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALTS_TAG: ${{ needs.sdk-releases.outputs.salts_release }}
+          SALTS_COMMIT: ${{ needs.sdk-releases.outputs.salts_sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          version="${SALTS_TAG#v}"
+          test "$SALTS_TAG" != "$version"
+          package="Salts.Native.$version.nupkg"
+          mkdir -p build/salts-native-release
+          gh release download "$SALTS_TAG" --repo qigao/salts \
+            --pattern "$package" --pattern SHA256SUMS \
+            --dir build/salts-native-release
+          python3 - <<'PY'
+          import hashlib, os, pathlib, zipfile
+          version = os.environ["SALTS_TAG"][1:]
+          root = pathlib.Path("build/salts-native-release")
+          pkg = root / ("Salts.Native." + version + ".nupkg")
+          lines = (root / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+          assert len(lines) == 1
+          wanted, entry = lines[0].strip().split(maxsplit=1)
+          assert len(wanted) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in wanted)
+          assert pathlib.PurePosixPath(entry.lstrip("*")).name == pkg.name
+          with pkg.open("rb") as stream:
+              assert hashlib.file_digest(stream, "sha256").hexdigest().lower() == wanted.lower()
+          with zipfile.ZipFile(pkg) as archive:
+              members = [n for n in archive.namelist() if n.startswith("sdk/macos-arm64/")]
+              assert members and all(".." not in pathlib.PurePosixPath(n).parts for n in members)
+              manifest = "sdk/macos-arm64/salts-sdk-manifest.txt"
+              assert manifest in members
+              fields = dict(line.split("=", 1) for line in
+                  archive.read(manifest).decode("utf-8-sig").splitlines() if "=" in line)
+              assert fields["version"] == version
+              assert fields["commit"] == os.environ["SALTS_COMMIT"]
+              assert fields["profile"] == "release"
+              assert any(n.endswith("/lib/cmake/Salts/SaltsConfig.cmake") for n in members)
+              assert any(n.endswith("/include/unicode/salts_unicode.h") for n in members)
+              archive.extractall(root, members)
+          print("Validated release-tagged macOS ARM64 Salts SDK and SHA256")
+          PY
+
+      - name: Build native C11 against installed macOS Salts SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
+          test -d "$sdk/lib/cmake/Salts"
+          cmake -S ui_core -B build/ui-core-macos -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake --build build/ui-core-macos --parallel 2 \
+            --target stun_markdown_c11_test stun_markdown_html_test \
+              stun_markdown_containers_test stun_markdown_quote_test \
+              stun_markdown_nested_quote_test stun_markdown_quoted_list_test \
+              stun_markdown_raw_html_policy_test
+
+      - name: Execute real macOS parser/HTML/ownership conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
+          export DYLD_LIBRARY_PATH="$sdk/lib:$sdk/bin:${DYLD_LIBRARY_PATH:-}"
+          ctest --test-dir build/ui-core-macos -C Release \
+            -R '^stun_markdown_(c11|html|containers|quote|nested_quote|quoted_list|raw_html_policy)_test$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$PWD/build/macos-native-c11-results.xml" \
+            2>&1 | tee build/macos-native-c11.log
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          cases = list(ET.parse("build/macos-native-c11-results.xml").getroot().iter("testcase"))
+          expected = {
+              "stun_markdown_c11_test", "stun_markdown_html_test",
+              "stun_markdown_containers_test", "stun_markdown_quote_test",
+              "stun_markdown_nested_quote_test", "stun_markdown_quoted_list_test",
+              "stun_markdown_raw_html_policy_test"
+          }
+          assert len(cases) == len(expected)
+          assert {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(t)) for c in cases for t in
+                         ("failure", "error", "skipped"))
+          print("macOS ARM64 native C11 parser/HTML/ownership CTests: 7/7")
+          PY
