@@ -246,6 +246,66 @@ spec("MarkdownWidget Parsing") {
         }
     }
 
+    // #229: the real shipping widget must now consume the canonical C11
+    // RichDoc, not reproduce the incorrect legacy C++ List->Table nesting.
+    it("uses canonical C11 task list then root table across blank separator") {
+        const std::string markdown =
+            "# 日本語 café 😀 Alpha\n\n"
+            "- [x] 発送済み\n- [ ] 待機中\n\n"
+            "| City | Price |\n| :--- | ---: |\n| 東京 | €20 |\n";
+        auto* md=box->create_widget<MarkdownWidget>(
+            "div","md-c11-root-list-table-229",markdown);
+        root->append(md);
+        auto* widget=static_cast<MarkdownWidget*>(md->widget);
+        check(widget!=nullptr);
+        if(!widget)return;
+        widget->update(0.0f,*md);
+        check(md->child_count()==3u);
+        if(md->child_count()!=3u)return;
+        auto* header=static_cast<Element*>(md->children()[0]);
+        auto* list=static_cast<Element*>(md->children()[1]);
+        auto* table=static_cast<Element*>(md->children()[2]);
+        check(header->has_class(Symbol("md-header")));
+        check(header->text()=="日本語 café 😀 Alpha");
+        check(list->has_class(Symbol("md-ul")));
+        check(list->child_count()==2u);
+        check(table->has_class(Symbol("md-table")));
+        check(table->child_count()==2u);
+        if(list->child_count()==2u) {
+            auto* done=static_cast<Element*>(list->children()[0]);
+            auto* pending=static_cast<Element*>(list->children()[1]);
+            check(done->has_class(Symbol("md-task-item")));
+            check(pending->has_class(Symbol("md-task-item")));
+            check(done->child_count()>=1u);
+            check(pending->child_count()>=1u);
+            if(done->child_count()&&pending->child_count()) {
+                auto* a=static_cast<Element*>(done->children()[0]);
+                auto* b=static_cast<Element*>(pending->children()[0]);
+                check(a->has_class(Symbol("md-checkbox")));
+                check(b->has_class(Symbol("md-checkbox")));
+                check(a->text()=="[x] ");
+                check(b->text()=="[ ] ");
+            }
+        }
+        const Element* const original=header;
+        widget->set_markdown(markdown);
+        widget->update(0.0f,*md);
+        check(md->child_count()==3u);
+        if(md->child_count()==3u) check(md->children()[0]==original);
+
+        // A 1 MiB over-budget update MUST NOT silently use md::parse or
+        // publish an incomplete tree. Previously valid children remain.
+        std::string over_budget(1024u*1024u,'x');
+        widget->set_markdown(over_budget);
+        widget->update(0.0f,*md);
+        check(md->child_count()==3u);
+        if(md->child_count()==3u)check(md->children()[0]==original);
+        widget->set_markdown(markdown);
+        widget->update(0.0f,*md);
+        check(md->child_count()==3u);
+        check(widget->markdown()==markdown);
+    }
+
     // #186 consumer isolation: the current MarkdownWidget still uses the
     // existing C++ md::parse, not the candidate C11 grammar. Exercise real
     // update/empty/rebuild transitions without a second runtime owner.
