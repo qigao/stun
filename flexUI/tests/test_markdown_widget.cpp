@@ -307,7 +307,7 @@ spec("MarkdownWidget Parsing") {
     // capacity rejection must not touch the visible Element tree.
     it("rolls back bounded detached projection and recovers without fallback") {
         auto* md = box->create_widget<MarkdownWidget>(
-            "div", "md-c11-stage-rollback-231", "# 初期 😀\n", 2u);
+            "div", "md-c11-stage-rollback-231", "# 初期 😀\n", 3u);
         root->append(md);
         auto* widget = static_cast<MarkdownWidget*>(md->widget);
         check(widget != nullptr);
@@ -318,8 +318,8 @@ spec("MarkdownWidget Parsing") {
         auto* original = static_cast<Element*>(md->children()[0]);
         check(original->text() == "初期 😀");
 
-        // The heading/list fit the budget, but the task item exceeds it
-        // after two detached Elements have already been allocated.
+        // The heading/list/task item fit the budget, but the checkbox exceeds
+        // it with one child already attached to a detached parent.
         widget->set_markdown(
             "# 次へ 😀\n\n- [x] 発送済み\n\n"
             "| City | Price |\n| --- | ---: |\n| 東京 | €20 |\n");
