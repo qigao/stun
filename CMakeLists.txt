@@ -52,6 +52,9 @@ add_subdirectory(flexUI)
 add_subdirectory(TextEdit)
 add_subdirectory(tango)
 add_subdirectory(ui_core)
+# Native C11 RichDoc is the sole MarkdownWidget parser. The C11 library is
+# declared after FlexUI so the existing Tango test build order stays intact.
+target_link_libraries(flexUI PRIVATE Stun::UICore)
 if(STUN_BUILD_APPLICATIONS)
   add_subdirectory(meta_editor)
   add_subdirectory(flexui_designer)

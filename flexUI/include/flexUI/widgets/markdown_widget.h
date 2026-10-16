@@ -1,7 +1,7 @@
 /*
  * flexUI - MarkdownWidget
  *
- * Markdown renderer using md4c and flexUI element hierarchy.
+ * Markdown renderer using the sole Stun C11 RichDoc parser and owned FlexUI elements.
  */
 
 #ifndef FLEXUI_MARKDOWN_WIDGET_H
