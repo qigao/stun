@@ -312,8 +312,6 @@ spec("MarkdownWidget Parsing") {
             check(md->parent_elem() == root);
         }
     }
-}
-
 
     // #230: a source that exceeds the single-owner C11 source budget
     // cannot retain stale visual state, publish a partial tree or invoke
@@ -342,6 +340,7 @@ spec("MarkdownWidget Parsing") {
         }
         check(md->parent_elem()==root);
     }
+}
 
 // ============================================================================
 // C++ Syntax Highlighting Tests
