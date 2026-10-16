@@ -138,9 +138,8 @@ spec("MarkdownWidget Parsing") {
             }
         }
 
-        // Existing widget update, not a C11 parser cutover: old children
-        // must no longer be visible, and repeated parsing releases its
-        // arena-allocated C++ AST via the single ParseContext destructor.
+        // C11 projection replaces the visible children once per changed source,
+        // with no legacy parser fallback.
         auto* widget = static_cast<MarkdownWidget*>(md->widget);
         widget->set_markdown("- [ ] pending\n");
         md->widget->update(0.0f, *md);
@@ -159,10 +158,8 @@ spec("MarkdownWidget Parsing") {
         }
     }
 
-    // #186/#228: an explicit root-level thematic break ends the legacy
-    // C++ md::parse List container before the sibling TABLE. The same
-    // markup with ONLY a blank separator is an outstanding legacy
-    // List/TABLE container bug (tracked under #186), not a qualified path.
+    // #186/#228: preserve explicit thematic-break rendering as well as the
+    // new blank-only C11 Task List → root Table regression below.
     // GFM tables cannot legally contain block/task nodes in their cells.
     it("composes Unicode heading tasks and table across explicit list close") {
         static const char* const sources[] = {
@@ -306,9 +303,47 @@ spec("MarkdownWidget Parsing") {
         check(widget->markdown()==markdown);
     }
 
-    // #186 consumer isolation: the current MarkdownWidget still uses the
-    // existing C++ md::parse, not the candidate C11 grammar. Exercise real
-    // update/empty/rebuild transitions without a second runtime owner.
+    // #231: even if the parser accepts the input, a later projection
+    // capacity rejection must not touch the visible Element tree.
+    it("rolls back bounded detached projection and recovers without fallback") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-c11-stage-rollback-231", "# 初期 😀\n", 2u);
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        auto* original = static_cast<Element*>(md->children()[0]);
+        check(original->text() == "初期 😀");
+
+        // The heading/list fit the budget, but the task item exceeds it
+        // after two detached Elements have already been allocated.
+        widget->set_markdown(
+            "# 次へ 😀\n\n- [x] 発送済み\n\n"
+            "| City | Price |\n| --- | ---: |\n| 東京 | €20 |\n");
+        for (size_t attempt = 0; attempt < 8u; ++attempt) {
+            widget->update(0.0f, *md);
+            check(md->child_count() == 1u);
+            if (md->child_count() != 1u) return;
+            check(md->children()[0] == original);
+            check(static_cast<Element*>(md->children()[0])->text() == "初期 😀");
+        }
+
+        widget->set_markdown("# 回復 ✅\n");
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() == 1u) {
+            auto* recovered = static_cast<Element*>(md->children()[0]);
+            check(recovered != original);
+            check(recovered->has_class(Symbol("md-header")));
+            check(recovered->text() == "回復 ✅");
+        }
+    }
+
+    // #186 / #231: repeated source updates must preserve the sole C11
+    // parser and the existing Box-owned presentation lifecycle.
     it("GFM repeated task table heading and empty updates remain bounded") {
         static const char* const sources[] = {
             "| H | V |\n| --- | --- |\n| a | b |\n",
