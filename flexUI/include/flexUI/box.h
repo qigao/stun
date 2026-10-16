@@ -132,6 +132,10 @@ public:
   void adopt_detached_elements(std::vector<std::unique_ptr<Element>> &&elements);
   // Diagnostics only; includes the Box-owned widget projections.
   std::size_t owned_element_count() const noexcept { return elements_.size(); }
+  // Diagnostic count of pointer-keyed CSS baseline objects retained in Box.
+  std::size_t cached_style_element_count() const noexcept {
+    return style_engine_.tracked_element_count();
+  }
   Element *create_with_widget(const std::string &tag, std::unique_ptr<Widget> widget,
                               const std::string &id = "");
   // Takes ownership of widget. Prefer the unique_ptr overload in new code.

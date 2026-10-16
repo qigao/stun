@@ -1694,6 +1694,7 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
     for (Element* element : candidates) {
       styled_elements_.erase(reinterpret_cast<std::uintptr_t>(element));
       container_widths_.erase(element);
+      style_engine_.forget_element(element);
     }
     elements_.erase(
         std::remove_if(elements_.begin(), elements_.end(),

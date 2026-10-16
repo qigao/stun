@@ -3522,6 +3522,17 @@ public:
     baseline_styles_.clear();
   }
 
+  void forget_element(const Element* element) noexcept {
+    if (!element) return;
+    baseline_styles_.erase(element);
+    container_registrations_.erase(element);
+    if (current_element_ == element) current_element_ = nullptr;
+  }
+
+  size_t tracked_element_count() const noexcept {
+    return baseline_styles_.size();
+  }
+
   const std::vector<AnimationKeyframeStep>* keyframes(
       const std::string& name) const {
     auto it = keyframes_.find(name);
@@ -8387,6 +8398,12 @@ bool StyleEngine::uses_pseudo_class(Symbol pseudo) const {
 }
 void StyleEngine::clear() { impl_->clear(); }
 void StyleEngine::clear_baseline_styles() { impl_->clear_baseline_styles(); }
+void StyleEngine::forget_element(const Element* element) noexcept {
+  impl_->forget_element(element);
+}
+size_t StyleEngine::tracked_element_count() const noexcept {
+  return impl_->tracked_element_count();
+}
 
 bool CssLoadResult::has_errors() const {
   return std::any_of(diagnostics.begin(), diagnostics.end(),

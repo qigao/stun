@@ -463,6 +463,41 @@ spec("MarkdownWidget Parsing") {
         check(box->owned_element_count() == steady_count);
     }
 
+    it("drops retired Markdown style baselines through layout and Unicode swaps") {
+        Box live(nullptr);
+        auto* root = live.create("div", "md-style-cache-root-231");
+        auto* host = live.create_widget<MarkdownWidget>(
+            "div", "md-style-cache-host-231", "# 初期 😀\n");
+        root->append(host);
+        live.set_root(root);
+        live.set_viewport(280.0f, 160.0f);
+        live.load_css("#md-style-cache-host-231 { width: 200px; } "
+                      ".md-header { color: #123456; }");
+        auto* widget = static_cast<MarkdownWidget*>(host->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *host);
+        live.update();
+        const size_t initial_elements = live.owned_element_count();
+        const size_t initial_baselines = live.cached_style_element_count();
+        check(initial_baselines >= 3u);
+
+        for (size_t round = 0; round < 48u; ++round) {
+            const bool alternate = (round % 2u) != 0u;
+            widget->set_markdown(
+                alternate ? "# Ελληνικά café ✅\n" : "# 東京 🇯🇵\n");
+            widget->update(0.0f, *host);
+            live.update(); // Actually apply StyleEngine to each new subtree.
+            check(host->child_count() == 1u);
+            if (host->child_count() != 1u) return;
+            auto* heading = static_cast<Element*>(host->child_at(0u));
+            check(heading->has_class(Symbol("md-header")));
+            check(heading->text() == (alternate ? "Ελληνικά café ✅" : "東京 🇯🇵"));
+            check(live.owned_element_count() == initial_elements);
+            check(live.cached_style_element_count() == initial_baselines);
+        }
+    }
+
     // #186 / #231: repeated source updates must preserve the sole C11
     // parser and the existing Box-owned presentation lifecycle.
     it("GFM repeated task table heading and empty updates remain bounded") {
