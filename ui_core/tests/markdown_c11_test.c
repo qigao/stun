@@ -535,6 +535,109 @@ static int test_gfm_wide_table_capacity(void) {
     return 0;
 }
 
+/* #229: original blank-only GFM Task List -> *root* TABLE regression.
+ * C11 RichDoc is the ONLY Markdown grammar; no thematic break workaround.
+ * Run this same native fixture on Linux, Windows x64 and macOS ARM64.
+ * Reject insufficient budgets without publishing a borrowed document. */
+static int test_gfm_blank_root_task_table(void) {
+    static const struct {
+        const char *markdown;
+        const char *heading;
+        const char *place;
+    } cases[] = {
+        {
+            "# 日本語 café 😀 Alpha\n\n- [x] 発送済み\n- [ ] 待機中\n\n| City | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
+            "日本語 café 😀 Alpha", "東京"
+        },
+        {
+            "# 日本語 café 😀 Alpha\r\n\r\n- [x] 発送済み\r\n- [ ] 待機中\r\n\r\n| City | Price |\r\n| :--- | ---: |\r\n| 東京 | €20 |\r\n",
+            "日本語 café 😀 Alpha", "東京"
+        },
+        {
+            "# ASCII heading\n\n- [x] shipped\n- [ ] pending\n\n| City | Price |\n| :--- | ---: |\n| Tokyo | 20 |\n",
+            "ASCII heading", "Tokyo"
+        }
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==3u,
+                   "original root Task/List/Table gate has three variants");
+    for(size_t c=0u;c<3u;++c) {
+        const size_t bytes=strlen(cases[c].markdown);
+        stun_md_document *doc=NULL;
+        CHECK(stun_md_parse(cases[c].markdown,bytes,256u,
+                            bytes+1u,&doc)==STUN_UI_OK);
+        CHECK(doc!=NULL);
+        const stun_ui_rich_document_view v=stun_md_document_view(doc);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==bytes);
+        CHECK(memcmp(v.raw_markdown,cases[c].markdown,bytes)==0);
+        CHECK(kinds(v,STUN_UI_BLOCK_HEADING)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TASK_ITEM)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_CHECKBOX)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==1u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==2u);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==4u);
+        CHECK(kinds(v,STUN_UI_BLOCK_RULE)==0u);
+        CHECK(text_is(v,cases[c].heading));
+        CHECK(text_is(v,cases[c].place));
+
+        size_t roots[3]={SIZE_MAX,SIZE_MAX,SIZE_MAX};
+        size_t root_count=0u,checked=0u,unchecked=0u;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            const stun_ui_block *b=&v.document.blocks[i];
+            if(b->parent_index==0u) {
+                CHECK(root_count<3u);
+                roots[root_count++]=i;
+            }
+            if(b->kind!=STUN_UI_BLOCK_CHECKBOX) continue;
+            CHECK(b->parent_index<i);
+            CHECK(v.document.blocks[b->parent_index].kind==
+                  STUN_UI_BLOCK_TASK_ITEM);
+            const char *meta=NULL;size_t meta_bytes=0u;
+            CHECK(stun_ui_rich_document_metadata(&v,i,&meta,&meta_bytes)==
+                  STUN_UI_OK);
+            CHECK(meta!=NULL && meta_bytes==1u);
+            if(meta[0]=='x')++checked;
+            else { CHECK(meta[0]==' ');++unchecked; }
+        }
+        CHECK(root_count==3u);
+        CHECK(v.document.blocks[roots[0]].kind==STUN_UI_BLOCK_HEADING);
+        CHECK(v.document.blocks[roots[1]].kind==STUN_UI_BLOCK_LIST);
+        CHECK(v.document.blocks[roots[2]].kind==STUN_UI_BLOCK_TABLE);
+        CHECK(checked==1u && unchecked==1u);
+
+        const char *align=NULL;size_t n_align=0u;
+        CHECK(stun_ui_rich_document_metadata(&v,roots[2],&align,&n_align)==
+              STUN_UI_OK);
+        CHECK(align!=NULL && n_align==2u);
+        CHECK((uint8_t)align[0]==STUN_UI_TABLE_ALIGN_LEFT);
+        CHECK((uint8_t)align[1]==STUN_UI_TABLE_ALIGN_RIGHT);
+
+        size_t need=SIZE_MAX,required=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,NULL,0u,&need)==STUN_UI_OK);
+        CHECK(need>0u && need<4096u);
+        unsigned char html[4096];memset(html,0xa5,sizeof(html));
+        CHECK(stun_md_render_html(&v,256u,(char*)html,need,&required)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(required==need);
+        for(size_t i=0u;i<sizeof(html);++i)CHECK(html[i]==0xa5);
+        CHECK(stun_md_render_html(&v,256u,(char*)html,
+                                  sizeof(html),&required)==STUN_UI_OK);
+        CHECK(required==need);
+        CHECK(strstr((char*)html,"<table>\n<thead>")!=NULL);
+        CHECK(strstr((char*)html,"<input type=\"checkbox\"")!=NULL);
+        stun_md_document_destroy(doc);
+
+        /* Parsing with insufficient capacity must not publish a document. */
+        doc=(stun_md_document*)(uintptr_t)0x1;
+        CHECK(stun_md_parse(cases[c].markdown,bytes,8u,bytes+1u,
+                            &doc)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(doc==NULL);
+    }
+    puts("#229 native blank-only root Task List -> Table: 3/3 PASS");
+    return 0;
+}
+
 static int test_gfm_list_table_ownership(void) {
     const char *sources[] = {
         "- | A | B |\n  | :--- | ---: |\n  | a\\|b | 7 |\n",
@@ -1844,6 +1947,7 @@ int main(void) {
     if(test_gfm_delimiter_column_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
     if(test_gfm_explicit_quote_table_ownership()) return 1;
+    if(test_gfm_blank_root_task_table()) return 1;
     if(test_gfm_list_table_ownership()) return 1;
     if(test_gfm_wide_table_capacity()) return 1;
     if(test_gfm_composed_list_table_ownership()) return 1;
