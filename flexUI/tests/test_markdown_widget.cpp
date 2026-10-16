@@ -159,6 +159,88 @@ spec("MarkdownWidget Parsing") {
         }
     }
 
+    // #186/#228: these are three sibling GFM blocks, NOT task/list blocks
+    // inside a GFM table cell (which the normative GFM grammar disallows).
+    // Keep the shipping C++ md::parse in place and exercise real element
+    // ownership, Unicode bytes, checkbox state, table shape, and idempotence.
+    it("composes Unicode heading sibling tasks and table without stale owners") {
+        static const char* const sources[] = {
+            "# 日本語 café 😀 Alpha\n\n"
+            "- [x] 発送済み\n- [ ] 待機中\n\n"
+            "| 城市 | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
+            "# Ελληνικά café 😀 Beta\n\n"
+            "- [ ] review\n- [x] 完了\n\n"
+            "| City | Price |\n| :--- | ---: |\n| Αθήνα | £30 |\n"
+        };
+        static const char* const headings[] = {
+            "日本語 café 😀 Alpha", "Ελληνικά café 😀 Beta"
+        };
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-unicode-gfm-186", sources[0]);
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (widget == nullptr) return;
+        for (size_t round = 0u; round < 8u; ++round) {
+            const size_t index = round % 2u;
+            widget->set_markdown(sources[index]);
+            widget->update(0.0f, *md);
+            check(widget->markdown() == sources[index]);
+            check(md->parent_elem() == root);
+            check(md->child_count() == 3u);
+            if (md->child_count() != 3u) return;
+
+            auto* heading = static_cast<Element*>(md->children()[0]);
+            auto* list = static_cast<Element*>(md->children()[1]);
+            auto* table = static_cast<Element*>(md->children()[2]);
+            check(heading->has_class(Symbol("md-header")));
+            check(heading->has_class(Symbol("h1")));
+            check(heading->text() == headings[index]);
+            check(list->has_class(Symbol("md-ul")));
+            check(list->child_count() == 2u);
+            check(table->has_class(Symbol("md-table")));
+            check(table->child_count() == 2u);
+
+            if (list->child_count() == 2u) {
+                auto* first = static_cast<Element*>(list->children()[0]);
+                auto* second = static_cast<Element*>(list->children()[1]);
+                check(first->has_class(Symbol("md-task-item")));
+                check(second->has_class(Symbol("md-task-item")));
+                check(first->child_count() >= 1u);
+                check(second->child_count() >= 1u);
+                if (first->child_count() != 0u && second->child_count() != 0u) {
+                    auto* first_checkbox =
+                        static_cast<Element*>(first->children()[0]);
+                    auto* second_checkbox =
+                        static_cast<Element*>(second->children()[0]);
+                    check(first_checkbox->has_class(Symbol("md-checkbox")));
+                    check(second_checkbox->has_class(Symbol("md-checkbox")));
+                    check(first_checkbox->text() == (index == 0u ? "[x] " : "[ ] "));
+                    check(second_checkbox->text() == (index == 0u ? "[ ] " : "[x] "));
+                }
+            }
+            if (table->child_count() == 2u) {
+                for (const auto* child : table->children()) {
+                    const auto* row = static_cast<const Element*>(child);
+                    check(row->has_class(Symbol("md-tr")));
+                    check(row->child_count() == 2u);
+                }
+            }
+            const Element* const original_heading = heading;
+            const Element* const original_list = list;
+            const Element* const original_table = table;
+            widget->set_markdown(sources[index]);
+            widget->update(0.0f, *md);
+            check(md->child_count() == 3u);
+            if (md->child_count() == 3u) {
+                check(md->children()[0] == original_heading);
+                check(md->children()[1] == original_list);
+                check(md->children()[2] == original_table);
+            }
+            check(md->parent_elem() == root);
+        }
+    }
+
     // #186 consumer isolation: the current MarkdownWidget still uses the
     // existing C++ md::parse, not the candidate C11 grammar. Exercise real
     // update/empty/rebuild transitions without a second runtime owner.
