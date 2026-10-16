@@ -213,7 +213,7 @@ jobs:
               assert manifest["commit"] == os.environ["SALTS_COMMIT"]
               assert manifest["profile"] == "release"
               assert any(p.endswith("/lib/cmake/Salts/SaltsConfig.cmake") for p in members)
-              assert any(p.endswith("/include/salts_unicode.h") for p in members)
+              assert any(p.endswith("/include/unicode/salts_unicode.h") for p in members)
               package.extractall(out, members)
           print("Accepted tagged Release SDK Windows x64 with exact provenance")
           PY
