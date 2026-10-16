@@ -849,6 +849,29 @@ void Group::clear_children() {
     mark_dirty(DirtyFlags::Children | DirtyFlags::Layout | DirtyFlags::Bounds);
 }
 
+void Group::replace_children_prevalidated(const std::vector<Node::RawPtr>& next_children) {
+    // Prepare the new storage and retain any shared children BEFORE touching
+    // the live topology. A bad_alloc leaves the original tree unchanged.
+    std::vector<Node::RawPtr> staged(next_children);
+    std::unordered_map<Node::RawPtr, Node::SharedPtr> retained;
+    retained.reserve(staged.size());
+    for (Node::RawPtr child : staged) {
+        const auto it = shared_children_.find(child);
+        if (it != shared_children_.end()) {
+            retained.emplace(child, it->second);
+        }
+    }
+
+    // From here on there is no allocation: pointer updates and container
+    // swaps commit all children as one topology revision.
+    for (Node::RawPtr child : children_) child->parent_ = nullptr;
+    for (Node::RawPtr child : staged) child->parent_ = this;
+    children_.swap(staged);
+    shared_children_.swap(retained);
+    mark_topology_changed();
+    mark_dirty(DirtyFlags::Children | DirtyFlags::Layout | DirtyFlags::Bounds);
+}
+
 Node::RawPtr Group::child_at(size_t index) const {
     if (index < children_.size()) {
         return children_[index];

@@ -14,6 +14,10 @@ typedef struct stun_html_writer {
     size_t length;
     size_t capacity;
     stun_ui_status error;
+    stun_md_html_policy policy;
+    const uint8_t *table_alignment; /* borrowed TABLE metadata, scoped */
+    size_t table_columns;
+    size_t table_column;
 } stun_html_writer;
 
 static void html_bytes(stun_html_writer *w, const char *bytes, size_t len) {
@@ -67,21 +71,90 @@ static bool html_ascii_equal(const char *bytes, size_t len, const char *key) {
     return true;
 }
 
-/* Treat an explicit URL scheme as a capability requiring admission. Reject
- * whitespace, raw control characters and unknown schemes; never emit a
- * javascript:, data: or vbscript: URL into an HTML attribute. */
-static bool html_safe_href(const char *s, size_t n) {
-    if (!s && n) return false;
-    for (size_t i=0;i<n;++i) {
+/* A fully DECODED destination must be validated from FIRST through LAST
+ * byte. Do not return early after "http:", '/' '?' or '#': HTML5 entities
+ * can create ASCII control characters late in a URL, even after a seemingly
+ * safe scheme or path separator. Early acceptance would permit those bytes
+ * inside a quoted href despite the documented fail-closed policy.
+ *
+ * A colon prior to a path/query/fragment separator declares an explicit
+ * scheme and must match the known allowlist. Other colons are relative URL
+ * payload. UTF-8 non-ASCII octets are percent encoded only AFTER admission.
+ */
+bool stun_md_html_safe_href(const char *s, size_t n) {
+    if(!s && n)return false;
+    bool seen_separator=false;
+    size_t scheme_colon=SIZE_MAX;
+    for(size_t i=0u;i<n;++i) {
         const unsigned char c=(unsigned char)s[i];
-        if (c<=0x20 || c==0x7f) return false;
-        if (c=='/' || c=='?' || c=='#') return true;
-        if (c==':') return
-            html_ascii_equal(s,i,"https") ||
-            html_ascii_equal(s,i,"http") ||
-            html_ascii_equal(s,i,"mailto");
+        /* Literal ASCII space is safe only after %20 normalization.
+         * All other C0 controls, including TAB/CR/LF, remain rejected. */
+        if(c<0x20u || c==0x7Fu)return false;
+        if(c=='/' || c=='?' || c=='#')seen_separator=true;
+        if(c==':' && !seen_separator && scheme_colon==SIZE_MAX)
+            scheme_colon=i;
     }
-    return true; /* Relative link, or fragment-only handled above. */
+    if(scheme_colon==SIZE_MAX)return true;
+    /* A colon only declares a URL scheme when the FIRST path component
+     * matches RFC3986 scheme syntax: ALPHA *( ALPHA / DIGIT / "+" /
+     * "-" / "." ). In "foo):" or a literal decoded closing parenthesis,
+     * the colon is relative-path punctuation and is not a scheme bypass.
+     * Keep the FULL byte scan above, and reject genuine unknown schemes
+     * (javascript:, data:, vbscript:, etc.) without an allowlist fallback. */
+    bool scheme=scheme_colon!=0u;
+    for(size_t i=0u;i<scheme_colon && scheme;++i) {
+        const unsigned char c=(unsigned char)s[i];
+        const bool alpha=(c>='A'&&c<='Z')||(c>='a'&&c<='z');
+        const bool digit=c>='0'&&c<='9';
+        if(!alpha && (i==0u || (!digit && c!='+' && c!='-' &&
+                                   c!='.')))
+            scheme=false;
+    }
+    if(!scheme)return true;
+    return html_ascii_equal(s,scheme_colon,"https") ||
+           html_ascii_equal(s,scheme_colon,"http") ||
+           html_ascii_equal(s,scheme_colon,"mailto");
+}
+
+/* Emit an admitted decoded URL with UTF-8 octets percent-encoded.
+ * The safety gate checks the DECODED URL before this encoding step, so
+ * character-reference obfuscation cannot create an unsafe scheme. Keep
+ * original ASCII percent escapes and escape HTML-special attributes. */
+static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
+    static const char digits[]="0123456789ABCDEF";
+    for(size_t i=0u;i<n && w->error==STUN_UI_OK;++i) {
+        const unsigned char b=(unsigned char)s[i];
+        /* CommonMark URI normalization percent-encodes decoded UTF-8,
+         * raw backslash, angle/quote/backtick delimiters and ASCII space, while
+         * existing %HH syntax and URL structural punctuation stay intact.
+         * This runs AFTER the full decoded href safety admission. */
+        if(b>=0x80u || b==' ' || b=='\\' || b=='<' ||
+           b=='>' || b=='\"' || b=='[' || b==']' || b==0x60u) {
+            const char pct[3]={'%',digits[b>>4u],digits[b&0x0Fu]};
+            html_bytes(w,pct,sizeof(pct));
+        } else html_escaped(w,s+i,1u,true);
+    }
+}
+/* IMAGE src uses a narrower policy than navigable href: mailto is
+ * never an image protocol. All decoded control bytes and unknown schemes
+ * are already rejected by the canonical full-byte href safety scan. */
+bool stun_md_html_safe_image_src(const char *s,size_t n) {
+    if(!stun_md_html_safe_href(s,n))return false;
+    if(n>=7u && s[6]==':' && html_ascii_equal(s,6u,"mailto"))
+        return false;
+    return true;
+}
+
+bool stun_md_html_safe_title(const char *s,size_t n) {
+    if(!s && n)return false;
+    for(size_t i=0u;i<n;++i) {
+        const unsigned char c=(unsigned char)s[i];
+        /* LF and TAB are safe payload in a quoted HTML5 title attribute.
+         * The Markdown collector normalizes physical CRLF to LF; all other
+         * C0/DEL bytes remain rejected. This does NOT relax href admission. */
+        if((c<0x20u && c!='\n' && c!='\t') || c==0x7Fu)return false;
+    }
+    return true;
 }
 
 static bool html_metadata(stun_html_writer *w, size_t id,
@@ -143,6 +216,64 @@ static void html_text(stun_html_writer *w, const stun_ui_block *node) {
                  length,false);
 }
 
+/* IMAGE alt is flattened from its owned RichDoc descendants, never from
+ * serialized markup or source reparsing. LINK and nested IMAGE contribute
+ * their visible TEXT, never their URLs or titles. The same bounded walk
+ * runs during sizing and writing; failures remain output-atomic. */
+static void html_image_alt_children(stun_html_writer *w,size_t parent,
+                                    size_t *after,size_t depth) {
+    const stun_ui_document_view *doc=&w->doc->document;
+    if(parent>=doc->block_count || depth>STUN_HTML_MAX_DEPTH) {
+        w->error=STUN_UI_CAPACITY_EXCEEDED;return;
+    }
+    size_t at=parent+1u;
+    while(at<doc->block_count && w->error==STUN_UI_OK &&
+          doc->blocks[at].parent_index==parent) {
+        const stun_ui_block_kind kind=doc->blocks[at].kind;
+        if(kind==STUN_UI_BLOCK_IMAGE_TITLE ||
+           kind==STUN_UI_BLOCK_LINK_TITLE) {
+            const bool correct=(at==parent+1u) &&
+                (kind==STUN_UI_BLOCK_IMAGE_TITLE?
+                 doc->blocks[parent].kind==STUN_UI_BLOCK_IMAGE:
+                 doc->blocks[parent].kind==STUN_UI_BLOCK_LINK);
+            if(!correct || (at+1u<doc->block_count &&
+                            doc->blocks[at+1u].parent_index==at)) {
+                w->error=STUN_UI_INVALID_ARGUMENT;break;
+            }
+            ++at;continue;
+        }
+        /* A typed inline HTML token contributes its literal visible
+         * characters to IMAGE alt, not live markup or its attributes.
+         * Always HTML-escape the alt attribute even in SPEC mode. */
+        if(kind==STUN_UI_BLOCK_TEXT ||
+           kind==STUN_UI_BLOCK_RAW_HTML_INLINE ||
+           kind==STUN_UI_BLOCK_URI_AUTOLINK) {
+            html_text(w,&doc->blocks[at]);
+            if(at+1u<doc->block_count &&
+               doc->blocks[at+1u].parent_index==at)
+                w->error=STUN_UI_INVALID_ARGUMENT;
+            ++at;continue;
+        }
+        if(kind==STUN_UI_BLOCK_LINE_BREAK ||
+           kind==STUN_UI_BLOCK_HARD_LINE_BREAK) {
+            html_str(w," ");++at;continue;
+        }
+        if(kind==STUN_UI_BLOCK_EMPHASIS ||
+           kind==STUN_UI_BLOCK_STRONG ||
+           kind==STUN_UI_BLOCK_STRIKETHROUGH ||
+           kind==STUN_UI_BLOCK_CODE_SPAN ||
+           kind==STUN_UI_BLOCK_LINK ||
+           kind==STUN_UI_BLOCK_IMAGE) {
+            size_t next=at;
+            html_image_alt_children(w,at,&next,depth+1u);
+            if(next<=at) {w->error=STUN_UI_INVALID_ARGUMENT;break;}
+            at=next;continue;
+        }
+        w->error=STUN_UI_INVALID_ARGUMENT;break;
+    }
+    *after=at;
+}
+
 static void html_node(stun_html_writer *w, size_t id,
                       size_t *next, size_t depth, bool table_header);
 
@@ -163,13 +294,72 @@ static void html_children(stun_html_writer *w, size_t id,
     *next=at;
 }
 
+/* Check all semantic ancestors of TABLE in an untrusted RichDoc.  A
+ * forged LIST under PARAGRAPH can retain valid immediate TABLE->ITEM->LIST
+ * edges and generic preorder IDs. The parser's actual TABLE containers
+ * are only DOCUMENT, QUOTE and LIST_ITEM/TASK_ITEM chains. */
+static bool html_table_owner_chain(const stun_ui_document_view *doc,
+                                   size_t table) {
+    size_t child=table;
+    for(size_t hops=0u;child>0u && hops<doc->block_count;++hops) {
+        const uint32_t parent=doc->blocks[child].parent_index;
+        if(parent>=child)return false;
+        const stun_ui_block_kind kind=doc->blocks[child].kind;
+        const stun_ui_block_kind owner=doc->blocks[parent].kind;
+        switch(kind) {
+        case STUN_UI_BLOCK_TABLE:
+        case STUN_UI_BLOCK_QUOTE:
+        case STUN_UI_BLOCK_LIST:
+        case STUN_UI_BLOCK_ORDERED_LIST:
+            if(owner!=STUN_UI_BLOCK_DOCUMENT &&
+               owner!=STUN_UI_BLOCK_QUOTE &&
+               owner!=STUN_UI_BLOCK_LIST_ITEM &&
+               owner!=STUN_UI_BLOCK_TASK_ITEM)return false;
+            break;
+        case STUN_UI_BLOCK_LIST_ITEM:
+        case STUN_UI_BLOCK_TASK_ITEM:
+            if(owner!=STUN_UI_BLOCK_LIST &&
+               owner!=STUN_UI_BLOCK_ORDERED_LIST)return false;
+            break;
+        default:return false;
+        }
+        if(parent==0u)return owner==STUN_UI_BLOCK_DOCUMENT;
+        child=parent;
+    }
+    return false;
+}
+
 static void html_table(stun_html_writer *w, size_t id,
                        size_t *next, size_t depth) {
     const stun_ui_document_view *doc=&w->doc->document;
+    /* Validate the entire typed owner chain before HTML sizing/writing. */
+    if(!html_table_owner_chain(doc,id)) {
+        w->error=STUN_UI_INVALID_ARGUMENT;return;
+    }
+    const char *metadata=NULL;size_t columns=0u;
+    if(!html_metadata(w,id,&metadata,&columns))return;
+    /* The canonical parser publishes exactly one byte per column. Never
+     * infer GFM alignment by reparsing text or trusting a child attribute. */
+    if(!columns || !metadata || columns>doc->block_count) {
+        w->error=STUN_UI_INVALID_ARGUMENT;return;
+    }
+    for(size_t i=0u;i<columns;++i)
+        if((unsigned char)metadata[i]>STUN_UI_TABLE_ALIGN_RIGHT) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+    const uint8_t *saved_alignment=w->table_alignment;
+    const size_t saved_columns=w->table_columns;
+    const size_t saved_column=w->table_column;
+    w->table_alignment=(const uint8_t*)metadata;
+    w->table_columns=columns;
+    w->table_column=0u;
     size_t at=id+1u;
     if (at>=doc->block_count || doc->blocks[at].parent_index!=id ||
         doc->blocks[at].kind!=STUN_UI_BLOCK_TABLE_ROW) {
         w->error=STUN_UI_INVALID_ARGUMENT;
+        w->table_alignment=saved_alignment;
+        w->table_columns=saved_columns;
+        w->table_column=saved_column;
         return;
     }
     html_str(w,"<table>\n<thead>\n");
@@ -191,6 +381,9 @@ static void html_table(stun_html_writer *w, size_t id,
     }
     if(has_body) html_str(w,"</tbody>\n");
     html_str(w,"</table>\n");
+    w->table_alignment=saved_alignment;
+    w->table_columns=saved_columns;
+    w->table_column=saved_column;
     *next=at;
 }
 
@@ -228,6 +421,59 @@ static void html_node(stun_html_writer *w, size_t id,
         { char digit=(char)('0'+node->heading_level); html_bytes(w,&digit,1u); }
         html_str(w,">");
         break;
+    case STUN_UI_BLOCK_RAW_HTML_INLINE:
+    case STUN_UI_BLOCK_RAW_HTML_BLOCK: {
+        if(node->byte_end<node->byte_begin ||
+           node->byte_end>doc->source_bytes ||
+           (!doc->source && node->byte_end!=node->byte_begin)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const size_t size=node->byte_end-node->byte_begin;
+        const char *raw=doc->source?doc->source+node->byte_begin:NULL;
+        if(w->policy==STUN_MD_HTML_SPEC_CONFORMANCE)
+            html_bytes(w,raw,size);
+        else html_escaped(w,raw,size,false);
+        if(id+1u<doc->block_count &&
+           doc->blocks[id+1u].parent_index==id)
+            w->error=STUN_UI_INVALID_ARGUMENT;
+        *next=id+1u;return;
+    }
+    case STUN_UI_BLOCK_URI_AUTOLINK: {
+        /* The parser records the undecoded literal URI in BOTH owned
+         * semantic text and metadata. The SAFE output remains the escaped
+         * angle token, never a clickable unsafe destination. Only the
+         * explicitly selected trusted SPEC profile may emit an anchor. */
+        if(!html_metadata(w,id,&meta,&meta_length))return;
+        if(node->byte_end<=node->byte_begin ||
+           node->byte_end>doc->source_bytes || !doc->source ||
+           !meta || meta_length!=node->byte_end-node->byte_begin ||
+           memcmp(meta,doc->source+node->byte_begin,meta_length) ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const char *raw=doc->source+node->byte_begin;
+        /* Reject forged embedded controls even for explicit SPEC. The
+         * canonical C11 autolink lexer already enforces this on admission. */
+        for(size_t i=0u;i<meta_length;++i) {
+            const unsigned char c=(unsigned char)raw[i];
+            if(c<=0x20u||c==0x7fu||c=='<'||c=='>') {
+                w->error=STUN_UI_INVALID_ARGUMENT;return;
+            }
+        }
+        if(w->policy==STUN_MD_HTML_SPEC_CONFORMANCE) {
+            html_str(w,"<a href=\"");
+            html_link_href(w,meta,meta_length);
+            html_str(w,"\">");
+            html_escaped(w,raw,meta_length,false);
+            html_str(w,"</a>");
+        } else {
+            html_str(w,"&lt;");
+            html_escaped(w,raw,meta_length,false);
+            html_str(w,"&gt;");
+        }
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_TEXT:
         html_text(w,node);
         if(id+1u<doc->block_count && doc->blocks[id+1u].parent_index==id)
@@ -238,15 +484,88 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_STRONG: html_str(w,"<strong>"); break;
     case STUN_UI_BLOCK_STRIKETHROUGH: html_str(w,"<del>"); break;
     case STUN_UI_BLOCK_CODE_SPAN: html_str(w,"<code>"); break;
-    case STUN_UI_BLOCK_LINK:
+    case STUN_UI_BLOCK_LINK: {
         if (!html_metadata(w,id,&meta,&meta_length)) return;
-        if(!html_safe_href(meta,meta_length)) {
-            w->error=STUN_UI_INVALID_ARGUMENT; return;
+        if(!stun_md_html_safe_href(meta,meta_length)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const char *title=NULL;
+        size_t title_length=0u;
+        bool has_title=false;
+        if(id+1u<doc->block_count &&
+           doc->blocks[id+1u].parent_index==id &&
+           doc->blocks[id+1u].kind==STUN_UI_BLOCK_LINK_TITLE) {
+            has_title=true;
+            if(!html_metadata(w,id+1u,&title,&title_length))return;
+            if(!stun_md_html_safe_title(title,title_length)) {
+                w->error=STUN_UI_INVALID_ARGUMENT;return;
+            }
         }
         html_str(w,"<a href=\"");
-        html_escaped(w,meta,meta_length,true);
-        html_str(w,"\">");
+        html_link_href(w,meta,meta_length);
+        html_str(w,"\"");
+        if(has_title) {
+            html_str(w," title=\"");
+            html_escaped(w,title,title_length,true);
+            html_str(w,"\"");
+        }
+        html_str(w,">");
         break;
+    }
+    case STUN_UI_BLOCK_IMAGE: {
+        if(!html_metadata(w,id,&meta,&meta_length))return;
+        if(!stun_md_html_safe_image_src(meta,meta_length)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const char *title=NULL;size_t title_length=0u;
+        bool has_title=false;
+        if(id+1u<doc->block_count &&
+           doc->blocks[id+1u].parent_index==id &&
+           doc->blocks[id+1u].kind==STUN_UI_BLOCK_IMAGE_TITLE) {
+            has_title=true;
+            if(!html_metadata(w,id+1u,&title,&title_length))return;
+            if(!stun_md_html_safe_title(title,title_length)) {
+                w->error=STUN_UI_INVALID_ARGUMENT;return;
+            }
+        }
+        html_str(w,"<img src=\"");
+        html_link_href(w,meta,meta_length);
+        html_str(w,"\" alt=\"");
+        size_t child_end=id;
+        html_image_alt_children(w,id,&child_end,depth+1u);
+        if(w->error!=STUN_UI_OK || child_end<=id)return;
+        html_str(w,"\"");
+        if(has_title) {
+            html_str(w," title=\"");
+            html_escaped(w,title,title_length,true);
+            html_str(w,"\"");
+        }
+        html_str(w," />");
+        *next=child_end;return;
+    }
+    case STUN_UI_BLOCK_IMAGE_TITLE: {
+        const uint32_t parent=node->parent_index;
+        if(parent>=id || id!=parent+1u ||
+           doc->blocks[parent].kind!=STUN_UI_BLOCK_IMAGE ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        *next=id+1u;return;
+    }
+    case STUN_UI_BLOCK_LINK_TITLE: {
+        /* This typed metadata child never renders as visible inline TEXT.
+         * Reject arbitrary parent placement or a second title silently
+         * supplied by an untrusted projected RichDoc. */
+        const uint32_t parent=node->parent_index;
+        if(parent>=id || id!=parent+1u ||
+           doc->blocks[parent].kind!=STUN_UI_BLOCK_LINK ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_CODE_INDENTED:
         html_str(w,"<pre><code>");
         break;
@@ -281,6 +600,43 @@ static void html_node(stun_html_writer *w, size_t id,
         }
         html_str(w,">\n");break;
     }
+    case STUN_UI_BLOCK_TASK_ITEM:
+        /* Require real list ownership, not merely a printable CHECKBOX. */
+        if(node->parent_index>=id ||
+           (doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_LIST &&
+            doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_ORDERED_LIST)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        /* A checked-state leaf must be the first direct TASK_ITEM child. */
+        if(id+1u>=doc->block_count ||
+           doc->blocks[id+1u].parent_index!=id ||
+           doc->blocks[id+1u].kind!=STUN_UI_BLOCK_CHECKBOX) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"<li>");break;
+    case STUN_UI_BLOCK_CHECKBOX: {
+        const uint32_t parent=node->parent_index;
+        if(parent>=id || id!=parent+1u ||
+           doc->blocks[parent].kind!=STUN_UI_BLOCK_TASK_ITEM ||
+           (id+1u<doc->block_count &&
+            doc->blocks[id+1u].parent_index==id) ||
+           !html_metadata(w,id,&meta,&meta_length)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        if(meta_length!=1u || !meta || (meta[0]!='x' && meta[0]!=' ')) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"<input type=\"checkbox\"");
+        if(meta[0]=='x')html_str(w," checked=\"\"");
+        html_str(w," disabled=\"\" />");
+        const bool sibling=id+1u<doc->block_count &&
+                           doc->blocks[id+1u].parent_index==parent;
+        /* Preserve the literal separator after a task marker even when
+         * a loose-list paragraph starts on the following HTML line. */
+        html_str(w," ");
+        if(sibling && html_loose_item(w,parent))html_str(w,"\n");
+        *next=id+1u;return;
+    }
     case STUN_UI_BLOCK_LIST_ITEM: {
         html_str(w,"<li>");
         /* A loose list does not give an empty item a phantom newline.
@@ -293,26 +649,64 @@ static void html_node(stun_html_writer *w, size_t id,
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_FENCE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_CODE_INDENTED ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_HEADING ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_RULE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_QUOTE ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_RAW_HTML_BLOCK ||
+            doc->blocks[id+1u].kind==STUN_UI_BLOCK_TABLE ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_LIST ||
             doc->blocks[id+1u].kind==STUN_UI_BLOCK_ORDERED_LIST))
             html_str(w,"\n");
         break;
     }
     case STUN_UI_BLOCK_QUOTE: html_str(w,"<blockquote>\n"); break;
-    case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"<tr>\n"); break;
-    case STUN_UI_BLOCK_TABLE_CELL:
-        html_str(w,table_header?"<th>":"<td>");
-        break;
+    case STUN_UI_BLOCK_TABLE_ROW:
+        if(!w->table_alignment || node->parent_index>=id ||
+           doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_TABLE) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        w->table_column=0u;
+        html_str(w,"<tr>\n");break;
+    case STUN_UI_BLOCK_TABLE_CELL: {
+        if(!w->table_alignment || w->table_column>=w->table_columns ||
+           node->parent_index>=id ||
+           doc->blocks[node->parent_index].kind!=STUN_UI_BLOCK_TABLE_ROW) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        const uint8_t align=w->table_alignment[w->table_column++];
+        html_str(w,table_header?"<th":"<td");
+        switch(align) {
+        case STUN_UI_TABLE_ALIGN_NONE: break;
+        case STUN_UI_TABLE_ALIGN_LEFT: html_str(w," align=\"left\"");break;
+        case STUN_UI_TABLE_ALIGN_CENTER: html_str(w," align=\"center\"");break;
+        case STUN_UI_TABLE_ALIGN_RIGHT: html_str(w," align=\"right\"");break;
+        default: w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,">");break;
+    }
     case STUN_UI_BLOCK_RULE:
         html_str(w,"<hr />\n");
         *next=id+1u; return;
     case STUN_UI_BLOCK_LINE_BREAK:
-        html_str(w,"\n"); /* soft line break; hard break IR is not yet distinct */
+        html_str(w,"\n"); /* soft: semantic LF, never a hard HTML break */
         *next=id+1u; return;
+    case STUN_UI_BLOCK_HARD_LINE_BREAK: {
+        if(!html_metadata(w,id,&meta,&meta_length)) return;
+        if(meta_length!=sizeof(stun_ui_line_break_semantics)) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        stun_ui_line_break_semantics info;
+        memcpy(&info,meta,sizeof(info));
+        if((info.origin!=STUN_UI_LINE_BREAK_TRAILING_SPACES &&
+            info.origin!=STUN_UI_LINE_BREAK_BACKSLASH) ||
+           info.reserved[0] || info.reserved[1] || info.reserved[2]) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"<br />\n");
+        *next=id+1u;return;
+    }
     default:
         /* No silent HTML generation for unsupported Markdown semantics.
-         * In particular: tasks, images, math, diagrams, entities, etc. */
+         * In particular: tasks, math, diagrams, entities, etc. */
         w->error=STUN_UI_INVALID_ARGUMENT;
         return;
     }
@@ -347,9 +741,14 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_CODE_INDENTED: html_str(w,"</code></pre>\n"); break;
     case STUN_UI_BLOCK_LIST: html_str(w,"</ul>\n"); break;
     case STUN_UI_BLOCK_ORDERED_LIST: html_str(w,"</ol>\n"); break;
-    case STUN_UI_BLOCK_LIST_ITEM: html_str(w,"</li>\n"); break;
+    case STUN_UI_BLOCK_LIST_ITEM:
+    case STUN_UI_BLOCK_TASK_ITEM: html_str(w,"</li>\n");break;
     case STUN_UI_BLOCK_QUOTE: html_str(w,"</blockquote>\n"); break;
-    case STUN_UI_BLOCK_TABLE_ROW: html_str(w,"</tr>\n"); break;
+    case STUN_UI_BLOCK_TABLE_ROW:
+        if(w->table_column!=w->table_columns) {
+            w->error=STUN_UI_INVALID_ARGUMENT;return;
+        }
+        html_str(w,"</tr>\n");break;
     case STUN_UI_BLOCK_TABLE_CELL:
         html_str(w,table_header?"</th>\n":"</td>\n");
         break;
@@ -358,17 +757,19 @@ static void html_node(stun_html_writer *w, size_t id,
     *next=child_end;
 }
 
-stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
-                                   size_t max_nodes,
-                                   char *buffer, size_t capacity,
-                                   size_t *required) {
-    if(!required || !view || (!buffer && capacity!=0u))
+stun_ui_status stun_md_render_html_with_policy(
+    const stun_ui_rich_document_view *view,size_t max_nodes,
+    stun_md_html_policy policy,char *buffer,size_t capacity,
+    size_t *required) {
+    if(!required || !view || (!buffer && capacity!=0u) ||
+       (policy!=STUN_MD_HTML_SAFE_APPLICATION &&
+        policy!=STUN_MD_HTML_SPEC_CONFORMANCE))
         return STUN_UI_INVALID_ARGUMENT;
     const stun_ui_status valid=stun_ui_rich_document_validate(view,max_nodes);
     if(valid!=STUN_UI_OK) return valid;
 
     /* Dry-run first: validation and exact byte count before any write. */
-    stun_html_writer measuring={view,NULL,0u,0u,STUN_UI_OK};
+    stun_html_writer measuring={view,NULL,0u,0u,STUN_UI_OK,policy,NULL,0u,0u};
     size_t next=0u;
     html_node(&measuring,0u,&next,0u,false);
     if(measuring.error!=STUN_UI_OK) return measuring.error;
@@ -380,11 +781,24 @@ stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
     if(measuring.length==SIZE_MAX || capacity<=measuring.length)
         return STUN_UI_CAPACITY_EXCEEDED;
 
-    stun_html_writer writing={view,buffer,0u,capacity-1u,STUN_UI_OK};
+    stun_html_writer writing={view,buffer,0u,capacity-1u,STUN_UI_OK,policy,
+                              NULL,0u,0u};
     html_node(&writing,0u,&next,0u,false);
     if(writing.error!=STUN_UI_OK || writing.length!=measuring.length ||
        next!=view->document.block_count)
         return STUN_UI_INVALID_ARGUMENT;
     buffer[writing.length]='\0';
     return STUN_UI_OK;
+}
+
+
+/* Public stable production entrypoint: always escapes untrusted markup.
+ * Spec conformance is never inferred from source syntax. */
+stun_ui_status stun_md_render_html(const stun_ui_rich_document_view *view,
+                                   size_t max_nodes,
+                                   char *buffer, size_t capacity,
+                                   size_t *required) {
+    return stun_md_render_html_with_policy(
+        view,max_nodes,STUN_MD_HTML_SAFE_APPLICATION,
+        buffer,capacity,required);
 }

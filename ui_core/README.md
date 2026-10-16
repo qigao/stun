@@ -60,7 +60,7 @@ backslash punctuation escaping and line breaks. Code fences retain
 exact CRLF/LF bytes and language metadata; links retain target metadata.
 
 **Not yet CommonMark/GFM complete**: reference links, nested/lazy-continuation
-list and quote semantics, full GFM table alignment/corner cases,
+list and quote semantics, nested GFM table/container corner cases,
 HTML/entity decoding, footnotes, math,
 definition lists, and full delimiter-run/flanking algorithms. Such syntax is
 not yet parity-qualified; do not switch all MarkdownWidget callers to C11
@@ -80,11 +80,15 @@ owned source and semantic spans, stable snapshot identities, metadata,
 Unicode/Emoji passthrough, limits, and failure rollback. The installed Salts
 SDK test runs it under ASan/UBSan alongside CMeta reflection tests.
 
-The GFM table slice parses escaped pipes and inline-code pipes (including
-multi-backtick code spans) without splitting a cell. It admits a table header
-only when the next line is a matching delimiter row, accepts pipe-free data
-rows, and pads/truncates data cells to the header's column count. A following
-blockquote, heading, thematic rule, code fence or list begins a new block.
+The GFM table slice records a bounded document-owned alignment byte for
+each delimiter column (none/left/center/right), shared by header and body
+cells. **Unescaped pipes divide table cells even within backticks**; an
+escaped `\\|` remains cell content, including inside code spans (GFM
+Example 200). The parser normalizes the escape in a parse-local copy,
+never mutating source Markdown or creating a second inline grammar.
+A table begins only after matching header/delimiter column counts; pipe-free
+data rows are supported, short rows padded and extra cells discarded.
+A following blockquote, heading, thematic rule, fence or list ends the table.
 This is a tested subset, not a complete GFM table conformance claim.
 
 ## GFM task list extension (M2 candidate)
@@ -97,8 +101,10 @@ Task markers are parsed **only** at the start of a list-item paragraph:
 - The remainder of the item is still parsed as inline Markdown.
 - A marker with following content must be separated by whitespace after ']'.
   Markers inside ordinary paragraphs or escaped markup are not admitted.
-- Simple ordered and unordered lists are supported. Nested/lazy task-list
-  continuation follows the wider CommonMark block-parsing backlog under #167.
+- Ordered, unordered and nested task lists use the existing canonical list
+  owner. Static HTML checkboxes are always disabled and their checked state
+  is derived only from the owned one-byte metadata; no interactive registry.
+  Additional loose-list and nested container edge cases remain under #186/#167.
 
 For application interaction, check/uncheck is **not** a parser mutation:
 the application keeps the runtime state and performs an explicit source/model
@@ -149,11 +155,11 @@ The comparison does NOT yet assert C11-generated HTML against this
 reference. A future proper HTML renderer/conformance runner must compare
 exact expected HTML for the full CommonMark/GFM fixtures.
 
-Important reference limitation: Mistune's GFM table extension may treat
-pipes in some backtick code spans as separators even when the intended GFM
-semantics differ. `survey.gfm.table-code-pipe` makes that disagreement
-reproducible; its cmarkgfm HTML is available for investigation. Do not
-silently trust a single Python implementation for disputed GFM syntax.
+GFM block table-cell boundaries are defined before inline spans: raw `|`
+characters divide columns even inside code spans; use `\\|` for a literal
+pipe (GFM §4.10, Example 200). C11 RichDoc and cmark-gfm HTML gates now
+exercise both cases. Mistune is an independent AST cross-check, not the
+normative source for disputed extension HTML.
 
 Executable CI: `runtime-conformance.yml` uses the **installed canonical Salts
 SDK** to build the C11 RichDoc dumper, then installs the latest available

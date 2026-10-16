@@ -26,6 +26,7 @@
 #include <flexUI/widgets/listview_widget.h>
 #include <flexUI/widgets/modal_widget.h>
 #include <flexUI/widgets/menu_widget.h>
+#include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/widgets/notification_widget.h>
 #include <flexUI/widgets/panel_widget.h>
 #include <flexUI/widgets/pagination_widget.h>
@@ -10302,4 +10303,737 @@ spec("AvatarWidget keeps initials when image url is empty") {
     check_false(backend.texts.empty());
     check(backend.texts.front().text == "BJ");
   }
+}
+
+
+// #186: Exercise the unchanged production MarkdownWidget/md::parse through
+// the *real* Box layout, shared text measurement, renderer and event routing.
+// The candidate C11 parser remains isolated in the existing oracle/Tango
+// tests, not a live fallback or an additional UI grammar.
+spec("MarkdownWidget UI layout and read-only scroll contracts") {
+  it("lays out rendered text and scrolls without modifying Markdown") {
+    Box box(nullptr);
+    auto* root = box.create("div", "md-root-186");
+    auto* viewport = box.create("div", "md-scroll-186");
+    auto* md = box.create_widget<MarkdownWidget>(
+        "div", "md-document-186", "# Status\n\nalpha\n");
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(260.0f, 180.0f);
+
+    box.load_css(R"(
+      #md-root-186 {
+        width: 240px;
+        height: 150px;
+        display: flex;
+        flex-direction: column;
+      }
+      #md-scroll-186 {
+        width: 170px;
+        height: 64px;
+        overflow-y: auto;
+        display: block;
+      }
+      #md-document-186 {
+        width: 150px;
+        min-height: 240px;
+        height: 240px;
+      }
+      .md-header {
+        width: 150px;
+        height: 34px;
+        font-size: 16px;
+      }
+      .md-p {
+        width: 150px;
+        height: 30px;
+        font-size: 14px;
+      }
+    )");
+
+    auto* widget = static_cast<MarkdownWidget*>(md->widget);
+    check(widget != nullptr);
+    widget->update(0.0f, *md);
+    box.update();
+
+    check(md->child_count() == 2u);
+    check(std::isfinite(md->width()) && md->width() > 0.0f);
+    check(std::isfinite(md->height()) && md->height() > 0.0f);
+    check(approx_eq(viewport->height(), 64.0f, 0.01f));
+    check(viewport->is_scroll_container());
+    check(viewport->max_scroll_y() > 0.0f);
+
+    if (md->child_count() != 2u) return;
+    auto* heading = static_cast<Element*>(md->children()[0]);
+    check(heading->has_class(Symbol("md-header")));
+    check(heading->text() == "Status");
+    check(heading->width() > 0.0f);
+    check(approximate_text_width(heading->computed_style, heading->text()) > 0.0f);
+    const auto measured = layout_text_block(
+        heading->computed_style, heading->text(),
+        0.0f, 0.0f, heading->width(), std::max(heading->height(), 34.0f),
+        Color{}, TextVerticalAlign::Top);
+    check(!measured.lines.empty());
+
+    RecordingRenderer before_scroll;
+    before_scroll.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer before_renderer(&before_scroll);
+    RenderManager before_manager(&before_renderer);
+    before_manager.render_tree(root);
+    const auto first = std::find_if(
+        before_scroll.texts.begin(), before_scroll.texts.end(),
+        [](const TextCall& call) { return call.text == "Status"; });
+    check(first != before_scroll.texts.end());
+    if (first == before_scroll.texts.end()) return;
+    const float initial_text_y = first->y;
+
+    Event wheel = Event::mouse_wheel(10.0f, 10.0f, 0.0f, -1.0f);
+    box.dispatch_event(wheel);
+    check(wheel.handled);
+    check(viewport->scroll_y() > 0.0f);
+    box.update();
+
+    RecordingRenderer after_scroll;
+    after_scroll.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer after_renderer(&after_scroll);
+    RenderManager after_manager(&after_renderer);
+    after_manager.render_tree(root);
+    const auto moved = std::find_if(
+        after_scroll.texts.begin(), after_scroll.texts.end(),
+        [](const TextCall& call) { return call.text == "Status"; });
+    // A scrolled heading can become fully clipped and legitimately vanish
+    // from the recording renderer. Either it moved upward while visible or
+    // the viewport culled it. Do not require offscreen text to be drawn.
+    if (moved != after_scroll.texts.end())
+      check(moved->y < initial_text_y);
+    // A fully clipped heading is also acceptable here. Restore visibility
+    // after Home below and verify the same text was not lost by scrolling.
+
+    box.set_focus(md);
+    Event end = Event::key_down(KeyCode::End);
+    box.dispatch_event(end);
+    check(end.handled);
+    check(approx_eq(viewport->scroll_y(), viewport->max_scroll_y(), 0.01f));
+    Event home = Event::key_down(KeyCode::Home);
+    box.dispatch_event(home);
+    check(home.handled);
+    check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+    box.update();
+    RecordingRenderer restored;
+    restored.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer restored_renderer(&restored);
+    RenderManager restored_manager(&restored_renderer);
+    restored_manager.render_tree(root);
+    const auto again = std::find_if(
+        restored.texts.begin(), restored.texts.end(),
+        [](const TextCall& call) { return call.text == "Status"; });
+    check(again != restored.texts.end());
+    if (again != restored.texts.end())
+      check(approx_eq(again->y, initial_text_y, 0.1f));
+
+    const std::string source = widget->markdown();
+    Event input = Event::text_input("must-not-change");
+    box.dispatch_event(input);
+    check(!input.handled);
+    check(widget->markdown() == source);
+    check(heading->text() == "Status");
+
+    // #186: update through the real production widget after scrolling has
+    // been restored to Home. The previous draw must disappear, the new one
+    // must be measurable/rendered, and repeated identical source must not
+    // recreate owned elements. No candidate C11 grammar is used here.
+    const std::string updated_markdown = "# Updated\n\nbeta\n";
+    widget->set_markdown(updated_markdown);
+    widget->update(0.0f, *md);
+    box.update();
+    check(widget->markdown() == updated_markdown);
+    check(md->child_count() == 2u);
+    if (md->child_count() == 2u) {
+      auto* updated_heading = static_cast<Element*>(md->children()[0]);
+      check(updated_heading->has_class(Symbol("md-header")));
+      check(updated_heading->text() == "Updated");
+      check(approximate_text_width(updated_heading->computed_style,
+                                   updated_heading->text()) > 0.0f);
+      RecordingRenderer updated_backend;
+      updated_backend.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer updated_renderer(&updated_backend);
+      RenderManager updated_manager(&updated_renderer);
+      updated_manager.render_tree(root);
+      const auto current = std::find_if(
+          updated_backend.texts.begin(), updated_backend.texts.end(),
+          [](const TextCall& call) { return call.text == "Updated"; });
+      const auto stale = std::find_if(
+          updated_backend.texts.begin(), updated_backend.texts.end(),
+          [](const TextCall& call) { return call.text == "Status"; });
+      check(current != updated_backend.texts.end());
+      check(stale == updated_backend.texts.end());
+      check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+      const Element* const same_heading = updated_heading;
+      widget->set_markdown(updated_markdown);
+      widget->update(0.0f, *md);
+      box.update();
+      check(md->child_count() == 2u);
+      if (md->child_count() == 2u)
+        check(md->children()[0] == same_heading);
+    }
+
+    // #186: scrolling, parsing and rendering must stay on the same live Box
+    // owner when a document is replaced *while its old heading is clipped*.
+    // Verify the restored new heading, no stale render command, bounded
+    // scrolling, and read-only input over multiple actual UI frames.
+    static constexpr const char* documents[] = {
+        "# First\n\nalpha\n",
+        "# Second\n\nbeta\n"
+    };
+    static constexpr const char* titles[] = {"First", "Second"};
+    static constexpr size_t cycles = 12u;
+    for (size_t cycle = 0u; cycle < cycles; ++cycle) {
+      const size_t index = cycle % 2u;
+      Event scroll = Event::mouse_wheel(10.0f, 10.0f, 0.0f, -1.0f);
+      box.dispatch_event(scroll);
+      check(scroll.handled);
+      check(viewport->scroll_y() > 0.0f);
+      check(viewport->scroll_y() <= viewport->max_scroll_y());
+      box.update();
+
+      widget->set_markdown(documents[index]);
+      widget->update(0.0f, *md);
+      box.update();
+      check(widget->markdown() == documents[index]);
+      check(md->child_count() == 2u);
+      check(viewport->scroll_y() >= 0.0f);
+      check(viewport->scroll_y() <= viewport->max_scroll_y());
+
+      RecordingRenderer during_scroll;
+      during_scroll.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer during_renderer(&during_scroll);
+      RenderManager during_manager(&during_renderer);
+      during_manager.render_tree(root);
+      const auto old_title = (index == 0u) ? "Second" : "First";
+      check(std::none_of(
+          during_scroll.texts.begin(), during_scroll.texts.end(),
+          [old_title](const TextCall& call) { return call.text == old_title; }));
+
+      Event back_to_home = Event::key_down(KeyCode::Home);
+      box.dispatch_event(back_to_home);
+      check(back_to_home.handled);
+      check(approx_eq(viewport->scroll_y(), 0.0f, 0.01f));
+      box.update();
+      RecordingRenderer recovered;
+      recovered.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer recovered_renderer(&recovered);
+      RenderManager recovered_manager(&recovered_renderer);
+      recovered_manager.render_tree(root);
+      const auto title = std::find_if(
+          recovered.texts.begin(), recovered.texts.end(),
+          [index](const TextCall& call) {
+            return call.text == titles[index];
+          });
+      check(title != recovered.texts.end());
+      check(std::none_of(
+          recovered.texts.begin(), recovered.texts.end(),
+          [old_title](const TextCall& call) { return call.text == old_title; }));
+      if (title != recovered.texts.end())
+        check(std::isfinite(title->y));
+
+      if (md->child_count() == 2u) {
+        const auto* reused = md->children()[0];
+        widget->set_markdown(documents[index]);
+        widget->update(0.0f, *md);
+        box.update();
+        check(md->child_count() == 2u);
+        if (md->child_count() == 2u)
+          check(md->children()[0] == reused);
+      }
+      Event rejected_input = Event::text_input("inert");
+      box.dispatch_event(rejected_input);
+      check(!rejected_input.handled);
+      check(widget->markdown() == documents[index]);
+    }
+  }
+
+  // #186: wrap long native MarkdownWidget paragraphs through the production
+  // CSS/layout/text renderer, not via the candidate C11 parser or an HTML
+  // surrogate. While the content box has the same fixed geometry, a source
+  // update retains its valid scroll position and cannot replay old text.
+  it("wraps long paragraphs and preserves bounded scroll across source updates") {
+    Box box(nullptr);
+    auto* root = box.create("div", "md-wrap-root-186");
+    auto* viewport = box.create("div", "md-wrap-viewport-186");
+
+    const std::string alpha =
+        "alpha bravo charlie delta echo foxtrot golf hotel india juliet "
+        "kilo lima mike november oscar papa quebec romeo sierra tango "
+        "uniform victor whiskey xray yankee zulu alpha bravo charlie delta";
+    const std::string omega =
+        "omega cinder copper solar river meadow forest pebble tulip maple "
+        "garden winter summer spring autumn canyon valley harbor ocean "
+        "island planet comet nebula rocket orange purple silver golden";
+    auto* md = box.create_widget<MarkdownWidget>(
+        "div", "md-wrap-doc-186", alpha + "\n");
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(300.0f, 180.0f);
+    box.load_css(R"(
+      #md-wrap-root-186 {
+        width: 220px;
+        height: 160px;
+        display: flex;
+        flex-direction: column;
+      }
+      #md-wrap-viewport-186 {
+        width: 140px;
+        height: 90px;
+        overflow-y: auto;
+        display: block;
+      }
+      #md-wrap-doc-186 {
+        width: 120px;
+        height: 360px;
+        min-height: 360px;
+      }
+      .md-p {
+        width: 112px;
+        height: 210px;
+        font-size: 14px;
+      }
+    )");
+
+    auto* widget = static_cast<MarkdownWidget*>(md->widget);
+    check(widget != nullptr);
+    widget->update(0.0f, *md);
+    box.update();
+    check(viewport->is_scroll_container());
+    check(viewport->max_scroll_y() > 0.0f);
+    check(md->child_count() == 1u);
+    if (md->child_count() != 1u) return;
+    auto* paragraph = static_cast<Element*>(md->children()[0]);
+    check(paragraph->has_class(Symbol("md-p")));
+    check(paragraph->text() == alpha);
+    check(std::isfinite(paragraph->width()));
+    check(paragraph->width() > 0.0f);
+
+    const auto wrapped = layout_text_block(
+        paragraph->computed_style, paragraph->text(), 0.0f, 0.0f,
+        paragraph->width(), std::max(paragraph->height(), 210.0f),
+        Color{}, TextVerticalAlign::Top);
+    check(wrapped.lines.size() >= 4u);
+    for (size_t i = 0; i < wrapped.lines.size(); ++i) {
+      check(!wrapped.lines[i].text.empty());
+      check(std::isfinite(wrapped.lines[i].width));
+      check(wrapped.lines[i].width <= paragraph->width() + 1.0f);
+      if (i != 0u)
+        check(wrapped.lines[i].baseline_y > wrapped.lines[i-1u].baseline_y);
+    }
+
+    RecordingRenderer initial;
+    initial.begin_frame(800.0f, 600.0f, 1.0f);
+    Renderer initial_renderer(&initial);
+    RenderManager initial_manager(&initial_renderer);
+    initial_manager.render_tree(root);
+    check(std::any_of(initial.texts.begin(), initial.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("alpha") != std::string::npos;
+        }));
+
+    const float retained_scroll = std::min(28.0f, viewport->max_scroll_y());
+    check(retained_scroll > 0.0f);
+    check(viewport->set_scroll_offset(0.0f, retained_scroll));
+    box.update();
+
+    // Repeat changes to exercise the real old-Node destruction, the same
+    // viewport's scroll metrics and the newer wrapping/painting path.
+    for (size_t iteration=0u; iteration<8u; ++iteration) {
+      const bool use_omega = iteration % 2u == 0u;
+      const std::string& text = use_omega ? omega : alpha;
+      const std::string& old_text = use_omega ? alpha : omega;
+      widget->set_markdown(text + "\n");
+      widget->update(0.0f, *md);
+      box.update();
+      check(md->child_count() == 1u);
+      if (md->child_count() != 1u) return;
+      paragraph = static_cast<Element*>(md->children()[0]);
+      check(paragraph->has_class(Symbol("md-p")));
+      check(paragraph->text() == text);
+      check(std::isfinite(paragraph->width()) &&
+            paragraph->width() > 0.0f);
+      check(approx_eq(viewport->scroll_y(), retained_scroll, 0.01f));
+      check(viewport->scroll_y() <= viewport->max_scroll_y());
+
+      const auto rewrapped = layout_text_block(
+          paragraph->computed_style, paragraph->text(), 0.0f, 0.0f,
+          paragraph->width(), std::max(paragraph->height(), 210.0f),
+          Color{}, TextVerticalAlign::Top);
+      check(rewrapped.lines.size() >= 4u);
+
+      RecordingRenderer scrolled;
+      scrolled.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer scrolled_renderer(&scrolled);
+      RenderManager scrolled_manager(&scrolled_renderer);
+      scrolled_manager.render_tree(root);
+      const std::string old_marker=old_text.substr(0,5);
+      check(std::none_of(scrolled.texts.begin(), scrolled.texts.end(),
+          [&old_marker](const TextCall& call) {
+            return call.text.find(old_marker) != std::string::npos;
+          }));
+
+      check(viewport->set_scroll_offset(0.0f, 0.0f));
+      box.update();
+      RecordingRenderer recovered;
+      recovered.begin_frame(800.0f, 600.0f, 1.0f);
+      Renderer recovered_renderer(&recovered);
+      RenderManager recovered_manager(&recovered_renderer);
+      recovered_manager.render_tree(root);
+      const std::string marker=text.substr(0,5);
+      check(std::any_of(recovered.texts.begin(), recovered.texts.end(),
+          [&marker](const TextCall& call) {
+            return call.text.find(marker) != std::string::npos;
+          }));
+      check(std::none_of(recovered.texts.begin(), recovered.texts.end(),
+          [&old_marker](const TextCall& call) {
+            return call.text.find(old_marker) != std::string::npos;
+          }));
+
+      const Element* same_paragraph = paragraph;
+      widget->set_markdown(text + "\n");
+      widget->update(0.0f, *md);
+      box.update();
+      check(md->child_count() == 1u);
+      if (md->child_count() == 1u)
+        check(md->children()[0] == same_paragraph);
+      check(widget->markdown() == text + "\n");
+      Event input=Event::text_input("read-only");
+      box.dispatch_event(input);
+      check(!input.handled);
+      check(widget->markdown() == text + "\n");
+      check(viewport->set_scroll_offset(0.0f, retained_scroll));
+      box.update();
+    }
+  }
+
+  // #186: unlike the fixed-size scroll tests, this keeps MarkdownWidget
+  // height:auto. The number of real parsed heading children changes the
+  // content extent, and LayoutManager must clamp an old oversized scroll
+  // offset after shrinking, without a stale paint command or second parser.
+  it("clamps intrinsic Markdown height changes and renders Unicode at Home") {
+    Box box(nullptr);
+    auto* root = box.create("div", "md-autosize-root-186");
+    auto* viewport = box.create("div", "md-autosize-viewport-186");
+    const std::string tall =
+        "# Alpha stage one.\n\n# Bravo stage two.\n\n# Charlie stage three.\n\n"
+        "# Delta stage four.\n\n# Echo stage five.\n\n# Foxtrot stage six.\n\n"
+        "# Golf stage seven.\n\n# Hotel stage eight.\n";
+    const std::string short_unicode = "# 日本語 café 😀 東京 花火 rivers valley\n";
+    const std::string medium =
+        "# Middle one.\n\n# Middle two.\n\n# Middle three.\n\n# Middle four.\n";
+    auto* md=box.create_widget<MarkdownWidget>(
+        "div", "md-autosize-doc-186", tall);
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(280.0f, 170.0f);
+    box.load_css(R"(
+      #md-autosize-root-186 {
+        width: 220px; height: 160px; display: flex;
+        flex-direction: column;
+      }
+      #md-autosize-viewport-186 {
+        width: 140px; height: 82px; display: block; overflow-y: auto;
+      }
+      #md-autosize-doc-186 {
+        width: 128px; height: auto; display: block;
+      }
+      .md-header {
+        width: 112px; height: 40px; font-size: 14px;
+      }
+    )");
+
+    auto* widget=static_cast<MarkdownWidget*>(md->widget);
+    check(widget!=nullptr);
+    widget->update(0.0f,*md);
+    box.update();
+    check(md->child_count()==8u);
+    check(viewport->is_scroll_container());
+    check(approx_eq(viewport->height(),82.0f,0.01f));
+    check(md->height()>viewport->height());
+    const float tall_max=viewport->max_scroll_y();
+    check(tall_max>80.0f);
+    if(tall_max<=80.0f) return;
+    check(viewport->set_scroll_offset(0.0f,tall_max));
+    box.update();
+    check(approx_eq(viewport->scroll_y(),tall_max,0.01f));
+
+    // Shrink below the viewport. The old scroll offset must be forced to
+    // zero by the actual layout pass; it must not survive as stale state.
+    widget->set_markdown(short_unicode);
+    widget->update(0.0f,*md);
+    box.update();
+    check(widget->markdown()==short_unicode);
+    check(md->child_count()==1u);
+    check(md->height()<viewport->height());
+    check(approx_eq(viewport->max_scroll_y(),0.0f,0.1f));
+    check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
+    if(md->child_count()!=1u) return;
+    auto* heading=static_cast<Element*>(md->children()[0]);
+    check(heading->has_class(Symbol("md-header")));
+    check(heading->text()=="日本語 café 😀 東京 花火 rivers valley");
+    const auto unicode_lines=layout_text_block(
+        heading->computed_style,heading->text(),0.0f,0.0f,
+        heading->width(),std::max(heading->height(),90.0f),
+        Color{},TextVerticalAlign::Top);
+    check(unicode_lines.lines.size()>=2u);
+    for(const auto& line:unicode_lines.lines) {
+      check(std::isfinite(line.width));
+      check(line.width>=0.0f);
+      check(line.width<=heading->width()+1.0f);
+    }
+    RecordingRenderer short_frame;
+    short_frame.begin_frame(800.0f,600.0f,1.0f);
+    Renderer short_renderer(&short_frame);
+    RenderManager short_manager(&short_renderer);
+    short_manager.render_tree(root);
+    check(std::none_of(
+        short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("Hotel")!=std::string::npos;
+        }));
+    check(std::any_of(
+        short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+
+    // Regrow to a medium auto-sized document. A previously clamped offset
+    // must remain zero until scrolling is explicitly requested.
+    widget->set_markdown(medium);
+    widget->update(0.0f,*md);
+    box.update();
+    check(widget->markdown()==medium);
+    check(md->child_count()==4u);
+    check(viewport->max_scroll_y()>0.0f);
+    check(viewport->max_scroll_y()<tall_max);
+    check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
+    const float retained=std::min(24.0f,viewport->max_scroll_y());
+    check(retained>0.0f);
+    check(viewport->set_scroll_offset(0.0f,retained));
+    box.update();
+
+    // A taller document should permit the same offset without resetting it
+    // or keeping the previous text in the recorded frame.
+    widget->set_markdown(tall);
+    widget->update(0.0f,*md);
+    box.update();
+    check(md->child_count()==8u);
+    check(approx_eq(viewport->scroll_y(),retained,0.1f));
+    check(viewport->max_scroll_y()>retained);
+    check(widget->markdown()==tall);
+    check(viewport->set_scroll_offset(0.0f,0.0f));
+    box.update();
+    RecordingRenderer tall_frame;
+    tall_frame.begin_frame(800.0f,600.0f,1.0f);
+    Renderer tall_renderer(&tall_frame);
+    RenderManager tall_manager(&tall_renderer);
+    tall_manager.render_tree(root);
+    check(std::any_of(
+        tall_frame.texts.begin(),tall_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("Alpha")!=std::string::npos;
+        }));
+    check(std::none_of(
+        tall_frame.texts.begin(),tall_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+
+    Event input=Event::text_input("read-only");
+    box.dispatch_event(input);
+    check(!input.handled);
+    check(widget->markdown()==tall);
+  }
+  // #186/#228: verify Unicode HEADING, TASK LIST and TABLE separated by
+  // a root-level thematic break. The shipping C++ md::parse fails to close
+  // LIST on a blank-only separator before a TABLE (tracked under #186).
+  // Exercise real Box layout, scroll and painting without a parser cutover.
+  it("paints Unicode GFM blocks across explicit root break and source replacement") {
+    Box box(nullptr);
+    auto* root=box.create("div","md-unicode-gfm-root-186");
+    auto* viewport=box.create("div","md-unicode-gfm-viewport-186");
+    static const char* const sources[]={
+      "# 日本語 café 😀 Alpha\n\n"
+      "- [x] 発送済み\n- [ ] 待機中\n\n---\n\n"
+      "| City | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
+      "# Ελληνικά café 😀 Beta\n\n"
+      "- [ ] review\n- [x] 完了\n\n---\n\n"
+      "| City | Price |\n| :--- | ---: |\n| Αθήνα | £30 |\n"
+    };
+    static const char* const titles[]={"日本語 café 😀 Alpha","Ελληνικά café 😀 Beta"};
+    static const char* const markers[]={"日本語","Ελληνικά"};
+    auto* md=box.create_widget<MarkdownWidget>(
+        "div","md-unicode-gfm-doc-186",sources[0]);
+    root->append(viewport);
+    viewport->append(md);
+    box.set_root(root);
+    box.set_viewport(280.0f,170.0f);
+    box.load_css(R"(
+      #md-unicode-gfm-root-186 {
+        width: 220px; height: 160px; display: flex;
+        flex-direction: column;
+      }
+      #md-unicode-gfm-viewport-186 {
+        width: 140px; height: 82px;
+        display: block; overflow-y: auto;
+      }
+      #md-unicode-gfm-doc-186 {
+        width: 128px; height: auto; display: block;
+      }
+      .md-header { width: 112px; height: 40px; font-size: 14px; }
+      .md-ul { width: 118px; min-height: 100px; }
+      .md-table { width: 118px; min-height: 104px; }
+    )");
+    auto* widget=static_cast<MarkdownWidget*>(md->widget);
+    check(widget!=nullptr);
+    if(widget==nullptr)return;
+    widget->update(0.0f,*md);
+    box.update();
+    check(viewport->is_scroll_container());
+    check(md->child_count()==4u);
+    check(viewport->max_scroll_y()>0.0f);
+    if(md->child_count()!=4u||viewport->max_scroll_y()<=0.0f)return;
+
+    // The first heading's composed Unicode text must be measurable and
+    // actually painted at Home, not just present as a parser or HTML node.
+    auto* original=static_cast<Element*>(md->children()[0]);
+    check(original->has_class(Symbol("md-header")));
+    check(original->text()==titles[0]);
+    check(original->width()>0.0f);
+    const auto measured=layout_text_block(
+        original->computed_style,original->text(),
+        0.0f,0.0f,original->width(),std::max(40.0f,original->height()),
+        Color{},TextVerticalAlign::Top);
+    check(!measured.lines.empty());
+    for(const auto& line:measured.lines) {
+      check(std::isfinite(line.width));
+      check(line.width>=0.0f);
+      check(line.width<=original->width()+1.0f);
+    }
+    RecordingRenderer before;
+    before.begin_frame(800.0f,600.0f,1.0f);
+    Renderer before_renderer(&before);
+    RenderManager before_manager(&before_renderer);
+    before_manager.render_tree(root);
+    check(std::any_of(before.texts.begin(),before.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+
+    for(size_t round=0u;round<8u;++round) {
+      const size_t index=(round+1u)%2u;
+      const size_t old_index=1u-index;
+      // Scroll with a real overflow container, then replace the entire AST
+      // while the old heading can legitimately be clipped out of the frame.
+      const float amount=std::min(32.0f,viewport->max_scroll_y());
+      check(amount>0.0f);
+      check(viewport->set_scroll_offset(0.0f,amount));
+      box.update();
+      check(viewport->scroll_y()>0.0f);
+      widget->set_markdown(sources[index]);
+      widget->update(0.0f,*md);
+      box.update();
+      check(widget->markdown()==sources[index]);
+      check(md->child_count()==4u);
+      check(viewport->scroll_y()>=0.0f);
+      check(viewport->scroll_y()<=viewport->max_scroll_y());
+      if(md->child_count()!=4u)return;
+      auto* heading=static_cast<Element*>(md->children()[0]);
+      auto* list=static_cast<Element*>(md->children()[1]);
+      auto* hr=static_cast<Element*>(md->children()[2]);
+      auto* table=static_cast<Element*>(md->children()[3]);
+      check(heading->has_class(Symbol("md-header")));
+      check(heading->text()==titles[index]);
+      check(list->has_class(Symbol("md-ul")));
+      check(hr->has_class(Symbol("md-hr")));
+      check(table->has_class(Symbol("md-table")));
+      check(list->child_count()==2u);
+      check(table->child_count()==2u);
+      if(list->child_count()==2u) {
+        auto* a=static_cast<Element*>(list->children()[0]);
+        auto* b=static_cast<Element*>(list->children()[1]);
+        check(a->has_class(Symbol("md-task-item")));
+        check(b->has_class(Symbol("md-task-item")));
+      }
+
+      RecordingRenderer scrolled;
+      scrolled.begin_frame(800.0f,600.0f,1.0f);
+      Renderer scrolled_renderer(&scrolled);
+      RenderManager scrolled_manager(&scrolled_renderer);
+      scrolled_manager.render_tree(root);
+      check(std::none_of(scrolled.texts.begin(),scrolled.texts.end(),
+          [old_index](const TextCall& call) {
+            return call.text.find(markers[old_index])!=std::string::npos;
+          }));
+
+      // Recover Home and inspect the *drawn* Unicode heading, with no stale
+      // previous source commands. Repeating identical source is a no-op.
+      check(viewport->set_scroll_offset(0.0f,0.0f));
+      box.update();
+      RecordingRenderer recovered;
+      recovered.begin_frame(800.0f,600.0f,1.0f);
+      Renderer recovered_renderer(&recovered);
+      RenderManager recovered_manager(&recovered_renderer);
+      recovered_manager.render_tree(root);
+      check(std::any_of(recovered.texts.begin(),recovered.texts.end(),
+          [index](const TextCall& call) {
+            return call.text.find(markers[index])!=std::string::npos;
+          }));
+      check(std::none_of(recovered.texts.begin(),recovered.texts.end(),
+          [old_index](const TextCall& call) {
+            return call.text.find(markers[old_index])!=std::string::npos;
+          }));
+      const Element* previous_heading=static_cast<const Element*>(md->children()[0]);
+      const Element* previous_list=static_cast<const Element*>(md->children()[1]);
+      const Element* previous_hr=static_cast<const Element*>(md->children()[2]);
+      const Element* previous_table=static_cast<const Element*>(md->children()[3]);
+      widget->set_markdown(sources[index]);
+      widget->update(0.0f,*md);
+      box.update();
+      check(md->child_count()==4u);
+      if(md->child_count()==4u) {
+        check(md->children()[0]==previous_heading);
+        check(md->children()[1]==previous_list);
+        check(md->children()[2]==previous_hr);
+        check(md->children()[3]==previous_table);
+      }
+      Event input=Event::text_input("must-not-edit");
+      box.dispatch_event(input);
+      check(!input.handled);
+      check(widget->markdown()==sources[index]);
+    }
+
+    // A short Unicode-only heading must evict obsolete task/table children
+    // and clamp an oversized old scroll offset to zero.
+    check(viewport->set_scroll_offset(
+        0.0f,std::min(64.0f,viewport->max_scroll_y())));
+    widget->set_markdown("# 日本語 short\n");
+    widget->update(0.0f,*md);
+    box.update();
+    check(md->child_count()==1u);
+    check(viewport->max_scroll_y()==0.0f);
+    check(approx_eq(viewport->scroll_y(),0.0f,0.1f));
+    RecordingRenderer short_frame;
+    short_frame.begin_frame(800.0f,600.0f,1.0f);
+    Renderer short_renderer(&short_frame);
+    RenderManager short_manager(&short_renderer);
+    short_manager.render_tree(root);
+    check(std::any_of(short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("日本語")!=std::string::npos;
+        }));
+    check(std::none_of(short_frame.texts.begin(),short_frame.texts.end(),
+        [](const TextCall& call) {
+          return call.text.find("Ελληνικά")!=std::string::npos;
+        }));
+  }
+
 }

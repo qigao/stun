@@ -108,7 +108,21 @@ typedef enum stun_ui_block_kind {
     STUN_UI_BLOCK_DEFINITION_DESC,
     STUN_UI_BLOCK_DIAGRAM,
     /* Appended: keep all existing public enum values stable. */
-    STUN_UI_BLOCK_CODE_INDENTED
+    STUN_UI_BLOCK_CODE_INDENTED,
+    /* Distinct from the existing SOFT STUN_UI_BLOCK_LINE_BREAK node. */
+    STUN_UI_BLOCK_HARD_LINE_BREAK,
+    /* Optional decoded title child of STUN_UI_BLOCK_LINK; metadata-owned. */
+    STUN_UI_BLOCK_LINK_TITLE,
+    /* Decoded IMAGE title, always the first direct IMAGE child. */
+    STUN_UI_BLOCK_IMAGE_TITLE,
+    /* Parser-owned literal HTML tokens; never implicit unsafe passthrough. */
+    STUN_UI_BLOCK_RAW_HTML_INLINE,
+    STUN_UI_BLOCK_RAW_HTML_BLOCK,
+    /* A CommonMark URI autolink outside the production scheme allowlist.
+     * Leaf with an owned visible-URI span plus matching metadata; the
+     * default SAFE HTML writer always escapes its enclosing angle token.
+     * Only explicit trusted SPEC_CONFORMANCE emits an anchor element. */
+    STUN_UI_BLOCK_URI_AUTOLINK
 } stun_ui_block_kind;
 
 typedef struct stun_ui_block {
@@ -158,6 +172,29 @@ typedef struct stun_ui_list_semantics {
     uint8_t loose; /* 0 tight; 1 loose */
     uint8_t reserved[2];
 } stun_ui_list_semantics;
+
+/* #186: a TABLE owns exactly one alignment byte per column in RichDoc
+ * metadata. The delimiter row supplies these values; header and body cells
+ * consume the same immutable vector. No renderer-side Markdown reparse. */
+typedef enum stun_ui_table_alignment {
+    STUN_UI_TABLE_ALIGN_NONE = 0,
+    STUN_UI_TABLE_ALIGN_LEFT = 1,
+    STUN_UI_TABLE_ALIGN_CENTER = 2,
+    STUN_UI_TABLE_ALIGN_RIGHT = 3
+} stun_ui_table_alignment;
+
+/* Hard-break source origin is owned as four metadata bytes on a
+ * STUN_UI_BLOCK_HARD_LINE_BREAK node, never re-read from decoded text or
+ * inferred by an HTML consumer. Soft breaks carry no origin metadata.
+ * Additional origins require explicit admission and validation. */
+typedef enum stun_ui_line_break_origin {
+    STUN_UI_LINE_BREAK_TRAILING_SPACES = 1,
+    STUN_UI_LINE_BREAK_BACKSLASH = 2
+} stun_ui_line_break_origin;
+typedef struct stun_ui_line_break_semantics {
+    uint8_t origin; /* stun_ui_line_break_origin */
+    uint8_t reserved[3];
+} stun_ui_line_break_semantics;
 
 typedef struct stun_ui_block_metadata {
     size_t byte_begin;

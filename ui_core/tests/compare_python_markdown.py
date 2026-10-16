@@ -60,9 +60,8 @@ CASES: tuple[Case, ...] = (
     Case("survey.gfm.table-code-pipe", "gfm",
          "| A | B |\n| --- | --- |\n| " "\x60" "x|y" "\x60" " | z |\n",
          False, "Mistune 3 table plugin treats some code-span pipes as delimiters; inspect cmarkgfm HTML"),
-    Case("survey.gfm.table-align", "gfm",
-         "| A | B |\n| :--- | ---: |\n| one | two |\n",
-         False, "C11 RichDoc currently does not preserve table-cell alignment metadata"),
+    Case("gfm.table-align", "gfm",
+         "| A | B |\n| :--- | ---: |\n| one | two |\n"),
     Case("survey.cm.reference-link", "commonmark",
          "[reference][id]\n\n[id]: https://example.org\n",
          False, "C11 reference-link grammar not yet implemented"),
@@ -218,6 +217,14 @@ def native_ast(parser: str, source: str) -> dict:
             if raw_meta:
                 raise ValueError("Unexpected metadata on plain text")
             node = text_node(body)
+        elif kind == "table":
+            # #186: TABLE metadata is one bounded alignment byte per column.
+            # Translate it into per-cell attributes only for the test oracle;
+            # the production renderer consumes the original column vector.
+            if not raw_meta or any(b > 3 for b in raw_meta):
+                raise ValueError("Invalid typed GFM table column alignment vector")
+            node = group(kind, [])
+            node["_column_alignment"] = list(raw_meta)
         elif kind in ("list", "ordered_list"):
             # ABI-stable C11 stun_ui_list_semantics is 8 bytes: uint32_t
             # start + marker + loose + two reserved bytes. Decode explicitly
@@ -257,6 +264,21 @@ def native_ast(parser: str, source: str) -> dict:
             return node
         if "children" in node:
             node["children"] = normalize_children([clean(c) for c in node["children"]])
+        if node["kind"] == "table":
+            alignments = node.pop("_column_alignment", [])
+            rows = node["children"]
+            if not rows or not alignments:
+                raise ValueError("GFM table without typed header and alignments")
+            labels = ("", "left", "center", "right")
+            for row in rows:
+                cells = row.get("children", [])
+                if row["kind"] != "table_row" or len(cells) != len(alignments):
+                    raise ValueError("Malformed GFM table row alignment ownership")
+                for col, cell in enumerate(cells):
+                    if cell["kind"] != "table_cell":
+                        raise ValueError("Malformed GFM table cell")
+                    if alignments[col]:
+                        cell["meta"] = f"align={labels[alignments[col]]}"
         # Omit optional empty children for leaf semantic nodes.
         if not node.get("children") and node["kind"] in ("rule", "line_break", "checkbox"):
             node.pop("children", None)
@@ -289,8 +311,8 @@ def first_difference(actual, expected, location="$") -> str | None:
     return None
 
 
-EXPECTED_GATE_CASES = 20
-EXPECTED_SURVEY_CASES = 4
+EXPECTED_GATE_CASES = 21
+EXPECTED_SURVEY_CASES = 3
 
 
 def main() -> int:

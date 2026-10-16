@@ -13,7 +13,11 @@ static const fixture cases[]={
   {"quoted-continuation","> - foo\n>   bar\n","<blockquote>\n<ul>\n<li>foo\nbar</li>\n</ul>\n</blockquote>\n",1,1},
   {"quoted-interruption","> foo\n> - bar\n","<blockquote>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n</blockquote>\n",1,1},
   {"ordered-noninterrupt","> foo\n> 2. bar\n","<blockquote>\n<p>foo\n2. bar</p>\n</blockquote>\n",1,0},
-  {"quote-to-root-paragraph","> - foo\n> - bar\nplain\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n</blockquote>\n<p>plain</p>\n",1,1},
+  /* CommonMark lazy continuation: an unmarked ordinary text line can
+   * still continue the second quoted LIST_ITEM's open paragraph. A blank
+   * barrier ends that ownership and restores a genuine ROOT paragraph. */
+  {"quoted-second-item-lazy","> - foo\n> - bar\nplain\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar\nplain</li>\n</ul>\n</blockquote>\n",1,1},
+  {"quote-to-root-after-blank","> - foo\n> - bar\n\nplain\n","<blockquote>\n<ul>\n<li>foo</li>\n<li>bar</li>\n</ul>\n</blockquote>\n<p>plain</p>\n",1,1},
   {"quoted-direct-fence","> - ~~~c\n>   alpha & beta\n>   ~~~\n",
    "<blockquote>\n<ul>\n<li>\n<pre><code class=\"language-c\">alpha &amp; beta\n</code></pre>\n</li>\n</ul>\n</blockquote>\n",1,1},
   {"quoted-direct-fence-blank","> - ~~~\n>   one\n>\n>   two\n>   ~~~\n",
@@ -21,7 +25,7 @@ static const fixture cases[]={
   {"quoted-direct-fence-sibling","> - ~~~\n>   ```\n>   abc\n>   ~~~\n> - bar\n",
    "<blockquote>\n<ul>\n<li>\n<pre><code>```\nabc\n</code></pre>\n</li>\n<li>bar</li>\n</ul>\n</blockquote>\n",1,1}
 };
-_Static_assert(sizeof(cases)/sizeof(cases[0])==10u,"fixture denominator");
+_Static_assert(sizeof(cases)/sizeof(cases[0])==11u,"fixture denominator");
 static int check(const fixture *f){
  stun_md_document *d=NULL;size_t n=strlen(f->input);
  if(stun_md_parse(f->input,n,256u,n+1u,&d)!=STUN_UI_OK||!d)return 1;

@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
     MD_TEST_INPUT_MAX = 1 << 20,
@@ -16,7 +17,16 @@ enum {
     MD_TEST_NODES_MAX = 16384
 };
 
-int main(void) {
+int main(int argc,char **argv) {
+    /* An explicit CLI flag requests unsafe literal HTML for trusted
+     * conformance testing. Zero-argument invocation stays production-safe. */
+    const bool spec_mode=argc==2 && !strcmp(argv[1],"--spec-html");
+    if(argc!=1 && !spec_mode) {
+        fputs("markdown HTML test CLI: invalid render policy\n",stderr);
+        return 2;
+    }
+    const stun_md_html_policy policy=spec_mode?
+        STUN_MD_HTML_SPEC_CONFORMANCE:STUN_MD_HTML_SAFE_APPLICATION;
     char *source = (char *)malloc(MD_TEST_INPUT_MAX + 1u);
     if (!source) {
         fputs("markdown HTML test CLI: input OOM\n", stderr);
@@ -46,7 +56,8 @@ int main(void) {
     }
     stun_ui_rich_document_view view=stun_md_document_view(doc);
     size_t size=0u;
-    status=stun_md_render_html(&view,MD_TEST_NODES_MAX,NULL,0u,&size);
+    status=stun_md_render_html_with_policy(&view,MD_TEST_NODES_MAX,
+                                             policy,NULL,0u,&size);
     if(status!=STUN_UI_OK || size>MD_TEST_OUTPUT_MAX) {
         fprintf(stderr,"markdown HTML test CLI: render/count error %d (%zu)\n",
                 (int)status,size);
@@ -60,7 +71,8 @@ int main(void) {
         stun_md_document_destroy(doc);
         return 2;
     }
-    status=stun_md_render_html(&view,MD_TEST_NODES_MAX,html,size+1u,&size);
+    status=stun_md_render_html_with_policy(&view,MD_TEST_NODES_MAX,
+                                             policy,html,size+1u,&size);
     if(status!=STUN_UI_OK) {
         fprintf(stderr,"markdown HTML test CLI: render error %d\n",(int)status);
         free(html);

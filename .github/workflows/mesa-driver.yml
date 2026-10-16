@@ -697,6 +697,16 @@ jobs:
             --report "$EVIDENCE_DIR/markdown-commonmark-652-survey.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-652-survey.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-652-survey.json"
+          # Explicit SPEC raw-HTML survey: 652-row independent diagnostic.
+          # Never replace the production-safe report or change its strict
+          # official-ID nonregression gate with these unsafe test-only bytes.
+          "$python_env/bin/python" ui_core/tests/survey_commonmark_spec.py \
+            --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
+            --spec tools/md/test/spec.txt \
+            --render-policy spec \
+            --report "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.log"
+          test -s "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json"
           "$python_env/bin/python" ui_core/tests/compare_cmarkgfm_html.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --report "$EVIDENCE_DIR/markdown-cmarkgfm-html.json" \
@@ -704,7 +714,22 @@ jobs:
           test -s "$EVIDENCE_DIR/markdown-cmarkgfm-html.json"
           git diff --exit-code
 
-      - name: Gate all 256 previously passing official CommonMark HTML examples
+      - name: Freeze independent GFM root list-to-table semantics (#229)
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_env="$RUNNER_TEMP/stun-markdown-oracle"
+          test -x "$python_env/bin/python"
+          "$python_env/bin/python" -c 'import cmarkgfm'
+          "$python_env/bin/python" ui_core/tests/oracle_legacy_list_table.py \
+            --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
+            --report "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.log"
+          test -s "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.json"
+          git diff --exit-code
+
+      - name: Gate 573 qualified SAFE CommonMark official HTML examples
         if: ${{ inputs.run_runtime && success() }}
         shell: bash
         run: |
@@ -715,6 +740,20 @@ jobs:
             --out "$EVIDENCE_DIR/markdown-commonmark-nonregression.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-nonregression.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-nonregression.json"
+          git diff --exit-code
+
+      - name: Gate 649 qualified SPEC CommonMark official HTML examples
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s ui_core/tests -p 'test_gate_commonmark_spec_nonregression.py'
+          python3 ui_core/tests/gate_commonmark_spec_nonregression.py \
+            --survey "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json" \
+            --baseline ui_core/tests/commonmark_0_31_2_spec_baseline.json \
+            --out "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.json" \
+            2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.log"
+          test -s "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.json"
           git diff --exit-code
 
       - name: Gate exact official CommonMark block-container HTML examples
@@ -1057,6 +1096,7 @@ jobs:
           ports="$EXTERNAL_PORTS_ROOT/flexui"
           tests=(
             test_text_util_unicode test_render_semantics test_widget_contracts
+            test_markdown_widget
             test_textedit_flexui test_plugin_abi test_service_registry
             test_plugin_host test_plugin_manifest test_desktop_application
             test_gcanvas_input test_gcanvas_application_input
@@ -1093,9 +1133,50 @@ jobs:
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$EVIDENCE_DIR/production-results.xml" \
             2>&1 | tee "$EVIDENCE_DIR/production-ctest.log"
+          # #186: Tango C11 candidate is a regular CTest, not a TinyTest
+          # binary. Its mandatory denominator is kept separate.
+          cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
+          ctest --test-dir "$production_build" -R '^stun_markdown_tango_candidate_test$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tango-candidate-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-ctest.log"
           cmake --install "$production_build" --component FlexUIPlugin \
             2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
           cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
+
+      - name: Prove bounded native Tree-sitter C highlighter
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          production_build="$GITHUB_WORKSPACE/build/flexui-production"
+          # Build actual C provider and Catch2 contract tests with the same
+          # production sanitizer flags; no grammar or SDK cutover.
+          cmake --build "$production_build" \
+            --target ts-lang-c test_ts_lang_c test_ts_highlighter_dso_lifetime \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-build.log"
+          ctest --test-dir "$production_build" \
+            -R '^(test_ts_lang_c|test_ts_highlighter_dso_lifetime)$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tree-sitter-c-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-ctest.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          import os
+          evidence = Path(os.environ["EVIDENCE_DIR"])
+          cases = list(ET.parse(evidence / "tree-sitter-c-results.xml")
+                       .getroot().iter("testcase"))
+          expected = {"test_ts_lang_c", "test_ts_highlighter_dso_lifetime"}
+          assert len(cases) == 2 and {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(t)) for c in cases
+                         for t in ("failure", "error", "skipped"))
+          print("Bounded C Tree-sitter + leased DSO lifetime CTests: 2/2")
+          PY
 
       - name: Consume installed PluginSDK and Services without host dependencies
         if: ${{ inputs.run_runtime && success() }}
@@ -1178,6 +1259,15 @@ jobs:
           assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
           totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
 
+          tango_cases = list(ET.parse(
+              evidence / 'tango-candidate-results.xml').getroot().iter('testcase'))
+          assert len(tango_cases) == 1
+          assert tango_cases[0].attrib['name'] == 'stun_markdown_tango_candidate_test'
+          assert not any(list(tango_cases[0].iter(tag))
+                         for tag in ('failure', 'error', 'skipped'))
+          tango_log = (evidence / 'tango-candidate-ctest.log').read_text()
+          assert 'Tango C11 candidate consumer: 64/64 lifecycle cases passed (4 sources x 16 repeats)' in tango_log
+
           installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
                              'Services': 'flexui_installed_services_consumer',
                              'host': 'flexui_plugin_install_consumer'}
@@ -1190,10 +1280,21 @@ jobs:
           commands = json.loads((production / 'compile_commands.json').read_text())
           for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
                          'flexUI/src/textedit.cpp', 'flex/modules/render/stb_sprintf.cpp',
-                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp'):
+                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp',
+                         'flexUI/src/widgets/markdown_widget.cpp',
+                         'tools/md/src/md_parser_driver.cpp',
+                         'tools/md/src/md_inline_parser.cpp',
+                         'tools/md/src/md_block_processor.cpp'):
               matches = [entry for entry in commands if entry['file'].endswith(suffix)]
               assert len(matches) == 1, suffix
               assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
+
+          for suffix in ('ui_core/tests/markdown_tango_candidate_test.c',
+                         'ui_core/src/markdown_c11.c', 'tango/src/tui_widgets.c'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in
+                         ('-fsanitize=address', '-fsanitize=undefined')), suffix
 
           binaries = {name: production / 'bin' / name for name in tests}
           binaries['installed_sdk'] = workspace / 'build/flexui-installed-PluginSDK/flexui_installed_sdk_consumer'
@@ -1241,7 +1342,10 @@ jobs:
                       assert path.is_relative_to(prefix), (component, key, path)
                       if key not in ('FlexUIConfig', 'Includes'):
                           assert value in command_text, (component, key, 'missing from actual link command')
-          result = {'production_ctest_passed': len(tests), 'installed_ctest_passed': len(installed_tests),
+          result = {'production_ctest_passed': len(tests),
+                    'tango_c11_candidate_ctest_passed': 1,
+                    'tango_c11_candidate_cases_passed': 64,
+                    'installed_ctest_passed': len(installed_tests),
                     'tinytest': totals, 'core_runtime_providers': providers,
                     'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
           (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
