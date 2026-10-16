@@ -10989,9 +10989,9 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
           [old_index](const TextCall& call) {
             return call.text.find(markers[old_index])!=std::string::npos;
           }));
-      const Element* previous_heading=md->children()[0];
-      const Element* previous_list=md->children()[1];
-      const Element* previous_table=md->children()[2];
+      const Element* previous_heading=static_cast<const Element*>(md->children()[0]);
+      const Element* previous_list=static_cast<const Element*>(md->children()[1]);
+      const Element* previous_table=static_cast<const Element*>(md->children()[2]);
       widget->set_markdown(sources[index]);
       widget->update(0.0f,*md);
       box.update();
