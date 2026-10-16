@@ -148,9 +148,8 @@ spec("MarkdownWidget Parsing") {
         check(s3->text() == "Emphasis");
     }
 
-    // #186: retain the existing production C++ md::parse consumer while
-    // evaluating the C11 replacement in a separate RichDoc/Tango harness.
-    // This verifies the *real* MarkdownWidget element hierarchy, not HTML.
+    // #186/#231: verify the real MarkdownWidget element hierarchy using
+    // only canonical C11 RichDoc, independent of the HTML emitter.
     it("GFM task items preserve checkbox state in the existing widget") {
         auto* md = box->create_widget<MarkdownWidget>(
             "div", "md", "- [x] shipped\n- [ ] pending\n");
@@ -874,6 +873,81 @@ spec("MarkdownWidget Parsing") {
             check(md->child_at(0u)->text() == "延后处理 🏯");
         check(box->owned_element_count() == steady_count);
         check(box->focused_element() == nullptr);
+    }
+
+    it("projects owned SAFE link/image metadata without exposing unsafe URIs") {
+        Box live(nullptr);
+        auto* root = live.create("div", "md-safe-attrs-root-231");
+        auto* host = live.create_widget<MarkdownWidget>(
+            "div", "md-safe-attrs-widget-231",
+            "Open [café](https://example.org/caf%C3%A9 \"T ©\") "
+            "and ![猫](/img/猫.png \"Photo ©\")\n");
+        root->append(host);
+        live.set_root(root);
+        auto* widget = static_cast<MarkdownWidget*>(host->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *host);
+        check(host->child_count() == 1u);
+        if (host->child_count() != 1u) return;
+        auto* paragraph = host->child_at(0u);
+        check(paragraph->has_class(Symbol("md-p")));
+        Element* link = nullptr;
+        Element* image = nullptr;
+        for (auto* child : paragraph->children()) {
+            auto* candidate = static_cast<Element*>(child);
+            if (candidate->has_class(Symbol("md-a"))) link = candidate;
+            if (candidate->has_class(Symbol("md-img"))) image = candidate;
+        }
+        check(link != nullptr);
+        check(image != nullptr);
+        if (!link || !image) return;
+        const auto* href = link->attribute("href");
+        const auto* link_title = link->attribute("title");
+        const auto* src = image->attribute("src");
+        const auto* image_title = image->attribute("title");
+        check(href && *href == "https://example.org/caf%C3%A9");
+        check(link_title && *link_title == "T ©");
+        check(src && *src == "/img/猫.png");
+        check(image_title && *image_title == "Photo ©");
+
+        // A decoded active script URI must fail closed before tree publish.
+        // Last valid UI stays intact: no old C++ parser and no raw HTML.
+        const auto published_count = live.owned_element_count();
+        const char* const invalid[] = {
+            "[unsafe](javascript:alert)\n",
+            "[unsafe](data:text/html)\n",
+            "![unsafe](mailto:user@example.org)\n",
+            "![unsafe](/a&#10;b)\n"
+        };
+        for (const char* markdown : invalid) {
+            widget->set_markdown(markdown);
+            widget->update(0.0f, *host);
+            check(host->child_count() == 1u);
+            if (host->child_count() != 1u) return;
+            check(host->child_at(0u) == paragraph);
+            check(live.owned_element_count() == published_count);
+            check(link->attribute("href") == href);
+            check(image->attribute("src") == src);
+        }
+        widget->set_markdown("[recovered](/safe \"Ready\")\n");
+        widget->update(0.0f, *host);
+        check(host->child_count() == 1u);
+        if (host->child_count() != 1u) return;
+        auto* next = host->child_at(0u);
+        check(next != paragraph);
+        link = nullptr;
+        for (auto* child : next->children()) {
+            auto* candidate = static_cast<Element*>(child);
+            if (candidate->has_class(Symbol("md-a"))) link = candidate;
+        }
+        check(link != nullptr);
+        if (link) {
+            const auto* target = link->attribute("href");
+            const auto* title = link->attribute("title");
+            check(target && *target == "/safe");
+            check(title && *title == "Ready");
+        }
     }
 
     // #186 / #231: repeated source updates must preserve the sole C11

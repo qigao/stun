@@ -11,6 +11,7 @@
 #include <flexUI/element.h>
 #include <flexUI/syntax_highlighter.h>
 #include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -38,6 +39,21 @@ std::string semantic(const stun_ui_rich_document_view& view,
     return n ? std::string(view.document.source + block.byte_begin, n)
              : std::string{};
 }
+
+/* Native UI and HTML share one C11 SAFE destination policy. Never turn a
+ * decoded javascript:/data:/control-laden link into a UI href/src. Return
+ * only owned bytes after complete validation; no parser reentry. */
+std::string safe_attribute_metadata(
+    const stun_ui_rich_document_view& view, size_t id,
+    bool (*admit)(const char*, size_t)) {
+    const char* value = nullptr;
+    size_t bytes = 0u;
+    if (stun_ui_rich_document_metadata(&view, id, &value, &bytes) != STUN_UI_OK ||
+        !admit(value, bytes) || (bytes && !value))
+        throw std::logic_error("unsafe C11 RichDoc URL or title metadata");
+    return bytes ? std::string(value, bytes) : std::string{};
+}
+
 
 bool known_kind(stun_ui_block_kind kind) {
     switch (kind) {
@@ -385,9 +401,26 @@ void project(const stun_ui_rich_document_view& view,
         case STUN_UI_BLOCK_UNDERLINE:
             elem = staged_create(result, "span", limit); elem->add_class("md-u"); break;
         case STUN_UI_BLOCK_LINK:
-            elem = staged_create(result, "span", limit); elem->add_class("md-a"); break;
-        case STUN_UI_BLOCK_IMAGE:
-            elem = staged_create(result, "span", limit); elem->add_class("md-img"); break;
+        case STUN_UI_BLOCK_IMAGE: {
+            const bool image = kind == STUN_UI_BLOCK_IMAGE;
+            // The sole C11 parser owns decoded destination/title metadata.
+            // Reuse HTML's public SAFE admission, never another URI parser.
+            const auto target = safe_attribute_metadata(
+                view, i, image ? &stun_md_html_safe_image_src
+                               : &stun_md_html_safe_href);
+            elem = staged_create(result, "span", limit);
+            elem->add_class(image ? "md-img" : "md-a");
+            elem->set_attribute(image ? "src" : "href", target);
+            const stun_ui_block_kind title_kind = image
+                ? STUN_UI_BLOCK_IMAGE_TITLE : STUN_UI_BLOCK_LINK_TITLE;
+            if (i + 1u < count &&
+                view.document.blocks[i + 1u].parent_index == i &&
+                view.document.blocks[i + 1u].kind == title_kind) {
+                elem->set_attribute("title", safe_attribute_metadata(
+                    view, i + 1u, &stun_md_html_safe_title));
+            }
+            break;
+        }
         case STUN_UI_BLOCK_CODE_FENCE:
             code_languages[i] = fence_language(view, i);
             elem = staged_create(result, "div", limit);

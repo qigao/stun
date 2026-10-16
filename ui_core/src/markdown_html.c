@@ -81,7 +81,7 @@ static bool html_ascii_equal(const char *bytes, size_t len, const char *key) {
  * scheme and must match the known allowlist. Other colons are relative URL
  * payload. UTF-8 non-ASCII octets are percent encoded only AFTER admission.
  */
-static bool html_safe_href(const char *s, size_t n) {
+bool stun_md_html_safe_href(const char *s, size_t n) {
     if(!s && n)return false;
     bool seen_separator=false;
     size_t scheme_colon=SIZE_MAX;
@@ -138,14 +138,14 @@ static void html_link_href(stun_html_writer *w,const char *s,size_t n) {
 /* IMAGE src uses a narrower policy than navigable href: mailto is
  * never an image protocol. All decoded control bytes and unknown schemes
  * are already rejected by the canonical full-byte href safety scan. */
-static bool html_safe_image_src(const char *s,size_t n) {
-    if(!html_safe_href(s,n))return false;
+bool stun_md_html_safe_image_src(const char *s,size_t n) {
+    if(!stun_md_html_safe_href(s,n))return false;
     if(n>=7u && s[6]==':' && html_ascii_equal(s,6u,"mailto"))
         return false;
     return true;
 }
 
-static bool html_safe_title(const char *s,size_t n) {
+bool stun_md_html_safe_title(const char *s,size_t n) {
     if(!s && n)return false;
     for(size_t i=0u;i<n;++i) {
         const unsigned char c=(unsigned char)s[i];
@@ -486,7 +486,7 @@ static void html_node(stun_html_writer *w, size_t id,
     case STUN_UI_BLOCK_CODE_SPAN: html_str(w,"<code>"); break;
     case STUN_UI_BLOCK_LINK: {
         if (!html_metadata(w,id,&meta,&meta_length)) return;
-        if(!html_safe_href(meta,meta_length)) {
+        if(!stun_md_html_safe_href(meta,meta_length)) {
             w->error=STUN_UI_INVALID_ARGUMENT;return;
         }
         const char *title=NULL;
@@ -497,7 +497,7 @@ static void html_node(stun_html_writer *w, size_t id,
            doc->blocks[id+1u].kind==STUN_UI_BLOCK_LINK_TITLE) {
             has_title=true;
             if(!html_metadata(w,id+1u,&title,&title_length))return;
-            if(!html_safe_title(title,title_length)) {
+            if(!stun_md_html_safe_title(title,title_length)) {
                 w->error=STUN_UI_INVALID_ARGUMENT;return;
             }
         }
@@ -514,7 +514,7 @@ static void html_node(stun_html_writer *w, size_t id,
     }
     case STUN_UI_BLOCK_IMAGE: {
         if(!html_metadata(w,id,&meta,&meta_length))return;
-        if(!html_safe_image_src(meta,meta_length)) {
+        if(!stun_md_html_safe_image_src(meta,meta_length)) {
             w->error=STUN_UI_INVALID_ARGUMENT;return;
         }
         const char *title=NULL;size_t title_length=0u;
@@ -524,7 +524,7 @@ static void html_node(stun_html_writer *w, size_t id,
            doc->blocks[id+1u].kind==STUN_UI_BLOCK_IMAGE_TITLE) {
             has_title=true;
             if(!html_metadata(w,id+1u,&title,&title_length))return;
-            if(!html_safe_title(title,title_length)) {
+            if(!stun_md_html_safe_title(title,title_length)) {
                 w->error=STUN_UI_INVALID_ARGUMENT;return;
             }
         }

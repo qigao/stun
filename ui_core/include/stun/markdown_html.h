@@ -31,6 +31,14 @@ typedef enum stun_md_html_policy {
     STUN_MD_HTML_SPEC_CONFORMANCE = 1
 } stun_md_html_policy;
 
+/* Share SAFE_APPLICATION destination checks with native RichDoc widgets.
+ * Input is already decoded C11 metadata; this does not parse Markdown.
+ * Reject decoded controls and non-allowlisted URI schemes. IMAGE rejects
+ * mailto, while link/image titles allow LF and TAB only. */
+bool stun_md_html_safe_href(const char *decoded, size_t bytes);
+bool stun_md_html_safe_image_src(const char *decoded, size_t bytes);
+bool stun_md_html_safe_title(const char *decoded, size_t bytes);
+
 stun_ui_status stun_md_render_html_with_policy(
     const stun_ui_rich_document_view *view,size_t max_nodes,
     stun_md_html_policy policy,char *buffer,size_t capacity,
