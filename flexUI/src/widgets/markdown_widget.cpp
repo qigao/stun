@@ -186,7 +186,7 @@ void project_code_text(Element* code_block, Projection& result, size_t limit,
     // retain the exact same visible code as plain presentation.
     if (!language.empty() && source.size() <= kMaxHighlightBytes) {
         try {
-            if (auto* highlighter = HighlighterFactory::instance().get(language))
+            if (auto highlighter = HighlighterFactory::instance().acquire(language))
                 tokens = highlighter->highlight(source);
         } catch (const std::exception&) {
             tokens.clear();

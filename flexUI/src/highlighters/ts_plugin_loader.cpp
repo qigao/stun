@@ -25,7 +25,8 @@ typedef HMODULE PluginHandle;
 #define PLUGIN_LOAD(path) dlopen(path, RTLD_LAZY)
 #define PLUGIN_SYM(handle, name) dlsym(handle, name)
 #define PLUGIN_UNLOAD(handle) dlclose(handle)
-#define PLUGIN_EXT ".so"
+// CMake SHARED plugins on macOS use .dylib.
+#define PLUGIN_EXT ".dylib"
 typedef void* PluginHandle;
 #else
 #include <limits.h>
@@ -120,7 +121,14 @@ void load_ts_plugins_from_dir(const std::string& dir) {
         if (!entry.is_regular_file()) continue;
         
         std::string filename = entry.path().filename().string();
-        if (filename.find("ts-lang-") == 0 && ends_with(filename, PLUGIN_EXT)) {
+        // macOS accepts the CMake SHARED .dylib and MODULE .so forms.
+        const bool supported_extension =
+            ends_with(filename, PLUGIN_EXT)
+#ifdef __APPLE__
+            || ends_with(filename, ".so")
+#endif
+            ;
+        if (filename.find("ts-lang-") == 0 && supported_extension) {
             load_ts_plugin(entry.path().string());
         }
     }
