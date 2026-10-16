@@ -186,16 +186,22 @@ jobs:
           gh release download "$SALTS_TAG" --repo qigao/salts \
             --pattern "$package" --pattern "SHA256SUMS" \
             --dir build/salts-native-release
-          (
-            cd build/salts-native-release
-            sha256sum -c SHA256SUMS
-          )
           python - <<'PY'
-          import os, pathlib, zipfile
+          import hashlib, os, pathlib, zipfile
           tag = os.environ["SALTS_TAG"]
           version = tag[1:]
           path = pathlib.Path("build/salts-native-release") / ("Salts.Native." + version + ".nupkg")
           out = pathlib.Path("build/salts-native-release")
+          lines = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+          assert len(lines) == 1, "expected exact one tagged release checksum"
+          wanted, entry = lines[0].strip().split(maxsplit=1)
+          assert len(wanted) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in wanted)
+          # The publisher hashes dist/<package> before publishing; GitHub
+          # downloads the asset by basename. Never bypass the actual digest.
+          assert pathlib.PurePosixPath(entry.lstrip("*")).name == path.name
+          with path.open("rb") as stream:
+              observed = hashlib.file_digest(stream, "sha256").hexdigest()
+          assert observed.lower() == wanted.lower(), "tagged package SHA256 mismatch"
           with zipfile.ZipFile(path) as package:
               members = [s for s in package.namelist() if s.startswith("sdk/windows-x64/")]
               assert members and all(".." not in pathlib.PurePosixPath(p).parts for p in members)
