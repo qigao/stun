@@ -47,3 +47,31 @@ jobs:
         run: |
           ctest --test-dir build/highlighter-loader-contract -C Debug \
             --no-tests=error --output-on-failure --timeout 120 --verbose
+
+  highlighter-tsan:
+    name: Highlighter ownership / Linux TSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure C11 provider and C++17 loader with TSan
+        shell: bash
+        run: |
+          cmake -S flexUI/tests/highlighter_loader_contract \
+            -B build/highlighter-loader-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSTUN_HIGHLIGHTER_TSAN=ON
+      - name: Build both sides with TSan
+        shell: bash
+        run: |
+          cmake --build build/highlighter-loader-tsan --parallel 2 --verbose
+          test -x build/highlighter-loader-tsan/test_highlighter_loader_contract
+          test -f build/highlighter-loader-tsan/ts-lang-contract.so
+          nm -D build/highlighter-loader-tsan/test_highlighter_loader_contract | grep '__tsan_' | head -3
+          nm -D build/highlighter-loader-tsan/ts-lang-contract.so | grep '__tsan_' | head -3
+      - name: Execute concurrent unload and replacement under TSan
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1:exitcode=66:report_signal_unsafe=1:second_deadlock_stack=1
+        run: |
+          ctest --test-dir build/highlighter-loader-tsan \
+            --no-tests=error --output-on-failure --timeout 120 --verbose
