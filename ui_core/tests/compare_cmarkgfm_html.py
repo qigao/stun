@@ -460,6 +460,13 @@ def describe_difference(got: bytes, expected: bytes) -> str | None:
     return f"byte {pos}, lengths {len(got)} != {len(expected)}; got={left!r} expected={right!r}"
 
 
+# SAFE rendering deliberately differs from cmark-gfm's omitted-HTML
+# comment: show literal escaped source, never executable HTML. This is a
+# policy gate independent of byte-exact reference parity.
+SAFE_RAW_HTML_SURVEY_ID = "survey.cm.raw-html"
+SAFE_RAW_HTML_EXPECTED = b"&lt;script&gt;unsafe()&lt;/script&gt;\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--renderer", type=Path, required=True)
@@ -502,6 +509,7 @@ def main() -> int:
     results: list[dict] = []
     gated_total = gated_passed = survey_total = survey_matched = 0
     gfm_official_total = gfm_official_passed = 0
+    safe_raw_html_valid = False
     cmark_gate_total = cmark_gate_passed = 0
     matrix_gate_total = matrix_gate_passed = 0
     normative_gate_total = normative_gate_passed = 0
@@ -526,6 +534,11 @@ def main() -> int:
                 record["normative_expected_html"] = case.normative_expected_html
             actual = native_html(args.renderer, case)
             record["actual_html"] = actual.decode("utf-8", "strict")
+            if case.case_id == SAFE_RAW_HTML_SURVEY_ID:
+                safe_raw_html_valid = actual == SAFE_RAW_HTML_EXPECTED
+                record["safe_raw_html_policy_match"] = safe_raw_html_valid
+                record["safe_raw_html_expected"] = (
+                    SAFE_RAW_HTML_EXPECTED.decode("ascii"))
             record["actual_sha256"] = hashlib.sha256(actual).hexdigest()
             difference = describe_difference(actual, expected)
             record["matched"] = difference is None
@@ -591,6 +604,11 @@ def main() -> int:
             "oracle": "strict independent cmark-gfm HTML byte equality",
         },
         "survey": {"matched": survey_matched, "total": survey_total},
+        "safe_raw_html_policy": {
+            "passed": int(safe_raw_html_valid), "total": 1,
+            "invariant": "SAFE render must escape script as literal text",
+            "comparison": "independent from cmark-gfm survey byte parity",
+        },
         "cases": results,
         "note": "Strict oracle profiles are reported separately: all but the one"
                 " pinned GFM task-first-paragraph normative case compare to independent"
@@ -608,7 +626,9 @@ def main() -> int:
           f"combined strict {gated_passed}/{gated_total}, "
           f"diagnostics {survey_matched}/{survey_total}; "
           f"report={args.report}")
-    return 0 if gated_passed == gated_total else 1
+    print(f"RESULT: SAFE raw HTML literal policy {int(safe_raw_html_valid)}/1 "
+          "(distinct from cmark-gfm diagnostic byte parity)")
+    return 0 if gated_passed == gated_total and safe_raw_html_valid else 1
 
 
 if __name__ == "__main__":
