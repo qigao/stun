@@ -269,6 +269,21 @@ spec("MarkdownWidget Parsing") {
         check(list->child_count()==2u);
         check(table->has_class(Symbol("md-table")));
         check(table->child_count()==2u);
+        if (table->child_count() == 2u) {
+            for (auto* node : table->children()) {
+                const auto* row = static_cast<const Element*>(node);
+                check(row->child_count() == 2u);
+                if (row->child_count() != 2u) continue;
+                auto* left = static_cast<Element*>(row->child_at(0u));
+                auto* right = static_cast<Element*>(row->child_at(1u));
+                check(left->has_class(Symbol("md-align-left")));
+                check(right->has_class(Symbol("md-align-right")));
+                const auto* left_meta = left->attribute("data-gfm-align");
+                const auto* right_meta = right->attribute("data-gfm-align");
+                check(left_meta != nullptr && *left_meta == "left");
+                check(right_meta != nullptr && *right_meta == "right");
+            }
+        }
         if(list->child_count()==2u) {
             auto* done=static_cast<Element*>(list->children()[0]);
             auto* pending=static_cast<Element*>(list->children()[1]);

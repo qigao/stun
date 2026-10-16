@@ -155,6 +155,9 @@ void project(const stun_ui_rich_document_view& view,
     const size_t count = view.document.block_count;
     std::vector<Element*> owners(count, nullptr);
     std::vector<size_t> child_count(count, 0u);
+    // Column order is a property of each typed TABLE_ROW, not Markdown
+    // punctuation. Consume the parent TABLE's immutable C11 alignment bytes.
+    std::vector<size_t> row_columns(count, 0u);
     for (size_t i = 1; i < count; ++i) {
         const uint32_t parent = view.document.blocks[i].parent_index;
         if (!is_metadata_leaf(view.document.blocks[i].kind)) ++child_count[parent];
@@ -218,8 +221,38 @@ void project(const stun_ui_rich_document_view& view,
             elem = staged_create(result, "div", limit); elem->add_class("md-table"); break;
         case STUN_UI_BLOCK_TABLE_ROW:
             elem = staged_create(result, "div", limit); elem->add_class("md-tr"); break;
-        case STUN_UI_BLOCK_TABLE_CELL:
-            elem = staged_create(result, "div", limit); elem->add_class("md-td"); break;
+        case STUN_UI_BLOCK_TABLE_CELL: {
+            const uint32_t row_id = block.parent_index;
+            if (row_id >= i || view.document.blocks[row_id].kind != STUN_UI_BLOCK_TABLE_ROW)
+                throw std::logic_error("table cell without typed row owner");
+            const uint32_t table_id = view.document.blocks[row_id].parent_index;
+            if (table_id >= row_id ||
+                view.document.blocks[table_id].kind != STUN_UI_BLOCK_TABLE)
+                throw std::logic_error("table row without typed table owner");
+            const char* alignment = nullptr;
+            size_t column_count = 0u;
+            if (stun_ui_rich_document_metadata(
+                    &view, table_id, &alignment, &column_count) != STUN_UI_OK ||
+                !alignment || row_columns[row_id] >= column_count)
+                throw std::logic_error("invalid typed GFM table alignment");
+            const unsigned char align =
+                static_cast<unsigned char>(alignment[row_columns[row_id]++]);
+            elem = staged_create(result, "div", limit);
+            elem->add_class("md-td");
+            const char* value = nullptr;
+            switch (align) {
+            case STUN_UI_TABLE_ALIGN_NONE: break;
+            case STUN_UI_TABLE_ALIGN_LEFT: value = "left"; break;
+            case STUN_UI_TABLE_ALIGN_CENTER: value = "center"; break;
+            case STUN_UI_TABLE_ALIGN_RIGHT: value = "right"; break;
+            default: throw std::logic_error("unknown typed GFM table alignment");
+            }
+            if (value) {
+                elem->add_class(std::string("md-align-") + value);
+                elem->set_attribute("data-gfm-align", value);
+            }
+            break;
+        }
         case STUN_UI_BLOCK_EMPHASIS:
             elem = staged_create(result, "span", limit); elem->add_class("md-em"); break;
         case STUN_UI_BLOCK_STRONG:
