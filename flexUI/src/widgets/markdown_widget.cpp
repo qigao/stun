@@ -123,6 +123,17 @@ void add_content(Element* target, const std::string& value) {
 struct Projection {
     std::vector<std::unique_ptr<Element>> elements;
     std::vector<Element*> roots;
+
+    ~Projection() {
+        // During rejected staging, children refer to other nodes in this
+        // batch. Unlink in reverse construction order while all nodes live,
+        // then let unique_ptr release the entire unpublished forest.
+        for (auto it = elements.rbegin(); it != elements.rend(); ++it) {
+            Element* element = it->get();
+            if (element && element->parent_elem())
+                element->parent_elem()->remove_child(element);
+        }
+    }
 };
 
 Element* staged_create(Projection& result, const std::string& tag,
