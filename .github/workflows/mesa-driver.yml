@@ -1155,10 +1155,12 @@ jobs:
           production_build="$GITHUB_WORKSPACE/build/flexui-production"
           # Build actual C provider and Catch2 contract tests with the same
           # production sanitizer flags; no grammar or SDK cutover.
-          cmake --build "$production_build" --target ts-lang-c test_ts_lang_c \
+          cmake --build "$production_build" \
+            --target ts-lang-c test_ts_lang_c test_ts_highlighter_dso_lifetime \
             --parallel 2 --verbose \
             2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-build.log"
-          ctest --test-dir "$production_build" -R '^test_ts_lang_c$' \
+          ctest --test-dir "$production_build" \
+            -R '^(test_ts_lang_c|test_ts_highlighter_dso_lifetime)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$EVIDENCE_DIR/tree-sitter-c-results.xml" \
             2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-ctest.log"
@@ -1169,10 +1171,11 @@ jobs:
           evidence = Path(os.environ["EVIDENCE_DIR"])
           cases = list(ET.parse(evidence / "tree-sitter-c-results.xml")
                        .getroot().iter("testcase"))
-          assert len(cases) == 1 and cases[0].attrib["name"] == "test_ts_lang_c"
-          assert not any(list(cases[0].iter(t)) for t in
-                         ("failure", "error", "skipped"))
-          print("In-tree C Tree-sitter provider capacity CTests: 1/1")
+          expected = {"test_ts_lang_c", "test_ts_highlighter_dso_lifetime"}
+          assert len(cases) == 2 and {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(t)) for c in cases
+                         for t in ("failure", "error", "skipped"))
+          print("Bounded C Tree-sitter + leased DSO lifetime CTests: 2/2")
           PY
 
       - name: Consume installed PluginSDK and Services without host dependencies

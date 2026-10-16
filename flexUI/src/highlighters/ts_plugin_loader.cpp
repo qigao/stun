@@ -4,7 +4,9 @@
 
 #include <flexUI/ts_plugin.h>
 #include <string>
-#include <vector>
+#include <memory>
+#include <mutex>
+#include <utility>
 #include <unordered_map>
 #include <filesystem>
 #include <cstring>
@@ -43,19 +45,26 @@ static bool ends_with(const std::string& str, const char* suffix) {
     return str.size() >= len && str.compare(str.size() - len, len, suffix) == 0;
 }
 
+// Each registered plugin is one bounded DSO owner. A highlighter receives
+// an aliasing shared_ptr lease so its TSPluginInfo and functions cannot outlive
+// the library when unload_all_ts_plugins() clears the registry.
 struct LoadedPlugin {
     std::string name;
-    const TSPluginInfo* info;
-    PluginHandle handle;
+    const TSPluginInfo* info = nullptr;
+    PluginHandle handle = nullptr;
+    ~LoadedPlugin() {
+        if (handle) PLUGIN_UNLOAD(handle);
+    }
 };
 
-static std::vector<LoadedPlugin>& get_loaded_plugins() {
-    static std::vector<LoadedPlugin> plugins;
-    return plugins;
+static std::mutex& plugin_mutex() {
+    static std::mutex m;
+    return m;
 }
 
-static std::unordered_map<std::string, const TSPluginInfo*>& get_plugin_map() {
-    static std::unordered_map<std::string, const TSPluginInfo*> map;
+static std::unordered_map<std::string, std::shared_ptr<LoadedPlugin>>&
+get_plugin_map() {
+    static std::unordered_map<std::string, std::shared_ptr<LoadedPlugin>> map;
     return map;
 }
 
@@ -83,31 +92,24 @@ static std::filesystem::path executable_dir() {
 bool load_ts_plugin(const std::string& path) {
     PluginHandle handle = PLUGIN_LOAD(path.c_str());
     if (!handle) return false;
-
+    // From here on, one RAII lease owns the handle even if the registry
+    // allocation throws. Never persist an unowned function pointer.
+    auto plugin = std::make_shared<LoadedPlugin>();
+    plugin->handle = handle;
     auto get_info = (const TSPluginInfo* (*)())PLUGIN_SYM(handle, "ts_plugin_info");
-    if (!get_info) {
-        PLUGIN_UNLOAD(handle);
-        return false;
-    }
-
+    if (!get_info) return false;
     const TSPluginInfo* info = get_info();
-    if (!info || !info->name || !info->highlight || !info->free_result) {
-        PLUGIN_UNLOAD(handle);
+    if (!info || !info->name || !info->highlight || !info->free_result)
         return false;
+    plugin->name = info->name;
+    plugin->info = info;
+    {
+        std::lock_guard<std::mutex> lock(plugin_mutex());
+        auto& map = get_plugin_map();
+        if (map.find(plugin->name) != map.end())
+            return true; // temporary additional dlopen lease is released
+        map.emplace(plugin->name, std::move(plugin));
     }
-
-    LoadedPlugin plugin;
-    plugin.name = info->name;
-    plugin.info = info;
-    plugin.handle = handle;
-
-    if (get_plugin_map().find(plugin.name) != get_plugin_map().end()) {
-        PLUGIN_UNLOAD(handle);
-        return true;
-    }
-
-    get_loaded_plugins().push_back(plugin);
-    get_plugin_map()[plugin.name] = info;
     return true;
 }
 
@@ -136,18 +138,25 @@ void load_default_ts_plugins() {
     }
 }
 
-const TSPluginInfo* get_ts_plugin(const std::string& name) {
-    auto& map = get_plugin_map();
-    auto it = map.find(name);
-    return (it != map.end()) ? it->second : nullptr;
+std::shared_ptr<const TSPluginInfo> acquire_ts_plugin(
+    const std::string& name) {
+    std::lock_guard<std::mutex> lock(plugin_mutex());
+    const auto it = get_plugin_map().find(name);
+    if (it == get_plugin_map().end()) return {};
+    // Alias the owning DSO lease without allocating or copying plugin code.
+    return std::shared_ptr<const TSPluginInfo>(it->second, it->second->info);
 }
 
 void unload_all_ts_plugins() {
-    for (auto& plugin : get_loaded_plugins()) {
-        PLUGIN_UNLOAD(plugin.handle);
+    // Remove discovery references immediately. A cached/in-flight
+    // TreeSitterHighlighter keeps the DSO alive until its last lease ends.
+    // Close outside the registry lock to avoid plugin destructor reentry.
+    std::unordered_map<std::string, std::shared_ptr<LoadedPlugin>> retired;
+    {
+        std::lock_guard<std::mutex> lock(plugin_mutex());
+        retired.swap(get_plugin_map());
     }
-    get_loaded_plugins().clear();
-    get_plugin_map().clear();
+    retired.clear();
 }
 
 } // namespace flexUI

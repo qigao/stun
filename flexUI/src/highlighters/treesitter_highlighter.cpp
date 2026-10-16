@@ -11,7 +11,7 @@
 
 namespace flexUI {
 
-const TSPluginInfo* get_ts_plugin(const std::string& name);
+std::shared_ptr<const TSPluginInfo> acquire_ts_plugin(const std::string& name);
 void load_ts_plugins_from_dir(const std::string& dir);
 void load_default_ts_plugins();
 
@@ -34,8 +34,9 @@ static HighlightType convert_type(TSHighlightType t) {
 
 class TreeSitterHighlighter : public SyntaxHighlighter {
 public:
-    explicit TreeSitterHighlighter(const TSPluginInfo* plugin, std::string name)
-        : plugin_(plugin), lang_name_(std::move(name)) {}
+    explicit TreeSitterHighlighter(
+        std::shared_ptr<const TSPluginInfo> plugin, std::string name)
+        : plugin_(std::move(plugin)), lang_name_(std::move(name)) {}
 
     std::vector<HighlightToken> highlight(std::string_view source) override {
         std::vector<HighlightToken> tokens;
@@ -78,7 +79,7 @@ public:
     const char* language() const override { return lang_name_.c_str(); }
 
 private:
-    const TSPluginInfo* plugin_;
+    std::shared_ptr<const TSPluginInfo> plugin_;
     std::string lang_name_;
 
     std::vector<HighlightToken> fill_gaps(const std::vector<HighlightToken>& tokens, size_t len) {
@@ -107,9 +108,9 @@ void init_treesitter_highlighters() {
 }
 
 SyntaxHighlighter* create_ts_highlighter(const std::string& lang) {
-    const TSPluginInfo* plugin = get_ts_plugin(lang);
+    auto plugin = acquire_ts_plugin(lang);
     if (!plugin) return nullptr;
-    return new TreeSitterHighlighter(plugin, lang);
+    return new TreeSitterHighlighter(std::move(plugin), lang);
 }
 
 } // namespace flexUI

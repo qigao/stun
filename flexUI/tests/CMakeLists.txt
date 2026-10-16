@@ -143,6 +143,23 @@ target_include_directories(
 set_target_properties(test_markdown_widget PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_markdown_widget COMMAND test_markdown_widget)
 
+# A real DSO lease test runs only when the tree-sitter C language plugin is
+# part of this build. Standalone FlexUI-only consumers stay independent.
+if(TARGET ts-lang-c)
+  add_executable(test_ts_highlighter_dso_lifetime
+                 test_highlighter_dso_lifetime.cpp)
+  target_link_libraries(test_ts_highlighter_dso_lifetime PRIVATE flexUI)
+  flexui_configure_tinytest(test_ts_highlighter_dso_lifetime)
+  target_include_directories(test_ts_highlighter_dso_lifetime PRIVATE ../include)
+  target_compile_definitions(test_ts_highlighter_dso_lifetime PRIVATE
+    "TS_LANG_C_PATH=\"$<TARGET_FILE:ts-lang-c>\"")
+  add_dependencies(test_ts_highlighter_dso_lifetime ts-lang-c)
+  set_target_properties(test_ts_highlighter_dso_lifetime
+                        PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_ts_highlighter_dso_lifetime
+           COMMAND test_ts_highlighter_dso_lifetime)
+endif()
+
 add_executable(test_style_engine test_style_engine.cpp)
 target_link_libraries(test_style_engine PRIVATE flexUI)
 flexui_configure_tinytest(test_style_engine)
