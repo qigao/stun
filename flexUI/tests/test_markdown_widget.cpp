@@ -159,18 +159,17 @@ spec("MarkdownWidget Parsing") {
         }
     }
 
-    // #186/#228: an explicit root-level thematic break ends the legacy
-    // C++ md::parse List container before the sibling TABLE. The same
-    // markup with ONLY a blank separator is an outstanding legacy
-    // List/TABLE container bug (tracked under #186), not a qualified path.
-    // GFM tables cannot legally contain block/task nodes in their cells.
-    it("composes Unicode heading tasks and table across explicit list close") {
+    // #186/#229/#230: the root TABLE after a blank-only task list must be
+    // a real sibling of LIST and HEADING. The shipping C++ parser failed
+    // this exact markup; MarkdownWidget now projects the new C11 RichDoc.
+    // No fake '---' separator, private Unicode table or C++ grammar fallback.
+    it("projects C11 Unicode task list then root table after blank only") {
         static const char* const sources[] = {
             "# 日本語 café 😀 Alpha\n\n"
-            "- [x] 発送済み\n- [ ] 待機中\n\n---\n\n"
+            "- [x] 発送済み\n- [ ] 待機中\n\n"
             "| 城市 | Price |\n| :--- | ---: |\n| 東京 | €20 |\n",
             "# Ελληνικά café 😀 Beta\n\n"
-            "- [ ] review\n- [x] 完了\n\n---\n\n"
+            "- [ ] review\n- [x] 完了\n\n"
             "| City | Price |\n| :--- | ---: |\n| Αθήνα | £30 |\n"
         };
         static const char* const headings[] = {
@@ -188,19 +187,17 @@ spec("MarkdownWidget Parsing") {
             widget->update(0.0f, *md);
             check(widget->markdown() == sources[index]);
             check(md->parent_elem() == root);
-            check(md->child_count() == 4u);
-            if (md->child_count() != 4u) return;
+            check(md->child_count() == 3u);
+            if (md->child_count() != 3u) return;
 
             auto* heading = static_cast<Element*>(md->children()[0]);
             auto* list = static_cast<Element*>(md->children()[1]);
-            auto* hr = static_cast<Element*>(md->children()[2]);
-            auto* table = static_cast<Element*>(md->children()[3]);
+            auto* table = static_cast<Element*>(md->children()[2]);
             check(heading->has_class(Symbol("md-header")));
             check(heading->has_class(Symbol("h1")));
             check(heading->text() == headings[index]);
             check(list->has_class(Symbol("md-ul")));
             check(list->child_count() == 2u);
-            check(hr->has_class(Symbol("md-hr")));
             check(table->has_class(Symbol("md-table")));
             check(table->child_count() == 2u);
 
@@ -229,26 +226,42 @@ spec("MarkdownWidget Parsing") {
                     check(row->child_count() == 2u);
                 }
             }
+            // These semantics are copied from the *C11 RichDoc* delimiter
+            // metadata vector; no renderer reparses colon alignment.
+            if (table->child_count() == 2u) {
+                auto* header = static_cast<Element*>(table->children()[0]);
+                if (header->child_count() == 2u) {
+                    auto* left = static_cast<Element*>(header->children()[0]);
+                    auto* right = static_cast<Element*>(header->children()[1]);
+                    check(left->has_class(Symbol("md-align-left")));
+                    check(right->has_class(Symbol("md-align-right")));
+                    const std::string* left_align =
+                        left->attribute("data-md-align");
+                    const std::string* right_align =
+                        right->attribute("data-md-align");
+                    check(left_align != nullptr);
+                    check(right_align != nullptr);
+                    if (left_align) check(*left_align == "left");
+                    if (right_align) check(*right_align == "right");
+                }
+            }
             const Element* const original_heading = heading;
             const Element* const original_list = list;
-            const Element* const original_hr = hr;
             const Element* const original_table = table;
             widget->set_markdown(sources[index]);
             widget->update(0.0f, *md);
-            check(md->child_count() == 4u);
-            if (md->child_count() == 4u) {
+            check(md->child_count() == 3u);
+            if (md->child_count() == 3u) {
                 check(md->children()[0] == original_heading);
                 check(md->children()[1] == original_list);
-                check(md->children()[2] == original_hr);
-                check(md->children()[3] == original_table);
+                check(md->children()[2] == original_table);
             }
             check(md->parent_elem() == root);
         }
     }
 
-    // #186 consumer isolation: the current MarkdownWidget still uses the
-    // existing C++ md::parse, not the candidate C11 grammar. Exercise real
-    // update/empty/rebuild transitions without a second runtime owner.
+    // #230: the *new C11* grammar owns all live MarkdownWidget updates;
+    // exercise task/table/empty transitions with no second parser or owner.
     it("GFM repeated task table heading and empty updates remain bounded") {
         static const char* const sources[] = {
             "| H | V |\n| --- | --- |\n| a | b |\n",
@@ -301,6 +314,34 @@ spec("MarkdownWidget Parsing") {
     }
 }
 
+
+    // #230: a source that exceeds the single-owner C11 source budget
+    // cannot retain stale visual state, publish a partial tree or invoke
+    // legacy md::parse. A subsequent accepted source must recover.
+    it("fails closed on over-budget C11 source and recovers without fallback") {
+        auto* md=box->create_widget<MarkdownWidget>(
+            "div","md-budget-fail-230","# Before\n");
+        root->append(md);
+        auto* widget=static_cast<MarkdownWidget*>(md->widget);
+        check(widget!=nullptr);
+        if(widget==nullptr)return;
+        widget->update(0.0f,*md);
+        check(md->child_count()==1u);
+        const std::string oversized(1024u*1024u+1u,'a');
+        widget->set_markdown(oversized);
+        widget->update(0.0f,*md);
+        check(widget->markdown()==oversized);
+        check(md->child_count()==0u);
+        widget->set_markdown("# After\n");
+        widget->update(0.0f,*md);
+        check(md->child_count()==1u);
+        if(md->child_count()==1u) {
+            auto* heading=static_cast<Element*>(md->children()[0]);
+            check(heading->has_class(Symbol("md-header")));
+            check(heading->text()=="After");
+        }
+        check(md->parent_elem()==root);
+    }
 
 // ============================================================================
 // C++ Syntax Highlighting Tests
