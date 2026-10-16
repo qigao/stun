@@ -1,7 +1,7 @@
-name: Unicode 17 candidate CommonMark (isolated ABI proof)
+name: Unicode 17 released SDK CommonMark 652 (Draft)
 
-# Experimental Stun branch consumes only the already-qualified *unpublished*
-# Salts #1227 post-merge exact QA SDK (based on master 6d6fd38). Never substitute a released SDK or ship QA artifacts.
+# Exact released Salts.Native 2.3.0-rc.17 SDK only, with tag/source and actual
+# six-RID NuGet SHA256 provenance. No QA SDK fallback or parser cutover.
 on:
   push:
     branches:
@@ -25,79 +25,95 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Download exact post-merge Salts Unicode QA SDK
-        uses: actions/download-artifact@v4
-        with:
-          repository: qigao/salts
-          run-id: 38770350872
-          name: salts-sdk-linux-x64
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/salts-unicode17-qa
+      - name: Download and attest immutable published Salts.Native rc.17
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v2.3.0-rc.17"
+          source_sha="6d6fd387cb245be8d7b0d866f9babad026a26832"
+          package_name="Salts.Native.2.3.0-rc.17.nupkg"
+          digest="dfda2bb9fbbbbf8b13f8ba941d3b4eb302814fd90da5869c6b22111f322e68c3"
+          test "$(gh api "repos/qigao/salts/git/ref/tags/$tag" --jq '.object.type')" = commit
+          test "$(gh api "repos/qigao/salts/git/ref/tags/$tag" --jq '.object.sha')" = "$source_sha"
+          test "$(gh api "repos/qigao/salts/releases/tags/$tag" --jq '.draft')" = false
+          test "$(gh api "repos/qigao/salts/releases/tags/$tag" --jq '.prerelease')" = true
+          test "$(gh api "repos/qigao/salts/releases/tags/$tag" --jq '.target_commitish')" = "$source_sha"
+          released_digest="$(gh api "repos/qigao/salts/releases/tags/$tag" \
+            --jq '.assets[] | select(.name == "Salts.Native.2.3.0-rc.17.nupkg") | .digest')"
+          test "$released_digest" = "sha256:$digest"
+          mkdir -p "$RUNNER_TEMP/salts-rc17-public"
+          gh release download "$tag" --repo qigao/salts \
+            --pattern "$package_name" --pattern SHA256SUMS \
+            --dir "$RUNNER_TEMP/salts-rc17-public"
+          package="$RUNNER_TEMP/salts-rc17-public/$package_name"
+          test -s "$package"
+          printf '%s  %s\n' "$digest" "$package" | sha256sum --check -
+          test "$(awk '$2 ~ /Salts.Native[.]2[.]3[.]0-rc[.]17[.]nupkg$/ {print $1}' \
+            "$RUNNER_TEMP/salts-rc17-public/SHA256SUMS")" = "$digest"
+          echo "SALTS_RC17_PACKAGE=$package" >> "$GITHUB_ENV"
+          echo "SALTS_RC17_DIGEST=$digest" >> "$GITHUB_ENV"
+          echo "SALTS_RC17_SHA=$source_sha" >> "$GITHUB_ENV"
 
-      - name: Fail closed on provenance or missing Unicode ABI
+      - name: Audit official six-RID ABI and reject mismatched release identities
         shell: bash
         run: |
           set -euo pipefail
-          sdk="$RUNNER_TEMP/salts-unicode17-qa/linux-x64"
-          test -f "$sdk/lib/cmake/Salts/SaltsConfig.cmake"
-          test -f "$sdk/salts-sdk-manifest.txt"
-          grep -Fx 'commit=43ae2cc4577b6a2e6fa7ab8f5ed9a1c950902b86' \
-            "$sdk/salts-sdk-manifest.txt"
-          header="$sdk/include/unicode/salts_unicode.h"
-          test -f "$header"
-          grep -F 'salts_unicode_is_punctuation_or_symbol(' "$header"
-          grep -F 'salts_unicode_case_fold(' "$header"
-          test -f "$sdk/lib/libsalts_unicode.a"
-          echo "SALTS_QA_ROOT=$sdk" >> "$GITHUB_ENV"
-          printf 'Stun exact=%s\nSalts post-merge QA exact=43ae2cc4577b6a2e6fa7ab8f5ed9a1c950902b86\n' \
-            "$(git rev-parse HEAD)"
-
-      - name: Fetch exact post-merge Salts tag-equivalent QA NuGet
-        uses: actions/download-artifact@v4
-        with:
-          repository: qigao/salts
-          run-id: 38775178582
-          name: salts-native-nuget
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/salts-unicode17-package
-
-      - name: Require six-RID actual archive ABI and reject QA-as-release
-        shell: bash
-        run: |
-          set -euo pipefail
-          package="$RUNNER_TEMP/salts-unicode17-package/Salts.Native.2.3.0.nupkg"
-          test -f "$package"
           command -v nm
           if ! command -v llvm-objdump; then
             sudo apt-get update
             sudo apt-get install -y llvm
           fi
           python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
-            --package "$package" \
+            --package "$SALTS_RC17_PACKAGE" \
+            --version 2.3.0-rc.17 \
+            --source-sha "$SALTS_RC17_SHA" \
+            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
+            --package-sha256 "$SALTS_RC17_DIGEST" \
+            --report build/salts-unicode17-rc17-release-proof.json
+          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+            --package "$SALTS_RC17_PACKAGE" \
             --version 2.3.0 \
+            --source-sha "$SALTS_RC17_SHA" \
+            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
+            --package-sha256 "$SALTS_RC17_DIGEST" \
+            > build/reject-wrong-version.log 2>&1; then
+            echo "ERROR: published rc.17 accepted an incorrect version" >&2
+            exit 1
+          fi
+          grep -Fq "NuGet version mismatch" build/reject-wrong-version.log
+          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+            --package "$SALTS_RC17_PACKAGE" \
+            --version 2.3.0-rc.17 \
             --source-sha 414f43362d95fa9c04a520a6be1c28a5e6a8a1fd \
             --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
-            --report build/salts-unicode17-qa-archive-proof.json
-          # The unsigned/unpublished QA candidate MUST NEVER pass a real
-          # rc.17 release attestation, even when native ABI is correct.
-          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
-            --package "$package" --version 2.3.0-rc.17 \
-            --source-sha 6d6fd387cb245be8d7b0d866f9babad026a26832 \
-            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
-            > build/reject-false-release.log 2>&1; then
-            echo "ERROR: QA package unexpectedly accepted as released rc.17" >&2
+            --package-sha256 "$SALTS_RC17_DIGEST" \
+            > build/reject-qa-source.log 2>&1; then
+            echo "ERROR: published rc.17 accepted the old QA source SHA" >&2
             exit 1
           fi
-          grep -Fq "NuGet version mismatch" build/reject-false-release.log
-          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
-            --package "$package" --version 2.3.0 \
-            --source-sha 6d6fd387cb245be8d7b0d866f9babad026a26832 \
-            --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
-            > build/reject-false-source.log 2>&1; then
-            echo "ERROR: QA package unexpectedly accepted as source from master" >&2
-            exit 1
-          fi
-          grep -Fq "NuGet RepositoryCommit differs" build/reject-false-source.log
+          grep -Fq "NuGet RepositoryCommit differs" build/reject-qa-source.log
+
+      - name: Extract only published installed Linux x64 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$SALTS_RC17_PACKAGE" "$RUNNER_TEMP/salts-rc17-extracted" <<'PY'
+          import sys,zipfile
+          from pathlib import Path
+          archive=Path(sys.argv[1]); root=Path(sys.argv[2])
+          with zipfile.ZipFile(archive) as pkg:
+              paths=[name for name in pkg.namelist() if name.startswith("sdk/linux-x64/")]
+              assert paths, "No Linux x64 SDK in published NuGet"
+              for name in paths:
+                  pkg.extract(name, root)
+          PY
+          sdk="$RUNNER_TEMP/salts-rc17-extracted/sdk/linux-x64"
+          test -f "$sdk/lib/cmake/Salts/SaltsConfig.cmake"
+          grep -Fx "commit=$SALTS_RC17_SHA" "$sdk/salts-sdk-manifest.txt"
+          grep -Fx 'version=2.3.0-rc.17' "$sdk/salts-sdk-manifest.txt"
+          echo "SALTS_RC17_ROOT=$sdk" >> "$GITHUB_ENV"
 
       - name: Build strict installed-SDK C11 under ASan and UBSan
         shell: bash
@@ -105,7 +121,7 @@ jobs:
           set -euo pipefail
           cmake -S ui_core -B build/unicode17-qa -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc \
-            "-DCMAKE_PREFIX_PATH=$SALTS_QA_ROOT" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_RC17_ROOT" \
             -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON -DBUILD_TESTING=ON \
             '-DCMAKE_C_FLAGS=-std=c11 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer'
           cmake --build build/unicode17-qa --parallel 2
@@ -175,7 +191,7 @@ jobs:
         with:
           name: stun-unicode17-qa-commonmark
           path: |
-            build/salts-unicode17-qa-archive-proof.json
+            build/salts-unicode17-rc17-release-proof.json
             build/unicode17-qa/spec-652.json
             build/unicode17-qa/safe-652.json
             build/unicode17-qa/gfm-independent.json
