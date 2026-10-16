@@ -10,6 +10,7 @@
 #include "../widget.h"
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace flexUI {
 
@@ -42,6 +43,8 @@ private:
     std::string markdown_;
     bool needs_rebuild_ = true;
     const std::size_t max_render_elements_;
+    // Borrowed identities only; Box remains the sole Element owner.
+    std::vector<Element*> published_projection_;
 };
 
 } // namespace flexUI

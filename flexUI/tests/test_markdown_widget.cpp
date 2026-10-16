@@ -360,6 +360,7 @@ spec("MarkdownWidget Parsing") {
         if (md->child_count() != 1u) return;
         auto* original = static_cast<Element*>(md->children()[0]);
         check(original->text() == "初期 😀");
+        const std::size_t owner_count = box->owned_element_count();
 
         // The heading/list/task item fit the budget, but the checkbox exceeds
         // it with one child already attached to a detached parent.
@@ -372,6 +373,7 @@ spec("MarkdownWidget Parsing") {
             if (md->child_count() != 1u) return;
             check(md->children()[0] == original);
             check(static_cast<Element*>(md->children()[0])->text() == "初期 😀");
+            check(box->owned_element_count() == owner_count);
         }
 
         widget->set_markdown("# 回復 ✅\n");
@@ -379,10 +381,44 @@ spec("MarkdownWidget Parsing") {
         check(md->child_count() == 1u);
         if (md->child_count() == 1u) {
             auto* recovered = static_cast<Element*>(md->children()[0]);
-            check(recovered != original);
             check(recovered->has_class(Symbol("md-header")));
             check(recovered->text() == "回復 ✅");
+            check(box->owned_element_count() == owner_count);
         }
+    }
+
+    it("retires old Box-owned Markdown projections across Unicode source swaps") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-c11-retire-231", "# 初回 😀\n");
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+        widget->update(0.0f, *md);
+        check(md->child_count() == 1u);
+        if (md->child_count() != 1u) return;
+        const std::size_t owner_count = box->owned_element_count();
+        auto* retired = static_cast<Element*>(md->children()[0]);
+        box->set_focus(retired);
+        box->set_mouse_capture(retired);
+
+        for (std::size_t round = 0; round < 64u; ++round) {
+            widget->set_markdown(round % 2u ? "# 完成 ✅\n" : "# 更新 🏯\n");
+            widget->update(0.0f, *md);
+            check(md->child_count() == 1u);
+            if (md->child_count() != 1u) return;
+            auto* heading = static_cast<Element*>(md->children()[0]);
+            check(heading->has_class(Symbol("md-header")));
+            check(heading->text() == (round % 2u ? "完成 ✅" : "更新 🏯"));
+            check(box->owned_element_count() == owner_count);
+            check(box->focused_element() == nullptr);
+            check(box->capturing_element() == nullptr);
+        }
+
+        widget->set_markdown("");
+        widget->update(0.0f, *md);
+        check(md->child_count() == 0u);
+        check(box->owned_element_count() + 1u == owner_count);
     }
 
     // #186 / #231: repeated source updates must preserve the sole C11

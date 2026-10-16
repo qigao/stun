@@ -130,6 +130,8 @@ public:
   // detached roots using Element::replace_children(). On admission failure,
   // the caller retains and destroys the staged nodes.
   void adopt_detached_elements(std::vector<std::unique_ptr<Element>> &&elements);
+  // Diagnostics only; includes the Box-owned widget projections.
+  std::size_t owned_element_count() const noexcept { return elements_.size(); }
   Element *create_with_widget(const std::string &tag, std::unique_ptr<Widget> widget,
                               const std::string &id = "");
   // Takes ownership of widget. Prefer the unique_ptr overload in new code.
@@ -228,6 +230,7 @@ private:
   friend class BoxPreparedMutation;
   friend class Element;
   friend class Widget;
+  friend class MarkdownWidget;
 
   void reindex_element_id(Element *elem, const std::string &old_id, const std::string &new_id);
   void notify_utility_tree_changed();
@@ -236,6 +239,10 @@ private:
   void apply_theme_to_root();
   bool owns_element(const Element *element) const;
   void deactivate_subtree(Element *root);
+  // Retire precisely the id-less Box-owned projection nodes that have
+  // already been detached by a successful MarkdownWidget tree replacement.
+  // Failed validation leaves all elements allocated.
+  bool retire_detached_elements(const std::vector<Element*> &elements) noexcept;
   Element *create_widget_part(Element &host, const std::string &tag, const std::string &part_name);
   void compute_styles(Element *elem, bool parent_recomputed = false);
   bool has_view_root() const override;

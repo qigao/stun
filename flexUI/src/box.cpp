@@ -1647,6 +1647,58 @@ void Box::adopt_detached_elements(std::vector<std::unique_ptr<Element>>&& staged
   }
 }
 
+bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noexcept {
+  if (candidates.empty()) return true;
+  try {
+    // Check Box ownership before dereferencing any candidate: repeated or
+    // foreign/stale pointers must never trigger a partial reclamation.
+    std::unordered_set<Element*> batch;
+    batch.reserve(candidates.size());
+    for (Element* element : candidates) {
+      if (!element || !batch.insert(element).second) return false;
+    }
+    std::size_t found = 0;
+    for (const auto& owned : elements_) {
+      if (batch.count(owned.get())) ++found;
+    }
+    if (found != batch.size()) return false;
+
+    std::vector<Element*> roots;
+    roots.reserve(batch.size());
+    for (Element* element : candidates) {
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || !element->id().empty()) return false;
+      Element* parent = element->parent_elem();
+      if (!parent) roots.push_back(element);
+      else if (!batch.count(parent)) return false;
+      for (auto* child : element->children()) {
+        auto* contained = dynamic_cast<Element*>(child);
+        if (!contained || !batch.count(contained)) return false;
+      }
+    }
+    if (roots.empty()) return false;
+
+    // All validation is complete. Detach event/focus/capture and runtime
+    // effects while the old forest is still alive but no longer visible.
+    for (Element* root : roots) deactivate_subtree(root);
+    for (Element* element : candidates) {
+      styled_elements_.erase(reinterpret_cast<std::uintptr_t>(element));
+      container_widths_.erase(element);
+    }
+    elements_.erase(
+        std::remove_if(elements_.begin(), elements_.end(),
+                       [&batch](const std::unique_ptr<Element>& element) {
+                         return batch.count(element.get()) != 0;
+                       }),
+        elements_.end());
+    notify_utility_tree_changed();
+    return true;
+  } catch (...) {
+    // On allocation / event-detachment failure, retain ownership in Box.
+    return false;
+  }
+}
+
 Element* Box::create(const std::string& tag, const std::string& id) {
   auto elem = std::make_unique<Element>();
   elem->set_tag(tag);

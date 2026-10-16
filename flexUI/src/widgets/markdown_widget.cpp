@@ -314,23 +314,43 @@ void MarkdownWidget::rebuild_elements(Element& elem) {
     if (!preflight(view)) return;
 
     Projection staged;
+    std::vector<Element*> next_projection;
     try {
         project(view, staged, max_render_elements_);
-        // Box reserves and validates the complete detached forest before
-        // taking ownership. No live child is removed in this phase.
+        next_projection.reserve(staged.elements.size());
+        for (const auto& element : staged.elements)
+            next_projection.push_back(element.get());
+
+        // Box reserves and validates the whole detached forest before taking
+        // sole ownership; a failed stage leaves the old view untouched.
         elem.owner_box_->adopt_detached_elements(std::move(staged.elements));
     } catch (const std::exception&) {
-        // Keep existing children, source, and retry state. No fallback parser.
+        return; // no legacy parser and no partial publication
+    }
+
+    try {
+        // Group now prepares all child storage before committing one topology
+        // replacement, so even bad_alloc preserves the prior visible tree.
+        elem.replace_children(staged.roots);
+    } catch (const std::exception&) {
+        // Adoption succeeded but publication did not: explicitly reclaim the
+        // detached batch to avoid persistent orphan nodes in the Box.
+        (void)elem.owner_box_->retire_detached_elements(next_projection);
         return;
     }
 
-    // Exactly one live tree publication, after successful projection.
-    elem.replace_children(staged.roots);
     elem.set_text("");
     if (elem.computed_style)
         elem.computed_style->flex_direction = FlexDirection::Column;
     needs_rebuild_ = false;
     elem.mark_style_dirty();
+
+    // Once the new view is published, retire precisely the old projection.
+    // All released Nodes are id-less, application-owned descendants; Box
+    // first clears focus/capture, animation, style, and container caches.
+    std::vector<Element*> previous = std::move(published_projection_);
+    published_projection_ = std::move(next_projection);
+    (void)elem.owner_box_->retire_detached_elements(previous);
 }
 
 void MarkdownWidget::emit_render_commands(const Element&, RenderCommandList&) {}
