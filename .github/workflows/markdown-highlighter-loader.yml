@@ -1,0 +1,49 @@
+name: Markdown highlighter loader portability
+
+on:
+  push:
+    branches:
+      - draft/markdownwidget-single-c11-parser-229
+    paths:
+      - "flexUI/src/highlighters/**"
+      - "flexUI/src/syntax_highlighter.cpp"
+      - "flexUI/include/flexUI/syntax_highlighter.h"
+      - "flexUI/tests/highlighter_loader_contract/**"
+      - ".github/workflows/markdown-highlighter-loader.yml"
+  pull_request:
+    paths:
+      - "flexUI/src/highlighters/**"
+      - "flexUI/src/syntax_highlighter.cpp"
+      - "flexUI/include/flexUI/syntax_highlighter.h"
+      - "flexUI/tests/highlighter_loader_contract/**"
+      - ".github/workflows/markdown-highlighter-loader.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  highlighter-loader:
+    name: DSO loader / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure standalone C11 plugin loader conformance
+        shell: bash
+        run: |
+          cmake -S flexUI/tests/highlighter_loader_contract \
+            -B build/highlighter-loader-contract \
+            -DCMAKE_BUILD_TYPE=Debug
+      - name: Build C11 provider and C++17 loader
+        shell: bash
+        run: |
+          cmake --build build/highlighter-loader-contract --config Debug --parallel 2
+      - name: Execute extension, reload and concurrent lease tests
+        shell: bash
+        run: |
+          ctest --test-dir build/highlighter-loader-contract -C Debug \
+            --no-tests=error --output-on-failure --timeout 120 --verbose
