@@ -1,5 +1,16 @@
 # C11 RichDoc → HTML (bounded candidate)
 
+> **Current mainline qualification (2026-10-17):** all 652 official
+> CommonMark 0.31.2 HTML examples match byte-for-byte under the explicit,
+> trusted **SPEC** test profile. Default untrusted-input **SAFE** output
+> independently freezes 576 official matches; the other 76 are policy-driven
+> differences involving raw HTML and URI admission. The immutable official
+> source digest is `c784c98aa6f8a1db1292dfd883f3b6743f2ad66578f89fae1fc9223f208f7bfd`.
+> Newly admitted #206, #354 and #540 use Salts Unicode 17 installed-SDK
+> native tests for both render profiles. This does **not** prove complete GFM
+> extension conformance or authorize untrusted use of SPEC.
+
+
 Relates to [#172](https://github.com/qigao/stun/issues/172) and [#167](https://github.com/qigao/stun/issues/167).
 For whitespace ownership, HTML5 vs XML distinctions, and the safe-vs-normative
 output-policy decision, see [ADR_MARKDOWN_HTML_OUTPUT.md](ADR_MARKDOWN_HTML_OUTPUT.md)

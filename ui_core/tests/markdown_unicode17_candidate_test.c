@@ -1,6 +1,7 @@
-/* Isolated joint Salts #1209 candidate consumer: CommonMark 0.31.2
- * official #206/#354/#540. This executable is NOT a parser cutover gate.
- * It is valid only with the public Salts C11 P/S and full-fold ABI. */
+/* Canonical installed-SDK Unicode 17 regression: official CommonMark 0.31.2
+ * #206/#354/#540, plus reverse-casefold negative controls. Both default SAFE
+ * and explicit test-only SPEC HTML policies must match exact official bytes.
+ * No local Unicode table, old parser fallback or Tango migration. */
 #include <stun/markdown_c11.h>
 #include <stun/markdown_html.h>
 #include <salts_unicode.h>

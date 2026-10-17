@@ -1,5 +1,12 @@
 # ADR: Typed Raw HTML and Explicit Render Policies
 
+> **Current mainline status (2026-10-17):** SAFE remains the production
+> default and escapes untrusted HTML. SPEC remains opt-in and test-only,
+> with no unsafe fallback. Qualified official CommonMark regression baselines:
+> **SAFE 576 IDs** and **SPEC 652 IDs**. Earlier candidate/Draft descriptions
+> below are retained as historical design notes predating #231–#233.
+
+
 Status: incremental C11 contract for Stun #184; PR #223 remains Draft / DO NOT MERGE.
 
 ## Decision
