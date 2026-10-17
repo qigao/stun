@@ -8,6 +8,25 @@ permissions:
   contents: read
 
 jobs:
+  # Fast architecture gate on every PR. The existing native released-SDK
+  # conformance and real Mesa/ASan/UBSan Widget runs remain mandatory;
+  # static checks alone cannot establish parser or runtime correctness.
+  markdownwidget-single-c11-parser:
+    name: MarkdownWidget sole C11 parser contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Stun source candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Reject legacy parser link or include reintroduction
+        run: |
+          set -euo pipefail
+          python3 ui_core/tests/verify_single_markdown_parser.py
+          git diff --exit-code
+
   sdk-releases:
     uses: ./.github/workflows/salts-sdk-releases.yml
 

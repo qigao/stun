@@ -1925,6 +1925,74 @@ done:
 #undef FENCE_VERIFY
 }
 
+/* #186 post-merge: a borrowed RichDoc is untrusted by its HTML consumer.
+ * Forging column metadata or ancestor ownership must not emit even partial
+ * HTML, and must not mutate the original C11 parser-owned document. */
+static int test_gfm_forged_table_view_refusal(void) {
+    static const char sample[] =
+        "Before\n\n| A | B |\n| :--- | ---: |\n| x | y |\n";
+    stun_md_document *doc=NULL;
+    CHECK(stun_md_parse(sample,sizeof(sample)-1u,128u,
+                        sizeof(sample),&doc)==STUN_UI_OK);
+    CHECK(doc!=NULL);
+    const stun_ui_rich_document_view original=stun_md_document_view(doc);
+    CHECK(stun_ui_rich_document_validate(&original,128u)==STUN_UI_OK);
+    CHECK(kinds(original,STUN_UI_BLOCK_TABLE)==1u);
+    CHECK(original.document.block_count<=128u);
+    CHECK(original.metadata_bytes<=512u);
+    CHECK(original.document.blocks[1u].kind==STUN_UI_BLOCK_PARAGRAPH);
+
+    size_t table=SIZE_MAX;
+    for(size_t i=1u;i<original.document.block_count;++i) {
+        if(original.document.blocks[i].kind==STUN_UI_BLOCK_TABLE)
+            table=i;
+    }
+    CHECK(table!=SIZE_MAX && table>1u);
+    const stun_ui_block_metadata range=original.block_metadata[table];
+    CHECK(range.byte_end-range.byte_begin==2u);
+
+    /* Local copies are an external consumer's forged borrowed view: the
+     * parser owner itself is never overwritten during negative tests. */
+    stun_ui_block blocks[128];
+    stun_ui_block_metadata ranges[128];
+    char metadata[512];
+    char buffer[1024];
+    for(unsigned mode=0u;mode<3u;++mode) {
+        memcpy(blocks,original.document.blocks,
+               original.document.block_count*sizeof(blocks[0]));
+        memcpy(ranges,original.block_metadata,
+               original.document.block_count*sizeof(ranges[0]));
+        if(original.metadata_bytes)
+            memcpy(metadata,original.metadata,original.metadata_bytes);
+        stun_ui_rich_document_view forged=original;
+        forged.document.blocks=blocks;
+        forged.block_metadata=ranges;
+        forged.metadata=metadata;
+
+        if(mode==0u)
+            metadata[range.byte_begin]=(char)0xff; /* invalid alignment */
+        else if(mode==1u)
+            ranges[table].byte_end=ranges[table].byte_begin;
+        else
+            blocks[table].parent_index=1u; /* TABLE under PARAGRAPH */
+        CHECK(stun_ui_rich_document_validate(&forged,128u)==STUN_UI_OK);
+        memset(buffer,0x57,sizeof(buffer));
+        size_t required=SIZE_MAX;
+        CHECK(stun_md_render_html(&forged,128u,buffer,sizeof(buffer),
+                                  &required)==STUN_UI_INVALID_ARGUMENT);
+        CHECK(required==SIZE_MAX);
+        for(size_t i=0u;i<sizeof(buffer);++i)
+            CHECK((unsigned char)buffer[i]==0x57u);
+    }
+    size_t required=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,128u,NULL,0u,&required)==STUN_UI_OK);
+    CHECK(required>0u && required<sizeof(buffer));
+    CHECK(original.raw_markdown_bytes==sizeof(sample)-1u);
+    CHECK(!memcmp(original.raw_markdown,sample,sizeof(sample)-1u));
+    stun_md_document_destroy(doc);
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -1943,6 +2011,7 @@ int main(void) {
     if(test_gfm_tables()) return 1;
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
+    if(test_gfm_forged_table_view_refusal()) return 1;
     if(test_gfm_wide_table_budget()) return 1;
     if(test_gfm_delimiter_column_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
