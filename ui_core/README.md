@@ -1,5 +1,12 @@
 # Stun UI C11 semantic core — M1 vertical slice
 
+> **Current production state (post-PR #231, 2026-10-16):** FlexUI
+> MarkdownWidget uses the canonical `stun_md_parse()` C11 RichDoc grammar,
+> with no `md::parse()` or MD4C fallback. The M1/M2 migration checkpoints
+> below are historical design notes, **not** current parser authority.
+> Tango is not switched; native CommonMark/GFM compatibility is still
+> qualified through explicit tests and SAFE HTML policy boundaries.
+
 Tracks [#167](https://github.com/qigao/stun/issues/167); relates to [#90](https://github.com/qigao/stun/issues/90), [#165](https://github.com/qigao/stun/issues/165), [#74](https://github.com/qigao/stun/issues/74), [#15](https://github.com/qigao/stun/issues/15).
 
 This target is **not** a new production layout or Markdown parser. It is the first C11 semantic projection contract that lets the existing FlexUI layout/Markdown implementations and the Tango renderer share native data without extra reflection registries.

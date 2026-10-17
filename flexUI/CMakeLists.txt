@@ -248,7 +248,6 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
-         ${CMAKE_SOURCE_DIR}/vendor/md/include
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 

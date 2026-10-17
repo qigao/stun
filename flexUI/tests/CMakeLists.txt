@@ -138,8 +138,7 @@ endif()
 add_executable(test_markdown_widget test_markdown_widget.cpp)
 target_link_libraries(test_markdown_widget PRIVATE flexUI)
 flexui_configure_tinytest(test_markdown_widget)
-target_include_directories(
-  test_markdown_widget PRIVATE ../include ${CMAKE_SOURCE_DIR}/vendor/md4c/src)
+target_include_directories(test_markdown_widget PRIVATE ../include)
 set_target_properties(test_markdown_widget PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_markdown_widget COMMAND test_markdown_widget)
 

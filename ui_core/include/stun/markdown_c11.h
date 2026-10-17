@@ -7,21 +7,19 @@
 extern "C" {
 #endif
 
-/* New, native C11 Markdown parser candidate.
+/* Canonical native C11 Markdown grammar and RichDoc ownership.
  *
- * This parses Markdown input directly; it is NOT an adapter over md::parse().
- * The existing C++ parser remains the production authority until semantic
- * parity has been qualified and callers are switched atomically. Do not run
- * two parsers to produce one UI document.
+ * Since Stun PR #231, MarkdownWidget calls stun_md_parse() directly. There
+ * is no alternate C++/MD4C parser or error fallback in that production path.
+ * Other consumers (including Tango) retain separate migration boundaries.
  *
- * A successful parse owns the raw Markdown, the decoded/semantic text buffer,
- * metadata, and all nodes. The returned view borrows the document; it becomes
- * invalid on destroy. On failure *out remains NULL and partial state is freed.
+ * A successful parse owns the raw Markdown, decoded semantic text, metadata
+ * and nodes. The returned view borrows that document and expires on destroy.
+ * Failed parses leave *out NULL and release partial state; callers MUST NOT
+ * publish a partial or legacy-parser substitute.
  *
- * This initial implementation covers the explicitly tested CommonMark subset:
- * ATX/Setext headings, paragraphs, fenced code, quotes, lists, thematic rules,
- * emphasis/strong, inline code, links/images, escaped punctuation and line
- * breaks. It does not claim full CommonMark/GFM compliance yet.
+ * CommonMark/GFM feature and compatibility claims must be established by
+ * independent fixtures; this API does not promise universal conformance.
  */
 typedef struct stun_md_document stun_md_document;
 
