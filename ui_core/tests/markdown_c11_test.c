@@ -1993,6 +1993,247 @@ static int test_gfm_forged_table_view_refusal(void) {
     return 0;
 }
 
+
+/* #186: only the exact visible '>' depth and the LIST_ITEM content column
+ * may start/extend a GFM TABLE. A lazy or partially quoted physical line
+ * may be paragraph text but must never be silently promoted to a table row.
+ * The same contract is executed on Linux, Windows and macOS installed SDKs. */
+static int test_gfm_quote_table_explicit_lazy_boundaries(void) {
+    typedef struct {
+        const char *name, *source;
+        size_t quotes, lists, tables, rows;
+        stun_ui_block_kind table_parent;
+    } fixture;
+    static const fixture cases[]={
+        {"quote-row-lf",
+         "> | H | V |\n> | :--- | ---: |\n> | x | y |\n",
+         1u,0u,1u,2u,STUN_UI_BLOCK_QUOTE},
+        {"quote-row-crlf",
+         "> | H | V |\r\n> | :--- | ---: |\r\n> | x | y |\r\n",
+         1u,0u,1u,2u,STUN_UI_BLOCK_QUOTE},
+        {"quote-unmarked-delimiter",
+         "> | H | V |\n| :--- | ---: |\n",
+         1u,0u,0u,0u,STUN_UI_BLOCK_DOCUMENT},
+        {"quote-unmarked-data-row",
+         "> | H | V |\n> | :--- | ---: |\nx | y |\n",
+         1u,0u,1u,1u,STUN_UI_BLOCK_QUOTE},
+        {"nested-quote-explicit-row",
+         "> > | H | V |\n> > | :--- | ---: |\n> > | x | y |\n",
+         2u,0u,1u,2u,STUN_UI_BLOCK_QUOTE},
+        {"nested-quote-reduced-delimiter",
+         "> > | H | V |\n> | :--- | ---: |\n",
+         2u,0u,0u,0u,STUN_UI_BLOCK_DOCUMENT},
+        {"nested-quote-reduced-data-row",
+         "> > | H | V |\n> > | :--- | ---: |\n> | x | y |\n",
+         2u,0u,1u,1u,STUN_UI_BLOCK_QUOTE},
+        {"quoted-list-explicit-row",
+         "> - | H | V |\n>   | :--- | ---: |\n>   | x | y |\n",
+         1u,1u,1u,2u,STUN_UI_BLOCK_LIST_ITEM},
+        {"quoted-list-unmarked-row",
+         "> - | H | V |\n>   | :--- | ---: |\nx | y |\n",
+         1u,1u,1u,1u,STUN_UI_BLOCK_LIST_ITEM},
+        {"nested-quoted-list-reduced-row",
+         "> > - | H | V |\n> >   | :--- | ---: |\n>   | x | y |\n",
+         2u,1u,1u,1u,STUN_UI_BLOCK_LIST_ITEM},
+        {"quoted-list-wrong-content-column",
+         "> - | H | V |\n>   | :--- | ---: |\n> | x | y |\n",
+         1u,1u,1u,1u,STUN_UI_BLOCK_LIST_ITEM},
+        {"quote-overindented-delimiter",
+         "> | H | V |\n>     | :--- | ---: |\n",
+         1u,0u,0u,0u,STUN_UI_BLOCK_DOCUMENT}
+    };
+    _Static_assert(sizeof(cases)/sizeof(cases[0])==12u,
+                   "#186 exact-marker/lazy fixture denominator");
+    for(size_t f=0u;f<sizeof(cases)/sizeof(cases[0]);++f) {
+        const fixture *const c=&cases[f];
+        const size_t bytes=strlen(c->source);
+        char *input=(char*)malloc(bytes+1u);
+        CHECK(input!=NULL);
+        memcpy(input,c->source,bytes+1u);
+        stun_md_document *owned=NULL;
+        const stun_ui_status rc=stun_md_parse(
+            input,bytes,256u,bytes+1u,&owned);
+        memset(input,0x31,bytes);
+        free(input);
+        if(rc!=STUN_UI_OK || !owned) {
+            fprintf(stderr,"#186 quote boundary %s parse rc=%d\n",
+                    c->name,(int)rc);
+            return 1;
+        }
+        const stun_ui_rich_document_view v=stun_md_document_view(owned);
+        CHECK(stun_ui_rich_document_validate(&v,256u)==STUN_UI_OK);
+        CHECK(v.raw_markdown_bytes==bytes &&
+              memcmp(v.raw_markdown,c->source,bytes)==0);
+        CHECK(kinds(v,STUN_UI_BLOCK_QUOTE)==c->quotes);
+        CHECK(kinds(v,STUN_UI_BLOCK_LIST)==c->lists);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE)==c->tables);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_ROW)==c->rows);
+        CHECK(kinds(v,STUN_UI_BLOCK_TABLE_CELL)==2u*c->rows);
+        size_t table_count=0u;
+        for(size_t i=1u;i<v.document.block_count;++i) {
+            if(v.document.blocks[i].kind!=STUN_UI_BLOCK_TABLE)continue;
+            ++table_count;
+            const uint32_t parent=v.document.blocks[i].parent_index;
+            CHECK(parent<i);
+            CHECK(v.document.blocks[parent].kind==c->table_parent);
+            size_t ancestor_quotes=0u,at=i;
+            while(at>0u) {
+                const uint32_t p=v.document.blocks[at].parent_index;
+                CHECK(p<at);
+                if(v.document.blocks[p].kind==STUN_UI_BLOCK_QUOTE)
+                    ++ancestor_quotes;
+                at=p;
+            }
+            CHECK(ancestor_quotes==c->quotes);
+            const char *meta=NULL;size_t length=SIZE_MAX;
+            CHECK(stun_ui_rich_document_metadata(
+                &v,i,&meta,&length)==STUN_UI_OK);
+            CHECK(meta && length==2u);
+            CHECK((uint8_t)meta[0]==STUN_UI_TABLE_ALIGN_LEFT);
+            CHECK((uint8_t)meta[1]==STUN_UI_TABLE_ALIGN_RIGHT);
+        }
+        CHECK(table_count==c->tables);
+        size_t needed=SIZE_MAX,reported=SIZE_MAX;
+        CHECK(stun_md_render_html(&v,256u,NULL,0u,&needed)==STUN_UI_OK);
+        CHECK(needed<4096u);
+        unsigned char output[4096];
+        memset(output,0x79,sizeof(output));
+        CHECK(stun_md_render_html(&v,256u,(char*)output,needed,
+                                  &reported)==STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(reported==needed);
+        for(size_t k=0u;k<sizeof(output);++k)
+            CHECK(output[k]==0x79u);
+        CHECK(stun_md_render_html(&v,256u,(char*)output,
+                                  sizeof(output),&reported)==STUN_UI_OK);
+        CHECK(reported==needed);
+        CHECK(output[needed]==0u);
+        stun_md_document_destroy(owned);
+
+        /* Source/node failures are atomic for every explicit/lazy variant. */
+        owned=(stun_md_document*)(uintptr_t)1u;
+        CHECK(stun_md_parse(c->source,bytes,1u,bytes+1u,&owned)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(owned==NULL);
+        owned=(stun_md_document*)(uintptr_t)1u;
+        CHECK(stun_md_parse(c->source,bytes,256u,bytes-1u,&owned)==
+              STUN_UI_CAPACITY_EXCEEDED);
+        CHECK(owned==NULL);
+    }
+    puts("#186 exact quote/table marker boundaries: 12/12");
+    return 0;
+}
+
+/* #186: a syntactically well-formed producer is not a guarantee that a
+ * borrowed consumer view remains unmodified. Forge row/cell ancestor shapes
+ * (not only TABLE metadata as in #232) and reject in BOTH SAFE and SPEC
+ * profiles before writing any output. Keep the original owner immutable. */
+static int test_gfm_forged_nested_row_cell_rejection(void) {
+    static const char source[]=
+        "> - | H | V |\n>   | :--- | ---: |\n>   | x | y |\n";
+    stun_md_document *owned=NULL;
+    CHECK(stun_md_parse(source,sizeof(source)-1u,256u,
+                        sizeof(source),&owned)==STUN_UI_OK);
+    CHECK(owned!=NULL);
+    const stun_ui_rich_document_view original=stun_md_document_view(owned);
+    CHECK(stun_ui_rich_document_validate(&original,256u)==STUN_UI_OK);
+    CHECK(kinds(original,STUN_UI_BLOCK_TABLE)==1u);
+    CHECK(kinds(original,STUN_UI_BLOCK_TABLE_ROW)==2u);
+    CHECK(kinds(original,STUN_UI_BLOCK_TABLE_CELL)==4u);
+    CHECK(original.document.block_count<=256u);
+    CHECK(original.metadata_bytes<=256u);
+    size_t table=SIZE_MAX,header_row=SIZE_MAX,data_row=SIZE_MAX;
+    size_t header_cell=SIZE_MAX,data_cell=SIZE_MAX;
+    for(size_t i=1u;i<original.document.block_count;++i) {
+        const stun_ui_block *b=&original.document.blocks[i];
+        if(b->kind==STUN_UI_BLOCK_TABLE)table=i;
+        if(b->kind==STUN_UI_BLOCK_TABLE_ROW) {
+            if(header_row==SIZE_MAX)header_row=i;
+            else if(data_row==SIZE_MAX)data_row=i;
+        }
+        if(b->kind==STUN_UI_BLOCK_TABLE_CELL) {
+            if(header_cell==SIZE_MAX)header_cell=i;
+            else if(header_row!=SIZE_MAX && data_row!=SIZE_MAX &&
+                    b->parent_index==data_row && data_cell==SIZE_MAX)
+                data_cell=i;
+        }
+    }
+    CHECK(table!=SIZE_MAX && header_row!=SIZE_MAX &&
+          data_row!=SIZE_MAX && header_cell!=SIZE_MAX &&
+          data_cell!=SIZE_MAX);
+    const uint32_t item=original.document.blocks[table].parent_index;
+    CHECK(item<table &&
+          original.document.blocks[item].kind==STUN_UI_BLOCK_LIST_ITEM);
+    const stun_ui_block_metadata align=original.block_metadata[table];
+    CHECK(align.byte_end-align.byte_begin==2u);
+    size_t pristine=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,256u,NULL,0u,&pristine)==
+          STUN_UI_OK);
+    CHECK(pristine>0u && pristine<4096u);
+
+    for(unsigned mutation=0u;mutation<7u;++mutation) {
+        stun_ui_block blocks[256];
+        stun_ui_block_metadata ranges[256];
+        char metadata[256];
+        memcpy(blocks,original.document.blocks,
+               original.document.block_count*sizeof(blocks[0]));
+        memcpy(ranges,original.block_metadata,
+               original.document.block_count*sizeof(ranges[0]));
+        if(original.metadata_bytes)
+            memcpy(metadata,original.metadata,original.metadata_bytes);
+        stun_ui_rich_document_view forged=original;
+        forged.document.blocks=blocks;
+        forged.block_metadata=ranges;
+        forged.metadata=metadata;
+        switch(mutation) {
+        case 0u:
+            blocks[header_row].kind=STUN_UI_BLOCK_PARAGRAPH;
+            break;
+        case 1u:
+            blocks[header_cell].kind=STUN_UI_BLOCK_TEXT;
+            break;
+        case 2u:
+            blocks[data_row].parent_index=item;
+            break;
+        case 3u:
+            blocks[data_cell].parent_index=(uint32_t)header_row;
+            break;
+        case 4u:
+            blocks[header_cell].parent_index=(uint32_t)table;
+            break;
+        case 5u:
+            ranges[table].byte_end=ranges[table].byte_begin+1u;
+            break;
+        default:
+            blocks[data_cell].kind=STUN_UI_BLOCK_PARAGRAPH;
+            break;
+        }
+        CHECK(stun_ui_rich_document_validate(&forged,256u)==STUN_UI_OK);
+        for(unsigned profile=0u;profile<2u;++profile) {
+            const stun_md_html_policy policy=profile?
+                STUN_MD_HTML_SPEC_CONFORMANCE:
+                STUN_MD_HTML_SAFE_APPLICATION;
+            unsigned char output[4096];
+            memset(output,0x5a,sizeof(output));
+            size_t required=SIZE_MAX;
+            CHECK(stun_md_render_html_with_policy(
+                &forged,256u,policy,(char*)output,
+                sizeof(output),&required)==STUN_UI_INVALID_ARGUMENT);
+            CHECK(required==SIZE_MAX);
+            for(size_t k=0u;k<sizeof(output);++k)
+                CHECK(output[k]==0x5au);
+        }
+    }
+    /* Rejected caller-owned views cannot poison the parser-owned original. */
+    size_t required=SIZE_MAX;
+    CHECK(stun_md_render_html(&original,256u,NULL,0u,&required)==STUN_UI_OK);
+    CHECK(required==pristine);
+    CHECK(original.raw_markdown_bytes==sizeof(source)-1u);
+    CHECK(!memcmp(original.raw_markdown,source,sizeof(source)-1u));
+    stun_md_document_destroy(owned);
+    puts("#186 forged nested TABLE_ROW/CELL: 7/7 SAFE + SPEC rejection");
+    return 0;
+}
+
 int main(void) {
     if(test_block_and_inline_baseline()) return 1;
     if(test_setext_unicode_and_crlf()) return 1;
@@ -2012,6 +2253,8 @@ int main(void) {
     if(test_gfm_table_termination_and_uneven_rows()) return 1;
     if(test_gfm_table_alignment_ownership()) return 1;
     if(test_gfm_forged_table_view_refusal()) return 1;
+    if(test_gfm_quote_table_explicit_lazy_boundaries()) return 1;
+    if(test_gfm_forged_nested_row_cell_rejection()) return 1;
     if(test_gfm_wide_table_budget()) return 1;
     if(test_gfm_delimiter_column_ownership()) return 1;
     if(test_gfm_even_backslash_cell_ownership()) return 1;
