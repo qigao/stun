@@ -3,7 +3,7 @@ name: gCanvas Android EGL compile
 on:
   pull_request:
     paths:
-      - "vendor/gCanvas/**"
+      - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-android-egl.yml"
   workflow_dispatch:
 
@@ -45,14 +45,14 @@ jobs:
 
           "$cxx" -std=c++17 -Wall -Wextra -Werror -fPIC -shared \
             -Wl,--no-undefined \
-            -Ivendor/gCanvas/include \
-            vendor/gCanvas/src/platform/android/egl_host.cpp \
+            -Ishared/gcanvas/include \
+            shared/gcanvas/src/platform/android/egl_host.cpp \
             -lEGL -landroid \
             -o build/android-egl/libgcanvas_android_egl.so
 
           "$cxx" -std=c++17 -Wall -Wextra -Werror \
-            -Ivendor/gCanvas/include \
-            -fsyntax-only vendor/gCanvas/tests/android_egl_contract_test.cpp
+            -Ishared/gcanvas/include \
+            -fsyntax-only shared/gcanvas/tests/android_egl_contract_test.cpp
 
           "$readelf" -d build/android-egl/libgcanvas_android_egl.so \
             > build/android-egl/dynamic.txt
@@ -64,5 +64,5 @@ jobs:
         run: |
           set -euo pipefail
           ! grep -R -nE 'glad|glfw|jni\.h|Activity|SurfaceView' \
-            vendor/gCanvas/include/gcanvas/platform/android_egl.hpp \
-            vendor/gCanvas/src/platform/android/egl_host.cpp
+            shared/gcanvas/include/gcanvas/platform/android_egl.hpp \
+            shared/gcanvas/src/platform/android/egl_host.cpp

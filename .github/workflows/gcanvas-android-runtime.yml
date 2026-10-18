@@ -3,7 +3,7 @@ name: gCanvas Android runtime
 on:
   pull_request:
     paths:
-      - "vendor/gCanvas/**"
+      - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-android-runtime.yml"
   workflow_dispatch:
 
@@ -49,8 +49,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gradle -p vendor/gCanvas/tests/android --no-daemon :app:assembleDebug
-          test -f vendor/gCanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
+          gradle -p shared/gcanvas/tests/android --no-daemon :app:assembleDebug
+          test -f shared/gcanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Enable KVM
         shell: bash
@@ -72,4 +72,4 @@ jobs:
             -no-snapshot-save -no-window -gpu swiftshader_indirect
             -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: bash vendor/gCanvas/tests/android/run-emulator-lifecycle.sh
+          script: bash shared/gcanvas/tests/android/run-emulator-lifecycle.sh

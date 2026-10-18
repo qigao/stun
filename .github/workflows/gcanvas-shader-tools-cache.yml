@@ -3,7 +3,7 @@ name: gCanvas shader toolchain cache contract
 on:
   pull_request:
     paths:
-      - "vendor/gCanvas/**"
+      - "shared/gcanvas/**"
       - "tools/gcanvas-shaderc/**"
       - ".github/workflows/gcanvas-shader-tools-cache.yml"
   workflow_dispatch:
