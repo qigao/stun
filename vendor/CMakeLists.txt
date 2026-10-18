@@ -27,7 +27,6 @@ if(STUN_BUILD_APPLICATIONS OR FLEX_BUILD_RENDER_ENGINE_NANOVG OR
    (APPLE AND NANOGUI_BACKEND STREQUAL "Metal"))
   add_subdirectory(nanovg)
 endif()
-add_subdirectory(gCanvas)
 if(STUN_BUILD_APPLICATIONS)
   add_subdirectory(pdfgen)
   add_subdirectory(dxf)

@@ -47,11 +47,13 @@ add_subdirectory(tools)
 include(FindTools)
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
+add_subdirectory(shared)
 add_subdirectory(flex)
 add_subdirectory(flexUI)
 add_subdirectory(TextEdit)
 add_subdirectory(tango)
-add_subdirectory(ui_core)
+# MarkdownWidget uses the canonical C11 parser from shared/markdown.
+add_subdirectory(shared/markdown)
 # Native C11 RichDoc is the sole MarkdownWidget parser. The C11 library is
 # declared after FlexUI so the existing Tango test build order stays intact.
 target_link_libraries(flexUI PRIVATE Stun::UICore)
