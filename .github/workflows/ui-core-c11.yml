@@ -224,7 +224,7 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/windows-x64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S ui_core -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
+          cmake -S shared/markdown -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
             -DBUILD_TESTING=ON \
             "-DCMAKE_PREFIX_PATH=$(cygpath -w "$sdk")" \
             "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
@@ -343,7 +343,7 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S ui_core -B build/ui-core-macos -G "Unix Makefiles" \
+          cmake -S shared/markdown -B build/ui-core-macos -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \
