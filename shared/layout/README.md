@@ -75,7 +75,7 @@ To qualify an individual algorithm on Windows without UI/parser dependencies,
 enter an x64 Visual Studio developer shell and use the standalone presets:
 
 ```sh
-cd charts/graphlayout
+cd shared/layout
 cmake --preset win-release-user
 cmake --build --preset win-release-user --target stun_graph_vpsc
 cmake --build --preset win-release-user --target stun_graph_force
@@ -117,7 +117,7 @@ stages. The renderer owns neither the algorithm nor its node identities.
 ## Standalone qualification
 
 ```sh
-cd charts/graphlayout
+cd shared/layout
 cmake --preset win-release-user
 cmake --build --preset win-release-user --parallel 2
 ctest --preset win-release-user
@@ -343,7 +343,7 @@ alone is claimed.
 Standalone comparison (optional target; disabled in regular builds):
 
 ```sh
-cmake -S charts/graphlayout -B build/graphlayout-bench -G Ninja \
+cmake -S shared/layout -B build/graphlayout-bench -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DSTUN_GRAPHLAYOUT_BUILD_BENCHMARKS=ON
 cmake --build build/graphlayout-bench --target stun_graphlayout_stress_compare
 build/graphlayout-bench/stun_graphlayout_stress_compare
@@ -422,7 +422,7 @@ Gradient Stress, SMACOF and Force under both objective functions, and also
 reports edge-length RMSE, rectangle-overlap count and elapsed time:
 
 ```sh
-cmake -S charts/graphlayout -B build/graphlayout-bench -G Ninja \
+cmake -S shared/layout -B build/graphlayout-bench -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DSTUN_GRAPHLAYOUT_BUILD_BENCHMARKS=ON
 cmake --build build/graphlayout-bench --target stun_graphlayout_force_compare
 build/graphlayout-bench/stun_graphlayout_force_compare
