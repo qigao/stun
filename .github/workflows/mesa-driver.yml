@@ -650,7 +650,7 @@ jobs:
           set -euo pipefail
           unset LD_LIBRARY_PATH LD_PRELOAD
           build_dir="$GITHUB_WORKSPACE/build/ui-core-c11-installed"
-          cmake -S ui_core -B "$build_dir" -G Ninja \
+          cmake -S shared/markdown -B "$build_dir" -G Ninja \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=Debug \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
             -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
