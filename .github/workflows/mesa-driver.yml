@@ -1674,10 +1674,10 @@ jobs:
           for suffix in ('flexUI/modules/desktop/gcanvas_window_host.cpp',
                          'flexUI/modules/desktop/gcanvas_plugin_window_host.cpp',
                          'flex/render/engines/gcanvas/renderer.cpp',
-                         'vendor/gCanvas/src/window_impl.cpp',
-                         'vendor/gCanvas/src/backends/gl/context_impl_gl.cpp',
-                         'vendor/gCanvas/src/backends/opengl/context_opengl.cpp',
-                         'vendor/gCanvas/src/backends/vulkan/context_impl_vulkan.cpp'):
+                         'shared/gcanvas/src/window_impl.cpp',
+                         'shared/gcanvas/src/backends/gl/context_impl_gl.cpp',
+                         'shared/gcanvas/src/backends/opengl/context_opengl.cpp',
+                         'shared/gcanvas/src/backends/vulkan/context_impl_vulkan.cpp'):
               matching = [c for c in commands if c['file'].endswith(suffix)]
               assert len(matching) == 1, suffix
               assert all(flag in matching[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined')), suffix
