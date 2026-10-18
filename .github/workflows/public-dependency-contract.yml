@@ -24,7 +24,7 @@ jobs:
       - name: Reject legacy parser link or include reintroduction
         run: |
           set -euo pipefail
-          python3 ui_core/tests/verify_single_markdown_parser.py
+          python3 shared/markdown/tests/verify_single_markdown_parser.py
           git diff --exit-code
 
   sdk-releases:
