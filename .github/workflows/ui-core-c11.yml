@@ -52,10 +52,10 @@ jobs:
             -isystem .ci/salts/platform/include
             -isystem .ci/salts/concurrency/include
           )
-          cc "${common[@]}" -fsyntax-only shared/markdown/src/shared/markdown.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/ui_core.c
           cc "${common[@]}" -fsyntax-only shared/markdown/src/markdown_c11.c
           cc "${common[@]}" -fsyntax-only shared/markdown/src/markdown_html.c
-          cc "${common[@]}" -fsyntax-only shared/markdown/tests/shared/markdown_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/ui_core_test.c
           cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_c11_test.c
           cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_html_test.c
           cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_html_dump.c
@@ -121,7 +121,7 @@ jobs:
             -isystem .ci/salts/concurrency/include
           )
           files=(
-            shared/markdown/src/shared/markdown.c
+            shared/markdown/src/ui_core.c
             shared/markdown/src/markdown_c11.c
             shared/markdown/src/markdown_html.c
             shared/markdown/tests/markdown_c11_test.c
@@ -224,7 +224,7 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/windows-x64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S shared/markdown -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
+          cmake -S ui_core -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
             -DBUILD_TESTING=ON \
             "-DCMAKE_PREFIX_PATH=$(cygpath -w "$sdk")" \
             "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
@@ -242,7 +242,7 @@ jobs:
           sdk="$PWD/build/salts-native-release/sdk/windows-x64"
           export PATH="$sdk/bin:$PATH"
           ctest --test-dir build/ui-core-windows -C Release \
-            -R '^(stun_shared/markdown_test|stun_markdown_[a-z0-9_]+_test)$' \
+            -R '^(stun_ui_core_test|stun_markdown_[a-z0-9_]+_test)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$(cygpath -w "$PWD/build/windows-native-c11-results.xml")" \
             2>&1 | tee build/windows-native-c11.log
@@ -250,7 +250,7 @@ jobs:
           import xml.etree.ElementTree as ET
           cases = list(ET.parse("build/windows-native-c11-results.xml").getroot().iter("testcase"))
           expected = {
-              "stun_shared/markdown_test",
+              "stun_ui_core_test",
               "stun_markdown_c11_test",
               "stun_markdown_entities_test",
               "stun_markdown_link_target_test",
@@ -343,7 +343,7 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S shared/markdown -B build/ui-core-macos -G "Unix Makefiles" \
+          cmake -S ui_core -B build/ui-core-macos -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \
@@ -360,7 +360,7 @@ jobs:
           sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
           export DYLD_LIBRARY_PATH="$sdk/lib:$sdk/bin:${DYLD_LIBRARY_PATH:-}"
           ctest --test-dir build/ui-core-macos -C Release \
-            -R '^(stun_shared/markdown_test|stun_markdown_[a-z0-9_]+_test)$' \
+            -R '^(stun_ui_core_test|stun_markdown_[a-z0-9_]+_test)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$PWD/build/macos-native-c11-results.xml" \
             2>&1 | tee build/macos-native-c11.log
@@ -369,7 +369,7 @@ jobs:
           from pathlib import Path
           cases = list(ET.parse("build/macos-native-c11-results.xml").getroot().iter("testcase"))
           expected = {
-              "stun_shared/markdown_test",
+              "stun_ui_core_test",
               "stun_markdown_c11_test",
               "stun_markdown_entities_test",
               "stun_markdown_link_target_test",
