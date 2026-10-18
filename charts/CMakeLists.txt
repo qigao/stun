@@ -1,4 +1,3 @@
-add_subdirectory(graphlayout)
 add_subdirectory(ui)
 add_subdirectory(infographic)
 add_subdirectory(flexchart)
