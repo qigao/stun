@@ -2,7 +2,7 @@ name: GraphLayout native algorithm qualification
 on:
   pull_request:
     paths:
-      - 'charts/graphlayout/**'
+      - 'shared/layout/**'
       - 'charts/dotgraph/**'
       - 'charts/mermaid/flowchart/**'
       - 'charts/mermaid/mindmap/**'
@@ -12,7 +12,7 @@ on:
       - '.github/workflows/graphlayout-native.yml'
   push:
     paths:
-      - 'charts/graphlayout/**'
+      - 'shared/layout/**'
       - 'charts/dotgraph/**'
       - 'charts/mermaid/flowchart/**'
       - 'charts/mermaid/mindmap/**'
@@ -60,18 +60,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-${{ hashFiles('charts/graphlayout/**') }}
+          key: graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-${{ hashFiles('shared/layout/**') }}
           restore-keys: |
             graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-
       - name: Configure
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cmake -S charts/graphlayout -B build/graphlayout -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON
+            cmake -S shared/layout -B build/graphlayout -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON
           else
             extra=()
             if [[ '${{ matrix.toolchain }}' == 'clang' ]]; then extra+=(-DCMAKE_CXX_COMPILER=clang++); fi
-            cmake -S charts/graphlayout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${extra[@]}"
+            cmake -S shared/layout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${extra[@]}"
           fi
       - name: Build
         run: cmake --build build/graphlayout --config Release --parallel 2

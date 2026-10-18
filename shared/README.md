@@ -4,7 +4,7 @@ This directory owns reusable implementation modules shared by Stun components.
 Each child directory has its own CMake target declarations and tests; the root
 project includes this directory through `add_subdirectory(shared)`.
 
-Planned modules:
+Modules:
 
 - `gcanvas/`: canvas core and optional rendering/presentation backends.
 - `markdown/`: the canonical C11 Markdown parser and its semantic/HTML output

@@ -674,7 +674,7 @@ jobs:
           python3 -m venv "$reference_venv"
           "$reference_venv/bin/python" -m pip install \
             --disable-pip-version-check --no-cache-dir mistune cmarkgfm
-          "$reference_venv/bin/python" ui_core/tests/compare_python_markdown.py \
+          "$reference_venv/bin/python" shared/markdown/tests/compare_python_markdown.py \
             --parser "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_ast_dump" \
             --report "$EVIDENCE_DIR/markdown-python-oracle.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-python-oracle.log"
@@ -691,7 +691,7 @@ jobs:
           python_env="$RUNNER_TEMP/stun-markdown-oracle"
           test -x "$python_env/bin/python"
           "$python_env/bin/python" -c 'import cmarkgfm, mistune'
-          "$python_env/bin/python" ui_core/tests/survey_commonmark_spec.py \
+          "$python_env/bin/python" shared/markdown/tests/survey_commonmark_spec.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
             --report "$EVIDENCE_DIR/markdown-commonmark-652-survey.json" \
@@ -700,14 +700,14 @@ jobs:
           # Explicit SPEC raw-HTML survey: 652-row independent diagnostic.
           # Never replace the production-safe report or change its strict
           # official-ID nonregression gate with these unsafe test-only bytes.
-          "$python_env/bin/python" ui_core/tests/survey_commonmark_spec.py \
+          "$python_env/bin/python" shared/markdown/tests/survey_commonmark_spec.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
             --render-policy spec \
             --report "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json"
-          "$python_env/bin/python" ui_core/tests/compare_cmarkgfm_html.py \
+          "$python_env/bin/python" shared/markdown/tests/compare_cmarkgfm_html.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --report "$EVIDENCE_DIR/markdown-cmarkgfm-html.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-cmarkgfm-html.log"
@@ -722,7 +722,7 @@ jobs:
           python_env="$RUNNER_TEMP/stun-markdown-oracle"
           test -x "$python_env/bin/python"
           "$python_env/bin/python" -c 'import cmarkgfm'
-          "$python_env/bin/python" ui_core/tests/oracle_legacy_list_table.py \
+          "$python_env/bin/python" shared/markdown/tests/oracle_legacy_list_table.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --report "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-legacy-list-table-oracle.log"
@@ -734,9 +734,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 ui_core/tests/gate_commonmark_nonregression.py \
+          python3 shared/markdown/tests/gate_commonmark_nonregression.py \
             --survey "$EVIDENCE_DIR/markdown-commonmark-652-survey.json" \
-            --baseline ui_core/tests/commonmark_0_31_2_baseline.json \
+            --baseline shared/markdown/tests/commonmark_0_31_2_baseline.json \
             --out "$EVIDENCE_DIR/markdown-commonmark-nonregression.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-nonregression.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-nonregression.json"
@@ -747,10 +747,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s ui_core/tests -p 'test_gate_commonmark_spec_nonregression.py'
-          python3 ui_core/tests/gate_commonmark_spec_nonregression.py \
+          python3 -m unittest discover -s shared/markdown/tests -p 'test_gate_commonmark_spec_nonregression.py'
+          python3 shared/markdown/tests/gate_commonmark_spec_nonregression.py \
             --survey "$EVIDENCE_DIR/markdown-commonmark-652-spec-policy.json" \
-            --baseline ui_core/tests/commonmark_0_31_2_spec_baseline.json \
+            --baseline shared/markdown/tests/commonmark_0_31_2_spec_baseline.json \
             --out "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.json" \
             2>&1 | tee "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.log"
           test -s "$EVIDENCE_DIR/markdown-commonmark-spec-nonregression.json"
@@ -763,7 +763,7 @@ jobs:
           set -euo pipefail
           python_env="$RUNNER_TEMP/stun-markdown-oracle"
           test -x "$python_env/bin/python"
-          "$python_env/bin/python" ui_core/tests/gate_commonmark_indented.py \
+          "$python_env/bin/python" shared/markdown/tests/gate_commonmark_indented.py \
             --renderer "$GITHUB_WORKSPACE/build/ui-core-c11-installed/tests/stun_markdown_html_dump" \
             --spec tools/md/test/spec.txt \
             --report "$EVIDENCE_DIR/markdown-indented-official-gate.json" \
@@ -1289,8 +1289,8 @@ jobs:
               assert len(matches) == 1, suffix
               assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
 
-          for suffix in ('ui_core/tests/markdown_tango_candidate_test.c',
-                         'ui_core/src/markdown_c11.c', 'tango/src/tui_widgets.c'):
+          for suffix in ('shared/markdown/tests/markdown_tango_candidate_test.c',
+                         'shared/markdown/src/markdown_c11.c', 'tango/src/tui_widgets.c'):
               matches = [entry for entry in commands if entry['file'].endswith(suffix)]
               assert len(matches) == 1, suffix
               assert all(flag in matches[0]['command'] for flag in
