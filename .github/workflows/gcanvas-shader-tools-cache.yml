@@ -50,16 +50,11 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$VCPKG_CACHE_REPOSITORY_ROOT"
-          manifest="$VCPKG_CACHE_REPOSITORY_ROOT/manifests/gcanvas-shader-tools"
+          manifest="$GITHUB_WORKSPACE/.ci/gcanvas-shader-tools"
           test -f "$manifest/vcpkg.json"
 
-          case "$VCPKG_CACHE_REPOSITORY_ROOT" in
-            "$GITHUB_WORKSPACE"*)
-              echo "shader-tool profile must come from qigao/vcpkg-cache, not a copied Stun manifest" >&2
-              exit 1
-              ;;
-          esac
-
+          # Product dependency policy belongs to Stun; vcpkg-cache owns only
+          # the shared toolchain, overlays and binary-cache transport.
           log="$RUNNER_TEMP/stun-gcanvas-shader-tools-cache.log"
           install_root="$RUNNER_TEMP/stun-gcanvas-shader-tools-installed"
           rm -rf "$install_root"
