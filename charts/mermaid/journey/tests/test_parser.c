@@ -68,7 +68,7 @@ spec("journey_parser") {
             REQUIRE(diagram != NULL);
             
             if(diagram->title) {
-                check_str_eq(diagram->title, "My Journey");
+                check_true(diagram->title != NULL && strcmp(diagram->title, "My Journey") == 0);
             } else {
                 // failure
                 REQUIRE(0 && "Title is NULL");
@@ -76,20 +76,20 @@ spec("journey_parser") {
             
             JourneySection* s = diagram->sections;
             REQUIRE(s != NULL);
-            check_str_eq(s->title, "Section 1");
+            check_true(s->title != NULL && strcmp(s->title, "Section 1") == 0);
             
             JourneyTask* t = s->tasks;
             REQUIRE(t != NULL);
-            check_str_eq(t->title, "Task 1");
-            check_int_eq(t->score, 5);
+            check_true(t->title != NULL && strcmp(t->title, "Task 1") == 0);
+            check_true((t->score) == (5));
             REQUIRE(t->actor_count == 1);
-            check_str_eq(t->actors[0], "Me");
+            check_true(t->actors[0] != NULL && strcmp(t->actors[0], "Me") == 0);
             
             t = t->next;
             REQUIRE(t != NULL);
-            check_str_eq(t->title, "Task 2");
-            check_int_eq(t->score, 3);
-            check_str_eq(t->actors[0], "Cat");
+            check_true(t->title != NULL && strcmp(t->title, "Task 2") == 0);
+            check_true((t->score) == (3));
+            check_true(t->actors[0] != NULL && strcmp(t->actors[0], "Cat") == 0);
             
             journey_free_diagram(diagram);
         }
@@ -102,8 +102,8 @@ spec("journey_parser") {
             
             JourneyDiagram* diagram = journey_parse(input);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->acc_title, "My Title");
-            check_str_eq(diagram->acc_descr, "My Description");
+            check_true(diagram->acc_title != NULL && strcmp(diagram->acc_title, "My Title") == 0);
+            check_true(diagram->acc_descr != NULL && strcmp(diagram->acc_descr, "My Description") == 0);
             journey_free_diagram(diagram);
         }
 
@@ -127,13 +127,13 @@ spec("journey_parser") {
                 return;
             }
 
-            check_int_eq(s->tasks->score, 5);
+            check_true((s->tasks->score) == (5));
             if (!s->tasks->next) {
                 check(0, "second task parsed");
                 journey_free_diagram(diagram);
                 return;
             }
-            check_int_eq(s->tasks->next->score, 10);
+            check_true((s->tasks->next->score) == (10));
 
             journey_free_diagram(diagram);
         }
