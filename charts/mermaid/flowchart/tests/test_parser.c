@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "flowchart/flowchart_parser_wrapper.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -35,55 +35,55 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static void normalize_json(json_value_t* v) {
     if (!v) return;
-    turbo_json_type_t type = turbo_json_type(v);
-    if (type == TURBO_JSON_OBJECT) {
-        size_t count = turbo_json_object_size(v);
+    json_type_t type = json_type(v);
+    if (type == JSON_OBJECT) {
+        size_t count = json_object_size(v);
         for (size_t i = 0; i < count; i++) {
-            const char* key = turbo_json_object_key(v, i);
-            json_value_t* val = turbo_json_object_value(v, i);
-            if (strcmp(key, "shape") == 0 && turbo_json_type(val) == TURBO_JSON_STRING) {
-                const char* shape_val = turbo_json_string(val);
+            const char* key = json_object_key(v, i);
+            json_value_t* val = json_object_value(v, i);
+            if (strcmp(key, "shape") == 0 && json_type(val) == JSON_STRING) {
+                const char* shape_val = json_string(val);
                 if (strcmp(shape_val, "square") == 0) {
-                    turbo_json_object_set_string(v, key, "rect");
+                    json_object_set_string(v, key, "rect");
                 }
             }
             normalize_json(val);
         }
-    } else if (type == TURBO_JSON_ARRAY) {
-        size_t count = turbo_json_array_size(v);
+    } else if (type == JSON_ARRAY) {
+        size_t count = json_array_size(v);
         for (size_t i = 0; i < count; i++) {
-            normalize_json(turbo_json_array_get(v, i));
+            normalize_json(json_array_get(v, i));
         }
     }
 }
 
 static int json_value_equal(const json_value_t* a, const json_value_t* b) {
-    if (!a || !b || turbo_json_type(a) != turbo_json_type(b)) return a == b;
-    switch (turbo_json_type(a)) {
-        case TURBO_JSON_NULL:
+    if (!a || !b || json_type(a) != json_type(b)) return a == b;
+    switch (json_type(a)) {
+        case JSON_NULL:
             return 1;
-        case TURBO_JSON_BOOL:
-            return turbo_json_bool(a) == turbo_json_bool(b);
-        case TURBO_JSON_NUMBER:
-            return turbo_json_number(a) == turbo_json_number(b);
-        case TURBO_JSON_STRING:
-            return strcmp(turbo_json_string(a), turbo_json_string(b)) == 0;
-        case TURBO_JSON_ARRAY: {
-            size_t count = turbo_json_array_size(a);
-            if (count != turbo_json_array_size(b)) return 0;
+        case JSON_BOOL:
+            return json_bool(a) == json_bool(b);
+        case JSON_NUMBER:
+            return json_number(a) == json_number(b);
+        case JSON_STRING:
+            return strcmp(json_string(a), json_string(b)) == 0;
+        case JSON_ARRAY: {
+            size_t count = json_array_size(a);
+            if (count != json_array_size(b)) return 0;
             for (size_t i = 0; i < count; ++i) {
-                if (!json_value_equal(turbo_json_array_get(a, i),
-                                      turbo_json_array_get(b, i))) return 0;
+                if (!json_value_equal(json_array_get(a, i),
+                                      json_array_get(b, i))) return 0;
             }
             return 1;
         }
-        case TURBO_JSON_OBJECT: {
-            size_t count = turbo_json_object_size(a);
-            if (count != turbo_json_object_size(b)) return 0;
+        case JSON_OBJECT: {
+            size_t count = json_object_size(a);
+            if (count != json_object_size(b)) return 0;
             for (size_t i = 0; i < count; ++i) {
-                const char* key = turbo_json_object_key(a, i);
-                if (!json_value_equal(turbo_json_object_value(a, i),
-                                      turbo_json_object_get(b, key))) return 0;
+                const char* key = json_object_key(a, i);
+                if (!json_value_equal(json_object_value(a, i),
+                                      json_object_get(b, key))) return 0;
             }
             return 1;
         }
@@ -93,9 +93,9 @@ static int json_value_equal(const json_value_t* a, const json_value_t* b) {
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
     
@@ -103,8 +103,8 @@ static int json_equal(const char* a, const char* b) {
     normalize_json(jb);
 
     int eq = json_value_equal(ja, jb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -209,7 +209,7 @@ spec("flowchart_parser") {
 
                     check(json_equal(actual, expected), "JSON mismatch");
 
-                    turbo_json_serialize_free(actual);
+                    json_serialize_free(actual);
                     flowchart_diagram_free(diagram);
                     free(expected);
                     free(input);

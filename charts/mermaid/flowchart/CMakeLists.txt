@@ -63,7 +63,7 @@ target_include_directories(mermaid_flowchart
 )
  
 target_link_libraries(mermaid_flowchart 
-    PUBLIC TurboParser::Parser flex_runtime TurboParser::Mustache
+    PUBLIC Salts::JsonParser flex_runtime Salts::Mustache
     PRIVATE Stun::MermaidFlowchartLayout
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
@@ -77,7 +77,7 @@ endif()
 
 # 原有的 Parser 测试
 add_executable(flowchart_test tests/test_parser.c)
-target_link_libraries(flowchart_test PRIVATE mermaid_flowchart Salts::TinyTest TurboParser::Parser)
+target_link_libraries(flowchart_test PRIVATE mermaid_flowchart Salts::TinyTest Salts::JsonParser)
 target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
 add_test(NAME flowchart_test COMMAND flowchart_test)
 set_target_properties(flowchart_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
