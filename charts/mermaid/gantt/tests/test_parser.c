@@ -63,17 +63,17 @@ spec("gantt_parser") {
 
             GanttDiagram* diagram = gantt_parse(input);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->title, "A simple gantt chart");
-            check_str_eq(diagram->date_format, "YYYY-MM-DD");
+            check_true(diagram->title != NULL && strcmp(diagram->title, "A simple gantt chart") == 0);
+            check_true(diagram->date_format != NULL && strcmp(diagram->date_format, "YYYY-MM-DD") == 0);
             
             REQUIRE(diagram->sections != NULL);
-            check_str_eq(diagram->sections->name, "Section 1");
+            check_true(diagram->sections->name != NULL && strcmp(diagram->sections->name, "Section 1") == 0);
             
             REQUIRE(diagram->sections->tasks != NULL);
-            check_str_eq(diagram->sections->tasks->name, "A task");
-            check_str_eq(diagram->sections->tasks->id, "a1");
-            check_str_eq(diagram->sections->tasks->start, "2023-01-01");
-            check_str_eq(diagram->sections->tasks->end, "30d");
+            check_true(diagram->sections->tasks->name != NULL && strcmp(diagram->sections->tasks->name, "A task") == 0);
+            check_true(diagram->sections->tasks->id != NULL && strcmp(diagram->sections->tasks->id, "a1") == 0);
+            check_true(diagram->sections->tasks->start != NULL && strcmp(diagram->sections->tasks->start, "2023-01-01") == 0);
+            check_true(diagram->sections->tasks->end != NULL && strcmp(diagram->sections->tasks->end, "30d") == 0);
             
             gantt_diagram_free(diagram);
         }
@@ -93,13 +93,13 @@ spec("gantt_parser") {
             
             GanttTask* t = s->tasks;
             REQUIRE(t != NULL);
-            check_str_eq(t->name, "Completed");
-            check_int_eq(t->status, GANTT_STATUS_DONE);
+            check_true(t->name != NULL && strcmp(t->name, "Completed") == 0);
+            check_true(t->status == GANTT_STATUS_DONE);
             
             t = t->next;
             REQUIRE(t != NULL);
-            check_str_eq(t->name, "Active");
-            check_int_eq(t->status, GANTT_STATUS_ACTIVE);
+            check_true(t->name != NULL && strcmp(t->name, "Active") == 0);
+            check_true(t->status == GANTT_STATUS_ACTIVE);
             
             gantt_diagram_free(diagram);
         }
