@@ -78,24 +78,24 @@ spec("sequence_parser") {
             // Participants are prepended
             REQUIRE(diagram->participants != NULL);
             // Bob should be first if prepended
-            check_str_eq(diagram->participants->id, "Bob");
-            check_str_eq(diagram->participants->next->id, "Alice");
+            check_true(diagram->participants->id != NULL && strcmp(diagram->participants->id, "Bob") == 0);
+            check_true(diagram->participants->next->id != NULL && strcmp(diagram->participants->next->id, "Alice") == 0);
             
             SequenceStatement* s = diagram->statements;
             REQUIRE(s != NULL);
-            check_int_eq(s->type, SEQ_STMT_SIGNAL);
-            check_str_eq(s->data.signal.from, "Alice");
-            check_str_eq(s->data.signal.to, "Bob");
-            check_str_eq(s->data.signal.message, "Hello Bob, how are you?");
-            check_int_eq(s->data.signal.signal_type, SEQ_SIGNAL_SOLID);
+            check_true((s->type) == (SEQ_STMT_SIGNAL));
+            check_true(s->data.signal.from != NULL && strcmp(s->data.signal.from, "Alice") == 0);
+            check_true(s->data.signal.to != NULL && strcmp(s->data.signal.to, "Bob") == 0);
+            check_true(s->data.signal.message != NULL && strcmp(s->data.signal.message, "Hello Bob, how are you?") == 0);
+            check_true((s->data.signal.signal_type) == (SEQ_SIGNAL_SOLID));
             
             s = s->next;
             REQUIRE(s != NULL);
-            check_int_eq(s->type, SEQ_STMT_SIGNAL);
-            check_str_eq(s->data.signal.from, "Bob");
-            check_str_eq(s->data.signal.to, "Alice");
-            check_str_eq(s->data.signal.message, "I am good thanks!");
-            check_int_eq(s->data.signal.signal_type, SEQ_SIGNAL_DOTTED);
+            check_true((s->type) == (SEQ_STMT_SIGNAL));
+            check_true(s->data.signal.from != NULL && strcmp(s->data.signal.from, "Bob") == 0);
+            check_true(s->data.signal.to != NULL && strcmp(s->data.signal.to, "Alice") == 0);
+            check_true(s->data.signal.message != NULL && strcmp(s->data.signal.message, "I am good thanks!") == 0);
+            check_true((s->data.signal.signal_type) == (SEQ_SIGNAL_DOTTED));
             
             sequence_diagram_free(diagram);
         }
@@ -113,16 +113,16 @@ spec("sequence_parser") {
             SequenceParticipant* p = diagram->participants;
             REQUIRE(p != NULL);
             // B as Bob
-            check_str_eq(p->id, "B");
-            check_str_eq(p->label, "Bob");
-            check_str_eq(p->type, "actor");
+            check_true(p->id != NULL && strcmp(p->id, "B") == 0);
+            check_true(p->label != NULL && strcmp(p->label, "Bob") == 0);
+            check_true(p->type != NULL && strcmp(p->type, "actor") == 0);
             
             p = p->next;
             REQUIRE(p != NULL);
             // A as Alice
-            check_str_eq(p->id, "A");
-            check_str_eq(p->label, "Alice");
-            check_str_eq(p->type, "participant");
+            check_true(p->id != NULL && strcmp(p->id, "A") == 0);
+            check_true(p->label != NULL && strcmp(p->label, "Alice") == 0);
+            check_true(p->type != NULL && strcmp(p->type, "participant") == 0);
             
             sequence_diagram_free(diagram);
         }
@@ -145,15 +145,15 @@ spec("sequence_parser") {
             // 1: signal
             s = s->next; // 2: activate
             REQUIRE(s != NULL);
-            check_int_eq(s->type, SEQ_STMT_ACTIVATE);
-            check_str_eq(s->data.activation.actor, "Bob");
+            check_true((s->type) == (SEQ_STMT_ACTIVATE));
+            check_true(s->data.activation.actor != NULL && strcmp(s->data.activation.actor, "Bob") == 0);
             
             s = s->next; // 3: note
             REQUIRE(s != NULL);
-            check_int_eq(s->type, SEQ_STMT_NOTE);
-            check_str_eq(s->data.note.actor, "Alice");
-            check_str_eq(s->data.note.text, "Alice is thinking");
-            check_int_eq(s->data.note.placement, SEQ_NOTE_LEFT_OF);
+            check_true((s->type) == (SEQ_STMT_NOTE));
+            check_true(s->data.note.actor != NULL && strcmp(s->data.note.actor, "Alice") == 0);
+            check_true(s->data.note.text != NULL && strcmp(s->data.note.text, "Alice is thinking") == 0);
+            check_true((s->data.note.placement) == (SEQ_NOTE_LEFT_OF));
             
             sequence_diagram_free(diagram);
         }
