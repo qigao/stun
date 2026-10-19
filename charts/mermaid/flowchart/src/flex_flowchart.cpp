@@ -3,6 +3,7 @@
 #include "flowchart_renderer.h"
 #include "flowchart/flowchart_parser_wrapper.h"
 #include "flex/runtime/text.h"
+#include "flex/core/debug.h"
 #include <cmath>
 #include <deque>
 #include <exception>
@@ -139,7 +140,7 @@ void register_flowchart_component() {
         const FlowchartParseStatus parse_status = flowchart_parse_ex(code.c_str(), &parsed_diagram);
         DiagramPtr diagram(parsed_diagram, &flowchart_diagram_free);
         if (parse_status != FLOWCHART_PARSE_COMPLETE) {
-            TLOG_ERROR((std::string("Flowchart parse failed: ") + flowchart_get_last_error()).c_str());
+            FLEX_LOGE("Flowchart parse failed: %s", flowchart_get_last_error());
             return nullptr;
         }
         if (routing_mode == "polyline") {
