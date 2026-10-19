@@ -71,26 +71,26 @@ spec("C4 Parser") {
 
             C4Diagram* diagram = c4_parse(input);
             check_ptr_ne(diagram, NULL);
-            check_int_eq(diagram->type, C4_DT_CONTEXT);
+            check_true((diagram->type) == (C4_DT_CONTEXT));
 
             // Check elements
             C4Element* el = diagram->elements;
             check_ptr_ne(el, NULL);
-            check_str_eq(el->alias, "customerA");
-            check_int_eq(el->type, C4_EL_PERSON);
-            check_str_eq(el->label, "Banking Customer A");
+            check_true(el->alias != NULL && strcmp(el->alias, "customerA") == 0);
+            check_true((el->type) == (C4_EL_PERSON));
+            check_true(el->label != NULL && strcmp(el->label, "Banking Customer A") == 0);
 
             el = el->next;
             check_ptr_ne(el, NULL);
-            check_str_eq(el->alias, "systemA");
-            check_int_eq(el->type, C4_EL_SYSTEM);
+            check_true(el->alias != NULL && strcmp(el->alias, "systemA") == 0);
+            check_true((el->type) == (C4_EL_SYSTEM));
 
             // Check relationships
             C4Rel* rel = diagram->relationships;
             check_ptr_ne(rel, NULL);
-            check_str_eq(rel->from, "customerA");
-            check_str_eq(rel->to, "systemA");
-            check_str_eq(rel->label, "Uses");
+            check_true(rel->from != NULL && strcmp(rel->from, "customerA") == 0);
+            check_true(rel->to != NULL && strcmp(rel->to, "systemA") == 0);
+            check_true(rel->label != NULL && strcmp(rel->label, "Uses") == 0);
 
             c4_free_diagram(diagram);
         }
@@ -104,13 +104,13 @@ spec("C4 Parser") {
 
             C4Diagram* diagram = c4_parse(input);
             check_ptr_ne(diagram, NULL);
-            check_int_eq(diagram->type, C4_DT_CONTAINER);
+            check_true((diagram->type) == (C4_DT_CONTAINER));
 
             C4Element* el = diagram->elements;
             check_ptr_ne(el, NULL);
-            check_str_eq(el->alias, "web_app");
-            check_int_eq(el->type, C4_EL_CONTAINER);
-            check_str_eq(el->technology, "Java, Spring MVC");
+            check_true(el->alias != NULL && strcmp(el->alias, "web_app") == 0);
+            check_true((el->type) == (C4_EL_CONTAINER));
+            check_true(el->technology != NULL && strcmp(el->technology, "Java, Spring MVC") == 0);
 
             c4_free_diagram(diagram);
         }
@@ -130,12 +130,12 @@ spec("C4 Parser") {
             // First element is the boundary
             C4Element* boundary = diagram->elements;
             check_ptr_ne(boundary, NULL);
-            check_int_eq(boundary->type, C4_EL_SYSTEM_BOUNDARY);
+            check_true((boundary->type) == (C4_EL_SYSTEM_BOUNDARY));
 
             // Child is in children list, not next (flat)
             C4Element* child = boundary->children;
             check_ptr_ne(child, NULL);
-            check_str_eq(child->alias, "backend");
+            check_true(child->alias != NULL && strcmp(child->alias, "backend") == 0);
             check_ptr_eq(child->parent, boundary);
             check_ptr_eq(child->next, NULL); // No siblings for child
 
@@ -156,16 +156,16 @@ spec("C4 Parser") {
 
             C4Element* ent = diagram->elements;
             check_ptr_ne(ent, NULL);
-            check_int_eq(ent->type, C4_EL_ENTERPRISE_BOUNDARY);
+            check_true((ent->type) == (C4_EL_ENTERPRISE_BOUNDARY));
 
             C4Element* sys = ent->children;
             check_ptr_ne(sys, NULL);
-            check_int_eq(sys->type, C4_EL_SYSTEM_BOUNDARY);
+            check_true((sys->type) == (C4_EL_SYSTEM_BOUNDARY));
             check_ptr_eq(sys->parent, ent);
 
             C4Element* app = sys->children;
             check_ptr_ne(app, NULL);
-            check_int_eq(app->type, C4_EL_SYSTEM);
+            check_true((app->type) == (C4_EL_SYSTEM));
             check_ptr_eq(app->parent, sys);
 
             c4_free_diagram(diagram);
@@ -182,9 +182,9 @@ spec("C4 Parser") {
             check_ptr_ne(diagram, NULL);
 
             C4Element* el = diagram->elements;
-            check_str_eq(el->alias, "alias");
-            check_str_eq(el->label, "Label with spaces");
-            check_str_eq(el->descr, "unquoted_tech");
+            check_true(el->alias != NULL && strcmp(el->alias, "alias") == 0);
+            check_true(el->label != NULL && strcmp(el->label, "Label with spaces") == 0);
+            check_true(el->descr != NULL && strcmp(el->descr, "unquoted_tech") == 0);
 
             c4_free_diagram(diagram);
         }
