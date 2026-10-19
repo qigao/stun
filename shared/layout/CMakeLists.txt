@@ -141,7 +141,7 @@ endif()
 
 # Headless consumer qualification without the full parser/UI/render graph.
 # Infographic's geometry adapter must compile and execute on the same native
-# toolchain matrix as GraphLayout; full STUN_BUILD_CHARTS=ON is a later gate.
+# toolchain matrix as GraphLayout; chart adapters are validated by the root-build CI gate.
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../charts/infographic/src/layout/layout_engine.cpp")
     add_executable(stun_graphlayout_infographic_tests
         tests/infographic_adapter_test.cpp

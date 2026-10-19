@@ -126,8 +126,8 @@ ctest --preset win-release-user
 The standalone manifest has no external dependencies. Its vcpkg toolchain
 remains enabled through the preset. The formal suites include the actual
 DOT/Mermaid Flowchart, Infographic and Mindmap layout adapter implementations.
-This headless qualification does not replace a full `STUN_BUILD_CHARTS=ON`
-build, which additionally requires the configured TurboParser SDK and render
+This headless qualification does not replace a full charts-enabled root build
+build, which additionally requires the published Salts/SaltsUtils SDK and render
 dependencies.
 
 ## Algorithm v2: orthogonal obstacle-aware routing
@@ -414,7 +414,7 @@ finite-difference derivatives, disconnected repulsion, cycles and duplicate
 edges, reversed edge insertion and node permutations, hard pins and
 non-overlap, degenerate seeds, work budgets and 30 deterministic graph
 families. The standalone CMake/CTest matrix is independent of the full Charts
-package and is **not** evidence that the full `STUN_BUILD_CHARTS=ON` stack
+package and is **not** evidence that the full charts-enabled root build stack
 compiles and renders correctly.
 
 An optional comparison (disabled in normal CI) evaluates **every output** of
