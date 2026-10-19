@@ -178,9 +178,9 @@ spec("flowchart_parser") {
                     char* expected = load_golden_file(case_name, "output", "json");
                     if (!expected) expected = load_golden_file(case_name, "", "json");
                     if (!input || !expected) {
+                        check_true(0);
                         free(input);
                         free(expected);
-                        check_true(input != NULL && expected != NULL);
                     } else {
                         FlowchartDiagram* diagram = flowchart_parse(input);
                         REQUIRE(diagram != NULL);
@@ -217,9 +217,9 @@ spec("flowchart_parser") {
                     char* expected = load_golden_file(case_name, "output", "json");
                     if (!expected) expected = load_golden_file(case_name, "", "json");
                     if (!input || !expected) {
+                        check_true(0);
                         free(input);
                         free(expected);
-                        check_true(input != NULL && expected != NULL);
                     } else {
                         FlowchartDiagram* diagram = flowchart_parse(input);
                         REQUIRE(diagram != NULL);
