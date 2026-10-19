@@ -65,22 +65,22 @@ spec("dotgraph") {
         it("parses directed and undirected graphs") {
             auto directed = parse("digraph { A -> B; B -> C; }");
             check_not_null(directed.get());
-            check_int_eq(directed->is_directed, 1);
-            check_size_eq(count_nodes(directed.get()), 3);
-            check_size_eq(count_edges(directed.get()), 2);
+            check_true((directed->is_directed) == (1));
+            check_true((count_nodes(directed.get())) == (3));
+            check_true((count_edges(directed.get())) == (2));
 
             auto undirected = parse("graph { A -- B; }");
             check_not_null(undirected.get());
-            check_int_eq(undirected->is_directed, 0);
-            check_size_eq(count_edges(undirected.get()), 1);
+            check_true((undirected->is_directed) == (0));
+            check_true((count_edges(undirected.get())) == (1));
         }
 
         it("recognizes case-insensitive DOT keywords") {
             auto diagram = parse("StRiCt DiGrApH G { A -> B; }");
             check_not_null(diagram.get());
-            check_int_eq(diagram->is_strict, 1);
-            check_int_eq(diagram->is_directed, 1);
-            check_str_eq(diagram->graph_id, "G");
+            check_true((diagram->is_strict) == (1));
+            check_true((diagram->is_directed) == (1));
+            check_true((diagram->graph_id) != nullptr && ("G") != nullptr && std::strcmp((diagram->graph_id), ("G")) == 0);
         }
 
         it("preserves node attributes and endpoint compass points") {
@@ -89,34 +89,34 @@ spec("dotgraph") {
             check_not_null(diagram.get());
             const auto* node = find_node(diagram.get(), "A");
             check_not_null(node);
-            check_str_eq(node->label, "Hello");
-            check_int_eq(node->shape, DG_SHAPE_BOX);
+            check_true((node->label) != nullptr && ("Hello") != nullptr && std::strcmp((node->label), ("Hello")) == 0);
+            check_true((node->shape) == (DG_SHAPE_BOX));
             check_not_null(diagram->edges);
-            check_int_eq(diagram->edges->from_compass, DG_COMPASS_E);
-            check_int_eq(diagram->edges->to_compass, DG_COMPASS_W);
+            check_true((diagram->edges->from_compass) == (DG_COMPASS_E));
+            check_true((diagram->edges->to_compass) == (DG_COMPASS_W));
         }
 
         it("coalesces duplicate edges in strict graphs") {
             auto diagram = parse(
                 "strict digraph { A -> B [color=red]; A -> B [label=latest]; }");
             check_not_null(diagram.get());
-            check_size_eq(count_edges(diagram.get()), 1);
-            check_str_eq(diagram->edges->color, "red");
-            check_str_eq(diagram->edges->label, "latest");
+            check_true((count_edges(diagram.get())) == (1));
+            check_true((diagram->edges->color) != nullptr && ("red") != nullptr && std::strcmp((diagram->edges->color), ("red")) == 0);
+            check_true((diagram->edges->label) != nullptr && ("latest") != nullptr && std::strcmp((diagram->edges->label), ("latest")) == 0);
         }
 
         it("fails fast on lexical and syntax errors") {
             auto lexical = parse("digraph { A @ -> B; }");
             check_null(lexical.get());
-            check_str_contains(dotgraph_get_last_error(), "lexical error");
+            check_true(std::string((dotgraph_get_last_error())).find(("lexical error")) != std::string::npos);
 
             auto partial = parse("digraph { A -> B; C -> ; }");
             check_null(partial.get());
-            check_str_contains(dotgraph_get_last_error(), "syntax error");
+            check_true(std::string((dotgraph_get_last_error())).find(("syntax error")) != std::string::npos);
 
             auto wrong_operator = parse("graph { A -> B; }");
             check_null(wrong_operator.get());
-            check_str_contains(dotgraph_get_last_error(), "does not match");
+            check_true(std::string((dotgraph_get_last_error())).find(("does not match")) != std::string::npos);
         }
 
         it("reports null input without returning a stale error") {
@@ -125,18 +125,18 @@ spec("dotgraph") {
 
             auto null_input = parse(nullptr);
             check_null(null_input.get());
-            check_str_eq(dotgraph_get_last_error(), "DOT input is NULL");
+            check_true((dotgraph_get_last_error()) != nullptr && ("DOT input is NULL") != nullptr && std::strcmp((dotgraph_get_last_error()), ("DOT input is NULL")) == 0);
         }
     }
 
     group("layout and MIR") {
         it("initializes snapshot dimensions deterministically") {
             auto snapshot = layout("digraph { A -> B; }");
-            check_double_eq(snapshot.width, 0.0, 1e-9);
-            check_double_eq(snapshot.height, 0.0, 1e-9);
+            check_true(std::fabs((snapshot.width) - (0.0)) <= (1e-9));
+            check_true(std::fabs((snapshot.height) - (0.0)) <= (1e-9));
             const std::string svg = dotgraph::DotGraphRenderer::to_svg(snapshot);
-            check_string_contains(svg, "<svg");
-            check_string_contains(svg, "</svg>");
+            check_true(std::string((svg)).find(("<svg")) != std::string::npos);
+            check_true(std::string((svg)).find(("</svg>")) != std::string::npos);
         }
 
         it("evaluates dimension and zero-valued numeric expressions") {
@@ -144,9 +144,9 @@ spec("dotgraph") {
                 "digraph { A [width=\"w*2\" height=\"h+10\" opacity=\"idx-idx\"]; }");
             const auto* node = find_rendered_node(snapshot, "A");
             check_not_null(node);
-            check_double_eq(node->width, 240.0, 1e-9);
-            check_double_eq(node->height, 60.0, 1e-9);
-            check_string_eq(node->extra.at("opacity"), "0");
+            check_true(std::fabs((node->width) - (240.0)) <= (1e-9));
+            check_true(std::fabs((node->height) - (60.0)) <= (1e-9));
+            check_true((node->extra.at("opacity")) == ("0"));
         }
 
         it("cascades graph node and edge defaults into rendered values") {
@@ -154,23 +154,23 @@ spec("dotgraph") {
                 "digraph { node [shape=box color=red fillcolor=\"#ffeeaa\" "
                 "width=\"w+10\"]; edge [color=blue label=\"default\"]; "
                 "A -> B [color=green]; }");
-            check_size_eq(snapshot.nodes.size(), 2);
+            check_true((snapshot.nodes.size()) == (2));
             for (const auto& node : snapshot.nodes) {
-                check_int_eq(node.shape, DG_SHAPE_BOX);
-                check_string_eq(node.color, "red");
-                check_string_eq(node.fillcolor, "#ffeeaa");
-                check_double_eq(node.width, 130.0, 1e-9);
+                check_true((node.shape) == (DG_SHAPE_BOX));
+                check_true((node.color) == ("red"));
+                check_true((node.fillcolor) == ("#ffeeaa"));
+                check_true(std::fabs((node.width) - (130.0)) <= (1e-9));
             }
-            check_size_eq(snapshot.edges.size(), 1);
-            check_string_eq(snapshot.edges.front().color, "green");
-            check_string_eq(snapshot.edges.front().label, "default");
+            check_true((snapshot.edges.size()) == (1));
+            check_true((snapshot.edges.front().color) == ("green"));
+            check_true((snapshot.edges.front().label) == ("default"));
         }
 
         it("rejects invalid numeric expressions") {
             auto diagram = parse("digraph { A [penwidth=\"w + (\"]; }");
             check_not_null(diagram.get());
             dotgraph::DotGraphRenderer renderer;
-            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+            check_true(([&]() { try { (void)(renderer.layout(diagram.get())); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
         }
 
         it("honors all rank directions") {
@@ -192,7 +192,7 @@ spec("dotgraph") {
 
         it("native orthogonal routes are axis-aligned and preserve self loops") {
             auto snapshot = layout("digraph { rankdir=LR; A -> B; B -> C; C -> C; }");
-            check_size_eq(snapshot.edges.size(), 3);
+            check_true((snapshot.edges.size()) == (3));
             bool saw_loop = false;
             for (const auto& edge : snapshot.edges) {
                 check(edge.points.size() >= 2);
@@ -214,20 +214,20 @@ spec("dotgraph") {
             check_not_null(diagram.get());
             diagram->routing_crossing_penalty = 5.0;
             DotGraphRenderer renderer;
-            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+            check_true(([&]() { try { (void)(renderer.layout(diagram.get())); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
             diagram->routing_crossing_penalty = -1.0;
             diagram->edges->from_compass = DG_COMPASS_C;
-            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+            check_true(([&]() { try { (void)(renderer.layout(diagram.get())); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
         }
 
         it("binds real measured local DOT named port geometry") {
             auto diagram = parse("digraph { rankdir=LR; A:out -> B:in; }");
             check_not_null(diagram.get());
             check_not_null(diagram->edges);
-            check_str_eq(diagram->edges->from_port, "out");
-            check_str_eq(diagram->edges->to_port, "in");
+            check_true((diagram->edges->from_port) != nullptr && ("out") != nullptr && std::strcmp((diagram->edges->from_port), ("out")) == 0);
+            check_true((diagram->edges->to_port) != nullptr && ("in") != nullptr && std::strcmp((diagram->edges->to_port), ("in")) == 0);
             dotgraph::DotGraphRenderer renderer;
-            check_throws_as(renderer.layout(diagram.get()), std::invalid_argument);
+            check_true(([&]() { try { (void)(renderer.layout(diagram.get())); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
 
             // Measurements belong to actual local node geometry, not label text.
             const std::vector<dotgraph::MeasuredDotPort> measured{
@@ -237,35 +237,35 @@ spec("dotgraph") {
             for (auto mode : {DG_ROUTE_ORTHOGONAL, DG_ROUTE_POLYLINE}) {
                 diagram->routing_mode = mode;
                 const auto snapshot = renderer.layout(diagram.get(), measured);
-                check_size_eq(snapshot.edges.size(), 1);
+                check_true((snapshot.edges.size()) == (1));
                 const auto* a = find_rendered_node(snapshot, "A");
                 const auto* b = find_rendered_node(snapshot, "B");
                 check_not_null(a);
                 check_not_null(b);
                 const auto& points = snapshot.edges.front().points;
                 check(points.size() >= 2);
-                check_double_eq(points.front().x, a->x + a->width, 1e-8);
-                check_double_eq(points.front().y, a->y + 12.5, 1e-8);
-                check_double_eq(points.back().x, b->x, 1e-8);
-                check_double_eq(points.back().y, b->y + 37.5, 1e-8);
+                check_true(std::fabs((points.front().x) - (a->x + a->width)) <= (1e-8));
+                check_true(std::fabs((points.front().y) - (a->y + 12.5)) <= (1e-8));
+                check_true(std::fabs((points.back().x) - (b->x)) <= (1e-8));
+                check_true(std::fabs((points.back().y) - (b->y + 37.5)) <= (1e-8));
             }
             auto invalid = measured;
             invalid[0].local_x = 80.0;
-            check_throws_as(renderer.layout(diagram.get(), invalid), std::invalid_argument);
+            check_true(([&]() { try { (void)(renderer.layout(diagram.get(), invalid)); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
             diagram->edges->from_compass = DG_COMPASS_S;
-            check_throws_as(renderer.layout(diagram.get(), measured), std::invalid_argument);
+            check_true(([&]() { try { (void)(renderer.layout(diagram.get(), measured)); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
         }
 
         it("renders nested clusters") {
             auto snapshot = layout(
                 "digraph { subgraph cluster_outer { subgraph cluster_inner { A; B; } } }");
-            check_size_eq(snapshot.clusters.size(), 2);
+            check_true((snapshot.clusters.size()) == (2));
         }
 
         it("escapes labels in generated SVG") {
             auto snapshot = layout("digraph { A [label=\"<unsafe & text>\"]; }");
             const std::string svg = dotgraph::DotGraphRenderer::to_svg(snapshot);
-            check_string_contains(svg, "&lt;unsafe &amp; text&gt;");
+            check_true(std::string((svg)).find(("&lt;unsafe &amp; text&gt;")) != std::string::npos);
             check(svg.find("<unsafe & text>") == std::string::npos);
         }
     }
@@ -283,8 +283,8 @@ spec("dotgraph") {
             auto svg = std::dynamic_pointer_cast<flex::Svg>(node);
             check_not_null(svg.get());
             check_false(svg->data().empty());
-            check_float_eq(svg->layout_width(), 320.0f, 1e-5f);
-            check_float_eq(svg->layout_height(), 200.0f, 1e-5f);
+            check_true(std::fabs((svg->layout_width()) - (320.0f)) <= (1e-5f));
+            check_true(std::fabs((svg->layout_height()) - (200.0f)) <= (1e-5f));
         }
 
         it("builds a Box-owned semantic tree for CSS and events") {
@@ -296,13 +296,13 @@ spec("dotgraph") {
                 box,
                 "digraph { A [shape=diamond fillcolor=red]; A -> B [label=\"edge\"]; }",
                 options);
-            check_string_eq(result.error, "");
+            check_true((result.error) == (""));
             check(static_cast<bool>(result));
             check_not_null(result.root);
-            check_string_eq(result.root->tag(), "dotgraph");
+            check_true((result.root->tag()) == ("dotgraph"));
             check(result.root->has_class("dotgraph"));
-            check_str_eq(result.root->attribute("data-slot")->c_str(), "dotgraph");
-            check_str_eq(result.root->attribute("data-render-mode")->c_str(), "tree");
+            check_true((result.root->attribute("data-slot")->c_str()) != nullptr && ("dotgraph") != nullptr && std::strcmp((result.root->attribute("data-slot")->c_str()), ("dotgraph")) == 0);
+            check_true((result.root->attribute("data-render-mode")->c_str()) != nullptr && ("tree") != nullptr && std::strcmp((result.root->attribute("data-render-mode")->c_str()), ("tree")) == 0);
 
             box.set_root(result.root);
             box.set_viewport(options.width, options.height);
@@ -323,15 +323,15 @@ spec("dotgraph") {
             check_not_null(edge);
             check_not_null(node_a->widget);
             check_not_null(edge->widget);
-            check_str_eq(node_a->attribute("data-shape")->c_str(), "diamond");
+            check_true((node_a->attribute("data-shape")->c_str()) != nullptr && ("diamond") != nullptr && std::strcmp((node_a->attribute("data-shape")->c_str()), ("diamond")) == 0);
             check(node_a->utility_names().count("absolute") == 1);
             check(result.root->computed_style->position == flexUI::Position::Relative);
             check_true(box.missing_utility_tokens().empty());
-            check_float_eq(node_a->style_.background_color.r, 0x22 / 255.0f, 1e-5f);
-            check_float_eq(node_a->style_.background_color.g, 0x44 / 255.0f, 1e-5f);
-            check_float_eq(node_a->style_.background_color.b, 0x66 / 255.0f, 1e-5f);
-            check_size_eq(box.query_selector_all(".dot-node").size(), 2);
-            check_size_eq(box.query_selector_all(".dot-edge").size(), 1);
+            check_true(std::fabs((node_a->style_.background_color.r) - (0x22 / 255.0f)) <= (1e-5f));
+            check_true(std::fabs((node_a->style_.background_color.g) - (0x44 / 255.0f)) <= (1e-5f));
+            check_true(std::fabs((node_a->style_.background_color.b) - (0x66 / 255.0f)) <= (1e-5f));
+            check_true((box.query_selector_all(".dot-node").size()) == (2));
+            check_true((box.query_selector_all(".dot-edge").size()) == (1));
             check_not_null(box.query_selector(".dot-edge-label"));
         }
 
