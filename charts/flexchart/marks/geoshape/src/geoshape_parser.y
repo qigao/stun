@@ -3,6 +3,7 @@
 %extra_argument { flex::chart::MarkParserContext *ctx }
 
 %token_type { char* }
+%token_destructor { free($); }
 
 %include {
 #include <assert.h>
