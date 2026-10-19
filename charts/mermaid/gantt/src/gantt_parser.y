@@ -3,6 +3,7 @@
 %extra_argument { GanttParserContext *ctx }
 
 %token_type { char* }
+%token_destructor { free($); }
 %type any_text { char* }
 %type any_word { char* }
 %type task_name { char* }
