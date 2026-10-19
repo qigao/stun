@@ -139,7 +139,7 @@ void register_flowchart_component() {
         const FlowchartParseStatus parse_status = flowchart_parse_ex(code.c_str(), &parsed_diagram);
         DiagramPtr diagram(parsed_diagram, &flowchart_diagram_free);
         if (parse_status != FLOWCHART_PARSE_COMPLETE) {
-            TLOG_ERROR("Flowchart parse failed: {}", flowchart_get_last_error());
+            TLOG_ERROR((std::string("Flowchart parse failed: ") + flowchart_get_last_error()).c_str());
             return nullptr;
         }
         if (routing_mode == "polyline") {
@@ -186,7 +186,7 @@ void register_flowchart_component() {
             snapshot.options.font_size = font_size;
             svg = mermaid::flowchart::FlowchartRenderer::to_svg(snapshot);
         } catch (const std::exception& error) {
-            TLOG_ERROR("Flowchart rendering failed: {}", error.what());
+            TLOG_ERROR((std::string("Flowchart rendering failed: ") + error.what()).c_str());
             return nullptr;
         }
         if (svg.empty()) {
