@@ -1794,13 +1794,17 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
 
+      - name: Run chart JSON CTests and install FlexUI plugin
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          production_build="$GITHUB_WORKSPACE/build/flexui-production"
+          chart_test_pattern="^(block_test|c4_test|classdiagram_test|er_test|flowchart_test|gantt_test|journey_test|kanban_test|mindmap_test|quadrant_test|sankey_test|sequence_test|statediagram_test|timeline_test|xychart_test|flowchart_renderer_test|flowchart_flex_test|DotGraphParserTest|FlexChartGeoshapeParserTest|FlexChartGeoshapeTest)$"
           ctest --test-dir "$production_build" -R "$chart_test_pattern" \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit "$EVIDENCE_DIR/chart-json-results.xml" \
             2>&1 | tee "$EVIDENCE_DIR/chart-json-ctest.log"
-
-          # #186: Tango C11 candidate is a regular CTest, not a TinyTest
-          # binary. Its mandatory denominator is kept separate.
           cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
             --parallel 2 --verbose \
             2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
@@ -3100,23 +3104,6 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
 
-          ctest --test-dir "$production_build" -R "$chart_test_pattern" \
-            --no-tests=error --verbose --output-on-failure --timeout 120 \
-            --output-junit "$EVIDENCE_DIR/chart-json-results.xml" \
-            2>&1 | tee "$EVIDENCE_DIR/chart-json-ctest.log"
-
-          # #186: Tango C11 candidate is a regular CTest, not a TinyTest
-          # binary. Its mandatory denominator is kept separate.
-          cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
-            --parallel 2 --verbose \
-            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
-          ctest --test-dir "$production_build" -R '^stun_markdown_tango_candidate_test$' \
-            --no-tests=error --verbose --output-on-failure --timeout 120 \
-            --output-junit "$EVIDENCE_DIR/tango-candidate-results.xml" \
-            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-ctest.log"
-          cmake --install "$production_build" --component FlexUIPlugin \
-            2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
-          cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
 
       - name: Prove bounded native Tree-sitter C highlighter
         if: ${{ inputs.run_runtime && success() }}
