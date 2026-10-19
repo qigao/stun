@@ -70,11 +70,11 @@ spec("kanban_parser") {
              // Root is dummy. Children should be Todo.
              REQUIRE(diagram->root->children != NULL);
              KanbanNode* todo = diagram->root->children;
-             check_str_eq(todo->label, "Todo");
+             check_true(todo->label != NULL && strcmp(todo->label, "Todo") == 0);
              
              REQUIRE(todo->children != NULL);
              KanbanNode* task1 = todo->children;
-             check_str_eq(task1->label, "Task 1");
+             check_true(task1->label != NULL && strcmp(task1->label, "Task 1") == 0);
              REQUIRE(task1->type == KANBAN_NODE_SQUARE);
              
              kanban_free_diagram(diagram);
@@ -93,17 +93,17 @@ spec("kanban_parser") {
              
              KanbanNode* col1 = diagram->root->children;
              REQUIRE(col1 != NULL);
-             check_str_eq(col1->label, "Col1");
+             check_true(col1->label != NULL && strcmp(col1->label, "Col1") == 0);
              
              KanbanNode* col2 = col1->next;
              REQUIRE(col2 != NULL);
-             check_str_eq(col2->label, "Col2");
+             check_true(col2->label != NULL && strcmp(col2->label, "Col2") == 0);
              
              REQUIRE(col1->children != NULL);
-             check_str_eq(col1->children->label, "Item1");
+             check_true(col1->children->label != NULL && strcmp(col1->children->label, "Item1") == 0);
              
              REQUIRE(col2->children != NULL);
-             check_str_eq(col2->children->label, "Item2");
+             check_true(col2->children->label != NULL && strcmp(col2->children->label, "Item2") == 0);
              
              kanban_free_diagram(diagram);
         }
@@ -119,11 +119,11 @@ spec("kanban_parser") {
              
              KanbanNode* item1 = diagram->root->children;
              REQUIRE(item1 != NULL);
-             check_str_eq(item1->label, "Item1");
+             check_true(item1->label != NULL && strcmp(item1->label, "Item1") == 0);
              
              KanbanNode* item2 = item1->next;
              REQUIRE(item2 != NULL);
-             check_str_eq(item2->label, "Item2");
+             check_true(item2->label != NULL && strcmp(item2->label, "Item2") == 0);
              
              kanban_free_diagram(diagram);
         }
