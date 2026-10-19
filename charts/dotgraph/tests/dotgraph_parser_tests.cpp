@@ -1,3 +1,4 @@
+#include <cmath>
 #include "tinytest.h"
 
 #include "dotgraph/dotgraph_ast.h"
