@@ -35,7 +35,7 @@ void ChartComponent::register_component() {
         AstProgram program;
         std::string error;
         if (!parse_chart(content.c_str(), &program, error)) {
-             TLOG_ERROR("Chart parse error: {}", error);
+             TLOG_ERROR((std::string("Chart parse error: ") + error).c_str());
              return nullptr;
         }
 

@@ -28,8 +28,8 @@ void InfographicComponent::register_component() {
             UnifiedParser parser;
             auto result = parser.parse(source);
             if (!result.success) {
-                TLOG_ERROR("Infographic parse error at {}:{}: {}", result.error_line,
-                           result.error_column, result.get_error());
+                TLOG_ERROR((std::string("Infographic parse error at ") + std::to_string(result.error_line) + ":" +
+                             std::to_string(result.error_column) + ": " + result.get_error()).c_str());
                 return nullptr;
             }
 
