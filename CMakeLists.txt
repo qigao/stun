@@ -47,6 +47,9 @@ add_subdirectory(tools)
 include(FindTools)
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
+# gCanvas is a repository-owned shared module, but Flex and FlexUI consume its
+# targets while they are configured. Define it before those consumers.
+add_subdirectory(shared/gcanvas)
 add_subdirectory(flex)
 add_subdirectory(flexUI)
 add_subdirectory(TextEdit)
