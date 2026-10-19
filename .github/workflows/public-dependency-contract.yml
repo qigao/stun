@@ -21,6 +21,16 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Reject retired TurboParser and optional charts switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'TurboParser|turbo_parser\.h|turbo_json_|turbo_parse_json|turbo_free_json|TURBOPARSER_ROOT|STUN_BUILD_CHARTS' \
+            --exclude='public-dependency-contract.yml' --exclude-dir=.git .; then
+            echo "Retired parser API or optional chart switch remains in the source tree" >&2
+            exit 1
+          fi
+
       - name: Reject legacy parser link or include reintroduction
         run: |
           set -euo pipefail
