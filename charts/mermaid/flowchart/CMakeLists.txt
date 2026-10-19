@@ -90,8 +90,10 @@ set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid
 
 # 新的 Flex 集成测试
 add_executable(flowchart_flex_test tests/test_flex.cpp)
+# test_flex.cpp includes <flex.h>; link the compiler target to inherit the
+# generated flex_parser_gen.h include directory and generation dependency.
 target_link_libraries(flowchart_flex_test PRIVATE
-    mermaid_flowchart flex_runtime Salts::TinyTest)
+    mermaid_flowchart flex_runtime flex Salts::TinyTest)
 add_test(NAME flowchart_flex_test COMMAND flowchart_flex_test)
 set_target_properties(flowchart_flex_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
