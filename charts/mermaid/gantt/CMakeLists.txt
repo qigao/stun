@@ -31,7 +31,7 @@ target_include_directories(gantt PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(gantt PUBLIC TurboParser::Parser)
+target_link_libraries(gantt PUBLIC Salts::JsonParser)
 
 # Test executable
 add_executable(gantt_test tests/test_parser.c)
