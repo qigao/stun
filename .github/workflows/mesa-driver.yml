@@ -1144,7 +1144,1313 @@ jobs:
           )
           cmake --build "$production_build" --target "${chart_targets[@]}" --parallel 2 --verbose \
             2>&1 | tee "$EVIDENCE_DIR/chart-json-build.log"
-          chart_test_pattern='^(block_test|c4_test|classdiagram_test|er_test|flowchart_test|gantt_test|journey_test|kanban_test|mindmap_test|quadrant_test|sankey_test|sequence_test|statediagram_test|timeline_test|xychart_test|flowchart_renderer_test|flowchart_flex_test|DotGraphParserTest|FlexChartGeoshapeParserTest|FlexChartGeoshapeTest)          # binary. Its mandatory denominator is kept separate.
+          chart_test_pattern='^(block_test|c4_test|classdiagram_test|er_test|flowchart_test|gantt_test|journey_test|kanban_test|mindmap_test|quadrant_test|sankey_test|sequence_test|statediagram_test|timeline_test|xychart_test|flowchart_renderer_test|flowchart_flex_test|DotGraphParserTest|FlexChartGeoshapeParserTest|FlexChartGeoshapeTest)
+          cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
+          ctest --test-dir "$production_build" -R '^stun_markdown_tango_candidate_test$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tango-candidate-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-ctest.log"
+          cmake --install "$production_build" --component FlexUIPlugin \
+            2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
+          cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
+
+      - name: Prove bounded native Tree-sitter C highlighter
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          production_build="$GITHUB_WORKSPACE/build/flexui-production"
+          # Build actual C provider and Catch2 contract tests with the same
+          # production sanitizer flags; no grammar or SDK cutover.
+          cmake --build "$production_build" \
+            --target ts-lang-c test_ts_lang_c test_ts_highlighter_dso_lifetime \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-build.log"
+          ctest --test-dir "$production_build" \
+            -R '^(test_ts_lang_c|test_ts_highlighter_dso_lifetime)$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tree-sitter-c-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-ctest.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          import os
+          evidence = Path(os.environ["EVIDENCE_DIR"])
+          cases = list(ET.parse(evidence / "tree-sitter-c-results.xml")
+                       .getroot().iter("testcase"))
+          expected = {"test_ts_lang_c", "test_ts_highlighter_dso_lifetime"}
+          assert len(cases) == 2 and {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(t)) for c in cases
+                         for t in ("failure", "error", "skipped"))
+          print("Bounded C Tree-sitter + leased DSO lifetime CTests: 2/2")
+          PY
+
+      - name: Consume installed PluginSDK and Services without host dependencies
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD SALTS_ROOT SALTS_UTILS_ROOT
+          for component in PluginSDK Services; do
+            consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-$component"
+            cmake -S flexUI/tests/plugin_install_consumer -B "$consumer_build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DFLEXUI_CONSUMER_COMPONENT=$component" \
+              "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT" \
+              -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+              -DCMAKE_DISABLE_FIND_PACKAGE_Salts=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_SaltsUtils=TRUE \
+              '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-configure.log"
+            cmake --build "$consumer_build" --verbose --parallel 2 \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-build.log"
+            ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+              --output-junit "$EVIDENCE_DIR/$component-consumer-results.xml" \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-ctest.log"
+          done
+
+      - name: Run the installed C plugin and C++ host round trip
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-host"
+          cmake -S flexUI/examples/plugin_echo -B "$consumer_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT;$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+            -DFLEXUI_EXAMPLE_BUILD_HOST=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_ADDRESS_SANITIZER=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_UNDEFINED_SANITIZER=ON \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-configure.log"
+          cmake --build "$consumer_build" --verbose --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-build.log"
+          ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/host-consumer-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-ctest.log"
+
+      - name: Verify production results and installed consumer paths
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          flexui_sdk = Path(os.environ['FLEXUI_INSTALL_ROOT']).resolve(strict=True)
+          production = workspace / 'build/flexui-production'
+          tests = (evidence / 'production-tests.txt').read_text().splitlines()
+          results = ET.parse(evidence / 'production-results.xml').getroot()
+          cases = list(results.iter('testcase'))
+          assert {c.attrib['name'] for c in cases} == set(tests) and len(cases) == len(tests)
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'production-ctest.log').read_text())
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == len(tests), (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
+          totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
+
+          tango_cases = list(ET.parse(
+              evidence / 'tango-candidate-results.xml').getroot().iter('testcase'))
+          assert len(tango_cases) == 1
+          assert tango_cases[0].attrib['name'] == 'stun_markdown_tango_candidate_test'
+          assert not any(list(tango_cases[0].iter(tag))
+                         for tag in ('failure', 'error', 'skipped'))
+          tango_log = (evidence / 'tango-candidate-ctest.log').read_text()
+          assert 'Tango C11 candidate consumer: 64/64 lifecycle cases passed (4 sources x 16 repeats)' in tango_log
+
+          installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
+                             'Services': 'flexui_installed_services_consumer',
+                             'host': 'flexui_plugin_install_consumer'}
+          for component, expected in installed_tests.items():
+              results = ET.parse(evidence / f'{component}-consumer-results.xml').getroot()
+              cases = list(results.iter('testcase'))
+              assert len(cases) == 1 and cases[0].attrib['name'] == expected, component
+              assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+
+          commands = json.loads((production / 'compile_commands.json').read_text())
+          for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
+                         'flexUI/src/textedit.cpp', 'flex/modules/render/stb_sprintf.cpp',
+                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp',
+                         'flexUI/src/widgets/markdown_widget.cpp',
+                         'tools/md/src/md_parser_driver.cpp',
+                         'tools/md/src/md_inline_parser.cpp',
+                         'tools/md/src/md_block_processor.cpp'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
+
+          for suffix in ('shared/markdown/tests/markdown_tango_candidate_test.c',
+                         'shared/markdown/src/markdown_c11.c', 'tango/src/tui_widgets.c'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in
+                         ('-fsanitize=address', '-fsanitize=undefined')), suffix
+
+          binaries = {name: production / 'bin' / name for name in tests}
+          binaries['installed_sdk'] = workspace / 'build/flexui-installed-PluginSDK/flexui_installed_sdk_consumer'
+          binaries['installed_services'] = workspace / 'build/flexui-installed-Services/flexui_installed_services_consumer'
+          binaries['installed_host'] = workspace / 'build/flexui-installed-host/bin/flexui_plugin_consumer'
+          core_pattern = re.compile(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', re.I)
+          providers = {}
+          env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'LD_PRELOAD')}
+          for name, binary in binaries.items():
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True, env=env)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True, env=env)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              paths = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if core_pattern.fullmatch(path.name):
+                      paths.add(str(path))
+              assert len(paths) <= 1, (name, paths)
+              if name in ('test_render_semantics', 'test_widget_contracts', 'installed_host'):
+                  assert len(paths) == 1, name
+              providers[name] = sorted(paths)
+
+          forbidden = [str(production), str(workspace / '.ci/install-sources'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-package-build'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-isolated')]
+          for component in ('PluginSDK', 'Services', 'host'):
+              build = workspace / f'build/flexui-installed-{component}'
+              command_text = (build / 'compile_commands.json').read_text()
+              command_text += (evidence / f'{component}-consumer-build.log').read_text()
+              assert all(path not in command_text for path in forbidden), component
+              pairs = [line.split('=', 1) for line in (build / 'installed-component-Debug.txt').read_text().splitlines()]
+              expected = {'FlexUIConfig', 'Includes'}
+              if component == 'Services':
+                  expected.add('Library')
+              elif component == 'host':
+                  expected.update(('Services', 'Host', 'Core', 'Toml'))
+              assert len(pairs) == len(expected) and {key for key, _ in pairs} == expected
+              for key, raw in pairs:
+                  prefix = sdk if key in ('Core', 'Toml') else flexui_sdk
+                  for value in raw.split(';'):
+                      path = Path(value).resolve(strict=True)
+                      assert path.is_relative_to(prefix), (component, key, path)
+                      if key not in ('FlexUIConfig', 'Includes'):
+                          assert value in command_text, (component, key, 'missing from actual link command')
+          result = {'production_ctest_passed': len(tests),
+                    'tango_c11_candidate_ctest_passed': 1,
+                    'tango_c11_candidate_cases_passed': 64,
+                    'installed_ctest_passed': len(installed_tests),
+                    'tinytest': totals, 'core_runtime_providers': providers,
+                    'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
+          (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Production FlexUI and exported components'
+            echo 'Actual repository targets with ASan/UBSan; Linux without a window/GPU backend.'
+            echo 'Installed C PluginSDK, C++ Services, and C plugin/host round trip executed separately.'
+            echo '```json'
+            cat "$EVIDENCE_DIR/production-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload package and consumer evidence
+        if: ${{ always() && inputs.run_runtime && steps.unicode_paths.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicode-install-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/unicode-install-evidence
+            build/unicode-install-consumer/*.log
+            build/unicode-install-consumer/*.json
+            build/unicode-install-consumer/*.map
+            build/unicode-install-consumer/*.txt
+            build/unicode-install-consumer/Testing/Temporary/LastTest.log
+            build/flexui-production/CMakeCache.txt
+            build/flexui-production/compile_commands.json
+            build/flexui-production/Testing/Temporary/LastTest.log
+            build/flexui-installed-*/CMakeCache.txt
+            build/flexui-installed-*/compile_commands.json
+            build/flexui-installed-*/installed-component-*.txt
+            build/flexui-installed-*/Testing/Temporary/LastTest.log
+          if-no-files-found: error
+
+      - name: Define isolated paths
+        if: ${{ inputs.run_runtime && success() }}
+        id: desktop_paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SALTS_SHA" && test -n "$SALTS_UTILS_SHA"
+          test -f "$RUNNER_TEMP/stun-unicode-sdk/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$RUNNER_TEMP/stun-unicode-sdk/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test ! -e .ci/install-sources
+          test ! -e "$RUNNER_TEMP/stun-unicode-package-build"
+          {
+            echo "SALTS_ROOT=$RUNNER_TEMP/stun-unicode-sdk"
+            echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-unicode-sdk"
+            echo "PACKAGE_BUILD_ROOT=$RUNNER_TEMP/stun-unicode-package-build"
+            echo "PORTS_ROOT=$RUNNER_TEMP/stun-unicode-external-ports"
+            echo "EVIDENCE_DIR=$GITHUB_WORKSPACE/build/desktop-evidence"
+            echo "MESA_ROOT=$RUNNER_TEMP/stun-mesa-sdk"
+            echo "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1"
+            echo "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
+            echo "LD_LIBRARY_PATH=$RUNNER_TEMP/stun-unicode-sdk/lib"
+          } >> "$GITHUB_ENV"
+      - name: Prepare tools and record exact provenance
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          grep -Fqx "Salts=$SALTS_SHA" build/unicode-install-evidence/provenance.txt
+          grep -Fqx "SaltsUtils=$SALTS_UTILS_SHA" build/unicode-install-evidence/provenance.txt
+          test ! -e .ci/install-sources
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -n "$VCPKG_TOOL_REVISION"
+          test -n "$VCPKG_SCRIPTS_REVISION"
+          test -n "$VCPKG_CACHE_REVISION"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SCRIPTS_REVISION"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg_port_baseline=%s\nvcpkg_tool=%s\nvcpkg_scripts=%s\nvcpkg_cache_revision=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" \
+            "$VCPKG_PORT_BASELINE" "$VCPKG_TOOL_REVISION" \
+            "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
+            | tee "$EVIDENCE_DIR/provenance.txt"
+          # Mesa already refreshed apt metadata in this same runner.
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool \
+            xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
+            vulkan-validationlayers xvfb xauth fonts-dejavu-core
+          dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
+          mapfile -t vulkan_system_libs < <(dpkg -L libvulkan-dev | grep -E '/libvulkan\.so$')
+          test "${#vulkan_system_libs[@]}" -eq 1
+          test -f /usr/include/vulkan/vulkan.h
+          vulkan_system_library="$(readlink -e "${vulkan_system_libs[0]}")"
+          test -n "$vulkan_system_library"
+          {
+            echo "VULKAN_SYSTEM_LIBRARY=$vulkan_system_library"
+            echo "VULKAN_SYSTEM_INCLUDE=/usr/include"
+            echo "VULKAN_EXPECTED_LOADER=$vulkan_system_library"
+          } >> "$GITHUB_ENV"
+          sha256sum "$vulkan_system_library" > "$EVIDENCE_DIR/vulkan-loader.sha256"
+          test -x "$RUNNER_TEMP/stun-build-tools/cmake/data/bin/cmake"
+      - name: Verify driver package and exact-head lifecycle receipt
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          source = Path('build/mesa-evidence')
+          root = Path(os.environ['MESA_ROOT'])
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
+          assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
+          assert provenance['vcpkg_port_baseline'] == os.environ['VCPKG_PORT_BASELINE'], provenance
+          patch = Path('cmake/ci/mesa/module-cleanup.patch')
+          assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
+          rows = json.loads((source / 'results.json').read_text())
+          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          assert len(rows) == 20
+          assert {(r['variant'], r['mode'], r['cycles']) for r in rows} == {
+              (v, m, n) for v in ('baseline', 'patched') for m in readbacks for n in (1, 4)}
+          for row in rows:
+              assert row['completed'] and row['pixel_checks'] == readbacks[row['mode']] * row['cycles'], row
+              if row['variant'] == 'patched' or row['mode'] == 'init':
+                  assert row['exit_code'] == 0 and not row['leaks'], row
+              elif row['mode'] in ('draw', 'overlap', 'threads'):
+                  assert row['exit_code'] != 0 and row['leaks'], row
+          archive = source / 'mesa-sdk.tar.xz'
+          archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+          assert archive_hash == (source / 'mesa-sdk.sha256').read_text().split()[0]
+          # Mesa just built and patched this very installation on this
+          # runner. Verify its existing bytes without archive re-extraction.
+          assert root.is_dir(), root
+          assert (root / 'lib').is_dir()
+          libs = {}
+          for filename, report in ((f"libgallium-{provenance['Mesa']}.so", 'patched-driver.sha256'),
+                                   ('libGLX_mesa.so.0.0.0', 'patched-glx.sha256')):
+              path = (root / 'lib' / filename).resolve(strict=True)
+              assert path.parent == (root / 'lib').resolve(strict=True)
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert digest == (source / report).read_text().split()[0], path
+              libs[filename] = digest
+          assert (root / 'lib/libGLX_mesa.so.0').resolve(strict=True) == root / 'lib/libGLX_mesa.so.0.0.0'
+          assert not any(p.name.startswith('libsalts') for p in (root / 'lib').iterdir())
+          receipt = {'source_head': provenance['Stun'], 'workflow_run': os.environ['GITHUB_RUN_ID'],
+                     'mesa_version': provenance['Mesa'], 'source_archive_sha256': provenance['ArchiveSHA256'],
+                     'package_sha256': archive_hash, 'patch_sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
+                     'libraries': libs, 'patched_processes': 10, 'patched_pixel_checks': 65}
+          (evidence / 'mesa-package.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          shutil.copyfile(source / 'provenance.txt', evidence / 'mesa-provenance.txt')
+          shutil.copyfile(source / 'results.json', evidence / 'mesa-lifecycle-results.json')
+          print(json.dumps(receipt, indent=2))
+          PY
+
+      - name: Verify single installed SDK and graphics cache for Desktop
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          status="$PORTS_ROOT/flexui/vcpkg/status"
+          test -s "$status"
+          ! grep -Fqx 'Package: vulkan-loader' "$status"
+          ! grep -Fqx 'Package: vulkan-headers' "$status"
+          cp "$status" "$EVIDENCE_DIR/graphics-packages.txt"
+          cp build/unicode-install-evidence/flexui-ports-install.log "$EVIDENCE_DIR/graphics-install.log"
+          grep -Eq 'Restored [1-9][0-9]* package\(s\) from NuGet' "$EVIDENCE_DIR/graphics-install.log"
+          ! grep -Eq '^Building [^:]+:x64-linux' "$EVIDENCE_DIR/graphics-install.log"
+          test ! -e .ci/install-sources
+          test ! -e "$PACKAGE_BUILD_ROOT"
+
+      - name: Configure and build real window and renderer targets
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          ports="$PORTS_ROOT/flexui"
+          cmake -S . -B build/desktop-runtime -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT" \
+            "-DOpenSSL_DIR=$PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            "-DVulkan_LIBRARY=$VULKAN_SYSTEM_LIBRARY" \
+            "-DVulkan_INCLUDE_DIR=$VULKAN_SYSTEM_INCLUDE" \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=OFF \
+            -DGCANVAS_BUILD_OPENGL=ON -DGCANVAS_BUILD_VULKAN=ON -DGCANVAS_BUILD_SVG=ON \
+            -DGCANVAS_BUILD_WINDOW=ON -DGCANVAS_BUILD_TESTS=ON \
+            -DGCANVAS_BUILD_GPU_TESTS=ON -DGCANVAS_BUILD_EXAMPLES=ON \
+            -DGCANVAS_ENABLE_VULKAN_VALIDATION=ON \
+            -DFLEX_BUILD_GCANVAS_GPU_TESTS=ON \
+            -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=ON -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF \
+            -DFLEX_BUILD_BACKEND_OPENGL=OFF -DFLEX_BUILD_BACKEND_VULKAN=OFF \
+            -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-configure.log"
+          grep -Fq "Found Vulkan: $VULKAN_SYSTEM_LIBRARY" "$EVIDENCE_DIR/desktop-configure.log"
+          cmake --build build/desktop-runtime --parallel 2 --verbose --target \
+            test_gcanvas_window_host test_gcanvas_plugin_window_host gcanvas_gpu_test gcanvas_showcase \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-build.log"
+      - name: Select and verify software graphics drivers
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD VK_ICD_FILENAMES VK_ADD_DRIVER_FILES LIBGL_DRIVERS_PATH
+          # Select exactly one installed Lavapipe manifest, never a fallback GPU.
+          mapfile -t drivers < <(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd[^/]*\.json$')
+          test "${#drivers[@]}" -eq 1
+          export VK_DRIVER_FILES="${drivers[0]}"
+          mapfile -t vk_libs < <(dpkg -L mesa-vulkan-drivers | grep -E '/libvulkan_lvp\.so$')
+          test "${#vk_libs[@]}" -eq 1
+          export VULKAN_EXPECTED_DRIVER="$(readlink -e "${vk_libs[0]}")"
+          sha256sum "$VULKAN_EXPECTED_DRIVER" > "$EVIDENCE_DIR/vulkan-library.sha256"
+          export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/stun-desktop-xdg"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          cat "$VK_DRIVER_FILES" > "$EVIDENCE_DIR/vulkan-driver.json"
+          sha256sum "$VK_DRIVER_FILES" > "$EVIDENCE_DIR/vulkan-driver.sha256"
+          xvfb-run -a env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            glxinfo -B 2>&1 | tee "$EVIDENCE_DIR/opengl-driver.log"
+          xvfb-run -a vulkaninfo --summary 2>&1 | tee "$EVIDENCE_DIR/vulkan-driver.log"
+          grep -q 'OpenGL renderer string: llvmpipe' "$EVIDENCE_DIR/opengl-driver.log"
+          grep -q 'PHYSICAL_DEVICE_TYPE_CPU' "$EVIDENCE_DIR/vulkan-driver.log"
+          grep -q 'VK_LAYER_KHRONOS_validation' "$EVIDENCE_DIR/vulkan-driver.log"
+          {
+            echo "VK_DRIVER_FILES=$VK_DRIVER_FILES"
+            echo "VULKAN_EXPECTED_DRIVER=$VULKAN_EXPECTED_DRIVER"
+            echo "LIBGL_ALWAYS_SOFTWARE=$LIBGL_ALWAYS_SOFTWARE"
+            echo "GALLIUM_DRIVER=$GALLIUM_DRIVER"
+            echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+          } >> "$GITHUB_ENV"
+      - name: Execute both backends and real FlexUI window lifecycle
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS VK_ICD_FILENAMES VK_ADD_DRIVER_FILES LIBGL_DRIVERS_PATH
+          pattern='^(test_gcanvas_window_host|test_gcanvas_plugin_window_host|gcanvas_gpu_opengl|gcanvas_gpu_vulkan|gcanvas_showcase_opengl|gcanvas_showcase_vulkan)$'
+          ctest --test-dir build/desktop-runtime -R "$pattern" --show-only=json-v1 \
+            > "$EVIDENCE_DIR/selected-tests.json"
+          xvfb-run -a -s '-screen 0 1280x720x24 -nolisten tcp' \
+            env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            LSAN_OPTIONS=exitcode=0 \
+            LD_DEBUG=files LD_DEBUG_OUTPUT="$EVIDENCE_DIR/loader" \
+            ctest --test-dir build/desktop-runtime -R "$pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 180 \
+            --output-junit "$EVIDENCE_DIR/desktop-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-ctest.log"
+      - name: Verify execution, instrumentation, and runtime ownership
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          sha256sum --check "$EVIDENCE_DIR/vulkan-library.sha256"
+          sha256sum --check "$EVIDENCE_DIR/vulkan-loader.sha256"
+          python3 cmake/ci/mesa/verify_desktop_drivers.py
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          build = Path('build/desktop-runtime').resolve(strict=True)
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          expected_vulkan_loader = Path(os.environ['VULKAN_EXPECTED_LOADER']).resolve(strict=True)
+          expected = {'test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
+                      'gcanvas_gpu_opengl', 'gcanvas_gpu_vulkan',
+                      'gcanvas_showcase_opengl', 'gcanvas_showcase_vulkan'}
+          selected = json.loads((evidence / 'selected-tests.json').read_text())['tests']
+          assert len(selected) == len(expected) and {t['name'] for t in selected} == expected
+          cases = list(ET.parse(evidence / 'desktop-results.xml').getroot().iter('testcase'))
+          assert len(cases) == len(expected) and {c.attrib['name'] for c in cases} == expected
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'desktop-ctest.log').read_text())
+          assert not re.search(r'VULKAN VALIDATION \[(ERROR|WARNING)\]|ERROR: AddressSanitizer:|runtime error:', log)
+
+          # LeakSanitizer stays enabled. Only independently tracked upstream
+          # GLFW/X11 owners (#45/#47/#65) may remain; any new owner is fatal.
+          leak_blocks = re.findall(
+              r'((?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\).*?)(?=(?:\n(?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\))|(?:\n(?:\d+: )?SUMMARY: AddressSanitizer:)|\Z)',
+              log, re.S)
+          leak_owners = {'x11_init': 0, 'glfw_glx': 0}
+          for block in leak_blocks:
+              if re.search(r'_glfw(?:Connect|Init)X11.*?src/x11_init\.c', block, re.S):
+                  leak_owners['x11_init'] += 1
+              elif re.search(r'(?:extensionSupportedGLX|_glfwInitGLX).*?src/glx_context\.c', block, re.S):
+                  leak_owners['glfw_glx'] += 1
+              else:
+                  raise AssertionError(block)
+              assert not re.search(r'libgallium|rtasm_execmem|u_cpu_detect|mesa-build', block, re.I), block
+          leak_summaries = re.findall(
+              r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)
+          assert bool(leak_blocks) == bool(leak_summaries)
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == 2, (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == 2 and all(int(f) == 0 for _, f in assertions)
+          totals['assertions_passed'] = sum(int(p) for p, _ in assertions)
+          commands_text = (build / 'compile_commands.json').read_text()
+          commands = json.loads(commands_text)
+          for suffix in ('flexUI/modules/desktop/gcanvas_window_host.cpp',
+                         'flexUI/modules/desktop/gcanvas_plugin_window_host.cpp',
+                         'flex/render/engines/gcanvas/renderer.cpp',
+                         'shared/gcanvas/src/window_impl.cpp',
+                         'shared/gcanvas/src/backends/gl/context_impl_gl.cpp',
+                         'shared/gcanvas/src/backends/opengl/context_opengl.cpp',
+                         'shared/gcanvas/src/backends/vulkan/context_impl_vulkan.cpp'):
+              matching = [c for c in commands if c['file'].endswith(suffix)]
+              assert len(matching) == 1, suffix
+              assert all(flag in matching[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined')), suffix
+          forbidden = [str(Path(os.environ['GITHUB_WORKSPACE']) / '.ci/sources'),
+                       os.environ['PACKAGE_BUILD_ROOT'],
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-desktop-quarantine')]
+          assert all(not Path(p).exists() for p in forbidden[:2])
+          link_text = (evidence / 'desktop-build.log').read_text()
+          assert all(p not in commands_text + link_text for p in forbidden)
+          providers = {}
+          for name in ('test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
+                       'gcanvas_gpu_test', 'gcanvas_showcase'):
+              binary = build / 'bin' / name
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              assert all(p not in dynamic + loader for p in forbidden)
+              core = set()
+              vulkan_loaders = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if re.fullmatch(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', path.name, re.I):
+                      core.add(str(path))
+                  if re.fullmatch(r'libvulkan\.so(?:\.\d+)*', path.name):
+                      vulkan_loaders.add(path)
+              assert vulkan_loaders <= {expected_vulkan_loader}, (name, vulkan_loaders)
+              assert len(core) == (1 if name.startswith('test_') else 0), (name, core)
+              providers[name] = {'core': sorted(core),
+                                 'vulkan_loader': sorted(map(str, vulkan_loaders))}
+          result = {'ctest_passed': len(cases), 'tinytest': totals,
+                    'runtime_providers': providers,
+                    'known_upstream_leak_blocks': len(leak_blocks),
+                    'known_upstream_leak_owners': leak_owners,
+                    'known_upstream_leak_summaries': leak_summaries,
+                    'driver_runtime_providers': json.loads((evidence / 'desktop-driver-providers.json').read_text()),
+                    'scope': 'Linux Xvfb, patched Mesa llvmpipe and distribution Lavapipe; real FlexUI window/plugin lifecycle and gCanvas pixel/showcase tests. No physical GPU, TurboScript editor, installed desktop, or Windows/macOS claim.'}
+          (evidence / 'desktop-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Real gCanvas window and renderer validation'
+            echo '```json'
+            cat "$EVIDENCE_DIR/desktop-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Cache telemetry includes Mesa Meson + all CMake compiler-launcher
+      # invocations in this one runner. No semantic assertion depends on hits.
+      - name: Report compiler cache effectiveness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ccache >/dev/null 2>&1; then
+            mkdir -p build/mesa-evidence
+            ccache --show-stats | tee build/mesa-evidence/ccache-stats.txt
+            {
+              echo '### Native compiler cache'
+              echo 'Meson Mesa + installed Salts/FlexUI CMake builds; cache hits are performance evidence, not conformance.'
+              echo '~~~text'
+              cat build/mesa-evidence/ccache-stats.txt
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Preserve exact-head evidence even on failure
+        if: ${{ always() && inputs.run_runtime && steps.desktop_paths.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/desktop-evidence
+            build/mesa-evidence/ccache-stats.txt
+            build/desktop-runtime/CMakeCache.txt
+            build/desktop-runtime/compile_commands.json
+            build/desktop-runtime/Testing/Temporary/LastTest.log
+          if-no-files-found: error
+
+      - name: Preserve installed SDK after runtime failure
+        if: ${{ failure() && inputs.run_runtime && steps.dependency_packages.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/stun-salts-sdk.tar.gz" \
+            -C "$RUNNER_TEMP/stun-unicode-sdk" . \
+            -C "$GITHUB_WORKSPACE/build/unicode-install-evidence" provenance.txt
+
+      - name: Upload SDK from failed runtime
+        if: ${{ failure() && inputs.run_runtime && steps.dependency_packages.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: salts-sdk-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Save bounded native compiler cache
+        if: ${{ success() && steps.compiler_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
+
+          ctest --test-dir "$production_build" -R "$chart_test_pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/chart-json-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/chart-json-ctest.log"
+
+          # #186: Tango C11 candidate is a regular CTest, not a TinyTest
+          # binary. Its mandatory denominator is kept separate.
+          cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
+          ctest --test-dir "$production_build" -R '^stun_markdown_tango_candidate_test$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tango-candidate-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tango-candidate-ctest.log"
+          cmake --install "$production_build" --component FlexUIPlugin \
+            2>&1 | tee "$EVIDENCE_DIR/flexui-install.log"
+          cp "$production_build/install_manifest_FlexUIPlugin.txt" "$EVIDENCE_DIR/"
+
+      - name: Prove bounded native Tree-sitter C highlighter
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          production_build="$GITHUB_WORKSPACE/build/flexui-production"
+          # Build actual C provider and Catch2 contract tests with the same
+          # production sanitizer flags; no grammar or SDK cutover.
+          cmake --build "$production_build" \
+            --target ts-lang-c test_ts_lang_c test_ts_highlighter_dso_lifetime \
+            --parallel 2 --verbose \
+            2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-build.log"
+          ctest --test-dir "$production_build" \
+            -R '^(test_ts_lang_c|test_ts_highlighter_dso_lifetime)$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/tree-sitter-c-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/tree-sitter-c-ctest.log"
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          import os
+          evidence = Path(os.environ["EVIDENCE_DIR"])
+          cases = list(ET.parse(evidence / "tree-sitter-c-results.xml")
+                       .getroot().iter("testcase"))
+          expected = {"test_ts_lang_c", "test_ts_highlighter_dso_lifetime"}
+          assert len(cases) == 2 and {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(t)) for c in cases
+                         for t in ("failure", "error", "skipped"))
+          print("Bounded C Tree-sitter + leased DSO lifetime CTests: 2/2")
+          PY
+
+      - name: Consume installed PluginSDK and Services without host dependencies
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD SALTS_ROOT SALTS_UTILS_ROOT
+          for component in PluginSDK Services; do
+            consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-$component"
+            cmake -S flexUI/tests/plugin_install_consumer -B "$consumer_build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              "-DFLEXUI_CONSUMER_COMPONENT=$component" \
+              "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT" \
+              -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+              -DCMAKE_DISABLE_FIND_PACKAGE_Salts=TRUE -DCMAKE_DISABLE_FIND_PACKAGE_SaltsUtils=TRUE \
+              '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-configure.log"
+            cmake --build "$consumer_build" --verbose --parallel 2 \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-build.log"
+            ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+              --output-junit "$EVIDENCE_DIR/$component-consumer-results.xml" \
+              2>&1 | tee "$EVIDENCE_DIR/$component-consumer-ctest.log"
+          done
+
+      - name: Run the installed C plugin and C++ host round trip
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          consumer_build="$GITHUB_WORKSPACE/build/flexui-installed-host"
+          cmake -S flexUI/examples/plugin_echo -B "$consumer_build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_PREFIX_PATH=$FLEXUI_INSTALL_ROOT;$SALTS_ROOT" \
+            "-DOpenSSL_DIR=$EXTERNAL_PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF \
+            -DFLEXUI_EXAMPLE_BUILD_HOST=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_ADDRESS_SANITIZER=ON \
+            -DFLEXUI_EXAMPLE_ENABLE_UNDEFINED_SANITIZER=ON \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-configure.log"
+          cmake --build "$consumer_build" --verbose --parallel 2 \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-build.log"
+          ctest --test-dir "$consumer_build" --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$EVIDENCE_DIR/host-consumer-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/host-consumer-ctest.log"
+
+      - name: Verify production results and installed consumer paths
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          flexui_sdk = Path(os.environ['FLEXUI_INSTALL_ROOT']).resolve(strict=True)
+          production = workspace / 'build/flexui-production'
+          tests = (evidence / 'production-tests.txt').read_text().splitlines()
+          results = ET.parse(evidence / 'production-results.xml').getroot()
+          cases = list(results.iter('testcase'))
+          assert {c.attrib['name'] for c in cases} == set(tests) and len(cases) == len(tests)
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'production-ctest.log').read_text())
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == len(tests), (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == len(tests) and all(int(failed) == 0 for _, failed in assertions)
+          totals['assertions_passed'] = sum(int(passed) for passed, _ in assertions)
+
+          tango_cases = list(ET.parse(
+              evidence / 'tango-candidate-results.xml').getroot().iter('testcase'))
+          assert len(tango_cases) == 1
+          assert tango_cases[0].attrib['name'] == 'stun_markdown_tango_candidate_test'
+          assert not any(list(tango_cases[0].iter(tag))
+                         for tag in ('failure', 'error', 'skipped'))
+          tango_log = (evidence / 'tango-candidate-ctest.log').read_text()
+          assert 'Tango C11 candidate consumer: 64/64 lifecycle cases passed (4 sources x 16 repeats)' in tango_log
+
+          installed_tests = {'PluginSDK': 'flexui_installed_sdk_consumer',
+                             'Services': 'flexui_installed_services_consumer',
+                             'host': 'flexui_plugin_install_consumer'}
+          for component, expected in installed_tests.items():
+              results = ET.parse(evidence / f'{component}-consumer-results.xml').getroot()
+              cases = list(results.iter('testcase'))
+              assert len(cases) == 1 and cases[0].attrib['name'] == expected, component
+              assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+
+          commands = json.loads((production / 'compile_commands.json').read_text())
+          for suffix in ('flexUI/src/text_util.cpp', 'flexUI/src/text_layout.cpp',
+                         'flexUI/src/textedit.cpp', 'flex/modules/render/stb_sprintf.cpp',
+                         'flexUI/src/widgets/input_widget.cpp', 'flexUI/src/widgets/textarea_widget.cpp',
+                         'flexUI/src/widgets/markdown_widget.cpp',
+                         'tools/md/src/md_parser_driver.cpp',
+                         'tools/md/src/md_inline_parser.cpp',
+                         'tools/md/src/md_block_processor.cpp'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined'))
+
+          for suffix in ('shared/markdown/tests/markdown_tango_candidate_test.c',
+                         'shared/markdown/src/markdown_c11.c', 'tango/src/tui_widgets.c'):
+              matches = [entry for entry in commands if entry['file'].endswith(suffix)]
+              assert len(matches) == 1, suffix
+              assert all(flag in matches[0]['command'] for flag in
+                         ('-fsanitize=address', '-fsanitize=undefined')), suffix
+
+          binaries = {name: production / 'bin' / name for name in tests}
+          binaries['installed_sdk'] = workspace / 'build/flexui-installed-PluginSDK/flexui_installed_sdk_consumer'
+          binaries['installed_services'] = workspace / 'build/flexui-installed-Services/flexui_installed_services_consumer'
+          binaries['installed_host'] = workspace / 'build/flexui-installed-host/bin/flexui_plugin_consumer'
+          core_pattern = re.compile(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', re.I)
+          providers = {}
+          env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'LD_PRELOAD')}
+          for name, binary in binaries.items():
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True, env=env)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True, env=env)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              paths = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if core_pattern.fullmatch(path.name):
+                      paths.add(str(path))
+              assert len(paths) <= 1, (name, paths)
+              if name in ('test_render_semantics', 'test_widget_contracts', 'installed_host'):
+                  assert len(paths) == 1, name
+              providers[name] = sorted(paths)
+
+          forbidden = [str(production), str(workspace / '.ci/install-sources'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-package-build'),
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-unicode-isolated')]
+          for component in ('PluginSDK', 'Services', 'host'):
+              build = workspace / f'build/flexui-installed-{component}'
+              command_text = (build / 'compile_commands.json').read_text()
+              command_text += (evidence / f'{component}-consumer-build.log').read_text()
+              assert all(path not in command_text for path in forbidden), component
+              pairs = [line.split('=', 1) for line in (build / 'installed-component-Debug.txt').read_text().splitlines()]
+              expected = {'FlexUIConfig', 'Includes'}
+              if component == 'Services':
+                  expected.add('Library')
+              elif component == 'host':
+                  expected.update(('Services', 'Host', 'Core', 'Toml'))
+              assert len(pairs) == len(expected) and {key for key, _ in pairs} == expected
+              for key, raw in pairs:
+                  prefix = sdk if key in ('Core', 'Toml') else flexui_sdk
+                  for value in raw.split(';'):
+                      path = Path(value).resolve(strict=True)
+                      assert path.is_relative_to(prefix), (component, key, path)
+                      if key not in ('FlexUIConfig', 'Includes'):
+                          assert value in command_text, (component, key, 'missing from actual link command')
+          result = {'production_ctest_passed': len(tests),
+                    'tango_c11_candidate_ctest_passed': 1,
+                    'tango_c11_candidate_cases_passed': 64,
+                    'installed_ctest_passed': len(installed_tests),
+                    'tinytest': totals, 'core_runtime_providers': providers,
+                    'scope': 'Linux production FlexUI without a window/GPU backend; installed SDK, Services and PluginHost'}
+          (evidence / 'production-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Production FlexUI and exported components'
+            echo 'Actual repository targets with ASan/UBSan; Linux without a window/GPU backend.'
+            echo 'Installed C PluginSDK, C++ Services, and C plugin/host round trip executed separately.'
+            echo '```json'
+            cat "$EVIDENCE_DIR/production-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload package and consumer evidence
+        if: ${{ always() && inputs.run_runtime && steps.unicode_paths.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicode-install-consumer-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/unicode-install-evidence
+            build/unicode-install-consumer/*.log
+            build/unicode-install-consumer/*.json
+            build/unicode-install-consumer/*.map
+            build/unicode-install-consumer/*.txt
+            build/unicode-install-consumer/Testing/Temporary/LastTest.log
+            build/flexui-production/CMakeCache.txt
+            build/flexui-production/compile_commands.json
+            build/flexui-production/Testing/Temporary/LastTest.log
+            build/flexui-installed-*/CMakeCache.txt
+            build/flexui-installed-*/compile_commands.json
+            build/flexui-installed-*/installed-component-*.txt
+            build/flexui-installed-*/Testing/Temporary/LastTest.log
+          if-no-files-found: error
+
+      - name: Define isolated paths
+        if: ${{ inputs.run_runtime && success() }}
+        id: desktop_paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SALTS_SHA" && test -n "$SALTS_UTILS_SHA"
+          test -f "$RUNNER_TEMP/stun-unicode-sdk/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$RUNNER_TEMP/stun-unicode-sdk/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test ! -e .ci/install-sources
+          test ! -e "$RUNNER_TEMP/stun-unicode-package-build"
+          {
+            echo "SALTS_ROOT=$RUNNER_TEMP/stun-unicode-sdk"
+            echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-unicode-sdk"
+            echo "PACKAGE_BUILD_ROOT=$RUNNER_TEMP/stun-unicode-package-build"
+            echo "PORTS_ROOT=$RUNNER_TEMP/stun-unicode-external-ports"
+            echo "EVIDENCE_DIR=$GITHUB_WORKSPACE/build/desktop-evidence"
+            echo "MESA_ROOT=$RUNNER_TEMP/stun-mesa-sdk"
+            echo "ASAN_OPTIONS=detect_leaks=1:halt_on_error=1"
+            echo "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
+            echo "LD_LIBRARY_PATH=$RUNNER_TEMP/stun-unicode-sdk/lib"
+          } >> "$GITHUB_ENV"
+      - name: Prepare tools and record exact provenance
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$SALTS_ROOT" "$PORTS_ROOT" "$RUNNER_TEMP/stun-vcpkg-cache"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          grep -Fqx "Salts=$SALTS_SHA" build/unicode-install-evidence/provenance.txt
+          grep -Fqx "SaltsUtils=$SALTS_UTILS_SHA" build/unicode-install-evidence/provenance.txt
+          test ! -e .ci/install-sources
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          test -n "$VCPKG_TOOL_REVISION"
+          test -n "$VCPKG_SCRIPTS_REVISION"
+          test -n "$VCPKG_CACHE_REVISION"
+          test "$(git -C "$VCPKG_ROOT" rev-parse HEAD)" = "$VCPKG_SCRIPTS_REVISION"
+          printf 'Stun=%s\nSalts=%s\nSaltsUtils=%s\nvcpkg_port_baseline=%s\nvcpkg_tool=%s\nvcpkg_scripts=%s\nvcpkg_cache_revision=%s\n' \
+            "$EXPECTED_STUN_SHA" "$SALTS_SHA" "$SALTS_UTILS_SHA" \
+            "$VCPKG_PORT_BASELINE" "$VCPKG_TOOL_REVISION" \
+            "$VCPKG_SCRIPTS_REVISION" "$VCPKG_CACHE_REVISION" \
+            | tee "$EVIDENCE_DIR/provenance.txt"
+          # Mesa already refreshed apt metadata in this same runner.
+          sudo apt-get install -y ninja-build pkg-config nasm curl xz-utils \
+            autoconf autoconf-archive automake libtool \
+            xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev \
+            libvulkan-dev mesa-vulkan-drivers mesa-utils vulkan-tools libllvm20 \
+            vulkan-validationlayers xvfb xauth fonts-dejavu-core
+          dpkg-query -W > "$EVIDENCE_DIR/system-packages.txt"
+          mapfile -t vulkan_system_libs < <(dpkg -L libvulkan-dev | grep -E '/libvulkan\.so$')
+          test "${#vulkan_system_libs[@]}" -eq 1
+          test -f /usr/include/vulkan/vulkan.h
+          vulkan_system_library="$(readlink -e "${vulkan_system_libs[0]}")"
+          test -n "$vulkan_system_library"
+          {
+            echo "VULKAN_SYSTEM_LIBRARY=$vulkan_system_library"
+            echo "VULKAN_SYSTEM_INCLUDE=/usr/include"
+            echo "VULKAN_EXPECTED_LOADER=$vulkan_system_library"
+          } >> "$GITHUB_ENV"
+          sha256sum "$vulkan_system_library" > "$EVIDENCE_DIR/vulkan-loader.sha256"
+          test -x "$RUNNER_TEMP/stun-build-tools/cmake/data/bin/cmake"
+      - name: Verify driver package and exact-head lifecycle receipt
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          source = Path('build/mesa-evidence')
+          root = Path(os.environ['MESA_ROOT'])
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          provenance = dict(line.split('=', 1) for line in (source / 'provenance.txt').read_text().splitlines())
+          assert provenance['Stun'] == os.environ['EXPECTED_STUN_SHA'], provenance
+          assert provenance['vcpkg_port_baseline'] == os.environ['VCPKG_PORT_BASELINE'], provenance
+          patch = Path('cmake/ci/mesa/module-cleanup.patch')
+          assert patch.read_bytes() == (source / 'module-cleanup.patch').read_bytes()
+          rows = json.loads((source / 'results.json').read_text())
+          readbacks = {'init': 0, 'window': 0, 'draw': 1, 'overlap': 4, 'threads': 8}
+          assert len(rows) == 20
+          assert {(r['variant'], r['mode'], r['cycles']) for r in rows} == {
+              (v, m, n) for v in ('baseline', 'patched') for m in readbacks for n in (1, 4)}
+          for row in rows:
+              assert row['completed'] and row['pixel_checks'] == readbacks[row['mode']] * row['cycles'], row
+              if row['variant'] == 'patched' or row['mode'] == 'init':
+                  assert row['exit_code'] == 0 and not row['leaks'], row
+              elif row['mode'] in ('draw', 'overlap', 'threads'):
+                  assert row['exit_code'] != 0 and row['leaks'], row
+          archive = source / 'mesa-sdk.tar.xz'
+          archive_hash = hashlib.sha256(archive.read_bytes()).hexdigest()
+          assert archive_hash == (source / 'mesa-sdk.sha256').read_text().split()[0]
+          # Mesa just built and patched this very installation on this
+          # runner. Verify its existing bytes without archive re-extraction.
+          assert root.is_dir(), root
+          assert (root / 'lib').is_dir()
+          libs = {}
+          for filename, report in ((f"libgallium-{provenance['Mesa']}.so", 'patched-driver.sha256'),
+                                   ('libGLX_mesa.so.0.0.0', 'patched-glx.sha256')):
+              path = (root / 'lib' / filename).resolve(strict=True)
+              assert path.parent == (root / 'lib').resolve(strict=True)
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert digest == (source / report).read_text().split()[0], path
+              libs[filename] = digest
+          assert (root / 'lib/libGLX_mesa.so.0').resolve(strict=True) == root / 'lib/libGLX_mesa.so.0.0.0'
+          assert not any(p.name.startswith('libsalts') for p in (root / 'lib').iterdir())
+          receipt = {'source_head': provenance['Stun'], 'workflow_run': os.environ['GITHUB_RUN_ID'],
+                     'mesa_version': provenance['Mesa'], 'source_archive_sha256': provenance['ArchiveSHA256'],
+                     'package_sha256': archive_hash, 'patch_sha256': hashlib.sha256(patch.read_bytes()).hexdigest(),
+                     'libraries': libs, 'patched_processes': 10, 'patched_pixel_checks': 65}
+          (evidence / 'mesa-package.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          shutil.copyfile(source / 'provenance.txt', evidence / 'mesa-provenance.txt')
+          shutil.copyfile(source / 'results.json', evidence / 'mesa-lifecycle-results.json')
+          print(json.dumps(receipt, indent=2))
+          PY
+
+      - name: Verify single installed SDK and graphics cache for Desktop
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$SALTS_ROOT/lib/cmake/Salts/SaltsConfig.cmake"
+          test -f "$SALTS_ROOT/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake"
+          status="$PORTS_ROOT/flexui/vcpkg/status"
+          test -s "$status"
+          ! grep -Fqx 'Package: vulkan-loader' "$status"
+          ! grep -Fqx 'Package: vulkan-headers' "$status"
+          cp "$status" "$EVIDENCE_DIR/graphics-packages.txt"
+          cp build/unicode-install-evidence/flexui-ports-install.log "$EVIDENCE_DIR/graphics-install.log"
+          grep -Eq 'Restored [1-9][0-9]* package\(s\) from NuGet' "$EVIDENCE_DIR/graphics-install.log"
+          ! grep -Eq '^Building [^:]+:x64-linux' "$EVIDENCE_DIR/graphics-install.log"
+          test ! -e .ci/install-sources
+          test ! -e "$PACKAGE_BUILD_ROOT"
+
+      - name: Configure and build real window and renderer targets
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          ports="$PORTS_ROOT/flexui"
+          cmake -S . -B build/desktop-runtime -G Ninja \
+            -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_TARGET_TRIPLET=x64-linux \
+            "-DVCPKG_INSTALLED_DIR=$ports" \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$ports/x64-linux/debug" \
+            "-DSALTS_ROOT=$SALTS_ROOT" "-DSALTS_UTILS_ROOT=$SALTS_UTILS_ROOT" \
+            "-DOpenSSL_DIR=$PORTS_ROOT/salts-utils/x64-linux/share/OpenSSL" \
+            "-DPKG_CONFIG_EXECUTABLE=$ports/x64-linux/tools/pkgconf/pkgconf" \
+            -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON \
+            "-DVulkan_LIBRARY=$VULKAN_SYSTEM_LIBRARY" \
+            "-DVulkan_INCLUDE_DIR=$VULKAN_SYSTEM_INCLUDE" \
+            -DBUILD_TESTING=ON -DBUILD_TESTS=ON -DNANOGUI_BUILD_EXAMPLES=OFF \
+            -DSTUN_BUILD_APPLICATIONS=OFF -DFLEX_BUILD_TOOLS=OFF \
+            -DFLEXUI_ENABLE_PLUGINS=ON -DFLEXUI_ENABLE_TURBOSCRIPT=OFF \
+            -DGCANVAS_BUILD_OPENGL=ON -DGCANVAS_BUILD_VULKAN=ON -DGCANVAS_BUILD_SVG=ON \
+            -DGCANVAS_BUILD_WINDOW=ON -DGCANVAS_BUILD_TESTS=ON \
+            -DGCANVAS_BUILD_GPU_TESTS=ON -DGCANVAS_BUILD_EXAMPLES=ON \
+            -DGCANVAS_ENABLE_VULKAN_VALIDATION=ON \
+            -DFLEX_BUILD_GCANVAS_GPU_TESTS=ON \
+            -DFLEX_BUILD_RENDER_ENGINE_GCANVAS=ON -DFLEX_BUILD_RENDER_ENGINE_NANOVG=OFF \
+            -DFLEX_BUILD_BACKEND_OPENGL=OFF -DFLEX_BUILD_BACKEND_VULKAN=OFF \
+            -DFLEX_BUILD_BACKEND_D2D=OFF -DFLEX_BUILD_BACKEND_TUI=OFF \
+            -DENABLE_SANITIZER_ADDRESS=ON -DENABLE_SANITIZER_UNDEFINED=ON \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-configure.log"
+          grep -Fq "Found Vulkan: $VULKAN_SYSTEM_LIBRARY" "$EVIDENCE_DIR/desktop-configure.log"
+          cmake --build build/desktop-runtime --parallel 2 --verbose --target \
+            test_gcanvas_window_host test_gcanvas_plugin_window_host gcanvas_gpu_test gcanvas_showcase \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-build.log"
+      - name: Select and verify software graphics drivers
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD VK_ICD_FILENAMES VK_ADD_DRIVER_FILES LIBGL_DRIVERS_PATH
+          # Select exactly one installed Lavapipe manifest, never a fallback GPU.
+          mapfile -t drivers < <(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd[^/]*\.json$')
+          test "${#drivers[@]}" -eq 1
+          export VK_DRIVER_FILES="${drivers[0]}"
+          mapfile -t vk_libs < <(dpkg -L mesa-vulkan-drivers | grep -E '/libvulkan_lvp\.so$')
+          test "${#vk_libs[@]}" -eq 1
+          export VULKAN_EXPECTED_DRIVER="$(readlink -e "${vk_libs[0]}")"
+          sha256sum "$VULKAN_EXPECTED_DRIVER" > "$EVIDENCE_DIR/vulkan-library.sha256"
+          export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/stun-desktop-xdg"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          cat "$VK_DRIVER_FILES" > "$EVIDENCE_DIR/vulkan-driver.json"
+          sha256sum "$VK_DRIVER_FILES" > "$EVIDENCE_DIR/vulkan-driver.sha256"
+          xvfb-run -a env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            glxinfo -B 2>&1 | tee "$EVIDENCE_DIR/opengl-driver.log"
+          xvfb-run -a vulkaninfo --summary 2>&1 | tee "$EVIDENCE_DIR/vulkan-driver.log"
+          grep -q 'OpenGL renderer string: llvmpipe' "$EVIDENCE_DIR/opengl-driver.log"
+          grep -q 'PHYSICAL_DEVICE_TYPE_CPU' "$EVIDENCE_DIR/vulkan-driver.log"
+          grep -q 'VK_LAYER_KHRONOS_validation' "$EVIDENCE_DIR/vulkan-driver.log"
+          {
+            echo "VK_DRIVER_FILES=$VK_DRIVER_FILES"
+            echo "VULKAN_EXPECTED_DRIVER=$VULKAN_EXPECTED_DRIVER"
+            echo "LIBGL_ALWAYS_SOFTWARE=$LIBGL_ALWAYS_SOFTWARE"
+            echo "GALLIUM_DRIVER=$GALLIUM_DRIVER"
+            echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+          } >> "$GITHUB_ENV"
+      - name: Execute both backends and real FlexUI window lifecycle
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD LSAN_OPTIONS VK_ICD_FILENAMES VK_ADD_DRIVER_FILES LIBGL_DRIVERS_PATH
+          pattern='^(test_gcanvas_window_host|test_gcanvas_plugin_window_host|gcanvas_gpu_opengl|gcanvas_gpu_vulkan|gcanvas_showcase_opengl|gcanvas_showcase_vulkan)$'
+          ctest --test-dir build/desktop-runtime -R "$pattern" --show-only=json-v1 \
+            > "$EVIDENCE_DIR/selected-tests.json"
+          xvfb-run -a -s '-screen 0 1280x720x24 -nolisten tcp' \
+            env LD_LIBRARY_PATH="$MESA_ROOT/lib" __GLX_VENDOR_LIBRARY_NAME=mesa \
+            LSAN_OPTIONS=exitcode=0 \
+            LD_DEBUG=files LD_DEBUG_OUTPUT="$EVIDENCE_DIR/loader" \
+            ctest --test-dir build/desktop-runtime -R "$pattern" \
+            --no-tests=error --verbose --output-on-failure --timeout 180 \
+            --output-junit "$EVIDENCE_DIR/desktop-results.xml" \
+            2>&1 | tee "$EVIDENCE_DIR/desktop-ctest.log"
+      - name: Verify execution, instrumentation, and runtime ownership
+        if: ${{ inputs.run_runtime && success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          sha256sum --check "$EVIDENCE_DIR/vulkan-library.sha256"
+          sha256sum --check "$EVIDENCE_DIR/vulkan-loader.sha256"
+          python3 cmake/ci/mesa/verify_desktop_drivers.py
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import xml.etree.ElementTree as ET
+
+          evidence = Path(os.environ['EVIDENCE_DIR'])
+          build = Path('build/desktop-runtime').resolve(strict=True)
+          sdk = Path(os.environ['SALTS_ROOT']).resolve(strict=True)
+          expected_vulkan_loader = Path(os.environ['VULKAN_EXPECTED_LOADER']).resolve(strict=True)
+          expected = {'test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
+                      'gcanvas_gpu_opengl', 'gcanvas_gpu_vulkan',
+                      'gcanvas_showcase_opengl', 'gcanvas_showcase_vulkan'}
+          selected = json.loads((evidence / 'selected-tests.json').read_text())['tests']
+          assert len(selected) == len(expected) and {t['name'] for t in selected} == expected
+          cases = list(ET.parse(evidence / 'desktop-results.xml').getroot().iter('testcase'))
+          assert len(cases) == len(expected) and {c.attrib['name'] for c in cases} == expected
+          assert not any(list(c.iter(tag)) for c in cases for tag in ('failure', 'error', 'skipped'))
+          log = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', (evidence / 'desktop-ctest.log').read_text())
+          assert not re.search(r'VULKAN VALIDATION \[(ERROR|WARNING)\]|ERROR: AddressSanitizer:|runtime error:', log)
+
+          # LeakSanitizer stays enabled. Only independently tracked upstream
+          # GLFW/X11 owners (#45/#47/#65) may remain; any new owner is fatal.
+          leak_blocks = re.findall(
+              r'((?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\).*?)(?=(?:\n(?:\d+: )?(?:Direct|Indirect) leak of \d+ byte\(s\))|(?:\n(?:\d+: )?SUMMARY: AddressSanitizer:)|\Z)',
+              log, re.S)
+          leak_owners = {'x11_init': 0, 'glfw_glx': 0}
+          for block in leak_blocks:
+              if re.search(r'_glfw(?:Connect|Init)X11.*?src/x11_init\.c', block, re.S):
+                  leak_owners['x11_init'] += 1
+              elif re.search(r'(?:extensionSupportedGLX|_glfwInitGLX).*?src/glx_context\.c', block, re.S):
+                  leak_owners['glfw_glx'] += 1
+              else:
+                  raise AssertionError(block)
+              assert not re.search(r'libgallium|rtasm_execmem|u_cpu_detect|mesa-build', block, re.I), block
+          leak_summaries = re.findall(
+              r'SUMMARY: AddressSanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)', log)
+          assert bool(leak_blocks) == bool(leak_summaries)
+          totals = {}
+          for status in ('PASSED', 'FAILED', 'SKIPPED', 'FILTERED', 'TODO'):
+              counts = [int(n) for n in re.findall(rf'Total tests \[{status}\]:\s*(\d+)', log)]
+              assert len(counts) == 2, (status, counts)
+              assert all(n > 0 if status == 'PASSED' else n == 0 for n in counts), (status, counts)
+              totals[status] = sum(counts)
+          assertions = re.findall(r'Assertions:\s*(\d+) passed,\s*(\d+) failed', log)
+          assert len(assertions) == 2 and all(int(f) == 0 for _, f in assertions)
+          totals['assertions_passed'] = sum(int(p) for p, _ in assertions)
+          commands_text = (build / 'compile_commands.json').read_text()
+          commands = json.loads(commands_text)
+          for suffix in ('flexUI/modules/desktop/gcanvas_window_host.cpp',
+                         'flexUI/modules/desktop/gcanvas_plugin_window_host.cpp',
+                         'flex/render/engines/gcanvas/renderer.cpp',
+                         'shared/gcanvas/src/window_impl.cpp',
+                         'shared/gcanvas/src/backends/gl/context_impl_gl.cpp',
+                         'shared/gcanvas/src/backends/opengl/context_opengl.cpp',
+                         'shared/gcanvas/src/backends/vulkan/context_impl_vulkan.cpp'):
+              matching = [c for c in commands if c['file'].endswith(suffix)]
+              assert len(matching) == 1, suffix
+              assert all(flag in matching[0]['command'] for flag in ('-fsanitize=address', '-fsanitize=undefined')), suffix
+          forbidden = [str(Path(os.environ['GITHUB_WORKSPACE']) / '.ci/sources'),
+                       os.environ['PACKAGE_BUILD_ROOT'],
+                       str(Path(os.environ['RUNNER_TEMP']) / 'stun-desktop-quarantine')]
+          assert all(not Path(p).exists() for p in forbidden[:2])
+          link_text = (evidence / 'desktop-build.log').read_text()
+          assert all(p not in commands_text + link_text for p in forbidden)
+          providers = {}
+          for name in ('test_gcanvas_window_host', 'test_gcanvas_plugin_window_host',
+                       'gcanvas_gpu_test', 'gcanvas_showcase'):
+              binary = build / 'bin' / name
+              dynamic = subprocess.check_output(['readelf', '-d', str(binary)], text=True)
+              loader = subprocess.check_output(['ldd', str(binary)], text=True)
+              (evidence / f'{name}-dynamic.txt').write_text(dynamic + '\n' + loader)
+              assert 'not found' not in loader and not re.search(r'libturbo[^/\s]*\.(?:so|a)', loader, re.I)
+              assert all(p not in dynamic + loader for p in forbidden)
+              core = set()
+              vulkan_loaders = set()
+              for raw in re.findall(r'=>\s+(/\S+)\s+\(', loader):
+                  path = Path(raw).resolve(strict=True)
+                  if path.name.startswith('libsalts'):
+                      assert path.is_relative_to(sdk), path
+                  if re.fullmatch(r'libsalts(?:[_-]core)?\.so(?:\.\d+)*', path.name, re.I):
+                      core.add(str(path))
+                  if re.fullmatch(r'libvulkan\.so(?:\.\d+)*', path.name):
+                      vulkan_loaders.add(path)
+              assert vulkan_loaders <= {expected_vulkan_loader}, (name, vulkan_loaders)
+              assert len(core) == (1 if name.startswith('test_') else 0), (name, core)
+              providers[name] = {'core': sorted(core),
+                                 'vulkan_loader': sorted(map(str, vulkan_loaders))}
+          result = {'ctest_passed': len(cases), 'tinytest': totals,
+                    'runtime_providers': providers,
+                    'known_upstream_leak_blocks': len(leak_blocks),
+                    'known_upstream_leak_owners': leak_owners,
+                    'known_upstream_leak_summaries': leak_summaries,
+                    'driver_runtime_providers': json.loads((evidence / 'desktop-driver-providers.json').read_text()),
+                    'scope': 'Linux Xvfb, patched Mesa llvmpipe and distribution Lavapipe; real FlexUI window/plugin lifecycle and gCanvas pixel/showcase tests. No physical GPU, TurboScript editor, installed desktop, or Windows/macOS claim.'}
+          (evidence / 'desktop-evidence.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+          git diff --exit-code
+          {
+            echo '### Real gCanvas window and renderer validation'
+            echo '```json'
+            cat "$EVIDENCE_DIR/desktop-evidence.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Cache telemetry includes Mesa Meson + all CMake compiler-launcher
+      # invocations in this one runner. No semantic assertion depends on hits.
+      - name: Report compiler cache effectiveness
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v ccache >/dev/null 2>&1; then
+            mkdir -p build/mesa-evidence
+            ccache --show-stats | tee build/mesa-evidence/ccache-stats.txt
+            {
+              echo '### Native compiler cache'
+              echo 'Meson Mesa + installed Salts/FlexUI CMake builds; cache hits are performance evidence, not conformance.'
+              echo '~~~text'
+              cat build/mesa-evidence/ccache-stats.txt
+              echo '~~~'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Preserve exact-head evidence even on failure
+        if: ${{ always() && inputs.run_runtime && steps.desktop_paths.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            build/desktop-evidence
+            build/mesa-evidence/ccache-stats.txt
+            build/desktop-runtime/CMakeCache.txt
+            build/desktop-runtime/compile_commands.json
+            build/desktop-runtime/Testing/Temporary/LastTest.log
+          if-no-files-found: error
+
+      - name: Preserve installed SDK after runtime failure
+        if: ${{ failure() && inputs.run_runtime && steps.dependency_packages.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/stun-salts-sdk.tar.gz" \
+            -C "$RUNNER_TEMP/stun-unicode-sdk" . \
+            -C "$GITHUB_WORKSPACE/build/unicode-install-evidence" provenance.txt
+
+      - name: Upload SDK from failed runtime
+        if: ${{ failure() && inputs.run_runtime && steps.dependency_packages.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: salts-sdk-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stun-salts-sdk.tar.gz
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Save bounded native compiler cache
+        if: ${{ success() && steps.compiler_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
+
+          # binary. Its mandatory denominator is kept separate.
           cmake --build "$production_build" --target stun_markdown_tango_candidate_test \
             --parallel 2 --verbose \
             2>&1 | tee "$EVIDENCE_DIR/tango-candidate-build.log"
