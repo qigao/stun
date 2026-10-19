@@ -67,27 +67,27 @@ spec("timeline_parser") {
              
              TimelineDiagram* diagram = timeline_parse(input);
              REQUIRE(diagram != NULL);
-             check_str_eq(diagram->title, "History of World War II");
+             check_true(diagram->title != NULL && strcmp(diagram->title, "History of World War II") == 0);
              
              REQUIRE(diagram->sections != NULL);
              TimelineSection* s1 = diagram->sections;
-             check_str_eq(s1->title, "Pre-war");
+             check_true(s1->title != NULL && strcmp(s1->title, "Pre-war") == 0);
              
              REQUIRE(s1->periods != NULL);
              TimelinePeriod* p1 = s1->periods;
-             check_str_eq(p1->title, "1938");
+             check_true(p1->title != NULL && strcmp(p1->title, "1938") == 0);
              
              REQUIRE(p1->events != NULL);
              TimelineEvent* e1 = p1->events;
-             check_str_eq(e1->text, "Munich Agreement");
-             check_str_eq(e1->next->text, "Kristallnacht");
+             check_true(e1->text != NULL && strcmp(e1->text, "Munich Agreement") == 0);
+             check_true(e1->next->text != NULL && strcmp(e1->next->text, "Kristallnacht") == 0);
              
              TimelineSection* s2 = s1->next;
-             check_str_eq(s2->title, "War Years");
+             check_true(s2->title != NULL && strcmp(s2->title, "War Years") == 0);
              
              TimelinePeriod* p2 = s2->periods;
-             check_str_eq(p2->title, "1939");
-             check_str_eq(p2->next->title, "1941");
+             check_true(p2->title != NULL && strcmp(p2->title, "1939") == 0);
+             check_true(p2->next->title != NULL && strcmp(p2->next->title, "1941") == 0);
              
              timeline_free_diagram(diagram);
         }
@@ -103,11 +103,11 @@ spec("timeline_parser") {
              
              REQUIRE(diagram->sections != NULL);
              TimelineSection* s = diagram->sections;
-             check_str_eq(s->title, ""); // Default section
+             check_true(s->title != NULL && strcmp(s->title, "") == 0); // Default section
              
              REQUIRE(s->periods != NULL);
-             check_str_eq(s->periods->title, "2023");
-             check_str_eq(s->periods->next->title, "2024");
+             check_true(s->periods->title != NULL && strcmp(s->periods->title, "2023") == 0);
+             check_true(s->periods->next->title != NULL && strcmp(s->periods->next->title, "2024") == 0);
              
              timeline_free_diagram(diagram);
         }
@@ -126,15 +126,15 @@ spec("timeline_parser") {
              
              TimelinePeriod* p1 = s->periods;
              REQUIRE(p1 != NULL);
-             check_str_eq(p1->title, "12:00");
+             check_true(p1->title != NULL && strcmp(p1->title, "12:00") == 0);
              REQUIRE(p1->events != NULL);
-             check_str_eq(p1->events->text, "Lunch Time");
+             check_true(p1->events->text != NULL && strcmp(p1->events->text, "Lunch Time") == 0);
              
              TimelinePeriod* p2 = p1->next;
              REQUIRE(p2 != NULL);
-             check_str_eq(p2->title, "2023-01");
+             check_true(p2->title != NULL && strcmp(p2->title, "2023-01") == 0);
              REQUIRE(p2->events != NULL);
-             check_str_eq(p2->events->text, "Special : Event");
+             check_true(p2->events->text != NULL && strcmp(p2->events->text, "Special : Event") == 0);
              
              timeline_free_diagram(diagram);
         }
