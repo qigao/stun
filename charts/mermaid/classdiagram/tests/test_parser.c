@@ -76,21 +76,21 @@ spec("classdiagram_parser") {
             REQUIRE(diagram != NULL);
 
             REQUIRE(diagram->classes != NULL);
-            check_str_eq(diagram->classes->name, "Animal");
+            check_true(diagram->classes->name != NULL && strcmp(diagram->classes->name, "Animal") == 0);
 
             ClassMember* m = diagram->classes->members;
             REQUIRE(m != NULL);
-            check_str_eq(m->name, "name");
-            check_str_eq(m->type, "String");
-            check_int_eq(m->visibility, CLASS_VISIBILITY_PUBLIC);
-            check_int_eq(m->is_method, 0);
+            check_true(m->name != NULL && strcmp(m->name, "name") == 0);
+            check_true(m->type != NULL && strcmp(m->type, "String") == 0);
+            check_true((m->visibility) == (CLASS_VISIBILITY_PUBLIC));
+            check_true((m->is_method) == (0));
 
             m = m->next;
             REQUIRE(m != NULL);
-            check_str_eq(m->name, "isAlive");
-            check_str_eq(m->return_type, "Boolean");
-            check_int_eq(m->visibility, CLASS_VISIBILITY_PUBLIC);
-            check_int_eq(m->is_method, 1);
+            check_true(m->name != NULL && strcmp(m->name, "isAlive") == 0);
+            check_true(m->return_type != NULL && strcmp(m->return_type, "Boolean") == 0);
+            check_true((m->visibility) == (CLASS_VISIBILITY_PUBLIC));
+            check_true((m->is_method) == (1));
 
             classdiagram_free(diagram);
         }
@@ -107,15 +107,15 @@ spec("classdiagram_parser") {
             ClassRelationship* r = diagram->relationships;
             REQUIRE(r != NULL);
 
-            check_str_eq(r->from, "Animal");
-            check_str_eq(r->to, "Duck");
+            check_true(r->from != NULL && strcmp(r->from, "Animal") == 0);
+            check_true(r->to != NULL && strcmp(r->to, "Duck") == 0);
 
             r = r->next;
             REQUIRE(r != NULL);
-            check_str_eq(r->from, "Duck");
-            check_str_eq(r->to, "Egg");
-            check_str_eq(r->from_cardinality, "1");
-            check_str_eq(r->to_cardinality, "*");
+            check_true(r->from != NULL && strcmp(r->from, "Duck") == 0);
+            check_true(r->to != NULL && strcmp(r->to, "Egg") == 0);
+            check_true(r->from_cardinality != NULL && strcmp(r->from_cardinality, "1") == 0);
+            check_true(r->to_cardinality != NULL && strcmp(r->to_cardinality, "*") == 0);
 
             classdiagram_free(diagram);
         }
