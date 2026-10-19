@@ -214,7 +214,7 @@ spec("dotgraph") {
             auto diagram = parse("digraph { A -> B; }");
             check_not_null(diagram.get());
             diagram->routing_crossing_penalty = 5.0;
-            DotGraphRenderer renderer;
+            dotgraph::DotGraphRenderer renderer;
             check_true(([&]() { try { (void)(renderer.layout(diagram.get())); } catch (const std::invalid_argument&) { return true; } catch (...) {} return false; })());
             diagram->routing_crossing_penalty = -1.0;
             diagram->edges->from_compass = DG_COMPASS_C;
