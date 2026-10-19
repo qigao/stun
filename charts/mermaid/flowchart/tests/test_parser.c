@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#endif
 
 extern char* flowchart_to_json(FlowchartDiagram* diagram);
 
@@ -117,108 +122,121 @@ spec("flowchart_parser") {
 
             FlowchartDiagram* diagram = flowchart_parse(input);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->direction, "LR");
+            check_true(strcmp(diagram->direction, "LR") == 0);
             flowchart_diagram_free(diagram);
         }
 
         it("distinguishes complete and partial parses") {
             FlowchartDiagram* diagram = NULL;
-            check_int_eq(flowchart_parse_ex("flowchart LR\nA[Good label]", &diagram),
-                         FLOWCHART_PARSE_COMPLETE);
+            check_true(flowchart_parse_ex("flowchart LR\nA[Good label]", &diagram) ==
+                       FLOWCHART_PARSE_COMPLETE);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->nodes->label, "Good label");
+            check_true(strcmp(diagram->nodes->label, "Good label") == 0);
             flowchart_diagram_free(diagram);
 
             diagram = NULL;
-            check_int_eq(flowchart_parse_ex("flowchart LR\na --> b --> c", &diagram),
-                         FLOWCHART_PARSE_COMPLETE);
+            check_true(flowchart_parse_ex("flowchart LR\na --> b --> c", &diagram) ==
+                       FLOWCHART_PARSE_COMPLETE);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->nodes->id, "a");
-            check_str_eq(diagram->nodes->next->id, "b");
-            check_str_eq(diagram->nodes->next->next->id, "c");
-            check_str_eq(diagram->edges->from, "a");
-            check_str_eq(diagram->edges->to, "b");
-            check_str_eq(diagram->edges->next->from, "b");
-            check_str_eq(diagram->edges->next->to, "c");
+            check_true(strcmp(diagram->nodes->id, "a") == 0);
+            check_true(strcmp(diagram->nodes->next->id, "b") == 0);
+            check_true(strcmp(diagram->nodes->next->next->id, "c") == 0);
+            check_true(strcmp(diagram->edges->from, "a") == 0);
+            check_true(strcmp(diagram->edges->to, "b") == 0);
+            check_true(strcmp(diagram->edges->next->from, "b") == 0);
+            check_true(strcmp(diagram->edges->next->to, "c") == 0);
             flowchart_diagram_free(diagram);
 
             diagram = NULL;
-            check_int_eq(flowchart_parse_ex("flowchart LR\nA[Good] @", &diagram),
-                         FLOWCHART_PARSE_PARTIAL);
+            check_true(flowchart_parse_ex("flowchart LR\nA[Good] @", &diagram) ==
+                       FLOWCHART_PARSE_PARTIAL);
             REQUIRE(diagram != NULL);
             flowchart_diagram_free(diagram);
         }
     }
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dirent.h>
-#endif
-
     describe("golden tests") {
-        // Dynamic test discovery
-        char search_path[MAX_PATH];
+        int count = 0;
+#ifdef _WIN32
+        char search_path[512];
         snprintf(search_path, sizeof(search_path), "%s/*.input.mmd", GOLDEN_DIR);
-
         WIN32_FIND_DATAA find_data;
         HANDLE hFind = FindFirstFileA(search_path, &find_data);
-
-        int count = 0;
         if (hFind != INVALID_HANDLE_VALUE) {
             do {
                 const char* filename = find_data.cFileName;
-                // Extract case name: remove .input.mmd
-                // Filename format: {case}.input.mmd
                 const char* ext = strstr(filename, ".input.mmd");
                 if (!ext) continue;
-                
-                size_t name_len = ext - filename;
-                if (name_len >= 128) continue; // safety
-
+                size_t name_len = (size_t)(ext - filename);
+                if (name_len >= 128) continue;
                 char case_name[128];
-                strncpy(case_name, filename, name_len);
+                memcpy(case_name, filename, name_len);
                 case_name[name_len] = '\0';
-
                 it(case_name) {
                     char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd"); 
-                    
+                    if (!input) input = load_golden_file(case_name, "output", "mmd");
                     char* expected = load_golden_file(case_name, "output", "json");
                     if (!expected) expected = load_golden_file(case_name, "", "json");
-
                     if (!input || !expected) {
-                        // Skip if files are missing (shouldn't happen with discovery)
-                        if(input) free(input);
-                        if(expected) free(expected);
-                        continue;
+                        free(input);
+                        free(expected);
+                        check_true(input != NULL && expected != NULL);
+                    } else {
+                        FlowchartDiagram* diagram = flowchart_parse(input);
+                        REQUIRE(diagram != NULL);
+                        char* actual = flowchart_to_json(diagram);
+                        REQUIRE(actual != NULL);
+                        check(json_equal(actual, expected), "JSON mismatch");
+                        json_serialize_free(actual);
+                        flowchart_diagram_free(diagram);
+                        free(expected);
+                        free(input);
                     }
-
-                    FlowchartDiagram* diagram = flowchart_parse(input);
-                    if (!diagram) {
-                         // printf("Failed to parse: %s\n", case_name); // Optional: log failure
-                         REQUIRE(diagram != NULL);
-                    }
-
-                    char* actual = flowchart_to_json(diagram);
-                    REQUIRE(actual != NULL);
-
-                    // Normalize expected JSON for loose comparison (e.g. square -> rect)
-                    // We need to parse 'expected' first to normalize it, then re-serialize?
-                    // json_equal function does specific attribute normalization.
-
-                    check(json_equal(actual, expected), "JSON mismatch");
-
-                    json_serialize_free(actual);
-                    flowchart_diagram_free(diagram);
-                    free(expected);
-                    free(input);
                 }
-                count++;
-                if (count >= 1000) break; // safety break
+                if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
             FindClose(hFind);
         }
+#else
+        DIR* directory = opendir(GOLDEN_DIR);
+        check_true(directory != NULL);
+        if (directory) {
+            struct dirent* entry;
+            while ((entry = readdir(directory)) != NULL) {
+                const char* filename = entry->d_name;
+                const char* ext = strstr(filename, ".input.mmd");
+                if (!ext || ext[strlen(".input.mmd")] != '\0') continue;
+                size_t name_len = (size_t)(ext - filename);
+                if (name_len >= 128) continue;
+                char case_name[128];
+                memcpy(case_name, filename, name_len);
+                case_name[name_len] = '\0';
+                it(case_name) {
+                    char* input = load_golden_file(case_name, "input", "mmd");
+                    if (!input) input = load_golden_file(case_name, "output", "mmd");
+                    char* expected = load_golden_file(case_name, "output", "json");
+                    if (!expected) expected = load_golden_file(case_name, "", "json");
+                    if (!input || !expected) {
+                        free(input);
+                        free(expected);
+                        check_true(input != NULL && expected != NULL);
+                    } else {
+                        FlowchartDiagram* diagram = flowchart_parse(input);
+                        REQUIRE(diagram != NULL);
+                        char* actual = flowchart_to_json(diagram);
+                        REQUIRE(actual != NULL);
+                        check(json_equal(actual, expected), "JSON mismatch");
+                        json_serialize_free(actual);
+                        flowchart_diagram_free(diagram);
+                        free(expected);
+                        free(input);
+                    }
+                }
+                if (++count >= 1000) break;
+            }
+            closedir(directory);
+        }
+#endif
         printf("Ran %d dynamic golden tests.\n", count);
     }
 }
