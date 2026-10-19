@@ -31,11 +31,6 @@ find_package(Threads REQUIRED)
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT}")
 find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
 
-# These packages belong to the optional chart/designer targets and the Windows
-# TurboScript runtime bundle. Flex and FlexUI use the canonical Salts packages.
-if(STUN_BUILD_CHARTS OR (WIN32 AND FLEXUI_ENABLE_TURBOSCRIPT))
-  find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
-endif()
 if(STUN_BUILD_APPLICATIONS OR (WIN32 AND FLEXUI_ENABLE_TURBOSCRIPT))
   find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
 endif()
@@ -65,12 +60,8 @@ if(STUN_BUILD_APPLICATIONS)
   add_subdirectory(meta_editor)
   add_subdirectory(flexui_designer)
 endif()
-# FlexPlayer's legacy SDL software compositor depends on the retired ThorVG
-# renderer and an external FFmpeg SDK. Keep it outside the supported build
-# until it has a native GPU compositor.
-if(STUN_BUILD_CHARTS)
-  add_subdirectory(charts)
-endif()
+# Chart libraries and parser tests are part of the normal supported build.
+add_subdirectory(charts)
 
 function(nanogui_set_target_output_dir target_name)
   if(NOT TARGET "${target_name}")

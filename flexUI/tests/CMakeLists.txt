@@ -552,7 +552,7 @@ if(WIN32)
     PROPERTY ENVIRONMENT_MODIFICATION
              "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
              "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
-             "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+)
 
   if(TEST test_flexui_desktop_editor_smoke)
     set_property(
@@ -561,6 +561,6 @@ if(WIN32)
                "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
                "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}"
                "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
-               "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+)
   endif()
 endif()
