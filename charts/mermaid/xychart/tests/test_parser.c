@@ -92,17 +92,17 @@ spec("xychart_parser") {
              
              XYDiagram* diagram = xychart_parse(input);
              REQUIRE(diagram != NULL);
-             check_str_eq(diagram->title, "Sample Chart");
+             check_true(diagram->title != NULL && strcmp(diagram->title, "Sample Chart") == 0);
              
              REQUIRE(diagram->orientation == XY_ORIENTATION_VERTICAL);
              
-             check_str_eq(diagram->xAxis.title, "Categories");
+             check_true(diagram->xAxis.title != NULL && strcmp(diagram->xAxis.title, "Categories") == 0);
              REQUIRE(diagram->xAxis.categories.count == 3);
-             check_str_eq(diagram->xAxis.categories.items[0], "A");
-             check_str_eq(diagram->xAxis.categories.items[1], "B");
-             check_str_eq(diagram->xAxis.categories.items[2], "C");
+             check_true(diagram->xAxis.categories.items[0] != NULL && strcmp(diagram->xAxis.categories.items[0], "A") == 0);
+             check_true(diagram->xAxis.categories.items[1] != NULL && strcmp(diagram->xAxis.categories.items[1], "B") == 0);
+             check_true(diagram->xAxis.categories.items[2] != NULL && strcmp(diagram->xAxis.categories.items[2], "C") == 0);
              
-             check_str_eq(diagram->yAxis.title, "Revenue");
+             check_true(diagram->yAxis.title != NULL && strcmp(diagram->yAxis.title, "Revenue") == 0);
              REQUIRE(diagram->yAxis.has_range == true);
              check_double_eq(diagram->yAxis.range_min, 0.0);
              check_double_eq(diagram->yAxis.range_max, 100.0);
@@ -110,7 +110,7 @@ spec("xychart_parser") {
              REQUIRE(diagram->series != NULL);
              XYSeries* s1 = diagram->series;
              REQUIRE(s1->type == XY_SERIES_LINE);
-             check_str_eq(s1->name, "Sales");
+             check_true(s1->name != NULL && strcmp(s1->name, "Sales") == 0);
              REQUIRE(s1->data.count == 3);
              check_double_eq(s1->data.items[0], 10.0);
              check_double_eq(s1->data.items[1], 20.5);
@@ -119,7 +119,7 @@ spec("xychart_parser") {
              XYSeries* s2 = s1->next;
              REQUIRE(s2 != NULL);
              REQUIRE(s2->type == XY_SERIES_BAR);
-             check_str_eq(s2->name, "Profit");
+             check_true(s2->name != NULL && strcmp(s2->name, "Profit") == 0);
              REQUIRE(s2->data.count == 3);
              check_double_eq(s2->data.items[0], 5.0);
              check_double_eq(s2->data.items[1], 12.0);
