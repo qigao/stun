@@ -104,7 +104,7 @@ spec("flexchart_geoshape_parser") {
             auto chart = flex::chart::geoshape_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check(std::string(mark->expr.c_str(), "geo(lat) == std::string(lon)"));
+            check(mark->expr == "geo(lat, lon)");
             check(mark->ranges.count("shape") > 0);
             auto& r = mark->ranges["shape"];
             check(r.size() == 3);
