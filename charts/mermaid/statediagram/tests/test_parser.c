@@ -85,8 +85,8 @@ spec("statediagram_parser") {
             
             StateTransition* t = diagram->root->transitions;
             REQUIRE(t != NULL);
-            check_str_eq(t->id1, "[*]");
-            check_str_eq(t->id2, "Still");
+            check_true(t->id1 != NULL && strcmp(t->id1, "[*]") == 0);
+            check_true(t->id2 != NULL && strcmp(t->id2, "Still") == 0);
             
             statediagram_free(diagram);
         }
@@ -104,14 +104,14 @@ spec("statediagram_parser") {
             
             StateNode* first = diagram->root->nodes;
             REQUIRE(first != NULL);
-            check_str_eq(first->id, "First");
-            check_int_eq(first->type, STATE_TYPE_COMPOSITE);
+            check_true(first->id != NULL && strcmp(first->id, "First") == 0);
+            check_true((first->type) == (STATE_TYPE_COMPOSITE));
             REQUIRE(first->doc != NULL);
             
             StateTransition* t = first->doc->transitions;
             REQUIRE(t != NULL);
-            check_str_eq(t->id1, "[*]");
-            check_str_eq(t->id2, "Second");
+            check_true(t->id1 != NULL && strcmp(t->id1, "[*]") == 0);
+            check_true(t->id2 != NULL && strcmp(t->id2, "Second") == 0);
             
             statediagram_free(diagram);
         }
