@@ -62,8 +62,8 @@ spec("mindmap_parser") {
             MindmapDiagram* diagram = mindmap_parse(input);
             REQUIRE(diagram != NULL);
             REQUIRE(diagram->root != NULL);
-            check_str_eq(diagram->root->label, "Root");
-            check_int_eq(diagram->root->level, 2); 
+            check_true(diagram->root->label != NULL && strcmp(diagram->root->label, "Root") == 0);
+            check_true((diagram->root->level) == (2)); 
             mindmap_free(diagram);
         }
 
@@ -80,19 +80,19 @@ spec("mindmap_parser") {
              
              MindmapNode* root = diagram->root;
              REQUIRE(root != NULL);
-             check_str_eq(root->label, "Root");
+             check_true(root->label != NULL && strcmp(root->label, "Root") == 0);
              
              MindmapNode* child1 = root->children;
              REQUIRE(child1 != NULL);
-             check_str_eq(child1->label, "Child1");
+             check_true(child1->label != NULL && strcmp(child1->label, "Child1") == 0);
              
              MindmapNode* child2 = child1->next;
              REQUIRE(child2 != NULL);
-             check_str_eq(child2->label, "Child2");
+             check_true(child2->label != NULL && strcmp(child2->label, "Child2") == 0);
              
              MindmapNode* grandchild = child2->children;
              REQUIRE(grandchild != NULL);
-             check_str_eq(grandchild->label, "GrandChild");
+             check_true(grandchild->label != NULL && strcmp(grandchild->label, "GrandChild") == 0);
              
              mindmap_free(diagram);
         }
@@ -107,8 +107,8 @@ spec("mindmap_parser") {
              
              MindmapNode* root = diagram->root;
              REQUIRE(root != NULL);
-             check_str_eq(root->id, "root");
-             check_str_eq(root->label, "CircleRoot");
+             check_true(root->id != NULL && strcmp(root->id, "root") == 0);
+             check_true(root->label != NULL && strcmp(root->label, "CircleRoot") == 0);
              REQUIRE(root->type == MINDMAP_NODE_CIRCLE);
              
              mindmap_free(diagram);
@@ -129,11 +129,11 @@ spec("mindmap_parser") {
              
              // Icon
              REQUIRE(root->icon != NULL);
-             check_str_eq(root->icon, "fa fa-book");
+             check_true(root->icon != NULL && strcmp(root->icon, "fa fa-book") == 0);
              
              // Class
              REQUIRE(root->classes != NULL);
-             check_str_eq(root->classes, "urgent");
+             check_true(root->classes != NULL && strcmp(root->classes, "urgent") == 0);
              
              mindmap_free(diagram);
         }
