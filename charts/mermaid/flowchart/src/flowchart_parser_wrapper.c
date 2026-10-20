@@ -66,6 +66,17 @@ static FlowchartClass *reverse_classes(FlowchartClass *head) {
   return result;
 }
 
+static FlowchartLinkStyle *reverse_link_styles(FlowchartLinkStyle *head) {
+  FlowchartLinkStyle *result = NULL;
+  while (head) {
+    FlowchartLinkStyle *next = head->next;
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
 static FlowchartClick *reverse_clicks(FlowchartClick *head) {
   FlowchartClick *result = NULL;
   while (head) {
@@ -97,6 +108,7 @@ static void restore_source_order(FlowchartDiagram *diagram) {
   diagram->subgraphs = reverse_subgraphs(diagram->subgraphs);
   diagram->classes = reverse_classes(diagram->classes);
   diagram->clicks = reverse_clicks(diagram->clicks);
+  diagram->link_styles = reverse_link_styles(diagram->link_styles);
 }
 
 static void free_active_subgraphs(FlowchartParserContext *ctx) {
@@ -269,6 +281,21 @@ void flowchart_diagram_free(FlowchartDiagram *diagram) {
     free(click->target);
     free(click);
     click = next;
+  }
+  FlowchartLinkStyle *link_style = diagram->link_styles;
+  while (link_style) {
+    FlowchartLinkStyle *next = link_style->next;
+    free(link_style->index);
+    FlowchartStyle *style = link_style->styles;
+    while (style) {
+      FlowchartStyle *style_next = style->next;
+      free(style->key);
+      free(style->value);
+      free(style);
+      style = style_next;
+    }
+    free(link_style);
+    link_style = next;
   }
   free(diagram);
 }
@@ -505,7 +532,30 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
     json_array_add(clicks_arr, click_obj);
   }
   json_object_add(root, "clicks", clicks_arr);
-  json_object_add(root, "linkStyles", json_create_array());
+
+  json_value_t *link_styles_arr = json_create_array();
+  for (FlowchartLinkStyle *item = diagram->link_styles; item; item = item->next) {
+    if (!item->index) continue;
+    json_value_t *link_style_obj = json_create_object();
+    if (strcmp(item->index, "default") == 0) {
+      json_object_set_string(link_style_obj, "index", item->index);
+    } else {
+      char *end = NULL;
+      long index = strtol(item->index, &end, 10);
+      if (end && *end == '\0' && end != item->index)
+        json_object_set_number(link_style_obj, "index", (double)index);
+      else
+        json_object_set_string(link_style_obj, "index", item->index);
+    }
+    json_value_t *styles_obj = json_create_object();
+    for (FlowchartStyle *style = item->styles; style; style = style->next) {
+      if (style->key && style->value)
+        json_object_set_string(styles_obj, style->key, style->value);
+    }
+    json_object_add(link_style_obj, "styles", styles_obj);
+    json_array_add(link_styles_arr, link_style_obj);
+  }
+  json_object_add(root, "linkStyles", link_styles_arr);
   json_object_set_string(root, "type", "flowchart");
 
   size_t len;

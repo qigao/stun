@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW CLASSDEF COMMA STYLE CLICK
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW CLASSDEF COMMA STYLE CLICK LINKSTYLE
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -248,6 +248,28 @@ static void add_class_assignment(FlowchartParserContext* ctx,
 }
 
 
+
+static void add_link_style(FlowchartParserContext* ctx, char* index,
+                           FlowchartStyle* styles) {
+    if (!index || !styles) {
+        free(index);
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    FlowchartLinkStyle* item = (FlowchartLinkStyle*)calloc(1, sizeof(FlowchartLinkStyle));
+    if (!item) {
+        free(index);
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    item->index = index;
+    item->styles = styles;
+    item->next = ctx->diagram->link_styles;
+    ctx->diagram->link_styles = item;
+}
+
 static void add_click(FlowchartParserContext* ctx, const char* node_id,
                       const char* target, int is_href) {
     if (!node_id || !target) {
@@ -376,6 +398,7 @@ statement ::= subgraph_statement.
 statement ::= class_statement.
 statement ::= classdef_statement.
 statement ::= click_statement.
+statement ::= linkstyle_statement.
 /* Preserve local direction on its subgraph without mutating diagram direction. */
 statement ::= DIRECTION DIR(A). {
     FlowchartSubGraph* sg = current_subgraph(ctx);
@@ -424,6 +447,13 @@ style_specs(R) ::= style_specs(A) COMMA style_spec(B). {
 style_spec(R) ::= STYLE(A). {
     R = parse_style(ctx, A);
     free(A);
+}
+
+linkstyle_statement ::= LINKSTYLE label_text(A) style_specs(B) SEMI. {
+    add_link_style(ctx, A, B);
+}
+linkstyle_statement ::= LINKSTYLE label_text(A) style_specs(B) NEWLINE. {
+    add_link_style(ctx, A, B);
 }
 
 click_statement ::= CLICK label_text(A) STRING(B) click_tooltip_opt(C). {

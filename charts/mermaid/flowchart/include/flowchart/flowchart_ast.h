@@ -94,6 +94,12 @@ typedef struct FlowchartClick {
     struct FlowchartClick* next;
 } FlowchartClick;
 
+typedef struct FlowchartLinkStyle {
+    char* index;
+    FlowchartStyle* styles;
+    struct FlowchartLinkStyle* next;
+} FlowchartLinkStyle;
+
 typedef struct FlowchartDiagram {
     char* direction; 
     FlowchartLayoutMode layout_mode;
@@ -111,6 +117,7 @@ typedef struct FlowchartDiagram {
     FlowchartClassDef* class_defs;
     FlowchartClass* classes;
     FlowchartClick* clicks;
+    FlowchartLinkStyle* link_styles;
 } FlowchartDiagram;
 
 typedef struct {

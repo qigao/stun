@@ -310,6 +310,48 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("linkStyle metadata") {
+        it("serializes default and indexed styles without consuming later nodes") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "A --> C\n"
+                "linkStyle default color:Sienna;\n"
+                "linkStyle 0 stroke:#D50000\n"
+                "style A stroke:#ff0000,fill:#ffcccc\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartLinkStyle* item = diagram->link_styles;
+            check_true(item != NULL);
+            if (item) {
+                check_true(strcmp(item->index, "default") == 0);
+                check_true(item->styles != NULL);
+                if (item->styles) {
+                    check_true(strcmp(item->styles->key, "color") == 0);
+                    check_true(strcmp(item->styles->value, "Sienna") == 0);
+                }
+                item = item->next;
+            }
+            check_true(item != NULL);
+            if (item) {
+                check_true(strcmp(item->index, "0") == 0);
+                check_true(item->styles != NULL);
+                if (item->styles) {
+                    check_true(strcmp(item->styles->key, "stroke") == 0);
+                    check_true(strcmp(item->styles->value, "#D50000") == 0);
+                }
+                item = item->next;
+            }
+            check_true(item == NULL);
+            check_true(diagram->nodes != NULL && diagram->nodes->next != NULL &&
+                       diagram->nodes->next->next == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("golden tests") {
         int count = 0;
         int golden_failures = 0;

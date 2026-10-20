@@ -41,6 +41,7 @@ loop:
         newline = [\n];
         style = [a-zA-Z_][a-zA-Z0-9_-]* ":" [^,;\n\000]+;
         new_node_props = "@{" [^}\n\000]* "}";
+        style_stmt = "style" [ \t]+ [^\n\000]*;
         // 限制标识符，不包括特殊操作符字符，或者将操作符放在前面
         ident = [a-zA-Z0-9_][a-zA-Z0-9_]*; 
         string = "\"" [^"\000]* "\"";
@@ -67,6 +68,9 @@ loop:
         // this adapter yet; consume the whole block rather than leaking its
         // label/value tokens as phantom nodes.
         new_node_props { goto loop; }
+        // Node-local style declarations are currently outside the JSON graph
+        // contract; skip their entire physical line instead of parsing CSS as nodes.
+        style_stmt { goto loop; }
 
         // 优先级 1: 关键字
         "graph"      { FlowchartParser(parser, FC_GRAPH, NULL, ctx); goto loop; }
@@ -74,6 +78,7 @@ loop:
         "subgraph"   { FlowchartParser(parser, FC_SUBGRAPH, NULL, ctx); goto loop; }
         "end"        { FlowchartParser(parser, FC_END, NULL, ctx); goto loop; }
         "classDef"   { s->in_classdef = 1; FlowchartParser(parser, FC_CLASSDEF, NULL, ctx); goto loop; }
+        "linkStyle"  { s->in_classdef = 1; FlowchartParser(parser, FC_LINKSTYLE, NULL, ctx); goto loop; }
         "click"      { FlowchartParser(parser, FC_CLICK, NULL, ctx); goto loop; }
         "class"      { FlowchartParser(parser, FC_CLASS, NULL, ctx); goto loop; }
         "direction"  { FlowchartParser(parser, FC_DIRECTION, NULL, ctx); goto loop; }
