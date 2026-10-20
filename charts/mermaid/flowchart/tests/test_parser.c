@@ -191,10 +191,7 @@ spec("flowchart_parser") {
                                 failed = 1;
                         }
                     }
-                    if (actual) json_serialize_free(actual);
-                    if (diagram) flowchart_diagram_free(diagram);
-                    free(expected);
-                    free(input);
+                    /* Diagnostics must run before releasing their source buffers. */
                     /* Defer assertions until the directory handle is closed. */
                     if (failed) {
                         fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
@@ -206,6 +203,10 @@ spec("flowchart_parser") {
                         }
                         golden_failures++;
                     }
+                    if (actual) json_serialize_free(actual);
+                    if (diagram) flowchart_diagram_free(diagram);
+                    free(expected);
+                    free(input);
                 }
                 if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
