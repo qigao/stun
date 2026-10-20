@@ -157,6 +157,7 @@ spec("flowchart_parser") {
 
     describe("golden tests") {
         int count = 0;
+        int golden_failures = 0;
 #ifdef _WIN32
         char search_path[512];
         snprintf(search_path, sizeof(search_path), "%s/*.input.mmd", GOLDEN_DIR);
@@ -194,9 +195,8 @@ spec("flowchart_parser") {
                     if (diagram) flowchart_diagram_free(diagram);
                     free(expected);
                     free(input);
-                    /* TinyTest's check() may return from this case immediately.
-                       Run it only after every per-case resource has been released. */
-                    if (failed) check(0, "JSON mismatch or parse/load failure");
+                    /* Defer assertions until the directory handle is closed. */
+                    if (failed) golden_failures++;
                 }
                 if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
@@ -238,15 +238,15 @@ spec("flowchart_parser") {
                     if (diagram) flowchart_diagram_free(diagram);
                     free(expected);
                     free(input);
-                    /* TinyTest's check() may return from this case immediately.
-                       Run it only after every per-case resource has been released. */
-                    if (failed) check(0, "JSON mismatch or parse/load failure");
+                    /* Defer assertions until the directory handle is closed. */
+                    if (failed) golden_failures++;
                 }
                 if (++count >= 1000) break;
             }
             closedir(directory);
         }
 #endif
+        check_true(golden_failures == 0);
         printf("Ran %d dynamic golden tests.\n", count);
     }
 }
