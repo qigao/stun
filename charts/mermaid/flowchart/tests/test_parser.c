@@ -196,7 +196,7 @@ spec("flowchart_parser") {
                     free(expected);
                     free(input);
                     /* Defer assertions until the directory handle is closed. */
-                    if (failed) golden_failures++;
+                    if (failed) { fprintf(stderr, "Flowchart golden mismatch: %s\\n", case_name); golden_failures++; }
                 }
                 if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
@@ -239,7 +239,7 @@ spec("flowchart_parser") {
                     free(expected);
                     free(input);
                     /* Defer assertions until the directory handle is closed. */
-                    if (failed) golden_failures++;
+                    if (failed) { fprintf(stderr, "Flowchart golden mismatch: %s\\n", case_name); golden_failures++; }
                 }
                 if (++count >= 1000) break;
             }
