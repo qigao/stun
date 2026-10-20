@@ -135,8 +135,7 @@ public:
                                      ctx.estimated_plot_h, path)) continue;
             }
 
-            auto shape = ctx.arena.create<Shape>();
-            if (!shape) return;
+            auto shape = Shape::create();
             shape->set_id("geoshape-mark-" + std::to_string(i));
             shape->set_path(path);
             shape->set_anchor(Anchor::TopLeft);
