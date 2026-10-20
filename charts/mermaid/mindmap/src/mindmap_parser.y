@@ -3,7 +3,7 @@
 %extra_argument { MindmapParserContext *ctx }
 
 %token_type { char* }
-%token_destructor { free($); }
+%token_destructor { free($$); }
 %type id { char* }
 %type indent { char* }
 %type node { MindmapNode* }
