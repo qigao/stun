@@ -76,6 +76,10 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
     FlowchartNode* curr = ctx->diagram->nodes;
     while (curr) {
         if (strcmp(curr->id, id) == 0) {
+            /* Membership depends on references inside the active subgraph, not
+               on where the node was first declared. */
+            FlowchartSubGraph* active = current_subgraph(ctx);
+            if (active) add_node_ref(ctx, active, id);
             if (label && (!curr->label || strcmp(curr->label, id) == 0)) {
                 char* replacement = strdup(label);
                 if (!replacement) {
@@ -206,9 +210,16 @@ statement ::= node_definition.
 statement ::= edge_statement.
 statement ::= subgraph_statement.
 statement ::= class_statement.
-/* Subgraph-local direction directives are syntax, not node IDs. The AST currently
-   stores only diagram direction, so consume local directives without changing it. */
-statement ::= DIRECTION DIR.
+/* Preserve local direction on its subgraph without mutating diagram direction. */
+statement ::= DIRECTION DIR(A). {
+    FlowchartSubGraph* sg = current_subgraph(ctx);
+    if (sg) {
+        char* direction = strdup(A);
+        if (!direction) ctx->error_count++;
+        else { free(sg->direction); sg->direction = direction; }
+    }
+    free(A);
+}
 statement ::= NEWLINE.
 statement ::= SEMI.
 
