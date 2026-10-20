@@ -202,51 +202,7 @@ spec("flowchart_parser") {
                         }
                         golden_failures++;
                     }
-                    if (actual) json_serialize_free(actual);
-                    if (diagram) flowchart_diagram_free(diagram);
-                    free(expected);
-                    free(input);
-                }
-                if (++count >= 1000) break;
-            } while (FindNextFileA(hFind, &find_data));
-            FindClose(hFind);
-        }
-#else
-        DIR* directory = opendir(GOLDEN_DIR);
-        check_true(directory != NULL);
-        if (directory) {
-            struct dirent* entry;
-            while ((entry = readdir(directory)) != NULL) {
-                const char* filename = entry->d_name;
-                const char* ext = strstr(filename, ".input.mmd");
-                if (!ext || ext[strlen(".input.mmd")] != '\0') continue;
-                size_t name_len = (size_t)(ext - filename);
-                if (name_len >= 128) continue;
-                char case_name[128];
-                memcpy(case_name, filename, name_len);
-                case_name[name_len] = '\0';
-                it(case_name) {
-                    char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd");
-                    char* expected = load_golden_file(case_name, "output", "json");
-                    if (!expected) expected = load_golden_file(case_name, "", "json");
-                    int failed = !input || !expected;
-                    FlowchartDiagram* diagram = NULL;
-                    char* actual = NULL;
-                    if (!failed) {
-                        diagram = flowchart_parse(input);
-                        if (!diagram) {
-                            failed = 1;
-                        } else {
-                            actual = flowchart_to_json(diagram);
-                            if (!actual || !json_equal(actual, expected))
-                                failed = 1;
-                        }
-                    }
-                    if (actual) json_serialize_free(actual);
-                    if (diagram) flowchart_diagram_free(diagram);
-                    free(expected);
-                    free(input);
+                    /* Diagnostics must run before releasing their source buffers. */
                     /* Defer assertions until the directory handle is closed. */
                     if (failed) {
                         fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
@@ -258,6 +214,10 @@ spec("flowchart_parser") {
                         }
                         golden_failures++;
                     }
+                    if (actual) json_serialize_free(actual);
+                    if (diagram) flowchart_diagram_free(diagram);
+                    free(expected);
+                    free(input);
                 }
                 if (++count >= 1000) break;
             }
