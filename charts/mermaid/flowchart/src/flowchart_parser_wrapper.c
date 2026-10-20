@@ -369,7 +369,18 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
         continue;
       }
     json_value_t *e_det = json_create_object();
-    json_object_set_number(e_det, "length", 1);
+    int edge_length = 1;
+    if (e->arrow_type) {
+      const char stroke_char = e->arrow_type[0];
+      if (stroke_char == '-' || stroke_char == '=') {
+        size_t stroke_length = 0;
+        while (e->arrow_type[stroke_length] == stroke_char)
+          ++stroke_length;
+        if (stroke_length > 1)
+          edge_length = (int)stroke_length - 1;
+      }
+    }
+    json_object_set_number(e_det, "length", edge_length);
     json_object_set_string(e_det, "source", e->from ? e->from : "");
     const char *stroke = "normal";
     if (e->arrow_type && strstr(e->arrow_type, "==="))
