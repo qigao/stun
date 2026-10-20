@@ -177,27 +177,26 @@ spec("flowchart_parser") {
                     if (!input) input = load_golden_file(case_name, "output", "mmd");
                     char* expected = load_golden_file(case_name, "output", "json");
                     if (!expected) expected = load_golden_file(case_name, "", "json");
-                    if (!input || !expected) {
-                        check_true(0);
-                        free(input);
-                        free(expected);
-                    } else {
-                        FlowchartDiagram* diagram = flowchart_parse(input);
+                    int failed = !input || !expected;
+                    FlowchartDiagram* diagram = NULL;
+                    char* actual = NULL;
+                    if (!failed) {
+                        diagram = flowchart_parse(input);
                         if (!diagram) {
-                            check_true(0);
+                            failed = 1;
                         } else {
-                            char* actual = flowchart_to_json(diagram);
-                            if (!actual) {
-                                check_true(0);
-                            } else {
-                                check(json_equal(actual, expected), "JSON mismatch");
-                                json_serialize_free(actual);
-                            }
-                            flowchart_diagram_free(diagram);
+                            actual = flowchart_to_json(diagram);
+                            if (!actual || !json_equal(actual, expected))
+                                failed = 1;
                         }
-                        free(expected);
-                        free(input);
                     }
+                    if (actual) json_serialize_free(actual);
+                    if (diagram) flowchart_diagram_free(diagram);
+                    free(expected);
+                    free(input);
+                    /* TinyTest's check() may return from this case immediately.
+                       Run it only after every per-case resource has been released. */
+                    if (failed) check(0, "JSON mismatch or parse/load failure");
                 }
                 if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
@@ -222,27 +221,26 @@ spec("flowchart_parser") {
                     if (!input) input = load_golden_file(case_name, "output", "mmd");
                     char* expected = load_golden_file(case_name, "output", "json");
                     if (!expected) expected = load_golden_file(case_name, "", "json");
-                    if (!input || !expected) {
-                        check_true(0);
-                        free(input);
-                        free(expected);
-                    } else {
-                        FlowchartDiagram* diagram = flowchart_parse(input);
+                    int failed = !input || !expected;
+                    FlowchartDiagram* diagram = NULL;
+                    char* actual = NULL;
+                    if (!failed) {
+                        diagram = flowchart_parse(input);
                         if (!diagram) {
-                            check_true(0);
+                            failed = 1;
                         } else {
-                            char* actual = flowchart_to_json(diagram);
-                            if (!actual) {
-                                check_true(0);
-                            } else {
-                                check(json_equal(actual, expected), "JSON mismatch");
-                                json_serialize_free(actual);
-                            }
-                            flowchart_diagram_free(diagram);
+                            actual = flowchart_to_json(diagram);
+                            if (!actual || !json_equal(actual, expected))
+                                failed = 1;
                         }
-                        free(expected);
-                        free(input);
                     }
+                    if (actual) json_serialize_free(actual);
+                    if (diagram) flowchart_diagram_free(diagram);
+                    free(expected);
+                    free(input);
+                    /* TinyTest's check() may return from this case immediately.
+                       Run it only after every per-case resource has been released. */
+                    if (failed) check(0, "JSON mismatch or parse/load failure");
                 }
                 if (++count >= 1000) break;
             }
