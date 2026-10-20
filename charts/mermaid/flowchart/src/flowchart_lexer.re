@@ -53,6 +53,7 @@ loop:
         "subgraph"   { FlowchartParser(parser, FC_SUBGRAPH, NULL, ctx); goto loop; }
         "end"        { FlowchartParser(parser, FC_END, NULL, ctx); goto loop; }
         "class"      { FlowchartParser(parser, FC_CLASS, NULL, ctx); goto loop; }
+        "direction"  { FlowchartParser(parser, FC_DIRECTION, NULL, ctx); goto loop; }
         "LR" | "TB" | "BT" | "RL" | "TD" { 
             FlowchartParser(parser, FC_DIR, copy_token(token, s->cursor), ctx); 
             goto loop; 
