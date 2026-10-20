@@ -66,6 +66,17 @@ static FlowchartClass *reverse_classes(FlowchartClass *head) {
   return result;
 }
 
+static FlowchartClick *reverse_clicks(FlowchartClick *head) {
+  FlowchartClick *result = NULL;
+  while (head) {
+    FlowchartClick *next = head->next;
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
 static FlowchartSubGraph *reverse_subgraphs(FlowchartSubGraph *head) {
   FlowchartSubGraph *result = NULL;
   while (head) {
@@ -85,6 +96,7 @@ static void restore_source_order(FlowchartDiagram *diagram) {
   diagram->edges = reverse_edges(diagram->edges);
   diagram->subgraphs = reverse_subgraphs(diagram->subgraphs);
   diagram->classes = reverse_classes(diagram->classes);
+  diagram->clicks = reverse_clicks(diagram->clicks);
 }
 
 static void free_active_subgraphs(FlowchartParserContext *ctx) {
@@ -249,6 +261,14 @@ void flowchart_diagram_free(FlowchartDiagram *diagram) {
     free(assignment->class_name);
     free(assignment);
     assignment = next;
+  }
+  FlowchartClick *click = diagram->clicks;
+  while (click) {
+    FlowchartClick *next = click->next;
+    free(click->node_id);
+    free(click->target);
+    free(click);
+    click = next;
   }
   free(diagram);
 }
@@ -475,7 +495,16 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
       json_array_add(class_names, json_create_string(assignment->class_name));
   }
   json_object_add(root, "classes", classes_obj);
-  json_object_add(root, "clicks", json_create_array());
+
+  json_value_t *clicks_arr = json_create_array();
+  for (FlowchartClick *click = diagram->clicks; click; click = click->next) {
+    if (!click->node_id || !click->target) continue;
+    json_value_t *click_obj = json_create_object();
+    json_object_set_string(click_obj, click->is_href ? "href" : "callback", click->target);
+    json_object_set_string(click_obj, "nodeId", click->node_id);
+    json_array_add(clicks_arr, click_obj);
+  }
+  json_object_add(root, "clicks", clicks_arr);
   json_object_add(root, "linkStyles", json_create_array());
   json_object_set_string(root, "type", "flowchart");
 

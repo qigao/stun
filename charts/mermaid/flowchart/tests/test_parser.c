@@ -227,6 +227,89 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("click statement metadata") {
+        it("serializes href and callback clicks in source order") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "click A \"index.html#link-clicked\" \"link test\"\n"
+                "click B testClick \"click test\"\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartClick* click = diagram->clicks;
+            check_true(click != NULL);
+            if (click) {
+                check_true(strcmp(click->node_id, "A") == 0);
+                check_true(click->is_href == 1);
+                check_true(strcmp(click->target, "index.html#link-clicked") == 0);
+                click = click->next;
+            }
+            check_true(click != NULL);
+            if (click) {
+                check_true(strcmp(click->node_id, "B") == 0);
+                check_true(click->is_href == 0);
+                check_true(strcmp(click->target, "testClick") == 0);
+                click = click->next;
+            }
+            check_true(click == NULL);
+
+            const char* expected =
+                "{"
+                "\"classDefs\":{},\"classes\":{},"
+                "\"clicks\":[{\"href\":\"index.html#link-clicked\",\"nodeId\":\"A\"},"
+                "{\"callback\":\"testClick\",\"nodeId\":\"B\"}],"
+                "\"direction\":\"LR\",\"linkStyles\":[],"
+                "\"links\":[{\"length\":1,\"source\":\"A\",\"stroke\":\"normal\","
+                "\"target\":\"B\",\"type\":\"arrow_point\"}],"
+                "\"nodes\":{\"A\":{\"id\":\"A\",\"shape\":\"rect\"},"
+                "\"B\":{\"id\":\"B\",\"shape\":\"rect\"}},"
+                "\"subgraphs\":[],\"type\":\"flowchart\""
+                "}";
+            char* actual = flowchart_to_json(diagram);
+            check_true(actual != NULL);
+            if (actual) {
+                check_true(json_equal(actual, expected));
+                json_serialize_free(actual);
+            }
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("modern node declaration syntax") {
+        it("accepts ampersand-separated and annotated nodes") {
+            const char* input =
+                "flowchart TB\n"
+                "n2[\"label for n2\"] & n4@{ label: \"label for n4\" }"
+                " & n5@{ label: \"label for n5\" }\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            int seen_n2 = 0, seen_n4 = 0, seen_n5 = 0;
+            for (FlowchartNode* node = diagram->nodes; node; node = node->next) {
+                if (strcmp(node->id, "n2") == 0) {
+                    seen_n2++;
+                    check_true(strcmp(node->label, "label for n2") == 0);
+                } else if (strcmp(node->id, "n4") == 0) {
+                    seen_n4++;
+                    check_true(strcmp(node->label, "n4") == 0);
+                } else if (strcmp(node->id, "n5") == 0) {
+                    seen_n5++;
+                    check_true(strcmp(node->label, "n5") == 0);
+                }
+            }
+            check_true(seen_n2 == 1);
+            check_true(seen_n4 == 1);
+            check_true(seen_n5 == 1);
+            check_true(diagram->edges == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("golden tests") {
         int count = 0;
         int golden_failures = 0;

@@ -40,6 +40,7 @@ loop:
         white = [ \t\r]+;
         newline = [\n];
         style = [a-zA-Z_][a-zA-Z0-9_-]* ":" [^,;\n\000]+;
+        new_node_props = "@{" [^}\n\000]* "}";
         // 限制标识符，不包括特殊操作符字符，或者将操作符放在前面
         ident = [a-zA-Z0-9_][a-zA-Z0-9_]*; 
         string = "\"" [^"\000]* "\"";
@@ -62,12 +63,18 @@ loop:
         }
         comment { goto loop; }
 
+        // v2 node metadata blocks do not change the graph facts projected by
+        // this adapter yet; consume the whole block rather than leaking its
+        // label/value tokens as phantom nodes.
+        new_node_props { goto loop; }
+
         // 优先级 1: 关键字
         "graph"      { FlowchartParser(parser, FC_GRAPH, NULL, ctx); goto loop; }
         "flowchart"  { FlowchartParser(parser, FC_FLOWCHART, NULL, ctx); goto loop; }
         "subgraph"   { FlowchartParser(parser, FC_SUBGRAPH, NULL, ctx); goto loop; }
         "end"        { FlowchartParser(parser, FC_END, NULL, ctx); goto loop; }
         "classDef"   { s->in_classdef = 1; FlowchartParser(parser, FC_CLASSDEF, NULL, ctx); goto loop; }
+        "click"      { FlowchartParser(parser, FC_CLICK, NULL, ctx); goto loop; }
         "class"      { FlowchartParser(parser, FC_CLASS, NULL, ctx); goto loop; }
         "direction"  { FlowchartParser(parser, FC_DIRECTION, NULL, ctx); goto loop; }
         "LR" | "TB" | "BT" | "RL" | "TD" { 
@@ -100,6 +107,7 @@ loop:
         "{"               { FlowchartParser(parser, FC_RHOMBUS_START, NULL, ctx); goto loop; }
         "}"               { FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
+        "&"               { goto loop; }
         ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; goto loop; }
         ","               { FlowchartParser(parser, FC_COMMA, NULL, ctx); goto loop; }
         ":"               { FlowchartParser(parser, FC_COLON, NULL, ctx); goto loop; }

@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW CLASSDEF COMMA STYLE
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW CLASSDEF COMMA STYLE CLICK
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -18,11 +18,13 @@
 %type class_ids { FlowchartNodeRef* }
 %type style_spec { FlowchartStyle* }
 %type style_specs { FlowchartStyle* }
+%type click_tooltip_opt { char* }
 %destructor label_text { free($$); }
 %destructor node_label { free($$); }
 %destructor class_ids { free_node_refs($$); }
 %destructor style_spec { free_styles($$); }
 %destructor style_specs { free_styles($$); }
+%destructor click_tooltip_opt { free($$); }
 
 %include {
 #include <stdlib.h>
@@ -245,6 +247,32 @@ static void add_class_assignment(FlowchartParserContext* ctx,
     ctx->diagram->classes = assignment;
 }
 
+
+static void add_click(FlowchartParserContext* ctx, const char* node_id,
+                      const char* target, int is_href) {
+    if (!node_id || !target) {
+        ctx->error_count++;
+        return;
+    }
+    FlowchartClick* click = (FlowchartClick*)calloc(1, sizeof(FlowchartClick));
+    if (!click) {
+        ctx->error_count++;
+        return;
+    }
+    click->node_id = strdup(node_id);
+    click->target = strdup(target);
+    click->is_href = is_href;
+    if (!click->node_id || !click->target) {
+        free(click->node_id);
+        free(click->target);
+        free(click);
+        ctx->error_count++;
+        return;
+    }
+    click->next = ctx->diagram->clicks;
+    ctx->diagram->clicks = click;
+}
+
 static void add_class_definition(FlowchartParserContext* ctx, char* id,
                                  FlowchartStyle* styles) {
     if (!id) {
@@ -347,6 +375,7 @@ statement ::= edge_statement.
 statement ::= subgraph_statement.
 statement ::= class_statement.
 statement ::= classdef_statement.
+statement ::= click_statement.
 /* Preserve local direction on its subgraph without mutating diagram direction. */
 statement ::= DIRECTION DIR(A). {
     FlowchartSubGraph* sg = current_subgraph(ctx);
@@ -396,6 +425,17 @@ style_spec(R) ::= STYLE(A). {
     R = parse_style(ctx, A);
     free(A);
 }
+
+click_statement ::= CLICK label_text(A) STRING(B) click_tooltip_opt(C). {
+    add_click(ctx, A, B, 1);
+    free(A); free(B); free(C);
+}
+click_statement ::= CLICK label_text(A) IDENTIFIER(B) click_tooltip_opt(C). {
+    add_click(ctx, A, B, 0);
+    free(A); free(B); free(C);
+}
+click_tooltip_opt(R) ::= STRING(A). { R = A; }
+click_tooltip_opt(R) ::= . { R = NULL; }
 
 node_definition ::= node(A). { (void)A; }
 
