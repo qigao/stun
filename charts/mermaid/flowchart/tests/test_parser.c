@@ -196,7 +196,16 @@ spec("flowchart_parser") {
                     free(expected);
                     free(input);
                     /* Defer assertions until the directory handle is closed. */
-                    if (failed) { fprintf(stderr, "Flowchart golden mismatch: %s\\n", case_name); golden_failures++; }
+                    if (failed) {
+                        fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
+                        if (golden_failures < 3) {
+                            fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
+                                    case_name, expected ? expected : "<missing>");
+                            fprintf(stderr, "--- actual JSON (%s) ---\n%s\n",
+                                    case_name, actual ? actual : "<parse/serialize failed>");
+                        }
+                        golden_failures++;
+                    }
                 }
                 if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
@@ -239,7 +248,16 @@ spec("flowchart_parser") {
                     free(expected);
                     free(input);
                     /* Defer assertions until the directory handle is closed. */
-                    if (failed) { fprintf(stderr, "Flowchart golden mismatch: %s\\n", case_name); golden_failures++; }
+                    if (failed) {
+                        fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
+                        if (golden_failures < 3) {
+                            fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
+                                    case_name, expected ? expected : "<missing>");
+                            fprintf(stderr, "--- actual JSON (%s) ---\n%s\n",
+                                    case_name, actual ? actual : "<parse/serialize failed>");
+                        }
+                        golden_failures++;
+                    }
                 }
                 if (++count >= 1000) break;
             }
