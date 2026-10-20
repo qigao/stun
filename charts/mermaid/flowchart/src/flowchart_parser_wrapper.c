@@ -12,6 +12,7 @@ typedef struct {
   const char *limit;
   const char *marker;
   int line;
+  int in_classdef;
 } Scanner;
 
 extern void flowchart_scan(Scanner *s, void *parser, FlowchartParserContext *ctx);
@@ -65,6 +66,17 @@ static FlowchartNodeRef *reverse_node_refs(FlowchartNodeRef *head) {
   return result;
 }
 
+static FlowchartClass *reverse_classes(FlowchartClass *head) {
+  FlowchartClass *result = NULL;
+  while (head) {
+    FlowchartClass *next = head->next;
+    head->next = result;
+    result = head;
+    head = next;
+  }
+  return result;
+}
+
 static FlowchartSubGraph *reverse_subgraphs(FlowchartSubGraph *head) {
   FlowchartSubGraph *result = NULL;
   while (head) {
@@ -82,6 +94,7 @@ static void restore_source_order(FlowchartDiagram *diagram) {
   diagram->nodes = reverse_nodes(diagram->nodes);
   diagram->edges = reverse_edges(diagram->edges);
   diagram->subgraphs = reverse_subgraphs(diagram->subgraphs);
+  diagram->classes = reverse_classes(diagram->classes);
 }
 
 static void free_active_subgraphs(FlowchartParserContext *ctx) {
@@ -141,6 +154,7 @@ FlowchartParseStatus flowchart_parse_ex(const char *input,
   s.limit = input + strlen(input);
   s.marker = NULL;
   s.line = 1;
+  s.in_classdef = 0;
 
   flowchart_scan(&s, parser, &ctx);
   FlowchartParser(parser, 0, NULL, &ctx);
@@ -222,6 +236,29 @@ void flowchart_diagram_free(FlowchartDiagram *diagram) {
     FlowchartSubGraph *next = sg->next;
     free_subgraph(sg);
     sg = next;
+  }
+  FlowchartClassDef *definition = diagram->class_defs;
+  while (definition) {
+    FlowchartClassDef *next = definition->next;
+    FlowchartStyle *style = definition->styles;
+    while (style) {
+      FlowchartStyle *style_next = style->next;
+      free(style->key);
+      free(style->value);
+      free(style);
+      style = style_next;
+    }
+    free(definition->id);
+    free(definition);
+    definition = next;
+  }
+  FlowchartClass *assignment = diagram->classes;
+  while (assignment) {
+    FlowchartClass *next = assignment->next;
+    free(assignment->node_id);
+    free(assignment->class_name);
+    free(assignment);
+    assignment = next;
   }
   free(diagram);
 }
@@ -411,9 +448,43 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
   serialize_subgraph_recursive(subgraphs_arr, diagram->subgraphs);
   json_object_add(root, "subgraphs", subgraphs_arr);
 
-  // Meta / Styles
-  json_object_add(root, "classDefs", json_create_object());
-  json_object_add(root, "classes", json_create_object());
+  // Meta / Styles: serialize declarations collected by the parser.
+  json_value_t *class_defs_obj = json_create_object();
+  for (FlowchartClassDef *definition = diagram->class_defs; definition; definition = definition->next) {
+    if (!definition->id) continue;
+    json_value_t *definition_obj = json_create_object();
+    json_object_set_string(definition_obj, "id", definition->id);
+    json_value_t *styles_obj = json_create_object();
+    for (FlowchartStyle *style = definition->styles; style; style = style->next) {
+      if (style->key && style->value)
+        json_object_set_string(styles_obj, style->key, style->value);
+    }
+    json_object_add(definition_obj, "styles", styles_obj);
+    json_object_add(class_defs_obj, definition->id, definition_obj);
+  }
+  json_object_add(root, "classDefs", class_defs_obj);
+
+  json_value_t *classes_obj = json_create_object();
+  for (FlowchartClass *assignment = diagram->classes; assignment; assignment = assignment->next) {
+    if (!assignment->node_id || !assignment->class_name) continue;
+    json_value_t *class_names = json_object_get(classes_obj, assignment->node_id);
+    if (!class_names) {
+      class_names = json_create_array();
+      json_object_add(classes_obj, assignment->node_id, class_names);
+    }
+    int duplicate = 0;
+    for (size_t i = 0; i < json_array_size(class_names); ++i) {
+      json_value_t *existing = json_array_get(class_names, i);
+      if (existing && json_type(existing) == JSON_STRING &&
+          strcmp(json_string(existing), assignment->class_name) == 0) {
+        duplicate = 1;
+        break;
+      }
+    }
+    if (!duplicate)
+      json_array_add(class_names, json_create_string(assignment->class_name));
+  }
+  json_object_add(root, "classes", classes_obj);
   json_object_add(root, "clicks", json_create_array());
   json_object_add(root, "linkStyles", json_create_array());
   json_object_set_string(root, "type", "flowchart");

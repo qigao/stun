@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW 
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW CLASSDEF COMMA STYLE
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -15,8 +15,14 @@
 %type label_text { char* }
 %type node_label { char* }
 %type edge_chain { FlowchartNode* }
-%destructor label_text { free($$); }
-%destructor node_label { free($$); }
+%type class_ids { FlowchartNodeRef* }
+%type style_spec { FlowchartStyle* }
+%type style_specs { FlowchartStyle* }
+%destructor label_text { free($); }
+%destructor node_label { free($); }
+%destructor class_ids { free_node_refs($); }
+%destructor style_spec { free_styles($); }
+%destructor style_specs { free_styles($); }
 
 %include {
 #include <stdlib.h>
@@ -141,6 +147,131 @@ static void add_edge(FlowchartParserContext *ctx, const char* from, const char* 
     ctx->diagram->edges = e;
 }
 
+
+static void free_node_refs(FlowchartNodeRef* refs) {
+    while (refs) {
+        FlowchartNodeRef* next = refs->next;
+        free(refs->id);
+        free(refs);
+        refs = next;
+    }
+}
+
+static void free_styles(FlowchartStyle* styles) {
+    while (styles) {
+        FlowchartStyle* next = styles->next;
+        free(styles->key);
+        free(styles->value);
+        free(styles);
+        styles = next;
+    }
+}
+
+static char* copy_trimmed(const char* start, size_t length) {
+    while (length && (*start == ' ' || *start == '\t' || *start == '\r')) {
+        ++start;
+        --length;
+    }
+    while (length && (start[length - 1] == ' ' || start[length - 1] == '\t' ||
+                      start[length - 1] == '\r'))
+        --length;
+    char* result = (char*)malloc(length + 1);
+    if (!result) return NULL;
+    memcpy(result, start, length);
+    result[length] = '\0';
+    return result;
+}
+
+static FlowchartStyle* parse_style(FlowchartParserContext* ctx, const char* raw) {
+    const char* colon = raw ? strchr(raw, ':') : NULL;
+    if (!colon) {
+        ctx->error_count++;
+        return NULL;
+    }
+    char* key = copy_trimmed(raw, (size_t)(colon - raw));
+    char* value = copy_trimmed(colon + 1, strlen(colon + 1));
+    if (!key || !value || !key[0]) {
+        free(key);
+        free(value);
+        ctx->error_count++;
+        return NULL;
+    }
+    FlowchartStyle* style = (FlowchartStyle*)calloc(1, sizeof(FlowchartStyle));
+    if (!style) {
+        free(key);
+        free(value);
+        ctx->error_count++;
+        return NULL;
+    }
+    style->key = key;
+    style->value = value;
+    return style;
+}
+
+static FlowchartStyle* append_styles(FlowchartStyle* first, FlowchartStyle* rest) {
+    if (!first) return rest;
+    FlowchartStyle* tail = first;
+    while (tail->next) tail = tail->next;
+    tail->next = rest;
+    return first;
+}
+
+static void add_class_assignment(FlowchartParserContext* ctx,
+                                 const char* node_id, const char* class_name) {
+    if (!node_id || !class_name) return;
+    for (FlowchartClass* existing = ctx->diagram->classes; existing; existing = existing->next) {
+        if (strcmp(existing->node_id, node_id) == 0 &&
+            strcmp(existing->class_name, class_name) == 0)
+            return;
+    }
+    FlowchartClass* assignment = (FlowchartClass*)calloc(1, sizeof(FlowchartClass));
+    if (!assignment) {
+        ctx->error_count++;
+        return;
+    }
+    assignment->node_id = strdup(node_id);
+    assignment->class_name = strdup(class_name);
+    if (!assignment->node_id || !assignment->class_name) {
+        free(assignment->node_id);
+        free(assignment->class_name);
+        free(assignment);
+        ctx->error_count++;
+        return;
+    }
+    assignment->next = ctx->diagram->classes;
+    ctx->diagram->classes = assignment;
+}
+
+static void add_class_definition(FlowchartParserContext* ctx, char* id,
+                                 FlowchartStyle* styles) {
+    if (!id) {
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    for (FlowchartClassDef* existing = ctx->diagram->class_defs;
+         existing; existing = existing->next) {
+        if (strcmp(existing->id, id) == 0) {
+            free(existing->id);
+            free_styles(existing->styles);
+            existing->id = id;
+            existing->styles = styles;
+            return;
+        }
+    }
+    FlowchartClassDef* definition = (FlowchartClassDef*)calloc(1, sizeof(FlowchartClassDef));
+    if (!definition) {
+        free(id);
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    definition->id = id;
+    definition->styles = styles;
+    definition->next = ctx->diagram->class_defs;
+    ctx->diagram->class_defs = definition;
+}
+
 static char* concat(FlowchartParserContext* ctx, char* a, char* b, const char* sep) {
     if (!a && !b) return NULL;
     if (!a) return b;
@@ -212,6 +343,7 @@ statement ::= node_definition.
 statement ::= edge_statement.
 statement ::= subgraph_statement.
 statement ::= class_statement.
+statement ::= classdef_statement.
 /* Preserve local direction on its subgraph without mutating diagram direction. */
 statement ::= DIRECTION DIR(A). {
     FlowchartSubGraph* sg = current_subgraph(ctx);
@@ -225,10 +357,42 @@ statement ::= DIRECTION DIR(A). {
 statement ::= NEWLINE.
 statement ::= SEMI.
 
-class_statement ::= CLASS class_idents SEMI.
-class_statement ::= CLASS class_idents NEWLINE.
-class_idents ::= class_idents label_text(A). { free(A); }
-class_idents ::= label_text(A). { free(A); }
+class_statement ::= CLASS class_ids(A) label_text(B) SEMI. {
+    for (FlowchartNodeRef* id = A; id; id = id->next)
+        add_class_assignment(ctx, id->id, B);
+    free(B);
+    free_node_refs(A);
+}
+class_statement ::= CLASS class_ids(A) label_text(B) NEWLINE. {
+    for (FlowchartNodeRef* id = A; id; id = id->next)
+        add_class_assignment(ctx, id->id, B);
+    free(B);
+    free_node_refs(A);
+}
+class_ids(R) ::= label_text(A). {
+    R = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
+    if (!R) { free(A); ctx->error_count++; }
+    else R->id = A;
+}
+class_ids(R) ::= label_text(A) COMMA class_ids(B). {
+    R = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
+    if (!R) { free(A); free_node_refs(B); ctx->error_count++; }
+    else { R->id = A; R->next = B; }
+}
+classdef_statement ::= CLASSDEF label_text(A) style_specs(B) SEMI. {
+    add_class_definition(ctx, A, B);
+}
+classdef_statement ::= CLASSDEF label_text(A) style_specs(B) NEWLINE. {
+    add_class_definition(ctx, A, B);
+}
+style_specs(R) ::= style_spec(A). { R = A; }
+style_specs(R) ::= style_specs(A) COMMA style_spec(B). {
+    R = append_styles(A, B);
+}
+style_spec(R) ::= STYLE(A). {
+    R = parse_style(ctx, A);
+    free(A);
+}
 
 node_definition ::= node(A). { (void)A; }
 

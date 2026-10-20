@@ -69,6 +69,24 @@ typedef struct FlowchartSubGraphStack {
     struct FlowchartSubGraphStack* next;
 } FlowchartSubGraphStack;
 
+typedef struct FlowchartStyle {
+    char* key;
+    char* value;
+    struct FlowchartStyle* next;
+} FlowchartStyle;
+
+typedef struct FlowchartClassDef {
+    char* id;
+    FlowchartStyle* styles;
+    struct FlowchartClassDef* next;
+} FlowchartClassDef;
+
+typedef struct FlowchartClass {
+    char* node_id;
+    char* class_name;
+    struct FlowchartClass* next;
+} FlowchartClass;
+
 typedef struct FlowchartDiagram {
     char* direction; 
     FlowchartLayoutMode layout_mode;
@@ -83,6 +101,8 @@ typedef struct FlowchartDiagram {
     FlowchartNode* nodes;
     FlowchartEdge* edges;
     FlowchartSubGraph* subgraphs;
+    FlowchartClassDef* class_defs;
+    FlowchartClass* classes;
 } FlowchartDiagram;
 
 typedef struct {

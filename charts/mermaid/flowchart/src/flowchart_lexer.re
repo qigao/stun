@@ -7,10 +7,12 @@
 #include "flowchart/flowchart_parser_wrapper.h"
 
 typedef struct {
+    char *start;
     char *cursor;
     char *limit;
     char *marker;
     int line;
+    int in_classdef;
 } LexerState;
 
 void FlowchartParser(void *parser, int token, void *value,
@@ -37,6 +39,7 @@ loop:
 
         white = [ \t\r]+;
         newline = [\n];
+        style = [a-zA-Z_][a-zA-Z0-9_-]* ":" [^,;\n\000]+;
         // 限制标识符，不包括特殊操作符字符，或者将操作符放在前面
         ident = [a-zA-Z0-9_][a-zA-Z0-9_]*; 
         string = "\"" [^"\000]* "\"";
@@ -54,6 +57,7 @@ loop:
                 ++lookahead;
             if (*lookahead != '-' && *lookahead != '=')
                 FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
+            s->in_classdef = 0;
             goto loop;
         }
         comment { goto loop; }
@@ -63,6 +67,7 @@ loop:
         "flowchart"  { FlowchartParser(parser, FC_FLOWCHART, NULL, ctx); goto loop; }
         "subgraph"   { FlowchartParser(parser, FC_SUBGRAPH, NULL, ctx); goto loop; }
         "end"        { FlowchartParser(parser, FC_END, NULL, ctx); goto loop; }
+        "classDef"   { s->in_classdef = 1; FlowchartParser(parser, FC_CLASSDEF, NULL, ctx); goto loop; }
         "class"      { FlowchartParser(parser, FC_CLASS, NULL, ctx); goto loop; }
         "direction"  { FlowchartParser(parser, FC_DIRECTION, NULL, ctx); goto loop; }
         "LR" | "TB" | "BT" | "RL" | "TD" { 
@@ -95,12 +100,30 @@ loop:
         "{"               { FlowchartParser(parser, FC_RHOMBUS_START, NULL, ctx); goto loop; }
         "}"               { FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
-        ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); goto loop; }
+        ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; goto loop; }
+        ","               { FlowchartParser(parser, FC_COMMA, NULL, ctx); goto loop; }
         ":"               { FlowchartParser(parser, FC_COLON, NULL, ctx); goto loop; }
         "-"               { FlowchartParser(parser, FC_DASH, NULL, ctx); goto loop; }
 
         html {
             FlowchartParser(parser, FC_HTML, copy_token(token, s->cursor), ctx);
+            goto loop;
+        }
+
+        // CSS key:value items are kept whole only inside a classDef declaration.
+        // Otherwise split at ':' to retain existing colon-separated node labels.
+        style {
+            if (s->in_classdef) {
+                FlowchartParser(parser, FC_STYLE, copy_token(token, s->cursor), ctx);
+            } else {
+                char *colon = strchr(token, ':');
+                if (!colon || colon == token) {
+                    ctx->error_count++;
+                } else {
+                    FlowchartParser(parser, FC_IDENTIFIER, copy_token(token, colon), ctx);
+                    s->cursor = colon;
+                }
+            }
             goto loop;
         }
 
