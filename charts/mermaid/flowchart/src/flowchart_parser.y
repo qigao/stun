@@ -50,6 +50,12 @@ static FlowchartSubGraph* current_subgraph(FlowchartParserContext *ctx) {
 }
 
 static void add_node_ref(FlowchartParserContext* ctx, FlowchartSubGraph* sg, const char* id) {
+    /* A node can be encountered more than once while parsing an edge chain.
+       Subgraph membership is a set: do not serialize duplicate node IDs. */
+    for (FlowchartNodeRef* existing = sg->node_refs; existing; existing = existing->next) {
+        if (existing->id && strcmp(existing->id, id) == 0)
+            return;
+    }
     FlowchartNodeRef* ref = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
     if (!ref) {
         ctx->error_count++;
