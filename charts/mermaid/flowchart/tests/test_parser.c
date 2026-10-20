@@ -155,10 +155,10 @@ spec("flowchart_parser") {
         }
         it("records classDef styles and serializes class assignments") {
             const char* input =
-                "flowchart LR\\n"
-                "A --> B\\n"
-                "class A redBg;\\n"
-                "classDef redBg fill:#622,color: white;\\n";
+                "flowchart LR\n"
+                "A --> B\n"
+                "class A redBg;\n"
+                "classDef redBg fill:#622,color: white;\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
             check_true(status == FLOWCHART_PARSE_COMPLETE);
