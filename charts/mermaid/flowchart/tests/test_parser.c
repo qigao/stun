@@ -191,17 +191,6 @@ spec("flowchart_parser") {
                                 failed = 1;
                         }
                     }
-                    /* Defer assertions until the directory handle is closed. */
-                    if (failed) {
-                        fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
-                        if (golden_failures < 3) {
-                            fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
-                                    case_name, expected ? expected : "<missing>");
-                            fprintf(stderr, "--- actual JSON (%s) ---\n%s\n",
-                                    case_name, actual ? actual : "<parse/serialize failed>");
-                        }
-                        golden_failures++;
-                    }
                     /* Diagnostics must run before releasing their source buffers. */
                     /* Defer assertions until the directory handle is closed. */
                     if (failed) {
