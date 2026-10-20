@@ -47,6 +47,7 @@ void gantt_diagram_free(GanttDiagram* diagram) {
     free(diagram->title);
     free(diagram->date_format);
     free(diagram->axis_format);
+    free(diagram->excludes);
     free_sections(diagram->sections);
     free(diagram);
 }
