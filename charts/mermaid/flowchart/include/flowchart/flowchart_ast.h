@@ -58,6 +58,7 @@ typedef struct FlowchartNodeRef {
 typedef struct FlowchartSubGraph {
     char* id;
     char* label;
+    char* direction;
     FlowchartNodeRef* node_refs;
     struct FlowchartSubGraph* children;
     struct FlowchartSubGraph* next;
