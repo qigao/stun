@@ -50,7 +50,7 @@ loop:
                line, e.g. a{{label}}\n--> b. Keep that newline out of the
                grammar only when the next non-whitespace byte starts an edge. */
             char *lookahead = s->cursor;
-            while (*lookahead == ' ' || *lookahead == '\\t' || *lookahead == '\\r')
+            while (*lookahead == ' ' || *lookahead == '\t' || *lookahead == '\r')
                 ++lookahead;
             if (*lookahead != '-' && *lookahead != '=')
                 FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
