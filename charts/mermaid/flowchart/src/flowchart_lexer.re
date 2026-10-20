@@ -44,7 +44,18 @@ loop:
         comment = "%%" [^\n\000]*;
 
         white { goto loop; }
-        newline { s->line++; FlowchartParser(parser, FC_NEWLINE, NULL, ctx); goto loop; }
+        newline {
+            s->line++;
+            /* Mermaid permits an edge operator to begin the next physical
+               line, e.g. a{{label}}\n--> b. Keep that newline out of the
+               grammar only when the next non-whitespace byte starts an edge. */
+            char *lookahead = s->cursor;
+            while (*lookahead == ' ' || *lookahead == '\\t' || *lookahead == '\\r')
+                ++lookahead;
+            if (*lookahead != '-' && *lookahead != '=')
+                FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
+            goto loop;
+        }
         comment { goto loop; }
 
         // 优先级 1: 关键字
