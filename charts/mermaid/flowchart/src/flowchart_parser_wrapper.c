@@ -183,6 +183,7 @@ static void free_subgraph(FlowchartSubGraph *sg) {
     return;
   free(sg->id);
   free(sg->label);
+  free(sg->direction);
   free_subgraph_node_refs(sg->node_refs);
 
   FlowchartSubGraph *child = sg->children;
@@ -301,6 +302,8 @@ static void serialize_subgraph_recursive(json_value_t *parent_arr, FlowchartSubG
     // printf("Serializing subgraph: %s\n", sg->id);
     json_value_t *sg_det = json_create_object();
     json_object_set_string(sg_det, "id", sg->id ? sg->id : "");
+    if (sg->direction)
+      json_object_set_string(sg_det, "direction", sg->direction);
 
     // Nodes
     json_value_t *nodes_arr = json_create_array();
