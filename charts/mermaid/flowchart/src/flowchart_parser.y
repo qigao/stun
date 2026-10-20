@@ -176,6 +176,8 @@ static void start_subgraph(FlowchartParserContext* ctx,
 
     FlowchartSubGraph* parent = current_subgraph(ctx);
     if (parent) {
+        /* Nested subgraphs are members of their parent, in source order. */
+        add_node_ref(ctx, parent, id);
         sg->next = parent->children;
         parent->children = sg;
     } else {
