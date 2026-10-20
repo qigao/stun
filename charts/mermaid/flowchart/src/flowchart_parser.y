@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR ARROW 
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW 
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -206,6 +206,9 @@ statement ::= node_definition.
 statement ::= edge_statement.
 statement ::= subgraph_statement.
 statement ::= class_statement.
+/* Subgraph-local direction directives are syntax, not node IDs. The AST currently
+   stores only diagram direction, so consume local directives without changing it. */
+statement ::= DIRECTION DIR.
 statement ::= NEWLINE.
 statement ::= SEMI.
 
