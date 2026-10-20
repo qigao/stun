@@ -56,12 +56,8 @@ static FlowchartSubGraph* current_subgraph(FlowchartParserContext *ctx) {
 }
 
 static void add_node_ref(FlowchartParserContext* ctx, FlowchartSubGraph* sg, const char* id) {
-    /* A node can be encountered more than once while parsing an edge chain.
-       Subgraph membership is a set: do not serialize duplicate node IDs. */
-    for (FlowchartNodeRef* existing = sg->node_refs; existing; existing = existing->next) {
-        if (existing->id && strcmp(existing->id, id) == 0)
-            return;
-    }
+    /* Mermaid's serialized subgraph node list reflects node references and
+       edge endpoints, including repeated references. Preserve each occurrence. */
     FlowchartNodeRef* ref = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
     if (!ref) {
         ctx->error_count++;
@@ -125,6 +121,13 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
 
 static void add_edge(FlowchartParserContext *ctx, const char* from, const char* to, const char* arrow, const char* label) {
     if (!from || !to) return;
+    /* Nodes are recorded at declaration/reference time and edge endpoints are
+       serialized as additional subgraph member references by Mermaid. */
+    FlowchartSubGraph* active = current_subgraph(ctx);
+    if (active) {
+        add_node_ref(ctx, active, from);
+        add_node_ref(ctx, active, to);
+    }
     FlowchartEdge* e = (FlowchartEdge*)calloc(1, sizeof(FlowchartEdge));
     if (!e) {
         ctx->error_count++;

@@ -55,17 +55,6 @@ static FlowchartEdge *reverse_edges(FlowchartEdge *head) {
   return result;
 }
 
-static FlowchartNodeRef *reverse_node_refs(FlowchartNodeRef *head) {
-  FlowchartNodeRef *result = NULL;
-  while (head) {
-    FlowchartNodeRef *next = head->next;
-    head->next = result;
-    result = head;
-    head = next;
-  }
-  return result;
-}
-
 static FlowchartClass *reverse_classes(FlowchartClass *head) {
   FlowchartClass *result = NULL;
   while (head) {
@@ -81,7 +70,8 @@ static FlowchartSubGraph *reverse_subgraphs(FlowchartSubGraph *head) {
   FlowchartSubGraph *result = NULL;
   while (head) {
     FlowchartSubGraph *next = head->next;
-    head->node_refs = reverse_node_refs(head->node_refs);
+    /* node_refs are head-inserted; the Mermaid AST contract preserves this
+       reference order rather than reversing it into source order. */
     head->children = reverse_subgraphs(head->children);
     head->next = result;
     result = head;

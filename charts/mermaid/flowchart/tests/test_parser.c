@@ -198,6 +198,35 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("subgraph member references") {
+        it("preserves node references and duplicate edge endpoints") {
+            const char* input =
+                "flowchart TB\n"
+                "subgraph one\n"
+                "a1 --> a2\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartSubGraph* sg = diagram->subgraphs;
+            check_true(sg != NULL);
+            if (sg) {
+                FlowchartNodeRef* ref = sg->node_refs;
+                const char* expected[] = {"a2", "a1", "a2", "a1"};
+                for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                    check_true(ref != NULL);
+                    if (!ref) break;
+                    check_true(ref->id != NULL && strcmp(ref->id, expected[i]) == 0);
+                    ref = ref->next;
+                }
+                check_true(ref == NULL);
+            }
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("golden tests") {
         int count = 0;
         int golden_failures = 0;
