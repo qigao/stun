@@ -63,6 +63,7 @@ loop:
         "---"              { FlowchartParser(parser, FC_ARROW, strdup("---"), ctx); goto loop; }
         "--"               { FlowchartParser(parser, FC_ARROW, strdup("--"), ctx); goto loop; }
         "->"               { FlowchartParser(parser, FC_ARROW, strdup("->"), ctx); goto loop; }
+        "===>"             { FlowchartParser(parser, FC_ARROW, strdup("==="), ctx); goto loop; }
         "==>"              { FlowchartParser(parser, FC_ARROW, strdup("==>"), ctx); goto loop; }
         "==="              { FlowchartParser(parser, FC_ARROW, strdup("==="), ctx); goto loop; }
 
