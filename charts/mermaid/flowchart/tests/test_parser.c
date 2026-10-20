@@ -183,12 +183,18 @@ spec("flowchart_parser") {
                         free(expected);
                     } else {
                         FlowchartDiagram* diagram = flowchart_parse(input);
-                        REQUIRE(diagram != NULL);
-                        char* actual = flowchart_to_json(diagram);
-                        REQUIRE(actual != NULL);
-                        check(json_equal(actual, expected), "JSON mismatch");
-                        json_serialize_free(actual);
-                        flowchart_diagram_free(diagram);
+                        if (!diagram) {
+                            check_true(0);
+                        } else {
+                            char* actual = flowchart_to_json(diagram);
+                            if (!actual) {
+                                check_true(0);
+                            } else {
+                                check(json_equal(actual, expected), "JSON mismatch");
+                                json_serialize_free(actual);
+                            }
+                            flowchart_diagram_free(diagram);
+                        }
                         free(expected);
                         free(input);
                     }
