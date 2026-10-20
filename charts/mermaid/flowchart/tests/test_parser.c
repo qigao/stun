@@ -153,6 +153,49 @@ spec("flowchart_parser") {
             REQUIRE(diagram != NULL);
             flowchart_diagram_free(diagram);
         }
+        it("records classDef styles and serializes class assignments") {
+            const char* input =
+                "flowchart LR\\n"
+                "A --> B\\n"
+                "class A redBg;\\n"
+                "classDef redBg fill:#622,color: white;\\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            REQUIRE(diagram->class_defs != NULL);
+            check_true(strcmp(diagram->class_defs->id, "redBg") == 0);
+            REQUIRE(diagram->class_defs->styles != NULL);
+            check_true(strcmp(diagram->class_defs->styles->key, "fill") == 0);
+            check_true(strcmp(diagram->class_defs->styles->value, "#622") == 0);
+            REQUIRE(diagram->class_defs->styles->next != NULL);
+            check_true(strcmp(diagram->class_defs->styles->next->key, "color") == 0);
+            check_true(strcmp(diagram->class_defs->styles->next->value, "white") == 0);
+            REQUIRE(diagram->classes != NULL);
+            check_true(strcmp(diagram->classes->node_id, "A") == 0);
+            check_true(strcmp(diagram->classes->class_name, "redBg") == 0);
+
+            const char* expected =
+                "{"
+                "\"classDefs\":{\"redBg\":{\"id\":\"redBg\",\"styles\":{\"fill\":\"#622\",\"color\":\"white\"}}},"
+                "\"classes\":{\"A\":[\"redBg\"]},"
+                "\"clicks\":[],"
+                "\"direction\":\"LR\","
+                "\"linkStyles\":[],"
+                "\"links\":[{\"length\":1,\"source\":\"A\",\"stroke\":\"normal\",\"target\":\"B\",\"type\":\"arrow_point\"}],"
+                "\"nodes\":{\"A\":{\"id\":\"A\",\"shape\":\"rect\"},\"B\":{\"id\":\"B\",\"shape\":\"rect\"}},"
+                "\"subgraphs\":[],"
+                "\"type\":\"flowchart\""
+                "}";
+            char* actual = flowchart_to_json(diagram);
+            check_true(actual != NULL);
+            if (actual) {
+                check_true(json_equal(actual, expected));
+                json_serialize_free(actual);
+            }
+            flowchart_diagram_free(diagram);
+        }
     }
 
     describe("golden tests") {
