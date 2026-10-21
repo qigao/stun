@@ -306,6 +306,86 @@ spec("flowchart_parser") {
         }
     }
 
+
+    describe("inline Mermaid edge labels") {
+        it("preserves the edge label without introducing phantom nodes") {
+            const char* input =
+                "flowchart LR\n"
+                "a1 -- l1 --> a2\n"
+                "i1 --lb1--> f1\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartEdge* first = diagram->edges;
+            FlowchartEdge* second = first ? first->next : NULL;
+            int edges_ok =
+                first && first->from && strcmp(first->from, "a1") == 0 &&
+                first->to && strcmp(first->to, "a2") == 0 &&
+                first->label && strcmp(first->label, "l1") == 0 &&
+                second && second->from && strcmp(second->from, "i1") == 0 &&
+                second->to && strcmp(second->to, "f1") == 0 &&
+                second->label && strcmp(second->label, "lb1") == 0 &&
+                second->next == NULL;
+            int node_count = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) ++node_count;
+            check_true(edges_ok);
+            check_true(node_count == 4);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("punctuated Mermaid identifiers") {
+        it("preserves dotted and hyphenated IDs without swallowing arrows") {
+            const char* input =
+                "flowchart LR\n"
+                "default-index.js --> dot.template.js\n"
+                "index.js --> module-utl.js\n"
+                "sid-AAA-BBB --> P1.5\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            const char* expected[][2] = {
+                {"default-index.js", "dot.template.js"},
+                {"index.js", "module-utl.js"},
+                {"sid-AAA-BBB", "P1.5"}
+            };
+            FlowchartEdge* edge = diagram->edges;
+            int edges_ok = 1;
+            for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                if (!edge || !edge->from || !edge->to ||
+                    strcmp(edge->from, expected[i][0]) != 0 ||
+                    strcmp(edge->to, expected[i][1]) != 0) {
+                    edges_ok = 0;
+                    break;
+                }
+                edge = edge->next;
+            }
+            check_true(edges_ok && edge == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("unquoted comma labels") {
+        it("retains commas between text and HTML line breaks") {
+            const char* input =
+                "flowchart LR\n"
+                "A[work,<br />something,else] --> B\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode* a = diagram->nodes;
+            while (a && strcmp(a->id, "A") != 0) a = a->next;
+            check_true(a && a->label &&
+                       strcmp(a->label, "work,<br />something,else") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("modern node declaration syntax") {
         it("accepts ampersand-separated and annotated nodes") {
             const char* input =
