@@ -51,6 +51,9 @@ jobs:
       - name: Validate incremental PR scope detection
         run: python3 .github/scripts/tests/test_ci_affected.py
 
+      - name: Validate published Flowchart SDK integrity verifier
+        run: python3 .github/scripts/tests/test_restore_flowchart_sdk.py
+
       - name: Reject retired TurboParser and optional charts switch
         shell: bash
         run: |
