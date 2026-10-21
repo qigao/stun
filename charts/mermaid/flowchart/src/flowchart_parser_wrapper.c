@@ -382,7 +382,11 @@ static void serialize_subgraph_recursive(json_value_t *parent_arr, FlowchartSubG
       printf("Infinite loop detected in subgraphs!\n");
       break;
     }
-    // printf("Serializing subgraph: %s\n", sg->id);
+    /* Mermaid JSON's subgraphs array is flat, with nested children before
+       their parent. Keep the AST ownership tree intact, but project it in
+       post-order rather than emitting a nested "subgraphs" property. */
+    if (sg->children)
+      serialize_subgraph_recursive(parent_arr, sg->children);
     json_value_t *sg_det = json_create_object();
     json_object_set_string(sg_det, "id", sg->id ? sg->id : "");
     if (sg->direction)
@@ -403,13 +407,6 @@ static void serialize_subgraph_recursive(json_value_t *parent_arr, FlowchartSubG
     json_object_set_string(title_obj, "text", sg->label ? sg->label : (sg->id ? sg->id : ""));
     json_object_set_string(title_obj, "type", "text");
     json_object_add(sg_det, "title", title_obj);
-
-    // Only add subgraphs key if there are nested ones
-    if (sg->children) {
-      json_value_t *children_arr = json_create_array();
-      serialize_subgraph_recursive(children_arr, sg->children);
-      json_object_add(sg_det, "subgraphs", children_arr);
-    }
 
     json_array_add(parent_arr, sg_det);
     sg = sg->next;
