@@ -21,18 +21,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # This targeted job can be executed from this existing PR workflow even
-  # before the new standalone workflow is merged to master. It qualifies
-  # production JSON serialization against published SDKs without Mesa.
-  flowchart-json-golden:
-    name: Flowchart JSON golden / published SDK
-    uses: ./.github/workflows/flowchart-json-golden.yml
-
   changes:
     name: Runtime change scope
     runs-on: ubuntu-24.04
     outputs:
       affected: ${{ steps.scope.outputs.affected }}
+      golden: ${{ steps.gold_scope.outputs.affected }}
     steps:
       - name: Checkout exact PR head
         uses: actions/checkout@v4
@@ -56,14 +50,25 @@ jobs:
             '.github/workflows/runtime-conformance.yml' \
             '.github/workflows/mesa-driver.yml' \
             '.github/workflows/salts-sdk-releases.yml'
+      - name: Detect Flowchart JSON golden changes
+        id: gold_scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'charts/mermaid/flowchart/*' \
+            'charts/mermaid/golden/flowchart/*' \
+            'tools/lemon/*' '.github/scripts/ci-affected.sh' \
+            '.github/scripts/restore-flowchart-sdk.py' \
+            '.github/workflows/runtime-conformance.yml'
 
   sdk-releases:
     needs: changes
-    if: needs.changes.outputs.affected == 'true'
+    if: needs.changes.outputs.affected == 'true' || needs.changes.outputs.golden == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   mesa-driver:
-    needs: sdk-releases
+    needs: [changes, sdk-releases]
+    if: needs.changes.outputs.affected == 'true'
     uses: ./.github/workflows/mesa-driver.yml
     with:
       run_runtime: true
@@ -71,3 +76,132 @@ jobs:
       salts_utils_sha: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
       salts_release: ${{ needs.sdk-releases.outputs.salts_release }}
       salts_utils_release: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+
+  # Fast full-JSON conformance for parser-only updates. Full runtime executes
+  # the same golden suite as part of Mesa/FlexUI for mixed changes or ci/full.
+  golden:
+    name: Linux / actual 95 Mermaid golden cases + ASan/UBSan
+    needs: [changes, sdk-releases]
+    if: needs.changes.outputs.golden == 'true' && needs.changes.outputs.affected != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+      SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
+      SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
+      SALTS_ROOT: ${{ runner.temp }}/stun-flowchart-native-sdk
+      PACKAGES_ROOT: ${{ runner.temp }}/stun-flowchart-native-nuget
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout exact Stun source candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout released Salts for canonical NuGet source settings
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
+          path: .ci/flowchart-salts
+          persist-credentials: false
+
+      - name: Verify exact dependency and source commits
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/flowchart-salts rev-parse HEAD)" = "$SALTS_SHA"
+          test -f .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config
+          test -n "$SALTS_RELEASE" && test -n "$SALTS_UTILS_RELEASE"
+
+      - name: Restore exact published native packages from GitHub Packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-flowchart-restore" "$PACKAGES_ROOT"
+          salts_version="${SALTS_RELEASE#v}"
+          utils_version="${SALTS_UTILS_RELEASE#v}"
+          cat > "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="$salts_version" />
+              <PackageReference Include="SaltsUtils.Native" Version="$utils_version" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" \
+            --configfile .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config \
+            --packages "$PACKAGES_ROOT" --no-cache --force-evaluate --verbosity minimal
+          # No downstream CMake consumer has access to a dependency source tree.
+          rm -rf .ci/flowchart-salts
+
+      - name: Verify official SHA256SUMS and restore isolated SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-flowchart-checks/salts" \
+                   "$RUNNER_TEMP/stun-flowchart-checks/utils"
+          gh release download "$SALTS_RELEASE" --repo qigao/salts \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/stun-flowchart-checks/salts"
+          gh release download "$SALTS_UTILS_RELEASE" --repo qigao/salts-utils \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/stun-flowchart-checks/utils"
+          python3 .github/scripts/restore-flowchart-sdk.py \
+            --packages "$PACKAGES_ROOT" --sdk "$SALTS_ROOT" \
+            --salts-release "$SALTS_RELEASE" \
+            --salts-utils-release "$SALTS_UTILS_RELEASE" \
+            --salts-checksums "$RUNNER_TEMP/stun-flowchart-checks/salts/SHA256SUMS" \
+            --salts-utils-checksums "$RUNNER_TEMP/stun-flowchart-checks/utils/SHA256SUMS"
+          printf 'LD_LIBRARY_PATH=%s/lib\n' "$SALTS_ROOT" >> "$GITHUB_ENV"
+
+      - name: Install minimal parser generator tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends re2c ninja-build
+          re2c --version
+
+      - name: Configure isolated JSON golden test against installed SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S charts/mermaid/flowchart/tests/standalone \
+            -B build/flowchart-json-golden -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DSTUN_CI_JSON_GOLDEN=ON -DSTUN_CI_SANITIZERS=ON \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake --build build/flowchart-json-golden \
+            --target stun_flowchart_json_golden --parallel 2
+
+      - name: Execute real Flowchart JSON golden suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          ldd build/flowchart-json-golden/stun_flowchart_json_golden | tee build/flowchart-json-golden/dependencies.txt
+          ! grep -q 'not found' build/flowchart-json-golden/dependencies.txt
+          ctest --test-dir build/flowchart-json-golden \
+            -R '^stun_flowchart_json_golden$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120
+          git diff --exit-code
+
+      - name: Preserve exact-head SDK and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowchart-json-golden-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: warn
+          retention-days: 3
+          path: |
+            ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
+            build/flowchart-json-golden/Testing/Temporary/LastTest.log
+            build/flowchart-json-golden/dependencies.txt
