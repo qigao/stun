@@ -39,12 +39,18 @@ establish Mermaid golden JSON conformance. The lightweight runner uses Ubuntu's
 re2c. The test-only `STUN_FLOWCHART_PARSER_ONLY` define removes only JSON
 serialization from the standalone smoke build; production retains it.
 
-The independent `Flowchart JSON golden / installed SDK` lane uses verified
-Salts.Native and SaltsUtils.Native NuGet archives, official GitHub Release
-SHA256SUMS, canonical Core SONAME aliases and the original 95-case Flowchart
-`test_parser.c` suite. It builds the production parser and SaltsUtils JSON
-serializer **without** Mesa, Android emulation, FlexUI renderer or alternate
-JSON provider. It is a conformance check on its own, not a replacement for
+The separate `golden` job inside the existing `Stun runtime conformance`
+workflow uses verified Salts.Native and SaltsUtils.Native NuGet archives,
+official GitHub Release SHA256SUMS, canonical Core SONAME aliases and the
+original 95-case Flowchart `test_parser.c` suite. It now builds and runs both
+the production JSON golden target and the lightweight native AST smoke in
+one isolated CMake build tree, **without** Mesa, Android emulation, the
+FlexUI renderer, or an alternate JSON provider. This eliminates a duplicate
+PR runner while preserving independent AST and JSON assertions.
+The `Flowchart native AST smoke` workflow is now a manual-only diagnostic
+entry point; its CMake harness works locally without the published SDK.
+
+The `golden` job is a conformance check on its own, not a replacement for
 complete released-SDK/FlexUI/Mesa integration on the final exact HEAD.
 
 The `ci-affected.sh` helper accepts a leading `!` to exclude specific
