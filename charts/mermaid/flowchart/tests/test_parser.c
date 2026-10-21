@@ -594,6 +594,53 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("multi-index linkStyle") {
+        it("retains each selected index and its independent style ownership") {
+            const char* input =
+                "flowchart TD\n"
+                "A --> B\n"
+                "A --> C\n"
+                "linkStyle 0,1 color:orange, stroke:orange;\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartLinkStyle* first = diagram->link_styles;
+            FlowchartLinkStyle* second = first ? first->next : NULL;
+            int owned_ok =
+                first && strcmp(first->index, "0") == 0 &&
+                first->styles && first->styles->next &&
+                second && strcmp(second->index, "1") == 0 &&
+                second->styles && second->styles->next &&
+                first->styles != second->styles &&
+                first->styles->key && second->styles->key &&
+                strcmp(first->styles->key, "color") == 0 &&
+                strcmp(second->styles->key, "color") == 0 &&
+                second->next == NULL;
+            check_true(owned_ok);
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* styles = root ? json_object_get(root, "linkStyles") : NULL;
+            int json_ok = styles && json_array_size(styles) == 2;
+            if (json_ok) {
+                json_value_t* first_index =
+                    json_object_get(json_array_get(styles, 0), "index");
+                json_value_t* second_index =
+                    json_object_get(json_array_get(styles, 1), "index");
+                json_ok = first_index && second_index &&
+                          json_type(first_index) == JSON_NUMBER &&
+                          json_type(second_index) == JSON_NUMBER &&
+                          json_number(first_index) == 0 &&
+                          json_number(second_index) == 1;
+            }
+            check_true(json_ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("linkStyle metadata") {
         it("serializes default and indexed styles without consuming later nodes") {
             const char* input =
