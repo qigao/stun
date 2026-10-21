@@ -45,11 +45,14 @@ loop:
         new_node_props = "@{" [^}\n\000]* "}";
         style_stmt = "style" [ \t]+ [^\n\000]*;
         // 限制标识符，不包括特殊操作符字符，或者将操作符放在前面
-        ident = [a-zA-Z0-9_][a-zA-Z0-9_]*; 
+        // Allow dotted and hyphenated node IDs without swallowing edge arrows.
+        ident = [a-zA-Z0-9_]+ ([.-] [a-zA-Z0-9_]+)*;
         string = "\"" [^"\000]* "\"";
         html = "<" [^>\n\000]* ">";
         comment = "%%" [^\n\000]*;
         punct = [.!?]+;
+        // Mermaid also permits --label--> and -- label --> edges.
+        inline_edge_label = "--" [ \t]* ident [ \t]* "-->";
 
         white { goto loop; }
         newline {
@@ -89,6 +92,19 @@ loop:
         "LR" | "TB" | "BT" | "RL" | "TD" { 
             FlowchartParser(parser, FC_DIR, copy_token(token, s->cursor), ctx); 
             goto loop; 
+        }
+
+        // Inline labels are one edge, not two unlabeled edges with a fake node.
+        inline_edge_label {
+            const char* begin = token + 2;
+            const char* end = s->cursor - 3;
+            while (begin < end && (*begin == ' ' || *begin == '\t')) ++begin;
+            while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) --end;
+            FlowchartParser(parser, FC_ARROW, strdup("-->"), ctx);
+            FlowchartParser(parser, FC_PIPE, NULL, ctx);
+            FlowchartParser(parser, FC_IDENTIFIER, copy_token(begin, end), ctx);
+            FlowchartParser(parser, FC_PIPE, NULL, ctx);
+            goto loop;
         }
 
         // 优先级 2: 多字符箭头（必须在标识符前匹配）
