@@ -21,6 +21,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # This targeted job can be executed from this existing PR workflow even
+  # before the new standalone workflow is merged to master. It qualifies
+  # production JSON serialization against published SDKs without Mesa.
+  flowchart-json-golden:
+    name: Flowchart JSON golden / published SDK
+    uses: ./.github/workflows/flowchart-json-golden.yml
+
   changes:
     name: Runtime change scope
     runs-on: ubuntu-24.04
