@@ -100,8 +100,8 @@ jobs:
       - name: Define isolated SDK paths
         shell: bash
         run: |
-          printf 'SALTS_ROOT=%s/stun-flowchart-native-sdk\\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-          printf 'PACKAGES_ROOT=%s/stun-flowchart-native-nuget\\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'SALTS_ROOT=%s/stun-flowchart-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'PACKAGES_ROOT=%s/stun-flowchart-native-nuget\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Checkout exact Stun source candidate
         uses: actions/checkout@v4
