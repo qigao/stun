@@ -457,19 +457,9 @@ click_statement ::= CLICK label_text(A) STRING(B). {
     add_click(ctx, A, B, 1);
     free(A); free(B);
 }
-click_statement ::= CLICK label_text(A) STRING(B) STRING(C). {
-    /* Tooltip is accepted syntax but is not part of this adapter's JSON schema. */
-    add_click(ctx, A, B, 1);
-    free(A); free(B); free(C);
-}
 click_statement ::= CLICK label_text(A) IDENTIFIER(B). {
     add_click(ctx, A, B, 0);
     free(A); free(B);
-}
-click_statement ::= CLICK label_text(A) IDENTIFIER(B) STRING(C). {
-    /* Consume the optional tooltip so it cannot become a phantom node. */
-    add_click(ctx, A, B, 0);
-    free(A); free(B); free(C);
 }
 
 node_definition ::= node(A). { (void)A; }
