@@ -540,6 +540,12 @@ node(R) ::= label_text(A) CPS node_label(B) CPE. {
     if (R) R->shape = FC_SHAPE_CIRCLE;
     free(A); free(B);
 }
+// An empty/space-only circle keeps Mermaid's visible single-space label.
+node(R) ::= label_text(A) CPS CPE. {
+    R = find_or_create_node(ctx, A, " ");
+    if (R) R->shape = FC_SHAPE_CIRCLE;
+    free(A);
+}
 node(R) ::= label_text(A) DOUBLE_CIRCLE_START node_label(B) DOUBLE_CIRCLE_END. {
     R = find_or_create_node(ctx, A, B);
     if (R) R->shape = FC_SHAPE_DOUBLECIRCLE;
