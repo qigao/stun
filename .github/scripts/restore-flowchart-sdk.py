@@ -41,8 +41,9 @@ def verify_official_digest(archive, sums):
 def extract_sdk_payload(archive, sdk):
     copied = 0
     root = pathlib.PurePosixPath("sdk/linux-x64")
+    seen_files = set()
     with zipfile.ZipFile(archive) as package:
-        for member in package.infolist():
+        for member in sorted(package.infolist(), key=lambda item: item.filename):
             rel = pathlib.PurePosixPath(member.filename)
             if rel == root:
                 continue
@@ -54,6 +55,11 @@ def extract_sdk_payload(archive, sdk):
             if member.is_dir():
                 dst.mkdir(parents=True, exist_ok=True)
                 continue
+            # Ambiguous duplicate names can mask archive entries and must
+            # not depend on the ZIP reader's chosen last/first-wins policy.
+            require(tail not in seen_files,
+                    f"Duplicate SDK archive entry: {member.filename}")
+            seen_files.add(tail)
             require(not dst.is_symlink(), f"Unexpected pre-existing SDK link: {dst}")
             # NuGet publishes native libraries as ordinary immutable ZIP
             # files. Reject symlink records instead of implicitly changing
