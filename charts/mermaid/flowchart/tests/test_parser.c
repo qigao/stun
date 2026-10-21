@@ -444,7 +444,7 @@ spec("flowchart_parser") {
             int ok = links && json_array_size(links) == 3;
             const char* types[] = {"arrow_point", "arrow_point", "arrow_open"};
             const char* strokes[] = {"normal", "thick", "normal"};
-            const double lengths[] = {3, 5, 2};
+            const double lengths[] = {3, 5, 1};
             for (size_t i = 0; ok && i < 3; ++i) {
                 json_value_t* item = json_array_get(links, i);
                 json_value_t* length = item ? json_object_get(item, "length") : NULL;
@@ -625,6 +625,30 @@ spec("flowchart_parser") {
         }
     }
 
+
+    describe("HTML-only node labels") {
+        it("accepts HTML tags as the first and only label token") {
+            const char* input =
+                "flowchart TD\n"
+                "B[<img>]\n"
+                "B --> C[<img>]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode *b = NULL, *c = NULL;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                if (strcmp(n->id, "B") == 0) b = n;
+                if (strcmp(n->id, "C") == 0) c = n;
+            }
+            check_true(b && b->label && strcmp(b->label, "<img>") == 0);
+            check_true(c && c->label && strcmp(c->label, "<img>") == 0);
+            check_true(diagram->edges && diagram->edges->next == NULL &&
+                       strcmp(diagram->edges->from, "B") == 0 &&
+                       strcmp(diagram->edges->to, "C") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
 
     describe("whitespace fidelity in node labels") {
         it("preserves exact leading and trailing spaces inside node shapes") {

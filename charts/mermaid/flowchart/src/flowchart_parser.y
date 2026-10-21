@@ -617,6 +617,8 @@ node_label(R) ::= node_label(A) DASH label_text(B). { R = concat(ctx, A, B, "-")
 // Commas inside unquoted node labels are content, not discarded separators.
 node_label(R) ::= node_label(A) COMMA. { R = concat(ctx, A, strdup(","), ""); }
 node_label(R) ::= node_label(A) HTML(B). { R = concat(ctx, A, B, ""); }
+// HTML-only labels such as B[<img>] must be allowed to start a node label.
+node_label(R) ::= HTML(A). { R = A; }
 node_label(R) ::= PUNCT(A). { R = A; }
 node_label(R) ::= node_label(A) PUNCT(B). { R = concat(ctx, A, B, ""); }
 
