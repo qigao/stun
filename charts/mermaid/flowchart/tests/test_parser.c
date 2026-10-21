@@ -386,6 +386,41 @@ spec("flowchart_parser") {
         }
     }
 
+
+    describe("circle and cylinder shape delimiters") {
+        it("distinguishes circles double circles cylinders and empty circles") {
+            const char* input =
+                "flowchart LR\n"
+                "A((circle)) --> B(((double)))\n"
+                "B --> C[(storage)]\n"
+                "D(( )) --> C\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartNode* a = NULL;
+            FlowchartNode* b = NULL;
+            FlowchartNode* c = NULL;
+            FlowchartNode* d = NULL;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                if (strcmp(n->id, "A") == 0) a = n;
+                else if (strcmp(n->id, "B") == 0) b = n;
+                else if (strcmp(n->id, "C") == 0) c = n;
+                else if (strcmp(n->id, "D") == 0) d = n;
+            }
+            check_true(a && a->shape == FC_SHAPE_CIRCLE &&
+                       strcmp(a->label, "circle") == 0);
+            check_true(b && b->shape == FC_SHAPE_DOUBLECIRCLE &&
+                       strcmp(b->label, "double") == 0);
+            check_true(c && c->shape == FC_SHAPE_CYLINDER &&
+                       strcmp(c->label, "storage") == 0);
+            check_true(d && d->shape == FC_SHAPE_CIRCLE &&
+                       strcmp(d->label, " ") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("modern node declaration syntax") {
         it("accepts ampersand-separated and annotated nodes") {
             const char* input =
