@@ -43,7 +43,10 @@ class SdkRestoreTests(unittest.TestCase):
             self.assertEqual(restore.extract_sdk_payload(archive, sdk), 1)
             self.assertEqual((sdk / "lib/libtinytest.a").read_bytes(), b"official-content")
             self.assertFalse((sdk / "README.md").exists())
-            self.assertEqual(restore.extract_sdk_payload(archive, sdk), 1)
+            # A second package without any new installed payload must fail
+            # closed rather than silently masquerade as another SDK component.
+            with self.assertRaisesRegex(RuntimeError, "No installed linux-x64 SDK payload"):
+                restore.extract_sdk_payload(archive, sdk)
 
             (sdk / "lib/libtinytest.a").write_bytes(b"tampered")
             with self.assertRaisesRegex(RuntimeError, "Conflicting"):
