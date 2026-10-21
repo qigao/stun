@@ -463,6 +463,49 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("multiple internal edges retain member event order") {
+        it("keeps earlier edge references before later borrowed nodes") {
+            const char* input =
+                "flowchart TB\n"
+                "subgraph container_Beta\n"
+                "process_C-->Process_D\n"
+                "end\n"
+                "subgraph container_Alpha\n"
+                "process_A-->process_B\n"
+                "process_A-->|messages|process_C\n"
+                "end\n";
+            FlowchartDiagram* d = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &d);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!d) return;
+
+            char* encoded = flowchart_to_json(d);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* groups = root ? json_object_get(root, "subgraphs") : NULL;
+            int ok = groups && json_array_size(groups) == 2;
+            if (ok) {
+                json_value_t* alpha = json_array_get(groups, 1);
+                const char* id = alpha ? json_get_string(alpha, "id") : NULL;
+                json_value_t* members = alpha ? json_object_get(alpha, "nodes") : NULL;
+                const char* expected[] = {
+                    "process_B", "process_A", "process_B",
+                    "process_A", "process_C", "process_A"
+                };
+                ok = id && strcmp(id, "container_Alpha") == 0 &&
+                     members && json_array_size(members) == 6;
+                for (size_t i = 0; ok && i < 6; ++i) {
+                    json_value_t* item = json_array_get(members, i);
+                    ok = item && json_type(item) == JSON_STRING &&
+                         strcmp(json_string(item), expected[i]) == 0;
+                }
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(d);
+        }
+    }
+
     describe("nested subgraph title and borrowed node projection") {
         it("preserves extra title spacing and excludes unused child IDs") {
             const char* input =

@@ -438,6 +438,86 @@ static int flowchart_in_nested_child_nodes(const FlowchartSubGraph* children,
   return 0;
 }
 
+/* For a leaf subgraph with multiple edges, implicit node references are
+ * inserted before their first edge and edge endpoint pairs follow that edge.
+ * Reconstruct only when every recorded member is accounted for exactly by
+ * those edge uses plus at most one implicit first-use per distinct node.
+ * Otherwise retain the original projection; never guess the event order. */
+typedef struct {
+  const char* id;
+  size_t ref_count;
+  size_t edge_uses;
+  int seen;
+} FlowchartRefProjection;
+
+static size_t flowchart_projection_index(const FlowchartRefProjection* refs,
+                                          size_t count, const char* id) {
+  if (!id) return count;
+  for (size_t i = 0; i < count; ++i)
+    if (refs[i].id && strcmp(refs[i].id, id) == 0) return i;
+  return count;
+}
+
+/* 1=emitted, 0=not uniquely reconstructible, -1=allocation failure. */
+static int flowchart_emit_leaf_edge_refs(json_value_t* nodes_arr,
+                                         const FlowchartDiagram* diagram,
+                                         const FlowchartSubGraph* sg,
+                                         const FlowchartNodeRef* const* refs,
+                                         size_t count) {
+  if (!count || sg->children) return 0;
+  FlowchartRefProjection* groups =
+      (FlowchartRefProjection*)calloc(count, sizeof(*groups));
+  if (!groups) return -1;
+  size_t groups_count = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const char* id = refs[i]->id;
+    size_t key = flowchart_projection_index(groups, groups_count, id);
+    if (key == groups_count) {
+      groups[key].id = id;
+      ++groups_count;
+    }
+    ++groups[key].ref_count;
+  }
+
+  size_t matched_edges = 0;
+  int valid = 1;
+  for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+    size_t from = flowchart_projection_index(groups, groups_count, e->from);
+    size_t to = flowchart_projection_index(groups, groups_count, e->to);
+    if (from == groups_count || to == groups_count) continue;
+    if (from == to) { valid = 0; break; }
+    ++groups[from].edge_uses;
+    ++groups[to].edge_uses;
+    ++matched_edges;
+  }
+  if (matched_edges < 2) valid = 0;
+  for (size_t i = 0; valid && i < groups_count; ++i) {
+    if (groups[i].edge_uses == 0 ||
+        groups[i].edge_uses > groups[i].ref_count ||
+        groups[i].ref_count - groups[i].edge_uses > 1)
+      valid = 0;
+  }
+  if (!valid) { free(groups); return 0; }
+
+  /* Emit implicit first-use references before that edge's pair. The pair
+     itself is target/source because the AST's references are head-inserted. */
+  for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+    size_t from = flowchart_projection_index(groups, groups_count, e->from);
+    size_t to = flowchart_projection_index(groups, groups_count, e->to);
+    if (from == groups_count || to == groups_count) continue;
+    if (!groups[to].seen && groups[to].ref_count > groups[to].edge_uses)
+      json_array_add(nodes_arr, json_create_string(e->to));
+    if (!groups[from].seen && groups[from].ref_count > groups[from].edge_uses)
+      json_array_add(nodes_arr, json_create_string(e->from));
+    groups[to].seen = 1;
+    groups[from].seen = 1;
+    json_array_add(nodes_arr, json_create_string(e->to));
+    json_array_add(nodes_arr, json_create_string(e->from));
+  }
+  free(groups);
+  return 1;
+}
+
 static int serialize_subgraph_recursive(json_value_t* parent_arr,
                                         const FlowchartDiagram* diagram,
                                         const FlowchartSubGraph* sg) {
@@ -506,15 +586,25 @@ static int serialize_subgraph_recursive(json_value_t* parent_arr,
         }
       }
     } else {
-      /* Members borrowed from nested child graphs follow the local members.
-         An unreferenced nested subgraph ID is not itself a parent node. */
-      for (int borrowed = 0; borrowed <= 1; ++borrowed) {
-        for (size_t x = 0; x < refs_count; ++x) {
-          const char* id = refs[x]->id;
-          if (!id || flowchart_child_subgraph_id_unused(sg, diagram, id))
-            continue;
-          if (flowchart_in_nested_child_nodes(sg->children, id) == borrowed)
-            json_array_add(nodes_arr, json_create_string(id));
+      int rebuilt =
+          flowchart_emit_leaf_edge_refs(nodes_arr, diagram, sg, refs, refs_count);
+      if (rebuilt < 0) {
+        free(refs);
+        json_free(nodes_arr);
+        json_free(sg_det);
+        return 0;
+      }
+      if (!rebuilt) {
+        /* Borrowed nested members follow the local members. Exclude
+           unreferenced child-subgraph IDs from the parent projection. */
+        for (int borrowed = 0; borrowed <= 1; ++borrowed) {
+          for (size_t x = 0; x < refs_count; ++x) {
+            const char* id = refs[x]->id;
+            if (!id || flowchart_child_subgraph_id_unused(sg, diagram, id))
+              continue;
+            if (flowchart_in_nested_child_nodes(sg->children, id) == borrowed)
+              json_array_add(nodes_arr, json_create_string(id));
+          }
         }
       }
     }
