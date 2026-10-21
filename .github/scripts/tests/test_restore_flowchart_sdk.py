@@ -63,6 +63,21 @@ class SdkRestoreTests(unittest.TestCase):
                 restore.extract_sdk_payload(archive, d / "installed")
             self.assertFalse((d / "outside").exists())
 
+    def test_duplicate_paths_in_official_zip_are_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            d = Path(root)
+            archive = d / "duplicate.nupkg"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("sdk/linux-x64/lib/libjson_parser.a", "first")
+                # Repeated names must fail closed even if the actual bytes
+                # happen to be identical: ownership must be unambiguous.
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    z.writestr("sdk/linux-x64/lib/libjson_parser.a", "first")
+            with self.assertRaisesRegex(RuntimeError, "Duplicate SDK archive"):
+                restore.extract_sdk_payload(archive, d / "installed")
+
     def test_sdk_symlink_entry_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             d = Path(root)
