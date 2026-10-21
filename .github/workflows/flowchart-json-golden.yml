@@ -3,6 +3,7 @@ name: Flowchart JSON golden / installed SDK
 # Run actual Mermaid golden JSON conformance with the published Salts and
 # SaltsUtils Native SDKs, without building Mesa, FlexUI or Android.
 on:
+  workflow_call:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
