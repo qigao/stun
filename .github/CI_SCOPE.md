@@ -21,7 +21,8 @@ The rapid-iteration path is:
 
 | New change | Actual heavy validation |
 | --- | --- |
-| Flowchart lexer/parser or golden regression | Stun runtime chart CTests and independent fast architecture check; standalone layout/graphics matrices are skipped |
+| Flowchart lexer/parser-only update | Fast real Lemon/re2c AST smoke on Linux with ASan/UBSan; full Mesa/SDK waits until `ci/full` requalification |
+| Flowchart JSON golden, parser wrapper, renderer or integration test | Full runtime chart CTests and released-SDK/Mesa qualification |
 | GraphLayout algorithms | GraphLayout native matrix and runtime |
 | gCanvas renderer or Android platform | Relevant GLES/Android/package/cache checks and runtime |
 | C11 Markdown | UI C11 released-SDK matrix and runtime |
@@ -30,6 +31,20 @@ The rapid-iteration path is:
 
 Matrix and sanitizer coverage has **not** been weakened, and the integration
 tests and golden fixtures have not been altered by this CI refactor.
+
+The `Flowchart native AST smoke` check compiles the *existing* C11 parser,
+repository Lemon template and re2c lexer in an isolated CMake project. It
+does not link the SaltsUtils JSON serializer, FlexUI or renderer, and does not
+establish Mermaid golden JSON conformance. The lightweight runner uses Ubuntu's
+re2c; complete acceptance still uses the pinned released SDK/toolchain in the
+full runtime workflow. The test-only `STUN_FLOWCHART_PARSER_ONLY` define removes
+only JSON serialization from the standalone smoke build; production retains it.
+
+The `ci-affected.sh` helper accepts a leading `!` to exclude specific
+parser-only paths from the expensive runtime gate. Mixed commits that also
+touch integration files still run the full check; invalid event metadata,
+missing history and missing include patterns fail open. All exclusions are
+ignored when `ci/full` is present.
 
 ## Before merging a PR
 
@@ -65,3 +80,8 @@ non-skippable full-acceptance check rather than treating `skipped` as passed.
   their owning subsystems and for pre-merge requalification.
 - Validate routing behavior with
   `python3 .github/scripts/tests/test_ci_affected.py`.
+- Run the native parser smoke locally with
+  `cmake -S charts/mermaid/flowchart/tests/standalone -B build/flowchart-ast-fast`,
+  `cmake --build build/flowchart-ast-fast`, and
+  `ctest --test-dir build/flowchart-ast-fast --output-on-failure` (re2c is
+  required). This does not replace the full exact-HEAD JSON golden gate.
