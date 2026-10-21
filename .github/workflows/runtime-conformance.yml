@@ -186,8 +186,10 @@ jobs:
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          # One generator invocation/build tree covers native AST ownership
+          # and production SaltsUtils-backed JSON serialization.
           cmake --build build/flowchart-json-golden \
-            --target stun_flowchart_json_golden --parallel 2
+            --target stun_flowchart_ast_smoke stun_flowchart_json_golden --parallel 2
 
       - name: Execute real Flowchart JSON golden suite
         shell: bash
@@ -196,7 +198,20 @@ jobs:
           ldd build/flowchart-json-golden/stun_flowchart_json_golden | tee build/flowchart-json-golden/dependencies.txt
           ! grep -q 'not found' build/flowchart-json-golden/dependencies.txt
           ctest --test-dir build/flowchart-json-golden \
-            -R '^stun_flowchart_json_golden$' \
+            -R '^stun_flowchart_(ast_smoke|json_golden)          git diff --exit-code
+
+      - name: Preserve exact-head SDK and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowchart-json-golden-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: warn
+          retention-days: 3
+          path: |
+            ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
+            build/flowchart-json-golden/Testing/Temporary/LastTest.log
+            build/flowchart-json-golden/dependencies.txt
+ \
             --no-tests=error --verbose --output-on-failure --timeout 120
           git diff --exit-code
 
