@@ -461,6 +461,62 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("edge JSON subgraph scope order") {
+        it("emits local edges, subgraph links, then outside edges") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph first\n"
+                "A --> B\n"
+                "end\n"
+                "X --> Y\n"
+                "subgraph second\n"
+                "C --> D\n"
+                "end\n"
+                "first --> second\n"
+                "P --> Q\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const char* source_order[][2] = {
+                {"A", "B"}, {"X", "Y"}, {"C", "D"},
+                {"first", "second"}, {"P", "Q"}
+            };
+            FlowchartEdge* edge = diagram->edges;
+            int ast_ok = 1;
+            for (size_t i = 0; i < 5; ++i) {
+                if (!edge || strcmp(edge->from, source_order[i][0]) != 0 ||
+                    strcmp(edge->to, source_order[i][1]) != 0) {
+                    ast_ok = 0;
+                    break;
+                }
+                edge = edge->next;
+            }
+            check_true(ast_ok && edge == NULL);
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            const char* projected[][2] = {
+                {"A", "B"}, {"C", "D"}, {"first", "second"},
+                {"X", "Y"}, {"P", "Q"}
+            };
+            int json_ok = links && json_array_size(links) == 5;
+            for (size_t i = 0; json_ok && i < 5; ++i) {
+                json_value_t* item = json_array_get(links, i);
+                const char* from = json_get_string(item, "source");
+                const char* to = json_get_string(item, "target");
+                json_ok = from && to &&
+                          strcmp(from, projected[i][0]) == 0 &&
+                          strcmp(to, projected[i][1]) == 0;
+            }
+            check_true(json_ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("variable-width edges") {
         it("retains directed tips and lengths on extended arrows") {
             const char* input =

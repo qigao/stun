@@ -423,6 +423,92 @@ static void serialize_subgraph_recursive(json_value_t *parent_arr, FlowchartSubG
   }
 }
 
+
+/* Keep the AST linked list in source order. JSON reflects Mermaid's scope
+ * projection: nested/local edges precede links between subgraphs, followed
+ * by edges not owned by any subgraph. This is stable within each category. */
+static int flowchart_subgraph_has_node(const FlowchartSubGraph* sg,
+                                       const char* id) {
+  if (!sg || !id) return 0;
+  for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next)
+    if (ref->id && strcmp(ref->id, id) == 0) return 1;
+  return 0;
+}
+
+static const FlowchartSubGraph* flowchart_first_edge_scope(
+    const FlowchartSubGraph* siblings, const FlowchartEdge* edge) {
+  for (const FlowchartSubGraph* sg = siblings; sg; sg = sg->next) {
+    const FlowchartSubGraph* inner =
+        flowchart_first_edge_scope(sg->children, edge);
+    if (inner) return inner;
+    if (flowchart_subgraph_has_node(sg, edge->from) &&
+        flowchart_subgraph_has_node(sg, edge->to))
+      return sg;
+  }
+  return NULL;
+}
+
+static int flowchart_is_subgraph_id(const FlowchartSubGraph* siblings,
+                                    const char* id) {
+  if (!id) return 0;
+  for (const FlowchartSubGraph* sg = siblings; sg; sg = sg->next) {
+    if (sg->id && strcmp(sg->id, id) == 0) return 1;
+    if (flowchart_is_subgraph_id(sg->children, id)) return 1;
+  }
+  return 0;
+}
+
+static void flowchart_json_append_edge(json_value_t* links_arr,
+                                        const FlowchartEdge* e) {
+  json_value_t *e_det = json_create_object();
+  int edge_length = 1;
+  if (e->arrow_type && strcmp(e->arrow_type, "---") != 0) {
+    const char stroke_char = e->arrow_type[0];
+    if (stroke_char == '-' || stroke_char == '=') {
+      size_t stroke_length = 0;
+      while (e->arrow_type[stroke_length] == stroke_char)
+        ++stroke_length;
+      if (stroke_length > 1)
+        edge_length = (int)stroke_length - 1;
+    }
+  }
+  json_object_set_number(e_det, "length", edge_length);
+  json_object_set_string(e_det, "source", e->from ? e->from : "");
+  const char *stroke = "normal";
+  if (e->arrow_type && strstr(e->arrow_type, "=="))
+    stroke = "thick";
+  if (e->arrow_type &&
+      (strstr(e->arrow_type, "-.-") || strstr(e->arrow_type, ".->") ||
+       strstr(e->arrow_type, "-...->")))
+    stroke = "dotted";
+  json_object_set_string(e_det, "stroke", stroke);
+  json_object_set_string(e_det, "target", e->to ? e->to : "");
+  json_object_set_string(e_det, "type", map_arrow(e->arrow_type));
+
+  if (e->label) {
+    json_value_t *text_obj = json_create_object();
+    json_object_set_string(text_obj, "text", e->label);
+    json_object_set_string(text_obj, "type", "text");
+    json_object_add(e_det, "text", text_obj);
+  }
+  json_array_add(links_arr, e_det);
+}
+
+static void flowchart_json_append_scoped_edges(json_value_t* links_arr,
+                                                const FlowchartDiagram* d,
+                                                const FlowchartSubGraph* sgs) {
+  for (const FlowchartSubGraph* sg = sgs; sg; sg = sg->next) {
+    flowchart_json_append_scoped_edges(links_arr, d, sg->children);
+    for (int labelled = 1; labelled >= 0; --labelled) {
+      for (const FlowchartEdge* e = d->edges; e; e = e->next) {
+        if ((e->label != NULL) == labelled &&
+            flowchart_first_edge_scope(d->subgraphs, e) == sg)
+          flowchart_json_append_edge(links_arr, e);
+      }
+    }
+  }
+}
+
 char *flowchart_to_json(FlowchartDiagram *diagram) {
   if (!diagram)
     return NULL;
@@ -452,48 +538,22 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
   }
   json_object_add(root, "nodes", nodes_obj);
 
-  // Edges
+  // Edges: preserve Mermaid's post-order scope projection without
+  // altering AST edge order or changing public data structures.
   json_value_t *links_arr = json_create_array();
-  for (int labelled_pass = 1; labelled_pass >= 0; --labelled_pass) {
-    FlowchartEdge *e = diagram->edges;
-    while (e) {
-      if ((e->label != NULL) != labelled_pass) {
-        e = e->next;
-        continue;
+  flowchart_json_append_scoped_edges(links_arr, diagram, diagram->subgraphs);
+  for (int phase = 0; phase < 2; ++phase) {
+    for (int labelled = 1; labelled >= 0; --labelled) {
+      for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+        if ((e->label != NULL) != labelled ||
+            flowchart_first_edge_scope(diagram->subgraphs, e))
+          continue;
+        int pair_of_subgraphs =
+            flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
+            flowchart_is_subgraph_id(diagram->subgraphs, e->to);
+        if (pair_of_subgraphs == (phase == 0))
+          flowchart_json_append_edge(links_arr, e);
       }
-    json_value_t *e_det = json_create_object();
-    int edge_length = 1;
-    if (e->arrow_type && strcmp(e->arrow_type, "---") != 0) {
-      const char stroke_char = e->arrow_type[0];
-      if (stroke_char == '-' || stroke_char == '=') {
-        size_t stroke_length = 0;
-        while (e->arrow_type[stroke_length] == stroke_char)
-          ++stroke_length;
-        if (stroke_length > 1)
-          edge_length = (int)stroke_length - 1;
-      }
-    }
-    json_object_set_number(e_det, "length", edge_length);
-    json_object_set_string(e_det, "source", e->from ? e->from : "");
-    const char *stroke = "normal";
-    if (e->arrow_type && strstr(e->arrow_type, "=="))
-      stroke = "thick";
-    if (e->arrow_type &&
-        (strstr(e->arrow_type, "-.-") || strstr(e->arrow_type, ".->") ||
-         strstr(e->arrow_type, "-...->")))
-      stroke = "dotted";
-    json_object_set_string(e_det, "stroke", stroke);
-    json_object_set_string(e_det, "target", e->to ? e->to : "");
-    json_object_set_string(e_det, "type", map_arrow(e->arrow_type));
-
-    if (e->label) {
-      json_value_t *text_obj = json_create_object();
-      json_object_set_string(text_obj, "text", e->label);
-      json_object_set_string(text_obj, "type", "text");
-      json_object_add(e_det, "text", text_obj);
-    }
-    json_array_add(links_arr, e_det);
-    e = e->next;
     }
   }
   json_object_add(root, "links", links_arr);
