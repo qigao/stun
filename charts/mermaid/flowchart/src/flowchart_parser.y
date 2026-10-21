@@ -65,6 +65,19 @@ static int has_node_ref(const FlowchartSubGraph* sg, const char* id) {
     return 0;
 }
 
+static int node_registered_in_another_subgraph(
+    const FlowchartSubGraph* siblings,
+    const FlowchartSubGraph* active,
+    const char* id) {
+    for (const FlowchartSubGraph* sg = siblings; sg; sg = sg->next) {
+        if (sg != active && has_node_ref(sg, id))
+            return 1;
+        if (node_registered_in_another_subgraph(sg->children, active, id))
+            return 1;
+    }
+    return 0;
+}
+
 static void add_node_ref(FlowchartParserContext* ctx, FlowchartSubGraph* sg, const char* id) {
     /* Mermaid's serialized subgraph node list reflects node references and
        edge endpoints, including repeated references. Preserve each occurrence. */
@@ -575,7 +588,9 @@ node_definition ::= node_group(A). {
     FlowchartSubGraph* active = current_subgraph(ctx);
     if (active) {
         for (FlowchartNodeRef* ref = A; ref; ref = ref->next) {
-            if (!has_node_ref(active, ref->id))
+            if (!has_node_ref(active, ref->id) &&
+                !node_registered_in_another_subgraph(
+                    ctx->diagram->subgraphs, active, ref->id))
                 add_node_ref(ctx, active, ref->id);
         }
     }
