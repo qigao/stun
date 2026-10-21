@@ -92,6 +92,7 @@ if(STUN_CI_JSON_GOLDEN)
     message(FATAL_ERROR
       "Flowchart JSON conformance requires >=95 real Mermaid fixtures; found ${_flowchart_golden_count}")
   endif()
+  message(STATUS "Qualified Flowchart input fixtures: ${_flowchart_golden_count}")
   if(NOT DEFINED ENV{SALTS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_ROOT}")
     message(FATAL_ERROR "Flowchart JSON golden requires the published installed Salts SDK in SALTS_ROOT")
   endif()
