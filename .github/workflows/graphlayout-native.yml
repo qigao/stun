@@ -1,6 +1,7 @@
 name: GraphLayout native algorithm qualification
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - 'shared/layout/**'
       - 'charts/dotgraph/**'
@@ -11,6 +12,7 @@ on:
       - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
   push:
+    branches: [master]
     paths:
       - 'shared/layout/**'
       - 'charts/dotgraph/**'
@@ -20,13 +22,40 @@ on:
       - 'vendor/CMakeLists.txt'
       - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
+      - '.github/scripts/ci-affected.sh'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: GraphLayout change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'shared/layout/*' 'charts/dotgraph/*' 'charts/mermaid/flowchart/src/flowchart_layout.cpp' 'charts/mermaid/flowchart/include/*' 'charts/mermaid/flowchart/CMakeLists.txt' \
+            'charts/mermaid/mindmap/*' 'charts/infographic/*' 'vendor/CMakeLists.txt' 'vendor/cola/*' \
+            '.github/workflows/graphlayout-native.yml' '.github/scripts/ci-affected.sh'
+
   graphlayout:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     name: ${{ matrix.os }} / ${{ matrix.toolchain }}
     strategy:
       fail-fast: false
