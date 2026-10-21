@@ -189,12 +189,10 @@ spec("flowchart_parser") {
                 "\"type\":\"flowchart\""
                 "}";
             char* actual = flowchart_to_json(diagram);
-            check_true(actual != NULL);
-            if (actual) {
-                check_true(json_equal(actual, expected));
-                json_serialize_free(actual);
-            }
+            int json_matches = actual != NULL && json_equal(actual, expected);
+            if (actual) json_serialize_free(actual);
             flowchart_diagram_free(diagram);
+            check_true(json_matches);
         }
     }
 
@@ -239,22 +237,18 @@ spec("flowchart_parser") {
             check_true(status == FLOWCHART_PARSE_COMPLETE);
             if (!diagram) return;
 
-            FlowchartClick* click = diagram->clicks;
-            check_true(click != NULL);
-            if (click) {
-                check_true(strcmp(click->node_id, "A") == 0);
-                check_true(click->is_href == 1);
-                check_true(strcmp(click->target, "index.html#link-clicked") == 0);
-                click = click->next;
-            }
-            check_true(click != NULL);
-            if (click) {
-                check_true(strcmp(click->node_id, "B") == 0);
-                check_true(click->is_href == 0);
-                check_true(strcmp(click->target, "testClick") == 0);
-                click = click->next;
-            }
-            check_true(click == NULL);
+            FlowchartClick* first_click = diagram->clicks;
+            FlowchartClick* second_click = first_click ? first_click->next : NULL;
+            int click_ast_matches =
+                first_click && first_click->node_id &&
+                strcmp(first_click->node_id, "A") == 0 &&
+                first_click->is_href == 1 && first_click->target &&
+                strcmp(first_click->target, "index.html#link-clicked") == 0 &&
+                second_click && second_click->node_id &&
+                strcmp(second_click->node_id, "B") == 0 &&
+                second_click->is_href == 0 && second_click->target &&
+                strcmp(second_click->target, "testClick") == 0 &&
+                second_click->next == NULL;
 
             const char* expected =
                 "{"
@@ -269,12 +263,11 @@ spec("flowchart_parser") {
                 "\"subgraphs\":[],\"type\":\"flowchart\""
                 "}";
             char* actual = flowchart_to_json(diagram);
-            check_true(actual != NULL);
-            if (actual) {
-                check_true(json_equal(actual, expected));
-                json_serialize_free(actual);
-            }
+            int click_json_matches = actual != NULL && json_equal(actual, expected);
+            if (actual) json_serialize_free(actual);
             flowchart_diagram_free(diagram);
+            check_true(click_ast_matches);
+            check_true(click_json_matches);
         }
     }
 
@@ -316,7 +309,7 @@ spec("flowchart_parser") {
                 "flowchart LR\n"
                 "A --> B\n"
                 "A --> C\n"
-                "linkStyle default color:Sienna;\n"
+                "linkStyle default color:Sienna\n"
                 "linkStyle 0 stroke:#D50000;\n"
                 "style A stroke:#ff0000,fill:#ffcccc\n";
             FlowchartDiagram* diagram = NULL;
@@ -346,9 +339,41 @@ spec("flowchart_parser") {
                 item = item->next;
             }
             check_true(item == NULL);
-            check_true(diagram->nodes != NULL && diagram->nodes->next != NULL &&
-                       diagram->nodes->next->next == NULL);
+            FlowchartNode* node_a = diagram->nodes;
+            FlowchartNode* node_b = node_a ? node_a->next : NULL;
+            FlowchartNode* node_c = node_b ? node_b->next : NULL;
+            int nodes_ok = node_a && node_a->id && strcmp(node_a->id, "A") == 0 &&
+                           node_b && node_b->id && strcmp(node_b->id, "B") == 0 &&
+                           node_c && node_c->id && strcmp(node_c->id, "C") == 0 &&
+                           node_c->next == NULL;
+
+            char* actual = flowchart_to_json(diagram);
+            json_value_t* root = actual ? json_parse(actual, strlen(actual)) : NULL;
+            json_value_t* styles = root ? json_object_get(root, "linkStyles") : NULL;
+            int json_styles_ok = styles && json_array_size(styles) == 2;
+            if (json_styles_ok) {
+                json_value_t* first = json_array_get(styles, 0);
+                json_value_t* second = json_array_get(styles, 1);
+                json_value_t* first_index = first ? json_object_get(first, "index") : NULL;
+                json_value_t* second_index = second ? json_object_get(second, "index") : NULL;
+                json_value_t* first_style_obj = first ? json_object_get(first, "styles") : NULL;
+                json_value_t* second_style_obj = second ? json_object_get(second, "styles") : NULL;
+                json_value_t* color = first_style_obj ? json_object_get(first_style_obj, "color") : NULL;
+                json_value_t* stroke = second_style_obj ? json_object_get(second_style_obj, "stroke") : NULL;
+                json_styles_ok = first_index && json_type(first_index) == JSON_STRING &&
+                    strcmp(json_string(first_index), "default") == 0 &&
+                    second_index && json_type(second_index) == JSON_NUMBER &&
+                    json_number(second_index) == 0.0 &&
+                    color && json_type(color) == JSON_STRING &&
+                    strcmp(json_string(color), "Sienna") == 0 &&
+                    stroke && json_type(stroke) == JSON_STRING &&
+                    strcmp(json_string(stroke), "#D50000") == 0;
+            }
+            json_free(root);
+            if (actual) json_serialize_free(actual);
             flowchart_diagram_free(diagram);
+            check_true(nodes_ok);
+            check_true(json_styles_ok);
         }
     }
 
