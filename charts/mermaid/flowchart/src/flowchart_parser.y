@@ -128,6 +128,19 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
     return n;
 }
 
+static FlowchartSubGraph* find_parent_of_nested_subgraph(
+    FlowchartSubGraph* siblings, const char* child_id) {
+    for (FlowchartSubGraph* parent = siblings; parent; parent = parent->next) {
+        for (FlowchartSubGraph* child = parent->children; child; child = child->next) {
+            if (child->id && strcmp(child->id, child_id) == 0)
+                return parent;
+        }
+        FlowchartSubGraph* ancestor = find_parent_of_nested_subgraph(parent->children, child_id);
+        if (ancestor) return ancestor;
+    }
+    return NULL;
+}
+
 static void add_edge(FlowchartParserContext *ctx, const char* from, const char* to, const char* arrow, const char* label) {
     if (!from || !to) return;
     /* Nodes are recorded at declaration/reference time and edge endpoints are
@@ -136,6 +149,20 @@ static void add_edge(FlowchartParserContext *ctx, const char* from, const char* 
     if (active) {
         add_node_ref(ctx, active, from);
         add_node_ref(ctx, active, to);
+    } else {
+        /* An edge between two sibling subgraphs contributes both endpoint
+           references to their common owner even if the edge is declared after
+           that owner's END. Mermaid keeps these as additional parent members.
+           Prepend in target/source order to preserve the source-facing order
+           in the head-inserted reference chain. */
+        FlowchartSubGraph* owner_from =
+            find_parent_of_nested_subgraph(ctx->diagram->subgraphs, from);
+        FlowchartSubGraph* owner_to =
+            find_parent_of_nested_subgraph(ctx->diagram->subgraphs, to);
+        if (owner_from && owner_from == owner_to) {
+            add_node_ref(ctx, owner_from, to);
+            add_node_ref(ctx, owner_from, from);
+        }
     }
     FlowchartEdge* e = (FlowchartEdge*)calloc(1, sizeof(FlowchartEdge));
     if (!e) {
