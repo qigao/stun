@@ -502,7 +502,7 @@ click_statement ::= CLICK label_text(A) IDENTIFIER(B). {
     free(A); free(B);
 }
 
-node_definition ::= node(A). { (void)A; }
+node_definition ::= node_group(A). { free_node_refs(A); }
 
 // 基础值可以是标识符或字符串
 label_text(R) ::= IDENTIFIER(A). { R = A; }
