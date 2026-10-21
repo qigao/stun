@@ -97,6 +97,11 @@ loop:
         "==="              { FlowchartParser(parser, FC_ARROW, strdup("==="), ctx); goto loop; }
 
         // 优先级 3: 形状限定符
+        "[/"               { FlowchartParser(parser, FC_TRAP_START, NULL, ctx); goto loop; }
+        "/]"               { FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        "\x5B\x5C"         { FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
+        "\x5C\x5D"         { FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        ">"                { FlowchartParser(parser, FC_ODD_START, NULL, ctx); goto loop; }
         "[["              { FlowchartParser(parser, FC_SUBROUTINE_START, NULL, ctx); goto loop; }
         "]]"              { FlowchartParser(parser, FC_SUBROUTINE_END, NULL, ctx); goto loop; }
         "{{"              { FlowchartParser(parser, FC_HEXAGON_START, NULL, ctx); goto loop; }

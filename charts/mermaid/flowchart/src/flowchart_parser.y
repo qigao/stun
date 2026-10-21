@@ -546,6 +546,11 @@ node(R) ::= label_text(A) INV_TRAP_START node_label(B) TRAP_END. {
     if (R) R->shape = FC_SHAPE_INV_TRAPEZOID;
     free(A); free(B);
 }
+node(R) ::= label_text(A) ODD_START node_label(B) SQE. {
+    R = find_or_create_node(ctx, A, B);
+    if (R) R->shape = FC_SHAPE_ODD;
+    free(A); free(B);
+}
 
 edge_statement ::= edge_chain(A). { (void)A; }
 

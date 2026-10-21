@@ -20,7 +20,8 @@ typedef enum {
     FC_SHAPE_TRAPEZOID,     // [/ /]
     FC_SHAPE_INV_TRAPEZOID, // [\ \]
     FC_SHAPE_HEXAGON,       // {{ }}
-    FC_SHAPE_DIAMOND        // { } - same as rhombus in many contexts
+    FC_SHAPE_DIAMOND,       // { } - same as rhombus in many contexts
+    FC_SHAPE_ODD            // >text] legacy odd/flag shape
 } FlowchartNodeShape;
 
 typedef enum {

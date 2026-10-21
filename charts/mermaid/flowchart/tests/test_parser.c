@@ -352,6 +352,34 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("legacy flowchart shape syntax") {
+        it("parses odd and leaning parallelogram nodes") {
+            const char* input =
+                "flowchart LR\n"
+                "G>red text] --> J[/blue text/]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartNode* g = diagram->nodes;
+            while (g && strcmp(g->id, "G") != 0) g = g->next;
+            FlowchartNode* j = diagram->nodes;
+            while (j && strcmp(j->id, "J") != 0) j = j->next;
+            check_true(g != NULL);
+            check_true(j != NULL);
+            if (g) {
+                check_true(g->shape == FC_SHAPE_ODD);
+                check_true(strcmp(g->label, "red text") == 0);
+            }
+            if (j) {
+                check_true(j->shape == FC_SHAPE_TRAPEZOID);
+                check_true(strcmp(j->label, "blue text") == 0);
+            }
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("golden tests") {
         int count = 0;
         int golden_failures = 0;
