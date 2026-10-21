@@ -274,6 +274,38 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("ampersand edge groups") {
+        it("expands each adjacent node group as a Cartesian product") {
+            const char* input =
+                "flowchart LR\\n"
+                "a --> b & c --> d & e\\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            const char* expected[][2] = {
+                {"a", "b"}, {"a", "c"},
+                {"b", "d"}, {"b", "e"},
+                {"c", "d"}, {"c", "e"}
+            };
+            int seen[6] = {0};
+            int edge_count = 0;
+            for (FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+                edge_count++;
+                for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                    if (strcmp(edge->from, expected[i][0]) == 0 &&
+                        strcmp(edge->to, expected[i][1]) == 0)
+                        seen[i]++;
+                }
+            }
+            check_true(edge_count == 6);
+            for (size_t i = 0; i < sizeof(seen) / sizeof(seen[0]); ++i)
+                check_true(seen[i] == 1);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("modern node declaration syntax") {
         it("accepts ampersand-separated and annotated nodes") {
             const char* input =
