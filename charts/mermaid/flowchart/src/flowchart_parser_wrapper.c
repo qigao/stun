@@ -13,6 +13,7 @@ typedef struct {
   const char *marker;
   int line;
   int in_classdef;
+  int click_phase;
 } Scanner;
 
 extern void flowchart_scan(Scanner *s, void *parser, FlowchartParserContext *ctx);
@@ -169,6 +170,7 @@ FlowchartParseStatus flowchart_parse_ex(const char *input,
   s.marker = NULL;
   s.line = 1;
   s.in_classdef = 0;
+  s.click_phase = 0;
 
   flowchart_scan(&s, parser, &ctx);
   FlowchartParser(parser, 0, NULL, &ctx);
