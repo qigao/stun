@@ -92,11 +92,17 @@ jobs:
       SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
       SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
       SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
-      SALTS_ROOT: ${{ runner.temp }}/stun-flowchart-native-sdk
-      PACKAGES_ROOT: ${{ runner.temp }}/stun-flowchart-native-nuget
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
+      # The runner context is unavailable in jobs.<job>.env; bind
+      # runner-local temp paths after the job starts.
+      - name: Define isolated SDK paths
+        shell: bash
+        run: |
+          printf 'SALTS_ROOT=%s/stun-flowchart-native-sdk\\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'PACKAGES_ROOT=%s/stun-flowchart-native-nuget\\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       - name: Checkout exact Stun source candidate
         uses: actions/checkout@v4
         with:
