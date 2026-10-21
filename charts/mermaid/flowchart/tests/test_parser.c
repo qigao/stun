@@ -317,6 +317,44 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("variable-width edges") {
+        it("retains directed tips and lengths on extended arrows") {
+            const char* input =
+                "flowchart LR\n"
+                "A ----> B\n"
+                "C ======> D\n"
+                "E --- F\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            int ok = links && json_array_size(links) == 3;
+            const char* types[] = {"arrow_point", "arrow_point", "arrow_open"};
+            const char* strokes[] = {"normal", "thick", "normal"};
+            const double lengths[] = {3, 5, 2};
+            for (size_t i = 0; ok && i < 3; ++i) {
+                json_value_t* item = json_array_get(links, i);
+                json_value_t* length = item ? json_object_get(item, "length") : NULL;
+                json_value_t* type = item ? json_object_get(item, "type") : NULL;
+                json_value_t* stroke = item ? json_object_get(item, "stroke") : NULL;
+                ok = length && json_type(length) == JSON_NUMBER &&
+                     json_number(length) == lengths[i] &&
+                     type && json_type(type) == JSON_STRING &&
+                     strcmp(json_string(type), types[i]) == 0 &&
+                     stroke && json_type(stroke) == JSON_STRING &&
+                     strcmp(json_string(stroke), strokes[i]) == 0;
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("click statement metadata") {
         it("serializes href and callback clicks in source order") {
             const char* input =
