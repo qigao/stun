@@ -243,6 +243,33 @@ static void free_styles(FlowchartStyle* styles) {
     }
 }
 
+static FlowchartStyle* clone_style_list(FlowchartParserContext* ctx,
+                                        const FlowchartStyle* source) {
+    FlowchartStyle* head = NULL;
+    FlowchartStyle** tail = &head;
+    for (const FlowchartStyle* item = source; item; item = item->next) {
+        FlowchartStyle* copied = (FlowchartStyle*)calloc(1, sizeof(FlowchartStyle));
+        if (!copied) {
+            ctx->error_count++;
+            free_styles(head);
+            return NULL;
+        }
+        copied->key = item->key ? strdup(item->key) : NULL;
+        copied->value = item->value ? strdup(item->value) : NULL;
+        if (!copied->key || !copied->value) {
+            ctx->error_count++;
+            free(copied->key);
+            free(copied->value);
+            free(copied);
+            free_styles(head);
+            return NULL;
+        }
+        *tail = copied;
+        tail = &copied->next;
+    }
+    return head;
+}
+
 static char* copy_trimmed(const char* start, size_t length) {
     while (length && (*start == ' ' || *start == '\t' || *start == '\r')) {
         ++start;
@@ -520,11 +547,17 @@ style_spec(R) ::= STYLE(A). {
     free(A);
 }
 
-linkstyle_statement ::= LINKSTYLE label_text(A) style_specs(B) SEMI. {
-    add_link_style(ctx, A, B);
+linkstyle_statement ::= LINKSTYLE class_ids(A) style_specs(B) SEMI. {
+    for (const FlowchartNodeRef* index = A; index; index = index->next)
+        add_link_style(ctx, strdup(index->id), clone_style_list(ctx, B));
+    free_node_refs(A);
+    free_styles(B);
 }
-linkstyle_statement ::= LINKSTYLE label_text(A) style_specs(B) NEWLINE. {
-    add_link_style(ctx, A, B);
+linkstyle_statement ::= LINKSTYLE class_ids(A) style_specs(B) NEWLINE. {
+    for (const FlowchartNodeRef* index = A; index; index = index->next)
+        add_link_style(ctx, strdup(index->id), clone_style_list(ctx, B));
+    free_node_refs(A);
+    free_styles(B);
 }
 click_statement ::= CLICK label_text(A) STRING(B). {
     add_click(ctx, A, B, 1);
