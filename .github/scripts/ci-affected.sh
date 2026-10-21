@@ -24,6 +24,11 @@ if [[ ! -r "${GITHUB_EVENT_PATH:-}" ]] || ! command -v jq >/dev/null; then
 fi
 
 action="$(jq -r '.action // empty' "$GITHUB_EVENT_PATH")"
+if [[ "$action" == "labeled" ]] && \
+    [[ "$(jq -r '.label.name // empty' "$GITHUB_EVENT_PATH")" != "ci/full" ]]; then
+    emit false "unrelated pull request label"
+    exit 0
+fi
 if [[ "$action" != "synchronize" ]]; then
     emit true "pull request action: ${action:-unknown}"
     exit 0
