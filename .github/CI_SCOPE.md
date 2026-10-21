@@ -21,8 +21,8 @@ The rapid-iteration path is:
 
 | New change | Actual heavy validation |
 | --- | --- |
-| Flowchart lexer/parser-only update | Fast real Lemon/re2c AST smoke on Linux with ASan/UBSan; full Mesa/SDK waits until `ci/full` requalification |
-| Flowchart JSON golden, parser wrapper, renderer or integration test | Full runtime chart CTests and released-SDK/Mesa qualification |
+| Flowchart lexer/parser-only update | Real Lemon/re2c AST smoke plus an independent **published-SDK JSON golden** lane, both with ASan/UBSan; full Mesa/FlexUI waits until `ci/full` |
+| Flowchart JSON golden/test or serializer update | Published-SDK JSON golden lane; serializer/integration changes also run full runtime |
 | GraphLayout algorithms | GraphLayout native matrix and runtime |
 | gCanvas renderer or Android platform | Relevant GLES/Android/package/cache checks and runtime |
 | C11 Markdown | UI C11 released-SDK matrix and runtime |
@@ -36,9 +36,16 @@ The `Flowchart native AST smoke` check compiles the *existing* C11 parser,
 repository Lemon template and re2c lexer in an isolated CMake project. It
 does not link the SaltsUtils JSON serializer, FlexUI or renderer, and does not
 establish Mermaid golden JSON conformance. The lightweight runner uses Ubuntu's
-re2c; complete acceptance still uses the pinned released SDK/toolchain in the
-full runtime workflow. The test-only `STUN_FLOWCHART_PARSER_ONLY` define removes
-only JSON serialization from the standalone smoke build; production retains it.
+re2c. The test-only `STUN_FLOWCHART_PARSER_ONLY` define removes only JSON
+serialization from the standalone smoke build; production retains it.
+
+The independent `Flowchart JSON golden / installed SDK` lane uses verified
+Salts.Native and SaltsUtils.Native NuGet archives, official GitHub Release
+SHA256SUMS, canonical Core SONAME aliases and the original 95-case Flowchart
+`test_parser.c` suite. It builds the production parser and SaltsUtils JSON
+serializer **without** Mesa, Android emulation, FlexUI renderer or alternate
+JSON provider. It is a conformance check on its own, not a replacement for
+complete released-SDK/FlexUI/Mesa integration on the final exact HEAD.
 
 The `ci-affected.sh` helper accepts a leading `!` to exclude specific
 parser-only paths from the expensive runtime gate. Mixed commits that also
