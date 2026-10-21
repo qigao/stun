@@ -124,6 +124,31 @@ static void test_punctuated_identifiers(void) {
                 edges, sizeof(edges) / sizeof(edges[0]), 6);
 }
 
+static void test_named_edge_metadata_nodes(void) {
+    const char* input =
+        "flowchart TD\n"
+        "A e1@--> B\n"
+        "e1@{ curve: natural }\n"
+        "e2@{ curve: stepAfter }\n";
+    FlowchartDiagram* d = NULL;
+    FlowchartParseStatus status = flowchart_parse_ex(input, &d);
+    CHECK(status == FLOWCHART_PARSE_COMPLETE);
+    if (!d) { ++failures; return; }
+    int count = 0, edges = 0;
+    for (FlowchartNode* n = d->nodes; n; n = n->next) ++count;
+    for (FlowchartEdge* e = d->edges; e; e = e->next) {
+        ++edges;
+        CHECK(e->from && e->to &&
+              strcmp(e->from, "A") == 0 && strcmp(e->to, "B") == 0);
+    }
+    CHECK(count == 4);
+    CHECK(edges == 1);
+    CHECK(find_node(d, "e1") != NULL);
+    CHECK(find_node(d, "e2") != NULL);
+    CHECK(find_node(d, "e3") == NULL);
+    flowchart_diagram_free(d);
+}
+
 static void test_shapes_and_text(void) {
     FlowchartDiagram *diagram = NULL;
     const char *source =
@@ -174,6 +199,7 @@ int main(void) {
     test_ampersand_groups();
     test_inline_edge_labels();
     test_punctuated_identifiers();
+    test_named_edge_metadata_nodes();
     test_shapes_and_text();
     test_malformed_input();
     if (failures) {

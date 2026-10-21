@@ -559,6 +559,42 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("named edge metadata declaration") {
+        it("preserves declared edge IDs as nodes, not extra edges") {
+            const char* input =
+                "flowchart TD\n"
+                "A e1@--> B\n"
+                "e1@{ curve: natural }\n"
+                "e2@{ curve: stepAfter }\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* nodes = root ? json_object_get(root, "nodes") : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            int ok = nodes && json_object_size(nodes) == 4 &&
+                     json_object_get(nodes, "A") &&
+                     json_object_get(nodes, "B") &&
+                     json_object_get(nodes, "e1") &&
+                     json_object_get(nodes, "e2") &&
+                     !json_object_get(nodes, "e3") &&
+                     links && json_array_size(links) == 1;
+            if (ok) {
+                json_value_t* link = json_array_get(links, 0);
+                const char* source = json_get_string(link, "source");
+                const char* target = json_get_string(link, "target");
+                ok = source && target && strcmp(source, "A") == 0 &&
+                     strcmp(target, "B") == 0;
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("variable-width edges") {
         it("retains directed tips and lengths on extended arrows") {
             const char* input =

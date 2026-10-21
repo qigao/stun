@@ -94,7 +94,21 @@ loop:
         // v2 node metadata blocks do not change the graph facts projected by
         // this adapter yet; consume the whole block rather than leaking its
         // label/value tokens as phantom nodes.
-        edge_curve_props { goto loop; }
+        edge_curve_props {
+            /* Standalone edge metadata contributes its explicitly declared
+               ID to Mermaid's graph nodes, but no extra edge or implicit
+               source/target node. The arrow's own ID remains metadata. */
+            const char* at = (const char*)memchr(
+                token, '@', (size_t)(s->cursor - token));
+            if (!at || at == token) {
+                ctx->error_count++;
+            } else {
+                char* edge_id = copy_token(token, at);
+                if (!edge_id) ctx->error_count++;
+                else FlowchartParser(parser, FC_IDENTIFIER, edge_id, ctx);
+            }
+            goto loop;
+        }
         new_node_props { goto loop; }
         // Style declarations may address a subgraph ID as a node, even when
         // that ID has never been an edge endpoint. Keep just the target ID in
