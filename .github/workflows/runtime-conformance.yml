@@ -44,6 +44,8 @@ jobs:
             '.ci/*' 'CMakeLists.txt' \
             '!charts/mermaid/flowchart/src/flowchart_parser.y' \
             '!charts/mermaid/flowchart/src/flowchart_lexer.re' \
+            '!charts/mermaid/flowchart/src/flowchart_parser_wrapper.c' \
+            '!charts/mermaid/flowchart/tests/test_parser.c' \
             '!charts/mermaid/flowchart/tests/ci_smoke.c' \
             '!charts/mermaid/flowchart/tests/standalone/*' \
             '.github/scripts/ci-affected.sh' \
