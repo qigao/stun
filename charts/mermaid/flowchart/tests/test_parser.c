@@ -225,6 +225,70 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("repeated edge membership") {
+        it("does not register existing nodes as new declarations on every edge") {
+            const char* input =
+                "flowchart RL\n"
+                "subgraph one\n"
+                "a1 -- l1 --> a2\n"
+                "a1 -- l2 --> a2\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* sg = diagram->subgraphs;
+            int members_ok = sg && sg->node_refs;
+            const char* expected[] = {"a2", "a1", "a2", "a1", "a2", "a1"};
+            FlowchartNodeRef* ref = sg ? sg->node_refs : NULL;
+            for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                if (!ref || strcmp(ref->id, expected[i]) != 0) {
+                    members_ok = 0;
+                    break;
+                }
+                ref = ref->next;
+            }
+            check_true(members_ok && ref == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("nested subgraph JSON projection") {
+        it("emits children before parents in a flat JSON array") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph TOP\n"
+                "subgraph B1\n"
+                "a --> b\n"
+                "end\n"
+                "subgraph B2\n"
+                "c --> d\n"
+                "end\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* json = flowchart_to_json(diagram);
+            json_value_t* root = json ? json_parse(json, strlen(json)) : NULL;
+            json_value_t* subgraphs = root ? json_object_get(root, "subgraphs") : NULL;
+            int flat_ok = subgraphs && json_array_size(subgraphs) == 3;
+            const char* expected[] = {"B1", "B2", "TOP"};
+            for (size_t i = 0; flat_ok && i < 3; ++i) {
+                json_value_t* sg = json_array_get(subgraphs, i);
+                json_value_t* id = sg ? json_object_get(sg, "id") : NULL;
+                flat_ok = id && json_type(id) == JSON_STRING &&
+                          strcmp(json_string(id), expected[i]) == 0 &&
+                          json_object_get(sg, "subgraphs") == NULL;
+            }
+            check_true(flat_ok);
+            json_free(root);
+            free(json);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("click statement metadata") {
         it("serializes href and callback clicks in source order") {
             const char* input =
