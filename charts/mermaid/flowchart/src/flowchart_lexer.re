@@ -49,6 +49,7 @@ loop:
         string = "\"" [^"\000]* "\"";
         html = "<" [^>\n\000]* ">";
         comment = "%%" [^\n\000]*;
+        punct = [.!?]+;
 
         white { goto loop; }
         newline {
@@ -145,6 +146,12 @@ loop:
                     s->cursor = colon;
                 }
             }
+            goto loop;
+        }
+
+        // Preserve label punctuation instead of silently dropping it.
+        punct {
+            FlowchartParser(parser, FC_PUNCT, copy_token(token, s->cursor), ctx);
             goto loop;
         }
 
