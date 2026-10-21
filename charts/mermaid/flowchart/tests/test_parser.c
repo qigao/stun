@@ -461,6 +461,48 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("explicit subgraph member JSON order") {
+        it("projects declarations in source order and external edge uses afterward") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph Declared\n"
+                "C\n"
+                "D\n"
+                "end\n"
+                "C --> D\n"
+                "subgraph InternallyLinked\n"
+                "a --> b\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* subgraphs = root ? json_object_get(root, "subgraphs") : NULL;
+            int ok = subgraphs && json_array_size(subgraphs) == 2;
+            const char* expected[][4] = {
+                {"C", "D", "D", "C"},
+                {"b", "a", "b", "a"}
+            };
+            for (size_t g = 0; ok && g < 2; ++g) {
+                json_value_t* group = json_array_get(subgraphs, g);
+                json_value_t* members = group ? json_object_get(group, "nodes") : NULL;
+                ok = members && json_array_size(members) == 4;
+                for (size_t i = 0; ok && i < 4; ++i) {
+                    json_value_t* item = json_array_get(members, i);
+                    ok = item && json_type(item) == JSON_STRING &&
+                         strcmp(json_string(item), expected[g][i]) == 0;
+                }
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("edge JSON subgraph scope order") {
         it("emits local edges, subgraph links, then outside edges") {
             const char* input =

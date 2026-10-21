@@ -5,6 +5,7 @@
 #endif
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 
@@ -385,42 +386,106 @@ static const char *map_arrow(const char *arrow) {
   return "arrow_point";
 }
 
-static void serialize_subgraph_recursive(json_value_t *parent_arr, FlowchartSubGraph *sg) {
+/* The reference list is head-inserted. A group with only distinct node
+ * references consists of explicit declarations; Mermaid serializes those in
+ * source order. It also lists each pre-existing edge joining two members
+ * after those declarations, in target/source reference order.
+ *
+ * Edge-containing groups already have repeated references (implicit nodes
+ * plus endpoints). Preserve those as-is: their runtime AST is authoritative.
+ * Only the JSON projection is affected, never parser ownership or AST order. */
+static int subgraph_refs_contain(const FlowchartNodeRef* const* refs,
+                                 size_t count, const char* id) {
+  if (!id) return 0;
+  for (size_t i = 0; i < count; ++i)
+    if (refs[i]->id && strcmp(refs[i]->id, id) == 0) return 1;
+  return 0;
+}
+
+static int serialize_subgraph_recursive(json_value_t* parent_arr,
+                                        const FlowchartDiagram* diagram,
+                                        const FlowchartSubGraph* sg) {
   int count = 0;
   while (sg) {
-    if (++count > 1000) {
-      printf("Infinite loop detected in subgraphs!\n");
-      break;
-    }
-    /* Mermaid JSON's subgraphs array is flat, with nested children before
-       their parent. Keep the AST ownership tree intact, but project it in
-       post-order rather than emitting a nested "subgraphs" property. */
-    if (sg->children)
-      serialize_subgraph_recursive(parent_arr, sg->children);
-    json_value_t *sg_det = json_create_object();
+    /* Reject a corrupted or unexpectedly large sibling chain rather than
+       silently serializing a partial graph. */
+    if (++count > 1000) return 0;
+    /* Mermaid's JSON subgraphs are flat, with children before their parent. */
+    if (sg->children &&
+        !serialize_subgraph_recursive(parent_arr, diagram, sg->children))
+      return 0;
+
+    json_value_t* sg_det = json_create_object();
+    if (!sg_det) return 0;
     json_object_set_string(sg_det, "id", sg->id ? sg->id : "");
     if (sg->direction)
       json_object_set_string(sg_det, "direction", sg->direction);
 
-    // Nodes
-    json_value_t *nodes_arr = json_create_array();
-    FlowchartNodeRef *nr = sg->node_refs;
-    while (nr) {
-      if (nr->id)
-        json_array_add(nodes_arr, json_create_string(nr->id));
-      nr = nr->next;
+    json_value_t* nodes_arr = json_create_array();
+    if (!nodes_arr) { json_free(sg_det); return 0; }
+    size_t refs_count = 0;
+    for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next) {
+      if (refs_count == SIZE_MAX / sizeof(const FlowchartNodeRef*)) {
+        json_free(nodes_arr);
+        json_free(sg_det);
+        return 0;
+      }
+      ++refs_count;
     }
+
+    const FlowchartNodeRef** refs =
+        refs_count ? (const FlowchartNodeRef**)malloc(refs_count * sizeof(*refs)) : NULL;
+    if (refs_count && !refs) {
+      json_free(nodes_arr);
+      json_free(sg_det);
+      return 0;
+    }
+    size_t i = 0;
+    for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next)
+      refs[i++] = ref;
+
+    int declarations_only = refs_count > 0;
+    for (size_t x = 0; x < refs_count && declarations_only; ++x) {
+      for (size_t y = 0; y < x; ++y) {
+        if (refs[x]->id && refs[y]->id &&
+            strcmp(refs[x]->id, refs[y]->id) == 0) {
+          declarations_only = 0;
+          break;
+        }
+      }
+    }
+    if (declarations_only) {
+      /* Distinct head-inserted declarations are reversed source order. */
+      for (size_t x = refs_count; x > 0; --x)
+        if (refs[x - 1]->id)
+          json_array_add(nodes_arr, json_create_string(refs[x - 1]->id));
+      /* Edges may predate or follow the subgraph declaration. The flat
+         Mermaid projection records both endpoint uses in source order. */
+      for (const FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+        if (subgraph_refs_contain(refs, refs_count, edge->from) &&
+            subgraph_refs_contain(refs, refs_count, edge->to)) {
+          json_array_add(nodes_arr, json_create_string(edge->to));
+          json_array_add(nodes_arr, json_create_string(edge->from));
+        }
+      }
+    } else {
+      for (size_t x = 0; x < refs_count; ++x)
+        if (refs[x]->id)
+          json_array_add(nodes_arr, json_create_string(refs[x]->id));
+    }
+    free(refs);
     json_object_add(sg_det, "nodes", nodes_arr);
 
-    // Title
-    json_value_t *title_obj = json_create_object();
-    json_object_set_string(title_obj, "text", sg->label ? sg->label : (sg->id ? sg->id : ""));
+    json_value_t* title_obj = json_create_object();
+    if (!title_obj) { json_free(sg_det); return 0; }
+    json_object_set_string(title_obj, "text",
+                           sg->label ? sg->label : (sg->id ? sg->id : ""));
     json_object_set_string(title_obj, "type", "text");
     json_object_add(sg_det, "title", title_obj);
-
     json_array_add(parent_arr, sg_det);
     sg = sg->next;
   }
+  return 1;
 }
 
 
@@ -560,7 +625,12 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
 
   // Subgraphs
   json_value_t *subgraphs_arr = json_create_array();
-  serialize_subgraph_recursive(subgraphs_arr, diagram->subgraphs);
+  if (!subgraphs_arr ||
+      !serialize_subgraph_recursive(subgraphs_arr, diagram, diagram->subgraphs)) {
+    json_free(subgraphs_arr);
+    json_free(root);
+    return NULL;
+  }
   json_object_add(root, "subgraphs", subgraphs_arr);
 
   // Meta / Styles: serialize declarations collected by the parser.
