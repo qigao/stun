@@ -57,6 +57,12 @@ target_compile_definitions(stun_flowchart_ast_smoke PRIVATE
   _POSIX_C_SOURCE=200809L
 )
 
+# Repository Lemon generates unavoidable unused-parameter and type-range
+# warnings in its template. Do not weaken the warnings on hand-written code.
+set_source_files_properties("${GENERATED_PARSER}" PROPERTIES
+  COMPILE_OPTIONS "-Wno-error=unused-variable;-Wno-error=unused-parameter;-Wno-error=type-limits"
+)
+
 option(STUN_CI_SANITIZERS "Enable ASan and UBSan for AST smoke" ON)
 if(STUN_CI_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(stun_flowchart_ast_smoke PRIVATE
