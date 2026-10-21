@@ -81,6 +81,17 @@ def main():
         assert not check(directory, event, ["shared/gcanvas/*"])
         assert check(directory, event, ["shared/gcanvas/*", "charts/*"])
 
+        # A parser-only push can use its dedicated native smoke instead
+        # of rebuilding Mesa and the entire installed-SDK graph.
+        assert not check(directory, event, [
+            "charts/*", "!charts/mermaid/flowchart/lexer.re",
+        ])
+        assert check(directory, event, [
+            "charts/*", "!charts/mermaid/flowchart/another-file.c",
+        ])
+        # Exclusion-only scopes are invalid, so fail open rather than skip.
+        assert check(directory, event, ["!charts/mermaid/flowchart/*"])
+
         labeled = dict(event)
         labeled["action"] = "labeled"
         labeled["label"] = {"name": "not-ci"}
@@ -91,6 +102,9 @@ def main():
         full = synchronize(before, after)
         full["pull_request"]["labels"] = [{"name": "ci/full"}]
         assert check(directory, full, ["shared/gcanvas/*"])
+        assert check(directory, full, [
+            "charts/*", "!charts/mermaid/flowchart/lexer.re",
+        ])
         assert check(directory, {"action": "opened"}, ["shared/gcanvas/*"])
         assert check(directory, {"action": "synchronize"}, ["shared/gcanvas/*"])
         assert check(directory, event, ["shared/gcanvas/*"], event_name="push")
