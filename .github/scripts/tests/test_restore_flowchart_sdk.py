@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import tempfile
+import stat
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -61,6 +62,19 @@ class SdkRestoreTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Unsafe SDK"):
                 restore.extract_sdk_payload(archive, d / "installed")
             self.assertFalse((d / "outside").exists())
+
+    def test_sdk_symlink_entry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            d = Path(root)
+            archive = d / "symlink.nupkg"
+            entry = zipfile.ZipInfo("sdk/linux-x64/lib/libevil.so")
+            entry.create_system = 3
+            entry.external_attr = (stat.S_IFLNK | 0o777) << 16
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr(entry, "../../another-file")
+            with self.assertRaisesRegex(RuntimeError, "Unsupported symlink"):
+                restore.extract_sdk_payload(archive, d / "installed")
+            self.assertFalse((d / "installed/lib/libevil.so").exists())
 
     def test_verified_core_aliases_become_canonical_symlinks(self):
         with tempfile.TemporaryDirectory() as root:
