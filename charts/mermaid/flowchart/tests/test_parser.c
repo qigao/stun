@@ -317,7 +317,7 @@ spec("flowchart_parser") {
                 "A --> B\n"
                 "A --> C\n"
                 "linkStyle default color:Sienna;\n"
-                "linkStyle 0 stroke:#D50000\n"
+                "linkStyle 0 stroke:#D50000;\n"
                 "style A stroke:#ff0000,fill:#ffcccc\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
