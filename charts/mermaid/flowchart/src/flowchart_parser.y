@@ -58,6 +58,13 @@ static FlowchartSubGraph* current_subgraph(FlowchartParserContext *ctx) {
     return s ? s->sg : NULL;
 }
 
+static int has_node_ref(const FlowchartSubGraph* sg, const char* id) {
+    if (!sg || !id) return 0;
+    for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next)
+        if (ref->id && strcmp(ref->id, id) == 0) return 1;
+    return 0;
+}
+
 static void add_node_ref(FlowchartParserContext* ctx, FlowchartSubGraph* sg, const char* id) {
     /* Mermaid's serialized subgraph node list reflects node references and
        edge endpoints, including repeated references. Preserve each occurrence. */
@@ -81,10 +88,9 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
     FlowchartNode* curr = ctx->diagram->nodes;
     while (curr) {
         if (strcmp(curr->id, id) == 0) {
-            /* Membership depends on references inside the active subgraph, not
-               on where the node was first declared. */
-            FlowchartSubGraph* active = current_subgraph(ctx);
-            if (active) add_node_ref(ctx, active, id);
+            /* Existing edge endpoints are recorded by add_edge(), once per
+               explicit edge. Re-entering an existing node in another edge
+               must not create a second implicit node declaration. */
             if (label && (!curr->label || strcmp(curr->label, id) == 0)) {
                 char* replacement = strdup(label);
                 if (!replacement) {
@@ -502,7 +508,19 @@ click_statement ::= CLICK label_text(A) IDENTIFIER(B). {
     free(A); free(B);
 }
 
-node_definition ::= node_group(A). { free_node_refs(A); }
+node_definition ::= node_group(A). {
+    /* Explicit declarations of an existing node inside a subgraph still add
+       membership. A newly created node has already been registered by
+       find_or_create_node(), so do not double-count it. */
+    FlowchartSubGraph* active = current_subgraph(ctx);
+    if (active) {
+        for (FlowchartNodeRef* ref = A; ref; ref = ref->next) {
+            if (!has_node_ref(active, ref->id))
+                add_node_ref(ctx, active, ref->id);
+        }
+    }
+    free_node_refs(A);
+}
 
 // 基础值可以是标识符或字符串
 label_text(R) ::= IDENTIFIER(A). { R = A; }
