@@ -4,21 +4,10 @@ name: Flowchart native AST smoke
 # grammar, re2c scanner and AST wrapper, not a second parser implementation.
 # Full JSON golden, SDK, renderer and sanitizer integration remains in the
 # Stun runtime conformance workflow (use the ci/full label before merging).
+# The published-SDK golden job already builds the same AST smoke target
+# together with the full JSON test. Keep this workflow as an opt-in tool for
+# isolating the grammar from SDK availability, not a duplicate PR check.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
-    paths:
-      - 'charts/mermaid/flowchart/**'
-      - 'tools/lemon/**'
-      - '.github/scripts/ci-affected.sh'
-      - '.github/workflows/flowchart-ast-smoke.yml'
-  push:
-    branches: [master]
-    paths:
-      - 'charts/mermaid/flowchart/**'
-      - 'tools/lemon/**'
-      - '.github/scripts/ci-affected.sh'
-      - '.github/workflows/flowchart-ast-smoke.yml'
   workflow_dispatch:
 
 permissions:
