@@ -511,7 +511,12 @@ label_text(R) ::= STRING(A).     { R = A; }
 // 形状和边标签允许由多个未加引号的单词组成；lexer 会丢弃词间空白。
 node_label(R) ::= label_text(A). { R = A; }
 node_label(R) ::= node_label(A) label_text(B). {
-    R = concat(ctx, A, B, (A && A[strlen(A) - 1] == '>') ? "" : " ");
+    const size_t len = A ? strlen(A) : 0;
+    /* The lexer discards ordinary interword whitespace. Retain explicit
+       punctuation adjacency (comma or HTML tag) rather than adding a space. */
+    const char* separator =
+        (len && (A[len - 1] == '>' || A[len - 1] == ',')) ? "" : " ";
+    R = concat(ctx, A, B, separator);
 }
 node_label(R) ::= node_label(A) COLON label_text(B). { R = concat(ctx, A, B, ":"); }
 node_label(R) ::= node_label(A) DASH label_text(B). { R = concat(ctx, A, B, "-"); }
