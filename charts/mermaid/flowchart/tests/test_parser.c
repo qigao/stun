@@ -277,8 +277,8 @@ spec("flowchart_parser") {
     describe("ampersand edge groups") {
         it("expands each adjacent node group as a Cartesian product") {
             const char* input =
-                "flowchart LR\\n"
-                "a --> b & c --> d & e\\n";
+                "flowchart LR\n"
+                "a --> b & c --> d & e\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
             check_true(status == FLOWCHART_PARSE_COMPLETE);
