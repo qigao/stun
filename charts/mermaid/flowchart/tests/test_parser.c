@@ -383,8 +383,8 @@ spec("flowchart_parser") {
     describe("unquoted label punctuation") {
         it("preserves periods, exclamation marks, and question marks") {
             const char* input =
-                "flowchart LR\\n"
-                "A[Wait... really?] --> B[No!]\\n";
+                "flowchart LR\n"
+                "A[Wait... really?] --> B[No!]\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
             check_true(status == FLOWCHART_PARSE_COMPLETE);
