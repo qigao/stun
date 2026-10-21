@@ -13,6 +13,8 @@ typedef struct {
     char *marker;
     int line;
     int in_classdef;
+    /* 1=node id, 2=target, 3=optional tooltip, 4=tooltip consumed. */
+    int click_phase;
 } LexerState;
 
 void FlowchartParser(void *parser, int token, void *value,
@@ -60,6 +62,7 @@ loop:
             if (*lookahead != '-' && *lookahead != '=')
                 FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
             s->in_classdef = 0;
+            s->click_phase = 0;
             goto loop;
         }
         comment { goto loop; }
@@ -79,7 +82,7 @@ loop:
         "end"        { FlowchartParser(parser, FC_END, NULL, ctx); goto loop; }
         "classDef"   { s->in_classdef = 1; FlowchartParser(parser, FC_CLASSDEF, NULL, ctx); goto loop; }
         "linkStyle"  { s->in_classdef = 1; FlowchartParser(parser, FC_LINKSTYLE, NULL, ctx); goto loop; }
-        "click"      { FlowchartParser(parser, FC_CLICK, NULL, ctx); goto loop; }
+        "click"      { s->click_phase = 1; FlowchartParser(parser, FC_CLICK, NULL, ctx); goto loop; }
         "class"      { FlowchartParser(parser, FC_CLASS, NULL, ctx); goto loop; }
         "direction"  { FlowchartParser(parser, FC_DIRECTION, NULL, ctx); goto loop; }
         "LR" | "TB" | "BT" | "RL" | "TD" { 
@@ -118,7 +121,7 @@ loop:
         "}"               { FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
         "&"               { goto loop; }
-        ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; goto loop; }
+        ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; s->click_phase = 0; goto loop; }
         ","               { FlowchartParser(parser, FC_COMMA, NULL, ctx); goto loop; }
         ":"               { FlowchartParser(parser, FC_COLON, NULL, ctx); goto loop; }
         "-"               { FlowchartParser(parser, FC_DASH, NULL, ctx); goto loop; }
@@ -147,12 +150,29 @@ loop:
 
         // 优先级 4: 通用标识符
         ident {
-            FlowchartParser(parser, FC_IDENTIFIER, copy_token(token, s->cursor), ctx);
+            char *value = copy_token(token, s->cursor);
+            if (s->click_phase == 1) s->click_phase = 2;
+            else if (s->click_phase == 2) s->click_phase = 3;
+            FlowchartParser(parser, FC_IDENTIFIER, value, ctx);
             goto loop;
         }
 
         string {
             char *val = copy_token(token + 1, s->cursor - 1);
+            if (s->click_phase == 1) {
+                /* Quoted node id. */
+                s->click_phase = 2;
+            } else if (s->click_phase == 2) {
+                /* Quoted href target; a following string is the tooltip. */
+                s->click_phase = 3;
+            } else if (s->click_phase == 3) {
+                /* Mermaid click tooltip is intentionally omitted from the
+                   normalized JSON contract. Consume it here to avoid treating
+                   it as a free-standing node or shifting grammar reductions. */
+                s->click_phase = 4;
+                free(val);
+                goto loop;
+            }
             FlowchartParser(parser, FC_STRING, val, ctx);
             goto loop;
         }
