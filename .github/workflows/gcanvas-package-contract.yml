@@ -2,16 +2,41 @@ name: gCanvas package contract
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-package-contract.yml"
+      - ".github/scripts/ci-affected.sh"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Component change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-package-contract.yml' '.github/scripts/ci-affected.sh'
+
   gles-installed-consumer:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -105,6 +130,8 @@ jobs:
 
 
   android-default-cmake:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
