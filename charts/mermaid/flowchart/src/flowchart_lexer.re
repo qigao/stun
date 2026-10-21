@@ -126,8 +126,14 @@ loop:
         "]]"              { FlowchartParser(parser, FC_SUBROUTINE_END, NULL, ctx); goto loop; }
         "{{"              { FlowchartParser(parser, FC_HEXAGON_START, NULL, ctx); goto loop; }
         "}}"              { FlowchartParser(parser, FC_HEXAGON_END, NULL, ctx); goto loop; }
-        "(("              { FlowchartParser(parser, FC_DOUBLE_CIRCLE_START, NULL, ctx); goto loop; }
-        "))"              { FlowchartParser(parser, FC_DOUBLE_CIRCLE_END, NULL, ctx); goto loop; }
+        // Mermaid ((label)) is a circle; only (((label))) is a double circle.
+        "((("             { FlowchartParser(parser, FC_DOUBLE_CIRCLE_START, NULL, ctx); goto loop; }
+        ")))"             { FlowchartParser(parser, FC_DOUBLE_CIRCLE_END, NULL, ctx); goto loop; }
+        "(("              { FlowchartParser(parser, FC_CPS, NULL, ctx); goto loop; }
+        "))"              { FlowchartParser(parser, FC_CPE, NULL, ctx); goto loop; }
+        // The cylinder spelling [(label)] must outrank single brackets.
+        "[("              { FlowchartParser(parser, FC_CYLINDER_START, NULL, ctx); goto loop; }
+        ")]"              { FlowchartParser(parser, FC_CYLINDER_END, NULL, ctx); goto loop; }
         "(["              { FlowchartParser(parser, FC_STADIUM_START, NULL, ctx); goto loop; }
         "])"              { FlowchartParser(parser, FC_STADIUM_END, NULL, ctx); goto loop; }
         "["               { FlowchartParser(parser, FC_SQS, NULL, ctx); goto loop; }
