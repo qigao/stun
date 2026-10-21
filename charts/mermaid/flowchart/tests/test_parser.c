@@ -352,6 +352,41 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("named Mermaid edge IDs") {
+        it("does not introduce phantom endpoint nodes or curve metadata") {
+            const char* input =
+                "flowchart TD\n"
+                "A e1@--> B e2@--> E\n"
+                "E e3@--> D\n"
+                "e1@{ curve: natural }\n"
+                "e2@{ curve: stepAfter }\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const char* endpoints[][2] = {
+                {"A", "B"}, {"B", "E"}, {"E", "D"}
+            };
+            int edges_ok = 1, count = 0;
+            for (FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+                if (count >= 3 || strcmp(edge->from, endpoints[count][0]) != 0 ||
+                    strcmp(edge->to, endpoints[count][1]) != 0)
+                    edges_ok = 0;
+                count++;
+            }
+            int node_count = 0, phantom = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                node_count++;
+                if (strcmp(n->id, "e1") == 0 ||
+                    strcmp(n->id, "e2") == 0 ||
+                    strcmp(n->id, "e3") == 0)
+                    phantom++;
+            }
+            check_true(edges_ok && count == 3 && node_count == 4 && phantom == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("dotted and embedded-label edges") {
         it("preserves stroke, arrow length and multiword inline text") {
             const char* input =

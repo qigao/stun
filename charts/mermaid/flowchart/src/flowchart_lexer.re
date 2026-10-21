@@ -57,6 +57,10 @@ loop:
         inline_edge_label = ("--" | "<--") [ \t]* label_words [ \t]* ("-->" | "--->");
         variable_dash_arrow = "--" "-"* ">";
         variable_thick_arrow = "==" "="* ">";
+        // Named edge IDs are presentation metadata; do not turn them into
+        // source/target nodes. Preserve the underlying arrow operator.
+        edge_id_arrow = ident "@" (variable_dash_arrow | variable_thick_arrow);
+        edge_curve_props = ident "@{" [ \t]* "curve:" [^}\n\000]* "}";
 
         white {
             if (s->shape_label_depth > 0) {
@@ -87,6 +91,7 @@ loop:
         // v2 node metadata blocks do not change the graph facts projected by
         // this adapter yet; consume the whole block rather than leaking its
         // label/value tokens as phantom nodes.
+        edge_curve_props { goto loop; }
         new_node_props { goto loop; }
         // Style declarations may address a subgraph ID as a node, even when
         // that ID has never been an edge endpoint. Keep just the target ID in
@@ -117,6 +122,16 @@ loop:
         "LR" | "TB" | "BT" | "RL" | "TD" { 
             FlowchartParser(parser, FC_DIR, copy_token(token, s->cursor), ctx); 
             goto loop; 
+        }
+
+        // An explicit Mermaid edge ID (e.g. e1@-->) is not a node.
+        edge_id_arrow {
+            const char* at = (const char*)memchr(token, '@', (size_t)(s->cursor - token));
+            if (at)
+                FlowchartParser(parser, FC_ARROW, copy_token(at + 1, s->cursor), ctx);
+            else
+                ctx->error_count++;
+            goto loop;
         }
 
         // Inline labels are one edge, not two unlabeled edges with a fake node.
