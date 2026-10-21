@@ -1,6 +1,8 @@
 #include "flowchart/flowchart_parser_wrapper.h"
 #include "flowchart_parser_gen.h"
+#ifndef STUN_FLOWCHART_PARSER_ONLY
 #include "json_parser.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -328,6 +330,9 @@ void flowchart_set_routing_mode(FlowchartDiagram* diagram, int mode) {
   diagram->routing_mode = (FlowchartRoutingMode)mode;
 }
 
+/* Lightweight exact-source parser qualification omits only the JSON serializer.
+   Production builds always compile the original SaltsUtils-backed serializer. */
+#ifndef STUN_FLOWCHART_PARSER_ONLY
 static const char *map_shape(FlowchartNodeShape shape) {
   switch (shape) {
   case FC_SHAPE_RECT:
@@ -567,3 +572,5 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
   json_free(root);
   return str;
 }
+
+#endif /* !STUN_FLOWCHART_PARSER_ONLY */
