@@ -264,11 +264,22 @@ spec("flowchart_parser") {
                 "subgraph B2\n"
                 "c --> d\n"
                 "end\n"
-                "end\n";
+                "end\n"
+                "B1 --> B2\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
             check_true(status == FLOWCHART_PARSE_COMPLETE);
             if (!diagram) return;
+
+            FlowchartSubGraph* parent = diagram->subgraphs;
+            FlowchartNodeRef* ref = parent ? parent->node_refs : NULL;
+            const char* expected_refs[] = {"B1", "B2", "B2", "B1"};
+            int refs_ok = parent != NULL;
+            for (size_t i = 0; refs_ok && i < 4; ++i) {
+                refs_ok = ref && ref->id && strcmp(ref->id, expected_refs[i]) == 0;
+                if (refs_ok) ref = ref->next;
+            }
+            check_true(refs_ok && ref == NULL);
 
             char* json = flowchart_to_json(diagram);
             json_value_t* root = json ? json_parse(json, strlen(json)) : NULL;
