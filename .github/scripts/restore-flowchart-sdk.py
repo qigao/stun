@@ -71,7 +71,7 @@ def canonicalize_core(sdk, salts_version):
     core = lib / ("libsalts.so." + salts_version.split("-", 1)[0])
     require(core.is_file() and not core.is_symlink(), f"Missing canonical Core DSO: {core}")
     metadata = subprocess.check_output(["readelf", "-d", str(core)], text=True)
-    sonames = re.findall(r"\\(SONAME\\).*?\\[([^\\]]+)\\]", metadata)
+    sonames = re.findall(r"\(SONAME\).*?\[([^\]]+)\]", metadata)
     require(len(sonames) == 1 and re.fullmatch(r"libsalts[.]so[.][0-9]+(?:[.][0-9]+)*", sonames[0]),
             f"Unexpected Core ELF SONAME: {sonames}")
     require(core.name.startswith(sonames[0] + "."), "Core SONAME/release mismatch")
