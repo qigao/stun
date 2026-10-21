@@ -53,6 +53,8 @@ loop:
         punct = [.!?]+;
         // Mermaid also permits --label--> and -- label --> edges.
         inline_edge_label = "--" [ \t]* ident [ \t]* "-->";
+        variable_dash_arrow = "--" "-"* ">";
+        variable_thick_arrow = "==" "="* ">";
 
         white { goto loop; }
         newline {
@@ -120,6 +122,15 @@ loop:
         }
 
         // 优先级 2: 多字符箭头（必须在标识符前匹配）
+        // Preserve the full operator width and its tip for spacing/length.
+        variable_dash_arrow {
+            FlowchartParser(parser, FC_ARROW, copy_token(token, s->cursor), ctx);
+            goto loop;
+        }
+        variable_thick_arrow {
+            FlowchartParser(parser, FC_ARROW, copy_token(token, s->cursor), ctx);
+            goto loop;
+        }
         "-->"              { FlowchartParser(parser, FC_ARROW, strdup("-->"), ctx); goto loop; }
         "---"              { FlowchartParser(parser, FC_ARROW, strdup("---"), ctx); goto loop; }
         "--"               { FlowchartParser(parser, FC_ARROW, strdup("--"), ctx); goto loop; }
