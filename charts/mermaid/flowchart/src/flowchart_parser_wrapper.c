@@ -370,6 +370,10 @@ static const char *map_shape(FlowchartNodeShape shape) {
 static const char *map_arrow(const char *arrow) {
   if (!arrow)
     return "arrow_point";
+  /* Three or more '-' characters are not necessarily open edges: ---->
+     remains directed, with length encoded separately. */
+  if (strchr(arrow, '>'))
+    return "arrow_point";
   if (strstr(arrow, "---") || strstr(arrow, "-.-"))
     return "arrow_open";
   return "arrow_point";
