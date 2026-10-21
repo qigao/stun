@@ -476,6 +476,8 @@ node_label(R) ::= node_label(A) label_text(B). {
 node_label(R) ::= node_label(A) COLON label_text(B). { R = concat(ctx, A, B, ":"); }
 node_label(R) ::= node_label(A) DASH label_text(B). { R = concat(ctx, A, B, "-"); }
 node_label(R) ::= node_label(A) HTML(B). { R = concat(ctx, A, B, ""); }
+node_label(R) ::= PUNCT(A). { R = A; }
+node_label(R) ::= node_label(A) PUNCT(B). { R = concat(ctx, A, B, ""); }
 
 node(R) ::= label_text(A). {
     R = find_or_create_node(ctx, A, NULL);
