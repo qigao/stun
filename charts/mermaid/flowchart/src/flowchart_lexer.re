@@ -2,6 +2,7 @@
 #define FLOWCHART_LEXER_H
 
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include "flowchart_parser_gen.h"
 #include "flowchart/flowchart_parser_wrapper.h"
@@ -16,6 +17,9 @@ typedef struct {
     /* 1=node id, 2=target, 3=optional tooltip, 4=tooltip consumed. */
     int click_phase;
     int shape_label_depth;
+    int after_subgraph_keyword;
+    const char* subgraph_extra_gap_start;
+    size_t subgraph_extra_gap_size;
 } LexerState;
 
 void FlowchartParser(void *parser, int token, void *value,
@@ -27,6 +31,24 @@ static char* copy_token(const char* start, const char* end) {
     memcpy(s, start, len);
     s[len] = '\0';
     return s;
+}
+
+static char* copy_subgraph_name_token(LexerState* s,
+                                      const char* start, const char* end) {
+    size_t prefix = s->after_subgraph_keyword ? s->subgraph_extra_gap_size : 0;
+    const char* gap = s->subgraph_extra_gap_start;
+    s->after_subgraph_keyword = 0;
+    s->subgraph_extra_gap_size = 0;
+    s->subgraph_extra_gap_start = NULL;
+    if (!prefix) return copy_token(start, end);
+    size_t length = (size_t)(end - start);
+    if (!gap || prefix >= SIZE_MAX - length) return NULL;
+    char* result = (char*)malloc(prefix + length + 1);
+    if (!result) return NULL;
+    memcpy(result, gap, prefix);
+    memcpy(result + prefix, start, length);
+    result[prefix + length] = '\0';
+    return result;
 }
 
 void flowchart_scan(LexerState *s, void *parser, FlowchartParserContext *ctx) {
@@ -66,6 +88,13 @@ loop:
         named_quoted_edge_label = ident "@" "--" [ \t]* string [ \t]* "-->";
 
         white {
+            /* Mermaid consumes one separator after "subgraph"; any remaining
+               spaces belong to the unquoted title, not to the stable ID. */
+            if (s->after_subgraph_keyword && !s->subgraph_extra_gap_start &&
+                s->cursor > token) {
+                s->subgraph_extra_gap_start = token + 1;
+                s->subgraph_extra_gap_size = (size_t)(s->cursor - token - 1);
+            }
             if (s->shape_label_depth > 0) {
                 char* whitespace = copy_token(token, s->cursor);
                 if (whitespace)
@@ -87,6 +116,9 @@ loop:
                 FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
             s->in_classdef = 0;
             s->click_phase = 0;
+            s->after_subgraph_keyword = 0;
+            s->subgraph_extra_gap_start = NULL;
+            s->subgraph_extra_gap_size = 0;
             goto loop;
         }
         comment { goto loop; }
@@ -129,7 +161,13 @@ loop:
         // 优先级 1: 关键字
         "graph"      { FlowchartParser(parser, FC_GRAPH, NULL, ctx); goto loop; }
         "flowchart"  { FlowchartParser(parser, FC_FLOWCHART, NULL, ctx); goto loop; }
-        "subgraph"   { FlowchartParser(parser, FC_SUBGRAPH, NULL, ctx); goto loop; }
+        "subgraph"   {
+            s->after_subgraph_keyword = 1;
+            s->subgraph_extra_gap_start = NULL;
+            s->subgraph_extra_gap_size = 0;
+            FlowchartParser(parser, FC_SUBGRAPH, NULL, ctx);
+            goto loop;
+        }
         "end"        { FlowchartParser(parser, FC_END, NULL, ctx); goto loop; }
         "classDef"   { s->in_classdef = 1; FlowchartParser(parser, FC_CLASSDEF, NULL, ctx); goto loop; }
         "linkStyle"  { s->in_classdef = 1; FlowchartParser(parser, FC_LINKSTYLE, NULL, ctx); goto loop; }
@@ -279,7 +317,8 @@ loop:
 
         // 优先级 4: 通用标识符
         ident {
-            char *value = copy_token(token, s->cursor);
+            char *value = copy_subgraph_name_token(s, token, s->cursor);
+            if (!value) { ctx->error_count++; goto loop; }
             if (s->click_phase == 1) s->click_phase = 2;
             else if (s->click_phase == 2) s->click_phase = 3;
             FlowchartParser(parser, FC_IDENTIFIER, value, ctx);
@@ -287,7 +326,8 @@ loop:
         }
 
         string {
-            char *val = copy_token(token + 1, s->cursor - 1);
+            char *val = copy_subgraph_name_token(s, token + 1, s->cursor - 1);
+            if (!val) { ctx->error_count++; goto loop; }
             if (s->click_phase == 1) {
                 /* Quoted node id. */
                 s->click_phase = 2;

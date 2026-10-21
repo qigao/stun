@@ -353,7 +353,7 @@ spec("flowchart_parser") {
     }
 
     describe("named Mermaid edge IDs") {
-        it("does not introduce phantom endpoint nodes or curve metadata") {
+        it("retains annotated edge IDs without creating phantom endpoints") {
             const char* input =
                 "flowchart TD\n"
                 "A e1@--> B e2@--> E\n"
@@ -374,15 +374,17 @@ spec("flowchart_parser") {
                     edges_ok = 0;
                 count++;
             }
-            int node_count = 0, phantom = 0;
+            int node_count = 0, annotated = 0, unannotated = 0;
             for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
                 node_count++;
                 if (strcmp(n->id, "e1") == 0 ||
-                    strcmp(n->id, "e2") == 0 ||
-                    strcmp(n->id, "e3") == 0)
-                    phantom++;
+                    strcmp(n->id, "e2") == 0)
+                    annotated++;
+                if (strcmp(n->id, "e3") == 0)
+                    unannotated++;
             }
-            check_true(edges_ok && count == 3 && node_count == 4 && phantom == 0);
+            check_true(edges_ok && count == 3 && node_count == 6 &&
+                       annotated == 2 && unannotated == 0);
             flowchart_diagram_free(diagram);
         }
     }
@@ -454,6 +456,53 @@ spec("flowchart_parser") {
             }
             for (size_t j = 0; j < 7; ++j)
                 if (seen[j] != 1) ok = 0;
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("nested subgraph title and borrowed node projection") {
+        it("preserves extra title spacing and excludes unused child IDs") {
+            const char* input =
+                "flowchart TD\n"
+                "subgraph  main\n"
+                "subgraph subcontainer\n"
+                "subcontainer-child\n"
+                "end\n"
+                "subcontainer-child-->subcontainer-sibling\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* main = diagram->subgraphs;
+            check_true(main && main->id && main->label &&
+                       strcmp(main->id, "main") == 0 &&
+                       strcmp(main->label, " main") == 0);
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* groups = root ? json_object_get(root, "subgraphs") : NULL;
+            int ok = groups && json_array_size(groups) == 2;
+            if (ok) {
+                json_value_t* parent = json_array_get(groups, 1);
+                json_value_t* members = json_object_get(parent, "nodes");
+                json_value_t* title_obj = json_object_get(parent, "title");
+                const char* title = title_obj ? json_get_string(title_obj, "text") : NULL;
+                const char* expected[] = {
+                    "subcontainer-sibling",
+                    "subcontainer-sibling",
+                    "subcontainer-child"
+                };
+                ok = title && strcmp(title, " main") == 0 &&
+                     members && json_array_size(members) == 3;
+                for (size_t i = 0; ok && i < 3; ++i) {
+                    json_value_t* member = json_array_get(members, i);
+                    ok = member && json_type(member) == JSON_STRING &&
+                         strcmp(json_string(member), expected[i]) == 0;
+                }
+            }
             check_true(ok);
             json_free(root);
             free(encoded);

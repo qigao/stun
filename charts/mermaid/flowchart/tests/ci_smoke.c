@@ -186,6 +186,22 @@ static void test_shapes_and_text(void) {
     flowchart_diagram_free(diagram);
 }
 
+static void test_subgraph_title_spacing(void) {
+    const char* input =
+        "flowchart TD\n"
+        "subgraph  main\n"
+        "A\n"
+        "end\n";
+    FlowchartDiagram* d = NULL;
+    FlowchartParseStatus status = flowchart_parse_ex(input, &d);
+    CHECK(status == FLOWCHART_PARSE_COMPLETE);
+    if (!d) { ++failures; return; }
+    CHECK(d->subgraphs && d->subgraphs->id && d->subgraphs->label &&
+          strcmp(d->subgraphs->id, "main") == 0 &&
+          strcmp(d->subgraphs->label, " main") == 0);
+    flowchart_diagram_free(d);
+}
+
 static void test_malformed_input(void) {
     FlowchartDiagram *diagram = NULL;
     CHECK(flowchart_parse_ex(NULL, &diagram) == FLOWCHART_PARSE_ERROR);
@@ -201,6 +217,7 @@ int main(void) {
     test_punctuated_identifiers();
     test_named_edge_metadata_nodes();
     test_shapes_and_text();
+    test_subgraph_title_spacing();
     test_malformed_input();
     if (failures) {
         fprintf(stderr, "Flowchart native AST smoke: %d assertion(s) failed\n",

@@ -499,9 +499,10 @@ static void start_subgraph(FlowchartParserContext* ctx,
         ctx->error_count++;
         return;
     }
-    sg->id = strdup(id);
-    sg->label = strdup(label);
-    if (!sg->id || !sg->label) {
+    /* Preserve the raw title, but resolve a stable whitespace-trimmed ID. */
+    sg->id = id ? copy_trimmed(id, strlen(id)) : NULL;
+    sg->label = label ? strdup(label) : NULL;
+    if (!sg->id || !sg->id[0] || !sg->label) {
         free(sg->id);
         free(sg->label);
         free(sg);
@@ -512,7 +513,7 @@ static void start_subgraph(FlowchartParserContext* ctx,
     FlowchartSubGraph* parent = current_subgraph(ctx);
     if (parent) {
         /* Nested subgraphs are members of their parent, in source order. */
-        add_node_ref(ctx, parent, id);
+        add_node_ref(ctx, parent, sg->id);
         sg->next = parent->children;
         parent->children = sg;
     } else {

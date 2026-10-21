@@ -18,6 +18,9 @@ typedef struct {
   int in_classdef;
   int click_phase;
   int shape_label_depth;
+  int after_subgraph_keyword;
+  const char* subgraph_extra_gap_start;
+  size_t subgraph_extra_gap_size;
 } Scanner;
 
 extern void flowchart_scan(Scanner *s, void *parser, FlowchartParserContext *ctx);
@@ -176,6 +179,9 @@ FlowchartParseStatus flowchart_parse_ex(const char *input,
   s.in_classdef = 0;
   s.click_phase = 0;
   s.shape_label_depth = 0;
+  s.after_subgraph_keyword = 0;
+  s.subgraph_extra_gap_start = NULL;
+  s.subgraph_extra_gap_size = 0;
 
   flowchart_scan(&s, parser, &ctx);
   FlowchartParser(parser, 0, NULL, &ctx);
@@ -402,6 +408,36 @@ static int subgraph_refs_contain(const FlowchartNodeRef* const* refs,
   return 0;
 }
 
+static int flowchart_child_subgraph_id_unused(
+    const FlowchartSubGraph* parent, const FlowchartDiagram* diagram,
+    const char* id) {
+  if (!id) return 0;
+  for (const FlowchartSubGraph* child = parent->children; child;
+       child = child->next) {
+    if (child->id && strcmp(child->id, id) == 0) {
+      for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+        if ((e->from && strcmp(e->from, id) == 0) ||
+            (e->to && strcmp(e->to, id) == 0))
+          return 0;
+      }
+      return 1; /* The child is not used as a graph edge endpoint. */
+    }
+  }
+  return 0;
+}
+
+static int flowchart_in_nested_child_nodes(const FlowchartSubGraph* children,
+                                           const char* id) {
+  if (!id) return 0;
+  for (const FlowchartSubGraph* child = children; child;
+       child = child->next) {
+    for (const FlowchartNodeRef* ref = child->node_refs; ref; ref = ref->next)
+      if (ref->id && strcmp(ref->id, id) == 0) return 1;
+    if (flowchart_in_nested_child_nodes(child->children, id)) return 1;
+  }
+  return 0;
+}
+
 static int serialize_subgraph_recursive(json_value_t* parent_arr,
                                         const FlowchartDiagram* diagram,
                                         const FlowchartSubGraph* sg) {
@@ -457,7 +493,8 @@ static int serialize_subgraph_recursive(json_value_t* parent_arr,
     if (declarations_only) {
       /* Distinct head-inserted declarations are reversed source order. */
       for (size_t x = refs_count; x > 0; --x)
-        if (refs[x - 1]->id)
+        if (refs[x - 1]->id &&
+            !flowchart_child_subgraph_id_unused(sg, diagram, refs[x - 1]->id))
           json_array_add(nodes_arr, json_create_string(refs[x - 1]->id));
       /* Edges may predate or follow the subgraph declaration. The flat
          Mermaid projection records both endpoint uses in source order. */
@@ -469,9 +506,17 @@ static int serialize_subgraph_recursive(json_value_t* parent_arr,
         }
       }
     } else {
-      for (size_t x = 0; x < refs_count; ++x)
-        if (refs[x]->id)
-          json_array_add(nodes_arr, json_create_string(refs[x]->id));
+      /* Members borrowed from nested child graphs follow the local members.
+         An unreferenced nested subgraph ID is not itself a parent node. */
+      for (int borrowed = 0; borrowed <= 1; ++borrowed) {
+        for (size_t x = 0; x < refs_count; ++x) {
+          const char* id = refs[x]->id;
+          if (!id || flowchart_child_subgraph_id_unused(sg, diagram, id))
+            continue;
+          if (flowchart_in_nested_child_nodes(sg->children, id) == borrowed)
+            json_array_add(nodes_arr, json_create_string(id));
+        }
+      }
     }
     free(refs);
     json_object_add(sg_det, "nodes", nodes_arr);
