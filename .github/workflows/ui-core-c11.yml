@@ -2,22 +2,51 @@ name: UI C11 Reflection Contract
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - 'shared/markdown/**'
       - 'CMakeLists.txt'
       - '.github/workflows/ui-core-c11.yml'
+      - '.github/scripts/ci-affected.sh'
   push:
     branches: [master]
     paths:
       - 'shared/markdown/**'
       - 'CMakeLists.txt'
       - '.github/workflows/ui-core-c11.yml'
+      - '.github/scripts/ci-affected.sh'
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: C11 Markdown change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'shared/markdown/*' 'CMakeLists.txt' \
+            '.github/workflows/ui-core-c11.yml' \
+            '.github/scripts/ci-affected.sh'
+
   sdk-releases:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   c11-headers:
