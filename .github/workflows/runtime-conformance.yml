@@ -5,6 +5,7 @@ name: Stun runtime conformance
 # Job isolation, sanitizer evidence and original job names are preserved.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [master, refactor/flexui-salts-unicode]
   workflow_dispatch:
@@ -18,7 +19,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Runtime change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'charts/*' 'flex/*' 'flexUI/*' 'ui_core/*' \
+            'shared/*' 'vendor/*' 'cmake/*' 'tools/*' \
+            '.ci/*' 'CMakeLists.txt' \
+            '.github/scripts/ci-affected.sh' \
+            '.github/workflows/runtime-conformance.yml' \
+            '.github/workflows/mesa-driver.yml' \
+            '.github/workflows/salts-sdk-releases.yml'
+
   sdk-releases:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   mesa-driver:
