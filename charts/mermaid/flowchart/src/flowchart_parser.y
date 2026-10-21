@@ -18,13 +18,11 @@
 %type class_ids { FlowchartNodeRef* }
 %type style_spec { FlowchartStyle* }
 %type style_specs { FlowchartStyle* }
-%type click_tooltip_opt { char* }
 %destructor label_text { free($$); }
 %destructor node_label { free($$); }
 %destructor class_ids { free_node_refs($$); }
 %destructor style_spec { free_styles($$); }
 %destructor style_specs { free_styles($$); }
-%destructor click_tooltip_opt { free($$); }
 
 %include {
 #include <stdlib.h>
@@ -452,20 +450,22 @@ style_spec(R) ::= STYLE(A). {
 linkstyle_statement ::= LINKSTYLE label_text(A) style_specs(B) SEMI. {
     add_link_style(ctx, A, B);
 }
-linkstyle_statement ::= LINKSTYLE label_text(A) style_specs(B) NEWLINE. {
-    add_link_style(ctx, A, B);
+click_statement ::= CLICK label_text(A) STRING(B). {
+    add_click(ctx, A, B, 1);
+    free(A); free(B);
 }
-
-click_statement ::= CLICK label_text(A) STRING(B) click_tooltip_opt(C). {
+click_statement ::= CLICK label_text(A) STRING(B) STRING(C). {
     add_click(ctx, A, B, 1);
     free(A); free(B); free(C);
 }
-click_statement ::= CLICK label_text(A) IDENTIFIER(B) click_tooltip_opt(C). {
+click_statement ::= CLICK label_text(A) IDENTIFIER(B). {
+    add_click(ctx, A, B, 0);
+    free(A); free(B);
+}
+click_statement ::= CLICK label_text(A) IDENTIFIER(B) STRING(C). {
     add_click(ctx, A, B, 0);
     free(A); free(B); free(C);
 }
-click_tooltip_opt(R) ::= STRING(A). { R = A; }
-click_tooltip_opt(R) ::= . { R = NULL; }
 
 node_definition ::= node(A). { (void)A; }
 
