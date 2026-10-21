@@ -7,6 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+_Static_assert(FC_SHAPE_HEXAGON == 11 && FC_SHAPE_DIAMOND == 12 &&
+               FC_SHAPE_ODD == 13,
+               "Pre-existing Flowchart public shape enumeration values changed");
+
 typedef struct {
     const char *from;
     const char *to;

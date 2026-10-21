@@ -109,9 +109,15 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
     FlowchartNode* curr = ctx->diagram->nodes;
     while (curr) {
         if (strcmp(curr->id, id) == 0) {
-            /* Existing edge endpoints are recorded by add_edge(), once per
-               explicit edge. Re-entering an existing node in another edge
-               must not create a second implicit node declaration. */
+            /* First appearance inside this subgraph: materialize the
+               declaration/reference even when the node was created outside.
+               Never silently transfer a node already owned by a different
+               subgraph, and do not duplicate membership for subsequent edges. */
+            FlowchartSubGraph* active = current_subgraph(ctx);
+            if (active && !has_node_ref(active, id) &&
+                !node_registered_in_another_subgraph(
+                    ctx->diagram->subgraphs, active, id))
+                add_node_ref(ctx, active, id);
             if (label && (!curr->label || strcmp(curr->label, id) == 0)) {
                 char* replacement = strdup(label);
                 if (!replacement) {

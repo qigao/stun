@@ -570,6 +570,31 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("existing external node first referenced inside subgraph") {
+        it("preserves the two implicit/edge member occurrences in one group") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "subgraph inner\n"
+                "B --> C\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* sg = diagram->subgraphs;
+            const char* expected[] = {"C", "B", "C", "B"};
+            FlowchartNodeRef* ref = sg ? sg->node_refs : NULL;
+            int ok = sg && sg->id && strcmp(sg->id, "inner") == 0;
+            for (size_t i = 0; ok && i < 4; ++i) {
+                ok = ref && ref->id && strcmp(ref->id, expected[i]) == 0;
+                if (ok) ref = ref->next;
+            }
+            check_true(ok && ref == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("click statement metadata") {
         it("serializes href and callback clicks in source order") {
             const char* input =

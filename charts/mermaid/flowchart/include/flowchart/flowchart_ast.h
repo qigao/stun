@@ -19,11 +19,12 @@ typedef enum {
     FC_SHAPE_DOUBLECIRCLE,  // ((( )))
     FC_SHAPE_TRAPEZOID,     // [/ /]
     FC_SHAPE_INV_TRAPEZOID, // [\ \]
-    FC_SHAPE_TRAPEZOID_SYMMETRIC, // [/ ... \] -> trapezoid
-    FC_SHAPE_INV_TRAPEZOID_SYMMETRIC, // [\ ... /] -> inv_trapezoid
     FC_SHAPE_HEXAGON,       // {{ }}
     FC_SHAPE_DIAMOND,       // { } - same as rhombus in many contexts
-    FC_SHAPE_ODD            // >text] legacy odd/flag shape
+    FC_SHAPE_ODD,           // >text] legacy odd/flag shape
+    /* Append new kinds: old integer values are public ABI. */
+    FC_SHAPE_TRAPEZOID_SYMMETRIC, // [/ ... \] -> trapezoid
+    FC_SHAPE_INV_TRAPEZOID_SYMMETRIC // [\ ... /] -> inv_trapezoid
 } FlowchartNodeShape;
 
 typedef enum {
