@@ -76,3 +76,42 @@ endif()
 
 add_test(NAME stun_flowchart_ast_smoke COMMAND stun_flowchart_ast_smoke)
 set_tests_properties(stun_flowchart_ast_smoke PROPERTIES TIMEOUT 30)
+
+# Optional isolated JSON golden lane. Unlike the AST smoke, this compiles the
+# SAME production SaltsUtils-backed serializer and original 95-case test suite.
+# It links only immutable installed Salts/SaltsUtils SDK targets, never a
+# second JSON implementation, source checkout, or full FlexUI renderer.
+option(STUN_CI_JSON_GOLDEN "Build the actual Flowchart JSON golden contract" OFF)
+if(STUN_CI_JSON_GOLDEN)
+  if(NOT DEFINED ENV{SALTS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_ROOT}")
+    message(FATAL_ERROR "Flowchart JSON golden requires the published installed Salts SDK in SALTS_ROOT")
+  endif()
+  find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+  find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+
+  add_executable(stun_flowchart_json_golden
+    "${GENERATED_PARSER}"
+    "${GENERATED_LEXER}"
+    "${FLOWCHART_SOURCE}/src/flowchart_parser_wrapper.c"
+    "${FLOWCHART_SOURCE}/tests/test_parser.c"
+  )
+  target_include_directories(stun_flowchart_json_golden PRIVATE
+    "${FLOWCHART_SOURCE}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}"
+  )
+  target_compile_definitions(stun_flowchart_json_golden PRIVATE
+    _POSIX_C_SOURCE=200809L
+    GOLDEN_DIR="${STUN_ROOT}/charts/mermaid/golden/flowchart"
+  )
+  target_link_libraries(stun_flowchart_json_golden PRIVATE
+    Salts::JsonParser Salts::TinyTest
+  )
+  if(STUN_CI_SANITIZERS AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(stun_flowchart_json_golden PRIVATE
+      -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(stun_flowchart_json_golden PRIVATE
+      -fsanitize=address,undefined)
+  endif()
+  add_test(NAME stun_flowchart_json_golden COMMAND stun_flowchart_json_golden)
+  set_tests_properties(stun_flowchart_json_golden PROPERTIES TIMEOUT 120)
+endif()
