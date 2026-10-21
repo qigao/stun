@@ -48,6 +48,9 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Validate incremental PR scope detection
+        run: python3 .github/scripts/tests/test_ci_affected.py
+
       - name: Reject retired TurboParser and optional charts switch
         shell: bash
         run: |
