@@ -3,6 +3,8 @@ name: Stun runtime conformance
 # One trigger and one release-resolution job for the existing independent
 # Unicode source, installed-SDK/FlexUI, Mesa and gCanvas Desktop gates.
 # Job isolation, sanitizer evidence and original job names are preserved.
+# Parser-only edits use Flowchart native AST smoke; ci/full always forces
+# complete chart JSON golden, released SDK and Mesa acceptance on exact HEAD.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
@@ -39,6 +41,10 @@ jobs:
             'charts/*' 'flex/*' 'flexUI/*' 'ui_core/*' \
             'shared/*' 'vendor/*' 'cmake/*' 'tools/*' \
             '.ci/*' 'CMakeLists.txt' \
+            '!charts/mermaid/flowchart/src/flowchart_parser.y' \
+            '!charts/mermaid/flowchart/src/flowchart_lexer.re' \
+            '!charts/mermaid/flowchart/tests/ci_smoke.c' \
+            '!charts/mermaid/flowchart/tests/standalone/*' \
             '.github/scripts/ci-affected.sh' \
             '.github/workflows/runtime-conformance.yml' \
             '.github/workflows/mesa-driver.yml' \
