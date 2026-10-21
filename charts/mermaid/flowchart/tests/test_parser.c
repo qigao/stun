@@ -289,6 +289,34 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("style target graph identity") {
+        it("materializes a styled subgraph ID without parsing CSS as nodes") {
+            const char* input =
+                "flowchart TB\n"
+                "subgraph bar[Bar SubGraph]\n"
+                "C\n"
+                "end\n"
+                "style bar fill:#999,stroke-width:10px,stroke:#0F0\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            int seen_bar = 0, seen_c = 0, node_count = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                node_count++;
+                if (strcmp(n->id, "bar") == 0) ++seen_bar;
+                if (strcmp(n->id, "C") == 0) ++seen_c;
+            }
+            check_true(node_count == 2 && seen_bar == 1 && seen_c == 1);
+            check_true(diagram->edges == NULL);
+            check_true(diagram->subgraphs &&
+                       strcmp(diagram->subgraphs->id, "bar") == 0 &&
+                       strcmp(diagram->subgraphs->label, "Bar SubGraph") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("click statement metadata") {
         it("serializes href and callback clicks in source order") {
             const char* input =
