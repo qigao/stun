@@ -68,7 +68,7 @@ class SdkRestoreTests(unittest.TestCase):
             (lib / "libsalts.so.2.3.0").write_bytes(payload)
             (lib / "libsalts.so.2.3").write_bytes(payload)
             (lib / "libsalts.so").write_bytes(payload)
-            soname = "Library soname: [libsalts.so.2.3]"
+            soname = "0x000000000000000e (SONAME) Library soname: [libsalts.so.2.3]"
             with patch.object(restore.subprocess, "check_output", return_value=soname):
                 manifest = restore.canonicalize_core(d, "2.3.0-rc.17")
             self.assertEqual(manifest["soname"], "libsalts.so.2.3")
@@ -85,7 +85,7 @@ class SdkRestoreTests(unittest.TestCase):
             (lib / "libsalts.so.2.3").write_bytes(b"other")
             (lib / "libsalts.so").write_bytes(b"official")
             with patch.object(restore.subprocess, "check_output",
-                              return_value="Library soname: [libsalts.so.2.3]"):
+                              return_value="0x000000000000000e (SONAME) Library soname: [libsalts.so.2.3]"):
                 with self.assertRaisesRegex(RuntimeError, "conflicting"):
                     restore.canonicalize_core(d, "2.3.0")
 
