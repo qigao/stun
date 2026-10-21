@@ -21,9 +21,9 @@
 %type style_specs { FlowchartStyle* }
 %destructor label_text { free($$); }
 %destructor node_label { free($$); }
-%destructor class_ids { free_node_refs($); }
-%destructor node_group { free_node_refs($); }
-%destructor edge_chain { free_node_refs($); }
+%destructor class_ids { free_node_refs($$); }
+%destructor node_group { free_node_refs($$); }
+%destructor edge_chain { free_node_refs($$); }
 %destructor style_spec { free_styles($$); }
 %destructor style_specs { free_styles($$); }
 
