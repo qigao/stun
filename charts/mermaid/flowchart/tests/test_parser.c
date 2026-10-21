@@ -380,6 +380,28 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("unquoted label punctuation") {
+        it("preserves periods, exclamation marks, and question marks") {
+            const char* input =
+                "flowchart LR\\n"
+                "A[Wait... really?] --> B[No!]\\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartNode* a = diagram->nodes;
+            while (a && strcmp(a->id, "A") != 0) a = a->next;
+            FlowchartNode* b = diagram->nodes;
+            while (b && strcmp(b->id, "B") != 0) b = b->next;
+            check_true(a != NULL);
+            check_true(b != NULL);
+            if (a) check_true(strcmp(a->label, "Wait... really?") == 0);
+            if (b) check_true(strcmp(b->label, "No!") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("legacy flowchart shape syntax") {
         it("parses odd and leaning parallelogram nodes") {
             const char* input =
