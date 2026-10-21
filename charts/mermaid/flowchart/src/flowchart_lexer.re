@@ -121,7 +121,7 @@ loop:
         "{"               { FlowchartParser(parser, FC_RHOMBUS_START, NULL, ctx); goto loop; }
         "}"               { FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
-        "&"               { goto loop; }
+        "&"               { FlowchartParser(parser, FC_AMP, NULL, ctx); goto loop; }
         ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; s->click_phase = 0; goto loop; }
         ","               { FlowchartParser(parser, FC_COMMA, NULL, ctx); goto loop; }
         ":"               { FlowchartParser(parser, FC_COLON, NULL, ctx); goto loop; }
