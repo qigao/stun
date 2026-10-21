@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW CLASSDEF COMMA STYLE CLICK LINKSTYLE
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW AMP CLASSDEF COMMA STYLE CLICK LINKSTYLE
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -14,13 +14,16 @@
 %type node { FlowchartNode* }
 %type label_text { char* }
 %type node_label { char* }
-%type edge_chain { FlowchartNode* }
+%type node_group { FlowchartNodeRef* }
+%type edge_chain { FlowchartNodeRef* }
 %type class_ids { FlowchartNodeRef* }
 %type style_spec { FlowchartStyle* }
 %type style_specs { FlowchartStyle* }
 %destructor label_text { free($$); }
 %destructor node_label { free($$); }
-%destructor class_ids { free_node_refs($$); }
+%destructor class_ids { free_node_refs($); }
+%destructor node_group { free_node_refs($); }
+%destructor edge_chain { free_node_refs($); }
 %destructor style_spec { free_styles($$); }
 %destructor style_specs { free_styles($$); }
 
@@ -150,6 +153,43 @@ static void add_edge(FlowchartParserContext *ctx, const char* from, const char* 
     ctx->diagram->edges = e;
 }
 
+
+static FlowchartNodeRef* make_node_ref(FlowchartParserContext *ctx, const char* id) {
+    FlowchartNodeRef* ref = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
+    if (!ref) {
+        ctx->error_count++;
+        return NULL;
+    }
+    ref->id = strdup(id);
+    if (!ref->id) {
+        free(ref);
+        ctx->error_count++;
+        return NULL;
+    }
+    return ref;
+}
+
+static FlowchartNodeRef* append_node_ref(FlowchartParserContext *ctx,
+                                         FlowchartNodeRef* refs,
+                                         const char* id) {
+    FlowchartNodeRef* added = make_node_ref(ctx, id);
+    if (!added) return refs;
+    if (!refs) return added;
+    FlowchartNodeRef* tail = refs;
+    while (tail->next) tail = tail->next;
+    tail->next = added;
+    return refs;
+}
+
+static void add_edges_between(FlowchartParserContext *ctx,
+                              const FlowchartNodeRef* sources,
+                              const FlowchartNodeRef* targets,
+                              const char* arrow,
+                              const char* label) {
+    for (const FlowchartNodeRef* source = sources; source; source = source->next)
+        for (const FlowchartNodeRef* target = targets; target; target = target->next)
+            add_edge(ctx, source->id, target->id, arrow, label);
+}
 
 static void free_node_refs(FlowchartNodeRef* refs) {
     while (refs) {
@@ -549,25 +589,36 @@ node(R) ::= label_text(A) ODD_START node_label(B) SQE. {
     free(A); free(B);
 }
 
-edge_statement ::= edge_chain(A). { (void)A; }
+edge_statement ::= edge_chain(A). { free_node_refs(A); }
 
-edge_chain(R) ::= node(A) ARROW(L) node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, NULL);
+node_group(R) ::= node(A). {
+    R = A ? make_node_ref(ctx, A->id) : NULL;
+}
+node_group(R) ::= node_group(A) AMP node(B). {
+    R = B ? append_node_ref(ctx, A, B->id) : A;
+}
+
+edge_chain(R) ::= node_group(A) ARROW(L) node_group(B). {
+    add_edges_between(ctx, A, B, L, NULL);
+    free_node_refs(A);
     free(L);
     R = B;
 }
-edge_chain(R) ::= edge_chain(A) ARROW(L) node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, NULL);
+edge_chain(R) ::= edge_chain(A) ARROW(L) node_group(B). {
+    add_edges_between(ctx, A, B, L, NULL);
+    free_node_refs(A);
     free(L);
     R = B;
 }
-edge_chain(R) ::= node(A) ARROW(L) PIPE node_label(C) PIPE node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, C);
+edge_chain(R) ::= node_group(A) ARROW(L) PIPE node_label(C) PIPE node_group(B). {
+    add_edges_between(ctx, A, B, L, C);
+    free_node_refs(A);
     free(L); free(C);
     R = B;
 }
-edge_chain(R) ::= edge_chain(A) ARROW(L) PIPE node_label(C) PIPE node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, C);
+edge_chain(R) ::= edge_chain(A) ARROW(L) PIPE node_label(C) PIPE node_group(B). {
+    add_edges_between(ctx, A, B, L, C);
+    free_node_refs(A);
     free(L); free(C);
     R = B;
 }
