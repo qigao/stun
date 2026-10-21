@@ -234,8 +234,10 @@ spec("flowchart_parser") {
                 "click B testClick \"click test\"\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
-            check_true(status == FLOWCHART_PARSE_COMPLETE);
-            if (!diagram) return;
+            if (!diagram) {
+                check_true(status == FLOWCHART_PARSE_COMPLETE);
+                return;
+            }
 
             FlowchartClick* first_click = diagram->clicks;
             FlowchartClick* second_click = first_click ? first_click->next : NULL;
@@ -266,6 +268,7 @@ spec("flowchart_parser") {
             int click_json_matches = actual != NULL && json_equal(actual, expected);
             if (actual) json_serialize_free(actual);
             flowchart_diagram_free(diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
             check_true(click_ast_matches);
             check_true(click_json_matches);
         }
@@ -314,31 +317,29 @@ spec("flowchart_parser") {
                 "style A stroke:#ff0000,fill:#ffcccc\n";
             FlowchartDiagram* diagram = NULL;
             FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
-            check_true(status == FLOWCHART_PARSE_COMPLETE);
-            if (!diagram) return;
+            if (!diagram) {
+                check_true(status == FLOWCHART_PARSE_COMPLETE);
+                return;
+            }
 
-            FlowchartLinkStyle* item = diagram->link_styles;
-            check_true(item != NULL);
-            if (item) {
-                check_true(strcmp(item->index, "default") == 0);
-                check_true(item->styles != NULL);
-                if (item->styles) {
-                    check_true(strcmp(item->styles->key, "color") == 0);
-                    check_true(strcmp(item->styles->value, "Sienna") == 0);
-                }
-                item = item->next;
-            }
-            check_true(item != NULL);
-            if (item) {
-                check_true(strcmp(item->index, "0") == 0);
-                check_true(item->styles != NULL);
-                if (item->styles) {
-                    check_true(strcmp(item->styles->key, "stroke") == 0);
-                    check_true(strcmp(item->styles->value, "#D50000") == 0);
-                }
-                item = item->next;
-            }
-            check_true(item == NULL);
+            FlowchartLinkStyle* first_item = diagram->link_styles;
+            FlowchartLinkStyle* second_item = first_item ? first_item->next : NULL;
+            int ast_styles_ok =
+                first_item && first_item->index &&
+                strcmp(first_item->index, "default") == 0 &&
+                first_item->styles && first_item->styles->key &&
+                strcmp(first_item->styles->key, "color") == 0 &&
+                first_item->styles->value &&
+                strcmp(first_item->styles->value, "Sienna") == 0 &&
+                first_item->styles->next == NULL &&
+                second_item && second_item->index &&
+                strcmp(second_item->index, "0") == 0 &&
+                second_item->styles && second_item->styles->key &&
+                strcmp(second_item->styles->key, "stroke") == 0 &&
+                second_item->styles->value &&
+                strcmp(second_item->styles->value, "#D50000") == 0 &&
+                second_item->styles->next == NULL &&
+                second_item->next == NULL;
             FlowchartNode* node_a = diagram->nodes;
             FlowchartNode* node_b = node_a ? node_a->next : NULL;
             FlowchartNode* node_c = node_b ? node_b->next : NULL;
@@ -372,6 +373,8 @@ spec("flowchart_parser") {
             json_free(root);
             if (actual) json_serialize_free(actual);
             flowchart_diagram_free(diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            check_true(ast_styles_ok);
             check_true(nodes_ok);
             check_true(json_styles_ok);
         }
