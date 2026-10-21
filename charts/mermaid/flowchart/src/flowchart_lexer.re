@@ -75,9 +75,21 @@ loop:
         // this adapter yet; consume the whole block rather than leaking its
         // label/value tokens as phantom nodes.
         new_node_props { goto loop; }
-        // Node-local style declarations are currently outside the JSON graph
-        // contract; skip their entire physical line instead of parsing CSS as nodes.
-        style_stmt { goto loop; }
+        // Style declarations may address a subgraph ID as a node, even when
+        // that ID has never been an edge endpoint. Keep just the target ID in
+        // the AST and consume the CSS tail as one token so property fragments
+        // cannot turn into phantom nodes or edges.
+        style_stmt {
+            const char* id = token + 5; /* strlen("style") */
+            while (id < s->cursor && (*id == ' ' || *id == '\t')) ++id;
+            const char* end = id;
+            while (end < s->cursor && *end != ' ' && *end != '\t') ++end;
+            if (end > id)
+                FlowchartParser(parser, FC_IDENTIFIER, copy_token(id, end), ctx);
+            else
+                ctx->error_count++;
+            goto loop;
+        }
 
         // 优先级 1: 关键字
         "graph"      { FlowchartParser(parser, FC_GRAPH, NULL, ctx); goto loop; }
