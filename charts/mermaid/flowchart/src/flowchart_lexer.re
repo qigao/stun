@@ -53,7 +53,8 @@ loop:
         comment = "%%" [^\n\000]*;
         punct = [.!?]+;
         // Mermaid also permits --label--> and -- label --> edges.
-        inline_edge_label = "--" [ \t]* ident [ \t]* "-->";
+        label_words = ident ([ \t]+ ident)*;
+        inline_edge_label = ("--" | "<--") [ \t]* label_words [ \t]* ("-->" | "--->");
         variable_dash_arrow = "--" "-"* ">";
         variable_thick_arrow = "==" "="* ">";
 
@@ -120,16 +121,24 @@ loop:
 
         // Inline labels are one edge, not two unlabeled edges with a fake node.
         inline_edge_label {
-            const char* begin = token + 2;
-            const char* end = s->cursor - 3;
+            const char* begin = token + (token[0] == '<' ? 3 : 2);
+            const size_t width = (size_t)(s->cursor - token);
+            const int long_tip = width >= 4 &&
+                                 memcmp(s->cursor - 4, "--->", 4) == 0;
+            const char* end = s->cursor - (long_tip ? 4 : 3);
             while (begin < end && (*begin == ' ' || *begin == '\t')) ++begin;
             while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) --end;
-            FlowchartParser(parser, FC_ARROW, strdup("-->"), ctx);
+            FlowchartParser(parser, FC_ARROW, strdup(long_tip ? "--->" : "-->"), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
             FlowchartParser(parser, FC_IDENTIFIER, copy_token(begin, end), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
             goto loop;
         }
+
+        // Dot-stroke Mermaid operators, including bidirectional notation.
+        ".->"              { FlowchartParser(parser, FC_ARROW, strdup(".->"), ctx); goto loop; }
+        "<.->"             { FlowchartParser(parser, FC_ARROW, strdup("<.->"), ctx); goto loop; }
+        "<-...->"          { FlowchartParser(parser, FC_ARROW, strdup("<-...->"), ctx); goto loop; }
 
         // 优先级 2: 多字符箭头（必须在标识符前匹配）
         // Preserve the full operator width and its tip for spacing/length.

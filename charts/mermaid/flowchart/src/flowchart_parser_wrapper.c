@@ -459,7 +459,7 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
       }
     json_value_t *e_det = json_create_object();
     int edge_length = 1;
-    if (e->arrow_type) {
+    if (e->arrow_type && strcmp(e->arrow_type, "---") != 0) {
       const char stroke_char = e->arrow_type[0];
       if (stroke_char == '-' || stroke_char == '=') {
         size_t stroke_length = 0;
@@ -472,9 +472,11 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
     json_object_set_number(e_det, "length", edge_length);
     json_object_set_string(e_det, "source", e->from ? e->from : "");
     const char *stroke = "normal";
-    if (e->arrow_type && strstr(e->arrow_type, "==="))
+    if (e->arrow_type && strstr(e->arrow_type, "=="))
       stroke = "thick";
-    if (e->arrow_type && strstr(e->arrow_type, "-.-"))
+    if (e->arrow_type &&
+        (strstr(e->arrow_type, "-.-") || strstr(e->arrow_type, ".->") ||
+         strstr(e->arrow_type, "-...->")))
       stroke = "dotted";
     json_object_set_string(e_det, "stroke", stroke);
     json_object_set_string(e_det, "target", e->to ? e->to : "");

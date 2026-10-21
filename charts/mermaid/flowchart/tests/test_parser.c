@@ -352,6 +352,80 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("dotted and embedded-label edges") {
+        it("preserves stroke, arrow length and multiword inline text") {
+            const char* input =
+                "flowchart TD\n"
+                "L1 --- L2\n"
+                "C -- Label 2 ---> E2\n"
+                "C <-- Label 3 ---> E3\n"
+                "R1 .-> R2\n"
+                "R2 <.-> C\n"
+                "C <-...-> E4\n"
+                "C ======> E5\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            struct EdgeCase {
+                const char* from;
+                const char* to;
+                const char* label;
+                const char* stroke;
+                const char* type;
+                double length;
+            };
+            const struct EdgeCase expected[] = {
+                {"L1", "L2", NULL, "normal", "arrow_open", 1},
+                {"C", "E2", "Label 2", "normal", "arrow_point", 2},
+                {"C", "E3", "Label 3", "normal", "arrow_point", 2},
+                {"R1", "R2", NULL, "dotted", "arrow_point", 1},
+                {"R2", "C", NULL, "dotted", "arrow_point", 1},
+                {"C", "E4", NULL, "dotted", "arrow_point", 1},
+                {"C", "E5", NULL, "thick", "arrow_point", 5},
+            };
+            int seen[7] = {0};
+            int ok = links && json_array_size(links) == 7;
+            for (size_t i = 0; ok && i < json_array_size(links); ++i) {
+                json_value_t* edge = json_array_get(links, i);
+                const char* from = json_get_string(edge, "source");
+                const char* to = json_get_string(edge, "target");
+                const char* stroke = json_get_string(edge, "stroke");
+                const char* type = json_get_string(edge, "type");
+                json_value_t* length = json_object_get(edge, "length");
+                json_value_t* text = json_object_get(edge, "text");
+                const char* label = text ? json_get_string(text, "text") : NULL;
+                int match = 0;
+                for (size_t j = 0; j < 7; ++j) {
+                    if (from && to && stroke && type && length &&
+                        strcmp(from, expected[j].from) == 0 &&
+                        strcmp(to, expected[j].to) == 0 &&
+                        strcmp(stroke, expected[j].stroke) == 0 &&
+                        strcmp(type, expected[j].type) == 0 &&
+                        json_number(length) == expected[j].length &&
+                        ((!label && !expected[j].label) ||
+                         (label && expected[j].label &&
+                          strcmp(label, expected[j].label) == 0))) {
+                        seen[j]++;
+                        match = 1;
+                        break;
+                    }
+                }
+                if (!match) ok = 0;
+            }
+            for (size_t j = 0; j < 7; ++j)
+                if (seen[j] != 1) ok = 0;
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("variable-width edges") {
         it("retains directed tips and lengths on extended arrows") {
             const char* input =
