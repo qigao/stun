@@ -253,6 +253,30 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("cross-subgraph node ownership") {
+        it("does not transfer an existing node by re-declaration alone") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph A\n"
+                "a --> b\n"
+                "end\n"
+                "subgraph B\n"
+                "b\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* first = diagram->subgraphs;
+            FlowchartSubGraph* second = first ? first->next : NULL;
+            check_true(first && first->id && strcmp(first->id, "A") == 0 &&
+                       first->node_refs != NULL);
+            check_true(second && second->id && strcmp(second->id, "B") == 0 &&
+                       second->node_refs == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("nested subgraph JSON projection") {
         it("emits children before parents in a flat JSON array") {
             const char* input =
