@@ -77,8 +77,35 @@ if ! git diff --no-renames --name-only -z "$before" "$after" -- > "$changed_path
     exit 0
 fi
 
+# A leading ! excludes only that exact file scope, useful for cheap
+# parser-only validation: a different changed file still triggers the gate.
+# The parser smoke tests stay mandatory for excluded parser sources.
+has_inclusion=false
+for glob in "$@"; do
+    if [[ "$glob" != '!'* ]]; then
+        has_inclusion=true
+        break
+    fi
+done
+if [[ "$has_inclusion" != true ]]; then
+    emit true "no positive scope supplied"
+    exit 0
+fi
+
 while IFS= read -r -d '' filename; do
+    excluded=false
     for glob in "$@"; do
+        if [[ "$glob" == '!'* && "$filename" == ${glob:1} ]]; then
+            excluded=true
+            break
+        fi
+    done
+    if [[ "$excluded" == true ]]; then
+        continue
+    fi
+
+    for glob in "$@"; do
+        [[ "$glob" == '!'* ]] && continue
         # RHS intentionally acts as a Bash glob (including directory slashes).
         if [[ "$filename" == $glob ]]; then
             emit true "latest push changed an applicable file"
