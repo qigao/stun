@@ -62,6 +62,8 @@ loop:
         // source/target nodes. Preserve the underlying arrow operator.
         edge_id_arrow = ident "@" (variable_dash_arrow | variable_thick_arrow);
         edge_curve_props = ident "@{" [ \t]* "curve:" [^}\n\000]* "}";
+        // link@-- "Label" --> is an explicitly named, labeled edge.
+        named_quoted_edge_label = ident "@" "--" [ \t]* string [ \t]* "-->";
 
         white {
             if (s->shape_label_depth > 0) {
@@ -135,6 +137,28 @@ loop:
             goto loop;
         }
 
+        // Consume the complete named edge before the lexer can emit its ID as
+        // a phantom node. The edge ID is metadata, not a source endpoint.
+        named_quoted_edge_label {
+            const char* quote = (const char*)memchr(token, '"',
+                                   (size_t)(s->cursor - token));
+            if (!quote || quote >= s->cursor - 3) {
+                ctx->error_count++;
+                goto loop;
+            }
+            const char* closing = (const char*)memchr(quote + 1, '"',
+                                   (size_t)(s->cursor - quote - 1));
+            if (!closing) {
+                ctx->error_count++;
+                goto loop;
+            }
+            FlowchartParser(parser, FC_ARROW, strdup("-->"), ctx);
+            FlowchartParser(parser, FC_PIPE, NULL, ctx);
+            FlowchartParser(parser, FC_STRING, copy_token(quote + 1, closing), ctx);
+            FlowchartParser(parser, FC_PIPE, NULL, ctx);
+            goto loop;
+        }
+
         // Inline labels are one edge, not two unlabeled edges with a fake node.
         inline_edge_label {
             const char* begin = token + (token[0] == '<' ? 3 : 2);
@@ -178,7 +202,7 @@ loop:
         "[/"               { s->shape_label_depth++; FlowchartParser(parser, FC_TRAP_START, NULL, ctx); goto loop; }
         "/]"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
         "\x5B\x5C"         { s->shape_label_depth++; FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
-        "\x5C\x5D"         { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        "\x5C\x5D"         { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_BACKSLASH_END, NULL, ctx); goto loop; }
         ">"                { s->shape_label_depth++; FlowchartParser(parser, FC_ODD_START, NULL, ctx); goto loop; }
         "[["              { s->shape_label_depth++; FlowchartParser(parser, FC_SUBROUTINE_START, NULL, ctx); goto loop; }
         "]]"              { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_SUBROUTINE_END, NULL, ctx); goto loop; }

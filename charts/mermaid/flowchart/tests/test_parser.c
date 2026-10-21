@@ -499,6 +499,77 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("named quoted edge labels") {
+        it("does not invent nodes for edge IDs or split quoted labels") {
+            const char* input =
+                "graph LR\n"
+                "id1(Start) link@-- \"Label\" -->id2(Stop)\n"
+                "class link myClass\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartEdge* e = diagram->edges;
+            check_true(e && !e->next && strcmp(e->from, "id1") == 0 &&
+                       strcmp(e->to, "id2") == 0 && e->label &&
+                       strcmp(e->label, "Label") == 0);
+            int nodes = 0, named_node = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                nodes++;
+                if (strcmp(n->id, "link") == 0 ||
+                    strcmp(n->id, "Label") == 0) named_node++;
+            }
+            check_true(nodes == 2 && named_node == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("trapezoid shape closure") {
+        it("maps each pair of slashes to a distinct shape and exact label") {
+            const char* input =
+                "graph LR\n"
+                "A[/Christmas\\] --> B[\\Go shopping/]\n"
+                "C[/Laptop/] --> D[\\iPhone\\]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode* found[4] = {0};
+            const char* ids[] = {"A", "B", "C", "D"};
+            for (FlowchartNode* node = diagram->nodes; node; node = node->next)
+                for (size_t i = 0; i < 4; ++i)
+                    if (strcmp(node->id, ids[i]) == 0) found[i] = node;
+            const FlowchartNodeShape kinds[] = {
+                FC_SHAPE_TRAPEZOID_SYMMETRIC,
+                FC_SHAPE_INV_TRAPEZOID_SYMMETRIC,
+                FC_SHAPE_TRAPEZOID,
+                FC_SHAPE_INV_TRAPEZOID
+            };
+            const char* labels[] = {
+                "Christmas\\", "\\Go shopping", "Laptop", "\\iPhone\\"
+            };
+            int good = 1;
+            for (size_t i = 0; i < 4; ++i)
+                if (!found[i] || found[i]->shape != kinds[i] ||
+                    strcmp(found[i]->label, labels[i]) != 0) good = 0;
+            check_true(good);
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* json = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* nodes = json ? json_object_get(json, "nodes") : NULL;
+            const char* shapes[] = {
+                "trapezoid", "inv_trapezoid", "lean_right", "lean_left"
+            };
+            for (size_t i = 0; i < 4; ++i) {
+                json_value_t* item = nodes ? json_object_get(nodes, ids[i]) : NULL;
+                const char* kind = item ? json_get_string(item, "shape") : NULL;
+                check_true(kind && strcmp(kind, shapes[i]) == 0);
+            }
+            json_free(json);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("click statement metadata") {
         it("serializes href and callback clicks in source order") {
             const char* input =

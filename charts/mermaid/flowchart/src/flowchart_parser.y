@@ -6,7 +6,7 @@
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
-       CYLINDER_START CYLINDER_END TRAP_START INV_TRAP_START TRAP_END ODD_START
+       CYLINDER_START CYLINDER_END TRAP_START INV_TRAP_START TRAP_END TRAP_BACKSLASH_END ODD_START
        SQS SQE PS PE PIPE SEMI COLON DASH HTML IDENTIFIER STRING CLASS EOF.
 
 %token_type { char* }
@@ -31,7 +31,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include "flowchart/flowchart_ast.h"
+
+/* Different delimiters carry independently observable Mermaid shapes and
+   literal backslashes at their ends. Keep the copied AST label unchanged by
+   the caller and allocate its normalized spelling exactly once. */
+static FlowchartNode* make_trapezoid_node(
+    FlowchartParserContext* ctx, const char* id, const char* raw,
+    FlowchartNodeShape shape, int leading_slash, int trailing_slash);
 
 static void push_subgraph(FlowchartParserContext *ctx, FlowchartSubGraph* sg) {
     FlowchartSubGraphStack* s = (FlowchartSubGraphStack*)malloc(sizeof(FlowchartSubGraphStack));
@@ -152,6 +160,32 @@ static FlowchartSubGraph* find_parent_of_nested_subgraph(
         if (ancestor) return ancestor;
     }
     return NULL;
+}
+
+static FlowchartNode* make_trapezoid_node(
+    FlowchartParserContext* ctx, const char* id, const char* raw,
+    FlowchartNodeShape shape, int leading_slash, int trailing_slash) {
+    if (!id || !raw) return NULL;
+    size_t n = strlen(raw);
+    if (n > SIZE_MAX - (size_t)leading_slash - (size_t)trailing_slash - 1) {
+        ctx->error_count++;
+        return NULL;
+    }
+    char* label = (char*)malloc(n + leading_slash + trailing_slash + 1);
+    if (!label) {
+        ctx->error_count++;
+        return NULL;
+    }
+    size_t off = 0;
+    if (leading_slash) label[off++] = '\\';
+    memcpy(label + off, raw, n);
+    off += n;
+    if (trailing_slash) label[off++] = '\\';
+    label[off] = '\0';
+    FlowchartNode* result = find_or_create_node(ctx, id, label);
+    if (result) result->shape = shape;
+    free(label);
+    return result;
 }
 
 static void add_edge(FlowchartParserContext *ctx, const char* from, const char* to, const char* arrow, const char* label) {
@@ -689,13 +723,19 @@ node(R) ::= label_text(A) CYLINDER_START node_label(B) CYLINDER_END. {
     free(A); free(B);
 }
 node(R) ::= label_text(A) TRAP_START node_label(B) TRAP_END. {
-    R = find_or_create_node(ctx, A, B);
-    if (R) R->shape = FC_SHAPE_TRAPEZOID;
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_TRAPEZOID, 0, 0);
+    free(A); free(B);
+}
+node(R) ::= label_text(A) TRAP_START node_label(B) TRAP_BACKSLASH_END. {
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_TRAPEZOID_SYMMETRIC, 0, 1);
     free(A); free(B);
 }
 node(R) ::= label_text(A) INV_TRAP_START node_label(B) TRAP_END. {
-    R = find_or_create_node(ctx, A, B);
-    if (R) R->shape = FC_SHAPE_INV_TRAPEZOID;
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_INV_TRAPEZOID_SYMMETRIC, 1, 0);
+    free(A); free(B);
+}
+node(R) ::= label_text(A) INV_TRAP_START node_label(B) TRAP_BACKSLASH_END. {
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_INV_TRAPEZOID, 1, 1);
     free(A); free(B);
 }
 node(R) ::= label_text(A) ODD_START node_label(B) SQE. {

@@ -358,6 +358,10 @@ static const char *map_shape(FlowchartNodeShape shape) {
     return "lean_right";
   case FC_SHAPE_INV_TRAPEZOID:
     return "lean_left";
+  case FC_SHAPE_TRAPEZOID_SYMMETRIC:
+    return "trapezoid";
+  case FC_SHAPE_INV_TRAPEZOID_SYMMETRIC:
+    return "inv_trapezoid";
   case FC_SHAPE_ODD:
     return "odd";
   case FC_SHAPE_HEXAGON:
