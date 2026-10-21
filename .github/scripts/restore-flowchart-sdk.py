@@ -11,6 +11,7 @@ import json
 import pathlib
 import re
 import shutil
+import stat
 import subprocess
 import zipfile
 
@@ -54,6 +55,12 @@ def extract_sdk_payload(archive, sdk):
                 dst.mkdir(parents=True, exist_ok=True)
                 continue
             require(not dst.is_symlink(), f"Unexpected pre-existing SDK link: {dst}")
+            # NuGet publishes native libraries as ordinary immutable ZIP
+            # files. Reject symlink records instead of implicitly changing
+            # their type or accepting an archive-controlled alias.
+            mode = member.external_attr >> 16
+            require(not stat.S_ISLNK(mode),
+                    f"Unsupported symlink in official SDK: {member.filename}")
             data = package.read(member)
             dst.parent.mkdir(parents=True, exist_ok=True)
             if dst.exists():
