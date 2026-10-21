@@ -48,6 +48,7 @@ loop:
         // 限制标识符，不包括特殊操作符字符，或者将操作符放在前面
         // Allow dotted and hyphenated node IDs without swallowing edge arrows.
         ident = [a-zA-Z0-9_]+ ([.-] [a-zA-Z0-9_]+)*;
+        class_shortcut = ":::" ident;
         string = "\"" [^"\000]* "\"";
         html = "<" [^>\n\000]* ">";
         comment = "%%" [^\n\000]*;
@@ -199,6 +200,10 @@ loop:
         ")"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_PE, NULL, ctx); goto loop; }
         "{"               { s->shape_label_depth++; FlowchartParser(parser, FC_RHOMBUS_START, NULL, ctx); goto loop; }
         "}"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
+        class_shortcut {
+            FlowchartParser(parser, FC_CLASS_SHORTCUT, copy_token(token + 3, s->cursor), ctx);
+            goto loop;
+        }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
         "&"               { FlowchartParser(parser, FC_AMP, NULL, ctx); goto loop; }
         ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; s->click_phase = 0; goto loop; }

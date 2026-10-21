@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW AMP CLASSDEF COMMA STYLE CLICK LINKSTYLE PUNCT
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW AMP CLASSDEF COMMA STYLE CLICK LINKSTYLE PUNCT CLASS_SHORTCUT
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -625,6 +625,12 @@ node_label(R) ::= node_label(A) PUNCT(B). { R = concat(ctx, A, B, ""); }
 node(R) ::= label_text(A). {
     R = find_or_create_node(ctx, A, NULL);
     free(A);
+}
+// Class shorthand applies to the immediately preceding node of any shape.
+node(R) ::= node(A) CLASS_SHORTCUT(B). {
+    R = A;
+    if (A) add_class_assignment(ctx, A->id, B);
+    free(B);
 }
 node(R) ::= label_text(A) SQS node_label(B) SQE. {
     R = find_or_create_node(ctx, A, B);

@@ -548,6 +548,51 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("inline Mermaid class shorthands") {
+        it("keeps grouped endpoints and assigns class without phantom nodes") {
+            const char* input =
+                "graph TD\n"
+                "A[ h ] -- hello --> B[\" test \"]:::exClass & C --> D;\n"
+                "classDef exClass fill:#bbb;\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const char* expected[][3] = {
+                {"A", "B", "hello"}, {"A", "C", "hello"},
+                {"B", "D", NULL}, {"C", "D", NULL}
+            };
+            int counts[4] = {0};
+            int edge_count = 0, node_count = 0, phantom = 0, styled = 0;
+            for (FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+                edge_count++;
+                for (size_t i = 0; i < 4; ++i) {
+                    if (strcmp(edge->from, expected[i][0]) == 0 &&
+                        strcmp(edge->to, expected[i][1]) == 0 &&
+                        ((!edge->label && !expected[i][2]) ||
+                         (edge->label && expected[i][2] &&
+                          strcmp(edge->label, expected[i][2]) == 0)))
+                        counts[i]++;
+                }
+            }
+            for (FlowchartNode* node = diagram->nodes; node; node = node->next) {
+                node_count++;
+                if (strcmp(node->id, "exClass") == 0) phantom++;
+                if (strcmp(node->id, "B") == 0 && node->label)
+                    check_true(strcmp(node->label, " test ") == 0);
+            }
+            for (FlowchartClass* cl = diagram->classes; cl; cl = cl->next)
+                if (strcmp(cl->node_id, "B") == 0 &&
+                    strcmp(cl->class_name, "exClass") == 0)
+                    styled++;
+            check_true(edge_count == 4 && node_count == 4 &&
+                       phantom == 0 && styled == 1);
+            for (size_t i = 0; i < 4; ++i)
+                check_true(counts[i] == 1);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("ampersand edge groups") {
         it("expands each adjacent node group as a Cartesian product") {
             const char* input =
