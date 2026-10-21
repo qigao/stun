@@ -15,6 +15,7 @@ typedef struct {
     int in_classdef;
     /* 1=node id, 2=target, 3=optional tooltip, 4=tooltip consumed. */
     int click_phase;
+    int shape_label_depth;
 } LexerState;
 
 void FlowchartParser(void *parser, int token, void *value,
@@ -56,7 +57,16 @@ loop:
         variable_dash_arrow = "--" "-"* ">";
         variable_thick_arrow = "==" "="* ">";
 
-        white { goto loop; }
+        white {
+            if (s->shape_label_depth > 0) {
+                char* whitespace = copy_token(token, s->cursor);
+                if (whitespace)
+                    FlowchartParser(parser, FC_PUNCT, whitespace, ctx);
+                else
+                    ctx->error_count++;
+            }
+            goto loop;
+        }
         newline {
             s->line++;
             /* Mermaid permits an edge operator to begin the next physical
@@ -140,31 +150,31 @@ loop:
         "==="              { FlowchartParser(parser, FC_ARROW, strdup("==="), ctx); goto loop; }
 
         // 优先级 3: 形状限定符
-        "[/"               { FlowchartParser(parser, FC_TRAP_START, NULL, ctx); goto loop; }
-        "/]"               { FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
-        "\x5B\x5C"         { FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
-        "\x5C\x5D"         { FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
-        ">"                { FlowchartParser(parser, FC_ODD_START, NULL, ctx); goto loop; }
-        "[["              { FlowchartParser(parser, FC_SUBROUTINE_START, NULL, ctx); goto loop; }
-        "]]"              { FlowchartParser(parser, FC_SUBROUTINE_END, NULL, ctx); goto loop; }
-        "{{"              { FlowchartParser(parser, FC_HEXAGON_START, NULL, ctx); goto loop; }
-        "}}"              { FlowchartParser(parser, FC_HEXAGON_END, NULL, ctx); goto loop; }
+        "[/"               { s->shape_label_depth++; FlowchartParser(parser, FC_TRAP_START, NULL, ctx); goto loop; }
+        "/]"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        "\x5B\x5C"         { s->shape_label_depth++; FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
+        "\x5C\x5D"         { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        ">"                { s->shape_label_depth++; FlowchartParser(parser, FC_ODD_START, NULL, ctx); goto loop; }
+        "[["              { s->shape_label_depth++; FlowchartParser(parser, FC_SUBROUTINE_START, NULL, ctx); goto loop; }
+        "]]"              { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_SUBROUTINE_END, NULL, ctx); goto loop; }
+        "{{"              { s->shape_label_depth++; FlowchartParser(parser, FC_HEXAGON_START, NULL, ctx); goto loop; }
+        "}}"              { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_HEXAGON_END, NULL, ctx); goto loop; }
         // Mermaid ((label)) is a circle; only (((label))) is a double circle.
-        "((("             { FlowchartParser(parser, FC_DOUBLE_CIRCLE_START, NULL, ctx); goto loop; }
-        ")))"             { FlowchartParser(parser, FC_DOUBLE_CIRCLE_END, NULL, ctx); goto loop; }
-        "(("              { FlowchartParser(parser, FC_CPS, NULL, ctx); goto loop; }
-        "))"              { FlowchartParser(parser, FC_CPE, NULL, ctx); goto loop; }
+        "((("             { s->shape_label_depth++; FlowchartParser(parser, FC_DOUBLE_CIRCLE_START, NULL, ctx); goto loop; }
+        ")))"             { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_DOUBLE_CIRCLE_END, NULL, ctx); goto loop; }
+        "(("              { s->shape_label_depth++; FlowchartParser(parser, FC_CPS, NULL, ctx); goto loop; }
+        "))"              { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_CPE, NULL, ctx); goto loop; }
         // The cylinder spelling [(label)] must outrank single brackets.
-        "[("              { FlowchartParser(parser, FC_CYLINDER_START, NULL, ctx); goto loop; }
-        ")]"              { FlowchartParser(parser, FC_CYLINDER_END, NULL, ctx); goto loop; }
-        "(["              { FlowchartParser(parser, FC_STADIUM_START, NULL, ctx); goto loop; }
-        "])"              { FlowchartParser(parser, FC_STADIUM_END, NULL, ctx); goto loop; }
-        "["               { FlowchartParser(parser, FC_SQS, NULL, ctx); goto loop; }
-        "]"               { FlowchartParser(parser, FC_SQE, NULL, ctx); goto loop; }
-        "("               { FlowchartParser(parser, FC_PS, NULL, ctx); goto loop; }
-        ")"               { FlowchartParser(parser, FC_PE, NULL, ctx); goto loop; }
-        "{"               { FlowchartParser(parser, FC_RHOMBUS_START, NULL, ctx); goto loop; }
-        "}"               { FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
+        "[("              { s->shape_label_depth++; FlowchartParser(parser, FC_CYLINDER_START, NULL, ctx); goto loop; }
+        ")]"              { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_CYLINDER_END, NULL, ctx); goto loop; }
+        "(["              { s->shape_label_depth++; FlowchartParser(parser, FC_STADIUM_START, NULL, ctx); goto loop; }
+        "])"              { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_STADIUM_END, NULL, ctx); goto loop; }
+        "["               { s->shape_label_depth++; FlowchartParser(parser, FC_SQS, NULL, ctx); goto loop; }
+        "]"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_SQE, NULL, ctx); goto loop; }
+        "("               { s->shape_label_depth++; FlowchartParser(parser, FC_PS, NULL, ctx); goto loop; }
+        ")"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_PE, NULL, ctx); goto loop; }
+        "{"               { s->shape_label_depth++; FlowchartParser(parser, FC_RHOMBUS_START, NULL, ctx); goto loop; }
+        "}"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_RHOMBUS_END, NULL, ctx); goto loop; }
         "|"               { FlowchartParser(parser, FC_PIPE, NULL, ctx); goto loop; }
         "&"               { FlowchartParser(parser, FC_AMP, NULL, ctx); goto loop; }
         ";"               { FlowchartParser(parser, FC_SEMI, NULL, ctx); s->in_classdef = 0; s->click_phase = 0; goto loop; }

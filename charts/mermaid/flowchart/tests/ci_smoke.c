@@ -127,7 +127,9 @@ static void test_shapes_and_text(void) {
         "A((circle)) --> B(((double)))\n"
         "B --> C[(storage)]\n"
         "D(( )) --> C\n"
-        "Q[work,<br />something,else]\n";
+        "Q[work,<br />something,else]\n"
+        "Z[ h ]\n"
+        "W(( A ))\n";
 
     FlowchartParseStatus status = flowchart_parse_ex(source, &diagram);
     CHECK(status == FLOWCHART_PARSE_COMPLETE);
@@ -138,6 +140,8 @@ static void test_shapes_and_text(void) {
     FlowchartNode *c = find_node(diagram, "C");
     FlowchartNode *d = find_node(diagram, "D");
     FlowchartNode *q = find_node(diagram, "Q");
+    FlowchartNode *z = find_node(diagram, "Z");
+    FlowchartNode *w = find_node(diagram, "W");
     CHECK(a && a->shape == FC_SHAPE_CIRCLE &&
           a->label && strcmp(a->label, "circle") == 0);
     CHECK(b && b->shape == FC_SHAPE_DOUBLECIRCLE &&
@@ -147,6 +151,8 @@ static void test_shapes_and_text(void) {
     CHECK(d && d->shape == FC_SHAPE_CIRCLE &&
           d->label && strcmp(d->label, " ") == 0);
     CHECK(q && q->label && strcmp(q->label, "work,<br />something,else") == 0);
+    CHECK(z && z->label && strcmp(z->label, " h ") == 0);
+    CHECK(w && w->label && strcmp(w->label, " A ") == 0);
 
     flowchart_diagram_free(diagram);
 }

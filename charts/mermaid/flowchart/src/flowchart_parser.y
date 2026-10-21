@@ -608,7 +608,8 @@ node_label(R) ::= node_label(A) label_text(B). {
     /* The lexer discards ordinary interword whitespace. Retain explicit
        punctuation adjacency (comma or HTML tag) rather than adding a space. */
     const char* separator =
-        (len && (A[len - 1] == '>' || A[len - 1] == ',')) ? "" : " ";
+        (len && (A[len - 1] == '>' || A[len - 1] == ',' ||
+                 A[len - 1] == ' ' || A[len - 1] == '\t')) ? "" : " ";
     R = concat(ctx, A, B, separator);
 }
 node_label(R) ::= node_label(A) COLON label_text(B). { R = concat(ctx, A, B, ":"); }

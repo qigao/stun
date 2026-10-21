@@ -552,6 +552,29 @@ spec("flowchart_parser") {
     }
 
 
+    describe("whitespace fidelity in node labels") {
+        it("preserves exact leading and trailing spaces inside node shapes") {
+            const char* input =
+                "flowchart LR\n"
+                "A[ h ] --> B(( A ))\n"
+                "C[Hello world] --> A\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode *a = NULL, *b = NULL, *c = NULL;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                if (strcmp(n->id, "A") == 0) a = n;
+                else if (strcmp(n->id, "B") == 0) b = n;
+                else if (strcmp(n->id, "C") == 0) c = n;
+            }
+            check_true(a && a->label && strcmp(a->label, " h ") == 0);
+            check_true(b && b->label && strcmp(b->label, " A ") == 0);
+            check_true(c && c->label && strcmp(c->label, "Hello world") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
     describe("circle and cylinder shape delimiters") {
         it("distinguishes circles double circles cylinders and empty circles") {
             const char* input =
