@@ -7,6 +7,11 @@ enable_testing()
 # ----------------------------------------------------------------------------
 # Foundation Tests (no scene, DSL, window, or GPU dependency)
 # ----------------------------------------------------------------------------
+add_executable(test_expr_c test_expr_c.c)
+target_link_libraries(test_expr_c PRIVATE Flex::Expression Salts::TinyTest)
+set_target_properties(test_expr_c PROPERTIES LINKER_LANGUAGE CXX FOLDER "flex/tests")
+add_test(NAME test_expr_c COMMAND test_expr_c)
+
 add_executable(test_animation test_animation.cpp)
 target_link_libraries(test_animation PRIVATE flex_animation Salts::TinyTest)
 set_target_properties(test_animation PROPERTIES FOLDER "flex/tests")
