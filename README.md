@@ -26,7 +26,7 @@ These ownership rules are the design contract. Current scope matters:
 | Area | Implemented and focused qualification | Remaining work |
 | --- | --- | --- |
 | Unicode/text | Strict scalar scanning, emoji property/presentation separation, grapheme-based approximate layout, and XML UTF-8 admission | Real shaping/measurement integration, editable grapheme geometry, complete application boundary coverage ([#15](https://github.com/qigao/stun/issues/15)) |
-| XML | Registry-backed factories, explicit IDs, attribute-based text, and strict source admission | Typed content descriptors, anonymous nodes, and natural text ([#16](https://github.com/qigao/stun/issues/16)) |
+| XML | Registered content preflight, anonymous nodes, natural text, strict UTF-8 admission, and real headless load/reload regressions | Complete property/event/binding schemas, stable internal identity, precise decoded-text source maps, and ordered mixed content ([#16](https://github.com/qigao/stun/issues/16)) |
 | CSS/Tailwind | Catalog-based utility compilation into the existing StyleEngine cascade | Fixed Tailwind v4 profile, broader syntax, and differential conformance ([#17](https://github.com/qigao/stun/issues/17)) |
 | Desktop delivery | Native application/controller code and focused component checks | Compatible TurboScript SDK integration, supported installed distributions/platforms, and physical-GPU qualification ([#31](https://github.com/qigao/stun/issues/31)) |
 
