@@ -151,11 +151,11 @@ spec("FlexUI strict Unicode scalar scanning") {
     check_equal(utf8_scalar_count(text), std::size_t{1});
   }
 
-
   it("uses Unicode 17 emoji properties without treating every Emoji scalar as presentation") {
     check_true(is_emoji(0x1F600u));
     check_true(is_emoji(static_cast<uint32_t>('1')));
     check_false(is_emoji(static_cast<uint32_t>('A')));
+    check_false(has_emoji("0123456789#*"));
     check_true(is_emoji_modifier(0x1F3FBu));
     check_true(is_emoji_modifier(0xFE0Fu));
     check_true(is_emoji_modifier(0x200Du));

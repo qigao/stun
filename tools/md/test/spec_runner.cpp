@@ -135,11 +135,12 @@ int main(int argc, char** argv) {
     
     auto tests = parse_spec_file(filename);
     
-    std::cout << "Loaded " << tests.size() << " tests from " << filename << std::endl;
+    std::cout << "Loaded " << tests.size() << " examples from " << filename << std::endl;
+    std::cout << "PARSE-ONLY DIAGNOSTIC: expected_html is NOT compared; this is NOT CommonMark conformance." << std::endl;
     std::cout << std::string(80, '=') << std::endl;
     
-    int passed = 0;
-    int failed = 0;
+    int parsed_nonempty = 0;
+    int empty_or_failed = 0;
     
     for (const auto& test : tests) {
         std::cout << "\nTest #" << test.number << " (line " << test.line_number << ")" << std::endl;
@@ -149,22 +150,24 @@ int main(int argc, char** argv) {
         auto root = result.root;
         
         if (root && root->children.size() > 0) {
-            std::cout << "✅ PARSED" << std::endl;
+            std::cout << "Non-empty AST (smoke only, expected HTML not compared)" << std::endl;
             dump_tree(root);
-            passed++;
+            parsed_nonempty++;
         } else {
-            std::cout << "❌ FAILED TO PARSE" << std::endl;
-            failed++;
+            std::cout << "No AST/children (smoke only)" << std::endl;
+            empty_or_failed++;
         }
         
         std::cout << std::string(80, '-') << std::endl;
     }
     
     std::cout << "\n" << std::string(80, '=') << std::endl;
-    std::cout << "Results: " << passed << " passed, " << failed << " failed" << std::endl;
+    std::cout << "PARSE SMOKE RESULTS: " << parsed_nonempty << " non-empty ASTs, "
+              << empty_or_failed << " empty/no ASTs" << std::endl;
     if (!tests.empty()) {
-        std::cout << "Success rate: " << (100.0 * passed / tests.size()) << "%" << std::endl;
+        std::cout << "Non-empty AST rate (NOT semantic conformance): "
+                  << (100.0 * parsed_nonempty / tests.size()) << "%" << std::endl;
     }
     
-    return failed > 0 ? 1 : 0;
+    return empty_or_failed > 0 ? 1 : 0;
 }

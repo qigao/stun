@@ -10,13 +10,17 @@
 #define FLEXUI_TRANSITION_H
 
 #include <flexUI/types.h>
+#include <flexUI/detail/style_property_registry.h>
 #include <flex/animation.h>
+#include <flex/core/types.h>
 #include <cmath>
 #include <cstdint>
 #include <string>
 #include <map>
 #include <vector>
 #include <functional>
+#include <variant>
+#include <utility>
 
 namespace flexUI {
 
@@ -189,31 +193,36 @@ std::vector<TransitionDef> parse_transition_list(const std::string& value);
 // Active Transition State
 // ============================================================================
 
+struct TransitionValue {
+    // Metadata is borrowed; copying a value only owns its AnimValue storage.
+    const cmeta_type_desc* type = nullptr;
+    flex::AnimValue value{};
+
+    bool has_value() const noexcept { return type != nullptr; }
+};
+
+struct TransitionValueOps {
+    const cmeta_type_desc* type = nullptr;
+    bool (*equal)(const void*, const void*) = nullptr;
+    bool (*interpolate)(const void*, const void*, float, void*) = nullptr;
+};
+
+const TransitionValueOps* transition_type_ops(
+    const cmeta_type_desc* type) noexcept;
+
 struct ActiveTransition {
-    std::string property;
-    float start_value;
-    float end_value;
-    float start_time_ms;
-    float duration_ms;
-    float delay_ms;
-    easing::EasingFunction easing_fn;
+    const detail::StylePropertyDesc* property = nullptr;
+    TransitionValue start_value{};
+    TransitionValue end_value{};
+    const TransitionValueOps* ops = nullptr;
+    float start_time_ms = 0.0f;
+    float duration_ms = 0.0f;
+    float delay_ms = 0.0f;
+    easing::EasingFunction easing_fn = easing::ease_in_out;
     EasingType easing_type = EasingType::Ease;
     float bezier[4] = {0.25f, 0.1f, 0.25f, 1.0f};
 
-    float current_value(float time_ms) const {
-        float elapsed = time_ms - start_time_ms - delay_ms;
-        if (elapsed < 0) return start_value;
-        if (elapsed >= duration_ms) return end_value;
-        float t = elapsed / duration_ms;
-        float eased_t = 0.0f;
-        if (easing_type == EasingType::CubicBezier || easing_type == EasingType::Ease) {
-            eased_t = easing::evaluate_cubic_bezier(bezier[0], bezier[1], bezier[2], bezier[3], t);
-        } else {
-            eased_t = easing_fn(t);
-        }
-        return flex::animation::interpolate(start_value, end_value, eased_t);
-    }
-
+    TransitionValue current_value(float time_ms) const;
     bool is_complete(float time_ms) const {
         return (time_ms - start_time_ms - delay_ms) >= duration_ms;
     }
@@ -231,16 +240,61 @@ public:
     void start(std::uintptr_t element_id, const std::string& property,
                float from, float to, const TransitionDef& def, float current_time_ms);
 
+    // Successful admission borrows property and type metadata until removal.
+    bool start_typed(std::uintptr_t element_id,
+                     const detail::StylePropertyDesc& property,
+                     const TransitionValue& from,
+                     const TransitionValue& to,
+                     const TransitionDef& def,
+                     float current_time_ms);
+
+    bool start_float(std::uintptr_t element_id,
+                     const detail::StylePropertyDesc& property,
+                     float previous_value,
+                     float target_value,
+                     const TransitionDef& def,
+                     float current_time_ms);
+
+    bool start_color(std::uintptr_t element_id,
+                     const detail::StylePropertyDesc& property,
+                     const Color& previous_value,
+                     const Color& target_value,
+                     const TransitionDef& def,
+                     float current_time_ms);
+
     /**
      * Get current value for a property (interpolated if transitioning)
      */
     float get(std::uintptr_t element_id, const std::string& property,
               float default_value, float current_time_ms);
 
+    TransitionValue get_typed(std::uintptr_t element_id,
+                              const detail::StylePropertyDesc& property,
+                              const TransitionValue& default_value,
+                              float current_time_ms) const;
+
+    float get_float(std::uintptr_t element_id,
+                    const detail::StylePropertyDesc& property,
+                    float default_value,
+                    float current_time_ms) const;
+
+    Color get_color(std::uintptr_t element_id,
+                    const detail::StylePropertyDesc& property,
+                    const Color& default_value,
+                    float current_time_ms) const;
+
     /**
      * Check if element has active transitions
      */
     bool has_active(std::uintptr_t element_id, float current_time_ms);
+
+    /**
+     * Union StylePropertyImpact metadata for active typed transitions on one
+     * element. The manager remains UI-object agnostic; Box/Element consume the
+     * returned impact.
+     */
+    std::uint32_t active_impact(std::uintptr_t element_id,
+                                float current_time_ms) const noexcept;
 
     /**
      * Update and remove completed transitions
@@ -259,7 +313,39 @@ public:
     void clear() { transitions_.clear(); }
 
 private:
-    std::map<std::string, ActiveTransition> transitions_;
+    using TypedTransitionKey =
+        std::pair<std::uintptr_t, detail::StylePropertyId>;
+
+    std::map<TypedTransitionKey, ActiveTransition> transitions_;
+};
+
+struct TypedAnimationPoint {
+    float offset = 0.0f;
+    TransitionValue value{};
+};
+
+struct TypedActiveAnimation {
+    const detail::StylePropertyDesc* property = nullptr;
+    std::vector<TypedAnimationPoint> keyframes;
+    const TransitionValueOps* ops = nullptr;
+    float start_time_ms = 0.0f;
+    float duration_ms = 0.0f;
+    float delay_ms = 0.0f;
+    float iteration_count = 1.0f;
+    bool infinite = false;
+    AnimationFillMode fill_mode = AnimationFillMode::None;
+    AnimationDirection direction = AnimationDirection::Normal;
+    AnimationPlayState play_state = AnimationPlayState::Running;
+    bool paused = false;
+    float paused_at_ms = 0.0f;
+    float total_paused_ms = 0.0f;
+    easing::EasingFunction easing_fn = easing::ease_in_out;
+
+    TransitionValue current_value(const TransitionValue& default_value,
+                                  float time_ms) const;
+    bool is_active(float time_ms) const;
+    bool retains_fill_value() const;
+    void set_paused(bool should_pause, float current_time_ms);
 };
 
 struct ActiveAnimation {
@@ -290,21 +376,60 @@ public:
                const std::vector<AnimationValuePoint>& keyframes,
                const AnimationDef& def, float current_time_ms);
 
+    // Successful admission borrows property and keyframe types until removal.
+    bool start_typed(std::uintptr_t element_id,
+                     const detail::StylePropertyDesc& property,
+                     const std::vector<TypedAnimationPoint>& keyframes,
+                     const AnimationDef& def,
+                     float current_time_ms);
+
+    bool start_float(std::uintptr_t element_id,
+                     const detail::StylePropertyDesc& property,
+                     const std::vector<AnimationValuePoint>& keyframes,
+                     const AnimationDef& def,
+                     float current_time_ms);
+
+    TransitionValue get_typed(std::uintptr_t element_id,
+                              const detail::StylePropertyDesc& property,
+                              const TransitionValue& default_value,
+                              float current_time_ms) const;
+
+    float get_float(std::uintptr_t element_id,
+                    const detail::StylePropertyDesc& property,
+                    float default_value,
+                    float current_time_ms) const;
+
+    Color get_color(std::uintptr_t element_id,
+                    const detail::StylePropertyDesc& property,
+                    const Color& default_value,
+                    float current_time_ms) const;
+
     float get(std::uintptr_t element_id, const std::string& property,
               float default_value, float current_time_ms) const;
 
     bool has_active(std::uintptr_t element_id, float current_time_ms) const;
+    std::uint32_t active_impact(std::uintptr_t element_id,
+                                float current_time_ms) const noexcept;
     bool has_effect(std::uintptr_t element_id, float current_time_ms) const;
-    bool has_any_effects() const { return !animations_.empty(); }
+    bool has_any_effects() const {
+        return !animations_.empty() || !typed_animations_.empty();
+    }
     bool has_any_active(float current_time_ms) const;
     void set_play_state(std::uintptr_t element_id, AnimationPlayState play_state,
                         float current_time_ms);
     void clear_element(std::uintptr_t element_id);
     void update(float current_time_ms);
-    void clear() { animations_.clear(); }
+    void clear() {
+        animations_.clear();
+        typed_animations_.clear();
+    }
 
 private:
+    using TypedAnimationKey =
+        std::pair<std::uintptr_t, detail::StylePropertyId>;
+
     std::map<std::string, ActiveAnimation> animations_;
+    std::map<TypedAnimationKey, TypedActiveAnimation> typed_animations_;
 };
 
 } // namespace flexUI

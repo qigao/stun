@@ -1,0 +1,32 @@
+name: Tango Native C Core
+
+on:
+  pull_request:
+    paths:
+      - 'tango/**'
+      - '.github/workflows/tango-core.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'tango/**'
+      - '.github/workflows/tango-core.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-core:
+    name: Native C / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Tango standalone
+        run: cmake -S tango -B build/tango -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+      - name: Build Tango and real static-link test
+        run: cmake --build build/tango --config Debug --parallel 2
+      - name: Run core regressions
+        run: ctest --test-dir build/tango -C Debug --output-on-failure

@@ -1,0 +1,171 @@
+# C11 RichDoc → HTML (bounded candidate)
+
+> **Current mainline qualification (2026-10-17):** all 652 official
+> CommonMark 0.31.2 HTML examples match byte-for-byte under the explicit,
+> trusted **SPEC** test profile. Default untrusted-input **SAFE** output
+> independently freezes 576 official matches; the other 76 are policy-driven
+> differences involving raw HTML and URI admission. The immutable official
+> source digest is `c784c98aa6f8a1db1292dfd883f3b6743f2ad66578f89fae1fc9223f208f7bfd`.
+> Newly admitted #206, #354 and #540 use Salts Unicode 17 installed-SDK
+> native tests for both render profiles. This does **not** prove complete GFM
+> extension conformance or authorize untrusted use of SPEC.
+
+
+Relates to [#172](https://github.com/qigao/stun/issues/172) and [#167](https://github.com/qigao/stun/issues/167).
+For whitespace ownership, HTML5 vs XML distinctions, and the safe-vs-normative
+output-policy decision, see [ADR_MARKDOWN_HTML_OUTPUT.md](ADR_MARKDOWN_HTML_OUTPUT.md)
+(#181 / #184).
+
+This C11 renderer consumes **only** a validated `stun_ui_rich_document_view` from the single Stun C11 Markdown parser. It does not tokenize Markdown or create a second grammar; it has no GUI, Tango, Python or cmark-gfm production dependencies.
+
+## Contract
+
+`stun_md_render_html(&view, max_nodes, buffer, capacity, &required)` uses two passes: first measure and validate, then write exactly `required` bytes plus NUL. Use `buffer=NULL,capacity=0` to query length. On any error or insufficient capacity, no caller output bytes are written. The view and all borrowed metadata must remain live during both passes under one owner thread.
+
+The first production-quality subset covers paragraphs, headings, emphasis/strong/del, code spans/fences, blockquotes, lists, safe links, soft breaks, rules and plain GFM tables. The source's UTF-8 bytes (including Emoji) remain unchanged except normal HTML text/attribute escaping.
+
+Semantic types without a qualified renderer must fail closed rather than
+fall back to raw HTML (e.g. math, diagrams and definition lists). Typed IMAGE,
+hard line breaks and task CHECKBOX semantics have explicit bounded rendering
+paths; active link/image protocols still require a separate safe URI check.
+Untrusted HTML remains escaped under the SAFE policy.
+
+The RichDoc now carries typed loose/tight list data, hard/soft line breaks,
+ordered starts, and GFM table alignment. **This is not a full CommonMark/GFM
+conformance claim**: remaining Unicode semantics, nested GFM admission and
+complete extension suites are separately gated. The renderer never infers
+these semantic facts from raw Markdown.
+
+## GFM extension slice (#186, Draft #226)
+
+The C11 TABLE node owns a bounded byte vector of length equal to the header
+column count: `STUN_UI_TABLE_ALIGN_NONE/LEFT/CENTER/RIGHT` come directly from
+the validated delimiter cells. Header and padded/truncated body rows consume
+this same vector. Invalid metadata/row length fails the dry-run HTML pass
+without partially writing a buffer. Task items reuse the existing typed
+`TASK_ITEM -> CHECKBOX` ownership, and emit a **fixed disabled** input element;
+only the metadata byte `x` or space can determine the checked attribute.
+
+GFM 4.10 parses table-cell boundaries before inline spans. A raw
+unescaped `|` splits a row even when it appears between backticks, while
+`\\|` is admitted as literal cell content. The cell's escaping backslash
+is removed in a bounded parse-local copy before inline scanning (including
+inside backtick spans); the original Markdown bytes are immutable. Official
+GFM Table Example 200 and both escaped/unescaped code-span-pipe cases are
+covered by native and independent HTML goldens.
+
+These are candidate GFM extensions, not CommonMark official-652 cases. The
+independent cmark-gfm GFM table/task HTML cases and Mistune alignment AST
+cases have their own positive gates, without weakening the official 573 SAFE
+or 649 SPEC CommonMark no-regression gates. Nested GFM combinations and a
+complete versioned GFM extension corpus remain follow-up work. MarkdownWidget
+and Tango are not switched on this branch.
+
+## Verification
+
+`stun_markdown_html_test` is a real strict C11 executable using the installed `Stun::UICore`, checked by the existing installed-Salts SDK ASan/UBSan workflow. It asserts a growing, explicitly counted C11 HTML golden subset, atomic
+capacity rejection, safe image/link admission and typed GFM task/table HTML.
+
+The next gate must **also** compare actual C11-produced HTML against independent `cmarkgfm` HTML on a complete, versioned sample suite. Mistune AST parity alone is not an HTML conformance proof, and our test-only HTML examples do not replace that independent oracle.
+
+## Independent HTML oracle (test-only)
+
+The test program `stun_markdown_html_dump` runs the **real** C11 Markdown
+parser and C11 RichDoc HTML renderer. It accepts at most 1 MiB of Markdown
+from stdin and writes only HTML bytes to stdout; failures use nonzero exit
+and stderr, never fallback to C++ or a Python parser.
+
+`ui_core/tests/compare_cmarkgfm_html.py` independently processes the *same*
+input through Python `cmarkgfm`: CommonMark examples use `markdown_to_html`,
+GFM examples use `github_flavored_markdown_to_html`. It asserts **exact HTML bytes**, including whitespace, escaping and
+structural tags, for an explicit, versioned supported subset. GFM extension
+Examples 198–205 and 279–280 have their own independent ten-ID subgate;
+unsupported cases remain separately counted and never silently promoted.
+
+The existing Unicode runtime installed-Salts SDK gate compiles the C11
+executable with its ASan/UBSan settings and runs the Python oracle inside
+a separate ephemeral virtualenv. The `cmarkgfm` package is not linked into
+Stun or required by any consumer; its resolved version and per-fixture
+first-byte differences are saved in `markdown-cmarkgfm-html.json`.
+
+**Important:** 17 supported fixtures passing means only *subset* byte-for-byte
+HTML equality, not normative full CommonMark/GFM compliance. Full official
+spec coverage, reference links, list tightness, ordered starts, alignment
+metadata, hardbreaks and task checkbox HTML remain required by #172.
+
+## Full CommonMark 0.31.2 survey (652 official examples)
+
+The repo's existing `tools/md/test/spec.txt` contains **652 official
+CommonMark 0.31.2 examples**, with canonical expected HTML. The test-only
+`ui_core/tests/survey_commonmark_spec.py` extracts every fenced example
+(substituting the spec's right-arrow TAB notation), invokes the **actual**
+C11 HTML executable and independently computes cmarkgfm reference HTML.
+
+It emits `markdown-commonmark-652-survey.json` with every numbered fixture's
+raw input, official expected HTML, cmarkgfm HTML, actual C11 HTML or explicit
+unsupported status, and first byte difference. It reports C11-vs-official,
+C11-vs-cmarkgfm and cmarkgfm-vs-official totals separately. Missing fixtures,
+unexpected interpreter/tool failures, native crashes, sanitizer reports or
+unexpected partial writes fail the survey immediately. The 652 semantic
+matches are **diagnostic only**, because the current C11 renderer deliberately
+rejects many unsupported grammar features. Full spec compliance is a separate
+future gate, not inferred from the 17-fixture supported-subset HTML comparison.
+
+## Indented code subset (#177)
+
+The C11 parser now distinguishes \`STUN_UI_BLOCK_CODE_INDENTED\` from fenced
+code. Its payload is owned literal UTF-8 text with four *column* indentation
+removed using CommonMark tab stops; CRLF and EOF are emitted as normalized LF.
+Interior blank lines remain pending until a following indented content line
+proves they belong to the code block; leading/trailing blank lines are dropped.
+Raw Markdown is untouched. The renderer escapes the text as \`<pre><code>\`
+without an info-string or a second Markdown grammar.
+
+\`stun_markdown_indented_test\` checks native tree ancestry, exact rendered
+HTML, bounded output, and rejection without partial writes. The independent
+official-spec test \`gate_commonmark_indented.py\` checks explicit numbered
+CommonMark 0.31.2 samples against **official expected HTML**. All 652 examples
+remain in the separately counted diagnostic survey. Loose list precedence
+(#108/#109) remains diagnostic until typed loose-list semantics are added.
+
+## List-container conformance subset (#181)
+
+A bounded C11 list-container frame stack now owns list/item continuation,
+marker-family boundaries, nested lists, blank lines and selected indented
+code/quote items. Owned binary `stun_ui_list_semantics` metadata records the
+exact ordered start (including zero), list marker and loose/tight distinction.
+The existing HTML renderer consumes these typed facts without reparsing
+Markdown. Legacy projected lists with zero metadata retain tight semantics.
+
+`stun_markdown_containers_test` now has **13** exact HTML/AST fixtures plus
+an atomic depth-exhaustion regression. The explicit official CommonMark
+0.31.2 gate covers #108/#109 and list precedence #254/#256/#301/#302/#304/#305
+alongside the previous 13 cases: **21 strict IDs** (not full 652 compliance).
+The full **652**-example diagnostic remains separate. Other lazy/container,
+task and raw-HTML semantics stay under #181/#172 and must not be reported as
+supported without passing the corresponding official HTML.
+
+
+## Nested Blockquote semantics (#181, PR #189)
+
+The single C11 block parser now admits a bounded 32-level quote-container
+stack. It owns nested quote ancestry and nested lazy unmarked paragraph
+continuation, plus quoted ATX/setext headings, thematic breaks, fenced code
+and indented code. An explicitly empty quote marker closes its paragraph
+without destroying the outer quote; root block interruptions close the
+quote. There is no second grammar or permanent C++ fallback, and source
+bytes remain owned and unmodified. 33 nested quote levels must fail
+atomically with `STUN_UI_CAPACITY_EXCEEDED` and no returned document.
+
+`stun_markdown_nested_quote_test` enforces six native quote AST/HTML
+fixtures and depth-exhaustion rollback. The official byte-exact CommonMark
+HTML allowlist is expanded from 21 to **31** explicit IDs after observing
+true expected-HTML matches on exact-head CI: #228, #229, #230, #232,
+#236, #237, #239, #240, #250, #252. The full 652-case survey remains
+diagnostic and the previously passing 256 example identities remain
+protected by their own strict nonregression gate.
+
+Known gaps: partial-marker lazy nesting (#251) and quote/list ownership
+(#235) are not qualified. C++ MarkdownWidget and Tango still retain
+their declared pre-cutover ownership and must not use this as a full
+CommonMark/GFM parity claim.

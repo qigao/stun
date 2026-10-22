@@ -84,9 +84,6 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
   if(WIN32)
     foreach(_flexui_turboscript_runtime
             TurboScript::TurboScript
-            TurboParser::Parser
-            TurboParser::Cron
-            TurboParser::Mustache
             TurboNet::CoroNet)
       add_custom_command(
         TARGET flexUI_controller_turboscript POST_BUILD

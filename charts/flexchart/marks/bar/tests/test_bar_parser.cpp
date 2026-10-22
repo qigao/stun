@@ -16,12 +16,12 @@ spec("flexchart_bar_parser") {
             std::string error;
             auto chart = flex::chart::bar_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Revenue");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Revenue"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "bar");
+            check(std::string(mark->type.c_str()) == std::string("bar"));
             check(mark->encodings.size() >= 2);
             // Find x and y encodings
             std::string x_field, y_field;
@@ -29,8 +29,8 @@ spec("flexchart_bar_parser") {
                 if (enc->channel == "x") x_field = enc->field;
                 if (enc->channel == "y") y_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "category");
-            check_str_eq(y_field.c_str(), "revenue");
+            check(std::string(x_field.c_str()) == std::string("category"));
+            check(std::string(y_field.c_str()) == std::string("revenue"));
         }
 
         it("should parse bar chart with data block") {
@@ -50,7 +50,7 @@ spec("flexchart_bar_parser") {
             std::string error;
             auto chart = flex::chart::bar_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Sales");
+            check(std::string(chart->title.c_str()) == std::string("Sales"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -60,7 +60,7 @@ spec("flexchart_bar_parser") {
             check(mark->styles.count("corner-radius") > 0);
             check(std::get<double>(mark->styles["corner-radius"]) > 5.9);
             check(mark->styles.count("orientation") > 0);
-            check_str_eq(std::get<std::string>(mark->styles["orientation"]).c_str(), "vertical");
+            check(std::string(std::get<std::string>(mark->styles["orientation"]).c_str()) == std::string("vertical"));
         }
 
         it("should parse encoding block") {
@@ -107,7 +107,7 @@ spec("flexchart_bar_parser") {
             auto chart = flex::chart::bar_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x) * 100");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x) * 100"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
@@ -126,7 +126,7 @@ spec("flexchart_bar_parser") {
             auto chart = flex::chart::bar_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "sales.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("sales.json"));
         }
 
         it("should return nullptr on invalid input") {

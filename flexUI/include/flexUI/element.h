@@ -246,21 +246,24 @@ public:
     }
     std::unordered_set<Element*> unique;
     unique.reserve(children.size());
+    std::vector<flex::Node::RawPtr> prepared;
+    prepared.reserve(children.size());
     for (auto* child : children) {
-      if (!child || child->is_widget_owned() ||
+      if (!child || child == this || child->is_widget_owned() ||
           (child->parent_elem() && child->parent_elem() != this) ||
+          (child->owner_box_ && owner_box_ && child->owner_box_ != owner_box_) ||
           !unique.insert(child).second) {
         throw std::invalid_argument(
             "replacement children must be unique, detached or existing "
-            "application elements");
+            "application elements of the same Box");
       }
+      prepared.push_back(child);
     }
 
-    flex::Group::clear_children();
-    for (auto* child : children) {
-      flex::Group::add_child(child);
-      child->owner_box_ = owner_box_;
-    }
+    // This operation preallocates all child storage while the old tree is
+    // untouched, and commits only through no-throw pointer/container swaps.
+    flex::Group::replace_children_prevalidated(prepared);
+    for (auto* child : children) child->owner_box_ = owner_box_;
     mark_tree_structure_dirty();
   }
 

@@ -1,5 +1,5 @@
 #include "backends/vulkan/init.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <cstdint>
 using namespace flex;
@@ -8,8 +8,8 @@ suite("flex::vulkan_backend") {
   it("loads the Vulkan API without requiring a physical device") {
     std::uint32_t api_version = VK_API_VERSION_1_0;
 
-    check_int_eq(vkEnumerateInstanceVersion(&api_version), VK_SUCCESS);
-    check_int_ge(static_cast<int>(VK_API_VERSION_MAJOR(api_version)), 1);
+    check_equal(vkEnumerateInstanceVersion(&api_version), VK_SUCCESS);
+    check_greater_equal(static_cast<int>(VK_API_VERSION_MAJOR(api_version)), 1);
   }
 
   it("rejects an incomplete Vulkan canvas without touching a device") {
@@ -25,7 +25,7 @@ suite("flex::vulkan_backend") {
 
     check_true(vulkan_backend::register_backend());
     check_true(is_renderer_backend_available(RendererBackend::Vulkan));
-    check_str_eq(renderer_backend_name(RendererBackend::Vulkan), "Vulkan");
+    check_equal(renderer_backend_name(RendererBackend::Vulkan), "Vulkan");
 
     register_renderer_backend(RendererBackend::Vulkan, previous);
   }
