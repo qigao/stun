@@ -53,13 +53,13 @@ set_target_properties(flexchart_pie PROPERTIES FOLDER "Modules/FlexChart/Marks")
 
 # Parser test
 add_executable(flexchart_pie_parser_test tests/test_pie_parser.cpp)
-target_link_libraries(flexchart_pie_parser_test PRIVATE flexchart_pie TurboUtils::TinyTest)
+target_link_libraries(flexchart_pie_parser_test PRIVATE flexchart_pie Salts::TinyTest)
 add_test(NAME FlexChartPieParserTest COMMAND flexchart_pie_parser_test)
 set_target_properties(flexchart_pie_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_pie_test tests/test_pie.cpp)
-target_link_libraries(flexchart_pie_test PRIVATE flexchart_pie TurboUtils::TinyTest)
+target_link_libraries(flexchart_pie_test PRIVATE flexchart_pie Salts::TinyTest)
 target_include_directories(flexchart_pie_test PRIVATE ../../src)
 add_test(NAME FlexChartPieTest COMMAND flexchart_pie_test)
 set_target_properties(flexchart_pie_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")

@@ -48,18 +48,18 @@ target_include_directories(flexchart_geoshape
     PUBLIC include "${CMAKE_CURRENT_BINARY_DIR}"
     PRIVATE ../../src
 )
-target_link_libraries(flexchart_geoshape PUBLIC flexchart_common flexchart PRIVATE TurboParser::Parser)
+target_link_libraries(flexchart_geoshape PUBLIC flexchart_common flexchart PRIVATE Salts::JsonParser)
 set_target_properties(flexchart_geoshape PROPERTIES FOLDER "Modules/FlexChart/Marks")
 
 # Parser test
 add_executable(flexchart_geoshape_parser_test tests/test_geoshape_parser.cpp)
-target_link_libraries(flexchart_geoshape_parser_test PRIVATE flexchart_geoshape TurboUtils::TinyTest)
+target_link_libraries(flexchart_geoshape_parser_test PRIVATE flexchart_geoshape Salts::TinyTest)
 add_test(NAME FlexChartGeoshapeParserTest COMMAND flexchart_geoshape_parser_test)
 set_target_properties(flexchart_geoshape_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_geoshape_test tests/test_geoshape.cpp)
-target_link_libraries(flexchart_geoshape_test PRIVATE flexchart_geoshape TurboUtils::TinyTest)
+target_link_libraries(flexchart_geoshape_test PRIVATE flexchart_geoshape Salts::TinyTest)
 target_include_directories(flexchart_geoshape_test PRIVATE ../../src)
 add_test(NAME FlexChartGeoshapeTest COMMAND flexchart_geoshape_test)
 set_target_properties(flexchart_geoshape_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")

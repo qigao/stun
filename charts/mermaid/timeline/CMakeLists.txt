@@ -32,11 +32,11 @@ target_include_directories(timeline PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(timeline PUBLIC TurboParser::Parser)
+target_link_libraries(timeline PUBLIC Salts::JsonParser)
 
 # Test executable
 add_executable(timeline_test tests/test_parser.c)
-target_link_libraries(timeline_test timeline TurboUtils::TinyTest)
+target_link_libraries(timeline_test timeline Salts::TinyTest)
 target_compile_definitions(timeline_test PRIVATE
     GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/timeline"
 )

@@ -1,17 +1,11 @@
 #pragma once
 
 #include "flex/core/types.h"
+#include "flex/core/cmeta_types.h"
 
 #include <cstdint>
 
 namespace flex::detail {
-
-enum class AnimatedPropertyValueKind : uint8_t {
-    Scalar,
-    String,
-    Color,
-    Vec2,
-};
 
 enum class PropertyTargetKind : uint8_t {
     Group = 1u << 0,
@@ -25,11 +19,13 @@ enum class PropertyTargetKind : uint8_t {
 
 struct AnimatedPropertyDescriptor {
     PropertyID id = PropertyID::Unknown;
-    AnimatedPropertyValueKind value_kind = AnimatedPropertyValueKind::Scalar;
+    const cmeta_type_desc* type = nullptr;
     uint8_t target_mask = 0;
 };
 
 const AnimatedPropertyDescriptor* animated_property_descriptor(PropertyID id) noexcept;
+const cmeta_type_desc* anim_value_type(const AnimValue& value) noexcept;
+bool animated_property_accepts(PropertyID id, const AnimValue& value) noexcept;
 bool animated_property_supports(PropertyID id, PropertyTargetKind target) noexcept;
 
 } // namespace flex::detail

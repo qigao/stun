@@ -611,7 +611,7 @@ public:
     if (!std::isfinite(font_size) || font_size <= 0.0f) {
       throw std::invalid_argument("gCanvas font size must be positive");
     }
-    if (font_size > static_cast<float>((std::numeric_limits<int>::max)())) {
+    if (static_cast<double>(font_size) > static_cast<double>((std::numeric_limits<int>::max)())) {
       throw std::length_error("gCanvas font size exceeds the context limit");
     }
     validate_sampled_shadow();
@@ -642,6 +642,29 @@ public:
           state_.shadow.blur * shadow_effect_scale(), sampled_shadow_spread(),
           to_transform(state_.transform));
     }
+  }
+
+  bool measure_text(const std::string& text,
+                    const std::string& font_family, float font_size, bool bold,
+                    TextMetrics& out_metrics) override {
+    if (!std::isfinite(font_size) || font_size <= 0.0f) {
+      throw std::invalid_argument("gCanvas font size must be positive");
+    }
+    if (static_cast<double>(font_size) > static_cast<double>((std::numeric_limits<int>::max)())) {
+      throw std::length_error("gCanvas font size exceeds the context limit");
+    }
+
+    ::gcanvas::Font* font = resolve_font(font_family, bold);
+    ::gcanvas::Font& selected_font =
+        font != nullptr ? *font : context_.get_default_font();
+    const int selected_size =
+        (std::max)(1, static_cast<int>(std::lround(font_size)));
+
+    const ::gcanvas::vec2 dimensions =
+        context_.measure_text(text, selected_font, selected_size);
+    const TextMetrics measured{dimensions.get_x(), dimensions.get_y()};
+    out_metrics = measured;
+    return true;
   }
 
   bool register_font(const std::string& family, const std::string& path) override {

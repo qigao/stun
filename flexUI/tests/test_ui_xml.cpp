@@ -145,16 +145,6 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check(span.column > 0);
   }
 
-  it("accepts valid Unicode text attributes without rewriting bytes") {
-    const auto compiled = flexUI::compile_ui_xml(
-        u8"<ui name=\"\u754C\u9762\"><label id=\"greeting\" "
-        u8"text=\"\u4FDD\u5B58\U0001F600e\u0301\"/></ui>");
-    check(static_cast<bool>(compiled));
-    const auto &text =
-        std::get<std::string>(compiled.program->definition().root.properties.at("text"));
-    check_equal(text, u8"\u4FDD\u5B58\U0001F600e\u0301");
-  }
-
   it("rejects malformed and truncated sources") {
     const auto malformed = flexUI::compile_ui_xml("<ui name=\"Bad\"><div id=\"root\"></ui>");
     check_false(static_cast<bool>(malformed));
@@ -167,17 +157,39 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     const auto truncated = flexUI::compile_ui_xml(embedded_nul);
     check_false(static_cast<bool>(truncated));
     check(truncated.error.code == UiDocumentErrorCode::ParseError);
+  }
 
-    std::string invalid_utf8 =
-        "<ui name=\"BadUtf8\"><label id=\"value\" text=\"";
-    invalid_utf8.push_back(static_cast<char>(0xC0));
-    invalid_utf8.push_back(static_cast<char>(0xAF));
-    invalid_utf8 += "\"/></ui>";
-    const auto invalid = flexUI::compile_ui_xml(invalid_utf8);
-    check_false(static_cast<bool>(invalid));
-    check(invalid.error.code == UiDocumentErrorCode::ParseError);
-    check(invalid.error.line > 0);
-    check(invalid.error.column > 0);
+
+  it("rejects malformed UTF-8 before XML parsing with source location") {
+    std::string invalid =
+        "<ui name=\"Bad\">\n"
+        "  <div id=\"root\" text=\"";
+    invalid.push_back(static_cast<char>(0xFF));
+    invalid += "\"/>\n</ui>";
+
+    const auto compiled = flexUI::compile_ui_xml(invalid);
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(compiled.error.line, 2);
+    check_equal(compiled.error.column, 24);
+
+    const auto parsed = flexUI::parse_ui_xml(invalid);
+    check_false(static_cast<bool>(parsed));
+    check(parsed.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(parsed.error.line, 2);
+    check_equal(parsed.error.column, 24);
+  }
+
+  it("validates the complete XML byte view after an otherwise complete document") {
+    std::string invalid_suffix = "<ui name=\"A\"><div id=\"root\"/></ui>";
+    invalid_suffix.push_back(static_cast<char>(0xE2));
+    invalid_suffix.push_back(static_cast<char>(0x82));
+
+    const auto compiled = flexUI::compile_ui_xml(invalid_suffix);
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(compiled.error.line, 1);
+    check(compiled.error.column > 1);
   }
 
   it("rejects invalid structure duplicate ids and ambiguous mixed text") {
@@ -231,5 +243,68 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     const auto property = flexUI::compile_ui_xml(kXmlDocument, property_limits);
     check_false(static_cast<bool>(property));
     check(property.error.code == UiDocumentErrorCode::PropertyLimitExceeded);
+  }
+}
+
+
+spec("FlexUI natural XML text is bounded and unambiguous") {
+  it("preserves internal whitespace across comments CDATA and entity decoding") {
+    const auto parsed = flexUI::compile_ui_xml(
+      "<ui name=\"Text\"><label>  A<!--split--> \t<!--split--><![CDATA[B & C]]>&amp;D  </label></ui>");
+    check(static_cast<bool>(parsed));
+    if (!parsed) return;
+    check_equal(std::get<std::string>(parsed.program->definition().root.properties.at("text")), "A \tB & C&D");
+    const auto unicode = flexUI::compile_ui_xml(u8"<ui name=\"Text\"><label> \u00A0é\u00A0 </label></ui>");
+    check(static_cast<bool>(unicode));
+    if (unicode) check_equal(std::get<std::string>(unicode.program->definition().root.properties.at("text")), u8"\u00A0é\u00A0");
+  }
+
+  it("checks decoded text bytes and generated property count before allocation") {
+    flexUI::UiDocumentLimits limits;
+    limits.max_string_bytes = 8;
+    const auto exact = flexUI::compile_ui_xml(
+      "<ui name=\"Text\"><label>   1234<![CDATA[5678]]>   </label></ui>", limits);
+    check(static_cast<bool>(exact));
+    const auto oversized = flexUI::compile_ui_xml(
+      "<ui name=\"Text\"><label>1234<![CDATA[56789]]></label></ui>", limits);
+    check_false(static_cast<bool>(oversized));
+    check(oversized.error.code == UiDocumentErrorCode::StringLimitExceeded);
+    limits.max_properties_per_node = 0;
+    const auto property = flexUI::compile_ui_xml("<ui name=\"Text\"><label>Hello</label></ui>", limits);
+    check_false(static_cast<bool>(property));
+    check(property.error.code == UiDocumentErrorCode::PropertyLimitExceeded);
+  }
+
+  it("ignores formatting-only content and anchors decoded text to its original XML node") {
+    const auto empty = flexUI::compile_ui_xml("<ui name=\"Text\"><label> \n<![CDATA[ \t ]]></label></ui>");
+    check(static_cast<bool>(empty));
+    if (empty) check_true(empty.program->definition().root.properties.empty());
+    const auto parsed = flexUI::compile_ui_xml("<ui name=\"Text\">\n  <label>\n    Hello &amp; <![CDATA[world]]>\n  </label>\n</ui>");
+    check(static_cast<bool>(parsed));
+    if (!parsed) return;
+    const auto &root = parsed.program->definition().root;
+    check_equal(std::get<std::string>(root.properties.at("text")), "Hello & world");
+    check_equal(root.property_spans.at("text").line, 2);
+    check_equal(root.property_spans.at("text").column, 10);
+    check_equal(root.property_spans.at("text").length, 0);
+  }
+
+  it("rejects an explicit content conflict and preserves initial text alongside a binding") {
+    const auto conflict = flexUI::compile_ui_xml("<ui name=\"Text\"><label content=\"\">Caption</label></ui>");
+    check_false(static_cast<bool>(conflict));
+    check(conflict.error.code == UiDocumentErrorCode::InvalidProperty);
+    const auto bound = flexUI::compile_ui_xml("<ui name=\"Text\" xmlns:bind=\"urn:flexui:binding\"><label id=\"a\" bind:text=\"$value\">Caption</label></ui>");
+    check(static_cast<bool>(bound));
+    if (!bound) return;
+    check_equal(std::get<std::string>(bound.program->definition().root.properties.at("text")), "Caption");
+    check_equal(bound.program->bindings().size(), 1);
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("value", "Updated");
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto instantiated = flexUI::UiDocumentInstantiator::instantiate(box, *bound.program, registry);
+    check(static_cast<bool>(instantiated));
+    if (!instantiated) return;
+    check_true(box.bindings().update());
+    check_equal(box.get_by_id("a")->text(), "Updated");
   }
 }

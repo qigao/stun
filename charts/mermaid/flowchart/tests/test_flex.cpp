@@ -1,3 +1,6 @@
+#include <cmath>
+#include <string>
+
 #include "tinytest.h"
 #include "flex.h"
 #include "flex/runtime/svg.h"
@@ -22,13 +25,13 @@ spec("flowchart flex adapter") {
 
         check_not_null(node.get());
         if (!node) return;
-        check_int_eq(static_cast<int>(node->type()), static_cast<int>(flex::NodeType::Svg));
+        check_true(static_cast<int>(node->type()) == static_cast<int>(flex::NodeType::Svg));
         auto svg = std::dynamic_pointer_cast<flex::Svg>(node);
         check_not_null(svg.get());
         if (!svg) return;
-        check_string_contains(svg->data(), "<svg");
-        check_float_eq(node->layout_width(), 800.0f, 0.001f);
-        check_float_eq(node->layout_height(), 400.0f, 0.001f);
+        check_true(svg->data().find("<svg") != std::string::npos);
+        check_true(std::fabs(node->layout_width() - 800.0f) < 0.001f);
+        check_true(std::fabs(node->layout_height() - 400.0f) < 0.001f);
     }
 
     it("rejects invalid routing and dimensions") {

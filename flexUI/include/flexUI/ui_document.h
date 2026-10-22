@@ -26,10 +26,11 @@ struct SourceSpan {
 struct UiNodeDefinition {
   std::string tag;
   std::string id;
-  SourceSpan source;
   std::unordered_map<std::string, UiDocumentValue> properties;
   std::unordered_map<std::string, SourceSpan> property_spans;
   std::vector<UiNodeDefinition> children;
+  /// Owning tag location; appended to preserve existing aggregate field order.
+  SourceSpan source;
 };
 
 struct UiDocumentDefinition {
@@ -90,6 +91,7 @@ enum class UiDocumentErrorCode {
   ResourceLimitExceeded,
   UnknownElementTag,
   WidgetFactoryFailed,
+  InvalidUtf8,
   RequiredElementId,
 };
 
@@ -158,7 +160,8 @@ struct BindingDefinition {
   SourceSpan source_span;
 };
 
-/// Immutable result of UI parsing and semantic lowering.
+/// Immutable result of structural parsing and event/binding lowering.
+/// Registry content schemas are checked separately before typed instantiation.
 ///
 /// A const program may be shared across threads. Instantiation still belongs to
 /// the target Box's owner thread, and the Box remains the sole owner of created
@@ -253,6 +256,8 @@ UiDocumentCompileResult compile_ui_definition(
 /// On failure, `error` describes the rejected definition or target and `box` remains unchanged.
 class UiDocumentInstantiator {
 public:
+  /// Structural-only overload creates generic Elements. Registry schema
+  /// acceptance requires the overload taking a WidgetRegistry (#16/#33).
   /// @param box Target ownership and ID-index boundary.
   /// @param definition Parsed or manually constructed UI definition.
   /// @return The installed root/index view, or a structured validation/build error.

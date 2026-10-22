@@ -62,7 +62,7 @@ gCanvas core 生成，OpenGL/Vulkan 不各自推进效果状态。失败发生�
 只接收当帧绘制命令并拥有 GPU 资源。迁移路径是先补齐 capability 与双后端像素测试，
 OpenGL 默认已切换到 gCanvas；显式设置 `FLEX_OPENGL_RENDER_ENGINE=nanovg` 即可回滚，
 不影响四种公开 backend 枚举或调用侧 `Renderer` 契约。
-新增依赖只在 `vendor/gCanvas` 内，版本、上游 commit、本地裁剪范围与 MIT 许可记录
+新增依赖只在 `shared/gcanvas` 内，版本、上游 commit、本地裁剪范围与 MIT 许可记录
 在其 `README.md` 和 `LICENSE` 中。
 
 当前已验证能力如下：

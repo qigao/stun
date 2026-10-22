@@ -1,0 +1,60 @@
+name: Resolve current Salts SDK releases
+
+on:
+  workflow_call:
+    outputs:
+      salts_release:
+        value: ${{ jobs.resolve.outputs.salts_release }}
+      salts_sha:
+        value: ${{ jobs.resolve.outputs.salts_sha }}
+      salts_utils_release:
+        value: ${{ jobs.resolve.outputs.salts_utils_release }}
+      salts_utils_sha:
+        value: ${{ jobs.resolve.outputs.salts_utils_sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      salts_release: ${{ steps.releases.outputs.salts_release }}
+      salts_sha: ${{ steps.releases.outputs.salts_sha }}
+      salts_utils_release: ${{ steps.releases.outputs.salts_utils_release }}
+      salts_utils_sha: ${{ steps.releases.outputs.salts_utils_sha }}
+    steps:
+      - name: Resolve newest matching published releases including RCs
+        id: releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolve_release() {
+            local name="$1" repo="$2" tag_pattern="${3:-^}" release sha attempt
+            for attempt in 1 2 3; do
+              release="$(gh api "repos/$repo/releases?per_page=30&page=1" --paginate --slurp | \
+                jq -r --arg pattern "$tag_pattern" \
+                  '[.[][] | select(.draft == false and (.tag_name | test($pattern)))] | max_by(.published_at).tag_name')"
+              if [[ -n "$release" && "$release" != null ]]; then
+                break
+              fi
+              echo "No published SDK release matching $tag_pattern for $repo (attempt $attempt/3)" >&2
+              if [[ "$attempt" == 3 ]]; then
+                return 1
+              fi
+              sleep 5
+            done
+            sha="$(gh api "repos/$repo/commits/$release" --jq .sha)"
+            if [[ -z "$sha" || "$sha" == null ]]; then
+              echo "Cannot resolve SDK release commit for $repo/$release" >&2
+              return 1
+            fi
+            echo "${name}_release=$release" >> "$GITHUB_OUTPUT"
+            echo "${name}_sha=$sha" >> "$GITHUB_OUTPUT"
+            printf 'Resolved %s: %s (%s)\n' "$repo" "$release" "$sha"
+          }
+          # Float within 2.3.0 (stable or prerelease), without following master.
+          resolve_release salts qigao/salts '^v2[.]3[.]0(-|$)'
+          resolve_release salts_utils qigao/salts-utils

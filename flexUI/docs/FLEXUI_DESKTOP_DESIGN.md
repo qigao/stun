@@ -68,7 +68,7 @@ XML UI Document + CSS/Tailwind Utility + TurboScript Controller
   `flexUI/modules/tailwindcss/CMakeLists.txt`、`flexUI/docs/ARCHITECTURE.md`。
 - gCanvas 已把核心 renderer 与可选 GLFW window helper 分离；OpenGL/Vulkan Context 支持
   host-managed native window，Context 与 GPU 资源限定在创建线程。证据：
-  `vendor/gCanvas/CMakeLists.txt`、`vendor/gCanvas/docs/host-and-resource-protocol.md`。
+  `shared/gcanvas/CMakeLists.txt`、`shared/gcanvas/docs/host-and-resource-protocol.md`。
 - TurboScript public host ABI 已能编译模块、按名称解析 export、重复调用并返回结构化错误；
   FlexUI 通过可选 `FlexUI::ControllerTurboScript` adapter 使用它，feature 关闭时不查找该依赖。
   证据：`flexUI/include/flexUI/controller_turboscript.h`、
@@ -196,8 +196,8 @@ flowchart LR
     Controller --> Services[FlexUI::Services]
     TurboAdapter[FlexUI::ControllerTurboScript] --> Controller
     TurboAdapter --> TurboScript[TurboScript package]
-    PluginHost --> TurboUtils[TurboUtils::Core]
-    PluginHost --> TurboParser[TurboParser::Parser TOML facade]
+    PluginHost --> SaltsCore["Salts::Core"]
+    PluginHost --> SaltsToml["Salts::TomlParser TOML facade"]
 
     classDef optional stroke-dasharray: 5 5;
     class TurboAdapter,TurboScript,PluginHost,GPluginHost optional;
@@ -574,13 +574,17 @@ optional = false
   endpoint 已复制需保留的数据并承担一次同 token completion 投递，失败则不得保留 request/sink。
 
 `FlexUI::PluginSDK` 始终提供纯 C header；`FLEXUI_ENABLE_PLUGINS=ON` 时才生成
-`FlexUI::PluginHost` 和平台 loader。manifest TOML 通过已安装 `TurboParser::Parser` 的 explicit-length
+`FlexUI::PluginHost` 和平台 loader。manifest TOML 通过已安装 `Salts::TomlParser` 的 explicit-length
 facade 解析；不开插件时不应引入 PluginHost/TOML 运行路径。PluginHost 目前完成以下边界：
 
 - builder 可接收调用方给出的绝对 DLL 或 manifest 路径；Windows 使用受限 `LoadLibraryExW` 搜索 flags，
   Unix 使用 `RTLD_NOW | RTLD_LOCAL`。manifest candidate 先完成全图解析，之后按 dependency-first 顺序
   load/create；registry build、required capability validation 与 start 仍是一个 publication transaction。
   失败不发布 registry，已 start 的 candidate 逆序 stop/join。
+- create 输出的 instance 直接进入 module 的唯一所有权槽。返回失败，或违规跨 C ABI 抛出异常时，
+  同一 create-unwind 路径恰好 destroy 一次，再卸载 DLL；未成功 create 的实例不进入 start/stop/join。
+  create 的异常捕获在 module 存活期间完成，先复制诊断并销毁异常对象，再释放 instance 和 DLL，
+  避免自定义异常的 `what()` 或析构调用已卸载的 provider 代码。
 - descriptor 在 DLL 卸载前复制到 host-owned C++ storage，再与 built-in endpoint 一起生成不可变 registry。
   插件默认最多 16 个，每个插件最多 256 个 in-flight request；槽表构建时一次预分配，满时返回 Busy，
   不扩容、不阻塞、不丢弃。
@@ -600,6 +604,12 @@ facade 解析；不开插件时不应引入 PluginHost/TOML 运行路径。Plugi
 API mediation/OS sandbox、签名验证、热重载和进程隔离。因此“可加载”
 只适用于调用方显式指定的可信 DLL，不表示可运行任意第三方 DLL。
 
+这里的 builder/publication/rollback 使用 ACE Component Configurator 的模式边界，但实现仍属于
+FlexUI PluginHost。当前 FlexUI v1 ABI 不交换 CMeta descriptor，也未接入 Salts Component、
+ComponentPlugin 或 Plugin runtime。未来若迁移到这些 runtime，静态能力声明归 CMeta，实例图与
+rollback 归 Component，generation/scope 归 ComponentPlugin，DSO lease/unload 归 Plugin；必须
+另行设计 ABI 迁移和版本协商，不能把现有 registry snapshot 当成 generation scope 或 DSO lease。
+
 ### 9.6 Plugin SDK 安装与版本契约
 
 安装树以 `FlexUIConfig.cmake` 为唯一入口，并把插件边界拆成三个可检查组件：
@@ -607,22 +617,29 @@ API mediation/OS sandbox、签名验证、热重载和进程隔离。因此“�
 | CMake component | target | 依赖与用途 |
 |---|---|---|
 | `PluginSDK` | `FlexUI::PluginSDK` | 始终存在；纯 C ABI header，不引入 loader 或 parser |
-| `Services` | `FlexUI::Services` | C++ registry、descriptor、request/completion contract |
-| `PluginHost` | `FlexUI::PluginHost` | 仅 `FLEXUI_ENABLE_PLUGINS=ON`；依赖前两者及 TurboUtils/TurboParser |
+| `Services` | `FlexUI::Services` | 独立 C++ registry、descriptor、request/completion contract，不查找 Salts |
+| `PluginHost` | `FlexUI::PluginHost` | 仅 `FLEXUI_ENABLE_PLUGINS=ON`；依赖前两者及 Salts/SaltsUtils |
 
-三者属于同一个 `FlexUIPluginTargets` export set，避免 export 文件引用未安装的源码树 target。安装命令可用
-`--component FlexUIPlugin` 只部署该闭包；外部工程通过
-`find_package(FlexUI 1.0 CONFIG REQUIRED COMPONENTS PluginSDK PluginHost)` fail fast 检查能力。
-`TurboUtils_DIR` 与 `TurboParser_DIR` 由消费方 profile 指向精确安装根，包配置不写入构建机绝对路径。
-仅请求 `PluginSDK` 时不会查找这两项 C++ 依赖；install-tree 测试会在不提供其 package root 的条件下
-单独配置并编译纯 C DLL。
+三者分别使用独立 export 文件，安装命令仍以 `--component FlexUIPlugin` 部署同一个组件集合。
+外部工程通过 `find_package(FlexUI 1.0 CONFIG REQUIRED COMPONENTS PluginSDK PluginHost)`
+检查能力；仅请求 `PluginSDK` 或 `Services` 时不加载 PluginHost，也不查找 Salts/SaltsUtils。
+请求 PluginHost 时先加载 SDK、Services 和真实依赖包；不指定 component 时加载构建中启用的全部组件。
+未知的 required component 或未启用的 PluginHost 会给出明确诊断。
+消费方通过安装前缀选择 package，PluginHost 还需设置 `SALTS_ROOT` 环境变量供 SaltsUtils 定位同一
+Salts profile，并使用与 producer 一致的 OpenSSL package；FlexUI 配置不写入构建机绝对路径。
 
 包版本当前为 `1.0.0`，major 与 `FLEXUI_PLUGIN_ABI_MAJOR` 同步；同 major package 使用 CMake
 `SameMajorVersion` 兼容规则。新增 reserved 字段解释、可选 target 或不改变既有字段含义的实现修复只增加
 minor/patch；改变调用约定、结构布局、ownership/lifetime 或错误语义必须提升 ABI 与 package major。
-独立示例 `flexUI/examples/plugin_echo` 只消费安装头和归档：它构建纯 C DLL，再由 C++ host 完成
-load/start/echo completion/stop/join/unload。`test_plugin_install_consumer` 每次先安装 staging component，
-再配置这个外部工程，因而可检测缺失 archive、泄漏源码树 include、漏导依赖和不可运行 DLL。
+独立示例 `flexUI/examples/plugin_echo` 消费安装包：它构建纯 C 动态模块，再由 C++ host 完成
+load/start/echo completion/stop/join/unload。`runtime-conformance.yml` 直接配置、构建并测试真实 production
+targets，以 `cmake --install ... --component FlexUIPlugin` 安装后，再单独 configure/build/CTest
+外部工程。`flexUI/tests/plugin_install_consumer` 通过 `FLEXUI_CONSUMER_COMPONENT=PluginSDK/Services`
+分别选择纯 C header 检查与真实 C++ registry 调用；两种消费都取消 Salts 环境变量并显式禁用包查找，
+PluginHost 示例则消费完整安装依赖。工作流保存编译、链接、CTest 与 loader 证据，并检查源码/构建路径泄漏。
+Linux profile 对 producer 和消费者启用 ASan/UBSan；示例的两项 sanitizer option 同时作用于 C 模块与
+C++ host。MSVC 保留 ASan，UBSan 请求明确拒绝。具体命令见
+[`plugin_echo/README.md`](../examples/plugin_echo/README.md)；该 Linux profile 不覆盖窗口或 GPU backend。
 
 ### 9.7 桌面编辑器端到端参考实现
 
@@ -1284,4 +1301,3 @@ FlexUI::Desktop
 - 无脚本、无 plugin、无动画窗口不产生脚本/plugin frame callback。
 - OpenGL GPU smoke、resize、DPI、text input、IME、clipboard 和 focus 回归通过。
 - benchmark 给出可复算基线，不用未经测量的“快于 Electron/Qt”作为完成结论。
-

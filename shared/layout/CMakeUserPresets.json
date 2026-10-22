@@ -1,0 +1,50 @@
+{
+    "version": 6,
+    "include": ["CMakePresets.json"],
+    "configurePresets": [
+        {
+            "name": "win-release-user",
+            "displayName": "GraphLayout Release (Windows, MSVC)",
+            "inherits": ["base-release", "flags-msvc"],
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "binaryDir": "${sourceDir}/build/win-release",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "VCPKG_MANIFEST_MODE": "ON",
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/build/win-release/vcpkg_installed"
+            },
+            "environment": {
+                "VCPKG_ROOT": "C:/tools/vcpkg",
+                "PATH": "${sourceDir}/build/win-release;${sourceDir}/build/win-release/vcpkg_installed/x64-windows/bin;$penv{PATH}"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "win-release-user",
+            "configurePreset": "win-release-user"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "win-release-user",
+            "configurePreset": "win-release-user",
+            "execution": {
+                "noTestsAction": "error",
+                "stopOnFailure": false
+            },
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

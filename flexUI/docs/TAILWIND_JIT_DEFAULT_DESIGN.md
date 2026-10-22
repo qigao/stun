@@ -8,11 +8,11 @@
 > 实施记录：P1-P8 的核心代码和相邻测试已落地；P9 已加入确定性离屏渲染快照与
 > 典型/大树性能基线。原生窗口人工 smoke 和仓库既有失败项仍保留在实施计划中。
 
-## 2026-09-20 兼容目标更新
+## 2026-10-22 兼容目标更新
 
 本文主要记录当前 whitelist/JIT 实现及其已有不变量；它不再定义长期对外 Tailwind 语义。
 
-长期 authoring contract 改为：
+以下是长期目标，不能视为当前 catalog/JIT 已实现的完整能力：
 
 - 使用标准 `class="..."`；
 - 固定一个上游 Tailwind 版本/compatibility profile；
@@ -22,9 +22,9 @@
 - official Tailwind toolchain 只作为 differential-test oracle，不成为安装运行时依赖；
 - 识别但未实现的 Tailwind 语义明确报 Unsupported，不做本地 fallback/reinterpretation。
 
-因此 `utility_whitelist.json`、`UtilityCatalog` 和 exact-token lookup 在迁移期间继续可用并保持测试，但它们是 current implementation/coverage data，不再是永久公开语义事实源。迁移跟踪：`stun#10`。
+因此 `utility_whitelist.json`、`UtilityCatalog` 和 exact-token lookup 在迁移期间继续可用并保持测试，但它们是 current implementation/coverage data，不再是永久公开语义事实源。迁移跟踪：[#17](https://github.com/qigao/stun/issues/17)。
 
-## 背景
+## 历史背景（默认内置 JIT 之前）
 
 `flexUI` 已具备基于显式白名单的 Tailwind-like Utility JIT。`Box` 会扫描
 Element 树中的 class token，生成确定性的 CSS stylesheet，再交给现有
@@ -49,7 +49,7 @@ JIT 管理。
 - Element tree 是 flexUI 唯一的 style/layout tree，见
   [ARCHITECTURE.md](ARCHITECTURE.md) 和
   [WIDGET_DEVELOPMENT.md](WIDGET_DEVELOPMENT.md)。
-- Utility whitelist 的事实源是
+- 当前 catalog 的生成输入是
   [`tools/shadcn-ir/schema/utility_whitelist.json`](../../tools/shadcn-ir/schema/utility_whitelist.json)。
   它是受控的 Tailwind-like 子集，不是完整 Tailwind 编译器。
 - `Box::enable_utility_jit()` 已具备原子替换 stylesheet、资源上限和失败保持旧

@@ -28,63 +28,6 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
           flexUI::WidgetRegistryErrorCode::InvalidFactory);
   }
 
-  it("exposes explicit container and widget descriptors") {
-    auto registry = flexUI::WidgetRegistry::builtins();
-    const auto *container = registry.descriptor("div");
-    const auto *widget = registry.descriptor("button");
-
-    check_not_null(container);
-    check_not_null(widget);
-    if (container && widget) {
-      check(container->kind == flexUI::UiNodeKind::Container);
-      check(container->content == flexUI::UiContentModel::Children);
-      check(widget->kind == flexUI::UiNodeKind::Widget);
-      check(widget->content == flexUI::UiContentModel::Children);
-    }
-  }
-
-  it("validates content models before invoking widget factories") {
-    int factory_calls = 0;
-    flexUI::WidgetRegistry registry;
-    check(registry.register_element("root").code ==
-          flexUI::WidgetRegistryErrorCode::None);
-    check(registry
-              .register_widget(
-                  "leaf",
-                  [&factory_calls](const flexUI::UiNodeDefinition &) {
-                    ++factory_calls;
-                    return std::make_unique<flexUI::ButtonWidget>();
-                  },
-                  flexUI::UiContentModel::Empty)
-              .code == flexUI::WidgetRegistryErrorCode::None);
-
-    const auto compiled = flexUI::compile_ui_xml(R"(
-      <ui name="Schema">
-        <root id="root">
-          <leaf id="parent">
-            <leaf id="child"/>
-          </leaf>
-        </root>
-      </ui>
-    )");
-    check(static_cast<bool>(compiled));
-
-    const auto error = registry.validate(*compiled.program);
-    check(static_cast<bool>(error));
-    check(error.code == flexUI::UiDocumentErrorCode::InvalidNode);
-    check(error.line > 0);
-    check(error.column > 0);
-    check_equal(factory_calls, 0);
-
-    flexUI::Box box(nullptr);
-    const auto instantiated =
-        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry);
-    check_false(static_cast<bool>(instantiated));
-    check(instantiated.error.code == flexUI::UiDocumentErrorCode::InvalidNode);
-    check_null(box.root());
-    check_equal(factory_calls, 0);
-  }
-
   it("constructs concrete built-in widget types from XML tags") {
     const auto compiled = flexUI::compile_ui_xml(R"(
       <ui name="Controls">
@@ -139,12 +82,6 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
     check(static_cast<bool>(compiled));
 
     auto registry = flexUI::WidgetRegistry::builtins();
-    const auto schema_error = registry.validate(*compiled.program);
-    check(static_cast<bool>(schema_error));
-    check(schema_error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
-    check(schema_error.line > 0);
-    check(schema_error.column > 0);
-
     flexUI::Box box(nullptr);
     const auto result =
         flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry);
@@ -224,5 +161,167 @@ spec("FlexUI WidgetRegistry creates typed XML widget trees") {
     check(static_cast<bool>(result));
     check_null(box.get_by_id("plain")->widget);
     check_equal(box.get_by_id("plain")->text(), "Plain");
+  }
+}
+
+
+spec("FlexUI registry preflight rejects invalid content before construction") {
+  it("classifies built-in leaves text widgets composites and structural containers") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    for (const auto *tag : {"input", "image", "slider", "progress", "select", "spinner", "divider"}) {
+      const auto *schema = registry.descriptor(tag);
+      check_not_null(schema);
+      if (schema) {
+        check(schema->kind == flexUI::UiNodeKind::Widget);
+        check(schema->content == flexUI::UiContentModel::Empty);
+      }
+    }
+    for (const auto *tag : {"label", "textarea", "badge", "checkbox", "radio", "switch", "markdown"}) {
+      const auto *schema = registry.descriptor(tag);
+      check_not_null(schema);
+      if (schema) check(schema->content == flexUI::UiContentModel::Text);
+    }
+    check(registry.descriptor("button")->content == flexUI::UiContentModel::TextAndChildren);
+    check(registry.descriptor("div")->kind == flexUI::UiNodeKind::Container);
+    check(registry.descriptor("div")->content == flexUI::UiContentModel::TextAndChildren);
+    check_null(registry.descriptor("unregistered"));
+  }
+
+  it("rejects an unknown later sibling before calling an earlier factory") {
+    int calls = 0;
+    flexUI::WidgetRegistry registry;
+    check_false(static_cast<bool>(registry.register_element("root")));
+    check_false(static_cast<bool>(registry.register_widget("probe", [&](const flexUI::UiNodeDefinition &) {
+      ++calls;
+      return std::make_unique<flexUI::ButtonWidget>();
+    }, flexUI::UiContentModel::Empty)));
+    auto parsed = flexUI::compile_ui_xml("<ui name=\"Order\"><root id=\"root\"><probe id=\"first\"/><missing id=\"last\"/></root></ui>");
+    check(static_cast<bool>(parsed));
+    if (!parsed) return;
+    flexUI::Box box(nullptr);
+    for (const bool compiled : {false, true}) {
+      const auto result = compiled
+          ? flexUI::UiDocumentInstantiator::instantiate(box, *parsed.program, registry)
+          : flexUI::UiDocumentInstantiator::instantiate(box, parsed.program->definition(), registry);
+      check_false(static_cast<bool>(result));
+      check(result.error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+      check_equal(calls, 0);
+      check_null(box.root());
+      check_null(box.get_by_id("first"));
+      check_null(box.get_by_id("last"));
+    }
+  }
+
+  it("rejects leaf children and text before allocating a typed tree") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    for (const auto *xml : {
+        "<ui name=\"Leaf\"><input id=\"root\"><label id=\"child\"/></input></ui>",
+        "<ui name=\"Leaf\"><image id=\"root\" text=\"\"/></ui>",
+        "<ui name=\"Leaf\"><label id=\"root\"><button id=\"child\"/></label></ui>"}) {
+      const auto parsed = flexUI::compile_ui_xml(xml);
+      check(static_cast<bool>(parsed));
+      if (!parsed) continue;
+      flexUI::Box box(nullptr);
+      const auto result = flexUI::UiDocumentInstantiator::instantiate(box, *parsed.program, registry);
+      check_false(static_cast<bool>(result));
+      check_null(box.root());
+      check_null(box.get_by_id("root"));
+    }
+  }
+
+  it("reports exact node positions and bounded traversal errors") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto parsed = flexUI::compile_ui_xml("<ui name=\"Position\">\n  <div id=\"root\">\n    <unknown id=\"bad\"/>\n  </div>\n</ui>");
+    check(static_cast<bool>(parsed));
+    if (!parsed) return;
+    auto error = registry.validate(*parsed.program);
+    check(error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+    check_equal(error.line, 3);
+    check_equal(error.column, 6);
+    flexUI::UiDocumentLimits limits;
+    limits.max_nodes = 1;
+    error = registry.validate(*parsed.program, limits);
+    check(error.code == flexUI::UiDocumentErrorCode::NodeLimitExceeded);
+    limits.max_nodes = 2;
+    limits.max_depth = 1;
+    error = registry.validate(*parsed.program, limits);
+    check(error.code == flexUI::UiDocumentErrorCode::DepthLimitExceeded);
+  }
+
+  it("checks direct factory content and preserves duplicate descriptors") {
+    int calls = 0;
+    flexUI::WidgetRegistry registry;
+    const auto factory = [&](const flexUI::UiNodeDefinition &) {
+      ++calls;
+      return std::make_unique<flexUI::ButtonWidget>();
+    };
+    check_false(static_cast<bool>(registry.register_widget("leaf", factory, flexUI::UiContentModel::Empty)));
+    check(registry.register_widget("leaf", factory, flexUI::UiContentModel::Text).code == flexUI::WidgetRegistryErrorCode::DuplicateTag);
+    check(registry.descriptor("leaf")->content == flexUI::UiContentModel::Empty);
+    flexUI::UiNodeDefinition invalid;
+    invalid.tag = "leaf";
+    invalid.id = "subject";
+    invalid.properties["text"] = std::string("invalid");
+    const auto result = registry.create(invalid);
+    check(result.error.code == flexUI::WidgetRegistryErrorCode::InvalidContent);
+    check_equal(calls, 0);
+    check(registry.register_element("bad", static_cast<flexUI::UiContentModel>(99)).code == flexUI::WidgetRegistryErrorCode::InvalidDescriptor);
+    check_false(registry.contains("bad"));
+  }
+}
+
+
+spec("FlexUI custom registration defaults remain compatible") {
+  it("allows text and children unless a custom tag explicitly restricts them") {
+    flexUI::WidgetRegistry registry;
+    check_false(static_cast<bool>(registry.register_element("custom")));
+    flexUI::UiDocumentDefinition definition;
+    definition.root.tag = "custom";
+    definition.root.properties["text"] = std::string("Caption");
+    definition.root.children.emplace_back();
+    definition.root.children.back().tag = "custom";
+    check_false(static_cast<bool>(registry.validate(definition)));
+    check_false(static_cast<bool>(registry.register_element("children", flexUI::UiContentModel::Children)));
+    definition.root.tag = "children";
+    check(registry.validate(definition).code == flexUI::UiDocumentErrorCode::InvalidProperty);
+  }
+}
+
+
+spec("FlexUI anonymous nodes stay outside the named index") {
+  it("constructs multiple anonymous widgets and preserves named handles in both typed overloads") {
+    const auto compiled = flexUI::compile_ui_xml(
+      "<ui name=\"Anonymous\"><main><button text=\"First\"/><button text=\"Second\"/><label id=\"title\" text=\"Named\"/></main></ui>");
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    for (const bool use_program : {false, true}) {
+      flexUI::Box box(nullptr);
+      const auto result = use_program
+        ? flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry)
+        : flexUI::UiDocumentInstantiator::instantiate(box, compiled.program->definition(), registry);
+      check(static_cast<bool>(result));
+      if (!result) continue;
+      check_equal(box.root()->child_count(), 3);
+      for (std::size_t index = 0; index < 2; ++index) {
+        auto *child = box.root()->child_at(index);
+        check_true(child->id().empty());
+        check_false(static_cast<bool>(box.handle_for(*child)));
+        auto *button = dynamic_cast<flexUI::ButtonWidget *>(child->widget);
+        check_not_null(button);
+        if (button) check_equal(button->text(), index == 0 ? "First" : "Second");
+      }
+      check_equal(result.tree.elements_by_id.size(), 1);
+      check_null(box.get_by_id(""));
+      check_true(box.root()->id().empty());
+      check_false(static_cast<bool>(box.handle_for(*box.root())));
+      auto *title = box.get_by_id("title");
+      check_not_null(title);
+      check_not_null(dynamic_cast<flexUI::LabelWidget *>(title->widget));
+      const auto handle = box.handle_for(*title);
+      check(static_cast<bool>(handle));
+      check_equal(box.resolve_handle(handle), title);
+      check_equal(title->text(), "Named");
+    }
   }
 }

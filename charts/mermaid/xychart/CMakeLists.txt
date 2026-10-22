@@ -31,11 +31,11 @@ target_include_directories(xychart PUBLIC
     include 
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
-target_link_libraries(xychart PUBLIC TurboParser::Parser flex_runtime)
+target_link_libraries(xychart PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(xychart_test tests/test_parser.c)
-target_link_libraries(xychart_test xychart TurboUtils::TinyTest TurboParser::Parser)
+target_link_libraries(xychart_test xychart Salts::TinyTest Salts::JsonParser)
 set_target_properties(xychart_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(xychart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/xychart")
 

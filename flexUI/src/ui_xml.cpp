@@ -1,8 +1,9 @@
 #include <flexUI/ui_xml.h>
 
 #include <pugixml.hpp>
-#include <turbo_vstr.h>
+#include "ui_xml_admission.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -28,28 +29,10 @@ UiDocumentError make_error(UiDocumentErrorCode code, std::string message, int li
   return {code, std::move(message), line, column};
 }
 
-SourceSpan source_span(std::string_view source, std::ptrdiff_t offset) {
-  SourceSpan span{1, 1, 0};
-  if (offset <= 0) {
-    return span;
-  }
-  const auto limit = static_cast<std::size_t>(offset) < source.size()
-                         ? static_cast<std::size_t>(offset)
-                         : source.size();
-  for (std::size_t index = 0; index < limit; ++index) {
-    if (source[index] == '\n') {
-      ++span.line;
-      span.column = 1;
-    } else {
-      ++span.column;
-    }
-  }
-  return span;
-}
 
 UiDocumentError node_error(std::string_view source, const pugi::xml_node &node,
                            UiDocumentErrorCode code, std::string message) {
-  const auto location = source_span(source, node.offset_debug());
+  const auto location = detail::xml_source_span(source, node.offset_debug());
   return make_error(code, std::move(message), location.line, location.column);
 }
 
@@ -57,17 +40,10 @@ bool is_namespace_declaration(std::string_view name) {
   return name == "xmlns" || name.rfind("xmlns:", 0) == 0;
 }
 
-bool has_non_whitespace(std::string_view text) {
-  return text.find_first_not_of(" \t\r\n") != std::string_view::npos;
-}
+constexpr const char *kXmlWhitespace = " \t\r\n";
 
-std::string_view trim_xml_text(std::string_view text) {
-  const auto first = text.find_first_not_of(" \t\r\n");
-  if (first == std::string_view::npos) {
-    return {};
-  }
-  const auto last = text.find_last_not_of(" \t\r\n");
-  return text.substr(first, last - first + 1);
+bool has_non_whitespace(std::string_view text) {
+  return text.find_first_not_of(kXmlWhitespace) != std::string_view::npos;
 }
 
 bool is_string_property(std::string_view name) {
@@ -160,10 +136,10 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
 
   definition.tag.assign(tag);
   definition.id.assign(id);
-  const auto location = source_span(source, xml_node.offset_debug());
-  definition.source = SourceSpan{location.line, location.column, tag.size()};
   std::unordered_set<std::string> property_names;
   std::size_t id_attribute_count = 0;
+  const auto location = detail::xml_source_span(source, xml_node.offset_debug());
+  definition.source = SourceSpan{location.line, location.column, tag.size()};
   for (const auto &attribute : xml_node.attributes()) {
     const std::string_view xml_name(attribute.name());
     if (xml_name == "id") {
@@ -203,7 +179,9 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
                                       SourceSpan{location.line, location.column, xml_name.size()});
   }
 
-  std::string text_content;
+  std::size_t text_bytes = 0;
+  std::size_t content_begin = 0;
+  std::size_t content_end = 0;
   SourceSpan text_source;
   bool has_text_content = false;
   bool has_element_children = false;
@@ -218,17 +196,22 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
       }
     } else if (child.type() == pugi::node_pcdata || child.type() == pugi::node_cdata) {
       const std::string_view text(child.value());
-      if (has_non_whitespace(text) && !has_text_content) {
-        const auto text_location = source_span(source, child.offset_debug());
-        text_source = SourceSpan{text_location.line, text_location.column, text.size()};
-        has_text_content = true;
+      const auto first = text.find_first_not_of(kXmlWhitespace);
+      if (first != std::string_view::npos) {
+        if (!has_text_content) {
+          content_begin = text_bytes + first;
+          // Anchor the original XML text node. Entity/CDATA decoding and outer
+          // whitespace trimming need not map to one contiguous source span.
+          text_source = detail::xml_source_span(source, child.offset_debug());
+          has_text_content = true;
+        }
+        content_end = text_bytes + text.find_last_not_of(kXmlWhitespace) + 1;
       }
-      text_content.append(text.data(), text.size());
+      text_bytes += text.size();
     }
   }
 
-  const auto normalized_text = trim_xml_text(text_content);
-  if (!normalized_text.empty()) {
+  if (has_text_content) {
     if (has_element_children) {
       return make_error(UiDocumentErrorCode::InvalidNode,
                         "mixed XML text and child elements are not supported",
@@ -245,12 +228,30 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
                         "UI node exceeds maximum property count: " + definition.id,
                         text_source.line, text_source.column);
     }
-    if (normalized_text.size() > limits.max_string_bytes) {
+    const auto normalized_size = content_end - content_begin;
+    if (normalized_size > limits.max_string_bytes) {
       return make_error(UiDocumentErrorCode::StringLimitExceeded,
                         "XML text content exceeds the string limit",
                         text_source.line, text_source.column);
     }
-    definition.properties.emplace("text", std::string(normalized_text));
+    // Determine the admitted size before allocating; formatting whitespace
+    // alone must not consume the text value budget or require a large copy.
+    std::string text_content;
+    text_content.reserve(normalized_size);
+    std::size_t offset = 0;
+    for (const auto &child : xml_node.children()) {
+      if (child.type() != pugi::node_pcdata && child.type() != pugi::node_cdata) {
+        continue;
+      }
+      const std::string_view text(child.value());
+      const auto begin = content_begin > offset ? std::min(content_begin - offset, text.size()) : 0;
+      const auto end = content_end > offset ? std::min(content_end - offset, text.size()) : 0;
+      if (end > begin) {
+        text_content.append(text.data() + begin, end - begin);
+      }
+      offset += text.size();
+    }
+    definition.properties.emplace("text", std::move(text_content));
     definition.property_spans.emplace("text", text_source);
   }
   return {};
@@ -350,22 +351,16 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
     return result;
   }
 
-  const auto invalid_utf8 =
-      vstr_utf8_invalid_offset(vstr_from_buf(source.data(), source.size()));
-  if (invalid_utf8 != VSTR_NPOS) {
-    const auto location =
-        source_span(source, static_cast<std::ptrdiff_t>(invalid_utf8));
-    result.error = make_error(UiDocumentErrorCode::ParseError,
-                              "UI XML source must be valid UTF-8",
-                              location.line, location.column);
+  result.error = detail::validate_ui_xml_utf8(source);
+  if (result.error) {
     return result;
   }
 
   pugi::xml_document document;
   const auto parsed =
-      document.load_buffer(source.data(), source.size(), pugi::parse_default, pugi::encoding_utf8);
+      document.load_buffer(source.data(), source.size(), pugi::parse_default | pugi::parse_ws_pcdata, pugi::encoding_utf8);
   if (!parsed) {
-    const auto location = source_span(source, parsed.offset);
+    const auto location = detail::xml_source_span(source, parsed.offset);
     result.error = make_error(UiDocumentErrorCode::ParseError,
                               std::string("invalid UI XML: ") + parsed.description(), location.line,
                               location.column);
