@@ -1,7 +1,7 @@
 #include <flexUI/ui_xml.h>
 
 #include <pugixml.hpp>
-#include <turbo_vstr.h>
+#include "ui_xml_admission.h"
 
 #include <charconv>
 #include <cmath>
@@ -28,28 +28,10 @@ UiDocumentError make_error(UiDocumentErrorCode code, std::string message, int li
   return {code, std::move(message), line, column};
 }
 
-SourceSpan source_span(std::string_view source, std::ptrdiff_t offset) {
-  SourceSpan span{1, 1, 0};
-  if (offset <= 0) {
-    return span;
-  }
-  const auto limit = static_cast<std::size_t>(offset) < source.size()
-                         ? static_cast<std::size_t>(offset)
-                         : source.size();
-  for (std::size_t index = 0; index < limit; ++index) {
-    if (source[index] == '\n') {
-      ++span.line;
-      span.column = 1;
-    } else {
-      ++span.column;
-    }
-  }
-  return span;
-}
 
 UiDocumentError node_error(std::string_view source, const pugi::xml_node &node,
                            UiDocumentErrorCode code, std::string message) {
-  const auto location = source_span(source, node.offset_debug());
+  const auto location = detail::xml_source_span(source, node.offset_debug());
   return make_error(code, std::move(message), location.line, location.column);
 }
 
@@ -151,10 +133,10 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
 
   definition.tag.assign(tag);
   definition.id.assign(id);
-  const auto location = source_span(source, xml_node.offset_debug());
-  definition.source = SourceSpan{location.line, location.column, tag.size()};
   std::unordered_set<std::string> property_names;
   std::size_t id_attribute_count = 0;
+  const auto location = detail::xml_source_span(source, xml_node.offset_debug());
+  definition.source = SourceSpan{location.line, location.column, tag.size()};
   for (const auto &attribute : xml_node.attributes()) {
     const std::string_view xml_name(attribute.name());
     if (xml_name == "id") {
@@ -307,14 +289,8 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
     return result;
   }
 
-  const auto invalid_utf8 =
-      vstr_utf8_invalid_offset(vstr_from_buf(source.data(), source.size()));
-  if (invalid_utf8 != VSTR_NPOS) {
-    const auto location =
-        source_span(source, static_cast<std::ptrdiff_t>(invalid_utf8));
-    result.error = make_error(UiDocumentErrorCode::ParseError,
-                              "UI XML source must be valid UTF-8",
-                              location.line, location.column);
+  result.error = detail::validate_ui_xml_utf8(source);
+  if (result.error) {
     return result;
   }
 
@@ -322,7 +298,7 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   const auto parsed =
       document.load_buffer(source.data(), source.size(), pugi::parse_default, pugi::encoding_utf8);
   if (!parsed) {
-    const auto location = source_span(source, parsed.offset);
+    const auto location = detail::xml_source_span(source, parsed.offset);
     result.error = make_error(UiDocumentErrorCode::ParseError,
                               std::string("invalid UI XML: ") + parsed.description(), location.line,
                               location.column);

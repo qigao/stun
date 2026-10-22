@@ -6,6 +6,8 @@
 #include <flexUI/widgets/textarea_widget.h>
 #include <flexUI/transition.h>
 #include <flexUI/detail/css_length.h>
+#include <flexUI/detail/css_semantic_value.h>
+#include <flexUI/detail/css_typed_value.h>
 #include <lexbor/css/css.h>
 #include <lexbor/css/rule.h>
 #include <lexbor/css/selectors/selectors.h>
@@ -593,9 +595,16 @@ public:
   LexborCSSParser(const LexborCSSParser &) = delete;
   LexborCSSParser &operator=(const LexborCSSParser &) = delete;
   lxb_css_stylesheet_t *parse(const char *css, size_t len) {
-    auto *sheet = lxb_css_stylesheet_parse(parser_, reinterpret_cast<const lxb_char_t *>(css), len);
+    auto *sheet = lxb_css_stylesheet_create(nullptr);
     if (!sheet)
+      throw std::runtime_error("Failed to create CSS stylesheet");
+    const auto status =
+        lxb_css_stylesheet_parse(sheet, parser_,
+                                 reinterpret_cast<const lxb_char_t *>(css), len);
+    if (status != LXB_STATUS_OK) {
+      lxb_css_stylesheet_destroy(sheet, true);
       throw std::runtime_error("Failed to parse CSS");
+    }
     return sheet;
   }
   lxb_css_log_t* log() const { return lxb_css_parser_log(parser_); }
@@ -726,7 +735,113 @@ struct CSSDeclaration {
   std::string value;
   bool important = false;
   uint64_t source_order = 0;
+  const detail::StylePropertyDesc* resolved_property = nullptr;
+  detail::CompiledCssLiteral compiled_value{};
+  detail::CompiledPropertyWriteList compiled_writes{};
+
+  CSSDeclaration(std::string property_value, std::string value_value,
+                 bool important_value, uint64_t source_order_value)
+      : property(std::move(property_value)),
+        value(std::move(value_value)),
+        important(important_value),
+        source_order(source_order_value),
+        resolved_property(detail::style_property_find(property)),
+        compiled_value(detail::compile_css_literal(resolved_property, value)),
+        compiled_writes(detail::compile_css_property_writes(property, value)) {}
 };
+
+static const void* compiled_literal_data(
+    const detail::CompiledCssLiteral& literal) {
+  if (!literal.has_value()) {
+    return nullptr;
+  }
+  if (const auto* value = std::get_if<float>(&literal.value)) {
+    return value;
+  }
+  if (const auto* value = std::get_if<Color>(&literal.value)) {
+    return value;
+  }
+  return nullptr;
+}
+
+static bool apply_compiled_writes(
+    const detail::CompiledPropertyWriteList& writes,
+    ComputedStyle* style) {
+  if (!style || writes.empty()) {
+    return false;
+  }
+
+  // Preflight the complete write set before mutating ComputedStyle. Compound
+  // declarations never partially enter the typed path.
+  for (std::size_t i = 0; i < writes.size(); ++i) {
+    const auto& write = writes[i];
+    if (!write.property || !write.property->write ||
+        !write.value.has_value() ||
+        !detail::style_property_accepts_type(*write.property, write.value.type) ||
+        !compiled_literal_data(write.value)) {
+      return false;
+    }
+  }
+
+  for (std::size_t i = 0; i < writes.size(); ++i) {
+    const auto& write = writes[i];
+    if (!detail::style_property_write(*write.property, *style,
+                                      write.value.type,
+                                      compiled_literal_data(write.value))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool apply_compiled_declaration(const CSSDeclaration& declaration,
+                                       ComputedStyle* style) {
+  if (!style) {
+    return false;
+  }
+  if (!declaration.compiled_writes.empty()) {
+    return apply_compiled_writes(declaration.compiled_writes, style);
+  }
+  if (!declaration.resolved_property ||
+      !declaration.compiled_value.has_value() ||
+      !detail::style_property_accepts_type(*declaration.resolved_property,
+                                           declaration.compiled_value.type)) {
+    return false;
+  }
+
+  switch (declaration.resolved_property->id) {
+  case detail::StylePropertyId::Opacity:
+  case detail::StylePropertyId::OutlineWidth:
+  case detail::StylePropertyId::OutlineOffset:
+  case detail::StylePropertyId::RingWidth:
+  case detail::StylePropertyId::RingOffset: {
+    const auto* value = std::get_if<float>(&declaration.compiled_value.value);
+    return value &&
+           detail::style_property_write(*declaration.resolved_property, *style,
+                                        declaration.compiled_value.type, value);
+  }
+  case detail::StylePropertyId::Visibility: {
+    const auto* value =
+        std::get_if<Visibility>(&declaration.compiled_value.value);
+    return value &&
+           detail::style_property_write(*declaration.resolved_property, *style,
+                                        declaration.compiled_value.type, value);
+  }
+  case detail::StylePropertyId::BackgroundColor:
+  case detail::StylePropertyId::OutlineColor:
+  case detail::StylePropertyId::RingColor:
+  case detail::StylePropertyId::RingOffsetColor: {
+    const auto* value = std::get_if<Color>(&declaration.compiled_value.value);
+    return value &&
+           detail::style_property_write(*declaration.resolved_property, *style,
+                                        declaration.compiled_value.type, value);
+  }
+  default:
+    // Text color, border color, shadow values and all other properties keep
+    // their existing computed-value/string path until separately qualified.
+    return false;
+  }
+}
 
 using DeclarationList = std::vector<CSSDeclaration>;
 
@@ -1950,36 +2065,8 @@ static bool extract_media_prelude_and_block(const lxb_css_rule_at_t* at_rule,
                                             std::string& prelude,
                                             std::string& block) {
   std::string serialized;
-  const char* source_begin = source_css.data();
-  const char* source_end = source_begin + source_css.size();
-  const char* rule_begin =
-      reinterpret_cast<const char*>(at_rule ? at_rule->rule.begin : nullptr);
-
-  if (rule_begin != nullptr && rule_begin >= source_begin &&
-      rule_begin < source_end) {
-    const size_t start_offset = static_cast<size_t>(rule_begin - source_begin);
-    size_t media_pos = source_css.find("@media", start_offset);
-    if (media_pos != std::string::npos) {
-      size_t brace_pos = source_css.find('{', media_pos + 6);
-      if (brace_pos != std::string::npos) {
-        int brace_depth = 1;
-        size_t i = brace_pos + 1;
-        for (; i < source_css.size(); ++i) {
-          if (source_css[i] == '{') {
-            ++brace_depth;
-          } else if (source_css[i] == '}') {
-            --brace_depth;
-            if (brace_depth == 0) {
-              serialized = source_css.substr(media_pos, i - media_pos + 1);
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if (serialized.empty() && !serialize_rule_to_string(&at_rule->rule, serialized)) {
+  (void) source_css;
+  if (!serialize_rule_to_string(&at_rule->rule, serialized)) {
     return false;
   }
 
@@ -3361,7 +3448,9 @@ public:
       const auto& prop = declaration.property;
       if (!(prop.size() > 2 && prop[0] == '-' && prop[1] == '-') &&
           prop != "color" && prop != "direction") {
-        apply_property(prop, declaration.value, elem->computed_style);
+        if (!apply_compiled_declaration(declaration, elem->computed_style)) {
+          apply_property(prop, declaration.value, elem->computed_style);
+        }
       }
     }
 
@@ -3431,6 +3520,17 @@ public:
 
   void clear_baseline_styles() {
     baseline_styles_.clear();
+  }
+
+  void forget_element(const Element* element) noexcept {
+    if (!element) return;
+    baseline_styles_.erase(element);
+    container_registrations_.erase(element);
+    if (current_element_ == element) current_element_ = nullptr;
+  }
+
+  size_t tracked_element_count() const noexcept {
+    return baseline_styles_.size();
   }
 
   const std::vector<AnimationKeyframeStep>* keyframes(
@@ -4191,8 +4291,7 @@ private:
       if (!supports_property_name(declaration.property)) {
         add_diagnostic(CssDiagnosticSeverity::Warning, selector_text,
                        declaration.property, declaration.value,
-                       "unsupported CSS property",
-                       style_rule->rule.begin);
+                       "unsupported CSS property");
       }
       const std::string property = to_lower_copy(declaration.property);
       const std::string value = to_lower_copy(trim_copy(declaration.value));
@@ -4202,7 +4301,7 @@ private:
           std::isnan(detail::parse_css_length(value))) {
         add_diagnostic(CssDiagnosticSeverity::Warning, selector_text,
                        declaration.property, declaration.value,
-                       "invalid CSS size value", style_rule->rule.begin);
+                       "invalid CSS size value");
         return true;
       }
       return false;
@@ -5753,9 +5852,12 @@ private:
           parse_style_color(value, style, style->ring_offset_color);
 
     // Visibility & Overflow
-    if (prop_sym == PROP_OPACITY)
-      style->opacity = std::stof(value);
-    else if (prop_sym == PROP_VISIBILITY) {
+    if (prop_sym == PROP_OPACITY) {
+      const auto parsed = detail::parse_css_number_literal(value);
+      if (parsed.is_concrete()) {
+        style->opacity = parsed.value;
+      }
+    } else if (prop_sym == PROP_VISIBILITY) {
       if (value == "visible")
         style->visibility = Visibility::Visible;
       else if (value == "hidden")
@@ -6337,327 +6439,11 @@ private:
     }
   }
 
-  Color parse_color(const std::string &value) {
-    const std::string input = to_lower_copy(trim_copy(value));
-    if (input.empty())
-      return Color(0.0f, 0.0f, 0.0f, 0.0f);
-
-    // Widget bridge variables historically store RGBA as four comma-separated
-    // components. Accept that representation after var() resolution so the
-    // same token can feed standard CSS color properties on semantic parts.
-    const auto serialized = split_top_level_csv(input);
-    if (serialized.size() == 4) {
-      float channels[4] = {};
-      bool valid = true;
-      for (size_t i = 0; i < serialized.size(); ++i) {
-        const std::string token = trim_copy(serialized[i]);
-        char* end = nullptr;
-        channels[i] = std::strtof(token.c_str(), &end);
-        if (end == token.c_str() || (end && *end != '\0')) {
-          valid = false;
-          break;
-        }
-      }
-      if (valid) {
-        constexpr float channel_max = 255.0f;
-        const auto rgb = [channel_max](float channel) {
-          return std::clamp(channel, 0.0f, channel_max) / channel_max;
-        };
-        const float alpha = channels[3] > 1.0f
-                                ? rgb(channels[3])
-                                : std::clamp(channels[3], 0.0f, 1.0f);
-        return Color(rgb(channels[0]), rgb(channels[1]), rgb(channels[2]),
-                     alpha);
-      }
-    }
-
-    // Hex color
-    if (input[0] == '#') {
-      std::string hex = input.substr(1);
-      if (hex.size() == 3) {
-        // #RGB -> #RRGGBB
-        hex = std::string(2, hex[0]) + std::string(2, hex[1]) + std::string(2, hex[2]);
-      }
-      if (hex.size() == 6) {
-        unsigned int r, g, b;
-        sscanf(hex.c_str(), "%2x%2x%2x", &r, &g, &b);
-        return Color(r / 255.0f, g / 255.0f, b / 255.0f, 1.0f);
-      }
-      if (hex.size() == 8) {
-        unsigned int r, g, b, a;
-        sscanf(hex.c_str(), "%2x%2x%2x%2x", &r, &g, &b, &a);
-        return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
-      }
-    }
-
-    const auto parse_alpha_token = [](const std::string& token) {
-      if (token.empty()) {
-        return 1.0f;
-      }
-      if (token.back() == '%') {
-        return std::clamp(
-            std::strtof(token.substr(0, token.size() - 1).c_str(), nullptr) /
-                100.0f,
-            0.0f, 1.0f);
-      }
-      return std::clamp(std::strtof(token.c_str(), nullptr), 0.0f, 1.0f);
-    };
-
-    const auto normalize_color_function_tokens = [](std::string inner) {
-      for (char& c : inner) {
-        if (c == ',' || c == '/') {
-          c = ' ';
-        }
-      }
-      return split_css_tokens(inner);
-    };
-
-    if (input.rfind("light-dark(", 0) == 0 && input.back() == ')') {
-      const std::string inner = input.substr(11, input.size() - 12);
-      const auto items = split_top_level_csv(inner);
-      if (!items.empty()) {
-        // flexUI currently has a stable light default unless explicit media rules
-        // override theme tokens.
-        return parse_color(items.front());
-      }
-    }
-
-    if (input.rfind("color-mix(", 0) == 0 && input.back() == ')') {
-      struct MixPart {
-        Color color;
-        float weight = NAN;
-      };
-
-      const auto parse_mix_part = [&](const std::string& raw) -> MixPart {
-        auto tokens = split_css_tokens(trim_copy(raw));
-        float weight = NAN;
-        if (!tokens.empty() && !tokens.back().empty() && tokens.back().back() == '%') {
-          weight = std::clamp(
-              std::strtof(tokens.back().substr(0, tokens.back().size() - 1).c_str(),
-                          nullptr) /
-                  100.0f,
-              0.0f, 1.0f);
-          tokens.pop_back();
-        }
-        return {parse_color(join_space_separated_tokens(tokens)), weight};
-      };
-
-      const std::string inner = input.substr(10, input.size() - 11);
-      const auto items = split_top_level_csv(inner);
-      if (items.size() >= 3) {
-        MixPart first = parse_mix_part(items[1]);
-        MixPart second = parse_mix_part(items[2]);
-        if (std::isnan(first.weight) && std::isnan(second.weight)) {
-          first.weight = 0.5f;
-          second.weight = 0.5f;
-        } else if (std::isnan(first.weight)) {
-          first.weight = 1.0f - second.weight;
-        } else if (std::isnan(second.weight)) {
-          second.weight = 1.0f - first.weight;
-        }
-
-        const float sum = first.weight + second.weight;
-        if (sum > 0.000001f) {
-          first.weight /= sum;
-          second.weight /= sum;
-        }
-
-        return Color(first.color.r * first.weight + second.color.r * second.weight,
-                     first.color.g * first.weight + second.color.g * second.weight,
-                     first.color.b * first.weight + second.color.b * second.weight,
-                     first.color.a * first.weight + second.color.a * second.weight);
-      }
-    }
-
-    const auto parse_rgb_component = [](const std::string& token) {
-      if (!token.empty() && token.back() == '%') {
-        return std::clamp(
-            std::strtof(token.substr(0, token.size() - 1).c_str(), nullptr) /
-                100.0f,
-            0.0f, 1.0f);
-      }
-      return std::clamp(std::strtof(token.c_str(), nullptr) / 255.0f, 0.0f,
-                        1.0f);
-    };
-
-    // rgb()/rgba() support both comma and modern slash-alpha syntaxes.
-    if (input.rfind("rgb", 0) == 0) {
-      const size_t start = input.find('(');
-      const size_t end = input.rfind(')');
-      if (start != std::string::npos && end != std::string::npos && end > start) {
-        const auto tokens =
-            normalize_color_function_tokens(input.substr(start + 1, end - start - 1));
-        if (tokens.size() >= 3) {
-          return Color(parse_rgb_component(tokens[0]), parse_rgb_component(tokens[1]),
-                       parse_rgb_component(tokens[2]),
-                       tokens.size() >= 4 ? parse_alpha_token(tokens[3]) : 1.0f);
-        }
-      }
-    }
-
-    const auto parse_percentage_token = [](const std::string& token) {
-      if (!token.empty() && token.back() == '%') {
-        return std::clamp(
-            std::strtof(token.substr(0, token.size() - 1).c_str(), nullptr) /
-                100.0f,
-            0.0f, 1.0f);
-      }
-      return std::clamp(std::strtof(token.c_str(), nullptr), 0.0f, 1.0f);
-    };
-
-    const auto parse_oklch_lightness_token = [](const std::string& token) {
-      if (!token.empty() && token.back() == '%') {
-        return std::clamp(
-            std::strtof(token.substr(0, token.size() - 1).c_str(), nullptr) /
-                100.0f,
-            0.0f, 1.0f);
-      }
-      return std::clamp(std::strtof(token.c_str(), nullptr), 0.0f, 1.0f);
-    };
-
-    const auto parse_angle_degrees = [](std::string token) {
-      if (ends_with_copy(token, "deg")) {
-        token = token.substr(0, token.size() - 3);
-      } else if (ends_with_copy(token, "rad")) {
-        return std::strtof(token.substr(0, token.size() - 3).c_str(), nullptr) *
-               180.0f / 3.14159265358979323846f;
-      } else if (ends_with_copy(token, "turn")) {
-        return std::strtof(token.substr(0, token.size() - 4).c_str(), nullptr) *
-               360.0f;
-      }
-      return std::strtof(token.c_str(), nullptr);
-    };
-
-    const auto hue_to_rgb = [](float p, float q, float t) {
-      if (t < 0.0f) t += 1.0f;
-      if (t > 1.0f) t -= 1.0f;
-      if (t < 1.0f / 6.0f) return p + (q - p) * 6.0f * t;
-      if (t < 1.0f / 2.0f) return q;
-      if (t < 2.0f / 3.0f) return p + (q - p) * (2.0f / 3.0f - t) * 6.0f;
-      return p;
-    };
-
-    // hsl()/hsla() is required for shadcn-style hsl(var(--token) / alpha).
-    if (input.rfind("hsl", 0) == 0) {
-      const size_t start = input.find('(');
-      const size_t end = input.rfind(')');
-      if (start != std::string::npos && end != std::string::npos && end > start) {
-        const auto tokens =
-            normalize_color_function_tokens(input.substr(start + 1, end - start - 1));
-        if (tokens.size() >= 3) {
-          float h = std::fmod(std::strtof(tokens[0].c_str(), nullptr), 360.0f);
-          if (h < 0.0f) h += 360.0f;
-          h /= 360.0f;
-          const float s = parse_percentage_token(tokens[1]);
-          const float l = parse_percentage_token(tokens[2]);
-          const float a = tokens.size() >= 4 ? parse_alpha_token(tokens[3]) : 1.0f;
-
-          if (s <= 0.0f) {
-            return Color(l, l, l, a);
-          }
-
-          const float q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
-          const float p = 2.0f * l - q;
-          return Color(hue_to_rgb(p, q, h + 1.0f / 3.0f),
-                       hue_to_rgb(p, q, h),
-                       hue_to_rgb(p, q, h - 1.0f / 3.0f), a);
-        }
-      }
-    }
-
-    const auto linear_to_srgb = [](float value) {
-      value = std::clamp(value, 0.0f, 1.0f);
-      if (value <= 0.0031308f) {
-        return 12.92f * value;
-      }
-      return 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
-    };
-
-    // OKLCH is used by modern Tailwind/shadcn theme tokens.
-    if (input.rfind("oklch", 0) == 0) {
-      const size_t start = input.find('(');
-      const size_t end = input.rfind(')');
-      if (start != std::string::npos && end != std::string::npos && end > start) {
-        const auto tokens =
-            normalize_color_function_tokens(input.substr(start + 1, end - start - 1));
-        if (tokens.size() >= 3) {
-          const float l = parse_oklch_lightness_token(tokens[0]);
-          const float c = std::max(std::strtof(tokens[1].c_str(), nullptr), 0.0f);
-          const float h = parse_angle_degrees(tokens[2]) *
-                          3.14159265358979323846f / 180.0f;
-          const float a = tokens.size() >= 4 ? parse_alpha_token(tokens[3]) : 1.0f;
-
-          const float ok_a = c * std::cos(h);
-          const float ok_b = c * std::sin(h);
-          const float l_ = l + 0.3963377774f * ok_a + 0.2158037573f * ok_b;
-          const float m_ = l - 0.1055613458f * ok_a - 0.0638541728f * ok_b;
-          const float s_ = l - 0.0894841775f * ok_a - 1.2914855480f * ok_b;
-          const float l3 = l_ * l_ * l_;
-          const float m3 = m_ * m_ * m_;
-          const float s3 = s_ * s_ * s_;
-
-          const float r_linear =
-              4.0767416621f * l3 - 3.3077115913f * m3 + 0.2309699292f * s3;
-          const float g_linear =
-              -1.2684380046f * l3 + 2.6097574011f * m3 - 0.3413193965f * s3;
-          const float b_linear =
-              -0.0041960863f * l3 - 0.7034186147f * m3 + 1.7076147010f * s3;
-          return Color(linear_to_srgb(r_linear), linear_to_srgb(g_linear),
-                       linear_to_srgb(b_linear), a);
-        }
-      }
-    }
-
-    if (input.rfind("oklab", 0) == 0) {
-      const size_t start = input.find('(');
-      const size_t end = input.rfind(')');
-      if (start != std::string::npos && end != std::string::npos && end > start) {
-        const auto tokens =
-            normalize_color_function_tokens(input.substr(start + 1, end - start - 1));
-        if (tokens.size() >= 3) {
-          const float l = parse_oklch_lightness_token(tokens[0]);
-          const float ok_a = std::strtof(tokens[1].c_str(), nullptr);
-          const float ok_b = std::strtof(tokens[2].c_str(), nullptr);
-          const float alpha = tokens.size() >= 4 ? parse_alpha_token(tokens[3]) : 1.0f;
-
-          const float l_ = l + 0.3963377774f * ok_a + 0.2158037573f * ok_b;
-          const float m_ = l - 0.1055613458f * ok_a - 0.0638541728f * ok_b;
-          const float s_ = l - 0.0894841775f * ok_a - 1.2914855480f * ok_b;
-          const float l3 = l_ * l_ * l_;
-          const float m3 = m_ * m_ * m_;
-          const float s3 = s_ * s_ * s_;
-
-          const float r_linear =
-              4.0767416621f * l3 - 3.3077115913f * m3 + 0.2309699292f * s3;
-          const float g_linear =
-              -1.2684380046f * l3 + 2.6097574011f * m3 - 0.3413193965f * s3;
-          const float b_linear =
-              -0.0041960863f * l3 - 0.7034186147f * m3 + 1.7076147010f * s3;
-          return Color(linear_to_srgb(r_linear), linear_to_srgb(g_linear),
-                       linear_to_srgb(b_linear), alpha);
-        }
-      }
-    }
-
-    // Named colors (common ones) - now using float [0.0-1.0]
-    if (input == "transparent")
-      return Color(0.0f, 0.0f, 0.0f, 0.0f);
-    if (input == "black")
-      return Color(0.0f, 0.0f, 0.0f, 1.0f);
-    if (input == "white")
-      return Color(1.0f, 1.0f, 1.0f, 1.0f);
-    if (input == "red")
-      return Color(1.0f, 0.0f, 0.0f, 1.0f);
-    if (input == "green")
-      return Color(0.0f, 0.5f, 0.0f, 1.0f); // CSS green is #008000
-    if (input == "blue")
-      return Color(0.0f, 0.0f, 1.0f, 1.0f);
-    if (input == "yellow")
-      return Color(1.0f, 1.0f, 0.0f, 1.0f);
-    if (input == "gray" || input == "grey")
-      return Color(0.5f, 0.5f, 0.5f, 1.0f);
-
-    return Color(0.0f, 0.0f, 0.0f, 1.0f); // Default: black
+  Color parse_color(const std::string& value) {
+    const auto parsed = detail::parse_css_color_literal(value);
+    return parsed.is_concrete()
+               ? parsed.value
+               : Color(0.0f, 0.0f, 0.0f, 1.0f);
   }
 
   Color parse_style_color(const std::string& value, const ComputedStyle* style,
@@ -7835,23 +7621,11 @@ private:
   }
 
   float parse_angle_degrees(std::string token) {
-    token = to_lower_copy(trim_copy(token));
-    if (token.size() >= 3 && token.compare(token.size() - 3, 3, "deg") == 0) {
-      return std::stof(token.substr(0, token.size() - 3));
+    const auto parsed = detail::parse_css_angle_literal(token);
+    if (!parsed.is_concrete()) {
+      throw std::invalid_argument("invalid CSS angle");
     }
-    if (token.size() >= 3 && token.compare(token.size() - 3, 3, "rad") == 0) {
-      return std::stof(token.substr(0, token.size() - 3)) *
-             180.0f / 3.14159265f;
-    }
-    if (token.size() >= 4 &&
-        token.compare(token.size() - 4, 4, "turn") == 0) {
-      return std::stof(token.substr(0, token.size() - 4)) * 360.0f;
-    }
-    if (token.size() >= 4 &&
-        token.compare(token.size() - 4, 4, "grad") == 0) {
-      return std::stof(token.substr(0, token.size() - 4)) * 0.9f;
-    }
-    return std::stof(token);
+    return parsed.value;
   }
 
   void sync_uniform_transform_scale(ComputedStyle* style) {
@@ -8624,6 +8398,12 @@ bool StyleEngine::uses_pseudo_class(Symbol pseudo) const {
 }
 void StyleEngine::clear() { impl_->clear(); }
 void StyleEngine::clear_baseline_styles() { impl_->clear_baseline_styles(); }
+void StyleEngine::forget_element(const Element* element) noexcept {
+  impl_->forget_element(element);
+}
+size_t StyleEngine::tracked_element_count() const noexcept {
+  return impl_->tracked_element_count();
+}
 
 bool CssLoadResult::has_errors() const {
   return std::any_of(diagnostics.begin(), diagnostics.end(),

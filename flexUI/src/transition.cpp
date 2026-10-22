@@ -3,6 +3,7 @@
  */
 
 #include <flexUI/transition.h>
+#include <flex/core/cmeta_types.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -11,6 +12,105 @@
 namespace flexUI {
 
 namespace {
+
+bool transition_value_matches_type(const TransitionValue& value,
+                                   const cmeta_type_desc* type) {
+    if (!value.has_value() || !type ||
+        !detail::style_value_type_matches(value.type, type)) {
+        return false;
+    }
+    if (detail::style_value_type_matches(type, &cmeta_type_float)) {
+        return std::holds_alternative<float>(value.value);
+    }
+    if (detail::style_value_type_matches(type, &flex::cmeta_type_color)) {
+        return std::holds_alternative<Color>(value.value);
+    }
+    return false;
+}
+
+const void* transition_value_data(const TransitionValue& value) {
+    if (const auto* scalar = std::get_if<float>(&value.value)) {
+        return scalar;
+    }
+    if (const auto* color = std::get_if<Color>(&value.value)) {
+        return color;
+    }
+    return nullptr;
+}
+
+void* transition_value_data(TransitionValue& value) {
+    if (auto* scalar = std::get_if<float>(&value.value)) {
+        return scalar;
+    }
+    if (auto* color = std::get_if<Color>(&value.value)) {
+        return color;
+    }
+    return nullptr;
+}
+
+bool transition_float_equal(const void* lhs, const void* rhs) {
+    if (!lhs || !rhs) return false;
+    return std::fabs(*static_cast<const float*>(lhs) -
+                     *static_cast<const float*>(rhs)) <= 0.0001f;
+}
+
+bool transition_float_interpolate(const void* from, const void* to,
+                                  float t, void* out) {
+    if (!from || !to || !out) return false;
+    *static_cast<float*>(out) =
+        flex::animation::interpolate(*static_cast<const float*>(from),
+                                     *static_cast<const float*>(to), t);
+    return true;
+}
+
+bool transition_color_equal(const void* lhs, const void* rhs) {
+    if (!lhs || !rhs) return false;
+    const auto& a = *static_cast<const Color*>(lhs);
+    const auto& b = *static_cast<const Color*>(rhs);
+    return std::fabs(a.r - b.r) <= 0.0001f &&
+           std::fabs(a.g - b.g) <= 0.0001f &&
+           std::fabs(a.b - b.b) <= 0.0001f &&
+           std::fabs(a.a - b.a) <= 0.0001f;
+}
+
+bool transition_color_interpolate(const void* from, const void* to,
+                                  float t, void* out) {
+    if (!from || !to || !out) return false;
+    const auto& a = *static_cast<const Color*>(from);
+    const auto& b = *static_cast<const Color*>(to);
+    auto& result = *static_cast<Color*>(out);
+    result = {
+        flex::animation::interpolate(a.r, b.r, t),
+        flex::animation::interpolate(a.g, b.g, t),
+        flex::animation::interpolate(a.b, b.b, t),
+        flex::animation::interpolate(a.a, b.a, t),
+    };
+    return true;
+}
+
+const TransitionValueOps kFloatTransitionOps = {
+    &cmeta_type_float,
+    transition_float_equal,
+    transition_float_interpolate,
+};
+
+const TransitionValueOps kColorTransitionOps = {
+    &flex::cmeta_type_color,
+    transition_color_equal,
+    transition_color_interpolate,
+};
+
+float transition_eased_progress(EasingType easing_type,
+                                easing::EasingFunction easing_fn,
+                                const float bezier[4],
+                                float t) {
+    if (easing_type == EasingType::CubicBezier ||
+        easing_type == EasingType::Ease) {
+        return easing::evaluate_cubic_bezier(
+            bezier[0], bezier[1], bezier[2], bezier[3], t);
+    }
+    return easing_fn(t);
+}
 
 std::string trim_copy(const std::string& value) {
     size_t start = 0;
@@ -144,6 +244,46 @@ float sample_animation_keyframes(const std::vector<AnimationValuePoint>& keyfram
     return keyframes.back().value;
 }
 
+TransitionValue sample_typed_animation_keyframes(
+    const std::vector<TypedAnimationPoint>& keyframes,
+    const TransitionValueOps* ops,
+    float progress) {
+    if (keyframes.empty() || !ops) {
+        return {};
+    }
+    if (progress <= keyframes.front().offset) {
+        return keyframes.front().value;
+    }
+    if (progress >= keyframes.back().offset) {
+        return keyframes.back().value;
+    }
+
+    for (std::size_t i = 1; i < keyframes.size(); ++i) {
+        const auto& prev = keyframes[i - 1];
+        const auto& next = keyframes[i];
+        if (progress <= next.offset) {
+            const float span = next.offset - prev.offset;
+            if (span <= 0.0001f) {
+                return next.value;
+            }
+            TransitionValue out = prev.value;
+            const void* from = transition_value_data(prev.value);
+            const void* to = transition_value_data(next.value);
+            void* target = transition_value_data(out);
+            if (!from || !to || !target) {
+                return {};
+            }
+            const float local_t = (progress - prev.offset) / span;
+            if (!ops->interpolate(from, to, local_t, target)) {
+                return {};
+            }
+            return out;
+        }
+    }
+
+    return keyframes.back().value;
+}
+
 bool animation_cycle_is_reversed(AnimationDirection direction, int iteration_index) {
     switch (direction) {
     case AnimationDirection::Reverse:
@@ -168,7 +308,8 @@ float animation_effective_progress(AnimationDirection direction,
                : eased_t;
 }
 
-float animation_terminal_progress(const ActiveAnimation& animation) {
+template <typename Animation>
+float animation_terminal_progress(const Animation& animation) {
     if (animation.infinite) {
         return animation_effective_progress(animation.direction, animation.easing_fn, 0, 0.0f);
     }
@@ -189,6 +330,40 @@ float animation_terminal_progress(const ActiveAnimation& animation) {
 }
 
 } // namespace
+
+const TransitionValueOps* transition_type_ops(
+    const cmeta_type_desc* type) noexcept {
+    if (detail::style_value_type_matches(type, &cmeta_type_float)) {
+        return &kFloatTransitionOps;
+    }
+    if (detail::style_value_type_matches(type, &flex::cmeta_type_color)) {
+        return &kColorTransitionOps;
+    }
+    return nullptr;
+}
+
+TransitionValue ActiveTransition::current_value(float time_ms) const {
+    if (!property || !ops ||
+        !transition_value_matches_type(start_value, property->type) ||
+        !transition_value_matches_type(end_value, property->type)) {
+        return {};
+    }
+
+    const float elapsed = time_ms - start_time_ms - delay_ms;
+    if (elapsed < 0.0f) return start_value;
+    if (elapsed >= duration_ms || duration_ms <= 0.0f) return end_value;
+
+    TransitionValue out = start_value;
+    void* out_data = transition_value_data(out);
+    const void* from_data = transition_value_data(start_value);
+    const void* to_data = transition_value_data(end_value);
+    if (!out_data || !from_data || !to_data) return {};
+
+    const float eased_t = transition_eased_progress(
+        easing_type, easing_fn, bezier, elapsed / duration_ms);
+    if (!ops->interpolate(from_data, to_data, eased_t, out_data)) return {};
+    return out;
+}
 
 // ============================================================================
 // Parse CSS transition shorthand
@@ -240,48 +415,179 @@ std::vector<TransitionDef> parse_transition_list(const std::string& value) {
 // TransitionManager Implementation
 // ============================================================================
 
-void TransitionManager::start(std::uintptr_t element_id, const std::string& property,
-                              float from, float to, const TransitionDef& def,
+void TransitionManager::start(std::uintptr_t element_id,
+                              const std::string& property,
+                              float from, float to,
+                              const TransitionDef& def,
                               float current_time_ms) {
+    const auto* descriptor = detail::style_property_find(property);
+    if (!descriptor) return;
+    start_float(element_id, *descriptor, from, to, def, current_time_ms);
+}
+
+bool TransitionManager::start_typed(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const TransitionValue& from,
+    const TransitionValue& to,
+    const TransitionDef& def,
+    float current_time_ms) {
+    const auto* ops = transition_type_ops(property.type);
+    if ((property.flags & detail::STYLE_PROPERTY_TRANSITIONABLE) == 0u ||
+        !ops || !ops->equal || !ops->interpolate ||
+        !transition_value_matches_type(from, property.type) ||
+        !transition_value_matches_type(to, property.type)) {
+        return false;
+    }
+
+    const void* from_data = transition_value_data(from);
+    const void* to_data = transition_value_data(to);
+    if (!from_data || !to_data || ops->equal(from_data, to_data)) return false;
+
     ActiveTransition trans;
-    trans.property = property;
+    trans.property = &property;
     trans.start_value = from;
     trans.end_value = to;
+    trans.ops = ops;
     trans.start_time_ms = current_time_ms;
     trans.duration_ms = def.duration_ms;
     trans.delay_ms = def.delay_ms;
     trans.easing_type = def.easing;
-    std::copy(std::begin(def.bezier), std::end(def.bezier), std::begin(trans.bezier));
+    std::copy(std::begin(def.bezier), std::end(def.bezier),
+              std::begin(trans.bezier));
     trans.easing_fn = easing::get(def.easing);
 
-    std::string key = std::to_string(element_id) + ":" + property;
-    transitions_[key] = trans;
+    transitions_[{element_id, property.id}] = std::move(trans);
+    return true;
 }
 
-float TransitionManager::get(std::uintptr_t element_id, const std::string& property,
-                             float default_value, float current_time_ms) {
-    std::string key = std::to_string(element_id) + ":" + property;
-    auto it = transitions_.find(key);
-    if (it == transitions_.end()) {
+TransitionValue TransitionManager::get_typed(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const TransitionValue& default_value,
+    float current_time_ms) const {
+    if (!transition_value_matches_type(default_value, property.type)) {
         return default_value;
     }
-    return it->second.current_value(current_time_ms);
+
+    const auto it = transitions_.find({element_id, property.id});
+    if (it == transitions_.end() || !it->second.property ||
+        it->second.property->id != property.id ||
+        !detail::style_value_type_matches(it->second.property->type,
+                                          property.type)) {
+        return default_value;
+    }
+
+    const TransitionValue current = it->second.current_value(current_time_ms);
+    return current.has_value() ? current : default_value;
 }
 
-bool TransitionManager::has_active(std::uintptr_t element_id, float current_time_ms) {
-    std::string prefix = std::to_string(element_id) + ":";
-    for (auto& [key, trans] : transitions_) {
-        if (key.find(prefix) == 0 && !trans.is_complete(current_time_ms)) {
+bool TransitionManager::start_float(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    float previous_value,
+    float target_value,
+    const TransitionDef& def,
+    float current_time_ms) {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
+        return false;
+    }
+    const TransitionValue baseline{&cmeta_type_float, flex::AnimValue{previous_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const TransitionValue target{&cmeta_type_float, flex::AnimValue{target_value}};
+    return start_typed(element_id, property, current, target, def,
+                       current_time_ms);
+}
+
+bool TransitionManager::start_color(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const Color& previous_value,
+    const Color& target_value,
+    const TransitionDef& def,
+    float current_time_ms) {
+    if (!detail::style_value_type_matches(property.type, &flex::cmeta_type_color)) {
+        return false;
+    }
+    const TransitionValue baseline{
+        &flex::cmeta_type_color, flex::AnimValue{previous_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const TransitionValue target{
+        &flex::cmeta_type_color, flex::AnimValue{target_value}};
+    return start_typed(element_id, property, current, target, def,
+                       current_time_ms);
+}
+
+float TransitionManager::get_float(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    float default_value,
+    float current_time_ms) const {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
+        return default_value;
+    }
+    const TransitionValue baseline{&cmeta_type_float, flex::AnimValue{default_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const auto* value = std::get_if<float>(&current.value);
+    return value ? *value : default_value;
+}
+
+Color TransitionManager::get_color(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const Color& default_value,
+    float current_time_ms) const {
+    if (!detail::style_value_type_matches(property.type, &flex::cmeta_type_color)) {
+        return default_value;
+    }
+    const TransitionValue baseline{
+        &flex::cmeta_type_color, flex::AnimValue{default_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const auto* value = std::get_if<Color>(&current.value);
+    return value ? *value : default_value;
+}
+
+float TransitionManager::get(std::uintptr_t element_id,
+                             const std::string& property,
+                             float default_value,
+                             float current_time_ms) {
+    if (const auto* descriptor = detail::style_property_find(property)) {
+        return get_float(element_id, *descriptor, default_value, current_time_ms);
+    }
+
+    return default_value;
+}
+
+bool TransitionManager::has_active(std::uintptr_t element_id,
+                                   float current_time_ms) {
+    for (const auto& [key, trans] : transitions_) {
+        if (key.first == element_id && !trans.is_complete(current_time_ms)) {
             return true;
         }
     }
     return false;
 }
 
+std::uint32_t TransitionManager::active_impact(
+    std::uintptr_t element_id, float current_time_ms) const noexcept {
+    std::uint32_t impact = detail::STYLE_IMPACT_NONE;
+    for (const auto& [key, transition] : transitions_) {
+        if (key.first != element_id || transition.is_complete(current_time_ms) ||
+            !transition.property) {
+            continue;
+        }
+        impact |= transition.property->impact;
+    }
+    return impact;
+}
+
 void TransitionManager::clear_element(std::uintptr_t element_id) {
-    const std::string prefix = std::to_string(element_id) + ":";
     for (auto it = transitions_.begin(); it != transitions_.end();) {
-        if (it->first.find(prefix) == 0) {
+        if (it->first.first == element_id) {
             it = transitions_.erase(it);
         } else {
             ++it;
@@ -290,13 +596,99 @@ void TransitionManager::clear_element(std::uintptr_t element_id) {
 }
 
 void TransitionManager::update(float current_time_ms) {
-    for (auto it = transitions_.begin(); it != transitions_.end(); ) {
+    for (auto it = transitions_.begin(); it != transitions_.end();) {
         if (it->second.is_complete(current_time_ms)) {
             it = transitions_.erase(it);
         } else {
             ++it;
         }
     }
+}
+
+TransitionValue TypedActiveAnimation::current_value(
+    const TransitionValue& default_value,
+    float time_ms) const {
+    if (!property || !ops || keyframes.empty() ||
+        !transition_value_matches_type(default_value, property->type)) {
+        return default_value;
+    }
+
+    const float effective_time_ms = paused ? paused_at_ms : time_ms;
+    const float local_time =
+        effective_time_ms - start_time_ms - delay_ms - total_paused_ms;
+    if (duration_ms <= 0.0f) {
+        return keyframes.back().value;
+    }
+
+    if (local_time < 0.0f) {
+        if (fill_mode == AnimationFillMode::Backwards ||
+            fill_mode == AnimationFillMode::Both) {
+            const TransitionValue sampled = sample_typed_animation_keyframes(
+                keyframes, ops,
+                animation_effective_progress(direction, easing_fn, 0, 0.0f));
+            return sampled.has_value() ? sampled : default_value;
+        }
+        return default_value;
+    }
+
+    const float cycle_duration = duration_ms;
+    const float total_duration = cycle_duration * iteration_count;
+    if (!infinite && local_time >= total_duration) {
+        if (fill_mode == AnimationFillMode::Forwards ||
+            fill_mode == AnimationFillMode::Both) {
+            const TransitionValue sampled = sample_typed_animation_keyframes(
+                keyframes, ops, animation_terminal_progress(*this));
+            return sampled.has_value() ? sampled : default_value;
+        }
+        return default_value;
+    }
+
+    const float cycle_time =
+        std::fmod(std::max(local_time, 0.0f), cycle_duration);
+    const int iteration_index =
+        std::max(static_cast<int>(local_time / cycle_duration), 0);
+    const float raw_t =
+        std::clamp(cycle_time / cycle_duration, 0.0f, 1.0f);
+    const TransitionValue sampled = sample_typed_animation_keyframes(
+        keyframes, ops,
+        animation_effective_progress(direction, easing_fn, iteration_index,
+                                     raw_t));
+    return sampled.has_value() ? sampled : default_value;
+}
+
+bool TypedActiveAnimation::is_active(float time_ms) const {
+    if (paused) {
+        return true;
+    }
+    const float local_time =
+        time_ms - start_time_ms - delay_ms - total_paused_ms;
+    if (local_time < 0.0f || infinite) {
+        return true;
+    }
+    return local_time < duration_ms * iteration_count;
+}
+
+bool TypedActiveAnimation::retains_fill_value() const {
+    return fill_mode == AnimationFillMode::Forwards ||
+           fill_mode == AnimationFillMode::Both;
+}
+
+void TypedActiveAnimation::set_paused(bool should_pause,
+                                      float current_time_ms) {
+    if (should_pause) {
+        if (!paused) {
+            paused = true;
+            paused_at_ms = current_time_ms;
+        }
+        play_state = AnimationPlayState::Paused;
+        return;
+    }
+    if (paused) {
+        total_paused_ms += current_time_ms - paused_at_ms;
+        paused = false;
+        paused_at_ms = 0.0f;
+    }
+    play_state = AnimationPlayState::Running;
 }
 
 float ActiveAnimation::current_value(float default_value, float time_ms) const {
@@ -411,8 +803,130 @@ void AnimationManager::start(std::uintptr_t element_id, const std::string& prope
     animations_[key] = std::move(animation);
 }
 
+bool AnimationManager::start_typed(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const std::vector<TypedAnimationPoint>& keyframes,
+    const AnimationDef& def,
+    float current_time_ms) {
+    const auto* ops = transition_type_ops(property.type);
+    if (!ops || keyframes.empty() || def.duration_ms < 0.0f) {
+        return false;
+    }
+
+    float previous_offset = -1.0f;
+    for (const auto& point : keyframes) {
+        if (!std::isfinite(point.offset) || point.offset < 0.0f ||
+            point.offset > 1.0f || point.offset < previous_offset ||
+            !transition_value_matches_type(point.value, property.type)) {
+            return false;
+        }
+        previous_offset = point.offset;
+    }
+
+    TypedActiveAnimation animation;
+    animation.property = &property;
+    animation.keyframes = keyframes;
+    animation.ops = ops;
+    animation.start_time_ms = current_time_ms;
+    animation.duration_ms = def.duration_ms;
+    animation.delay_ms = def.delay_ms;
+    animation.iteration_count = std::max(def.iteration_count, 0.0f);
+    animation.infinite = def.infinite;
+    animation.fill_mode = def.fill_mode;
+    animation.direction = def.direction;
+    animation.play_state = def.play_state;
+    animation.paused = def.play_state == AnimationPlayState::Paused;
+    animation.paused_at_ms = animation.paused ? current_time_ms : 0.0f;
+    animation.total_paused_ms = 0.0f;
+    animation.easing_fn = easing::get(def.easing);
+
+    typed_animations_[{element_id, property.id}] = std::move(animation);
+    return true;
+}
+
+bool AnimationManager::start_float(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const std::vector<AnimationValuePoint>& keyframes,
+    const AnimationDef& def,
+    float current_time_ms) {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
+        return false;
+    }
+
+    std::vector<TypedAnimationPoint> typed;
+    typed.reserve(keyframes.size());
+    for (const auto& point : keyframes) {
+        typed.push_back(
+            {point.offset,
+             TransitionValue{&cmeta_type_float,
+                             flex::AnimValue{point.value}}});
+    }
+    return start_typed(element_id, property, typed, def, current_time_ms);
+}
+
+TransitionValue AnimationManager::get_typed(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const TransitionValue& default_value,
+    float current_time_ms) const {
+    if (!transition_value_matches_type(default_value, property.type)) {
+        return default_value;
+    }
+    const auto it = typed_animations_.find({element_id, property.id});
+    if (it == typed_animations_.end() || !it->second.property ||
+        it->second.property->id != property.id ||
+        !detail::style_value_type_matches(it->second.property->type,
+                                          property.type)) {
+        return default_value;
+    }
+    return it->second.current_value(default_value, current_time_ms);
+}
+
+float AnimationManager::get_float(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    float default_value,
+    float current_time_ms) const {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
+        return default_value;
+    }
+    const TransitionValue baseline{
+        &cmeta_type_float, flex::AnimValue{default_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const auto* value = std::get_if<float>(&current.value);
+    return value ? *value : default_value;
+}
+
+Color AnimationManager::get_color(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const Color& default_value,
+    float current_time_ms) const {
+    if (!detail::style_value_type_matches(property.type, &flex::cmeta_type_color)) {
+        return default_value;
+    }
+    const TransitionValue baseline{
+        &flex::cmeta_type_color, flex::AnimValue{default_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const auto* value = std::get_if<Color>(&current.value);
+    return value ? *value : default_value;
+}
+
 float AnimationManager::get(std::uintptr_t element_id, const std::string& property,
                             float default_value, float current_time_ms) const {
+    if (const auto* descriptor = detail::style_property_find(property)) {
+        const auto typed =
+            typed_animations_.find({element_id, descriptor->id});
+        if (typed != typed_animations_.end()) {
+            return get_float(element_id, *descriptor, default_value,
+                             current_time_ms);
+        }
+    }
+
     std::string key = std::to_string(element_id) + ":" + property;
     auto it = animations_.find(key);
     if (it == animations_.end()) {
@@ -423,6 +937,11 @@ float AnimationManager::get(std::uintptr_t element_id, const std::string& proper
 
 bool AnimationManager::has_active(std::uintptr_t element_id,
                                   float current_time_ms) const {
+    for (const auto& [key, animation] : typed_animations_) {
+        if (key.first == element_id && animation.is_active(current_time_ms)) {
+            return true;
+        }
+    }
     const std::string prefix = std::to_string(element_id) + ":";
     for (const auto& [key, animation] : animations_) {
         if (key.find(prefix) == 0 && animation.is_active(current_time_ms)) {
@@ -432,8 +951,28 @@ bool AnimationManager::has_active(std::uintptr_t element_id,
     return false;
 }
 
+std::uint32_t AnimationManager::active_impact(
+    std::uintptr_t element_id, float current_time_ms) const noexcept {
+    std::uint32_t impact = detail::STYLE_IMPACT_NONE;
+    for (const auto& [key, animation] : typed_animations_) {
+        if (key.first != element_id || !animation.is_active(current_time_ms) ||
+            !animation.property) {
+            continue;
+        }
+        impact |= animation.property->impact;
+    }
+    return impact;
+}
+
 bool AnimationManager::has_effect(std::uintptr_t element_id,
                                   float current_time_ms) const {
+    for (const auto& [key, animation] : typed_animations_) {
+        if (key.first == element_id &&
+            (animation.is_active(current_time_ms) ||
+             animation.retains_fill_value())) {
+            return true;
+        }
+    }
     const std::string prefix = std::to_string(element_id) + ":";
     for (const auto& [key, animation] : animations_) {
         if (key.find(prefix) == 0 &&
@@ -446,6 +985,11 @@ bool AnimationManager::has_effect(std::uintptr_t element_id,
 }
 
 bool AnimationManager::has_any_active(float current_time_ms) const {
+    for (const auto& [key, animation] : typed_animations_) {
+        if (animation.is_active(current_time_ms)) {
+            return true;
+        }
+    }
     for (const auto& [key, animation] : animations_) {
         if (animation.is_active(current_time_ms)) {
             return true;
@@ -457,6 +1001,12 @@ bool AnimationManager::has_any_active(float current_time_ms) const {
 void AnimationManager::set_play_state(std::uintptr_t element_id,
                                       AnimationPlayState play_state,
                                       float current_time_ms) {
+    for (auto& [key, animation] : typed_animations_) {
+        if (key.first == element_id) {
+            animation.set_paused(play_state == AnimationPlayState::Paused,
+                                 current_time_ms);
+        }
+    }
     const std::string prefix = std::to_string(element_id) + ":";
     for (auto& [key, animation] : animations_) {
         if (key.find(prefix) == 0) {
@@ -467,6 +1017,15 @@ void AnimationManager::set_play_state(std::uintptr_t element_id,
 }
 
 void AnimationManager::clear_element(std::uintptr_t element_id) {
+    for (auto it = typed_animations_.begin();
+         it != typed_animations_.end();) {
+        if (it->first.first == element_id) {
+            it = typed_animations_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     const std::string prefix = std::to_string(element_id) + ":";
     for (auto it = animations_.begin(); it != animations_.end();) {
         if (it->first.find(prefix) == 0) {
@@ -478,6 +1037,16 @@ void AnimationManager::clear_element(std::uintptr_t element_id) {
 }
 
 void AnimationManager::update(float current_time_ms) {
+    for (auto it = typed_animations_.begin();
+         it != typed_animations_.end();) {
+        if (!it->second.is_active(current_time_ms) &&
+            !it->second.retains_fill_value()) {
+            it = typed_animations_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     for (auto it = animations_.begin(); it != animations_.end();) {
         if (!it->second.is_active(current_time_ms) &&
             !it->second.retains_fill_value()) {

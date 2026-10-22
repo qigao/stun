@@ -3,7 +3,7 @@
 #include <flexUI/keyed_repeater.h>
 
 #include <nlohmann/json.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <stdexcept>
 #include <string>
@@ -39,14 +39,14 @@ spec("UiKeyedRepeater reconciles rectangle-tree children by stable key") {
 
     const auto first = reconcile_items(
         repeater, {{"alpha", "Alpha"}, {"beta", "Beta"}});
-    check_size_eq(first.created, 2);
-    check_size_eq(first.reused, 0);
-    check_size_eq(container->child_count(), 2);
-    check_ptr_eq(container->child_at(0), repeater.find("alpha"));
-    check_ptr_eq(container->child_at(1), repeater.find("beta"));
+    check_equal(first.created, 2);
+    check_equal(first.reused, 0);
+    check_equal(container->child_count(), 2);
+    check_equal(container->child_at(0), repeater.find("alpha"));
+    check_equal(container->child_at(1), repeater.find("beta"));
 
     reconcile_items(repeater, {{"alpha", "Updated"}, {"beta", "Beta"}});
-    check_string_eq(repeater.find("alpha")->text(), "Updated");
+    check_equal(repeater.find("alpha")->text(), "Updated");
   }
 
   it("reorders active keys without replacing element identity") {
@@ -59,11 +59,11 @@ spec("UiKeyedRepeater reconciles rectangle-tree children by stable key") {
 
     const auto result =
         reconcile_items(repeater, {{"beta", "Beta 2"}, {"alpha", "Alpha 2"}});
-    check_size_eq(result.created, 0);
-    check_size_eq(result.reused, 2);
-    check_size_eq(result.moved, 2);
-    check_ptr_eq(container->child_at(0), beta);
-    check_ptr_eq(container->child_at(1), alpha);
+    check_equal(result.created, 0);
+    check_equal(result.reused, 2);
+    check_equal(result.moved, 2);
+    check_equal(container->child_at(0), beta);
+    check_equal(container->child_at(1), alpha);
   }
 
   it("retains removed keys and restores their element state") {
@@ -75,16 +75,16 @@ spec("UiKeyedRepeater reconciles rectangle-tree children by stable key") {
     alpha->set_attribute("data-local", "kept");
 
     const auto removed = reconcile_items(repeater, {});
-    check_size_eq(removed.retired, 1);
-    check_size_eq(repeater.active_count(), 0);
-    check_size_eq(repeater.retained_count(), 1);
+    check_equal(removed.retired, 1);
+    check_equal(repeater.active_count(), 0);
+    check_equal(repeater.retained_count(), 1);
     check_null(alpha->parent_elem());
 
     const auto restored = reconcile_items(repeater, {{"alpha", "Restored"}});
-    check_size_eq(restored.reused, 1);
-    check_ptr_eq(repeater.find("alpha"), alpha);
-    check_string_eq(*alpha->attribute("data-local"), "kept");
-    check_string_eq(alpha->text(), "Restored");
+    check_equal(restored.reused, 1);
+    check_equal(repeater.find("alpha"), alpha);
+    check_equal(*alpha->attribute("data-local"), "kept");
+    check_equal(alpha->text(), "Restored");
   }
 
   it("clears focus capture and interaction state when retiring a subtree") {
@@ -138,7 +138,7 @@ spec("UiKeyedRepeater reconciles rectangle-tree children by stable key") {
     reconcile();
     auto* alpha = repeater.find("alpha");
     box.update();
-    check_float_eq(alpha->computed_style->border_radius[0], 6.0f, 0.001f);
+    check_within(alpha->computed_style->border_radius[0], 6.0f, 0.001f);
 
     repeater.clear();
     box.update();
@@ -146,8 +146,8 @@ spec("UiKeyedRepeater reconciles rectangle-tree children by stable key") {
 
     reconcile();
     box.update();
-    check_ptr_eq(repeater.find("alpha"), alpha);
-    check_float_eq(alpha->computed_style->border_radius[0], 6.0f, 0.001f);
+    check_equal(repeater.find("alpha"), alpha);
+    check_within(alpha->computed_style->border_radius[0], 6.0f, 0.001f);
   }
 }
 
@@ -170,8 +170,8 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
     check_throws_as(run({{"", "Empty"}}), std::invalid_argument);
     check_throws_as(run({{"same", "One"}, {"same", "Two"}}),
                     std::invalid_argument);
-    check_int_eq(creates, 0);
-    check_size_eq(container->child_count(), 0);
+    check_equal(creates, 0);
+    check_equal(container->child_count(), 0);
   }
 
   it("rejects capacity overflow before changing the current children") {
@@ -184,8 +184,8 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
     check_throws_as(
         reconcile_items(repeater, {{"alpha", "Alpha"}, {"beta", "Beta"}}),
         std::length_error);
-    check_size_eq(container->child_count(), 1);
-    check_ptr_eq(container->child_at(0), alpha);
+    check_equal(container->child_count(), 1);
+    check_equal(container->child_at(0), alpha);
   }
 
   it("rejects invalid create results and non-Box containers") {
@@ -199,7 +199,7 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
             [](flexUI::Box&, const Item&) -> flexUI::Element* { return nullptr; },
             [](flexUI::Element&, const Item&) {}),
         std::invalid_argument);
-    check_size_eq(container->child_count(), 0);
+    check_equal(container->child_count(), 0);
 
     flexUI::Element unowned;
     check_throws_as(flexUI::UiKeyedRepeater(box, unowned),
@@ -227,9 +227,9 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
             [&](flexUI::Box&, const Item&) { return container; },
             [](flexUI::Element&, const Item&) {}),
         std::invalid_argument);
-    check_size_eq(repeater.active_count(), 0);
-    check_size_eq(repeater.retained_count(), 1);
-    check_size_eq(container->child_count(), 0);
+    check_equal(repeater.active_count(), 0);
+    check_equal(repeater.retained_count(), 1);
+    check_equal(container->child_count(), 0);
   }
 
   it("rejects an initially non-empty container") {
@@ -250,8 +250,8 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
 
     check_throws_as(reconcile_items(repeater, {{"alpha", "Alpha 2"}}),
                     std::logic_error);
-    check_size_eq(container->child_count(), 2);
-    check_ptr_eq(container->child_at(1), external);
+    check_equal(container->child_count(), 2);
+    check_equal(container->child_at(1), external);
   }
 
   it("detects direct-child changes made by callbacks before tree commit") {
@@ -274,10 +274,10 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
               }
             }),
         std::logic_error);
-    check_ptr_eq(repeater.find("alpha"), alpha);
-    check_size_eq(repeater.active_count(), 1);
-    check_size_eq(repeater.retained_count(), 1);
-    check_size_eq(container->child_count(), 2);
+    check_equal(repeater.find("alpha"), alpha);
+    check_equal(repeater.active_count(), 1);
+    check_equal(repeater.retained_count(), 1);
+    check_equal(container->child_count(), 2);
   }
 
   it("keeps the old child structure when an update callback throws") {
@@ -301,11 +301,11 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
               }
             }),
         std::runtime_error);
-    check_size_eq(container->child_count(), 1);
-    check_ptr_eq(container->child_at(0), alpha);
-    check_string_eq(alpha->text(), "Mutated");
-    check_size_eq(repeater.active_count(), 1);
-    check_size_eq(repeater.retained_count(), 1);
+    check_equal(container->child_count(), 1);
+    check_equal(container->child_at(0), alpha);
+    check_equal(alpha->text(), "Mutated");
+    check_equal(repeater.active_count(), 1);
+    check_equal(repeater.retained_count(), 1);
   }
 
   it("clear retires all active nodes") {
@@ -315,10 +315,10 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
     reconcile_items(repeater, {{"alpha", "Alpha"}, {"beta", "Beta"}});
 
     const auto result = repeater.clear();
-    check_size_eq(result.retired, 2);
-    check_size_eq(result.active, 0);
-    check_size_eq(result.retained, 2);
-    check_size_eq(container->child_count(), 0);
+    check_equal(result.retired, 2);
+    check_equal(result.active, 0);
+    check_equal(result.retained, 2);
+    check_equal(container->child_count(), 0);
   }
 
   it("destructor detaches managed children and preserves external children") {
@@ -334,7 +334,7 @@ spec("UiKeyedRepeater fails fast without corrupting managed structure") {
     }
 
     check_null(alpha->parent_elem());
-    check_size_eq(container->child_count(), 1);
-    check_ptr_eq(container->child_at(0), external);
+    check_equal(container->child_count(), 1);
+    check_equal(container->child_at(0), external);
   }
 }

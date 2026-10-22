@@ -1,12 +1,17 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "flowchart/flowchart_parser_wrapper.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#endif
 
-extern char* flowchart_to_json(FlowchartDiagram* diagram);
+extern int flowchart_test_json_v2(int (*equal)(const char*, const char*));
 
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -23,67 +28,90 @@ static char* read_file(const char* path) {
     return buf;
 }
 
-static char* load_golden_file(const char* case_name, const char* suffix, const char* ext) {
+static char* load_golden_input(const char* case_name) {
     char path[512];
-    snprintf(path, sizeof(path), "%s/%s.%s", GOLDEN_DIR, case_name, ext);
-    char* data = read_file(path);
-    if (data) return data;
-
-    snprintf(path, sizeof(path), "%s/%s.%s.%s", GOLDEN_DIR, case_name, suffix, ext);
+    snprintf(path, sizeof(path), "%s/%s.input.mmd", GOLDEN_DIR, case_name);
     return read_file(path);
 }
 
+/* Versioned, explicit test-corpus mapping: no missing-file fallback and no
+ * ignored mismatches. Historical output files stay untouched for audit. */
+static char* load_golden_expected(const char* case_name) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/contracts.json", GOLDEN_DIR);
+    char* text = read_file(path);
+    if (!text) return NULL;
+    json_value_t* manifest = json_parse(text, strlen(text));
+    free(text);
+    const char* schema = manifest ? json_get_string(manifest, "schema") : NULL;
+    json_value_t* cases = manifest ? json_object_get(manifest, "cases") : NULL;
+    json_value_t* entry = cases ? json_object_get(cases, case_name) : NULL;
+    const char* suffix = entry ? json_get_string(entry, "expected") : NULL;
+    char* result = NULL;
+    if (schema && strcmp(schema, "stun-flowchart-test-contract/1") == 0 &&
+        suffix && (strcmp(suffix, "output") == 0 ||
+                   strcmp(suffix, "source-v1") == 0)) {
+        snprintf(path, sizeof(path), "%s/%s.%s.json", GOLDEN_DIR, case_name, suffix);
+        result = read_file(path);
+    }
+    json_free(manifest);
+    return result;
+}
+
+/* Historical golden comparator policy deliberately aliases "square" to
+ * "rect" in test fixtures. The links-order-only diagnostic below uses that
+ * same policy; it does not claim raw byte-for-byte JSON equality. */
 static void normalize_json(json_value_t* v) {
     if (!v) return;
-    turbo_json_type_t type = turbo_json_type(v);
-    if (type == TURBO_JSON_OBJECT) {
-        size_t count = turbo_json_object_size(v);
+    json_type_t type = json_type(v);
+    if (type == JSON_OBJECT) {
+        size_t count = json_object_size(v);
         for (size_t i = 0; i < count; i++) {
-            const char* key = turbo_json_object_key(v, i);
-            json_value_t* val = turbo_json_object_value(v, i);
-            if (strcmp(key, "shape") == 0 && turbo_json_type(val) == TURBO_JSON_STRING) {
-                const char* shape_val = turbo_json_string(val);
+            const char* key = json_object_key(v, i);
+            json_value_t* val = json_object_value(v, i);
+            if (strcmp(key, "shape") == 0 && json_type(val) == JSON_STRING) {
+                const char* shape_val = json_string(val);
                 if (strcmp(shape_val, "square") == 0) {
-                    turbo_json_object_set_string(v, key, "rect");
+                    json_object_set_string(v, key, "rect");
                 }
             }
             normalize_json(val);
         }
-    } else if (type == TURBO_JSON_ARRAY) {
-        size_t count = turbo_json_array_size(v);
+    } else if (type == JSON_ARRAY) {
+        size_t count = json_array_size(v);
         for (size_t i = 0; i < count; i++) {
-            normalize_json(turbo_json_array_get(v, i));
+            normalize_json(json_array_get(v, i));
         }
     }
 }
 
 static int json_value_equal(const json_value_t* a, const json_value_t* b) {
-    if (!a || !b || turbo_json_type(a) != turbo_json_type(b)) return a == b;
-    switch (turbo_json_type(a)) {
-        case TURBO_JSON_NULL:
+    if (!a || !b || json_type(a) != json_type(b)) return a == b;
+    switch (json_type(a)) {
+        case JSON_NULL:
             return 1;
-        case TURBO_JSON_BOOL:
-            return turbo_json_bool(a) == turbo_json_bool(b);
-        case TURBO_JSON_NUMBER:
-            return turbo_json_number(a) == turbo_json_number(b);
-        case TURBO_JSON_STRING:
-            return strcmp(turbo_json_string(a), turbo_json_string(b)) == 0;
-        case TURBO_JSON_ARRAY: {
-            size_t count = turbo_json_array_size(a);
-            if (count != turbo_json_array_size(b)) return 0;
+        case JSON_BOOL:
+            return json_bool(a) == json_bool(b);
+        case JSON_NUMBER:
+            return json_number(a) == json_number(b);
+        case JSON_STRING:
+            return strcmp(json_string(a), json_string(b)) == 0;
+        case JSON_ARRAY: {
+            size_t count = json_array_size(a);
+            if (count != json_array_size(b)) return 0;
             for (size_t i = 0; i < count; ++i) {
-                if (!json_value_equal(turbo_json_array_get(a, i),
-                                      turbo_json_array_get(b, i))) return 0;
+                if (!json_value_equal(json_array_get(a, i),
+                                      json_array_get(b, i))) return 0;
             }
             return 1;
         }
-        case TURBO_JSON_OBJECT: {
-            size_t count = turbo_json_object_size(a);
-            if (count != turbo_json_object_size(b)) return 0;
+        case JSON_OBJECT: {
+            size_t count = json_object_size(a);
+            if (count != json_object_size(b)) return 0;
             for (size_t i = 0; i < count; ++i) {
-                const char* key = turbo_json_object_key(a, i);
-                if (!json_value_equal(turbo_json_object_value(a, i),
-                                      turbo_json_object_get(b, key))) return 0;
+                const char* key = json_object_key(a, i);
+                if (!json_value_equal(json_object_value(a, i),
+                                      json_object_get(b, key))) return 0;
             }
             return 1;
         }
@@ -93,9 +121,9 @@ static int json_value_equal(const json_value_t* a, const json_value_t* b) {
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
     
@@ -103,9 +131,99 @@ static int json_equal(const char* a, const char* b) {
     normalize_json(jb);
 
     int eq = json_value_equal(ja, jb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_free(ja);
+    json_free(jb);
     return eq;
+}
+
+/* Diagnostic only: identify a strict JSON failure caused exclusively by
+ * ordering of links. Do not count this as a passing golden or reorder links:
+ * numbered linkStyle properties are declaration-order sensitive. */
+static int golden_links_permutation_only(const char* actual,
+                                         const char* expected) {
+    if (!actual || !expected) return 0;
+    json_value_t* parsed_actual = json_parse(actual, strlen(actual));
+    json_value_t* parsed_expected = json_parse(expected, strlen(expected));
+    unsigned char* matched = NULL;
+    int only_order = 0;
+    if (!parsed_actual || !parsed_expected) goto done;
+    normalize_json(parsed_actual);
+    normalize_json(parsed_expected);
+    if (json_type(parsed_actual) != JSON_OBJECT ||
+        json_type(parsed_expected) != JSON_OBJECT ||
+        json_value_equal(parsed_actual, parsed_expected) ||
+        json_object_size(parsed_actual) != json_object_size(parsed_expected))
+        goto done;
+
+    for (size_t i = 0; i < json_object_size(parsed_expected); ++i) {
+        const char* key = json_object_key(parsed_expected, i);
+        if (!key || !json_object_get(parsed_actual, key)) goto done;
+        if (strcmp(key, "links") != 0 &&
+            !json_value_equal(json_object_value(parsed_expected, i),
+                              json_object_get(parsed_actual, key)))
+            goto done;
+    }
+    const json_value_t* expected_links = json_object_get(parsed_expected, "links");
+    const json_value_t* actual_links = json_object_get(parsed_actual, "links");
+    if (!expected_links || !actual_links ||
+        json_type(expected_links) != JSON_ARRAY ||
+        json_type(actual_links) != JSON_ARRAY)
+        goto done;
+    const size_t n = json_array_size(expected_links);
+    if (n != json_array_size(actual_links)) goto done;
+    matched = (unsigned char*)calloc(n ? n : 1, sizeof(*matched));
+    if (!matched) goto done;
+    for (size_t i = 0; i < n; ++i) {
+        const json_value_t* item = json_array_get(expected_links, i);
+        size_t j = 0;
+        for (; j < n; ++j) {
+            if (!matched[j] &&
+                json_value_equal(item, json_array_get(actual_links, j))) {
+                matched[j] = 1;
+                break;
+            }
+        }
+        if (j == n) goto done; /* Duplicated links count individually. */
+    }
+    only_order = 1;
+done:
+    free(matched);
+    json_free(parsed_actual);
+    json_free(parsed_expected);
+    return only_order;
+}
+
+/* Keep array ordering strict: node/link object keys are compared elsewhere,
+ * while link array positions remain observable to linkStyle consumers. */
+static int flowchart_links_in_order(const char* source,
+                                   const char* const* from,
+                                   const char* const* to,
+                                   size_t count) {
+    FlowchartDiagram* diagram = NULL;
+    if (flowchart_parse_ex(source, &diagram) != FLOWCHART_PARSE_COMPLETE ||
+        !diagram) {
+        flowchart_diagram_free(diagram);
+        return 0;
+    }
+    char* encoded = flowchart_to_json(diagram);
+    json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+    json_value_t* links = root ? json_object_get(root, "links") : NULL;
+    int ok = links && json_type(links) == JSON_ARRAY &&
+             json_array_size(links) == count;
+    for (size_t i = 0; ok && i < count; ++i) {
+        json_value_t* link = json_array_get(links, i);
+        json_value_t* left = link ? json_object_get(link, "source") : NULL;
+        json_value_t* right = link ? json_object_get(link, "target") : NULL;
+        ok = left && right &&
+             json_type(left) == JSON_STRING &&
+             json_type(right) == JSON_STRING &&
+             strcmp(json_string(left), from[i]) == 0 &&
+             strcmp(json_string(right), to[i]) == 0;
+    }
+    json_free(root);
+    free(encoded);
+    flowchart_diagram_free(diagram);
+    return ok;
 }
 
 spec("flowchart_parser") {
@@ -117,108 +235,1468 @@ spec("flowchart_parser") {
 
             FlowchartDiagram* diagram = flowchart_parse(input);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->direction, "LR");
+            check_true(strcmp(diagram->direction, "LR") == 0);
             flowchart_diagram_free(diagram);
         }
 
         it("distinguishes complete and partial parses") {
             FlowchartDiagram* diagram = NULL;
-            check_int_eq(flowchart_parse_ex("flowchart LR\nA[Good label]", &diagram),
-                         FLOWCHART_PARSE_COMPLETE);
+            check_true(flowchart_parse_ex("flowchart LR\nA[Good label]", &diagram) ==
+                       FLOWCHART_PARSE_COMPLETE);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->nodes->label, "Good label");
+            check_true(strcmp(diagram->nodes->label, "Good label") == 0);
             flowchart_diagram_free(diagram);
 
             diagram = NULL;
-            check_int_eq(flowchart_parse_ex("flowchart LR\na --> b --> c", &diagram),
-                         FLOWCHART_PARSE_COMPLETE);
+            check_true(flowchart_parse_ex("flowchart LR\na --> b --> c", &diagram) ==
+                       FLOWCHART_PARSE_COMPLETE);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->nodes->id, "a");
-            check_str_eq(diagram->nodes->next->id, "b");
-            check_str_eq(diagram->nodes->next->next->id, "c");
-            check_str_eq(diagram->edges->from, "a");
-            check_str_eq(diagram->edges->to, "b");
-            check_str_eq(diagram->edges->next->from, "b");
-            check_str_eq(diagram->edges->next->to, "c");
+            check_true(strcmp(diagram->nodes->id, "a") == 0);
+            check_true(strcmp(diagram->nodes->next->id, "b") == 0);
+            check_true(strcmp(diagram->nodes->next->next->id, "c") == 0);
+            check_true(strcmp(diagram->edges->from, "a") == 0);
+            check_true(strcmp(diagram->edges->to, "b") == 0);
+            check_true(strcmp(diagram->edges->next->from, "b") == 0);
+            check_true(strcmp(diagram->edges->next->to, "c") == 0);
             flowchart_diagram_free(diagram);
 
             diagram = NULL;
-            check_int_eq(flowchart_parse_ex("flowchart LR\nA[Good] @", &diagram),
-                         FLOWCHART_PARSE_PARTIAL);
+            check_true(flowchart_parse_ex("flowchart LR\nA[Good] @", &diagram) ==
+                       FLOWCHART_PARSE_PARTIAL);
             REQUIRE(diagram != NULL);
+            flowchart_diagram_free(diagram);
+        }
+        it("records classDef styles and serializes class assignments") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "class A redBg;\n"
+                "classDef redBg fill:#622,color: white;\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            REQUIRE(diagram->class_defs != NULL);
+            check_true(strcmp(diagram->class_defs->id, "redBg") == 0);
+            REQUIRE(diagram->class_defs->styles != NULL);
+            check_true(strcmp(diagram->class_defs->styles->key, "fill") == 0);
+            check_true(strcmp(diagram->class_defs->styles->value, "#622") == 0);
+            REQUIRE(diagram->class_defs->styles->next != NULL);
+            check_true(strcmp(diagram->class_defs->styles->next->key, "color") == 0);
+            check_true(strcmp(diagram->class_defs->styles->next->value, "white") == 0);
+            REQUIRE(diagram->classes != NULL);
+            check_true(strcmp(diagram->classes->node_id, "A") == 0);
+            check_true(strcmp(diagram->classes->class_name, "redBg") == 0);
+
+            const char* expected =
+                "{"
+                "\"classDefs\":{\"redBg\":{\"id\":\"redBg\",\"styles\":{\"fill\":\"#622\",\"color\":\"white\"}}},"
+                "\"classes\":{\"A\":[\"redBg\"]},"
+                "\"clicks\":[],"
+                "\"direction\":\"LR\","
+                "\"linkStyles\":[],"
+                "\"links\":[{\"length\":1,\"source\":\"A\",\"stroke\":\"normal\",\"target\":\"B\",\"type\":\"arrow_point\"}],"
+                "\"nodes\":{\"A\":{\"id\":\"A\",\"shape\":\"rect\"},\"B\":{\"id\":\"B\",\"shape\":\"rect\"}},"
+                "\"subgraphs\":[],"
+                "\"type\":\"flowchart\""
+                "}";
+            char* actual = flowchart_to_json(diagram);
+            int json_matches = actual != NULL && json_equal(actual, expected);
+            if (actual) json_serialize_free(actual);
+            flowchart_diagram_free(diagram);
+            check_true(json_matches);
+        }
+    }
+
+    describe("subgraph member references") {
+        it("preserves node references and duplicate edge endpoints") {
+            const char* input =
+                "flowchart TB\n"
+                "subgraph one\n"
+                "a1 --> a2\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartSubGraph* sg = diagram->subgraphs;
+            check_true(sg != NULL);
+            if (sg) {
+                FlowchartNodeRef* ref = sg->node_refs;
+                const char* expected[] = {"a2", "a1", "a2", "a1"};
+                for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                    check_true(ref != NULL);
+                    if (!ref) break;
+                    check_true(ref->id != NULL && strcmp(ref->id, expected[i]) == 0);
+                    ref = ref->next;
+                }
+                check_true(ref == NULL);
+            }
             flowchart_diagram_free(diagram);
         }
     }
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dirent.h>
-#endif
+    describe("repeated edge membership") {
+        it("does not register existing nodes as new declarations on every edge") {
+            const char* input =
+                "flowchart RL\n"
+                "subgraph one\n"
+                "a1 -- l1 --> a2\n"
+                "a1 -- l2 --> a2\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* sg = diagram->subgraphs;
+            int members_ok = sg && sg->node_refs;
+            const char* expected[] = {"a2", "a1", "a2", "a1", "a2", "a1"};
+            FlowchartNodeRef* ref = sg ? sg->node_refs : NULL;
+            for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                if (!ref || strcmp(ref->id, expected[i]) != 0) {
+                    members_ok = 0;
+                    break;
+                }
+                ref = ref->next;
+            }
+            check_true(members_ok && ref == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("cross-subgraph node ownership") {
+        it("does not transfer an existing node by re-declaration alone") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph A\n"
+                "a --> b\n"
+                "end\n"
+                "subgraph B\n"
+                "b\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* first = diagram->subgraphs;
+            FlowchartSubGraph* second = first ? first->next : NULL;
+            check_true(first && first->id && strcmp(first->id, "A") == 0 &&
+                       first->node_refs != NULL);
+            check_true(second && second->id && strcmp(second->id, "B") == 0 &&
+                       second->node_refs == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("nested subgraph JSON projection") {
+        it("emits children before parents in a flat JSON array") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph TOP\n"
+                "subgraph B1\n"
+                "a --> b\n"
+                "end\n"
+                "subgraph B2\n"
+                "c --> d\n"
+                "end\n"
+                "end\n"
+                "B1 --> B2\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartSubGraph* parent = diagram->subgraphs;
+            FlowchartNodeRef* ref = parent ? parent->node_refs : NULL;
+            const char* expected_refs[] = {"B1", "B2", "B2", "B1"};
+            int refs_ok = parent != NULL;
+            for (size_t i = 0; refs_ok && i < 4; ++i) {
+                refs_ok = ref && ref->id && strcmp(ref->id, expected_refs[i]) == 0;
+                if (refs_ok) ref = ref->next;
+            }
+            check_true(refs_ok && ref == NULL);
+
+            char* json = flowchart_to_json(diagram);
+            json_value_t* root = json ? json_parse(json, strlen(json)) : NULL;
+            json_value_t* subgraphs = root ? json_object_get(root, "subgraphs") : NULL;
+            int flat_ok = subgraphs && json_array_size(subgraphs) == 3;
+            const char* expected[] = {"B1", "B2", "TOP"};
+            for (size_t i = 0; flat_ok && i < 3; ++i) {
+                json_value_t* sg = json_array_get(subgraphs, i);
+                json_value_t* id = sg ? json_object_get(sg, "id") : NULL;
+                flat_ok = id && json_type(id) == JSON_STRING &&
+                          strcmp(json_string(id), expected[i]) == 0 &&
+                          json_object_get(sg, "subgraphs") == NULL;
+            }
+            check_true(flat_ok);
+            json_free(root);
+            free(json);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("style target graph identity") {
+        it("materializes a styled subgraph ID without parsing CSS as nodes") {
+            const char* input =
+                "flowchart TB\n"
+                "subgraph bar[Bar SubGraph]\n"
+                "C\n"
+                "end\n"
+                "style bar fill:#999,stroke-width:10px,stroke:#0F0\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            int seen_bar = 0, seen_c = 0, node_count = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                node_count++;
+                if (strcmp(n->id, "bar") == 0) ++seen_bar;
+                if (strcmp(n->id, "C") == 0) ++seen_c;
+            }
+            check_true(node_count == 2 && seen_bar == 1 && seen_c == 1);
+            check_true(diagram->edges == NULL);
+            check_true(diagram->subgraphs &&
+                       strcmp(diagram->subgraphs->id, "bar") == 0 &&
+                       strcmp(diagram->subgraphs->label, "Bar SubGraph") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("named Mermaid edge IDs") {
+        it("retains annotated edge IDs without creating phantom endpoints") {
+            const char* input =
+                "flowchart TD\n"
+                "A e1@--> B e2@--> E\n"
+                "E e3@--> D\n"
+                "e1@{ curve: natural }\n"
+                "e2@{ curve: stepAfter }\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const char* endpoints[][2] = {
+                {"A", "B"}, {"B", "E"}, {"E", "D"}
+            };
+            int edges_ok = 1, count = 0;
+            for (FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+                if (count >= 3 || strcmp(edge->from, endpoints[count][0]) != 0 ||
+                    strcmp(edge->to, endpoints[count][1]) != 0)
+                    edges_ok = 0;
+                count++;
+            }
+            int node_count = 0, annotated = 0, unannotated = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                node_count++;
+                if (strcmp(n->id, "e1") == 0 ||
+                    strcmp(n->id, "e2") == 0)
+                    annotated++;
+                if (strcmp(n->id, "e3") == 0)
+                    unannotated++;
+            }
+            check_true(edges_ok && count == 3 && node_count == 4 &&
+                       annotated == 0 && unannotated == 0);
+            check_true(diagram->edges && flowchart_edge_get_id(diagram->edges) &&
+                       strcmp(flowchart_edge_get_id(diagram->edges), "e1") == 0 &&
+                       flowchart_edge_get_curve(diagram->edges) &&
+                       strcmp(flowchart_edge_get_curve(diagram->edges), "natural") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("original named-edge fixture semantics") {
+        it("preserves all eight named IDs and seven curves without metadata nodes") {
+            char* input = load_golden_input("v2-mermaid-104");
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            free(input);
+            const char* ids[] = {"e1", "e5", "e7", "e3", "e2", "e4", "e6", "e8"};
+            const char* curves[] = {"natural", "linear", "cardinal", "monotoneY",
+                                    "stepAfter", "bumpY", "catmullRom", NULL};
+            int ok = status == FLOWCHART_PARSE_COMPLETE && diagram;
+            size_t nodes = 0, edges = 0;
+            for (FlowchartNode* node = diagram ? diagram->nodes : NULL;
+                 node; node = node->next) ++nodes;
+            for (FlowchartEdge* edge = diagram ? diagram->edges : NULL;
+                 edge; edge = edge->next, ++edges) {
+                const char* id = flowchart_edge_get_id(edge);
+                const char* curve = flowchart_edge_get_curve(edge);
+                if (edges >= 8 || !id || strcmp(id, ids[edges]) != 0) ok = 0;
+                if (edges < 8 && ((curve == NULL) != (curves[edges] == NULL) ||
+                    (curve && curves[edges] && strcmp(curve, curves[edges]) != 0))) ok = 0;
+            }
+            ok = ok && nodes == 6 && edges == 8;
+            flowchart_diagram_free(diagram);
+            check_true(ok);
+        }
+    }
+
+    describe("dotted and embedded-label edges") {
+        it("preserves stroke, arrow length and multiword inline text") {
+            const char* input =
+                "flowchart TD\n"
+                "L1 --- L2\n"
+                "C -- Label 2 ---> E2\n"
+                "C <-- Label 3 ---> E3\n"
+                "R1 .-> R2\n"
+                "R2 <.-> C\n"
+                "C <-...-> E4\n"
+                "C ======> E5\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            struct EdgeCase {
+                const char* from;
+                const char* to;
+                const char* label;
+                const char* stroke;
+                const char* type;
+                double length;
+            };
+            const struct EdgeCase expected[] = {
+                {"L1", "L2", NULL, "normal", "arrow_open", 1},
+                {"C", "E2", "Label 2", "normal", "arrow_point", 2},
+                {"C", "E3", "Label 3", "normal", "arrow_point", 2},
+                {"R1", "R2", NULL, "dotted", "arrow_point", 1},
+                {"R2", "C", NULL, "dotted", "arrow_point", 1},
+                {"C", "E4", NULL, "dotted", "arrow_point", 1},
+                {"C", "E5", NULL, "thick", "arrow_point", 5},
+            };
+            int seen[7] = {0};
+            int ok = links && json_array_size(links) == 7;
+            for (size_t i = 0; ok && i < json_array_size(links); ++i) {
+                json_value_t* edge = json_array_get(links, i);
+                const char* from = json_get_string(edge, "source");
+                const char* to = json_get_string(edge, "target");
+                const char* stroke = json_get_string(edge, "stroke");
+                const char* type = json_get_string(edge, "type");
+                json_value_t* length = json_object_get(edge, "length");
+                json_value_t* text = json_object_get(edge, "text");
+                const char* label = text ? json_get_string(text, "text") : NULL;
+                int match = 0;
+                for (size_t j = 0; j < 7; ++j) {
+                    if (from && to && stroke && type && length &&
+                        strcmp(from, expected[j].from) == 0 &&
+                        strcmp(to, expected[j].to) == 0 &&
+                        strcmp(stroke, expected[j].stroke) == 0 &&
+                        strcmp(type, expected[j].type) == 0 &&
+                        json_number(length) == expected[j].length &&
+                        ((!label && !expected[j].label) ||
+                         (label && expected[j].label &&
+                          strcmp(label, expected[j].label) == 0))) {
+                        seen[j]++;
+                        match = 1;
+                        break;
+                    }
+                }
+                if (!match) ok = 0;
+            }
+            for (size_t j = 0; j < 7; ++j)
+                if (seen[j] != 1) ok = 0;
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("multiple internal edges retain member event order") {
+        it("keeps earlier edge references before later borrowed nodes") {
+            const char* input =
+                "flowchart TB\n"
+                "subgraph container_Beta\n"
+                "process_C-->Process_D\n"
+                "end\n"
+                "subgraph container_Alpha\n"
+                "process_A-->process_B\n"
+                "process_A-->|messages|process_C\n"
+                "end\n";
+            FlowchartDiagram* d = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &d);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!d) return;
+
+            char* encoded = flowchart_to_json(d);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* groups = root ? json_object_get(root, "subgraphs") : NULL;
+            int ok = groups && json_array_size(groups) == 2;
+            if (ok) {
+                json_value_t* alpha = json_array_get(groups, 1);
+                const char* id = alpha ? json_get_string(alpha, "id") : NULL;
+                json_value_t* members = alpha ? json_object_get(alpha, "nodes") : NULL;
+                const char* expected[] = {
+                    "process_B", "process_A", "process_B",
+                    "process_A", "process_C", "process_A"
+                };
+                ok = id && strcmp(id, "container_Alpha") == 0 &&
+                     members && json_array_size(members) == 6;
+                for (size_t i = 0; ok && i < 6; ++i) {
+                    json_value_t* item = json_array_get(members, i);
+                    ok = item && json_type(item) == JSON_STRING &&
+                         strcmp(json_string(item), expected[i]) == 0;
+                }
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(d);
+        }
+    }
+
+    describe("nested subgraph title and borrowed node projection") {
+        it("preserves extra title spacing and excludes unused child IDs") {
+            const char* input =
+                "flowchart TD\n"
+                "subgraph  main\n"
+                "subgraph subcontainer\n"
+                "subcontainer-child\n"
+                "end\n"
+                "subcontainer-child-->subcontainer-sibling\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* main = diagram->subgraphs;
+            check_true(main && main->id && main->label &&
+                       strcmp(main->id, "main") == 0 &&
+                       strcmp(main->label, " main") == 0);
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* groups = root ? json_object_get(root, "subgraphs") : NULL;
+            int ok = groups && json_array_size(groups) == 2;
+            if (ok) {
+                json_value_t* parent = json_array_get(groups, 1);
+                json_value_t* members = json_object_get(parent, "nodes");
+                json_value_t* title_obj = json_object_get(parent, "title");
+                const char* title = title_obj ? json_get_string(title_obj, "text") : NULL;
+                const char* expected[] = {
+                    "subcontainer-sibling",
+                    "subcontainer-sibling",
+                    "subcontainer-child"
+                };
+                ok = title && strcmp(title, " main") == 0 &&
+                     members && json_array_size(members) == 3;
+                for (size_t i = 0; ok && i < 3; ++i) {
+                    json_value_t* member = json_array_get(members, i);
+                    ok = member && json_type(member) == JSON_STRING &&
+                         strcmp(json_string(member), expected[i]) == 0;
+                }
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("explicit subgraph member JSON order") {
+        it("projects declarations in source order and external edge uses afterward") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph Declared\n"
+                "C\n"
+                "D\n"
+                "end\n"
+                "C --> D\n"
+                "subgraph InternallyLinked\n"
+                "a --> b\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* subgraphs = root ? json_object_get(root, "subgraphs") : NULL;
+            int ok = subgraphs && json_array_size(subgraphs) == 2;
+            const char* expected[][4] = {
+                {"C", "D", "D", "C"},
+                {"b", "a", "b", "a"}
+            };
+            for (size_t g = 0; ok && g < 2; ++g) {
+                json_value_t* group = json_array_get(subgraphs, g);
+                json_value_t* members = group ? json_object_get(group, "nodes") : NULL;
+                ok = members && json_array_size(members) == 4;
+                for (size_t i = 0; ok && i < 4; ++i) {
+                    json_value_t* item = json_array_get(members, i);
+                    ok = item && json_type(item) == JSON_STRING &&
+                         strcmp(json_string(item), expected[g][i]) == 0;
+                }
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("edge JSON subgraph scope order") {
+        it("emits local edges, subgraph links, then outside edges") {
+            const char* input =
+                "flowchart LR\n"
+                "subgraph first\n"
+                "A --> B\n"
+                "end\n"
+                "X --> Y\n"
+                "subgraph second\n"
+                "C --> D\n"
+                "end\n"
+                "first --> second\n"
+                "P --> Q\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const char* source_order[][2] = {
+                {"A", "B"}, {"X", "Y"}, {"C", "D"},
+                {"first", "second"}, {"P", "Q"}
+            };
+            FlowchartEdge* edge = diagram->edges;
+            int ast_ok = 1;
+            for (size_t i = 0; i < 5; ++i) {
+                if (!edge || strcmp(edge->from, source_order[i][0]) != 0 ||
+                    strcmp(edge->to, source_order[i][1]) != 0) {
+                    ast_ok = 0;
+                    break;
+                }
+                edge = edge->next;
+            }
+            check_true(ast_ok && edge == NULL);
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            const char* projected[][2] = {
+                {"A", "B"}, {"C", "D"}, {"first", "second"},
+                {"X", "Y"}, {"P", "Q"}
+            };
+            int json_ok = links && json_array_size(links) == 5;
+            for (size_t i = 0; json_ok && i < 5; ++i) {
+                json_value_t* item = json_array_get(links, i);
+                const char* from = json_get_string(item, "source");
+                const char* to = json_get_string(item, "target");
+                json_ok = from && to &&
+                          strcmp(from, projected[i][0]) == 0 &&
+                          strcmp(to, projected[i][1]) == 0;
+            }
+            check_true(json_ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("named edge metadata declaration") {
+        it("attaches known edge properties and keeps unknown IDs as node declarations") {
+            const char* input =
+                "flowchart TD\n"
+                "A e1@--> B\n"
+                "e1@{ curve: natural }\n"
+                "e2@{ curve: stepAfter }\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* nodes = root ? json_object_get(root, "nodes") : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            int ok = nodes && json_object_size(nodes) == 3 &&
+                     json_object_get(nodes, "A") &&
+                     json_object_get(nodes, "B") &&
+                     !json_object_get(nodes, "e1") &&
+                     json_object_get(nodes, "e2") &&
+                     !json_object_get(nodes, "e3") &&
+                     links && json_array_size(links) == 1;
+            if (ok) {
+                json_value_t* link = json_array_get(links, 0);
+                const char* source = json_get_string(link, "source");
+                const char* target = json_get_string(link, "target");
+                const char* id = flowchart_edge_get_id(diagram->edges);
+                const char* curve = flowchart_edge_get_curve(diagram->edges);
+                ok = source && target && strcmp(source, "A") == 0 &&
+                     strcmp(target, "B") == 0 && id && strcmp(id, "e1") == 0 &&
+                     curve && strcmp(curve, "natural") == 0;
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("variable-width edges") {
+        it("retains directed tips and lengths on extended arrows") {
+            const char* input =
+                "flowchart LR\n"
+                "A ----> B\n"
+                "C ======> D\n"
+                "E --- F\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* links = root ? json_object_get(root, "links") : NULL;
+            int ok = links && json_array_size(links) == 3;
+            const char* types[] = {"arrow_point", "arrow_point", "arrow_open"};
+            const char* strokes[] = {"normal", "thick", "normal"};
+            const double lengths[] = {3, 5, 1};
+            for (size_t i = 0; ok && i < 3; ++i) {
+                json_value_t* item = json_array_get(links, i);
+                json_value_t* length = item ? json_object_get(item, "length") : NULL;
+                json_value_t* type = item ? json_object_get(item, "type") : NULL;
+                json_value_t* stroke = item ? json_object_get(item, "stroke") : NULL;
+                ok = length && json_type(length) == JSON_NUMBER &&
+                     json_number(length) == lengths[i] &&
+                     type && json_type(type) == JSON_STRING &&
+                     strcmp(json_string(type), types[i]) == 0 &&
+                     stroke && json_type(stroke) == JSON_STRING &&
+                     strcmp(json_string(stroke), strokes[i]) == 0;
+            }
+            check_true(ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("named quoted edge labels") {
+        it("does not invent nodes for edge IDs or split quoted labels") {
+            const char* input =
+                "graph LR\n"
+                "id1(Start) link@-- \"Label\" -->id2(Stop)\n"
+                "class link myClass\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartEdge* e = diagram->edges;
+            check_true(e && !e->next && strcmp(e->from, "id1") == 0 &&
+                       strcmp(e->to, "id2") == 0 && e->label &&
+                       strcmp(e->label, "Label") == 0);
+            int nodes = 0, named_node = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                nodes++;
+                if (strcmp(n->id, "link") == 0 ||
+                    strcmp(n->id, "Label") == 0) named_node++;
+            }
+            check_true(nodes == 2 && named_node == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("trapezoid shape closure") {
+        it("maps each pair of slashes to a distinct shape and exact label") {
+            const char* input =
+                "graph LR\n"
+                "A[/Christmas\\] --> B[\\Go shopping/]\n"
+                "C[/Laptop/] --> D[\\iPhone\\]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode* found[4] = {0};
+            const char* ids[] = {"A", "B", "C", "D"};
+            for (FlowchartNode* node = diagram->nodes; node; node = node->next)
+                for (size_t i = 0; i < 4; ++i)
+                    if (strcmp(node->id, ids[i]) == 0) found[i] = node;
+            const FlowchartNodeShape kinds[] = {
+                FC_SHAPE_TRAPEZOID_SYMMETRIC,
+                FC_SHAPE_INV_TRAPEZOID_SYMMETRIC,
+                FC_SHAPE_TRAPEZOID,
+                FC_SHAPE_INV_TRAPEZOID
+            };
+            const char* labels[] = {
+                "Christmas\\", "\\Go shopping", "Laptop", "\\iPhone\\"
+            };
+            int good = 1;
+            for (size_t i = 0; i < 4; ++i)
+                if (!found[i] || found[i]->shape != kinds[i] ||
+                    strcmp(found[i]->label, labels[i]) != 0) good = 0;
+            check_true(good);
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* json = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* nodes = json ? json_object_get(json, "nodes") : NULL;
+            const char* shapes[] = {
+                "trapezoid", "inv_trapezoid", "lean_right", "lean_left"
+            };
+            for (size_t i = 0; i < 4; ++i) {
+                json_value_t* item = nodes ? json_object_get(nodes, ids[i]) : NULL;
+                const char* kind = item ? json_get_string(item, "shape") : NULL;
+                check_true(kind && strcmp(kind, shapes[i]) == 0);
+            }
+            json_free(json);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("existing external node first referenced inside subgraph") {
+        it("preserves the two implicit/edge member occurrences in one group") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "subgraph inner\n"
+                "B --> C\n"
+                "end\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartSubGraph* sg = diagram->subgraphs;
+            const char* expected[] = {"C", "B", "C", "B"};
+            FlowchartNodeRef* ref = sg ? sg->node_refs : NULL;
+            int ok = sg && sg->id && strcmp(sg->id, "inner") == 0;
+            for (size_t i = 0; ok && i < 4; ++i) {
+                ok = ref && ref->id && strcmp(ref->id, expected[i]) == 0;
+                if (ok) ref = ref->next;
+            }
+            check_true(ok && ref == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("click statement metadata") {
+        it("serializes href and callback clicks in source order") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "click A \"index.html#link-clicked\" \"link test\"\n"
+                "click B testClick \"click test\"\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            if (!diagram) {
+                check_true(status == FLOWCHART_PARSE_COMPLETE);
+                return;
+            }
+
+            FlowchartClick* first_click = diagram->clicks;
+            FlowchartClick* second_click = first_click ? first_click->next : NULL;
+            int click_ast_matches =
+                first_click && first_click->node_id &&
+                strcmp(first_click->node_id, "A") == 0 &&
+                first_click->is_href == 1 && first_click->target &&
+                strcmp(first_click->target, "index.html#link-clicked") == 0 &&
+                second_click && second_click->node_id &&
+                strcmp(second_click->node_id, "B") == 0 &&
+                second_click->is_href == 0 && second_click->target &&
+                strcmp(second_click->target, "testClick") == 0 &&
+                second_click->next == NULL;
+
+            const char* expected =
+                "{"
+                "\"classDefs\":{},\"classes\":{},"
+                "\"clicks\":[{\"href\":\"index.html#link-clicked\",\"nodeId\":\"A\"},"
+                "{\"callback\":\"testClick\",\"nodeId\":\"B\"}],"
+                "\"direction\":\"LR\",\"linkStyles\":[],"
+                "\"links\":[{\"length\":1,\"source\":\"A\",\"stroke\":\"normal\","
+                "\"target\":\"B\",\"type\":\"arrow_point\"}],"
+                "\"nodes\":{\"A\":{\"id\":\"A\",\"shape\":\"rect\"},"
+                "\"B\":{\"id\":\"B\",\"shape\":\"rect\"}},"
+                "\"subgraphs\":[],\"type\":\"flowchart\""
+                "}";
+            char* actual = flowchart_to_json(diagram);
+            int click_json_matches = actual != NULL && json_equal(actual, expected);
+            if (actual) json_serialize_free(actual);
+            flowchart_diagram_free(diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            check_true(click_ast_matches);
+            check_true(click_json_matches);
+        }
+    }
+
+    describe("inline Mermaid class shorthands") {
+        it("keeps grouped endpoints and assigns class without phantom nodes") {
+            const char* input =
+                "graph TD\n"
+                "A[ h ] -- hello --> B[\" test \"]:::exClass & C --> D;\n"
+                "classDef exClass fill:#bbb;\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const char* expected[][3] = {
+                {"A", "B", "hello"}, {"A", "C", "hello"},
+                {"B", "D", NULL}, {"C", "D", NULL}
+            };
+            int counts[4] = {0};
+            int edge_count = 0, node_count = 0, phantom = 0, styled = 0;
+            for (FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+                edge_count++;
+                for (size_t i = 0; i < 4; ++i) {
+                    if (strcmp(edge->from, expected[i][0]) == 0 &&
+                        strcmp(edge->to, expected[i][1]) == 0 &&
+                        ((!edge->label && !expected[i][2]) ||
+                         (edge->label && expected[i][2] &&
+                          strcmp(edge->label, expected[i][2]) == 0)))
+                        counts[i]++;
+                }
+            }
+            for (FlowchartNode* node = diagram->nodes; node; node = node->next) {
+                node_count++;
+                if (strcmp(node->id, "exClass") == 0) phantom++;
+                if (strcmp(node->id, "B") == 0 && node->label)
+                    check_true(strcmp(node->label, " test ") == 0);
+            }
+            for (FlowchartClass* cl = diagram->classes; cl; cl = cl->next)
+                if (strcmp(cl->node_id, "B") == 0 &&
+                    strcmp(cl->class_name, "exClass") == 0)
+                    styled++;
+            check_true(edge_count == 4 && node_count == 4 &&
+                       phantom == 0 && styled == 1);
+            for (size_t i = 0; i < 4; ++i)
+                check_true(counts[i] == 1);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("ampersand edge groups") {
+        it("expands each adjacent node group as a Cartesian product") {
+            const char* input =
+                "flowchart LR\n"
+                "a --> b & c --> d & e\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            const char* expected[][2] = {
+                {"a", "b"}, {"a", "c"},
+                {"b", "d"}, {"b", "e"},
+                {"c", "d"}, {"c", "e"}
+            };
+            int seen[6] = {0};
+            int edge_count = 0;
+            for (FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+                edge_count++;
+                for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                    if (strcmp(edge->from, expected[i][0]) == 0 &&
+                        strcmp(edge->to, expected[i][1]) == 0)
+                        seen[i]++;
+                }
+            }
+            check_true(edge_count == 6);
+            for (size_t i = 0; i < sizeof(seen) / sizeof(seen[0]); ++i)
+                check_true(seen[i] == 1);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+
+    describe("inline Mermaid edge labels") {
+        it("preserves the edge label without introducing phantom nodes") {
+            const char* input =
+                "flowchart LR\n"
+                "a1 -- l1 --> a2\n"
+                "i1 --lb1--> f1\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartEdge* first = diagram->edges;
+            FlowchartEdge* second = first ? first->next : NULL;
+            int edges_ok =
+                first && first->from && strcmp(first->from, "a1") == 0 &&
+                first->to && strcmp(first->to, "a2") == 0 &&
+                first->label && strcmp(first->label, "l1") == 0 &&
+                second && second->from && strcmp(second->from, "i1") == 0 &&
+                second->to && strcmp(second->to, "f1") == 0 &&
+                second->label && strcmp(second->label, "lb1") == 0 &&
+                second->next == NULL;
+            int node_count = 0;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) ++node_count;
+            check_true(edges_ok);
+            check_true(node_count == 4);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("punctuated Mermaid identifiers") {
+        it("preserves dotted and hyphenated IDs without swallowing arrows") {
+            const char* input =
+                "flowchart LR\n"
+                "default-index.js --> dot.template.js\n"
+                "index.js --> module-utl.js\n"
+                "sid-AAA-BBB --> P1.5\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            const char* expected[][2] = {
+                {"default-index.js", "dot.template.js"},
+                {"index.js", "module-utl.js"},
+                {"sid-AAA-BBB", "P1.5"}
+            };
+            FlowchartEdge* edge = diagram->edges;
+            int edges_ok = 1;
+            for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
+                if (!edge || !edge->from || !edge->to ||
+                    strcmp(edge->from, expected[i][0]) != 0 ||
+                    strcmp(edge->to, expected[i][1]) != 0) {
+                    edges_ok = 0;
+                    break;
+                }
+                edge = edge->next;
+            }
+            check_true(edges_ok && edge == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("unquoted comma labels") {
+        it("retains commas between text and HTML line breaks") {
+            const char* input =
+                "flowchart LR\n"
+                "A[work,<br />something,else] --> B\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode* a = diagram->nodes;
+            while (a && strcmp(a->id, "A") != 0) a = a->next;
+            check_true(a && a->label &&
+                       strcmp(a->label, "work,<br />something,else") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+
+    describe("HTML-only node labels") {
+        it("accepts HTML tags as the first and only label token") {
+            const char* input =
+                "flowchart TD\n"
+                "B[<img>]\n"
+                "B --> C[<img>]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode *b = NULL, *c = NULL;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                if (strcmp(n->id, "B") == 0) b = n;
+                if (strcmp(n->id, "C") == 0) c = n;
+            }
+            check_true(b && b->label && strcmp(b->label, "<img>") == 0);
+            check_true(c && c->label && strcmp(c->label, "<img>") == 0);
+            check_true(diagram->edges && diagram->edges->next == NULL &&
+                       strcmp(diagram->edges->from, "B") == 0 &&
+                       strcmp(diagram->edges->to, "C") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("whitespace fidelity in node labels") {
+        it("preserves exact leading and trailing spaces inside node shapes") {
+            const char* input =
+                "flowchart LR\n"
+                "A[ h ] --> B(( A ))\n"
+                "C[Hello world] --> A\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartNode *a = NULL, *b = NULL, *c = NULL;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                if (strcmp(n->id, "A") == 0) a = n;
+                else if (strcmp(n->id, "B") == 0) b = n;
+                else if (strcmp(n->id, "C") == 0) c = n;
+            }
+            check_true(a && a->label && strcmp(a->label, " h ") == 0);
+            check_true(b && b->label && strcmp(b->label, " A ") == 0);
+            check_true(c && c->label && strcmp(c->label, "Hello world") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("circle and cylinder shape delimiters") {
+        it("distinguishes circles double circles cylinders and empty circles") {
+            const char* input =
+                "flowchart LR\n"
+                "A((circle)) --> B(((double)))\n"
+                "B --> C[(storage)]\n"
+                "D(( )) --> C\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartNode* a = NULL;
+            FlowchartNode* b = NULL;
+            FlowchartNode* c = NULL;
+            FlowchartNode* d = NULL;
+            for (FlowchartNode* n = diagram->nodes; n; n = n->next) {
+                if (strcmp(n->id, "A") == 0) a = n;
+                else if (strcmp(n->id, "B") == 0) b = n;
+                else if (strcmp(n->id, "C") == 0) c = n;
+                else if (strcmp(n->id, "D") == 0) d = n;
+            }
+            check_true(a && a->shape == FC_SHAPE_CIRCLE &&
+                       strcmp(a->label, "circle") == 0);
+            check_true(b && b->shape == FC_SHAPE_DOUBLECIRCLE &&
+                       strcmp(b->label, "double") == 0);
+            check_true(c && c->shape == FC_SHAPE_CYLINDER &&
+                       strcmp(c->label, "storage") == 0);
+            check_true(d && d->shape == FC_SHAPE_CIRCLE &&
+                       strcmp(d->label, " ") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("modern node declaration syntax") {
+        it("accepts ampersand-separated and annotated nodes") {
+            const char* input =
+                "flowchart TB\n"
+                "n2[\"label for n2\"] & n4@{ label: \"label for n4\" }"
+                " & n5@{ label: \"label for n5\" }\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            int seen_n2 = 0, seen_n4 = 0, seen_n5 = 0;
+            for (FlowchartNode* node = diagram->nodes; node; node = node->next) {
+                if (strcmp(node->id, "n2") == 0) {
+                    seen_n2++;
+                    check_true(strcmp(node->label, "label for n2") == 0);
+                } else if (strcmp(node->id, "n4") == 0) {
+                    seen_n4++;
+                    check_true(strcmp(node->label, "n4") == 0);
+                } else if (strcmp(node->id, "n5") == 0) {
+                    seen_n5++;
+                    check_true(strcmp(node->label, "n5") == 0);
+                }
+            }
+            check_true(seen_n2 == 1);
+            check_true(seen_n4 == 1);
+            check_true(seen_n5 == 1);
+            check_true(diagram->edges == NULL);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("root and subgraph link order") {
+        it("places single-outgoing root links before fanout after local edges") {
+            const char* input =
+                "flowchart TB\n"
+                "A\nB\n"
+                "subgraph foo\nC\nD\nend\n"
+                "subgraph bar\nE\nF\nend\n"
+                "G\n"
+                "A-->B\nB-->C\nC-->D\nB-->D\n"
+                "D-->E\nE-->A\nE-->F\nF-->D\n"
+                "F-->G\nB-->G\nG-->D\n";
+            static const char* const from[] = {
+                "C", "E", "A", "G", "B", "B", "D", "E", "F", "F", "B"
+            };
+            static const char* const to[] = {
+                "D", "F", "B", "D", "C", "D", "E", "A", "D", "G", "G"
+            };
+            check_true(flowchart_links_in_order(input, from, to, 11));
+        }
+
+        it("retains root source order when a subgraph ID is a link endpoint") {
+            const char* input =
+                "flowchart TB\n"
+                "ROOT\n"
+                "ROOT --> SUB\n"
+                "subgraph SUB\nA\nend\n"
+                "A --> T\n"
+                "SUB --> Z\n";
+            static const char* const from[] = { "ROOT", "A", "SUB" };
+            static const char* const to[] = { "SUB", "T", "Z" };
+            check_true(flowchart_links_in_order(input, from, to, 3));
+        }
+
+        it("keeps linkStyle 1 indexed to the second declared edge in the AST") {
+            const char* input =
+                "graph LR\n"
+                "A(( )) -->|step 1| B(( ))\n"
+                "B(( )) -->|step 2| C(( ))\n"
+                "C(( )) -->|step 3| D(( ))\n"
+                "linkStyle 1 stroke:greenyellow,stroke-width:2px\n";
+            static const char* const from[] = { "A", "B", "C" };
+            static const char* const to[] = { "B", "C", "D" };
+            check_true(flowchart_links_in_order(input, from, to, 3));
+
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const FlowchartLinkStyle* style = diagram->link_styles;
+            const FlowchartEdge* second =
+                diagram->edges ? diagram->edges->next : NULL;
+            int ordinal_ok =
+                style && style->index && strcmp(style->index, "1") == 0 &&
+                style->next == NULL && style->styles && style->styles->key &&
+                strcmp(style->styles->key, "stroke") == 0 &&
+                style->styles->value &&
+                strcmp(style->styles->value, "greenyellow") == 0 &&
+                second && second->from && second->to && second->label &&
+                strcmp(second->from, "B") == 0 &&
+                strcmp(second->to, "C") == 0 &&
+                strcmp(second->label, "step 2") == 0;
+            check_true(ordinal_ok);
+            flowchart_diagram_free(diagram);
+        }
+
+        it("does not alter numbered linkStyle ordering") {
+            const char* input =
+                "flowchart TB\n"
+                "A\nB\n"
+                "subgraph foo\nC\nend\n"
+                "subgraph bar\nD\nend\n"
+                "G\n"
+                "A --> B\nB --> C\nG --> D\n"
+                "linkStyle 1 stroke:blue\n";
+            static const char* const from[] = { "A", "B", "G" };
+            static const char* const to[] = { "B", "C", "D" };
+            check_true(flowchart_links_in_order(input, from, to, 3));
+        }
+    }
+
+    describe("multi-index linkStyle") {
+        it("retains each selected index and its independent style ownership") {
+            const char* input =
+                "flowchart TD\n"
+                "A --> B\n"
+                "A --> C\n"
+                "linkStyle 0,1 color:orange, stroke:orange;\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            FlowchartLinkStyle* first = diagram->link_styles;
+            FlowchartLinkStyle* second = first ? first->next : NULL;
+            int owned_ok =
+                first && strcmp(first->index, "0") == 0 &&
+                first->styles && first->styles->next &&
+                second && strcmp(second->index, "1") == 0 &&
+                second->styles && second->styles->next &&
+                first->styles != second->styles &&
+                first->styles->key && second->styles->key &&
+                strcmp(first->styles->key, "color") == 0 &&
+                strcmp(second->styles->key, "color") == 0 &&
+                second->next == NULL;
+            check_true(owned_ok);
+
+            char* encoded = flowchart_to_json(diagram);
+            json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+            json_value_t* styles = root ? json_object_get(root, "linkStyles") : NULL;
+            int json_ok = styles && json_array_size(styles) == 2;
+            if (json_ok) {
+                json_value_t* first_index =
+                    json_object_get(json_array_get(styles, 0), "index");
+                json_value_t* second_index =
+                    json_object_get(json_array_get(styles, 1), "index");
+                json_ok = first_index && second_index &&
+                          json_type(first_index) == JSON_NUMBER &&
+                          json_type(second_index) == JSON_NUMBER &&
+                          json_number(first_index) == 0 &&
+                          json_number(second_index) == 1;
+            }
+            check_true(json_ok);
+            json_free(root);
+            free(encoded);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("linkStyle metadata") {
+        it("serializes default and indexed styles without consuming later nodes") {
+            const char* input =
+                "flowchart LR\n"
+                "A --> B\n"
+                "A --> C\n"
+                "linkStyle default color:Sienna\n"
+                "linkStyle 0 stroke:#D50000;\n"
+                "style A stroke:#ff0000,fill:#ffcccc\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            if (!diagram) {
+                check_true(status == FLOWCHART_PARSE_COMPLETE);
+                return;
+            }
+
+            FlowchartLinkStyle* first_item = diagram->link_styles;
+            FlowchartLinkStyle* second_item = first_item ? first_item->next : NULL;
+            int ast_styles_ok =
+                first_item && first_item->index &&
+                strcmp(first_item->index, "default") == 0 &&
+                first_item->styles && first_item->styles->key &&
+                strcmp(first_item->styles->key, "color") == 0 &&
+                first_item->styles->value &&
+                strcmp(first_item->styles->value, "Sienna") == 0 &&
+                first_item->styles->next == NULL &&
+                second_item && second_item->index &&
+                strcmp(second_item->index, "0") == 0 &&
+                second_item->styles && second_item->styles->key &&
+                strcmp(second_item->styles->key, "stroke") == 0 &&
+                second_item->styles->value &&
+                strcmp(second_item->styles->value, "#D50000") == 0 &&
+                second_item->styles->next == NULL &&
+                second_item->next == NULL;
+            FlowchartNode* node_a = diagram->nodes;
+            FlowchartNode* node_b = node_a ? node_a->next : NULL;
+            FlowchartNode* node_c = node_b ? node_b->next : NULL;
+            int nodes_ok = node_a && node_a->id && strcmp(node_a->id, "A") == 0 &&
+                           node_b && node_b->id && strcmp(node_b->id, "B") == 0 &&
+                           node_c && node_c->id && strcmp(node_c->id, "C") == 0 &&
+                           node_c->next == NULL;
+
+            char* actual = flowchart_to_json(diagram);
+            json_value_t* root = actual ? json_parse(actual, strlen(actual)) : NULL;
+            json_value_t* styles = root ? json_object_get(root, "linkStyles") : NULL;
+            int json_styles_ok = styles && json_array_size(styles) == 2;
+            if (json_styles_ok) {
+                json_value_t* first = json_array_get(styles, 0);
+                json_value_t* second = json_array_get(styles, 1);
+                json_value_t* first_index = first ? json_object_get(first, "index") : NULL;
+                json_value_t* second_index = second ? json_object_get(second, "index") : NULL;
+                json_value_t* first_style_obj = first ? json_object_get(first, "styles") : NULL;
+                json_value_t* second_style_obj = second ? json_object_get(second, "styles") : NULL;
+                json_value_t* color = first_style_obj ? json_object_get(first_style_obj, "color") : NULL;
+                json_value_t* stroke = second_style_obj ? json_object_get(second_style_obj, "stroke") : NULL;
+                json_styles_ok = first_index && json_type(first_index) == JSON_STRING &&
+                    strcmp(json_string(first_index), "default") == 0 &&
+                    second_index && json_type(second_index) == JSON_NUMBER &&
+                    json_number(second_index) == 0.0 &&
+                    color && json_type(color) == JSON_STRING &&
+                    strcmp(json_string(color), "Sienna") == 0 &&
+                    stroke && json_type(stroke) == JSON_STRING &&
+                    strcmp(json_string(stroke), "#D50000") == 0;
+            }
+            json_free(root);
+            if (actual) json_serialize_free(actual);
+            flowchart_diagram_free(diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            check_true(ast_styles_ok);
+            check_true(nodes_ok);
+            check_true(json_styles_ok);
+        }
+    }
+
+    describe("unquoted label punctuation") {
+        it("preserves periods, exclamation marks, and question marks") {
+            const char* input =
+                "flowchart LR\n"
+                "A[Wait... really?] --> B[No!]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartNode* a = diagram->nodes;
+            while (a && strcmp(a->id, "A") != 0) a = a->next;
+            FlowchartNode* b = diagram->nodes;
+            while (b && strcmp(b->id, "B") != 0) b = b->next;
+            check_true(a != NULL);
+            check_true(b != NULL);
+            if (a) check_true(strcmp(a->label, "Wait... really?") == 0);
+            if (b) check_true(strcmp(b->label, "No!") == 0);
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("legacy flowchart shape syntax") {
+        it("parses odd and leaning parallelogram nodes") {
+            const char* input =
+                "flowchart LR\n"
+                "G>red text] --> J[/blue text/]\n";
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+
+            FlowchartNode* g = diagram->nodes;
+            while (g && strcmp(g->id, "G") != 0) g = g->next;
+            FlowchartNode* j = diagram->nodes;
+            while (j && strcmp(j->id, "J") != 0) j = j->next;
+            check_true(g != NULL);
+            check_true(j != NULL);
+            if (g) {
+                check_true(g->shape == FC_SHAPE_ODD);
+                check_true(strcmp(g->label, "red text") == 0);
+            }
+            if (j) {
+                check_true(j->shape == FC_SHAPE_TRAPEZOID);
+                check_true(strcmp(j->label, "blue text") == 0);
+            }
+            flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("golden difference classifier") {
+        it("identifies order-only changes while preserving strict equality") {
+            const char* expected =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"A\",\"target\":\"B\"},"
+                "{\"source\":\"B\",\"target\":\"C\"}],"
+                "\"linkStyles\":[{\"index\":1}]}";
+            const char* reordered =
+                "{\"linkStyles\":[{\"index\":1}],"
+                "\"links\":[{\"target\":\"C\",\"source\":\"B\"},"
+                "{\"target\":\"B\",\"source\":\"A\"}],"
+                "\"nodes\":{}}";
+            const char* changed_edge =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"B\",\"target\":\"D\"},"
+                "{\"source\":\"A\",\"target\":\"B\"}],"
+                "\"linkStyles\":[{\"index\":1}]}";
+            const char* changed_style =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"B\",\"target\":\"C\"},"
+                "{\"source\":\"A\",\"target\":\"B\"}],"
+                "\"linkStyles\":[{\"index\":0}]}";
+            const char* duplicate =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"A\",\"target\":\"B\"},"
+                "{\"source\":\"A\",\"target\":\"B\"}],"
+                "\"linkStyles\":[{\"index\":1}]}";
+            check_true(golden_links_permutation_only(reordered, expected));
+            check_true(!json_equal(reordered, expected));
+            check_true(!golden_links_permutation_only(expected, expected));
+            check_true(!golden_links_permutation_only(changed_edge, expected));
+            check_true(!golden_links_permutation_only(changed_style, expected));
+            check_true(!golden_links_permutation_only(duplicate, expected));
+            check_true(!golden_links_permutation_only("{", expected));
+            check_true(!golden_links_permutation_only(NULL, expected));
+        }
+    }
+
+    describe("explicit JSON v2 output contract") {
+        it("matches independent complete graphs and edge semantics in declaration order") {
+            check_true(flowchart_test_json_v2(json_equal));
+        }
+    }
 
     describe("golden tests") {
-        // Dynamic test discovery
-        char search_path[MAX_PATH];
+        int count = 0;
+        int golden_failures = 0;
+#ifdef _WIN32
+        char search_path[512];
         snprintf(search_path, sizeof(search_path), "%s/*.input.mmd", GOLDEN_DIR);
-
         WIN32_FIND_DATAA find_data;
         HANDLE hFind = FindFirstFileA(search_path, &find_data);
-
-        int count = 0;
         if (hFind != INVALID_HANDLE_VALUE) {
             do {
                 const char* filename = find_data.cFileName;
-                // Extract case name: remove .input.mmd
-                // Filename format: {case}.input.mmd
                 const char* ext = strstr(filename, ".input.mmd");
                 if (!ext) continue;
-                
-                size_t name_len = ext - filename;
-                if (name_len >= 128) continue; // safety
-
+                size_t name_len = (size_t)(ext - filename);
+                if (name_len >= 128) continue;
                 char case_name[128];
-                strncpy(case_name, filename, name_len);
+                memcpy(case_name, filename, name_len);
                 case_name[name_len] = '\0';
-
                 it(case_name) {
-                    char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd"); 
-                    
-                    char* expected = load_golden_file(case_name, "output", "json");
-                    if (!expected) expected = load_golden_file(case_name, "", "json");
-
-                    if (!input || !expected) {
-                        // Skip if files are missing (shouldn't happen with discovery)
-                        if(input) free(input);
-                        if(expected) free(expected);
-                        continue;
+                    char* input = load_golden_input(case_name);
+                    char* expected = load_golden_expected(case_name);
+                    int failed = !input || !expected;
+                    FlowchartDiagram* diagram = NULL;
+                    char* actual = NULL;
+                    if (!failed) {
+                        diagram = flowchart_parse(input);
+                        if (!diagram) {
+                            failed = 1;
+                        } else {
+                            actual = flowchart_to_json(diagram);
+                            if (!actual || !json_equal(actual, expected))
+                                failed = 1;
+                        }
                     }
-
-                    FlowchartDiagram* diagram = flowchart_parse(input);
-                    if (!diagram) {
-                         // printf("Failed to parse: %s\n", case_name); // Optional: log failure
-                         REQUIRE(diagram != NULL);
+                    /* Diagnostics must run before releasing their source buffers. */
+                    /* Defer assertions until the directory handle is closed. */
+                    if (failed) {
+                        fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
+                        if (golden_links_permutation_only(actual, expected))
+                            fprintf(stderr, "Flowchart golden links-order-only: %s\n",
+                                    case_name);
+                        if (golden_failures < 3) {
+                            fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
+                                    case_name, expected ? expected : "<missing>");
+                            fprintf(stderr, "--- actual JSON (%s) ---\n%s\n",
+                                    case_name, actual ? actual : "<parse/serialize failed>");
+                        }
+                        golden_failures++;
                     }
-
-                    char* actual = flowchart_to_json(diagram);
-                    REQUIRE(actual != NULL);
-
-                    // Normalize expected JSON for loose comparison (e.g. square -> rect)
-                    // We need to parse 'expected' first to normalize it, then re-serialize?
-                    // json_equal function does specific attribute normalization.
-
-                    check(json_equal(actual, expected), "JSON mismatch");
-
-                    turbo_json_serialize_free(actual);
-                    flowchart_diagram_free(diagram);
+                    if (actual) json_serialize_free(actual);
+                    if (diagram) flowchart_diagram_free(diagram);
                     free(expected);
                     free(input);
                 }
-                count++;
-                if (count >= 1000) break; // safety break
+                if (++count >= 1000) break;
             } while (FindNextFileA(hFind, &find_data));
             FindClose(hFind);
         }
+#else
+        DIR* directory = opendir(GOLDEN_DIR);
+        check_true(directory != NULL);
+        if (directory) {
+            struct dirent* entry;
+            while ((entry = readdir(directory)) != NULL) {
+                const char* filename = entry->d_name;
+                const char* ext = strstr(filename, ".input.mmd");
+                if (!ext || ext[strlen(".input.mmd")] != '\0') continue;
+                size_t name_len = (size_t)(ext - filename);
+                if (name_len >= 128) continue;
+                char case_name[128];
+                memcpy(case_name, filename, name_len);
+                case_name[name_len] = '\0';
+                it(case_name) {
+                    char* input = load_golden_input(case_name);
+                    char* expected = load_golden_expected(case_name);
+                    int failed = !input || !expected;
+                    FlowchartDiagram* diagram = NULL;
+                    char* actual = NULL;
+                    if (!failed) {
+                        diagram = flowchart_parse(input);
+                        if (!diagram) {
+                            failed = 1;
+                        } else {
+                            actual = flowchart_to_json(diagram);
+                            if (!actual || !json_equal(actual, expected))
+                                failed = 1;
+                        }
+                    }
+                    /* Diagnostics must run before releasing their source buffers. */
+                    /* Defer assertions until the directory handle is closed. */
+                    if (failed) {
+                        fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
+                        if (golden_links_permutation_only(actual, expected))
+                            fprintf(stderr, "Flowchart golden links-order-only: %s\n",
+                                    case_name);
+                        if (golden_failures < 3) {
+                            fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
+                                    case_name, expected ? expected : "<missing>");
+                            fprintf(stderr, "--- actual JSON (%s) ---\n%s\n",
+                                    case_name, actual ? actual : "<parse/serialize failed>");
+                        }
+                        golden_failures++;
+                    }
+                    if (actual) json_serialize_free(actual);
+                    if (diagram) flowchart_diagram_free(diagram);
+                    free(expected);
+                    free(input);
+                }
+                if (++count >= 1000) break;
+            }
+            closedir(directory);
+        }
+#endif
+        check_true(golden_failures == 0);
         printf("Ran %d dynamic golden tests.\n", count);
     }
 }

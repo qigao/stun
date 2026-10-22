@@ -23,7 +23,7 @@ add_subdirectory(modules/tailwindcss)
 
 # Find lexbor for CSS parsing
 find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
-find_library(LEXBOR_LIBRARY NAMES lexbor)
+find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR)
 
 # Find tree-sitter for syntax highlighting (core only, languages via plugins)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
@@ -95,6 +95,7 @@ set(FLEXUI_SOURCES
   src/binding_runtime.cpp
   src/ui_document.cpp
   src/ui_xml.cpp
+  src/ui_xml_admission.cpp
   src/widget_registry.cpp
   src/keyed_repeater.cpp
   src/view_pipeline.cpp
@@ -102,6 +103,10 @@ set(FLEXUI_SOURCES
   src/widget.cpp
   src/computed_style.cpp
   src/style_engine.cpp
+  src/style_property_registry.cpp
+  src/style_property_impact.cpp
+  src/css_semantic_value.cpp
+  src/css_typed_value.cpp
   src/clipboard.cpp
   src/textedit.cpp
   src/transition.cpp
@@ -157,6 +162,7 @@ set(FLEXUI_HEADERS
   include/flexUI/binding_runtime.h
   include/flexUI/ui_document.h
   include/flexUI/ui_xml.h
+  include/flexUI/ui_node_schema.h
   include/flexUI/widget_registry.h
   include/flexUI/keyed_repeater.h
   include/flexUI/text_value_widget.h
@@ -221,6 +227,11 @@ set(FLEXUI_HEADERS
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
 add_library(FlexUI::Core ALIAS flexUI)
 
+get_filename_component(_flexui_lexbor_library_name "${LEXBOR_LIBRARY}" NAME_WE)
+if(_flexui_lexbor_library_name MATCHES "^(lib)?lexbor_static$")
+  target_compile_definitions(flexUI PRIVATE LEXBOR_STATIC)
+endif()
+
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
     target_compile_definitions(flexUI PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -228,8 +239,8 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS TurboUtils::Core md_parser nlohmann_json::nlohmann_json
-    PRIVATE Flex::Compiler unofficial::tree-sitter::tree-sitter pugixml::pugixml
+    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
+    PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
@@ -240,7 +251,6 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
-         ${CMAKE_SOURCE_DIR}/vendor/md/include
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 
@@ -248,9 +258,9 @@ if(WIN32)
   add_custom_command(
     TARGET flexUI POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:TurboUtils::Core>
+            $<TARGET_FILE:Salts::Core>
             $<TARGET_FILE_DIR:flexUI>
-    COMMENT "Copying the TurboUtils runtime beside FlexUI executables")
+    COMMENT "Copying the Salts Core runtime beside FlexUI executables")
 endif()
 
 add_subdirectory(modules/services)
@@ -259,13 +269,7 @@ add_subdirectory(modules/controller)
 add_subdirectory(modules/desktop)
 
 set(FLEXUI_PLUGIN_PACKAGE_VERSION "1.0.0")
-set(FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES "")
-if(FLEXUI_ENABLE_PLUGINS)
-  string(
-    APPEND FLEXUI_CONFIG_PLUGIN_HOST_DEPENDENCIES
-    "find_dependency(TurboUtils CONFIG)\n"
-    "find_dependency(TurboParser CONFIG)\n")
-endif()
+set(FLEXUI_CONFIG_HAS_PLUGIN_HOST "${FLEXUI_ENABLE_PLUGINS}")
 configure_package_config_file(
   cmake/FlexUIConfig.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
@@ -276,11 +280,25 @@ write_basic_package_version_file(
   COMPATIBILITY SameMajorVersion)
 
 install(
-  EXPORT FlexUIPluginTargets
-  FILE FlexUIPluginTargets.cmake
+  EXPORT FlexUIPluginSDKTargets
+  FILE FlexUIPluginSDKTargets.cmake
   NAMESPACE FlexUI::
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
   COMPONENT FlexUIPlugin)
+install(
+  EXPORT FlexUIServicesTargets
+  FILE FlexUIServicesTargets.cmake
+  NAMESPACE FlexUI::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUIPlugin)
+if(FLEXUI_ENABLE_PLUGINS)
+  install(
+    EXPORT FlexUIPluginHostTargets
+    FILE FlexUIPluginHostTargets.cmake
+    NAMESPACE FlexUI::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+    COMPONENT FlexUIPlugin)
+endif()
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
@@ -304,5 +322,9 @@ install(FILES include/flexUI.h DESTINATION include)
 # 安装库
 install(TARGETS flexUI flexUI_tailwindcss DESTINATION lib)
 
-add_subdirectory(examples)
-add_subdirectory(tests)
+if(NANOGUI_BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()

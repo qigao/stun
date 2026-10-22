@@ -3,7 +3,7 @@
 
 #include <gcanvas/window.hpp>
 #include <path_tessellator.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -72,7 +72,7 @@ void run_path_pipeline_benchmark() {
     const gcanvas::Path path = gcanvas::Path::from_svg(kArbitraryPath);
     parsed_commands += path.commands().size();
   }
-  check_size_eq(parsed_commands,
+  check_equal(parsed_commands,
                 kPathBenchmarkSamples * parsed.commands().size());
 
   std::size_t generated_quads = 0;
@@ -81,7 +81,7 @@ void run_path_pipeline_benchmark() {
         parsed, paint, transform, 0.0f, kPathQuadLimit, kPaintTextureSize);
     generated_quads += geometry.mask_quads.size();
   }
-  check_size_eq(generated_quads,
+  check_equal(generated_quads,
                 kPathBenchmarkSamples * reference.mask_quads.size());
 
   std::size_t generated_stroke_quads = 0;
@@ -90,7 +90,7 @@ void run_path_pipeline_benchmark() {
         parsed, paint, transform, 2.0f, kPathQuadLimit, kPaintTextureSize);
     generated_stroke_quads += geometry.mask_quads.size();
   }
-  check_size_eq(generated_stroke_quads,
+  check_equal(generated_stroke_quads,
                 kPathBenchmarkSamples * stroke_reference.mask_quads.size());
 }
 

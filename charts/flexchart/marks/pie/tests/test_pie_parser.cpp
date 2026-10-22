@@ -16,12 +16,12 @@ spec("flexchart_pie_parser") {
             std::string error;
             auto chart = flex::chart::pie_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Sales");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Sales"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "pie");
+            check(std::string(mark->type.c_str()) == std::string("pie"));
             check(mark->encodings.size() >= 2);
             // Find theta and color encodings
             std::string theta_field, color_field;
@@ -29,8 +29,8 @@ spec("flexchart_pie_parser") {
                 if (enc->channel == "theta") theta_field = enc->field;
                 if (enc->channel == "color") color_field = enc->field;
             }
-            check_str_eq(theta_field.c_str(), "value");
-            check_str_eq(color_field.c_str(), "category");
+            check(std::string(theta_field.c_str()) == std::string("value"));
+            check(std::string(color_field.c_str()) == std::string("category"));
         }
 
         it("should parse pie chart with data block and styles") {
@@ -50,7 +50,7 @@ spec("flexchart_pie_parser") {
             std::string error;
             auto chart = flex::chart::pie_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Revenue");
+            check(std::string(chart->title.c_str()) == std::string("Revenue"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -107,7 +107,7 @@ spec("flexchart_pie_parser") {
             auto chart = flex::chart::pie_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "abs(x)");
+            check(std::string(mark->expr.c_str()) == std::string("abs(x)"));
             check(mark->ranges.count("theta") > 0);
             auto& r = mark->ranges["theta"];
             check(r.size() == 3);
@@ -126,7 +126,7 @@ spec("flexchart_pie_parser") {
             auto chart = flex::chart::pie_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "sales.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("sales.json"));
         }
 
         it("should return nullptr on invalid input") {
