@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "c4/c4_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include "../src/c4_parser_wrapper.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,19 +44,19 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -70,27 +70,27 @@ spec("C4 Parser") {
                 "Rel(customerA, systemA, \"Uses\")\n";
 
             C4Diagram* diagram = c4_parse(input);
-            check_ptr_ne(diagram, NULL);
-            check_int_eq(diagram->type, C4_DT_CONTEXT);
+            check_true((diagram) != NULL);
+            check_true((diagram->type) == (C4_DT_CONTEXT));
 
             // Check elements
             C4Element* el = diagram->elements;
-            check_ptr_ne(el, NULL);
-            check_str_eq(el->alias, "customerA");
-            check_int_eq(el->type, C4_EL_PERSON);
-            check_str_eq(el->label, "Banking Customer A");
+            check_true((el) != NULL);
+            check_true(el->alias != NULL && strcmp(el->alias, "customerA") == 0);
+            check_true((el->type) == (C4_EL_PERSON));
+            check_true(el->label != NULL && strcmp(el->label, "Banking Customer A") == 0);
 
             el = el->next;
-            check_ptr_ne(el, NULL);
-            check_str_eq(el->alias, "systemA");
-            check_int_eq(el->type, C4_EL_SYSTEM);
+            check_true((el) != NULL);
+            check_true(el->alias != NULL && strcmp(el->alias, "systemA") == 0);
+            check_true((el->type) == (C4_EL_SYSTEM));
 
             // Check relationships
             C4Rel* rel = diagram->relationships;
-            check_ptr_ne(rel, NULL);
-            check_str_eq(rel->from, "customerA");
-            check_str_eq(rel->to, "systemA");
-            check_str_eq(rel->label, "Uses");
+            check_true((rel) != NULL);
+            check_true(rel->from != NULL && strcmp(rel->from, "customerA") == 0);
+            check_true(rel->to != NULL && strcmp(rel->to, "systemA") == 0);
+            check_true(rel->label != NULL && strcmp(rel->label, "Uses") == 0);
 
             c4_free_diagram(diagram);
         }
@@ -103,14 +103,14 @@ spec("C4 Parser") {
                 "Container(web_app, \"Web Application\", \"Java, Spring MVC\", \"Delivers content\")\n";
 
             C4Diagram* diagram = c4_parse(input);
-            check_ptr_ne(diagram, NULL);
-            check_int_eq(diagram->type, C4_DT_CONTAINER);
+            check_true((diagram) != NULL);
+            check_true((diagram->type) == (C4_DT_CONTAINER));
 
             C4Element* el = diagram->elements;
-            check_ptr_ne(el, NULL);
-            check_str_eq(el->alias, "web_app");
-            check_int_eq(el->type, C4_EL_CONTAINER);
-            check_str_eq(el->technology, "Java, Spring MVC");
+            check_true((el) != NULL);
+            check_true(el->alias != NULL && strcmp(el->alias, "web_app") == 0);
+            check_true((el->type) == (C4_EL_CONTAINER));
+            check_true(el->technology != NULL && strcmp(el->technology, "Java, Spring MVC") == 0);
 
             c4_free_diagram(diagram);
         }
@@ -125,19 +125,19 @@ spec("C4 Parser") {
                 "}\n";
 
             C4Diagram* diagram = c4_parse(input);
-            check_ptr_ne(diagram, NULL);
+            check_true((diagram) != NULL);
 
             // First element is the boundary
             C4Element* boundary = diagram->elements;
-            check_ptr_ne(boundary, NULL);
-            check_int_eq(boundary->type, C4_EL_SYSTEM_BOUNDARY);
+            check_true((boundary) != NULL);
+            check_true((boundary->type) == (C4_EL_SYSTEM_BOUNDARY));
 
             // Child is in children list, not next (flat)
             C4Element* child = boundary->children;
-            check_ptr_ne(child, NULL);
-            check_str_eq(child->alias, "backend");
-            check_ptr_eq(child->parent, boundary);
-            check_ptr_eq(child->next, NULL); // No siblings for child
+            check_true((child) != NULL);
+            check_true(child->alias != NULL && strcmp(child->alias, "backend") == 0);
+            check_true((child->parent) == (boundary));
+            check_true((child->next) == (NULL)); // No siblings for child
 
             c4_free_diagram(diagram);
         }
@@ -152,21 +152,21 @@ spec("C4 Parser") {
                 "}\n";
 
             C4Diagram* diagram = c4_parse(input);
-            check_ptr_ne(diagram, NULL);
+            check_true((diagram) != NULL);
 
             C4Element* ent = diagram->elements;
-            check_ptr_ne(ent, NULL);
-            check_int_eq(ent->type, C4_EL_ENTERPRISE_BOUNDARY);
+            check_true((ent) != NULL);
+            check_true((ent->type) == (C4_EL_ENTERPRISE_BOUNDARY));
 
             C4Element* sys = ent->children;
-            check_ptr_ne(sys, NULL);
-            check_int_eq(sys->type, C4_EL_SYSTEM_BOUNDARY);
-            check_ptr_eq(sys->parent, ent);
+            check_true((sys) != NULL);
+            check_true((sys->type) == (C4_EL_SYSTEM_BOUNDARY));
+            check_true((sys->parent) == (ent));
 
             C4Element* app = sys->children;
-            check_ptr_ne(app, NULL);
-            check_int_eq(app->type, C4_EL_SYSTEM);
-            check_ptr_eq(app->parent, sys);
+            check_true((app) != NULL);
+            check_true((app->type) == (C4_EL_SYSTEM));
+            check_true((app->parent) == (sys));
 
             c4_free_diagram(diagram);
         }
@@ -179,12 +179,12 @@ spec("C4 Parser") {
                 "Person(alias, \"Label with spaces\", unquoted_tech)\n";
 
             C4Diagram* diagram = c4_parse(input);
-            check_ptr_ne(diagram, NULL);
+            check_true((diagram) != NULL);
 
             C4Element* el = diagram->elements;
-            check_str_eq(el->alias, "alias");
-            check_str_eq(el->label, "Label with spaces");
-            check_str_eq(el->descr, "unquoted_tech");
+            check_true(el->alias != NULL && strcmp(el->alias, "alias") == 0);
+            check_true(el->label != NULL && strcmp(el->label, "Label with spaces") == 0);
+            check_true(el->descr != NULL && strcmp(el->descr, "unquoted_tech") == 0);
 
             c4_free_diagram(diagram);
         }
@@ -237,7 +237,7 @@ spec("C4 Parser") {
                         check(1, "Parse successful");
                     }
 
-                    turbo_json_serialize_free(actual);
+                    json_serialize_free(actual);
                     c4_free_diagram(diagram);
                     free(input);
                 }

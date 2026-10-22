@@ -194,6 +194,7 @@ std::vector<TransitionDef> parse_transition_list(const std::string& value);
 // ============================================================================
 
 struct TransitionValue {
+    // Metadata is borrowed; copying a value only owns its AnimValue storage.
     const cmeta_type_desc* type = nullptr;
     flex::AnimValue value{};
 
@@ -239,6 +240,7 @@ public:
     void start(std::uintptr_t element_id, const std::string& property,
                float from, float to, const TransitionDef& def, float current_time_ms);
 
+    // Successful admission borrows property and type metadata until removal.
     bool start_typed(std::uintptr_t element_id,
                      const detail::StylePropertyDesc& property,
                      const TransitionValue& from,
@@ -285,6 +287,14 @@ public:
      * Check if element has active transitions
      */
     bool has_active(std::uintptr_t element_id, float current_time_ms);
+
+    /**
+     * Union StylePropertyImpact metadata for active typed transitions on one
+     * element. The manager remains UI-object agnostic; Box/Element consume the
+     * returned impact.
+     */
+    std::uint32_t active_impact(std::uintptr_t element_id,
+                                float current_time_ms) const noexcept;
 
     /**
      * Update and remove completed transitions
@@ -366,6 +376,7 @@ public:
                const std::vector<AnimationValuePoint>& keyframes,
                const AnimationDef& def, float current_time_ms);
 
+    // Successful admission borrows property and keyframe types until removal.
     bool start_typed(std::uintptr_t element_id,
                      const detail::StylePropertyDesc& property,
                      const std::vector<TypedAnimationPoint>& keyframes,
@@ -388,10 +399,17 @@ public:
                     float default_value,
                     float current_time_ms) const;
 
+    Color get_color(std::uintptr_t element_id,
+                    const detail::StylePropertyDesc& property,
+                    const Color& default_value,
+                    float current_time_ms) const;
+
     float get(std::uintptr_t element_id, const std::string& property,
               float default_value, float current_time_ms) const;
 
     bool has_active(std::uintptr_t element_id, float current_time_ms) const;
+    std::uint32_t active_impact(std::uintptr_t element_id,
+                                float current_time_ms) const noexcept;
     bool has_effect(std::uintptr_t element_id, float current_time_ms) const;
     bool has_any_effects() const {
         return !animations_.empty() || !typed_animations_.empty();

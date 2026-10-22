@@ -1,4 +1,6 @@
 #include "tinytest.h"
+#include <cmath>
+#include <string>
 #include "flexchart/flexchart.h"
 #include "flexchart/chart_ast.h"
 #include "../src/chart_component_internal.h"
@@ -38,9 +40,9 @@ spec("flexchart_parser") {
             REQUIRE(program.views.size() > 0);
             auto chart = std::dynamic_pointer_cast<AstChart>(program.views[0]);
             REQUIRE(chart != nullptr);
-            check_string_eq(chart->title, "Test Chart");
-            check_string_eq(chart->width, "800");
-            check_string_eq(chart->height, "500");
+            check(std::string(chart->title) == std::string("Test Chart"));
+            check(std::string(chart->width) == std::string("800"));
+            check(std::string(chart->height) == std::string("500"));
         }
 
         it("should reject an unexpected character inside a valid chart") {
@@ -104,12 +106,12 @@ spec("flexchart_parser") {
             REQUIRE(chart != nullptr);
             REQUIRE(chart->marks.size() == 1);
             auto mark = chart->marks[0];
-            check_string_eq(mark->type, "bar");
+            check(std::string(mark->type) == std::string("bar"));
             REQUIRE(mark->encodings.size() == 2);
-            check_string_eq(mark->encodings[0]->channel, "x");
-            check_string_eq(mark->encodings[0]->field, "month");
-            check_string_eq(mark->encodings[1]->channel, "y");
-            check_string_eq(mark->encodings[1]->field, "revenue");
+            check(std::string(mark->encodings[0]->channel) == std::string("x"));
+            check(std::string(mark->encodings[0]->field) == std::string("month"));
+            check(std::string(mark->encodings[1]->channel) == std::string("y"));
+            check(std::string(mark->encodings[1]->field) == std::string("revenue"));
             REQUIRE(mark->styles.count("corner-radius") > 0);
         }
     }
@@ -155,13 +157,13 @@ spec("flexchart_parser") {
             REQUIRE(chart != nullptr);
             REQUIRE(chart->marks.size() == 1);
             auto mark = chart->marks[0];
-            check_string_eq(mark->expr, "sin(x) * 2 + cos(x / 3)");
+            check(std::string(mark->expr) == std::string("sin(x) * 2 + cos(x / 3)"));
             REQUIRE(mark->ranges.count("x") == 1);
             auto& r = mark->ranges["x"];
             REQUIRE(r.size() == 3);
-            check_float_eq(r[0], 0.0, 0.001);
-            check_float_eq(r[1], 6.28, 0.001);
-            check_float_eq(r[2], 0.1, 0.001);
+            check(std::fabs((r[0]) - (0.0)) <= (0.001));
+            check(std::fabs((r[1]) - (6.28)) <= (0.001));
+            check(std::fabs((r[2]) - (0.1)) <= (0.001));
         }
 
         it("should evaluate x*x over range") {
@@ -171,11 +173,11 @@ spec("flexchart_parser") {
 
             auto records = get_records(data);
             REQUIRE(records.size() == 4);
-            check_float_eq(get_double_val(records[0].get("y")), 0.0, 0.001);
-            check_float_eq(get_double_val(records[1].get("y")), 1.0, 0.001);
-            check_float_eq(get_double_val(records[2].get("y")), 4.0, 0.001);
-            check_float_eq(get_double_val(records[3].get("y")), 9.0, 0.001);
-            check_float_eq(get_double_val(records[2].get("x")), 2.0, 0.001);
+            check(std::fabs((get_double_val(records[0].get("y"))) - (0.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[1].get("y"))) - (1.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[2].get("y"))) - (4.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[3].get("y"))) - (9.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[2].get("x"))) - (2.0)) <= (0.001));
         }
 
         it("should apply filter transform") {
@@ -191,8 +193,8 @@ spec("flexchart_parser") {
             auto records = get_records(data);
             // x=0->0, x=1->1, x=2->4, x=3->9, x=4->16 => y>5 keeps x=3,x=4
             REQUIRE(records.size() == 2);
-            check_float_eq(get_double_val(records[0].get("x")), 3.0, 0.001);
-            check_float_eq(get_double_val(records[1].get("x")), 4.0, 0.001);
+            check(std::fabs((get_double_val(records[0].get("x"))) - (3.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[1].get("x"))) - (4.0)) <= (0.001));
         }
 
         it("should apply formula transform") {
@@ -208,9 +210,9 @@ spec("flexchart_parser") {
 
             auto records = get_records(data);
             REQUIRE(records.size() == 3);
-            check_float_eq(get_double_val(records[0].get("scaled")), 3.0, 0.001);
-            check_float_eq(get_double_val(records[1].get("scaled")), 5.0, 0.001);
-            check_float_eq(get_double_val(records[2].get("scaled")), 7.0, 0.001);
+            check(std::fabs((get_double_val(records[0].get("scaled"))) - (3.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[1].get("scaled"))) - (5.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[2].get("scaled"))) - (7.0)) <= (0.001));
         }
     }
 
@@ -232,31 +234,31 @@ spec("flexchart_parser") {
             REQUIRE(chart != nullptr);
             REQUIRE(chart->marks.size() == 1);
             auto mark = chart->marks[0];
-            check_string_eq(mark->type, "line");
-            check_string_eq(mark->expr, "sin(x)");
+            check(std::string(mark->type) == std::string("line"));
+            check(std::string(mark->expr) == std::string("sin(x)"));
             REQUIRE(mark->ranges.count("x") == 1);
             auto& r = mark->ranges["x"];
             REQUIRE(r.size() == 3);
-            check_float_eq(r[0], 0.0, 0.001);
-            check_float_eq(r[1], 6.28, 0.001);
-            check_float_eq(r[2], 0.1, 0.001);
+            check(std::fabs((r[0]) - (0.0)) <= (0.001));
+            check(std::fabs((r[1]) - (6.28)) <= (0.001));
+            check(std::fabs((r[2]) - (0.1)) <= (0.001));
         }
 
         it("should generate records from inline mark expr") {
             auto records = generate_expr_records("t * t", {{"t", {0, 3, 1}}});
             REQUIRE(records.size() == 4);
-            check_float_eq(get_double_val(records[0].get("t")), 0.0, 0.001);
-            check_float_eq(get_double_val(records[0].get("y")), 0.0, 0.001);
-            check_float_eq(get_double_val(records[2].get("t")), 2.0, 0.001);
-            check_float_eq(get_double_val(records[2].get("y")), 4.0, 0.001);
-            check_float_eq(get_double_val(records[3].get("y")), 9.0, 0.001);
+            check(std::fabs((get_double_val(records[0].get("t"))) - (0.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[0].get("y"))) - (0.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[2].get("t"))) - (2.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[2].get("y"))) - (4.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[3].get("y"))) - (9.0)) <= (0.001));
         }
 
         it("should support descending ranges") {
             auto records = generate_expr_records("t * 2", {{"t", {3, 0, -1}}});
             check_size_eq(records.size(), 4);
-            check_float_eq(get_double_val(records.front().get("t")), 3.0, 0.001);
-            check_float_eq(get_double_val(records.back().get("t")), 0.0, 0.001);
+            check(std::fabs((get_double_val(records.front().get("t"))) - (3.0)) <= (0.001));
+            check(std::fabs((get_double_val(records.back().get("t"))) - (0.0)) <= (0.001));
         }
 
         it("should reject unsafe ranges") {
@@ -270,10 +272,10 @@ spec("flexchart_parser") {
                 "clamp(pow(t, 2), 0, 4) + (t >= 2 and not (t > 2))",
                 {{"t", {0, 3, 1}}});
             REQUIRE(records.size() == 4);
-            check_float_eq(get_double_val(records[0].get("y")), 0.0, 0.001);
-            check_float_eq(get_double_val(records[1].get("y")), 1.0, 0.001);
-            check_float_eq(get_double_val(records[2].get("y")), 5.0, 0.001);
-            check_float_eq(get_double_val(records[3].get("y")), 4.0, 0.001);
+            check(std::fabs((get_double_val(records[0].get("y"))) - (0.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[1].get("y"))) - (1.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[2].get("y"))) - (5.0)) <= (0.001));
+            check(std::fabs((get_double_val(records[3].get("y"))) - (4.0)) <= (0.001));
         }
 
         it("should keep compiled chart expressions when records have extra fields") {
@@ -289,7 +291,7 @@ spec("flexchart_parser") {
             enc->field = "pow(x, 2) + clamp(y, 0, 3)";
             apply_computed_fields(records, {enc});
 
-            check_float_eq(get_double_val(records[0].get("__expr_size")), 7.0, 0.001);
+            check(std::fabs((get_double_val(records[0].get("__expr_size"))) - (7.0)) <= (0.001));
         }
     }
 
@@ -332,7 +334,7 @@ spec("flexchart_parser") {
             auto result = flex::modules::chart::create_flexui_chart(
                 box, *chart, options);
             check_true(static_cast<bool>(result));
-            check_string_eq(result.error, "");
+            check(std::string(result.error) == std::string(""));
             box.set_root(result.root);
             box.set_viewport(options.width, options.height);
             box.update();

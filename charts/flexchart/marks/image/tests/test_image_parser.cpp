@@ -17,12 +17,12 @@ spec("flexchart_image_parser") {
             std::string error;
             auto chart = flex::chart::image_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Icons");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Icons"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "image");
+            check(std::string(mark->type.c_str()) == std::string("image"));
             check(mark->encodings.size() >= 3);
             // Find x, y, url encodings
             std::string x_field, y_field, url_field;
@@ -31,9 +31,9 @@ spec("flexchart_image_parser") {
                 if (enc->channel == "y") y_field = enc->field;
                 if (enc->channel == "url") url_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "category");
-            check_str_eq(y_field.c_str(), "value");
-            check_str_eq(url_field.c_str(), "icon");
+            check(std::string(x_field.c_str()) == std::string("category"));
+            check(std::string(y_field.c_str()) == std::string("value"));
+            check(std::string(url_field.c_str()) == std::string("icon"));
         }
 
         it("should parse image chart with data block") {
@@ -53,7 +53,7 @@ spec("flexchart_image_parser") {
             std::string error;
             auto chart = flex::chart::image_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Logos");
+            check(std::string(chart->title.c_str()) == std::string("Logos"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -107,7 +107,7 @@ spec("flexchart_image_parser") {
             auto chart = flex::chart::image_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x) * 100");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x) * 100"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
@@ -126,7 +126,7 @@ spec("flexchart_image_parser") {
             auto chart = flex::chart::image_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "icons.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("icons.json"));
         }
 
         it("should return nullptr on invalid input") {

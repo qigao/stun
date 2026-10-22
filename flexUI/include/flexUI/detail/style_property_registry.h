@@ -8,6 +8,10 @@
 #include <cstdint>
 #include <string_view>
 
+namespace flexUI {
+class Element;
+}
+
 namespace flexUI::detail {
 
 enum class StylePropertyId : std::uint16_t {
@@ -74,6 +78,13 @@ const StylePropertyDesc* style_property_at(std::size_t index) noexcept;
 const StylePropertyDesc* style_property_descriptor(StylePropertyId id) noexcept;
 const StylePropertyDesc* style_property_find(std::string_view name) noexcept;
 
+// Native style values require matching storage as well as semantic identity.
+bool style_value_type_matches(const cmeta_type_desc* expected,
+                              const cmeta_type_desc* supplied) noexcept;
+
+bool style_property_accepts_type(const StylePropertyDesc& property,
+                                 const cmeta_type_desc* type) noexcept;
+
 bool style_property_read(const StylePropertyDesc& property,
                          const ComputedStyle& style,
                          const cmeta_type_desc* expected_type,
@@ -83,5 +94,17 @@ bool style_property_write(const StylePropertyDesc& property,
                           ComputedStyle& style,
                           const cmeta_type_desc* supplied_type,
                           const void* value) noexcept;
+
+/**
+ * Apply FlexUI-owned invalidation semantics for a union of StylePropertyImpact
+ * flags. CMeta remains the semantic type source; dirty behavior stays in
+ * FlexUI.
+ */
+void mark_style_impact(Element& element, std::uint32_t impact) noexcept;
+
+inline void mark_style_property_dirty(
+    Element& element, const StylePropertyDesc& property) noexcept {
+    mark_style_impact(element, property.impact);
+}
 
 } // namespace flexUI::detail

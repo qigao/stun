@@ -15,7 +15,9 @@ namespace dotgraph {
 /**
  * Options shared by DOT parsing/layout and the flexUI semantic view.
  *
- * Negative routing tuning values preserve libavoid's defaults.
+ * Negative routing tuning values select the native GraphLayout defaults.
+ * Explicit crossing/angle penalties and terminal/shared-path nudging flags are
+ * unsupported; Polyline mode also rejects an explicit segment penalty.
  */
 struct FlexUiDotGraphOptions {
     float width = 500.0f;

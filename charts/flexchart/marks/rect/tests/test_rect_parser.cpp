@@ -17,12 +17,12 @@ spec("flexchart_rect_parser") {
             std::string error;
             auto chart = flex::chart::rect_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Heatmap");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Heatmap"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "rect");
+            check(std::string(mark->type.c_str()) == std::string("rect"));
             check(mark->encodings.size() >= 3);
             // Find x, y, color encodings
             std::string x_field, y_field, color_field;
@@ -31,9 +31,9 @@ spec("flexchart_rect_parser") {
                 if (enc->channel == "y") y_field = enc->field;
                 if (enc->channel == "color") color_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "col");
-            check_str_eq(y_field.c_str(), "row");
-            check_str_eq(color_field.c_str(), "value");
+            check(std::string(x_field.c_str()) == std::string("col"));
+            check(std::string(y_field.c_str()) == std::string("row"));
+            check(std::string(color_field.c_str()) == std::string("value"));
         }
 
         it("should parse rect chart with data block") {
@@ -53,7 +53,7 @@ spec("flexchart_rect_parser") {
             std::string error;
             auto chart = flex::chart::rect_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Grid");
+            check(std::string(chart->title.c_str()) == std::string("Grid"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -108,7 +108,7 @@ spec("flexchart_rect_parser") {
             auto chart = flex::chart::rect_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "x * y");
+            check(std::string(mark->expr.c_str()) == std::string("x * y"));
             check(mark->ranges.count("x") > 0);
             auto& rx = mark->ranges["x"];
             check(rx.size() == 3);
@@ -130,7 +130,7 @@ spec("flexchart_rect_parser") {
             auto chart = flex::chart::rect_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "heatmap.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("heatmap.json"));
         }
 
         it("should return nullptr on invalid input") {

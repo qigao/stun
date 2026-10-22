@@ -9,6 +9,7 @@
 #include <flexUI/view_pipeline.h>
 #include <flexUI/tailwindcss.h>
 #include <flexUI/detail/css_typed_value.h>
+#include <flex/core/cmeta_types.h>
 #include "default_style_assets.h"
 #include <flex/bridge/renderer.h>
 #include <nlohmann/json.hpp>
@@ -115,8 +116,26 @@ void mark_visible_active_effects_dirty(Element* elem,
   }
 
   const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
-  if (transitions.has_active(element_id, time_ms) ||
-      animations.has_active(element_id, time_ms)) {
+  const bool transition_active =
+      transitions.has_active(element_id, time_ms);
+  const bool animation_active =
+      animations.has_active(element_id, time_ms);
+  const std::uint32_t transition_impact =
+      transitions.active_impact(element_id, time_ms);
+  const std::uint32_t animation_impact =
+      animations.active_impact(element_id, time_ms);
+  const std::uint32_t typed_impact =
+      transition_impact | animation_impact;
+
+  if (typed_impact != detail::STYLE_IMPACT_NONE) {
+    detail::mark_style_impact(*elem, typed_impact);
+  }
+
+  // Legacy string-keyed keyframes are still paint-only until #94 completes.
+  // Keep their old behavior while typed tracks use reflected impact metadata.
+  if (animation_active ||
+      (transition_active &&
+       transition_impact == detail::STYLE_IMPACT_NONE)) {
     elem->mark_paint_dirty();
   }
 
@@ -718,27 +737,6 @@ void finalize_animation_points(std::map<float, float>& values, float base_value,
   }
 }
 
-void register_float_animation_track(
-    AnimationManager& animations, std::uintptr_t element_id,
-    const std::string& property, float base_value,
-    const std::vector<AnimationKeyframeStep>& keyframes, const AnimationDef& def,
-    float current_time_ms,
-    const std::function<bool(const std::map<std::string, std::string>&,
-                             float&)>& extractor) {
-  std::map<float, float> values;
-  for (const auto& frame : keyframes) {
-    float sampled = 0.0f;
-    if (extractor(frame.properties, sampled)) {
-      values[frame.offset] = sampled;
-    }
-  }
-  std::vector<AnimationValuePoint> points;
-  finalize_animation_points(values, base_value, points);
-  if (!points.empty()) {
-    animations.start(element_id, property, points, def, current_time_ms);
-  }
-}
-
 void register_typed_float_animation_track(
     AnimationManager& animations, std::uintptr_t element_id,
     const detail::StylePropertyDesc& property, float base_value,
@@ -768,7 +766,8 @@ void register_typed_float_animation_track(
     const std::function<bool(const std::map<std::string, std::string>&,
                              float&)>& extractor) {
   const auto* property = detail::style_property_descriptor(property_id);
-  if (!property) {
+  if (!property || !property->type ||
+      !cmeta_type_equal(property->type, &cmeta_type_float)) {
     return;
   }
   register_typed_float_animation_track(
@@ -776,51 +775,44 @@ void register_typed_float_animation_track(
       current_time_ms, extractor);
 }
 
-void register_color_animation_track(AnimationManager& animations,
-                                    std::uintptr_t element_id,
-                                    const std::string& property_prefix,
-                                    const Color& base_color,
-                                    const std::vector<AnimationKeyframeStep>& keyframes,
-                                    const AnimationDef& def,
-                                    float current_time_ms,
-                                    const std::function<bool(
-                                        const std::map<std::string, std::string>&,
-                                        Color&)>& extractor) {
-  std::map<float, float> r_values;
-  std::map<float, float> g_values;
-  std::map<float, float> b_values;
-  std::map<float, float> a_values;
+void register_typed_color_animation_track(
+    AnimationManager& animations, std::uintptr_t element_id,
+    detail::StylePropertyId property_id, const Color& base_color,
+    const std::vector<AnimationKeyframeStep>& keyframes,
+    const AnimationDef& def, float current_time_ms,
+    const std::function<bool(const std::map<std::string, std::string>&,
+                             Color&)>& extractor) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  if (!property || !property->type ||
+      !cmeta_type_equal(property->type, &flex::cmeta_type_color)) {
+    return;
+  }
+
+  std::map<float, Color> values;
   for (const auto& frame : keyframes) {
     Color color;
     if (extractor(frame.properties, color)) {
-      r_values[frame.offset] = color.r;
-      g_values[frame.offset] = color.g;
-      b_values[frame.offset] = color.b;
-      a_values[frame.offset] = color.a;
+      values[frame.offset] = color;
     }
   }
+  if (values.empty()) {
+    return;
+  }
+  if (values.begin()->first > 0.0f) {
+    values.emplace(0.0f, base_color);
+  }
+  if (values.rbegin()->first < 1.0f) {
+    values.emplace(1.0f, base_color);
+  }
 
-  std::vector<AnimationValuePoint> points;
-  finalize_animation_points(r_values, base_color.r, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-r", points, def,
-                     current_time_ms);
+  std::vector<TypedAnimationPoint> points;
+  points.reserve(values.size());
+  for (const auto& [offset, value] : values) {
+    points.push_back(
+        {offset, TransitionValue{&flex::cmeta_type_color,
+                                 flex::AnimValue{value}}});
   }
-  finalize_animation_points(g_values, base_color.g, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-g", points, def,
-                     current_time_ms);
-  }
-  finalize_animation_points(b_values, base_color.b, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-b", points, def,
-                     current_time_ms);
-  }
-  finalize_animation_points(a_values, base_color.a, points);
-  if (!points.empty()) {
-    animations.start(element_id, property_prefix + "-a", points, def,
-                     current_time_ms);
-  }
+  animations.start_typed(element_id, *property, points, def, current_time_ms);
 }
 
 void register_element_animations(Box& box, Element* elem, StyleEngine& style_engine,
@@ -898,8 +890,8 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           });
     }
 
-    register_color_animation_track(
-        box.animations(), element_id, "background-color",
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BackgroundColor,
         resolved_element_background(*elem, style), *keyframes, def,
         current_time_ms,
         [](const auto& props, Color& out) {
@@ -981,9 +973,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           return true;
         });
 
-    register_color_animation_track(
-        box.animations(), element_id, "border-color", style.border_color,
-        *keyframes, def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BorderColor,
+        style.border_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("border-color");
           if (it == props.end()) {
@@ -1015,9 +1007,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_length(it->second);
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "outline-color", style.outline_color,
-        *keyframes, def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::OutlineColor,
+        style.outline_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("outline-color");
           if (it == props.end()) {
@@ -1049,9 +1041,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_length(it->second);
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "ring-color", style.ring_color, *keyframes,
-        def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::RingColor,
+        style.ring_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("ring-color");
           if (it == props.end()) {
@@ -1060,8 +1052,8 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_color(it->second);
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "ring-offset-color",
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::RingOffsetColor,
         style.ring_offset_color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("ring-offset-color");
@@ -1136,9 +1128,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = shadow.spread_radius;
           return true;
         });
-    register_color_animation_track(
-        box.animations(), element_id, "box-shadow-color", style.shadow.color,
-        *keyframes, def, current_time_ms,
+    register_typed_color_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BoxShadowColor,
+        style.shadow.color, *keyframes, def, current_time_ms,
         [](const auto& props, Color& out) {
           auto it = props.find("box-shadow");
           if (it == props.end()) {
@@ -1619,6 +1611,98 @@ void Box::unregister_font(const std::string& family) {
 void Box::set_variable(const std::string& name, const std::string& value) {
   if (root_) {
     root_->set_custom_property(name, value);
+  }
+}
+
+void Box::adopt_detached_elements(std::vector<std::unique_ptr<Element>>&& staged) {
+  // Every staged element must be an id-less application element whose parent,
+  // if any, belongs to this batch. All validation/allocation occurs before
+  // moving a single owning pointer into the Box.
+  std::unordered_set<Element*> batch;
+  batch.reserve(staged.size());
+  for (const auto& element : staged) {
+    if (!element || element->owner_box_ || element->is_widget_owned() ||
+        element->widget || !element->id().empty() ||
+        !batch.insert(element.get()).second) {
+      throw std::invalid_argument("invalid detached Element admission");
+    }
+  }
+  for (const auto& element : staged) {
+    Element* parent = element->parent_elem();
+    if (parent && !batch.count(parent)) {
+      throw std::invalid_argument("detached Element has foreign parent");
+    }
+  }
+  if (staged.size() > elements_.max_size() - elements_.size()) {
+    throw std::length_error("detached Element batch exceeds Box capacity");
+  }
+  elements_.reserve(elements_.size() + staged.size());
+  for (auto& element : staged) {
+    element->owner_box_ = this;
+    elements_.push_back(std::move(element));
+  }
+}
+
+bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noexcept {
+  if (candidates.empty()) return true;
+  try {
+    // Check Box ownership before dereferencing any candidate: repeated or
+    // foreign/stale pointers must never trigger a partial reclamation.
+    std::unordered_set<Element*> batch;
+    batch.reserve(candidates.size());
+    for (Element* element : candidates) {
+      if (!element || !batch.insert(element).second) return false;
+    }
+    std::size_t found = 0;
+    for (const auto& owned : elements_) {
+      if (batch.count(owned.get())) ++found;
+    }
+    if (found != batch.size()) return false;
+
+    std::vector<Element*> roots;
+    roots.reserve(batch.size());
+    for (Element* element : candidates) {
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || !element->id().empty()) return false;
+      Element* parent = element->parent_elem();
+      if (!parent) roots.push_back(element);
+      else if (!batch.count(parent)) return false;
+      for (auto* child : element->children()) {
+        auto* contained = dynamic_cast<Element*>(child);
+        if (!contained || !batch.count(contained)) return false;
+      }
+    }
+    if (roots.empty()) return false;
+
+    // Focus-out callbacks may run application code. Deactivate while every
+    // Element remains owned, then verify the subtree again before deletion.
+    for (Element* root : roots) deactivate_subtree(root);
+    for (Element* element : candidates) {
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || !element->id().empty()) return false;
+      Element* parent = element->parent_elem();
+      if (parent && !batch.count(parent)) return false;
+      for (auto* child : element->children()) {
+        auto* contained = dynamic_cast<Element*>(child);
+        if (!contained || !batch.count(contained)) return false;
+      }
+    }
+    for (Element* element : candidates) {
+      styled_elements_.erase(reinterpret_cast<std::uintptr_t>(element));
+      container_widths_.erase(element);
+      style_engine_.forget_element(element);
+    }
+    elements_.erase(
+        std::remove_if(elements_.begin(), elements_.end(),
+                       [&batch](const std::unique_ptr<Element>& element) {
+                         return batch.count(element.get()) != 0;
+                       }),
+        elements_.end());
+    notify_utility_tree_changed();
+    return true;
+  } catch (...) {
+    // On allocation / event-detachment failure, retain ownership in Box.
+    return false;
   }
 }
 

@@ -1,0 +1,569 @@
+{
+  "mermaid": "11.12.0",
+  "integrity": "sha512-ZudVx73BwrMJfCFmSSJT84y6u5brEoV8DOItdHomNLz32uBjNrelm7mg95X7g+C6UoQH/W6mBLGDEDv73JdxBg==",
+  "lockSha256": "99c874b86494b41ed95f94c4faa59daff873d750bf9a435e7fdbbb74d6a69a55",
+  "adapterPolicy": {
+    "doubleArrowPoint": "arrow_point",
+    "dottedLength": 1,
+    "edgeIdsAndCurves": "retained in AST accessors; omitted by legacy JSON"
+  },
+  "changes": [
+    {
+      "name": "mermaid-005",
+      "inputSha256": "1a790d98047a972e374d60e8e72ec9fa985161734b68b81c8c065b85d3d7b002",
+      "historicalSha256": "21ffe3cf8b28d2f5e48f86ccc50959ec3b5d6f624afd7a652635015461496057",
+      "expectedSha256": "0af88f4312a197ef81bff4c177bf336a3b8719c9947a6a49ec6137294f5ef645",
+      "removedNodes": [],
+      "originalOrder": [
+        [
+          "1A",
+          "1B"
+        ],
+        [
+          "1C",
+          "D"
+        ],
+        [
+          "1C",
+          "E"
+        ],
+        [
+          "1B",
+          "1C"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "1A",
+          "1B"
+        ],
+        [
+          "1B",
+          "1C"
+        ],
+        [
+          "1C",
+          "D"
+        ],
+        [
+          "1C",
+          "E"
+        ]
+      ]
+    },
+    {
+      "name": "mermaid-006",
+      "inputSha256": "51ff34b4f5894dd4c30a9f905ea8e477e8880fae63c878a197d1ab1c6aec30c8",
+      "historicalSha256": "c2b6ba2c0e5adc5c06af1b222332a97ed171dcd09e949804f1ff8c8d6385e81a",
+      "expectedSha256": "0fd0934cdfecbc941062318ce790c56b6a20984536fb1327c64dec627372d1ed",
+      "removedNodes": [],
+      "originalOrder": [
+        [
+          "47",
+          "48"
+        ],
+        [
+          "37",
+          "48"
+        ],
+        [
+          "35",
+          "47"
+        ],
+        [
+          "35",
+          "45"
+        ],
+        [
+          "35",
+          "39"
+        ],
+        [
+          "41",
+          "47"
+        ],
+        [
+          "41",
+          "45"
+        ],
+        [
+          "41",
+          "44"
+        ],
+        [
+          "46",
+          "47"
+        ],
+        [
+          "40",
+          "47"
+        ],
+        [
+          "38",
+          "47"
+        ],
+        [
+          "43",
+          "47"
+        ],
+        [
+          "42",
+          "47"
+        ],
+        [
+          "36",
+          "39"
+        ],
+        [
+          "44",
+          "47"
+        ],
+        [
+          "45",
+          "46"
+        ],
+        [
+          "39",
+          "43"
+        ],
+        [
+          "39",
+          "42"
+        ],
+        [
+          "39",
+          "41"
+        ],
+        [
+          "39",
+          "40"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "47",
+          "48"
+        ],
+        [
+          "37",
+          "48"
+        ],
+        [
+          "35",
+          "47"
+        ],
+        [
+          "41",
+          "47"
+        ],
+        [
+          "44",
+          "47"
+        ],
+        [
+          "46",
+          "47"
+        ],
+        [
+          "40",
+          "47"
+        ],
+        [
+          "38",
+          "47"
+        ],
+        [
+          "43",
+          "47"
+        ],
+        [
+          "42",
+          "47"
+        ],
+        [
+          "45",
+          "46"
+        ],
+        [
+          "35",
+          "45"
+        ],
+        [
+          "41",
+          "45"
+        ],
+        [
+          "41",
+          "44"
+        ],
+        [
+          "39",
+          "43"
+        ],
+        [
+          "39",
+          "42"
+        ],
+        [
+          "39",
+          "41"
+        ],
+        [
+          "39",
+          "40"
+        ],
+        [
+          "35",
+          "39"
+        ],
+        [
+          "36",
+          "39"
+        ]
+      ]
+    },
+    {
+      "name": "mermaid-024",
+      "inputSha256": "aab79baee8bf36d436302774f2a7c029d5c64866b689565b8f629ab57f2774da",
+      "historicalSha256": "352b1bd641fb71ed206aa020bbbd7c774c097b4f3d6454b33766842ed02dae4c",
+      "expectedSha256": "1d4976c019e7f565981db1fec921904303a658e6659134d61f352e128486dd28",
+      "removedNodes": [],
+      "originalOrder": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "C",
+          "D"
+        ],
+        [
+          "B",
+          "C"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "B",
+          "C"
+        ],
+        [
+          "C",
+          "D"
+        ]
+      ]
+    },
+    {
+      "name": "mermaid-031",
+      "inputSha256": "1d8c2c3758a2d4f353d2a2fe807b3806b1472600da07c68290fd7538f9f1ebe8",
+      "historicalSha256": "1bda5170f3669f7a384a5ab2c43fd3d9c9184829f4761f5e1b0a78add749ea95",
+      "expectedSha256": "2785a50336f21509e61f26a70faa2a657999b92648fdc9b0c135581a86944a0e",
+      "removedNodes": [],
+      "originalOrder": [
+        [
+          "work",
+          "sleep"
+        ],
+        [
+          "work",
+          "eat"
+        ],
+        [
+          "sleep",
+          "work"
+        ],
+        [
+          "eat",
+          "sleep"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "work",
+          "sleep"
+        ],
+        [
+          "sleep",
+          "work"
+        ],
+        [
+          "eat",
+          "sleep"
+        ],
+        [
+          "work",
+          "eat"
+        ]
+      ]
+    },
+    {
+      "name": "mermaid-035",
+      "inputSha256": "31aad7595d5aa24353294aaf2225627ec4604219e7b4ef17ce6d8f9fe0bf814c",
+      "historicalSha256": "8a3365b066dfca855f1ea2bf3ac40fd9beb13d4e5e4ccec41051fd1fd0bc83aa",
+      "expectedSha256": "4b2e604ed459c739c55313e925630335ec3c0b27b2ed39526b8ba1db6225f4b4",
+      "removedNodes": [],
+      "originalOrder": [
+        [
+          "L1",
+          "L2"
+        ],
+        [
+          "C",
+          "E1"
+        ],
+        [
+          "C",
+          "E2"
+        ],
+        [
+          "C",
+          "E3"
+        ],
+        [
+          "C",
+          "E4"
+        ],
+        [
+          "C",
+          "E5"
+        ],
+        [
+          "M1",
+          "C"
+        ],
+        [
+          "R1",
+          "R2"
+        ],
+        [
+          "L2",
+          "C"
+        ],
+        [
+          "R2",
+          "C"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "L1",
+          "L2"
+        ],
+        [
+          "L2",
+          "C"
+        ],
+        [
+          "M1",
+          "C"
+        ],
+        [
+          "R1",
+          "R2"
+        ],
+        [
+          "R2",
+          "C"
+        ],
+        [
+          "C",
+          "E1"
+        ],
+        [
+          "C",
+          "E2"
+        ],
+        [
+          "C",
+          "E3"
+        ],
+        [
+          "C",
+          "E4"
+        ],
+        [
+          "C",
+          "E5"
+        ]
+      ]
+    },
+    {
+      "name": "v2-mermaid-054",
+      "inputSha256": "fdddf4273a37047054d89cb7589382cef0e6fc14875b0fa0542381cd61c6d3cb",
+      "historicalSha256": "489ac0ea888c175d7f7cb1c4fef2efb6b2da3ad829ccfc0765ce24c2a89d6bad",
+      "expectedSha256": "1b48853e472f393b876971b449634a165c9e2b2569d6a39433ceb3941d5e8cca",
+      "removedNodes": [],
+      "originalOrder": [
+        [
+          "L1",
+          "L2"
+        ],
+        [
+          "C",
+          "E1"
+        ],
+        [
+          "C",
+          "E2"
+        ],
+        [
+          "C",
+          "E3"
+        ],
+        [
+          "C",
+          "E4"
+        ],
+        [
+          "C",
+          "E5"
+        ],
+        [
+          "M1",
+          "C"
+        ],
+        [
+          "R1",
+          "R2"
+        ],
+        [
+          "L2",
+          "C"
+        ],
+        [
+          "R2",
+          "C"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "L1",
+          "L2"
+        ],
+        [
+          "L2",
+          "C"
+        ],
+        [
+          "M1",
+          "C"
+        ],
+        [
+          "R1",
+          "R2"
+        ],
+        [
+          "R2",
+          "C"
+        ],
+        [
+          "C",
+          "E1"
+        ],
+        [
+          "C",
+          "E2"
+        ],
+        [
+          "C",
+          "E3"
+        ],
+        [
+          "C",
+          "E4"
+        ],
+        [
+          "C",
+          "E5"
+        ]
+      ]
+    },
+    {
+      "name": "v2-mermaid-104",
+      "inputSha256": "61602a9758467a4db3a3b2120375496e0f22d42b83a45a10425a8aedbeee010a",
+      "historicalSha256": "450cc8a52eac19886df60b1823764ce6b2fb3ea129cad4217773ac6cac21921a",
+      "expectedSha256": "b6df6328f1f59a2abd24964fe84ddb82e4860ae3d29e62bb79dc9283cb1c224a",
+      "removedNodes": [
+        "e1",
+        "e2",
+        "e3",
+        "e4",
+        "e5",
+        "e6",
+        "e7"
+      ],
+      "originalOrder": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "A",
+          "C"
+        ],
+        [
+          "E",
+          "D"
+        ],
+        [
+          "F",
+          "D"
+        ],
+        [
+          "B",
+          "E"
+        ],
+        [
+          "B",
+          "D"
+        ],
+        [
+          "C",
+          "D"
+        ],
+        [
+          "C",
+          "F"
+        ]
+      ],
+      "sourceOrder": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "B",
+          "E"
+        ],
+        [
+          "E",
+          "D"
+        ],
+        [
+          "B",
+          "D"
+        ],
+        [
+          "A",
+          "C"
+        ],
+        [
+          "C",
+          "D"
+        ],
+        [
+          "C",
+          "F"
+        ],
+        [
+          "F",
+          "D"
+        ]
+      ]
+    }
+  ]
+}

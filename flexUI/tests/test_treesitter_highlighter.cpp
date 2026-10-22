@@ -2,7 +2,7 @@
  * Unit tests for tree-sitter highlighter integration
  */
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 #undef group
 #include "test_support.h"
 #include <flexUI/syntax_highlighter.h>

@@ -14,10 +14,8 @@ validate manifest against descriptor -> build registry -> validate required capa
 in dependency order -> publish. Failure publishes neither host nor registry and existing RAII
 unloads every unstarted module; already-started modules stop in reverse order.
 
-**Libraries:** C++17, `TurboUtils::Core`, the installed `TurboParser::Parser` TOML facade, existing
-`FlexUI::Services`, existing native library adapter, TinyTest. The configured root TurboUtils SDK
-does not export `TurboUtils::TomlParser`, so this phase uses the already-required facade rather than
-adding a package-root fallback.
+**Libraries:** C++17, `Salts::Core`, the installed `Salts::TomlParser` TOML facade, existing
+`FlexUI::Services`, existing native library adapter, TinyTest. The manifest reader uses the published SaltsUtils `toml.h` API directly (`toml_parse` / `toml_free`); no compatibility facade or package-root fallback is needed.
 
 ## Public contract
 
@@ -111,8 +109,8 @@ optional = false
   build-tree paths into the repository.
 
 - Read through `turbo_fs_open/read` into a fixed `max_manifest_bytes + 1` buffer so concurrent file
-  growth cannot trigger an unbounded allocation; parse with the explicit-length `turbo_parse_toml`
-  facade from `TurboParser::Parser`.
+  growth cannot trigger an unbounded allocation; parse with the explicit-length `toml_parse`
+  facade from `Salts::TomlParser`.
 - Copy all values into an internal model and free each TOML string with its owning parser API.
 - Validate required/unknown keys, types, UTF-8/string/list/count bounds, canonical identifiers,
   canonical SemVer and duplicate list entries.

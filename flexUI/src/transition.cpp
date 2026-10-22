@@ -16,13 +16,13 @@ namespace {
 bool transition_value_matches_type(const TransitionValue& value,
                                    const cmeta_type_desc* type) {
     if (!value.has_value() || !type ||
-        !cmeta_type_equal(value.type, type)) {
+        !detail::style_value_type_matches(value.type, type)) {
         return false;
     }
-    if (cmeta_type_equal(type, &cmeta_type_float)) {
+    if (detail::style_value_type_matches(type, &cmeta_type_float)) {
         return std::holds_alternative<float>(value.value);
     }
-    if (cmeta_type_equal(type, &flex::cmeta_type_color)) {
+    if (detail::style_value_type_matches(type, &flex::cmeta_type_color)) {
         return std::holds_alternative<Color>(value.value);
     }
     return false;
@@ -333,10 +333,10 @@ float animation_terminal_progress(const Animation& animation) {
 
 const TransitionValueOps* transition_type_ops(
     const cmeta_type_desc* type) noexcept {
-    if (type && cmeta_type_equal(type, &cmeta_type_float)) {
+    if (detail::style_value_type_matches(type, &cmeta_type_float)) {
         return &kFloatTransitionOps;
     }
-    if (type && cmeta_type_equal(type, &flex::cmeta_type_color)) {
+    if (detail::style_value_type_matches(type, &flex::cmeta_type_color)) {
         return &kColorTransitionOps;
     }
     return nullptr;
@@ -473,7 +473,8 @@ TransitionValue TransitionManager::get_typed(
     const auto it = transitions_.find({element_id, property.id});
     if (it == transitions_.end() || !it->second.property ||
         it->second.property->id != property.id ||
-        !cmeta_type_equal(it->second.property->type, property.type)) {
+        !detail::style_value_type_matches(it->second.property->type,
+                                          property.type)) {
         return default_value;
     }
 
@@ -488,7 +489,7 @@ bool TransitionManager::start_float(
     float target_value,
     const TransitionDef& def,
     float current_time_ms) {
-    if (!property.type || !cmeta_type_equal(property.type, &cmeta_type_float)) {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
         return false;
     }
     const TransitionValue baseline{&cmeta_type_float, flex::AnimValue{previous_value}};
@@ -506,8 +507,7 @@ bool TransitionManager::start_color(
     const Color& target_value,
     const TransitionDef& def,
     float current_time_ms) {
-    if (!property.type ||
-        !cmeta_type_equal(property.type, &flex::cmeta_type_color)) {
+    if (!detail::style_value_type_matches(property.type, &flex::cmeta_type_color)) {
         return false;
     }
     const TransitionValue baseline{
@@ -525,7 +525,7 @@ float TransitionManager::get_float(
     const detail::StylePropertyDesc& property,
     float default_value,
     float current_time_ms) const {
-    if (!property.type || !cmeta_type_equal(property.type, &cmeta_type_float)) {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
         return default_value;
     }
     const TransitionValue baseline{&cmeta_type_float, flex::AnimValue{default_value}};
@@ -540,8 +540,7 @@ Color TransitionManager::get_color(
     const detail::StylePropertyDesc& property,
     const Color& default_value,
     float current_time_ms) const {
-    if (!property.type ||
-        !cmeta_type_equal(property.type, &flex::cmeta_type_color)) {
+    if (!detail::style_value_type_matches(property.type, &flex::cmeta_type_color)) {
         return default_value;
     }
     const TransitionValue baseline{
@@ -571,6 +570,19 @@ bool TransitionManager::has_active(std::uintptr_t element_id,
         }
     }
     return false;
+}
+
+std::uint32_t TransitionManager::active_impact(
+    std::uintptr_t element_id, float current_time_ms) const noexcept {
+    std::uint32_t impact = detail::STYLE_IMPACT_NONE;
+    for (const auto& [key, transition] : transitions_) {
+        if (key.first != element_id || transition.is_complete(current_time_ms) ||
+            !transition.property) {
+            continue;
+        }
+        impact |= transition.property->impact;
+    }
+    return impact;
 }
 
 void TransitionManager::clear_element(std::uintptr_t element_id) {
@@ -839,8 +851,7 @@ bool AnimationManager::start_float(
     const std::vector<AnimationValuePoint>& keyframes,
     const AnimationDef& def,
     float current_time_ms) {
-    if (!property.type ||
-        !cmeta_type_equal(property.type, &cmeta_type_float)) {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
         return false;
     }
 
@@ -866,7 +877,8 @@ TransitionValue AnimationManager::get_typed(
     const auto it = typed_animations_.find({element_id, property.id});
     if (it == typed_animations_.end() || !it->second.property ||
         it->second.property->id != property.id ||
-        !cmeta_type_equal(it->second.property->type, property.type)) {
+        !detail::style_value_type_matches(it->second.property->type,
+                                          property.type)) {
         return default_value;
     }
     return it->second.current_value(default_value, current_time_ms);
@@ -877,8 +889,7 @@ float AnimationManager::get_float(
     const detail::StylePropertyDesc& property,
     float default_value,
     float current_time_ms) const {
-    if (!property.type ||
-        !cmeta_type_equal(property.type, &cmeta_type_float)) {
+    if (!detail::style_value_type_matches(property.type, &cmeta_type_float)) {
         return default_value;
     }
     const TransitionValue baseline{
@@ -886,6 +897,22 @@ float AnimationManager::get_float(
     const TransitionValue current =
         get_typed(element_id, property, baseline, current_time_ms);
     const auto* value = std::get_if<float>(&current.value);
+    return value ? *value : default_value;
+}
+
+Color AnimationManager::get_color(
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const Color& default_value,
+    float current_time_ms) const {
+    if (!detail::style_value_type_matches(property.type, &flex::cmeta_type_color)) {
+        return default_value;
+    }
+    const TransitionValue baseline{
+        &flex::cmeta_type_color, flex::AnimValue{default_value}};
+    const TransitionValue current =
+        get_typed(element_id, property, baseline, current_time_ms);
+    const auto* value = std::get_if<Color>(&current.value);
     return value ? *value : default_value;
 }
 
@@ -922,6 +949,19 @@ bool AnimationManager::has_active(std::uintptr_t element_id,
         }
     }
     return false;
+}
+
+std::uint32_t AnimationManager::active_impact(
+    std::uintptr_t element_id, float current_time_ms) const noexcept {
+    std::uint32_t impact = detail::STYLE_IMPACT_NONE;
+    for (const auto& [key, animation] : typed_animations_) {
+        if (key.first != element_id || !animation.is_active(current_time_ms) ||
+            !animation.property) {
+            continue;
+        }
+        impact |= animation.property->impact;
+    }
+    return impact;
 }
 
 bool AnimationManager::has_effect(std::uintptr_t element_id,

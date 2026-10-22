@@ -138,6 +138,18 @@ Color get_transition_color(TransitionManager& transitions,
              : fallback;
 }
 
+Color get_animation_color(const AnimationManager& animations,
+                          std::uintptr_t element_id,
+                          detail::StylePropertyId property_id,
+                          const Color& fallback,
+                          float current_time_ms) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  return property
+             ? animations.get_color(element_id, *property, fallback,
+                                    current_time_ms)
+             : fallback;
+}
+
 float get_animation_float(const AnimationManager& animations,
                           std::uintptr_t element_id,
                           detail::StylePropertyId property_id,
@@ -2050,14 +2062,9 @@ void RenderManager::render_element(Element* elem,
             element_id, *opacity_property, opacity, current_time);
       }
       const Color before_border_color = border_color;
-      border_color.r =
-          animations.get(element_id, "border-color-r", border_color.r, current_time);
-      border_color.g =
-          animations.get(element_id, "border-color-g", border_color.g, current_time);
-      border_color.b =
-          animations.get(element_id, "border-color-b", border_color.b, current_time);
-      border_color.a =
-          animations.get(element_id, "border-color-a", border_color.a, current_time);
+      border_color = get_animation_color(
+          animations, element_id, detail::StylePropertyId::BorderColor,
+          border_color, current_time);
       border_color_effect_active =
           border_color_effect_active ||
           std::fabs(border_color.r - before_border_color.r) > 0.001f ||
@@ -2070,36 +2077,21 @@ void RenderManager::render_element(Element* elem,
       outline_offset = get_animation_float(
           animations, element_id, detail::StylePropertyId::OutlineOffset,
           outline_offset, current_time);
-      outline_color.r =
-          animations.get(element_id, "outline-color-r", outline_color.r, current_time);
-      outline_color.g =
-          animations.get(element_id, "outline-color-g", outline_color.g, current_time);
-      outline_color.b =
-          animations.get(element_id, "outline-color-b", outline_color.b, current_time);
-      outline_color.a =
-          animations.get(element_id, "outline-color-a", outline_color.a, current_time);
+      outline_color = get_animation_color(
+          animations, element_id, detail::StylePropertyId::OutlineColor,
+          outline_color, current_time);
       ring_width = get_animation_float(
           animations, element_id, detail::StylePropertyId::RingWidth,
           ring_width, current_time);
       ring_offset = get_animation_float(
           animations, element_id, detail::StylePropertyId::RingOffset,
           ring_offset, current_time);
-      ring_color.r =
-          animations.get(element_id, "ring-color-r", ring_color.r, current_time);
-      ring_color.g =
-          animations.get(element_id, "ring-color-g", ring_color.g, current_time);
-      ring_color.b =
-          animations.get(element_id, "ring-color-b", ring_color.b, current_time);
-      ring_color.a =
-          animations.get(element_id, "ring-color-a", ring_color.a, current_time);
-      ring_offset_color.r = animations.get(
-          element_id, "ring-offset-color-r", ring_offset_color.r, current_time);
-      ring_offset_color.g = animations.get(
-          element_id, "ring-offset-color-g", ring_offset_color.g, current_time);
-      ring_offset_color.b = animations.get(
-          element_id, "ring-offset-color-b", ring_offset_color.b, current_time);
-      ring_offset_color.a = animations.get(
-          element_id, "ring-offset-color-a", ring_offset_color.a, current_time);
+      ring_color = get_animation_color(
+          animations, element_id, detail::StylePropertyId::RingColor,
+          ring_color, current_time);
+      ring_offset_color = get_animation_color(
+          animations, element_id, detail::StylePropertyId::RingOffsetColor,
+          ring_offset_color, current_time);
       primary_shadow.offset_x = get_animation_float(
           animations, element_id, detail::StylePropertyId::BoxShadowOffsetX,
           primary_shadow.offset_x, current_time);
@@ -2112,14 +2104,9 @@ void RenderManager::render_element(Element* elem,
       primary_shadow.spread_radius = get_animation_float(
           animations, element_id, detail::StylePropertyId::BoxShadowSpread,
           primary_shadow.spread_radius, current_time);
-      primary_shadow.color.r = animations.get(
-          element_id, "box-shadow-color-r", primary_shadow.color.r, current_time);
-      primary_shadow.color.g = animations.get(
-          element_id, "box-shadow-color-g", primary_shadow.color.g, current_time);
-      primary_shadow.color.b = animations.get(
-          element_id, "box-shadow-color-b", primary_shadow.color.b, current_time);
-      primary_shadow.color.a = animations.get(
-          element_id, "box-shadow-color-a", primary_shadow.color.a, current_time);
+      primary_shadow.color = get_animation_color(
+          animations, element_id, detail::StylePropertyId::BoxShadowColor,
+          primary_shadow.color, current_time);
     }
     if (transform_scale_x == 1.0f && transform_scale_y == 1.0f &&
         transform_scale != 1.0f) {
@@ -2327,14 +2314,9 @@ void RenderManager::render_element(Element* elem,
     }
     if (animations.has_any_effects() &&
         animations.has_effect(element_id, current_time)) {
-      bg_color.r = animations.get(element_id, "background-color-r", bg_color.r,
-                                  current_time);
-      bg_color.g = animations.get(element_id, "background-color-g", bg_color.g,
-                                  current_time);
-      bg_color.b = animations.get(element_id, "background-color-b", bg_color.b,
-                                  current_time);
-      bg_color.a = animations.get(element_id, "background-color-a", bg_color.a,
-                                  current_time);
+      bg_color = get_animation_color(
+          animations, element_id, detail::StylePropertyId::BackgroundColor,
+          bg_color, current_time);
     }
   }
   if (!widget_paints_host_box && bg_color.a > 0 && bg_clip.width > 0.0f &&
