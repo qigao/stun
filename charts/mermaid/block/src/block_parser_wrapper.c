@@ -37,7 +37,10 @@ static void free_stmt(BlockStatement* s) {
             free(s->data.node.label);
             free(s->data.node.shape);
             if (s->data.node.children) free_stmts(s->data.node.children);
-            // Directions
+            for (int i = 0; i < s->data.node.direction_count; ++i) {
+                free(s->data.node.directions[i]);
+            }
+            free(s->data.node.directions);
             break;
         case BLOCK_STMT_EDGE:
             free(s->data.edge.id1);
