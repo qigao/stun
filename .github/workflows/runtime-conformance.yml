@@ -44,7 +44,7 @@ jobs:
             'charts/mermaid/golden/flowchart/*' \
             'tools/lemon/*' '.github/scripts/ci-affected.sh' \
             '.github/scripts/restore-flowchart-sdk.py' \
-            '.github/workflows/runtime-conformance.yml'
+            '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
 
       - name: Detect typed animation changes
         id: animation_scope
@@ -58,7 +58,7 @@ jobs:
             'flexUI/tests/test_typed_animation.cpp' 'flexUI/tests/test_typed_transition.cpp' \
             'flexUI/tests/typed_value_test_support.h' 'flex/tests/cmeta_types_peer.cpp' \
             'flexUI/tests/typed-animation-standalone/*' 'flexUI/CMakeLists.txt' \
-            '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
+            '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
       - name: Detect headless text measurement changes
         id: measurement_scope
@@ -77,7 +77,7 @@ jobs:
             'flexUI/*' 'flex/*' 'shared/markdown/*' 'shared/gcanvas/*' \
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \
             'tools/lemon/*' 'cmake/Sanitizers.cmake' \
-            '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/runtime-conformance.yml'
+            '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
 
       - name: Detect Unicode text policy changes
         id: unicode_scope
@@ -89,7 +89,7 @@ jobs:
             'flexUI/src/widgets/textarea_widget.cpp' 'flexUI/tests/test_text_util_unicode.cpp' \
             'flexUI/tests/test_widget_contracts.cpp' 'flexUI/tests/test_text_layout_unicode.cpp' \
             'flexUI/tests/unicode-standalone/*' 'flexUI/tests/CMakeLists.txt' \
-            '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
+            '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
       - name: Detect numeric expression parser changes
         id: expression_scope
@@ -108,7 +108,7 @@ jobs:
             'charts/mermaid/xychart/*' 'charts/mermaid/golden/xychart/*' \
             'charts/mermaid/quadrant/*' 'charts/mermaid/golden/quadrant/*' \
             'charts/mermaid/tests/expression-standalone/*' \
-            '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
+            '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
   mermaid-oracle:
     name: Pinned Mermaid semantic evidence (independent of Stun golden)
