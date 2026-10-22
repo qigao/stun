@@ -1431,3 +1431,69 @@ spec("FlexUI desktop application owns close and shutdown state") {
     check(built.application->state() == flexUI::DesktopApplicationState::Ready);
   }
 }
+
+spec("FlexUI desktop content preflight runs before stylesheet admission") {
+  it("reports an unknown tag before an invalid stylesheet") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Schema\">\n  <unknown id=\"root\"/>\n</ui>")
+           .stylesheet("#root { widht: 90px; }");
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+    check_equal(built.error.ui_error.line, 2);
+    check_equal(built.error.ui_error.column, 4);
+    check_true(built.error.css_diagnostics.empty());
+  }
+
+  it("reports forbidden leaf children before an invalid stylesheet") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Schema\"><input id=\"root\"><label id=\"child\"/></input></ui>")
+           .stylesheet("#root { widht: 90px; }");
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidNode);
+    check_true(built.error.css_diagnostics.empty());
+  }
+}
+
+
+spec("FlexUI schema rejection preserves the active application") {
+  it("rejects an invalid later sibling before invoking factories during reload") {
+    int calls = 0;
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(registry.register_widget("probe", [&](const flexUI::UiNodeDefinition &) {
+      ++calls;
+      return std::make_unique<flexUI::ButtonWidget>();
+    }, flexUI::UiContentModel::Empty)));
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.widget_registry(std::move(registry))
+           .xml_entry("<ui name=\"Stable\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto *active_box = &built.application->box();
+    auto *active_root = active_box->root();
+    const auto active_source = built.application->sources().ui;
+    const auto failed = built.application->reload({
+      "<ui name=\"Replacement\"><div id=\"replacement\"><probe id=\"first\"/><input id=\"last\" text=\"forbidden\"/></div></ui>",
+      "#replacement { widht: 90px; }", "", "schema-reload"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(failed.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidProperty);
+    check_true(failed.error.css_diagnostics.empty());
+    check_equal(calls, 0);
+    check_equal(&built.application->box(), active_box);
+    check_equal(active_box->root(), active_root);
+    check_null(active_box->get_by_id("replacement"));
+    check_null(active_box->get_by_id("first"));
+    check_equal(built.application->sources().ui, active_source);
+    check(built.application->state() == flexUI::DesktopApplicationState::Ready);
+  }
+}

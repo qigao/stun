@@ -919,6 +919,13 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     return result;
   }
 
+  if (registry) {
+    result.error = registry->validate(definition);
+    if (result.error) {
+      return result;
+    }
+  }
+
   result.error = validate_target(box, definition);
   if (result.error) {
     return result;

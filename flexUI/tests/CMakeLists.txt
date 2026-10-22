@@ -570,3 +570,7 @@ if(WIN32)
 )
   endif()
 endif()
+
+add_executable(test_ui_content_models test_ui_content_models.cpp)
+target_link_libraries(test_ui_content_models PRIVATE flexUI Salts::TinyTest)
+add_test(NAME test_ui_content_models COMMAND test_ui_content_models)

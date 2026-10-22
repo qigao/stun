@@ -162,6 +162,7 @@ set(FLEXUI_HEADERS
   include/flexUI/binding_runtime.h
   include/flexUI/ui_document.h
   include/flexUI/ui_xml.h
+  include/flexUI/ui_node_schema.h
   include/flexUI/widget_registry.h
   include/flexUI/keyed_repeater.h
   include/flexUI/text_value_widget.h
