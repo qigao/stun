@@ -263,6 +263,16 @@ static void add_edge(FlowchartParserContext *ctx, const char* from, const char* 
         }
         memcpy(owned->id, arrow, length);
         owned->id[length] = '\0';
+        /* Mermaid gives an explicit name only to its first declared edge.
+           Later reuse has no explicit ID; declaration ordinal stays unique. */
+        for (const FlowchartEdge* prior = ctx->diagram->edges; prior; prior = prior->next) {
+            const char* prior_id = flowchart_edge_get_id(prior);
+            if (prior_id && strcmp(prior_id, owned->id) == 0) {
+                free(owned->id);
+                owned->id = NULL;
+                break;
+            }
+        }
         arrow = at + 1;
     }
     e->from = strdup(from);

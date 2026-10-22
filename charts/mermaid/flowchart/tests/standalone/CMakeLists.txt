@@ -104,6 +104,7 @@ if(STUN_CI_JSON_GOLDEN)
     "${GENERATED_LEXER}"
     "${FLOWCHART_SOURCE}/src/flowchart_parser_wrapper.c"
     "${FLOWCHART_SOURCE}/tests/test_parser.c"
+    "${FLOWCHART_SOURCE}/tests/test_json_v2.c"
   )
   target_include_directories(stun_flowchart_json_golden PRIVATE
     "${FLOWCHART_SOURCE}/include"
@@ -112,6 +113,7 @@ if(STUN_CI_JSON_GOLDEN)
   target_compile_definitions(stun_flowchart_json_golden PRIVATE
     _POSIX_C_SOURCE=200809L
     GOLDEN_DIR="${STUN_ROOT}/charts/mermaid/golden/flowchart"
+    JSON_V2_CONTRACT="${FLOWCHART_SOURCE}/tests/json-v2-contract.json"
   )
   target_link_libraries(stun_flowchart_json_golden PRIVATE
     Salts::JsonParser Salts::TinyTest

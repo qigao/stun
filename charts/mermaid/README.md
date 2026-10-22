@@ -142,3 +142,52 @@ the pinned D3 implementation and checks viewport containment. Generated fixture
 geometry used for numerical comparison excludes obstacles; the full scene is
 separately accepted in professional mode and rejected in legacy mode. No window
 or Mesa build is required.
+
+## Explicit Flowchart JSON v2
+
+Serializer consumers can opt into `flowchart_to_json_ex(diagram,
+FLOWCHART_JSON_SOURCE_V2)`. The root identifies this contract with
+`"schema":"stun.flowchart/2"`. `flowchart_to_json` and explicit
+`FLOWCHART_JSON_LEGACY` continue to select the existing sparse projection.
+Unknown format values return NULL; there is no automatic schema selection or
+fallback. V2 requires parser-owned diagrams and edges. Free exported buffers
+with `json_serialize_free`; the buffer remains valid after freeing its diagram.
+Callers requiring a complete source parse must check `flowchart_parse_ex` first.
+
+V2 emits `links` in AST declaration order, with the following edge fields:
+
+| Field | Contract |
+| --- | --- |
+| `declarationIndex` | Zero-based declaration ordinal; identity remains distinct for parallel edges. |
+| `source`, `target` | AST endpoint IDs. |
+| `type` | `arrow_open`, single `arrow_point/circle/cross`, or `double_arrow_point/circle/cross`. |
+| `arrowTypeStart`, `arrowTypeEnd` | Explicit endpoint types; `none` means no head. |
+| `stroke` | `normal`, `thick`, `dotted`, or `invisible`. |
+| `length` | Pinned Mermaid semantics, including dot counts and its maximum of 10. |
+| `id` | Explicit edge name, or JSON null. No generated ID substitutes for an absent name. |
+| `curve` | Parsed explicit curve property, or JSON null; this does not assert renderer support. |
+| `text` | Existing source label object when present, preserving markup bytes. |
+
+For example, `C <-...-> E4` exports `double_arrow_point`, both point heads,
+`dotted` and length 3. Numbered `linkStyle` entries address `declarationIndex`.
+When an explicit edge ID is reused, only its first declared edge retains that
+ID, matching pinned Mermaid lookup; later reuse has null `id` and its own
+ordinal. Curve property lookup therefore continues to address the first named
+edge. Unknown operator profiles refuse v2 export rather than using legacy data.
+
+This migration changes ordered edge metadata. Other graph fields and source
+label bytes retain their existing projection, including literal `<br/>` versus
+`<br>` spelling; Mermaid's rendering-time HTML canonicalization is not applied
+by this C11 export API. It is not a claim of complete Mermaid graph/config JSON
+conformance. Existing production callers remain on their explicitly selected
+API; this change does not switch a consumer automatically.
+
+`flowchart/tests/oracle/generate-json-v2.mjs --write` explicitly regenerates the
+reviewable `json-v2-contract.json`; CI runs it without `--write`. The integrity-
+locked Mermaid 11.12.0 oracle supplies ordered arrow/identity/curve facts for
+all 95 original sources plus six regression groups. The file records source,
+baseline and package-lock hashes. Historical source, JSON and provenance files
+remain unchanged. Tests require COMPLETE parses, compare all 95 complete v2
+graphs strictly (using only the existing square/rect alias), and independently
+retain the 95-case legacy gate. Doubled delimiter backslashes are now recognized
+without recording a spurious lexer error or changing their established labels.

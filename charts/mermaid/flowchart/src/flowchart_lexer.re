@@ -80,9 +80,14 @@ loop:
         inline_edge_label = ("--" | "<--") [ \t]* label_words [ \t]* ("-->" | "--->");
         variable_dash_arrow = "--" "-"* ">";
         variable_thick_arrow = "==" "="* ">";
+        full_dash_arrow = [<ox]? "--" "-"* [>ox] | "---" "-"*;
+        full_thick_arrow = [<ox]? "==" "="* [>ox] | "===" "="*;
+        full_dot_arrow = [<ox]? "-"? "."+ "-" [>ox]?;
+        full_invisible_arrow = "~~~" "~"*;
+        full_arrow = full_dash_arrow | full_thick_arrow | full_dot_arrow | full_invisible_arrow;
         // Named edge IDs are presentation metadata; do not turn them into
         // source/target nodes. Preserve the underlying arrow operator.
-        edge_id_arrow = ident "@" (variable_dash_arrow | variable_thick_arrow);
+        edge_id_arrow = ident "@" full_arrow;
         edge_curve_props = ident "@{" [ \t]* "curve:" [^}\n\000]* "}";
         // link@-- "Label" --> is an explicitly named, labeled edge.
         named_quoted_edge_label = ident "@" "--" [ \t]* string [ \t]* "-->";
@@ -220,10 +225,18 @@ loop:
             const char* end = s->cursor - (long_tip ? 4 : 3);
             while (begin < end && (*begin == ' ' || *begin == '\t')) ++begin;
             while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) --end;
-            FlowchartParser(parser, FC_ARROW, strdup(long_tip ? "--->" : "-->"), ctx);
+            const char* op = token[0] == '<' ? (long_tip ? "<--->" : "<-->")
+                                                : (long_tip ? "--->" : "-->");
+            FlowchartParser(parser, FC_ARROW, strdup(op), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
             FlowchartParser(parser, FC_IDENTIFIER, copy_token(begin, end), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
+            goto loop;
+        }
+
+        // Preserve heads and complete stroke lengths for explicit JSON v2.
+        full_arrow {
+            FlowchartParser(parser, FC_ARROW, copy_token(token, s->cursor), ctx);
             goto loop;
         }
 
@@ -253,6 +266,10 @@ loop:
         // 优先级 3: 形状限定符
         "[/"               { s->shape_label_depth++; FlowchartParser(parser, FC_TRAP_START, NULL, ctx); goto loop; }
         "/]"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        // Doubled delimiter backslashes in the historical Mermaid corpus
+        // represent one retained label slash, already reconstructed by grammar.
+        "\x5B\x5C\x5C" { s->shape_label_depth++; FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
+        "\x5C\x5C\x5D" { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_BACKSLASH_END, NULL, ctx); goto loop; }
         "\x5B\x5C"         { s->shape_label_depth++; FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
         "\x5C\x5D"         { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_BACKSLASH_END, NULL, ctx); goto loop; }
         ">"                { s->shape_label_depth++; FlowchartParser(parser, FC_ODD_START, NULL, ctx); goto loop; }

@@ -84,3 +84,21 @@ owned IDs/curve names, every control/end coordinate and viewport containment.
 Independent diagnostic sampling confirms the original legacy scene's refused
 node intersection; it does not replace the production conservative certificate.
 Native tests require full-scene professional acceptance and legacy refusal.
+
+## Explicit JSON v2 contract (#239)
+
+Run `node generate-json-v2.mjs` to verify `../json-v2-contract.json`; use
+`--write` only to regenerate the proposal for review. All ordered type/stroke/
+length/identity/curve facts come from pinned Mermaid 11.12.0. Other graph fields
+and source label objects retain the existing explicit baseline. Labels are
+matched bijectively to historical edges (exact labels disambiguate repeated
+endpoints), so HTML canonicalization does not silently replace source markup.
+No actual Stun output is used to generate expectations.
+
+Native tests require COMPLETE source parses and strict full-graph equality for
+all 95 cases, while the original legacy golden gate remains unchanged. Six
+additional groups cover variable strokes/heads/length caps, labelled arrows,
+named chains, parallel endpoints, repeated IDs, curve lookup timing and escaping.
+Unknown schemas/operators are tested as explicit failures, and owned output is
+read after its source AST is freed. The same focused installed-SDK sanitizer job
+runs both output contracts without Mesa or desktop qualification.
