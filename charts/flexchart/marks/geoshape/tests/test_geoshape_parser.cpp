@@ -15,18 +15,18 @@ spec("flexchart_geoshape_parser") {
             std::string error;
             auto chart = flex::chart::geoshape_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Geo Shape");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Geo Shape"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "geoshape");
+            check(std::string(mark->type.c_str()) == std::string("geoshape"));
             check(mark->encodings.size() >= 1);
             std::string shape_field;
             for (auto& enc : mark->encodings) {
                 if (enc->channel == "shape") shape_field = enc->field;
             }
-            check_str_eq(shape_field.c_str(), "shape_data");
+            check(std::string(shape_field.c_str()) == std::string("shape_data"));
         }
 
         it("should parse geoshape chart with data block") {
@@ -44,7 +44,7 @@ spec("flexchart_geoshape_parser") {
             std::string error;
             auto chart = flex::chart::geoshape_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "World Map");
+            check(std::string(chart->title.c_str()) == std::string("World Map"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -55,11 +55,11 @@ spec("flexchart_geoshape_parser") {
                 if (enc->channel == "shape") shape_f = enc->field;
                 if (enc->channel == "color") color_f = enc->field;
             }
-            check_str_eq(shape_f.c_str(), "shape_data");
-            check_str_eq(color_f.c_str(), "color");
+            check(std::string(shape_f.c_str()) == std::string("shape_data"));
+            check(std::string(color_f.c_str()) == std::string("color"));
             // Check projection style
             check(mark->styles.count("projection") > 0);
-            check_str_eq(std::get<std::string>(mark->styles["projection"]).c_str(), "mercator");
+            check(std::string(std::get<std::string>(mark->styles["projection"]).c_str()) == std::string("mercator"));
         }
 
         it("should parse encoding block") {
@@ -90,7 +90,7 @@ spec("flexchart_geoshape_parser") {
             auto chart = flex::chart::geoshape_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(std::get<std::string>(mark->styles["projection"]).c_str(), "mercator");
+            check(std::string(std::get<std::string>(mark->styles["projection"]).c_str()) == std::string("mercator"));
             check(std::get<double>(mark->styles["fill-opacity"]) > 0.79);
         }
 
@@ -104,7 +104,7 @@ spec("flexchart_geoshape_parser") {
             auto chart = flex::chart::geoshape_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "geo(lat, lon)");
+            check(mark->expr == "geo(lat, lon)");
             check(mark->ranges.count("shape") > 0);
             auto& r = mark->ranges["shape"];
             check(r.size() == 3);
@@ -123,7 +123,7 @@ spec("flexchart_geoshape_parser") {
             auto chart = flex::chart::geoshape_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "world.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("world.json"));
         }
 
         it("should parse projection as string") {
@@ -137,7 +137,7 @@ spec("flexchart_geoshape_parser") {
             check(chart != nullptr);
             auto& mark = chart->marks[0];
             check(mark->styles.count("projection") > 0);
-            check_str_eq(std::get<std::string>(mark->styles["projection"]).c_str(), "albers-usa");
+            check(std::string(std::get<std::string>(mark->styles["projection"]).c_str()) == std::string("albers-usa"));
         }
 
         it("should return nullptr on invalid input") {

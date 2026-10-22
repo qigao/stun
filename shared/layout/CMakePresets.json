@@ -1,0 +1,16 @@
+{
+    "version": 6,
+    "include": ["../../presets/CompilerFlags.json"],
+    "configurePresets": [
+        {
+            "name": "base-release",
+            "hidden": true,
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "BUILD_TESTING": "ON",
+                "STUN_GRAPHLAYOUT_BUILD_BENCHMARKS": "OFF"
+            }
+        }
+    ]
+}

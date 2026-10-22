@@ -56,6 +56,12 @@ target_include_directories(test_runtime PRIVATE ../include)
 set_target_properties(test_runtime PROPERTIES FOLDER "flex/tests")
 add_test(NAME test_runtime COMMAND test_runtime)
 
+add_executable(test_property_cmeta test_property_cmeta.cpp cmeta_types_peer.cpp)
+target_link_libraries(test_property_cmeta PRIVATE flex_runtime Salts::TinyTest)
+target_include_directories(test_property_cmeta PRIVATE ../include)
+set_target_properties(test_property_cmeta PROPERTIES FOLDER "flex/tests")
+add_test(NAME test_property_cmeta COMMAND test_property_cmeta)
+
 add_executable(test_cubic_bezier test_cubic_bezier.cpp)
 target_link_libraries(test_cubic_bezier PRIVATE flex_runtime Salts::TinyTest)
 target_include_directories(test_cubic_bezier PRIVATE ../include)
@@ -130,7 +136,7 @@ if(FLEX_BUILD_GCANVAS_GPU_TESTS AND
     PRIVATE flex flex_render_engine_gcanvas gCanvas::Window
             Salts::TinyTest)
   target_include_directories(
-    benchmark_gcanvas_blur PRIVATE ${CMAKE_SOURCE_DIR}/vendor/gCanvas/src)
+    benchmark_gcanvas_blur PRIVATE ${CMAKE_SOURCE_DIR}/shared/gcanvas/src)
   set_target_properties(
     benchmark_gcanvas_blur PROPERTIES FOLDER "flex/benchmarks")
 endif()

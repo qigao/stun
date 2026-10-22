@@ -86,6 +86,10 @@ public:
     }
 
     void clear_children();
+    // Caller validates uniqueness and parentage first. All allocations
+    // happen before altering parents or visible children, providing the
+    // strong exception guarantee for raw-pointer tree replacement.
+    void replace_children_prevalidated(const std::vector<Node::RawPtr>& children);
     void clear() { clear_children(); }
 
     Node::RawPtr child_at(size_t index) const;

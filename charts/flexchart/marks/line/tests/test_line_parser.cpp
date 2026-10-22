@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <string>
 #include "flexchart/line/line_parser.h"
 
 spec("flexchart_line_parser") {
@@ -19,12 +20,12 @@ spec("flexchart_line_parser") {
             std::string error;
             auto chart = flex::chart::line_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Trend");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Trend"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "line");
+            check(std::string(mark->type.c_str()) == std::string("line"));
             check(mark->encodings.size() == 2);
             // Check styles
             auto it_sw = mark->styles.find("stroke-width");
@@ -32,13 +33,13 @@ spec("flexchart_line_parser") {
             check(std::get<double>(it_sw->second) == 2.0);
             auto it_interp = mark->styles.find("interpolate");
             check(it_interp != mark->styles.end());
-            check_str_eq(std::get<std::string>(it_interp->second).c_str(), "monotone");
+            check(std::string(std::get<std::string>(it_interp->second).c_str()) == std::string("monotone"));
             auto it_pt = mark->styles.find("point");
             check(it_pt != mark->styles.end());
             check(std::get<bool>(it_pt->second) == true);
             auto it_dash = mark->styles.find("dash");
             check(it_dash != mark->styles.end());
-            check_str_eq(std::get<std::string>(it_dash->second).c_str(), "4 2");
+            check(std::string(std::get<std::string>(it_dash->second).c_str()) == std::string("4 2"));
         }
 
         it("should parse encoding and style blocks") {
@@ -59,8 +60,8 @@ spec("flexchart_line_parser") {
             check(chart != nullptr);
             auto& mark = chart->marks[0];
             check(mark->encodings.size() == 2);
-            check_str_eq(mark->encodings[0]->channel.c_str(), "x");
-            check_str_eq(mark->encodings[0]->field.c_str(), "date");
+            check(std::string(mark->encodings[0]->channel.c_str()) == std::string("x"));
+            check(std::string(mark->encodings[0]->field.c_str()) == std::string("date"));
             auto it_sw = mark->styles.find("stroke-width");
             check(it_sw != mark->styles.end());
             check(std::get<double>(it_sw->second) == 3.0);
@@ -96,7 +97,7 @@ spec("flexchart_line_parser") {
             auto chart = flex::chart::line_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(chart->datasets.size() == 1);
-            check_str_eq(chart->datasets[0]->source.c_str(), "stocks.csv");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("stocks.csv"));
         }
 
         it("should parse expr with ranges") {
@@ -109,7 +110,7 @@ spec("flexchart_line_parser") {
             auto chart = flex::chart::line_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x)");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x)"));
             check(mark->ranges.count("x") == 1);
             auto& r = mark->ranges["x"];
             check(r[0] == 0.0);
@@ -128,7 +129,7 @@ spec("flexchart_line_parser") {
             auto chart = flex::chart::line_chart_parse_ast("line {}", error);
             check(chart != nullptr);
             check(chart->marks.size() == 1);
-            check_str_eq(chart->marks[0]->type.c_str(), "line");
+            check(std::string(chart->marks[0]->type.c_str()) == std::string("line"));
         }
     }
 }

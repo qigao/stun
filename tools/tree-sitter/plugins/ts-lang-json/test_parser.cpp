@@ -5,6 +5,7 @@
 #include <catch2/catch_all.hpp>
 #include "../ts_plugin.h"
 #include <cstring>
+#include <string>
 
 extern "C" const TSPluginInfo* ts_plugin_info(void);
 
@@ -78,5 +79,28 @@ TEST_CASE("JSON Highlight nested structure", "[ts-lang-json]") {
     CHECK(key_count == 2); // "a", "b"
     CHECK(num_count == 3); // 1, 2, 3
     
+    info->free_result(result);
+}
+
+TEST_CASE("Highlight bounded dense input and clean large-source refusal",
+          "[tree-sitter][capacity]") {
+    const TSPluginInfo* info = ts_plugin_info();
+    REQUIRE(info != nullptr);
+    std::string input;
+    for (unsigned i = 0; i < 2500u; ++i)
+        input += "0,";
+    TSHighlightResult* result = info->highlight(
+        input.data(), static_cast<uint32_t>(input.size()));
+    REQUIRE(result != nullptr);
+    CHECK(result->count <= 1024u);
+    CHECK(result->capacity <= 1024u);
+    CHECK(result->count <= result->capacity);
+    info->free_result(result);
+
+    input.assign(64u * 1024u + 1u, 'x');
+    result = info->highlight(input.data(), static_cast<uint32_t>(input.size()));
+    REQUIRE(result != nullptr);
+    CHECK(result->count == 0u);
+    CHECK(result->capacity == 0u);
     info->free_result(result);
 }

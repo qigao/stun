@@ -30,10 +30,10 @@ target_include_directories(statediagram PUBLIC
     include 
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
-target_link_libraries(statediagram PUBLIC TurboParser::Parser)
+target_link_libraries(statediagram PUBLIC Salts::JsonParser)
 # Test executable
 add_executable(statediagram_test tests/test_parser.c)
-target_link_libraries(statediagram_test statediagram Salts::TinyTest TurboParser::Parser)
+target_link_libraries(statediagram_test statediagram Salts::TinyTest Salts::JsonParser)
 target_compile_definitions(statediagram_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/state")
 
 add_test(NAME statediagram_test COMMAND statediagram_test)
