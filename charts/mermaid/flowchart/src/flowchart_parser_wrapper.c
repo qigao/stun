@@ -699,9 +699,19 @@ static void flowchart_json_append_scoped_edges(json_value_t* links_arr,
                                                 const FlowchartSubGraph* sgs) {
   for (const FlowchartSubGraph* sg = sgs; sg; sg = sg->next) {
     flowchart_json_append_scoped_edges(links_arr, d, sg->children);
-    for (int labelled = 1; labelled >= 0; --labelled) {
+    /* Preserve source order when the first link of this scope has no
+       label. Otherwise retain Mermaid's label-first compatibility
+       projection for scopes that begin with a labelled link. */
+    int label_first = 0;
+    for (const FlowchartEdge* e = d->edges; e; e = e->next) {
+      if (flowchart_first_edge_scope(d->subgraphs, e) == sg) {
+        label_first = e->label != NULL;
+        break;
+      }
+    }
+    for (int pass = 0; pass < (label_first ? 2 : 1); ++pass) {
       for (const FlowchartEdge* e = d->edges; e; e = e->next) {
-        if ((e->label != NULL) == labelled &&
+        if ((!label_first || (e->label != NULL) == (pass == 0)) &&
             flowchart_first_edge_scope(d->subgraphs, e) == sg)
           flowchart_json_append_edge(links_arr, e);
       }
@@ -743,12 +753,28 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
   json_value_t *links_arr = json_create_array();
   flowchart_json_append_scoped_edges(links_arr, diagram, diagram->subgraphs);
   for (int phase = 0; phase < 2; ++phase) {
-    for (int labelled = 1; labelled >= 0; --labelled) {
+    /* A root category beginning with an unlabelled statement must not
+       promote later labels ahead of it. Keep the existing two-category
+       projection (subgraph-ID links first, then ordinary root links). */
+    int label_first = 0;
+    for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+      if (flowchart_first_edge_scope(diagram->subgraphs, e))
+        continue;
+      const int pair_of_subgraphs =
+          flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
+          flowchart_is_subgraph_id(diagram->subgraphs, e->to);
+      if (pair_of_subgraphs == (phase == 0)) {
+        label_first = e->label != NULL;
+        break;
+      }
+    }
+    for (int pass = 0; pass < (label_first ? 2 : 1); ++pass) {
       for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
-        if ((e->label != NULL) != labelled ||
-            flowchart_first_edge_scope(diagram->subgraphs, e))
+        if (label_first && (e->label != NULL) != (pass == 0))
           continue;
-        int pair_of_subgraphs =
+        if (flowchart_first_edge_scope(diagram->subgraphs, e))
+          continue;
+        const int pair_of_subgraphs =
             flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
             flowchart_is_subgraph_id(diagram->subgraphs, e->to);
         if (pair_of_subgraphs == (phase == 0))
