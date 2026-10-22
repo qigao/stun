@@ -389,6 +389,48 @@ static const char *map_arrow(const char *arrow) {
   return "arrow_point";
 }
 
+/* Consumes value on both success and failure, unlike the SDK's checked API. */
+static int flowchart_json_put(json_value_t* object, const char* key, json_value_t* value) {
+  if (!value) return 0;
+  if (json_object_add_checked(object, key, value)) return 1;
+  json_free(value);
+  return 0;
+}
+
+static int flowchart_json_push(json_value_t* array, json_value_t* value) {
+  if (!value) return 0;
+  if (json_array_add_checked(array, value)) return 1;
+  json_free(value);
+  return 0;
+}
+
+/* Returned children are already owned by their parent, including on a later
+ * field failure. A single ancestor cleanup releases the complete subtree. */
+static json_value_t* flowchart_json_object(json_value_t* owner, const char* key) {
+  json_value_t* child = json_create_object();
+  return flowchart_json_put(owner, key, child) ? child : NULL;
+}
+
+static json_value_t* flowchart_json_array(json_value_t* owner, const char* key) {
+  json_value_t* child = json_create_array();
+  return flowchart_json_put(owner, key, child) ? child : NULL;
+}
+
+static int flowchart_json_text(json_value_t* owner, const char* key, const char* value) {
+  json_value_t* text = flowchart_json_object(owner, key);
+  return text && flowchart_json_put(text, "text", json_create_string(value)) &&
+                 flowchart_json_put(text, "type", json_create_string("text"));
+}
+
+static int flowchart_json_styles(json_value_t* owner, const FlowchartStyle* list) {
+  json_value_t* styles = flowchart_json_object(owner, "styles");
+  if (!styles) return 0;
+  for (const FlowchartStyle* s = list; s; s = s->next)
+    if (s->key && s->value &&
+        !flowchart_json_put(styles, s->key, json_create_string(s->value))) return 0;
+  return 1;
+}
+
 /* The reference list is head-inserted. A group with only distinct node
  * references consists of explicit declarations; Mermaid serializes those in
  * source order. It also lists each pre-existing edge joining two members
@@ -502,17 +544,20 @@ static int flowchart_emit_leaf_edge_refs(json_value_t* nodes_arr,
     size_t from = flowchart_projection_index(groups, groups_count, e->from);
     size_t to = flowchart_projection_index(groups, groups_count, e->to);
     if (from == groups_count || to == groups_count) continue;
-    if (!groups[to].seen && groups[to].ref_count > groups[to].edge_uses)
-      json_array_add(nodes_arr, json_create_string(e->to));
-    if (!groups[from].seen && groups[from].ref_count > groups[from].edge_uses)
-      json_array_add(nodes_arr, json_create_string(e->from));
+    if (!groups[to].seen && groups[to].ref_count > groups[to].edge_uses &&
+        !flowchart_json_push(nodes_arr, json_create_string(e->to))) goto fail;
+    if (!groups[from].seen && groups[from].ref_count > groups[from].edge_uses &&
+        !flowchart_json_push(nodes_arr, json_create_string(e->from))) goto fail;
     groups[to].seen = 1;
     groups[from].seen = 1;
-    json_array_add(nodes_arr, json_create_string(e->to));
-    json_array_add(nodes_arr, json_create_string(e->from));
+    if (!flowchart_json_push(nodes_arr, json_create_string(e->to)) ||
+        !flowchart_json_push(nodes_arr, json_create_string(e->from))) goto fail;
   }
   free(groups);
   return 1;
+fail:
+  free(groups);
+  return -1;
 }
 
 static int serialize_subgraph_recursive(json_value_t* parent_arr,
@@ -520,106 +565,68 @@ static int serialize_subgraph_recursive(json_value_t* parent_arr,
                                         const FlowchartSubGraph* sg) {
   int count = 0;
   while (sg) {
-    /* Reject a corrupted or unexpectedly large sibling chain rather than
-       silently serializing a partial graph. */
     if (++count > 1000) return 0;
-    /* Mermaid's JSON subgraphs are flat, with children before their parent. */
-    if (sg->children &&
-        !serialize_subgraph_recursive(parent_arr, diagram, sg->children))
+    /* Preserve the established flat children-before-parent projection. */
+    if (sg->children && !serialize_subgraph_recursive(parent_arr, diagram, sg->children))
       return 0;
-
     json_value_t* sg_det = json_create_object();
+    const FlowchartNodeRef** refs = NULL;
     if (!sg_det) return 0;
-    json_object_set_string(sg_det, "id", sg->id ? sg->id : "");
-    if (sg->direction)
-      json_object_set_string(sg_det, "direction", sg->direction);
-
-    json_value_t* nodes_arr = json_create_array();
-    if (!nodes_arr) { json_free(sg_det); return 0; }
+    if (!flowchart_json_put(sg_det, "id", json_create_string(sg->id ? sg->id : "")) ||
+        (sg->direction && !flowchart_json_put(sg_det, "direction", json_create_string(sg->direction))))
+      goto fail;
+    json_value_t* nodes_arr = flowchart_json_array(sg_det, "nodes");
+    if (!nodes_arr) goto fail;
     size_t refs_count = 0;
     for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next) {
-      if (refs_count == SIZE_MAX / sizeof(const FlowchartNodeRef*)) {
-        json_free(nodes_arr);
-        json_free(sg_det);
-        return 0;
-      }
+      if (refs_count == SIZE_MAX / sizeof(*refs)) goto fail;
       ++refs_count;
     }
-
-    const FlowchartNodeRef** refs =
-        refs_count ? (const FlowchartNodeRef**)malloc(refs_count * sizeof(*refs)) : NULL;
-    if (refs_count && !refs) {
-      json_free(nodes_arr);
-      json_free(sg_det);
-      return 0;
-    }
+    refs = refs_count ? (const FlowchartNodeRef**)malloc(refs_count * sizeof(*refs)) : NULL;
+    if (refs_count && !refs) goto fail;
     size_t i = 0;
-    for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next)
-      refs[i++] = ref;
-
+    for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next) refs[i++] = ref;
     int declarations_only = refs_count > 0;
-    for (size_t x = 0; x < refs_count && declarations_only; ++x) {
-      for (size_t y = 0; y < x; ++y) {
-        if (refs[x]->id && refs[y]->id &&
-            strcmp(refs[x]->id, refs[y]->id) == 0) {
+    for (size_t x = 0; x < refs_count && declarations_only; ++x)
+      for (size_t y = 0; y < x; ++y)
+        if (refs[x]->id && refs[y]->id && strcmp(refs[x]->id, refs[y]->id) == 0) {
           declarations_only = 0;
           break;
         }
-      }
-    }
     if (declarations_only) {
-      /* Distinct head-inserted declarations are reversed source order. */
       for (size_t x = refs_count; x > 0; --x)
-        if (refs[x - 1]->id &&
-            !flowchart_child_subgraph_id_unused(sg, diagram, refs[x - 1]->id))
-          json_array_add(nodes_arr, json_create_string(refs[x - 1]->id));
-      /* Edges may predate or follow the subgraph declaration. The flat
-         Mermaid projection records both endpoint uses in source order. */
-      for (const FlowchartEdge* edge = diagram->edges; edge; edge = edge->next) {
+        if (refs[x - 1]->id && !flowchart_child_subgraph_id_unused(sg, diagram, refs[x - 1]->id) &&
+            !flowchart_json_push(nodes_arr, json_create_string(refs[x - 1]->id))) goto fail;
+      for (const FlowchartEdge* edge = diagram->edges; edge; edge = edge->next)
         if (subgraph_refs_contain(refs, refs_count, edge->from) &&
-            subgraph_refs_contain(refs, refs_count, edge->to)) {
-          json_array_add(nodes_arr, json_create_string(edge->to));
-          json_array_add(nodes_arr, json_create_string(edge->from));
-        }
-      }
+            subgraph_refs_contain(refs, refs_count, edge->to) &&
+            (!flowchart_json_push(nodes_arr, json_create_string(edge->to)) ||
+             !flowchart_json_push(nodes_arr, json_create_string(edge->from)))) goto fail;
     } else {
-      int rebuilt =
-          flowchart_emit_leaf_edge_refs(nodes_arr, diagram, sg, refs, refs_count);
-      if (rebuilt < 0) {
-        free(refs);
-        json_free(nodes_arr);
-        json_free(sg_det);
-        return 0;
-      }
-      if (!rebuilt) {
-        /* Borrowed nested members follow the local members. Exclude
-           unreferenced child-subgraph IDs from the parent projection. */
-        for (int borrowed = 0; borrowed <= 1; ++borrowed) {
+      const int rebuilt = flowchart_emit_leaf_edge_refs(nodes_arr, diagram, sg, refs, refs_count);
+      if (rebuilt < 0) goto fail;
+      if (!rebuilt)
+        for (int borrowed = 0; borrowed <= 1; ++borrowed)
           for (size_t x = 0; x < refs_count; ++x) {
             const char* id = refs[x]->id;
-            if (!id || flowchart_child_subgraph_id_unused(sg, diagram, id))
-              continue;
-            if (flowchart_in_nested_child_nodes(sg->children, id) == borrowed)
-              json_array_add(nodes_arr, json_create_string(id));
+            if (!id || flowchart_child_subgraph_id_unused(sg, diagram, id)) continue;
+            if (flowchart_in_nested_child_nodes(sg->children, id) == borrowed &&
+                !flowchart_json_push(nodes_arr, json_create_string(id))) goto fail;
           }
-        }
-      }
     }
-    free(refs);
-    json_object_add(sg_det, "nodes", nodes_arr);
-
-    json_value_t* title_obj = json_create_object();
-    if (!title_obj) { json_free(sg_det); return 0; }
-    json_object_set_string(title_obj, "text",
-                           sg->label ? sg->label : (sg->id ? sg->id : ""));
-    json_object_set_string(title_obj, "type", "text");
-    json_object_add(sg_det, "title", title_obj);
-    json_array_add(parent_arr, sg_det);
+    free(refs); refs = NULL;
+    if (!flowchart_json_text(sg_det, "title", sg->label ? sg->label : (sg->id ? sg->id : "")))
+      goto fail;
+    if (!flowchart_json_push(parent_arr, sg_det)) return 0; // Consumed on failure too.
     sg = sg->next;
+    continue;
+fail:
+    free(refs);
+    json_free(sg_det);
+    return 0;
   }
   return 1;
 }
-
 
 /* Keep the AST linked list in source order. JSON reflects Mermaid's scope
  * projection: nested/local edges precede links between subgraphs, followed
@@ -693,22 +700,25 @@ static int flowchart_has_subgraph_link_endpoint(const FlowchartDiagram* d) {
   return 0;
 }
 
-static void flowchart_json_append_edge(json_value_t* links_arr,
+static int flowchart_json_append_edge(json_value_t* links_arr,
                                         const FlowchartEdge* e) {
   json_value_t *e_det = json_create_object();
+  if (!e_det) return 0;
   int edge_length = 1;
   if (e->arrow_type && strcmp(e->arrow_type, "---") != 0) {
-    const char stroke_char = e->arrow_type[0];
+    /* The inline-label scanner now preserves a leading point head. Keep
+       the established legacy width of previously normalized labelled edges. */
+    const char* body = e->arrow_type + (e->arrow_type[0] == '<');
+    const char stroke_char = body[0];
     if (stroke_char == '-' || stroke_char == '=') {
       size_t stroke_length = 0;
-      while (e->arrow_type[stroke_length] == stroke_char)
+      while (body[stroke_length] == stroke_char)
         ++stroke_length;
       if (stroke_length > 1)
         edge_length = (int)stroke_length - 1;
     }
   }
-  json_object_set_number(e_det, "length", edge_length);
-  json_object_set_string(e_det, "source", e->from ? e->from : "");
+
   const char *stroke = "normal";
   if (e->arrow_type && strstr(e->arrow_type, "=="))
     stroke = "thick";
@@ -716,24 +726,23 @@ static void flowchart_json_append_edge(json_value_t* links_arr,
       (strstr(e->arrow_type, "-.-") || strstr(e->arrow_type, ".->") ||
        strstr(e->arrow_type, "-...->")))
     stroke = "dotted";
-  json_object_set_string(e_det, "stroke", stroke);
-  json_object_set_string(e_det, "target", e->to ? e->to : "");
-  json_object_set_string(e_det, "type", map_arrow(e->arrow_type));
-
-  if (e->label) {
-    json_value_t *text_obj = json_create_object();
-    json_object_set_string(text_obj, "text", e->label);
-    json_object_set_string(text_obj, "type", "text");
-    json_object_add(e_det, "text", text_obj);
+  if (!flowchart_json_put(e_det, "length", json_create_number(edge_length)) ||
+      !flowchart_json_put(e_det, "source", json_create_string(e->from ? e->from : "")) ||
+      !flowchart_json_put(e_det, "stroke", json_create_string(stroke)) ||
+      !flowchart_json_put(e_det, "target", json_create_string(e->to ? e->to : "")) ||
+      !flowchart_json_put(e_det, "type", json_create_string(map_arrow(e->arrow_type))) ||
+      (e->label && !flowchart_json_text(e_det, "text", e->label))) {
+    json_free(e_det);
+    return 0;
   }
-  json_array_add(links_arr, e_det);
+  return flowchart_json_push(links_arr, e_det);
 }
 
-static void flowchart_json_append_scoped_edges(json_value_t* links_arr,
+static int flowchart_json_append_scoped_edges(json_value_t* links_arr,
                                                 const FlowchartDiagram* d,
                                                 const FlowchartSubGraph* sgs) {
   for (const FlowchartSubGraph* sg = sgs; sg; sg = sg->next) {
-    flowchart_json_append_scoped_edges(links_arr, d, sg->children);
+    if (!flowchart_json_append_scoped_edges(links_arr, d, sg->children)) return 0;
     /* Preserve source order when the first link of this scope has no
        label. Otherwise retain Mermaid's label-first compatibility
        projection for scopes that begin with a labelled link. */
@@ -748,45 +757,68 @@ static void flowchart_json_append_scoped_edges(json_value_t* links_arr,
       for (const FlowchartEdge* e = d->edges; e; e = e->next) {
         if ((!label_first || (e->label != NULL) == (pass == 0)) &&
             flowchart_first_edge_scope(d->subgraphs, e) == sg)
-          flowchart_json_append_edge(links_arr, e);
+          if (!flowchart_json_append_edge(links_arr, e)) return 0;
       }
     }
   }
+  return 1;
 }
 
-char *flowchart_to_json(FlowchartDiagram *diagram) {
-  if (!diagram)
-    return NULL;
-
-  json_value_t *root = json_create_object();
-  json_object_set_string(root, "direction", diagram->direction ? diagram->direction : "TB");
-
-  // Nodes
-  json_value_t *nodes_obj = json_create_object();
-  FlowchartNode *n = diagram->nodes;
-  while (n) {
-    if (n->id) {
-      json_value_t *n_det = json_create_object();
-      json_object_set_string(n_det, "id", n->id);
-      json_object_set_string(n_det, "shape", map_shape(n->shape));
-
-      if (n->label && strcmp(n->label, n->id) != 0) {
-        json_value_t *text_obj = json_create_object();
-        json_object_set_string(text_obj, "text", n->label);
-        json_object_set_string(text_obj, "type", "text");
-        json_object_add(n_det, "text", text_obj);
-      }
-
-      json_object_add(nodes_obj, n->id, n_det);
-    }
-    n = n->next;
+/* Mermaid 11.12.0 destructEndLink semantics, including the length cap of 10.
+ * Keep these facts separate from the intentionally sparse legacy projection. */
+static int flowchart_json_v2_edge(json_value_t* links, const FlowchartEdge* e, size_t ordinal) {
+  const char* op = e->arrow_type;
+  const size_t n = op ? strlen(op) : 0;
+  if (n < 3 || !e->from || !e->to) return 0;
+  size_t dots = 0;
+  int thick = 0, invisible = 0;
+  for (size_t i = 0; i < n; ++i) {
+    if (!strchr("-=~.<>ox", op[i])) return 0;
+    dots += op[i] == '.';
+    thick |= op[i] == '=';
+    invisible |= op[i] == '~';
   }
-  json_object_add(root, "nodes", nodes_obj);
+  const char last = op[n - 1];
+  const char* type = "arrow_open";
+  const char* head = "none";
+  int both = 0;
+  if (last == '>') { head = "arrow_point"; both = op[0] == '<'; }
+  else if (last == 'o') { head = "arrow_circle"; both = op[0] == 'o'; }
+  else if (last == 'x') { head = "arrow_cross"; both = op[0] == 'x'; }
+  if (strcmp(head, "none") != 0) type = head;
+  if (both) {
+    if (last == '>') type = "double_arrow_point";
+    else if (last == 'o') type = "double_arrow_circle";
+    else type = "double_arrow_cross";
+  }
+  size_t length = dots ? dots : n - 2 - (size_t)both;
+  if (!length || (thick && dots) || (invisible && (thick || dots))) return 0;
+  if (length > 10) length = 10;
+  const char* id = flowchart_edge_get_id(e);
+  const char* curve = flowchart_edge_get_curve(e);
+  json_value_t* item = json_create_object();
+  if (!item) return 0;
+  if (!flowchart_json_put(item, "declarationIndex", json_create_uint64((uint64_t)ordinal)) ||
+      !flowchart_json_put(item, "source", json_create_string(e->from)) ||
+      !flowchart_json_put(item, "target", json_create_string(e->to)) ||
+      !flowchart_json_put(item, "length", json_create_uint64((uint64_t)length)) ||
+      !flowchart_json_put(item, "stroke", json_create_string(dots ? "dotted" : thick ? "thick" : invisible ? "invisible" : "normal")) ||
+      !flowchart_json_put(item, "type", json_create_string(type)) ||
+      !flowchart_json_put(item, "arrowTypeStart", json_create_string(both ? head : "none")) ||
+      !flowchart_json_put(item, "arrowTypeEnd", json_create_string(head)) ||
+      !flowchart_json_put(item, "id", id ? json_create_string(id) : json_create_null()) ||
+      !flowchart_json_put(item, "curve", curve ? json_create_string(curve) : json_create_null()))
+    goto fail;
+  if (e->label && !flowchart_json_text(item, "text", e->label)) goto fail;
+  return flowchart_json_push(links, item);
+fail:
+  json_free(item);
+  return 0;
+}
 
-  // Edges: preserve Mermaid's post-order scope projection without
-  // altering AST edge order or changing public data structures.
-  json_value_t *links_arr = json_create_array();
-  flowchart_json_append_scoped_edges(links_arr, diagram, diagram->subgraphs);
+static int flowchart_json_append_legacy_projection(json_value_t* links_arr,
+                                                    const FlowchartDiagram* diagram) {
+  if (!flowchart_json_append_scoped_edges(links_arr, diagram, diagram->subgraphs)) return 0;
   for (int phase = 0; phase < 2; ++phase) {
     /* A root category beginning with an unlabelled statement must not
        promote later labels ahead of it. Keep the existing two-category
@@ -831,100 +863,106 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
           if (promote_single_outgoing &&
               flowchart_root_single_outgoing(diagram, e) != source_class)
             continue;
-          flowchart_json_append_edge(links_arr, e);
+          if (!flowchart_json_append_edge(links_arr, e)) return 0;
         }
       }
     }
   }
-  json_object_add(root, "links", links_arr);
+  return 1;
+}
 
-  // Subgraphs
-  json_value_t *subgraphs_arr = json_create_array();
-  if (!subgraphs_arr ||
-      !serialize_subgraph_recursive(subgraphs_arr, diagram, diagram->subgraphs)) {
-    json_free(subgraphs_arr);
-    json_free(root);
-    return NULL;
+char *flowchart_to_json_ex(const FlowchartDiagram *diagram, FlowchartJsonFormat format) {
+  if (!diagram || (format != FLOWCHART_JSON_LEGACY && format != FLOWCHART_JSON_SOURCE_V2)) return NULL;
+  json_value_t* root = json_create_object();
+  if (!root) return NULL;
+  if ((format == FLOWCHART_JSON_SOURCE_V2 &&
+       !flowchart_json_put(root, "schema", json_create_string("stun.flowchart/2"))) ||
+      !flowchart_json_put(root, "direction", json_create_string(diagram->direction ? diagram->direction : "TB")))
+    goto fail;
+  json_value_t* nodes = flowchart_json_object(root, "nodes");
+  if (!nodes) goto fail;
+  for (const FlowchartNode* n = diagram->nodes; n; n = n->next) {
+    if (!n->id) continue;
+    json_value_t* node = flowchart_json_object(nodes, n->id);
+    if (!node || !flowchart_json_put(node, "id", json_create_string(n->id)) ||
+        !flowchart_json_put(node, "shape", json_create_string(map_shape(n->shape))) ||
+        (n->label && strcmp(n->label, n->id) != 0 && !flowchart_json_text(node, "text", n->label))) goto fail;
   }
-  json_object_add(root, "subgraphs", subgraphs_arr);
-
-  // Meta / Styles: serialize declarations collected by the parser.
-  json_value_t *class_defs_obj = json_create_object();
-  for (FlowchartClassDef *definition = diagram->class_defs; definition; definition = definition->next) {
-    if (!definition->id) continue;
-    json_value_t *definition_obj = json_create_object();
-    json_object_set_string(definition_obj, "id", definition->id);
-    json_value_t *styles_obj = json_create_object();
-    for (FlowchartStyle *style = definition->styles; style; style = style->next) {
-      if (style->key && style->value)
-        json_object_set_string(styles_obj, style->key, style->value);
-    }
-    json_object_add(definition_obj, "styles", styles_obj);
-    json_object_add(class_defs_obj, definition->id, definition_obj);
+  json_value_t* links = flowchart_json_array(root, "links");
+  if (!links) goto fail;
+  if (format == FLOWCHART_JSON_SOURCE_V2) {
+    size_t ordinal = 0;
+    for (const FlowchartEdge* e = diagram->edges; e; e = e->next, ++ordinal)
+      if (!flowchart_json_v2_edge(links, e, ordinal)) goto fail;
+  } else if (!flowchart_json_append_legacy_projection(links, diagram)) goto fail;
+  json_value_t* subgraphs = flowchart_json_array(root, "subgraphs");
+  if (!subgraphs || !serialize_subgraph_recursive(subgraphs, diagram, diagram->subgraphs)) goto fail;
+  json_value_t* class_defs = flowchart_json_object(root, "classDefs");
+  if (!class_defs) goto fail;
+  for (const FlowchartClassDef* d = diagram->class_defs; d; d = d->next) {
+    if (!d->id) continue;
+    json_value_t* item = flowchart_json_object(class_defs, d->id);
+    if (!item || !flowchart_json_put(item, "id", json_create_string(d->id)) ||
+        !flowchart_json_styles(item, d->styles)) goto fail;
   }
-  json_object_add(root, "classDefs", class_defs_obj);
-
-  json_value_t *classes_obj = json_create_object();
-  for (FlowchartClass *assignment = diagram->classes; assignment; assignment = assignment->next) {
-    if (!assignment->node_id || !assignment->class_name) continue;
-    json_value_t *class_names = json_object_get(classes_obj, assignment->node_id);
-    if (!class_names) {
-      class_names = json_create_array();
-      json_object_add(classes_obj, assignment->node_id, class_names);
-    }
+  json_value_t* classes = flowchart_json_object(root, "classes");
+  if (!classes) goto fail;
+  for (const FlowchartClass* c = diagram->classes; c; c = c->next) {
+    if (!c->node_id || !c->class_name) continue;
+    json_value_t* names = json_object_get(classes, c->node_id);
+    if (!names) names = flowchart_json_array(classes, c->node_id);
+    if (!names) goto fail;
     int duplicate = 0;
-    for (size_t i = 0; i < json_array_size(class_names); ++i) {
-      json_value_t *existing = json_array_get(class_names, i);
-      if (existing && json_type(existing) == JSON_STRING &&
-          strcmp(json_string(existing), assignment->class_name) == 0) {
+    for (size_t i = 0; i < json_array_size(names); ++i) {
+      json_value_t* old = json_array_get(names, i);
+      if (old && json_type(old) == JSON_STRING && strcmp(json_string(old), c->class_name) == 0) {
         duplicate = 1;
         break;
       }
     }
-    if (!duplicate)
-      json_array_add(class_names, json_create_string(assignment->class_name));
+    if (!duplicate && !flowchart_json_push(names, json_create_string(c->class_name))) goto fail;
   }
-  json_object_add(root, "classes", classes_obj);
-
-  json_value_t *clicks_arr = json_create_array();
-  for (FlowchartClick *click = diagram->clicks; click; click = click->next) {
-    if (!click->node_id || !click->target) continue;
-    json_value_t *click_obj = json_create_object();
-    json_object_set_string(click_obj, click->is_href ? "href" : "callback", click->target);
-    json_object_set_string(click_obj, "nodeId", click->node_id);
-    json_array_add(clicks_arr, click_obj);
-  }
-  json_object_add(root, "clicks", clicks_arr);
-
-  json_value_t *link_styles_arr = json_create_array();
-  for (FlowchartLinkStyle *item = diagram->link_styles; item; item = item->next) {
-    if (!item->index) continue;
-    json_value_t *link_style_obj = json_create_object();
-    if (strcmp(item->index, "default") == 0) {
-      json_object_set_string(link_style_obj, "index", item->index);
-    } else {
-      char *end = NULL;
-      long index = strtol(item->index, &end, 10);
-      if (end && *end == '\0' && end != item->index)
-        json_object_set_number(link_style_obj, "index", (double)index);
-      else
-        json_object_set_string(link_style_obj, "index", item->index);
+  json_value_t* clicks = flowchart_json_array(root, "clicks");
+  if (!clicks) goto fail;
+  for (const FlowchartClick* c = diagram->clicks; c; c = c->next) {
+    if (!c->node_id || !c->target) continue;
+    json_value_t* item = json_create_object();
+    if (!item) goto fail;
+    if (!flowchart_json_put(item, c->is_href ? "href" : "callback", json_create_string(c->target)) ||
+        !flowchart_json_put(item, "nodeId", json_create_string(c->node_id))) {
+      json_free(item);
+      goto fail;
     }
-    json_value_t *styles_obj = json_create_object();
-    for (FlowchartStyle *style = item->styles; style; style = style->next) {
-      if (style->key && style->value)
-        json_object_set_string(styles_obj, style->key, style->value);
-    }
-    json_object_add(link_style_obj, "styles", styles_obj);
-    json_array_add(link_styles_arr, link_style_obj);
+    if (!flowchart_json_push(clicks, item)) goto fail;
   }
-  json_object_add(root, "linkStyles", link_styles_arr);
-  json_object_set_string(root, "type", "flowchart");
-
+  json_value_t* link_styles = flowchart_json_array(root, "linkStyles");
+  if (!link_styles) goto fail;
+  for (const FlowchartLinkStyle* s = diagram->link_styles; s; s = s->next) {
+    if (!s->index) continue;
+    json_value_t* item = json_create_object();
+    if (!item) goto fail;
+    char* end = NULL;
+    const long index = strtol(s->index, &end, 10);
+    json_value_t* index_value = end && *end == '\0' && end != s->index
+        ? json_create_number((double)index) : json_create_string(s->index);
+    if (!flowchart_json_put(item, "index", index_value) || !flowchart_json_styles(item, s->styles)) {
+      json_free(item);
+      goto fail;
+    }
+    if (!flowchart_json_push(link_styles, item)) goto fail;
+  }
+  if (!flowchart_json_put(root, "type", json_create_string("flowchart"))) goto fail;
   size_t len;
-  char *str = json_serialize_pretty(root, &len);
+  char* output = json_serialize_pretty(root, &len);
   json_free(root);
-  return str;
+  return output;
+fail:
+  json_free(root);
+  return NULL;
+}
+
+char *flowchart_to_json(FlowchartDiagram *diagram) {
+  return flowchart_to_json_ex(diagram, FLOWCHART_JSON_LEGACY);
 }
 
 #endif /* !STUN_FLOWCHART_PARSER_ONLY */

@@ -51,6 +51,7 @@ add_library(mermaid_flowchart STATIC
     ${FC_PARSER_GEN_C}
     src/flowchart_parser_wrapper.c
     src/flowchart_renderer.cpp
+    src/flowchart_curve.cpp
     src/flex_flowchart.cpp
 )
 
@@ -76,9 +77,10 @@ endif()
 # ============================================================================
 
 # 原有的 Parser 测试
-add_executable(flowchart_test tests/test_parser.c)
+add_executable(flowchart_test tests/test_parser.c tests/test_json_v2.c)
 target_link_libraries(flowchart_test PRIVATE mermaid_flowchart Salts::TinyTest Salts::JsonParser)
-target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
+target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart"
+    JSON_V2_CONTRACT="${CMAKE_CURRENT_SOURCE_DIR}/tests/json-v2-contract.json")
 add_test(NAME flowchart_test COMMAND flowchart_test)
 set_target_properties(flowchart_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
@@ -87,6 +89,11 @@ add_executable(flowchart_renderer_test tests/test_renderer.cpp)
 target_link_libraries(flowchart_renderer_test PRIVATE mermaid_flowchart)
 add_test(NAME flowchart_renderer_test COMMAND flowchart_renderer_test)
 set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
+
+add_executable(flowchart_linkstyle_test tests/test_linkstyle.cpp tests/test_curves.cpp)
+target_link_libraries(flowchart_linkstyle_test PRIVATE mermaid_flowchart)
+target_compile_definitions(flowchart_linkstyle_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
+add_test(NAME flowchart_linkstyle_test COMMAND flowchart_linkstyle_test)
 
 # 新的 Flex 集成测试
 add_executable(flowchart_flex_test tests/test_flex.cpp)

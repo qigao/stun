@@ -51,6 +51,8 @@ static char* copy_subgraph_name_token(LexerState* s,
     return result;
 }
 
+static int starts_edge_continuation(const char* cursor);
+
 void flowchart_scan(LexerState *s, void *parser, FlowchartParserContext *ctx) {
     char *token;
 loop:
@@ -80,9 +82,14 @@ loop:
         inline_edge_label = ("--" | "<--") [ \t]* label_words [ \t]* ("-->" | "--->");
         variable_dash_arrow = "--" "-"* ">";
         variable_thick_arrow = "==" "="* ">";
+        full_dash_arrow = [<ox]? "--" "-"* [>ox] | "---" "-"*;
+        full_thick_arrow = [<ox]? "==" "="* [>ox] | "===" "="*;
+        full_dot_arrow = [<ox]? "-"? "."+ "-" [>ox]?;
+        full_invisible_arrow = "~~~" "~"*;
+        full_arrow = full_dash_arrow | full_thick_arrow | full_dot_arrow | full_invisible_arrow;
         // Named edge IDs are presentation metadata; do not turn them into
         // source/target nodes. Preserve the underlying arrow operator.
-        edge_id_arrow = ident "@" (variable_dash_arrow | variable_thick_arrow);
+        edge_id_arrow = ident "@" full_arrow;
         edge_curve_props = ident "@{" [ \t]* "curve:" [^}\n\000]* "}";
         // link@-- "Label" --> is an explicitly named, labeled edge.
         named_quoted_edge_label = ident "@" "--" [ \t]* string [ \t]* "-->";
@@ -112,7 +119,7 @@ loop:
             char *lookahead = s->cursor;
             while (*lookahead == ' ' || *lookahead == '\t' || *lookahead == '\r')
                 ++lookahead;
-            if (*lookahead != '-' && *lookahead != '=')
+            if (!starts_edge_continuation(lookahead))
                 FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
             s->in_classdef = 0;
             s->click_phase = 0;
@@ -220,10 +227,18 @@ loop:
             const char* end = s->cursor - (long_tip ? 4 : 3);
             while (begin < end && (*begin == ' ' || *begin == '\t')) ++begin;
             while (end > begin && (end[-1] == ' ' || end[-1] == '\t')) --end;
-            FlowchartParser(parser, FC_ARROW, strdup(long_tip ? "--->" : "-->"), ctx);
+            const char* op = token[0] == '<' ? (long_tip ? "<--->" : "<-->")
+                                                : (long_tip ? "--->" : "-->");
+            FlowchartParser(parser, FC_ARROW, strdup(op), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
             FlowchartParser(parser, FC_IDENTIFIER, copy_token(begin, end), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
+            goto loop;
+        }
+
+        // Preserve heads and complete stroke lengths for explicit JSON v2.
+        full_arrow {
+            FlowchartParser(parser, FC_ARROW, copy_token(token, s->cursor), ctx);
             goto loop;
         }
 
@@ -253,6 +268,10 @@ loop:
         // 优先级 3: 形状限定符
         "[/"               { s->shape_label_depth++; FlowchartParser(parser, FC_TRAP_START, NULL, ctx); goto loop; }
         "/]"               { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_END, NULL, ctx); goto loop; }
+        // Doubled delimiter backslashes in the historical Mermaid corpus
+        // represent one retained label slash, already reconstructed by grammar.
+        "\x5B\x5C\x5C" { s->shape_label_depth++; FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
+        "\x5C\x5C\x5D" { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_BACKSLASH_END, NULL, ctx); goto loop; }
         "\x5B\x5C"         { s->shape_label_depth++; FlowchartParser(parser, FC_INV_TRAP_START, NULL, ctx); goto loop; }
         "\x5C\x5D"         { if (s->shape_label_depth > 0) --s->shape_label_depth; FlowchartParser(parser, FC_TRAP_BACKSLASH_END, NULL, ctx); goto loop; }
         ">"                { s->shape_label_depth++; FlowchartParser(parser, FC_ODD_START, NULL, ctx); goto loop; }
@@ -349,6 +368,20 @@ loop:
         "\000" { FlowchartParser(parser, FC_EOF, NULL, ctx); return; }
 
         . { ctx->error_count++; goto loop; }
+    */
+}
+
+/* Reuse the scanner's operator definitions. A following node named o/x (or
+ * a named-edge declaration) must not be mistaken for an edge continuation. */
+static int starts_edge_continuation(const char* cursor) {
+    const char* marker;
+    /*!re2c
+        re2c:define:YYCTYPE = char;
+        re2c:define:YYCURSOR = cursor;
+        re2c:define:YYMARKER = marker;
+        re2c:yyfill:enable = 0;
+        full_arrow | inline_edge_label { return 1; }
+        * { return 0; }
     */
 }
 

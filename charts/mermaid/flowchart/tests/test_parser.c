@@ -11,7 +11,7 @@
 #include <dirent.h>
 #endif
 
-extern char* flowchart_to_json(FlowchartDiagram* diagram);
+extern int flowchart_test_json_v2(int (*equal)(const char*, const char*));
 
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -1574,6 +1574,12 @@ spec("flowchart_parser") {
             check_true(!golden_links_permutation_only(duplicate, expected));
             check_true(!golden_links_permutation_only("{", expected));
             check_true(!golden_links_permutation_only(NULL, expected));
+        }
+    }
+
+    describe("explicit JSON v2 output contract") {
+        it("matches independent complete graphs and edge semantics in declaration order") {
+            check_true(flowchart_test_json_v2(json_equal));
         }
     }
 

@@ -30,7 +30,8 @@ Parsed edge IDs and curves can be read through
 `flowchart_edge_get_id` / `flowchart_edge_get_curve`. Their strings are owned
 by the parsed edge and freed with its diagram. Public AST structure layouts
 remain unchanged. These accessors accept parser-owned edges only. The current
-renderer does not yet apply the parsed curve choice to visual routing.
+renderer applies the supported parsed curve choices to SVG path interpolation,
+with a bounded node-clearance check; see the module README.
 The legacy JSON adapter still omits edge IDs and curves; adding those JSON
 fields belongs to the separately reviewed output-contract migration.
 
@@ -57,5 +58,47 @@ limitations: double-ended point arrows are projected as `arrow_point`, dotted
 arrow length is 1, node-level inline styles are not represented, and edge IDs
 and curves are exposed through AST accessors rather than JSON. These omissions
 are not excused as full Mermaid conformance by a passing test. The source
-contract preserves numeric `linkStyle` declaration indices; the renderer's
-application of those styles and curves remains separate work.
+contract preserves numeric `linkStyle` declaration indices. The focused renderer
+profile applies stroke/width by those indices and supported named curves.
+Broader CSS and stronger curve-clearance constraints remain outside the profile. See [the module README](../../../README.md#flowchart-svg-link-styles)
+for supported values and rejection behavior.
+
+`verify.mjs` also checks the default/indexed precedence used by the headless
+renderer regression: repeated indexed declarations replace the previous style
+list, and the final default is combined under the final indexed list. This
+evidence comes from the pinned Mermaid parser database, independent of Stun.
+
+## Production SVG curve evidence
+
+After the native headless renderer test has emitted its artifacts, run:
+
+```sh
+node verify-curves.mjs /path/to/flowchart-linkstyle.svg.curves \
+  /path/to/flowchart-linkstyle.svg.curves.legacy \
+  /path/to/flowchart-linkstyle.svg.curves.professional
+```
+
+The oracle uses lock-pinned d3-shape 3.2.0, a Mermaid dependency, to compute
+commands from actual native route knots. It checks all 313 emitted SVG paths,
+owned IDs/curve names, every control/end coordinate and viewport containment.
+Independent diagnostic sampling confirms the original legacy scene's refused
+node intersection; it does not replace the production conservative certificate.
+Native tests require full-scene professional acceptance and legacy refusal.
+
+## Explicit JSON v2 contract (#239)
+
+Run `node generate-json-v2.mjs` to verify `../json-v2-contract.json`; use
+`--write` only to regenerate the proposal for review. All ordered type/stroke/
+length/identity/curve facts come from pinned Mermaid 11.12.0. Other graph fields
+and source label objects retain the existing explicit baseline. Labels are
+matched bijectively to historical edges (exact labels disambiguate repeated
+endpoints), so HTML canonicalization does not silently replace source markup.
+No actual Stun output is used to generate expectations.
+
+Native tests require COMPLETE source parses and strict full-graph equality for
+all 95 cases, while the original legacy golden gate remains unchanged. Six
+additional groups cover variable strokes/heads/length caps, labelled arrows,
+named chains, parallel endpoints, repeated IDs, curve lookup timing and escaping.
+Unknown schemas/operators are tested as explicit failures, and owned output is
+read after its source AST is freed. The same focused installed-SDK sanitizer job
+runs both output contracts without Mesa or desktop qualification.
