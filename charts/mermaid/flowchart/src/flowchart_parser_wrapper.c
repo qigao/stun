@@ -658,6 +658,33 @@ static int flowchart_is_subgraph_id(const FlowchartSubGraph* siblings,
   return 0;
 }
 
+/* Nested/local edges are emitted separately. For legacy unstyled
+ * subgraph graphs, root nodes with one outgoing link are a distinct
+ * projection category before root fan-out edges. This does not alter
+ * the AST edge list or numbered linkStyle declaration semantics. */
+static int flowchart_node_in_subgraph_tree(
+    const FlowchartSubGraph* siblings, const char* id) {
+  for (const FlowchartSubGraph* sg = siblings; sg; sg = sg->next) {
+    if (flowchart_subgraph_has_node(sg, id) ||
+        flowchart_node_in_subgraph_tree(sg->children, id))
+      return 1;
+  }
+  return 0;
+}
+
+static int flowchart_root_single_outgoing(
+    const FlowchartDiagram* diagram, const FlowchartEdge* edge) {
+  if (!edge || !edge->from ||
+      flowchart_node_in_subgraph_tree(diagram->subgraphs, edge->from))
+    return 0;
+  unsigned count = 0;
+  for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+    if (e->from && strcmp(e->from, edge->from) == 0 && ++count > 1)
+      return 0;
+  }
+  return count == 1;
+}
+
 static void flowchart_json_append_edge(json_value_t* links_arr,
                                         const FlowchartEdge* e) {
   json_value_t *e_det = json_create_object();
@@ -768,17 +795,36 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
         break;
       }
     }
-    for (int pass = 0; pass < (label_first ? 2 : 1); ++pass) {
+    /* This precedence applies only to the unstyled ordinary-root
+       category. Indexed link styles must retain their existing indices. */
+    int root_has_label = 0;
+    if (phase == 1 && diagram->subgraphs && !diagram->link_styles) {
       for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
-        if (label_first && (e->label != NULL) != (pass == 0))
-          continue;
-        if (flowchart_first_edge_scope(diagram->subgraphs, e))
-          continue;
-        const int pair_of_subgraphs =
-            flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
-            flowchart_is_subgraph_id(diagram->subgraphs, e->to);
-        if (pair_of_subgraphs == (phase == 0))
+        if (!flowchart_first_edge_scope(diagram->subgraphs, e) && e->label)
+          root_has_label = 1;
+      }
+    }
+    const int promote_single_outgoing =
+        phase == 1 && diagram->subgraphs && !diagram->link_styles &&
+        !root_has_label;
+    for (int source_class = promote_single_outgoing ? 1 : 0;
+         source_class >= 0; --source_class) {
+      for (int pass = 0; pass < (label_first ? 2 : 1); ++pass) {
+        for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+          if (label_first && (e->label != NULL) != (pass == 0))
+            continue;
+          if (flowchart_first_edge_scope(diagram->subgraphs, e))
+            continue;
+          const int pair_of_subgraphs =
+              flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
+              flowchart_is_subgraph_id(diagram->subgraphs, e->to);
+          if (pair_of_subgraphs != (phase == 0))
+            continue;
+          if (promote_single_outgoing &&
+              flowchart_root_single_outgoing(diagram, e) != source_class)
+            continue;
           flowchart_json_append_edge(links_arr, e);
+        }
       }
     }
   }
