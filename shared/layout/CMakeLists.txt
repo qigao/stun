@@ -141,15 +141,15 @@ endif()
 
 # Headless consumer qualification without the full parser/UI/render graph.
 # Infographic's geometry adapter must compile and execute on the same native
-# toolchain matrix as GraphLayout; full STUN_BUILD_CHARTS=ON is a later gate.
-if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/src/layout/layout_engine.cpp")
+# toolchain matrix as GraphLayout; chart adapters are validated by the root-build CI gate.
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../charts/infographic/src/layout/layout_engine.cpp")
     add_executable(stun_graphlayout_infographic_tests
         tests/infographic_adapter_test.cpp
-        ../infographic/src/layout/layout_engine.cpp
-        ../infographic/src/ir/unified_infographic.cpp
+        ../../charts/infographic/src/layout/layout_engine.cpp
+        ../../charts/infographic/src/ir/unified_infographic.cpp
     )
     target_include_directories(stun_graphlayout_infographic_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../infographic/include/infographic
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../charts/infographic/include/infographic
     )
     target_link_libraries(stun_graphlayout_infographic_tests PRIVATE Stun::GraphProjection Stun::GraphTidyTree)
     target_compile_features(stun_graphlayout_infographic_tests PRIVATE cxx_std_17)
@@ -198,16 +198,16 @@ endif()
 # Exercise real DOT/Mermaid AST-to-Graph placement adapters headlessly. Chart
 # parsers, UI, Mustache, OpenGL and libavoid are deliberately not linked.
 if(BUILD_TESTING AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../dotgraph/src/dotgraph_layout.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../mermaid/flowchart/src/flowchart_layout.cpp")
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../charts/dotgraph/src/dotgraph_layout.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../charts/mermaid/flowchart/src/flowchart_layout.cpp")
     add_executable(stun_graphlayout_chart_adapter_tests
         tests/chart_adapter_test.cpp
-        ../dotgraph/src/dotgraph_layout.cpp
-        ../mermaid/flowchart/src/flowchart_layout.cpp
+        ../../charts/dotgraph/src/dotgraph_layout.cpp
+        ../../charts/mermaid/flowchart/src/flowchart_layout.cpp
     )
     target_include_directories(stun_graphlayout_chart_adapter_tests PRIVATE
-        ../dotgraph/include ../dotgraph/src
-        ../mermaid/flowchart/include ../mermaid/flowchart/src
+        ../../charts/dotgraph/include ../../charts/dotgraph/src
+        ../../charts/mermaid/flowchart/include ../../charts/mermaid/flowchart/src
     )
     target_link_libraries(stun_graphlayout_chart_adapter_tests PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphNudging Stun::GraphPolylineNudging Stun::GraphPortBindings)
     add_test(NAME StunGraphChartAdaptersTests COMMAND stun_graphlayout_chart_adapter_tests)
@@ -221,13 +221,13 @@ if(BUILD_TESTING)
 endif()
 
 # Real Mermaid Mindmap AST adapter: no parser, UI or rendering dependency.
-if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../mermaid/mindmap/src/mindmap_layout.cpp")
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../charts/mermaid/mindmap/src/mindmap_layout.cpp")
     add_executable(stun_graphlayout_mindmap_tests
         tests/mindmap_adapter_test.cpp
-        ../mermaid/mindmap/src/mindmap_layout.cpp
+        ../../charts/mermaid/mindmap/src/mindmap_layout.cpp
     )
     target_include_directories(stun_graphlayout_mindmap_tests PRIVATE
-        ../mermaid/mindmap/include
+        ../../charts/mermaid/mindmap/include
     )
     target_link_libraries(stun_graphlayout_mindmap_tests PRIVATE Stun::GraphTidyTree)
     add_test(NAME StunGraphMindmapAdapterTests COMMAND stun_graphlayout_mindmap_tests)
@@ -235,10 +235,10 @@ endif()
 
 # Compile and execute the actual tree renderer source against a lightweight
 # headless rendering contract; the installed/full Charts build is a separate gate.
-if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../infographic/tree/src/tree_layout_renderer.cpp")
+if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../charts/infographic/tree/src/tree_layout_renderer.cpp")
     add_executable(stun_graphlayout_tree_renderer_tests
         tests/infographic_tree_renderer_test.cpp
-        ../infographic/tree/src/tree_layout_renderer.cpp
+        ../../charts/infographic/tree/src/tree_layout_renderer.cpp
     )
     target_include_directories(stun_graphlayout_tree_renderer_tests PRIVATE
         tests/stubs

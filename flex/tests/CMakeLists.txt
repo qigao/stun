@@ -136,7 +136,7 @@ if(FLEX_BUILD_GCANVAS_GPU_TESTS AND
     PRIVATE flex flex_render_engine_gcanvas gCanvas::Window
             Salts::TinyTest)
   target_include_directories(
-    benchmark_gcanvas_blur PRIVATE ${CMAKE_SOURCE_DIR}/vendor/gCanvas/src)
+    benchmark_gcanvas_blur PRIVATE ${CMAKE_SOURCE_DIR}/shared/gcanvas/src)
   set_target_properties(
     benchmark_gcanvas_blur PROPERTIES FOLDER "flex/benchmarks")
 endif()

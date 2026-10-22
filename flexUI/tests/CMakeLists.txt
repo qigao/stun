@@ -453,7 +453,7 @@ target_link_libraries(
   test_gcanvas_application_input
   PRIVATE FlexUI::GCanvasApplicationInput)
 target_include_directories(
-  test_gcanvas_application_input PRIVATE "${gCanvas_SOURCE_DIR}/src")
+  test_gcanvas_application_input PRIVATE "${CMAKE_SOURCE_DIR}/shared/gcanvas/src")
 flexui_configure_tinytest(test_gcanvas_application_input)
 set_target_properties(
   test_gcanvas_application_input PROPERTIES FOLDER "flexUI/tests")
@@ -552,7 +552,7 @@ if(WIN32)
     PROPERTY ENVIRONMENT_MODIFICATION
              "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
              "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
-             "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+)
 
   if(TEST test_flexui_desktop_editor_smoke)
     set_property(
@@ -561,6 +561,6 @@ if(WIN32)
                "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
                "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}"
                "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
-               "PATH=path_list_prepend:${TURBOPARSER_ROOT}/${CMAKE_INSTALL_BINDIR}")
+)
   endif()
 endif()

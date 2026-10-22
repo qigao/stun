@@ -68,7 +68,7 @@ XML UI Document + CSS/Tailwind Utility + TurboScript Controller
   `flexUI/modules/tailwindcss/CMakeLists.txt`、`flexUI/docs/ARCHITECTURE.md`。
 - gCanvas 已把核心 renderer 与可选 GLFW window helper 分离；OpenGL/Vulkan Context 支持
   host-managed native window，Context 与 GPU 资源限定在创建线程。证据：
-  `vendor/gCanvas/CMakeLists.txt`、`vendor/gCanvas/docs/host-and-resource-protocol.md`。
+  `shared/gcanvas/CMakeLists.txt`、`shared/gcanvas/docs/host-and-resource-protocol.md`。
 - TurboScript public host ABI 已能编译模块、按名称解析 export、重复调用并返回结构化错误；
   FlexUI 通过可选 `FlexUI::ControllerTurboScript` adapter 使用它，feature 关闭时不查找该依赖。
   证据：`flexUI/include/flexUI/controller_turboscript.h`、

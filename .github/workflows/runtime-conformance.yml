@@ -1,10 +1,10 @@
 name: Stun runtime conformance
 
-# One trigger and one release-resolution job for the existing independent
-# Unicode source, installed-SDK/FlexUI, Mesa and gCanvas Desktop gates.
-# Job isolation, sanitizer evidence and original job names are preserved.
+# Focused parser and headless renderer checks against published SDKs. Keep normal PR validation
+# independent of Mesa source builds and desktop/window runtime qualification.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [master, refactor/flexui-salts-unicode]
   workflow_dispatch:
@@ -14,19 +14,215 @@ permissions:
   packages: read
 
 concurrency:
-  group: stun-runtime-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: stun-runtime-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Runtime change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      golden: ${{ steps.gold_scope.outputs.affected }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Detect Flowchart JSON golden changes
+        id: gold_scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'charts/mermaid/flowchart/*' 'shared/layout/*' \
+            'charts/mermaid/golden/flowchart/*' \
+            'tools/lemon/*' '.github/scripts/ci-affected.sh' \
+            '.github/scripts/restore-flowchart-sdk.py' \
+            '.github/workflows/runtime-conformance.yml'
+
+  mermaid-oracle:
+    name: Pinned Mermaid semantic evidence (independent of Stun golden)
+    needs: changes
+    if: needs.changes.outputs.golden == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: charts/mermaid/flowchart/tests/oracle/package-lock.json
+      - name: Verify pinned independent semantics without changing fixtures
+        working-directory: charts/mermaid/flowchart/tests/oracle
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node verify.mjs "$RUNNER_TEMP/flowchart-mermaid-oracle.json"
+          node migrate.mjs
+          node generate-json-v2.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowchart-mermaid-oracle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/flowchart-mermaid-oracle.json
+          if-no-files-found: error
+
   sdk-releases:
+    needs: changes
+    if: needs.changes.outputs.golden == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
-  mesa-driver:
-    needs: sdk-releases
-    uses: ./.github/workflows/mesa-driver.yml
-    with:
-      run_runtime: true
-      salts_sha: ${{ needs.sdk-releases.outputs.salts_sha }}
-      salts_utils_sha: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
-      salts_release: ${{ needs.sdk-releases.outputs.salts_release }}
-      salts_utils_release: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+  # Run the installed-SDK AST and exact JSON suite for every applicable
+  # update, including mixed changes and explicit ci/full requests.
+  golden:
+    name: Linux / 95 Mermaid goldens + headless SVG + ASan/UBSan
+    needs: [changes, sdk-releases]
+    if: needs.changes.outputs.golden == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+      SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
+      SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      # The runner context is unavailable in jobs.<job>.env; bind
+      # runner-local temp paths after the job starts.
+      - name: Define isolated SDK paths
+        shell: bash
+        run: |
+          printf 'SALTS_ROOT=%s/stun-flowchart-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'PACKAGES_ROOT=%s/stun-flowchart-native-nuget\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Checkout exact Stun source candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout released Salts for canonical NuGet source settings
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
+          path: .ci/flowchart-salts
+          persist-credentials: false
+
+      - name: Verify exact dependency and source commits
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+          test "$(git -C .ci/flowchart-salts rev-parse HEAD)" = "$SALTS_SHA"
+          test -f .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config
+          test -n "$SALTS_RELEASE" && test -n "$SALTS_UTILS_RELEASE"
+
+      - name: Restore exact published native packages from GitHub Packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-flowchart-restore" "$PACKAGES_ROOT"
+          salts_version="${SALTS_RELEASE#v}"
+          utils_version="${SALTS_UTILS_RELEASE#v}"
+          cat > "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="Salts.Native" Version="$salts_version" />
+              <PackageReference Include="SaltsUtils.Native" Version="$utils_version" />
+            </ItemGroup>
+          </Project>
+          EOF
+          dotnet restore "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" \
+            --configfile .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config \
+            --packages "$PACKAGES_ROOT" --no-cache --force-evaluate --verbosity minimal
+          # No downstream CMake consumer has access to a dependency source tree.
+          rm -rf .ci/flowchart-salts
+
+      - name: Verify official SHA256SUMS and restore isolated SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-flowchart-checks/salts" \
+                   "$RUNNER_TEMP/stun-flowchart-checks/utils"
+          gh release download "$SALTS_RELEASE" --repo qigao/salts \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/stun-flowchart-checks/salts"
+          gh release download "$SALTS_UTILS_RELEASE" --repo qigao/salts-utils \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/stun-flowchart-checks/utils"
+          python3 .github/scripts/restore-flowchart-sdk.py \
+            --packages "$PACKAGES_ROOT" --sdk "$SALTS_ROOT" \
+            --salts-release "$SALTS_RELEASE" \
+            --salts-utils-release "$SALTS_UTILS_RELEASE" \
+            --salts-checksums "$RUNNER_TEMP/stun-flowchart-checks/salts/SHA256SUMS" \
+            --salts-utils-checksums "$RUNNER_TEMP/stun-flowchart-checks/utils/SHA256SUMS"
+          printf 'LD_LIBRARY_PATH=%s/lib\n' "$SALTS_ROOT" >> "$GITHUB_ENV"
+
+      - name: Install minimal parser generator tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends re2c ninja-build
+          re2c --version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: charts/mermaid/flowchart/tests/oracle/package-lock.json
+      - name: Restore pinned independent curve oracle
+        working-directory: charts/mermaid/flowchart/tests/oracle
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Configure isolated JSON golden test against installed SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S charts/mermaid/flowchart/tests/standalone \
+            -B build/flowchart-json-golden -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DSTUN_CI_JSON_GOLDEN=ON -DSTUN_CI_RENDERER_STYLE=ON -DSTUN_CI_SANITIZERS=ON \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          # Reuse one generator invocation and build tree for all focused checks.
+          cmake --build build/flowchart-json-golden \
+            --target stun_flowchart_ast_smoke stun_flowchart_json_golden stun_flowchart_json_failures stun_flowchart_linkstyle --parallel 2
+
+      - name: Execute production parser, JSON golden and headless SVG checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ldd build/flowchart-json-golden/stun_flowchart_json_golden | tee build/flowchart-json-golden/dependencies.txt
+          ! grep -q 'not found' build/flowchart-json-golden/dependencies.txt
+          ctest --test-dir build/flowchart-json-golden \
+            -R '^stun_flowchart_(ast_smoke|json_golden|json_failures|linkstyle)$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120
+          python3 charts/mermaid/flowchart/tests/verify_linkstyle_svg.py \
+            build/flowchart-json-golden/flowchart-linkstyle.svg
+          node charts/mermaid/flowchart/tests/oracle/verify-curves.mjs \
+            build/flowchart-json-golden/flowchart-linkstyle.svg.curves \
+            build/flowchart-json-golden/flowchart-linkstyle.svg.curves.legacy \
+            build/flowchart-json-golden/flowchart-linkstyle.svg.curves.professional
+          git diff --exit-code
+
+      - name: Preserve exact-head SDK and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowchart-json-golden-${{ github.event.pull_request.head.sha || github.sha }}
+          if-no-files-found: warn
+          retention-days: 3
+          path: |
+            ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
+            build/flowchart-json-golden/Testing/Temporary/LastTest.log
+            build/flowchart-json-golden/dependencies.txt
+            build/flowchart-json-golden/flowchart-linkstyle.svg*

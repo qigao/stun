@@ -75,7 +75,7 @@ To qualify an individual algorithm on Windows without UI/parser dependencies,
 enter an x64 Visual Studio developer shell and use the standalone presets:
 
 ```sh
-cd charts/graphlayout
+cd shared/layout
 cmake --preset win-release-user
 cmake --build --preset win-release-user --target stun_graph_vpsc
 cmake --build --preset win-release-user --target stun_graph_force
@@ -117,7 +117,7 @@ stages. The renderer owns neither the algorithm nor its node identities.
 ## Standalone qualification
 
 ```sh
-cd charts/graphlayout
+cd shared/layout
 cmake --preset win-release-user
 cmake --build --preset win-release-user --parallel 2
 ctest --preset win-release-user
@@ -126,8 +126,8 @@ ctest --preset win-release-user
 The standalone manifest has no external dependencies. Its vcpkg toolchain
 remains enabled through the preset. The formal suites include the actual
 DOT/Mermaid Flowchart, Infographic and Mindmap layout adapter implementations.
-This headless qualification does not replace a full `STUN_BUILD_CHARTS=ON`
-build, which additionally requires the configured TurboParser SDK and render
+This headless qualification does not replace a full charts-enabled root build
+build, which additionally requires the published Salts/SaltsUtils SDK and render
 dependencies.
 
 ## Algorithm v2: orthogonal obstacle-aware routing
@@ -343,7 +343,7 @@ alone is claimed.
 Standalone comparison (optional target; disabled in regular builds):
 
 ```sh
-cmake -S charts/graphlayout -B build/graphlayout-bench -G Ninja \
+cmake -S shared/layout -B build/graphlayout-bench -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DSTUN_GRAPHLAYOUT_BUILD_BENCHMARKS=ON
 cmake --build build/graphlayout-bench --target stun_graphlayout_stress_compare
 build/graphlayout-bench/stun_graphlayout_stress_compare
@@ -414,7 +414,7 @@ finite-difference derivatives, disconnected repulsion, cycles and duplicate
 edges, reversed edge insertion and node permutations, hard pins and
 non-overlap, degenerate seeds, work budgets and 30 deterministic graph
 families. The standalone CMake/CTest matrix is independent of the full Charts
-package and is **not** evidence that the full `STUN_BUILD_CHARTS=ON` stack
+package and is **not** evidence that the full charts-enabled root build stack
 compiles and renders correctly.
 
 An optional comparison (disabled in normal CI) evaluates **every output** of
@@ -422,7 +422,7 @@ Gradient Stress, SMACOF and Force under both objective functions, and also
 reports edge-length RMSE, rectangle-overlap count and elapsed time:
 
 ```sh
-cmake -S charts/graphlayout -B build/graphlayout-bench -G Ninja \
+cmake -S shared/layout -B build/graphlayout-bench -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DSTUN_GRAPHLAYOUT_BUILD_BENCHMARKS=ON
 cmake --build build/graphlayout-bench --target stun_graphlayout_force_compare
 build/graphlayout-bench/stun_graphlayout_force_compare

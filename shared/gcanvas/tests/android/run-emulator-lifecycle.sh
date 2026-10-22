@@ -2,7 +2,7 @@
 set -euo pipefail
 
 package=com.qigao.gcanvas.lifecycle
-apk=vendor/gCanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
+apk=shared/gcanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
 
 test -f "$apk"
 adb install -r "$apk"

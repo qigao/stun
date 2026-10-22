@@ -1,8 +1,9 @@
 name: GraphLayout native algorithm qualification
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
-      - 'charts/graphlayout/**'
+      - 'shared/layout/**'
       - 'charts/dotgraph/**'
       - 'charts/mermaid/flowchart/**'
       - 'charts/mermaid/mindmap/**'
@@ -10,9 +11,11 @@ on:
       - 'vendor/CMakeLists.txt'
       - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
+      - '.github/scripts/ci-affected.sh'
   push:
+    branches: [master]
     paths:
-      - 'charts/graphlayout/**'
+      - 'shared/layout/**'
       - 'charts/dotgraph/**'
       - 'charts/mermaid/flowchart/**'
       - 'charts/mermaid/mindmap/**'
@@ -20,13 +23,40 @@ on:
       - 'vendor/CMakeLists.txt'
       - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
+      - '.github/scripts/ci-affected.sh'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: GraphLayout change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'shared/layout/*' 'charts/dotgraph/*' 'charts/mermaid/flowchart/src/flowchart_layout.cpp' 'charts/mermaid/flowchart/include/*' 'charts/mermaid/flowchart/CMakeLists.txt' \
+            'charts/mermaid/mindmap/*' 'charts/infographic/*' 'vendor/CMakeLists.txt' 'vendor/cola/*' \
+            '.github/workflows/graphlayout-native.yml' '.github/scripts/ci-affected.sh'
+
   graphlayout:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     name: ${{ matrix.os }} / ${{ matrix.toolchain }}
     strategy:
       fail-fast: false
@@ -60,18 +90,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-${{ hashFiles('charts/graphlayout/**') }}
+          key: graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-${{ hashFiles('shared/layout/**') }}
           restore-keys: |
             graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-
       - name: Configure
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cmake -S charts/graphlayout -B build/graphlayout -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON
+            cmake -S shared/layout -B build/graphlayout -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON
           else
             extra=()
             if [[ '${{ matrix.toolchain }}' == 'clang' ]]; then extra+=(-DCMAKE_CXX_COMPILER=clang++); fi
-            cmake -S charts/graphlayout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${extra[@]}"
+            cmake -S shared/layout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${extra[@]}"
           fi
       - name: Build
         run: cmake --build build/graphlayout --config Release --parallel 2

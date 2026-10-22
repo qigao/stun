@@ -65,14 +65,14 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y llvm
           fi
-          python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+          python3 shared/markdown/tests/verify_salts_native_unicode_sdk.py \
             --package "$SALTS_RC17_PACKAGE" \
             --version 2.3.0-rc.17 \
             --source-sha "$SALTS_RC17_SHA" \
             --header-sha256 effe759a1a69c08e1e5bf5e0aeb0e68f99861d1bd73a7c32b5b71d4f1f8b2666 \
             --package-sha256 "$SALTS_RC17_DIGEST" \
             --report build/salts-unicode17-rc17-release-proof.json
-          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+          if python3 shared/markdown/tests/verify_salts_native_unicode_sdk.py \
             --package "$SALTS_RC17_PACKAGE" \
             --version 2.3.0 \
             --source-sha "$SALTS_RC17_SHA" \
@@ -83,7 +83,7 @@ jobs:
             exit 1
           fi
           grep -Fq "NuGet version mismatch" build/reject-wrong-version.log
-          if python3 ui_core/tests/verify_salts_native_unicode_sdk.py \
+          if python3 shared/markdown/tests/verify_salts_native_unicode_sdk.py \
             --package "$SALTS_RC17_PACKAGE" \
             --version 2.3.0-rc.17 \
             --source-sha 414f43362d95fa9c04a520a6be1c28a5e6a8a1fd \
@@ -119,7 +119,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S ui_core -B build/unicode17-qa -G Ninja \
+          cmake -S shared/markdown -B build/unicode17-qa -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=gcc \
             "-DCMAKE_PREFIX_PATH=$SALTS_RC17_ROOT" \
             -DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON -DBUILD_TESTING=ON \
@@ -137,21 +137,21 @@ jobs:
           "$py" -m pip install --disable-pip-version-check --no-cache-dir cmarkgfm mistune
           "$py" -m pip freeze
           renderer="$GITHUB_WORKSPACE/build/unicode17-qa/tests/stun_markdown_html_dump"
-          "$py" ui_core/tests/survey_commonmark_spec.py \
+          "$py" shared/markdown/tests/survey_commonmark_spec.py \
             --renderer "$renderer" --spec tools/md/test/spec.txt \
             --render-policy spec --report build/unicode17-qa/spec-652.json
-          "$py" ui_core/tests/survey_commonmark_spec.py \
+          "$py" shared/markdown/tests/survey_commonmark_spec.py \
             --renderer "$renderer" --spec tools/md/test/spec.txt \
             --report build/unicode17-qa/safe-652.json
-          "$py" ui_core/tests/compare_cmarkgfm_html.py \
+          "$py" shared/markdown/tests/compare_cmarkgfm_html.py \
             --renderer "$renderer" --report build/unicode17-qa/gfm-independent.json
-          "$py" ui_core/tests/oracle_legacy_list_table.py \
+          "$py" shared/markdown/tests/oracle_legacy_list_table.py \
             --renderer "$renderer" \
             --report build/unicode17-qa/gfm-root-list-table-229.json
           "$py" - <<'PY'
           import hashlib,json
           from pathlib import Path
-          root=Path("ui_core/tests")
+          root=Path("shared/markdown/tests")
           b=json.loads((root/"commonmark_0_31_2_spec_baseline.json").read_text())
           s=json.loads(Path("build/unicode17-qa/spec-652.json").read_text())
           rows=s["cases"]

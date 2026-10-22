@@ -10,7 +10,6 @@
             "cacheVariables": {
                 "SALTS_ROOT": "$penv{SALTS_ROOT}",
                 "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "TURBOPARSER_ROOT": "C:/projects/cpp/external/pkgs/turboparser",
                 "TURBONET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
                 "TURBOHTTP_ROOT": "c:/projects/cpp/external/pkgs/turbohttp",
@@ -37,7 +36,6 @@
             "cacheVariables": {
                 "SALTS_ROOT": "$penv{SALTS_ROOT}",
                 "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "TURBOPARSER_ROOT": "/opt/turboparser",
                 "TURBONET_ROOT": "/opt/turbonet",
                 "TURBOSCRIPT_ROOT": "/opt/turboscript",
                 "TURBOHTTP_ROOT": "/opt/turbohttp",
@@ -84,7 +82,6 @@
             "binaryDir": "${sourceDir}/build/Msvc-Core-Release",
             "cacheVariables": {
                 "STUN_BUILD_APPLICATIONS": "OFF",
-                "STUN_BUILD_CHARTS": "OFF",
                 "FLEXUI_ENABLE_PLUGINS": "ON",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/Msvc-Core-Release/install"
             },

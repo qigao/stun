@@ -2,11 +2,11 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR ARROW 
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW EDGE_PROPS AMP CLASSDEF COMMA STYLE CLICK LINKSTYLE PUNCT CLASS_SHORTCUT
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
-       CYLINDER_START CYLINDER_END TRAP_START INV_TRAP_START TRAP_END
+       CYLINDER_START CYLINDER_END TRAP_START INV_TRAP_START TRAP_END TRAP_BACKSLASH_END ODD_START
        SQS SQE PS PE PIPE SEMI COLON DASH HTML IDENTIFIER STRING CLASS EOF.
 
 %token_type { char* }
@@ -14,15 +14,61 @@
 %type node { FlowchartNode* }
 %type label_text { char* }
 %type node_label { char* }
-%type edge_chain { FlowchartNode* }
+%type node_group { FlowchartNodeRef* }
+%type edge_chain { FlowchartNodeRef* }
+%type class_ids { FlowchartNodeRef* }
+%type style_spec { FlowchartStyle* }
+%type style_specs { FlowchartStyle* }
 %destructor label_text { free($$); }
 %destructor node_label { free($$); }
+%destructor class_ids { free_node_refs($$); }
+%destructor node_group { free_node_refs($$); }
+%destructor edge_chain { free_node_refs($$); }
+%destructor style_spec { free_styles($$); }
+%destructor style_specs { free_styles($$); }
 
 %include {
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include "flowchart/flowchart_ast.h"
+
+/* Parsed edges own private metadata after the unchanged public AST prefix.
+   Accessors accept only edges returned by this parser. No global registry or
+   change to the public FlowchartEdge layout is needed. */
+typedef struct {
+    FlowchartEdge edge;
+    char* id;
+    char* curve;
+} ParsedFlowchartEdge;
+
+const char* flowchart_edge_get_id(const FlowchartEdge* edge) {
+    return edge ? ((const ParsedFlowchartEdge*)edge)->id : NULL;
+}
+
+const char* flowchart_edge_get_curve(const FlowchartEdge* edge) {
+    return edge ? ((const ParsedFlowchartEdge*)edge)->curve : NULL;
+}
+
+void flowchart_parsed_edge_free(FlowchartEdge* edge) {
+    if (!edge) return;
+    ParsedFlowchartEdge* owned = (ParsedFlowchartEdge*)edge;
+    free(edge->from);
+    free(edge->to);
+    free(edge->label);
+    free(edge->arrow_type);
+    free(owned->id);
+    free(owned->curve);
+    free(owned);
+}
+
+/* Different delimiters carry independently observable Mermaid shapes and
+   literal backslashes at their ends. Keep the copied AST label unchanged by
+   the caller and allocate its normalized spelling exactly once. */
+static FlowchartNode* make_trapezoid_node(
+    FlowchartParserContext* ctx, const char* id, const char* raw,
+    FlowchartNodeShape shape, int leading_slash, int trailing_slash);
 
 static void push_subgraph(FlowchartParserContext *ctx, FlowchartSubGraph* sg) {
     FlowchartSubGraphStack* s = (FlowchartSubGraphStack*)malloc(sizeof(FlowchartSubGraphStack));
@@ -49,7 +95,29 @@ static FlowchartSubGraph* current_subgraph(FlowchartParserContext *ctx) {
     return s ? s->sg : NULL;
 }
 
+static int has_node_ref(const FlowchartSubGraph* sg, const char* id) {
+    if (!sg || !id) return 0;
+    for (const FlowchartNodeRef* ref = sg->node_refs; ref; ref = ref->next)
+        if (ref->id && strcmp(ref->id, id) == 0) return 1;
+    return 0;
+}
+
+static int node_registered_in_another_subgraph(
+    const FlowchartSubGraph* siblings,
+    const FlowchartSubGraph* active,
+    const char* id) {
+    for (const FlowchartSubGraph* sg = siblings; sg; sg = sg->next) {
+        if (sg != active && has_node_ref(sg, id))
+            return 1;
+        if (node_registered_in_another_subgraph(sg->children, active, id))
+            return 1;
+    }
+    return 0;
+}
+
 static void add_node_ref(FlowchartParserContext* ctx, FlowchartSubGraph* sg, const char* id) {
+    /* Mermaid's serialized subgraph node list reflects node references and
+       edge endpoints, including repeated references. Preserve each occurrence. */
     FlowchartNodeRef* ref = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
     if (!ref) {
         ctx->error_count++;
@@ -70,6 +138,15 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
     FlowchartNode* curr = ctx->diagram->nodes;
     while (curr) {
         if (strcmp(curr->id, id) == 0) {
+            /* First appearance inside this subgraph: materialize the
+               declaration/reference even when the node was created outside.
+               Never silently transfer a node already owned by a different
+               subgraph, and do not duplicate membership for subsequent edges. */
+            FlowchartSubGraph* active = current_subgraph(ctx);
+            if (active && !has_node_ref(active, id) &&
+                !node_registered_in_another_subgraph(
+                    ctx->diagram->subgraphs, active, id))
+                add_node_ref(ctx, active, id);
             if (label && (!curr->label || strcmp(curr->label, id) == 0)) {
                 char* replacement = strdup(label);
                 if (!replacement) {
@@ -107,28 +184,379 @@ static FlowchartNode* find_or_create_node(FlowchartParserContext *ctx, const cha
     return n;
 }
 
+static FlowchartSubGraph* find_parent_of_nested_subgraph(
+    FlowchartSubGraph* siblings, const char* child_id) {
+    for (FlowchartSubGraph* parent = siblings; parent; parent = parent->next) {
+        for (FlowchartSubGraph* child = parent->children; child; child = child->next) {
+            if (child->id && strcmp(child->id, child_id) == 0)
+                return parent;
+        }
+        FlowchartSubGraph* ancestor = find_parent_of_nested_subgraph(parent->children, child_id);
+        if (ancestor) return ancestor;
+    }
+    return NULL;
+}
+
+static FlowchartNode* make_trapezoid_node(
+    FlowchartParserContext* ctx, const char* id, const char* raw,
+    FlowchartNodeShape shape, int leading_slash, int trailing_slash) {
+    if (!id || !raw) return NULL;
+    size_t n = strlen(raw);
+    if (n > SIZE_MAX - (size_t)leading_slash - (size_t)trailing_slash - 1) {
+        ctx->error_count++;
+        return NULL;
+    }
+    char* label = (char*)malloc(n + leading_slash + trailing_slash + 1);
+    if (!label) {
+        ctx->error_count++;
+        return NULL;
+    }
+    size_t off = 0;
+    if (leading_slash) label[off++] = '\\';
+    memcpy(label + off, raw, n);
+    off += n;
+    if (trailing_slash) label[off++] = '\\';
+    label[off] = '\0';
+    FlowchartNode* result = find_or_create_node(ctx, id, label);
+    if (result) result->shape = shape;
+    free(label);
+    return result;
+}
+
 static void add_edge(FlowchartParserContext *ctx, const char* from, const char* to, const char* arrow, const char* label) {
     if (!from || !to) return;
-    FlowchartEdge* e = (FlowchartEdge*)calloc(1, sizeof(FlowchartEdge));
-    if (!e) {
+    /* Nodes are recorded at declaration/reference time and edge endpoints are
+       serialized as additional subgraph member references by Mermaid. */
+    FlowchartSubGraph* active = current_subgraph(ctx);
+    if (active) {
+        add_node_ref(ctx, active, from);
+        add_node_ref(ctx, active, to);
+    } else {
+        /* An edge between two sibling subgraphs contributes both endpoint
+           references to their common owner even if the edge is declared after
+           that owner's END. Mermaid keeps these as additional parent members.
+           Prepend in target/source order to preserve the source-facing order
+           in the head-inserted reference chain. */
+        FlowchartSubGraph* owner_from =
+            find_parent_of_nested_subgraph(ctx->diagram->subgraphs, from);
+        FlowchartSubGraph* owner_to =
+            find_parent_of_nested_subgraph(ctx->diagram->subgraphs, to);
+        if (owner_from && owner_from == owner_to) {
+            add_node_ref(ctx, owner_from, to);
+            add_node_ref(ctx, owner_from, from);
+        }
+    }
+    ParsedFlowchartEdge* owned = (ParsedFlowchartEdge*)calloc(1, sizeof(*owned));
+    if (!owned) {
         ctx->error_count++;
         return;
+    }
+    FlowchartEdge* e = &owned->edge;
+    const char* at = arrow ? strchr(arrow, '@') : NULL;
+    if (at) {
+        size_t length = (size_t)(at - arrow);
+        owned->id = (char*)malloc(length + 1);
+        if (!owned->id) {
+            free(owned);
+            ctx->error_count++;
+            return;
+        }
+        memcpy(owned->id, arrow, length);
+        owned->id[length] = '\0';
+        /* Mermaid gives an explicit name only to its first declared edge.
+           Later reuse has no explicit ID; declaration ordinal stays unique. */
+        for (const FlowchartEdge* prior = ctx->diagram->edges; prior; prior = prior->next) {
+            const char* prior_id = flowchart_edge_get_id(prior);
+            if (prior_id && strcmp(prior_id, owned->id) == 0) {
+                free(owned->id);
+                owned->id = NULL;
+                break;
+            }
+        }
+        arrow = at + 1;
     }
     e->from = strdup(from);
     e->to = strdup(to);
     e->label = label ? strdup(label) : NULL;
     e->arrow_type = arrow ? strdup(arrow) : strdup("-->");
     if (!e->from || !e->to || !e->arrow_type || (label && !e->label)) {
-        free(e->from);
-        free(e->to);
-        free(e->label);
-        free(e->arrow_type);
-        free(e);
+        flowchart_parsed_edge_free(e);
         ctx->error_count++;
         return;
     }
     e->next = ctx->diagram->edges;
     ctx->diagram->edges = e;
+}
+
+static void apply_edge_properties(FlowchartParserContext* ctx, char* text) {
+    char* at = text ? strchr(text, '@') : NULL;
+    char* colon = at ? strchr(at, ':') : NULL;
+    char* close = colon ? strchr(colon, '}') : NULL;
+    if (!at || !colon || !close) {
+        ctx->error_count++;
+        free(text);
+        return;
+    }
+    *at = '\0';
+    char* curve = colon + 1;
+    while (*curve == ' ' || *curve == '\t') ++curve;
+    while (close > curve && (close[-1] == ' ' || close[-1] == '\t')) --close;
+    *close = '\0';
+    /* Mermaid resolves edge properties against edges already declared.
+       An unknown ID is a node declaration, including before its named edge. */
+    FlowchartEdge* edge = ctx->diagram->edges;
+    while (edge && (!flowchart_edge_get_id(edge) ||
+                   strcmp(flowchart_edge_get_id(edge), text) != 0))
+        edge = edge->next;
+    if (edge) {
+        char* replacement = strdup(curve);
+        if (!replacement) ctx->error_count++;
+        else {
+            ParsedFlowchartEdge* owned = (ParsedFlowchartEdge*)edge;
+            free(owned->curve);
+            owned->curve = replacement;
+        }
+    } else {
+        find_or_create_node(ctx, text, NULL);
+    }
+    free(text);
+}
+
+
+static FlowchartNodeRef* make_node_ref(FlowchartParserContext *ctx, const char* id) {
+    FlowchartNodeRef* ref = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
+    if (!ref) {
+        ctx->error_count++;
+        return NULL;
+    }
+    ref->id = strdup(id);
+    if (!ref->id) {
+        free(ref);
+        ctx->error_count++;
+        return NULL;
+    }
+    return ref;
+}
+
+static FlowchartNodeRef* append_node_ref(FlowchartParserContext *ctx,
+                                         FlowchartNodeRef* refs,
+                                         const char* id) {
+    FlowchartNodeRef* added = make_node_ref(ctx, id);
+    if (!added) return refs;
+    if (!refs) return added;
+    FlowchartNodeRef* tail = refs;
+    while (tail->next) tail = tail->next;
+    tail->next = added;
+    return refs;
+}
+
+static void add_edges_between(FlowchartParserContext *ctx,
+                              const FlowchartNodeRef* sources,
+                              const FlowchartNodeRef* targets,
+                              const char* arrow,
+                              const char* label) {
+    for (const FlowchartNodeRef* source = sources; source; source = source->next)
+        for (const FlowchartNodeRef* target = targets; target; target = target->next)
+            add_edge(ctx, source->id, target->id, arrow, label);
+}
+
+static void free_node_refs(FlowchartNodeRef* refs) {
+    while (refs) {
+        FlowchartNodeRef* next = refs->next;
+        free(refs->id);
+        free(refs);
+        refs = next;
+    }
+}
+
+static void free_styles(FlowchartStyle* styles) {
+    while (styles) {
+        FlowchartStyle* next = styles->next;
+        free(styles->key);
+        free(styles->value);
+        free(styles);
+        styles = next;
+    }
+}
+
+static FlowchartStyle* clone_style_list(FlowchartParserContext* ctx,
+                                        const FlowchartStyle* source) {
+    FlowchartStyle* head = NULL;
+    FlowchartStyle** tail = &head;
+    for (const FlowchartStyle* item = source; item; item = item->next) {
+        FlowchartStyle* copied = (FlowchartStyle*)calloc(1, sizeof(FlowchartStyle));
+        if (!copied) {
+            ctx->error_count++;
+            free_styles(head);
+            return NULL;
+        }
+        copied->key = item->key ? strdup(item->key) : NULL;
+        copied->value = item->value ? strdup(item->value) : NULL;
+        if (!copied->key || !copied->value) {
+            ctx->error_count++;
+            free(copied->key);
+            free(copied->value);
+            free(copied);
+            free_styles(head);
+            return NULL;
+        }
+        *tail = copied;
+        tail = &copied->next;
+    }
+    return head;
+}
+
+static char* copy_trimmed(const char* start, size_t length) {
+    while (length && (*start == ' ' || *start == '\t' || *start == '\r')) {
+        ++start;
+        --length;
+    }
+    while (length && (start[length - 1] == ' ' || start[length - 1] == '\t' ||
+                      start[length - 1] == '\r'))
+        --length;
+    char* result = (char*)malloc(length + 1);
+    if (!result) return NULL;
+    memcpy(result, start, length);
+    result[length] = '\0';
+    return result;
+}
+
+static FlowchartStyle* parse_style(FlowchartParserContext* ctx, const char* raw) {
+    const char* colon = raw ? strchr(raw, ':') : NULL;
+    if (!colon) {
+        ctx->error_count++;
+        return NULL;
+    }
+    char* key = copy_trimmed(raw, (size_t)(colon - raw));
+    char* value = copy_trimmed(colon + 1, strlen(colon + 1));
+    if (!key || !value || !key[0]) {
+        free(key);
+        free(value);
+        ctx->error_count++;
+        return NULL;
+    }
+    FlowchartStyle* style = (FlowchartStyle*)calloc(1, sizeof(FlowchartStyle));
+    if (!style) {
+        free(key);
+        free(value);
+        ctx->error_count++;
+        return NULL;
+    }
+    style->key = key;
+    style->value = value;
+    return style;
+}
+
+static FlowchartStyle* append_styles(FlowchartStyle* first, FlowchartStyle* rest) {
+    if (!first) return rest;
+    FlowchartStyle* tail = first;
+    while (tail->next) tail = tail->next;
+    tail->next = rest;
+    return first;
+}
+
+static void add_class_assignment(FlowchartParserContext* ctx,
+                                 const char* node_id, const char* class_name) {
+    if (!node_id || !class_name) return;
+    for (FlowchartClass* existing = ctx->diagram->classes; existing; existing = existing->next) {
+        if (strcmp(existing->node_id, node_id) == 0 &&
+            strcmp(existing->class_name, class_name) == 0)
+            return;
+    }
+    FlowchartClass* assignment = (FlowchartClass*)calloc(1, sizeof(FlowchartClass));
+    if (!assignment) {
+        ctx->error_count++;
+        return;
+    }
+    assignment->node_id = strdup(node_id);
+    assignment->class_name = strdup(class_name);
+    if (!assignment->node_id || !assignment->class_name) {
+        free(assignment->node_id);
+        free(assignment->class_name);
+        free(assignment);
+        ctx->error_count++;
+        return;
+    }
+    assignment->next = ctx->diagram->classes;
+    ctx->diagram->classes = assignment;
+}
+
+
+
+static void add_link_style(FlowchartParserContext* ctx, char* index,
+                           FlowchartStyle* styles) {
+    if (!index || !styles) {
+        free(index);
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    FlowchartLinkStyle* item = (FlowchartLinkStyle*)calloc(1, sizeof(FlowchartLinkStyle));
+    if (!item) {
+        free(index);
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    item->index = index;
+    item->styles = styles;
+    item->next = ctx->diagram->link_styles;
+    ctx->diagram->link_styles = item;
+}
+
+static void add_click(FlowchartParserContext* ctx, const char* node_id,
+                      const char* target, int is_href) {
+    if (!node_id || !target) {
+        ctx->error_count++;
+        return;
+    }
+    FlowchartClick* click = (FlowchartClick*)calloc(1, sizeof(FlowchartClick));
+    if (!click) {
+        ctx->error_count++;
+        return;
+    }
+    click->node_id = strdup(node_id);
+    click->target = strdup(target);
+    click->is_href = is_href;
+    if (!click->node_id || !click->target) {
+        free(click->node_id);
+        free(click->target);
+        free(click);
+        ctx->error_count++;
+        return;
+    }
+    click->next = ctx->diagram->clicks;
+    ctx->diagram->clicks = click;
+}
+
+static void add_class_definition(FlowchartParserContext* ctx, char* id,
+                                 FlowchartStyle* styles) {
+    if (!id) {
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    for (FlowchartClassDef* existing = ctx->diagram->class_defs;
+         existing; existing = existing->next) {
+        if (strcmp(existing->id, id) == 0) {
+            free(existing->id);
+            free_styles(existing->styles);
+            existing->id = id;
+            existing->styles = styles;
+            return;
+        }
+    }
+    FlowchartClassDef* definition = (FlowchartClassDef*)calloc(1, sizeof(FlowchartClassDef));
+    if (!definition) {
+        free(id);
+        free_styles(styles);
+        ctx->error_count++;
+        return;
+    }
+    definition->id = id;
+    definition->styles = styles;
+    definition->next = ctx->diagram->class_defs;
+    ctx->diagram->class_defs = definition;
 }
 
 static char* concat(FlowchartParserContext* ctx, char* a, char* b, const char* sep) {
@@ -154,9 +582,10 @@ static void start_subgraph(FlowchartParserContext* ctx,
         ctx->error_count++;
         return;
     }
-    sg->id = strdup(id);
-    sg->label = strdup(label);
-    if (!sg->id || !sg->label) {
+    /* Preserve the raw title, but resolve a stable whitespace-trimmed ID. */
+    sg->id = id ? copy_trimmed(id, strlen(id)) : NULL;
+    sg->label = label ? strdup(label) : NULL;
+    if (!sg->id || !sg->id[0] || !sg->label) {
         free(sg->id);
         free(sg->label);
         free(sg);
@@ -166,6 +595,8 @@ static void start_subgraph(FlowchartParserContext* ctx,
 
     FlowchartSubGraph* parent = current_subgraph(ctx);
     if (parent) {
+        /* Nested subgraphs are members of their parent, in source order. */
+        add_node_ref(ctx, parent, sg->id);
         sg->next = parent->children;
         parent->children = sg;
     } else {
@@ -198,17 +629,98 @@ statements ::= .
 
 statement ::= node_definition.
 statement ::= edge_statement.
+statement ::= EDGE_PROPS(A). { apply_edge_properties(ctx, A); }
 statement ::= subgraph_statement.
 statement ::= class_statement.
+statement ::= classdef_statement.
+statement ::= click_statement.
+statement ::= linkstyle_statement.
+/* Preserve local direction on its subgraph without mutating diagram direction. */
+statement ::= DIRECTION DIR(A). {
+    FlowchartSubGraph* sg = current_subgraph(ctx);
+    if (sg) {
+        char* direction = strdup(A);
+        if (!direction) ctx->error_count++;
+        else { free(sg->direction); sg->direction = direction; }
+    }
+    free(A);
+}
 statement ::= NEWLINE.
 statement ::= SEMI.
 
-class_statement ::= CLASS class_idents SEMI.
-class_statement ::= CLASS class_idents NEWLINE.
-class_idents ::= class_idents label_text(A). { free(A); }
-class_idents ::= label_text(A). { free(A); }
+class_statement ::= CLASS class_ids(A) label_text(B) SEMI. {
+    for (FlowchartNodeRef* id = A; id; id = id->next)
+        add_class_assignment(ctx, id->id, B);
+    free(B);
+    free_node_refs(A);
+}
+class_statement ::= CLASS class_ids(A) label_text(B) NEWLINE. {
+    for (FlowchartNodeRef* id = A; id; id = id->next)
+        add_class_assignment(ctx, id->id, B);
+    free(B);
+    free_node_refs(A);
+}
+class_ids(R) ::= label_text(A). {
+    R = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
+    if (!R) { free(A); ctx->error_count++; }
+    else R->id = A;
+}
+class_ids(R) ::= label_text(A) COMMA class_ids(B). {
+    R = (FlowchartNodeRef*)calloc(1, sizeof(FlowchartNodeRef));
+    if (!R) { free(A); free_node_refs(B); ctx->error_count++; }
+    else { R->id = A; R->next = B; }
+}
+classdef_statement ::= CLASSDEF label_text(A) style_specs(B) SEMI. {
+    add_class_definition(ctx, A, B);
+}
+classdef_statement ::= CLASSDEF label_text(A) style_specs(B) NEWLINE. {
+    add_class_definition(ctx, A, B);
+}
+style_specs(R) ::= style_spec(A). { R = A; }
+style_specs(R) ::= style_specs(A) COMMA style_spec(B). {
+    R = append_styles(A, B);
+}
+style_spec(R) ::= STYLE(A). {
+    R = parse_style(ctx, A);
+    free(A);
+}
 
-node_definition ::= node(A). { (void)A; }
+linkstyle_statement ::= LINKSTYLE class_ids(A) style_specs(B) SEMI. {
+    for (const FlowchartNodeRef* index = A; index; index = index->next)
+        add_link_style(ctx, strdup(index->id), clone_style_list(ctx, B));
+    free_node_refs(A);
+    free_styles(B);
+}
+linkstyle_statement ::= LINKSTYLE class_ids(A) style_specs(B) NEWLINE. {
+    for (const FlowchartNodeRef* index = A; index; index = index->next)
+        add_link_style(ctx, strdup(index->id), clone_style_list(ctx, B));
+    free_node_refs(A);
+    free_styles(B);
+}
+click_statement ::= CLICK label_text(A) STRING(B). {
+    add_click(ctx, A, B, 1);
+    free(A); free(B);
+}
+click_statement ::= CLICK label_text(A) IDENTIFIER(B). {
+    add_click(ctx, A, B, 0);
+    free(A); free(B);
+}
+
+node_definition ::= node_group(A). {
+    /* Explicit declarations of an existing node inside a subgraph still add
+       membership. A newly created node has already been registered by
+       find_or_create_node(), so do not double-count it. */
+    FlowchartSubGraph* active = current_subgraph(ctx);
+    if (active) {
+        for (FlowchartNodeRef* ref = A; ref; ref = ref->next) {
+            if (!has_node_ref(active, ref->id) &&
+                !node_registered_in_another_subgraph(
+                    ctx->diagram->subgraphs, active, ref->id))
+                add_node_ref(ctx, active, ref->id);
+        }
+    }
+    free_node_refs(A);
+}
 
 // 基础值可以是标识符或字符串
 label_text(R) ::= IDENTIFIER(A). { R = A; }
@@ -217,15 +729,33 @@ label_text(R) ::= STRING(A).     { R = A; }
 // 形状和边标签允许由多个未加引号的单词组成；lexer 会丢弃词间空白。
 node_label(R) ::= label_text(A). { R = A; }
 node_label(R) ::= node_label(A) label_text(B). {
-    R = concat(ctx, A, B, (A && A[strlen(A) - 1] == '>') ? "" : " ");
+    const size_t len = A ? strlen(A) : 0;
+    /* The lexer discards ordinary interword whitespace. Retain explicit
+       punctuation adjacency (comma or HTML tag) rather than adding a space. */
+    const char* separator =
+        (len && (A[len - 1] == '>' || A[len - 1] == ',' ||
+                 A[len - 1] == ' ' || A[len - 1] == '\t')) ? "" : " ";
+    R = concat(ctx, A, B, separator);
 }
 node_label(R) ::= node_label(A) COLON label_text(B). { R = concat(ctx, A, B, ":"); }
 node_label(R) ::= node_label(A) DASH label_text(B). { R = concat(ctx, A, B, "-"); }
+// Commas inside unquoted node labels are content, not discarded separators.
+node_label(R) ::= node_label(A) COMMA. { R = concat(ctx, A, strdup(","), ""); }
 node_label(R) ::= node_label(A) HTML(B). { R = concat(ctx, A, B, ""); }
+// HTML-only labels such as B[<img>] must be allowed to start a node label.
+node_label(R) ::= HTML(A). { R = A; }
+node_label(R) ::= PUNCT(A). { R = A; }
+node_label(R) ::= node_label(A) PUNCT(B). { R = concat(ctx, A, B, ""); }
 
 node(R) ::= label_text(A). {
     R = find_or_create_node(ctx, A, NULL);
     free(A);
+}
+// Class shorthand applies to the immediately preceding node of any shape.
+node(R) ::= node(A) CLASS_SHORTCUT(B). {
+    R = A;
+    if (A) add_class_assignment(ctx, A->id, B);
+    free(B);
 }
 node(R) ::= label_text(A) SQS node_label(B) SQE. {
     R = find_or_create_node(ctx, A, B);
@@ -241,6 +771,12 @@ node(R) ::= label_text(A) CPS node_label(B) CPE. {
     R = find_or_create_node(ctx, A, B);
     if (R) R->shape = FC_SHAPE_CIRCLE;
     free(A); free(B);
+}
+// An empty/space-only circle keeps Mermaid's visible single-space label.
+node(R) ::= label_text(A) CPS CPE. {
+    R = find_or_create_node(ctx, A, " ");
+    if (R) R->shape = FC_SHAPE_CIRCLE;
+    free(A);
 }
 node(R) ::= label_text(A) DOUBLE_CIRCLE_START node_label(B) DOUBLE_CIRCLE_END. {
     R = find_or_create_node(ctx, A, B);
@@ -278,35 +814,57 @@ node(R) ::= label_text(A) CYLINDER_START node_label(B) CYLINDER_END. {
     free(A); free(B);
 }
 node(R) ::= label_text(A) TRAP_START node_label(B) TRAP_END. {
-    R = find_or_create_node(ctx, A, B);
-    if (R) R->shape = FC_SHAPE_TRAPEZOID;
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_TRAPEZOID, 0, 0);
+    free(A); free(B);
+}
+node(R) ::= label_text(A) TRAP_START node_label(B) TRAP_BACKSLASH_END. {
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_TRAPEZOID_SYMMETRIC, 0, 1);
     free(A); free(B);
 }
 node(R) ::= label_text(A) INV_TRAP_START node_label(B) TRAP_END. {
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_INV_TRAPEZOID_SYMMETRIC, 1, 0);
+    free(A); free(B);
+}
+node(R) ::= label_text(A) INV_TRAP_START node_label(B) TRAP_BACKSLASH_END. {
+    R = make_trapezoid_node(ctx, A, B, FC_SHAPE_INV_TRAPEZOID, 1, 1);
+    free(A); free(B);
+}
+node(R) ::= label_text(A) ODD_START node_label(B) SQE. {
     R = find_or_create_node(ctx, A, B);
-    if (R) R->shape = FC_SHAPE_INV_TRAPEZOID;
+    if (R) R->shape = FC_SHAPE_ODD;
     free(A); free(B);
 }
 
-edge_statement ::= edge_chain(A). { (void)A; }
+edge_statement ::= edge_chain(A). { free_node_refs(A); }
 
-edge_chain(R) ::= node(A) ARROW(L) node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, NULL);
+node_group(R) ::= node(A). {
+    R = A ? make_node_ref(ctx, A->id) : NULL;
+}
+node_group(R) ::= node_group(A) AMP node(B). {
+    R = B ? append_node_ref(ctx, A, B->id) : A;
+}
+
+edge_chain(R) ::= node_group(A) ARROW(L) node_group(B). {
+    add_edges_between(ctx, A, B, L, NULL);
+    free_node_refs(A);
     free(L);
     R = B;
 }
-edge_chain(R) ::= edge_chain(A) ARROW(L) node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, NULL);
+edge_chain(R) ::= edge_chain(A) ARROW(L) node_group(B). {
+    add_edges_between(ctx, A, B, L, NULL);
+    free_node_refs(A);
     free(L);
     R = B;
 }
-edge_chain(R) ::= node(A) ARROW(L) PIPE node_label(C) PIPE node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, C);
+edge_chain(R) ::= node_group(A) ARROW(L) PIPE node_label(C) PIPE node_group(B). {
+    add_edges_between(ctx, A, B, L, C);
+    free_node_refs(A);
     free(L); free(C);
     R = B;
 }
-edge_chain(R) ::= edge_chain(A) ARROW(L) PIPE node_label(C) PIPE node(B). {
-    if (A && B) add_edge(ctx, A->id, B->id, L, C);
+edge_chain(R) ::= edge_chain(A) ARROW(L) PIPE node_label(C) PIPE node_group(B). {
+    add_edges_between(ctx, A, B, L, C);
+    free_node_refs(A);
     free(L); free(C);
     R = B;
 }

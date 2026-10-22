@@ -2,22 +2,51 @@ name: UI C11 Reflection Contract
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
-      - 'ui_core/**'
+      - 'shared/markdown/**'
       - 'CMakeLists.txt'
       - '.github/workflows/ui-core-c11.yml'
+      - '.github/scripts/ci-affected.sh'
   push:
     branches: [master]
     paths:
-      - 'ui_core/**'
+      - 'shared/markdown/**'
       - 'CMakeLists.txt'
       - '.github/workflows/ui-core-c11.yml'
+      - '.github/scripts/ci-affected.sh'
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: C11 Markdown change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'shared/markdown/*' 'CMakeLists.txt' \
+            '.github/workflows/ui-core-c11.yml' \
+            '.github/scripts/ci-affected.sh'
+
   sdk-releases:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   c11-headers:
@@ -44,7 +73,7 @@ jobs:
           set -euo pipefail
           common=(
             -std=c11 -Wall -Wextra -Wpedantic -Werror
-            -Iui_core/include
+            -Ishared/markdown/include
             -isystem .ci/salts/cmeta/include
             -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
@@ -52,23 +81,23 @@ jobs:
             -isystem .ci/salts/platform/include
             -isystem .ci/salts/concurrency/include
           )
-          cc "${common[@]}" -fsyntax-only ui_core/src/ui_core.c
-          cc "${common[@]}" -fsyntax-only ui_core/src/markdown_c11.c
-          cc "${common[@]}" -fsyntax-only ui_core/src/markdown_html.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/ui_core_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_c11_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_html_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_html_dump.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_indented_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_c11_dump.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_golden_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/ui_core.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/markdown_c11.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/markdown_html.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/ui_core_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_c11_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_html_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_html_dump.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_indented_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_c11_dump.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_golden_test.c
           # Fast failure for the conformance tests added under #181: the
           # complete installed-SDK ASan/UBSan runner remains independently
           # mandatory, but malformed C11 fixtures must fail this short gate.
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_containers_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_quote_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_nested_quote_test.c
-          cc "${common[@]}" -fsyntax-only ui_core/tests/markdown_quoted_list_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_containers_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_quote_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_nested_quote_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_quoted_list_test.c
 
       - name: Verify clean source tree
         shell: bash
@@ -112,7 +141,7 @@ jobs:
           set -euo pipefail
           common=(
             -std=c11 -Wall -Wextra -Wpedantic -Werror
-            -Iui_core/include
+            -Ishared/markdown/include
             -isystem .ci/salts/cmeta/include
             -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
@@ -121,15 +150,15 @@ jobs:
             -isystem .ci/salts/concurrency/include
           )
           files=(
-            ui_core/src/ui_core.c
-            ui_core/src/markdown_c11.c
-            ui_core/src/markdown_html.c
-            ui_core/tests/markdown_c11_test.c
-            ui_core/tests/markdown_html_test.c
-            ui_core/tests/markdown_containers_test.c
-            ui_core/tests/markdown_quote_test.c
-            ui_core/tests/markdown_nested_quote_test.c
-            ui_core/tests/markdown_quoted_list_test.c
+            shared/markdown/src/ui_core.c
+            shared/markdown/src/markdown_c11.c
+            shared/markdown/src/markdown_html.c
+            shared/markdown/tests/markdown_c11_test.c
+            shared/markdown/tests/markdown_html_test.c
+            shared/markdown/tests/markdown_containers_test.c
+            shared/markdown/tests/markdown_quote_test.c
+            shared/markdown/tests/markdown_nested_quote_test.c
+            shared/markdown/tests/markdown_quoted_list_test.c
           )
           for file in "${files[@]}"; do
             clang "${common[@]}" -fsyntax-only "$file"
@@ -146,7 +175,7 @@ jobs:
             '  stun_md_document_destroy(doc);' \
             '}' > c11_public_consumer.cpp
           clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
-            -Iui_core/include \
+            -Ishared/markdown/include \
             -isystem .ci/salts/cmeta/include \
             -isystem .ci/salts/unicode/include \
             -isystem .ci/salts/utils/include \
@@ -224,7 +253,7 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/windows-x64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S ui_core -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
+          cmake -S shared/markdown -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
             -DBUILD_TESTING=ON \
             "-DCMAKE_PREFIX_PATH=$(cygpath -w "$sdk")" \
             "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
@@ -343,7 +372,7 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S ui_core -B build/ui-core-macos -G "Unix Makefiles" \
+          cmake -S shared/markdown -B build/ui-core-macos -G "Unix Makefiles" \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \

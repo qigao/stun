@@ -1,0 +1,480 @@
+{
+  "schema": "stun-flowchart-test-contract/1",
+  "cases": {
+    "basic": {
+      "expected": "output",
+      "inputSha256": "08a9d415d6b5789cb22f7912b5fc24738c2b6263d4c09b10387c9f0252587c2e",
+      "expectedSha256": "77fbf46712a16291b8d1ad6ef31303aacca13153e63586b2d44cb89e4151ea76"
+    },
+    "mermaid-001": {
+      "expected": "output",
+      "inputSha256": "070d79bab4584f91fb5f21bbc7f88e4977656f9d492d2e31630f6a4c093fa595",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "mermaid-002": {
+      "expected": "output",
+      "inputSha256": "070d79bab4584f91fb5f21bbc7f88e4977656f9d492d2e31630f6a4c093fa595",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "mermaid-003": {
+      "expected": "output",
+      "inputSha256": "cc154c7309ca98c4b662d52842a6f5e55193e6796c6886dacedc53e5868af28a",
+      "expectedSha256": "b2a1a6602bcf7e44c4ca195a18128d2f0c3d48059c93f62755ffe2ddfe367874"
+    },
+    "mermaid-004": {
+      "expected": "output",
+      "inputSha256": "07fa115e4dfc410d0c253e596c99abe2d7e14097077ca39a2eff98fe2dcd1a45",
+      "expectedSha256": "4d2b78c03a702ca5bbea8960079ba847ef4b51356ae6e04025ec3d4dc0a43e4d"
+    },
+    "mermaid-005": {
+      "expected": "source-v1",
+      "inputSha256": "1a790d98047a972e374d60e8e72ec9fa985161734b68b81c8c065b85d3d7b002",
+      "expectedSha256": "0af88f4312a197ef81bff4c177bf336a3b8719c9947a6a49ec6137294f5ef645"
+    },
+    "mermaid-006": {
+      "expected": "source-v1",
+      "inputSha256": "51ff34b4f5894dd4c30a9f905ea8e477e8880fae63c878a197d1ab1c6aec30c8",
+      "expectedSha256": "0fd0934cdfecbc941062318ce790c56b6a20984536fb1327c64dec627372d1ed"
+    },
+    "mermaid-008": {
+      "expected": "output",
+      "inputSha256": "87a0449855a6b1f0201790b6fece163d3adf73cf3e7f9efa219735f42a239193",
+      "expectedSha256": "835c297afca1b652410b12c5bed6cfbde313132312ff99a1156a599e1e64dcb9"
+    },
+    "mermaid-009": {
+      "expected": "output",
+      "inputSha256": "84049ece214a1cb43df39502e89424ff6d7408b6d3b974c63e8b1cde87834c89",
+      "expectedSha256": "3b2cc37835da1b55596d99b9cfbbe0708a388cf7562699d53c152f35218b1e7c"
+    },
+    "mermaid-010": {
+      "expected": "output",
+      "inputSha256": "b8f5ebfe339b94c8f398047478d62837b78d7902859c5569c5fe663b0765c601",
+      "expectedSha256": "82a15d6e1371eb22ff83fb291c23b722b190ef1696a357a0c4fadc3bda8b93f5"
+    },
+    "mermaid-011": {
+      "expected": "output",
+      "inputSha256": "005f85ea1762262797b2a4d3916d6f07c0f284e0066101542eceef7fe520a850",
+      "expectedSha256": "da4cb7c08248b3738f330f6cc32f6ac7c94d307f3360f4d43a0b30af203a2469"
+    },
+    "mermaid-012": {
+      "expected": "output",
+      "inputSha256": "9de3b90023803c08d5d64028f2303ae5e67d60f51923cb24c6c7328f41e04edb",
+      "expectedSha256": "27a7ecc1323509448d7b23285583ee4d4000aca0d44221b88a5da21d06087792"
+    },
+    "mermaid-013": {
+      "expected": "output",
+      "inputSha256": "410d5f13f02a0a6b4499f788c0fa2d0b2b125b345e46aad6d4b647b7d564495c",
+      "expectedSha256": "4050dd3be4cc2582dedc30c9a667e3949e3ba49142015a7fb03baf4726163ca8"
+    },
+    "mermaid-014": {
+      "expected": "output",
+      "inputSha256": "98723d8a6865cf49091b6344021a079cd78ef6a5b0d25425137a806148bd2311",
+      "expectedSha256": "245a3c64c4809b1aca22ae57e7beffdb4527eaff39f963551e44f26f6fceb46f"
+    },
+    "mermaid-016": {
+      "expected": "output",
+      "inputSha256": "55034e761e628462c1f0cde3a1ebba0176191bd7883df9d02bfc26ace7e26811",
+      "expectedSha256": "e54414f639db2886b7710dc1fa1557b296de80c78b965d0204dab3591c892a38"
+    },
+    "mermaid-017": {
+      "expected": "output",
+      "inputSha256": "e409c921b784108197b435be57d38a3dc6c1528f0f1066544cf12dc366da3023",
+      "expectedSha256": "3fc1e921dda39d54b63f8a060f121af067f7a3e3392152290fc6c3fd3553e491"
+    },
+    "mermaid-018": {
+      "expected": "output",
+      "inputSha256": "4caf780050bc6c0faf58780d098833d7471f834732f39dfa42c7a75f673c7e7d",
+      "expectedSha256": "3c904f5b120091167bfcb759f46f959f8ec7c7380bb410f6958706f9e1b894c7"
+    },
+    "mermaid-019": {
+      "expected": "output",
+      "inputSha256": "455fba849a7cc6cfa2d0112203dbd82089652cec883b79ebb97bca1065e5ab07",
+      "expectedSha256": "c2185110986d0e45d3cdbc7d95d4762dbf5d46895f08478a6043567028a1ae9a"
+    },
+    "mermaid-020": {
+      "expected": "output",
+      "inputSha256": "a835902731e1c189a68dd094d91eb173ce2335c059735ae4adbb8830e7b9bd4a",
+      "expectedSha256": "eab0a5bf929b25aa22f83ae5322e71b19f268fece09ac80435ec32cd976d467a"
+    },
+    "mermaid-021": {
+      "expected": "output",
+      "inputSha256": "bbf7978143f3fffc60d39f438329615566023dafb9e6dcdfdcb5fa881e30869a",
+      "expectedSha256": "320ab9875df7eef1f892c9e806ca891c4214e24606fcf54b8e651ce9ee86a5b8"
+    },
+    "mermaid-024": {
+      "expected": "source-v1",
+      "inputSha256": "aab79baee8bf36d436302774f2a7c029d5c64866b689565b8f629ab57f2774da",
+      "expectedSha256": "1d4976c019e7f565981db1fec921904303a658e6659134d61f352e128486dd28"
+    },
+    "mermaid-026": {
+      "expected": "output",
+      "inputSha256": "b660bb50ce61106495c30ca7a9fff64f1a198e7915254731a5de12a099197c3e",
+      "expectedSha256": "ccee2ff7fddaaa35d9adc068e62785e2812f48a3e8570d906fa41e24d2ec0620"
+    },
+    "mermaid-027": {
+      "expected": "output",
+      "inputSha256": "b660bb50ce61106495c30ca7a9fff64f1a198e7915254731a5de12a099197c3e",
+      "expectedSha256": "ccee2ff7fddaaa35d9adc068e62785e2812f48a3e8570d906fa41e24d2ec0620"
+    },
+    "mermaid-028": {
+      "expected": "output",
+      "inputSha256": "09c12dbbf6a0ad74ef99a012f021a300c208baa5718ecec895c228df17308e1a",
+      "expectedSha256": "7c8ee77e432f2c3084d77d402adbbe4299c2d2a16225a9fbf2e80e6686c30fb9"
+    },
+    "mermaid-029": {
+      "expected": "output",
+      "inputSha256": "09c12dbbf6a0ad74ef99a012f021a300c208baa5718ecec895c228df17308e1a",
+      "expectedSha256": "7c8ee77e432f2c3084d77d402adbbe4299c2d2a16225a9fbf2e80e6686c30fb9"
+    },
+    "mermaid-030": {
+      "expected": "output",
+      "inputSha256": "d2fe2af1c8b9f0d82d17053e442bb1199d84a5515ceac8590be2362f3e4350c4",
+      "expectedSha256": "11ad1275a381737741c49defc87e7da82b0b052d931e6b735518eb647af231c1"
+    },
+    "mermaid-031": {
+      "expected": "source-v1",
+      "inputSha256": "1d8c2c3758a2d4f353d2a2fe807b3806b1472600da07c68290fd7538f9f1ebe8",
+      "expectedSha256": "2785a50336f21509e61f26a70faa2a657999b92648fdc9b0c135581a86944a0e"
+    },
+    "mermaid-032": {
+      "expected": "output",
+      "inputSha256": "b1ade02e5dd4cdeba20441a41bbb83ff6069482c85e8d46e9241385522a07fb5",
+      "expectedSha256": "9873966efee07e0fb928afcd322022366b171bcc732bb5e8e477ff7ba1b63034"
+    },
+    "mermaid-034": {
+      "expected": "output",
+      "inputSha256": "d71faa9c65c04153b4112f670a77bf80866f18196ea57af551477173b426f929",
+      "expectedSha256": "ece7231b57cb4ccc99d4fba7eb645feb98f63e917774ab3325d4b0523bd512f8"
+    },
+    "mermaid-035": {
+      "expected": "source-v1",
+      "inputSha256": "31aad7595d5aa24353294aaf2225627ec4604219e7b4ef17ce6d8f9fe0bf814c",
+      "expectedSha256": "4b2e604ed459c739c55313e925630335ec3c0b27b2ed39526b8ba1db6225f4b4"
+    },
+    "mermaid-036": {
+      "expected": "output",
+      "inputSha256": "ae758bf6fa6bf21d25da6febcdf234a53c745de7985302347fc69e1a5cd43b0f",
+      "expectedSha256": "ccc45f9d67159d243e3f3f8e9a2d20d87fc53ff8888e68c6c4978284bfb671ca"
+    },
+    "mermaid-037": {
+      "expected": "output",
+      "inputSha256": "ae758bf6fa6bf21d25da6febcdf234a53c745de7985302347fc69e1a5cd43b0f",
+      "expectedSha256": "ccc45f9d67159d243e3f3f8e9a2d20d87fc53ff8888e68c6c4978284bfb671ca"
+    },
+    "mermaid-038": {
+      "expected": "output",
+      "inputSha256": "43ef09d7024089fc0cae3b887a22ca5a840144c1946e08c15e33eacbd7c3ef7a",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "mermaid-039": {
+      "expected": "output",
+      "inputSha256": "070d79bab4584f91fb5f21bbc7f88e4977656f9d492d2e31630f6a4c093fa595",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "mermaid-041": {
+      "expected": "output",
+      "inputSha256": "cc12b152114b709a9a233565282fa11ba51ea3f790b044b80a90ae255c30a79d",
+      "expectedSha256": "2a65e6aad6ba66385a2062a44c3a3c0ae2c141dd6fb2c3602ce85230bb1f1ee5"
+    },
+    "mermaid-042": {
+      "expected": "output",
+      "inputSha256": "64f536375fe43120161ecf063a96776c16b23778e2deec22c83ddf469c5b4bce",
+      "expectedSha256": "0c88115f2790edd8c812e31b2a21d2da297c23a8cb37bfe5ef215e1a3cdf1dc4"
+    },
+    "mermaid-043": {
+      "expected": "output",
+      "inputSha256": "eba5031373e7cfa6b4b986a953e8533f3e45aa51721641cd438ace68b031a86b",
+      "expectedSha256": "7cd20b75832b9f9ecb3ca310f201b3f7d0173e24c87f8f25bf695d00925505a7"
+    },
+    "mermaid-044": {
+      "expected": "output",
+      "inputSha256": "bd3303e0fa728f3905e8ae201a7c30916e96ec016f1b6eeda53a6fb54cc5f18e",
+      "expectedSha256": "ecd62b3224065a614f05831340b25f0c0f18c3d86951c71b8dd901da769a83c3"
+    },
+    "mermaid-045": {
+      "expected": "output",
+      "inputSha256": "005f85ea1762262797b2a4d3916d6f07c0f284e0066101542eceef7fe520a850",
+      "expectedSha256": "da4cb7c08248b3738f330f6cc32f6ac7c94d307f3360f4d43a0b30af203a2469"
+    },
+    "mermaid-046": {
+      "expected": "output",
+      "inputSha256": "3becdcccc5fa2214cceeb1692101b6968367b0dde668903636b367224410ebe5",
+      "expectedSha256": "ae8720645001a46b0bae96ba84e84fb225b3a1ca93ad3fa8a96b3d2a5f83d7b3"
+    },
+    "mermaid-047": {
+      "expected": "output",
+      "inputSha256": "b95a8c0b5e0f2286bb06c5575e914d48b4e4931be426ead4e5fec1641a55c709",
+      "expectedSha256": "05ffd740b41cdb51a5974e42f9d0b17c5c4224829e072aafaed04c60c04b0b93"
+    },
+    "mermaid-048": {
+      "expected": "output",
+      "inputSha256": "4cd501a43909d7ecf106f4e7f3584bab31b5f1e93691f0d04552afc0924c6a07",
+      "expectedSha256": "e93fd5e0eb3f9283de453fc3ba14a9de6a18fbf7ed84e5df4fd884713668c5a7"
+    },
+    "mermaid-049": {
+      "expected": "output",
+      "inputSha256": "3e8a991a84b09223d142b95df162b8e06af2cc1347b6e944faac2528c224d8db",
+      "expectedSha256": "56a57c1b53a72f25681fd180521e5515924c95d5be1020d808327467e3aecf27"
+    },
+    "subgraphs": {
+      "expected": "output",
+      "inputSha256": "450bd871224ad282d6de3c02b84d8926cc54f4a8cc84461ede405309f2379bf9",
+      "expectedSha256": "8e28c509145694ce597858f0f7b11ce7dbc682c13dab682dc769db121a2b5a74"
+    },
+    "v2-mermaid-051": {
+      "expected": "output",
+      "inputSha256": "43ef09d7024089fc0cae3b887a22ca5a840144c1946e08c15e33eacbd7c3ef7a",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "v2-mermaid-053": {
+      "expected": "output",
+      "inputSha256": "fc6b9f23e66a69a53e988392a038c1b1f6e094cdfafea04205a7d5691461eac7",
+      "expectedSha256": "71b20a7e794a64dbe6defe10fc1c0187f09375ab403589b5215ca0ba939735c6"
+    },
+    "v2-mermaid-054": {
+      "expected": "source-v1",
+      "inputSha256": "fdddf4273a37047054d89cb7589382cef0e6fc14875b0fa0542381cd61c6d3cb",
+      "expectedSha256": "1b48853e472f393b876971b449634a165c9e2b2569d6a39433ceb3941d5e8cca"
+    },
+    "v2-mermaid-055": {
+      "expected": "output",
+      "inputSha256": "c91b07f13edff481ffcda099b909f3f077fa6154044f4403b0ea7b7912e44272",
+      "expectedSha256": "b95d7edffe65d1592cf3f0d423471bb214e00a2fecab5c67ee31f639f0b0f1d9"
+    },
+    "v2-mermaid-056": {
+      "expected": "output",
+      "inputSha256": "88ca3965f782c4d7f3099a24fc15c3805f5d8ee5ed6e9085915b9e8fb89f6182",
+      "expectedSha256": "226978e537907068cf1460305bca9206bed44e3d5753c8476029999634bf6c13"
+    },
+    "v2-mermaid-057": {
+      "expected": "output",
+      "inputSha256": "7854eb4bd0e4572ba14465a2db01c1630b767de7f28414a569830b181123525f",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "v2-mermaid-058": {
+      "expected": "output",
+      "inputSha256": "43ef09d7024089fc0cae3b887a22ca5a840144c1946e08c15e33eacbd7c3ef7a",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "v2-mermaid-059": {
+      "expected": "output",
+      "inputSha256": "43ef09d7024089fc0cae3b887a22ca5a840144c1946e08c15e33eacbd7c3ef7a",
+      "expectedSha256": "091206fe66c28e04ab46c458c62190ad409e41642fc643c8b32f95c67024eafe"
+    },
+    "v2-mermaid-060": {
+      "expected": "output",
+      "inputSha256": "214b50ad4979eb640585364f8948cd66088016e9c60f7b513637315de45d0149",
+      "expectedSha256": "e54414f639db2886b7710dc1fa1557b296de80c78b965d0204dab3591c892a38"
+    },
+    "v2-mermaid-061": {
+      "expected": "output",
+      "inputSha256": "083c5c97a8fe4bd56c0864aa09c5c73401762778c7d9abf4ce6a73f373ca2717",
+      "expectedSha256": "123356c23b80b4f37deb9951dd3f0659d19337e45d196ecf3ed16cf1230fc2a2"
+    },
+    "v2-mermaid-062": {
+      "expected": "output",
+      "inputSha256": "083c5c97a8fe4bd56c0864aa09c5c73401762778c7d9abf4ce6a73f373ca2717",
+      "expectedSha256": "123356c23b80b4f37deb9951dd3f0659d19337e45d196ecf3ed16cf1230fc2a2"
+    },
+    "v2-mermaid-063": {
+      "expected": "output",
+      "inputSha256": "c7dedb3ab247d9d63107257f90de98af112a7374f17cfe5beb21a69dcfab65c6",
+      "expectedSha256": "e4a4bb95f658283f2d6d8d8aeffdae91926469495961131b4e63209e3f526ab2"
+    },
+    "v2-mermaid-064": {
+      "expected": "output",
+      "inputSha256": "de6fcc7ef8731f1e8970220795ef8eb679d5f518fab14315e22509df327bfbfe",
+      "expectedSha256": "ed248d89a24121c1bc2454fdf903c629d069bae3b95eb9797c7bddbd49c9097e"
+    },
+    "v2-mermaid-065": {
+      "expected": "output",
+      "inputSha256": "5abcfa99b09b29afad19fb55c6f28c1f4438477cb58714e4239f940e51848c58",
+      "expectedSha256": "f1c4488538cad7df9ce5a77e0476dd3f39e85a9d97e00b7dafb53e3c20902045"
+    },
+    "v2-mermaid-067": {
+      "expected": "output",
+      "inputSha256": "7853e7fb6be6650033660aa54f9debd83603b792d74b1fd8367df7f3cae8d868",
+      "expectedSha256": "1229efc7bc280299e55d6a10127ebb540a5139082684dbd12097f58db39f424a"
+    },
+    "v2-mermaid-068": {
+      "expected": "output",
+      "inputSha256": "df31cb7dd485a1711421b2975e737d75ba78ef899d2b1a069d8e8da69317fccc",
+      "expectedSha256": "ac2a0d6fbd16aec67c8c6695ca7aa023902dc594ca7534ff1bae1d35d7680fe5"
+    },
+    "v2-mermaid-069": {
+      "expected": "output",
+      "inputSha256": "1c231ae5c6296a881b62b3c2e7f7b786fc66fbc449d2a134b7bc5d54a917dc18",
+      "expectedSha256": "30991e0de4c559a9b19924b18f6f9a2c4091ded9d24d65c655482f184f2caf02"
+    },
+    "v2-mermaid-070": {
+      "expected": "output",
+      "inputSha256": "f4ddc73bd88be46e5f91b2386188d0ffbf9ee0e628168227fcd2e4cbba1da61d",
+      "expectedSha256": "2a65e6aad6ba66385a2062a44c3a3c0ae2c141dd6fb2c3602ce85230bb1f1ee5"
+    },
+    "v2-mermaid-071": {
+      "expected": "output",
+      "inputSha256": "b89ce9e79fdece40221931bf42bb5d191e8a6989ce68ee7fa38e663e151cc58a",
+      "expectedSha256": "4947fc07a754bc6247b3df743be44c1b3e3250a0ff4cf82fbf26c48c7c0b819c"
+    },
+    "v2-mermaid-072": {
+      "expected": "output",
+      "inputSha256": "343a0278711efa69262bc03cdc968b3619e78d288f944ccf64d60d0c4f20037e",
+      "expectedSha256": "9d35d3b1e203661fec00642e90ac03407501063e28f00dc84014c927f60cc343"
+    },
+    "v2-mermaid-073": {
+      "expected": "output",
+      "inputSha256": "202865525d795386b6de834e8f257c511d563119badc6b898a5946f4b048dc52",
+      "expectedSha256": "7cd20b75832b9f9ecb3ca310f201b3f7d0173e24c87f8f25bf695d00925505a7"
+    },
+    "v2-mermaid-074": {
+      "expected": "output",
+      "inputSha256": "31e9141b6ee39a255285466d15d478990387a0b046fc98c25d202faa9aa14376",
+      "expectedSha256": "da4cb7c08248b3738f330f6cc32f6ac7c94d307f3360f4d43a0b30af203a2469"
+    },
+    "v2-mermaid-075": {
+      "expected": "output",
+      "inputSha256": "3becdcccc5fa2214cceeb1692101b6968367b0dde668903636b367224410ebe5",
+      "expectedSha256": "ae8720645001a46b0bae96ba84e84fb225b3a1ca93ad3fa8a96b3d2a5f83d7b3"
+    },
+    "v2-mermaid-076": {
+      "expected": "output",
+      "inputSha256": "23a92b65ee71242dd7ad48adc8c188e8b73a897849148ad892ccda6b8b829827",
+      "expectedSha256": "35da727fc610ec5c9a498b8cea63a6597388dde3fc50ce47f5fbb1b61ade5ca8"
+    },
+    "v2-mermaid-077": {
+      "expected": "output",
+      "inputSha256": "ababa2897772413e6f9c4ea8bf8c12708fb8c798fe7d6bc708de264683da9e1d",
+      "expectedSha256": "38d40eb05bd39133a195bcfc3bfcb6e2df3edd1edd1ab5a303836c4afcd4cc14"
+    },
+    "v2-mermaid-078": {
+      "expected": "output",
+      "inputSha256": "d69c1d031f77c2843a6d638d18206b8a691f851ef8d5a85a7972964a1f4ca77d",
+      "expectedSha256": "629f316f240d06cd4553a396634539e7aed932c473d890cc700f25f445869912"
+    },
+    "v2-mermaid-079": {
+      "expected": "output",
+      "inputSha256": "e1dd68b856fd0ab28b91d8ca9f19b3e12d13bac06730f9ecc676ef28dd73a070",
+      "expectedSha256": "2a1c3e8b8ae55bafefc152276a1d875636bc9c2b98f80baff9c6720a479aaec9"
+    },
+    "v2-mermaid-080": {
+      "expected": "output",
+      "inputSha256": "fc5b76e1e85a63ee6a39689fe9c153086d2723c4fa7ef39c8834b83719bcbdd6",
+      "expectedSha256": "25e2ab081c92c24ac31363759e4a7d9e2c7e7a68ba5a18bc7c076a03041d10d7"
+    },
+    "v2-mermaid-081": {
+      "expected": "output",
+      "inputSha256": "ebeeca9e2b73cd13ea31510e618c1683f9f1af5a71797be1fb462e1163913a93",
+      "expectedSha256": "7e4add0d9a8173ddae935dc5c1ac60cc2f1057e5ba4b61a83f32de7a8f4db746"
+    },
+    "v2-mermaid-082": {
+      "expected": "output",
+      "inputSha256": "f573d5a4dd2c2bc59b5f207d41946809bc778af59971617f62f44ce52f6c3101",
+      "expectedSha256": "1151e1a438c991c1c88421369a836e6a77120e3e8f0965afaaa5cda20100774f"
+    },
+    "v2-mermaid-083": {
+      "expected": "output",
+      "inputSha256": "ebeeca9e2b73cd13ea31510e618c1683f9f1af5a71797be1fb462e1163913a93",
+      "expectedSha256": "7e4add0d9a8173ddae935dc5c1ac60cc2f1057e5ba4b61a83f32de7a8f4db746"
+    },
+    "v2-mermaid-084": {
+      "expected": "output",
+      "inputSha256": "eef72aaa8781908350f7fbe2ecc4d2551893d6c6ec5efbb963c5764e89146c11",
+      "expectedSha256": "d41763cccc2a3459ecad210a28324170d37f0d03ba628459f85624fa63f06db7"
+    },
+    "v2-mermaid-085": {
+      "expected": "output",
+      "inputSha256": "1d5c54144c272fea8a4de8675f48d624e1c00ad738451472ca43884f9308c109",
+      "expectedSha256": "8460b68cb427049cdbfbe3e7038098da0bb1a78885dfe1d51de2f5f6b427aed6"
+    },
+    "v2-mermaid-086": {
+      "expected": "output",
+      "inputSha256": "fa8e377ee4bc7717850d1d9e4007f42cfc3d21ddd8d6049cdcdb17cc6bae0a63",
+      "expectedSha256": "ac7cec4f5e39ba8b118a1d5adf6c7ecea017cd322f640d856069a0c5f5676b8c"
+    },
+    "v2-mermaid-087": {
+      "expected": "output",
+      "inputSha256": "29b1e7a05a2db180b3b44e741366e7fd8780ce94acbc1d08a5461ec5b6db2b88",
+      "expectedSha256": "265b6a17b2368d695d9a687d6fecec6f38a42b56646af4bc6275293e096deaa1"
+    },
+    "v2-mermaid-088": {
+      "expected": "output",
+      "inputSha256": "0759c27c3500b54546081573890f82b27232ec36958ce671d556a2c44059333a",
+      "expectedSha256": "735188fdf0fc65ed905e070ba03aa5f34390fadb5d23db32876799e2991d9119"
+    },
+    "v2-mermaid-090": {
+      "expected": "output",
+      "inputSha256": "8002f5c8c072525562140b95e5072d0e3afb246d0971fd723e7814c5bc5d39c8",
+      "expectedSha256": "d0e42f3d1165ead2b8b400b26192a457cea6d295e2a6b6d96aa4e91d80d43664"
+    },
+    "v2-mermaid-091": {
+      "expected": "output",
+      "inputSha256": "76e3c4f605717e80b1d2fcde07d32a2396f735caca22eaee729972595062f87b",
+      "expectedSha256": "befef35a8b37778a121ad17bbed4229e416125cfa887201f04211fc7497180dc"
+    },
+    "v2-mermaid-093": {
+      "expected": "output",
+      "inputSha256": "a71b0806374b481f62c1dd4d582a88e374223a666807c2f8524db9680db41755",
+      "expectedSha256": "ac7cec4f5e39ba8b118a1d5adf6c7ecea017cd322f640d856069a0c5f5676b8c"
+    },
+    "v2-mermaid-094": {
+      "expected": "output",
+      "inputSha256": "5736ca7f5b830b6de3f6547112195d15486d9548657c945933e1eba3c086cc68",
+      "expectedSha256": "9db7ae0bee807933990efa56a2043fb824168d01cd5f0a823f6f89ee11eaf7d6"
+    },
+    "v2-mermaid-095": {
+      "expected": "output",
+      "inputSha256": "a71b0806374b481f62c1dd4d582a88e374223a666807c2f8524db9680db41755",
+      "expectedSha256": "ac7cec4f5e39ba8b118a1d5adf6c7ecea017cd322f640d856069a0c5f5676b8c"
+    },
+    "v2-mermaid-096": {
+      "expected": "output",
+      "inputSha256": "fdfd14c6b825c1f6e00cf4f472d181b242f90cbfa35f2164d56f133c6f6f43e8",
+      "expectedSha256": "220696ae78816170a7298aabad3a36a4656a4e2f9390eec622bcb15e35aefc19"
+    },
+    "v2-mermaid-097": {
+      "expected": "output",
+      "inputSha256": "50a9ff45b16c97f96797bb14afbf45232c32e53f774d84f004b80a4c34c9c16f",
+      "expectedSha256": "35b89c9aa7164662f44b1e1d468821f96212b6512fdee7bdd8494ea699a1e663"
+    },
+    "v2-mermaid-098": {
+      "expected": "output",
+      "inputSha256": "50a9ff45b16c97f96797bb14afbf45232c32e53f774d84f004b80a4c34c9c16f",
+      "expectedSha256": "35b89c9aa7164662f44b1e1d468821f96212b6512fdee7bdd8494ea699a1e663"
+    },
+    "v2-mermaid-099": {
+      "expected": "output",
+      "inputSha256": "ec7de3a850caf3392e49b78b5baf59c8e40b543ccf76d37ea10faa6e52785b09",
+      "expectedSha256": "35b89c9aa7164662f44b1e1d468821f96212b6512fdee7bdd8494ea699a1e663"
+    },
+    "v2-mermaid-101": {
+      "expected": "output",
+      "inputSha256": "7ae01249c2ad09a3be88fd7b62c86205bbc361fa92c743bfe2e71bda29216695",
+      "expectedSha256": "e49565582e97bc6e35cf25224b2fedda752dc4d42dc8e35ee91b1dda45cda18d"
+    },
+    "v2-mermaid-102": {
+      "expected": "output",
+      "inputSha256": "29a85c5342ad828963fc775c93960b19d680f095e94ac3f51275d6433d263066",
+      "expectedSha256": "a86674f184b395944c268b23cb6f17866fca3d7546fefdf8ae05a9776ef9dd46"
+    },
+    "v2-mermaid-103": {
+      "expected": "output",
+      "inputSha256": "17eac8fab026d427e0464555e5cff5f30ca8d3b9f8bbd859a3ab8daac26c526b",
+      "expectedSha256": "b1793f34972ecc157653bba7ee185e2dad33c6d9665c28e0c500d33b69c7d432"
+    },
+    "v2-mermaid-104": {
+      "expected": "source-v1",
+      "inputSha256": "61602a9758467a4db3a3b2120375496e0f22d42b83a45a10425a8aedbeee010a",
+      "expectedSha256": "b6df6328f1f59a2abd24964fe84ddb82e4860ae3d29e62bb79dc9283cb1c224a"
+    },
+    "v2-mermaid-106": {
+      "expected": "output",
+      "inputSha256": "6ddc2fc5ddb5e5ae98f35c27f979b1064386a55ee9c040d7ef0993a567373818",
+      "expectedSha256": "9f15b1e63ba845e137a3a2c45c6522abd838d80edcf7eafbbdf94d0d2dff6f3d"
+    },
+    "with-labels": {
+      "expected": "output",
+      "inputSha256": "de487b2ecb90b80d81dd9e3d58eb7ea9be6f167f26eb61a309fb1c38c788832c",
+      "expectedSha256": "d388190fa7845c6ffd46539af38cbc6a8c16f70f5de3ac56c6239e9732f2d884"
+    }
+  }
+}
