@@ -737,27 +737,6 @@ void finalize_animation_points(std::map<float, float>& values, float base_value,
   }
 }
 
-void register_float_animation_track(
-    AnimationManager& animations, std::uintptr_t element_id,
-    const std::string& property, float base_value,
-    const std::vector<AnimationKeyframeStep>& keyframes, const AnimationDef& def,
-    float current_time_ms,
-    const std::function<bool(const std::map<std::string, std::string>&,
-                             float&)>& extractor) {
-  std::map<float, float> values;
-  for (const auto& frame : keyframes) {
-    float sampled = 0.0f;
-    if (extractor(frame.properties, sampled)) {
-      values[frame.offset] = sampled;
-    }
-  }
-  std::vector<AnimationValuePoint> points;
-  finalize_animation_points(values, base_value, points);
-  if (!points.empty()) {
-    animations.start(element_id, property, points, def, current_time_ms);
-  }
-}
-
 void register_typed_float_animation_track(
     AnimationManager& animations, std::uintptr_t element_id,
     const detail::StylePropertyDesc& property, float base_value,
@@ -1006,9 +985,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           return true;
         });
 
-    register_float_animation_track(
-        box.animations(), element_id, "outline-width", style.outline_width,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::OutlineWidth,
+        style.outline_width, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("outline-width");
           if (it == props.end()) {
@@ -1017,9 +996,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_length(it->second);
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "outline-offset", style.outline_offset,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::OutlineOffset,
+        style.outline_offset, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("outline-offset");
           if (it == props.end()) {
@@ -1040,9 +1019,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           return true;
         });
 
-    register_float_animation_track(
-        box.animations(), element_id, "ring-width", style.ring_width, *keyframes,
-        def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::RingWidth,
+        style.ring_width, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("ring-width");
           if (it == props.end()) {
@@ -1051,9 +1030,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = parse_animation_length(it->second);
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "ring-offset", style.ring_offset, *keyframes,
-        def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::RingOffset,
+        style.ring_offset, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("ring-offset");
           if (it == props.end()) {
@@ -1085,9 +1064,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           return true;
         });
 
-    register_float_animation_track(
-        box.animations(), element_id, "box-shadow-offset-x", style.shadow.offset_x,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BoxShadowOffsetX,
+        style.shadow.offset_x, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("box-shadow");
           if (it == props.end()) {
@@ -1101,9 +1080,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = shadow.offset_x;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "box-shadow-offset-y", style.shadow.offset_y,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BoxShadowOffsetY,
+        style.shadow.offset_y, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("box-shadow");
           if (it == props.end()) {
@@ -1117,9 +1096,9 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = shadow.offset_y;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "box-shadow-blur", style.shadow.blur_radius,
-        *keyframes, def, current_time_ms,
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BoxShadowBlur,
+        style.shadow.blur_radius, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("box-shadow");
           if (it == props.end()) {
@@ -1133,8 +1112,8 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
           out = shadow.blur_radius;
           return true;
         });
-    register_float_animation_track(
-        box.animations(), element_id, "box-shadow-spread",
+    register_typed_float_animation_track(
+        box.animations(), element_id, detail::StylePropertyId::BoxShadowSpread,
         style.shadow.spread_radius, *keyframes, def, current_time_ms,
         [](const auto& props, float& out) {
           auto it = props.find("box-shadow");
