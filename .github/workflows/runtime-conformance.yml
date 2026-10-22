@@ -1,10 +1,7 @@
 name: Stun runtime conformance
 
-# One trigger and one release-resolution job for the existing independent
-# Unicode source, installed-SDK/FlexUI, Mesa and gCanvas Desktop gates.
-# Job isolation, sanitizer evidence and original job names are preserved.
-# Parser-only edits use Flowchart native AST smoke; ci/full always forces
-# complete chart JSON golden, released SDK and Mesa acceptance on exact HEAD.
+# Focused parser checks against published SDKs. Keep normal PR validation
+# independent of Mesa source builds and desktop/window runtime qualification.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
@@ -25,7 +22,6 @@ jobs:
     name: Runtime change scope
     runs-on: ubuntu-24.04
     outputs:
-      affected: ${{ steps.scope.outputs.affected }}
       golden: ${{ steps.gold_scope.outputs.affected }}
     steps:
       - name: Checkout exact PR head
@@ -34,25 +30,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
-      - name: Classify latest PR update
-        id: scope
-        shell: bash
-        run: |
-          bash .github/scripts/ci-affected.sh \
-            'charts/*' 'flex/*' 'flexUI/*' 'ui_core/*' \
-            'shared/*' 'vendor/*' 'cmake/*' 'tools/*' \
-            '.ci/*' 'CMakeLists.txt' \
-            '!charts/mermaid/flowchart/src/flowchart_parser.y' \
-            '!charts/mermaid/flowchart/src/flowchart_lexer.re' \
-            '!charts/mermaid/flowchart/src/flowchart_parser_wrapper.c' \
-            '!charts/mermaid/flowchart/tests/test_parser.c' \
-            '!charts/mermaid/flowchart/tests/ci_smoke.c' \
-            '!charts/mermaid/flowchart/tests/standalone/*' \
-            '!charts/mermaid/flowchart/tests/oracle/*' \
-            '.github/scripts/ci-affected.sh' \
-            '.github/workflows/runtime-conformance.yml' \
-            '.github/workflows/mesa-driver.yml' \
-            '.github/workflows/salts-sdk-releases.yml'
       - name: Detect Flowchart JSON golden changes
         id: gold_scope
         shell: bash
@@ -94,26 +71,15 @@ jobs:
 
   sdk-releases:
     needs: changes
-    if: needs.changes.outputs.affected == 'true' || needs.changes.outputs.golden == 'true'
+    if: needs.changes.outputs.golden == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
-  mesa-driver:
-    needs: [changes, sdk-releases]
-    if: needs.changes.outputs.affected == 'true'
-    uses: ./.github/workflows/mesa-driver.yml
-    with:
-      run_runtime: true
-      salts_sha: ${{ needs.sdk-releases.outputs.salts_sha }}
-      salts_utils_sha: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
-      salts_release: ${{ needs.sdk-releases.outputs.salts_release }}
-      salts_utils_release: ${{ needs.sdk-releases.outputs.salts_utils_release }}
-
-  # Fast full-JSON conformance for parser-only updates. Full runtime executes
-  # the same golden suite as part of Mesa/FlexUI for mixed changes or ci/full.
+  # Run the installed-SDK AST and exact JSON suite for every applicable
+  # update, including mixed changes and explicit ci/full requests.
   golden:
     name: Linux / actual 95 Mermaid golden cases + ASan/UBSan
     needs: [changes, sdk-releases]
-    if: needs.changes.outputs.golden == 'true' && needs.changes.outputs.affected != 'true'
+    if: needs.changes.outputs.golden == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:

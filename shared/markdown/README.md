@@ -168,11 +168,11 @@ pipe (GFM §4.10, Example 200). C11 RichDoc and cmark-gfm HTML gates now
 exercise both cases. Mistune is an independent AST cross-check, not the
 normative source for disputed extension HTML.
 
-Executable CI: `runtime-conformance.yml` uses the **installed canonical Salts
-SDK** to build the C11 RichDoc dumper, then installs the latest available
-Python `mistune` and `cmarkgfm` tools in an isolated test-only virtual
-environment without exact package pins. The JSON report and human-readable
-comparison log are kept in the normal Unicode CI evidence directory.
+The C11 RichDoc dumper and Python reference tools can be run against the
+installed canonical Salts SDK. Install `mistune` and `cmarkgfm` in an isolated
+test-only virtual environment and retain the JSON report with the comparison
+log. The former combined Mesa/Desktop CI job has been removed; these commands
+describe local qualification rather than a current automatic Markdown gate.
 
 Example after building `ui_core` with installed Salts:
 
@@ -184,28 +184,12 @@ python -m venv .venv-reference
   --report build/markdown-python-oracle.json
 ```
 
-### Unified Mesa/Desktop runner
+### CI scope
 
-The runtime workflow calls `mesa-driver.yml` once with the resolved Salts
-release SHAs and `run_desktop: true`. Its one Linux runner builds pinned Mesa,
-executes baseline/patched control evidence, then directly consumes the same
-patched installation for real gCanvas/OpenGL/Vulkan and FlexUI window lifecycle
-tests under ASan/UBSan. No second desktop runner, Mesa artifact download or
-unpack is needed. Separate production FlexUI installed-SDK and Unicode jobs
-still run independently. Manual Mesa `workflow_dispatch` remains Mesa-only.
- 
-### One Mesa runner for every runtime gate
-
-The `Stun runtime conformance` workflow resolves one exact Salts/SaltsUtils
-release graph and invokes `mesa-driver.yml` in `run_runtime` mode.
-The same Linux runner constructs Mesa's patched llvmpipe desktop environment
-once, then executes Unicode source/TinyTest, native C11 Markdown and official
-HTML oracle gates, installed Salts/FlexUI package consumers, production
-PluginSDK tests, and finally six real gCanvas/FlexUI OpenGL/Vulkan window
-CTest processes. One installed Salts SDK and one restored FlexUI ports graph
-serve both non-window and desktop tests: no second Salts build, Mesa download,
-Desktop runner or duplicated CMake setup. Standalone Mesa dispatch remains a
-Mesa-only driver lifecycle test. All prior JSON/JUnit and sanitizer evidence
-remains separate by directory and artifact name. Strict C11 and Public
-Dependency compile contracts stay independent as fast checks.
-
+`Stun runtime conformance` now runs the focused installed-SDK Flowchart AST
+and 95-case JSON golden suite with ASan/UBSan, plus the pinned independent
+Mermaid oracle. Applicable mixed changes use that same focused lane.
+The combined Mesa source build, Unicode/Markdown/FlexUI package qualification
+and desktop window/pixel job is no longer part of automatic CI. The independent
+public-dependency, reflection, GraphLayout and gCanvas compile/package/runtime
+workflows retain their own scopes.

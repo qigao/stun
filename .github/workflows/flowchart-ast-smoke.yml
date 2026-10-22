@@ -2,8 +2,8 @@ name: Flowchart native AST smoke
 
 # Fast feedback for parser changes. This compiles the repository's real Lemon
 # grammar, re2c scanner and AST wrapper, not a second parser implementation.
-# Full JSON golden, SDK, renderer and sanitizer integration remains in the
-# Stun runtime conformance workflow (use the ci/full label before merging).
+# Full JSON golden and installed-SDK sanitizer checks remain in the
+# Stun runtime conformance workflow.
 # The published-SDK golden job already builds the same AST smoke target
 # together with the full JSON test. Keep this workflow as an opt-in tool for
 # isolating the grammar from SDK availability, not a duplicate PR check.
