@@ -10,7 +10,7 @@ set_target_properties(flexUI_plugin_sdk PROPERTIES EXPORT_NAME PluginSDK)
 
 install(
   TARGETS flexUI_plugin_sdk
-  EXPORT FlexUIPluginTargets
+  EXPORT FlexUIPluginSDKTargets
   COMPONENT FlexUIPlugin)
 
 if(FLEXUI_ENABLE_PLUGINS)
@@ -36,14 +36,14 @@ if(FLEXUI_ENABLE_PLUGINS)
   target_link_libraries(
     flexUI_plugin_host
     PUBLIC FlexUI::PluginSDK FlexUI::Services
-    PRIVATE TurboUtils::Core Salts::TomlParser ${CMAKE_DL_LIBS})
+    PRIVATE Salts::Core Salts::TomlParser ${CMAKE_DL_LIBS})
   if(WIN32)
     target_compile_definitions(
       flexUI_plugin_host PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     add_custom_command(
       TARGET flexUI_plugin_host POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:TurboUtils::Core>
+              $<TARGET_FILE:Salts::Core>
               $<TARGET_FILE_DIR:flexUI_plugin_host>
       COMMENT "Copying PluginHost runtime dependencies beside FlexUI executables")
   endif()
@@ -52,7 +52,7 @@ if(FLEXUI_ENABLE_PLUGINS)
                                   EXPORT_NAME PluginHost)
   install(
     TARGETS flexUI_plugin_host
-    EXPORT FlexUIPluginTargets
+    EXPORT FlexUIPluginHostTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUIPlugin
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUIPlugin
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT FlexUIPlugin)

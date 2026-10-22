@@ -1,5 +1,5 @@
 #include "flex/animation.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -17,7 +17,7 @@ void collect_interval(void* user, const PlaybackInterval& interval) {
 
 suite("flex::animation") {
     it("interpolates scalar values for UI adapters") {
-        check_float_eq(interpolate(10.0f, 20.0f, 0.25f), 12.5f, 0.001f);
+        check_within(interpolate(10.0f, 20.0f, 0.25f), 12.5f, 0.001f);
     }
 
     it("samples a MIR animation expression from fixed numeric inputs") {
@@ -25,9 +25,9 @@ suite("flex::animation") {
             "lerp(from, to, clamp(progress, 0, 1)) + sin(time)");
 
         check(expression.uses_jit());
-        check_float_eq(expression.sample({0.0f, 0.25f, 10.0f, 30.0f}),
+        check_within(expression.sample({0.0f, 0.25f, 10.0f, 30.0f}),
                        15.0f, 0.001f);
-        check_float_eq(expression.sample({0.0f, 2.0f, 10.0f, 30.0f}),
+        check_within(expression.sample({0.0f, 2.0f, 10.0f, 30.0f}),
                        30.0f, 0.001f);
     }
 
@@ -43,7 +43,7 @@ suite("flex::animation") {
             "derivative(lerp(from, to, progress) + sin(time), time)");
 
         check(expression.uses_jit());
-        check_float_eq(expression.sample({0.75f, 0.5f, 10.0f, 30.0f}),
+        check_within(expression.sample({0.75f, 0.5f, 10.0f, 30.0f}),
                        static_cast<float>(std::cos(0.75)), 0.001f);
     }
 
@@ -80,11 +80,11 @@ suite("flex::animation") {
 
         check(result.valid);
         check(result.active);
-        check_float_eq(cursor.time(), 0.5f, 0.001f);
+        check_within(cursor.time(), 0.5f, 0.001f);
         check(intervals.size() == 3);
-        check_float_eq(intervals[0].from, 0.0f, 0.001f);
-        check_float_eq(intervals[0].to, 1.0f, 0.001f);
-        check_float_eq(intervals[2].to, 0.5f, 0.001f);
+        check_within(intervals[0].from, 0.0f, 0.001f);
+        check_within(intervals[0].to, 1.0f, 0.001f);
+        check_within(intervals[2].to, 0.5f, 0.001f);
     }
 
     it("reflects across multiple ping-pong boundaries") {
@@ -97,7 +97,7 @@ suite("flex::animation") {
 
         check(result.valid);
         check(result.active);
-        check_float_eq(cursor.time(), 0.75f, 0.001f);
+        check_within(cursor.time(), 0.75f, 0.001f);
         check(cursor.reverse());
         check(intervals.size() == 4);
         check(intervals[0].forward);

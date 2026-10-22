@@ -7,7 +7,7 @@
  * - retained mode reuses cached draw objects and only updates transforms
  */
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 #include "test_render_trace.h"
 
 using namespace flex;
@@ -46,17 +46,17 @@ suite("flex::behavior") {
             RecordingRenderer renderer;
             scene->render(renderer);
 
-            check_float_eq(first->x(), 5.0, 0.001);
-            check_float_eq(first->y(), 5.0, 0.001);
-            check_float_eq(second->x(), 65.0, 0.001);
-            check_float_eq(second->y(), 5.0, 0.001);
+            check_within(first->x(), 5.0, 0.001);
+            check_within(first->y(), 5.0, 0.001);
+            check_within(second->x(), 65.0, 0.001);
+            check_within(second->y(), 5.0, 0.001);
 
             auto rects = renderer.find_all("draw_rect");
             check(rects.size() == 2);
-            check_float_eq(rects[0].args[0], 25.0, 0.001);
-            check_float_eq(rects[0].args[1], 15.0, 0.001);
-            check_float_eq(rects[1].args[0], 85.0, 0.001);
-            check_float_eq(rects[1].args[1], 15.0, 0.001);
+            check_within(rects[0].args[0], 25.0, 0.001);
+            check_within(rects[0].args[1], 15.0, 0.001);
+            check_within(rects[1].args[0], 85.0, 0.001);
+            check_within(rects[1].args[1], 15.0, 0.001);
 
             int clip_index = renderer.first_index("clip_rect");
             int first_rect_index = renderer.first_index("draw_rect");
@@ -96,12 +96,12 @@ suite("flex::behavior") {
                 return;
             }
 
-            check_float_eq(rects[0].args[0], 15.0f, 0.001f);
-            check_float_eq(rects[0].args[1], 25.0f, 0.001f);
+            check_within(rects[0].args[0], 15.0f, 0.001f);
+            check_within(rects[0].args[1], 25.0f, 0.001f);
 
             auto world = fixed->to_world(Vec2{0.0f, 0.0f});
-            check_float_eq(world.x, 15.0f, 0.001f);
-            check_float_eq(world.y, 25.0f, 0.001f);
+            check_within(world.x, 15.0f, 0.001f);
+            check_within(world.y, 25.0f, 0.001f);
         }
     }
 
@@ -135,9 +135,9 @@ suite("flex::behavior") {
 
             auto rects = renderer.find_all("draw_rect");
             check(rects.size() == 1);
-            check_float_eq(shape->x(), 50.0, 0.001);
-            check_float_eq(rects[0].args[0], 50.0, 0.001);
-            check_float_eq(rects[0].args[1], 0.0, 0.001);
+            check_within(shape->x(), 50.0, 0.001);
+            check_within(rects[0].args[0], 50.0, 0.001);
+            check_within(rects[0].args[1], 0.0, 0.001);
         }
     }
 
@@ -173,8 +173,8 @@ suite("flex::behavior") {
 
             auto updates = renderer.find_all("update_transform");
             check(updates.size() == 1);
-            check_float_eq(tx(updates[0].transform), 30.0, 0.001);
-            check_float_eq(ty(updates[0].transform), 8.0, 0.001);
+            check_within(tx(updates[0].transform), 30.0, 0.001);
+            check_within(ty(updates[0].transform), 8.0, 0.001);
         }
 
         it("reuses the same cached handle for transform-only updates") {
@@ -211,8 +211,8 @@ suite("flex::behavior") {
                 return;
             }
             check(updates[0].handle == initial_handle);
-            check_float_eq(tx(updates[0].transform), 18.0f, 0.001f);
-            check_float_eq(ty(updates[0].transform), 6.0f, 0.001f);
+            check_within(tx(updates[0].transform), 18.0f, 0.001f);
+            check_within(ty(updates[0].transform), 6.0f, 0.001f);
         }
 
         it("rebuilds cached paint on content changes") {
@@ -291,7 +291,7 @@ suite("flex::behavior") {
             }
             check(removes[0].handle == initial_handle);
             check(pushes[0].handle != initial_handle);
-            check_float_eq(pushes[0].alpha, 0.25f, 0.001f);
+            check_within(pushes[0].alpha, 0.25f, 0.001f);
         }
     }
 }

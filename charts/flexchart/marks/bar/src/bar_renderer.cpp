@@ -38,7 +38,7 @@ void BarMarkRenderer::render(const std::shared_ptr<AstMark>& mark, const std::ve
         Color(0.6f, 0.4f, 0.8f),   Color(0.0f, 0.8f, 0.8f)
     };
 
-    TLOG_INFO("Rendering Bars (Mark {}): group_w={:.2f}", ctx.mark_index, group_w);
+    FLEX_LOGI("Rendering Bars (Mark %zu): group_w=%.2f", static_cast<size_t>(ctx.mark_index), static_cast<double>(group_w));
     for (size_t i = 0; i < ctx.x_labels.size(); ++i) {
         const auto& label_text = ctx.x_labels[i];
 

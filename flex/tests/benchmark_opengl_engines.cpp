@@ -2,7 +2,7 @@
 #include "flex/render/engines/nanovg.h"
 #include "opengl_engine_test_support.h"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cstddef>
 #include <cstdlib>
@@ -112,7 +112,7 @@ suite("Flex OpenGL engine performance") {
     check_not_null(image_path);
     static constexpr unsigned char kPpm[] = {
         'P', '6', '\n', '1', ' ', '1', '\n', '2', '5', '5', '\n', 255, 255, 255};
-    check_int_eq(tt_write_file(image_path, kPpm, sizeof(kPpm)), 0);
+    check_equal(tt_write_file(image_path, kPpm, sizeof(kPpm)), 0);
 
     auto gcanvas = flex::render::engines::gcanvas::create_external_opengl_renderer(load_proc);
     register_fonts(*gcanvas, fonts);
@@ -124,7 +124,7 @@ suite("Flex OpenGL engine performance") {
     benchmark_renderer("NanoVG", *nanovg, image_path);
     nanovg.reset();
 
-    check_int_eq(tt_remove_file(image_path), 0);
+    check_equal(tt_remove_file(image_path), 0);
     std::free(image_path);
   }
 }

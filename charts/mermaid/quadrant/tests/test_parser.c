@@ -1,6 +1,6 @@
 #include "tinytest.h"
 #include "quadrant/quadrant_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -50,19 +50,19 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -95,26 +95,26 @@ spec("quadrant_parser") {
              
              QuadrantDiagram* diagram = quadrant_parse(input);
              REQUIRE(diagram != NULL);
-             check_str_eq(diagram->title, "Reach and engagement of campaigns");
-             check_str_eq(diagram->xAxisLeft, "Low Reach");
-             check_str_eq(diagram->xAxisRight, "High Reach");
-             check_str_eq(diagram->yAxisBottom, "Low Engagement");
-             check_str_eq(diagram->yAxisTop, "High Engagement");
+             check_true(diagram->title != NULL && strcmp(diagram->title, "Reach and engagement of campaigns") == 0);
+             check_true(diagram->xAxisLeft != NULL && strcmp(diagram->xAxisLeft, "Low Reach") == 0);
+             check_true(diagram->xAxisRight != NULL && strcmp(diagram->xAxisRight, "High Reach") == 0);
+             check_true(diagram->yAxisBottom != NULL && strcmp(diagram->yAxisBottom, "Low Engagement") == 0);
+             check_true(diagram->yAxisTop != NULL && strcmp(diagram->yAxisTop, "High Engagement") == 0);
              
-             check_str_eq(diagram->quadrant1Text, "We should expand");
-             check_str_eq(diagram->quadrant2Text, "Need to promote");
-             check_str_eq(diagram->quadrant3Text, "Re-evaluate");
-             check_str_eq(diagram->quadrant4Text, "May be improved");
+             check_true(diagram->quadrant1Text != NULL && strcmp(diagram->quadrant1Text, "We should expand") == 0);
+             check_true(diagram->quadrant2Text != NULL && strcmp(diagram->quadrant2Text, "Need to promote") == 0);
+             check_true(diagram->quadrant3Text != NULL && strcmp(diagram->quadrant3Text, "Re-evaluate") == 0);
+             check_true(diagram->quadrant4Text != NULL && strcmp(diagram->quadrant4Text, "May be improved") == 0);
              
              REQUIRE(diagram->points != NULL);
              QuadrantPoint* p1 = diagram->points;
-             check_str_eq(p1->text, "Campaign A");
+             check_true(p1->text != NULL && strcmp(p1->text, "Campaign A") == 0);
              check_double_eq(p1->x, 0.3);
              check_double_eq(p1->y, 0.6);
              
              QuadrantPoint* p2 = p1->next;
              REQUIRE(p2 != NULL);
-             check_str_eq(p2->text, "Campaign B");
+             check_true(p2->text != NULL && strcmp(p2->text, "Campaign B") == 0);
              check_double_eq(p2->x, 0.45);
              check_double_eq(p2->y, 0.23);
              
@@ -131,8 +131,8 @@ spec("quadrant_parser") {
              
              REQUIRE(diagram->points != NULL);
              QuadrantPoint* p = diagram->points;
-             check_str_eq(p->text, "Campaign C");
-             check_str_eq(p->className, "urgent");
+             check_true(p->text != NULL && strcmp(p->text, "Campaign C") == 0);
+             check_true(p->className != NULL && strcmp(p->className, "urgent") == 0);
              check_double_eq(p->x, 0.1);
              check_double_eq(p->y, 0.1);
              
@@ -154,7 +154,7 @@ spec("quadrant_parser") {
                  quadrant_free_diagram(diagram);
                  return;
              }
-             check_str_eq(diagram->points->text, "Campaign Expr");
+             check_true(diagram->points->text != NULL && strcmp(diagram->points->text, "Campaign Expr") == 0);
              check_double_eq(diagram->points->x, 0.3);
              check_double_eq(diagram->points->y, 0.3);
 
@@ -209,7 +209,7 @@ spec("quadrant_parser") {
                         check(1, "Parse successful");
                     }
 
-                    turbo_json_serialize_free(actual);
+                    json_serialize_free(actual);
                     quadrant_free_diagram(diagram);
                     free(input);
                 }
@@ -258,7 +258,7 @@ spec("quadrant_parser") {
                         check(1, "Parse successful");
                     }
 
-                    turbo_json_serialize_free(actual);
+                    json_serialize_free(actual);
                     quadrant_free_diagram(diagram);
                     free(input);
                 }

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "sankey/sankey_ast.h"
 
-#include <json_parser.h>
+#include "json_parser.h"
 
 static char* copy_string(const char* s) {
     if(!s) return NULL;

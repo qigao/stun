@@ -35,6 +35,12 @@
 - 注释只解释意图、约束与设计理由，不复述代码字面逻辑
 - 若用户、协议、外部接口或既有文件明确要求其他语言，则以兼容性为先
 
+## 许可证与源文件
+
+- first-party 源码、测试、构建文件不得添加 `SPDX-License-Identifier` 或逐文件许可证模板
+- first-party 许可信息只维护在仓库根目录的 `LICENSE`、`NOTICE` 与 `THIRD_PARTY_NOTICES.md`
+- vendored/third-party 文件必须保留上游版权、许可证与 SPDX 标识，不得为了统一格式而删除或改写
+
 ## 分析与结论表达
 
 - 发现代码结构、调用关系、算法路径或边界问题时，必须说明其影响与用途：影响哪些模块、接口、数据、测试或用户可见行为
@@ -207,21 +213,21 @@
 
 ### 标准库与成熟算法优先
 
-> **详细 API 参见**: 全局 skill `turboutils`
+> **详细 API 参见**：当前锁定版本的 Salts / SaltsUtils 上游头文件、文档与安装导出；按实际能力使用 canonical `Salts::*` target。
 
 #### 库优先级顺序（从高到低）
 
-1. **TurboUtils**（仓库 `utils/` 模块；构建时优先通过 CMake target `TurboUtils::Core` 使用）— 最优先
+1. **Salts / SaltsUtils**（Core 基础能力使用 `Salts::Core`，其他能力使用各自导出的 `Salts::*` target）— 最优先
 2. **项目内模块**（`exprtk/`、`plugins/` 等）
 3. **vendor/ 库**（sds、croar、mir、monocypher、sha2、uuid、miniblas）
 4. **vcpkg 依赖**（xxhash、sqlite3、zstd、openssl、c-ares、aklomp-base64、simde）
 5. **C 标准库**（libc：`string.h`、`stdlib.h`、`stdio.h`）
-6. **底层系统 API**（仅允许封装在 TurboUtils 平台/协程适配层或项目适配层之后使用）
+6. **底层系统 API**（仅允许封装在 Salts 平台/并发适配层或项目适配层之后使用）
 
 #### 手写实现触发条件（严格约束）
 
 允许手写实现的前提：
-1. **TurboUtils/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
+1. **Salts/SaltsUtils/vendor/vcpkg 无对应功能**，且项目内没有稳定复用点；或现有库无法满足接口/平台/许可约束
 2. 若是为了替换现有库或优化成熟通用能力，必须有 profiling 证明现有路径是瓶颈（≥20% 总耗时）
 3. 若是因为特殊约束（嵌入式、实时性、代码体积 <50KB），必须说明约束来源
 4. 高风险基础设施必须提供 Benchmark 对比、测试覆盖率目标和文档化理由
