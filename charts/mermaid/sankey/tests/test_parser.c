@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "tinytest.h"
 #include "sankey/sankey_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 #ifndef REQUIRE
 #define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
@@ -40,18 +40,18 @@ static char* golden_path(const char* filename) {
 // Compare two JSON strings by parsing and re-serializing to compact form
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -80,14 +80,14 @@ spec("sankey_parser") {
              
              REQUIRE(diagram->links != NULL);
              SankeyLink* l1 = diagram->links;
-             check_str_eq(l1->source, "source");
-             check_str_eq(l1->target, "target");
+             check_true(l1->source != NULL && strcmp(l1->source, "source") == 0);
+             check_true(l1->target != NULL && strcmp(l1->target, "target") == 0);
              check_double_eq(l1->value, 10.0);
              
              SankeyLink* l2 = l1->next;
              REQUIRE(l2 != NULL);
-             check_str_eq(l2->source, "a");
-             check_str_eq(l2->target, "b");
+             check_true(l2->source != NULL && strcmp(l2->source, "a") == 0);
+             check_true(l2->target != NULL && strcmp(l2->target, "b") == 0);
              check_double_eq(l2->value, 5.0);
              
              sankey_free_diagram(diagram);
@@ -103,8 +103,8 @@ spec("sankey_parser") {
              
              REQUIRE(diagram->links != NULL);
              SankeyLink* l = diagram->links;
-             check_str_eq(l->source, "Long Source Name");
-             check_str_eq(l->target, "Target, Name");
+             check_true(l->source != NULL && strcmp(l->source, "Long Source Name") == 0);
+             check_true(l->target != NULL && strcmp(l->target, "Target, Name") == 0);
              check_double_eq(l->value, 12.5);
              
              sankey_free_diagram(diagram);
@@ -157,7 +157,7 @@ spec("sankey_parser") {
 
              check(json_equal(actual, expected), "JSON mismatch");
 
-             turbo_json_serialize_free(actual);
+             json_serialize_free(actual);
              sankey_free_diagram(diagram);
              free(expected);
              free(input);
@@ -181,7 +181,7 @@ spec("sankey_parser") {
 
              check(json_equal(actual, expected), "JSON mismatch");
 
-             turbo_json_serialize_free(actual);
+             json_serialize_free(actual);
              sankey_free_diagram(diagram);
              free(expected);
              free(input);
@@ -205,7 +205,7 @@ spec("sankey_parser") {
 
              check(json_equal(actual, expected), "JSON mismatch");
 
-             turbo_json_serialize_free(actual);
+             json_serialize_free(actual);
              sankey_free_diagram(diagram);
              free(expected);
              free(input);

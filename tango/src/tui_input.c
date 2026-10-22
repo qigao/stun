@@ -2,7 +2,7 @@
  * TUI Input Implementation
  */
 
-#include "tui.h"
+#include "tui_terminal_internal.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -15,34 +15,7 @@
 #endif
 
 /* Forward declaration of terminal struct */
-struct tui_terminal {
-    bool            initialized;
-    int             width;
-    int             height;
-    int             color_mode;
-    
-    tui_buffer_t*   front;
-    tui_buffer_t*   back;
-    
-    char*           output;
-    size_t          output_cap;
-    size_t          output_len;
-    
-    bool            mouse_enabled;
-    
-#ifdef _WIN32
-    HANDLE          h_out;
-    HANDLE          h_in;
-    DWORD           orig_out_mode;
-    DWORD           orig_in_mode;
-#else
-    char            orig_termios[60]; /* struct termios */
-#endif
-};
 
-#ifndef _WIN32
-extern volatile sig_atomic_t g_resize_pending;
-#endif
 
 /* ============================================================================
  * Mouse Control
@@ -185,8 +158,6 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
 
 #else /* Unix */
 
-/* Declared in tui_terminal.c */
-extern volatile sig_atomic_t g_resize_pending;
 
 bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
     if (!term || !event) return false;
@@ -194,8 +165,7 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
     memset(event, 0, sizeof(*event));
     
     /* Check resize signal */
-    if (g_resize_pending) {
-        g_resize_pending = 0;
+    if (tui_terminal_consume_resize_pending()) {
         event->type = TUI_EVENT_RESIZE;
         return true;
     }
@@ -206,8 +176,7 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
     
     struct timeval tv = {0, 0};
     if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0) {
-        if (g_resize_pending) {
-            g_resize_pending = 0;
+        if (tui_terminal_consume_resize_pending()) {
             event->type = TUI_EVENT_RESIZE;
             return true;
         }

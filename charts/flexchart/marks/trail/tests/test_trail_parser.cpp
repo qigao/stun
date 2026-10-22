@@ -16,20 +16,20 @@ spec("flexchart_trail_parser") {
             std::string error;
             auto chart = flex::chart::trail_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Trail");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Trail"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "trail");
+            check(std::string(mark->type.c_str()) == std::string("trail"));
             check(mark->encodings.size() >= 2);
             std::string x_field, y_field;
             for (auto& enc : mark->encodings) {
                 if (enc->channel == "x") x_field = enc->field;
                 if (enc->channel == "y") y_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "x_val");
-            check_str_eq(y_field.c_str(), "y_val");
+            check(std::string(x_field.c_str()) == std::string("x_val"));
+            check(std::string(y_field.c_str()) == std::string("y_val"));
         }
 
         it("should parse trail chart with all encoding channels") {
@@ -48,7 +48,7 @@ spec("flexchart_trail_parser") {
             std::string error;
             auto chart = flex::chart::trail_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Movement");
+            check(std::string(chart->title.c_str()) == std::string("Movement"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -58,8 +58,8 @@ spec("flexchart_trail_parser") {
                 if (enc->channel == "size") size_field = enc->field;
                 if (enc->channel == "color") color_field = enc->field;
             }
-            check_str_eq(size_field.c_str(), "sz");
-            check_str_eq(color_field.c_str(), "clr");
+            check(std::string(size_field.c_str()) == std::string("sz"));
+            check(std::string(color_field.c_str()) == std::string("clr"));
         }
 
         it("should parse encoding block") {
@@ -93,7 +93,7 @@ spec("flexchart_trail_parser") {
             check(chart != nullptr);
             auto& mark = chart->marks[0];
             check(std::get<double>(mark->styles["opacity"]) > 0.79);
-            check_str_eq(std::get<std::string>(mark->styles["interpolate"]).c_str(), "monotone");
+            check(std::string(std::get<std::string>(mark->styles["interpolate"]).c_str()) == std::string("monotone"));
         }
 
         it("should parse expr and range") {
@@ -106,7 +106,7 @@ spec("flexchart_trail_parser") {
             auto chart = flex::chart::trail_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x) * 100");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x) * 100"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
@@ -125,7 +125,7 @@ spec("flexchart_trail_parser") {
             auto chart = flex::chart::trail_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "movement.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("movement.json"));
         }
 
         it("should return nullptr on invalid input") {

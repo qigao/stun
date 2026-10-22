@@ -16,12 +16,12 @@ spec("flexchart_radar_parser") {
             std::string error;
             auto chart = flex::chart::radar_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Attributes");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "500");
+            check(std::string(chart->title.c_str()) == std::string("Attributes"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("500"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "radar");
+            check(std::string(mark->type.c_str()) == std::string("radar"));
             check(mark->encodings.size() >= 2);
             // Find category and value encodings
             std::string cat_field, val_field;
@@ -29,8 +29,8 @@ spec("flexchart_radar_parser") {
                 if (enc->channel == "category") cat_field = enc->field;
                 if (enc->channel == "value") val_field = enc->field;
             }
-            check_str_eq(cat_field.c_str(), "attr");
-            check_str_eq(val_field.c_str(), "score");
+            check(std::string(cat_field.c_str()) == std::string("attr"));
+            check(std::string(val_field.c_str()) == std::string("score"));
         }
 
         it("should parse radar chart with data block") {
@@ -50,7 +50,7 @@ spec("flexchart_radar_parser") {
             std::string error;
             auto chart = flex::chart::radar_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Skills");
+            check(std::string(chart->title.c_str()) == std::string("Skills"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -107,7 +107,7 @@ spec("flexchart_radar_parser") {
             auto chart = flex::chart::radar_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x) * 100");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x) * 100"));
             check(mark->ranges.count("category") > 0);
             auto& r = mark->ranges["category"];
             check(r.size() == 3);
@@ -126,7 +126,7 @@ spec("flexchart_radar_parser") {
             auto chart = flex::chart::radar_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "stats.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("stats.json"));
         }
 
         it("should return nullptr on invalid input") {

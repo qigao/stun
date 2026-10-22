@@ -2,7 +2,7 @@
 #include "flex/render/engines/nanovg.h"
 #include "opengl_engine_test_support.h"
 
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -45,7 +45,7 @@ struct Difference {
 
 Difference compare_images(const std::vector<std::uint8_t>& first,
                           const std::vector<std::uint8_t>& second) {
-  check_size_eq(first.size(), second.size());
+  check_equal(first.size(), second.size());
   std::uint64_t absolute_sum = 0;
   std::size_t changed_pixels = 0;
   for (std::size_t offset = 0; offset < first.size(); offset += 4U) {
@@ -100,8 +100,8 @@ suite("Flex OpenGL engine migration parity") {
     nanovg.reset();
 
     const Difference difference = compare_images(gcanvas_pixels, nanovg_pixels);
-    check_double_le(difference.mean_absolute, 18.0);
-    check_double_le(difference.changed_pixel_ratio, 0.18);
+    check_less_equal(difference.mean_absolute, 18.0);
+    check_less_equal(difference.changed_pixel_ratio, 0.18);
 
     for (const auto& pixels : {&gcanvas_pixels, &nanovg_pixels}) {
       check_true(is_bright(pixel_at(*pixels, 30, 25)));

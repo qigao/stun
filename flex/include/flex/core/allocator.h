@@ -15,6 +15,8 @@
 #include <stdexcept>
 #include <utility>
 #include <new>
+#include <type_traits>
+#include <vector>
 
 namespace flex {
 
@@ -26,6 +28,19 @@ class ArenaAllocator {
 private:
     MemoryPool* pool_;
     std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
+
+    struct DestructorEntry {
+        void* object;
+        void (*destroy)(void*);
+    };
+    std::vector<DestructorEntry> destructors_;
+
+    void destroy_objects() noexcept {
+        for (auto it = destructors_.rbegin(); it != destructors_.rend(); ++it) {
+            it->destroy(it->object);
+        }
+        destructors_.clear();
+    }
 
     template<typename T>
     static auto bind_lifetime(T* object, const std::weak_ptr<const void>& lifetime, int)
@@ -44,6 +59,7 @@ public:
     }
 
     ~ArenaAllocator() {
+        destroy_objects();
         lifetime_.reset();
         if (pool_) {
             pool_destroy(pool_);
@@ -71,6 +87,15 @@ public:
         void* mem = allocate(sizeof(T));
         if (!mem) return nullptr;
         T* object = new (mem) T(std::forward<Args>(args)...);
+        try {
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                destructors_.push_back(DestructorEntry{
+                    object, [](void* p) { static_cast<T*>(p)->~T(); }});
+            }
+        } catch (...) {
+            object->~T();
+            throw;
+        }
         bind_lifetime(object, lifetime_, 0);
         return object;
     }
@@ -113,6 +138,7 @@ public:
     // Reset pool (reuse memory)
     void reset() {
         if (pool_) {
+            destroy_objects();
             lifetime_ = std::make_shared<int>(0);
             pool_reset(pool_);
         }
@@ -152,6 +178,7 @@ public:
 
     // Initialize pool with specific size
     void init(size_t size) {
+        destroy_objects();
         lifetime_ = std::make_shared<int>(0);
         if (pool_) {
             pool_destroy(pool_);

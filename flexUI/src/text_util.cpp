@@ -1,8 +1,8 @@
 /*
  * flexUI - Text Utilities
  *
- * UTF-8 scanning is owned by Salts::Unicode. Emoji grouping below remains
- * a rendering heuristic until shared Unicode boundary work in salts-utils#101.
+ * UTF-8 scanning, grapheme boundaries, and Unicode emoji property facts are
+ * owned by Salts::Unicode. FlexUI only applies the rendering/font policy.
  */
 
 #include <flexUI/text_util.h>
@@ -10,6 +10,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <utility>
 
 namespace flexUI {
 
@@ -53,188 +54,129 @@ size_t utf8_scalar_count(const std::string& text) {
 }
 
 // ============================================================================
-// Emoji Detection
+// Emoji Detection and Grapheme Segmentation
 // ============================================================================
 
-bool is_emoji(uint32_t cp) {
-    // Miscellaneous Symbols and Pictographs (1F300-1F5FF)
-    if (cp >= 0x1F300 && cp <= 0x1F5FF) return true;
+namespace {
 
-    // Emoticons (1F600-1F64F)
-    if (cp >= 0x1F600 && cp <= 0x1F64F) return true;
+uint32_t unicode_properties(uint32_t cp) {
+    uint32_t properties = 0u;
+    const salts_unicode_status status =
+        salts_unicode_scalar_properties(cp, &properties);
+    if (status != SALTS_UNICODE_OK) {
+        throw std::invalid_argument("Salts::Unicode rejected a scalar property query");
+    }
+    return properties;
+}
 
-    // Transport and Map Symbols (1F680-1F6FF)
-    if (cp >= 0x1F680 && cp <= 0x1F6FF) return true;
+bool grapheme_uses_emoji_presentation(vstr cluster) {
+    size_t cursor = 0u;
+    salts_unicode_scalar scalar{};
+    bool has_emoji = false;
+    bool has_default_emoji = false;
+    bool has_extended_pictographic = false;
+    bool has_modifier = false;
+    bool has_emoji_selector = false;
+    bool has_text_selector = false;
+    bool has_keycap = false;
 
-    // Supplemental Symbols and Pictographs (1F900-1F9FF)
-    if (cp >= 0x1F900 && cp <= 0x1F9FF) return true;
+    while (cursor < cluster.len) {
+        const salts_unicode_status status =
+            salts_unicode_utf8_next(cluster, &cursor, &scalar);
+        if (status != SALTS_UNICODE_OK) {
+            if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+                throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+            }
+            throw std::runtime_error("Salts::Unicode failed to scan a grapheme");
+        }
 
-    // Symbols and Pictographs Extended-A (1FA00-1FA6F)
-    if (cp >= 0x1FA00 && cp <= 0x1FA6F) return true;
-
-    // Symbols and Pictographs Extended-B (1FA70-1FAFF)
-    if (cp >= 0x1FA70 && cp <= 0x1FAFF) return true;
-
-    // Dingbats (2700-27BF)
-    if (cp >= 0x2700 && cp <= 0x27BF) return true;
-
-    // Miscellaneous Symbols (2600-26FF)
-    if (cp >= 0x2600 && cp <= 0x26FF) return true;
-
-    // Regional Indicators for flags (1F1E0-1F1FF)
-    if (cp >= 0x1F1E0 && cp <= 0x1F1FF) return true;
-
-    // Common standalone emoji
-    switch (cp) {
-        case 0x2B50:  // Star
-        case 0x2B55:  // Circle
-        case 0x2764:  // Red heart
-        case 0x2763:  // Heart exclamation
-        case 0x2665:  // Heart suit
-        case 0x2666:  // Diamond suit
-        case 0x2660:  // Spade suit
-        case 0x2663:  // Club suit
-        case 0x270A:  // Raised fist
-        case 0x270B:  // Raised hand
-        case 0x270C:  // Victory hand
-        case 0x270D:  // Writing hand
-        case 0x2728:  // Sparkles
-        case 0x2744:  // Snowflake
-        case 0x274C:  // Cross mark
-        case 0x274E:  // Cross mark negative
-        case 0x2753:  // Question ornament
-        case 0x2754:  // White question
-        case 0x2755:  // White exclamation
-        case 0x2757:  // Exclamation mark
-        case 0x203C:  // Double exclamation
-        case 0x2049:  // Exclamation question
-        case 0x00A9:  // Copyright
-        case 0x00AE:  // Registered
-        case 0x2122:  // Trademark
-            return true;
+        const uint32_t properties = scalar.properties;
+        has_emoji |=
+            (properties & SALTS_UNICODE_PROPERTY_EMOJI) != 0u;
+        has_default_emoji |=
+            (properties & SALTS_UNICODE_PROPERTY_EMOJI_PRESENTATION) != 0u;
+        has_extended_pictographic |=
+            (properties & SALTS_UNICODE_PROPERTY_EXTENDED_PICTOGRAPHIC) != 0u;
+        has_modifier |=
+            (properties & SALTS_UNICODE_PROPERTY_EMOJI_MODIFIER) != 0u;
+        has_text_selector |= scalar.value == 0xFE0Eu;
+        has_emoji_selector |= scalar.value == 0xFE0Fu;
+        has_keycap |= scalar.value == 0x20E3u;
     }
 
-    return false;
+    if (has_text_selector) {
+        return false;
+    }
+    return has_default_emoji || has_extended_pictographic || has_modifier ||
+           (has_emoji && (has_emoji_selector || has_keycap));
+}
+
+void append_segment(std::vector<TextSegment>& segments,
+                    TextSegmentType type,
+                    const char* bytes,
+                    size_t length) {
+    if (length == 0u) return;
+    if (!segments.empty() && segments.back().type == type) {
+        segments.back().text.append(bytes, length);
+        return;
+    }
+
+    TextSegment segment;
+    segment.text.assign(bytes, length);
+    segment.type = type;
+    segment.width = 0.0f;
+    segments.push_back(std::move(segment));
+}
+
+} // namespace
+
+bool is_emoji(uint32_t cp) {
+    return (unicode_properties(cp) & SALTS_UNICODE_PROPERTY_EMOJI) != 0u;
 }
 
 bool is_emoji_modifier(uint32_t cp) {
-    // Skin tone modifiers (1F3FB-1F3FF)
-    if (cp >= 0x1F3FB && cp <= 0x1F3FF) return true;
-
-    // Variation selectors
-    if (cp == 0xFE0E || cp == 0xFE0F) return true;
-
-    // Zero-width joiner
-    if (cp == 0x200D) return true;
-
-    // Combining enclosing keycap
-    if (cp == 0x20E3) return true;
-
-    return false;
+    const uint32_t properties = unicode_properties(cp);
+    return (properties & (SALTS_UNICODE_PROPERTY_EMOJI_MODIFIER |
+                          SALTS_UNICODE_PROPERTY_EMOJI_COMPONENT)) != 0u;
 }
-
-// ============================================================================
-// Text Segmentation
-// ============================================================================
 
 std::vector<TextSegment> segment_text(const std::string& text) {
     std::vector<TextSegment> segments;
-
     if (text.empty()) return segments;
 
-    TextSegment current;
-    current.type = TextSegmentType::Regular;
-    current.width = 0;
+    size_t cursor = 0u;
+    vstr cluster{};
+    const vstr input = vstr_from_buf(text.data(), text.size());
 
-    size_t pos = 0;
-    while (pos < text.size()) {
-        size_t char_start = pos;
-        uint32_t cp = utf8_next_scalar(text, pos).value;
-
-        // Check if this is an emoji
-        if (is_emoji(cp)) {
-            // Flush accumulated regular text
-            if (!current.text.empty() && current.type == TextSegmentType::Regular) {
-                segments.push_back(current);
-                current.text.clear();
-            }
-
-            // Start emoji segment
-            std::string emoji_str = text.substr(char_start, pos - char_start);
-
-            // Consume any following modifiers (skin tone, ZWJ sequences)
-            while (pos < text.size()) {
-                size_t next_start = pos;
-                uint32_t next_cp = utf8_next_scalar(text, pos).value;
-
-                if (is_emoji_modifier(next_cp)) {
-                    // Include modifier in emoji
-                    emoji_str += text.substr(next_start, pos - next_start);
-
-                    // If ZWJ, also include the next emoji
-                    if (next_cp == 0x200D && pos < text.size()) {
-                        size_t emoji_start = pos;
-                        uint32_t emoji_cp = utf8_next_scalar(text, pos).value;
-                        if (is_emoji(emoji_cp) || is_emoji_modifier(emoji_cp)) {
-                            emoji_str += text.substr(emoji_start, pos - emoji_start);
-                        } else {
-                            pos = emoji_start; // Back up
-                            break;
-                        }
-                    }
-                } else if (is_emoji(next_cp)) {
-                    // Another emoji right after (might be flag sequence)
-                    // Check if previous was regional indicator
-                    if (cp >= 0x1F1E0 && cp <= 0x1F1FF &&
-                        next_cp >= 0x1F1E0 && next_cp <= 0x1F1FF) {
-                        // Flag sequence - include second regional indicator
-                        emoji_str += text.substr(next_start, pos - next_start);
-                        break;
-                    } else {
-                        // Not a sequence, back up
-                        pos = next_start;
-                        break;
-                    }
-                } else {
-                    // Not a modifier or emoji, back up
-                    pos = next_start;
-                    break;
-                }
-            }
-
-            // Add emoji segment
-            TextSegment emoji_seg;
-            emoji_seg.text = emoji_str;
-            emoji_seg.type = TextSegmentType::Emoji;
-            emoji_seg.width = 0;
-            segments.push_back(emoji_seg);
-
-        } else {
-            // Regular character
-            if (current.type != TextSegmentType::Regular && !current.text.empty()) {
-                segments.push_back(current);
-                current.text.clear();
-            }
-            current.type = TextSegmentType::Regular;
-            current.text += text.substr(char_start, pos - char_start);
+    while (cursor < text.size()) {
+        const size_t start = cursor;
+        const salts_unicode_status status =
+            salts_unicode_grapheme_next(input, &cursor, &cluster);
+        if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+            throw std::invalid_argument(
+                "invalid UTF-8 at byte offset " + std::to_string(start));
         }
-    }
+        if (status != SALTS_UNICODE_OK || cursor <= start) {
+            throw std::runtime_error(
+                "Salts::Unicode failed to segment FlexUI text");
+        }
 
-    // Flush remaining text
-    if (!current.text.empty()) {
-        segments.push_back(current);
+        const TextSegmentType type =
+            grapheme_uses_emoji_presentation(cluster)
+                ? TextSegmentType::Emoji
+                : TextSegmentType::Regular;
+        append_segment(segments, type, text.data() + start, cursor - start);
     }
 
     return segments;
 }
 
 bool has_emoji(const std::string& text) {
-    size_t pos = 0;
     bool found = false;
-    while (pos < text.size()) {
-        const uint32_t cp = utf8_next_scalar(text, pos).value;
-        // A positive match must not hide malformed UTF-8 later in the input.
-        if (is_emoji(cp)) found = true;
+    for (const auto& segment : segment_text(text)) {
+        if (segment.type == TextSegmentType::Emoji) {
+            found = true;
+        }
     }
     return found;
 }

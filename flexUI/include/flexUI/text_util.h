@@ -1,8 +1,8 @@
 /*
  * flexUI - Text Utilities
  *
- * Provides emoji detection and text segmentation for proper rendering
- * of mixed text (regular characters + emoji) with font fallback.
+ * Provides strict UTF-8 utilities and grapheme-aware rendering segmentation.
+ * Unicode facts and boundaries come from Salts::Unicode; FlexUI owns font policy.
  */
 
 #ifndef FLEXUI_TEXT_UTIL_H
@@ -63,12 +63,12 @@ Utf8Scalar utf8_next_scalar(const std::string& text, size_t& cursor);
 size_t utf8_scalar_count(const std::string& text);
 
 /**
- * Check if a code point is an emoji
+ * Query the Unicode 17 Emoji property for one scalar.
  */
 bool is_emoji(uint32_t codepoint);
 
 /**
- * Check if a code point is an emoji modifier or ZWJ
+ * Query whether a scalar is an Emoji_Modifier or Emoji_Component.
  */
 bool is_emoji_modifier(uint32_t codepoint);
 
@@ -77,7 +77,7 @@ bool is_emoji_modifier(uint32_t codepoint);
 // ============================================================================
 
 /**
- * Segment text into runs of regular text and emoji
+ * Segment text into grapheme-preserving runs of regular and emoji presentation.
  *
  * Example:
  *   "Hello 👋 World 🌍" -> [

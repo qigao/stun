@@ -1,4 +1,4 @@
-#include <tinytest.h>
+#include <tinytest.hpp>
 #undef group
 #include "test_support.h"
 
@@ -216,7 +216,7 @@ float textarea_expected_width(const Element& elem, const std::string& text) {
     if (has_previous_glyph) {
       width += std::max(style->letter_spacing, 0.0f);
     }
-    if (is_emoji(cp)) {
+    if (has_emoji(text.substr(start, byte_pos - start))) {
       width += metrics.font_size;
     } else {
       width += approximate_text_width(
@@ -256,7 +256,7 @@ float input_expected_width(const Element& elem, const std::string& text) {
     if (has_previous_glyph) {
       width += std::max(style->letter_spacing, 0.0f);
     }
-    if (is_emoji(cp)) {
+    if (has_emoji(text.substr(start, byte_pos - start))) {
       width += metrics.font_size;
     } else {
       width += approximate_text_width(

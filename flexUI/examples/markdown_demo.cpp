@@ -16,7 +16,7 @@ using namespace flexUI;
 const char* DEMO_MARKDOWN = 
 "# flexUI Markdown Renderer\n"
 "\n"
-"This is a demo of the **MarkdownWidget** implemented using [MD4C](https://github.com/mity/md4c).\n"
+"This **MarkdownWidget** uses the canonical Stun C11 RichDoc parser.\n"
 "\n"
 "## Features:\n"
 "- **Fast**: Event-driven parsing.\n"
