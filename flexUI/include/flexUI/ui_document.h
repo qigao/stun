@@ -92,6 +92,7 @@ enum class UiDocumentErrorCode {
   UnknownElementTag,
   WidgetFactoryFailed,
   InvalidUtf8,
+  RequiredElementId,
 };
 
 struct UiDocumentError {

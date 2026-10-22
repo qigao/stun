@@ -32,14 +32,20 @@ jobs:
         run: |
           set -euo pipefail
           resolve_release() {
-            local name="$1" repo="$2" tag_pattern="${3:-^}" release sha
-            release="$(gh api "repos/$repo/releases?per_page=30" --paginate --slurp | \
-              jq -r --arg pattern "$tag_pattern" \
-                '[.[][] | select(.draft == false and (.tag_name | test($pattern)))] | max_by(.published_at).tag_name')"
-            if [[ -z "$release" || "$release" == null ]]; then
-              echo "No published SDK release matching $tag_pattern found for $repo" >&2
-              return 1
-            fi
+            local name="$1" repo="$2" tag_pattern="${3:-^}" release sha attempt
+            for attempt in 1 2 3; do
+              release="$(gh api "repos/$repo/releases?per_page=30&page=1" --paginate --slurp | \
+                jq -r --arg pattern "$tag_pattern" \
+                  '[.[][] | select(.draft == false and (.tag_name | test($pattern)))] | max_by(.published_at).tag_name')"
+              if [[ -n "$release" && "$release" != null ]]; then
+                break
+              fi
+              echo "No published SDK release matching $tag_pattern for $repo (attempt $attempt/3)" >&2
+              if [[ "$attempt" == 3 ]]; then
+                return 1
+              fi
+              sleep 5
+            done
             sha="$(gh api "repos/$repo/commits/$release" --jq .sha)"
             if [[ -z "$sha" || "$sha" == null ]]; then
               echo "Cannot resolve SDK release commit for $repo/$release" >&2

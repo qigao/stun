@@ -49,15 +49,15 @@ UiDocumentError validate_node_fields(
     const std::string &tag, const std::string &id,
     const Properties &properties, const UiDocumentLimits &limits,
     std::unordered_set<std::string> &ids) {
-  if (tag.empty() || id.empty()) {
+  if (tag.empty()) {
     return make_error(UiDocumentErrorCode::InvalidNode,
-                      "UI nodes require a non-empty tag and id");
+                      "UI nodes require a non-empty tag");
   }
   if (tag.size() > limits.max_string_bytes || id.size() > limits.max_string_bytes) {
     return make_error(UiDocumentErrorCode::StringLimitExceeded,
                       "UI node tag or id exceeds the string limit");
   }
-  if (!ids.insert(id).second) {
+  if (!id.empty() && !ids.insert(id).second) {
     return make_error(UiDocumentErrorCode::DuplicateElementId,
                       "duplicate UI element id: " + id);
   }
@@ -247,6 +247,11 @@ UiDocumentError lower_event_bindings(const UiNodeDefinition &node,
     const auto span_it = node.property_spans.find(name);
     const SourceSpan span =
         span_it == node.property_spans.end() ? SourceSpan{} : span_it->second;
+    if (node.id.empty()) {
+      return make_error(UiDocumentErrorCode::RequiredElementId,
+                        "UI event bindings require an explicit element id",
+                        span.line, span.column);
+    }
     UiEventKind kind;
     if (!resolve_event_kind(std::string_view(name).substr(3), kind)) {
       return make_error(UiDocumentErrorCode::UnknownEvent,
@@ -389,6 +394,12 @@ UiDocumentError lower_bindings(const UiNodeDefinition &node,
                         span.line, span.column);
     }
 
+    if (node.id.empty()) {
+      return make_error(UiDocumentErrorCode::RequiredElementId,
+                        "UI bindings require an explicit element id",
+                        span.line, span.column);
+    }
+
     const std::string target_name = name.substr(5);
     LoweredBinding lowered;
     lowered.source_property = name;
@@ -497,7 +508,7 @@ UiDocumentError validate_target(Box &box, const UiDocumentDefinition &definition
   while (!pending.empty()) {
     const UiNodeDefinition *node = pending.back();
     pending.pop_back();
-    if (box.get_by_id(node->id)) {
+    if (!node->id.empty() && box.get_by_id(node->id)) {
       return make_error(UiDocumentErrorCode::ElementIdConflict,
                         "Box already contains element id: " + node->id);
     }
@@ -610,7 +621,9 @@ Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree,
 
   auto element = std::make_unique<Element>();
   element->set_tag(definition.tag);
-  element->set_element_id(definition.id);
+  if (!definition.id.empty()) {
+    element->set_element_id(definition.id);
+  }
   if (widget) {
     element->widget = widget.get();
     element->focusable = true;
@@ -618,7 +631,9 @@ Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree,
   apply_properties(*element, definition, include_event_attributes);
 
   Element *raw = element.get();
-  tree.elements_by_id.emplace(definition.id, raw);
+  if (!definition.id.empty()) {
+    tree.elements_by_id.emplace(definition.id, raw);
+  }
   tree.elements.push_back(std::move(element));
   if (widget) {
     tree.widgets.push_back({raw, std::move(widget)});

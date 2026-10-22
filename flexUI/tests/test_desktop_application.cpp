@@ -250,6 +250,34 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_within(save->style_.width, 123.0F, 0.001F);
   }
 
+  it("publishes anonymous structural nodes without public handles") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(R"(
+      <ui name="Anonymous">
+        <main class="page">
+          <div class="panel">
+            <label id="title" text="Settings"/>
+          </div>
+        </main>
+      </ui>
+    )");
+
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *root = built.application->box().root();
+    auto *title = built.application->box().get_by_id("title");
+    check_not_null(root);
+    check_not_null(title);
+    check(root->id().empty());
+    check_false(static_cast<bool>(built.application->box().handle_for(*root)));
+    check_null(built.application->box().get_by_id(""));
+    check(static_cast<bool>(built.application->box().handle_for(*title)));
+  }
+
   it("rejects strict CSS diagnostics before publishing an application") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
     builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>")
@@ -1495,5 +1523,31 @@ spec("FlexUI schema rejection preserves the active application") {
     check_null(active_box->get_by_id("first"));
     check_equal(built.application->sources().ui, active_source);
     check(built.application->state() == flexUI::DesktopApplicationState::Ready);
+  }
+}
+
+
+spec("FlexUI anonymous application reload keeps named state transactional") {
+  it("keeps an anonymous root and a named handle when a replacement lacks a binding id") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Stable\"><main><label id=\"title\" text=\"Stable\"/></main></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto *active_box = &built.application->box();
+    auto *active_root = active_box->root();
+    auto *title = active_box->get_by_id("title");
+    const auto handle = active_box->handle_for(*title);
+    const auto source = built.application->sources().ui;
+    const auto failed = built.application->reload({
+      "<ui name=\"Replacement\" xmlns:bind=\"urn:flexui:binding\"><main><label bind:text=\"$title\"/></main></ui>", "", "", "missing-binding-id"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::RequiredElementId);
+    check(failed.error.ui_error.line > 0);
+    check_equal(&built.application->box(), active_box);
+    check_equal(active_box->root(), active_root);
+    check_equal(active_box->resolve_handle(handle), title);
+    check_null(active_box->get_by_id(""));
+    check_equal(built.application->sources().ui, source);
   }
 }

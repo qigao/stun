@@ -41,6 +41,7 @@ This profile excludes window/GPU/Mesa, native plugin hosts and TurboScript JIT.
 Existing ScriptModuleFactory fixtures exercise the real controller/application
 boundary, but do not qualify a published TurboScript runtime or installed editor
 (#31). Content-model checks cover registered tags, children and declared text;
-complete property/event/binding schemas, anonymous nodes and natural XML text
-remain separate #16 work. The no-registry instantiation overload remains an
+complete property/event/binding schemas, stable internal reconciliation identity
+and natural XML text remain separate #16 work. Anonymous nodes stay outside
+the named index; event and binding targets require an explicit id. The no-registry instantiation overload remains an
 explicit structural compatibility path.
