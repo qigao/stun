@@ -1,0 +1,428 @@
+name: UI C11 Reflection Contract
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths:
+      - 'shared/markdown/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/ui-core-c11.yml'
+      - '.github/scripts/ci-affected.sh'
+  push:
+    branches: [master]
+    paths:
+      - 'shared/markdown/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/ui-core-c11.yml'
+      - '.github/scripts/ci-affected.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: C11 Markdown change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'shared/markdown/*' 'CMakeLists.txt' \
+            '.github/workflows/ui-core-c11.yml' \
+            '.github/scripts/ci-affected.sh'
+
+  sdk-releases:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
+  c11-headers:
+    needs: sdk-releases
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Stun head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout canonical released Salts headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
+          path: .ci/salts
+          persist-credentials: false
+
+      - name: Strict C11 source and reflection compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c11 -Wall -Wextra -Wpedantic -Werror
+            -Ishared/markdown/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+          )
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/ui_core.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/markdown_c11.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/src/markdown_html.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/ui_core_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_c11_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_html_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_html_dump.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_indented_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_c11_dump.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_golden_test.c
+          # Fast failure for the conformance tests added under #181: the
+          # complete installed-SDK ASan/UBSan runner remains independently
+          # mandatory, but malformed C11 fixtures must fail this short gate.
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_containers_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_quote_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_nested_quote_test.c
+          cc "${common[@]}" -fsyntax-only shared/markdown/tests/markdown_quoted_list_test.c
+
+      - name: Verify clean source tree
+        shell: bash
+        run: git diff --exit-code
+
+
+  c11-macos-windows-headers:
+    name: C11 SDK compile / ${{ matrix.os }}
+    needs: sdk-releases
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022]
+    steps:
+      - name: Checkout exact Stun candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout released Salts 2.3 headers
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
+          path: .ci/salts
+          persist-credentials: false
+
+      - name: Validate C11 compiler and published SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang --version
+          clang++ --version
+          test -d .ci/salts/cmeta/include
+
+      - name: Compile sole C11 parser/renderer and public consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          common=(
+            -std=c11 -Wall -Wextra -Wpedantic -Werror
+            -Ishared/markdown/include
+            -isystem .ci/salts/cmeta/include
+            -isystem .ci/salts/unicode/include
+            -isystem .ci/salts/utils/include
+            -isystem .ci/salts/utils/parser
+            -isystem .ci/salts/platform/include
+            -isystem .ci/salts/concurrency/include
+          )
+          files=(
+            shared/markdown/src/ui_core.c
+            shared/markdown/src/markdown_c11.c
+            shared/markdown/src/markdown_html.c
+            shared/markdown/tests/markdown_c11_test.c
+            shared/markdown/tests/markdown_html_test.c
+            shared/markdown/tests/markdown_containers_test.c
+            shared/markdown/tests/markdown_quote_test.c
+            shared/markdown/tests/markdown_nested_quote_test.c
+            shared/markdown/tests/markdown_quoted_list_test.c
+          )
+          for file in "${files[@]}"; do
+            clang "${common[@]}" -fsyntax-only "$file"
+          done
+          # Separate C++17 consumer checks exported C11 declarations and
+          # signatures. No old C++ Markdown parser or fallback is used.
+          printf '%s\n' \
+            '#include <stun/markdown_c11.h>' \
+            '#include <type_traits>' \
+            'static_assert(std::is_pointer<stun_md_document*>::value, "C11 document pointer");' \
+            'void consume(const char* b, size_t n) {' \
+            '  stun_md_document* doc = nullptr;' \
+            '  (void)stun_md_parse(b, n, 32u, n + 1u, &doc);' \
+            '  stun_md_document_destroy(doc);' \
+            '}' > c11_public_consumer.cpp
+          clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+            -Ishared/markdown/include \
+            -isystem .ci/salts/cmeta/include \
+            -isystem .ci/salts/unicode/include \
+            -isystem .ci/salts/utils/include \
+            -isystem .ci/salts/utils/parser \
+            -isystem .ci/salts/platform/include \
+            -isystem .ci/salts/concurrency/include \
+            -fsyntax-only c11_public_consumer.cpp
+          rm c11_public_consumer.cpp
+          git diff --exit-code
+
+
+  c11-windows-released-sdk-runtime:
+    name: C11 native runtime / Windows x64 released Salts
+    needs: sdk-releases
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Stun candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Restore immutable tagged Salts.Native release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALTS_TAG: ${{ needs.sdk-releases.outputs.salts_release }}
+          SALTS_COMMIT: ${{ needs.sdk-releases.outputs.salts_sha }}
+        run: |
+          set -euo pipefail
+          version="${SALTS_TAG#v}"
+          test "$SALTS_TAG" != "$version"
+          package="Salts.Native.$version.nupkg"
+          mkdir -p build/salts-native-release
+          gh release download "$SALTS_TAG" --repo qigao/salts \
+            --pattern "$package" --pattern "SHA256SUMS" \
+            --dir build/salts-native-release
+          python - <<'PY'
+          import hashlib, os, pathlib, zipfile
+          tag = os.environ["SALTS_TAG"]
+          version = tag[1:]
+          path = pathlib.Path("build/salts-native-release") / ("Salts.Native." + version + ".nupkg")
+          out = pathlib.Path("build/salts-native-release")
+          lines = (out / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+          assert len(lines) == 1, "expected exact one tagged release checksum"
+          wanted, entry = lines[0].strip().split(maxsplit=1)
+          assert len(wanted) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in wanted)
+          # The publisher hashes dist/<package> before publishing; GitHub
+          # downloads the asset by basename. Never bypass the actual digest.
+          assert pathlib.PurePosixPath(entry.lstrip("*")).name == path.name
+          with path.open("rb") as stream:
+              observed = hashlib.file_digest(stream, "sha256").hexdigest()
+          assert observed.lower() == wanted.lower(), "tagged package SHA256 mismatch"
+          with zipfile.ZipFile(path) as package:
+              members = [s for s in package.namelist() if s.startswith("sdk/windows-x64/")]
+              assert members and all(".." not in pathlib.PurePosixPath(p).parts for p in members)
+              required = "sdk/windows-x64/salts-sdk-manifest.txt"
+              assert required in members, "tagged package missing windows-x64 SDK"
+              manifest = dict(line.split("=", 1) for line in
+                  package.read(required).decode("utf-8-sig").splitlines() if "=" in line)
+              assert manifest["version"] == version
+              assert manifest["commit"] == os.environ["SALTS_COMMIT"]
+              assert manifest["profile"] == "release"
+              assert any(p.endswith("/lib/cmake/Salts/SaltsConfig.cmake") for p in members)
+              assert any(p.endswith("/include/unicode/salts_unicode.h") for p in members)
+              package.extractall(out, members)
+          print("Accepted tagged Release SDK Windows x64 with exact provenance")
+          PY
+
+      - name: Build native Stun C11 parser against installed Salts SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/windows-x64"
+          test -d "$sdk/lib/cmake/Salts"
+          cmake -S shared/markdown -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
+            -DBUILD_TESTING=ON \
+            "-DCMAKE_PREFIX_PATH=$(cygpath -w "$sdk")" \
+            "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          # Standalone Stun::UICore has 20 CTests. Build all genuine native
+          # C11 targets, not only the seven earlier smoke tests. Tango is
+          # intentionally absent: no second Markdown parser or fallback.
+          cmake --build build/ui-core-windows --config Release --parallel 2
+
+      - name: Execute native parser ownership and SAFE HTML tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/windows-x64"
+          export PATH="$sdk/bin:$PATH"
+          ctest --test-dir build/ui-core-windows -C Release \
+            -R '^(stun_ui_core_test|stun_markdown_[a-z0-9_]+_test)$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$(cygpath -w "$PWD/build/windows-native-c11-results.xml")" \
+            2>&1 | tee build/windows-native-c11.log
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = list(ET.parse("build/windows-native-c11-results.xml").getroot().iter("testcase"))
+          expected = {
+              "stun_ui_core_test",
+              "stun_markdown_c11_test",
+              "stun_markdown_entities_test",
+              "stun_markdown_link_target_test",
+              "stun_markdown_uri_policy_test",
+              "stun_markdown_reference_test",
+              "stun_markdown_reference_multiline_test",
+              "stun_markdown_paragraph_inline_test",
+              "stun_markdown_break_semantics_test",
+              "stun_markdown_image_test",
+              "stun_markdown_container_reference_test",
+              "stun_markdown_raw_html_policy_test",
+              "stun_markdown_golden_test",
+              "stun_markdown_html_test",
+              "stun_markdown_indented_test",
+              "stun_markdown_containers_test",
+              "stun_markdown_quote_test",
+              "stun_markdown_nested_quote_test",
+              "stun_markdown_quoted_list_test",
+              "stun_markdown_unicode17_candidate_test"
+          }
+          assert len(expected) == 20
+          assert len(cases) == 20, (len(cases), [c.attrib['name'] for c in cases])
+          assert {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(tag)) for c in cases for tag in
+                         ("failure", "error", "skipped"))
+          print("Windows x64 full standalone Stun C11 CTests: 20/20")
+          PY
+
+
+  c11-macos-released-sdk-runtime:
+    name: C11 native runtime / macOS ARM64 released Salts
+    needs: sdk-releases
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Stun candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Restore canonical tagged Salts.Native macOS ARM64 SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SALTS_TAG: ${{ needs.sdk-releases.outputs.salts_release }}
+          SALTS_COMMIT: ${{ needs.sdk-releases.outputs.salts_sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          version="${SALTS_TAG#v}"
+          test "$SALTS_TAG" != "$version"
+          package="Salts.Native.$version.nupkg"
+          mkdir -p build/salts-native-release
+          gh release download "$SALTS_TAG" --repo qigao/salts \
+            --pattern "$package" --pattern SHA256SUMS \
+            --dir build/salts-native-release
+          python3 - <<'PY'
+          import hashlib, os, pathlib, zipfile
+          version = os.environ["SALTS_TAG"][1:]
+          root = pathlib.Path("build/salts-native-release")
+          pkg = root / ("Salts.Native." + version + ".nupkg")
+          lines = (root / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+          assert len(lines) == 1
+          wanted, entry = lines[0].strip().split(maxsplit=1)
+          assert len(wanted) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in wanted)
+          assert pathlib.PurePosixPath(entry.lstrip("*")).name == pkg.name
+          with pkg.open("rb") as stream:
+              assert hashlib.file_digest(stream, "sha256").hexdigest().lower() == wanted.lower()
+          with zipfile.ZipFile(pkg) as archive:
+              members = [n for n in archive.namelist() if n.startswith("sdk/macos-arm64/")]
+              assert members and all(".." not in pathlib.PurePosixPath(n).parts for n in members)
+              manifest = "sdk/macos-arm64/salts-sdk-manifest.txt"
+              assert manifest in members
+              fields = dict(line.split("=", 1) for line in
+                  archive.read(manifest).decode("utf-8-sig").splitlines() if "=" in line)
+              assert fields["version"] == version
+              assert fields["commit"] == os.environ["SALTS_COMMIT"]
+              assert fields["profile"] == "release"
+              assert any(n.endswith("/lib/cmake/Salts/SaltsConfig.cmake") for n in members)
+              assert any(n.endswith("/include/unicode/salts_unicode.h") for n in members)
+              archive.extractall(root, members)
+          print("Validated release-tagged macOS ARM64 Salts SDK and SHA256")
+          PY
+
+      - name: Build native C11 against installed macOS Salts SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
+          test -d "$sdk/lib/cmake/Salts"
+          cmake -S shared/markdown -B build/ui-core-macos -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          # Build all 20 native C11 conformance tests against immutable
+          # published macos-arm64 Salts SDK. No Tango dependency.
+          cmake --build build/ui-core-macos --parallel 2
+
+      - name: Execute real macOS parser/HTML/ownership conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
+          export DYLD_LIBRARY_PATH="$sdk/lib:$sdk/bin:${DYLD_LIBRARY_PATH:-}"
+          ctest --test-dir build/ui-core-macos -C Release \
+            -R '^(stun_ui_core_test|stun_markdown_[a-z0-9_]+_test)$' \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit "$PWD/build/macos-native-c11-results.xml" \
+            2>&1 | tee build/macos-native-c11.log
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          cases = list(ET.parse("build/macos-native-c11-results.xml").getroot().iter("testcase"))
+          expected = {
+              "stun_ui_core_test",
+              "stun_markdown_c11_test",
+              "stun_markdown_entities_test",
+              "stun_markdown_link_target_test",
+              "stun_markdown_uri_policy_test",
+              "stun_markdown_reference_test",
+              "stun_markdown_reference_multiline_test",
+              "stun_markdown_paragraph_inline_test",
+              "stun_markdown_break_semantics_test",
+              "stun_markdown_image_test",
+              "stun_markdown_container_reference_test",
+              "stun_markdown_raw_html_policy_test",
+              "stun_markdown_golden_test",
+              "stun_markdown_html_test",
+              "stun_markdown_indented_test",
+              "stun_markdown_containers_test",
+              "stun_markdown_quote_test",
+              "stun_markdown_nested_quote_test",
+              "stun_markdown_quoted_list_test",
+              "stun_markdown_unicode17_candidate_test"
+          }
+          assert len(expected) == 20
+          assert len(cases) == 20, (len(cases), [c.attrib['name'] for c in cases])
+          assert {c.attrib["name"] for c in cases} == expected
+          assert not any(list(c.iter(t)) for c in cases for t in
+                         ("failure", "error", "skipped"))
+          print("macOS ARM64 full standalone Stun C11 CTests: 20/20")
+          PY

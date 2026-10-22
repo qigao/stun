@@ -2,16 +2,41 @@ name: gCanvas Android runtime
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
-      - "vendor/gCanvas/**"
+      - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-android-runtime.yml"
+      - ".github/scripts/ci-affected.sh"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Component change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-android-runtime.yml' '.github/scripts/ci-affected.sh'
+
   android-surface-lifecycle:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -49,8 +74,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gradle -p vendor/gCanvas/tests/android --no-daemon :app:assembleDebug
-          test -f vendor/gCanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
+          gradle -p shared/gcanvas/tests/android --no-daemon :app:assembleDebug
+          test -f shared/gcanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Enable KVM
         shell: bash
@@ -72,4 +97,4 @@ jobs:
             -no-snapshot-save -no-window -gpu swiftshader_indirect
             -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: bash vendor/gCanvas/tests/android/run-emulator-lifecycle.sh
+          script: bash shared/gcanvas/tests/android/run-emulator-lifecycle.sh

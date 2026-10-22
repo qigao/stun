@@ -6,20 +6,28 @@
  * behavior without depending on backend-specific pixels.
  */
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+// COM declares Enum(); parse it before CMeta's declaration macros are visible.
+#include <windows.h>
+#include <d2d1.h>
+#include <d2d1helper.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+#endif
+
 #include "flex.h"
 #if defined(FLEX_HAS_OPENGL)
 #include "backends/opengl/init.h"
 #include <glad/glad.h>
 #endif
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
 #include "backends/d2d/init.h"
 #endif
 #include "backends/tui/init.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 #include "test_render_trace.h"
 #include "tui.h"
 
@@ -29,13 +37,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#ifdef _WIN32
-#include <d2d1.h>
-#include <d2d1helper.h>
-#include <wincodec.h>
-#include <wrl/client.h>
-#endif
 
 using namespace flex;
 using namespace flex::test_support;
@@ -1071,13 +1072,45 @@ void check_d2d_shadow_contract() {
 } // namespace
 
 suite("flex::standard") {
+    group("animation metadata admission") {
+        it("validates DSL keyframes against canonical property value types") {
+            struct Case {
+                const char* target;
+                const char* valid_value;
+                const char* invalid_value;
+                const char* kind;
+            };
+            const Case cases[] = {
+                {"#marker/x", "10", "\"wrong\"", "scalar"},
+                {"#label/content", "\"ready\"", "5", "string"},
+                {"#marker/fill", "#3366ff", "5", "color"},
+                {"#marker/position", "vec2(10, 20)", "5", "vec2"},
+            };
+            for (const auto& item : cases) {
+                const auto source = [&](const char* value) {
+                    return std::string(standard_scene_source()) +
+                        "\nanim \"metadataAdmission\" { duration: 1 track \"" +
+                        item.target + "\" { keyframe 0 -> " + value + " } }\n";
+                };
+                auto accepted = Definition::load(source(item.valid_value).c_str());
+                check_not_null(accepted.get());
+                check_false(accepted->has_error());
+                auto rejected = Definition::load(source(item.invalid_value).c_str());
+                check_not_null(rejected.get());
+                check_true(rejected->has_error());
+                check_true(std::string(rejected->error_message()).find(
+                    std::string("expects ") + item.kind + " keyframes") !=
+                    std::string::npos);
+            }
+        }
+    }
     group("render trace") {
         it("matches the canonical runtime-built scene") {
             ArenaAllocator arena(8192);
             auto scene = build_standard_scene(arena);
 
             auto trace = render_trace(scene);
-            check_eq(trace, expected_standard_trace());
+            check_eq_container(trace, expected_standard_trace());
         }
 
         it("matches the canonical trace after DSL lowering") {
@@ -1087,7 +1120,7 @@ suite("flex::standard") {
             }
 
             auto trace = render_trace(definition->scene());
-            check_eq(trace, expected_standard_trace());
+            check_eq_container(trace, expected_standard_trace());
         }
     }
 
@@ -1097,7 +1130,7 @@ suite("flex::standard") {
             auto scene = build_clip_scene(arena);
 
             auto trace = render_trace(scene);
-            check_eq(trace, expected_clip_trace());
+            check_eq_container(trace, expected_clip_trace());
         }
     }
 
@@ -1107,7 +1140,7 @@ suite("flex::standard") {
             auto scene = build_text_opacity_scene(arena);
 
             auto trace = render_trace(scene);
-            check_eq(trace, expected_text_opacity_trace());
+            check_eq_container(trace, expected_text_opacity_trace());
         }
     }
 
@@ -1130,10 +1163,10 @@ suite("flex::standard") {
             svg->set_shadow(shadow);
             svg->render(renderer);
 
-            check_size_eq(renderer.count("set_shadow"), std::size_t{2});
-            check_size_eq(renderer.count("clear_shadow"), std::size_t{2});
-            check_size_eq(renderer.count("draw_image"), std::size_t{1});
-            check_size_eq(renderer.count("draw_svg_data"), std::size_t{1});
+            check_equal(renderer.count("set_shadow"), std::size_t{2});
+            check_equal(renderer.count("clear_shadow"), std::size_t{2});
+            check_equal(renderer.count("draw_image"), std::size_t{1});
+            check_equal(renderer.count("draw_svg_data"), std::size_t{1});
         }
 
         it("renders file-backed svg nodes through draw_svg") {
@@ -1144,7 +1177,7 @@ suite("flex::standard") {
             };
 
             auto trace = render_trace(scene);
-            check_eq(trace, expected);
+            check_eq_container(trace, expected);
         }
 
         it("lowers svg width height and inline data into renderer calls") {
@@ -1154,7 +1187,7 @@ suite("flex::standard") {
             }
 
             auto trace = render_trace(definition->scene());
-            check_eq(trace, expected_svg_trace());
+            check_eq_container(trace, expected_svg_trace());
         }
     }
 
@@ -1183,13 +1216,13 @@ suite("flex::standard") {
             if (!marker) {
                 return;
             }
-            check_float_eq(marker->x(), 200.0f, 0.001f);
+            check_within(marker->x(), 200.0f, 0.001f);
 
             RecordingRenderer renderer;
             instance->render(renderer);
 
             auto trace = stable_trace(renderer);
-            check_eq(trace, expected_standard_trace(200.0f));
+            check_eq_container(trace, expected_standard_trace(200.0f));
         }
     }
 

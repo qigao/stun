@@ -40,8 +40,8 @@ inline bool is_profile_enabled() {
   return enabled;
 }
 
-inline salts_log_level_t get_log_level() {
-  static salts_log_level_t level = [] {
+inline cmeta_log_level_t get_log_level() {
+  static cmeta_log_level_t level = [] {
     const char* env = std::getenv("FLEX_LOG_LEVEL");
     if (!env) return SALTS_LOG_LEVEL_DEBUG;
     if (env[0] == 'E' || env[0] == 'e') return SALTS_LOG_LEVEL_ERROR;
@@ -402,17 +402,17 @@ inline void init(const char* log_file = nullptr) {
 
         tlog_t* logger = tlog_create(&config);
         if (logger) {
-            salts_console_sink_opts_t copts = {};
+            cmeta_console_sink_opts_t copts = {};
             copts.output = stdout;
             copts.use_colors = 1;
-            tlog_add_sink(logger, salts_sink_console_create(&copts));
+            tlog_add_sink(logger, cmeta_sink_console_create(&copts));
 
             if (log_file) {
-                salts_file_sink_opts_t fopts = {};
+                cmeta_file_sink_opts_t fopts = {};
                 fopts.path = log_file;
                 fopts.max_size = 10 * 1024 * 1024;
                 fopts.max_files = 3;
-                tlog_add_sink(logger, salts_sink_file_create(&fopts));
+                tlog_add_sink(logger, cmeta_sink_file_create(&fopts));
             }
             tlog_set_default(logger);
             initialized = true;

@@ -3,7 +3,7 @@
 #include "flex/core/group.h"
 #include "flex/core/shape.h"
 #include "flex/core/timeline.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <string>
 #include <variant>
@@ -18,7 +18,7 @@ spec("Flex motion path performance") {
     const CubicBezier2D curve({0.0f, 0.0f}, {100.0f, 200.0f}, {200.0f, -100.0f}, {300.0f, 0.0f});
 
     const Vec2 midpoint = curve.position(0.5f);
-    check_float_within_abs(midpoint.x, 150.0f, 0.001f);
+    check_within(midpoint.x, 150.0f, 0.001f);
 
     volatile float sink = 0.0f;
     benchmark_ops("cubic Bezier position and derivative samples", kBatchCount, kSamplesPerBatch) {
@@ -46,13 +46,13 @@ spec("Flex motion path performance") {
     track->add_keyframe(2.0f, Vec2{200.0f, -40.0f});
     track->add_keyframe(3.0f, Vec2{300.0f, 0.0f});
     const AnimationProgram& program = timeline->program();
-    check_size_eq(program.keyframe_count(), 4);
+    check_equal(program.keyframe_count(), 4);
 
     const Vec2 midpoint = std::get<Vec2>(track->sample(1.5f));
-    check_float_within_abs(midpoint.x, 150.0f, 0.001f);
+    check_within(midpoint.x, 150.0f, 0.001f);
     const Vec2 compiled_midpoint = std::get<Vec2>(program.sample(0, 1.5f));
-    check_float_within_abs(compiled_midpoint.x, midpoint.x, 0.001f);
-    check_float_within_abs(compiled_midpoint.y, midpoint.y, 0.001f);
+    check_within(compiled_midpoint.x, midpoint.x, 0.001f);
+    check_within(compiled_midpoint.y, midpoint.y, 0.001f);
 
     volatile float sink = 0.0f;
     benchmark_ops("Catmull-Rom Vec2 samples", kBatchCount, kSamplesPerBatch) {
@@ -89,13 +89,13 @@ spec("Flex motion path performance") {
     track->add_spatial_keyframe(3.0f, Vec2{300.0f, 0.0f},
                                 Vec2{-100.0f, -100.0f}, Vec2{0.0f, 0.0f});
     const AnimationProgram& program = timeline->program();
-    check_size_eq(program.keyframe_count(), 2);
+    check_equal(program.keyframe_count(), 2);
 
     const Vec2 midpoint = std::get<Vec2>(track->sample(1.5f));
-    check_float_within_abs(midpoint.x, 150.0f, 0.001f);
+    check_within(midpoint.x, 150.0f, 0.001f);
     const Vec2 compiled_midpoint = std::get<Vec2>(program.sample(0, 1.5f));
-    check_float_within_abs(compiled_midpoint.x, midpoint.x, 0.001f);
-    check_float_within_abs(compiled_midpoint.y, midpoint.y, 0.001f);
+    check_within(compiled_midpoint.x, midpoint.x, 0.001f);
+    check_within(compiled_midpoint.y, midpoint.y, 0.001f);
 
     volatile float sink = 0.0f;
     benchmark_ops("cubic Bezier Vec2 track samples", kBatchCount,
@@ -139,11 +139,11 @@ spec("Flex motion path performance") {
     }
 
     const AnimationProgram& program = timeline->program();
-    check_size_eq(program.track_count(), kTrackCount);
+    check_equal(program.track_count(), kTrackCount);
 
     std::vector<AnimValue> sampled_values(program.track_count());
     program.sample_all(0.5f, sampled_values.data(), sampled_values.size());
-    check_float_within_abs(std::get<float>(sampled_values.back()), 16.0f,
+    check_within(std::get<float>(sampled_values.back()), 16.0f,
                            0.001f);
 
     volatile float sample_sink = 0.0f;
@@ -159,7 +159,7 @@ spec("Flex motion path performance") {
     check(sample_sink != 0.0f);
 
     timeline->apply(root, 0.5f);
-    check_float_within_abs(child->x(), 16.0f, 0.001f);
+    check_within(child->x(), 16.0f, 0.001f);
 
     volatile float sink = 0.0f;
     benchmark_ops("resolve and apply descendant tracks", kBatchCount,
@@ -220,7 +220,7 @@ spec("Flex motion path performance") {
     player.play();
     player.advance(0.5f);
     player.apply();
-    check_float_within_abs(targets.back()->x(), 16.0f, 0.001f);
+    check_within(targets.back()->x(), 16.0f, 0.001f);
 
     volatile float sink = 0.0f;
     benchmark_ops("advance and apply multi-target player", kBatchCount,

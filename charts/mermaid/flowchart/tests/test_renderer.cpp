@@ -7,7 +7,7 @@
 
 // 引入原有的 JSON 序列化和释放函数
 extern "C" char* flowchart_to_json(FlowchartDiagram* diagram);
-extern "C" void turbo_json_serialize_free(char* str);
+extern "C" void json_serialize_free(char* str);
 
 int main() {
     const char* mermaid_code = 
@@ -24,7 +24,7 @@ int main() {
     char* json = flowchart_to_json(diagram);
     if (json) {
         // std::cout << "Parser Output (JSON):\n" << json << std::endl;
-        turbo_json_serialize_free(json); // 必须用专用的释放函数
+        json_serialize_free(json); // 必须用专用的释放函数
     }
     std::cout << "Parsing successful." << std::endl;
 

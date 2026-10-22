@@ -11,11 +11,11 @@ suite("FlexUI shared CSS semantic values") {
         const auto exponent = parse_css_number_literal("-1.25e+2");
 
         check_true(zero.is_concrete());
-        check_float_eq(zero.value, 0.0f, 0.0001f);
+        check_within(zero.value, 0.0f, 0.0001f);
         check_true(signed_value.is_concrete());
-        check_float_eq(signed_value.value, 0.625f, 0.0001f);
+        check_within(signed_value.value, 0.625f, 0.0001f);
         check_true(exponent.is_concrete());
-        check_float_eq(exponent.value, -125.0f, 0.0001f);
+        check_within(exponent.value, -125.0f, 0.0001f);
     }
 
     it("rejects non-CSS and malformed numeric spellings") {
@@ -45,11 +45,11 @@ suite("FlexUI shared CSS semantic values") {
         const auto collapse = parse_css_visibility_literal("collapse");
 
         check_true(visible.is_concrete());
-        check(visible.value == Visibility::Visible);
+        check(visible.value == flexUI::Visibility::Visible);
         check_true(hidden.is_concrete());
-        check(hidden.value == Visibility::Hidden);
+        check(hidden.value == flexUI::Visibility::Hidden);
         check_true(collapse.is_concrete());
-        check(collapse.value == Visibility::Collapse);
+        check(collapse.value == flexUI::Visibility::Collapse);
 
         check_true(parse_css_visibility_literal("inherit").is_deferred());
         check_true(parse_css_visibility_literal("initial").is_deferred());
@@ -71,18 +71,18 @@ suite("FlexUI shared CSS semantic values") {
             parse_css_color_literal("light-dark(#112233, #ffffff)");
 
         check_true(hex.is_concrete());
-        check_float_eq(hex.value.r, 0.2f, 0.001f);
-        check_float_eq(hex.value.g, 0.4f, 0.001f);
-        check_float_eq(hex.value.b, 0.6f, 0.001f);
+        check_within(hex.value.r, 0.2f, 0.001f);
+        check_within(hex.value.g, 0.4f, 0.001f);
+        check_within(hex.value.b, 0.6f, 0.001f);
 
         check_true(rgb.is_concrete());
-        check_float_eq(rgb.value.r, 1.0f, 0.001f);
-        check_float_eq(rgb.value.b, 128.0f / 255.0f, 0.001f);
-        check_float_eq(rgb.value.a, 0.5f, 0.001f);
+        check_within(rgb.value.r, 1.0f, 0.001f);
+        check_within(rgb.value.b, 128.0f / 255.0f, 0.001f);
+        check_within(rgb.value.a, 0.5f, 0.001f);
 
         check_true(mixed.is_concrete());
         check_true(light.is_concrete());
-        check_float_eq(light.value.r, 0x11 / 255.0f, 0.001f);
+        check_within(light.value.r, 0x11 / 255.0f, 0.001f);
     }
 
     it("parses shared context-independent CSS angles") {
@@ -94,15 +94,15 @@ suite("FlexUI shared CSS semantic values") {
         const auto unitless = parse_css_angle_literal("-45");
 
         check_true(deg.is_concrete());
-        check_float_eq(deg.value, 90.0f, 0.0001f);
+        check_within(deg.value, 90.0f, 0.0001f);
         check_true(rad.is_concrete());
-        check_float_eq(rad.value, 180.0f, 0.001f);
+        check_within(rad.value, 180.0f, 0.001f);
         check_true(turn.is_concrete());
-        check_float_eq(turn.value, 90.0f, 0.0001f);
+        check_within(turn.value, 90.0f, 0.0001f);
         check_true(grad.is_concrete());
-        check_float_eq(grad.value, 90.0f, 0.0001f);
+        check_within(grad.value, 90.0f, 0.0001f);
         check_true(unitless.is_concrete());
-        check_float_eq(unitless.value, -45.0f, 0.0001f);
+        check_within(unitless.value, -45.0f, 0.0001f);
 
         check_true(parse_css_angle_literal("var(--angle)").is_deferred());
         check_true(parse_css_angle_literal("calc(90deg)").is_deferred());
@@ -115,9 +115,9 @@ suite("FlexUI shared CSS semantic values") {
             parse_css_context_independent_length_literal("3.5");
 
         check_true(px.is_concrete());
-        check_float_eq(px.value, 2.0f, 0.0001f);
+        check_within(px.value, 2.0f, 0.0001f);
         check_true(unitless.is_concrete());
-        check_float_eq(unitless.value, 3.5f, 0.0001f);
+        check_within(unitless.value, 3.5f, 0.0001f);
 
         check_true(
             parse_css_context_independent_length_literal("50%").is_deferred());
@@ -153,11 +153,11 @@ suite("FlexUI shared CSS semantic values") {
     }
 
     it("maps fixed border-width keywords without layout context") {
-        check_float_eq(parse_css_border_width_literal("thin").value,
+        check_within(parse_css_border_width_literal("thin").value,
                        1.0f, 0.0001f);
-        check_float_eq(parse_css_border_width_literal("medium").value,
+        check_within(parse_css_border_width_literal("medium").value,
                        3.0f, 0.0001f);
-        check_float_eq(parse_css_border_width_literal("thick").value,
+        check_within(parse_css_border_width_literal("thick").value,
                        5.0f, 0.0001f);
         check_true(parse_css_border_width_literal("2px").is_concrete());
         check_true(parse_css_border_width_literal("1rem").is_deferred());

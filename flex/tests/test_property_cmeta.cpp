@@ -7,6 +7,10 @@
 
 using namespace flex;
 
+const cmeta_type_desc* flex_test_peer_color_type() noexcept;
+const cmeta_type_desc* flex_test_peer_vec2_type() noexcept;
+const cmeta_type_desc* flex_test_peer_string_type() noexcept;
+
 suite("Flex animation CMeta property types") {
     it("publishes canonical semantic descriptors") {
         check_true(cmeta_type_desc_valid(&cmeta_type_color));
@@ -52,5 +56,26 @@ suite("Flex animation CMeta property types") {
 
         check(&peer_color != &cmeta_type_color);
         check_true(cmeta_type_equal(&peer_color, &cmeta_type_color));
+    }
+
+    it("accepts semantic type identities from a separate translation unit") {
+        const auto* color = flex_test_peer_color_type();
+        const auto* vec2 = flex_test_peer_vec2_type();
+        const auto* string = flex_test_peer_string_type();
+
+        check_not_equal(color, &cmeta_type_color);
+        check_not_equal(vec2, &cmeta_type_vec2);
+        check_not_equal(string, &cmeta_type_string);
+        check_true(cmeta_type_equal(color, &cmeta_type_color));
+        check_true(cmeta_type_equal(vec2, &cmeta_type_vec2));
+        check_true(cmeta_type_equal(string, &cmeta_type_string));
+        check_false(cmeta_type_equal(color, vec2));
+    }
+
+    it("keeps semantic identity distinct from native storage layout") {
+        auto wrong_shape = *flex_test_peer_color_type();
+        wrong_shape.size += sizeof(float);
+        check_true(cmeta_type_equal(&wrong_shape, &cmeta_type_color));
+        check_not_equal(wrong_shape.size, cmeta_type_color.size);
     }
 };

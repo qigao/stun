@@ -3,7 +3,7 @@
  * Tests binary serialization, CRC32, and round-trip consistency
  */
 
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <cstdint>
 #include <cstring>
@@ -26,7 +26,7 @@ using namespace flex::binary;
 namespace {
 
 inline void check_close(float actual, float expected, float eps = 0.001f) {
-    check_float_eq(actual, expected, eps);
+    check_within(actual, expected, eps);
 }
 
 struct TempBinaryFile {
@@ -1274,7 +1274,7 @@ scene RuntimeInput {
 
             check(compiler.has_error());
             check(binary.empty());
-            check_str_contains(compiler.error_message(), "runtime var schemas");
+            check_contains(compiler.error_message(), "runtime var schemas");
         }
 
         it("rejects property bindings instead of silently dropping them") {
@@ -1289,7 +1289,7 @@ scene BoundScene {
 
             check(compiler.has_error());
             check(binary.empty());
-            check_str_contains(compiler.error_message(), "property bindings");
+            check_contains(compiler.error_message(), "property bindings");
         }
 
         it("rejects component bindings instead of silently dropping them") {
@@ -1308,7 +1308,7 @@ scene ComponentScene {
 
             check(compiler.has_error());
             check(binary.empty());
-            check_str_contains(compiler.error_message(), "component bindings");
+            check_contains(compiler.error_message(), "component bindings");
         }
 
         it("rejects state machines instead of silently dropping them") {
@@ -1330,7 +1330,7 @@ machine visibility {
 
             check(compiler.has_error());
             check(binary.empty());
-            check_str_contains(compiler.error_message(), "state machines");
+            check_contains(compiler.error_message(), "state machines");
         }
 
         it("rejects asset manifests instead of silently dropping them") {
@@ -1346,7 +1346,7 @@ scene AssetScene {}
 
             check(compiler.has_error());
             check(binary.empty());
-            check_str_contains(compiler.error_message(), "asset manifests");
+            check_contains(compiler.error_message(), "asset manifests");
         }
 
         it("clears stale errors and statistics before each compilation") {
@@ -1384,7 +1384,7 @@ scene Recovered {
 
             check(!compiler.compile_to_file("missing.flex", nullptr));
             check(compiler.has_error());
-            check_str_eq(compiler.error_message(), "Empty output path");
+            check_equal(compiler.error_message(), "Empty output path");
         }
 
         it("collects compilation statistics") {

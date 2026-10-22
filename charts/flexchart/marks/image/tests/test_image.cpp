@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <string>
 #include "chart_component_internal.h"
 #include "flexchart/mark_renderer_registry.h"
 
@@ -35,10 +36,10 @@ spec("flexchart_image") {
             auto renderer = flex::chart::MarkRendererRegistry::instance().create("image");
             renderer->render(mark, records, ctx);
 
-            check_int_eq(overlay->child_count(), 1);
+            check((overlay->child_count()) == (1));
             auto image = dynamic_cast<flex::Image*>(overlay->child_at(0));
             check(image != nullptr);
-            check_string_eq(image->src(), "icon.png");
+            check(std::string(image->src()) == std::string("icon.png"));
             check_float_eq(image->width(), 48.0f, 0.001f);
             check_float_eq(image->height(), 24.0f, 0.001f);
         }

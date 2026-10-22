@@ -16,20 +16,20 @@ spec("flexchart_area_parser") {
             std::string error;
             auto chart = flex::chart::area_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Coverage");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Coverage"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "area");
+            check(std::string(mark->type.c_str()) == std::string("area"));
             check(mark->encodings.size() >= 2);
             std::string x_field, y_field;
             for (auto& enc : mark->encodings) {
                 if (enc->channel == "x") x_field = enc->field;
                 if (enc->channel == "y") y_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "month");
-            check_str_eq(y_field.c_str(), "value");
+            check(std::string(x_field.c_str()) == std::string("month"));
+            check(std::string(y_field.c_str()) == std::string("value"));
         }
 
         it("should parse area chart with data block") {
@@ -49,14 +49,14 @@ spec("flexchart_area_parser") {
             std::string error;
             auto chart = flex::chart::area_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Trends");
+            check(std::string(chart->title.c_str()) == std::string("Trends"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
             check(mark->styles.count("opacity") > 0);
             check(std::get<double>(mark->styles["opacity"]) > 0.59);
             check(mark->styles.count("interpolate") > 0);
-            check_str_eq(std::get<std::string>(mark->styles["interpolate"]).c_str(), "monotone");
+            check(std::string(std::get<std::string>(mark->styles["interpolate"]).c_str()) == std::string("monotone"));
             check(mark->styles.count("stroke-width") > 0);
             check(std::get<double>(mark->styles["stroke-width"]) > 1.9);
         }
@@ -91,7 +91,7 @@ spec("flexchart_area_parser") {
             check(chart != nullptr);
             auto& mark = chart->marks[0];
             check(std::get<double>(mark->styles["opacity"]) > 0.79);
-            check_str_eq(std::get<std::string>(mark->styles["interpolate"]).c_str(), "linear");
+            check(std::string(std::get<std::string>(mark->styles["interpolate"]).c_str()) == std::string("linear"));
             check(std::get<double>(mark->styles["stroke-width"]) > 2.9);
         }
 
@@ -105,7 +105,7 @@ spec("flexchart_area_parser") {
             auto chart = flex::chart::area_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x) * 50");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x) * 50"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
@@ -124,7 +124,7 @@ spec("flexchart_area_parser") {
             auto chart = flex::chart::area_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "metrics.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("metrics.json"));
         }
 
         it("should return nullptr on invalid input") {

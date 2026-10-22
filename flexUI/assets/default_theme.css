@@ -91,3 +91,9 @@
   --input: #334155;
   --ring: #60a5fa;
 }
+
+/* Stun C11 RichDoc TABLE metadata drives cell alignment. No Markdown
+   delimiter inference or second renderer grammar. */
+.md-table .md-td.md-align-left { text-align: left; }
+.md-table .md-td.md-align-center { text-align: center; }
+.md-table .md-td.md-align-right { text-align: right; }

@@ -11,7 +11,7 @@ struct DelimiterInfo;  // forward declaration
 
 class InlineParser {
 public:
-    explicit InlineParser(MemoryPool* pool) : pool_(pool) {}
+    explicit InlineParser(ParseContext* context) : context_(context) {}
     
     Node* transform(const Block& block);
     
@@ -22,9 +22,9 @@ private:
     Node* create_node(NodeType type);
     Node* create_text(std::string_view text);
     
-    MemoryPool* pool_;
+    ParseContext* context_;
 };
 
-Node* blocks_to_ast(const Block& root, MemoryPool* pool);
+Node* blocks_to_ast(const Block& root, ParseContext* context);
 
 } // namespace md

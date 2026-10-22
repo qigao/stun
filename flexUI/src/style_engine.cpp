@@ -777,7 +777,7 @@ static bool apply_compiled_writes(
     const auto& write = writes[i];
     if (!write.property || !write.property->write ||
         !write.value.has_value() ||
-        !cmeta_type_equal(write.value.type, write.property->type) ||
+        !detail::style_property_accepts_type(*write.property, write.value.type) ||
         !compiled_literal_data(write.value)) {
       return false;
     }
@@ -804,8 +804,8 @@ static bool apply_compiled_declaration(const CSSDeclaration& declaration,
   }
   if (!declaration.resolved_property ||
       !declaration.compiled_value.has_value() ||
-      !cmeta_type_equal(declaration.compiled_value.type,
-                        declaration.resolved_property->type)) {
+      !detail::style_property_accepts_type(*declaration.resolved_property,
+                                           declaration.compiled_value.type)) {
     return false;
   }
 
@@ -3520,6 +3520,17 @@ public:
 
   void clear_baseline_styles() {
     baseline_styles_.clear();
+  }
+
+  void forget_element(const Element* element) noexcept {
+    if (!element) return;
+    baseline_styles_.erase(element);
+    container_registrations_.erase(element);
+    if (current_element_ == element) current_element_ = nullptr;
+  }
+
+  size_t tracked_element_count() const noexcept {
+    return baseline_styles_.size();
   }
 
   const std::vector<AnimationKeyframeStep>* keyframes(
@@ -8387,6 +8398,12 @@ bool StyleEngine::uses_pseudo_class(Symbol pseudo) const {
 }
 void StyleEngine::clear() { impl_->clear(); }
 void StyleEngine::clear_baseline_styles() { impl_->clear_baseline_styles(); }
+void StyleEngine::forget_element(const Element* element) noexcept {
+  impl_->forget_element(element);
+}
+size_t StyleEngine::tracked_element_count() const noexcept {
+  return impl_->tracked_element_count();
+}
 
 bool CssLoadResult::has_errors() const {
   return std::any_of(diagnostics.begin(), diagnostics.end(),

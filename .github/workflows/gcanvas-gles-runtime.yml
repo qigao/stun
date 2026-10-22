@@ -2,16 +2,41 @@ name: gCanvas OpenGLES runtime
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
-      - "vendor/gCanvas/**"
+      - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-gles-runtime.yml"
+      - ".github/scripts/ci-affected.sh"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Component change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-gles-runtime.yml' '.github/scripts/ci-affected.sh'
+
   gles-runtime:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -32,21 +57,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(grep -c 'RoundedRectData payload\[128\]' vendor/gCanvas/src/resources.hpp)" -eq 2
-          grep -q '#define GCANVAS_GL_SHADER_BATCH_CAPACITY 16' vendor/gCanvas/src/backends/gl/gl_api.hpp
-          grep -q 'std::to_string(GCANVAS_GL_SHADER_BATCH_CAPACITY)' vendor/gCanvas/src/backends/opengles/gles_shader_source.cpp
-          ! grep -q 'gl_VertexID' vendor/gCanvas/src/resources.hpp
-          grep -q 'layout(location = 0) in vec2 corner;' vendor/gCanvas/src/resources.hpp
-          grep -q 'float shape = 1.0;' vendor/gCanvas/src/resources.hpp
-          grep -q 'line_width > 0. || any(greaterThan(border_radius, vec4(0.)))' vendor/gCanvas/src/resources.hpp
-          ! grep -q 'texture(textures\[index\]' vendor/gCanvas/src/resources.hpp
-          grep -q 'case 9: return texture(textures\[9\], uv);' vendor/gCanvas/src/resources.hpp
+          test "$(grep -c 'RoundedRectData payload\[128\]' shared/gcanvas/src/resources.hpp)" -eq 2
+          grep -q '#define GCANVAS_GL_SHADER_BATCH_CAPACITY 16' shared/gcanvas/src/backends/gl/gl_api.hpp
+          grep -q 'std::to_string(GCANVAS_GL_SHADER_BATCH_CAPACITY)' shared/gcanvas/src/backends/opengles/gles_shader_source.cpp
+          ! grep -q 'gl_VertexID' shared/gcanvas/src/resources.hpp
+          grep -q 'layout(location = 0) in vec2 corner;' shared/gcanvas/src/resources.hpp
+          grep -q 'float shape = 1.0;' shared/gcanvas/src/resources.hpp
+          grep -q 'line_width > 0. || any(greaterThan(border_radius, vec4(0.)))' shared/gcanvas/src/resources.hpp
+          ! grep -q 'texture(textures\[index\]' shared/gcanvas/src/resources.hpp
+          grep -q 'case 9: return texture(textures\[9\], uv);' shared/gcanvas/src/resources.hpp
 
       - name: Configure GLES-only gCanvas
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S vendor/gCanvas -B build/gcanvas-gles -G Ninja \
+          cmake -S shared/gcanvas -B build/gcanvas-gles -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DSTB_INCLUDE_DIRS=/usr/include/stb \

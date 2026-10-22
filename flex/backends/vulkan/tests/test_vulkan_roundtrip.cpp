@@ -1,5 +1,5 @@
 #include "backends/vulkan/init.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -229,13 +229,13 @@ suite("flex::vulkan_backend GPU round-trip") {
     }
     if (setup != SetupResult::ready) {
       info("Vulkan setup failed at %s", fixture.failure_stage);
-      check_int_eq(static_cast<int>(setup), static_cast<int>(SetupResult::ready));
+      check_equal(static_cast<int>(setup), static_cast<int>(SetupResult::ready));
       return;
     }
 
     VkCommandBufferBeginInfo begin_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     const VkResult begin_result = vkBeginCommandBuffer(fixture.command_buffer, &begin_info);
-    check_int_eq(begin_result, VK_SUCCESS);
+    check_equal(begin_result, VK_SUCCESS);
     if (begin_result != VK_SUCCESS) {
       return;
     }
@@ -282,7 +282,7 @@ suite("flex::vulkan_backend GPU round-trip") {
                            &readback_copy);
 
     const VkResult end_result = vkEndCommandBuffer(fixture.command_buffer);
-    check_int_eq(end_result, VK_SUCCESS);
+    check_equal(end_result, VK_SUCCESS);
     if (end_result != VK_SUCCESS) {
       renderer.reset();
       return;
@@ -291,13 +291,13 @@ suite("flex::vulkan_backend GPU round-trip") {
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &fixture.command_buffer;
     const VkResult submit_result = vkQueueSubmit(fixture.queue, 1, &submit_info, VK_NULL_HANDLE);
-    check_int_eq(submit_result, VK_SUCCESS);
+    check_equal(submit_result, VK_SUCCESS);
     if (submit_result != VK_SUCCESS) {
       renderer.reset();
       return;
     }
     const VkResult wait_result = vkQueueWaitIdle(fixture.queue);
-    check_int_eq(wait_result, VK_SUCCESS);
+    check_equal(wait_result, VK_SUCCESS);
     if (wait_result != VK_SUCCESS) {
       renderer.reset();
       return;
@@ -306,7 +306,7 @@ suite("flex::vulkan_backend GPU round-trip") {
     void *mapped = nullptr;
     const VkResult map_result =
         vkMapMemory(fixture.device, fixture.readback_memory, 0, test_buffer_size, 0, &mapped);
-    check_int_eq(map_result, VK_SUCCESS);
+    check_equal(map_result, VK_SUCCESS);
     if (map_result != VK_SUCCESS) {
       renderer.reset();
       return;
@@ -314,10 +314,10 @@ suite("flex::vulkan_backend GPU round-trip") {
     check_not_null(mapped);
     if (mapped) {
       const auto *pixel = static_cast<const std::uint8_t *>(mapped);
-      check_uint_eq(pixel[0], 0u);
-      check_uint_eq(pixel[1], 0u);
-      check_uint_eq(pixel[2], 255u);
-      check_uint_eq(pixel[3], 255u);
+      check_equal(pixel[0], 0u);
+      check_equal(pixel[1], 0u);
+      check_equal(pixel[2], 255u);
+      check_equal(pixel[3], 255u);
       vkUnmapMemory(fixture.device, fixture.readback_memory);
     }
 
