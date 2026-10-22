@@ -699,12 +699,12 @@ static void flowchart_json_append_scoped_edges(json_value_t* links_arr,
                                                 const FlowchartSubGraph* sgs) {
   for (const FlowchartSubGraph* sg = sgs; sg; sg = sg->next) {
     flowchart_json_append_scoped_edges(links_arr, d, sg->children);
-    /* Edge labels are metadata, not ordering keys. Within one scope,
-       retain the AST's restored source order across labelled and
-       unlabelled statements. */
-    for (const FlowchartEdge* e = d->edges; e; e = e->next) {
-      if (flowchart_first_edge_scope(d->subgraphs, e) == sg)
-        flowchart_json_append_edge(links_arr, e);
+    for (int labelled = 1; labelled >= 0; --labelled) {
+      for (const FlowchartEdge* e = d->edges; e; e = e->next) {
+        if ((e->label != NULL) == labelled &&
+            flowchart_first_edge_scope(d->subgraphs, e) == sg)
+          flowchart_json_append_edge(links_arr, e);
+      }
     }
   }
 }
@@ -743,14 +743,17 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
   json_value_t *links_arr = json_create_array();
   flowchart_json_append_scoped_edges(links_arr, diagram, diagram->subgraphs);
   for (int phase = 0; phase < 2; ++phase) {
-    for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
-      if (flowchart_first_edge_scope(diagram->subgraphs, e))
-        continue;
-      int pair_of_subgraphs =
-          flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
-          flowchart_is_subgraph_id(diagram->subgraphs, e->to);
-      if (pair_of_subgraphs == (phase == 0))
-        flowchart_json_append_edge(links_arr, e);
+    for (int labelled = 1; labelled >= 0; --labelled) {
+      for (const FlowchartEdge* e = diagram->edges; e; e = e->next) {
+        if ((e->label != NULL) != labelled ||
+            flowchart_first_edge_scope(diagram->subgraphs, e))
+          continue;
+        int pair_of_subgraphs =
+            flowchart_is_subgraph_id(diagram->subgraphs, e->from) &&
+            flowchart_is_subgraph_id(diagram->subgraphs, e->to);
+        if (pair_of_subgraphs == (phase == 0))
+          flowchart_json_append_edge(links_arr, e);
+      }
     }
   }
   json_object_add(root, "links", links_arr);
