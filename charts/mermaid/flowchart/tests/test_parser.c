@@ -38,6 +38,9 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
     return read_file(path);
 }
 
+/* Historical golden comparator policy deliberately aliases "square" to
+ * "rect" in test fixtures. The links-order-only diagnostic below uses that
+ * same policy; it does not claim raw byte-for-byte JSON equality. */
 static void normalize_json(json_value_t* v) {
     if (!v) return;
     json_type_t type = json_type(v);
@@ -1264,7 +1267,7 @@ spec("flowchart_parser") {
             check_true(flowchart_links_in_order(input, from, to, 3));
         }
 
-        it("keeps linkStyle 1 bound to the second declared labelled edge") {
+        it("keeps linkStyle 1 indexed to the second declared edge in the AST") {
             const char* input =
                 "graph LR\n"
                 "A(( )) -->|step 1| B(( ))\n"
@@ -1274,6 +1277,26 @@ spec("flowchart_parser") {
             static const char* const from[] = { "A", "B", "C" };
             static const char* const to[] = { "B", "C", "D" };
             check_true(flowchart_links_in_order(input, from, to, 3));
+
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            check_true(status == FLOWCHART_PARSE_COMPLETE);
+            if (!diagram) return;
+            const FlowchartLinkStyle* style = diagram->link_styles;
+            const FlowchartEdge* second =
+                diagram->edges ? diagram->edges->next : NULL;
+            int ordinal_ok =
+                style && style->index && strcmp(style->index, "1") == 0 &&
+                style->next == NULL && style->styles && style->styles->key &&
+                strcmp(style->styles->key, "stroke") == 0 &&
+                style->styles->value &&
+                strcmp(style->styles->value, "greenyellow") == 0 &&
+                second && second->from && second->to && second->label &&
+                strcmp(second->from, "B") == 0 &&
+                strcmp(second->to, "C") == 0 &&
+                strcmp(second->label, "step 2") == 0;
+            check_true(ordinal_ok);
+            flowchart_diagram_free(diagram);
         }
 
         it("does not alter numbered linkStyle ordering") {
