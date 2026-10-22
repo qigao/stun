@@ -33,7 +33,7 @@ jobs:
           set -euo pipefail
           resolve_release() {
             local name="$1" repo="$2" tag_pattern="${3:-^}" release sha
-            release="$(gh api "repos/$repo/releases?per_page=100" --paginate --slurp | \
+            release="$(gh api "repos/$repo/releases?per_page=30" --paginate --slurp | \
               jq -r --arg pattern "$tag_pattern" \
                 '[.[][] | select(.draft == false and (.tag_name | test($pattern)))] | max_by(.published_at).tag_name')"
             if [[ -z "$release" || "$release" == null ]]; then
