@@ -52,7 +52,9 @@ typedef enum FlowchartJsonFormat {
 /** Explicit output contract. SOURCE_V2 requires parser-owned diagrams/edges,
  * emits links in AST declaration order, and exports arrow/ID/curve metadata.
  * Unsupported formats/operators return NULL; there is
- * no fallback to another schema. Free successful output with json_serialize_free.
+ * no fallback to another schema. Allocation/insertion failure frees the entire
+ * temporary DOM and returns NULL rather than partial JSON. Free successful
+ * output with json_serialize_free.
  * The returned buffer is independent of the diagram's lifetime. */
 char* flowchart_to_json_ex(const FlowchartDiagram* diagram, FlowchartJsonFormat format);
 /** Existing sparse projection; equivalent to explicitly selecting LEGACY. */

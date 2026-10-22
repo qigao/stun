@@ -191,3 +191,22 @@ remain unchanged. Tests require COMPLETE parses, compare all 95 complete v2
 graphs strictly (using only the existing square/rect alias), and independently
 retain the 95-case legacy gate. Doubled delimiter backslashes are now recognized
 without recording a spurious lexer error or changing their established labels.
+
+### JSON export failure handling
+
+Both export formats check every adapter-level JSON factory, object insertion,
+array append, projection-buffer allocation and final serialization result.
+Children are attached to their owning parent immediately, or freed if insertion
+fails. Any failure disposes the entire temporary graph and returns NULL; it
+does not return incomplete JSON or change formats. The borrowed AST remains
+unchanged and can be exported again after a transient failure.
+
+The Linux installed-SDK lane also builds `stun_flowchart_json_failures` using
+GNU linker interception. It fails each operation once across nested subgraphs,
+leaf-edge and declaration projections, classes, styles, clicks, named/parallel
+edges and an empty graph in both formats. It checks 2,118 failure points and
+verifies a subsequent successful export is byte-identical to the baseline.
+The hooks cover the adapter's calls into the real SDK and its malloc/calloc
+projection buffers; they do not substitute a JSON implementation or instrument
+every allocation inside the SDK shared library. ASan/UBSan and CI leak checking
+validate cleanup. This is a fourth focused CTest in the existing runtime job.
