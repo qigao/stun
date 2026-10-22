@@ -1207,6 +1207,18 @@ spec("flowchart_parser") {
             check_true(flowchart_links_in_order(input, from, to, 3));
         }
 
+        it("keeps linkStyle 1 bound to the second declared labelled edge") {
+            const char* input =
+                "graph LR\n"
+                "A(( )) -->|step 1| B(( ))\n"
+                "B(( )) -->|step 2| C(( ))\n"
+                "C(( )) -->|step 3| D(( ))\n"
+                "linkStyle 1 stroke:greenyellow,stroke-width:2px\n";
+            static const char* const from[] = { "A", "B", "C" };
+            static const char* const to[] = { "B", "C", "D" };
+            check_true(flowchart_links_in_order(input, from, to, 3));
+        }
+
         it("does not alter numbered linkStyle ordering") {
             const char* input =
                 "flowchart TB\n"
