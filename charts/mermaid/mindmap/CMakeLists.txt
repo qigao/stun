@@ -31,7 +31,7 @@ target_include_directories(mindmap PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(mindmap PUBLIC Salts::JsonParser flex_runtime)
+target_link_libraries(mindmap PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(mindmap_test tests/test_parser.c)

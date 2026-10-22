@@ -121,5 +121,7 @@ char* xychart_to_json(XYDiagram* diagram) {
     }
 
     size_t len;
-    return json_serialize_pretty_crlf(root, &len);
+    char* result = json_serialize_pretty_crlf(root, &len);
+    json_free(root);
+    return result;
 }

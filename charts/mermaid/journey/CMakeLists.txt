@@ -32,7 +32,7 @@ target_include_directories(journey PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(journey PUBLIC Salts::JsonParser flex_runtime)
+target_link_libraries(journey PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(journey_test tests/test_parser.c)

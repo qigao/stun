@@ -31,7 +31,7 @@ target_include_directories(xychart PUBLIC
     include 
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
-target_link_libraries(xychart PUBLIC Salts::JsonParser flex_runtime)
+target_link_libraries(xychart PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(xychart_test tests/test_parser.c)

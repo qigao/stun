@@ -45,7 +45,7 @@ void block_scan(Scanner *s, void *parser, BlockParserContext *ctx) {
 
         white = [ \t\r,]+;
         newline = [\n];
-        comment = ("%%"| "#") [^\n]* newline;
+        comment = ("%%"| "#") [^\n\x00]* newline?;
 
         white { goto loop; }
         newline { s->line++; BlockParser(parser, BLOCK_NL, NULL, ctx); goto loop; }
@@ -91,7 +91,7 @@ void block_scan(Scanner *s, void *parser, BlockParserContext *ctx) {
         "right"             { BlockParser(parser, BLOCK_DIR, strdup("right"), ctx); goto loop; }
         
         // Quoted string
-        "\"" [^\"]* "\"" {
+        "\"" [^\"\x00]* "\"" {
             BlockParser(parser, BLOCK_STRING, copy_quoted(token, s->cursor), ctx);
             goto loop;
         }

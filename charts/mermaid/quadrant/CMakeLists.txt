@@ -32,7 +32,7 @@ target_include_directories(quadrant PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(quadrant PUBLIC Salts::JsonParser flex_runtime)
+target_link_libraries(quadrant PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(quadrant_test tests/test_parser.c)

@@ -27,7 +27,16 @@ add_executable(stun_expression_lemon "${STUN_ROOT}/tools/lemon/lemon.c")
 set(LEMON_EXECUTABLE "$<TARGET_FILE:stun_expression_lemon>")
 set(LEMPAR "${STUN_ROOT}/tools/lemon/lempar.c")
 set(MERMAID_GOLDEN_DIR "${STUN_ROOT}/charts/mermaid/golden")
-set(STUN_EXPRESSION_PARSERS sankey CACHE STRING "Production parser targets to qualify")
+set(STUN_EXPRESSION_PARSERS sankey block kanban journey mindmap xychart quadrant
+  CACHE STRING "Production parser targets to qualify")
+if("mindmap" IN_LIST STUN_EXPRESSION_PARSERS)
+  # Supply the real adapter prerequisite while graph algorithm regressions
+  # remain in their independent gate. Only parser targets are built here.
+  set(_expression_build_testing "${BUILD_TESTING}")
+  set(BUILD_TESTING OFF)
+  add_subdirectory("${STUN_ROOT}/shared/layout" graph-layout EXCLUDE_FROM_ALL)
+  set(BUILD_TESTING "${_expression_build_testing}")
+endif()
 foreach(parser IN LISTS STUN_EXPRESSION_PARSERS)
   if(NOT parser MATCHES "^(sankey|block|kanban|journey|mindmap|xychart|quadrant)$")
     message(FATAL_ERROR "Unsupported expression qualification parser: ${parser}")

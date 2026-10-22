@@ -26,7 +26,7 @@ add_library(block STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/block_parser_gen.c"
 )
 
-target_link_libraries(block PUBLIC Salts::JsonParser flex_runtime)
+target_link_libraries(block PUBLIC Salts::JsonParser Flex::Expression)
 target_include_directories(block PUBLIC 
     include 
     "${CMAKE_CURRENT_BINARY_DIR}"

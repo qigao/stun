@@ -100,6 +100,12 @@ jobs:
             'flex/include/flex/core/types.h' 'flex/tests/test_expr_c.c' \
             'vendor/mir/*' 'cmake/Sanitizers.cmake' \
             'charts/mermaid/sankey/*' 'charts/mermaid/golden/sankey/*' \
+            'charts/mermaid/block/*' 'charts/mermaid/golden/block/*' \
+            'charts/mermaid/kanban/*' 'charts/mermaid/golden/kanban/*' \
+            'charts/mermaid/journey/*' 'charts/mermaid/golden/journey/*' \
+            'charts/mermaid/mindmap/*' 'charts/mermaid/golden/mindmap/*' \
+            'charts/mermaid/xychart/*' 'charts/mermaid/golden/xychart/*' \
+            'charts/mermaid/quadrant/*' 'charts/mermaid/golden/quadrant/*' \
             'charts/mermaid/tests/expression-standalone/*' \
             '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
