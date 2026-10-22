@@ -10,6 +10,12 @@ find_path(STB_INCLUDE_DIR stb_sprintf.h PATH_SUFFIXES stb REQUIRED)
 add_executable(test_text_util_unicode
   "${STUN_ROOT}/flexUI/tests/test_text_util_unicode.cpp"
   "${STUN_ROOT}/flexUI/src/text_util.cpp")
+add_executable(test_text_layout_unicode
+  "${STUN_ROOT}/flexUI/tests/test_text_layout_unicode.cpp"
+  "${STUN_ROOT}/flexUI/src/text_util.cpp"
+  "${STUN_ROOT}/flexUI/src/text_layout.cpp"
+  "${STUN_ROOT}/flexUI/src/computed_style.cpp"
+  "${STUN_ROOT}/flexUI/src/render_command.cpp")
 # Compile actual layout and widget consumers plus their retained regressions.
 # This is not a full widget/application runtime qualification.
 add_library(unicode_call_sites OBJECT
@@ -17,7 +23,7 @@ add_library(unicode_call_sites OBJECT
   "${STUN_ROOT}/flexUI/src/widgets/input_widget.cpp"
   "${STUN_ROOT}/flexUI/src/widgets/textarea_widget.cpp"
   "${STUN_ROOT}/flexUI/tests/test_widget_contracts.cpp")
-foreach(target IN ITEMS test_text_util_unicode unicode_call_sites)
+foreach(target IN ITEMS test_text_util_unicode test_text_layout_unicode unicode_call_sites)
   target_compile_features(${target} PRIVATE cxx_std_17)
   target_include_directories(${target} PRIVATE "${STUN_ROOT}/flexUI/include"
     "${STUN_ROOT}/flex/include" "${STB_INCLUDE_DIR}")
@@ -28,3 +34,5 @@ foreach(target IN ITEMS test_text_util_unicode unicode_call_sites)
 endforeach()
 add_test(NAME test_text_util_unicode COMMAND test_text_util_unicode)
 set_tests_properties(test_text_util_unicode PROPERTIES TIMEOUT 30)
+add_test(NAME test_text_layout_unicode COMMAND test_text_layout_unicode)
+set_tests_properties(test_text_layout_unicode PROPERTIES TIMEOUT 30)

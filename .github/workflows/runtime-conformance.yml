@@ -85,7 +85,8 @@ jobs:
             'flexUI/src/text_util.cpp' 'flexUI/include/flexUI/text_util.h' \
             'flexUI/src/text_layout.cpp' 'flexUI/src/widgets/input_widget.cpp' \
             'flexUI/src/widgets/textarea_widget.cpp' 'flexUI/tests/test_text_util_unicode.cpp' \
-            'flexUI/tests/test_widget_contracts.cpp' 'flexUI/tests/unicode-standalone/*' \
+            'flexUI/tests/test_widget_contracts.cpp' 'flexUI/tests/test_text_layout_unicode.cpp' \
+            'flexUI/tests/unicode-standalone/*' 'flexUI/tests/CMakeLists.txt' \
             '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
   mermaid-oracle:
