@@ -1006,6 +1006,8 @@ void tui_textarea_set_text(tui_textarea_t* ta, const char* text) {
     int line = 0, col = 0;
     while (*text && line < TUI_TEXTAREA_MAX_LINES) {
         if (*text == '\n') {
+            /* Never advertise a line_count larger than the fixed array. */
+            if (line + 1 >= TUI_TEXTAREA_MAX_LINES) break;
             line++;
             col = 0;
         } else if (col < TUI_TEXTAREA_LINE_LEN - 1) {
@@ -1096,14 +1098,17 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
                         line_len - ta->cursor_x + 1);
                 ta->cursor_x--;
             } else if (ta->cursor_y > 0) {
-                int prev_len = (int)strlen(ta->lines[ta->cursor_y - 1]);
-                strcat(ta->lines[ta->cursor_y - 1], ta->lines[ta->cursor_y]);
+                size_t prev_len = strlen(ta->lines[ta->cursor_y - 1]);
+                size_t current_len = strlen(ta->lines[ta->cursor_y]);
+                if (prev_len + current_len >= TUI_TEXTAREA_LINE_LEN) return true;
+                memcpy(ta->lines[ta->cursor_y - 1] + prev_len,
+                       ta->lines[ta->cursor_y], current_len + 1);
                 for (int i = ta->cursor_y; i < ta->line_count - 1; i++) {
                     memcpy(ta->lines[i], ta->lines[i+1], TUI_TEXTAREA_LINE_LEN);
                 }
                 ta->line_count--;
                 ta->cursor_y--;
-                ta->cursor_x = prev_len;
+                ta->cursor_x = (int)prev_len;
             }
             return true;
         case TUI_KEY_DELETE:
@@ -1112,7 +1117,10 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
                         &ta->lines[ta->cursor_y][ta->cursor_x + 1],
                         line_len - ta->cursor_x);
             } else if (ta->cursor_y < ta->line_count - 1) {
-                strcat(ta->lines[ta->cursor_y], ta->lines[ta->cursor_y + 1]);
+                size_t next_len = strlen(ta->lines[ta->cursor_y + 1]);
+                if ((size_t)line_len + next_len >= TUI_TEXTAREA_LINE_LEN) return true;
+                memcpy(ta->lines[ta->cursor_y] + line_len,
+                       ta->lines[ta->cursor_y + 1], next_len + 1);
                 for (int i = ta->cursor_y + 1; i < ta->line_count - 1; i++) {
                     memcpy(ta->lines[i], ta->lines[i+1], TUI_TEXTAREA_LINE_LEN);
                 }

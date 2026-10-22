@@ -39,6 +39,7 @@ static void free_attribute_list(C4Attribute* list) {
 }
 
 %token_type { char* }
+%token_destructor { free($$); }
 %type attribute { char* }
 %type attribute_list { C4Attribute* }
 %type attributes { C4Attribute* }

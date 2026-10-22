@@ -1,0 +1,77 @@
+name: Flowchart native AST smoke
+
+# Fast feedback for parser changes. This compiles the repository's real Lemon
+# grammar, re2c scanner and AST wrapper, not a second parser implementation.
+# Full JSON golden and installed-SDK sanitizer checks remain in the
+# Stun runtime conformance workflow.
+# The published-SDK golden job already builds the same AST smoke target
+# together with the full JSON test. Keep this workflow as an opt-in tool for
+# isolating the grammar from SDK availability, not a duplicate PR check.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Flowchart change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Check latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'charts/mermaid/flowchart/*' 'tools/lemon/*' \
+            '.github/scripts/ci-affected.sh' \
+            '.github/workflows/flowchart-ast-smoke.yml'
+
+  parser:
+    name: Linux C11 Lemon/re2c AST + ASan/UBSan
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install grammar generator
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends re2c ninja-build
+          re2c --version
+      - name: Configure production-source C11 parser harness
+        shell: bash
+        run: |
+          cmake -S charts/mermaid/flowchart/tests/standalone \
+            -B build/flowchart-ast-fast -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DSTUN_CI_SANITIZERS=ON
+      - name: Generate parser and build AST smoke
+        run: |
+          cmake --build build/flowchart-ast-fast \
+            --target stun_flowchart_ast_smoke --parallel 2
+      - name: Execute actual AST and sanitizer checks
+        run: |
+          ctest --test-dir build/flowchart-ast-fast \
+            -R '^stun_flowchart_ast_smoke$' \
+            --no-tests=error --verbose --output-on-failure
+      - name: Ensure tracked sources are unchanged
+        run: git diff --exit-code

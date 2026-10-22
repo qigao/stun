@@ -88,7 +88,7 @@ infographic/
 ├── src/
 │   ├── infographic_component.cpp  # flex 组件
 │   ├── flexinfographic_new.cpp    # 对外入口
-│   ├── layout/layout_engine.cpp   # 布局引擎（libcola）
+│   ├── layout/layout_engine.cpp   # 布局引擎（原生 GraphProjection / TidyTree）
 │   └── renderer/                  # SVG 渲染器
 │       ├── template_renderer.cpp
 │       ├── list_renderer.cpp

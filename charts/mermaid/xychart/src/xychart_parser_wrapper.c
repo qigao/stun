@@ -59,7 +59,7 @@ XYDiagram* xychart_parse(const char* input) {
 }
 
 // --- JSON Serialization ---
-#include <json_parser.h>
+#include "json_parser.h"
 
 static json_value_t* serialize_axis(XYAxis* axis) {
     json_value_t* obj = json_create_object();
@@ -121,5 +121,7 @@ char* xychart_to_json(XYDiagram* diagram) {
     }
 
     size_t len;
-    return json_serialize_pretty_crlf(root, &len);
+    char* result = json_serialize_pretty_crlf(root, &len);
+    json_free(root);
+    return result;
 }

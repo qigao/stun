@@ -53,13 +53,13 @@ set_target_properties(flexchart_image PROPERTIES FOLDER "Modules/FlexChart/Marks
 
 # Parser test
 add_executable(flexchart_image_parser_test tests/test_image_parser.cpp)
-target_link_libraries(flexchart_image_parser_test PRIVATE flexchart_image TurboUtils::TinyTest)
+target_link_libraries(flexchart_image_parser_test PRIVATE flexchart_image Salts::TinyTest)
 add_test(NAME FlexChartImageParserTest COMMAND flexchart_image_parser_test)
 set_target_properties(flexchart_image_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_image_test tests/test_image.cpp)
-target_link_libraries(flexchart_image_test PRIVATE flexchart_image TurboUtils::TinyTest)
+target_link_libraries(flexchart_image_test PRIVATE flexchart_image Salts::TinyTest)
 target_include_directories(flexchart_image_test PRIVATE ../../src)
 add_test(NAME FlexChartImageTest COMMAND flexchart_image_test)
 set_target_properties(flexchart_image_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")

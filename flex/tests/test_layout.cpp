@@ -3,7 +3,15 @@
  * Tests Flexbox layout parsing from DSL and runtime behavior
  */
 
-#include "tinytest.h"
+#ifdef _WIN32
+// COM headers declare Enum methods; load them before CMeta's Enum macro.
+#include <windows.h>
+#include <d2d1.h>
+#include <wincodec.h>
+#include <wrl/client.h>
+#endif
+
+#include "tinytest.hpp"
 
 #include "flex/dsl.h"
 #include "flex/core.h"
@@ -43,7 +51,7 @@ inline WithinAbsMatcher WithinAbs(float expected, float epsilon) {
 }
 
 inline void check_close(float actual, float expected, float epsilon = 0.001f) {
-  check_float_eq(actual, expected, epsilon);
+  check_within(actual, expected, epsilon);
 }
 
 struct TempWorkspace {
@@ -1187,7 +1195,7 @@ TEST_CASE("Definition: typed var defaults initialize and isolate runtime inputs"
   REQUIRE_THAT(first_box->x(), WithinAbs(24.0f, 0.001f));
   REQUIRE_THAT(first_box->y(), WithinAbs(48.0f, 0.001f));
   REQUIRE(first_box->visible());
-  check_eq(first_label->content(), std::string("Ready"));
+  check_equal(first_label->content(), std::string("Ready"));
 
   first->set_input("offset", 42.0f);
   first->set_input("title", "Running");
@@ -1197,7 +1205,7 @@ TEST_CASE("Definition: typed var defaults initialize and isolate runtime inputs"
   REQUIRE_THAT(first_box->x(), WithinAbs(42.0f, 0.001f));
   REQUIRE_THAT(first_box->y(), WithinAbs(84.0f, 0.001f));
   REQUIRE_FALSE(first_box->visible());
-  check_eq(first_label->content(), std::string("Running"));
+  check_equal(first_label->content(), std::string("Running"));
   REQUIRE_THAT(second_box->x(), WithinAbs(24.0f, 0.001f));
 
   check_throws_as(first->set_input("offset", "wrong"), std::invalid_argument);
@@ -1913,7 +1921,7 @@ TEST_CASE("Definition: load_file merges imported runtime objects but not importe
   REQUIRE(instance != nullptr);
   REQUIRE(instance->asset_manager() != nullptr);
   auto expected_logo_path = (workspace.root / "images" / "logo.png").generic_string();
-  check_eq(std::string(instance->asset_manager()->resolve_path("logo")),
+  check_equal(std::string(instance->asset_manager()->resolve_path("logo")),
            expected_logo_path);
 }
 
@@ -2004,7 +2012,7 @@ TEST_CASE("Definition: imported asset paths are rebased to the imported file dir
 
   auto expected_logo_path =
       (workspace.root / "nested" / "images" / "logo.png").generic_string();
-  check_eq(std::string(instance->asset_manager()->resolve_path("logo")),
+  check_equal(std::string(instance->asset_manager()->resolve_path("logo")),
            expected_logo_path);
 }
 
@@ -2110,12 +2118,12 @@ TEST_CASE("Definition: DSL machine transitions drive animation params in instanc
   machine_probe->set_input("trigger", 1.0f);
   machine_probe->update(0.0f);
 
-  check_int_eq(callback_count, 1);
-  check_eq(captured.to_state, std::string("active"));
-  check_eq(captured.animation, std::string("pulse"));
-  check_int_eq(static_cast<int>(captured.animation_params.size()), 2);
-  check_eq(captured.animation_params.at("duration"), std::string("dur"));
-  check_eq(captured.animation_params.at("speed"), std::string("rate"));
+  check_equal(callback_count, 1);
+  check_equal(captured.to_state, std::string("active"));
+  check_equal(captured.animation, std::string("pulse"));
+  check_equal(static_cast<int>(captured.animation_params.size()), 2);
+  check_equal(captured.animation_params.at("duration"), std::string("dur"));
+  check_equal(captured.animation_params.at("speed"), std::string("rate"));
 
   auto instance = Instance::create(definition);
   REQUIRE(instance != nullptr);
@@ -2139,7 +2147,7 @@ TEST_CASE("Definition: DSL machine transitions drive animation params in instanc
     return;
   }
 
-  check_eq(layer->current_state(), std::string("idle"));
+  check_equal(layer->current_state(), std::string("idle"));
   REQUIRE_THAT(box->y(), WithinAbs(0.0f, 0.001f));
 
   instance->set_input("trigger", true);
@@ -2147,7 +2155,7 @@ TEST_CASE("Definition: DSL machine transitions drive animation params in instanc
   instance->set_input("rate", 3.0f);
   instance->advance(0.5f);
 
-  check_eq(layer->current_state(), std::string("active"));
+  check_equal(layer->current_state(), std::string("active"));
   REQUIRE_THAT(box->y(), WithinAbs(100.0f, 0.001f));
 }
 
@@ -2197,12 +2205,12 @@ TEST_CASE("Definition: DSL machine transitions drive set actions in instances",
   machine_probe->set_input("trigger", 1.0f);
   machine_probe->update(0.0f);
 
-  check_int_eq(callback_count, 1);
-  check_eq(captured.to_state, std::string("active"));
-  check_int_eq(static_cast<int>(captured.actions.size()), 1);
-  check_eq(captured.actions[0].node_id, std::string("box"));
-  check_eq(captured.actions[0].property, std::string("x"));
-  check_eq(captured.actions[0].expression, std::string("42.000000"));
+  check_equal(callback_count, 1);
+  check_equal(captured.to_state, std::string("active"));
+  check_equal(static_cast<int>(captured.actions.size()), 1);
+  check_equal(captured.actions[0].node_id, std::string("box"));
+  check_equal(captured.actions[0].property, std::string("x"));
+  check_equal(captured.actions[0].expression, std::string("42.000000"));
 
   auto instance = Instance::create(definition);
   REQUIRE(instance != nullptr);
@@ -2226,13 +2234,13 @@ TEST_CASE("Definition: DSL machine transitions drive set actions in instances",
     return;
   }
 
-  check_eq(layer->current_state(), std::string("idle"));
+  check_equal(layer->current_state(), std::string("idle"));
   REQUIRE_THAT(box->x(), WithinAbs(0.0f, 0.001f));
 
   instance->set_input("trigger", true);
   instance->advance(0.0f);
 
-  check_eq(layer->current_state(), std::string("active"));
+  check_equal(layer->current_state(), std::string("active"));
   REQUIRE_THAT(box->x(), WithinAbs(42.0f, 0.001f));
 }
 
@@ -2255,10 +2263,10 @@ TEST_CASE("Runtime machine: audio-only initial state fires state change callback
   machine.trigger_initial_animations();
 
   REQUIRE(layer->current_state() == "idle");
-  check_int_eq(callback_count, 1);
-  check_eq(captured.layer, std::string("main"));
-  check_eq(captured.to_state, std::string("idle"));
-  check_eq(captured.play_audio, std::string("bgm"));
+  check_equal(callback_count, 1);
+  check_equal(captured.layer, std::string("main"));
+  check_equal(captured.to_state, std::string("idle"));
+  check_equal(captured.play_audio, std::string("bgm"));
 }
 
 TEST_CASE("Instance: pointer events use node-local coordinates through transforms",
@@ -2485,10 +2493,10 @@ TEST_CASE("Instance: focused node receives key text and composition input",
   REQUIRE(instance->request_focus(field, FocusChangeReason::Programmatic));
   REQUIRE(instance->focused_node() == field);
   REQUIRE(field->focused());
-  check_int_eq(legacy_focus_count, 1);
+  check_equal(legacy_focus_count, 1);
   REQUIRE(legacy_focused);
-  check_int_eq(field_focus_gained, 1);
-  check_int_eq(field_focus_lost, 0);
+  check_equal(field_focus_gained, 1);
+  check_equal(field_focus_lost, 0);
   REQUIRE(last_focus_reason == FocusChangeReason::Programmatic);
   REQUIRE(last_related_target == nullptr);
 
@@ -2503,14 +2511,14 @@ TEST_CASE("Instance: focused node receives key text and composition input",
   REQUIRE(target_ctrl);
 
   instance->send_text_input("text", true);
-  check_eq(committed_text, std::string("text"));
+  check_equal(committed_text, std::string("text"));
   REQUIRE(committed_from_ime);
 
   instance->send_composition_event(CompositionEventType::Update, "preedit", 1, 3);
   REQUIRE(composition_type == CompositionEventType::Update);
-  check_eq(composition_text, std::string("preedit"));
-  check_int_eq(composition_selection_start, 1);
-  check_int_eq(composition_selection_end, 3);
+  check_equal(composition_text, std::string("preedit"));
+  check_equal(composition_selection_start, 1);
+  check_equal(composition_selection_end, 3);
 
   int other_focus_gained = 0;
   other->on_focus_event([&](FocusEvent& event) {
@@ -2526,8 +2534,8 @@ TEST_CASE("Instance: focused node receives key text and composition input",
   REQUIRE(instance->focused_node() == other);
   REQUIRE_FALSE(field->focused());
   REQUIRE(other->focused());
-  check_int_eq(field_focus_lost, 1);
-  check_int_eq(other_focus_gained, 1);
+  check_equal(field_focus_lost, 1);
+  check_equal(other_focus_gained, 1);
   REQUIRE(last_focus_reason == FocusChangeReason::Pointer);
   REQUIRE(last_related_target == other);
 

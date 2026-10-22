@@ -1,4 +1,4 @@
-#include <tinytest.h>
+#include <tinytest.hpp>
 #undef group
 
 #include <flexUI/render_command.h>

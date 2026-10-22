@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "block/block_ast.h"
 #include "block_parser_gen.h"
-#include <json_parser.h>
+#include "json_parser.h"
 
 void *BlockParserAlloc(void *(*mallocProc)(size_t));
 void BlockParser(void *yyp, int yymajor, void* yyminor, BlockParserContext *ctx);

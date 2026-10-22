@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "quadrant/quadrant_ast.h"
 #include "quadrant_parser_gen.h"
-#include <json_parser.h>
+#include "json_parser.h"
 
 void *QuadrantParserAlloc(void *(*mallocProc)(size_t));
 void QuadrantParser(void *yyp, int yymajor, void* yyminor, QuadrantParserContext *ctx);

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "kanban/kanban_ast.h"
 #include "kanban_parser_gen.h"
-#include <json_parser.h>
+#include "json_parser.h"
 
 void *KanbanParserAlloc(void *(*mallocProc)(size_t));
 void KanbanParser(void *yyp, int yymajor, void* yyminor, KanbanParserContext *ctx);

@@ -2,7 +2,7 @@
 #include <flexUI/utility_jit.h>
 
 #include <nlohmann/json.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <stdexcept>
 #include <string>

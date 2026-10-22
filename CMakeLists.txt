@@ -27,13 +27,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${NANOGUI_OUTPUT_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${NANOGUI_OUTPUT_DIR}")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${NANOGUI_OUTPUT_DIR}")
 
-find_package(base64 CONFIG REQUIRED)
-find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
-find_package(TurboUtils CONFIG REQUIRED PATHS "${TURBO_UTILS_ROOT}")
-find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
+find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT}")
 find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
-find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
+
+if(STUN_BUILD_APPLICATIONS OR (WIN32 AND FLEXUI_ENABLE_TURBOSCRIPT))
+  find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
+endif()
 
 # Cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -42,15 +42,25 @@ add_subdirectory(tools)
 include(FindTools)
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
+# gCanvas is a repository-owned shared module, but Flex and FlexUI consume its
+# targets while they are configured. Define it before those consumers.
+add_subdirectory(shared/gcanvas)
 add_subdirectory(flex)
 add_subdirectory(flexUI)
 add_subdirectory(TextEdit)
-add_subdirectory(meta_editor)
 add_subdirectory(tango)
-add_subdirectory(flexui_designer)
-# FlexPlayer's legacy SDL software compositor depends on the retired ThorVG
-# renderer and an external FFmpeg SDK. Keep it outside the supported build
-# until it has a native GPU compositor.
+# shared/markdown tests conditionally include the Tango consumer contract, so
+# define Tango before configuring shared modules. Targets can still be linked
+# by FlexUI below after both subdirectories have been added.
+add_subdirectory(shared)
+# Native C11 RichDoc is the sole MarkdownWidget parser. The C11 library is
+# declared after FlexUI so the existing Tango test build order stays intact.
+target_link_libraries(flexUI PRIVATE Stun::UICore)
+if(STUN_BUILD_APPLICATIONS)
+  add_subdirectory(meta_editor)
+  add_subdirectory(flexui_designer)
+endif()
+# Chart libraries and parser tests are part of the normal supported build.
 add_subdirectory(charts)
 
 function(nanogui_set_target_output_dir target_name)

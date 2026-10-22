@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "mindmap/mindmap_ast.h"
 #include "mindmap_parser_gen.h"
-#include <json_parser.h>
+#include "json_parser.h"
 
 void *MindmapParserAlloc(void *(*mallocProc)(size_t));
 void MindmapParser(void *yyp, int yymajor, void* yyminor, MindmapParserContext *ctx);

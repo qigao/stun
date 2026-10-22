@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "statediagram/statediagram_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -48,19 +48,19 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -85,8 +85,8 @@ spec("statediagram_parser") {
             
             StateTransition* t = diagram->root->transitions;
             REQUIRE(t != NULL);
-            check_str_eq(t->id1, "[*]");
-            check_str_eq(t->id2, "Still");
+            check_true(t->id1 != NULL && strcmp(t->id1, "[*]") == 0);
+            check_true(t->id2 != NULL && strcmp(t->id2, "Still") == 0);
             
             statediagram_free(diagram);
         }
@@ -104,14 +104,14 @@ spec("statediagram_parser") {
             
             StateNode* first = diagram->root->nodes;
             REQUIRE(first != NULL);
-            check_str_eq(first->id, "First");
-            check_int_eq(first->type, STATE_TYPE_COMPOSITE);
+            check_true(first->id != NULL && strcmp(first->id, "First") == 0);
+            check_true((first->type) == (STATE_TYPE_COMPOSITE));
             REQUIRE(first->doc != NULL);
             
             StateTransition* t = first->doc->transitions;
             REQUIRE(t != NULL);
-            check_str_eq(t->id1, "[*]");
-            check_str_eq(t->id2, "Second");
+            check_true(t->id1 != NULL && strcmp(t->id1, "[*]") == 0);
+            check_true(t->id2 != NULL && strcmp(t->id2, "Second") == 0);
             
             statediagram_free(diagram);
         }
@@ -165,7 +165,7 @@ spec("statediagram_parser") {
                             check(1, "Parse successful (no golden json)");
                         }
 
-                        turbo_json_serialize_free(actual);
+                        json_serialize_free(actual);
                         statediagram_free(diagram);
                     }
                     if (input) free(input);

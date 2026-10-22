@@ -1,14 +1,16 @@
 /*
  * flexUI - MarkdownWidget
  *
- * Markdown renderer using md4c and flexUI element hierarchy.
+ * Markdown renderer using the sole Stun C11 RichDoc parser and owned FlexUI elements.
  */
 
 #ifndef FLEXUI_MARKDOWN_WIDGET_H
 #define FLEXUI_MARKDOWN_WIDGET_H
 
 #include "../widget.h"
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace flexUI {
 
@@ -20,7 +22,10 @@ namespace flexUI {
  */
 class MarkdownWidget : public Widget {
 public:
-    explicit MarkdownWidget(const std::string& markdown = "");
+    static constexpr std::size_t kDefaultMaxRenderElements = 16384u;
+    explicit MarkdownWidget(
+        const std::string& markdown = "",
+        std::size_t max_render_elements = kDefaultMaxRenderElements);
 
     // Widget interface
     void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
@@ -37,6 +42,14 @@ private:
 
     std::string markdown_;
     bool needs_rebuild_ = true;
+    bool rebuilding_ = false;
+    const std::size_t max_render_elements_;
+    // Borrowed identities only; Box remains the sole Element owner.
+    std::vector<Element*> published_projection_;
+    // At most one detached projection may await a callback-safe Box drain.
+    // If retirement fails, further parse/publish work is blocked until it
+    // succeeds; the renderer cannot accumulate unbounded orphaned Elements.
+    std::vector<Element*> pending_retirement_;
 };
 
 } // namespace flexUI

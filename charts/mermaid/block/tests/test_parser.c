@@ -1,18 +1,12 @@
 #include "tinytest.h"
 #include "block/block_ast.h"
-#include <json_parser.h>
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 #ifndef REQUIRE
 #define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
-#endif
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dirent.h>
 #endif
 
 extern BlockDiagram* block_parse(const char* input);
@@ -48,22 +42,23 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
     return read_file(path);
 }
 
-static int json_equal(const char* a, const char* b) {
-    json_value_t *ja = NULL, *jb = NULL;
-    if ((ja = json_parse(a, strlen(a))) == NULL) return 0;
-    if ((jb = json_parse(b, strlen(b))) == NULL) {
-        json_free(ja);
-        return 0;
+/* These checked-in cases have source/normalized Mermaid, not JSON oracles.
+ * Validate both forms explicitly on every platform without inventing goldens. */
+static void check_block_fixture(const char* name, const char* form) {
+    char* input = load_golden_file(name, form, "mmd");
+    check(input != NULL, "required Block fixture exists");
+    if (!input) return;
+    BlockDiagram* diagram = block_parse(input);
+    check(diagram != NULL, "Block fixture parses");
+    if (diagram) {
+        char* actual = block_to_json(diagram);
+        json_value_t* parsed = actual ? json_parse(actual, strlen(actual)) : NULL;
+        check(parsed != NULL, "Block fixture exports valid JSON");
+        json_free(parsed);
+        json_serialize_free(actual);
+        block_free(diagram);
     }
-    
-    char *sa = json_serialize(ja, NULL);
-    char *sb = json_serialize(jb, NULL);
-    int eq = (sa && sb && strcmp(sa, sb) == 0);
-    json_serialize_free(sa);
-    json_serialize_free(sb);
-    json_free(ja);
-    json_free(jb);
-    return eq;
+    free(input);
 }
 
 spec("block_parser") {
@@ -76,60 +71,13 @@ spec("block_parser") {
         }
     }
 
-    describe("golden tests") {
-#ifdef _WIN32
-        char search_path[MAX_PATH];
-        snprintf(search_path, sizeof(search_path), "%s/*.input.mmd", GOLDEN_DIR);
-
-        WIN32_FIND_DATAA find_data;
-        HANDLE hFind = FindFirstFileA(search_path, &find_data);
-
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                const char* filename = find_data.cFileName;
-                const char* ext = strstr(filename, ".input.mmd");
-                if (!ext) continue;
-                
-                size_t name_len = ext - filename;
-                if (name_len >= 128) continue; 
-
-                char case_name[128];
-                strncpy(case_name, filename, name_len);
-                case_name[name_len] = '\0';
-
-                it(case_name) {
-                    char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd"); 
-
-                    REQUIRE(input != NULL);
-
-                    BlockDiagram* diagram = block_parse(input);
-                    if (!diagram) {
-                        REQUIRE(diagram != NULL);
-                    }
-
-                    char* actual = block_to_json(diagram);
-                    REQUIRE(actual != NULL);
-
-                    char* expected = load_golden_file(case_name, "output", "json");
-                    if (!expected) expected = load_golden_file(case_name, "", "json");
-
-                    if (expected) {
-                        if (!json_equal(actual, expected)) {
-                            check(0, "JSON mismatch");
-                        }
-                        free(expected);
-                    } else {
-                        check(1, "Parse successful");
-                    }
-
-                    json_serialize_free(actual);
-                    block_free(diagram);
-                    free(input);
-                }
-            } while (FindNextFileA(hFind, &find_data));
-            FindClose(hFind);
+    describe("checked-in source and normalized fixtures") {
+        const char* cases[] = {"basic", "columns", "nested", "with-edges"};
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            it(cases[i]) {
+                check_block_fixture(cases[i], "input");
+                check_block_fixture(cases[i], "output");
+            }
         }
-#endif
     }
 }

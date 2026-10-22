@@ -20,12 +20,12 @@ spec("flexchart_boxplot_parser") {
             std::string error;
             auto chart = flex::chart::boxplot_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Distribution");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Distribution"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "boxplot");
+            check(std::string(mark->type.c_str()) == std::string("boxplot"));
             check(mark->encodings.size() >= 6);
             // Find all encoding channels
             std::string x_f, min_f, q1_f, med_f, q3_f, max_f;
@@ -37,12 +37,12 @@ spec("flexchart_boxplot_parser") {
                 if (enc->channel == "q3") q3_f = enc->field;
                 if (enc->channel == "max") max_f = enc->field;
             }
-            check_str_eq(x_f.c_str(), "category");
-            check_str_eq(min_f.c_str(), "min_val");
-            check_str_eq(q1_f.c_str(), "q1_val");
-            check_str_eq(med_f.c_str(), "med_val");
-            check_str_eq(q3_f.c_str(), "q3_val");
-            check_str_eq(max_f.c_str(), "max_val");
+            check(std::string(x_f.c_str()) == std::string("category"));
+            check(std::string(min_f.c_str()) == std::string("min_val"));
+            check(std::string(q1_f.c_str()) == std::string("q1_val"));
+            check(std::string(med_f.c_str()) == std::string("med_val"));
+            check(std::string(q3_f.c_str()) == std::string("q3_val"));
+            check(std::string(max_f.c_str()) == std::string("max_val"));
         }
 
         it("should parse boxplot chart with data block") {
@@ -63,11 +63,11 @@ spec("flexchart_boxplot_parser") {
             std::string error;
             auto chart = flex::chart::boxplot_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Box Plot");
+            check(std::string(chart->title.c_str()) == std::string("Box Plot"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "boxplot");
+            check(std::string(mark->type.c_str()) == std::string("boxplot"));
         }
 
         it("should parse encoding block") {
@@ -103,7 +103,7 @@ spec("flexchart_boxplot_parser") {
             check(chart != nullptr);
             auto& mark = chart->marks[0];
             check(std::get<double>(mark->styles["box-width"]) > 29.9);
-            check_str_eq(std::get<std::string>(mark->styles["fill-opacity"]).c_str(), "0.5");
+            check(std::string(std::get<std::string>(mark->styles["fill-opacity"]).c_str()) == std::string("0.5"));
         }
 
         it("should parse data source reference") {
@@ -116,7 +116,7 @@ spec("flexchart_boxplot_parser") {
             auto chart = flex::chart::boxplot_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "stats.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("stats.json"));
         }
 
         it("should parse expr and range") {
@@ -129,7 +129,7 @@ spec("flexchart_boxplot_parser") {
             auto chart = flex::chart::boxplot_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "quantile(x)");
+            check(std::string(mark->expr.c_str()) == std::string("quantile(x)"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
