@@ -113,6 +113,39 @@ static int json_equal(const char* a, const char* b) {
     return eq;
 }
 
+/* Keep array ordering strict: node/link object keys are compared elsewhere,
+ * while link array positions remain observable to linkStyle consumers. */
+static int flowchart_links_in_order(const char* source,
+                                   const char* const* from,
+                                   const char* const* to,
+                                   size_t count) {
+    FlowchartDiagram* diagram = NULL;
+    if (flowchart_parse_ex(source, &diagram) != FLOWCHART_PARSE_COMPLETE ||
+        !diagram) {
+        flowchart_diagram_free(diagram);
+        return 0;
+    }
+    char* encoded = flowchart_to_json(diagram);
+    json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
+    json_value_t* links = root ? json_object_get(root, "links") : NULL;
+    int ok = links && json_type(links) == JSON_ARRAY &&
+             json_array_size(links) == count;
+    for (size_t i = 0; ok && i < count; ++i) {
+        json_value_t* link = json_array_get(links, i);
+        json_value_t* left = link ? json_object_get(link, "source") : NULL;
+        json_value_t* right = link ? json_object_get(link, "target") : NULL;
+        ok = left && right &&
+             json_type(left) == JSON_STRING &&
+             json_type(right) == JSON_STRING &&
+             strcmp(json_string(left), from[i]) == 0 &&
+             strcmp(json_string(right), to[i]) == 0;
+    }
+    json_free(root);
+    free(encoded);
+    flowchart_diagram_free(diagram);
+    return ok;
+}
+
 spec("flowchart_parser") {
     describe("parsing basics") {
         it("should parse LR flowchart with nodes and edges") {
@@ -1138,6 +1171,54 @@ spec("flowchart_parser") {
             check_true(seen_n5 == 1);
             check_true(diagram->edges == NULL);
             flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("root and subgraph link order") {
+        it("places single-outgoing root links before fanout after local edges") {
+            const char* input =
+                "flowchart TB\n"
+                "A\nB\n"
+                "subgraph foo\nC\nD\nend\n"
+                "subgraph bar\nE\nF\nend\n"
+                "G\n"
+                "A-->B\nB-->C\nC-->D\nB-->D\n"
+                "D-->E\nE-->A\nE-->F\nF-->D\n"
+                "F-->G\nB-->G\nG-->D\n";
+            static const char* const from[] = {
+                "C", "E", "A", "G", "B", "B", "D", "E", "F", "F", "B"
+            };
+            static const char* const to[] = {
+                "D", "F", "B", "D", "C", "D", "E", "A", "D", "G", "G"
+            };
+            check_true(flowchart_links_in_order(input, from, to, 11));
+        }
+
+        it("retains root source order when a subgraph ID is a link endpoint") {
+            const char* input =
+                "flowchart TB\n"
+                "ROOT\n"
+                "ROOT --> SUB\n"
+                "subgraph SUB\nA\nend\n"
+                "A --> T\n"
+                "SUB --> Z\n";
+            static const char* const from[] = { "ROOT", "A", "SUB" };
+            static const char* const to[] = { "SUB", "T", "Z" };
+            check_true(flowchart_links_in_order(input, from, to, 3));
+        }
+
+        it("does not alter numbered linkStyle ordering") {
+            const char* input =
+                "flowchart TB\n"
+                "A\nB\n"
+                "subgraph foo\nC\nend\n"
+                "subgraph bar\nD\nend\n"
+                "G\n"
+                "A --> B\nB --> C\nG --> D\n"
+                "linkStyle 1 stroke:blue\n";
+            static const char* const from[] = { "A", "B", "G" };
+            static const char* const to[] = { "B", "C", "D" };
+            check_true(flowchart_links_in_order(input, from, to, 3));
         }
     }
 
