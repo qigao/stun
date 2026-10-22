@@ -685,6 +685,17 @@ static int flowchart_root_single_outgoing(
   return count == 1;
 }
 
+/* Subgraph IDs used as link endpoints have their own projection phase.
+ * Do not reorder ordinary root links around that explicit ordering contract. */
+static int flowchart_has_subgraph_link_endpoint(const FlowchartDiagram* d) {
+  for (const FlowchartEdge* e = d->edges; e; e = e->next) {
+    if (flowchart_is_subgraph_id(d->subgraphs, e->from) ||
+        flowchart_is_subgraph_id(d->subgraphs, e->to))
+      return 1;
+  }
+  return 0;
+}
+
 static void flowchart_json_append_edge(json_value_t* links_arr,
                                         const FlowchartEdge* e) {
   json_value_t *e_det = json_create_object();
@@ -806,7 +817,7 @@ char *flowchart_to_json(FlowchartDiagram *diagram) {
     }
     const int promote_single_outgoing =
         phase == 1 && diagram->subgraphs && !diagram->link_styles &&
-        !root_has_label;
+        !root_has_label && !flowchart_has_subgraph_link_endpoint(diagram);
     for (int source_class = promote_single_outgoing ? 1 : 0;
          source_class >= 0; --source_class) {
       for (int pass = 0; pass < (label_first ? 2 : 1); ++pass) {
