@@ -139,8 +139,10 @@ if(STUN_CI_RENDERER_STYLE)
     "${GENERATED_PARSER}" "${GENERATED_LEXER}"
     "${FLOWCHART_SOURCE}/src/flowchart_parser_wrapper.c"
     "${FLOWCHART_SOURCE}/src/flowchart_renderer.cpp"
+    "${FLOWCHART_SOURCE}/src/flowchart_curve.cpp"
     "${FLOWCHART_SOURCE}/src/flowchart_layout.cpp"
-    "${FLOWCHART_SOURCE}/tests/test_linkstyle.cpp")
+    "${FLOWCHART_SOURCE}/tests/test_linkstyle.cpp"
+    "${FLOWCHART_SOURCE}/tests/test_curves.cpp")
   target_include_directories(stun_flowchart_linkstyle PRIVATE
     "${FLOWCHART_SOURCE}/include" "${CMAKE_CURRENT_BINARY_DIR}")
   target_compile_features(stun_flowchart_linkstyle PRIVATE cxx_std_17)

@@ -32,7 +32,7 @@ static const char* get_svg_template() {
 </defs>
 <g>
   {{#edges}}
-  <path class="edge-path" data-edge-index="{{edge_index}}" d="{{path_d}}" fill="none" stroke="{{edge_line_color}}" stroke-width="{{edge_line_width}}" stroke-opacity="0.5" marker-end="url(#{{edge_marker_id}})" />
+  <path class="edge-path" data-edge-index="{{edge_index}}" data-edge-id="{{edge_id}}" data-edge-curve="{{edge_curve}}" d="{{path_d}}" fill="none" stroke="{{edge_line_color}}" stroke-width="{{edge_line_width}}" stroke-opacity="0.5" marker-end="url(#{{edge_marker_id}})" />
   {{#has_label}}
   <rect x="{{label_rect_x}}" y="{{label_rect_y}}" width="{{label_rect_w}}" height="{{label_rect_h}}" fill="{{background_color}}" rx="6"/>
   <text class="label-text" x="{{label_x}}" y="{{label_y}}" text-anchor="middle" dominant-baseline="middle" fill="{{text_color}}" opacity="0.7">{{label}}</text>

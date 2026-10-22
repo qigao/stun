@@ -33,6 +33,8 @@ struct RenderedEdge {
     // Owned presentation values resolved by AST declaration ordinal, never by
     // source/target pair or a possibly reordered JSON projection.
     std::size_t declaration_index = 0;
+    std::string id; // Owned parsed edge identity; empty when unnamed.
+    std::string curve; // Empty preserves the native polyline; explicit names are validated.
     std::string stroke; // Empty uses RenderOptions::line_color.
     double stroke_width = -1.0; // Negative uses RenderOptions::line_width.
 };
@@ -69,8 +71,10 @@ public:
 
     /**
      * 执行布局运算
-     * @param diagram 已经解析好的图表数据
-     * @throws std::invalid_argument for unsupported linkStyle properties or values.
+     * @param diagram Parser-owned diagram from flowchart_parse[_ex]. Its edges
+     * must remain parser-owned; private edge metadata is read during layout.
+     * Caller-built snapshots can be passed directly to to_svg.
+     * @throws std::invalid_argument for unsupported styles or curve names.
      * @return 包含坐标和路径的快照
      */
     LayoutSnapshot layout(const FlowchartDiagram* diagram);
@@ -78,6 +82,8 @@ public:
     /**
      * 将布局快照转换为 SVG 字符串
      * @param snapshot 布局结果
+     * @throws std::invalid_argument for invalid curves/geometry, node
+     * intersections, or exhausted curve-clearance qualification limits.
      * @return SVG 源代码
      */
     static std::string to_svg(const LayoutSnapshot& snapshot);

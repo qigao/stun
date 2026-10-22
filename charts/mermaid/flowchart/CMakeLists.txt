@@ -51,6 +51,7 @@ add_library(mermaid_flowchart STATIC
     ${FC_PARSER_GEN_C}
     src/flowchart_parser_wrapper.c
     src/flowchart_renderer.cpp
+    src/flowchart_curve.cpp
     src/flex_flowchart.cpp
 )
 
@@ -88,7 +89,7 @@ target_link_libraries(flowchart_renderer_test PRIVATE mermaid_flowchart)
 add_test(NAME flowchart_renderer_test COMMAND flowchart_renderer_test)
 set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
-add_executable(flowchart_linkstyle_test tests/test_linkstyle.cpp)
+add_executable(flowchart_linkstyle_test tests/test_linkstyle.cpp tests/test_curves.cpp)
 target_link_libraries(flowchart_linkstyle_test PRIVATE mermaid_flowchart)
 target_compile_definitions(flowchart_linkstyle_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
 add_test(NAME flowchart_linkstyle_test COMMAND flowchart_linkstyle_test)

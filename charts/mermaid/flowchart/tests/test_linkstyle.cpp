@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <string>
 
+void check_named_curves(const char* artifact);
+
 using namespace mermaid::flowchart;
 using Diagram = std::unique_ptr<FlowchartDiagram, decltype(&flowchart_diagram_free)>;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error("linkStyle: " #x); } while (0)
@@ -117,6 +119,8 @@ int main(int argc, char** argv) {
         check_precedence_and_identity();
         check_supported_values();
         check_rejection();
+        const std::string curves = argc == 2 ? std::string(argv[1]) + ".curves" : "";
+        check_named_curves(curves.empty() ? nullptr : curves.c_str());
         CHECK(FlowchartRenderer::to_svg(LayoutSnapshot{}).find("<svg") != std::string::npos);
         std::cout << "Flowchart linkStyle: ordinal, precedence, ownership, SVG and rejection checks passed\n";
         return 0;

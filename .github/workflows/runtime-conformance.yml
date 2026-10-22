@@ -173,6 +173,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends re2c ninja-build
           re2c --version
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: charts/mermaid/flowchart/tests/oracle/package-lock.json
+      - name: Restore pinned independent curve oracle
+        working-directory: charts/mermaid/flowchart/tests/oracle
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Configure isolated JSON golden test against installed SDKs
         shell: bash
         run: |
@@ -198,6 +207,10 @@ jobs:
             --no-tests=error --verbose --output-on-failure --timeout 120
           python3 charts/mermaid/flowchart/tests/verify_linkstyle_svg.py \
             build/flowchart-json-golden/flowchart-linkstyle.svg
+          node charts/mermaid/flowchart/tests/oracle/verify-curves.mjs \
+            build/flowchart-json-golden/flowchart-linkstyle.svg.curves \
+            build/flowchart-json-golden/flowchart-linkstyle.svg.curves.legacy \
+            build/flowchart-json-golden/flowchart-linkstyle.svg.curves.professional
           git diff --exit-code
 
       - name: Preserve exact-head SDK and test evidence
@@ -211,4 +224,4 @@ jobs:
             ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
             build/flowchart-json-golden/Testing/Temporary/LastTest.log
             build/flowchart-json-golden/dependencies.txt
-            build/flowchart-json-golden/flowchart-linkstyle.svg
+            build/flowchart-json-golden/flowchart-linkstyle.svg*

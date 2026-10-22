@@ -1,5 +1,7 @@
 #include "flowchart_layout.h"
 #include "flowchart_renderer.h"
+#include "flowchart/flowchart_parser_wrapper.h"
+#include "flowchart_curve.h"
 #include "flowchart/flowchart_ast.h"
 #include <map>
 #include <vector>
@@ -136,9 +138,15 @@ static std::vector<EdgeStyle> resolve_edge_styles(const FlowchartDiagram* diagra
     return result;
 }
 
-static void set_edge_style(RenderedEdge& edge, std::size_t ordinal,
+static void set_edge_style(RenderedEdge& edge, const FlowchartEdge* parsed, std::size_t ordinal,
                            const std::vector<EdgeStyle>& styles) {
     edge.declaration_index = ordinal;
+    const auto* id = flowchart_edge_get_id(parsed);
+    const auto* selected = flowchart_edge_get_curve(parsed);
+    if (selected && (!*selected || !curve::supported(selected)))
+        throw std::invalid_argument("flowchart: unsupported named curve");
+    edge.id = id ? id : "";
+    edge.curve = selected ? selected : "";
     edge.stroke = styles.at(ordinal).stroke;
     edge.stroke_width = styles.at(ordinal).width;
 }
@@ -245,7 +253,7 @@ private:
         for (auto* e = diagram->edges; e; e = e->next, ++ordinal) {
             if (coords.count(e->from) && coords.count(e->to)) {
                 RenderedEdge re;
-                set_edge_style(re, ordinal, styles);
+                set_edge_style(re, e, ordinal, styles);
                 re.source_id = e->from;
                 re.target_id = e->to;
                 re.label = e->label ? e->label : "";
@@ -309,7 +317,7 @@ private:
         size_t i = 0;
         for (auto* edge = diagram->edges; edge; edge = edge->next, ++i) {
             RenderedEdge re;
-            set_edge_style(re, i, styles);
+            set_edge_style(re, edge, i, styles);
             re.source_id = edge->from;
             re.target_id = edge->to;
             re.label = edge->label ? edge->label : "";
@@ -347,6 +355,7 @@ struct MustacheProxy {
 
 struct ProviderPool {
     std::vector<std::unique_ptr<MustacheProxy>> storage;
+    std::vector<std::vector<curve::Command>> paths;
     MustacheProxy* create(ProxyType t, const LayoutSnapshot* s, size_t i = 0, double x = 0, double y = 0) {
         storage.push_back(std::make_unique<MustacheProxy>(MustacheProxy{t, s, i, x, y}));
         return storage.back().get();
@@ -363,7 +372,7 @@ static std::string format_double(double v) {
     return s;
 }
 
-static std::string format_stroke_width(double width) {
+static std::string format_number(double width) {
     std::ostringstream stream;
     stream.imbue(std::locale::classic());
     stream << std::setprecision(std::numeric_limits<double>::max_digits10) << width;
@@ -434,16 +443,19 @@ static void* get_child_by_name(void* node, const char* name, size_t size, void* 
         if (key == "radius") return create_val(format_double(std::min(n.width, n.height) / 2));
     } else if (proxy->type == ProxyType::Edge) {
         const auto& e = proxy->snapshot->edges[proxy->index];
+        if (key == "edge_id") return create_val(e.id);
+        if (key == "edge_curve") return create_val(e.curve);
         if (key == "edge_index") return create_val(std::to_string(e.declaration_index));
         if (key == "edge_marker_id") return create_val("arrowhead-" + std::to_string(proxy->index));
         if (key == "edge_line_color") return create_val(e.stroke.empty() ? opt.line_color : e.stroke);
-        if (key == "edge_line_width") return create_val(format_stroke_width(e.stroke_width < 0 ? opt.line_width : e.stroke_width));
+        if (key == "edge_line_width") return create_val(format_number(e.stroke_width < 0 ? opt.line_width : e.stroke_width));
         if (key == "path_d") {
             std::stringstream ss;
-            if (e.points.size() >= 2) {
-                ss << "M" << format_double(e.points[0].x + proxy->ox) << " " << format_double(e.points[0].y + proxy->oy);
-                for (size_t i = 1; i < e.points.size(); ++i) {
-                    ss << " L " << format_double(e.points[i].x + proxy->ox) << " " << format_double(e.points[i].y + proxy->oy);
+            for (const auto& c : pool->paths.at(proxy->index)) {
+                ss << c.kind;
+                for (std::size_t i = 0; i < c.size(); ++i) {
+                    ss << format_number(c.points[i].x + proxy->ox) << ' '
+                       << format_number(c.points[i].y + proxy->oy) << ' ';
                 }
             }
             return create_val(ss.str());
@@ -523,27 +535,39 @@ std::string FlowchartRenderer::to_svg(const LayoutSnapshot& snapshot) {
         }
     }
 
-    // Routed edges (especially self-loops) may exceed node bounds.
-    for (const auto& edge : snapshot.edges)
-        for (const auto& p : edge.points) {
-            min_x = std::min(min_x, p.x);
-            min_y = std::min(min_y, p.y);
-            max_x = std::max(max_x, p.x);
-            max_y = std::max(max_y, p.y);
+    // Include cubic controls as a conservative bound for curve overshoot.
+    ProviderPool pool;
+    for (const auto& edge : snapshot.edges) {
+        auto commands = curve::interpolate(edge.points, edge.curve);
+        if (!edge.curve.empty() && edge.curve != "linear")
+            curve::check_obstacles(commands, snapshot.nodes);
+        for (const auto& c : commands) for (std::size_t i = 0; i < c.size(); ++i) {
+            const auto p = c.points[i];
+            min_x = std::min(min_x, p.x); min_y = std::min(min_y, p.y);
+            max_x = std::max(max_x, p.x); max_y = std::max(max_y, p.y);
         }
+        pool.paths.push_back(std::move(commands));
+    }
 
     LayoutSnapshot mutable_snapshot = snapshot;
     if (mutable_snapshot.total_width <= 0) {
-        mutable_snapshot.total_width = has_nodes ? (max_x - min_x + 100) : 200;
+        mutable_snapshot.total_width = (has_nodes || !snapshot.edges.empty()) ? (max_x - min_x + 100) : 200;
     }
     if (mutable_snapshot.total_height <= 0) {
-        mutable_snapshot.total_height = has_nodes ? (max_y - min_y + 100) : 200;
+        mutable_snapshot.total_height = (has_nodes || !snapshot.edges.empty()) ? (max_y - min_y + 100) : 200;
     }
     
-    double offset_x = has_nodes ? (-min_x + 50) : 50;
-    double offset_y = has_nodes ? (-min_y + 50) : 50;
+    double offset_x = -min_x + 50;
+    double offset_y = -min_y + 50;
 
-    ProviderPool pool;
+    if (!std::isfinite(mutable_snapshot.total_width) || !std::isfinite(mutable_snapshot.total_height) ||
+        !std::isfinite(offset_x) || !std::isfinite(offset_y))
+        throw std::invalid_argument("flowchart: nonfinite SVG extent");
+    for (const auto& path : pool.paths) for (const auto& c : path)
+        for (std::size_t i = 0; i < c.size(); ++i)
+            if (!std::isfinite(c.points[i].x + offset_x) || !std::isfinite(c.points[i].y + offset_y))
+                throw std::invalid_argument("flowchart: curve translation overflow");
+
     pool.create(ProxyType::Root, &mutable_snapshot, 0, offset_x, offset_y);
 
     MUSTACHE_RENDERER renderer = { out_verbatim, out_escaped };
