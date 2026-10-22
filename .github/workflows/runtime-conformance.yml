@@ -26,6 +26,7 @@ jobs:
       animation: ${{ steps.animation_scope.outputs.affected }}
       measurement: ${{ steps.measurement_scope.outputs.affected }}
       xml_admission: ${{ steps.xml_scope.outputs.affected }}
+      unicode: ${{ steps.unicode_scope.outputs.affected }}
     steps:
       - name: Checkout exact PR head
         uses: actions/checkout@v4
@@ -76,6 +77,17 @@ jobs:
             'flexUI/tests/test_ui_xml*' 'flexUI/tests/test_desktop_application.cpp' \
             'flexUI/tests/xml-admission-standalone/*'
 
+      - name: Detect Unicode text policy changes
+        id: unicode_scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'flexUI/src/text_util.cpp' 'flexUI/include/flexUI/text_util.h' \
+            'flexUI/src/text_layout.cpp' 'flexUI/src/widgets/input_widget.cpp' \
+            'flexUI/src/widgets/textarea_widget.cpp' 'flexUI/tests/test_text_util_unicode.cpp' \
+            'flexUI/tests/test_widget_contracts.cpp' 'flexUI/tests/unicode-standalone/*' \
+            '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
+
   mermaid-oracle:
     name: Pinned Mermaid semantic evidence (independent of Stun golden)
     needs: changes
@@ -107,7 +119,7 @@ jobs:
 
   sdk-releases:
     needs: changes
-    if: needs.changes.outputs.golden == 'true' || needs.changes.outputs.animation == 'true' || needs.changes.outputs.measurement == 'true' || needs.changes.outputs.xml_admission == 'true'
+    if: needs.changes.outputs.golden == 'true' || needs.changes.outputs.animation == 'true' || needs.changes.outputs.measurement == 'true' || needs.changes.outputs.xml_admission == 'true' || needs.changes.outputs.unicode == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   # Run the installed-SDK AST and exact JSON suite for every applicable
@@ -115,7 +127,7 @@ jobs:
   golden:
     name: Linux / focused installed-SDK ASan/UBSan
     needs: [changes, sdk-releases]
-    if: needs.changes.outputs.golden == 'true' || needs.changes.outputs.animation == 'true' || needs.changes.outputs.measurement == 'true' || needs.changes.outputs.xml_admission == 'true'
+    if: needs.changes.outputs.golden == 'true' || needs.changes.outputs.animation == 'true' || needs.changes.outputs.measurement == 'true' || needs.changes.outputs.xml_admission == 'true' || needs.changes.outputs.unicode == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -317,6 +329,17 @@ jobs:
           ctest --test-dir build/xml-admission --no-tests=error --verbose --output-on-failure
           git diff --exit-code
 
+      - name: Compile Unicode consumers and run original strict text suite
+        if: needs.changes.outputs.unicode == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S flexUI/tests/unicode-standalone -B build/unicode -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/unicode --parallel 2
+          ctest --test-dir build/unicode --no-tests=error --verbose --output-on-failure
+          git diff --exit-code
+
       - name: Preserve exact-head SDK and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -331,4 +354,5 @@ jobs:
             build/typed-animation/Testing/Temporary/LastTest.log
             build/measurement/Testing/Temporary/LastTest.log
             build/xml-admission/Testing/Temporary/LastTest.log
+            build/unicode/Testing/Temporary/LastTest.log
             build/flowchart-json-golden/flowchart-linkstyle.svg*

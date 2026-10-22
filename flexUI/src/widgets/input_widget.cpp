@@ -254,10 +254,10 @@ float measure_input_text_width(const std::string& text, const ComputedStyle* sty
   return width;
 }
 
-float measure_input_codepoint_width(const std::string& glyph, uint32_t cp,
+float measure_input_codepoint_width(const std::string& glyph,
                                     const ComputedStyle* style,
                                     const EditableTextMetrics& metrics) {
-  if (is_emoji(cp)) {
+  if (has_emoji(glyph)) {
     return metrics.font_size;
   }
 
@@ -1285,7 +1285,7 @@ size_t InputWidget::x_to_index(float x, const Element& elem) const {
     const uint32_t cp = utf8_next_scalar(display, byte_pos).value;
     const float spacing_before = first_glyph ? 0.0f : letter_spacing;
     const float glyph_width = measure_input_codepoint_width(
-        display.substr(start, byte_pos - start), cp, style, metrics);
+        display.substr(start, byte_pos - start), style, metrics);
     const float spacing_after =
         is_word_spacing_gap(cp) ? word_spacing : 0.0f;
     const float caret_before = advance;
@@ -1323,7 +1323,7 @@ float InputWidget::index_to_x(size_t index, const Element& elem) const {
   while (byte_pos < display.size() && byte_pos < clamped_index) {
     const size_t start = byte_pos;
     const uint32_t cp = utf8_next_scalar(display, byte_pos).value;
-    advance += measure_input_codepoint_width(display.substr(start, byte_pos - start), cp,
+    advance += measure_input_codepoint_width(display.substr(start, byte_pos - start),
                                              style, metrics);
     if (is_word_spacing_gap(cp)) {
       advance += word_spacing;
