@@ -16,20 +16,20 @@ spec("flexchart_rule_parser") {
             std::string error;
             auto chart = flex::chart::rule_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Reference");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Reference"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "rule");
+            check(std::string(mark->type.c_str()) == std::string("rule"));
             check(mark->encodings.size() >= 2);
             std::string x_field, y_field;
             for (auto& enc : mark->encodings) {
                 if (enc->channel == "x") x_field = enc->field;
                 if (enc->channel == "y") y_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "category");
-            check_str_eq(y_field.c_str(), "value");
+            check(std::string(x_field.c_str()) == std::string("category"));
+            check(std::string(y_field.c_str()) == std::string("value"));
         }
 
         it("should parse rule chart with data block") {
@@ -47,7 +47,7 @@ spec("flexchart_rule_parser") {
             std::string error;
             auto chart = flex::chart::rule_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Thresholds");
+            check(std::string(chart->title.c_str()) == std::string("Thresholds"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
@@ -75,9 +75,9 @@ spec("flexchart_rule_parser") {
                 if (enc->channel == "y2") y2_field = enc->field;
                 if (enc->channel == "color") color_field = enc->field;
             }
-            check_str_eq(x2_field.c_str(), "end");
-            check_str_eq(y2_field.c_str(), "level2");
-            check_str_eq(color_field.c_str(), "group");
+            check(std::string(x2_field.c_str()) == std::string("end"));
+            check(std::string(y2_field.c_str()) == std::string("level2"));
+            check(std::string(color_field.c_str()) == std::string("group"));
         }
 
         it("should parse encoding block") {
@@ -122,7 +122,7 @@ spec("flexchart_rule_parser") {
             auto chart = flex::chart::rule_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "threshold(x)");
+            check(std::string(mark->expr.c_str()) == std::string("threshold(x)"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
@@ -141,7 +141,7 @@ spec("flexchart_rule_parser") {
             auto chart = flex::chart::rule_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "thresholds.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("thresholds.json"));
         }
 
         it("should return nullptr on invalid input") {

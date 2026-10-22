@@ -2,7 +2,7 @@
 #include "backends/tui/init.h"
 #include "backends/vulkan/init.h"
 #include "flex/render.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #ifdef _WIN32
   #include "backends/d2d/init.h"

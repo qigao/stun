@@ -611,7 +611,7 @@ public:
     if (!std::isfinite(font_size) || font_size <= 0.0f) {
       throw std::invalid_argument("gCanvas font size must be positive");
     }
-    if (font_size > static_cast<float>((std::numeric_limits<int>::max)())) {
+    if (static_cast<double>(font_size) > static_cast<double>((std::numeric_limits<int>::max)())) {
       throw std::length_error("gCanvas font size exceeds the context limit");
     }
     validate_sampled_shadow();
@@ -650,7 +650,7 @@ public:
     if (!std::isfinite(font_size) || font_size <= 0.0f) {
       throw std::invalid_argument("gCanvas font size must be positive");
     }
-    if (font_size > static_cast<float>((std::numeric_limits<int>::max)())) {
+    if (static_cast<double>(font_size) > static_cast<double>((std::numeric_limits<int>::max)())) {
       throw std::length_error("gCanvas font size exceeds the context limit");
     }
 

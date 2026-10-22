@@ -1,0 +1,366 @@
+#include <flexUI/box.h>
+#include <flexUI/detail/css_typed_value.h>
+
+#include <tinytest.hpp>
+
+using namespace flexUI;
+
+namespace {
+
+Element* make_target(Box& box, const char* class_name = nullptr) {
+    auto* root = box.create("div", "root");
+    auto* target = box.create("div", "target");
+    if (class_name) target->add_class(class_name);
+    root->append(target);
+    box.set_root(root);
+    box.set_viewport(320.0f, 200.0f);
+    return target;
+}
+
+void check_color(const Color& actual, const Color& expected,
+                 float epsilon = 0.001f) {
+    check_within(actual.r, expected.r, epsilon);
+    check_within(actual.g, expected.g, epsilon);
+    check_within(actual.b, expected.b, epsilon);
+    check_within(actual.a, expected.a, epsilon);
+}
+
+} // namespace
+
+suite("FlexUI typed CSS opacity apply") {
+    it("applies a compiled literal through the registry") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css("#target { opacity: 0.625; }");
+        box.update();
+
+        check_within(target->computed_style->opacity, 0.625f, 0.0001f);
+    }
+
+    it("preserves source order for typed opacity declarations") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target { opacity: 0.2; }
+          #target { opacity: 0.75; }
+        )");
+        box.update();
+
+        check_within(target->computed_style->opacity, 0.75f, 0.0001f);
+    }
+
+    it("preserves important and specificity ordering") {
+        Box box(nullptr);
+        auto* target = make_target(box, "item");
+
+        box.load_css(R"(
+          #target { opacity: 0.1; }
+          .item { opacity: 0.8 !important; }
+          #target { opacity: 0.4; }
+        )");
+        box.update();
+
+        check_within(target->computed_style->opacity, 0.8f, 0.0001f);
+    }
+
+    it("falls back for variable-backed opacity") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            --target-opacity: 0.375;
+            opacity: var(--target-opacity);
+          }
+        )");
+        box.update();
+
+        check_within(target->computed_style->opacity, 0.375f, 0.0001f);
+    }
+
+    it("keeps deferred calc opacity on the fallback path") {
+        const auto* property = detail::style_property_find("opacity");
+        check_not_null(property);
+        check_false(
+            detail::compile_css_literal(property, "calc(1 - 0.25)").has_value());
+    }
+
+    it("applies typed visibility and preserves inherited/fallback semantics") {
+        Box box(nullptr);
+        auto* root = box.create("div", "root");
+        auto* target = box.create("div", "target");
+        root->append(target);
+        box.set_root(root);
+        box.set_viewport(320.0f, 200.0f);
+
+        box.load_css(R"(
+          #root { visibility: hidden; }
+          #target { visibility: visible; }
+        )");
+        box.update();
+        check(root->computed_style->visibility == Visibility::Hidden);
+        check(target->computed_style->visibility == Visibility::Visible);
+
+        Box inherited_box(nullptr);
+        auto* inherited_root = inherited_box.create("div", "root2");
+        auto* inherited_child = inherited_box.create("div", "child");
+        inherited_root->append(inherited_child);
+        inherited_box.set_root(inherited_root);
+        inherited_box.load_css("#root2 { visibility: collapse; }");
+        inherited_box.update();
+        check(inherited_root->computed_style->visibility == Visibility::Collapse);
+        check(inherited_child->computed_style->visibility == Visibility::Collapse);
+
+        Box variable_box(nullptr);
+        auto* variable_target = make_target(variable_box);
+        variable_box.load_css(R"(
+          #target {
+            --state: hidden;
+            visibility: var(--state);
+          }
+        )");
+        variable_box.update();
+        check(variable_target->computed_style->visibility == Visibility::Hidden);
+    }
+
+    it("applies safe literal Color properties through the registry") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            background-color: #336699;
+            outline-color: rgb(255 0 128 / 50%);
+            ring-color: hsl(120 100% 25%);
+            ring-offset-color: #112233;
+          }
+        )");
+        box.update();
+
+        check_color(target->computed_style->background_color,
+                    Color{0.2f, 0.4f, 0.6f, 1.0f});
+        check_color(target->computed_style->outline_color,
+                    Color{1.0f, 0.0f, 128.0f / 255.0f, 0.5f});
+        check_color(target->computed_style->ring_color,
+                    Color{0.0f, 0.5f, 0.0f, 1.0f});
+        check_color(target->computed_style->ring_offset_color,
+                    Color{0x11 / 255.0f, 0x22 / 255.0f, 0x33 / 255.0f, 1.0f});
+    }
+
+    it("preserves Color source order and important semantics") {
+        Box box(nullptr);
+        auto* target = make_target(box, "item");
+
+        box.load_css(R"(
+          #target { background-color: #ff0000; }
+          .item { background-color: #00ff00 !important; }
+          #target { background-color: #0000ff; }
+        )");
+        box.update();
+
+        check_color(target->computed_style->background_color,
+                    Color{0.0f, 1.0f, 0.0f, 1.0f});
+    }
+
+    it("falls back for variable-backed and currentColor values") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            --surface: #123456;
+            color: #336699;
+            background-color: var(--surface);
+            outline-color: currentColor;
+          }
+        )");
+        box.update();
+
+        check_color(target->computed_style->background_color,
+                    Color{0x12 / 255.0f, 0x34 / 255.0f, 0x56 / 255.0f, 1.0f});
+        check_color(target->computed_style->outline_color,
+                    target->computed_style->text_color);
+    }
+
+    it("applies safe effect lengths through the typed path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            outline-width: thin;
+            outline-offset: 2px;
+            ring-width: 3.5;
+            ring-offset: -1px;
+          }
+        )");
+        box.update();
+
+        check_within(target->computed_style->outline_width,
+                       1.0f, 0.0001f);
+        check_within(target->computed_style->outline_offset,
+                       2.0f, 0.0001f);
+        check_within(target->computed_style->ring_width,
+                       3.5f, 0.0001f);
+        check_within(target->computed_style->ring_offset,
+                       -1.0f, 0.0001f);
+    }
+
+    it("preserves effect length source order and important semantics") {
+        Box box(nullptr);
+        auto* target = make_target(box, "item");
+
+        box.load_css(R"(
+          #target {
+            ring-offset: 1px;
+            outline-offset: 1px;
+          }
+          #target { ring-offset: 5px; }
+          .item { outline-offset: 3px !important; }
+          #target { outline-offset: 2px; }
+        )");
+        box.update();
+
+        check_within(target->computed_style->ring_offset,
+                       5.0f, 0.0001f);
+        check_within(target->computed_style->outline_offset,
+                       3.0f, 0.0001f);
+    }
+
+    it("keeps dependent effect lengths on the computed-value path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            --ring-gap: 4px;
+            outline-offset: var(--ring-gap);
+            ring-width: 10vw;
+          }
+        )");
+        box.update();
+
+        check_within(target->computed_style->outline_offset,
+                       4.0f, 0.0001f);
+        check_within(target->computed_style->ring_width,
+                       32.0f, 0.001f);
+    }
+
+    it("keeps outline shorthand on the legacy path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css("#target { outline: 2px solid #112233; }");
+        box.update();
+
+        check_within(target->computed_style->outline_width,
+                       2.0f, 0.0001f);
+        check_color(target->computed_style->outline_color,
+                    Color{0x11 / 255.0f, 0x22 / 255.0f,
+                          0x33 / 255.0f, 1.0f});
+    }
+
+    it("applies individual transform writes through the registry") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(R"(
+          #target {
+            translate: 12px -4px;
+            scale: 2 3;
+            rotate: .25turn;
+          }
+        )");
+        box.update();
+
+        check_within(target->computed_style->transform_x,
+                       12.0f, 0.0001f);
+        check_within(target->computed_style->transform_y,
+                       -4.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale,
+                       1.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale_x,
+                       2.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale_y,
+                       3.0f, 0.0001f);
+        check_within(target->computed_style->transform_rotate,
+                       90.0f, 0.0001f);
+    }
+
+    it("preserves transform source order and important semantics") {
+        Box box(nullptr);
+        auto* target = make_target(box, "item");
+
+        box.load_css(R"(
+          #target {
+            translate: 1px 2px;
+            scale: 1;
+          }
+          #target { translate: 5px 6px; }
+          .item { scale: 2 !important; }
+          #target { scale: 3; }
+        )");
+        box.update();
+
+        check_within(target->computed_style->transform_x,
+                       5.0f, 0.0001f);
+        check_within(target->computed_style->transform_y,
+                       6.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale,
+                       2.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale_x,
+                       2.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale_y,
+                       2.0f, 0.0001f);
+    }
+
+    it("preserves legacy near-uniform scale projection") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css("#target { scale: 1.00001 1.00002; }");
+        box.update();
+
+        check_within(target->computed_style->transform_scale,
+                       1.00001f, 0.000001f);
+        check_within(target->computed_style->transform_scale_x,
+                       1.00001f, 0.000001f);
+        check_within(target->computed_style->transform_scale_y,
+                       1.00002f, 0.000001f);
+    }
+
+    it("keeps transform shorthand on the legacy path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css(
+            "#target { transform: translate(9px, 10px) scale(2) rotate(90deg); }");
+        box.update();
+
+        check_within(target->computed_style->transform_x,
+                       9.0f, 0.0001f);
+        check_within(target->computed_style->transform_y,
+                       10.0f, 0.0001f);
+        check_within(target->computed_style->transform_scale,
+                       2.0f, 0.0001f);
+        check_within(target->computed_style->transform_rotate,
+                       90.0f, 0.0001f);
+    }
+
+    it("keeps border-color on the legacy side-projection path") {
+        Box box(nullptr);
+        auto* target = make_target(box);
+
+        box.load_css("#target { border-color: #112233; }");
+        box.update();
+
+        check_true(target->computed_style->has_border_side_colors);
+        for (const auto& side : target->computed_style->border_colors) {
+            check_color(side,
+                        Color{0x11 / 255.0f, 0x22 / 255.0f,
+                              0x33 / 255.0f, 1.0f});
+        }
+    }
+};

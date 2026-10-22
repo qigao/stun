@@ -100,6 +100,10 @@ public:
   bool uses_pseudo_class(Symbol pseudo) const;
   void clear();
   void clear_baseline_styles();
+  // A retired Box-owned Element must not leave pointer-keyed CSS baselines
+  // or container query metadata that could corrupt a reused address.
+  void forget_element(const Element* element) noexcept;
+  size_t tracked_element_count() const noexcept;
 
 private:
   class Impl;

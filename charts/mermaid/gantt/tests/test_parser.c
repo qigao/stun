@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "gantt/gantt_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -36,18 +36,18 @@ static char* golden_path(const char* name, const char* ext) {
 // Compare two JSON strings by parsing and re-serializing to compact form
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -63,17 +63,17 @@ spec("gantt_parser") {
 
             GanttDiagram* diagram = gantt_parse(input);
             REQUIRE(diagram != NULL);
-            check_str_eq(diagram->title, "A simple gantt chart");
-            check_str_eq(diagram->date_format, "YYYY-MM-DD");
+            check_true(diagram->title != NULL && strcmp(diagram->title, "A simple gantt chart") == 0);
+            check_true(diagram->date_format != NULL && strcmp(diagram->date_format, "YYYY-MM-DD") == 0);
             
             REQUIRE(diagram->sections != NULL);
-            check_str_eq(diagram->sections->name, "Section 1");
+            check_true(diagram->sections->name != NULL && strcmp(diagram->sections->name, "Section 1") == 0);
             
             REQUIRE(diagram->sections->tasks != NULL);
-            check_str_eq(diagram->sections->tasks->name, "A task");
-            check_str_eq(diagram->sections->tasks->id, "a1");
-            check_str_eq(diagram->sections->tasks->start, "2023-01-01");
-            check_str_eq(diagram->sections->tasks->end, "30d");
+            check_true(diagram->sections->tasks->name != NULL && strcmp(diagram->sections->tasks->name, "A task") == 0);
+            check_true(diagram->sections->tasks->id != NULL && strcmp(diagram->sections->tasks->id, "a1") == 0);
+            check_true(diagram->sections->tasks->start != NULL && strcmp(diagram->sections->tasks->start, "2023-01-01") == 0);
+            check_true(diagram->sections->tasks->end != NULL && strcmp(diagram->sections->tasks->end, "30d") == 0);
             
             gantt_diagram_free(diagram);
         }
@@ -93,13 +93,13 @@ spec("gantt_parser") {
             
             GanttTask* t = s->tasks;
             REQUIRE(t != NULL);
-            check_str_eq(t->name, "Completed");
-            check_int_eq(t->status, GANTT_STATUS_DONE);
+            check_true(t->name != NULL && strcmp(t->name, "Completed") == 0);
+            check_true(t->status == GANTT_STATUS_DONE);
             
             t = t->next;
             REQUIRE(t != NULL);
-            check_str_eq(t->name, "Active");
-            check_int_eq(t->status, GANTT_STATUS_ACTIVE);
+            check_true(t->name != NULL && strcmp(t->name, "Active") == 0);
+            check_true(t->status == GANTT_STATUS_ACTIVE);
             
             gantt_diagram_free(diagram);
         }
@@ -131,7 +131,7 @@ spec("gantt_parser") {
 
                 check(json_equal(actual, expected), "JSON mismatch");
 
-                turbo_json_serialize_free(actual);
+                json_serialize_free(actual);
                 gantt_diagram_free(diagram);
                 free(mmd);
                 free(expected);

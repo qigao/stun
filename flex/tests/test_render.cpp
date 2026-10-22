@@ -1,5 +1,5 @@
 #include "flex/render.h"
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 using namespace flex;
 
@@ -11,10 +11,10 @@ std::unique_ptr<Renderer> null_renderer_factory(CanvasHandle) { return nullptr; 
 
 suite("flex::render") {
   it("exposes only platform rendering backends") {
-    check_str_eq(renderer_backend_name(RendererBackend::OpenGL), "OpenGL");
-    check_str_eq(renderer_backend_name(RendererBackend::Vulkan), "Vulkan");
-    check_str_eq(renderer_backend_name(RendererBackend::TUI), "TUI");
-    check_str_eq(renderer_backend_name(RendererBackend::Direct2D), "Direct2D");
+    check_equal(renderer_backend_name(RendererBackend::OpenGL), "OpenGL");
+    check_equal(renderer_backend_name(RendererBackend::Vulkan), "Vulkan");
+    check_equal(renderer_backend_name(RendererBackend::TUI), "TUI");
+    check_equal(renderer_backend_name(RendererBackend::Direct2D), "Direct2D");
   }
 
   it("registers backend factories without a window or GPU") {

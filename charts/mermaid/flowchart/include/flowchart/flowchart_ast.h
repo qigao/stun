@@ -20,7 +20,11 @@ typedef enum {
     FC_SHAPE_TRAPEZOID,     // [/ /]
     FC_SHAPE_INV_TRAPEZOID, // [\ \]
     FC_SHAPE_HEXAGON,       // {{ }}
-    FC_SHAPE_DIAMOND        // { } - same as rhombus in many contexts
+    FC_SHAPE_DIAMOND,       // { } - same as rhombus in many contexts
+    FC_SHAPE_ODD,           // >text] legacy odd/flag shape
+    /* Append new kinds: old integer values are public ABI. */
+    FC_SHAPE_TRAPEZOID_SYMMETRIC, // [/ ... \] -> trapezoid
+    FC_SHAPE_INV_TRAPEZOID_SYMMETRIC // [\ ... /] -> inv_trapezoid
 } FlowchartNodeShape;
 
 typedef enum {
@@ -58,6 +62,7 @@ typedef struct FlowchartNodeRef {
 typedef struct FlowchartSubGraph {
     char* id;
     char* label;
+    char* direction;
     FlowchartNodeRef* node_refs;
     struct FlowchartSubGraph* children;
     struct FlowchartSubGraph* next;
@@ -67,6 +72,37 @@ typedef struct FlowchartSubGraphStack {
     FlowchartSubGraph* sg;
     struct FlowchartSubGraphStack* next;
 } FlowchartSubGraphStack;
+
+typedef struct FlowchartStyle {
+    char* key;
+    char* value;
+    struct FlowchartStyle* next;
+} FlowchartStyle;
+
+typedef struct FlowchartClassDef {
+    char* id;
+    FlowchartStyle* styles;
+    struct FlowchartClassDef* next;
+} FlowchartClassDef;
+
+typedef struct FlowchartClass {
+    char* node_id;
+    char* class_name;
+    struct FlowchartClass* next;
+} FlowchartClass;
+
+typedef struct FlowchartClick {
+    char* node_id;
+    char* target;
+    int is_href;
+    struct FlowchartClick* next;
+} FlowchartClick;
+
+typedef struct FlowchartLinkStyle {
+    char* index;
+    FlowchartStyle* styles;
+    struct FlowchartLinkStyle* next;
+} FlowchartLinkStyle;
 
 typedef struct FlowchartDiagram {
     char* direction; 
@@ -82,6 +118,10 @@ typedef struct FlowchartDiagram {
     FlowchartNode* nodes;
     FlowchartEdge* edges;
     FlowchartSubGraph* subgraphs;
+    FlowchartClassDef* class_defs;
+    FlowchartClass* classes;
+    FlowchartClick* clicks;
+    FlowchartLinkStyle* link_styles;
 } FlowchartDiagram;
 
 typedef struct {

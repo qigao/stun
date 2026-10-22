@@ -34,14 +34,14 @@ spec("flexchart_bar") {
             std::string error;
             auto chart = bar_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(error.c_str(), "");
+            check(std::string(error.c_str()) == std::string(""));
 
             // Verify chart metadata
-            check_str_eq(chart->title.c_str(), "Sales");
+            check(std::string(chart->title.c_str()) == std::string("Sales"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "bar");
-            check_str_eq(mark->data_ref.c_str(), "default");
+            check(std::string(mark->type.c_str()) == std::string("bar"));
+            check(std::string(mark->data_ref.c_str()) == std::string("default"));
 
             // Verify encodings
             std::string x_field, y_field;
@@ -49,13 +49,13 @@ spec("flexchart_bar") {
                 if (enc->channel == "x") x_field = enc->field;
                 if (enc->channel == "y") y_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "month");
-            check_str_eq(y_field.c_str(), "revenue");
+            check(std::string(x_field.c_str()) == std::string("month"));
+            check(std::string(y_field.c_str()) == std::string("revenue"));
 
             // Verify dataset exists
             check(chart->datasets.size() == 1);
             auto& ds = chart->datasets[0];
-            check_str_eq(ds->name.c_str(), "default");
+            check(std::string(ds->name.c_str()) == std::string("default"));
 
             // Verify inline_values: 3 rows × 2 fields × 2 (key+val) = 12
             check(ds->inline_values.size() == 12);
@@ -63,13 +63,13 @@ spec("flexchart_bar") {
             // Check actual values in inline_values
             // Row 0: "month", "Jan", "revenue", "35"
             check(std::holds_alternative<std::string>(ds->inline_values[0]));
-            check_str_eq(std::get<std::string>(ds->inline_values[0]).c_str(), "month");
+            check(std::string(std::get<std::string>(ds->inline_values[0]).c_str()) == std::string("month"));
             check(std::holds_alternative<std::string>(ds->inline_values[1]));
-            check_str_eq(std::get<std::string>(ds->inline_values[1]).c_str(), "Jan");
+            check(std::string(std::get<std::string>(ds->inline_values[1]).c_str()) == std::string("Jan"));
             check(std::holds_alternative<std::string>(ds->inline_values[2]));
-            check_str_eq(std::get<std::string>(ds->inline_values[2]).c_str(), "revenue");
+            check(std::string(std::get<std::string>(ds->inline_values[2]).c_str()) == std::string("revenue"));
             check(std::holds_alternative<std::string>(ds->inline_values[3]));
-            check_str_eq(std::get<std::string>(ds->inline_values[3]).c_str(), "35");
+            check(std::string(std::get<std::string>(ds->inline_values[3]).c_str()) == std::string("35"));
 
             // Verify find_dataset
             auto found = find_dataset(chart, "default");
@@ -134,8 +134,8 @@ spec("flexchart_bar") {
                 x_labels.push_back(get_string_val(rec.get(x_field)));
             }
             check(x_labels.size() == 2);
-            check_str_eq(x_labels[0].c_str(), "A");
-            check_str_eq(x_labels[1].c_str(), "B");
+            check(std::string(x_labels[0].c_str()) == std::string("A"));
+            check(std::string(x_labels[1].c_str()) == std::string("B"));
 
             // Verify record_map lookup works for each label
             for (const auto& label : x_labels) {
@@ -220,7 +220,7 @@ spec("flexchart_bar") {
             // get_double_val should convert it
             auto& val = records[0].fields["score"];
             check(std::holds_alternative<std::string>(val));
-            check_str_eq(std::get<std::string>(val).c_str(), "95");
+            check(std::string(std::get<std::string>(val).c_str()) == std::string("95"));
             check(get_double_val(val) > 94.9);
             check(get_double_val(val) < 95.1);
         }

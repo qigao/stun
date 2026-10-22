@@ -1,4 +1,4 @@
-#include <tinytest.h>
+#include <tinytest.hpp>
 #undef group
 
 #include "test_support.h"
@@ -52,6 +52,8 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 #include <iostream>
 
 using namespace flexUI;
@@ -66,6 +68,7 @@ struct DrawRectCall {
   float y;
   float w;
   float h;
+  float radius;
   flex::Color fill_color;
   flex::Color stroke_color;
   float stroke_width;
@@ -100,6 +103,7 @@ public:
     viewport_ = {0.0f, 0.0f, width, height};
     tx_ = 0.0f;
     ty_ = 0.0f;
+    save_stack_.clear();
     rects.clear();
     circles.clear();
     texts.clear();
@@ -108,8 +112,15 @@ public:
 
   void end_frame() override {}
   void set_retained_mode(bool enabled) override { retained_mode_ = enabled; }
-  void save() override {}
-  void restore() override {}
+  void save() override { save_stack_.push_back({tx_, ty_}); }
+  void restore() override {
+    if (save_stack_.empty()) {
+      throw std::runtime_error("render restore without matching save");
+    }
+    tx_ = save_stack_.back().first;
+    ty_ = save_stack_.back().second;
+    save_stack_.pop_back();
+  }
   void reset() override {
     tx_ = 0.0f;
     ty_ = 0.0f;
@@ -144,10 +155,11 @@ public:
   }
   void draw_line(float, float, float, float, const flex::Paint&, float) override {}
 
-  void draw_rect(float x, float y, float w, float h, float, const flex::Paint& fill,
+  void draw_rect(float x, float y, float w, float h, float radius,
+                 const flex::Paint& fill,
                  const flex::Paint& stroke, float stroke_width) override {
     rects.push_back(
-        {x + tx_, y + ty_, w, h,
+        {x + tx_, y + ty_, w, h, radius,
          fill.type == flex::Paint::Type::Solid ? fill.color : flex::Color{},
          stroke.type == flex::Paint::Type::Solid ? stroke.color : flex::Color{},
          stroke_width});
@@ -216,6 +228,7 @@ private:
   bool retained_mode_ = false;
   float tx_ = 0.0f;
   float ty_ = 0.0f;
+  std::vector<std::pair<float, float>> save_stack_;
   flex::Bounds viewport_{};
   flex::RendererCapabilities capabilities_{};
 };
@@ -1503,7 +1516,8 @@ std::string describe_rects(const RecordingRenderer& backend) {
       oss << " | ";
     }
     oss << "#" << i << " x=" << rect.x << " y=" << rect.y << " w=" << rect.w
-        << " h=" << rect.h << " fill=(" << rect.fill_color.r << ","
+        << " h=" << rect.h << " radius=" << rect.radius
+        << " fill=(" << rect.fill_color.r << ","
         << rect.fill_color.g << "," << rect.fill_color.b << ","
         << rect.fill_color.a << ") stroke=(" << rect.stroke_color.r << ","
         << rect.stroke_color.g << "," << rect.stroke_color.b << ","
@@ -1647,7 +1661,8 @@ void require_render_expectations(const std::string& case_name,
         });
     if (match == backend.texts.end()) {
       throw std::runtime_error("render text expectation failed in case '" +
-                               case_name + "'");
+                               case_name + "'; actual texts: " +
+                               describe_texts(backend));
     }
   }
   for (const auto& rect_expect : render.value("rects", json::array())) {
@@ -1664,6 +1679,19 @@ void require_render_expectations(const std::string& case_name,
           if (rect_expect.contains("stroke_width") &&
               !approx_eq(call.stroke_width,
                          rect_expect.at("stroke_width").get<float>(), 0.001f)) {
+            return false;
+          }
+          if (rect_expect.contains("w") &&
+              !approx_eq(call.w, rect_expect.at("w").get<float>(), 0.001f)) {
+            return false;
+          }
+          if (rect_expect.contains("h") &&
+              !approx_eq(call.h, rect_expect.at("h").get<float>(), 0.001f)) {
+            return false;
+          }
+          if (rect_expect.contains("radius") &&
+              !approx_eq(call.radius, rect_expect.at("radius").get<float>(),
+                         0.001f)) {
             return false;
           }
           if (rect_expect.contains("min_x") &&

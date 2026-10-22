@@ -31,11 +31,6 @@ find_package(Threads REQUIRED)
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT}")
 find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
 
-# These packages belong to the optional chart/designer targets and the Windows
-# TurboScript runtime bundle. Flex and FlexUI use the canonical Salts packages.
-if(STUN_BUILD_CHARTS OR (WIN32 AND FLEXUI_ENABLE_TURBOSCRIPT))
-  find_package(TurboParser CONFIG REQUIRED PATHS "${TURBOPARSER_ROOT}")
-endif()
 if(STUN_BUILD_APPLICATIONS OR (WIN32 AND FLEXUI_ENABLE_TURBOSCRIPT))
   find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
 endif()
@@ -47,20 +42,26 @@ add_subdirectory(tools)
 include(FindTools)
 # Add vendor libraries before creating nanogui target
 add_subdirectory(vendor)
+# gCanvas is a repository-owned shared module, but Flex and FlexUI consume its
+# targets while they are configured. Define it before those consumers.
+add_subdirectory(shared/gcanvas)
 add_subdirectory(flex)
 add_subdirectory(flexUI)
 add_subdirectory(TextEdit)
 add_subdirectory(tango)
+# shared/markdown tests conditionally include the Tango consumer contract, so
+# define Tango before configuring shared modules. Targets can still be linked
+# by FlexUI below after both subdirectories have been added.
+add_subdirectory(shared)
+# Native C11 RichDoc is the sole MarkdownWidget parser. The C11 library is
+# declared after FlexUI so the existing Tango test build order stays intact.
+target_link_libraries(flexUI PRIVATE Stun::UICore)
 if(STUN_BUILD_APPLICATIONS)
   add_subdirectory(meta_editor)
   add_subdirectory(flexui_designer)
 endif()
-# FlexPlayer's legacy SDL software compositor depends on the retired ThorVG
-# renderer and an external FFmpeg SDK. Keep it outside the supported build
-# until it has a native GPU compositor.
-if(STUN_BUILD_CHARTS)
-  add_subdirectory(charts)
-endif()
+# Chart libraries and parser tests are part of the normal supported build.
+add_subdirectory(charts)
 
 function(nanogui_set_target_output_dir target_name)
   if(NOT TARGET "${target_name}")

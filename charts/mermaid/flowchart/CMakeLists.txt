@@ -33,11 +33,25 @@ add_custom_command(
 # Flowchart Library (mermaid_flowchart)
 # ============================================================================
 
+# Mermaid's renderer-independent flowchart graph algorithm adapter.
+add_library(stun_mermaid_flowchart_layout STATIC src/flowchart_layout.cpp)
+add_library(Stun::MermaidFlowchartLayout ALIAS stun_mermaid_flowchart_layout)
+target_include_directories(stun_mermaid_flowchart_layout PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(stun_mermaid_flowchart_layout
+    PUBLIC Stun::GraphCore
+    PRIVATE Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline Stun::GraphPolylineNudging Stun::GraphNudging
+)
+target_compile_features(stun_mermaid_flowchart_layout PUBLIC cxx_std_17)
+set_target_properties(stun_mermaid_flowchart_layout PROPERTIES FOLDER "Modules/Mermaid/FlowchartLayout")
+
 add_library(mermaid_flowchart STATIC
     ${FC_LEXER_GEN_C}
     ${FC_PARSER_GEN_C}
     src/flowchart_parser_wrapper.c
     src/flowchart_renderer.cpp
+    src/flowchart_curve.cpp
     src/flex_flowchart.cpp
 )
 
@@ -50,7 +64,8 @@ target_include_directories(mermaid_flowchart
 )
  
 target_link_libraries(mermaid_flowchart 
-    PUBLIC TurboParser::Parser flex_runtime TurboParser::Mustache avoid
+    PUBLIC Salts::JsonParser flex_runtime Salts::Mustache
+    PRIVATE Stun::MermaidFlowchartLayout
 )
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
@@ -62,9 +77,10 @@ endif()
 # ============================================================================
 
 # 原有的 Parser 测试
-add_executable(flowchart_test tests/test_parser.c)
-target_link_libraries(flowchart_test PRIVATE mermaid_flowchart Salts::TinyTest TurboParser::Parser)
-target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
+add_executable(flowchart_test tests/test_parser.c tests/test_json_v2.c)
+target_link_libraries(flowchart_test PRIVATE mermaid_flowchart Salts::TinyTest Salts::JsonParser)
+target_compile_definitions(flowchart_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart"
+    JSON_V2_CONTRACT="${CMAKE_CURRENT_SOURCE_DIR}/tests/json-v2-contract.json")
 add_test(NAME flowchart_test COMMAND flowchart_test)
 set_target_properties(flowchart_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
@@ -74,10 +90,17 @@ target_link_libraries(flowchart_renderer_test PRIVATE mermaid_flowchart)
 add_test(NAME flowchart_renderer_test COMMAND flowchart_renderer_test)
 set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
+add_executable(flowchart_linkstyle_test tests/test_linkstyle.cpp tests/test_curves.cpp)
+target_link_libraries(flowchart_linkstyle_test PRIVATE mermaid_flowchart)
+target_compile_definitions(flowchart_linkstyle_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
+add_test(NAME flowchart_linkstyle_test COMMAND flowchart_linkstyle_test)
+
 # 新的 Flex 集成测试
 add_executable(flowchart_flex_test tests/test_flex.cpp)
+# test_flex.cpp includes <flex.h>; link the compiler target to inherit the
+# generated flex_parser_gen.h include directory and generation dependency.
 target_link_libraries(flowchart_flex_test PRIVATE
-    mermaid_flowchart flex_runtime Salts::TinyTest)
+    mermaid_flowchart flex_runtime flex Salts::TinyTest)
 add_test(NAME flowchart_flex_test COMMAND flowchart_flex_test)
 set_target_properties(flowchart_flex_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 

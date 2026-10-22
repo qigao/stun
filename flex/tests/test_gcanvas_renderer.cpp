@@ -431,6 +431,14 @@ suite("Flex gCanvas renderer") {
     check_within(bold.width, 20.0f, 0.001f);
     check_within(bold.height, 64.0f, 0.001f);
 
+    // float(INT_MAX) rounds up to 2^31; it must not pass the int boundary.
+    flex::TextMetrics refused{123.0f, 456.0f};
+    check_throws_as(renderer->measure_text(
+                        "H", "ui", static_cast<float>((std::numeric_limits<int>::max)()),
+                        false, refused), std::length_error);
+    check_within(refused.width, 123.0f, 0.001f);
+    check_within(refused.height, 456.0f, 0.001f);
+
     // Measurement is a query: it must not alter the context's active font state.
     check_true(canvas.selected_font_source().empty());
     check_equal(canvas.font_size(), 10);

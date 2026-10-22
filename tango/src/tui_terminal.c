@@ -2,7 +2,7 @@
  * TUI Terminal Implementation
  */
 
-#include "tui.h"
+#include "tui_terminal_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -29,32 +29,15 @@ static void handle_sigwinch(int sig) {
     (void)sig;
     g_resize_pending = 1;
 }
+
+/* Keep the signal flag private to this translation unit. */
+bool tui_terminal_consume_resize_pending(void) {
+    if (!g_resize_pending) return false;
+    g_resize_pending = 0;
+    return true;
+}
 #endif
 
-struct tui_terminal {
-    bool            initialized;
-    int             width;
-    int             height;
-    tui_color_mode_t color_mode;
-    
-    tui_buffer_t*   front;      /* What's on screen */
-    tui_buffer_t*   back;       /* What we're drawing */
-    
-    char*           output;     /* Escape sequence buffer */
-    size_t          output_cap;
-    size_t          output_len;
-    
-    bool            mouse_enabled;
-    
-#ifdef _WIN32
-    HANDLE          h_out;
-    HANDLE          h_in;
-    DWORD           orig_out_mode;
-    DWORD           orig_in_mode;
-#else
-    struct termios  orig_termios;
-#endif
-};
 
 /* ============================================================================
  * Output buffer helpers
