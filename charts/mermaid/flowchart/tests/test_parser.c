@@ -28,14 +28,34 @@ static char* read_file(const char* path) {
     return buf;
 }
 
-static char* load_golden_file(const char* case_name, const char* suffix, const char* ext) {
+static char* load_golden_input(const char* case_name) {
     char path[512];
-    snprintf(path, sizeof(path), "%s/%s.%s", GOLDEN_DIR, case_name, ext);
-    char* data = read_file(path);
-    if (data) return data;
-
-    snprintf(path, sizeof(path), "%s/%s.%s.%s", GOLDEN_DIR, case_name, suffix, ext);
+    snprintf(path, sizeof(path), "%s/%s.input.mmd", GOLDEN_DIR, case_name);
     return read_file(path);
+}
+
+/* Versioned, explicit test-corpus mapping: no missing-file fallback and no
+ * ignored mismatches. Historical output files stay untouched for audit. */
+static char* load_golden_expected(const char* case_name) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/contracts.json", GOLDEN_DIR);
+    char* text = read_file(path);
+    if (!text) return NULL;
+    json_value_t* manifest = json_parse(text, strlen(text));
+    free(text);
+    const char* schema = manifest ? json_get_string(manifest, "schema") : NULL;
+    json_value_t* cases = manifest ? json_object_get(manifest, "cases") : NULL;
+    json_value_t* entry = cases ? json_object_get(cases, case_name) : NULL;
+    const char* suffix = entry ? json_get_string(entry, "expected") : NULL;
+    char* result = NULL;
+    if (schema && strcmp(schema, "stun-flowchart-test-contract/1") == 0 &&
+        suffix && (strcmp(suffix, "output") == 0 ||
+                   strcmp(suffix, "source-v1") == 0)) {
+        snprintf(path, sizeof(path), "%s/%s.%s.json", GOLDEN_DIR, case_name, suffix);
+        result = read_file(path);
+    }
+    json_free(manifest);
+    return result;
 }
 
 /* Historical golden comparator policy deliberately aliases "square" to
@@ -483,6 +503,33 @@ spec("flowchart_parser") {
                        flowchart_edge_get_curve(diagram->edges) &&
                        strcmp(flowchart_edge_get_curve(diagram->edges), "natural") == 0);
             flowchart_diagram_free(diagram);
+        }
+    }
+
+    describe("original named-edge fixture semantics") {
+        it("preserves all eight named IDs and seven curves without metadata nodes") {
+            char* input = load_golden_input("v2-mermaid-104");
+            FlowchartDiagram* diagram = NULL;
+            FlowchartParseStatus status = flowchart_parse_ex(input, &diagram);
+            free(input);
+            const char* ids[] = {"e1", "e5", "e7", "e3", "e2", "e4", "e6", "e8"};
+            const char* curves[] = {"natural", "linear", "cardinal", "monotoneY",
+                                    "stepAfter", "bumpY", "catmullRom", NULL};
+            int ok = status == FLOWCHART_PARSE_COMPLETE && diagram;
+            size_t nodes = 0, edges = 0;
+            for (FlowchartNode* node = diagram ? diagram->nodes : NULL;
+                 node; node = node->next) ++nodes;
+            for (FlowchartEdge* edge = diagram ? diagram->edges : NULL;
+                 edge; edge = edge->next, ++edges) {
+                const char* id = flowchart_edge_get_id(edge);
+                const char* curve = flowchart_edge_get_curve(edge);
+                if (edges >= 8 || !id || strcmp(id, ids[edges]) != 0) ok = 0;
+                if (edges < 8 && ((curve == NULL) != (curves[edges] == NULL) ||
+                    (curve && curves[edges] && strcmp(curve, curves[edges]) != 0))) ok = 0;
+            }
+            ok = ok && nodes == 6 && edges == 8;
+            flowchart_diagram_free(diagram);
+            check_true(ok);
         }
     }
 
@@ -1549,10 +1596,8 @@ spec("flowchart_parser") {
                 memcpy(case_name, filename, name_len);
                 case_name[name_len] = '\0';
                 it(case_name) {
-                    char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd");
-                    char* expected = load_golden_file(case_name, "output", "json");
-                    if (!expected) expected = load_golden_file(case_name, "", "json");
+                    char* input = load_golden_input(case_name);
+                    char* expected = load_golden_expected(case_name);
                     int failed = !input || !expected;
                     FlowchartDiagram* diagram = NULL;
                     char* actual = NULL;
@@ -1605,10 +1650,8 @@ spec("flowchart_parser") {
                 memcpy(case_name, filename, name_len);
                 case_name[name_len] = '\0';
                 it(case_name) {
-                    char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd");
-                    char* expected = load_golden_file(case_name, "output", "json");
-                    if (!expected) expected = load_golden_file(case_name, "", "json");
+                    char* input = load_golden_input(case_name);
+                    char* expected = load_golden_expected(case_name);
                     int failed = !input || !expected;
                     FlowchartDiagram* diagram = NULL;
                     char* actual = NULL;

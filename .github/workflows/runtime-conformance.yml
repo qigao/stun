@@ -85,6 +85,7 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node verify.mjs "$RUNNER_TEMP/flowchart-mermaid-oracle.json"
+          node migrate.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: flowchart-mermaid-oracle-${{ github.event.pull_request.head.sha || github.sha }}
