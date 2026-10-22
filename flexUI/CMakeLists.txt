@@ -95,6 +95,7 @@ set(FLEXUI_SOURCES
   src/binding_runtime.cpp
   src/ui_document.cpp
   src/ui_xml.cpp
+  src/ui_xml_admission.cpp
   src/widget_registry.cpp
   src/keyed_repeater.cpp
   src/view_pipeline.cpp
