@@ -88,6 +88,11 @@ target_link_libraries(flowchart_renderer_test PRIVATE mermaid_flowchart)
 add_test(NAME flowchart_renderer_test COMMAND flowchart_renderer_test)
 set_target_properties(flowchart_renderer_test PROPERTIES FOLDER "Modules/Mermaid/Tests")
 
+add_executable(flowchart_linkstyle_test tests/test_linkstyle.cpp)
+target_link_libraries(flowchart_linkstyle_test PRIVATE mermaid_flowchart)
+target_compile_definitions(flowchart_linkstyle_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/flowchart")
+add_test(NAME flowchart_linkstyle_test COMMAND flowchart_linkstyle_test)
+
 # 新的 Flex 集成测试
 add_executable(flowchart_flex_test tests/test_flex.cpp)
 # test_flex.cpp includes <flex.h>; link the compiler target to inherit the

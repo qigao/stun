@@ -57,5 +57,12 @@ limitations: double-ended point arrows are projected as `arrow_point`, dotted
 arrow length is 1, node-level inline styles are not represented, and edge IDs
 and curves are exposed through AST accessors rather than JSON. These omissions
 are not excused as full Mermaid conformance by a passing test. The source
-contract preserves numeric `linkStyle` declaration indices; the renderer's
-application of those styles and curves remains separate work.
+contract preserves numeric `linkStyle` declaration indices. The focused renderer
+profile now applies stroke/width by those indices; named curves and broader CSS
+remain separate work under #238. See [the module README](../../../README.md#flowchart-svg-link-styles)
+for supported values and rejection behavior.
+
+`verify.mjs` also checks the default/indexed precedence used by the headless
+renderer regression: repeated indexed declarations replace the previous style
+list, and the final default is combined under the final indexed list. This
+evidence comes from the pinned Mermaid parser database, independent of Stun.

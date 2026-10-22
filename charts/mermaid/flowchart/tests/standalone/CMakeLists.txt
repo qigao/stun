@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 project(stun_flowchart_ast_smoke LANGUAGES C)
 
 # Test-only parser build using the SAME Lemon grammar, re2c scanner and AST
-# implementation as production. The serializer and renderer are intentionally
-# absent: their SDK integration / golden JSON conformance is checked elsewhere.
+# implementation as production. Optional installed-SDK lanes also compile
+# the production serializer and headless renderer without the desktop stack.
 include(CTest)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -124,4 +124,37 @@ if(STUN_CI_JSON_GOLDEN)
   endif()
   add_test(NAME stun_flowchart_json_golden COMMAND stun_flowchart_json_golden)
   set_tests_properties(stun_flowchart_json_golden PROPERTIES TIMEOUT 120)
+endif()
+
+# Compile the actual renderer, Mustache template and native routing adapter
+# without FlexUI, a window, a GPU, vcpkg or a Mesa source build.
+option(STUN_CI_RENDERER_STYLE "Build production headless edge-style checks" ${STUN_CI_JSON_GOLDEN})
+if(STUN_CI_RENDERER_STYLE)
+  if(NOT STUN_CI_JSON_GOLDEN)
+    message(FATAL_ERROR "Renderer checks require the installed-SDK JSON qualification")
+  endif()
+  enable_language(CXX)
+  add_subdirectory("${STUN_ROOT}/shared/layout" "${CMAKE_CURRENT_BINARY_DIR}/graphlayout" EXCLUDE_FROM_ALL)
+  add_executable(stun_flowchart_linkstyle
+    "${GENERATED_PARSER}" "${GENERATED_LEXER}"
+    "${FLOWCHART_SOURCE}/src/flowchart_parser_wrapper.c"
+    "${FLOWCHART_SOURCE}/src/flowchart_renderer.cpp"
+    "${FLOWCHART_SOURCE}/src/flowchart_layout.cpp"
+    "${FLOWCHART_SOURCE}/tests/test_linkstyle.cpp")
+  target_include_directories(stun_flowchart_linkstyle PRIVATE
+    "${FLOWCHART_SOURCE}/include" "${CMAKE_CURRENT_BINARY_DIR}")
+  target_compile_features(stun_flowchart_linkstyle PRIVATE cxx_std_17)
+  target_compile_definitions(stun_flowchart_linkstyle PRIVATE
+    STUN_FLOWCHART_PARSER_ONLY=1 _POSIX_C_SOURCE=200809L
+    GOLDEN_DIR="${STUN_ROOT}/charts/mermaid/golden/flowchart")
+  target_link_libraries(stun_flowchart_linkstyle PRIVATE Salts::Mustache
+    Stun::GraphLayered Stun::GraphOrthogonal Stun::GraphPolyline
+    Stun::GraphPolylineNudging Stun::GraphNudging)
+  if(STUN_CI_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(stun_flowchart_linkstyle PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(stun_flowchart_linkstyle PRIVATE -fsanitize=address,undefined)
+  endif()
+  add_test(NAME stun_flowchart_linkstyle COMMAND stun_flowchart_linkstyle
+    "${CMAKE_CURRENT_BINARY_DIR}/flowchart-linkstyle.svg")
+  set_tests_properties(stun_flowchart_linkstyle PROPERTIES TIMEOUT 30)
 endif()

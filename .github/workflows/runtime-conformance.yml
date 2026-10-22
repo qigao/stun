@@ -1,6 +1,6 @@
 name: Stun runtime conformance
 
-# Focused parser checks against published SDKs. Keep normal PR validation
+# Focused parser and headless renderer checks against published SDKs. Keep normal PR validation
 # independent of Mesa source builds and desktop/window runtime qualification.
 on:
   pull_request:
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           bash .github/scripts/ci-affected.sh \
-            'charts/mermaid/flowchart/*' \
+            'charts/mermaid/flowchart/*' 'shared/layout/*' \
             'charts/mermaid/golden/flowchart/*' \
             'tools/lemon/*' '.github/scripts/ci-affected.sh' \
             '.github/scripts/restore-flowchart-sdk.py' \
@@ -77,7 +77,7 @@ jobs:
   # Run the installed-SDK AST and exact JSON suite for every applicable
   # update, including mixed changes and explicit ci/full requests.
   golden:
-    name: Linux / actual 95 Mermaid golden cases + ASan/UBSan
+    name: Linux / 95 Mermaid goldens + headless SVG + ASan/UBSan
     needs: [changes, sdk-releases]
     if: needs.changes.outputs.golden == 'true'
     runs-on: ubuntu-24.04
@@ -179,23 +179,25 @@ jobs:
           set -euo pipefail
           cmake -S charts/mermaid/flowchart/tests/standalone \
             -B build/flowchart-json-golden -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DSTUN_CI_JSON_GOLDEN=ON -DSTUN_CI_SANITIZERS=ON \
+            -DSTUN_CI_JSON_GOLDEN=ON -DSTUN_CI_RENDERER_STYLE=ON -DSTUN_CI_SANITIZERS=ON \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
-          # Reuse one generator invocation and build tree for both checks.
+          # Reuse one generator invocation and build tree for all focused checks.
           cmake --build build/flowchart-json-golden \
-            --target stun_flowchart_ast_smoke stun_flowchart_json_golden --parallel 2
+            --target stun_flowchart_ast_smoke stun_flowchart_json_golden stun_flowchart_linkstyle --parallel 2
 
-      - name: Execute real Flowchart JSON golden suite
+      - name: Execute production parser, JSON golden and headless SVG checks
         shell: bash
         run: |
           set -euo pipefail
           ldd build/flowchart-json-golden/stun_flowchart_json_golden | tee build/flowchart-json-golden/dependencies.txt
           ! grep -q 'not found' build/flowchart-json-golden/dependencies.txt
           ctest --test-dir build/flowchart-json-golden \
-            -R '^stun_flowchart_(ast_smoke|json_golden)$' \
+            -R '^stun_flowchart_(ast_smoke|json_golden|linkstyle)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120
+          python3 charts/mermaid/flowchart/tests/verify_linkstyle_svg.py \
+            build/flowchart-json-golden/flowchart-linkstyle.svg
           git diff --exit-code
 
       - name: Preserve exact-head SDK and test evidence
@@ -209,3 +211,4 @@ jobs:
             ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
             build/flowchart-json-golden/Testing/Temporary/LastTest.log
             build/flowchart-json-golden/dependencies.txt
+            build/flowchart-json-golden/flowchart-linkstyle.svg

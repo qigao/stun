@@ -24,13 +24,15 @@ static const char* get_svg_template() {
     <stop offset="0%" style="stop-color:{{primary_color}};stop-opacity:1" />
     <stop offset="100%" style="stop-color:{{primary_color_alt}};stop-opacity:1" />
   </linearGradient>
-  <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-    <path d="M0 0 L10 3.5 L0 7" fill="{{line_color}}" opacity="0.4"/>
+  {{#edges}}
+  <marker id="{{edge_marker_id}}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+    <path d="M0 0 L10 3.5 L0 7" fill="{{edge_line_color}}" opacity="0.4"/>
   </marker>
+  {{/edges}}
 </defs>
 <g>
   {{#edges}}
-  <path class="edge-path" d="{{path_d}}" fill="none" stroke="{{line_color}}" stroke-width="{{line_width}}" stroke-opacity="0.5" marker-end="url(#arrowhead)" />
+  <path class="edge-path" data-edge-index="{{edge_index}}" d="{{path_d}}" fill="none" stroke="{{edge_line_color}}" stroke-width="{{edge_line_width}}" stroke-opacity="0.5" marker-end="url(#{{edge_marker_id}})" />
   {{#has_label}}
   <rect x="{{label_rect_x}}" y="{{label_rect_y}}" width="{{label_rect_w}}" height="{{label_rect_h}}" fill="{{background_color}}" rx="6"/>
   <text class="label-text" x="{{label_x}}" y="{{label_y}}" text-anchor="middle" dominant-baseline="middle" fill="{{text_color}}" opacity="0.7">{{label}}</text>

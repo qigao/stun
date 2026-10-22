@@ -12,23 +12,151 @@
 #include <deque>
 #include <unordered_map>
 #include <stdexcept>
+#include <charconv>
+#include <cmath>
+#include <locale>
+#include <string_view>
+#include <iterator>
+#include <limits>
 #include "mustache/mustache.h"
 #include "flowchart_template.h"
 namespace mermaid {
 namespace flowchart {
 
+namespace {
+struct EdgeStyle {
+    std::string stroke;
+    double width = -1.0;
+};
+
+static std::string trim_style(const char* text) {
+    const std::string value = text ? text : "";
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    return value.substr(first, value.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+static bool supported_stroke(const std::string& value) {
+    if (value.empty()) return false;
+    if (value.front() == '#') {
+        const auto n = value.size() - 1;
+        if (n != 3 && n != 4 && n != 6 && n != 8) return false;
+        return std::all_of(value.begin() + 1, value.end(), [](unsigned char c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        });
+    }
+    std::string lower = value;
+    for (char& c : lower) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        else if (c < 'a' || c > 'z') return false;
+    }
+    // CSS named-color vocabulary, plus SVG paint and inherited-color keywords.
+    // Functions/URLs/custom properties are outside this initial render profile.
+    static constexpr std::string_view names[] = {
+        "aliceblue", "antiquewhite", "aqua", "aquamarine", "azure", "beige",
+        "bisque", "black", "blanchedalmond", "blue", "blueviolet", "brown",
+        "burlywood", "cadetblue", "chartreuse", "chocolate", "coral", "cornflowerblue",
+        "cornsilk", "crimson", "currentcolor", "cyan", "darkblue", "darkcyan",
+        "darkgoldenrod", "darkgray", "darkgreen", "darkgrey", "darkkhaki", "darkmagenta",
+        "darkolivegreen", "darkorange", "darkorchid", "darkred", "darksalmon", "darkseagreen",
+        "darkslateblue", "darkslategray", "darkslategrey", "darkturquoise", "darkviolet", "deeppink",
+        "deepskyblue", "dimgray", "dimgrey", "dodgerblue", "firebrick", "floralwhite",
+        "forestgreen", "fuchsia", "gainsboro", "ghostwhite", "gold", "goldenrod",
+        "gray", "green", "greenyellow", "grey", "honeydew", "hotpink",
+        "indianred", "indigo", "ivory", "khaki", "lavender", "lavenderblush",
+        "lawngreen", "lemonchiffon", "lightblue", "lightcoral", "lightcyan", "lightgoldenrodyellow",
+        "lightgray", "lightgreen", "lightgrey", "lightpink", "lightsalmon", "lightseagreen",
+        "lightskyblue", "lightslategray", "lightslategrey", "lightsteelblue", "lightyellow", "lime",
+        "limegreen", "linen", "magenta", "maroon", "mediumaquamarine", "mediumblue",
+        "mediumorchid", "mediumpurple", "mediumseagreen", "mediumslateblue", "mediumspringgreen", "mediumturquoise",
+        "mediumvioletred", "midnightblue", "mintcream", "mistyrose", "moccasin", "navajowhite",
+        "navy", "none", "oldlace", "olive", "olivedrab", "orange",
+        "orangered", "orchid", "palegoldenrod", "palegreen", "paleturquoise", "palevioletred",
+        "papayawhip", "peachpuff", "peru", "pink", "plum", "powderblue",
+        "purple", "rebeccapurple", "red", "rosybrown", "royalblue", "saddlebrown",
+        "salmon", "sandybrown", "seagreen", "seashell", "sienna", "silver",
+        "skyblue", "slateblue", "slategray", "slategrey", "snow", "springgreen",
+        "steelblue", "tan", "teal", "thistle", "tomato", "transparent",
+        "turquoise", "violet", "wheat", "white", "whitesmoke", "yellow",
+        "yellowgreen",
+    };
+    return std::binary_search(std::begin(names), std::end(names), std::string_view(lower));
+}
+
+static void apply_style(EdgeStyle& result, const FlowchartStyle* style) {
+    for (; style; style = style->next) {
+        const auto key = trim_style(style->key);
+        const auto value = trim_style(style->value);
+        if (key == "stroke") {
+            if (!supported_stroke(value))
+                throw std::invalid_argument("flowchart: unsupported stroke color");
+            result.stroke = value;
+        } else if (key == "stroke-width") {
+            std::string number = value;
+            if (number.size() >= 2 && number.substr(number.size() - 2) == "px")
+                number.resize(number.size() - 2);
+            std::istringstream stream(number);
+            stream.imbue(std::locale::classic());
+            double width;
+            if (!(stream >> width) || !std::isfinite(width) || width < 0)
+                throw std::invalid_argument("flowchart: invalid stroke width");
+            stream >> std::ws;
+            if (!stream.eof())
+                throw std::invalid_argument("flowchart: unsupported stroke width unit");
+            result.width = width;
+        } else if (key != "fill" || value != "none") {
+            throw std::invalid_argument("flowchart: unsupported linkStyle property");
+        }
+    }
+}
+
+static std::vector<EdgeStyle> resolve_edge_styles(const FlowchartDiagram* diagram) {
+    std::size_t count = 0;
+    for (auto* edge = diagram->edges; edge; edge = edge->next) ++count;
+    const FlowchartStyle* defaults = nullptr;
+    std::vector<const FlowchartStyle*> indexed(count, nullptr);
+    for (auto* rule = diagram->link_styles; rule; rule = rule->next) {
+        const auto index = trim_style(rule->index);
+        if (index == "default") {
+            defaults = rule->styles;
+        } else {
+            std::size_t ordinal = 0;
+            const auto parsed = std::from_chars(index.data(), index.data() + index.size(), ordinal);
+            if (parsed.ec != std::errc{} || parsed.ptr != index.data() + index.size() || ordinal >= count)
+                throw std::invalid_argument("flowchart: linkStyle index outside declared edges");
+            // Mermaid 11.12.0 replaces a previous indexed rule as a whole;
+            // it then overlays the final indexed rule on the final default.
+            indexed[ordinal] = rule->styles;
+        }
+    }
+    EdgeStyle base;
+    apply_style(base, defaults);
+    std::vector<EdgeStyle> result(count, base);
+    for (std::size_t i = 0; i < count; ++i) apply_style(result[i], indexed[i]);
+    return result;
+}
+
+static void set_edge_style(RenderedEdge& edge, std::size_t ordinal,
+                           const std::vector<EdgeStyle>& styles) {
+    edge.declaration_index = ordinal;
+    edge.stroke = styles.at(ordinal).stroke;
+    edge.stroke_width = styles.at(ordinal).width;
+}
+} // namespace
+
 class FlowchartRenderer::Impl {
 public:
     LayoutSnapshot layout(const FlowchartDiagram* diagram) {
         if (!diagram || !diagram->nodes) return {};
+        const auto styles = resolve_edge_styles(diagram);
         if (diagram->layout_mode == FC_LAYOUT_LEGACY) {
-            return layout_legacy(diagram);
+            return layout_legacy(diagram, styles);
         }
-        return layout_professional(diagram);
+        return layout_professional(diagram, styles);
     }
 
 private:
-    LayoutSnapshot layout_legacy(const FlowchartDiagram* diagram) {
+    LayoutSnapshot layout_legacy(const FlowchartDiagram* diagram, const std::vector<EdgeStyle>& styles) {
         LayoutSnapshot snapshot;
         std::map<std::string, FlowchartNode*> node_registry;
         std::vector<FlowchartNode*> all_nodes;
@@ -113,9 +241,11 @@ private:
             }
         }
 
-        for (auto* e = diagram->edges; e; e = e->next) {
+        std::size_t ordinal = 0;
+        for (auto* e = diagram->edges; e; e = e->next, ++ordinal) {
             if (coords.count(e->from) && coords.count(e->to)) {
                 RenderedEdge re;
+                set_edge_style(re, ordinal, styles);
                 re.source_id = e->from;
                 re.target_id = e->to;
                 re.label = e->label ? e->label : "";
@@ -130,7 +260,7 @@ private:
         return snapshot;
     }
 
-    LayoutSnapshot layout_professional(const FlowchartDiagram* diagram) {
+    LayoutSnapshot layout_professional(const FlowchartDiagram* diagram, const std::vector<EdgeStyle>& styles) {
         LayoutSnapshot snapshot;
         std::vector<FlowchartNode*> nodes;
         std::unordered_map<std::string, size_t> index_of;
@@ -179,6 +309,7 @@ private:
         size_t i = 0;
         for (auto* edge = diagram->edges; edge; edge = edge->next, ++i) {
             RenderedEdge re;
+            set_edge_style(re, i, styles);
             re.source_id = edge->from;
             re.target_id = edge->to;
             re.label = edge->label ? edge->label : "";
@@ -230,6 +361,13 @@ static std::string format_double(double v) {
     s.erase(s.find_last_not_of('0') + 1, std::string::npos);
     if (s.back() == '.') s.pop_back();
     return s;
+}
+
+static std::string format_stroke_width(double width) {
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::setprecision(std::numeric_limits<double>::max_digits10) << width;
+    return stream.str();
 }
 
 static void* get_root(void* data) {
@@ -296,6 +434,10 @@ static void* get_child_by_name(void* node, const char* name, size_t size, void* 
         if (key == "radius") return create_val(format_double(std::min(n.width, n.height) / 2));
     } else if (proxy->type == ProxyType::Edge) {
         const auto& e = proxy->snapshot->edges[proxy->index];
+        if (key == "edge_index") return create_val(std::to_string(e.declaration_index));
+        if (key == "edge_marker_id") return create_val("arrowhead-" + std::to_string(proxy->index));
+        if (key == "edge_line_color") return create_val(e.stroke.empty() ? opt.line_color : e.stroke);
+        if (key == "edge_line_width") return create_val(format_stroke_width(e.stroke_width < 0 ? opt.line_width : e.stroke_width));
         if (key == "path_d") {
             std::stringstream ss;
             if (e.points.size() >= 2) {

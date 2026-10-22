@@ -25,6 +25,7 @@ async function parse(source) {
   const diagram = await mermaid.mermaidAPI.getDiagramFromText(source);
   return {
     nodes: [...diagram.db.getVertices().keys()],
+    defaultStyles: diagram.db.getEdges().defaultStyle ?? [],
     edges: diagram.db.getEdges().map(edge => ({
       source: edge.start, target: edge.end, id: edge.id,
       curve: edge.interpolate ?? null, styles: edge.style ?? [],
@@ -76,7 +77,22 @@ assert.deepEqual(before.nodes, ['e1', 'A', 'B']);
 assert.equal(before.edges[0].curve, null);
 evidence.lookupTiming = {after: timing, before};
 
+// Final indexed declarations replace earlier indexed declarations as a whole;
+// the final default is then merged under each edge, regardless of source order.
+const precedence = await parse('flowchart LR\nA --> B\nA --> B\nB --> C\n' +
+  'linkStyle default stroke:blue,stroke-width:4px\n' +
+  'linkStyle 1 stroke:red,stroke-width:8px\n' +
+  'linkStyle 1 stroke-width:0px\n' +
+  'linkStyle default stroke:green,stroke-width:3px\n' +
+  'linkStyle 0,2 stroke:#abc\n');
+assert.deepEqual(endpoints(precedence.edges), [['A', 'B'], ['A', 'B'], ['B', 'C']]);
+assert.deepEqual(precedence.defaultStyles, ['stroke:green', 'stroke-width:3px']);
+assert.deepEqual(precedence.edges.map(e => e.styles), [
+  ['stroke:#abc', 'fill:none'], ['stroke-width:0px', 'fill:none'], ['stroke:#abc', 'fill:none'],
+]);
+evidence.linkStylePrecedence = precedence;
+
 if (process.argv[2]) writeFileSync(process.argv[2], JSON.stringify(evidence, null, 2) + '\n');
-console.log(`Mermaid ${installed.version}: verified 14 source/JSON endpoint orders, linkStyle retargeting, named-edge metadata and lookup timing.`);
+console.log(`Mermaid ${installed.version}: verified 14 source/JSON endpoint orders, linkStyle retargeting and precedence, named-edge metadata and lookup timing.`);
 console.log('Diagnostic evidence only. Stun strict golden and full runtime acceptance remain separate.');
 dom.window.close();

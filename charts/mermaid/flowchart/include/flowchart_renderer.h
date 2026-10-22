@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 #include <memory>
@@ -29,6 +30,11 @@ struct RenderedEdge {
     std::string target_id;
     std::string label;
     std::vector<Point> points; // 布局引擎生成的路径点
+    // Owned presentation values resolved by AST declaration ordinal, never by
+    // source/target pair or a possibly reordered JSON projection.
+    std::size_t declaration_index = 0;
+    std::string stroke; // Empty uses RenderOptions::line_color.
+    double stroke_width = -1.0; // Negative uses RenderOptions::line_width.
 };
 
 struct RenderOptions {
@@ -44,8 +50,8 @@ struct RenderOptions {
 struct LayoutSnapshot {
     std::vector<RenderedNode> nodes;
     std::vector<RenderedEdge> edges;
-    double total_width;
-    double total_height;
+    double total_width = 0;
+    double total_height = 0;
     RenderOptions options; // 视觉配置
 };
 
@@ -64,6 +70,7 @@ public:
     /**
      * 执行布局运算
      * @param diagram 已经解析好的图表数据
+     * @throws std::invalid_argument for unsupported linkStyle properties or values.
      * @return 包含坐标和路径的快照
      */
     LayoutSnapshot layout(const FlowchartDiagram* diagram);
