@@ -476,8 +476,12 @@ spec("flowchart_parser") {
                 if (strcmp(n->id, "e3") == 0)
                     unannotated++;
             }
-            check_true(edges_ok && count == 3 && node_count == 6 &&
-                       annotated == 2 && unannotated == 0);
+            check_true(edges_ok && count == 3 && node_count == 4 &&
+                       annotated == 0 && unannotated == 0);
+            check_true(diagram->edges && flowchart_edge_get_id(diagram->edges) &&
+                       strcmp(flowchart_edge_get_id(diagram->edges), "e1") == 0 &&
+                       flowchart_edge_get_curve(diagram->edges) &&
+                       strcmp(flowchart_edge_get_curve(diagram->edges), "natural") == 0);
             flowchart_diagram_free(diagram);
         }
     }
@@ -745,7 +749,7 @@ spec("flowchart_parser") {
     }
 
     describe("named edge metadata declaration") {
-        it("preserves declared edge IDs as nodes, not extra edges") {
+        it("attaches known edge properties and keeps unknown IDs as node declarations") {
             const char* input =
                 "flowchart TD\n"
                 "A e1@--> B\n"
@@ -759,10 +763,10 @@ spec("flowchart_parser") {
             json_value_t* root = encoded ? json_parse(encoded, strlen(encoded)) : NULL;
             json_value_t* nodes = root ? json_object_get(root, "nodes") : NULL;
             json_value_t* links = root ? json_object_get(root, "links") : NULL;
-            int ok = nodes && json_object_size(nodes) == 4 &&
+            int ok = nodes && json_object_size(nodes) == 3 &&
                      json_object_get(nodes, "A") &&
                      json_object_get(nodes, "B") &&
-                     json_object_get(nodes, "e1") &&
+                     !json_object_get(nodes, "e1") &&
                      json_object_get(nodes, "e2") &&
                      !json_object_get(nodes, "e3") &&
                      links && json_array_size(links) == 1;
@@ -770,8 +774,11 @@ spec("flowchart_parser") {
                 json_value_t* link = json_array_get(links, 0);
                 const char* source = json_get_string(link, "source");
                 const char* target = json_get_string(link, "target");
+                const char* id = flowchart_edge_get_id(diagram->edges);
+                const char* curve = flowchart_edge_get_curve(diagram->edges);
                 ok = source && target && strcmp(source, "A") == 0 &&
-                     strcmp(target, "B") == 0;
+                     strcmp(target, "B") == 0 && id && strcmp(id, "e1") == 0 &&
+                     curve && strcmp(curve, "natural") == 0;
             }
             check_true(ok);
             json_free(root);

@@ -141,11 +141,59 @@ static void test_named_edge_metadata_nodes(void) {
         CHECK(e->from && e->to &&
               strcmp(e->from, "A") == 0 && strcmp(e->to, "B") == 0);
     }
-    CHECK(count == 4);
+    CHECK(count == 3);
     CHECK(edges == 1);
-    CHECK(find_node(d, "e1") != NULL);
+    CHECK(find_node(d, "e1") == NULL);
     CHECK(find_node(d, "e2") != NULL);
     CHECK(find_node(d, "e3") == NULL);
+    CHECK(flowchart_edge_get_id(d->edges) &&
+          strcmp(flowchart_edge_get_id(d->edges), "e1") == 0);
+    CHECK(flowchart_edge_get_curve(d->edges) &&
+          strcmp(flowchart_edge_get_curve(d->edges), "natural") == 0);
+    flowchart_diagram_free(d);
+}
+
+static void test_named_edge_chain_metadata(void) {
+    FlowchartDiagram* d = NULL;
+    CHECK(flowchart_parse_ex(
+        "flowchart TD\nA e1@--> B e2@--> C\n"
+        "e1@{ curve: natural }\ne2@{ curve: stepAfter }\n"
+        "e1@{ curve: linear }\n", &d) == FLOWCHART_PARSE_COMPLETE);
+    if (!d) { ++failures; return; }
+    const FlowchartEdge* first = d->edges;
+    const FlowchartEdge* second = first ? first->next : NULL;
+    CHECK(first && second && !second->next);
+    CHECK(first && flowchart_edge_get_id(first) &&
+          strcmp(flowchart_edge_get_id(first), "e1") == 0);
+    CHECK(first && flowchart_edge_get_curve(first) &&
+          strcmp(flowchart_edge_get_curve(first), "linear") == 0);
+    CHECK(second && flowchart_edge_get_id(second) &&
+          strcmp(flowchart_edge_get_id(second), "e2") == 0);
+    CHECK(second && flowchart_edge_get_curve(second) &&
+          strcmp(flowchart_edge_get_curve(second), "stepAfter") == 0);
+    CHECK(find_node(d, "e1") == NULL && find_node(d, "e2") == NULL);
+    flowchart_diagram_free(d);
+
+    /* A property statement before the edge remains a node declaration in
+       Mermaid 11.12.0; it must not retroactively attach to a future edge. */
+    d = NULL;
+    CHECK(flowchart_parse_ex("flowchart TD\ne1@{ curve: natural }\n"
+                            "A e1@--> B\n", &d) == FLOWCHART_PARSE_COMPLETE);
+    if (!d) { ++failures; return; }
+    CHECK(find_node(d, "e1") != NULL);
+    CHECK(d->edges && flowchart_edge_get_curve(d->edges) == NULL);
+    flowchart_diagram_free(d);
+
+    d = NULL;
+    CHECK(flowchart_parse_ex("flowchart TD\nA link@-- \"label\" --> B\n"
+                            "link@{ curve: basis }\n", &d) == FLOWCHART_PARSE_COMPLETE);
+    if (!d) { ++failures; return; }
+    CHECK(d->edges && d->edges->label && strcmp(d->edges->label, "label") == 0);
+    CHECK(d->edges && flowchart_edge_get_id(d->edges) &&
+          strcmp(flowchart_edge_get_id(d->edges), "link") == 0);
+    CHECK(d->edges && flowchart_edge_get_curve(d->edges) &&
+          strcmp(flowchart_edge_get_curve(d->edges), "basis") == 0);
+    CHECK(find_node(d, "link") == NULL);
     flowchart_diagram_free(d);
 }
 
@@ -216,6 +264,7 @@ int main(void) {
     test_inline_edge_labels();
     test_punctuated_identifiers();
     test_named_edge_metadata_nodes();
+    test_named_edge_chain_metadata();
     test_shapes_and_text();
     test_subgraph_title_spacing();
     test_malformed_input();

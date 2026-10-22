@@ -2,7 +2,7 @@
 %token_prefix FC_
 %extra_argument { FlowchartParserContext *ctx }
 
-%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW AMP CLASSDEF COMMA STYLE CLICK LINKSTYLE PUNCT CLASS_SHORTCUT
+%token NEWLINE GRAPH FLOWCHART SUBGRAPH END DIR DIRECTION ARROW EDGE_PROPS AMP CLASSDEF COMMA STYLE CLICK LINKSTYLE PUNCT CLASS_SHORTCUT
        DOUBLE_CIRCLE_START DOUBLE_CIRCLE_END CPS CPE STADIUM_START STADIUM_END
        SUBROUTINE_START SUBROUTINE_END HEXAGON_START HEXAGON_END
        RHOMBUS_START RHOMBUS_END ELLIPSE_START ELLIPSE_END
@@ -33,6 +33,35 @@
 #include <string.h>
 #include <stdint.h>
 #include "flowchart/flowchart_ast.h"
+
+/* Parsed edges own private metadata after the unchanged public AST prefix.
+   Accessors accept only edges returned by this parser. No global registry or
+   change to the public FlowchartEdge layout is needed. */
+typedef struct {
+    FlowchartEdge edge;
+    char* id;
+    char* curve;
+} ParsedFlowchartEdge;
+
+const char* flowchart_edge_get_id(const FlowchartEdge* edge) {
+    return edge ? ((const ParsedFlowchartEdge*)edge)->id : NULL;
+}
+
+const char* flowchart_edge_get_curve(const FlowchartEdge* edge) {
+    return edge ? ((const ParsedFlowchartEdge*)edge)->curve : NULL;
+}
+
+void flowchart_parsed_edge_free(FlowchartEdge* edge) {
+    if (!edge) return;
+    ParsedFlowchartEdge* owned = (ParsedFlowchartEdge*)edge;
+    free(edge->from);
+    free(edge->to);
+    free(edge->label);
+    free(edge->arrow_type);
+    free(owned->id);
+    free(owned->curve);
+    free(owned);
+}
 
 /* Different delimiters carry independently observable Mermaid shapes and
    literal backslashes at their ends. Keep the copied AST label unchanged by
@@ -217,26 +246,70 @@ static void add_edge(FlowchartParserContext *ctx, const char* from, const char* 
             add_node_ref(ctx, owner_from, from);
         }
     }
-    FlowchartEdge* e = (FlowchartEdge*)calloc(1, sizeof(FlowchartEdge));
-    if (!e) {
+    ParsedFlowchartEdge* owned = (ParsedFlowchartEdge*)calloc(1, sizeof(*owned));
+    if (!owned) {
         ctx->error_count++;
         return;
+    }
+    FlowchartEdge* e = &owned->edge;
+    const char* at = arrow ? strchr(arrow, '@') : NULL;
+    if (at) {
+        size_t length = (size_t)(at - arrow);
+        owned->id = (char*)malloc(length + 1);
+        if (!owned->id) {
+            free(owned);
+            ctx->error_count++;
+            return;
+        }
+        memcpy(owned->id, arrow, length);
+        owned->id[length] = '\0';
+        arrow = at + 1;
     }
     e->from = strdup(from);
     e->to = strdup(to);
     e->label = label ? strdup(label) : NULL;
     e->arrow_type = arrow ? strdup(arrow) : strdup("-->");
     if (!e->from || !e->to || !e->arrow_type || (label && !e->label)) {
-        free(e->from);
-        free(e->to);
-        free(e->label);
-        free(e->arrow_type);
-        free(e);
+        flowchart_parsed_edge_free(e);
         ctx->error_count++;
         return;
     }
     e->next = ctx->diagram->edges;
     ctx->diagram->edges = e;
+}
+
+static void apply_edge_properties(FlowchartParserContext* ctx, char* text) {
+    char* at = text ? strchr(text, '@') : NULL;
+    char* colon = at ? strchr(at, ':') : NULL;
+    char* close = colon ? strchr(colon, '}') : NULL;
+    if (!at || !colon || !close) {
+        ctx->error_count++;
+        free(text);
+        return;
+    }
+    *at = '\0';
+    char* curve = colon + 1;
+    while (*curve == ' ' || *curve == '\t') ++curve;
+    while (close > curve && (close[-1] == ' ' || close[-1] == '\t')) --close;
+    *close = '\0';
+    /* Mermaid resolves edge properties against edges already declared.
+       An unknown ID is a node declaration, including before its named edge. */
+    FlowchartEdge* edge = ctx->diagram->edges;
+    while (edge && (!flowchart_edge_get_id(edge) ||
+                   strcmp(flowchart_edge_get_id(edge), text) != 0))
+        edge = edge->next;
+    if (edge) {
+        char* replacement = strdup(curve);
+        if (!replacement) ctx->error_count++;
+        else {
+            ParsedFlowchartEdge* owned = (ParsedFlowchartEdge*)edge;
+            free(owned->curve);
+            owned->curve = replacement;
+        }
+    } else {
+        find_or_create_node(ctx, text, NULL);
+    }
+    free(text);
 }
 
 
@@ -546,6 +619,7 @@ statements ::= .
 
 statement ::= node_definition.
 statement ::= edge_statement.
+statement ::= EDGE_PROPS(A). { apply_edge_properties(ctx, A); }
 statement ::= subgraph_statement.
 statement ::= class_statement.
 statement ::= classdef_statement.

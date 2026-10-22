@@ -48,6 +48,7 @@ jobs:
             '!charts/mermaid/flowchart/tests/test_parser.c' \
             '!charts/mermaid/flowchart/tests/ci_smoke.c' \
             '!charts/mermaid/flowchart/tests/standalone/*' \
+            '!charts/mermaid/flowchart/tests/oracle/*' \
             '.github/scripts/ci-affected.sh' \
             '.github/workflows/runtime-conformance.yml' \
             '.github/workflows/mesa-driver.yml' \
@@ -62,6 +63,33 @@ jobs:
             'tools/lemon/*' '.github/scripts/ci-affected.sh' \
             '.github/scripts/restore-flowchart-sdk.py' \
             '.github/workflows/runtime-conformance.yml'
+
+  mermaid-oracle:
+    name: Pinned Mermaid semantic evidence (independent of Stun golden)
+    needs: changes
+    if: needs.changes.outputs.golden == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: charts/mermaid/flowchart/tests/oracle/package-lock.json
+      - name: Verify pinned independent semantics without changing fixtures
+        working-directory: charts/mermaid/flowchart/tests/oracle
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node verify.mjs "$RUNNER_TEMP/flowchart-mermaid-oracle.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowchart-mermaid-oracle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/flowchart-mermaid-oracle.json
+          if-no-files-found: error
 
   sdk-releases:
     needs: changes

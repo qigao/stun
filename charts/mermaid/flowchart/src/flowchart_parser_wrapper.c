@@ -30,6 +30,7 @@ void FlowchartParser(void *yyp, int yymajor, void *yyminor, FlowchartParserConte
 void FlowchartParserFree(void *p, void (*freeProc)(void*));
 
 void flowchart_diagram_free(FlowchartDiagram *diagram);
+void flowchart_parsed_edge_free(FlowchartEdge *edge);
 
 #if defined(_MSC_VER)
 __declspec(thread) static char g_flowchart_last_error[128] = {0};
@@ -251,11 +252,7 @@ void flowchart_diagram_free(FlowchartDiagram *diagram) {
   FlowchartEdge *e = diagram->edges;
   while (e) {
     FlowchartEdge *next = e->next;
-    free(e->from);
-    free(e->to);
-    free(e->label);
-    free(e->arrow_type);
-    free(e);
+    flowchart_parsed_edge_free(e);
     e = next;
   }
   FlowchartSubGraph *sg = diagram->subgraphs;

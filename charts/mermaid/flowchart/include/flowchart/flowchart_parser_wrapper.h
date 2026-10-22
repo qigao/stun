@@ -38,6 +38,12 @@ const char* flowchart_get_last_error();
  */
 void flowchart_diagram_free(FlowchartDiagram* diagram);
 
+/** Borrowed metadata, valid until the owning parsed diagram is freed.
+ * Pass only edges returned by flowchart_parse[_ex], not caller-built edges.
+ * NULL means that no explicit ID / curve was declared. */
+const char* flowchart_edge_get_id(const FlowchartEdge* edge);
+const char* flowchart_edge_get_curve(const FlowchartEdge* edge);
+
 void flowchart_set_node_size(FlowchartDiagram* diagram, const char* id, double width, double height);
 
 void flowchart_set_layout_mode(FlowchartDiagram* diagram, int mode);

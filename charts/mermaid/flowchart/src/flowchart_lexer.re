@@ -127,18 +127,10 @@ loop:
         // this adapter yet; consume the whole block rather than leaking its
         // label/value tokens as phantom nodes.
         edge_curve_props {
-            /* Standalone edge metadata contributes its explicitly declared
-               ID to Mermaid's graph nodes, but no extra edge or implicit
-               source/target node. The arrow's own ID remains metadata. */
-            const char* at = (const char*)memchr(
-                token, '@', (size_t)(s->cursor - token));
-            if (!at || at == token) {
-                ctx->error_count++;
-            } else {
-                char* edge_id = copy_token(token, at);
-                if (!edge_id) ctx->error_count++;
-                else FlowchartParser(parser, FC_IDENTIFIER, edge_id, ctx);
-            }
+            /* Resolve after the preceding edge's Lemon reduction. Looking
+               up the ID directly in the scanner can miss that pending edge. */
+            FlowchartParser(parser, FC_EDGE_PROPS,
+                            copy_token(token, s->cursor), ctx);
             goto loop;
         }
         new_node_props { goto loop; }
@@ -183,7 +175,7 @@ loop:
         edge_id_arrow {
             const char* at = (const char*)memchr(token, '@', (size_t)(s->cursor - token));
             if (at)
-                FlowchartParser(parser, FC_ARROW, copy_token(at + 1, s->cursor), ctx);
+                FlowchartParser(parser, FC_ARROW, copy_token(token, s->cursor), ctx);
             else
                 ctx->error_count++;
             goto loop;
@@ -204,7 +196,15 @@ loop:
                 ctx->error_count++;
                 goto loop;
             }
-            FlowchartParser(parser, FC_ARROW, strdup("-->"), ctx);
+            const char* at = (const char*)memchr(token, '@',
+                                               (size_t)(quote - token));
+            if (!at) { ctx->error_count++; goto loop; }
+            size_t prefix = (size_t)(at - token) + 1;
+            char* arrow = (char*)malloc(prefix + 4);
+            if (!arrow) { ctx->error_count++; goto loop; }
+            memcpy(arrow, token, prefix);
+            memcpy(arrow + prefix, "-->", 4);
+            FlowchartParser(parser, FC_ARROW, arrow, ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
             FlowchartParser(parser, FC_STRING, copy_token(quote + 1, closing), ctx);
             FlowchartParser(parser, FC_PIPE, NULL, ctx);
