@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "dotgraph/dotgraph_ast.h"
+#include "dotgraph/dotgraph_ports.h"
 
 namespace dotgraph {
 
@@ -70,6 +71,10 @@ public:
     DotGraphRenderer& operator=(const DotGraphRenderer&) = delete;
 
     LayoutSnapshot layout(const DotGraphDiagram* diagram);
+    // Callers must explicitly supply real node-local port geometry when DOT
+    // edges refer to names; no name-to-position inference is performed.
+    LayoutSnapshot layout(const DotGraphDiagram* diagram,
+                          const std::vector<MeasuredDotPort>& measured_ports);
     static std::string to_svg(const LayoutSnapshot& snapshot);
 
 private:

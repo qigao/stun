@@ -1,4 +1,4 @@
-#include "tinytest.h"
+#include "tinytest.hpp"
 
 #include "flex/core/expr_compiled.h"
 

@@ -1,100 +1,75 @@
 # Stun
 
-Stun is a native C/C++ declarative UI and charting stack built around **FlexUI**, **Flex**, and **gCanvas**.
+Stun is a native C/C++ UI and charting stack built around **FlexUI**, **Flex**,
+and **gCanvas**. Its desktop application design uses XML, CSS/Tailwind utilities,
+and TurboScript without requiring a browser runtime in the installed application.
 
-The desktop application model is intentionally Web-familiar without embedding a browser runtime:
+## Application authoring and ownership
 
-```text
-XML UI + CSS / Tailwind classes + TurboScript + assets/services
-                         |
-                         v
-                    FlexUI runtime
-                         |
-                  Flex / gCanvas
-                         |
-                  OpenGL / Vulkan
-```
+- **XML** describes UI structure and static properties; FlexUI compiles it into an
+  immutable `CompiledUiProgram` before instantiation.
+- **CSS** owns the style cascade and animation declarations. The current utility
+  catalog generates CSS into that same cascade. Full Tailwind v4 compatibility
+  is a separate compiler goal, not a property of the current whitelist.
+- **TurboScript** controllers receive typed event snapshots and request bounded
+  UI mutations and service commands. The architecture keeps Element pointers,
+  renderer access, and GPU resources in the native host.
+- **FlexUI** owns the Element tree, computed style, widgets, layout, and application
+  candidate publication. A failed reload must leave the active instance intact.
+- **Salts::Unicode** supplies strict UTF-8 scanning, versioned Unicode properties,
+  and text boundaries. FlexUI owns typography and editing policy above them.
+- **gCanvas** owns canvas/window/GPU drawing resources and consumes rendering
+  commands; application semantics remain in FlexUI.
 
-## Application authoring
+These ownership rules are the design contract. Current scope matters:
 
-The target authoring surface is:
+| Area | Implemented and focused qualification | Remaining work |
+| --- | --- | --- |
+| Unicode/text | Strict scalar scanning, emoji property/presentation separation, grapheme-based approximate layout, and XML UTF-8 admission | Real shaping/measurement integration, editable grapheme geometry, complete application boundary coverage ([#15](https://github.com/qigao/stun/issues/15)) |
+| XML | Registry-backed factories, explicit IDs, attribute-based text, and strict source admission | Typed content descriptors, anonymous nodes, and natural text ([#16](https://github.com/qigao/stun/issues/16)) |
+| CSS/Tailwind | Catalog-based utility compilation into the existing StyleEngine cascade | Fixed Tailwind v4 profile, broader syntax, and differential conformance ([#17](https://github.com/qigao/stun/issues/17)) |
+| Desktop delivery | Native application/controller code and focused component checks | Compatible TurboScript SDK integration, supported installed distributions/platforms, and physical-GPU qualification ([#31](https://github.com/qigao/stun/issues/31)) |
 
-- **XML** for typed UI structure and widget composition.
-- **CSS** for the normal cascade, design tokens, state styles, transitions, and animation declarations.
-- **Tailwind-compatible classes** for modern utility-first styling using the standard `class="..."` surface.
-- **TurboScript (TBS)** for controller-local state, event handling, bounded UI mutations, and typed application-service commands.
-- **gCanvas** for native window/GPU resources and drawing; it is not the UI semantic layer.
-
-A representative application is intended to look like:
-
-```xml
-<ui name="Settings"
-    xmlns:on="urn:flexui:event"
-    xmlns:bind="urn:flexui:binding">
-  <column class="min-h-screen bg-background p-6 gap-4">
-    <label class="text-2xl font-semibold">Settings</label>
-
-    <card class="rounded-xl border bg-card p-6 shadow-sm">
-      <row class="items-center justify-between gap-4">
-        <label>Wi-Fi</label>
-        <switch id="wifi" bind:checked="wifiEnabled"
-                on:change="set_wifi" />
-      </row>
-    </card>
-  </column>
-</ui>
-```
-
-TurboScript does **not** receive a browser DOM or renderer pointers. It consumes immutable typed event snapshots and returns bounded mutation/command effects. FlexUI remains the owner of UI state.
-
-## Runtime ownership
-
-The primary runtime rules are:
-
-1. **Element tree + computed style are the single UI truth.**
-2. **XML compiles to an immutable `CompiledUiProgram` before instantiation.**
-3. **Containers, widgets, text, and reusable components have typed schemas/content models.**
-4. **CSS and Tailwind utilities share one StyleEngine cascade.**
-5. **Salts::Unicode is the Unicode/UTF-8 data boundary; FlexUI must not maintain a second Unicode implementation.**
-6. **Text layout/shaping stays above Unicode and below widget rendering.**
-7. **TurboScript can request UI mutations or typed services but cannot own `Element*`, renderer, gCanvas context, or GPU resources.**
-8. **Application load/reload is transactional: a complete detached candidate is validated before publication.**
-9. **There is no silent compatibility fallback between source formats, style semantics, scripts, or services.**
-
-See:
-
-- [FlexUI architecture](flexUI/docs/ARCHITECTURE.md)
-- [XML / CSS / TurboScript architecture](flexUI/docs/XML_CSS_TBS_ARCHITECTURE.md)
-- [FlexUI Desktop design](flexUI/docs/FLEXUI_DESKTOP_DESIGN.md)
-- [TurboScript controller design](flexUI/docs/TURBOSCRIPT_CONTROLLER_DESIGN.md)
-- [Tailwind JIT current implementation](flexUI/docs/TAILWIND_JIT_DEFAULT_DESIGN.md)
-
-The active umbrella is [issue #1](https://github.com/qigao/stun/issues/1).
+See the [architecture](flexUI/docs/ARCHITECTURE.md),
+[XML/CSS/TurboScript decision](flexUI/docs/XML_CSS_TBS_ARCHITECTURE.md),
+[desktop design](flexUI/docs/FLEXUI_DESKTOP_DESIGN.md),
+[controller design](flexUI/docs/TURBOSCRIPT_CONTROLLER_DESIGN.md), and
+[current utility JIT design](flexUI/docs/TAILWIND_JIT_DEFAULT_DESIGN.md).
+The application umbrella is [#1](https://github.com/qigao/stun/issues/1).
 
 ## Major modules
 
-- `flexUI/` — declarative UI, widgets, CSS, layout, text, events, controller/application runtime.
-- `flex/` — scene/runtime/animation/render abstractions and gCanvas rendering integration.
-- `vendor/gCanvas/` — native canvas/window/GPU substrate.
-- `charts/` — chart engines and FlexUI adapters, including Mermaid support.
-- `TextEdit/` — text-editor integration.
-- `meta_editor/` — diagram/editor tooling.
-- `flexui_designer/` — visual designer tooling.
-- `tango/` — terminal UI support.
+- `flexUI/`: declarative UI, widgets, CSS, text, events, and application/controller runtime.
+- `flex/`: expression, animation, scene/runtime, and rendering capabilities. Native
+  capabilities remain useful independently of the legacy `.flex` source DSL.
+- `shared/gcanvas/`: native canvas/window/GPU substrate.
+- `shared/layout/`: independently consumable graph layout algorithms.
+- `shared/markdown/`: canonical Markdown parsing shared by its consumers.
+- `charts/`: chart engines and UI adapters; see the [Mermaid documentation](charts/mermaid/README.md).
+- `tango/`: terminal UI support.
 
-## Current convergence work
+The legacy `.flex` source path remains during migration. Its deletion requires
+consumer and install-tree validation; it is separate from retaining native Flex
+animation, numerical MIR, layout, and physics capabilities.
 
-The current architecture work is tracked independently:
+## Flex/FlexUI core development on Windows
 
-- [#8 — Unicode/text boundary](https://github.com/qigao/stun/issues/8)
-- [#9 — typed XML container/widget/text/component schema](https://github.com/qigao/stun/issues/9)
-- [#10 — standard-compatible Tailwind semantics](https://github.com/qigao/stun/issues/10)
-- [salts-utils #101 — Unicode grapheme/word/line-break/bidi primitives](https://github.com/qigao/salts-utils/issues/101)
+`win-core-release-user` builds the Flex/FlexUI graph with plugin support enabled
+and bundled applications/charts disabled. It uses the repository's vcpkg
+manifest and requires x64 Release Salts and SaltsUtils SDK installations.
+The full application build remains available as `win-release-user`.
 
-The legacy `.flex` UI source path is migration-only. Native Flex runtime capabilities such as layout, timeline, curve, animation, and physics are independent of that source DSL and remain runtime capabilities.
+Run in an x64 Visual Studio developer shell, setting the SDK roots to your
+installed packages (the following paths match this workspace):
 
-## Charts
+```powershell
+$env:SALTS_ROOT = 'C:/projects/cpp/external/pkgs/salts/release'
+$env:SALTS_UTILS_ROOT = 'C:/projects/cpp/external/pkgs/salts-utils/release'
+cmake --preset win-core-release-user
+cmake --build --preset win-core-release-user --target test_plugin_create_unwind test_plugin_host test_plugin_manifest test_plugin_abi test_service_registry test_property_cmeta test_style_property_registry test_style_engine test_css_typed_ir test_css_typed_apply test_typed_transition test_typed_animation --parallel 2
+ctest --preset win-core-release-user -R '^(test_plugin_create_unwind|test_plugin_host|test_plugin_manifest|test_plugin_abi|test_service_registry|test_property_cmeta|test_style_property_registry|test_style_engine|test_css_typed_ir|test_css_typed_apply|test_typed_transition|test_typed_animation)$'
+```
 
-Chart engines are under `charts/`. Mermaid chart engines are documented in:
+This profile's install entry is `install-win-core-release-user`; its destination
+is `build/Msvc-Core-Release/install`, separate from both SDK roots.
 
-- [charts/mermaid/README.md](charts/mermaid/README.md)

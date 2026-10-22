@@ -6,6 +6,7 @@
 #include "flex/runtime/shape.h"
 #include "flex/runtime/component.h"
 #include "flex.h"
+#include "flex/core/debug.h"
 #include "flex/runtime/timeline.h"
 #include "flexchart/flexchart.h"
 #include <fstream>
@@ -35,7 +36,7 @@ void ChartComponent::register_component() {
         AstProgram program;
         std::string error;
         if (!parse_chart(content.c_str(), &program, error)) {
-             TLOG_ERROR("Chart parse error: {}", error);
+             FLEX_LOGE("Chart parse error: %s", error.c_str());
              return nullptr;
         }
 
@@ -80,7 +81,7 @@ Group* ChartComponent::build(const std::shared_ptr<AstChart>& chart,
             if (end >= 2 && s[end-1] == 'x' && s[end-2] == 'p') end -= 2;
             return std::stof(s.substr(0, end));
         } catch (...) {
-            TLOG_WARN("Chart: could not parse size '{}', using default {:.0f}", s, default_px);
+            FLEX_LOGW("Chart: could not parse size '%s', using default %.0f", s.c_str(), static_cast<double>(default_px));
             return default_px;
         }
     };

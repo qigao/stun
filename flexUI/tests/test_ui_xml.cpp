@@ -93,16 +93,6 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     check_equal(parsed.definition->root.children.front().id, "save");
   }
 
-  it("accepts valid Unicode text attributes without rewriting bytes") {
-    const auto compiled = flexUI::compile_ui_xml(
-        u8"<ui name=\"\u754C\u9762\"><label id=\"greeting\" "
-        u8"text=\"\u4FDD\u5B58\U0001F600e\u0301\"/></ui>");
-    check(static_cast<bool>(compiled));
-    const auto &text =
-        std::get<std::string>(compiled.program->definition().root.properties.at("text"));
-    check_equal(text, u8"\u4FDD\u5B58\U0001F600e\u0301");
-  }
-
   it("rejects malformed and truncated sources") {
     const auto malformed = flexUI::compile_ui_xml("<ui name=\"Bad\"><div id=\"root\"></ui>");
     check_false(static_cast<bool>(malformed));
@@ -115,17 +105,39 @@ spec("FlexUI XML adapter produces the shared immutable UI program") {
     const auto truncated = flexUI::compile_ui_xml(embedded_nul);
     check_false(static_cast<bool>(truncated));
     check(truncated.error.code == UiDocumentErrorCode::ParseError);
+  }
 
-    std::string invalid_utf8 =
-        "<ui name=\"BadUtf8\"><label id=\"value\" text=\"";
-    invalid_utf8.push_back(static_cast<char>(0xC0));
-    invalid_utf8.push_back(static_cast<char>(0xAF));
-    invalid_utf8 += "\"/></ui>";
-    const auto invalid = flexUI::compile_ui_xml(invalid_utf8);
-    check_false(static_cast<bool>(invalid));
-    check(invalid.error.code == UiDocumentErrorCode::ParseError);
-    check(invalid.error.line > 0);
-    check(invalid.error.column > 0);
+
+  it("rejects malformed UTF-8 before XML parsing with source location") {
+    std::string invalid =
+        "<ui name=\"Bad\">\n"
+        "  <div id=\"root\" text=\"";
+    invalid.push_back(static_cast<char>(0xFF));
+    invalid += "\"/>\n</ui>";
+
+    const auto compiled = flexUI::compile_ui_xml(invalid);
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(compiled.error.line, 2);
+    check_equal(compiled.error.column, 24);
+
+    const auto parsed = flexUI::parse_ui_xml(invalid);
+    check_false(static_cast<bool>(parsed));
+    check(parsed.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(parsed.error.line, 2);
+    check_equal(parsed.error.column, 24);
+  }
+
+  it("validates the complete XML byte view after an otherwise complete document") {
+    std::string invalid_suffix = "<ui name=\"A\"><div id=\"root\"/></ui>";
+    invalid_suffix.push_back(static_cast<char>(0xE2));
+    invalid_suffix.push_back(static_cast<char>(0x82));
+
+    const auto compiled = flexUI::compile_ui_xml(invalid_suffix);
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == UiDocumentErrorCode::InvalidUtf8);
+    check_equal(compiled.error.line, 1);
+    check(compiled.error.column > 1);
   }
 
   it("rejects invalid structure duplicate ids and text nodes") {

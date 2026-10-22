@@ -4,7 +4,7 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "timeline/timeline_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 extern TimelineDiagram* timeline_parse(const char* input);
 extern void timeline_free_diagram(TimelineDiagram* diagram);
@@ -37,18 +37,18 @@ static char* golden_path(const char* filename) {
 // Compare two JSON strings by parsing and re-serializing to compact form
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -67,27 +67,27 @@ spec("timeline_parser") {
              
              TimelineDiagram* diagram = timeline_parse(input);
              REQUIRE(diagram != NULL);
-             check_str_eq(diagram->title, "History of World War II");
+             check_true(diagram->title != NULL && strcmp(diagram->title, "History of World War II") == 0);
              
              REQUIRE(diagram->sections != NULL);
              TimelineSection* s1 = diagram->sections;
-             check_str_eq(s1->title, "Pre-war");
+             check_true(s1->title != NULL && strcmp(s1->title, "Pre-war") == 0);
              
              REQUIRE(s1->periods != NULL);
              TimelinePeriod* p1 = s1->periods;
-             check_str_eq(p1->title, "1938");
+             check_true(p1->title != NULL && strcmp(p1->title, "1938") == 0);
              
              REQUIRE(p1->events != NULL);
              TimelineEvent* e1 = p1->events;
-             check_str_eq(e1->text, "Munich Agreement");
-             check_str_eq(e1->next->text, "Kristallnacht");
+             check_true(e1->text != NULL && strcmp(e1->text, "Munich Agreement") == 0);
+             check_true(e1->next->text != NULL && strcmp(e1->next->text, "Kristallnacht") == 0);
              
              TimelineSection* s2 = s1->next;
-             check_str_eq(s2->title, "War Years");
+             check_true(s2->title != NULL && strcmp(s2->title, "War Years") == 0);
              
              TimelinePeriod* p2 = s2->periods;
-             check_str_eq(p2->title, "1939");
-             check_str_eq(p2->next->title, "1941");
+             check_true(p2->title != NULL && strcmp(p2->title, "1939") == 0);
+             check_true(p2->next->title != NULL && strcmp(p2->next->title, "1941") == 0);
              
              timeline_free_diagram(diagram);
         }
@@ -103,11 +103,11 @@ spec("timeline_parser") {
              
              REQUIRE(diagram->sections != NULL);
              TimelineSection* s = diagram->sections;
-             check_str_eq(s->title, ""); // Default section
+             check_true(s->title != NULL && strcmp(s->title, "") == 0); // Default section
              
              REQUIRE(s->periods != NULL);
-             check_str_eq(s->periods->title, "2023");
-             check_str_eq(s->periods->next->title, "2024");
+             check_true(s->periods->title != NULL && strcmp(s->periods->title, "2023") == 0);
+             check_true(s->periods->next->title != NULL && strcmp(s->periods->next->title, "2024") == 0);
              
              timeline_free_diagram(diagram);
         }
@@ -126,15 +126,15 @@ spec("timeline_parser") {
              
              TimelinePeriod* p1 = s->periods;
              REQUIRE(p1 != NULL);
-             check_str_eq(p1->title, "12:00");
+             check_true(p1->title != NULL && strcmp(p1->title, "12:00") == 0);
              REQUIRE(p1->events != NULL);
-             check_str_eq(p1->events->text, "Lunch Time");
+             check_true(p1->events->text != NULL && strcmp(p1->events->text, "Lunch Time") == 0);
              
              TimelinePeriod* p2 = p1->next;
              REQUIRE(p2 != NULL);
-             check_str_eq(p2->title, "2023-01");
+             check_true(p2->title != NULL && strcmp(p2->title, "2023-01") == 0);
              REQUIRE(p2->events != NULL);
-             check_str_eq(p2->events->text, "Special : Event");
+             check_true(p2->events->text != NULL && strcmp(p2->events->text, "Special : Event") == 0);
              
              timeline_free_diagram(diagram);
         }
@@ -153,7 +153,7 @@ spec("timeline_parser") {
             char* actual = timeline_to_json(diagram);
             REQUIRE(actual != NULL);
             check(json_equal(actual, expected), "JSON mismatch");
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             timeline_free_diagram(diagram);
             free(expected);
             free(input);
@@ -173,7 +173,7 @@ spec("timeline_parser") {
             char* actual = timeline_to_json(diagram);
             REQUIRE(actual != NULL);
             check(json_equal(actual, expected), "JSON mismatch");
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             timeline_free_diagram(diagram);
             free(expected);
             free(input);
@@ -192,7 +192,7 @@ spec("timeline_parser") {
             char* actual = timeline_to_json(diagram);
             REQUIRE(actual != NULL);
             check(json_equal(actual, expected), "JSON mismatch");
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             timeline_free_diagram(diagram);
             free(expected);
             free(input);
@@ -212,7 +212,7 @@ spec("timeline_parser") {
             char* actual = timeline_to_json(diagram);
             REQUIRE(actual != NULL);
             check(json_equal(actual, expected), "JSON mismatch");
-            turbo_json_serialize_free(actual);
+            json_serialize_free(actual);
             timeline_free_diagram(diagram);
             free(expected);
             free(input);

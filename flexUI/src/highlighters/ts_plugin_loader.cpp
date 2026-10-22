@@ -4,7 +4,9 @@
 
 #include <flexUI/ts_plugin.h>
 #include <string>
-#include <vector>
+#include <memory>
+#include <mutex>
+#include <utility>
 #include <unordered_map>
 #include <filesystem>
 #include <cstring>
@@ -23,7 +25,8 @@ typedef HMODULE PluginHandle;
 #define PLUGIN_LOAD(path) dlopen(path, RTLD_LAZY)
 #define PLUGIN_SYM(handle, name) dlsym(handle, name)
 #define PLUGIN_UNLOAD(handle) dlclose(handle)
-#define PLUGIN_EXT ".so"
+// CMake SHARED plugins on macOS use .dylib.
+#define PLUGIN_EXT ".dylib"
 typedef void* PluginHandle;
 #else
 #include <limits.h>
@@ -43,19 +46,26 @@ static bool ends_with(const std::string& str, const char* suffix) {
     return str.size() >= len && str.compare(str.size() - len, len, suffix) == 0;
 }
 
+// Each registered plugin is one bounded DSO owner. A highlighter receives
+// an aliasing shared_ptr lease so its TSPluginInfo and functions cannot outlive
+// the library when unload_all_ts_plugins() clears the registry.
 struct LoadedPlugin {
     std::string name;
-    const TSPluginInfo* info;
-    PluginHandle handle;
+    const TSPluginInfo* info = nullptr;
+    PluginHandle handle = nullptr;
+    ~LoadedPlugin() {
+        if (handle) PLUGIN_UNLOAD(handle);
+    }
 };
 
-static std::vector<LoadedPlugin>& get_loaded_plugins() {
-    static std::vector<LoadedPlugin> plugins;
-    return plugins;
+static std::mutex& plugin_mutex() {
+    static std::mutex m;
+    return m;
 }
 
-static std::unordered_map<std::string, const TSPluginInfo*>& get_plugin_map() {
-    static std::unordered_map<std::string, const TSPluginInfo*> map;
+static std::unordered_map<std::string, std::shared_ptr<LoadedPlugin>>&
+get_plugin_map() {
+    static std::unordered_map<std::string, std::shared_ptr<LoadedPlugin>> map;
     return map;
 }
 
@@ -81,33 +91,26 @@ static std::filesystem::path executable_dir() {
 }
 
 bool load_ts_plugin(const std::string& path) {
-    PluginHandle handle = PLUGIN_LOAD(path.c_str());
-    if (!handle) return false;
-
-    auto get_info = (const TSPluginInfo* (*)())PLUGIN_SYM(handle, "ts_plugin_info");
-    if (!get_info) {
-        PLUGIN_UNLOAD(handle);
-        return false;
-    }
-
+    // Allocate the owner before loading the DSO so a bad_alloc cannot leak
+    // a library handle between PLUGIN_LOAD and shared_ptr construction.
+    auto plugin = std::make_shared<LoadedPlugin>();
+    plugin->handle = PLUGIN_LOAD(path.c_str());
+    if (!plugin->handle) return false;
+    auto get_info = (const TSPluginInfo* (*)())PLUGIN_SYM(
+        plugin->handle, "ts_plugin_info");
+    if (!get_info) return false;
     const TSPluginInfo* info = get_info();
-    if (!info || !info->name || !info->highlight) {
-        PLUGIN_UNLOAD(handle);
+    if (!info || !info->name || !info->highlight || !info->free_result)
         return false;
+    plugin->name = info->name;
+    plugin->info = info;
+    {
+        std::lock_guard<std::mutex> lock(plugin_mutex());
+        auto& map = get_plugin_map();
+        if (map.find(plugin->name) != map.end())
+            return true; // temporary additional dlopen lease is released
+        map.emplace(plugin->name, std::move(plugin));
     }
-
-    LoadedPlugin plugin;
-    plugin.name = info->name;
-    plugin.info = info;
-    plugin.handle = handle;
-
-    if (get_plugin_map().find(plugin.name) != get_plugin_map().end()) {
-        PLUGIN_UNLOAD(handle);
-        return true;
-    }
-
-    get_loaded_plugins().push_back(plugin);
-    get_plugin_map()[plugin.name] = info;
     return true;
 }
 
@@ -118,7 +121,14 @@ void load_ts_plugins_from_dir(const std::string& dir) {
         if (!entry.is_regular_file()) continue;
         
         std::string filename = entry.path().filename().string();
-        if (filename.find("ts-lang-") == 0 && ends_with(filename, PLUGIN_EXT)) {
+        // macOS accepts the CMake SHARED .dylib and MODULE .so forms.
+        const bool supported_extension =
+            ends_with(filename, PLUGIN_EXT)
+#ifdef __APPLE__
+            || ends_with(filename, ".so")
+#endif
+            ;
+        if (filename.find("ts-lang-") == 0 && supported_extension) {
             load_ts_plugin(entry.path().string());
         }
     }
@@ -136,18 +146,25 @@ void load_default_ts_plugins() {
     }
 }
 
-const TSPluginInfo* get_ts_plugin(const std::string& name) {
-    auto& map = get_plugin_map();
-    auto it = map.find(name);
-    return (it != map.end()) ? it->second : nullptr;
+std::shared_ptr<const TSPluginInfo> acquire_ts_plugin(
+    const std::string& name) {
+    std::lock_guard<std::mutex> lock(plugin_mutex());
+    const auto it = get_plugin_map().find(name);
+    if (it == get_plugin_map().end()) return {};
+    // Alias the owning DSO lease without allocating or copying plugin code.
+    return std::shared_ptr<const TSPluginInfo>(it->second, it->second->info);
 }
 
 void unload_all_ts_plugins() {
-    for (auto& plugin : get_loaded_plugins()) {
-        PLUGIN_UNLOAD(plugin.handle);
+    // Remove discovery references immediately. A cached/in-flight
+    // TreeSitterHighlighter keeps the DSO alive until its last lease ends.
+    // Close outside the registry lock to avoid plugin destructor reentry.
+    std::unordered_map<std::string, std::shared_ptr<LoadedPlugin>> retired;
+    {
+        std::lock_guard<std::mutex> lock(plugin_mutex());
+        retired.swap(get_plugin_map());
     }
-    get_loaded_plugins().clear();
-    get_plugin_map().clear();
+    retired.clear();
 }
 
 } // namespace flexUI

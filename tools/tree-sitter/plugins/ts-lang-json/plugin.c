@@ -5,23 +5,43 @@
 #include <tree_sitter/api.h>
 #include "../ts_plugin.h"
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 
 extern const TSLanguage* tree_sitter_json(void);
 
-static TSParser* parser = NULL;
+// Presentation-only Tree-sitter providers have fixed admission limits.
+// A discarded highlight leaves Markdown text unchanged; these are NOT a
+// secondary Markdown grammar.
+enum { TS_RENDER_MAX_BYTES = 64u * 1024u,
+       TS_RENDER_MAX_TOKENS = 1024u,
+       TS_RENDER_MAX_DEPTH = 128u };
+typedef struct {
+    TSHighlightResult* result;
+    bool stopped;
+} TSRenderWriter;
 
-static void ensure_parser(void) {
-    if (!parser) {
-        parser = ts_parser_new();
-        ts_parser_set_language(parser, tree_sitter_json());
+static void add_token(TSRenderWriter* writer, TSHighlightType type,
+                      uint32_t start, uint32_t length) {
+    if (writer->stopped || !length) return;
+    TSHighlightResult* result = writer->result;
+    if (result->count >= TS_RENDER_MAX_TOKENS) {
+        writer->stopped = true;
+        return;
     }
-}
-
-static void add_token(TSHighlightResult* result, TSHighlightType type, uint32_t start, uint32_t length) {
-    if (result->count >= result->capacity) {
-        result->capacity = result->capacity ? result->capacity * 2 : 64;
-        result->tokens = realloc(result->tokens, result->capacity * sizeof(TSHighlightToken));
+    if (result->count == result->capacity) {
+        const uint32_t next = result->capacity
+            ? (result->capacity < TS_RENDER_MAX_TOKENS / 2u
+                 ? result->capacity * 2u : TS_RENDER_MAX_TOKENS)
+            : 64u;
+        TSHighlightToken* grown = (TSHighlightToken*)realloc(
+            result->tokens, (size_t)next * sizeof(TSHighlightToken));
+        if (!grown) {
+            writer->stopped = true;
+            return;
+        }
+        result->tokens = grown;
+        result->capacity = next;
     }
     result->tokens[result->count++] = (TSHighlightToken){type, start, length};
 }
@@ -37,7 +57,10 @@ static TSHighlightType node_type_to_highlight(const char* type) {
     return TS_HIGHLIGHT_PLAIN;
 }
 
-static void traverse(TSNode node, TSHighlightResult* result, int is_key) {
+static void traverse(TSNode node, TSRenderWriter* writer,
+                     int is_key, uint32_t depth) {
+    if (writer->stopped || depth >= TS_RENDER_MAX_DEPTH ||
+        writer->result->count >= TS_RENDER_MAX_TOKENS) return;
     const char* type = ts_node_type(node);
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
@@ -45,41 +68,46 @@ static void traverse(TSNode node, TSHighlightResult* result, int is_key) {
 
     // JSON key (first string in a pair)
     if (is_key && strcmp(type, "string") == 0) {
-        add_token(result, TS_HIGHLIGHT_VARIABLE, start, end - start);
+        add_token(writer, TS_HIGHLIGHT_VARIABLE, start, end - start);
         return;
     }
 
     TSHighlightType hl = node_type_to_highlight(type);
     if (hl != TS_HIGHLIGHT_PLAIN) {
-        add_token(result, hl, start, end - start);
+        add_token(writer, hl, start, end - start);
         return;
     }
 
     // Handle pair: first child is key, rest are values
     if (strcmp(type, "pair") == 0 && child_count >= 2) {
-        traverse(ts_node_child(node, 0), result, 1);  // key
+        traverse(ts_node_child(node, 0), writer, 1, depth + 1u);  // key
         for (uint32_t i = 1; i < child_count; i++) {
-            traverse(ts_node_child(node, i), result, 0);  // values
+            traverse(ts_node_child(node, i), writer, 0, depth + 1u);  // values
         }
         return;
     }
 
     for (uint32_t i = 0; i < child_count; i++) {
-        traverse(ts_node_child(node, i), result, 0);
+        traverse(ts_node_child(node, i), writer, 0, depth + 1u);
     }
 }
 
 static TSHighlightResult* json_highlight(const char* source, uint32_t length) {
-    ensure_parser();
-    
-    TSHighlightResult* result = calloc(1, sizeof(TSHighlightResult));
-    if (!source || length == 0) return result;
-    
-    TSTree* tree = ts_parser_parse_string(parser, NULL, source, length);
-    if (tree) {
-        traverse(ts_tree_root_node(tree), result, 0);
-        ts_tree_delete(tree);
+    TSHighlightResult* result = (TSHighlightResult*)calloc(
+        1u, sizeof(TSHighlightResult));
+    if (!result || !source || !length || length > TS_RENDER_MAX_BYTES)
+        return result;
+    TSParser* parser = ts_parser_new();
+    if (!parser) return result;
+    if (ts_parser_set_language(parser, tree_sitter_json())) {
+        TSTree* tree = ts_parser_parse_string(parser, NULL, source, length);
+        if (tree) {
+            TSRenderWriter writer = {result, false};
+            traverse(ts_tree_root_node(tree), &writer, 0, 0u);
+            ts_tree_delete(tree);
+        }
     }
+    ts_parser_delete(parser);
     return result;
 }
 

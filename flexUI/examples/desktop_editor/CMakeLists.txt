@@ -14,7 +14,7 @@ target_compile_features(flexui_desktop_editor PRIVATE cxx_std_17)
 target_link_libraries(
   flexui_desktop_editor
   PRIVATE FlexUI::GCanvasPluginWindowHost FlexUI::ControllerTurboScript
-          TurboUtils::Core)
+          Salts::Core)
 target_compile_definitions(
   flexui_desktop_editor
   PRIVATE

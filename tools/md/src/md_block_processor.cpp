@@ -82,12 +82,12 @@ static std::vector<std::string> split_cells(const std::string& line) {
     return cells;
 }
 
-void process_blocks(Node* node, MemoryPool* pool) {
+void process_blocks(Node* node, ParseContext* context) {
     if (!node) return;
     
     // 1. Recurse first (depth-first)
     for (auto child : node->children) {
-        process_blocks(child, pool);
+        process_blocks(child, context);
     }
     
     // 2. Process CodeBlocks with registered handlers
@@ -119,18 +119,14 @@ void process_blocks(Node* node, MemoryPool* pool) {
                 if (next->type == NodeType::Paragraph) {
                     std::string next_text = get_raw_text(next);
                     if (is_table_delimiter(next_text)) {
-                        void* t_mem = pool_alloc(pool, sizeof(Node));
-                        auto table = new (t_mem) Node(NodeType::Table);
+                        auto table = context->create_node(NodeType::Table);
                         
                         // Header
-                        void* h_mem = pool_alloc(pool, sizeof(Node));
-                        auto header = new (h_mem) Node(NodeType::TableRow);
+                        auto header = context->create_node(NodeType::TableRow);
                         auto head_cells = split_cells(get_raw_text(current));
                         for (const auto& cell_text : head_cells) {
-                            void* c_mem = pool_alloc(pool, sizeof(Node));
-                            auto cell = new (c_mem) Node(NodeType::TableCell);
-                            void* txt_mem = pool_alloc(pool, sizeof(Node));
-                            auto txt = new (txt_mem) Node(NodeType::Text);
+                            auto cell = context->create_node(NodeType::TableCell);
+                            auto txt = context->create_node(NodeType::Text);
                             txt->text = cell_text;
                             cell->children.push_back(txt);
                             header->children.push_back(cell);
@@ -146,14 +142,11 @@ void process_blocks(Node* node, MemoryPool* pool) {
                             std::string row_text = get_raw_text(row_node);
                             if (row_text.find('|') == std::string::npos) break;
                             
-                            void* r_mem = pool_alloc(pool, sizeof(Node));
-                            auto row = new (r_mem) Node(NodeType::TableRow);
+                            auto row = context->create_node(NodeType::TableRow);
                             auto row_cells = split_cells(row_text);
                             for (const auto& cell_text : row_cells) {
-                                void* rc_mem = pool_alloc(pool, sizeof(Node));
-                                auto cell = new (rc_mem) Node(NodeType::TableCell);
-                                void* rtxt_mem = pool_alloc(pool, sizeof(Node));
-                                auto txt = new (rtxt_mem) Node(NodeType::Text);
+                                auto cell = context->create_node(NodeType::TableCell);
+                                auto txt = context->create_node(NodeType::Text);
                                 txt->text = cell_text;
                                 cell->children.push_back(txt);
                                 row->children.push_back(cell);
@@ -169,8 +162,7 @@ void process_blocks(Node* node, MemoryPool* pool) {
             
             // Paragraph merging: if this is a paragraph and the previous was a paragraph, merge.
             if (current->type == NodeType::Paragraph && !new_children.empty() && new_children.back()->type == NodeType::Paragraph) {
-                void* sp_mem = pool_alloc(pool, sizeof(Node));
-                auto space = new (sp_mem) Node(NodeType::Text);
+                auto space = context->create_node(NodeType::Text);
                 space->text = " ";
                 new_children.back()->children.push_back(space);
                 for (auto p_child : current->children) {

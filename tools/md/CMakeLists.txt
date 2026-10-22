@@ -15,7 +15,7 @@ target_include_directories(${TARGET_NAME}
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_link_libraries(${TARGET_NAME} PUBLIC TurboUtils::Core)
+target_link_libraries(${TARGET_NAME} PUBLIC Salts::Core)
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
     target_compile_definitions(${TARGET_NAME}  PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
