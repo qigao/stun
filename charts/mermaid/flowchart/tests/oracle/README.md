@@ -33,3 +33,29 @@ remain unchanged. These accessors accept parser-owned edges only. The current
 renderer does not yet apply the parsed curve choice to visual routing.
 The legacy JSON adapter still omits edge IDs and curves; adding those JSON
 fields belongs to the separately reviewed output-contract migration.
+
+## Proposed fixture migration (#236)
+
+`node migrate.mjs` verifies an explicit 95-case test contract. It keeps the
+existing expectations for 88 cases, and checks seven new `*.source-v1.json`
+expectations against pinned Mermaid edge declaration order. The C test reads
+`contracts.json` on both Windows and POSIX; an absent case, unsupported schema
+or missing expected file fails the test. No link array is normalized during
+comparison. All original input/output Mermaid and JSON files remain unchanged.
+
+The migration permits only two changes to the historical snapshots: a
+bijective permutation of complete link objects into independently observed
+declaration order, and removal of IDs that Mermaid recognizes as named edges
+rather than nodes. The latter affects the seven phantom nodes in
+`v2-mermaid-104`. Node properties, class/style data and every link object are
+otherwise preserved. `source-v1-provenance.json` records source, historical and
+proposed hashes and the before/after order. `node migrate.mjs --write` explicitly
+regenerates the proposal for review; CI only checks it.
+
+This preserves the existing sparse JSON adapter contract, including its
+limitations: double-ended point arrows are projected as `arrow_point`, dotted
+arrow length is 1, node-level inline styles are not represented, and edge IDs
+and curves are exposed through AST accessors rather than JSON. These omissions
+are not excused as full Mermaid conformance by a passing test. The source
+contract preserves numeric `linkStyle` declaration indices; the renderer's
+application of those styles and curves remains separate work.
