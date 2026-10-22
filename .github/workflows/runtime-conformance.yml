@@ -1,6 +1,6 @@
 name: Stun runtime conformance
 
-# Focused parser and headless renderer checks against published SDKs. Keep normal PR validation
+# Focused parser, headless renderer and typed animation checks against published SDKs. Keep normal PR validation
 # independent of Mesa source builds and desktop/window runtime qualification.
 on:
   pull_request:
@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       golden: ${{ steps.gold_scope.outputs.affected }}
+      animation: ${{ steps.animation_scope.outputs.affected }}
     steps:
       - name: Checkout exact PR head
         uses: actions/checkout@v4
@@ -40,6 +41,20 @@ jobs:
             'tools/lemon/*' '.github/scripts/ci-affected.sh' \
             '.github/scripts/restore-flowchart-sdk.py' \
             '.github/workflows/runtime-conformance.yml'
+
+      - name: Detect typed animation changes
+        id: animation_scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'flexUI/src/box.cpp' 'flexUI/src/render_manager.cpp' \
+            'flexUI/src/transition.cpp' 'flexUI/src/style_property_registry.cpp' \
+            'flexUI/src/style_property_impact.cpp' \
+            'flexUI/include/*' 'flex/include/*' \
+            'flexUI/tests/test_typed_animation.cpp' 'flexUI/tests/test_typed_transition.cpp' \
+            'flexUI/tests/typed_value_test_support.h' 'flex/tests/cmeta_types_peer.cpp' \
+            'flexUI/tests/typed-animation-standalone/*' 'flexUI/CMakeLists.txt' \
+            '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
   mermaid-oracle:
     name: Pinned Mermaid semantic evidence (independent of Stun golden)
@@ -72,15 +87,15 @@ jobs:
 
   sdk-releases:
     needs: changes
-    if: needs.changes.outputs.golden == 'true'
+    if: needs.changes.outputs.golden == 'true' || needs.changes.outputs.animation == 'true'
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   # Run the installed-SDK AST and exact JSON suite for every applicable
   # update, including mixed changes and explicit ci/full requests.
   golden:
-    name: Linux / 95 Mermaid goldens + headless SVG + ASan/UBSan
+    name: Linux / focused installed-SDK ASan/UBSan
     needs: [changes, sdk-releases]
-    if: needs.changes.outputs.golden == 'true'
+    if: needs.changes.outputs.golden == 'true' || needs.changes.outputs.animation == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -171,7 +186,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends re2c ninja-build
+          sudo apt-get install -y --no-install-recommends re2c ninja-build nlohmann-json3-dev
           re2c --version
 
       - uses: actions/setup-node@v4
@@ -214,6 +229,24 @@ jobs:
             build/flowchart-json-golden/flowchart-linkstyle.svg.curves.professional
           git diff --exit-code
 
+      - name: Compile production animation call sites and existing manager suites
+        if: needs.changes.outputs.animation == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S flexUI/tests/typed-animation-standalone \
+            -B build/typed-animation -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/typed-animation --parallel 2
+
+      - name: Run typed animation and transition regressions
+        if: needs.changes.outputs.animation == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --test-dir build/typed-animation --no-tests=error \
+            --verbose --output-on-failure --timeout 30
+          git diff --exit-code
+
       - name: Preserve exact-head SDK and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -225,4 +258,5 @@ jobs:
             ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
             build/flowchart-json-golden/Testing/Temporary/LastTest.log
             build/flowchart-json-golden/dependencies.txt
+            build/typed-animation/Testing/Temporary/LastTest.log
             build/flowchart-json-golden/flowchart-linkstyle.svg*
