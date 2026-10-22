@@ -19,12 +19,12 @@ spec("flexchart_point_parser") {
             std::string error;
             auto chart = flex::chart::point_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Scatter");
-            check_str_eq(chart->width.c_str(), "600");
-            check_str_eq(chart->height.c_str(), "400");
+            check(std::string(chart->title.c_str()) == std::string("Scatter"));
+            check(std::string(chart->width.c_str()) == std::string("600"));
+            check(std::string(chart->height.c_str()) == std::string("400"));
             check(chart->marks.size() == 1);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->type.c_str(), "point");
+            check(std::string(mark->type.c_str()) == std::string("point"));
             check(mark->encodings.size() >= 4);
             // Find encodings
             std::string x_field, y_field, size_field, color_field;
@@ -34,13 +34,13 @@ spec("flexchart_point_parser") {
                 if (enc->channel == "size") size_field = enc->field;
                 if (enc->channel == "color") color_field = enc->field;
             }
-            check_str_eq(x_field.c_str(), "x");
-            check_str_eq(y_field.c_str(), "y");
-            check_str_eq(size_field.c_str(), "size");
-            check_str_eq(color_field.c_str(), "category");
+            check(std::string(x_field.c_str()) == std::string("x"));
+            check(std::string(y_field.c_str()) == std::string("y"));
+            check(std::string(size_field.c_str()) == std::string("size"));
+            check(std::string(color_field.c_str()) == std::string("category"));
             // Check shape style
             check(mark->styles.count("shape") > 0);
-            check_str_eq(std::get<std::string>(mark->styles["shape"]).c_str(), "circle");
+            check(std::string(std::get<std::string>(mark->styles["shape"]).c_str()) == std::string("circle"));
         }
 
         it("should parse point chart with data block") {
@@ -59,12 +59,12 @@ spec("flexchart_point_parser") {
             std::string error;
             auto chart = flex::chart::point_chart_parse_ast(input, error);
             check(chart != nullptr);
-            check_str_eq(chart->title.c_str(), "Measurements");
+            check(std::string(chart->title.c_str()) == std::string("Measurements"));
             check(!chart->datasets.empty());
             check(!chart->datasets[0]->inline_values.empty());
             auto& mark = chart->marks[0];
             check(mark->styles.count("shape") > 0);
-            check_str_eq(std::get<std::string>(mark->styles["shape"]).c_str(), "diamond");
+            check(std::string(std::get<std::string>(mark->styles["shape"]).c_str()) == std::string("diamond"));
         }
 
         it("should parse encoding block") {
@@ -98,7 +98,7 @@ spec("flexchart_point_parser") {
             auto chart = flex::chart::point_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(std::get<std::string>(mark->styles["shape"]).c_str(), "square");
+            check(std::string(std::get<std::string>(mark->styles["shape"]).c_str()) == std::string("square"));
             check(std::get<bool>(mark->styles["filled"]) == true);
             check(std::get<double>(mark->styles["opacity"]) > 0.79);
         }
@@ -113,7 +113,7 @@ spec("flexchart_point_parser") {
             auto chart = flex::chart::point_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(mark->expr.c_str(), "sin(x) * 100");
+            check(std::string(mark->expr.c_str()) == std::string("sin(x) * 100"));
             check(mark->ranges.count("x") > 0);
             auto& r = mark->ranges["x"];
             check(r.size() == 3);
@@ -132,7 +132,7 @@ spec("flexchart_point_parser") {
             auto chart = flex::chart::point_chart_parse_ast(input, error);
             check(chart != nullptr);
             check(!chart->datasets.empty());
-            check_str_eq(chart->datasets[0]->source.c_str(), "scatter.json");
+            check(std::string(chart->datasets[0]->source.c_str()) == std::string("scatter.json"));
         }
 
         it("should parse shape as string") {
@@ -145,7 +145,7 @@ spec("flexchart_point_parser") {
             auto chart = flex::chart::point_chart_parse_ast(input, error);
             check(chart != nullptr);
             auto& mark = chart->marks[0];
-            check_str_eq(std::get<std::string>(mark->styles["shape"]).c_str(), "triangle-up");
+            check(std::string(std::get<std::string>(mark->styles["shape"]).c_str()) == std::string("triangle-up"));
         }
 
         it("should return nullptr on invalid input") {

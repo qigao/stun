@@ -221,7 +221,7 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 - [x] 定义 `plugin.toml` schema：name、version、ABI、library、required/optional dependencies、
   services、capabilities 和 permissions。
-- [x] 使用已安装 `TurboParser::Parser` explicit-length TOML facade 解析，不手写 parser。
+- [x] 使用已发布的 SaltsUtils `Salts::TomlParser` / `toml.h` API 解析，不手写 parser。
 - [x] 验证路径规范化/包目录约束、文件大小、name/version 长度和重复 plugin ID。
 - [x] required dependency 缺失或精确 SemVer 不匹配 fail fast。
 - [x] optional 仅在 manifest 显式声明时允许缺失；存在时仍验证版本，不静默替换实现。
@@ -229,7 +229,7 @@ UI 状态，默认 Box 路径仍未被隐式接管。
 
 ### Loader 与生命周期
 
-- [x] 仓库与已安装 TurboUtils 无动态库 API；以 `native_plugin_library` 私有 adapter 集中平台
+- [x] 仓库与已发布 SaltsUtils 无动态库 API；以 `native_plugin_library` 私有 adapter 集中平台
   load/symbol/unload，Win32/`dlopen` 不扩散到 PluginHost 或 service 层。
 - [x] 实现 Validated/Loaded/Created/Started/Stopping/Destroyed/Unloaded 状态机；支持显式 manifest
   staging，目录 discovery 保留给后续子阶段。

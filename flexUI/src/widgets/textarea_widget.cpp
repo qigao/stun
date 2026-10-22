@@ -54,20 +54,10 @@ size_t count_word_spacing_gaps(const std::string& text) {
   size_t count = 0;
   size_t pos = 0;
   while (pos < text.size()) {
-    const uint32_t cp = utf8_decode(text, pos);
+    const uint32_t cp = utf8_next_scalar(text, pos).value;
     if (is_word_spacing_gap(cp)) {
       ++count;
     }
-  }
-  return count;
-}
-
-size_t utf8_codepoint_count(const std::string& text) {
-  size_t count = 0;
-  size_t pos = 0;
-  while (pos < text.size()) {
-    utf8_decode(text, pos);
-    ++count;
   }
   return count;
 }
@@ -78,7 +68,7 @@ int next_utf8_offset(const std::string& text, int byte_offset) {
   if (pos >= text.size()) {
     return static_cast<int>(text.size());
   }
-  utf8_decode(text, pos);
+  utf8_next_scalar(text, pos).value;
   return static_cast<int>(pos);
 }
 
@@ -93,7 +83,7 @@ int previous_utf8_offset(const std::string& text, int byte_offset) {
   size_t pos = 0;
   while (pos < target) {
     previous = pos;
-    utf8_decode(text, pos);
+    utf8_next_scalar(text, pos).value;
   }
   return static_cast<int>(previous);
 }
@@ -108,7 +98,7 @@ int clamp_utf8_offset(const std::string& text, int byte_offset) {
   size_t pos = 0;
   while (pos < static_cast<size_t>(clamped)) {
     const size_t start = pos;
-    utf8_decode(text, pos);
+    utf8_next_scalar(text, pos).value;
     if (pos > static_cast<size_t>(clamped)) {
       return static_cast<int>(start);
     }
@@ -144,13 +134,13 @@ float textarea_line_width(const std::string& line, const ComputedStyle* style,
   size_t word_gap_count = 0;
   for (const auto& segment : segment_text(display)) {
     if (segment.type == TextSegmentType::Emoji) {
-      const size_t count = utf8_codepoint_count(segment.text);
+      const size_t count = utf8_scalar_count(segment.text);
       width += static_cast<float>(count) * metrics.font_size;
       codepoint_count += count;
       continue;
     }
     width += approximate_text_width(&measure_style, segment.text);
-    const size_t count = utf8_codepoint_count(segment.text);
+    const size_t count = utf8_scalar_count(segment.text);
     codepoint_count += count;
     word_gap_count += count_word_spacing_gaps(segment.text);
   }
@@ -205,7 +195,7 @@ int textarea_column_from_x(const Element& elem, const ComputedStyle* style,
   size_t byte_pos = 0;
   while (byte_pos < line.size()) {
     const size_t start = byte_pos;
-    utf8_decode(line, byte_pos);
+    utf8_next_scalar(line, byte_pos).value;
     const float glyph_width = textarea_line_width(
         line.substr(start, byte_pos - start), style, metrics);
     const float glyph_advance =
@@ -225,7 +215,7 @@ float textarea_segment_width(const TextSegment& segment,
     size_t count = 0;
     size_t pos = 0;
     while (pos < segment.text.size()) {
-      utf8_decode(segment.text, pos);
+      utf8_next_scalar(segment.text, pos).value;
       count++;
     }
     return static_cast<float>(count) * metrics.font_size;
@@ -259,11 +249,11 @@ float draw_textarea_segmented(RenderCommandList& commands, const std::string& te
       size_t byte_pos = 0;
       while (byte_pos < segment.text.size()) {
         const size_t run_start = byte_pos;
-        const uint32_t first_cp = utf8_decode(segment.text, byte_pos);
+        const uint32_t first_cp = utf8_next_scalar(segment.text, byte_pos).value;
         const bool gap_run = is_word_spacing_gap(first_cp);
         while (byte_pos < segment.text.size()) {
           const size_t before = byte_pos;
-          const uint32_t cp = utf8_decode(segment.text, byte_pos);
+          const uint32_t cp = utf8_next_scalar(segment.text, byte_pos).value;
           if (is_word_spacing_gap(cp) != gap_run) {
             byte_pos = before;
             break;
@@ -279,7 +269,7 @@ float draw_textarea_segmented(RenderCommandList& commands, const std::string& te
         current_x += run_width > 0.0f
                          ? run_width
                          : metrics.font_size * 0.5f *
-                               static_cast<float>(utf8_codepoint_count(run));
+                               static_cast<float>(utf8_scalar_count(run));
         current_x += word_spacing *
                      static_cast<float>(count_word_spacing_gaps(run));
       }
@@ -287,7 +277,7 @@ float draw_textarea_segmented(RenderCommandList& commands, const std::string& te
       size_t byte_pos = 0;
       while (byte_pos < segment.text.size()) {
         const size_t start = byte_pos;
-        const uint32_t cp = utf8_decode(segment.text, byte_pos);
+        const uint32_t cp = utf8_next_scalar(segment.text, byte_pos).value;
         const std::string glyph = segment.text.substr(start, byte_pos - start);
         const float glyph_width = approximate_text_width(&measure_style, glyph);
         if (!is_word_spacing_gap(cp)) {

@@ -32,11 +32,11 @@ target_include_directories(quadrant PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(quadrant PUBLIC TurboParser::Parser flex_runtime)
+target_link_libraries(quadrant PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(quadrant_test tests/test_parser.c)
-target_link_libraries(quadrant_test quadrant TurboUtils::TinyTest TurboParser::Parser)
+target_link_libraries(quadrant_test quadrant Salts::TinyTest Salts::JsonParser)
 set_target_properties(quadrant_test PROPERTIES LINKER_LANGUAGE CXX)
 target_compile_definitions(quadrant_test PRIVATE GOLDEN_DIR="${MERMAID_GOLDEN_DIR}/quadrant")
 

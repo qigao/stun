@@ -12,7 +12,7 @@ set_target_properties(textedit_flexui PROPERTIES FOLDER "TextEdit")
 if(BUILD_TESTING)
   add_executable(test_textedit_flexui tests/test_flexui_text_editor.cpp)
   target_link_libraries(
-    test_textedit_flexui PRIVATE TextEdit::FlexUI TurboUtils::TinyTest)
+    test_textedit_flexui PRIVATE TextEdit::FlexUI Salts::TinyTest)
   set_target_properties(test_textedit_flexui PROPERTIES FOLDER "TextEdit/tests")
   add_test(NAME test_textedit_flexui COMMAND test_textedit_flexui)
 endif()

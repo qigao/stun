@@ -6,8 +6,7 @@
 namespace md {
 
 Node* InlineParser::create_node(NodeType type) {
-    void* mem = pool_alloc(pool_, sizeof(Node));
-    return new (mem) Node(type);
+    return context_->create_node(type);
 }
 
 Node* InlineParser::create_text(std::string_view text) {
@@ -613,8 +612,8 @@ void InlineParser::process_emphasis(std::vector<Node*>& nodes, std::vector<Delim
     nodes.erase(std::remove(nodes.begin(), nodes.end(), nullptr), nodes.end());
 }
 
-Node* blocks_to_ast(const Block& root, MemoryPool* pool) {
-    InlineParser parser(pool);
+Node* blocks_to_ast(const Block& root, ParseContext* context) {
+    InlineParser parser(context);
     return parser.transform(root);
 }
 

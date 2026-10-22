@@ -22,6 +22,18 @@ static char* copy_token(const char* start, const char* end) {
     return res;
 }
 
+static char* copy_metadata(const char* start, const char* end) {
+    const char* value = memchr(start, ':', (size_t)(end - start));
+    ++value; /* The matching lexer rule requires a colon. */
+    while (value < end && (*value == ' ' || *value == '\t')) ++value;
+    while (end > value && (end[-1] == ' ' || end[-1] == '\t')) --end;
+    if (end - value >= 2 && value[0] == '"' && end[-1] == '"') {
+        ++value;
+        --end;
+    }
+    return copy_token(value, end);
+}
+
 void xychart_scan(Scanner *s, void *parser, XYParserContext *ctx) {
     const char *token;
 
@@ -46,12 +58,24 @@ void xychart_scan(Scanner *s, void *parser, XYParserContext *ctx) {
         
         ws { goto loop; }
         
-        "%%" [^\r\n]* { goto loop; } // skip comments
+        "%%" [^\r\n\x00]* { goto loop; } // skip comments
 
         "xychart-beta" | "xychart" { XYParser(parser, XY_XY_KW, NULL, ctx); goto loop; }
         "vertical" { XYParser(parser, XY_ORIENTATION, strdup("vertical"), ctx); goto loop; }
         "horizontal" { XYParser(parser, XY_ORIENTATION, strdup("horizontal"), ctx); goto loop; }
         "title" { XYParser(parser, XY_TITLE_KW, NULL, ctx); goto loop; }
+        "accTitle" [ \t]* ":" [^\r\n\x00]* {
+            XYParser(parser, XY_ACC_TITLE_KW, NULL, ctx);
+            XYParser(parser, XY_COLON, NULL, ctx);
+            XYParser(parser, XY_TEXT, copy_metadata(token, s->cursor), ctx);
+            goto loop;
+        }
+        "accDescr" [ \t]* ":" [^\r\n\x00]* {
+            XYParser(parser, XY_ACC_DESCR_KW, NULL, ctx);
+            XYParser(parser, XY_COLON, NULL, ctx);
+            XYParser(parser, XY_TEXT, copy_metadata(token, s->cursor), ctx);
+            goto loop;
+        }
         "accTitle" { XYParser(parser, XY_ACC_TITLE_KW, NULL, ctx); goto loop; }
         "accDescr" { XYParser(parser, XY_ACC_DESCR_KW, NULL, ctx); goto loop; }
         "x-axis" { XYParser(parser, XY_X_AXIS_KW, NULL, ctx); goto loop; }

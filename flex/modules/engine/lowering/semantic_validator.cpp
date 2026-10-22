@@ -26,7 +26,13 @@ enum class ValueKind {
   Color,
 };
 
-using KeyframeKind = detail::AnimatedPropertyValueKind;
+// AST value categories are derived from the runtime's canonical metadata.
+enum class KeyframeKind {
+  Scalar,
+  String,
+  Color,
+  Vec2,
+};
 
 struct PropertyRule {
   ValueKind kind;
@@ -206,8 +212,22 @@ bool supports_animated_property(const std::string &node_type, PropertyID propert
 
 std::optional<KeyframeKind> animated_property_kind(PropertyID property) {
   const auto *descriptor = detail::animated_property_descriptor(property);
-  return descriptor ? std::optional<KeyframeKind>(descriptor->value_kind)
-                    : std::nullopt;
+  if (!descriptor) {
+    return std::nullopt;
+  }
+  if (cmeta_type_equal(descriptor->type, &cmeta_type_float)) {
+    return KeyframeKind::Scalar;
+  }
+  if (cmeta_type_equal(descriptor->type, &cmeta_type_string)) {
+    return KeyframeKind::String;
+  }
+  if (cmeta_type_equal(descriptor->type, &cmeta_type_color)) {
+    return KeyframeKind::Color;
+  }
+  if (cmeta_type_equal(descriptor->type, &cmeta_type_vec2)) {
+    return KeyframeKind::Vec2;
+  }
+  return std::nullopt;
 }
 
 const char *keyframe_kind_name(KeyframeKind kind) {

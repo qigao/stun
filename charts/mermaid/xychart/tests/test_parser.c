@@ -1,18 +1,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 #include "tinytest.h"
 #include "xychart/xychart_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 
 #ifndef REQUIRE
 #define REQUIRE(cond) do { if (!(cond)) { check(0, #cond); return; } } while (0)
-#endif
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dirent.h>
 #endif
 
 // Forward declarations
@@ -49,22 +44,64 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
     return read_file(path);
 }
 
-static int json_equal(const char* a, const char* b) {
-    json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
-        return 0;
-    }
+static int same_text(const char* a, const char* b) {
+    return strcmp(a ? a : "", b ? b : "") == 0;
+}
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
-    int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
-    return eq;
+/* The checked-in renderer oracle uses label/values/min/max; the existing
+ * public exporter uses name/data/rangeMin/rangeMax and explicit defaults.
+ * Compare oracle facts to the AST, preserving both public JSON and fixtures. */
+static void check_axis_oracle(const XYAxis* axis, const json_value_t* oracle) {
+    check(same_text(axis->title, json_get_string(oracle, "title")), "axis title");
+    const json_value_t* min = json_object_get(oracle, "min");
+    const json_value_t* max = json_object_get(oracle, "max");
+    check(axis->has_range == (min != NULL && max != NULL), "axis range presence");
+    if (min && max) {
+        check(fabs(axis->range_min - json_number(min)) < 0.0001, "axis minimum");
+        check(fabs(axis->range_max - json_number(max)) < 0.0001, "axis maximum");
+    }
+    const json_value_t* categories = json_object_get(oracle, "categories");
+    check((size_t)axis->categories.count == json_array_size(categories), "category count");
+    for (int i = 0; i < axis->categories.count; ++i) {
+        check(same_text(axis->categories.items[i], json_string(json_array_get(categories, (size_t)i))),
+              "category text");
+    }
+}
+
+static void check_xy_oracle(const XYDiagram* diagram, const char* expected) {
+    json_value_t* oracle = json_parse(expected, strlen(expected));
+    check(oracle != NULL, "required XYChart oracle is valid JSON");
+    if (!oracle) return;
+    check(same_text(json_get_string(oracle, "type"), "xychart"), "oracle chart type");
+    check(same_text(diagram->title, json_get_string(oracle, "title")), "chart title");
+    check(same_text(diagram->accTitle, json_get_string(oracle, "accTitle")), "accessibility title");
+    check(same_text(diagram->accDescr, json_get_string(oracle, "accDescription")), "accessibility description");
+    const char* orientation = json_get_string(oracle, "orientation");
+    check(diagram->orientation == (orientation && strcmp(orientation, "horizontal") == 0
+          ? XY_ORIENTATION_HORIZONTAL : XY_ORIENTATION_VERTICAL), "orientation");
+    check_axis_oracle(&diagram->xAxis, json_object_get(oracle, "xAxis"));
+    check_axis_oracle(&diagram->yAxis, json_object_get(oracle, "yAxis"));
+    const json_value_t* series = json_object_get(oracle, "series");
+    const XYSeries* current = diagram->series;
+    size_t count = 0;
+    for (; current; current = current->next, ++count) {
+        const json_value_t* item = json_array_get(series, count);
+        check(item != NULL, "series has oracle entry");
+        if (!item) continue;
+        check(same_text(current->name, json_get_string(item, "label")), "series label");
+        check(same_text(current->type == XY_SERIES_LINE ? "line" : "bar",
+                        json_get_string(item, "type")), "series type");
+        const json_value_t* values = json_object_get(item, "values");
+        check((size_t)current->data.count == json_array_size(values), "series value count");
+        for (int i = 0; i < current->data.count; ++i) {
+            const json_value_t* value = json_array_get(values, (size_t)i);
+            check(value && json_type(value) == JSON_NUMBER &&
+                  fabs(current->data.items[i] - json_number(value)) < 0.0001,
+                  "series value");
+        }
+    }
+    check(count == json_array_size(series), "series count");
+    json_free(oracle);
 }
 
 #ifdef check_double_eq
@@ -79,6 +116,33 @@ static int json_equal(const char* a, const char* b) {
     } \
 } while(0)
 
+static void check_xy_fixture(const char* name, const char* form, int has_json) {
+    char* input = load_golden_file(name, form, "mmd");
+    check(input != NULL, "required XYChart fixture exists");
+    if (!input) return;
+    XYDiagram* diagram = xychart_parse(input);
+    check(diagram != NULL, "XYChart fixture parses");
+    if (diagram) {
+        char* actual = xychart_to_json(diagram);
+        check(actual != NULL, "XYChart fixture exports JSON");
+        if (has_json) {
+            char* expected = load_golden_file(name, "", "json");
+            check(expected != NULL, "required XYChart JSON golden exists");
+            if (actual && expected) {
+                check_xy_oracle(diagram, expected);
+            }
+            free(expected);
+        } else {
+            json_value_t* parsed = actual ? json_parse(actual, strlen(actual)) : NULL;
+            check(parsed != NULL, "XYChart source fixture exports valid JSON");
+            json_free(parsed);
+        }
+        json_serialize_free(actual);
+        xychart_free_diagram(diagram);
+    }
+    free(input);
+}
+
 spec("xychart_parser") {
     describe("parsing basics") {
         it("should parse simple xychart with categories") {
@@ -92,17 +156,17 @@ spec("xychart_parser") {
              
              XYDiagram* diagram = xychart_parse(input);
              REQUIRE(diagram != NULL);
-             check_str_eq(diagram->title, "Sample Chart");
+             check_true(diagram->title != NULL && strcmp(diagram->title, "Sample Chart") == 0);
              
              REQUIRE(diagram->orientation == XY_ORIENTATION_VERTICAL);
              
-             check_str_eq(diagram->xAxis.title, "Categories");
+             check_true(diagram->xAxis.title != NULL && strcmp(diagram->xAxis.title, "Categories") == 0);
              REQUIRE(diagram->xAxis.categories.count == 3);
-             check_str_eq(diagram->xAxis.categories.items[0], "A");
-             check_str_eq(diagram->xAxis.categories.items[1], "B");
-             check_str_eq(diagram->xAxis.categories.items[2], "C");
+             check_true(diagram->xAxis.categories.items[0] != NULL && strcmp(diagram->xAxis.categories.items[0], "A") == 0);
+             check_true(diagram->xAxis.categories.items[1] != NULL && strcmp(diagram->xAxis.categories.items[1], "B") == 0);
+             check_true(diagram->xAxis.categories.items[2] != NULL && strcmp(diagram->xAxis.categories.items[2], "C") == 0);
              
-             check_str_eq(diagram->yAxis.title, "Revenue");
+             check_true(diagram->yAxis.title != NULL && strcmp(diagram->yAxis.title, "Revenue") == 0);
              REQUIRE(diagram->yAxis.has_range == true);
              check_double_eq(diagram->yAxis.range_min, 0.0);
              check_double_eq(diagram->yAxis.range_max, 100.0);
@@ -110,7 +174,7 @@ spec("xychart_parser") {
              REQUIRE(diagram->series != NULL);
              XYSeries* s1 = diagram->series;
              REQUIRE(s1->type == XY_SERIES_LINE);
-             check_str_eq(s1->name, "Sales");
+             check_true(s1->name != NULL && strcmp(s1->name, "Sales") == 0);
              REQUIRE(s1->data.count == 3);
              check_double_eq(s1->data.items[0], 10.0);
              check_double_eq(s1->data.items[1], 20.5);
@@ -119,7 +183,7 @@ spec("xychart_parser") {
              XYSeries* s2 = s1->next;
              REQUIRE(s2 != NULL);
              REQUIRE(s2->type == XY_SERIES_BAR);
-             check_str_eq(s2->name, "Profit");
+             check_true(s2->name != NULL && strcmp(s2->name, "Profit") == 0);
              REQUIRE(s2->data.count == 3);
              check_double_eq(s2->data.items[0], 5.0);
              check_double_eq(s2->data.items[1], 12.0);
@@ -175,62 +239,22 @@ spec("xychart_parser") {
         }
     }
 
-    describe("golden tests") {
-#ifdef _WIN32
-        char search_path[1024];
-        snprintf(search_path, sizeof(search_path), "%s/*.input.mmd", GOLDEN_DIR);
-
-        WIN32_FIND_DATAA find_data;
-        HANDLE hFind = FindFirstFileA(search_path, &find_data);
-
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                const char* filename = find_data.cFileName;
-                const char* ext = strstr(filename, ".input.mmd");
-                if (!ext) continue;
-
-                size_t name_len = ext - filename;
-                if (name_len >= 128) continue;
-
-                char case_name[128];
-                strncpy(case_name, filename, name_len);
-                case_name[name_len] = '\0';
-
-                it(case_name) {
-                    char* input = load_golden_file(case_name, "input", "mmd");
-                    if (!input) input = load_golden_file(case_name, "output", "mmd");
-
-                    REQUIRE(input != NULL);
-
-                    XYDiagram* diagram = xychart_parse(input);
-                    if (!diagram) {
-                         check(0, "Failed to parse diagram");
-                    } else {
-                        char* actual = xychart_to_json(diagram);
-                        REQUIRE(actual != NULL);
-
-                        char* expected = load_golden_file(case_name, "output", "json");
-
-                        if (expected) {
-                            if (!json_equal(actual, expected)) {
-                                printf("JSON mismatch for case: %s\n", case_name);
-                                check(0, "JSON mismatch");
-                            } else {
-                                check(1, "JSON match");
-                            }
-                            free(expected);
-                        } else {
-                            check(1, "Parse successful (no golden json)");
-                        }
-
-                        turbo_json_serialize_free(actual);
-                        xychart_free_diagram(diagram);
-                    }
-                    if (input) free(input);
-                }
-            } while (FindNextFileA(hFind, &find_data));
-            FindClose(hFind);
+    describe("source fixtures") {
+        const char* cases[] = {"basic", "simple"};
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            it(cases[i]) {
+                check_xy_fixture(cases[i], "input", 0);
+            }
         }
-#endif
+    }
+
+    describe("checked-in semantic JSON oracles on every platform") {
+        const char* cases[] = {
+            "render-simple", "render-complex", "render-titles", "render-axes"};
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+            it(cases[i]) {
+                check_xy_fixture(cases[i], "", 1);
+            }
+        }
     }
 }

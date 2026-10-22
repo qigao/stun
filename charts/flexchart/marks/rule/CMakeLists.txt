@@ -53,13 +53,13 @@ set_target_properties(flexchart_rule PROPERTIES FOLDER "Modules/FlexChart/Marks"
 
 # Parser test
 add_executable(flexchart_rule_parser_test tests/test_rule_parser.cpp)
-target_link_libraries(flexchart_rule_parser_test PRIVATE flexchart_rule TurboUtils::TinyTest)
+target_link_libraries(flexchart_rule_parser_test PRIVATE flexchart_rule Salts::TinyTest)
 add_test(NAME FlexChartRuleParserTest COMMAND flexchart_rule_parser_test)
 set_target_properties(flexchart_rule_parser_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")
 
 # Renderer test
 add_executable(flexchart_rule_test tests/test_rule.cpp)
-target_link_libraries(flexchart_rule_test PRIVATE flexchart_rule TurboUtils::TinyTest)
+target_link_libraries(flexchart_rule_test PRIVATE flexchart_rule Salts::TinyTest)
 target_include_directories(flexchart_rule_test PRIVATE ../../src)
 add_test(NAME FlexChartRuleTest COMMAND flexchart_rule_test)
 set_target_properties(flexchart_rule_test PROPERTIES FOLDER "Modules/FlexChart/Marks/tests")

@@ -1,0 +1,192 @@
+#include <flexUI/detail/style_property_registry.h>
+#include <flexUI/element.h>
+
+#include <flex/core/cmeta_types.h>
+#include <tinytest.hpp>
+
+using namespace flexUI;
+using namespace flexUI::detail;
+
+const cmeta_type_desc* flex_test_peer_color_type() noexcept;
+
+suite("FlexUI CMeta style property registry") {
+    it("resolves canonical names and migration aliases") {
+        const auto* opacity = style_property_find("opacity");
+        const auto* visibility = style_property_find("visibility");
+        const auto* color = style_property_find("color");
+        const auto* text_color = style_property_find("text-color");
+        const auto* font_size = style_property_find("font-size");
+        const auto* font_size_alias = style_property_find("fontSize");
+
+        check_not_null(opacity);
+        check_not_null(visibility);
+        check_true(cmeta_type_desc_valid(visibility->type));
+        check(visibility->type->kind == CMETA_T_INTEGER);
+        check_false(cmeta_type_equal(visibility->type, &cmeta_type_int));
+        check_true((visibility->flags & STYLE_PROPERTY_INHERITED) != 0u);
+        check_true((visibility->flags & STYLE_PROPERTY_DISCRETE) != 0u);
+        check_false(
+            (visibility->flags & STYLE_PROPERTY_TRANSITIONABLE) != 0u);
+        check_true((visibility->impact & STYLE_IMPACT_PAINT) != 0u);
+        check_true((visibility->impact & STYLE_IMPACT_HIT_TEST) != 0u);
+        check_not_null(color);
+        check(color == text_color);
+        check(font_size == font_size_alias);
+        check_null(style_property_find("does-not-exist"));
+
+        check_true(cmeta_type_equal(opacity->type, &cmeta_type_float));
+        check_true(cmeta_type_equal(color->type, &flex::cmeta_type_color));
+    }
+
+    it("publishes transition groups and dirty impact metadata") {
+        const auto* tx = style_property_find("transform-x");
+        const auto* shadow = style_property_find("box-shadow-color");
+        const auto* font_size = style_property_find("font-size");
+        const auto* opacity = style_property_find("opacity");
+
+        check_not_null(tx);
+        check_equal(tx->transition_group, "transform");
+        check_true((tx->impact & STYLE_IMPACT_HIT_TEST) != 0u);
+
+        check_not_null(shadow);
+        check_equal(shadow->transition_group, "box-shadow");
+
+        check_true((font_size->impact & STYLE_IMPACT_TEXT_LAYOUT) != 0u);
+        check_true((font_size->impact & STYLE_IMPACT_LAYOUT) != 0u);
+        check_true((font_size->flags & STYLE_PROPERTY_INHERITED) != 0u);
+
+        check_true((opacity->impact & STYLE_IMPACT_COMPOSITE) != 0u);
+        check_true((opacity->flags & STYLE_PROPERTY_TRANSITIONABLE) != 0u);
+    }
+
+    it("reads and writes through CMeta-validated accessors") {
+        ComputedStyle style;
+        style.opacity = 0.25f;
+        style.background_color = Color{0.1f, 0.2f, 0.3f, 1.0f};
+
+        const auto* opacity = style_property_find("opacity");
+        const auto* background = style_property_find("background-color");
+
+        float read_opacity = 0.0f;
+        check_true(style_property_read(
+            *opacity, style, &cmeta_type_float, &read_opacity));
+        check_within(read_opacity, 0.25f, 0.0001f);
+
+        const float new_opacity = 0.75f;
+        check_true(style_property_write(
+            *opacity, style, &cmeta_type_float, &new_opacity));
+        check_within(style.opacity, 0.75f, 0.0001f);
+
+        Color read_color{};
+        check_true(style_property_read(
+            *background, style, &flex::cmeta_type_color, &read_color));
+        check_within(read_color.g, 0.2f, 0.0001f);
+
+        const Color new_color{0.8f, 0.7f, 0.6f, 1.0f};
+        check_true(style_property_write(
+            *background, style, &flex::cmeta_type_color, &new_color));
+        check_within(style.background_color.r, 0.8f, 0.0001f);
+
+        check_false(style_property_write(
+            *background, style, &cmeta_type_float, &new_opacity));
+
+        const auto* visibility = style_property_find("visibility");
+        const Visibility hidden = Visibility::Hidden;
+        check_true(style_property_write(
+            *visibility, style, visibility->type, &hidden));
+        check(style.visibility == Visibility::Hidden);
+
+        Visibility read_visibility = Visibility::Visible;
+        check_true(style_property_read(
+            *visibility, style, visibility->type, &read_visibility));
+        check(read_visibility == Visibility::Hidden);
+
+        check_false(style_property_write(
+            *visibility, style, &cmeta_type_int, &hidden));
+    }
+
+    it("validates property access with a type from another translation unit") {
+        const auto* background = style_property_find("background-color");
+        const auto* peer_color = flex_test_peer_color_type();
+        check_not_null(background);
+        check_not_equal(peer_color, background->type);
+
+        ComputedStyle style;
+        const Color supplied{0.8f, 0.7f, 0.6f, 1.0f};
+        check_true(style_property_write(*background, style, peer_color, &supplied));
+        Color read{};
+        check_true(style_property_read(*background, style, peer_color, &read));
+        check_within(read.r, supplied.r, 0.0001f);
+        check_within(read.g, supplied.g, 0.0001f);
+        check_within(read.b, supplied.b, 0.0001f);
+
+        auto wrong_shape = *peer_color;
+        wrong_shape.size += sizeof(float);
+        const Color rejected{};
+        check_false(style_property_write(*background, style, &wrong_shape, &rejected));
+        check_within(style.background_color.r, supplied.r, 0.0001f);
+        check_false(style_property_read(*background, style, &wrong_shape, &read));
+        check_within(read.r, supplied.r, 0.0001f);
+    }
+
+    it("rejects matching identities with incompatible alignment or kind") {
+        const auto* background = style_property_find("background-color");
+        check_not_null(background);
+        ComputedStyle style;
+        style.background_color = Color{0.8f, 0.7f, 0.6f, 1.0f};
+        const Color rejected{};
+        Color read = style.background_color;
+
+        auto wrong_alignment = *flex_test_peer_color_type();
+        wrong_alignment.align += alignof(Color);
+        auto wrong_kind = *flex_test_peer_color_type();
+        wrong_kind.kind = CMETA_T_FLOAT;
+        for (const auto* type : {&wrong_alignment, &wrong_kind}) {
+            check_true(cmeta_type_equal(type, background->type));
+            check_false(style_property_accepts_type(*background, type));
+            check_false(style_property_write(*background, style, type, &rejected));
+            check_false(style_property_read(*background, style, type, &read));
+            check_within(style.background_color.r, 0.8f, 0.0001f);
+            check_within(read.r, 0.8f, 0.0001f);
+        }
+    }
+
+    it("maps style impact metadata onto element dirty stages") {
+        Element element;
+        element.clear_dirty();
+
+        const auto* opacity = style_property_find("opacity");
+        const auto* transform = style_property_find("transform-x");
+        const auto* font_size = style_property_find("font-size");
+        check_not_null(opacity);
+        check_not_null(transform);
+        check_not_null(font_size);
+
+        mark_style_property_dirty(element, *opacity);
+        check_true(element.is_dirty(flex::DirtyFlags::Visual));
+        check_false(element.is_dirty(flex::DirtyFlags::Layout));
+
+        element.clear_dirty();
+        mark_style_property_dirty(element, *transform);
+        check_true(element.is_dirty(flex::DirtyFlags::Visual));
+        check_true(element.is_dirty(flex::DirtyFlags::Bounds));
+        check_true(element.is_dirty(flex::DirtyFlags::WorldBounds));
+        check_false(element.is_dirty(flex::DirtyFlags::Layout));
+
+        element.clear_dirty();
+        mark_style_property_dirty(element, *font_size);
+        check_true(element.is_dirty(flex::DirtyFlags::Content));
+        check_true(element.is_dirty(flex::DirtyFlags::Bounds));
+        check_true(element.is_dirty(flex::DirtyFlags::Layout));
+        check_true(element.is_dirty(flex::DirtyFlags::Visual));
+    }
+
+    it("covers the current stable transition property subset") {
+        check(style_property_count() >= static_cast<std::size_t>(24));
+        check_not_null(style_property_find("border-color"));
+        check_not_null(style_property_find("outline-width"));
+        check_not_null(style_property_find("ring-offset-color"));
+        check_not_null(style_property_find("transform-scale-y"));
+        check_not_null(style_property_find("box-shadow-spread"));
+    }
+};

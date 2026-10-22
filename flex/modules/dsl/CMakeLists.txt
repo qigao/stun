@@ -64,7 +64,7 @@ target_include_directories(
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
          $<INSTALL_INTERFACE:include>)
 target_compile_features(flex_compiler PUBLIC cxx_std_17)
-target_link_libraries(flex_compiler PUBLIC TurboUtils::Core Flex::Runtime)
+target_link_libraries(flex_compiler PUBLIC Salts::Core Flex::Runtime)
 set_target_properties(
   flex_compiler PROPERTIES FOLDER "flex/dsl" POSITION_INDEPENDENT_CODE ON)
 

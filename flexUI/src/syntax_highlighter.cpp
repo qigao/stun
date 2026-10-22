@@ -20,28 +20,40 @@ namespace {
     } init;
 }
 
-void HighlighterFactory::register_highlighter(const std::string& lang, 
+void HighlighterFactory::register_highlighter(const std::string& lang,
                                                std::unique_ptr<SyntaxHighlighter> highlighter) {
-    highlighters_[lang] = std::move(highlighter);
+    // A prior acquired renderer keeps its own shared lifetime when this entry
+    // is replaced. The factory mutex never spans a provider callback.
+    auto owner = std::shared_ptr<SyntaxHighlighter>(std::move(highlighter));
+    std::lock_guard<std::mutex> lock(mutex_);
+    highlighters_[lang] = std::move(owner);
+}
+
+std::shared_ptr<SyntaxHighlighter>
+HighlighterFactory::acquire(const std::string& lang) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = highlighters_.find(lang);
+        if (it != highlighters_.end()) return it->second;
+    }
+    // Provider discovery takes its own DSO registry lock. Never hold both
+    // locks at once: unloading and application callbacks may run concurrently.
+    auto created = std::shared_ptr<SyntaxHighlighter>(create_ts_highlighter(lang));
+    if (!created) return {};
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto [it, inserted] = highlighters_.try_emplace(lang, created);
+    return it->second;
 }
 
 SyntaxHighlighter* HighlighterFactory::get(const std::string& lang) {
-    auto it = highlighters_.find(lang);
-    if (it != highlighters_.end()) {
-        return it->second.get();
-    }
-    
-    // Try to create from loaded plugin
-    SyntaxHighlighter* hl = create_ts_highlighter(lang);
-    if (hl) {
-        highlighters_[lang] = std::unique_ptr<SyntaxHighlighter>(hl);
-        return hl;
-    }
-    return nullptr;
+    // Kept for older single-threaded callers. MarkdownWidget uses acquire().
+    return acquire(lang).get();
 }
 
 bool HighlighterFactory::supports(const std::string& lang) const {
-    return highlighters_.find(lang) != highlighters_.end();
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = highlighters_.find(lang);
+    return it != highlighters_.end() && static_cast<bool>(it->second);
 }
 
 const char* highlight_class(HighlightType type) {

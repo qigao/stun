@@ -2,7 +2,7 @@
 
 #include "plugin_validation.hpp"
 
-#include <turbo_vstr.h>
+#include <vstr.h>
 
 #include <algorithm>
 #include <array>
@@ -241,8 +241,10 @@ PluginModule::load(const std::filesystem::path &absolute_path,
                            absolute_path, "plugin host limits are invalid")};
   }
 
+  // Keep provider code live through exception inspection and destruction.
+  NativePluginLibrary library;
+  std::shared_ptr<PluginModule> module;
   try {
-    NativePluginLibrary library;
     std::string message;
     if (!library.open(absolute_path, message)) {
       const auto code = absolute_path.is_absolute()
@@ -354,22 +356,17 @@ PluginModule::load(const std::filesystem::path &absolute_path,
       services.push_back(std::move(service));
     }
 
-    auto module = std::shared_ptr<PluginModule>(new PluginModule(
+    module = std::shared_ptr<PluginModule>(new PluginModule(
         std::move(library), api, nullptr, plugin_id, std::move(plugin_version),
         descriptor->required_host_minor, std::move(services), limits));
     AbiErrorBuffer error_buffer(limits.max_error_message_bytes);
-    flexui_plugin_instance *instance = nullptr;
-    const auto status = api->create(&module->host_api_, &instance,
+    const auto status = api->create(&module->host_api_, &module->instance_,
                                     &error_buffer.abi);
-    if (status != FLEXUI_PLUGIN_STATUS_OK || instance == nullptr) {
-      if (instance != nullptr) {
-        api->destroy(instance);
-      }
+    if (status != FLEXUI_PLUGIN_STATUS_OK || module->instance_ == nullptr) {
       return {{}, host_error(PluginHostErrorCode::CreateFailed, "create",
                              module->library_.path(), error_buffer.message(),
                              module->plugin_id_, status)};
     }
-    module->instance_ = instance;
     return {std::move(module), {}};
   } catch (const std::bad_alloc &) {
     return {{}, host_error(PluginHostErrorCode::AllocationFailed, "load",
