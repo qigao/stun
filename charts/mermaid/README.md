@@ -185,7 +185,8 @@ API; this change does not switch a consumer automatically.
 `flowchart/tests/oracle/generate-json-v2.mjs --write` explicitly regenerates the
 reviewable `json-v2-contract.json`; CI runs it without `--write`. The integrity-
 locked Mermaid 11.12.0 oracle supplies ordered arrow/identity/curve facts for
-all 95 original sources plus six regression groups. The file records source,
+all 95 original sources plus seven regression groups. The multiline group also
+checks line-leading arrow operators against upstream. The file records source,
 baseline and package-lock hashes. Historical source, JSON and provenance files
 remain unchanged. Tests require COMPLETE parses, compare all 95 complete v2
 graphs strictly (using only the existing square/rect alias), and independently

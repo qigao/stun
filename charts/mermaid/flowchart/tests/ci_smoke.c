@@ -250,6 +250,16 @@ static void test_subgraph_title_spacing(void) {
     flowchart_diagram_free(d);
 }
 
+static void test_multiline_edge_boundaries(void) {
+    static const ExpectedEdge edges[] = {
+        {"A", "B", NULL}, {"C", "D", NULL}, {"E", "F", NULL},
+    };
+    check_edges("multiline edge boundaries",
+                "flowchart LR\nA\n<--> B\nC\no--o D\nE\nx--x F\n"
+                "o\nx\nother\nxylophone\n",
+                edges, sizeof(edges) / sizeof(edges[0]), 10);
+}
+
 static void test_malformed_input(void) {
     FlowchartDiagram *diagram = NULL;
     CHECK(flowchart_parse_ex(NULL, &diagram) == FLOWCHART_PARSE_ERROR);
@@ -267,6 +277,7 @@ int main(void) {
     test_named_edge_chain_metadata();
     test_shapes_and_text();
     test_subgraph_title_spacing();
+    test_multiline_edge_boundaries();
     test_malformed_input();
     if (failures) {
         fprintf(stderr, "Flowchart native AST smoke: %d assertion(s) failed\n",

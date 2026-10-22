@@ -51,6 +51,8 @@ static char* copy_subgraph_name_token(LexerState* s,
     return result;
 }
 
+static int starts_edge_continuation(const char* cursor);
+
 void flowchart_scan(LexerState *s, void *parser, FlowchartParserContext *ctx) {
     char *token;
 loop:
@@ -117,7 +119,7 @@ loop:
             char *lookahead = s->cursor;
             while (*lookahead == ' ' || *lookahead == '\t' || *lookahead == '\r')
                 ++lookahead;
-            if (*lookahead != '-' && *lookahead != '=')
+            if (!starts_edge_continuation(lookahead))
                 FlowchartParser(parser, FC_NEWLINE, NULL, ctx);
             s->in_classdef = 0;
             s->click_phase = 0;
@@ -366,6 +368,20 @@ loop:
         "\000" { FlowchartParser(parser, FC_EOF, NULL, ctx); return; }
 
         . { ctx->error_count++; goto loop; }
+    */
+}
+
+/* Reuse the scanner's operator definitions. A following node named o/x (or
+ * a named-edge declaration) must not be mistaken for an edge continuation. */
+static int starts_edge_continuation(const char* cursor) {
+    const char* marker;
+    /*!re2c
+        re2c:define:YYCTYPE = char;
+        re2c:define:YYCURSOR = cursor;
+        re2c:define:YYMARKER = marker;
+        re2c:yyfill:enable = 0;
+        full_arrow | inline_edge_label { return 1; }
+        * { return 0; }
     */
 }
 

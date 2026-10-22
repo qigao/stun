@@ -79,6 +79,8 @@ const regressions = {
     'first@{ curve: natural }\nthird@{ curve: stepAfter }\nlinkStyle 2 stroke:red,stroke-width:3px\n',
   duplicate_ids: 'flowchart TD\nA same@--> B\nA same@--> B\nsame@{ curve: natural }\n',
   timing: 'flowchart TD\ne1@{ curve: natural }\nA e1@--> B\ne1@{ curve: linear }\n',
+  multiline: 'flowchart LR\n' + ['-->', '<-->', 'o--o', 'x--x', '~~~', '.->', '<.->', '<==>', 'o==o', 'x-.->', '<-- label -->']
+    .map((op, i) => `A${i}\n  ${op} B${i}`).join('\n') + '\no\nx\nother\nxylophone\n',
   escaping: 'flowchart LR\nA -->|"hello & world"| B\n',
 };
 for (const [name, source] of Object.entries(regressions))

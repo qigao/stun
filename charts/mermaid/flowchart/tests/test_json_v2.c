@@ -73,7 +73,7 @@ int flowchart_test_json_v2(JsonEqual equal) {
   json_value_t* regressions = contract ? json_object_get(contract, "regressions") : NULL;
   int ok = schema && strcmp(schema, "stun-flowchart-json-v2-test/1") == 0 &&
            cases && json_type(cases) == JSON_OBJECT && json_object_size(cases) == 95 &&
-           regressions && json_type(regressions) == JSON_OBJECT && json_object_size(regressions) == 6;
+           regressions && json_type(regressions) == JSON_OBJECT && json_object_size(regressions) == 7;
   if (!ok) fprintf(stderr, "Missing/incomplete/unsupported JSON v2 test contract\n");
   size_t graphs = 0, groups = 0;
   for (size_t i = 0; ok && i < json_object_size(cases); ++i) {
