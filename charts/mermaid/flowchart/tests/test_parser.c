@@ -113,6 +113,63 @@ static int json_equal(const char* a, const char* b) {
     return eq;
 }
 
+/* Diagnostic only: identify a strict JSON failure caused exclusively by
+ * ordering of links. Do not count this as a passing golden or reorder links:
+ * numbered linkStyle properties are declaration-order sensitive. */
+static int golden_links_permutation_only(const char* actual,
+                                         const char* expected) {
+    if (!actual || !expected) return 0;
+    json_value_t* parsed_actual = json_parse(actual, strlen(actual));
+    json_value_t* parsed_expected = json_parse(expected, strlen(expected));
+    unsigned char* matched = NULL;
+    int only_order = 0;
+    if (!parsed_actual || !parsed_expected) goto done;
+    normalize_json(parsed_actual);
+    normalize_json(parsed_expected);
+    if (json_type(parsed_actual) != JSON_OBJECT ||
+        json_type(parsed_expected) != JSON_OBJECT ||
+        json_value_equal(parsed_actual, parsed_expected) ||
+        json_object_size(parsed_actual) != json_object_size(parsed_expected))
+        goto done;
+
+    for (size_t i = 0; i < json_object_size(parsed_expected); ++i) {
+        const char* key = json_object_key(parsed_expected, i);
+        if (!key || !json_object_get(parsed_actual, key)) goto done;
+        if (strcmp(key, "links") != 0 &&
+            !json_value_equal(json_object_value(parsed_expected, i),
+                              json_object_get(parsed_actual, key)))
+            goto done;
+    }
+    const json_value_t* expected_links = json_object_get(parsed_expected, "links");
+    const json_value_t* actual_links = json_object_get(parsed_actual, "links");
+    if (!expected_links || !actual_links ||
+        json_type(expected_links) != JSON_ARRAY ||
+        json_type(actual_links) != JSON_ARRAY)
+        goto done;
+    const size_t n = json_array_size(expected_links);
+    if (n != json_array_size(actual_links)) goto done;
+    matched = (unsigned char*)calloc(n ? n : 1, sizeof(*matched));
+    if (!matched) goto done;
+    for (size_t i = 0; i < n; ++i) {
+        const json_value_t* item = json_array_get(expected_links, i);
+        size_t j = 0;
+        for (; j < n; ++j) {
+            if (!matched[j] &&
+                json_value_equal(item, json_array_get(actual_links, j))) {
+                matched[j] = 1;
+                break;
+            }
+        }
+        if (j == n) goto done; /* Duplicated links count individually. */
+    }
+    only_order = 1;
+done:
+    free(matched);
+    json_free(parsed_actual);
+    json_free(parsed_expected);
+    return only_order;
+}
+
 /* Keep array ordering strict: node/link object keys are compared elsewhere,
  * while link array positions remain observable to linkStyle consumers. */
 static int flowchart_links_in_order(const char* source,
@@ -1405,6 +1462,44 @@ spec("flowchart_parser") {
         }
     }
 
+    describe("golden difference classifier") {
+        it("identifies order-only changes while preserving strict equality") {
+            const char* expected =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"A\",\"target\":\"B\"},"
+                "{\"source\":\"B\",\"target\":\"C\"}],"
+                "\"linkStyles\":[{\"index\":1}]}";
+            const char* reordered =
+                "{\"linkStyles\":[{\"index\":1}],"
+                "\"links\":[{\"target\":\"C\",\"source\":\"B\"},"
+                "{\"target\":\"B\",\"source\":\"A\"}],"
+                "\"nodes\":{}}";
+            const char* changed_edge =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"B\",\"target\":\"D\"},"
+                "{\"source\":\"A\",\"target\":\"B\"}],"
+                "\"linkStyles\":[{\"index\":1}]}";
+            const char* changed_style =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"B\",\"target\":\"C\"},"
+                "{\"source\":\"A\",\"target\":\"B\"}],"
+                "\"linkStyles\":[{\"index\":0}]}";
+            const char* duplicate =
+                "{\"nodes\":{},\"links\":["
+                "{\"source\":\"A\",\"target\":\"B\"},"
+                "{\"source\":\"A\",\"target\":\"B\"}],"
+                "\"linkStyles\":[{\"index\":1}]}";
+            check_true(golden_links_permutation_only(reordered, expected));
+            check_true(!json_equal(reordered, expected));
+            check_true(!golden_links_permutation_only(expected, expected));
+            check_true(!golden_links_permutation_only(changed_edge, expected));
+            check_true(!golden_links_permutation_only(changed_style, expected));
+            check_true(!golden_links_permutation_only(duplicate, expected));
+            check_true(!golden_links_permutation_only("{", expected));
+            check_true(!golden_links_permutation_only(NULL, expected));
+        }
+    }
+
     describe("golden tests") {
         int count = 0;
         int golden_failures = 0;
@@ -1445,6 +1540,9 @@ spec("flowchart_parser") {
                     /* Defer assertions until the directory handle is closed. */
                     if (failed) {
                         fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
+                        if (golden_links_permutation_only(actual, expected))
+                            fprintf(stderr, "Flowchart golden links-order-only: %s\n",
+                                    case_name);
                         if (golden_failures < 3) {
                             fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
                                     case_name, expected ? expected : "<missing>");
@@ -1498,6 +1596,9 @@ spec("flowchart_parser") {
                     /* Defer assertions until the directory handle is closed. */
                     if (failed) {
                         fprintf(stderr, "Flowchart golden mismatch: %s\n", case_name);
+                        if (golden_links_permutation_only(actual, expected))
+                            fprintf(stderr, "Flowchart golden links-order-only: %s\n",
+                                    case_name);
                         if (golden_failures < 3) {
                             fprintf(stderr, "--- expected JSON (%s) ---\n%s\n",
                                     case_name, expected ? expected : "<missing>");
