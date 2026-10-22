@@ -1,7 +1,9 @@
 # Headless XML runtime qualification
 
 This profile builds the normal production `flexUI`, `flexUI_controller`, Flex
-Runtime/Compiler/Expression/Render/Animation, Markdown and gCanvas Core targets.
+Runtime/Compiler/Expression/Render/Animation and Markdown targets. gCanvas Core
+is configured to provide the real desktop target graph, but these selected tests
+do not build or execute it.
 It executes the original XML admission, XML compiler, UI document, widget registry,
 content model and desktop application suites with ASan/UBSan. Whole-tree schema
 rejection, factory ordering, failed application publication and failed reload
@@ -41,7 +43,11 @@ This profile excludes window/GPU/Mesa, native plugin hosts and TurboScript JIT.
 Existing ScriptModuleFactory fixtures exercise the real controller/application
 boundary, but do not qualify a published TurboScript runtime or installed editor
 (#31). Content-model checks cover registered tags, children and declared text;
-complete property/event/binding schemas, stable internal reconciliation identity
-and natural XML text remain separate #16 work. Anonymous nodes stay outside
-the named index; event and binding targets require an explicit id. The no-registry instantiation overload remains an
-explicit structural compatibility path.
+complete property/event/binding schemas and stable internal reconciliation identity
+remain separate #16 work. Natural text concatenates character data/CDATA,
+trims only outer XML formatting whitespace, and preserves internal whitespace.
+Mixed text with element children is explicitly rejected. Text diagnostics anchor
+the first contributing XML text node; their zero length does not claim an exact
+raw range across entity/CDATA decoding and trimming. Anonymous nodes stay outside
+the named index; event and binding targets require an explicit id. The no-registry
+instantiation overload remains an explicit structural compatibility path.

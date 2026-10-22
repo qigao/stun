@@ -250,6 +250,26 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_within(save->style_.width, 123.0F, 0.001F);
   }
 
+  it("instantiates widget text from natural XML content") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Natural\"><button id=\"save\">Save</button></ui>");
+
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *save = built.application->box().get_by_id("save");
+    auto *button = save ? dynamic_cast<flexUI::ButtonWidget *>(save->widget) : nullptr;
+    check_not_null(save);
+    check_not_null(button);
+    if (save && button) {
+      check_equal(save->text(), std::string("Save"));
+      check_equal(button->text(), std::string("Save"));
+    }
+  }
+
   it("publishes anonymous structural nodes without public handles") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
     builder.xml_entry(R"(
@@ -1548,6 +1568,27 @@ spec("FlexUI anonymous application reload keeps named state transactional") {
     check_equal(active_box->root(), active_root);
     check_equal(active_box->resolve_handle(handle), title);
     check_null(active_box->get_by_id(""));
+    check_equal(built.application->sources().ui, source);
+  }
+}
+
+
+spec("FlexUI natural text obeys content models during reload") {
+  it("preserves the active application when natural text is forbidden on a leaf") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Text\"><button id=\"save\">Save &amp; close</button></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto *box = &built.application->box();
+    auto *save = box->get_by_id("save");
+    const auto source = built.application->sources().ui;
+    const auto failed = built.application->reload({"<ui name=\"Bad\"><input>forbidden</input></ui>", "", "", "natural-text-reload"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidProperty);
+    check_equal(&built.application->box(), box);
+    check_equal(box->get_by_id("save"), save);
+    check_equal(dynamic_cast<flexUI::ButtonWidget *>(save->widget)->text(), "Save & close");
     check_equal(built.application->sources().ui, source);
   }
 }
