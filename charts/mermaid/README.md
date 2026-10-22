@@ -142,3 +142,72 @@ the pinned D3 implementation and checks viewport containment. Generated fixture
 geometry used for numerical comparison excludes obstacles; the full scene is
 separately accepted in professional mode and rejected in legacy mode. No window
 or Mesa build is required.
+
+## Explicit Flowchart JSON v2
+
+Serializer consumers can opt into `flowchart_to_json_ex(diagram,
+FLOWCHART_JSON_SOURCE_V2)`. The root identifies this contract with
+`"schema":"stun.flowchart/2"`. `flowchart_to_json` and explicit
+`FLOWCHART_JSON_LEGACY` continue to select the existing sparse projection.
+Unknown format values return NULL; there is no automatic schema selection or
+fallback. V2 requires parser-owned diagrams and edges. Free exported buffers
+with `json_serialize_free`; the buffer remains valid after freeing its diagram.
+Callers requiring a complete source parse must check `flowchart_parse_ex` first.
+
+V2 emits `links` in AST declaration order, with the following edge fields:
+
+| Field | Contract |
+| --- | --- |
+| `declarationIndex` | Zero-based declaration ordinal; identity remains distinct for parallel edges. |
+| `source`, `target` | AST endpoint IDs. |
+| `type` | `arrow_open`, single `arrow_point/circle/cross`, or `double_arrow_point/circle/cross`. |
+| `arrowTypeStart`, `arrowTypeEnd` | Explicit endpoint types; `none` means no head. |
+| `stroke` | `normal`, `thick`, `dotted`, or `invisible`. |
+| `length` | Pinned Mermaid semantics, including dot counts and its maximum of 10. |
+| `id` | Explicit edge name, or JSON null. No generated ID substitutes for an absent name. |
+| `curve` | Parsed explicit curve property, or JSON null; this does not assert renderer support. |
+| `text` | Existing source label object when present, preserving markup bytes. |
+
+For example, `C <-...-> E4` exports `double_arrow_point`, both point heads,
+`dotted` and length 3. Numbered `linkStyle` entries address `declarationIndex`.
+When an explicit edge ID is reused, only its first declared edge retains that
+ID, matching pinned Mermaid lookup; later reuse has null `id` and its own
+ordinal. Curve property lookup therefore continues to address the first named
+edge. Unknown operator profiles refuse v2 export rather than using legacy data.
+
+This migration changes ordered edge metadata. Other graph fields and source
+label bytes retain their existing projection, including literal `<br/>` versus
+`<br>` spelling; Mermaid's rendering-time HTML canonicalization is not applied
+by this C11 export API. It is not a claim of complete Mermaid graph/config JSON
+conformance. Existing production callers remain on their explicitly selected
+API; this change does not switch a consumer automatically.
+
+`flowchart/tests/oracle/generate-json-v2.mjs --write` explicitly regenerates the
+reviewable `json-v2-contract.json`; CI runs it without `--write`. The integrity-
+locked Mermaid 11.12.0 oracle supplies ordered arrow/identity/curve facts for
+all 95 original sources plus seven regression groups. The multiline group also
+checks line-leading arrow operators against upstream. The file records source,
+baseline and package-lock hashes. Historical source, JSON and provenance files
+remain unchanged. Tests require COMPLETE parses, compare all 95 complete v2
+graphs strictly (using only the existing square/rect alias), and independently
+retain the 95-case legacy gate. Doubled delimiter backslashes are now recognized
+without recording a spurious lexer error or changing their established labels.
+
+### JSON export failure handling
+
+Both export formats check every adapter-level JSON factory, object insertion,
+array append, projection-buffer allocation and final serialization result.
+Children are attached to their owning parent immediately, or freed if insertion
+fails. Any failure disposes the entire temporary graph and returns NULL; it
+does not return incomplete JSON or change formats. The borrowed AST remains
+unchanged and can be exported again after a transient failure.
+
+The Linux installed-SDK lane also builds `stun_flowchart_json_failures` using
+GNU linker interception. It fails each operation once across nested subgraphs,
+leaf-edge and declaration projections, classes, styles, clicks, named/parallel
+edges and an empty graph in both formats. It checks 2,118 failure points and
+verifies a subsequent successful export is byte-identical to the baseline.
+The hooks cover the adapter's calls into the real SDK and its malloc/calloc
+projection buffers; they do not substitute a JSON implementation or instrument
+every allocation inside the SDK shared library. ASan/UBSan and CI leak checking
+validate cleanup. This is a fourth focused CTest in the existing runtime job.

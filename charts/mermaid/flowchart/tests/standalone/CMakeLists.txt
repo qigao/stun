@@ -104,6 +104,7 @@ if(STUN_CI_JSON_GOLDEN)
     "${GENERATED_LEXER}"
     "${FLOWCHART_SOURCE}/src/flowchart_parser_wrapper.c"
     "${FLOWCHART_SOURCE}/tests/test_parser.c"
+    "${FLOWCHART_SOURCE}/tests/test_json_v2.c"
   )
   target_include_directories(stun_flowchart_json_golden PRIVATE
     "${FLOWCHART_SOURCE}/include"
@@ -112,6 +113,7 @@ if(STUN_CI_JSON_GOLDEN)
   target_compile_definitions(stun_flowchart_json_golden PRIVATE
     _POSIX_C_SOURCE=200809L
     GOLDEN_DIR="${STUN_ROOT}/charts/mermaid/golden/flowchart"
+    JSON_V2_CONTRACT="${FLOWCHART_SOURCE}/tests/json-v2-contract.json"
   )
   target_link_libraries(stun_flowchart_json_golden PRIVATE
     Salts::JsonParser Salts::TinyTest
@@ -121,6 +123,28 @@ if(STUN_CI_JSON_GOLDEN)
       -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(stun_flowchart_json_golden PRIVATE
       -fsanitize=address,undefined)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_executable(stun_flowchart_json_failures
+      "${GENERATED_PARSER}" "${GENERATED_LEXER}"
+      "${FLOWCHART_SOURCE}/src/flowchart_parser_wrapper.c"
+      "${FLOWCHART_SOURCE}/tests/test_json_failures.c")
+    target_include_directories(stun_flowchart_json_failures PRIVATE
+      "${FLOWCHART_SOURCE}/include" "${CMAKE_CURRENT_BINARY_DIR}")
+    target_compile_definitions(stun_flowchart_json_failures PRIVATE _POSIX_C_SOURCE=200809L)
+    target_link_libraries(stun_flowchart_json_failures PRIVATE Salts::JsonParser)
+    foreach(symbol IN ITEMS malloc calloc json_create_object json_create_array
+        json_create_string json_create_number json_create_uint64 json_create_null
+        json_object_add_checked json_array_add_checked json_serialize_pretty)
+      target_link_options(stun_flowchart_json_failures PRIVATE "-Wl,--wrap=${symbol}")
+    endforeach()
+    if(STUN_CI_SANITIZERS)
+      target_compile_options(stun_flowchart_json_failures PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer)
+      target_link_options(stun_flowchart_json_failures PRIVATE -fsanitize=address,undefined)
+    endif()
+    add_test(NAME stun_flowchart_json_failures COMMAND stun_flowchart_json_failures)
+    set_tests_properties(stun_flowchart_json_failures PROPERTIES TIMEOUT 30)
   endif()
   add_test(NAME stun_flowchart_json_golden COMMAND stun_flowchart_json_golden)
   set_tests_properties(stun_flowchart_json_golden PROPERTIES TIMEOUT 120)

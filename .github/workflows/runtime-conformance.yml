@@ -63,6 +63,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           node verify.mjs "$RUNNER_TEMP/flowchart-mermaid-oracle.json"
           node migrate.mjs
+          node generate-json-v2.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: flowchart-mermaid-oracle-${{ github.event.pull_request.head.sha || github.sha }}
@@ -194,7 +195,7 @@ jobs:
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
           # Reuse one generator invocation and build tree for all focused checks.
           cmake --build build/flowchart-json-golden \
-            --target stun_flowchart_ast_smoke stun_flowchart_json_golden stun_flowchart_linkstyle --parallel 2
+            --target stun_flowchart_ast_smoke stun_flowchart_json_golden stun_flowchart_json_failures stun_flowchart_linkstyle --parallel 2
 
       - name: Execute production parser, JSON golden and headless SVG checks
         shell: bash
@@ -203,7 +204,7 @@ jobs:
           ldd build/flowchart-json-golden/stun_flowchart_json_golden | tee build/flowchart-json-golden/dependencies.txt
           ! grep -q 'not found' build/flowchart-json-golden/dependencies.txt
           ctest --test-dir build/flowchart-json-golden \
-            -R '^stun_flowchart_(ast_smoke|json_golden|linkstyle)$' \
+            -R '^stun_flowchart_(ast_smoke|json_golden|json_failures|linkstyle)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120
           python3 charts/mermaid/flowchart/tests/verify_linkstyle_svg.py \
             build/flowchart-json-golden/flowchart-linkstyle.svg
