@@ -1,7 +1,7 @@
 #include "tinytest.h"
 #define REQUIRE(cond) do { if (!(cond)) { check_true(cond); return; } } while (0)
 #include "classdiagram/classdiagram_ast.h"
-#include "turbo_parser.h"
+#include "json_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -47,19 +47,19 @@ static char* load_golden_file(const char* case_name, const char* suffix, const c
 
 static int json_equal(const char* a, const char* b) {
     json_value_t *ja = NULL, *jb = NULL;
-    if (turbo_parse_json((const uint8_t*)a, strlen(a), &ja) != 0) return 0;
-    if (turbo_parse_json((const uint8_t*)b, strlen(b), &jb) != 0) {
-        turbo_free_json(&ja);
+    if (!(ja = json_parse(a, strlen(a)))) return 0;
+    if (!(jb = json_parse(b, strlen(b)))) {
+        json_free(ja);
         return 0;
     }
 
-    char *sa = turbo_json_serialize(ja, NULL);
-    char *sb = turbo_json_serialize(jb, NULL);
+    char *sa = json_serialize(ja, NULL);
+    char *sb = json_serialize(jb, NULL);
     int eq = (sa && sb && strcmp(sa, sb) == 0);
-    turbo_json_serialize_free(sa);
-    turbo_json_serialize_free(sb);
-    turbo_free_json(&ja);
-    turbo_free_json(&jb);
+    json_serialize_free(sa);
+    json_serialize_free(sb);
+    json_free(ja);
+    json_free(jb);
     return eq;
 }
 
@@ -76,21 +76,21 @@ spec("classdiagram_parser") {
             REQUIRE(diagram != NULL);
 
             REQUIRE(diagram->classes != NULL);
-            check_str_eq(diagram->classes->name, "Animal");
+            check_true(diagram->classes->name != NULL && strcmp(diagram->classes->name, "Animal") == 0);
 
             ClassMember* m = diagram->classes->members;
             REQUIRE(m != NULL);
-            check_str_eq(m->name, "name");
-            check_str_eq(m->type, "String");
-            check_int_eq(m->visibility, CLASS_VISIBILITY_PUBLIC);
-            check_int_eq(m->is_method, 0);
+            check_true(m->name != NULL && strcmp(m->name, "name") == 0);
+            check_true(m->type != NULL && strcmp(m->type, "String") == 0);
+            check_true((m->visibility) == (CLASS_VISIBILITY_PUBLIC));
+            check_true((m->is_method) == (0));
 
             m = m->next;
             REQUIRE(m != NULL);
-            check_str_eq(m->name, "isAlive");
-            check_str_eq(m->return_type, "Boolean");
-            check_int_eq(m->visibility, CLASS_VISIBILITY_PUBLIC);
-            check_int_eq(m->is_method, 1);
+            check_true(m->name != NULL && strcmp(m->name, "isAlive") == 0);
+            check_true(m->return_type != NULL && strcmp(m->return_type, "Boolean") == 0);
+            check_true((m->visibility) == (CLASS_VISIBILITY_PUBLIC));
+            check_true((m->is_method) == (1));
 
             classdiagram_free(diagram);
         }
@@ -107,15 +107,15 @@ spec("classdiagram_parser") {
             ClassRelationship* r = diagram->relationships;
             REQUIRE(r != NULL);
 
-            check_str_eq(r->from, "Animal");
-            check_str_eq(r->to, "Duck");
+            check_true(r->from != NULL && strcmp(r->from, "Animal") == 0);
+            check_true(r->to != NULL && strcmp(r->to, "Duck") == 0);
 
             r = r->next;
             REQUIRE(r != NULL);
-            check_str_eq(r->from, "Duck");
-            check_str_eq(r->to, "Egg");
-            check_str_eq(r->from_cardinality, "1");
-            check_str_eq(r->to_cardinality, "*");
+            check_true(r->from != NULL && strcmp(r->from, "Duck") == 0);
+            check_true(r->to != NULL && strcmp(r->to, "Egg") == 0);
+            check_true(r->from_cardinality != NULL && strcmp(r->from_cardinality, "1") == 0);
+            check_true(r->to_cardinality != NULL && strcmp(r->to_cardinality, "*") == 0);
 
             classdiagram_free(diagram);
         }
@@ -168,7 +168,7 @@ spec("classdiagram_parser") {
                         check(1, "Parse successful");
                     }
 
-                    turbo_json_serialize_free(actual);
+                    json_serialize_free(actual);
                     classdiagram_free(diagram);
                     free(input);
                 }

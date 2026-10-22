@@ -2,18 +2,43 @@ name: gCanvas shader toolchain cache contract
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
-      - "vendor/gCanvas/**"
+      - "shared/gcanvas/**"
       - "tools/gcanvas-shaderc/**"
       - ".github/workflows/gcanvas-shader-tools-cache.yml"
+      - ".github/scripts/ci-affected.sh"
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Component change scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' 'tools/gcanvas-shaderc/*' '.github/workflows/gcanvas-shader-tools-cache.yml' '.github/scripts/ci-affected.sh'
+
   linux-cache-only:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     name: Linux shared shader-tool cache
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -50,16 +75,11 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$VCPKG_CACHE_REPOSITORY_ROOT"
-          manifest="$VCPKG_CACHE_REPOSITORY_ROOT/manifests/gcanvas-shader-tools"
+          manifest="$GITHUB_WORKSPACE/.ci/gcanvas-shader-tools"
           test -f "$manifest/vcpkg.json"
 
-          case "$VCPKG_CACHE_REPOSITORY_ROOT" in
-            "$GITHUB_WORKSPACE"*)
-              echo "shader-tool profile must come from qigao/vcpkg-cache, not a copied Stun manifest" >&2
-              exit 1
-              ;;
-          esac
-
+          # Product dependency policy belongs to Stun; vcpkg-cache owns only
+          # the shared toolchain, overlays and binary-cache transport.
           log="$RUNNER_TEMP/stun-gcanvas-shader-tools-cache.log"
           install_root="$RUNNER_TEMP/stun-gcanvas-shader-tools-installed"
           rm -rf "$install_root"

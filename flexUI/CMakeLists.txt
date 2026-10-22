@@ -103,6 +103,7 @@ set(FLEXUI_SOURCES
   src/computed_style.cpp
   src/style_engine.cpp
   src/style_property_registry.cpp
+  src/style_property_impact.cpp
   src/css_semantic_value.cpp
   src/css_typed_value.cpp
   src/clipboard.cpp
@@ -236,7 +237,7 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core md_parser nlohmann_json::nlohmann_json
+    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
@@ -248,7 +249,6 @@ target_include_directories(
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
          ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
-         ${CMAKE_SOURCE_DIR}/vendor/md/include
          $<INSTALL_INTERFACE:include>
          ${Stb_INCLUDE_DIR})
 

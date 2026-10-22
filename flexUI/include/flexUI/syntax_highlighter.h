@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 namespace flexUI {
@@ -62,13 +63,18 @@ public:
     void register_highlighter(const std::string& lang, std::unique_ptr<SyntaxHighlighter> highlighter);
     
     // Get highlighter for a language (returns nullptr if not found)
+    // Legacy borrowed pointer: do not race get() with replacing the same
+    // language in register_highlighter(). Concurrent consumers should acquire
+    // a lifetime-owning handle and retain it throughout highlight().
     SyntaxHighlighter* get(const std::string& lang);
-    
+    std::shared_ptr<SyntaxHighlighter> acquire(const std::string& lang);
+
     // Check if a language is supported
     bool supports(const std::string& lang) const;
 
 private:
-    std::unordered_map<std::string, std::unique_ptr<SyntaxHighlighter>> highlighters_;
+    mutable std::mutex mutex_;
+    std::unordered_map<std::string, std::shared_ptr<SyntaxHighlighter>> highlighters_;
 };
 
 // Map HighlightType to CSS class name

@@ -5,7 +5,7 @@
 #include "flexUI/plugin_abi.h"
 
 #include <toml.h>
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -24,10 +24,10 @@ namespace {
 
 constexpr std::int64_t kManifestVersion = 1;
 struct FileHandle {
-  salts_file_t value = SALTS_INVALID_FILE;
+  cmeta_file_t value = SALTS_INVALID_FILE;
   ~FileHandle() {
     if (value != SALTS_INVALID_FILE) {
-      (void)salts_fs_close(value);
+      (void)cmeta_fs_close(value);
     }
   }
 };
@@ -458,8 +458,8 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     }
 
     const std::string native_manifest_path = canonical_manifest.string();
-    salts_fs_stat_t file_stat{};
-    if (salts_fs_stat(native_manifest_path.c_str(), &file_stat) != 0 ||
+    cmeta_fs_stat_t file_stat{};
+    if (cmeta_fs_stat(native_manifest_path.c_str(), &file_stat) != 0 ||
         !file_stat.is_file) {
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,
@@ -472,7 +472,7 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     }
 
     FileHandle file;
-    file.value = salts_fs_open(native_manifest_path.c_str(),
+    file.value = cmeta_fs_open(native_manifest_path.c_str(),
                                SALTS_FS_O_RDONLY, 0);
     if (file.value == SALTS_INVALID_FILE) {
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
@@ -482,7 +482,7 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
     std::vector<std::uint8_t> buffer(limits.max_manifest_bytes + 1);
     std::size_t bytes_read = 0;
     while (bytes_read < buffer.size()) {
-      const int current = salts_fs_read(
+      const int current = cmeta_fs_read(
           file.value, reinterpret_cast<char *>(buffer.data() + bytes_read),
           buffer.size() - bytes_read);
       if (current < 0) {
@@ -500,7 +500,7 @@ parse_plugin_manifest(const std::filesystem::path &absolute_manifest_path,
                                  "manifest_read", canonical_manifest,
                                  "plugin manifest grew beyond the configured byte limit")};
     }
-    if (salts_fs_close(file.value) != 0) {
+    if (cmeta_fs_close(file.value) != 0) {
       file.value = SALTS_INVALID_FILE;
       return {{}, manifest_error(PluginHostErrorCode::ManifestReadFailed,
                                  "manifest_read", canonical_manifest,

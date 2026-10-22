@@ -1,0 +1,229 @@
+/* #186: isolated C11 RichDoc -> real Tango buffer acceptance.
+ * This is a test-only projection, never a second grammar or production
+ * MarkdownWidget/Tango parser switch. The candidate C11 parser owns
+ * immutable source and metadata until the consumer returns.
+ */
+#include <stun/markdown_c11.h>
+#include <stun/markdown_html.h>
+#include <tui.h>
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#define REQUIRE(expr) do { \
+    if (!(expr)) { \
+        fprintf(stderr, "Tango Markdown candidate: %s:%d: %s\n", \
+                __FILE__, __LINE__, #expr); \
+        failed=1; goto cleanup; \
+    } \
+} while (0)
+
+static bool ancestor_kind(const stun_ui_rich_document_view *v, size_t index,
+                          stun_ui_block_kind kind) {
+    while (index != 0u) {
+        if (index >= v->document.block_count) return false;
+        const stun_ui_block *b=&v->document.blocks[index];
+        if (b->kind==kind) return true;
+        if (b->parent_index>=index) return false;
+        index=b->parent_index;
+    }
+    return false;
+}
+
+static bool copy_text(const stun_ui_rich_document_view *v, size_t index,
+                      char *buffer, size_t capacity) {
+    const stun_ui_block *node=&v->document.blocks[index];
+    if (node->kind!=STUN_UI_BLOCK_TEXT ||
+        node->byte_end<node->byte_begin ||
+        node->byte_end>v->document.source_bytes) return false;
+    const size_t length=node->byte_end-node->byte_begin;
+    if (length==0u || length>=capacity) return false;
+    memcpy(buffer,v->document.source+node->byte_begin,length);
+    buffer[length]='\0';
+    return true;
+}
+
+static int run_case(const char *source, bool expected_checked,
+                    const char *expected_label, unsigned expected_quotes,
+                    bool expected_ordered) {
+    int failed=0;
+    stun_md_document *document=NULL;
+    tui_buffer_t *screen=NULL;
+    const size_t length=strlen(source);
+    /* A cancelled/inadmissible C11 parse must publish no new owner.
+     * This is an external consumer boundary, not a hidden fallback path. */
+    stun_md_document *denied=(stun_md_document *)(uintptr_t)1u;
+    REQUIRE(stun_md_parse(source,length,1u,length+1u,&denied)==
+            STUN_UI_CAPACITY_EXCEEDED);
+    REQUIRE(denied==NULL);
+    denied=(stun_md_document *)(uintptr_t)1u;
+    REQUIRE(stun_md_parse(source,length,512u,length-1u,&denied)==
+            STUN_UI_CAPACITY_EXCEEDED);
+    REQUIRE(denied==NULL);
+    REQUIRE(stun_md_parse(source,length,512u,length+1u,&document)==STUN_UI_OK);
+    REQUIRE(document!=NULL);
+    const stun_ui_rich_document_view v=stun_md_document_view(document);
+    REQUIRE(stun_ui_rich_document_validate(&v,512u)==STUN_UI_OK);
+    REQUIRE(v.raw_markdown_bytes==length);
+    REQUIRE(memcmp(v.raw_markdown,source,length)==0);
+
+    size_t task_count=0u,checkbox_count=0u,table_count=0u;
+    size_t quote_count=0u, ordered_count=0u;
+    size_t data_row=SIZE_MAX;
+    unsigned row_count=0u;
+    bool checked=false;
+    char label[40]={0};
+    for (size_t i=1u;i<v.document.block_count;++i) {
+        const stun_ui_block *b=&v.document.blocks[i];
+        if (b->kind==STUN_UI_BLOCK_QUOTE) ++quote_count;
+        if (b->kind==STUN_UI_BLOCK_ORDERED_LIST) ++ordered_count;
+        if (b->kind==STUN_UI_BLOCK_TASK_ITEM) ++task_count;
+        if (b->kind==STUN_UI_BLOCK_CHECKBOX) {
+            ++checkbox_count;
+            REQUIRE(b->parent_index<i);
+            REQUIRE(v.document.blocks[b->parent_index].kind==STUN_UI_BLOCK_TASK_ITEM);
+            const char *metadata=NULL;size_t size=0u;
+            REQUIRE(stun_ui_rich_document_metadata(&v,i,&metadata,&size)==STUN_UI_OK);
+            REQUIRE(metadata!=NULL && size==1u);
+            REQUIRE(metadata[0]=='x' || metadata[0]==' ');
+            checked=metadata[0]=='x';
+        }
+        if (b->kind==STUN_UI_BLOCK_TABLE) {
+            ++table_count;
+            REQUIRE(ancestor_kind(&v,i,STUN_UI_BLOCK_TASK_ITEM));
+            const char *metadata=NULL;size_t size=0u;
+            REQUIRE(stun_ui_rich_document_metadata(&v,i,&metadata,&size)==STUN_UI_OK);
+            REQUIRE(metadata!=NULL && size==2u);
+            REQUIRE((unsigned char)metadata[0]==STUN_UI_TABLE_ALIGN_LEFT);
+            REQUIRE((unsigned char)metadata[1]==STUN_UI_TABLE_ALIGN_RIGHT);
+        }
+        if (b->kind==STUN_UI_BLOCK_TABLE_ROW) {
+            REQUIRE(ancestor_kind(&v,i,STUN_UI_BLOCK_TABLE));
+            if (++row_count==2u) data_row=i;
+        }
+        if (b->kind==STUN_UI_BLOCK_TEXT &&
+            ancestor_kind(&v,i,STUN_UI_BLOCK_TASK_ITEM) &&
+            !ancestor_kind(&v,i,STUN_UI_BLOCK_TABLE)) {
+            REQUIRE(label[0]=='\0');
+            REQUIRE(copy_text(&v,i,label,sizeof(label)));
+        }
+    }
+    REQUIRE(task_count==1u && checkbox_count==1u && table_count==1u);
+    REQUIRE(quote_count==expected_quotes);
+    REQUIRE(ordered_count==(expected_ordered?1u:0u));
+    REQUIRE(row_count==2u && data_row!=SIZE_MAX);
+    REQUIRE(checked==expected_checked);
+    REQUIRE(strcmp(label,expected_label)==0);
+
+    /* HTML measurement succeeds but any undersized consumer output buffer
+     * must remain untouched. The real Tango path below uses the same typed
+     * view, never HTML as a substitute Markdown grammar. */
+    size_t html_bytes=SIZE_MAX, capacity_result=SIZE_MAX;
+    REQUIRE(stun_md_render_html(&v,512u,NULL,0u,&html_bytes)==STUN_UI_OK);
+    REQUIRE(html_bytes>0u && html_bytes<2048u);
+    unsigned char html[2048];
+    memset(html,0xd5,sizeof(html));
+    REQUIRE(stun_md_render_html(&v,512u,(char*)html,html_bytes,
+                                &capacity_result)==STUN_UI_CAPACITY_EXCEEDED);
+    REQUIRE(capacity_result==html_bytes);
+    for(size_t k=0;k<sizeof(html);++k) REQUIRE(html[k]==0xd5u);
+    REQUIRE(stun_md_render_html(&v,512u,(char*)html,sizeof(html),
+                                &capacity_result)==STUN_UI_OK);
+    REQUIRE(capacity_result==html_bytes);
+    REQUIRE(html[html_bytes]=='\0');
+
+    /* Inspect typed data cells instead of reparsing the Markdown. */
+    char cells[2][40]={{0}};
+    unsigned column=0u;
+    for (size_t i=data_row+1u;i<v.document.block_count;++i) {
+        const stun_ui_block *b=&v.document.blocks[i];
+        if (b->kind==STUN_UI_BLOCK_TABLE_CELL &&
+            b->parent_index==data_row) {
+            REQUIRE(column<2u);
+            unsigned cell_text_count=0u;
+            for (size_t j=i+1u;j<v.document.block_count;++j) {
+                const stun_ui_block *child=&v.document.blocks[j];
+                if (child->parent_index==i &&
+                    child->kind==STUN_UI_BLOCK_TEXT) {
+                    REQUIRE(cell_text_count++==0u);
+                    REQUIRE(copy_text(&v,j,cells[column],sizeof(cells[column])));
+                }
+            }
+            REQUIRE(cell_text_count==1u);
+            ++column;
+        }
+    }
+    REQUIRE(column==2u);
+    REQUIRE(strcmp(cells[0],"left")==0 && strcmp(cells[1],"right")==0);
+
+    /* Real Tango consumes the immutable C11 typed projection synchronously. */
+    screen=tui_buffer_create(32,3);
+    REQUIRE(screen!=NULL);
+    const tui_theme_t theme=tui_theme_default();
+    tui_widget_checkbox(screen,0,0,checked,label,&theme);
+    char rendered_row[90]={0};
+    const int written=snprintf(rendered_row,sizeof(rendered_row),
+                               "%s | %s",cells[0],cells[1]);
+    REQUIRE(written>0 && (size_t)written<sizeof(rendered_row));
+    tui_buffer_text(screen,0,1,rendered_row,theme.fg,theme.bg);
+    const tui_cell_t *glyph=tui_buffer_at_const(screen,0,0);
+    REQUIRE(glyph!=NULL && glyph->ch==(checked?0x2611u:0x2610u));
+    for (size_t i=0u;i<(size_t)written;++i) {
+        const tui_cell_t *cell=tui_buffer_at_const(screen,(int)i,1);
+        REQUIRE(cell!=NULL && cell->ch==(unsigned char)rendered_row[i]);
+    }
+    REQUIRE(v.raw_markdown_bytes==length);
+    REQUIRE(memcmp(v.raw_markdown,source,length)==0);
+
+    /* After transfer into real Tango cells the C11 owner may be released;
+     * no borrowed RichDoc pointer escapes this synchronous projection. */
+    stun_md_document_destroy(document);
+    document=NULL;
+    REQUIRE(tui_buffer_at_const(screen,0,0)!=NULL);
+    REQUIRE(tui_buffer_at_const(screen,0,0)->ch==
+            (expected_checked?0x2611u:0x2610u));
+    for(size_t i=0u;i<(size_t)written;++i) {
+        const tui_cell_t *cell=tui_buffer_at_const(screen,(int)i,1);
+        REQUIRE(cell!=NULL && cell->ch==(unsigned char)rendered_row[i]);
+    }
+
+cleanup:
+    if (screen) tui_buffer_destroy(screen);
+    stun_md_document_destroy(document);
+    return failed;
+}
+
+int main(void) {
+    static const char checked[] =
+        "- [x] shipped\n\n"
+        "  | A | B |\n  | :--- | ---: |\n  | left | right |\n";
+    static const char unchecked[] =
+        "- [ ] pending\n\n"
+        "  | A | B |\n  | :--- | ---: |\n  | left | right |\n";
+    /* Quoted TASK markers are recognized in the first LIST_ITEM paragraph,
+     * even though cmark-gfm differs from the GFM §5.3 normative oracle
+     * for some loose quoted lists. The C11 typed checkbox is the authority
+     * for the test-only Tango consumer (never a second Markdown parse). */
+    static const char quoted_checked[] =
+        "> - [x] shipped\n>\n"
+        ">   | A | B |\n>   | :--- | ---: |\n>   | left | right |\n";
+    static const char quoted_ordered_unchecked[] =
+        "> 4. [ ] pending\n>\n"
+        ">    | A | B |\n>    | :--- | ---: |\n"
+        ">    | left | right |\n";
+    /* Exercise explicit owner teardown/recreation under Sanitizers. Each
+     * iteration verifies budget rejection, output rollback, independent C11
+     * owner drain, and persistence of synchronous Tango cell copies. */
+    enum { REPEATS=16u, SOURCES=4u };
+    for(unsigned round=0u;round<REPEATS;++round) {
+        if (run_case(checked,true,"shipped",0u,false) ||
+            run_case(unchecked,false,"pending",0u,false) ||
+            run_case(quoted_checked,true,"shipped",1u,false) ||
+            run_case(quoted_ordered_unchecked,false,"pending",1u,true))
+            return 1;
+    }
+    puts("Tango C11 candidate consumer: 64/64 lifecycle cases passed (4 sources x 16 repeats)");
+    return 0;
+}

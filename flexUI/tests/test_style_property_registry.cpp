@@ -7,6 +7,8 @@
 using namespace flexUI;
 using namespace flexUI::detail;
 
+const cmeta_type_desc* flex_test_peer_color_type() noexcept;
+
 suite("FlexUI CMeta style property registry") {
     it("resolves canonical names and migration aliases") {
         const auto* opacity = style_property_find("opacity");
@@ -43,11 +45,11 @@ suite("FlexUI CMeta style property registry") {
         const auto* opacity = style_property_find("opacity");
 
         check_not_null(tx);
-        check_str_eq(tx->transition_group, "transform");
+        check_equal(tx->transition_group, "transform");
         check_true((tx->impact & STYLE_IMPACT_HIT_TEST) != 0u);
 
         check_not_null(shadow);
-        check_str_eq(shadow->transition_group, "box-shadow");
+        check_equal(shadow->transition_group, "box-shadow");
 
         check_true((font_size->impact & STYLE_IMPACT_TEXT_LAYOUT) != 0u);
         check_true((font_size->impact & STYLE_IMPACT_LAYOUT) != 0u);
@@ -68,22 +70,22 @@ suite("FlexUI CMeta style property registry") {
         float read_opacity = 0.0f;
         check_true(style_property_read(
             *opacity, style, &cmeta_type_float, &read_opacity));
-        check_float_eq(read_opacity, 0.25f, 0.0001f);
+        check_within(read_opacity, 0.25f, 0.0001f);
 
         const float new_opacity = 0.75f;
         check_true(style_property_write(
             *opacity, style, &cmeta_type_float, &new_opacity));
-        check_float_eq(style.opacity, 0.75f, 0.0001f);
+        check_within(style.opacity, 0.75f, 0.0001f);
 
         Color read_color{};
         check_true(style_property_read(
             *background, style, &flex::cmeta_type_color, &read_color));
-        check_float_eq(read_color.g, 0.2f, 0.0001f);
+        check_within(read_color.g, 0.2f, 0.0001f);
 
         const Color new_color{0.8f, 0.7f, 0.6f, 1.0f};
         check_true(style_property_write(
             *background, style, &flex::cmeta_type_color, &new_color));
-        check_float_eq(style.background_color.r, 0.8f, 0.0001f);
+        check_within(style.background_color.r, 0.8f, 0.0001f);
 
         check_false(style_property_write(
             *background, style, &cmeta_type_float, &new_opacity));
@@ -101,6 +103,52 @@ suite("FlexUI CMeta style property registry") {
 
         check_false(style_property_write(
             *visibility, style, &cmeta_type_int, &hidden));
+    }
+
+    it("validates property access with a type from another translation unit") {
+        const auto* background = style_property_find("background-color");
+        const auto* peer_color = flex_test_peer_color_type();
+        check_not_null(background);
+        check_not_equal(peer_color, background->type);
+
+        ComputedStyle style;
+        const Color supplied{0.8f, 0.7f, 0.6f, 1.0f};
+        check_true(style_property_write(*background, style, peer_color, &supplied));
+        Color read{};
+        check_true(style_property_read(*background, style, peer_color, &read));
+        check_within(read.r, supplied.r, 0.0001f);
+        check_within(read.g, supplied.g, 0.0001f);
+        check_within(read.b, supplied.b, 0.0001f);
+
+        auto wrong_shape = *peer_color;
+        wrong_shape.size += sizeof(float);
+        const Color rejected{};
+        check_false(style_property_write(*background, style, &wrong_shape, &rejected));
+        check_within(style.background_color.r, supplied.r, 0.0001f);
+        check_false(style_property_read(*background, style, &wrong_shape, &read));
+        check_within(read.r, supplied.r, 0.0001f);
+    }
+
+    it("rejects matching identities with incompatible alignment or kind") {
+        const auto* background = style_property_find("background-color");
+        check_not_null(background);
+        ComputedStyle style;
+        style.background_color = Color{0.8f, 0.7f, 0.6f, 1.0f};
+        const Color rejected{};
+        Color read = style.background_color;
+
+        auto wrong_alignment = *flex_test_peer_color_type();
+        wrong_alignment.align += alignof(Color);
+        auto wrong_kind = *flex_test_peer_color_type();
+        wrong_kind.kind = CMETA_T_FLOAT;
+        for (const auto* type : {&wrong_alignment, &wrong_kind}) {
+            check_true(cmeta_type_equal(type, background->type));
+            check_false(style_property_accepts_type(*background, type));
+            check_false(style_property_write(*background, style, type, &rejected));
+            check_false(style_property_read(*background, style, type, &read));
+            check_within(style.background_color.r, 0.8f, 0.0001f);
+            check_within(read.r, 0.8f, 0.0001f);
+        }
     }
 
     it("maps style impact metadata onto element dirty stages") {

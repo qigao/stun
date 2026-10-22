@@ -1,0 +1,9 @@
+{
+  "name": "stun-flowchart-semantic-oracle",
+  "private": true,
+  "scripts": {"test": "node verify.mjs"},
+  "dependencies": {
+    "jsdom": "26.1.0",
+    "mermaid": "11.12.0"
+  }
+}

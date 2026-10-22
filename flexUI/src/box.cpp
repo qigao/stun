@@ -1635,6 +1635,98 @@ void Box::set_variable(const std::string& name, const std::string& value) {
   }
 }
 
+void Box::adopt_detached_elements(std::vector<std::unique_ptr<Element>>&& staged) {
+  // Every staged element must be an id-less application element whose parent,
+  // if any, belongs to this batch. All validation/allocation occurs before
+  // moving a single owning pointer into the Box.
+  std::unordered_set<Element*> batch;
+  batch.reserve(staged.size());
+  for (const auto& element : staged) {
+    if (!element || element->owner_box_ || element->is_widget_owned() ||
+        element->widget || !element->id().empty() ||
+        !batch.insert(element.get()).second) {
+      throw std::invalid_argument("invalid detached Element admission");
+    }
+  }
+  for (const auto& element : staged) {
+    Element* parent = element->parent_elem();
+    if (parent && !batch.count(parent)) {
+      throw std::invalid_argument("detached Element has foreign parent");
+    }
+  }
+  if (staged.size() > elements_.max_size() - elements_.size()) {
+    throw std::length_error("detached Element batch exceeds Box capacity");
+  }
+  elements_.reserve(elements_.size() + staged.size());
+  for (auto& element : staged) {
+    element->owner_box_ = this;
+    elements_.push_back(std::move(element));
+  }
+}
+
+bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noexcept {
+  if (candidates.empty()) return true;
+  try {
+    // Check Box ownership before dereferencing any candidate: repeated or
+    // foreign/stale pointers must never trigger a partial reclamation.
+    std::unordered_set<Element*> batch;
+    batch.reserve(candidates.size());
+    for (Element* element : candidates) {
+      if (!element || !batch.insert(element).second) return false;
+    }
+    std::size_t found = 0;
+    for (const auto& owned : elements_) {
+      if (batch.count(owned.get())) ++found;
+    }
+    if (found != batch.size()) return false;
+
+    std::vector<Element*> roots;
+    roots.reserve(batch.size());
+    for (Element* element : candidates) {
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || !element->id().empty()) return false;
+      Element* parent = element->parent_elem();
+      if (!parent) roots.push_back(element);
+      else if (!batch.count(parent)) return false;
+      for (auto* child : element->children()) {
+        auto* contained = dynamic_cast<Element*>(child);
+        if (!contained || !batch.count(contained)) return false;
+      }
+    }
+    if (roots.empty()) return false;
+
+    // Focus-out callbacks may run application code. Deactivate while every
+    // Element remains owned, then verify the subtree again before deletion.
+    for (Element* root : roots) deactivate_subtree(root);
+    for (Element* element : candidates) {
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || !element->id().empty()) return false;
+      Element* parent = element->parent_elem();
+      if (parent && !batch.count(parent)) return false;
+      for (auto* child : element->children()) {
+        auto* contained = dynamic_cast<Element*>(child);
+        if (!contained || !batch.count(contained)) return false;
+      }
+    }
+    for (Element* element : candidates) {
+      styled_elements_.erase(reinterpret_cast<std::uintptr_t>(element));
+      container_widths_.erase(element);
+      style_engine_.forget_element(element);
+    }
+    elements_.erase(
+        std::remove_if(elements_.begin(), elements_.end(),
+                       [&batch](const std::unique_ptr<Element>& element) {
+                         return batch.count(element.get()) != 0;
+                       }),
+        elements_.end());
+    notify_utility_tree_changed();
+    return true;
+  } catch (...) {
+    // On allocation / event-detachment failure, retain ownership in Box.
+    return false;
+  }
+}
+
 Element* Box::create(const std::string& tag, const std::string& id) {
   auto elem = std::make_unique<Element>();
   elem->set_tag(tag);

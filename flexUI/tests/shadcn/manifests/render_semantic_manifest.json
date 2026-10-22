@@ -317,7 +317,7 @@
       ],
       "expect": {
         "render": {
-          "min_rect_count": 1,
+          "min_rect_count": 2,
           "texts": [
             {
               "text": "Email me",
@@ -337,6 +337,11 @@
                 0.921569,
                 1.0
               ],
+              "stroke_width": 0.0,
+              "min_w": 20.0,
+              "min_h": 20.0
+            },
+            {
               "stroke_color": [
                 0.113725,
                 0.305882,
@@ -1923,6 +1928,61 @@
       }
     },
     {
+      "name": "input-unfocused-placeholder-render",
+      "component": "input",
+      "widget": "input",
+      "tag": "input",
+      "id": "field",
+      "widget_props": {
+        "placeholder": "Search"
+      },
+      "css": "#field { width: 180px; height: 36px; --input-bg: #ffffff; --input-border: #cbd5e1; --input-placeholder: #94a3b8; }",
+      "required_features": [
+        "input",
+        "placeholder",
+        "render"
+      ],
+      "expect": {
+        "render": {
+          "min_rect_count": 2,
+          "max_rect_count": 2,
+          "max_text_count": 1,
+          "texts": [
+            {
+              "text": "Search",
+              "color": [
+                0.580392,
+                0.639216,
+                0.721569,
+                1.0
+              ]
+            }
+          ],
+          "rects": [
+            {
+              "fill_color": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "min_w": 180.0,
+              "min_h": 36.0
+            },
+            {
+              "stroke_color": [
+                0.796078,
+                0.835294,
+                0.882353,
+                1.0
+              ],
+              "stroke_width": 1.0
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "input-placeholder-caret-render",
       "component": "input",
       "widget": "input",
@@ -1944,17 +2004,7 @@
       "expect": {
         "render": {
           "min_rect_count": 3,
-          "texts": [
-            {
-              "text": "Search",
-              "color": [
-                0.580392,
-                0.639216,
-                0.721569,
-                1.0
-              ]
-            }
-          ],
+          "max_text_count": 0,
           "rects": [
             {
               "fill_color": [
@@ -2212,8 +2262,19 @@
       ],
       "expect": {
         "render": {
-          "min_circle_count": 8,
+          "min_circle_count": 7,
+          "max_circle_count": 7,
           "circles": [
+            {
+              "fill_color": [
+                0.145098,
+                0.388235,
+                0.921569,
+                0.125
+              ],
+              "min_radius": 1.4,
+              "max_radius": 1.5
+            },
             {
               "fill_color": [
                 0.145098,
@@ -2821,7 +2882,7 @@
       ],
       "expect": {
         "render": {
-          "min_rect_count": 2,
+          "min_rect_count": 4,
           "rects": [
             {
               "fill_color": [
@@ -2842,9 +2903,7 @@
               ],
               "min_w": 80.0,
               "min_h": 4.0
-            }
-          ],
-          "circles": [
+            },
             {
               "fill_color": [
                 1.0,
@@ -2852,6 +2911,15 @@
                 1.0,
                 1.0
               ],
+              "w": 20.0,
+              "h": 20.0,
+              "radius": 10.0,
+              "min_x": 74.0,
+              "max_x": 74.0,
+              "min_y": 2.0,
+              "max_y": 2.0
+            },
+            {
               "stroke_color": [
                 0.580392,
                 0.639216,
@@ -2859,8 +2927,13 @@
                 1.0
               ],
               "stroke_width": 2.0,
-              "min_radius": 10.0,
-              "max_radius": 10.0
+              "w": 20.0,
+              "h": 20.0,
+              "radius": 10.0,
+              "min_x": 74.0,
+              "max_x": 74.0,
+              "min_y": 2.0,
+              "max_y": 2.0
             }
           ]
         }

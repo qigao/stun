@@ -1,7 +1,7 @@
 #include <flexUI/application_turboscript.h>
 #include <flexUI/gcanvas_plugin_window_host.h>
 
-#include <salts_fs.h>
+#include <cmeta_fs.h>
 
 #include <chrono>
 #include <cstddef>
@@ -43,8 +43,8 @@ int fail(std::string_view stage, std::string_view message) {
 
 bool read_bounded_file(const std::filesystem::path &path, std::string &output, std::string &error) {
   const auto native_path = path.generic_string();
-  salts_fs_stat_t metadata{};
-  if (salts_fs_stat(native_path.c_str(), &metadata) != 0 || !metadata.is_file) {
+  cmeta_fs_stat_t metadata{};
+  if (cmeta_fs_stat(native_path.c_str(), &metadata) != 0 || !metadata.is_file) {
     error = "asset is not a readable regular file: " + native_path;
     return false;
   }
@@ -53,13 +53,13 @@ bool read_bounded_file(const std::filesystem::path &path, std::string &output, s
     return false;
   }
 
-  salts_fs_buf_t bytes{};
-  if (salts_fs_read_file(native_path.c_str(), &bytes) != 0) {
+  cmeta_fs_buf_t bytes{};
+  if (cmeta_fs_read_file(native_path.c_str(), &bytes) != 0) {
     error = "could not read asset: " + native_path;
     return false;
   }
   if (bytes.len > kMaximumAssetBytes || (bytes.len != 0U && bytes.base == nullptr)) {
-    salts_fs_buf_free(&bytes);
+    cmeta_fs_buf_free(&bytes);
     error = "asset changed or became invalid while being read: " + native_path;
     return false;
   }
@@ -70,11 +70,11 @@ bool read_bounded_file(const std::filesystem::path &path, std::string &output, s
       output.assign(bytes.base, bytes.len);
     }
   } catch (const std::bad_alloc &) {
-    salts_fs_buf_free(&bytes);
+    cmeta_fs_buf_free(&bytes);
     error = "could not allocate storage for asset: " + native_path;
     return false;
   }
-  salts_fs_buf_free(&bytes);
+  cmeta_fs_buf_free(&bytes);
   return true;
 }
 

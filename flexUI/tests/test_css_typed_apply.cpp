@@ -19,10 +19,10 @@ Element* make_target(Box& box, const char* class_name = nullptr) {
 
 void check_color(const Color& actual, const Color& expected,
                  float epsilon = 0.001f) {
-    check_float_eq(actual.r, expected.r, epsilon);
-    check_float_eq(actual.g, expected.g, epsilon);
-    check_float_eq(actual.b, expected.b, epsilon);
-    check_float_eq(actual.a, expected.a, epsilon);
+    check_within(actual.r, expected.r, epsilon);
+    check_within(actual.g, expected.g, epsilon);
+    check_within(actual.b, expected.b, epsilon);
+    check_within(actual.a, expected.a, epsilon);
 }
 
 } // namespace
@@ -35,7 +35,7 @@ suite("FlexUI typed CSS opacity apply") {
         box.load_css("#target { opacity: 0.625; }");
         box.update();
 
-        check_float_eq(target->computed_style->opacity, 0.625f, 0.0001f);
+        check_within(target->computed_style->opacity, 0.625f, 0.0001f);
     }
 
     it("preserves source order for typed opacity declarations") {
@@ -48,7 +48,7 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->opacity, 0.75f, 0.0001f);
+        check_within(target->computed_style->opacity, 0.75f, 0.0001f);
     }
 
     it("preserves important and specificity ordering") {
@@ -62,7 +62,7 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->opacity, 0.8f, 0.0001f);
+        check_within(target->computed_style->opacity, 0.8f, 0.0001f);
     }
 
     it("falls back for variable-backed opacity") {
@@ -77,7 +77,7 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->opacity, 0.375f, 0.0001f);
+        check_within(target->computed_style->opacity, 0.375f, 0.0001f);
     }
 
     it("keeps deferred calc opacity on the fallback path") {
@@ -198,13 +198,13 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->outline_width,
+        check_within(target->computed_style->outline_width,
                        1.0f, 0.0001f);
-        check_float_eq(target->computed_style->outline_offset,
+        check_within(target->computed_style->outline_offset,
                        2.0f, 0.0001f);
-        check_float_eq(target->computed_style->ring_width,
+        check_within(target->computed_style->ring_width,
                        3.5f, 0.0001f);
-        check_float_eq(target->computed_style->ring_offset,
+        check_within(target->computed_style->ring_offset,
                        -1.0f, 0.0001f);
     }
 
@@ -223,9 +223,9 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->ring_offset,
+        check_within(target->computed_style->ring_offset,
                        5.0f, 0.0001f);
-        check_float_eq(target->computed_style->outline_offset,
+        check_within(target->computed_style->outline_offset,
                        3.0f, 0.0001f);
     }
 
@@ -242,9 +242,9 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->outline_offset,
+        check_within(target->computed_style->outline_offset,
                        4.0f, 0.0001f);
-        check_float_eq(target->computed_style->ring_width,
+        check_within(target->computed_style->ring_width,
                        32.0f, 0.001f);
     }
 
@@ -255,7 +255,7 @@ suite("FlexUI typed CSS opacity apply") {
         box.load_css("#target { outline: 2px solid #112233; }");
         box.update();
 
-        check_float_eq(target->computed_style->outline_width,
+        check_within(target->computed_style->outline_width,
                        2.0f, 0.0001f);
         check_color(target->computed_style->outline_color,
                     Color{0x11 / 255.0f, 0x22 / 255.0f,
@@ -275,17 +275,17 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->transform_x,
+        check_within(target->computed_style->transform_x,
                        12.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_y,
+        check_within(target->computed_style->transform_y,
                        -4.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale,
+        check_within(target->computed_style->transform_scale,
                        1.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale_x,
+        check_within(target->computed_style->transform_scale_x,
                        2.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale_y,
+        check_within(target->computed_style->transform_scale_y,
                        3.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_rotate,
+        check_within(target->computed_style->transform_rotate,
                        90.0f, 0.0001f);
     }
 
@@ -304,15 +304,15 @@ suite("FlexUI typed CSS opacity apply") {
         )");
         box.update();
 
-        check_float_eq(target->computed_style->transform_x,
+        check_within(target->computed_style->transform_x,
                        5.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_y,
+        check_within(target->computed_style->transform_y,
                        6.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale,
+        check_within(target->computed_style->transform_scale,
                        2.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale_x,
+        check_within(target->computed_style->transform_scale_x,
                        2.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale_y,
+        check_within(target->computed_style->transform_scale_y,
                        2.0f, 0.0001f);
     }
 
@@ -323,11 +323,11 @@ suite("FlexUI typed CSS opacity apply") {
         box.load_css("#target { scale: 1.00001 1.00002; }");
         box.update();
 
-        check_float_eq(target->computed_style->transform_scale,
+        check_within(target->computed_style->transform_scale,
                        1.00001f, 0.000001f);
-        check_float_eq(target->computed_style->transform_scale_x,
+        check_within(target->computed_style->transform_scale_x,
                        1.00001f, 0.000001f);
-        check_float_eq(target->computed_style->transform_scale_y,
+        check_within(target->computed_style->transform_scale_y,
                        1.00002f, 0.000001f);
     }
 
@@ -339,13 +339,13 @@ suite("FlexUI typed CSS opacity apply") {
             "#target { transform: translate(9px, 10px) scale(2) rotate(90deg); }");
         box.update();
 
-        check_float_eq(target->computed_style->transform_x,
+        check_within(target->computed_style->transform_x,
                        9.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_y,
+        check_within(target->computed_style->transform_y,
                        10.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_scale,
+        check_within(target->computed_style->transform_scale,
                        2.0f, 0.0001f);
-        check_float_eq(target->computed_style->transform_rotate,
+        check_within(target->computed_style->transform_rotate,
                        90.0f, 0.0001f);
     }
 
