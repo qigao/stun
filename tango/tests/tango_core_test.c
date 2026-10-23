@@ -285,6 +285,126 @@ static int test_buffer_and_layout(void) {
     return 0;
 }
 
+#define UTF8_GRIN       "\xF0\x9F\x98\x80"
+#define UTF8_WOMAN_TECH "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB"
+#define UTF8_FLAG_JP    "\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5"
+#define UTF8_THUMBS_MED "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD"
+#define UTF8_HEART      "\xE2\x9D\xA4\xEF\xB8\x8F"
+#define UTF8_KEYCAP_ONE "1\xEF\xB8\x8F\xE2\x83\xA3"
+#define UTF8_CJK        "\xE4\xB8\xAD"
+#define UTF8_E_ACUTE    "e\xCC\x81"
+
+static char rendered[4096];
+static size_t rendered_len;
+
+static bool capture_write(tui_terminal_t *terminal, const char *data,
+                          size_t size) {
+    (void)terminal;
+    if (size > sizeof(rendered) - 1u - rendered_len) return false;
+    memcpy(rendered + rendered_len, data, size);
+    rendered_len += size;
+    rendered[rendered_len] = 0;
+    return true;
+}
+
+static int test_grapheme_cells(void) {
+    static const char text[] =
+        "A" UTF8_GRIN UTF8_WOMAN_TECH UTF8_FLAG_JP UTF8_THUMBS_MED
+        UTF8_HEART UTF8_KEYCAP_ONE UTF8_CJK UTF8_E_ACUTE "Z";
+    static const int leads[] = {0, 1, 3, 5, 7, 9, 11, 13, 15, 16};
+    static const int continuations[] = {2, 4, 6, 8, 10, 12, 14};
+    tui_buffer_t *buffer = tui_buffer_create(20, 2);
+    CHECK(buffer != NULL);
+
+    CHECK(tui_grapheme_width(UTF8_GRIN, sizeof(UTF8_GRIN) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_WOMAN_TECH,
+                             sizeof(UTF8_WOMAN_TECH) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_FLAG_JP, sizeof(UTF8_FLAG_JP) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_THUMBS_MED,
+                             sizeof(UTF8_THUMBS_MED) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_HEART, sizeof(UTF8_HEART) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_KEYCAP_ONE,
+                             sizeof(UTF8_KEYCAP_ONE) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_CJK, sizeof(UTF8_CJK) - 1u) == 2);
+    CHECK(tui_grapheme_width(UTF8_E_ACUTE,
+                             sizeof(UTF8_E_ACUTE) - 1u) == 1);
+    CHECK(tui_buffer_text(buffer, 0, 0, text, TUI_WHITE, TUI_BLACK));
+
+    for (size_t i = 0; i < sizeof(leads) / sizeof(leads[0]); ++i) {
+        CHECK(tui_buffer_at_const(buffer, leads[i], 0)->span !=
+              TUI_CELL_SPAN_CONTINUATION);
+    }
+    for (size_t i = 0;
+         i < sizeof(continuations) / sizeof(continuations[0]); ++i) {
+        CHECK(tui_buffer_at_const(buffer, continuations[i], 0)->span ==
+              TUI_CELL_SPAN_CONTINUATION);
+    }
+    CHECK(tui_buffer_at_const(buffer, 3, 0)->grapheme_len ==
+          sizeof(UTF8_WOMAN_TECH) - 1u);
+    CHECK(memcmp(tui_buffer_at_const(buffer, 3, 0)->grapheme,
+                 UTF8_WOMAN_TECH, sizeof(UTF8_WOMAN_TECH) - 1u) == 0);
+    CHECK(tui_buffer_at_const(buffer, 15, 0)->ch == 'e');
+
+    /* Replacing either half clears the complete old wide-cell span. */
+    tui_buffer_set(buffer, 2, 0, tui_cell('x', TUI_WHITE, TUI_BLACK));
+    CHECK(tui_buffer_at_const(buffer, 1, 0)->ch == ' ');
+    CHECK(tui_buffer_at_const(buffer, 1, 0)->span == TUI_CELL_SPAN_SINGLE);
+    CHECK(tui_buffer_at_const(buffer, 2, 0)->ch == 'x');
+    tui_buffer_set(buffer, 3, 0, tui_cell('y', TUI_WHITE, TUI_BLACK));
+    CHECK(tui_buffer_at_const(buffer, 3, 0)->ch == 'y');
+    CHECK(tui_buffer_at_const(buffer, 4, 0)->ch == ' ');
+
+    /* Invalid, oversized, and clipped-wide writes publish no partial cell. */
+    const tui_cell_t prior = *tui_buffer_at_const(buffer, 19, 0);
+    CHECK(!tui_buffer_set_grapheme(buffer, 19, 0, UTF8_CJK,
+                                   sizeof(UTF8_CJK) - 1u,
+                                   TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    CHECK(tui_cell_eq(&prior, tui_buffer_at_const(buffer, 19, 0)));
+    CHECK(!tui_buffer_text(buffer, 19, 0, "\xF0\x28\x8C\x28",
+                           TUI_WHITE, TUI_BLACK));
+    CHECK(tui_cell_eq(&prior, tui_buffer_at_const(buffer, 19, 0)));
+    char oversized[TUI_CELL_GRAPHEME_CAPACITY + 2u];
+    oversized[0] = 'e';
+    for (size_t i = 1u; i < sizeof(oversized) - 1u; i += 2u) {
+        oversized[i] = (char)0xCC;
+        oversized[i + 1u] = (char)0x81;
+    }
+    oversized[sizeof(oversized) - 1u] = 0;
+    CHECK(!tui_buffer_text(buffer, 19, 0, oversized,
+                           TUI_WHITE, TUI_BLACK));
+    CHECK(tui_cell_eq(&prior, tui_buffer_at_const(buffer, 19, 0)));
+
+    tui_buffer_clear(buffer);
+    tui_text_wrap(buffer, 0, 0, 2, 2, UTF8_CJK "a",
+                  TUI_WHITE, TUI_BLACK);
+    CHECK(tui_buffer_at_const(buffer, 0, 0)->span == TUI_CELL_SPAN_WIDE);
+    CHECK(tui_buffer_at_const(buffer, 1, 0)->span ==
+          TUI_CELL_SPAN_CONTINUATION);
+    CHECK(tui_buffer_at_const(buffer, 0, 1)->ch == 'a');
+    CHECK(tui_text_wrap_height(UTF8_CJK "a", 2) == 2);
+    tui_buffer_destroy(buffer);
+
+    /* The renderer emits owned cluster bytes once; continuation emits none. */
+    tui_terminal_t *terminal = tui_terminal_create();
+    CHECK(terminal != NULL);
+    terminal->width = 4;
+    terminal->height = 1;
+    terminal->front = tui_buffer_create(4, 1);
+    terminal->back = tui_buffer_create(4, 1);
+    CHECK(terminal->front != NULL && terminal->back != NULL);
+    terminal->initialized = true;
+    terminal->color_mode = TUI_COLOR_TRUECOLOR;
+    terminal->write_output = capture_write;
+    rendered_len = 0u;
+    CHECK(tui_buffer_text(terminal->back, 0, 0,
+                          UTF8_WOMAN_TECH "X", TUI_WHITE, TUI_BLACK));
+    CHECK(tui_terminal_render(terminal));
+    CHECK(strstr(rendered, UTF8_WOMAN_TECH "X") != NULL);
+    terminal->initialized = false;
+    tui_terminal_destroy(terminal);
+    return 0;
+}
+
 static int test_layout_rejects_invalid_graphs(void) {
     int x = 7, y = 7, w = 7, h = 7;
 
@@ -421,6 +541,7 @@ int main(void) {
     if (test_terminal_input_is_incremental()) return 1;
 #endif
     if (test_buffer_and_layout()) return 1;
+    if (test_grapheme_cells()) return 1;
     if (test_layout_rejects_invalid_graphs()) return 1;
     if (test_textarea_bounds()) return 1;
     puts("Tango native-core tests passed");

@@ -1,5 +1,5 @@
 /*
- * TUI - Terminal User Interface Library (C99)
+ * TUI - Terminal User Interface Library (C11)
  *
  * A lightweight, zero-dependency TUI library for modern terminals.
  * Inspired by notcurses, bubbletea, and the Elm Architecture.
@@ -80,26 +80,51 @@ typedef enum {
  * Cell - The fundamental unit of terminal display
  * ============================================================================ */
 
+/* Grapheme bytes are owned by the leading cell.  The bound is deliberately
+ * explicit: terminal buffers stay trivially copyable and never allocate while
+ * drawing.  APIs that receive a larger cluster fail without changing cells. */
+#define TUI_CELL_GRAPHEME_CAPACITY 64
+
+typedef enum {
+    TUI_CELL_SPAN_SINGLE = 0,
+    TUI_CELL_SPAN_WIDE = 1,
+    TUI_CELL_SPAN_CONTINUATION = 2,
+} tui_cell_span_t;
+
 typedef struct {
-    uint32_t    ch;         /* Unicode codepoint */
+    uint32_t    ch;         /* First scalar; retained for scalar-cell callers */
     tui_color_t fg;
     tui_color_t bg;
     uint8_t     style;      /* tui_style_t flags */
+    uint8_t     span;       /* tui_cell_span_t */
+    uint8_t     grapheme_len;
+    char        grapheme[TUI_CELL_GRAPHEME_CAPACITY];
 } tui_cell_t;
 
 static inline tui_cell_t tui_cell(uint32_t ch, tui_color_t fg, tui_color_t bg) {
-    tui_cell_t c; c.ch = ch; c.fg = fg; c.bg = bg; c.style = TUI_STYLE_NONE; return c;
+    tui_cell_t c;
+    c.ch = ch; c.fg = fg; c.bg = bg; c.style = TUI_STYLE_NONE;
+    c.span = TUI_CELL_SPAN_SINGLE; c.grapheme_len = 0;
+    for (size_t i = 0; i < TUI_CELL_GRAPHEME_CAPACITY; ++i) c.grapheme[i] = 0;
+    return c;
 }
 
 static inline tui_cell_t tui_cell_styled(uint32_t ch, tui_color_t fg, tui_color_t bg, uint8_t style) {
-    tui_cell_t c; c.ch = ch; c.fg = fg; c.bg = bg; c.style = style; return c;
+    tui_cell_t c = tui_cell(ch, fg, bg); c.style = style; return c;
 }
 
 #define TUI_CELL_DEFAULT      tui_cell(' ', TUI_WHITE, TUI_BLACK)
 
 static inline bool tui_cell_eq(const tui_cell_t* a, const tui_cell_t* b) {
-    return a->ch == b->ch && tui_color_eq(a->fg, b->fg) && 
-           tui_color_eq(a->bg, b->bg) && a->style == b->style;
+    if (a->grapheme_len > TUI_CELL_GRAPHEME_CAPACITY ||
+        b->grapheme_len > TUI_CELL_GRAPHEME_CAPACITY) return false;
+    if (a->ch != b->ch || !tui_color_eq(a->fg, b->fg) ||
+        !tui_color_eq(a->bg, b->bg) || a->style != b->style ||
+        a->span != b->span || a->grapheme_len != b->grapheme_len) return false;
+    for (size_t i = 0; i < a->grapheme_len; ++i) {
+        if (a->grapheme[i] != b->grapheme[i]) return false;
+    }
+    return true;
 }
 
 /* ============================================================================
@@ -133,7 +158,18 @@ void            tui_buffer_clear(tui_buffer_t* buf);
 void            tui_buffer_clear_color(tui_buffer_t* buf, tui_color_t bg);
 void            tui_buffer_set(tui_buffer_t* buf, int x, int y, tui_cell_t cell);
 void            tui_buffer_set_char(tui_buffer_t* buf, int x, int y, uint32_t ch);
-void            tui_buffer_text(tui_buffer_t* buf, int x, int y, const char* str, tui_color_t fg, tui_color_t bg);
+/* Returns -1 for malformed input/not exactly one grapheme, otherwise Tango's
+ * terminal presentation width (0, 1, or 2 columns).  This is deliberately a
+ * Tango policy, not a Unicode width claim: canonical Salts Emoji, grapheme and
+ * line-break facts feed a stable terminal-oriented choice. */
+int             tui_grapheme_width(const char* utf8, size_t len);
+/* These calls are failure-atomic for malformed/oversized graphemes. */
+bool            tui_buffer_set_grapheme(tui_buffer_t* buf, int x, int y,
+                                        const char* utf8, size_t len,
+                                        tui_color_t fg, tui_color_t bg,
+                                        uint8_t style);
+bool            tui_buffer_text(tui_buffer_t* buf, int x, int y, const char* str,
+                                tui_color_t fg, tui_color_t bg);
 void            tui_buffer_fill(tui_buffer_t* buf, int x, int y, int w, int h, tui_cell_t cell);
 void            tui_buffer_fill_color(tui_buffer_t* buf, int x, int y, int w, int h, tui_color_t bg);
 

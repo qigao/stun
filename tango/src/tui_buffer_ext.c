@@ -143,7 +143,7 @@ void tui_buffer_braille_set(tui_buffer_t* buf, int px, int py, tui_color_t fg, t
         {0x40, 0x80}   /* row 3: dots 7, 8 */
     };
     
-    tui_cell_t* cell = tui_buffer_at(buf, cx, cy);
+    const tui_cell_t* cell = tui_buffer_at_const(buf, cx, cy);
     uint32_t ch = cell->ch;
     if (ch < 0x2800 || ch > 0x28FF) ch = 0x2800;
     
@@ -151,9 +151,7 @@ void tui_buffer_braille_set(tui_buffer_t* buf, int px, int py, tui_color_t fg, t
     int dy = py % 4;
     ch |= dot_bits[dy][dx];
     
-    cell->ch = ch;
-    cell->fg = fg;
-    cell->bg = bg;
+    tui_buffer_set(buf, cx, cy, tui_cell_styled(ch, fg, bg, cell->style));
 }
 
 void tui_buffer_braille_clear(tui_buffer_t* buf, int x, int y, int w, int h, tui_color_t bg) {
