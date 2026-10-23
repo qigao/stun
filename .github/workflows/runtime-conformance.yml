@@ -157,8 +157,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
       SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
-      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
-      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
@@ -176,46 +174,47 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout released Salts for canonical NuGet source settings
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts
-          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
-          path: .ci/flowchart-salts
-          persist-credentials: false
-
-      - name: Verify exact dependency and source commits
+      - name: Verify exact source and resolved releases
         shell: bash
         env:
           EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          test "$(git -C .ci/flowchart-salts rev-parse HEAD)" = "$SALTS_SHA"
-          test -f .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config
           test -n "$SALTS_RELEASE" && test -n "$SALTS_UTILS_RELEASE"
 
-      - name: Restore exact published native packages from GitHub Packages
+      - name: Download exact published native packages with curl
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/stun-flowchart-restore" "$PACKAGES_ROOT"
-          salts_version="${SALTS_RELEASE#v}"
-          utils_version="${SALTS_UTILS_RELEASE#v}"
-          cat > "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" <<EOF
-          <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
-            <ItemGroup>
-              <PackageReference Include="Salts.Native" Version="$salts_version" />
-              <PackageReference Include="SaltsUtils.Native" Version="$utils_version" />
-            </ItemGroup>
-          </Project>
-          EOF
-          dotnet restore "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" \
-            --configfile .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config \
-            --packages "$PACKAGES_ROOT" --no-cache --force-evaluate --verbosity minimal
-          # No downstream CMake consumer has access to a dependency source tree.
-          rm -rf .ci/flowchart-salts
+          mkdir -p "$PACKAGES_ROOT"
+          curl_args=(--fail --silent --show-error --location --retry 3
+            --proto '=https' --proto-redir '=https'
+            --connect-timeout 15 --max-time 300
+            --user "$GITHUB_ACTOR:$GITHUB_TOKEN")
+          # Discover the NuGet v3 content endpoint; no managed runtime or
+          # dependency source checkout is needed to download native archives.
+          curl "${curl_args[@]}" 'https://nuget.pkg.github.com/qigao/index.json' \
+            --output "$RUNNER_TEMP/stun-native-package-index.json"
+          package_base="$(jq -er '
+            [.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"]
+            | unique
+            | if length == 1 and (.[0] | test("^https://nuget[.]pkg[.]github[.]com/qigao/[A-Za-z0-9/_-]*$"))
+              then .[0] else error("Missing or unexpected GitHub Packages content endpoint") end
+            ' "$RUNNER_TEMP/stun-native-package-index.json")"
+          download_package() {
+            local id="$1" version="${2#v}" archive
+            version="${version,,}"
+            [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
+            archive="$PACKAGES_ROOT/$id/$version/$id.$version.nupkg"
+            mkdir -p "$(dirname "$archive")"
+            curl "${curl_args[@]}" \
+              "${package_base%/}/$id/$version/$id.$version.nupkg" \
+              --output "$archive.part"
+            mv "$archive.part" "$archive"
+          }
+          download_package salts.native "$SALTS_RELEASE"
+          download_package saltsutils.native "$SALTS_UTILS_RELEASE"
 
       - name: Verify official SHA256SUMS and restore isolated SDK
         shell: bash
