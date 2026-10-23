@@ -26,6 +26,7 @@ jobs:
       animation: ${{ steps.animation_scope.outputs.affected }}
       measurement: ${{ steps.measurement_scope.outputs.affected }}
       xml_runtime: ${{ steps.xml_scope.outputs.affected }}
+      turboscript: ${{ steps.turboscript_scope.outputs.affected }}
       unicode: ${{ steps.unicode_scope.outputs.affected }}
       expression: ${{ steps.expression_scope.outputs.affected }}
     steps:
@@ -78,6 +79,18 @@ jobs:
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \
             'tools/lemon/*' 'cmake/Sanitizers.cmake' \
             '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
+
+      - name: Detect TurboScript controller changes
+        id: turboscript_scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'flexUI/modules/controller/*' 'flexUI/include/flexUI/*' \
+            'flexUI/tests/test_turboscript*' 'flexUI/tests/test_desktop_editor_controller.cpp' \
+            'flexUI/examples/desktop_editor/editor.tbs' \
+            'flexUI/tests/xml-runtime-standalone/*' 'flexUI/tests/xml-runtime-deps/*' \
+            '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' \
+            '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
 
       - name: Detect Unicode text policy changes
         id: unicode_scope
@@ -157,8 +170,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
       SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
-      SALTS_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
-      SALTS_UTILS_SHA: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
+      TURBOSCRIPT_RELEASE: v3.0.10
+      QUALIFY_TURBOSCRIPT: ${{ needs.changes.outputs.turboscript }}
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
@@ -168,6 +181,8 @@ jobs:
         shell: bash
         run: |
           printf 'SALTS_ROOT=%s/stun-flowchart-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'SALTS_UTILS_ROOT=%s/stun-flowchart-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'TURBOSCRIPT_ROOT=%s/stun-turboscript-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           printf 'PACKAGES_ROOT=%s/stun-flowchart-native-nuget\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Checkout exact Stun source candidate
@@ -176,46 +191,50 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout released Salts for canonical NuGet source settings
-        uses: actions/checkout@v4
-        with:
-          repository: qigao/salts
-          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
-          path: .ci/flowchart-salts
-          persist-credentials: false
-
-      - name: Verify exact dependency and source commits
+      - name: Verify exact source and resolved releases
         shell: bash
         env:
           EXPECTED_STUN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-          test "$(git -C .ci/flowchart-salts rev-parse HEAD)" = "$SALTS_SHA"
-          test -f .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config
           test -n "$SALTS_RELEASE" && test -n "$SALTS_UTILS_RELEASE"
 
-      - name: Restore exact published native packages from GitHub Packages
+      - name: Download exact published native packages with curl
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/stun-flowchart-restore" "$PACKAGES_ROOT"
-          salts_version="${SALTS_RELEASE#v}"
-          utils_version="${SALTS_UTILS_RELEASE#v}"
-          cat > "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" <<EOF
-          <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
-            <ItemGroup>
-              <PackageReference Include="Salts.Native" Version="$salts_version" />
-              <PackageReference Include="SaltsUtils.Native" Version="$utils_version" />
-            </ItemGroup>
-          </Project>
-          EOF
-          dotnet restore "$RUNNER_TEMP/stun-flowchart-restore/NativeSdk.csproj" \
-            --configfile .ci/flowchart-salts/cmake/vcpkg-cache.nuget.config \
-            --packages "$PACKAGES_ROOT" --no-cache --force-evaluate --verbosity minimal
-          # No downstream CMake consumer has access to a dependency source tree.
-          rm -rf .ci/flowchart-salts
+          mkdir -p "$PACKAGES_ROOT"
+          curl_args=(--fail --silent --show-error --location --retry 3
+            --proto '=https' --proto-redir '=https'
+            --connect-timeout 15 --max-time 300
+            --user "$GITHUB_ACTOR:$GITHUB_TOKEN")
+          # Discover the NuGet v3 content endpoint; no managed runtime or
+          # dependency source checkout is needed to download native archives.
+          curl "${curl_args[@]}" 'https://nuget.pkg.github.com/qigao/index.json' \
+            --output "$RUNNER_TEMP/stun-native-package-index.json"
+          package_base="$(jq -er '
+            [.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"]
+            | unique
+            | if length == 1 and (.[0] | test("^https://nuget[.]pkg[.]github[.]com/qigao/[A-Za-z0-9/_-]*$"))
+              then .[0] else error("Missing or unexpected GitHub Packages content endpoint") end
+            ' "$RUNNER_TEMP/stun-native-package-index.json")"
+          download_package() {
+            local id="$1" version="${2#v}" archive
+            version="${version,,}"
+            [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
+            archive="$PACKAGES_ROOT/$id/$version/$id.$version.nupkg"
+            mkdir -p "$(dirname "$archive")"
+            curl "${curl_args[@]}" \
+              "${package_base%/}/$id/$version/$id.$version.nupkg" \
+              --output "$archive.part"
+            mv "$archive.part" "$archive"
+          }
+          download_package salts.native "$SALTS_RELEASE"
+          download_package saltsutils.native "$SALTS_UTILS_RELEASE"
+          if [[ "$QUALIFY_TURBOSCRIPT" == true ]]; then
+            download_package turboscript.native "$TURBOSCRIPT_RELEASE"
+          fi
 
       - name: Verify official SHA256SUMS and restore isolated SDK
         shell: bash
@@ -234,6 +253,53 @@ jobs:
             --salts-checksums "$RUNNER_TEMP/stun-flowchart-checks/salts/SHA256SUMS" \
             --salts-utils-checksums "$RUNNER_TEMP/stun-flowchart-checks/utils/SHA256SUMS"
           printf 'LD_LIBRARY_PATH=%s/lib\n' "$SALTS_ROOT" >> "$GITHUB_ENV"
+
+      - name: Verify and restore the published TurboScript SDK
+        if: needs.changes.outputs.turboscript == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # TurboScript publishes a GitHub release asset digest, rather than
+          # SHA256SUMS. Verify the Packages download against that official digest.
+          gh api "repos/qigao/TurboScript/releases/tags/$TURBOSCRIPT_RELEASE" \
+            > "$RUNNER_TEMP/stun-turboscript-release.json"
+          python3 - <<'PYSDK'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location("sdk_restore", ".github/scripts/restore-flowchart-sdk.py")
+          sdk = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(sdk)
+          release = os.environ["TURBOSCRIPT_RELEASE"]
+          version = release.removeprefix("v")
+          metadata = json.loads((Path(os.environ["RUNNER_TEMP"]) / "stun-turboscript-release.json").read_text())
+          sdk.require(metadata["tag_name"] == release and not metadata["draft"], "Unexpected TurboScript release")
+          assets = [a for a in metadata["assets"] if a["name"] == f"TurboScript.Native.{version}.nupkg"]
+          sdk.require(len(assets) == 1, "Missing or ambiguous official TurboScript package asset")
+          archive = Path(os.environ["PACKAGES_ROOT"]) / "turboscript.native" / version / f"turboscript.native.{version}.nupkg"
+          sha256 = sdk.digest(archive)
+          sdk.require(assets[0].get("digest") == f"sha256:{sha256}", "Official TurboScript SHA256 mismatch")
+          destination = Path(os.environ["TURBOSCRIPT_ROOT"])
+          destination.mkdir(parents=True, exist_ok=True)
+          sdk.require(not any(destination.iterdir()), "TurboScript SDK destination must be empty")
+          sdk.extract_sdk_payload(archive, destination)
+          provenance = {"release": release, "sha256": sha256, "asset_id": assets[0]["id"], "rid": "linux-x64"}
+          (destination / "turboscript-sdk-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+          print("Verified published TurboScript SDK:", provenance)
+          PYSDK
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$TURBOSCRIPT_ROOT/lib"
+          printf 'LD_LIBRARY_PATH=%s\n' "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          mkdir -p build/xml-runtime
+          readelf -d "$TURBOSCRIPT_ROOT/lib/libturbo_script.so"
+          ldd -r "$TURBOSCRIPT_ROOT/lib/libturbo_script.so" 2>&1 | tee build/xml-runtime/turboscript-loader.txt
+          if grep -E 'not found|undefined symbol' build/xml-runtime/turboscript-loader.txt; then
+            echo 'Published TurboScript dependency closure is unresolved' >&2
+            exit 1
+          fi
+          mapfile -t core_providers < <(awk '/libsalts[.]so/ {print $3}' build/xml-runtime/turboscript-loader.txt | sort -u)
+          test "${#core_providers[@]}" = 1
+          test "$(realpath "${core_providers[0]}")" = "$(realpath "$SALTS_ROOT/lib/libsalts.so")"
 
       - name: Install minimal parser generator tools
         shell: bash
@@ -359,16 +425,22 @@ jobs:
           cmake --build build/xml-deps --parallel 2
           cmake --install build/xml-deps
 
-      - name: Execute real XML registry and application load/reload regressions
+      - name: Execute real XML and applicable TurboScript application regressions
         if: needs.changes.outputs.xml_runtime == 'true'
         shell: bash
         run: |
           set -euo pipefail
           cmake -S flexUI/tests/xml-runtime-standalone -B build/xml-runtime -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            "-DSTUN_XML_RUNTIME_TURBOSCRIPT=$QUALIFY_TURBOSCRIPT" \
+            "-DTURBOSCRIPT_ROOT=$TURBOSCRIPT_ROOT" \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$RUNNER_TEMP/stun-xml-runtime-deps" \
             -DSTB_INCLUDE_DIRS=/usr/include/stb
-          cmake --build build/xml-runtime --target stun_xml_runtime_qualification --parallel 2
+          targets=(stun_xml_runtime_qualification)
+          if [[ "$QUALIFY_TURBOSCRIPT" == true ]]; then
+            targets+=(stun_turboscript_qualification)
+          fi
+          cmake --build build/xml-runtime --target "${targets[@]}" --parallel 2
           ctest --test-dir build/xml-runtime --no-tests=error --verbose --output-on-failure \
             --timeout 120 --output-junit build/xml-runtime/results.xml
           git diff --exit-code
@@ -410,6 +482,8 @@ jobs:
             build/measurement/Testing/Temporary/LastTest.log
             build/xml-runtime/Testing/Temporary/LastTest.log
             build/xml-runtime/results.xml
+            build/xml-runtime/turboscript-loader.txt
+            ${{ runner.temp }}/stun-turboscript-native-sdk/turboscript-sdk-provenance.json
             build/xml-runtime/compile_commands.json
             build/unicode/Testing/Temporary/LastTest.log
             build/expression-parsers/Testing/Temporary/LastTest.log

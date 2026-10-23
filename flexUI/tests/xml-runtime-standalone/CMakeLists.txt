@@ -15,12 +15,15 @@ set(ENABLE_SANITIZER_UNDEFINED ON CACHE BOOL "Qualify production runtime")
 include("${STUN_ROOT}/cmake/Sanitizers.cmake")
 
 # The same production targets and complete source lists used by the application.
-# Only their optional test/example/window/GPU/JIT consumers are disabled.
+# Optional examples/window/GPU consumers remain disabled. The installed JIT
+# contracts are an explicit opt-in, separate from ordinary XML qualification.
 set(BUILD_TESTING OFF)
 set(BUILD_SHARED_LIBS OFF)
 set(NANOGUI_BUILD_EXAMPLES OFF)
 set(FLEXUI_ENABLE_PLUGINS OFF)
-set(FLEXUI_ENABLE_TURBOSCRIPT OFF)
+option(STUN_XML_RUNTIME_TURBOSCRIPT
+  "Execute installed TurboScript interpreter/JIT contracts without a window" OFF)
+set(FLEXUI_ENABLE_TURBOSCRIPT "${STUN_XML_RUNTIME_TURBOSCRIPT}")
 foreach(option IN ITEMS GCANVAS_BUILD_OPENGL GCANVAS_BUILD_GLES
     GCANVAS_BUILD_ANDROID_EGL GCANVAS_BUILD_VULKAN GCANVAS_BUILD_SVG
     GCANVAS_BUILD_WINDOW GCANVAS_BUILD_TESTS GCANVAS_BUILD_EXAMPLES
@@ -54,7 +57,21 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
-if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas OR
-   TARGET FlexUI::ControllerTurboScript)
-  message(FATAL_ERROR "XML runtime gate must remain headless and independent of TurboScript JIT")
+if(STUN_XML_RUNTIME_TURBOSCRIPT)
+  add_custom_target(stun_turboscript_qualification)
+  foreach(test IN ITEMS test_turboscript_controller test_turboscript_application
+      test_desktop_editor_controller)
+    add_executable(${test} "${STUN_ROOT}/flexUI/tests/${test}.cpp")
+    target_link_libraries(${test} PRIVATE FlexUI::ControllerTurboScript Salts::TinyTest)
+    add_test(NAME ${test} COMMAND ${test})
+    set_tests_properties(${test} PROPERTIES TIMEOUT 120)
+    add_dependencies(stun_turboscript_qualification ${test})
+  endforeach()
+  target_compile_definitions(test_desktop_editor_controller PRIVATE
+    FLEXUI_EDITOR_CONTROLLER_PATH="${STUN_ROOT}/flexUI/examples/desktop_editor/editor.tbs")
+elseif(TARGET FlexUI::ControllerTurboScript)
+  message(FATAL_ERROR "The ordinary XML gate must remain independent of TurboScript JIT")
+endif()
+if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas)
+  message(FATAL_ERROR "XML and optional TurboScript contracts must remain headless")
 endif()
