@@ -354,6 +354,20 @@ static int test_grapheme_cells(void) {
     CHECK(tui_buffer_at_const(buffer, 3, 0)->ch == 'y');
     CHECK(tui_buffer_at_const(buffer, 4, 0)->ch == ' ');
 
+    /* Scalar callers are normalized through the same width policy, while
+     * terminal controls and invalid scalars never enter the buffer. */
+    tui_buffer_clear(buffer);
+    tui_buffer_set(buffer, 0, 0, tui_cell(0x4e2du, TUI_WHITE, TUI_BLACK));
+    CHECK(tui_buffer_at_const(buffer, 0, 0)->span == TUI_CELL_SPAN_WIDE);
+    CHECK(tui_buffer_at_const(buffer, 1, 0)->span ==
+          TUI_CELL_SPAN_CONTINUATION);
+    const tui_cell_t scalar_prior = *tui_buffer_at_const(buffer, 2, 0);
+    tui_buffer_set(buffer, 2, 0, tui_cell(0x1bu, TUI_WHITE, TUI_BLACK));
+    CHECK(tui_cell_eq(&scalar_prior, tui_buffer_at_const(buffer, 2, 0)));
+    tui_buffer_set(buffer, 2, 0,
+                   tui_cell(0x110000u, TUI_WHITE, TUI_BLACK));
+    CHECK(tui_cell_eq(&scalar_prior, tui_buffer_at_const(buffer, 2, 0)));
+
     /* Invalid, oversized, and clipped-wide writes publish no partial cell. */
     const tui_cell_t prior = *tui_buffer_at_const(buffer, 19, 0);
     CHECK(!tui_buffer_set_grapheme(buffer, 19, 0, UTF8_CJK,
@@ -400,6 +414,64 @@ static int test_grapheme_cells(void) {
                           UTF8_WOMAN_TECH "X", TUI_WHITE, TUI_BLACK));
     CHECK(tui_terminal_render(terminal));
     CHECK(strstr(rendered, UTF8_WOMAN_TECH "X") != NULL);
+    terminal->initialized = false;
+    tui_terminal_destroy(terminal);
+    return 0;
+}
+
+static int test_terminal_render_contract(void) {
+    tui_terminal_t *terminal = tui_terminal_create();
+    CHECK(terminal != NULL);
+    terminal->width = 2;
+    terminal->height = 1;
+    terminal->front = tui_buffer_create(2, 1);
+    terminal->back = tui_buffer_create(2, 1);
+    CHECK(terminal->front != NULL && terminal->back != NULL);
+    terminal->initialized = true;
+    terminal->write_output = capture_write;
+
+    /* Public structs may be mutated directly.  The final renderer boundary
+     * must reject forged control bytes without writing a partial frame. */
+    tui_cell_t *forged = tui_buffer_at(terminal->back, 0, 0);
+    forged->ch = 0x1bu;
+    forged->grapheme_len = 1u;
+    forged->grapheme[0] = '\033';
+    tui_buffer_mark_dirty(terminal->back, 0, 0);
+    rendered_len = 0u;
+    CHECK(!tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) ==
+          TUI_TERMINAL_ERROR_INVALID_STATE);
+    CHECK(rendered_len == 0u);
+    CHECK(tui_buffer_is_dirty(terminal->back));
+
+    /* Both supported color modes have an exact, tested SGR contract. */
+    terminal->color_mode = TUI_COLOR_TRUECOLOR;
+    tui_buffer_set(terminal->back, 0, 0,
+                   tui_cell('X', TUI_COLOR(1, 2, 3), TUI_COLOR(4, 5, 6)));
+    rendered_len = 0u;
+    CHECK(tui_terminal_render(terminal));
+    CHECK(strstr(rendered, "\033[38;2;1;2;3m") != NULL);
+    CHECK(strstr(rendered, "\033[48;2;4;5;6m") != NULL);
+
+    terminal->color_mode = TUI_COLOR_256;
+    tui_buffer_set(terminal->back, 0, 0,
+                   tui_cell('Y', TUI_COLOR(255, 0, 0),
+                             TUI_COLOR(0, 255, 0)));
+    rendered_len = 0u;
+    CHECK(tui_terminal_render(terminal));
+    CHECK(strstr(rendered, "\033[38;5;196m") != NULL);
+    CHECK(strstr(rendered, "\033[48;5;46m") != NULL);
+
+    /* A forged wide lead without its continuation is likewise rejected. */
+    forged = tui_buffer_at(terminal->back, 0, 0);
+    forged->span = TUI_CELL_SPAN_WIDE;
+    tui_buffer_mark_dirty(terminal->back, 0, 0);
+    rendered_len = 0u;
+    CHECK(!tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) ==
+          TUI_TERMINAL_ERROR_INVALID_STATE);
+    CHECK(rendered_len == 0u);
+
     terminal->initialized = false;
     tui_terminal_destroy(terminal);
     return 0;
@@ -687,6 +759,7 @@ int main(void) {
 #endif
     if (test_buffer_and_layout()) return 1;
     if (test_grapheme_cells()) return 1;
+    if (test_terminal_render_contract()) return 1;
     if (test_layout_rejects_invalid_graphs()) return 1;
     if (test_input_grapheme_editing()) return 1;
     if (test_textarea_bounds()) return 1;
