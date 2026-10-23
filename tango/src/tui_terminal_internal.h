@@ -25,6 +25,9 @@ struct tui_terminal {
     char *output;
     size_t output_cap;
     size_t output_len;
+    size_t output_limit;
+    void *(*output_realloc)(void *, size_t);
+    tui_terminal_error_t last_error;
 
     bool mouse_enabled;
 

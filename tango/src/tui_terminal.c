@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -47,34 +48,47 @@ static void output_clear(tui_terminal_t* term) {
     term->output_len = 0;
 }
 
-static void output_ensure(tui_terminal_t* term, size_t need) {
-    size_t required = term->output_len + need;
-    if (required > term->output_cap) {
-        size_t new_cap = term->output_cap * 2;
-        if (new_cap < required) new_cap = required;
-        char* new_buf = (char*)realloc(term->output, new_cap);
-        if (new_buf) {
-            term->output = new_buf;
-            term->output_cap = new_cap;
+static bool output_ensure(tui_terminal_t* term, size_t need) {
+    if (term->output_len > term->output_limit ||
+        need > term->output_limit - term->output_len) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_LIMIT;
+        return false;
+    }
+
+    const size_t required = term->output_len + need;
+    if (required <= term->output_cap) return true;
+
+    size_t new_cap = term->output_cap;
+    while (new_cap < required) {
+        if (new_cap > term->output_limit / 2u) {
+            new_cap = term->output_limit;
+        } else {
+            new_cap *= 2u;
         }
     }
+
+    char* new_buf = (char*)term->output_realloc(term->output, new_cap);
+    if (!new_buf) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
+        return false;
+    }
+
+    term->output = new_buf;
+    term->output_cap = new_cap;
+    return true;
 }
 
-static void output_append(tui_terminal_t* term, const char* str) {
+static bool output_append(tui_terminal_t* term, const char* str) {
     size_t len = strlen(str);
-    output_ensure(term, len);
+    if (!output_ensure(term, len)) return false;
     memcpy(term->output + term->output_len, str, len);
     term->output_len += len;
-}
-
-static void output_append_char(tui_terminal_t* term, char c) {
-    output_ensure(term, 1);
-    term->output[term->output_len++] = c;
+    return true;
 }
 
 /* UTF-8 encode */
-static void output_append_utf8(tui_terminal_t* term, uint32_t cp) {
-    output_ensure(term, 4);
+static bool output_append_utf8(tui_terminal_t* term, uint32_t cp) {
+    if (!output_ensure(term, 4u)) return false;
     char* p = term->output + term->output_len;
     
     if (cp < 0x80) {
@@ -96,31 +110,52 @@ static void output_append_utf8(tui_terminal_t* term, uint32_t cp) {
         *p++ = (char)(0x80 | (cp & 0x3F));
         term->output_len += 4;
     }
+    return true;
 }
 
 /* ============================================================================
  * Raw I/O
  * ============================================================================ */
 
-static void write_raw(tui_terminal_t* term, const char* data, size_t len) {
+static bool write_raw(tui_terminal_t* term, const char* data, size_t len) {
 #ifdef _WIN32
-    DWORD written;
-    WriteConsoleA(term->h_out, data, (DWORD)len, &written, NULL);
+    size_t offset = 0u;
+    while (offset < len) {
+        DWORD written = 0u;
+        const DWORD chunk = (DWORD)(len - offset);
+        if (!WriteConsoleA(term->h_out, data + offset, chunk, &written, NULL) ||
+            written == 0u) return false;
+        offset += (size_t)written;
+    }
 #else
-    (void)write(STDOUT_FILENO, data, len);
+    (void)term;
+    size_t offset = 0u;
+    while (offset < len) {
+        const ssize_t written = write(STDOUT_FILENO, data + offset, len - offset);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return false;
+        offset += (size_t)written;
+    }
 #endif
+    return true;
 }
 
 static void write_raw_str(tui_terminal_t* term, const char* str) {
-    write_raw(term, str, strlen(str));
+    (void)write_raw(term, str, strlen(str));
 }
 
-static void flush_output(tui_terminal_t* term) {
-    if (term->output_len > 0) {
-        write_raw(term, term->output, term->output_len);
-        term->output_len = 0;
+static bool flush_output(tui_terminal_t* term) {
+    if (fflush(stdout) != 0) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
+        return false;
     }
-    fflush(stdout);
+    if (term->output_len > 0u &&
+        !write_raw(term, term->output, term->output_len)) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
+        return false;
+    }
+    term->output_len = 0u;
+    return true;
 }
 
 /* ============================================================================
@@ -153,6 +188,8 @@ tui_terminal_t* tui_terminal_create(void) {
     term->width = 80;
     term->height = 24;
     term->output_cap = 8192;
+    term->output_limit = 64u * 1024u * 1024u;
+    term->output_realloc = realloc;
     term->output = (char*)malloc(term->output_cap);
     
     if (!term->output) {
@@ -317,8 +354,12 @@ tui_buffer_t* tui_terminal_buffer(tui_terminal_t* term) {
  * Rendering
  * ============================================================================ */
 
-void tui_terminal_render(tui_terminal_t* term) {
-    if (!term || !term->initialized) return;
+bool tui_terminal_render(tui_terminal_t* term) {
+    if (!term || !term->initialized || !term->front || !term->back) {
+        if (term) term->last_error = TUI_TERMINAL_ERROR_INVALID_STATE;
+        return false;
+    }
+    term->last_error = TUI_TERMINAL_ERROR_NONE;
     
     tui_buffer_t* back = term->back;
     tui_buffer_t* front = term->front;
@@ -327,15 +368,20 @@ void tui_terminal_render(tui_terminal_t* term) {
     if (back->width != term->width || back->height != term->height) {
         tui_buffer_resize(back, term->width, term->height);
         tui_buffer_resize(front, term->width, term->height);
+        if (back->width != term->width || back->height != term->height ||
+            front->width != term->width || front->height != term->height) {
+            term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
+            return false;
+        }
         /* Force full redraw */
         tui_buffer_clear(front);
         tui_buffer_mark_all_dirty(back);
     }
     
-    if (!tui_buffer_is_dirty(back)) return;
+    if (!tui_buffer_is_dirty(back)) return true;
     
     output_clear(term);
-    output_append(term, "\033[0m");
+    if (!output_append(term, "\033[0m")) goto output_failed;
     
     tui_color_t last_fg = TUI_WHITE;
     tui_color_t last_bg = TUI_BLACK;
@@ -365,22 +411,22 @@ void tui_terminal_render(tui_terminal_t* term) {
             /* Move cursor if not sequential */
             if (last_x != x - 1 || last_y != y) {
                 snprintf(buf, sizeof(buf), "\033[%d;%dH", y + 1, x + 1);
-                output_append(term, buf);
+                if (!output_append(term, buf)) goto output_failed;
             }
             
             /* Update style */
             if (cell->style != last_style) {
-                output_append(term, "\033[0m");
+                if (!output_append(term, "\033[0m")) goto output_failed;
                 last_fg = TUI_WHITE;
                 last_bg = TUI_BLACK;
                 
-                if (cell->style & TUI_STYLE_BOLD) output_append(term, "\033[1m");
-                if (cell->style & TUI_STYLE_DIM) output_append(term, "\033[2m");
-                if (cell->style & TUI_STYLE_ITALIC) output_append(term, "\033[3m");
-                if (cell->style & TUI_STYLE_UNDERLINE) output_append(term, "\033[4m");
-                if (cell->style & TUI_STYLE_BLINK) output_append(term, "\033[5m");
-                if (cell->style & TUI_STYLE_REVERSE) output_append(term, "\033[7m");
-                if (cell->style & TUI_STYLE_STRIKE) output_append(term, "\033[9m");
+                if ((cell->style & TUI_STYLE_BOLD) && !output_append(term, "\033[1m")) goto output_failed;
+                if ((cell->style & TUI_STYLE_DIM) && !output_append(term, "\033[2m")) goto output_failed;
+                if ((cell->style & TUI_STYLE_ITALIC) && !output_append(term, "\033[3m")) goto output_failed;
+                if ((cell->style & TUI_STYLE_UNDERLINE) && !output_append(term, "\033[4m")) goto output_failed;
+                if ((cell->style & TUI_STYLE_BLINK) && !output_append(term, "\033[5m")) goto output_failed;
+                if ((cell->style & TUI_STYLE_REVERSE) && !output_append(term, "\033[7m")) goto output_failed;
+                if ((cell->style & TUI_STYLE_STRIKE) && !output_append(term, "\033[9m")) goto output_failed;
                 
                 last_style = cell->style;
             }
@@ -392,7 +438,7 @@ void tui_terminal_render(tui_terminal_t* term) {
                 } else {
                     snprintf(buf, sizeof(buf), "\033[38;5;%dm", quantize_256(cell->fg));
                 }
-                output_append(term, buf);
+                if (!output_append(term, buf)) goto output_failed;
                 last_fg = cell->fg;
             }
             
@@ -402,25 +448,40 @@ void tui_terminal_render(tui_terminal_t* term) {
                 } else {
                     snprintf(buf, sizeof(buf), "\033[48;5;%dm", quantize_256(cell->bg));
                 }
-                output_append(term, buf);
+                if (!output_append(term, buf)) goto output_failed;
                 last_bg = cell->bg;
             }
             
             /* Output character */
             if (cell->ch != 0) {
-                output_append_utf8(term, cell->ch);
+                if (!output_append_utf8(term, cell->ch)) goto output_failed;
             }
             
             last_x = x;
             last_y = y;
             
-            /* Update front buffer */
-            *tui_buffer_at(front, x, y) = *cell;
         }
     }
-    
-    flush_output(term);
+
+    if (!flush_output(term)) goto output_failed;
+
+    /* Commit the rendered rectangle only after output construction and write
+       both succeed. Failure leaves the previous front and dirty back intact. */
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            *tui_buffer_at(front, x, y) = *tui_buffer_at_const(back, x, y);
+        }
+    }
     tui_buffer_reset_dirty(back);
+    return true;
+
+output_failed:
+    output_clear(term);
+    return false;
+}
+
+tui_terminal_error_t tui_terminal_last_error(const tui_terminal_t* term) {
+    return term ? term->last_error : TUI_TERMINAL_ERROR_INVALID_STATE;
 }
 
 void tui_terminal_refresh(tui_terminal_t* term) {

@@ -1,5 +1,6 @@
 /* Native Tango core regression tests. Does not require an interactive TTY. */
 #include "tui.h"
+#include "tui_terminal_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,56 @@ static int test_terminal_link(void) {
     CHECK(!tui_terminal_poll(NULL, &event));
     tui_terminal_t *terminal = tui_terminal_create();
     CHECK(terminal != NULL);
+    tui_terminal_destroy(terminal);
+    return 0;
+}
+
+static void *reject_realloc(void *old, size_t size) {
+    (void)old;
+    (void)size;
+    return NULL;
+}
+
+static int test_terminal_output_limit_is_atomic(void) {
+    tui_terminal_t *terminal = tui_terminal_create();
+    CHECK(terminal != NULL);
+
+    terminal->width = 128;
+    terminal->height = 64;
+    terminal->front = tui_buffer_create(terminal->width, terminal->height);
+    terminal->back = tui_buffer_create(terminal->width, terminal->height);
+    CHECK(terminal->front != NULL && terminal->back != NULL);
+    terminal->initialized = true;
+    terminal->color_mode = TUI_COLOR_TRUECOLOR;
+
+    const tui_cell_t prior = *tui_buffer_at_const(terminal->front, 0, 0);
+    for (int y = 0; y < terminal->height; ++y) {
+        for (int x = 0; x < terminal->width; ++x) {
+            const tui_color_t fg = TUI_COLOR((x + y) & 0xff, x & 0xff, y & 0xff);
+            tui_buffer_set(terminal->back, x, y,
+                           tui_cell_styled('X', fg, TUI_BLACK, TUI_STYLE_BOLD));
+        }
+    }
+
+    /* A failed growth must publish neither bytes nor front-buffer state. */
+    terminal->output_realloc = reject_realloc;
+    CHECK(!tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) ==
+          TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION);
+    CHECK(terminal->output_len == 0u);
+    CHECK(tui_cell_eq(tui_buffer_at_const(terminal->front, 0, 0), &prior));
+    CHECK(tui_buffer_is_dirty(terminal->back));
+
+    /* The independent hard limit follows the same retry-safe contract. */
+    terminal->output_realloc = realloc;
+    terminal->output_limit = terminal->output_cap;
+    CHECK(!tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_OUTPUT_LIMIT);
+    CHECK(terminal->output_len == 0u);
+    CHECK(tui_cell_eq(tui_buffer_at_const(terminal->front, 0, 0), &prior));
+    CHECK(tui_buffer_is_dirty(terminal->back));
+
+    terminal->initialized = false;
     tui_terminal_destroy(terminal);
     return 0;
 }
@@ -121,6 +172,7 @@ static int test_textarea_bounds(void) {
 
 int main(void) {
     if (test_terminal_link()) return 1;
+    if (test_terminal_output_limit_is_atomic()) return 1;
     if (test_buffer_and_layout()) return 1;
     if (test_textarea_bounds()) return 1;
     puts("Tango native-core tests passed");

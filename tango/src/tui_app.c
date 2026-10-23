@@ -96,8 +96,11 @@ void tui_app_run(tui_app_t* app) {
         if (needs_redraw) {
             tui_buffer_t* buf = tui_terminal_buffer(app->terminal);
             app->view(app->model, buf);
-            tui_terminal_render(app->terminal);
-            needs_redraw = false;
+            if (!tui_terminal_render(app->terminal)) {
+                running = false;
+            } else {
+                needs_redraw = false;
+            }
         }
         
         sleep_ms(16);  /* ~60 FPS */
