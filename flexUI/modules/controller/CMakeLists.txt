@@ -29,6 +29,15 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
   find_package(TurboScript CONFIG REQUIRED HINTS ${_flexui_turboscript_hints})
 
   get_target_property(
+    _flexui_turboscript_link_libraries
+    TurboScript::TurboScript INTERFACE_LINK_LIBRARIES)
+  if(_flexui_turboscript_link_libraries MATCHES "TurboNet")
+    message(
+      FATAL_ERROR
+        "TurboScript::TurboScript must publish its current Salts-owned dependency graph, not a retired TurboNet target")
+  endif()
+
+  get_target_property(
     _flexui_turboscript_include_dirs
     TurboScript::TurboScript INTERFACE_INCLUDE_DIRECTORIES)
   set(_flexui_turboscript_public_header)
@@ -82,15 +91,11 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
     flexUI_controller_turboscript PROPERTIES FOLDER "flexUI/controller")
 
   if(WIN32)
-    foreach(_flexui_turboscript_runtime
-            TurboScript::TurboScript
-            TurboNet::CoroNet)
-      add_custom_command(
-        TARGET flexUI_controller_turboscript POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:${_flexui_turboscript_runtime}>
-                $<TARGET_FILE_DIR:flexUI_controller_turboscript>)
-    endforeach()
+    add_custom_command(
+      TARGET flexUI_controller_turboscript POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:TurboScript::TurboScript>
+              $<TARGET_FILE_DIR:flexUI_controller_turboscript>)
   endif()
 
   install(TARGETS flexUI_controller_turboscript DESTINATION lib)

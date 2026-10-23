@@ -201,6 +201,8 @@ FlexUI 接入前，TurboScript 需要在其自身仓库提供稳定 C ABI。以�
 - 增加构建选项 `FLEXUI_ENABLE_TURBOSCRIPT`；默认关闭直到 ABI、资源限制和集成测试全部
   通过。
 - `TURBOSCRIPT_ROOT` 只作为 package 搜索 hint，不把本机源码绝对路径写进生产 target。
+- TurboScript 安装包必须导出其真实 Salts/SaltsUtils 依赖；FlexUI 不查找、链接或复制已退休
+  的 TurboNet/CoroNet target，也不猜测传递 TLS DLL。
 - TurboScript 类型只出现在 adapter 的 `.cpp`/私有头中，公共 FlexUI 头保持依赖隔离。
 
 引入依赖前仍需核对 TurboScript 的许可证、安装包导出、Debug/Release ABI、Windows/Linux
