@@ -151,11 +151,6 @@ struct TransitionDef {
     float bezier[4] = {0.25f, 0.1f, 0.25f, 1.0f};
 };
 
-struct AnimationKeyframeStep {
-    float offset = 0.0f;
-    std::map<std::string, std::string> properties;
-};
-
 struct AnimationDef {
     float duration_ms = 0.0f;
     float delay_ms = 0.0f;
@@ -322,6 +317,25 @@ private:
 struct TypedAnimationPoint {
     float offset = 0.0f;
     TransitionValue value{};
+};
+
+struct CompiledAnimationTrack {
+    const detail::StylePropertyDesc* property = nullptr;
+    std::vector<TypedAnimationPoint> keyframes;
+};
+
+struct CompiledAnimationProgram {
+    std::vector<CompiledAnimationTrack> tracks;
+
+    const CompiledAnimationTrack* find(
+        detail::StylePropertyId property_id) const noexcept {
+        for (const auto& track : tracks) {
+            if (track.property && track.property->id == property_id) {
+                return &track;
+            }
+        }
+        return nullptr;
+    }
 };
 
 struct TypedActiveAnimation {

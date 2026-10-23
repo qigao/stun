@@ -8,6 +8,7 @@
 #include <flexUI/detail/css_length.h>
 #include <flexUI/detail/css_semantic_value.h>
 #include <flexUI/detail/css_typed_value.h>
+#include <flex/core/cmeta_types.h>
 #include <lexbor/css/css.h>
 #include <lexbor/css/rule.h>
 #include <lexbor/css/selectors/selectors.h>
@@ -3533,8 +3534,7 @@ public:
     return baseline_styles_.size();
   }
 
-  const std::vector<AnimationKeyframeStep>* keyframes(
-      const std::string& name) const {
+  const CompiledAnimationProgram* keyframes(const std::string& name) const {
     auto it = keyframes_.find(name);
     return it != keyframes_.end() ? &it->second : nullptr;
   }
@@ -3571,7 +3571,7 @@ private:
   std::vector<StylesheetRecord> stylesheets_;
   std::vector<CSSRule> rules_;
   std::unordered_set<Symbol, SymbolHash> pseudo_dependencies_;
-  std::unordered_map<std::string, std::vector<AnimationKeyframeStep>> keyframes_;
+  std::unordered_map<std::string, CompiledAnimationProgram> keyframes_;
   std::unordered_map<const Element *, ComputedStyle> baseline_styles_;
   std::unordered_map<const Element*, ContainerRegistration> container_registrations_;
   const Element* current_element_ = nullptr;
@@ -4044,7 +4044,228 @@ private:
       return;
     }
 
-    std::vector<AnimationKeyframeStep> frames;
+    struct TrackBuilder {
+      const detail::StylePropertyDesc* property = nullptr;
+      std::map<float, TransitionValue> values;
+    };
+    std::map<detail::StylePropertyId, TrackBuilder> compiled_tracks;
+
+    const auto descriptor = [](detail::StylePropertyId id) {
+      return detail::style_property_descriptor(id);
+    };
+    const auto append_value = [&](float offset,
+                                  const detail::StylePropertyDesc& property,
+                                  const ComputedStyle& style) {
+      TransitionValue value;
+      if (detail::style_value_type_matches(property.type,
+                                           &cmeta_type_float)) {
+        float scalar = 0.0f;
+        if (!detail::style_property_read(property, style, &cmeta_type_float,
+                                         &scalar)) {
+          return false;
+        }
+        value = {&cmeta_type_float, flex::AnimValue{scalar}};
+      } else if (detail::style_value_type_matches(
+                     property.type, &flex::cmeta_type_color)) {
+        Color color;
+        if (!detail::style_property_read(
+                property, style, &flex::cmeta_type_color, &color)) {
+          return false;
+        }
+        value = {&flex::cmeta_type_color, flex::AnimValue{color}};
+      } else {
+        return false;
+      }
+
+      auto& track = compiled_tracks[property.id];
+      track.property = &property;
+      track.values[offset] = std::move(value);
+      return true;
+    };
+    const auto report_invalid = [&](const std::string& property,
+                                    const std::string& value) {
+      add_diagnostic(CssDiagnosticSeverity::Error, "@keyframes " + name,
+                     property, value,
+                     "invalid value for typed animation property");
+    };
+    const auto is_concrete_length = [](const std::string& token) {
+      return detail::parse_css_context_independent_length_literal(token)
+          .is_concrete();
+    };
+    const auto is_concrete_number = [](const std::string& token) {
+      return detail::parse_css_number_literal(token).is_concrete();
+    };
+    const auto is_concrete_angle = [](const std::string& token) {
+      return detail::parse_css_angle_literal(token).is_concrete();
+    };
+    const auto valid_transform = [&](const std::string& raw_value) {
+      const std::string value = trim_copy(raw_value);
+      if (to_lower_copy(value) == "none") {
+        return true;
+      }
+
+      bool parsed_function = false;
+      size_t position = 0;
+      while (position < value.size()) {
+        position = skip_selector_ws(value, position);
+        if (position >= value.size()) {
+          break;
+        }
+        const std::string function =
+            to_lower_copy(parse_identifier_token(value, position));
+        position = skip_selector_ws(value, position);
+        if (function.empty() || position >= value.size() ||
+            value[position] != '(') {
+          return false;
+        }
+        const std::string inner =
+            parse_balanced_token(value, position, '(', ')');
+        const auto args = split_transform_arguments(inner);
+        const auto all_lengths = [&] {
+          return std::all_of(args.begin(), args.end(), is_concrete_length);
+        };
+        const auto all_numbers = [&] {
+          return std::all_of(args.begin(), args.end(), is_concrete_number);
+        };
+
+        bool valid = false;
+        if (function == "translate") {
+          valid = args.size() >= 1 && args.size() <= 2 && all_lengths();
+        } else if (function == "translate3d") {
+          valid = args.size() == 3 && is_concrete_length(args[0]) &&
+                  is_concrete_length(args[1]) && is_concrete_number(args[2]);
+        } else if (function == "translatex" || function == "translatey") {
+          valid = args.size() == 1 && is_concrete_length(args[0]);
+        } else if (function == "scale") {
+          valid = args.size() >= 1 && args.size() <= 2 && all_numbers();
+        } else if (function == "scale3d") {
+          valid = args.size() == 3 && all_numbers();
+        } else if (function == "scalex" || function == "scaley") {
+          valid = args.size() == 1 && is_concrete_number(args[0]);
+        } else if (function == "rotate" || function == "rotatez") {
+          valid = args.size() == 1 && is_concrete_angle(args[0]);
+        } else if (function == "matrix") {
+          valid = args.size() == 6 && is_concrete_number(args[0]) &&
+                  is_concrete_number(args[1]) &&
+                  is_concrete_number(args[2]) &&
+                  is_concrete_number(args[3]) &&
+                  is_concrete_length(args[4]) &&
+                  is_concrete_length(args[5]);
+        } else if (function == "skewx" || function == "skewy") {
+          valid = args.size() == 1 && is_concrete_angle(args[0]);
+        } else if (function == "skew") {
+          valid = args.size() >= 1 && args.size() <= 2 &&
+                  std::all_of(args.begin(), args.end(), is_concrete_angle);
+        }
+        if (!valid) {
+          return false;
+        }
+        parsed_function = true;
+      }
+      return parsed_function;
+    };
+    const auto compile_declaration = [&](float offset,
+                                         const std::string& raw_property,
+                                         const std::string& raw_value) {
+      const std::string property = to_lower_copy(trim_copy(raw_property));
+      const std::string value = trim_copy(raw_value);
+      std::vector<const detail::StylePropertyDesc*> targets;
+
+      const auto append_target = [&](detail::StylePropertyId id) {
+        const auto* target = descriptor(id);
+        if (target &&
+            (target->flags & detail::STYLE_PROPERTY_ANIMATABLE) != 0u) {
+          targets.push_back(target);
+        }
+      };
+
+      if (property == "transform") {
+        append_target(detail::StylePropertyId::TransformX);
+        append_target(detail::StylePropertyId::TransformY);
+        append_target(detail::StylePropertyId::TransformScale);
+        append_target(detail::StylePropertyId::TransformScaleX);
+        append_target(detail::StylePropertyId::TransformScaleY);
+        append_target(detail::StylePropertyId::TransformRotate);
+      } else if (property == "box-shadow") {
+        append_target(detail::StylePropertyId::BoxShadowOffsetX);
+        append_target(detail::StylePropertyId::BoxShadowOffsetY);
+        append_target(detail::StylePropertyId::BoxShadowBlur);
+        append_target(detail::StylePropertyId::BoxShadowSpread);
+        append_target(detail::StylePropertyId::BoxShadowColor);
+      } else if (property == "background") {
+        append_target(detail::StylePropertyId::BackgroundColor);
+      } else if (const auto* exact =
+                     detail::style_property_find(raw_property)) {
+        switch (exact->id) {
+        case detail::StylePropertyId::Opacity:
+        case detail::StylePropertyId::BackgroundColor:
+        case detail::StylePropertyId::TextColor:
+        case detail::StylePropertyId::BorderColor:
+        case detail::StylePropertyId::FontSize:
+        case detail::StylePropertyId::OutlineWidth:
+        case detail::StylePropertyId::OutlineOffset:
+        case detail::StylePropertyId::OutlineColor:
+        case detail::StylePropertyId::RingWidth:
+        case detail::StylePropertyId::RingOffset:
+        case detail::StylePropertyId::RingColor:
+        case detail::StylePropertyId::RingOffsetColor:
+          append_target(exact->id);
+          break;
+        default:
+          break;
+        }
+      }
+
+      if (targets.empty()) {
+        return;
+      }
+
+      if (property == "opacity") {
+        const auto literal =
+            detail::compile_css_literal(targets.front(), value);
+        if (!literal.has_value() ||
+            !detail::style_value_type_matches(literal.type,
+                                              &cmeta_type_float)) {
+          report_invalid(raw_property, raw_value);
+          return;
+        }
+      }
+      if (property == "transform" && !valid_transform(value)) {
+        report_invalid(raw_property, raw_value);
+        return;
+      }
+      const bool color_target = std::all_of(
+          targets.begin(), targets.end(), [](const auto* target) {
+            return target && detail::style_value_type_matches(
+                                 target->type, &flex::cmeta_type_color);
+          });
+      if (color_target && property != "box-shadow" &&
+          !detail::parse_css_color_literal(value).is_concrete()) {
+        report_invalid(raw_property, raw_value);
+        return;
+      }
+
+      ComputedStyle parsed;
+      try {
+        apply_property(property, value, &parsed);
+      } catch (...) {
+        report_invalid(raw_property, raw_value);
+        return;
+      }
+      if (property == "box-shadow" &&
+          to_lower_copy(value) != "none" && !parsed.has_shadow) {
+        report_invalid(raw_property, raw_value);
+        return;
+      }
+
+      for (const auto* target : targets) {
+        if (!append_value(offset, *target, parsed)) {
+          report_invalid(raw_property, raw_value);
+          return;
+        }
+      }
+    };
+
     size_t segment_start = 0;
     size_t i = 0;
     int brace_depth = 0;
@@ -4076,7 +4297,9 @@ private:
               block.substr(content_start, block_close - content_start), props);
           if (!props.empty()) {
             for (float offset : parse_keyframe_offsets(selector_text)) {
-              frames.push_back(AnimationKeyframeStep{offset, props});
+              for (const auto& [property, value] : props) {
+                compile_declaration(offset, property, value);
+              }
             }
           }
 
@@ -4091,15 +4314,23 @@ private:
       ++i;
     }
 
-    if (frames.empty()) {
+    if (compiled_tracks.empty()) {
       return;
     }
 
-    std::stable_sort(frames.begin(), frames.end(),
-                     [](const auto& lhs, const auto& rhs) {
-                       return lhs.offset < rhs.offset;
-                     });
-    keyframes_[name] = std::move(frames);
+    CompiledAnimationProgram program;
+    program.tracks.reserve(compiled_tracks.size());
+    for (auto& [property_id, builder] : compiled_tracks) {
+      (void)property_id;
+      CompiledAnimationTrack track;
+      track.property = builder.property;
+      track.keyframes.reserve(builder.values.size());
+      for (auto& [offset, value] : builder.values) {
+        track.keyframes.push_back({offset, std::move(value)});
+      }
+      program.tracks.push_back(std::move(track));
+    }
+    keyframes_[name] = std::move(program);
   }
 
   void parse_plain_css_fragment(
@@ -8389,7 +8620,7 @@ bool StyleEngine::remove_stylesheet(StylesheetId stylesheet_id) {
   return impl_->remove_stylesheet(stylesheet_id);
 }
 void StyleEngine::apply_styles(Element *elem) { impl_->apply_styles(elem); }
-const std::vector<AnimationKeyframeStep>* StyleEngine::keyframes(
+const CompiledAnimationProgram* StyleEngine::keyframes(
     const std::string& name) const {
   return impl_->keyframes(name);
 }
