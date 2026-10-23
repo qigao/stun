@@ -110,7 +110,7 @@ jobs:
             'flexUI/tests/unicode-standalone/*' 'flexUI/tests/CMakeLists.txt' \
             '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
-      - name: Detect numeric expression parser changes
+      - name: Detect Mermaid parser changes
         id: expression_scope
         shell: bash
         run: |
@@ -126,6 +126,13 @@ jobs:
             'charts/mermaid/mindmap/*' 'charts/mermaid/golden/mindmap/*' \
             'charts/mermaid/xychart/*' 'charts/mermaid/golden/xychart/*' \
             'charts/mermaid/quadrant/*' 'charts/mermaid/golden/quadrant/*' \
+            'charts/mermaid/sequence/*' 'charts/mermaid/golden/sequence/*' \
+            'charts/mermaid/er/*' 'charts/mermaid/golden/er/*' \
+            'charts/mermaid/gantt/*' 'charts/mermaid/golden/gantt/*' \
+            'charts/mermaid/statediagram/*' 'charts/mermaid/golden/state/*' \
+            'charts/mermaid/timeline/*' 'charts/mermaid/golden/timeline/*' \
+            'charts/mermaid/classdiagram/*' 'charts/mermaid/golden/class/*' \
+            'charts/mermaid/c4/*' 'charts/mermaid/golden/c4/*' \
             'charts/mermaid/tests/expression-standalone/*' \
             '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml' '.github/scripts/ci-affected.sh'
 
@@ -412,15 +419,16 @@ jobs:
           ctest --test-dir build/unicode --no-tests=error --verbose --output-on-failure
           git diff --exit-code
 
-      - name: Link real Expression capability and execute parser goldens without Runtime
+      - name: Execute all direct Mermaid parser goldens against installed SDKs
         if: needs.changes.outputs.expression == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S charts/mermaid/tests/expression-standalone -B build/expression-parsers -G Ninja \
+          cmake -S charts/mermaid/tests/expression-standalone -B build/mermaid-parsers -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build/expression-parsers --target stun_expression_qualification --parallel 2
-          ctest --test-dir build/expression-parsers --no-tests=error --verbose --output-on-failure --timeout 120
+          cmake --build build/mermaid-parsers --target stun_parser_qualification --parallel 2
+          ctest --test-dir build/mermaid-parsers --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit build/mermaid-parsers/results.xml
           git diff --exit-code
 
       - name: Preserve exact-head SDK and test evidence
@@ -441,5 +449,6 @@ jobs:
             build/xml-runtime/results.xml
             build/xml-runtime/compile_commands.json
             build/unicode/Testing/Temporary/LastTest.log
-            build/expression-parsers/Testing/Temporary/LastTest.log
+            build/mermaid-parsers/Testing/Temporary/LastTest.log
+            build/mermaid-parsers/results.xml
             build/flowchart-json-golden/flowchart-linkstyle.svg*
