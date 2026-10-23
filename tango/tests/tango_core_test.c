@@ -30,6 +30,100 @@ static void *reject_realloc(void *old, size_t size) {
     return NULL;
 }
 
+static int lifecycle_enters;
+static int lifecycle_leaves;
+static int lifecycle_writes;
+static bool lifecycle_leave_succeeds;
+
+static bool fake_platform_enter(tui_terminal_t *terminal) {
+    (void)terminal;
+    ++lifecycle_enters;
+    return true;
+}
+
+static bool fake_platform_leave(tui_terminal_t *terminal) {
+    (void)terminal;
+    ++lifecycle_leaves;
+    return lifecycle_leave_succeeds;
+}
+
+static bool fake_write(tui_terminal_t *terminal, const char *data, size_t size) {
+    (void)terminal;
+    (void)data;
+    (void)size;
+    ++lifecycle_writes;
+    return true;
+}
+
+static bool reject_write(tui_terminal_t *terminal, const char *data,
+                         size_t size) {
+    (void)terminal;
+    (void)data;
+    (void)size;
+    ++lifecycle_writes;
+    return false;
+}
+
+static int test_terminal_lifecycle_is_transactional(void) {
+    tui_terminal_t *terminal = tui_terminal_create();
+    CHECK(terminal != NULL);
+    terminal->platform_enter = fake_platform_enter;
+    terminal->platform_leave = fake_platform_leave;
+    terminal->write_output = reject_write;
+    lifecycle_enters = lifecycle_leaves = lifecycle_writes = 0;
+    lifecycle_leave_succeeds = true;
+
+    CHECK(!tui_terminal_init(terminal));
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_OUTPUT_IO);
+    CHECK(!terminal->initialized);
+    CHECK(!terminal->platform_active);
+    CHECK(terminal->front == NULL && terminal->back == NULL);
+    CHECK(lifecycle_enters == 1 && lifecycle_leaves == 1);
+    CHECK(lifecycle_writes == 2); /* failed enter + best-effort rollback */
+
+    terminal->write_output = fake_write;
+    CHECK(tui_terminal_init(terminal));
+    CHECK(terminal->initialized);
+    CHECK(terminal->platform_active);
+    CHECK(terminal->front != NULL && terminal->back != NULL);
+
+    terminal->write_output = reject_write;
+    CHECK(!tui_terminal_cleanup(terminal));
+    CHECK(terminal->initialized); /* output restoration can be retried */
+    CHECK(!terminal->platform_active); /* platform restoration still ran */
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_OUTPUT_IO);
+    terminal->write_output = fake_write;
+    CHECK(tui_terminal_cleanup(terminal));
+
+    tui_buffer_t *retained_front = terminal->front;
+    tui_buffer_t *retained_back = terminal->back;
+    terminal->write_output = reject_write;
+    CHECK(!tui_terminal_init(terminal));
+    CHECK(!terminal->initialized);
+    CHECK(!terminal->platform_active);
+    CHECK(terminal->front == retained_front && terminal->back == retained_back);
+
+    terminal->write_output = fake_write;
+    CHECK(tui_terminal_init(terminal));
+    lifecycle_leave_succeeds = false;
+    CHECK(!tui_terminal_cleanup(terminal));
+    CHECK(terminal->initialized); /* restoration can be retried */
+    CHECK(terminal->platform_active);
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_PLATFORM);
+
+    lifecycle_leave_succeeds = true;
+    CHECK(tui_terminal_cleanup(terminal));
+    CHECK(!terminal->initialized);
+    CHECK(!terminal->platform_active);
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_NONE);
+
+    /* A later successful init replaces, rather than leaks, retained buffers. */
+    CHECK(tui_terminal_init(terminal));
+    CHECK(tui_terminal_cleanup(terminal));
+    tui_terminal_destroy(terminal);
+    return 0;
+}
+
 static int test_terminal_output_limit_is_atomic(void) {
     tui_terminal_t *terminal = tui_terminal_create();
     CHECK(terminal != NULL);
@@ -172,6 +266,7 @@ static int test_textarea_bounds(void) {
 
 int main(void) {
     if (test_terminal_link()) return 1;
+    if (test_terminal_lifecycle_is_transactional()) return 1;
     if (test_terminal_output_limit_is_atomic()) return 1;
     if (test_buffer_and_layout()) return 1;
     if (test_textarea_bounds()) return 1;

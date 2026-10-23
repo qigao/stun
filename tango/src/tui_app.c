@@ -58,7 +58,10 @@ void tui_app_run(tui_app_t* app) {
     if (!app) return;
     
     if (!tui_terminal_init(app->terminal)) return;
-    tui_terminal_enable_mouse(app->terminal);
+    if (!tui_terminal_enable_mouse(app->terminal)) {
+        (void)tui_terminal_cleanup(app->terminal);
+        return;
+    }
     
     bool running = true;
     bool needs_redraw = true;
@@ -106,8 +109,8 @@ void tui_app_run(tui_app_t* app) {
         sleep_ms(16);  /* ~60 FPS */
     }
     
-    tui_terminal_disable_mouse(app->terminal);
-    tui_terminal_cleanup(app->terminal);
+    (void)tui_terminal_disable_mouse(app->terminal);
+    (void)tui_terminal_cleanup(app->terminal);
 }
 
 /* ============================================================================
