@@ -350,10 +350,12 @@ static int test_buffer_and_layout(void) {
 
 static char rendered[4096];
 static size_t rendered_len;
+static size_t rendered_write_calls;
 
 static bool capture_write(tui_terminal_t *terminal, const char *data,
                           size_t size) {
     (void)terminal;
+    ++rendered_write_calls;
     if (size > sizeof(rendered) - 1u - rendered_len) return false;
     memcpy(rendered + rendered_len, data, size);
     rendered_len += size;
@@ -538,10 +540,12 @@ static int test_terminal_render_contract(void) {
 static int expect_invalid_render(tui_terminal_t *terminal,
                                  const tui_cell_t expected_front[3]) {
     rendered_len = 0u;
+    rendered_write_calls = 0u;
     CHECK(!tui_terminal_render(terminal));
     CHECK(tui_terminal_last_error(terminal) ==
           TUI_TERMINAL_ERROR_INVALID_STATE);
     CHECK(rendered_len == 0u);
+    CHECK(rendered_write_calls == 0u);
     CHECK(terminal->output_len == 0u);
     CHECK(tui_buffer_is_dirty(terminal->back));
     for (int x = 0; x < 3; ++x) {
