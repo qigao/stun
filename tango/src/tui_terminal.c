@@ -437,10 +437,18 @@ bool tui_terminal_init(tui_terminal_t* term) {
         }
     }
     
-    /* Enter alternate screen, hide cursor */
+    /* Enter alternate screen and hide cursor.  Unix input enables bracketed
+     * paste so pasted ESC/CSI bytes stay outside the key decoder. */
+#ifdef _WIN32
+    const char* enter_sequence = "\033[?1049h\033[?25l\033[2J";
+    const char* rollback_sequence = "\033[?25h\033[?1049l\033[0m";
+#else
+    const char* enter_sequence = "\033[?1049h\033[?25l\033[2J\033[?2004h";
+    const char* rollback_sequence = "\033[?2004l\033[?25h\033[?1049l\033[0m";
+#endif
     if (fflush(stdout) != 0 ||
-        !write_raw_str(term, "\033[?1049h\033[?25l\033[2J")) {
-        (void)write_raw_str(term, "\033[?25h\033[?1049l\033[0m");
+        !write_raw_str(term, enter_sequence)) {
+        (void)write_raw_str(term, rollback_sequence);
         const bool restored = term->platform_leave(term);
         if (restored) term->platform_active = false;
         tui_buffer_destroy(front);
@@ -466,8 +474,12 @@ bool tui_terminal_cleanup(tui_terminal_t* term) {
     
     if (!tui_terminal_disable_mouse(term)) ok = false;
     
-    if (fflush(stdout) != 0 ||
-        !write_raw_str(term, "\033[?25h\033[?1049l\033[0m")) {
+#ifdef _WIN32
+    const char* leave_sequence = "\033[?25h\033[?1049l\033[0m";
+#else
+    const char* leave_sequence = "\033[?2004l\033[?25h\033[?1049l\033[0m";
+#endif
+    if (fflush(stdout) != 0 || !write_raw_str(term, leave_sequence)) {
         term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
         ok = false;
     }
@@ -481,6 +493,12 @@ bool tui_terminal_cleanup(tui_terminal_t* term) {
     if (ok) {
         term->initialized = false;
         term->last_error = TUI_TERMINAL_ERROR_NONE;
+#ifndef _WIN32
+        term->input_len = 0u;
+        term->paste_bytes = 0u;
+        term->paste_active = false;
+        term->paste_discarding = false;
+#endif
     }
     return ok;
 }

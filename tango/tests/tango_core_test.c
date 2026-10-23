@@ -253,6 +253,60 @@ static int test_terminal_input_is_incremental(void) {
     CHECK(!tui_terminal_input_flush(terminal, &event));
     CHECK(terminal->input_len == 0u);
 
+    /* Bracketed paste framing may split at any byte.  Payload scalars are
+     * explicitly typed as paste data, never keyboard commands. */
+    CHECK(tui_terminal_input_push(terminal, "\033[20", 4u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "0~", 2u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(terminal->paste_active);
+    CHECK(tui_terminal_input_push(terminal, "a\xE4", 2u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_PASTE && event.ch == 'a');
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "\xB8\xAD\r\n", 4u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_PASTE && event.ch == 0x4e2du);
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_PASTE && event.ch == '\n');
+
+    /* An escape sequence inside a paste cannot become an arrow event. */
+    CHECK(tui_terminal_input_push(terminal, "\033[Aq", 4u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_PASTE && event.ch == '[');
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_PASTE && event.ch == 'A');
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_PASTE && event.ch == 'q');
+
+    CHECK(tui_terminal_input_push(terminal, "\033[20", 4u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "1~\033[A", 5u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(!terminal->paste_active);
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_UP);
+
+    /* A timed-out partial paste control never falls through as Escape/key
+     * input; discard mode remains bounded until a later complete end marker. */
+    CHECK(tui_terminal_input_push(terminal, "\033[200~", 6u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "\033[20", 4u));
+    CHECK(!tui_terminal_input_flush(terminal, &event));
+    CHECK(terminal->paste_active && terminal->paste_discarding);
+    CHECK(tui_terminal_input_push(terminal, "\033[201~k", 7u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.ch == 'k');
+
+    /* Once the hard payload limit is reached, content is discarded until the
+     * trusted end marker, after which ordinary keyboard decoding resumes. */
+    CHECK(tui_terminal_input_push(terminal, "\033[200~", 6u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    terminal->paste_bytes = TUI_TERMINAL_PASTE_LIMIT;
+    CHECK(tui_terminal_input_push(terminal, "x\033[201~z", 8u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(!terminal->paste_active && !terminal->paste_discarding);
+    CHECK(event.type == TUI_EVENT_KEY && event.ch == 'z');
+
     tui_terminal_destroy(terminal);
     return 0;
 }
@@ -550,6 +604,13 @@ static tui_event_t scalar_event(uint32_t scalar) {
     return e;
 }
 
+static tui_event_t paste_event(uint32_t scalar) {
+    tui_event_t e = {0};
+    e.type = TUI_EVENT_PASTE;
+    e.ch = scalar;
+    return e;
+}
+
 static int test_input_grapheme_editing(void) {
     tui_input_state_t state;
     tui_input_init(&state);
@@ -571,6 +632,15 @@ static int test_input_grapheme_editing(void) {
     CHECK(strcmp(state.text, UTF8_WOMAN_TECH) == 0);
     CHECK(tui_input_handle(&state, &backspace));
     CHECK(state.text[0] == '\0' && state.cursor == 0 && state.len == 0);
+
+    /* Paste events insert data but cannot smuggle a navigation key. */
+    tui_event_t pasted = paste_event('x');
+    pasted.key = TUI_KEY_BACKSPACE;
+    CHECK(tui_input_handle(&state, &pasted));
+    CHECK(strcmp(state.text, "x") == 0 && state.cursor == 1);
+    pasted = paste_event('\n');
+    CHECK(!tui_input_handle(&state, &pasted));
+    CHECK(strcmp(state.text, "x") == 0);
 
     /* Scalar input can merge with adjacent text; deletion still removes the
      * resulting complete extended grapheme. */
@@ -690,6 +760,15 @@ static int test_textarea_bounds(void) {
     CHECK(ta->cursor_x == (int)(sizeof(UTF8_E_ACUTE) - 1u));
     CHECK(tui_textarea_handle(ta, &backspace));
     CHECK(ta->lines[0][0] == '\0' && ta->cursor_x == 0);
+
+    /* Multi-line paste content uses data events; only newline data splits. */
+    tui_event_t pasted = paste_event(0x4e2du);
+    pasted.key = TUI_KEY_DELETE;
+    CHECK(tui_textarea_handle(ta, &pasted));
+    CHECK(strcmp(ta->lines[0], UTF8_CJK) == 0);
+    pasted = paste_event('\n');
+    CHECK(tui_textarea_handle(ta, &pasted));
+    CHECK(ta->line_count == 2 && ta->cursor_y == 1 && ta->cursor_x == 0);
 
     /* Vertical movement preserves terminal columns rather than byte offsets. */
     tui_textarea_set_text(ta, UTF8_CJK "a\nabc");

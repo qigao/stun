@@ -12,6 +12,7 @@
 #else
 #include <signal.h>
 #include <termios.h>
+#define TUI_TERMINAL_PASTE_LIMIT (1024u * 1024u)
 #endif
 
 struct tui_terminal;
@@ -62,6 +63,9 @@ struct tui_terminal {
      * queue: Unicode scalar/grapheme decoding belongs to Salts::Unicode. */
     unsigned char input_bytes[64];
     size_t input_len;
+    size_t paste_bytes;
+    bool paste_active;
+    bool paste_discarding;
 #endif
 };
 

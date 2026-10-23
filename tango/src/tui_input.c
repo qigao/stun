@@ -306,6 +306,13 @@ static tui_input_result_t decode_csi(tui_terminal_t *term,
     if (bytes[size - 1u] == '~') {
         int number;
         if (parse_decimal(bytes, 2u, size - 1u, &number)) {
+            if (number == 200) {
+                term->paste_active = true;
+                term->paste_discarding = false;
+                term->paste_bytes = 0u;
+                input_consume(term, size);
+                return TUI_INPUT_IGNORED;
+            }
             switch (number) {
                 case 1: event->key = TUI_KEY_HOME; break;
                 case 2: event->key = TUI_KEY_INSERT; break;
@@ -333,10 +340,94 @@ static tui_input_result_t decode_csi(tui_terminal_t *term,
     return TUI_INPUT_IGNORED;
 }
 
+static bool paste_accept(tui_terminal_t *term, size_t size) {
+    if (term->paste_discarding) return false;
+    if (term->paste_bytes > TUI_TERMINAL_PASTE_LIMIT ||
+        size > TUI_TERMINAL_PASTE_LIMIT - term->paste_bytes) {
+        term->paste_discarding = true;
+        return false;
+    }
+    term->paste_bytes += size;
+    return true;
+}
+
+static tui_input_result_t decode_paste(tui_terminal_t *term,
+                                       tui_event_t *event) {
+    static const unsigned char end_marker[] = {27u, '[', '2', '0', '1', '~'};
+    const unsigned char *bytes = term->input_bytes;
+    if (term->input_len == 0u) return TUI_INPUT_INCOMPLETE;
+
+    if (bytes[0] == 27u) {
+        const size_t compared = term->input_len < sizeof(end_marker) ?
+            term->input_len : sizeof(end_marker);
+        if (memcmp(bytes, end_marker, compared) == 0) {
+            if (term->input_len < sizeof(end_marker))
+                return TUI_INPUT_INCOMPLETE;
+            input_consume(term, sizeof(end_marker));
+            term->paste_active = false;
+            term->paste_discarding = false;
+            term->paste_bytes = 0u;
+            return TUI_INPUT_IGNORED;
+        }
+
+        /* Escape/control payload is data from an untrusted paste, never a
+         * keyboard command.  Drop ESC and preserve later printable text. */
+        input_consume(term, 1u);
+        (void)paste_accept(term, 1u);
+        return TUI_INPUT_IGNORED;
+    }
+
+    if (term->paste_discarding) {
+        input_consume(term, 1u);
+        return TUI_INPUT_IGNORED;
+    }
+
+    if (bytes[0] < 0x80u) {
+        size_t size = 1u;
+        uint32_t scalar = bytes[0];
+        if (scalar == '\r') {
+            if (term->input_len == 1u) return TUI_INPUT_INCOMPLETE;
+            if (bytes[1] == '\n') size = 2u;
+            scalar = '\n';
+        }
+        input_consume(term, size);
+        if (!paste_accept(term, size)) return TUI_INPUT_IGNORED;
+        if ((scalar < 0x20u && scalar != '\n') || scalar == 0x7fu)
+            return TUI_INPUT_IGNORED;
+        event->type = TUI_EVENT_PASTE;
+        event->ch = scalar;
+        return TUI_INPUT_EVENT;
+    }
+
+    const size_t max = term->input_len < 4u ? term->input_len : 4u;
+    for (size_t size = 1u; size <= max; ++size) {
+        const vstr input = vstr_from_buf((const char *)bytes, size);
+        salts_unicode_scalar scalar;
+        size_t cursor = 0u;
+        if (salts_unicode_utf8_next(input, &cursor, &scalar) ==
+                SALTS_UNICODE_OK && cursor == size) {
+            input_consume(term, size);
+            if (!paste_accept(term, size) ||
+                (scalar.value >= 0x80u && scalar.value <= 0x9fu))
+                return TUI_INPUT_IGNORED;
+            event->type = TUI_EVENT_PASTE;
+            event->ch = scalar.value;
+            return TUI_INPUT_EVENT;
+        }
+    }
+    if (term->input_len >= 4u) {
+        input_consume(term, 1u);
+        (void)paste_accept(term, 1u);
+        return TUI_INPUT_IGNORED;
+    }
+    return TUI_INPUT_INCOMPLETE;
+}
+
 static tui_input_result_t decode_one(tui_terminal_t *term,
                                      tui_event_t *event) {
     const unsigned char *bytes = term->input_bytes;
     if (term->input_len == 0u) return TUI_INPUT_INCOMPLETE;
+    if (term->paste_active) return decode_paste(term, event);
 
     if (bytes[0] < 0x80u && bytes[0] != 27u) {
         input_key(bytes[0], event);
@@ -416,8 +507,16 @@ bool tui_terminal_input_next(tui_terminal_t *term, tui_event_t *event) {
 bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event) {
     if (!term || !event || term->input_len == 0u) return false;
     if (tui_terminal_input_next(term, event)) return true;
+    if (term->input_len == 0u) return false;
 
     memset(event, 0, sizeof(*event));
+    if (term->paste_active) {
+        /* A timed-out paste prefix/scalar is never replayed through the key
+         * decoder.  Stay in discard mode until a complete end marker arrives. */
+        input_consume(term, term->input_len);
+        term->paste_discarding = true;
+        return false;
+    }
     if (term->input_len == 1u && term->input_bytes[0] == 27u) {
         input_key(term->input_bytes[0], event);
         input_consume(term, 1u);
