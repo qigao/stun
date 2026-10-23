@@ -471,6 +471,77 @@ static tui_event_t key_event(tui_key_t key) {
     return e;
 }
 
+static tui_event_t scalar_event(uint32_t scalar) {
+    tui_event_t e = {0};
+    e.type = TUI_EVENT_KEY;
+    e.ch = scalar;
+    return e;
+}
+
+static int test_input_grapheme_editing(void) {
+    tui_input_state_t state;
+    tui_input_init(&state);
+    tui_input_set(&state, UTF8_WOMAN_TECH "a" UTF8_E_ACUTE);
+    CHECK(state.len == (int)(sizeof(UTF8_WOMAN_TECH) - 1u + 1u +
+                             sizeof(UTF8_E_ACUTE) - 1u));
+    CHECK(state.cursor == state.len);
+
+    tui_event_t left = key_event(TUI_KEY_LEFT);
+    tui_event_t right = key_event(TUI_KEY_RIGHT);
+    tui_event_t backspace = key_event(TUI_KEY_BACKSPACE);
+    tui_event_t del = key_event(TUI_KEY_DELETE);
+    CHECK(tui_input_handle(&state, &left));
+    CHECK(state.cursor == (int)(sizeof(UTF8_WOMAN_TECH) - 1u + 1u));
+    CHECK(tui_input_handle(&state, &backspace));
+    CHECK(strcmp(state.text, UTF8_WOMAN_TECH UTF8_E_ACUTE) == 0);
+    CHECK(state.cursor == (int)(sizeof(UTF8_WOMAN_TECH) - 1u));
+    CHECK(tui_input_handle(&state, &del));
+    CHECK(strcmp(state.text, UTF8_WOMAN_TECH) == 0);
+    CHECK(tui_input_handle(&state, &backspace));
+    CHECK(state.text[0] == '\0' && state.cursor == 0 && state.len == 0);
+
+    /* Scalar input can merge with adjacent text; deletion still removes the
+     * resulting complete extended grapheme. */
+    tui_input_set(&state, "e");
+    tui_event_t acute = scalar_event(0x0301u);
+    CHECK(tui_input_handle(&state, &acute));
+    CHECK(strcmp(state.text, UTF8_E_ACUTE) == 0);
+    CHECK(state.cursor == (int)(sizeof(UTF8_E_ACUTE) - 1u));
+    CHECK(tui_input_handle(&state, &backspace));
+    CHECK(state.text[0] == '\0');
+
+    tui_input_set(&state, UTF8_WOMAN_TECH "a" UTF8_E_ACUTE);
+    state.cursor = 0;
+    CHECK(tui_input_handle(&state, &right));
+    CHECK(state.cursor == (int)(sizeof(UTF8_WOMAN_TECH) - 1u));
+    CHECK(tui_input_handle(&state, &right));
+    CHECK(state.cursor == (int)(sizeof(UTF8_WOMAN_TECH) - 1u + 1u));
+    CHECK(tui_input_handle(&state, &right));
+    CHECK(state.cursor == state.len);
+
+    /* Capacity truncation never copies a partial UTF-8 scalar/grapheme. */
+    char capacity_text[258];
+    memset(capacity_text, 'a', 254u);
+    memcpy(capacity_text + 254u, UTF8_CJK, sizeof(UTF8_CJK));
+    tui_input_set(&state, capacity_text);
+    CHECK(state.len == 254 && state.cursor == 254);
+    CHECK(state.text[254] == '\0');
+    tui_input_set(&state, "\xF0\x28\x8C\x28");
+    CHECK(state.len == 0 && state.cursor == 0 && state.text[0] == '\0');
+
+    /* Widget cursor placement uses display columns, not UTF-8 bytes. */
+    tui_buffer_t *buffer = tui_buffer_create(8, 1);
+    CHECK(buffer != NULL);
+    tui_widget_input(buffer, 0, 0, 8, UTF8_CJK "a",
+                     (int)(sizeof(UTF8_CJK) - 1u), true, NULL);
+    CHECK(tui_buffer_at_const(buffer, 1, 0)->span == TUI_CELL_SPAN_WIDE);
+    CHECK(tui_buffer_at_const(buffer, 2, 0)->span ==
+          TUI_CELL_SPAN_CONTINUATION);
+    CHECK(tui_buffer_at_const(buffer, 3, 0)->ch == 0x258fu);
+    tui_buffer_destroy(buffer);
+    return 0;
+}
+
 static int test_textarea_bounds(void) {
     tui_textarea_t *ta = (tui_textarea_t*)calloc(1, sizeof(*ta));
     CHECK(ta != NULL);
@@ -543,6 +614,7 @@ int main(void) {
     if (test_buffer_and_layout()) return 1;
     if (test_grapheme_cells()) return 1;
     if (test_layout_rejects_invalid_graphs()) return 1;
+    if (test_input_grapheme_editing()) return 1;
     if (test_textarea_bounds()) return 1;
     puts("Tango native-core tests passed");
     return 0;
