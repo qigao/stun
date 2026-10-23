@@ -90,6 +90,65 @@ static int classify_grapheme(vstr cluster, uint32_t* first_scalar) {
     return has_base ? 1 : 0;
 }
 
+static bool encode_display_scalar(uint32_t scalar, char bytes[4],
+                                  size_t* size) {
+    if (!size || scalar > 0x10ffffu ||
+        (scalar >= 0xd800u && scalar <= 0xdfffu) ||
+        scalar < 0x20u || (scalar >= 0x7fu && scalar <= 0x9fu)) return false;
+    if (scalar < 0x80u) {
+        bytes[0] = (char)scalar;
+        *size = 1u;
+    } else if (scalar < 0x800u) {
+        bytes[0] = (char)(0xc0u | (scalar >> 6));
+        bytes[1] = (char)(0x80u | (scalar & 0x3fu));
+        *size = 2u;
+    } else if (scalar < 0x10000u) {
+        bytes[0] = (char)(0xe0u | (scalar >> 12));
+        bytes[1] = (char)(0x80u | ((scalar >> 6) & 0x3fu));
+        bytes[2] = (char)(0x80u | (scalar & 0x3fu));
+        *size = 3u;
+    } else {
+        bytes[0] = (char)(0xf0u | (scalar >> 18));
+        bytes[1] = (char)(0x80u | ((scalar >> 12) & 0x3fu));
+        bytes[2] = (char)(0x80u | ((scalar >> 6) & 0x3fu));
+        bytes[3] = (char)(0x80u | (scalar & 0x3fu));
+        *size = 4u;
+    }
+    return true;
+}
+
+static bool normalize_leading_cell(tui_cell_t* cell) {
+    int width;
+    uint32_t first = 0u;
+
+    if (!cell || cell->span == TUI_CELL_SPAN_CONTINUATION ||
+        cell->span > TUI_CELL_SPAN_CONTINUATION ||
+        cell->grapheme_len > TUI_CELL_GRAPHEME_CAPACITY) return false;
+
+    if (cell->grapheme_len != 0u) {
+        const vstr input = vstr_from_buf(cell->grapheme,
+                                         cell->grapheme_len);
+        size_t cursor = 0u;
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+                SALTS_UNICODE_OK ||
+            cursor != input.len || cluster.len != input.len) return false;
+        width = classify_grapheme(cluster, &first);
+        if (width <= 0 || width > 2) return false;
+        cell->ch = first;
+    } else {
+        char encoded[4];
+        size_t encoded_size = 0u;
+        if (!encode_display_scalar(cell->ch, encoded, &encoded_size))
+            return false;
+        width = classify_grapheme(vstr_from_buf(encoded, encoded_size), NULL);
+        if (width <= 0 || width > 2) return false;
+    }
+
+    cell->span = width == 2 ? TUI_CELL_SPAN_WIDE : TUI_CELL_SPAN_SINGLE;
+    return true;
+}
+
 int tui_grapheme_width(const char* utf8, size_t len) {
     if ((!utf8 && len != 0u) || len == 0u) return -1;
     const vstr input = vstr_from_buf(utf8, len);
@@ -220,10 +279,8 @@ void tui_buffer_clear_color(tui_buffer_t* buf, tui_color_t bg) {
 }
 
 void tui_buffer_set(tui_buffer_t* buf, int x, int y, tui_cell_t cell) {
-    if (!tui_buffer_in_bounds(buf, x, y) ||
-        cell.span == TUI_CELL_SPAN_CONTINUATION ||
-        cell.span > TUI_CELL_SPAN_CONTINUATION ||
-        cell.grapheme_len > TUI_CELL_GRAPHEME_CAPACITY) return;
+    if (!buf || !tui_buffer_in_bounds(buf, x, y) ||
+        !normalize_leading_cell(&cell)) return;
     if (cell.span == TUI_CELL_SPAN_WIDE &&
         !tui_buffer_in_bounds(buf, x + 1, y)) return;
 
