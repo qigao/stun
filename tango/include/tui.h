@@ -283,6 +283,8 @@ typedef enum {
     TUI_EVENT_MOUSE_RELEASE,
     TUI_EVENT_MOUSE_MOVE,
     TUI_EVENT_RESIZE,
+    /* Bracketed-paste content is never decoded as keyboard control input. */
+    TUI_EVENT_PASTE,
 } tui_event_type_t;
 
 typedef struct {
@@ -299,6 +301,7 @@ static inline bool tui_event_is_mouse(const tui_event_t* e) {
     return e->type == TUI_EVENT_MOUSE_PRESS || e->type == TUI_EVENT_MOUSE_RELEASE || e->type == TUI_EVENT_MOUSE_MOVE; 
 }
 static inline bool tui_event_is_resize(const tui_event_t* e) { return e->type == TUI_EVENT_RESIZE; }
+static inline bool tui_event_is_paste(const tui_event_t* e) { return e->type == TUI_EVENT_PASTE; }
 static inline bool tui_event_is(const tui_event_t* e, tui_key_t k) { return e->type == TUI_EVENT_KEY && e->key == k; }
 static inline bool tui_event_is_char(const tui_event_t* e, char c) { return e->type == TUI_EVENT_KEY && e->ch == (uint32_t)c; }
 static inline bool tui_event_is_ctrl(const tui_event_t* e, char c) {
