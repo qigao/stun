@@ -2569,10 +2569,12 @@ spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
     style.variables[Symbol("--white-space")] = "nowrap";
     style.variables[Symbol("--text-overflow")] = "clip";
     const std::string text = "\xE4\xB8\xAD\xE6\x96\x87";
+    const float scalar_width = approximate_text_width(&style, "\xE4\xB8\xAD");
     const struct {
       float width;
       const char* expected;
-    } cases[] = {{30.0f, "\xE4\xB8\xAD"}, {14.0f, ""}};
+    } cases[] = {{scalar_width * 1.5f, "\xE4\xB8\xAD"},
+                 {scalar_width * 0.5f, ""}};
 
     for (const auto& item : cases) {
       const auto calls = render_plain_text(style, text, item.width);
@@ -2591,11 +2593,16 @@ spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
     style.font_size = 10.0f;
     style.variables[Symbol("--white-space")] = "nowrap";
     style.variables[Symbol("--text-overflow")] = "ellipsis";
-    const std::string text = "\xE4\xB8\xAD\xE6\x96\x87";
+    // Keep the full source wider than a prefix plus ellipsis under the
+    // grapheme-based estimate; UTF-8 byte length is not a glyph advance.
+    const std::string text = "\xE4\xB8\xAD\xE6\x96\x87\xE8\xAA\x9E";
+    const float scalar_width = approximate_text_width(&style, "\xE4\xB8\xAD");
+    const float ellipsis_width = approximate_text_width(&style, "...");
     const struct {
       float width;
       const char* expected;
-    } cases[] = {{36.0f, "\xE4\xB8\xAD..."}, {20.0f, "..."}};
+    } cases[] = {{ellipsis_width + scalar_width * 1.5f, "\xE4\xB8\xAD..."},
+                 {ellipsis_width + scalar_width * 0.5f, "..."}};
 
     for (const auto& item : cases) {
       const auto calls = render_plain_text(style, text, item.width);
@@ -2623,7 +2630,8 @@ spec("RenderManager preserves UTF-8 scalar boundaries in constrained text") {
       ComputedStyle style;
       style.font_size = 10.0f;
       style.variables[Symbol(mode.property)] = mode.value;
-      const auto calls = render_plain_text(style, text, 20.0f);
+      const float width = approximate_text_width(&style, expected.front()) * 0.5f;
+      const auto calls = render_plain_text(style, text, width);
       check(calls.size() == expected.size());
       std::string emitted;
       for (size_t i = 0; i < calls.size(); ++i) {
