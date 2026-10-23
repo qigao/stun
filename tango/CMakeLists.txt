@@ -1,13 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Permit a dependency-free C core gate without configuring the full Stun GUI.
+# Permit the C core gate without configuring the full Stun GUI.  The installed
+# Salts SDK remains mandatory so standalone and integrated builds have one
+# Unicode implementation and identical input semantics.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(StunTango LANGUAGES C)
     include(CTest)
+    find_package(Salts CONFIG REQUIRED)
 endif()
 set(TARGET_NAME tango)
 
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON) 
 
 # TUI library sources
@@ -23,6 +26,10 @@ set(TUI_SOURCES
 )
 
 add_library(${TARGET_NAME} STATIC ${TUI_SOURCES})
+if(NOT TARGET Salts::Unicode)
+    message(FATAL_ERROR "Tango requires the canonical installed Salts::Unicode target")
+endif()
+target_link_libraries(${TARGET_NAME} PUBLIC Salts::Unicode)
 
 # tui_advanced.c uses sqrtf; static consumers need the math dependency.
 if(UNIX)
