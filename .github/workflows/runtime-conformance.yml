@@ -61,6 +61,7 @@ jobs:
             'charts/mermaid/flowchart/*' 'shared/layout/*' \
             'charts/mermaid/golden/flowchart/*' \
             'tools/lemon/*' '.github/scripts/ci-affected.sh' \
+            '.github/scripts/build-re2c-master.sh' \
             '.github/scripts/restore-flowchart-sdk.py' \
             '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
 
@@ -262,13 +263,13 @@ jobs:
             --salts-utils-checksums "$RUNNER_TEMP/stun-flowchart-checks/utils/SHA256SUMS"
           printf 'LD_LIBRARY_PATH=%s/lib\n' "$SALTS_ROOT" >> "$GITHUB_ENV"
 
-      - name: Install minimal parser generator tools
+      - name: Install parser prerequisites and build re2c master
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends re2c ninja-build nlohmann-json3-dev libfreetype-dev libstb-dev libpugixml-dev
-          re2c --version
+          sudo apt-get install -y --no-install-recommends ninja-build nlohmann-json3-dev libfreetype-dev libstb-dev libpugixml-dev
+          bash .github/scripts/build-re2c-master.sh
 
       - uses: actions/setup-node@v4
         with:
@@ -431,6 +432,7 @@ jobs:
           retention-days: 3
           path: |
             ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
+            ${{ runner.temp }}/stun-re2c-provenance.json
             build/flowchart-json-golden/Testing/Temporary/LastTest.log
             build/flowchart-json-golden/dependencies.txt
             build/typed-animation/Testing/Temporary/LastTest.log

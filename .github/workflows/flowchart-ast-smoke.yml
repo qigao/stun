@@ -54,6 +54,7 @@ jobs:
           bash .github/scripts/ci-affected.sh \
             'charts/mermaid/flowchart/*' 'tools/lemon/*' \
             '.github/scripts/ci-affected.sh' \
+            '.github/scripts/build-re2c-master.sh' \
             '.github/workflows/flowchart-ast-smoke.yml'
 
   parser:
@@ -76,11 +77,11 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-      - name: Install grammar generator
+      - name: Build grammar generator from upstream master
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends re2c ninja-build
-          re2c --version
+          sudo apt-get install -y --no-install-recommends ninja-build
+          bash .github/scripts/build-re2c-master.sh
       - name: Configure production-source C11 parser harness
         shell: bash
         run: |
@@ -98,3 +99,11 @@ jobs:
             --no-tests=error --verbose --output-on-failure
       - name: Ensure tracked sources are unchanged
         run: git diff --exit-code
+      - name: Preserve re2c source provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: re2c-master-${{ needs.changes.outputs.source_sha }}
+          if-no-files-found: error
+          retention-days: 3
+          path: ${{ runner.temp }}/stun-re2c-provenance.json
