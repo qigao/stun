@@ -27,6 +27,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -38,13 +39,30 @@ jobs:
     name: GraphLayout change scope
     runs-on: ubuntu-24.04
     outputs:
+      source_sha: ${{ steps.run_head.outputs.sha }}
       affected: ${{ steps.scope.outputs.affected }}
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
+          [[ "$sha" =~ ^[0-9a-fA-F]{40}$ && ! "$sha" =~ ^0+$ ]]
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          printf 'RunHead=%s\n' "$sha"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           fetch-depth: 1
           persist-credentials: false
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Classify latest PR update
         id: scope
         shell: bash
@@ -74,7 +92,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.changes.outputs.source_sha }}
           persist-credentials: false
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Setup ccache
         if: runner.os != 'Windows'
         shell: bash
