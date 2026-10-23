@@ -1164,7 +1164,13 @@ char* tui_textarea_get_text(const tui_textarea_t* ta) {
 
 bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
     if (!ta || !event || !ta->focused) return false;
-    if (event->type != TUI_EVENT_KEY) return false;
+    if (event->type != TUI_EVENT_KEY && event->type != TUI_EVENT_PASTE)
+        return false;
+    const tui_key_t key = event->type == TUI_EVENT_PASTE &&
+                                  (event->ch == '\n' || event->ch == '\r') ?
+                              TUI_KEY_ENTER :
+                              (event->type == TUI_EVENT_KEY ? event->key :
+                                                             TUI_KEY_NONE);
 
     if (ta->line_count < 1) ta->line_count = 1;
     if (ta->line_count > TUI_TEXTAREA_MAX_LINES)
@@ -1178,7 +1184,7 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
     ta->cursor_x = (int)textarea_boundary_at_or_before(
         input, ta->cursor_x < 0 ? 0u : (size_t)ta->cursor_x);
     
-    switch (event->key) {
+    switch (key) {
         case TUI_KEY_UP:
             if (ta->cursor_y > 0) {
                 int column = textarea_column_to(input, (size_t)ta->cursor_x);
