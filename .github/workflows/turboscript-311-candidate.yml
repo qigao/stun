@@ -25,12 +25,12 @@ jobs:
       SALTS_RELEASE: v2.3.0-rc.17
       SALTS_UTILS_RELEASE: v4.3.0-rc.11
       QUALIFY_TURBOSCRIPT: 'true'
-      CANDIDATE_RUN: '39906294375'
-      CANDIDATE_ARTIFACT: '12481636996'
-      CANDIDATE_SHA: 76b2dd49829e33500d5e08404ecd1a60dc130fc4
-      CANDIDATE_VERSION: 3.0.11-ci.329.1
-      CANDIDATE_ZIP_SHA256: b1b6510348d7aa24555492e8171115920b313afc2066e0444f02b36c0d72a7a7
-      CANDIDATE_PACKAGE_SHA256: aa532bcead3553bc3ad6c3e3002baf23c809951308989f67d33bb04de08440ab
+      CANDIDATE_RUN: '39908706869'
+      CANDIDATE_ARTIFACT: '12481768762'
+      CANDIDATE_SHA: cf84f011e0cec2a04f322ced1b3c9ff43f0bbc24
+      CANDIDATE_VERSION: 3.0.11-ci.332.1
+      CANDIDATE_ZIP_SHA256: d935cd1186f2b825a1c3a372710bf8e4ddc76617a3d4226129c4fa8bfcc440e4
+      CANDIDATE_PACKAGE_SHA256: 0069752453ada1a243857e959b1d5956bb96ee7f542610205ab7707ac4f727a7
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
@@ -234,7 +234,7 @@ jobs:
         fi
         cmake --build build/xml-runtime --target "${targets[@]}" --parallel 2
         ctest --test-dir build/xml-runtime --no-tests=error --verbose --output-on-failure \
-          --timeout 120 --output-junit build/xml-runtime/results.xml
+          --timeout 120 --output-junit "$GITHUB_WORKSPACE/build/xml-runtime/results.xml"
         git diff --exit-code
     - name: Preserve candidate and unchanged-consumer evidence
       if: always()
