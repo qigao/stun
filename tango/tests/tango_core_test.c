@@ -263,6 +263,65 @@ static int test_buffer_and_layout(void) {
     return 0;
 }
 
+static int test_layout_rejects_invalid_graphs(void) {
+    int x = 7, y = 7, w = 7, h = 7;
+
+    CHECK(tui_layout_item(NULL) == -1);
+    tui_layout_reset(NULL);
+    tui_layout_insert(NULL, 0, 1);
+    tui_layout_set_size(NULL, 0, 1, 1);
+    tui_layout_set_min_size(NULL, 0, 1, 1);
+    tui_layout_set_grow(NULL, 0, 1);
+    tui_layout_set_shrink(NULL, 0, 1);
+    tui_layout_set_flags(NULL, 0, 0);
+    tui_layout_set_margins(NULL, 0, 0, 0, 0, 0);
+    tui_layout_compute(NULL, 0, 1, 1);
+    tui_layout_get_rect(NULL, 0, &x, &y, &w, &h);
+    CHECK(x == 0 && y == 0 && w == 0 && h == 0);
+
+    tui_layout_t *layout = tui_layout_create();
+    CHECK(layout != NULL);
+    int root = tui_layout_item(layout);
+    int child = tui_layout_item(layout);
+    int other = tui_layout_item(layout);
+    CHECK(root == 0 && child == 1 && other == 2);
+
+    /* All out-of-range public handles are safe no-ops. */
+    tui_layout_insert(layout, 99, child);
+    tui_layout_insert(layout, root, 99);
+    tui_layout_set_size(layout, 99, 1, 1);
+    tui_layout_set_min_size(layout, 99, 1, 1);
+    tui_layout_set_grow(layout, 99, 1);
+    tui_layout_set_shrink(layout, 99, 1);
+    tui_layout_set_flags(layout, 99, TUI_LAY_ROW);
+    tui_layout_set_margins(layout, 99, 1, 1, 1, 1);
+    tui_layout_compute(layout, 99, 1, 1);
+    tui_layout_get_rect(layout, 99, &x, NULL, &w, NULL);
+    CHECK(x == 0 && w == 0);
+
+    tui_layout_insert(layout, root, child);
+    tui_layout_insert(layout, child, root); /* cycle */
+    tui_layout_insert(layout, other, child); /* reparent */
+    tui_layout_set_flags(layout, root, TUI_LAY_ROW);
+    tui_layout_set_min_size(layout, child, 1, 1);
+    tui_layout_set_grow(layout, child, -1);
+    tui_layout_insert(layout, root, other);
+    tui_layout_set_min_size(layout, other, 1, 1);
+    tui_layout_set_grow(layout, other, 1);
+    tui_layout_compute(layout, root, 10, 2);
+
+    tui_layout_get_rect(layout, child, &x, &y, &w, &h);
+    CHECK(x == 0 && y == 0 && w == 1 && h == 2);
+    tui_layout_get_rect(layout, other, &x, &y, &w, &h);
+    CHECK(x == 1 && y == 0 && w == 9 && h == 2);
+
+    /* The fixed-capacity arena refuses item 257 without writing past it. */
+    for (int i = 3; i < 256; ++i) CHECK(tui_layout_item(layout) == i);
+    CHECK(tui_layout_item(layout) == -1);
+    tui_layout_destroy(layout);
+    return 0;
+}
+
 static tui_event_t key_event(tui_key_t key) {
     tui_event_t e = {0};
     e.type = TUI_EVENT_KEY;
@@ -340,6 +399,7 @@ int main(void) {
     if (test_terminal_input_is_incremental()) return 1;
 #endif
     if (test_buffer_and_layout()) return 1;
+    if (test_layout_rejects_invalid_graphs()) return 1;
     if (test_textarea_bounds()) return 1;
     puts("Tango native-core tests passed");
     return 0;
