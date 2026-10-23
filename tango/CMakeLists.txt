@@ -26,6 +26,14 @@ set(TUI_SOURCES
 )
 
 add_library(${TARGET_NAME} STATIC ${TUI_SOURCES})
+if(WIN32)
+    # Keep windows.h from importing legacy Winsock before Salts::Core's
+    # Winsock2-backed public headers reach a Tango translation unit.
+    target_compile_definitions(${TARGET_NAME} PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+endif()
 if(NOT TARGET Salts::Unicode)
     message(FATAL_ERROR "Tango requires the canonical installed Salts::Unicode target")
 endif()
