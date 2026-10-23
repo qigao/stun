@@ -91,8 +91,8 @@ suite("FlexUI typed AnimationManager core") {
         check_true(manager.has_effect(1, 50.0f));
         check_within(manager.get_float(1, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_within(manager.get(1, "opacity", -1.0f, 50.0f),
-                       0.5f, 0.0001f);
+        check_within(manager.get_float(2, *opacity, -1.0f, 50.0f),
+                       -1.0f, 0.0001f);
     }
 
     it("preserves delay and fill modes") {
@@ -219,8 +219,8 @@ suite("FlexUI typed AnimationManager core") {
             45.0f, 0.0001f);
 
         check_within(
-            manager.get(51, "transform-x", -1.0f, 50.0f),
-            10.0f, 0.0001f);
+            manager.get_float(52, *tx, -1.0f, 50.0f),
+            -1.0f, 0.0001f);
     }
 
     it("keeps reflected effect scalar tracks independent") {
@@ -248,7 +248,7 @@ suite("FlexUI typed AnimationManager core") {
                        6.0f, 0.0001f);
     }
 
-    it("coexists with legacy non migrated animation tracks") {
+    it("clears every reflected track for one element without clearing its peers") {
         AnimationManager manager;
         const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
         check_not_null(opacity);
@@ -257,16 +257,56 @@ suite("FlexUI typed AnimationManager core") {
         check_true(manager.start_float(
             6, *opacity, opacity_points(), linear_animation(), 0.0f));
 
-        std::vector<AnimationValuePoint> legacy = {
+        const auto* tx = style_property_descriptor(StylePropertyId::TransformX);
+        check_not_null(tx);
+        if (!tx) return;
+        std::vector<AnimationValuePoint> transform = {
             {0.0f, 10.0f}, {1.0f, 20.0f}};
-        manager.start(6, "transform-x", legacy, linear_animation(), 0.0f);
+        check_true(manager.start_float(
+            6, *tx, transform, linear_animation(), 0.0f));
+        check_true(manager.start_float(
+            61, *opacity, opacity_points(), linear_animation(), 0.0f));
 
         check_within(manager.get_float(6, *opacity, -1.0f, 50.0f),
                        0.5f, 0.0001f);
-        check_within(manager.get(6, "transform-x", -1.0f, 50.0f),
+        check_within(manager.get_float(6, *tx, -1.0f, 50.0f),
                        15.0f, 0.0001f);
 
         manager.clear_element(6);
+        check_false(manager.has_effect(6, 50.0f));
+        check_false(manager.has_active(6, 50.0f));
+        check_within(manager.get_float(6, *tx, -1.0f, 50.0f),
+                     -1.0f, 0.0001f);
+        check_true(manager.has_any_effects());
+        check_true(manager.has_active(61, 50.0f));
+        check_within(manager.get_float(61, *opacity, -1.0f, 50.0f),
+                     0.5f, 0.0001f);
+        manager.clear();
+        check_false(manager.has_any_effects());
+        check_false(manager.has_any_active(50.0f));
+    }
+
+    it("expires completed tracks while preserving forward fill until explicit clear") {
+        const auto* opacity = style_property_descriptor(StylePropertyId::Opacity);
+        const auto* tx = style_property_descriptor(StylePropertyId::TransformX);
+        check_not_null(opacity);
+        check_not_null(tx);
+        if (!opacity || !tx) return;
+        AnimationManager manager;
+        AnimationDef filled = linear_animation();
+        filled.fill_mode = AnimationFillMode::Forwards;
+        check_true(manager.start_float(1, *opacity, opacity_points(), filled, 0.0f));
+        check_true(manager.start_float(1, *tx, opacity_points(), linear_animation(), 0.0f));
+        check_true(manager.start_float(12, *opacity, opacity_points(), linear_animation(), 0.0f));
+        check_true(manager.has_any_active(50.0f));
+        manager.update(150.0f);
+        check_false(manager.has_any_active(150.0f));
+        check_false(manager.has_active(1, 150.0f));
+        check_true(manager.has_effect(1, 150.0f));
+        check_false(manager.has_effect(12, 150.0f));
+        check_within(manager.get_float(1, *opacity, -1.0f, 150.0f), 1.0f, 0.0001f);
+        check_within(manager.get_float(1, *tx, -1.0f, 150.0f), -1.0f, 0.0001f);
+        manager.clear_element(1);
         check_false(manager.has_any_effects());
     }
 };

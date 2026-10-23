@@ -216,34 +216,6 @@ TransitionDef parse_single_transition(const std::string& value) {
     return def;
 }
 
-float sample_animation_keyframes(const std::vector<AnimationValuePoint>& keyframes,
-                                 float progress) {
-    if (keyframes.empty()) {
-        return 0.0f;
-    }
-    if (progress <= keyframes.front().offset) {
-        return keyframes.front().value;
-    }
-    if (progress >= keyframes.back().offset) {
-        return keyframes.back().value;
-    }
-
-    for (size_t i = 1; i < keyframes.size(); ++i) {
-        const auto& prev = keyframes[i - 1];
-        const auto& next = keyframes[i];
-        if (progress <= next.offset) {
-            const float span = next.offset - prev.offset;
-            if (span <= 0.0001f) {
-                return next.value;
-            }
-            const float local_t = (progress - prev.offset) / span;
-            return flex::animation::interpolate(prev.value, next.value, local_t);
-        }
-    }
-
-    return keyframes.back().value;
-}
-
 TransitionValue sample_typed_animation_keyframes(
     const std::vector<TypedAnimationPoint>& keyframes,
     const TransitionValueOps* ops,
@@ -691,118 +663,6 @@ void TypedActiveAnimation::set_paused(bool should_pause,
     play_state = AnimationPlayState::Running;
 }
 
-float ActiveAnimation::current_value(float default_value, float time_ms) const {
-    if (keyframes.empty()) {
-        return default_value;
-    }
-
-    const float effective_time_ms = paused ? paused_at_ms : time_ms;
-    const float local_time =
-        effective_time_ms - start_time_ms - delay_ms - total_paused_ms;
-    if (duration_ms <= 0.0f) {
-        return keyframes.back().value;
-    }
-
-    if (local_time < 0.0f) {
-        if (fill_mode == AnimationFillMode::Backwards ||
-            fill_mode == AnimationFillMode::Both) {
-            return sample_animation_keyframes(
-                keyframes,
-                animation_effective_progress(direction, easing_fn, 0, 0.0f));
-        }
-        return default_value;
-    }
-
-    const float cycle_duration = duration_ms;
-    const float total_duration = cycle_duration * iteration_count;
-    if (!infinite && local_time >= total_duration) {
-        if (fill_mode == AnimationFillMode::Forwards ||
-            fill_mode == AnimationFillMode::Both) {
-            return sample_animation_keyframes(keyframes,
-                                              animation_terminal_progress(*this));
-        }
-        return default_value;
-    }
-
-    float cycle_time = local_time;
-    if (infinite || cycle_duration > 0.0f) {
-        cycle_time = std::fmod(std::max(local_time, 0.0f), cycle_duration);
-    }
-    const int iteration_index =
-        cycle_duration > 0.0f ? std::max(static_cast<int>(local_time / cycle_duration), 0)
-                              : 0;
-    const float raw_t =
-        cycle_duration > 0.0f ? std::clamp(cycle_time / cycle_duration, 0.0f, 1.0f)
-                              : 1.0f;
-    return sample_animation_keyframes(
-        keyframes,
-        animation_effective_progress(direction, easing_fn, iteration_index, raw_t));
-}
-
-bool ActiveAnimation::is_active(float time_ms) const {
-    if (paused) {
-        return true;
-    }
-    const float local_time = time_ms - start_time_ms - delay_ms - total_paused_ms;
-    if (local_time < 0.0f) {
-        return true;
-    }
-    if (infinite) {
-        return true;
-    }
-    return local_time < duration_ms * iteration_count;
-}
-
-bool ActiveAnimation::retains_fill_value() const {
-    return fill_mode == AnimationFillMode::Forwards ||
-           fill_mode == AnimationFillMode::Both;
-}
-
-void ActiveAnimation::set_paused(bool should_pause, float current_time_ms) {
-    if (should_pause) {
-        if (!paused) {
-            paused = true;
-            paused_at_ms = current_time_ms;
-        }
-        play_state = AnimationPlayState::Paused;
-        return;
-    }
-
-    if (paused) {
-        total_paused_ms += current_time_ms - paused_at_ms;
-        paused = false;
-        paused_at_ms = 0.0f;
-    }
-    play_state = AnimationPlayState::Running;
-}
-
-void AnimationManager::start(std::uintptr_t element_id, const std::string& property,
-                             const std::vector<AnimationValuePoint>& keyframes,
-                             const AnimationDef& def, float current_time_ms) {
-    if (keyframes.empty() || def.duration_ms < 0.0f) {
-        return;
-    }
-
-    ActiveAnimation animation;
-    animation.property = property;
-    animation.keyframes = keyframes;
-    animation.start_time_ms = current_time_ms;
-    animation.duration_ms = def.duration_ms;
-    animation.delay_ms = def.delay_ms;
-    animation.iteration_count = std::max(def.iteration_count, 0.0f);
-    animation.infinite = def.infinite;
-    animation.fill_mode = def.fill_mode;
-    animation.direction = def.direction;
-    animation.play_state = def.play_state;
-    animation.paused = def.play_state == AnimationPlayState::Paused;
-    animation.paused_at_ms = animation.paused ? current_time_ms : 0.0f;
-    animation.total_paused_ms = 0.0f;
-    animation.easing_fn = easing::get(def.easing);
-
-    std::string key = std::to_string(element_id) + ":" + property;
-    animations_[key] = std::move(animation);
-}
-
 bool AnimationManager::start_typed(
     std::uintptr_t element_id,
     const detail::StylePropertyDesc& property,
@@ -916,35 +776,10 @@ Color AnimationManager::get_color(
     return value ? *value : default_value;
 }
 
-float AnimationManager::get(std::uintptr_t element_id, const std::string& property,
-                            float default_value, float current_time_ms) const {
-    if (const auto* descriptor = detail::style_property_find(property)) {
-        const auto typed =
-            typed_animations_.find({element_id, descriptor->id});
-        if (typed != typed_animations_.end()) {
-            return get_float(element_id, *descriptor, default_value,
-                             current_time_ms);
-        }
-    }
-
-    std::string key = std::to_string(element_id) + ":" + property;
-    auto it = animations_.find(key);
-    if (it == animations_.end()) {
-        return default_value;
-    }
-    return it->second.current_value(default_value, current_time_ms);
-}
-
 bool AnimationManager::has_active(std::uintptr_t element_id,
                                   float current_time_ms) const {
     for (const auto& [key, animation] : typed_animations_) {
         if (key.first == element_id && animation.is_active(current_time_ms)) {
-            return true;
-        }
-    }
-    const std::string prefix = std::to_string(element_id) + ":";
-    for (const auto& [key, animation] : animations_) {
-        if (key.find(prefix) == 0 && animation.is_active(current_time_ms)) {
             return true;
         }
     }
@@ -973,24 +808,11 @@ bool AnimationManager::has_effect(std::uintptr_t element_id,
             return true;
         }
     }
-    const std::string prefix = std::to_string(element_id) + ":";
-    for (const auto& [key, animation] : animations_) {
-        if (key.find(prefix) == 0 &&
-            (animation.is_active(current_time_ms) ||
-             animation.retains_fill_value())) {
-            return true;
-        }
-    }
     return false;
 }
 
 bool AnimationManager::has_any_active(float current_time_ms) const {
     for (const auto& [key, animation] : typed_animations_) {
-        if (animation.is_active(current_time_ms)) {
-            return true;
-        }
-    }
-    for (const auto& [key, animation] : animations_) {
         if (animation.is_active(current_time_ms)) {
             return true;
         }
@@ -1007,13 +829,6 @@ void AnimationManager::set_play_state(std::uintptr_t element_id,
                                  current_time_ms);
         }
     }
-    const std::string prefix = std::to_string(element_id) + ":";
-    for (auto& [key, animation] : animations_) {
-        if (key.find(prefix) == 0) {
-            animation.set_paused(play_state == AnimationPlayState::Paused,
-                                 current_time_ms);
-        }
-    }
 }
 
 void AnimationManager::clear_element(std::uintptr_t element_id) {
@@ -1021,15 +836,6 @@ void AnimationManager::clear_element(std::uintptr_t element_id) {
          it != typed_animations_.end();) {
         if (it->first.first == element_id) {
             it = typed_animations_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    const std::string prefix = std::to_string(element_id) + ":";
-    for (auto it = animations_.begin(); it != animations_.end();) {
-        if (it->first.find(prefix) == 0) {
-            it = animations_.erase(it);
         } else {
             ++it;
         }
@@ -1042,15 +848,6 @@ void AnimationManager::update(float current_time_ms) {
         if (!it->second.is_active(current_time_ms) &&
             !it->second.retains_fill_value()) {
             it = typed_animations_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    for (auto it = animations_.begin(); it != animations_.end();) {
-        if (!it->second.is_active(current_time_ms) &&
-            !it->second.retains_fill_value()) {
-            it = animations_.erase(it);
         } else {
             ++it;
         }
