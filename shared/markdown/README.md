@@ -26,7 +26,9 @@ This target is **not** a new production layout or Markdown parser. It is the fir
 ## Migration checkpoints
 
 - **M1 (this PR):** C11 view-state descriptor + current-value ObjectRef reads; explicit revision invalidation; borrowed flat rectangle/Markdown IR with stable IDs and bounded validation; CMeta lexical cleanup regression, strict C11 compiler and runtime tests.
-- **M2:** project existing `md::parse` AST to C11 IR, ensure source lifetime and node parity, then migrate production `MarkdownWidget` consumers without a competing grammar.
+- **M2:** replace the former C++ Markdown AST with the C11 RichDoc, ensure
+  source lifetime and node parity, then migrate production consumers without
+  a competing grammar. MarkdownWidget completed this cutover in PR #231.
 - **M3:** replace existing C++ geometry algorithms one semantic slice at a time with C11 measure/arrange, retaining full Flexbox/Grid/media/container test fixtures and **deleting old implementations** as each feature is admitted.
 - **M4:** connect C11 geometry/RichDoc to Tango and FlexUI adapters with backend-specific text measurement; validate CJK, grapheme clusters, terminal scrolling and GPU caret shaping.
 - **M5:** installed native C11/C++ SDK tests and Windows/macOS/Linux/mobile build gates; no exact package pins or provider fallback.
@@ -43,7 +45,7 @@ ctest --test-dir build/ui-c11 --output-on-failure
 
 A missing `Salts::CMeta` is a configuration failure; no stub or alternative reflection provider is selected. The integration also builds as part of the Stun top-level CMake project. Phase M1 is not complete until executable native CTest passes against an installed Salts provider.
 
-## Native C11 Markdown parser (M2 candidate)
+## Native C11 Markdown parser
 
 A real Markdown **parser**, not a C++ AST projector, is now available:
 
@@ -66,21 +68,15 @@ emphasis, strong, strikethrough, inline code, basic links/images,
 backslash punctuation escaping and line breaks. Code fences retain
 exact CRLF/LF bytes and language metadata; links retain target metadata.
 
-**Not yet CommonMark/GFM complete**: reference links, nested/lazy-continuation
-list and quote semantics, nested GFM table/container corner cases,
-HTML/entity decoding, footnotes, math,
-definition lists, and full delimiter-run/flanking algorithms. Such syntax is
-not yet parity-qualified; do not switch all MarkdownWidget callers to C11
-until the entire canonical fixture matrix passes.
+The parser and renderer pass the complete versioned CommonMark 0.31.2 SPEC
+gate, the separate production SAFE policy gate, and the declared GFM fixture
+sets. Those gates do not imply support for extensions outside their explicit
+contracts.
 
-The existing C++ tools/md parser remains the production semantic authority
-during migration. The C11 implementation is a **replacement candidate**, not
-a permanent second parsing truth source. Do not parse the same production UI
-document through both implementations. Port each feature against the existing
-CommonMark/GFM fixtures and retire the corresponding old C++ paths when
-end-to-end parity is established. Grammar-tool generation (re2c/Lemon) can
-replace current context-aware C11 hand-coded scanning as a single canonical
-pipeline, but no second grammar or optional fallback may remain.
+The former C++ `tools/md` parser, headers, test runner and build target were
+retired under #172. `tools/md/test/spec.txt` remains only as the immutable
+upstream CommonMark fixture consumed by the C11 gates. Production code must
+not add another grammar or optional fallback.
 
 The C11 native test stun_markdown_c11_test covers actual parsing, hierarchy,
 owned source and semantic spans, stable snapshot identities, metadata,

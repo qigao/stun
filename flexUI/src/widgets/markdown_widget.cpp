@@ -4,7 +4,7 @@
  * C11 RichDoc is the sole syntax/semantic authority, including Unicode 17
  * reference folding, task checkboxes and GFM table/list ownership. The
  * public view is borrowed only until projection finishes; FlexUI owns its
- * copied text/elements. No md::parse, alternate grammar or fallback.
+ * copied text/elements. No alternate grammar or fallback.
  */
 #include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/box.h>

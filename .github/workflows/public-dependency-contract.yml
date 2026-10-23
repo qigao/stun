@@ -53,12 +53,12 @@ jobs:
             '.github/workflows/public-dependency-contract.yml' \
             '.github/scripts/ci-affected.sh'
 
-  # Fast architecture gate on every PR. The existing native released-SDK
-  # conformance and real Mesa/ASan/UBSan Widget runs remain mandatory;
-  # static checks alone cannot establish parser or runtime correctness.
+  # Fast repository-wide parser-ownership gate on every PR. The existing
+  # native released-SDK conformance remains mandatory; static checks alone
+  # cannot establish parser or runtime correctness.
   markdownwidget-single-c11-parser:
     needs: changes
-    name: MarkdownWidget sole C11 parser contract
+    name: Repository sole C11 parser contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact Stun source candidate
@@ -88,7 +88,7 @@ jobs:
             exit 1
           fi
 
-      - name: Reject legacy parser link or include reintroduction
+      - name: Reject retired Markdown parser reintroduction
         run: |
           set -euo pipefail
           python3 shared/markdown/tests/verify_single_markdown_parser.py
