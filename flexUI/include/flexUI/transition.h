@@ -348,34 +348,9 @@ struct TypedActiveAnimation {
     void set_paused(bool should_pause, float current_time_ms);
 };
 
-struct ActiveAnimation {
-    std::string property;
-    std::vector<AnimationValuePoint> keyframes;
-    float start_time_ms = 0.0f;
-    float duration_ms = 0.0f;
-    float delay_ms = 0.0f;
-    float iteration_count = 1.0f;
-    bool infinite = false;
-    AnimationFillMode fill_mode = AnimationFillMode::None;
-    AnimationDirection direction = AnimationDirection::Normal;
-    AnimationPlayState play_state = AnimationPlayState::Running;
-    bool paused = false;
-    float paused_at_ms = 0.0f;
-    float total_paused_ms = 0.0f;
-    easing::EasingFunction easing_fn = easing::ease_in_out;
-
-    float current_value(float default_value, float time_ms) const;
-    bool is_active(float time_ms) const;
-    bool retains_fill_value() const;
-    void set_paused(bool should_pause, float current_time_ms);
-};
-
+// CSS keyframe runtime has one store, keyed by element and reflected property ID.
 class AnimationManager {
 public:
-    void start(std::uintptr_t element_id, const std::string& property,
-               const std::vector<AnimationValuePoint>& keyframes,
-               const AnimationDef& def, float current_time_ms);
-
     // Successful admission borrows property and keyframe types until removal.
     bool start_typed(std::uintptr_t element_id,
                      const detail::StylePropertyDesc& property,
@@ -404,15 +379,12 @@ public:
                     const Color& default_value,
                     float current_time_ms) const;
 
-    float get(std::uintptr_t element_id, const std::string& property,
-              float default_value, float current_time_ms) const;
-
     bool has_active(std::uintptr_t element_id, float current_time_ms) const;
     std::uint32_t active_impact(std::uintptr_t element_id,
                                 float current_time_ms) const noexcept;
     bool has_effect(std::uintptr_t element_id, float current_time_ms) const;
     bool has_any_effects() const {
-        return !animations_.empty() || !typed_animations_.empty();
+        return !typed_animations_.empty();
     }
     bool has_any_active(float current_time_ms) const;
     void set_play_state(std::uintptr_t element_id, AnimationPlayState play_state,
@@ -420,7 +392,6 @@ public:
     void clear_element(std::uintptr_t element_id);
     void update(float current_time_ms);
     void clear() {
-        animations_.clear();
         typed_animations_.clear();
     }
 
@@ -428,7 +399,6 @@ private:
     using TypedAnimationKey =
         std::pair<std::uintptr_t, detail::StylePropertyId>;
 
-    std::map<std::string, ActiveAnimation> animations_;
     std::map<TypedAnimationKey, TypedActiveAnimation> typed_animations_;
 };
 

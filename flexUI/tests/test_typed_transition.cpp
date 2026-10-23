@@ -225,7 +225,7 @@ suite("FlexUI typed TransitionManager core") {
         check( manager.active_impact(7, 25.0f) == STYLE_IMPACT_NONE );
     }
 
-    it("exposes typed keyframe property impact without changing legacy storage") {
+    it("exposes reflected keyframe property impact") {
         AnimationManager manager;
         const auto* opacity = style_property_find("opacity");
         check_not_null(opacity);

@@ -6799,14 +6799,17 @@ spec("Box registers and samples CSS animations at runtime") {
   
     const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
     check(box.animations().has_active(element_id, box.time()));
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.0f, 0.001f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.0f, 0.001f));
   
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
   
     box.update_time(100.0f);
     check_false(box.animations().has_active(element_id, box.time()));
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 1.0f, 0.001f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 1.0f, 0.001f));
   }
 }
 
@@ -6831,13 +6834,16 @@ spec("Box samples reverse and alternate CSS animations at runtime") {
     reverse_box.update();
   
     const auto reverse_id = reinterpret_cast<std::uintptr_t>(reverse_elem);
-    check(approx_eq(reverse_box.animations().get(reverse_id, "opacity", reverse_elem->computed_style->opacity, reverse_box.time()), 1.0f, 0.001f));
+    check(approx_eq(reverse_box.animations().get_float(
+        reverse_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), reverse_elem->computed_style->opacity, reverse_box.time()), 1.0f, 0.001f));
   
     reverse_box.update_time(100.0f);
-    check(approx_eq(reverse_box.animations().get(reverse_id, "opacity", reverse_elem->computed_style->opacity, reverse_box.time()), 0.5f, 0.02f));
+    check(approx_eq(reverse_box.animations().get_float(
+        reverse_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), reverse_elem->computed_style->opacity, reverse_box.time()), 0.5f, 0.02f));
   
     reverse_box.update_time(100.0f);
-    check(approx_eq(reverse_box.animations().get(reverse_id, "opacity", reverse_elem->computed_style->opacity, reverse_box.time()), 0.0f, 0.001f));
+    check(approx_eq(reverse_box.animations().get_float(
+        reverse_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), reverse_elem->computed_style->opacity, reverse_box.time()), 0.0f, 0.001f));
   
     Box alternate_box(nullptr);
     auto* alternate_elem = alternate_box.create("div", "alternate");
@@ -6859,12 +6865,14 @@ spec("Box samples reverse and alternate CSS animations at runtime") {
   
     const auto alternate_id = reinterpret_cast<std::uintptr_t>(alternate_elem);
     alternate_box.update_time(250.0f);
-    check(approx_eq(alternate_box.animations().get(alternate_id, "opacity", alternate_elem->computed_style->opacity, alternate_box.time()), 0.75f, 0.02f));
+    check(approx_eq(alternate_box.animations().get_float(
+        alternate_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), alternate_elem->computed_style->opacity, alternate_box.time()), 0.75f, 0.02f));
   
     alternate_box.update_time(150.0f);
     check_false(alternate_box.animations().has_active(alternate_id,
                                                         alternate_box.time()));
-    check(approx_eq(alternate_box.animations().get(alternate_id, "opacity", alternate_elem->computed_style->opacity, alternate_box.time()), 0.0f, 0.001f));
+    check(approx_eq(alternate_box.animations().get_float(
+        alternate_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), alternate_elem->computed_style->opacity, alternate_box.time()), 0.0f, 0.001f));
   }
 }
 
@@ -6894,26 +6902,31 @@ spec("Box pauses and resumes CSS animations at runtime") {
     box.update();
   
     const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.0f, 0.001f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.0f, 0.001f));
   
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.0f, 0.001f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.0f, 0.001f));
   
     elem->remove_class("paused");
     box.update();
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
   
     elem->add_class("paused");
     box.update();
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
   
     elem->remove_class("paused");
     box.update();
     box.update_time(100.0f);
     check_false(box.animations().has_active(element_id, box.time()));
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 1.0f, 0.001f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 1.0f, 0.001f));
   }
 }
 
@@ -6947,8 +6960,10 @@ spec("Box runs multiple CSS animations from shorthand lists at runtime") {
     check(box.animations().has_active(element_id, box.time()));
   
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
-    check(approx_eq(box.animations().get(element_id, "transform-x", elem->computed_style->transform_x, box.time()), 10.0f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::TransformX), elem->computed_style->transform_x, box.time()), 10.0f, 0.02f));
   }
 }
 
@@ -6984,8 +6999,10 @@ spec("Box runs multiple CSS animations from longhand lists at runtime") {
     check(box.animations().has_active(element_id, box.time()));
   
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "opacity", elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
-    check(approx_eq(box.animations().get(element_id, "transform-x", elem->computed_style->transform_x, box.time()), 10.0f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::Opacity), elem->computed_style->opacity, box.time()), 0.5f, 0.02f));
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::TransformX), elem->computed_style->transform_x, box.time()), 10.0f, 0.02f));
   }
 }
 
@@ -7421,25 +7438,30 @@ spec("Box registers and samples CSS box-shadow animations at runtime") {
 
     const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
     check(box.animations().has_active(element_id, box.time()));
-    check(approx_eq(box.animations().get(element_id, "box-shadow-offset-y",
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::BoxShadowOffsetY),
                                          elem->computed_style->shadow.offset_y,
                                          box.time()),
                     1.0f, 0.001f));
-    check(approx_eq(box.animations().get(element_id, "box-shadow-blur",
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::BoxShadowBlur),
                                          elem->computed_style->shadow.blur_radius,
                                          box.time()),
                     2.0f, 0.001f));
 
     box.update_time(100.0f);
-    check(approx_eq(box.animations().get(element_id, "box-shadow-offset-y",
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::BoxShadowOffsetY),
                                          elem->computed_style->shadow.offset_y,
                                          box.time()),
                     3.0f, 0.02f));
-    check(approx_eq(box.animations().get(element_id, "box-shadow-blur",
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::BoxShadowBlur),
                                          elem->computed_style->shadow.blur_radius,
                                          box.time()),
                     6.0f, 0.02f));
-    check(approx_eq(box.animations().get(element_id, "box-shadow-spread",
+    check(approx_eq(box.animations().get_float(
+        element_id, *detail::style_property_descriptor(detail::StylePropertyId::BoxShadowSpread),
                                          elem->computed_style->shadow.spread_radius,
                                          box.time()),
                     1.0f, 0.02f));
