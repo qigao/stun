@@ -21,22 +21,30 @@
  * Mouse Control
  * ============================================================================ */
 
-void tui_terminal_enable_mouse(tui_terminal_t* term) {
-    if (!term) return;
-    term->mouse_enabled = true;
+bool tui_terminal_enable_mouse(tui_terminal_t* term) {
+    if (!term) return false;
+    if (term->mouse_enabled) return true;
 #ifndef _WIN32
-    write(STDOUT_FILENO, "\033[?1006h", 8);  /* SGR extended */
-    write(STDOUT_FILENO, "\033[?1003h", 8);  /* All motion */
+    if (!term->write_output(term, "\033[?1006h\033[?1003h", 16u)) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
+        return false;
+    }
 #endif
+    term->mouse_enabled = true;
+    return true;
 }
 
-void tui_terminal_disable_mouse(tui_terminal_t* term) {
-    if (!term) return;
-    term->mouse_enabled = false;
+bool tui_terminal_disable_mouse(tui_terminal_t* term) {
+    if (!term) return false;
+    if (!term->mouse_enabled) return true;
 #ifndef _WIN32
-    write(STDOUT_FILENO, "\033[?1003l", 8);
-    write(STDOUT_FILENO, "\033[?1006l", 8);
+    if (!term->write_output(term, "\033[?1003l\033[?1006l", 16u)) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
+        return false;
+    }
 #endif
+    term->mouse_enabled = false;
+    return true;
 }
 
 /* ============================================================================

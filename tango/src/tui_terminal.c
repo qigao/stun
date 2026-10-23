@@ -140,8 +140,8 @@ static bool write_raw(tui_terminal_t* term, const char* data, size_t len) {
     return true;
 }
 
-static void write_raw_str(tui_terminal_t* term, const char* str) {
-    (void)write_raw(term, str, strlen(str));
+static bool write_raw_str(tui_terminal_t* term, const char* str) {
+    return term->write_output(term, str, strlen(str));
 }
 
 static bool flush_output(tui_terminal_t* term) {
@@ -150,7 +150,7 @@ static bool flush_output(tui_terminal_t* term) {
         return false;
     }
     if (term->output_len > 0u &&
-        !write_raw(term, term->output, term->output_len)) {
+        !term->write_output(term, term->output, term->output_len)) {
         term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
         return false;
     }
@@ -181,6 +181,122 @@ static int quantize_256(tui_color_t c) {
  * Terminal Lifecycle
  * ============================================================================ */
 
+#ifdef _WIN32
+static bool platform_leave(tui_terminal_t* term) {
+    bool ok = true;
+    if (term->in_mode_changed) {
+        if (SetConsoleMode(term->h_in, term->orig_in_mode)) {
+            term->in_mode_changed = false;
+        } else {
+            ok = false;
+        }
+    }
+    if (term->out_mode_changed) {
+        if (SetConsoleMode(term->h_out, term->orig_out_mode)) {
+            term->out_mode_changed = false;
+        } else {
+            ok = false;
+        }
+    }
+    if (term->input_cp_changed) {
+        if (SetConsoleCP(term->orig_input_cp)) {
+            term->input_cp_changed = false;
+        } else {
+            ok = false;
+        }
+    }
+    if (term->output_cp_changed) {
+        if (SetConsoleOutputCP(term->orig_output_cp)) {
+            term->output_cp_changed = false;
+        } else {
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+static bool platform_enter(tui_terminal_t* term) {
+    term->h_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    term->h_in = GetStdHandle(STD_INPUT_HANDLE);
+    if (!term->h_out || term->h_out == INVALID_HANDLE_VALUE ||
+        !term->h_in || term->h_in == INVALID_HANDLE_VALUE ||
+        !GetConsoleMode(term->h_out, &term->orig_out_mode) ||
+        !GetConsoleMode(term->h_in, &term->orig_in_mode)) return false;
+
+    term->orig_output_cp = GetConsoleOutputCP();
+    term->orig_input_cp = GetConsoleCP();
+    if (!term->orig_output_cp || !term->orig_input_cp) return false;
+
+    if (term->orig_output_cp != CP_UTF8) {
+        if (!SetConsoleOutputCP(CP_UTF8)) return false;
+        term->output_cp_changed = true;
+    }
+    if (term->orig_input_cp != CP_UTF8) {
+        if (!SetConsoleCP(CP_UTF8)) goto failed;
+        term->input_cp_changed = true;
+    }
+
+    const DWORD out_mode = term->orig_out_mode |
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+    const DWORD in_mode = (term->orig_in_mode | ENABLE_MOUSE_INPUT |
+        ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE;
+    if (!SetConsoleMode(term->h_out, out_mode)) goto failed;
+    term->out_mode_changed = true;
+    if (!SetConsoleMode(term->h_in, in_mode)) goto failed;
+    term->in_mode_changed = true;
+    return true;
+
+failed:
+    if (!platform_leave(term)) term->platform_active = true;
+    return false;
+}
+#else
+static bool platform_leave(tui_terminal_t* term) {
+    bool ok = true;
+    if (term->sigwinch_installed) {
+        if (sigaction(SIGWINCH, &term->orig_sigwinch, NULL) == 0) {
+            term->sigwinch_installed = false;
+        } else {
+            ok = false;
+        }
+    }
+    if (term->terminal_mode_changed) {
+        if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &term->orig_termios) == 0) {
+            term->terminal_mode_changed = false;
+        } else {
+            ok = false;
+        }
+    }
+    return ok;
+}
+
+static bool platform_enter(tui_terminal_t* term) {
+    if (tcgetattr(STDIN_FILENO, &term->orig_termios) != 0) return false;
+
+    struct termios raw = term->orig_termios;
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
+    raw.c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
+    raw.c_oflag &= ~(OPOST);
+    raw.c_cflag |= CS8;
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) return false;
+    term->terminal_mode_changed = true;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_sigwinch;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGWINCH, &sa, &term->orig_sigwinch) != 0) {
+        if (!platform_leave(term)) term->platform_active = true;
+        return false;
+    }
+    term->sigwinch_installed = true;
+    g_resize_pending = 0;
+    return true;
+}
+#endif
+
 tui_terminal_t* tui_terminal_create(void) {
     tui_terminal_t* term = (tui_terminal_t*)calloc(1, sizeof(tui_terminal_t));
     if (!term) return NULL;
@@ -190,6 +306,9 @@ tui_terminal_t* tui_terminal_create(void) {
     term->output_cap = 8192;
     term->output_limit = 64u * 1024u * 1024u;
     term->output_realloc = realloc;
+    term->platform_enter = platform_enter;
+    term->platform_leave = platform_leave;
+    term->write_output = write_raw;
     term->output = (char*)malloc(term->output_cap);
     
     if (!term->output) {
@@ -202,7 +321,7 @@ tui_terminal_t* tui_terminal_create(void) {
 
 void tui_terminal_destroy(tui_terminal_t* term) {
     if (!term) return;
-    tui_terminal_cleanup(term);
+    (void)tui_terminal_cleanup(term);
     tui_buffer_destroy(term->front);
     tui_buffer_destroy(term->back);
     free(term->output);
@@ -211,6 +330,7 @@ void tui_terminal_destroy(tui_terminal_t* term) {
 
 bool tui_terminal_init(tui_terminal_t* term) {
     if (!term || term->initialized) return term && term->initialized;
+    term->last_error = TUI_TERMINAL_ERROR_NONE;
     
     /* Auto-detect color mode if not set */
     if (term->color_mode == TUI_COLOR_AUTO) {
@@ -222,91 +342,84 @@ bool tui_terminal_init(tui_terminal_t* term) {
         }
     }
     
-#ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-    term->h_out = GetStdHandle(STD_OUTPUT_HANDLE);
-    term->h_in = GetStdHandle(STD_INPUT_HANDLE);
-    
-    GetConsoleMode(term->h_out, &term->orig_out_mode);
-    GetConsoleMode(term->h_in, &term->orig_in_mode);
-    
-    DWORD out_mode = term->orig_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
-    /* For mouse input on Windows:
-       - ENABLE_EXTENDED_FLAGS alone disables Quick Edit Mode
-       - ENABLE_MOUSE_INPUT enables mouse events
-       - Must NOT have ENABLE_QUICK_EDIT_MODE set */
-    DWORD in_mode = (term->orig_in_mode | ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS) 
-                    & ~ENABLE_QUICK_EDIT_MODE;
-    
-    SetConsoleMode(term->h_out, out_mode);
-    SetConsoleMode(term->h_in, in_mode);
-#else
-    tcgetattr(STDIN_FILENO, &term->orig_termios);
-    struct termios raw = term->orig_termios;
-    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
-    raw.c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
-    raw.c_oflag &= ~(OPOST);
-    raw.c_cflag |= CS8;
-    raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-    
-    /* SIGWINCH handler */
-    struct sigaction sa;
-    sa.sa_handler = handle_sigwinch;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGWINCH, &sa, NULL);
-#endif
+    if (!term->platform_enter(term)) {
+        term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        return false;
+    }
+    term->platform_active = true;
     
     tui_terminal_query_size(term);
     
-    term->front = tui_buffer_create(term->width, term->height);
-    term->back = tui_buffer_create(term->width, term->height);
+    tui_buffer_t* front = tui_buffer_create(term->width, term->height);
+    tui_buffer_t* back = tui_buffer_create(term->width, term->height);
     
-    if (!term->front || !term->back) {
-        tui_terminal_cleanup(term);
+    if (!front || !back) {
+        tui_buffer_destroy(front);
+        tui_buffer_destroy(back);
+        if (term->platform_leave(term)) {
+            term->platform_active = false;
+            term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
+        } else {
+            term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        }
         return false;
     }
     
     /* Mark front buffer as "invalid" to force first frame full render */
     {
         tui_cell_t invalid = {0xFFFFFFFF, {255,255,255}, {255,255,255}, 0xFF};
-        size_t count = (size_t)term->front->width * (size_t)term->front->height;
+        size_t count = (size_t)front->width * (size_t)front->height;
         for (size_t i = 0; i < count; i++) {
-            term->front->cells[i] = invalid;
+            front->cells[i] = invalid;
         }
     }
     
     /* Enter alternate screen, hide cursor */
-    write_raw_str(term, "\033[?1049h");  /* Alternate screen */
-    write_raw_str(term, "\033[?25l");    /* Hide cursor */
-    write_raw_str(term, "\033[2J");      /* Clear screen */
-    fflush(stdout);
+    if (fflush(stdout) != 0 ||
+        !write_raw_str(term, "\033[?1049h\033[?25l\033[2J")) {
+        (void)write_raw_str(term, "\033[?25h\033[?1049l\033[0m");
+        const bool restored = term->platform_leave(term);
+        if (restored) term->platform_active = false;
+        tui_buffer_destroy(front);
+        tui_buffer_destroy(back);
+        term->last_error = restored ? TUI_TERMINAL_ERROR_OUTPUT_IO :
+            TUI_TERMINAL_ERROR_PLATFORM;
+        return false;
+    }
+
+    tui_buffer_destroy(term->front);
+    tui_buffer_destroy(term->back);
+    term->front = front;
+    term->back = back;
     
     term->initialized = true;
     return true;
 }
 
-void tui_terminal_cleanup(tui_terminal_t* term) {
-    if (!term || !term->initialized) return;
+bool tui_terminal_cleanup(tui_terminal_t* term) {
+    if (!term) return false;
+    if (!term->initialized && !term->platform_active) return true;
+    bool ok = true;
     
-    tui_terminal_disable_mouse(term);
+    if (!tui_terminal_disable_mouse(term)) ok = false;
     
-    write_raw_str(term, "\033[?25h");    /* Show cursor */
-    write_raw_str(term, "\033[?1049l");  /* Exit alternate screen */
-    write_raw_str(term, "\033[0m");      /* Reset attributes */
-    fflush(stdout);
-    
-#ifdef _WIN32
-    SetConsoleMode(term->h_out, term->orig_out_mode);
-    SetConsoleMode(term->h_in, term->orig_in_mode);
-#else
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &term->orig_termios);
-#endif
-    
-    term->initialized = false;
+    if (fflush(stdout) != 0 ||
+        !write_raw_str(term, "\033[?25h\033[?1049l\033[0m")) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
+        ok = false;
+    }
+    if (!term->platform_leave(term)) {
+        term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        ok = false;
+    } else {
+        term->platform_active = false;
+    }
+
+    if (ok) {
+        term->initialized = false;
+        term->last_error = TUI_TERMINAL_ERROR_NONE;
+    }
+    return ok;
 }
 
 /* ============================================================================

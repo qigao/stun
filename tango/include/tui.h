@@ -279,13 +279,16 @@ typedef enum {
     TUI_TERMINAL_ERROR_INVALID_STATE,
     TUI_TERMINAL_ERROR_OUTPUT_LIMIT,
     TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION,
-    TUI_TERMINAL_ERROR_OUTPUT_IO
+    TUI_TERMINAL_ERROR_OUTPUT_IO,
+    TUI_TERMINAL_ERROR_PLATFORM
 } tui_terminal_error_t;
 
 tui_terminal_t* tui_terminal_create(void);
 void            tui_terminal_destroy(tui_terminal_t* term);
 bool            tui_terminal_init(tui_terminal_t* term);
-void            tui_terminal_cleanup(tui_terminal_t* term);
+/* Cleanup attempts every restoration step. A false result leaves the
+ * terminal initialized so the caller may retry failed restoration. */
+bool            tui_terminal_cleanup(tui_terminal_t* term);
 
 int             tui_terminal_width(const tui_terminal_t* term);
 int             tui_terminal_height(const tui_terminal_t* term);
@@ -316,8 +319,8 @@ void            tui_terminal_hide_cursor(tui_terminal_t* term);
 void            tui_terminal_move_cursor(tui_terminal_t* term, int x, int y);
 
 /* Input */
-void            tui_terminal_enable_mouse(tui_terminal_t* term);
-void            tui_terminal_disable_mouse(tui_terminal_t* term);
+bool            tui_terminal_enable_mouse(tui_terminal_t* term);
+bool            tui_terminal_disable_mouse(tui_terminal_t* term);
 bool            tui_terminal_poll(tui_terminal_t* term, tui_event_t* event);
 void            tui_terminal_wait(tui_terminal_t* term, tui_event_t* event);
 
