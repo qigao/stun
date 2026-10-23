@@ -704,6 +704,26 @@ static int test_terminal_renderer_rejects_forged_cells(void) {
     tui_buffer_mark_dirty(terminal->back, 2, 0);
     CHECK(expect_invalid_render(terminal, expected_front) == 0);
 
+    /* A repaired back buffer must be renderable after a rejected frame. */
+    tui_buffer_clear(terminal->back);
+    tui_buffer_set(terminal->back, 0, 0,
+                   tui_cell('A', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(terminal->back, 1, 0,
+                   tui_cell('B', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(terminal->back, 2, 0,
+                   tui_cell('C', TUI_WHITE, TUI_BLACK));
+    rendered_len = 0u;
+    rendered_write_calls = 0u;
+    CHECK(tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_NONE);
+    CHECK(rendered_write_calls == 1u);
+    CHECK(strstr(rendered, "ABC") != NULL);
+    CHECK(!tui_buffer_is_dirty(terminal->back));
+    for (int x = 0; x < 3; ++x) {
+        CHECK(tui_cell_eq(tui_buffer_at_const(terminal->back, x, 0),
+                          tui_buffer_at_const(terminal->front, x, 0)));
+    }
+
     terminal->initialized = false;
     tui_terminal_destroy(terminal);
     return 0;
