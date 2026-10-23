@@ -4,6 +4,7 @@
  */
 
 #include "tui.h"
+#include <salts_unicode.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -17,18 +18,26 @@ static inline float clamp_f(float v, float lo, float hi) { return v < lo ? lo : 
  * Text Utilities
  * ============================================================================ */
 
-static int utf8_strlen(const char* s) {
-    int len = 0;
-    while (*s) {
-        if ((*s & 0xC0) != 0x80) len++;
-        s++;
+static int text_display_width(const char* text) {
+    const vstr input = vstr_from_cstr(text);
+    size_t cursor = 0u;
+    int width = 0;
+    while (cursor < input.len) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return -1;
+        const int cluster_width =
+            tui_grapheme_width(cluster.data, cluster.len);
+        if (cluster_width < 0) return -1;
+        width += cluster_width;
     }
-    return len;
+    return width;
 }
 
 void tui_text_aligned(tui_buffer_t* buf, int x, int y, int width, const char* text, tui_align_t align, tui_color_t fg, tui_color_t bg) {
-    int len = utf8_strlen(text);
+    int len = text_display_width(text);
     int pad = 0;
+    if (len < 0) return;
     
     if (len >= width) {
         tui_text_ellipsis(buf, x, y, width, text, fg, bg);
@@ -51,70 +60,92 @@ void tui_text_aligned(tui_buffer_t* buf, int x, int y, int width, const char* te
 void tui_text_ellipsis(tui_buffer_t* buf, int x, int y, int width, const char* text, tui_color_t fg, tui_color_t bg) {
     if (width <= 0) return;
     
-    int len = utf8_strlen(text);
+    int len = text_display_width(text);
+    if (len < 0) return;
     if (len <= width) {
         tui_buffer_text(buf, x, y, text, fg, bg);
         return;
     }
     
-    const char* p = text;
+    const vstr input = vstr_from_cstr(text);
+    size_t cursor = 0u;
     int col = 0;
     int max_col = width - 1;
-    
-    while (*p && col < max_col) {
-        uint32_t ch = (uint8_t)*p;
-        if ((ch & 0x80) == 0) {
-            tui_buffer_set(buf, x + col, y, tui_cell(ch, fg, bg));
-            p++;
-        } else if ((ch & 0xE0) == 0xC0) {
-            ch = ((ch & 0x1F) << 6) | (p[1] & 0x3F);
-            tui_buffer_set(buf, x + col, y, tui_cell(ch, fg, bg));
-            p += 2;
-        } else if ((ch & 0xF0) == 0xE0) {
-            ch = ((ch & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
-            tui_buffer_set(buf, x + col, y, tui_cell(ch, fg, bg));
-            p += 3;
-        } else {
-            ch = ((ch & 0x07) << 18) | ((p[1] & 0x3F) << 12) | ((p[2] & 0x3F) << 6) | (p[3] & 0x3F);
-            tui_buffer_set(buf, x + col, y, tui_cell(ch, fg, bg));
-            p += 4;
-        }
-        col++;
+
+    while (cursor < input.len && col < max_col) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return;
+        const int cluster_width =
+            tui_grapheme_width(cluster.data, cluster.len);
+        if (cluster_width < 0) return;
+        if (cluster_width == 0) continue;
+        if (cluster_width > max_col - col) break;
+        if (!tui_buffer_set_grapheme(buf, x + col, y, cluster.data,
+                                     cluster.len, fg, bg,
+                                     TUI_STYLE_NONE)) return;
+        col += cluster_width;
     }
     tui_buffer_set(buf, x + width - 1, y, tui_cell(0x2026, fg, bg)); /* … */
 }
 
 void tui_text_wrap(tui_buffer_t* buf, int x, int y, int width, int height, const char* text, tui_color_t fg, tui_color_t bg) {
     int row = 0, col = 0;
-    const char* p = text;
-    
-    while (*p && row < height) {
-        if (*p == '\n') {
+    const vstr input = vstr_from_cstr(text);
+    size_t cursor = 0u;
+
+    while (cursor < input.len && row < height) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return;
+        if (cluster.len != 0u &&
+            (cluster.data[0] == '\n' || cluster.data[0] == '\r')) {
             row++;
             col = 0;
-            p++;
             continue;
         }
-        if (col >= width) {
+        const int cluster_width =
+            tui_grapheme_width(cluster.data, cluster.len);
+        if (cluster_width < 0) return;
+        if (cluster_width == 0) continue;
+        if (col + cluster_width > width) {
             row++;
             col = 0;
         }
         if (row >= height) break;
-        
-        tui_buffer_set(buf, x + col, y + row, tui_cell((uint8_t)*p, fg, bg));
-        col++;
-        p++;
+        if (cluster_width > width) continue;
+        if (!tui_buffer_set_grapheme(buf, x + col, y + row,
+                                     cluster.data, cluster.len, fg, bg,
+                                     TUI_STYLE_NONE)) return;
+        col += cluster_width;
     }
 }
 
 int tui_text_wrap_height(const char* text, int width) {
+    if (!text || width <= 0) return 0;
     int rows = 1, col = 0;
-    const char* p = text;
-    
-    while (*p) {
-        if (*p == '\n') { rows++; col = 0; }
-        else if (++col > width) { rows++; col = 1; }
-        p++;
+    const vstr input = vstr_from_cstr(text);
+    size_t cursor = 0u;
+
+    while (cursor < input.len) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return 0;
+        if (cluster.len != 0u &&
+            (cluster.data[0] == '\n' || cluster.data[0] == '\r')) {
+            rows++;
+            col = 0;
+            continue;
+        }
+        const int cluster_width =
+            tui_grapheme_width(cluster.data, cluster.len);
+        if (cluster_width < 0) return 0;
+        if (cluster_width == 0) continue;
+        if (col + cluster_width > width) {
+            rows++;
+            col = 0;
+        }
+        if (cluster_width <= width) col += cluster_width;
     }
     return rows;
 }
@@ -566,7 +597,8 @@ void tui_chart_bar_h(tui_buffer_t* buf, int x, int y, int width, int height,
     int label_w = 0;
     if (labels) {
         for (int i = 0; i < count; i++) {
-            int len = labels[i] ? utf8_strlen(labels[i]) : 0;
+            int len = labels[i] ? text_display_width(labels[i]) : 0;
+            if (len < 0) len = 0;
             if (len > label_w) label_w = len;
         }
         label_w = min_i(label_w + 1, width / 3);
