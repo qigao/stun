@@ -269,3 +269,59 @@ spec("FlexUI registry preflight rejects invalid content before construction") {
     check_false(registry.contains("bad"));
   }
 }
+
+
+spec("FlexUI custom registration defaults remain compatible") {
+  it("allows text and children unless a custom tag explicitly restricts them") {
+    flexUI::WidgetRegistry registry;
+    check_false(static_cast<bool>(registry.register_element("custom")));
+    flexUI::UiDocumentDefinition definition;
+    definition.root.tag = "custom";
+    definition.root.properties["text"] = std::string("Caption");
+    definition.root.children.emplace_back();
+    definition.root.children.back().tag = "custom";
+    check_false(static_cast<bool>(registry.validate(definition)));
+    check_false(static_cast<bool>(registry.register_element("children", flexUI::UiContentModel::Children)));
+    definition.root.tag = "children";
+    check(registry.validate(definition).code == flexUI::UiDocumentErrorCode::InvalidProperty);
+  }
+}
+
+
+spec("FlexUI anonymous nodes stay outside the named index") {
+  it("constructs multiple anonymous widgets and preserves named handles in both typed overloads") {
+    const auto compiled = flexUI::compile_ui_xml(
+      "<ui name=\"Anonymous\"><main><button text=\"First\"/><button text=\"Second\"/><label id=\"title\" text=\"Named\"/></main></ui>");
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    for (const bool use_program : {false, true}) {
+      flexUI::Box box(nullptr);
+      const auto result = use_program
+        ? flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry)
+        : flexUI::UiDocumentInstantiator::instantiate(box, compiled.program->definition(), registry);
+      check(static_cast<bool>(result));
+      if (!result) continue;
+      check_equal(box.root()->child_count(), 3);
+      for (std::size_t index = 0; index < 2; ++index) {
+        auto *child = box.root()->child_at(index);
+        check_true(child->id().empty());
+        check_false(static_cast<bool>(box.handle_for(*child)));
+        auto *button = dynamic_cast<flexUI::ButtonWidget *>(child->widget);
+        check_not_null(button);
+        if (button) check_equal(button->text(), index == 0 ? "First" : "Second");
+      }
+      check_equal(result.tree.elements_by_id.size(), 1);
+      check_null(box.get_by_id(""));
+      check_true(box.root()->id().empty());
+      check_false(static_cast<bool>(box.handle_for(*box.root())));
+      auto *title = box.get_by_id("title");
+      check_not_null(title);
+      check_not_null(dynamic_cast<flexUI::LabelWidget *>(title->widget));
+      const auto handle = box.handle_for(*title);
+      check(static_cast<bool>(handle));
+      check_equal(box.resolve_handle(handle), title);
+      check_equal(title->text(), "Named");
+    }
+  }
+}

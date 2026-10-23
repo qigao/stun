@@ -250,6 +250,54 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_within(save->style_.width, 123.0F, 0.001F);
   }
 
+  it("instantiates widget text from natural XML content") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Natural\"><button id=\"save\">Save</button></ui>");
+
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *save = built.application->box().get_by_id("save");
+    auto *button = save ? dynamic_cast<flexUI::ButtonWidget *>(save->widget) : nullptr;
+    check_not_null(save);
+    check_not_null(button);
+    if (save && button) {
+      check_equal(save->text(), std::string("Save"));
+      check_equal(button->text(), std::string("Save"));
+    }
+  }
+
+  it("publishes anonymous structural nodes without public handles") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(R"(
+      <ui name="Anonymous">
+        <main class="page">
+          <div class="panel">
+            <label id="title" text="Settings"/>
+          </div>
+        </main>
+      </ui>
+    )");
+
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *root = built.application->box().root();
+    auto *title = built.application->box().get_by_id("title");
+    check_not_null(root);
+    check_not_null(title);
+    check(root->id().empty());
+    check_false(static_cast<bool>(built.application->box().handle_for(*root)));
+    check_null(built.application->box().get_by_id(""));
+    check(static_cast<bool>(built.application->box().handle_for(*title)));
+  }
+
   it("rejects strict CSS diagnostics before publishing an application") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
     builder.xml_entry("<ui name=\"Static\"><div id=\"root\"/></ui>")
@@ -260,6 +308,57 @@ spec("FlexUI desktop application publishes complete XML candidates") {
     check_null(built.application.get());
     check(built.error.code == flexUI::DesktopApplicationErrorCode::CssLoadFailed);
     check_false(built.error.css_diagnostics.empty());
+  }
+
+
+  it("rejects invalid UTF-8 before publishing an application") {
+    std::string invalid =
+        "<ui name=\"Bad\">\n"
+        "  <div id=\"root\" text=\"";
+    invalid.push_back(static_cast<char>(0xFF));
+    invalid += "\"/>\n</ui>";
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(invalid);
+
+    const auto built = builder.build();
+    check_false(static_cast<bool>(built));
+    check_null(built.application.get());
+    check(built.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidUtf8);
+    check_equal(built.error.ui_error.line, 2);
+    check_equal(built.error.ui_error.column, 24);
+  }
+
+  it("keeps the active candidate unchanged when reload XML is invalid UTF-8") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Stable\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) {
+      return;
+    }
+
+    auto *active_box = &built.application->box();
+    const std::string active_ui = built.application->sources().ui;
+
+    std::string invalid =
+        "<ui name=\"Replacement\">\n"
+        "  <div id=\"replacement\" text=\"";
+    invalid.push_back(static_cast<char>(0xFF));
+    invalid += "\"/>\n</ui>";
+
+    const auto failed =
+        built.application->reload({invalid, "", "", "reload-invalid-utf8"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(failed.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidUtf8);
+    check_equal(&built.application->box(), active_box);
+    check_not_null(built.application->box().get_by_id("root"));
+    check_null(built.application->box().get_by_id("replacement"));
+    check_equal(built.application->sources().ui, active_ui);
   }
 
   it("rejects missing controller exports before publication") {
@@ -1381,7 +1480,6 @@ spec("FlexUI desktop application owns close and shutdown state") {
   }
 }
 
-
 spec("FlexUI desktop content preflight runs before stylesheet admission") {
   it("reports an unknown tag before an invalid stylesheet") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
@@ -1409,5 +1507,88 @@ spec("FlexUI desktop content preflight runs before stylesheet admission") {
     check(built.error.stage == flexUI::DesktopApplicationStage::UiCompile);
     check(built.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidNode);
     check_true(built.error.css_diagnostics.empty());
+  }
+}
+
+
+spec("FlexUI schema rejection preserves the active application") {
+  it("rejects an invalid later sibling before invoking factories during reload") {
+    int calls = 0;
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(registry.register_widget("probe", [&](const flexUI::UiNodeDefinition &) {
+      ++calls;
+      return std::make_unique<flexUI::ButtonWidget>();
+    }, flexUI::UiContentModel::Empty)));
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.widget_registry(std::move(registry))
+           .xml_entry("<ui name=\"Stable\"><div id=\"root\"/></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto *active_box = &built.application->box();
+    auto *active_root = active_box->root();
+    const auto active_source = built.application->sources().ui;
+    const auto failed = built.application->reload({
+      "<ui name=\"Replacement\"><div id=\"replacement\"><probe id=\"first\"/><input id=\"last\" text=\"forbidden\"/></div></ui>",
+      "#replacement { widht: 90px; }", "", "schema-reload"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(failed.error.stage == flexUI::DesktopApplicationStage::UiCompile);
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidProperty);
+    check_true(failed.error.css_diagnostics.empty());
+    check_equal(calls, 0);
+    check_equal(&built.application->box(), active_box);
+    check_equal(active_box->root(), active_root);
+    check_null(active_box->get_by_id("replacement"));
+    check_null(active_box->get_by_id("first"));
+    check_equal(built.application->sources().ui, active_source);
+    check(built.application->state() == flexUI::DesktopApplicationState::Ready);
+  }
+}
+
+
+spec("FlexUI anonymous application reload keeps named state transactional") {
+  it("keeps an anonymous root and a named handle when a replacement lacks a binding id") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Stable\"><main><label id=\"title\" text=\"Stable\"/></main></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto *active_box = &built.application->box();
+    auto *active_root = active_box->root();
+    auto *title = active_box->get_by_id("title");
+    const auto handle = active_box->handle_for(*title);
+    const auto source = built.application->sources().ui;
+    const auto failed = built.application->reload({
+      "<ui name=\"Replacement\" xmlns:bind=\"urn:flexui:binding\"><main><label bind:text=\"$title\"/></main></ui>", "", "", "missing-binding-id"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::RequiredElementId);
+    check(failed.error.ui_error.line > 0);
+    check_equal(&built.application->box(), active_box);
+    check_equal(active_box->root(), active_root);
+    check_equal(active_box->resolve_handle(handle), title);
+    check_null(active_box->get_by_id(""));
+    check_equal(built.application->sources().ui, source);
+  }
+}
+
+
+spec("FlexUI natural text obeys content models during reload") {
+  it("preserves the active application when natural text is forbidden on a leaf") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry("<ui name=\"Text\"><button id=\"save\">Save &amp; close</button></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto *box = &built.application->box();
+    auto *save = box->get_by_id("save");
+    const auto source = built.application->sources().ui;
+    const auto failed = built.application->reload({"<ui name=\"Bad\"><input>forbidden</input></ui>", "", "", "natural-text-reload"});
+    check_false(static_cast<bool>(failed));
+    check(failed.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidProperty);
+    check_equal(&built.application->box(), box);
+    check_equal(box->get_by_id("save"), save);
+    check_equal(dynamic_cast<flexUI::ButtonWidget *>(save->widget)->text(), "Save & close");
+    check_equal(built.application->sources().ui, source);
   }
 }

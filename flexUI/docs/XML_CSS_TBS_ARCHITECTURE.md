@@ -1,7 +1,66 @@
 # FlexUI XML、CSS 与 TurboScript 架构决策
 
-状态：已采用
+状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
+
+## 2026-10-22 实施范围与目标契约
+
+以下区分已合并源码与长期设计；后文的架构决策不代表全部能力已经验收。
+
+| 边界 | 当前事实 | 尚未完成 |
+| --- | --- | --- |
+| Text/Unicode | #76/#77/#78 已合并：XML 完整字节视图严格准入、Unicode 17 emoji 属性与呈现策略分离、字素级近似宽度/间距；事实与边界来自 `Salts::Unicode` | 真实 shaping/glyph advances、测量接入、编辑几何、完整应用字符串边界；见 [#15](https://github.com/qigao/stun/issues/15) |
+| XML | #12/#13/#14 提供注册内容模型预检、匿名节点、自然文本与严格 UTF-8 准入 | 完整 property/event/binding schema、稳定内部身份、精确解码文本 source map 和有序混合内容；见 [#16](https://github.com/qigao/stun/issues/16) |
+| CSS/Tailwind | 当前 catalog/JIT 生成 CSS 并进入同一个 StyleEngine cascade | 固定的 Tailwind v4 compatibility profile 与完整声明范围；见 [#17](https://github.com/qigao/stun/issues/17) |
+| Application | detached candidate 与 owner-thread publication/reload；真实无窗口 XML/registry/application 测试验证预检及失败回滚 | 真实 TurboScript JIT、完整 desktop/editor、安装分发及跨平台验收；见 [#31](https://github.com/qigao/stun/issues/31) |
+
+### Text / Unicode 目标契约
+
+公开字符串边界的目标编码是严格 UTF-8；非法输入应返回结构化错误，不静默替换。
+已验证的合法 bytes 保真，不隐式执行 NFC/NFD normalization。source/storage offset 以 byte
+表示；cursor/delete/selection 等用户可见操作应遵守 extended grapheme boundary，此项尚不能
+视为所有编辑控件的已完成行为。
+
+Unicode scalar、版本化 property、grapheme/word/line-break/bidi 基础事实由独立
+`Salts::Unicode` 提供；FlexUI 不维护第二份 Unicode 数据表。CSS typography、段落布局、
+font shaping/measurement、glyph 与 GPU font resource 分别属于其上层边界。
+`approximate_text_width()` 仍是近似值；字素计数正确并不构成真实字形测量。
+
+### XML typed schema 目标契约
+
+目标 descriptor 区分 structural/container、leaf/content widget、composite widget、text 和
+后续 reusable component，并声明 properties、events、bindings、content model 和可选 factory。
+非法组合应在带 source location 的 compiler/registry 边界拒绝；不能只在 paint 时发现错误。
+
+已实现的自然文本与匿名节点写法例如：
+
+```xml
+<label>保存</label>
+<button id="save" on:click="save">Save</button>
+```
+
+事件示例要求外围 `ui` 声明 `xmlns:on="urn:flexui:event"`。匿名结构或控件节点不进入名称索引，
+也没有公开 `UiHandle`；稳定内部 reconciliation identity 尚未完成。公开 handle 仍基于显式 ID
+与 generation，事件及 binding 目标必须有显式 ID；显式空 ID 仍报错。
+
+自然文本按顺序合并 PCData/CDATA，只裁剪两端 XML 格式空白；文本与元素子节点混排明确报错。
+实体解码及裁剪后的文本诊断锚定首个原始贡献文本节点，`SourceSpan.length == 0` 不表示已实现
+精确原始范围映射。当前内容模型只覆盖注册 tag、文本许可与子节点数量，不等于完整控件 schema。
+
+格式编译器产出结构程序；canonical application 与带 registry 的实例化先完成整树内容预检，
+再调用工厂或修改 Box，应用在加载 CSS 前也完成预检。无 registry 的重载保留为显式通用 Element
+兼容入口，不代表已通过 typed schema；统一的 registry-aware 公共编译 API 仍由 #16 跟踪。
+
+### Tailwind compatibility 目标契约
+
+目标 authoring surface 是标准 `class="..."`，普通 semantic class 与 Tailwind candidate 共存，
+utility 只生成进入同一个 cascade 的规则。固定 Tailwind v4 profile 后，逐项声明 utility、
+variant stacking、responsive、dark、data/aria、container query、theme 与 arbitrary syntax 的
+支持范围；识别但不能表达的语义应明确报 Unsupported，不重新解释为本地不同语义。
+
+官方 Tailwind compiler 可作为开发期 differential oracle，不作为安装后的 Node/npm 依赖。
+`utility_whitelist.json`、`UtilityCatalog` 与 exact-token lookup 继续作为当前实现及 coverage 数据，
+不能据此声称完整 Tailwind v4 兼容。只有 profiling/benchmark 证明必要时才考虑直接 Style IR lowering。
 
 ## 背景
 
@@ -12,7 +71,7 @@ FlexUI 需要形成类似 Qt `.ui` + QtScript 的桌面应用开发模型，但�
 ## 决策
 
 - XML 是 UI 结构与静态属性的唯一源格式。
-- CSS 与 Tailwind-like utility 是视觉、状态样式、transition 和 keyframes 的唯一源格式。
+- CSS 是视觉、状态样式、transition 与 keyframes 的同一个 cascade；Tailwind utility 编译到该 pipeline。
 - TurboScript（TBS）是交互、应用状态和命令编排的唯一可执行脚本语言；TBS 不创建或遍历一个
   通用 DOM，也不逐帧驱动动画。
 - Flex 的原生 Timeline、Track、Curve、显式三次贝塞尔、Physics/Box2D 和数值 MIR 保留为运行时
@@ -21,7 +80,7 @@ FlexUI 需要形成类似 Qt `.ui` + QtScript 的桌面应用开发模型，但�
 - XML、CSS 和 TBS 都先编译为不可变程序，再在 UI owner thread 上实例化或执行。
 
 ```mermaid
-flowchart LR
+flowchart TD
     XML[main.ui.xml] --> XP[XML adapter]
     CSS[theme.css] --> CP[CSS / utility compiler]
     TBS[controller.tbs] --> TS[TurboScript module]
@@ -76,10 +135,11 @@ sequenceDiagram
 任一阶段失败都立即返回结构化错误。旧实例在 reload 成功提交前继续作为唯一活动实例；不进行静默
 降级，也不混用新旧文档的部分产物。
 
-## XML 契约
+## 当前 XML 实现契约
 
 XML adapter 只负责格式适配，不持有业务状态。元素名称通过 `WidgetRegistry` 映射到具体 widget
-factory；未知 tag、重复 ID、重复属性和不合法类型均为 load error。通用属性映射到
+factory；typed load 拒绝未知 tag、重复非空 ID、重复属性及已有受约束属性的类型错误。完整的
+逐控件属性 schema 尚待 #16。通用属性映射到
 `UiNodeDefinition::properties`，事件使用 `on:*`，binding 使用 `bind:*`，命名空间在 adapter 边界
 转换为现有 canonical key（如 `on.click`、`bind.text`）。资源使用独立、受限的 `<resources>` 区域，
 最终产生 `UiResourceDefinition`。

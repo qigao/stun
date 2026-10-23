@@ -1,4 +1,5 @@
 #include "tinytest.h"
+#include <string>
 #include "chart_component_internal.h"
 #include "flexchart/mark_renderer_registry.h"
 
@@ -32,8 +33,8 @@ spec("flexchart_geoshape") {
             auto renderer = flex::chart::MarkRendererRegistry::instance().create("geoshape");
             renderer->render(mark, records, ctx);
 
-            check_int_eq(overlay->child_count(), 1);
-            check_str_eq(overlay->child_at(0)->type_name(), "Shape");
+            check((overlay->child_count()) == (1));
+            check(std::string(overlay->child_at(0)->type_name()) == std::string("Shape"));
         }
     }
 }

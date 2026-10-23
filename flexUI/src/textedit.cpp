@@ -7,9 +7,11 @@
 
 #include <flexUI/textedit.h>
 #include <flexUI/text_util.h>
+#include <salts_unicode.h>
 #include <string>
 #include <cstring>
 #include <algorithm>
+#include <stdexcept>
 
 namespace flexUI {
 
@@ -119,6 +121,116 @@ struct TextEditState {
   bool initialized = false;
 };
 
+namespace {
+
+[[noreturn]] void throw_unicode_edit_error(salts_unicode_status status,
+                                           const char* operation) {
+  if (status == SALTS_UNICODE_ERR_INVALID_UTF8) {
+    throw std::invalid_argument("FlexUI text contains invalid UTF-8");
+  }
+  throw std::runtime_error(operation);
+}
+
+size_t next_grapheme_boundary(const std::string& text, size_t position) {
+  size_t cursor = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status != SALTS_UNICODE_OK) {
+      throw_unicode_edit_error(status,
+                               "Salts::Unicode failed grapheme navigation");
+    }
+    if (cursor > position) {
+      return cursor;
+    }
+  }
+  return text.size();
+}
+
+size_t previous_grapheme_boundary(const std::string& text, size_t position) {
+  if (position == 0u) return 0u;
+
+  size_t cursor = 0u;
+  vstr cluster{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const size_t start = cursor;
+    const salts_unicode_status status =
+        salts_unicode_grapheme_next(input, &cursor, &cluster);
+    if (status != SALTS_UNICODE_OK) {
+      throw_unicode_edit_error(status,
+                               "Salts::Unicode failed grapheme navigation");
+    }
+    if (cursor >= position) {
+      return start;
+    }
+  }
+  return text.size();
+}
+
+size_t next_word_boundary(const std::string& text, size_t position) {
+  size_t cursor = 0u;
+  vstr segment{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const salts_unicode_status status =
+        salts_unicode_word_next(input, &cursor, &segment);
+    if (status != SALTS_UNICODE_OK) {
+      throw_unicode_edit_error(status,
+                               "Salts::Unicode failed word navigation");
+    }
+    if (cursor > position) {
+      return cursor;
+    }
+  }
+  return text.size();
+}
+
+size_t previous_word_boundary(const std::string& text, size_t position) {
+  if (position == 0u) return 0u;
+
+  size_t cursor = 0u;
+  vstr segment{};
+  const vstr input = vstr_from_buf(text.data(), text.size());
+
+  while (cursor < text.size()) {
+    const size_t start = cursor;
+    const salts_unicode_status status =
+        salts_unicode_word_next(input, &cursor, &segment);
+    if (status != SALTS_UNICODE_OK) {
+      throw_unicode_edit_error(status,
+                               "Salts::Unicode failed word navigation");
+    }
+    if (cursor >= position) {
+      return start;
+    }
+  }
+  return text.size();
+}
+
+void move_textedit_cursor(STB_TexteditState* state, size_t target, bool shift) {
+  const int clamped = static_cast<int>(target);
+  if (shift) {
+    if (state->select_start == state->select_end) {
+      state->select_start = state->cursor;
+    }
+    state->cursor = clamped;
+    state->select_end = clamped;
+    return;
+  }
+
+  state->cursor = clamped;
+  state->select_start = clamped;
+  state->select_end = clamped;
+}
+
+} // namespace
+
 // ============================================================================
 // TextEdit Implementation
 // ============================================================================
@@ -143,38 +255,69 @@ void TextEdit::init(std::string* text, float char_width, float line_height, bool
 }
 
 bool TextEdit::key(int key, bool shift, bool ctrl) {
-  if (!state_ || !state_->initialized) return false;
+  if (!state_ || !state_->initialized || !text_) return false;
 
-  int stb_key = map_key_to_stb(key, shift, ctrl);
+  const int stb_key = map_key_to_stb(key, shift, ctrl);
   if (stb_key == 0) return false;
 
-  // stb stores byte offsets. Move by one decoded scalar while retaining its
-  // selection-anchor and selection-collapse behavior for each arrow key.
-  size_t key_steps = 1;
+  stb_textedit_clamp(&state_->string, &state_->stb_state);
   const int navigation_key = stb_key & ~STB_TEXTEDIT_K_SHIFT;
-  const bool scalar_navigation = navigation_key == STB_TEXTEDIT_K_LEFT ||
-                                 navigation_key == STB_TEXTEDIT_K_RIGHT;
-  if (scalar_navigation) {
-    stb_textedit_clamp(&state_->string, &state_->stb_state);
-  }
-  if (scalar_navigation && (shift || !has_selection())) {
-    const size_t cursor = static_cast<size_t>(state_->stb_state.cursor);
-    if (navigation_key == STB_TEXTEDIT_K_RIGHT && cursor < text_->size()) {
-      size_t next = cursor;
-      (void)utf8_next_scalar(*text_, next);
-      key_steps = next - cursor;
-    } else if (navigation_key == STB_TEXTEDIT_K_LEFT && cursor > 0) {
-      size_t previous = 0;
-      for (size_t next = 0; next < cursor;) {
-        previous = next;
-        (void)utf8_next_scalar(*text_, next);
-      }
-      key_steps = cursor - previous;
+
+  const bool boundary_navigation =
+      navigation_key == STB_TEXTEDIT_K_LEFT ||
+      navigation_key == STB_TEXTEDIT_K_RIGHT ||
+      navigation_key == STB_TEXTEDIT_K_WORDLEFT ||
+      navigation_key == STB_TEXTEDIT_K_WORDRIGHT;
+
+  if (boundary_navigation) {
+    const bool moving_left = navigation_key == STB_TEXTEDIT_K_LEFT ||
+                             navigation_key == STB_TEXTEDIT_K_WORDLEFT;
+
+    if (!shift && has_selection()) {
+      const size_t target = static_cast<size_t>(
+          moving_left ? selection_start() : selection_end());
+      move_textedit_cursor(&state_->stb_state, target, false);
+      return true;
     }
+
+    const size_t cursor = static_cast<size_t>(state_->stb_state.cursor);
+    size_t target = cursor;
+    if (navigation_key == STB_TEXTEDIT_K_LEFT) {
+      target = previous_grapheme_boundary(*text_, cursor);
+    } else if (navigation_key == STB_TEXTEDIT_K_RIGHT) {
+      target = next_grapheme_boundary(*text_, cursor);
+    } else if (navigation_key == STB_TEXTEDIT_K_WORDLEFT) {
+      target = previous_word_boundary(*text_, cursor);
+    } else {
+      target = next_word_boundary(*text_, cursor);
+    }
+    move_textedit_cursor(&state_->stb_state, target, shift);
+    return true;
   }
-  for (size_t step = 0; step < key_steps; ++step) {
-    stb_textedit_key(&state_->string, &state_->stb_state, stb_key);
+
+  if (!has_selection() &&
+      (navigation_key == STB_TEXTEDIT_K_BACKSPACE ||
+       navigation_key == STB_TEXTEDIT_K_DELETE)) {
+    const size_t cursor = static_cast<size_t>(state_->stb_state.cursor);
+    size_t start = cursor;
+    size_t end = cursor;
+
+    if (navigation_key == STB_TEXTEDIT_K_BACKSPACE) {
+      start = previous_grapheme_boundary(*text_, cursor);
+    } else {
+      end = next_grapheme_boundary(*text_, cursor);
+    }
+
+    if (start != end) {
+      state_->stb_state.select_start = static_cast<int>(start);
+      state_->stb_state.select_end = static_cast<int>(end);
+      state_->stb_state.cursor = static_cast<int>(end);
+      stb_textedit_key(&state_->string, &state_->stb_state, navigation_key);
+    }
+    return true;
   }
+
+  stb_textedit_key(&state_->string, &state_->stb_state, stb_key);
   return true;
 }
 

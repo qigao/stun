@@ -1,4 +1,4 @@
-#include <tinytest.h>
+#include <tinytest.hpp>
 #ifdef group
 #undef group
 #endif
@@ -209,7 +209,7 @@ void validate_utility_whitelist(const json& value) {
 }
 
 void require_contains(const std::string& text, const std::string& needle) {
-  check_str_contains(text.c_str(), needle.c_str());
+  check_contains(text.c_str(), needle.c_str());
 }
 
 bool ends_with_text(const std::string& value, const std::string& suffix) {

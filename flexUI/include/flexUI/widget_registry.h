@@ -49,9 +49,10 @@ public:
   /// Registers a structural tag that creates an Element without a Widget.
   /// @param tag Non-empty canonical XML tag.
   /// @return None on success; InvalidTag or DuplicateTag without changing an
-  ///         existing registration.
+  ///         existing registration. The default preserves custom structural
+  ///         tags that previously accepted both text and children.
   WidgetRegistryError register_element(
-      std::string tag, UiContentModel content = UiContentModel::Children);
+      std::string tag, UiContentModel content = UiContentModel::TextAndChildren);
 
   /// Registers one Widget factory for a canonical XML tag.
   /// @param tag Non-empty canonical XML tag.

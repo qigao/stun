@@ -31,7 +31,7 @@ target_include_directories(kanban PUBLIC
     "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-target_link_libraries(kanban PUBLIC TurboParser::Parser flex_runtime)
+target_link_libraries(kanban PUBLIC Salts::JsonParser Flex::Expression)
 
 # Test executable
 add_executable(kanban_test tests/test_parser.c)

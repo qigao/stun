@@ -48,9 +48,8 @@ set_target_properties(
 
 install(
   TARGETS flexui_desktop_editor flexui_document_service
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT DesktopEditor
-  LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT DesktopEditor)
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(
   FILES ${_flexui_desktop_editor_asset_paths}
-  DESTINATION ${CMAKE_INSTALL_BINDIR}/desktop_editor_assets
-  COMPONENT DesktopEditor)
+  DESTINATION ${CMAKE_INSTALL_BINDIR}/desktop_editor_assets)

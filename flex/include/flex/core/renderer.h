@@ -29,6 +29,11 @@ struct RendererCapabilities {
     bool blur = false;
 };
 
+struct TextMetrics {
+    float width = 0.0f;
+    float height = 0.0f;
+};
+
 // ============================================================================
 // Renderer Interface
 // ============================================================================
@@ -86,6 +91,19 @@ public:
     virtual void draw_text(const std::string& text, float x, float y,
                           const std::string& font_family, float font_size,
                           bool bold, const Color& color) = 0;
+
+    // Explicit optional real-metrics capability. Returning false means this
+    // backend does not provide text measurement; out_metrics remains unchanged.
+    virtual bool measure_text(const std::string& text,
+                              const std::string& font_family, float font_size,
+                              bool bold, TextMetrics& out_metrics) {
+        (void)text;
+        (void)font_family;
+        (void)font_size;
+        (void)bold;
+        (void)out_metrics;
+        return false;
+    }
 
     // Optional asset facade. Backends that support runtime font registration
     // override these methods; custom renderers remain source-compatible.

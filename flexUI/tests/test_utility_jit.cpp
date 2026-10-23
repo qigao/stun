@@ -3,7 +3,7 @@
 #include <flexUI/utility_jit.h>
 
 #include <nlohmann/json.hpp>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <stdexcept>
 #include <string>
@@ -155,12 +155,12 @@ spec("UtilityJit incrementally compiles deterministic CSS snapshots") {
 
     box.update();
     check_true(box.utility_jit_enabled());
-    check_float_eq(child->computed_style->border_radius[0], 6.0f, 0.001f);
+    check_within(child->computed_style->border_radius[0], 6.0f, 0.001f);
     check_true(box.missing_utility_tokens().empty());
 
     child->set_classes("inline-flex");
     box.update();
-    check_float_eq(child->computed_style->border_radius[0], 0.0f, 0.001f);
+    check_within(child->computed_style->border_radius[0], 0.0f, 0.001f);
     check(child->computed_style->display == flexUI::Display::Flex);
     check_true(box.missing_utility_tokens().empty());
 
@@ -180,7 +180,7 @@ spec("UtilityJit incrementally compiles deterministic CSS snapshots") {
     box.update();
     check_true(box.utility_jit_enabled());
     check(root->computed_style->display == flexUI::Display::Flex);
-    check_float_eq(root->computed_style->border_radius[0], 6.0f, 0.001f);
+    check_within(root->computed_style->border_radius[0], 6.0f, 0.001f);
     check(root->utility_names().count("bg-background") == 1);
     check_throws_as(root->add_utility("not-in-the-built-in-catalog"),
                     std::invalid_argument);
@@ -204,13 +204,13 @@ spec("UtilityJit incrementally compiles deterministic CSS snapshots") {
     media.prefers_dark_scheme = true;
     box.set_media_environment(media);
     box.update();
-    check_string_eq(root->computed_style->get_variable(flex::Symbol("--background")),
+    check_equal(root->computed_style->get_variable(flex::Symbol("--background")),
                     "#0f172a");
-    check_float_eq(root->computed_style->background_color.r,
+    check_within(root->computed_style->background_color.r,
                    0x0f / 255.0f, 0.001f);
-    check_float_eq(root->computed_style->background_color.g,
+    check_within(root->computed_style->background_color.g,
                    0x17 / 255.0f, 0.001f);
-    check_float_eq(root->computed_style->background_color.b,
+    check_within(root->computed_style->background_color.b,
                    0x2a / 255.0f, 0.001f);
   }
 

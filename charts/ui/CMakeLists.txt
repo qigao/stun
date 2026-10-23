@@ -6,7 +6,9 @@ add_library(chart_ui STATIC
 target_include_directories(chart_ui
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-target_link_libraries(chart_ui PUBLIC flexUI)
+# The adapter includes <flex.h>, whose public DSL headers depend on the
+# generated flex_parser_gen.h exported by the Flex::Compiler target.
+target_link_libraries(chart_ui PUBLIC flexUI flex)
 target_compile_features(chart_ui PUBLIC cxx_std_17)
 set_target_properties(chart_ui PROPERTIES FOLDER "Modules/Charts/UI")
 

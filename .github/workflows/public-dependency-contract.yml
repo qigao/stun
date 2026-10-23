@@ -2,13 +2,81 @@ name: Public dependency compile contract
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
+    branches: [master]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Public provider contract scope
+    runs-on: ubuntu-24.04
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Classify latest PR update
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'flex/*' 'flexUI/*' 'ui_core/*' 'shared/markdown/*' \
+            'tools/md/*' '.ci/*' 'cmake/*' 'CMakeLists.txt' \
+            '.github/workflows/public-dependency-contract.yml' \
+            '.github/scripts/ci-affected.sh'
+
+  # Fast architecture gate on every PR. The existing native released-SDK
+  # conformance and real Mesa/ASan/UBSan Widget runs remain mandatory;
+  # static checks alone cannot establish parser or runtime correctness.
+  markdownwidget-single-c11-parser:
+    name: MarkdownWidget sole C11 parser contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact Stun source candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate incremental PR scope detection
+        run: python3 .github/scripts/tests/test_ci_affected.py
+
+      - name: Validate published Flowchart SDK integrity verifier
+        run: python3 .github/scripts/tests/test_restore_flowchart_sdk.py
+
+      - name: Reject retired TurboParser and optional charts switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'TurboParser|turbo_parser\.h|turbo_json_|turbo_parse_json|turbo_free_json|TURBOPARSER_ROOT|STUN_BUILD_CHARTS' \
+            --exclude='public-dependency-contract.yml' --exclude-dir=.git .; then
+            echo "Retired parser API or optional chart switch remains in the source tree" >&2
+            exit 1
+          fi
+
+      - name: Reject legacy parser link or include reintroduction
+        run: |
+          set -euo pipefail
+          python3 shared/markdown/tests/verify_single_markdown_parser.py
+          git diff --exit-code
+
+  sdk-releases:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
   controller-salts-concurrency:
+    needs: sdk-releases
     name: Controller Salts::Concurrency contract
     runs-on: ubuntu-latest
     steps:
@@ -19,14 +87,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: master
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
       - name: Verify canonical dependency surface
         shell: bash
         run: |
           set -euo pipefail
-          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
           grep -Fq '#include <salts/disruptor.h>' flexUI/modules/controller/application_completion.cpp
           grep -Fq 'PRIVATE Salts::Concurrency)' flexUI/modules/controller/CMakeLists.txt
           if grep -Fq '#include <turbo/disruptor.h>' flexUI/modules/controller/application_completion.cpp; then
@@ -41,6 +108,7 @@ jobs:
           c++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -IflexUI/include             -I.ci/salts/concurrency/include             -fsyntax-only flexUI/modules/controller/application_completion.cpp
 
   flexui-salts-core-provider:
+    needs: sdk-releases
     name: FlexUI Salts::Core provider contract
     runs-on: ubuntu-latest
     steps:
@@ -51,14 +119,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: master
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
       - name: Verify FlexUI main runtime has one Core provider
         shell: bash
         run: |
           set -euo pipefail
-          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
           for file in             flex/modules/runtime/CMakeLists.txt             flex/modules/dsl/CMakeLists.txt             flexUI/CMakeLists.txt             tools/md/CMakeLists.txt             flexUI/examples/desktop_editor/CMakeLists.txt             flexUI/tests/CMakeLists.txt; do
             if grep -n 'TurboUtils::Core' "$file"; then
               echo "legacy Core provider remains in $file" >&2
@@ -104,10 +171,10 @@ jobs:
           c++ "${common[@]}" -Iflex/include -fsyntax-only /tmp/flex_debug_contract.cpp
 
           cat > /tmp/flex_fs_contract.cpp <<'EOF'
-          #include <salts_fs.h>
+          #include <cmeta_fs.h>
           int main() {
-            salts_fs_stat_t stat{};
-            salts_fs_buf_t buf{};
+            cmeta_fs_stat_t stat{};
+            cmeta_fs_buf_t buf{};
             (void)stat;
             (void)buf;
             return 0;
@@ -116,6 +183,7 @@ jobs:
           c++ "${common[@]}" -fsyntax-only /tmp/flex_fs_contract.cpp
 
   pluginhost-canonical-packages:
+    needs: sdk-releases
     name: PluginHost canonical Salts contracts
     runs-on: ubuntu-latest
     steps:
@@ -126,22 +194,20 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: master
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
       - name: Checkout canonical SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: master
+          ref: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
           path: .ci/salts-utils
 
       - name: Verify source and install package ownership
         shell: bash
         run: |
           set -euo pipefail
-          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
-          git -C .ci/salts-utils log -1 --format='SaltsUtilsRef=master SaltsUtils=%H'
           grep -Fq '#include <toml.h>' flexUI/modules/plugin_host/plugin_manifest.cpp
           grep -Fq 'Salts::TomlParser' flexUI/modules/plugin_host/CMakeLists.txt
           grep -Fq 'Salts::Core' flexUI/modules/plugin_host/CMakeLists.txt
@@ -183,32 +249,31 @@ jobs:
 
 
   flexui-salts-unicode:
+    needs: sdk-releases
     name: FlexUI Salts::Unicode contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Stun
         uses: actions/checkout@v4
 
-      - name: Checkout Salts master
+      - name: Checkout released Salts
         uses: actions/checkout@v4
         with:
           repository: qigao/salts
-          ref: master
+          ref: ${{ needs.sdk-releases.outputs.salts_sha }}
           path: .ci/salts
 
-      - name: Checkout SaltsUtils master
+      - name: Checkout released SaltsUtils
         uses: actions/checkout@v4
         with:
           repository: qigao/salts-utils
-          ref: master
+          ref: ${{ needs.sdk-releases.outputs.salts_utils_sha }}
           path: .ci/salts-utils
 
       - name: Verify Unicode ownership contract
         shell: bash
         run: |
           set -euo pipefail
-          git -C .ci/salts log -1 --format='SaltsRef=master Salts=%H'
-          git -C .ci/salts-utils log -1 --format='SaltsUtilsRef=master SaltsUtils=%H'
           grep -Fq 'Salts::Unicode' flexUI/CMakeLists.txt
           grep -Fq '#include <salts_unicode.h>' flexUI/src/text_util.cpp
           grep -Fq 'utf8_next_scalar' flexUI/include/flexUI/text_util.h
@@ -228,7 +293,7 @@ jobs:
             -Wextra
             -Werror
             -IflexUI/include
-            -isystem .ci/salts-utils/unicode/include
+            -isystem .ci/salts/unicode/include
             -isystem .ci/salts/utils/include
             -isystem .ci/salts/utils/parser
             -isystem .ci/salts/platform/include

@@ -1,8 +1,11 @@
 %name BlockParser
 %token_prefix BLOCK_
 %extra_argument { BlockParserContext *ctx }
+%token_type { char* }
+%token_destructor { free($$); }
 
 %type id { char* }
+%destructor id { free($$); }
 %type node_def { char* }
 
 // Precedence declarations to resolve shift/reduce conflicts
