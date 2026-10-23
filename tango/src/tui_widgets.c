@@ -341,7 +341,10 @@ static bool encode_input_scalar(uint32_t scalar, char bytes[4], size_t* size) {
 }
 
 bool tui_input_handle(tui_input_state_t* state, const tui_event_t* event) {
-    if (!state || !event || event->type != TUI_EVENT_KEY) return false;
+    if (!state || !event ||
+        (event->type != TUI_EVENT_KEY && event->type != TUI_EVENT_PASTE))
+        return false;
+    const bool pasted = event->type == TUI_EVENT_PASTE;
     size_t observed_len = 0u;
     while (observed_len < sizeof(state->text) &&
            state->text[observed_len] != '\0') ++observed_len;
@@ -354,29 +357,29 @@ bool tui_input_handle(tui_input_state_t* state, const tui_event_t* event) {
     state->cursor = (int)input_boundary_at_or_before(
         input, state->cursor < 0 ? 0u : (size_t)state->cursor);
     
-    if (event->key == TUI_KEY_LEFT && state->cursor > 0) {
+    if (!pasted && event->key == TUI_KEY_LEFT && state->cursor > 0) {
         size_t cursor = (size_t)state->cursor;
         vstr cluster;
         if (salts_unicode_grapheme_prev(input, &cursor, &cluster) ==
             SALTS_UNICODE_OK) state->cursor = (int)cursor;
         return true;
     }
-    if (event->key == TUI_KEY_RIGHT && state->cursor < state->len) {
+    if (!pasted && event->key == TUI_KEY_RIGHT && state->cursor < state->len) {
         size_t cursor = (size_t)state->cursor;
         vstr cluster;
         if (salts_unicode_grapheme_next(input, &cursor, &cluster) ==
             SALTS_UNICODE_OK) state->cursor = (int)cursor;
         return true;
     }
-    if (event->key == TUI_KEY_HOME) {
+    if (!pasted && event->key == TUI_KEY_HOME) {
         state->cursor = 0;
         return true;
     }
-    if (event->key == TUI_KEY_END) {
+    if (!pasted && event->key == TUI_KEY_END) {
         state->cursor = state->len;
         return true;
     }
-    if (event->key == TUI_KEY_BACKSPACE && state->cursor > 0) {
+    if (!pasted && event->key == TUI_KEY_BACKSPACE && state->cursor > 0) {
         size_t start = (size_t)state->cursor;
         vstr cluster;
         if (salts_unicode_grapheme_prev(input, &start, &cluster) ==
@@ -388,7 +391,7 @@ bool tui_input_handle(tui_input_state_t* state, const tui_event_t* event) {
         }
         return true;
     }
-    if (event->key == TUI_KEY_DELETE && state->cursor < state->len) {
+    if (!pasted && event->key == TUI_KEY_DELETE && state->cursor < state->len) {
         size_t end = (size_t)state->cursor;
         vstr cluster;
         if (salts_unicode_grapheme_next(input, &end, &cluster) ==
