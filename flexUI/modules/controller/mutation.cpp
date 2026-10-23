@@ -41,6 +41,9 @@ void visit_strings(const UiMutation &mutation, Visitor &&visitor) {
             std::is_same_v<T, SetBindingInputStringMutation>) {
           visitor(value.name);
           visitor(value.value);
+        } else if constexpr (std::is_same_v<T, SetStyleNumberMutation>) {
+          visitor(value.target.id);
+          visitor(value.property);
         } else {
           visitor(value.name);
         }
@@ -105,6 +108,15 @@ MutationResult validate_mutation(const UiMutation &mutation,
             if (value.name.empty()) {
               return fail(MutationErrorCode::InvalidName, index,
                           "attribute name must not be empty");
+            }
+          } else if constexpr (std::is_same_v<T, SetStyleNumberMutation>) {
+            if (value.property.empty()) {
+              return fail(MutationErrorCode::InvalidName, index,
+                          "style property name must not be empty");
+            }
+            if (!std::isfinite(value.value)) {
+              return fail(MutationErrorCode::InvalidNumber, index,
+                          "style property number must be finite");
             }
           }
         }

@@ -3455,6 +3455,17 @@ public:
       }
     }
 
+    // Binding/controller overrides are already typed and descriptor-validated.
+    // Apply them after the CSS cascade so recomputation cannot discard them.
+    for (const auto& [property_id, value] :
+         elem->registered_style_numbers()) {
+      if (const auto* property =
+              detail::style_property_descriptor(property_id)) {
+        (void)detail::style_property_write(
+            *property, *elem->computed_style, &cmeta_type_float, &value);
+      }
+    }
+
     // Composite controls paint their visible control surface through stable
     // child parts. Project author-facing host box properties into inherited
     // internal tokens so normal CSS remains useful without overriding a

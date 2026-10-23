@@ -6,8 +6,10 @@
 #include "flexUI/box.h"
 #include "flexUI/render_command.h"
 #include "flexUI/renderer.h"
+#include <flex/core/cmeta_types.h>
 #include <flex/bridge/renderer.h>
 #include <cctype>
+#include <cmath>
 #include <stdexcept>
 
 namespace flexUI {
@@ -434,6 +436,45 @@ void Element::remove_custom_property(const std::string& name) {
 const std::string* Element::custom_property(const std::string& name) const {
   auto it = custom_properties_.find(Symbol(name));
   return it != custom_properties_.end() ? &it->second : nullptr;
+}
+
+bool Element::set_registered_style_number(
+    const RegisteredStyleProperty& property, float value) {
+  if (!property.write || !std::isfinite(value) ||
+      !detail::style_property_accepts_type(property, &cmeta_type_float)) {
+    return false;
+  }
+  const auto found = registered_style_numbers_.find(property.id);
+  if (found != registered_style_numbers_.end() && found->second == value) {
+    return true;
+  }
+  registered_style_numbers_[property.id] = value;
+  mark_dirty(flex::DirtyFlags::Content);
+  if (owner_box_) {
+    owner_box_->notify_dirty_style();
+  }
+  detail::mark_style_property_dirty(*this, property);
+  return true;
+}
+
+bool Element::remove_registered_style_number(
+    RegisteredStylePropertyId property_id) {
+  const auto* property = detail::style_property_descriptor(property_id);
+  if (!property || registered_style_numbers_.erase(property_id) == 0) {
+    return false;
+  }
+  mark_dirty(flex::DirtyFlags::Content);
+  if (owner_box_) {
+    owner_box_->notify_dirty_style();
+  }
+  detail::mark_style_property_dirty(*this, *property);
+  return true;
+}
+
+const float* Element::registered_style_number(
+    RegisteredStylePropertyId property) const noexcept {
+  const auto found = registered_style_numbers_.find(property);
+  return found != registered_style_numbers_.end() ? &found->second : nullptr;
 }
 
 void Element::set_state(Symbol state, bool active) {

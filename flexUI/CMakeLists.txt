@@ -167,6 +167,7 @@ set(FLEXUI_HEADERS
   include/flexUI/keyed_repeater.h
   include/flexUI/text_value_widget.h
   include/flexUI/computed_style.h
+  include/flexUI/style_property.h
   include/flexUI/style_engine.h
   include/flexUI/event.h
   include/flexUI/event_dispatcher.h

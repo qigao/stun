@@ -4,6 +4,7 @@
 
 #include <tinytest.hpp>
 
+#include <cmath>
 #include <string>
 
 namespace {
@@ -169,5 +170,39 @@ spec("FlexUI Box mutation host") {
     check_false(static_cast<bool>(missing_result));
     check(missing_result.error.code == flexUI::MutationErrorCode::InvalidName);
     check_false(box.bindings().inputs().contains("unknown"));
+  }
+
+  it("commits registered numeric styles atomically with registry impact") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    box.set_root(root);
+    box.load_css("#root { opacity: 0.9; }");
+    box.update();
+    check_false(root->dirty_layout());
+
+    flexUI::UiMutationBatch batch;
+    require_append(batch,
+                   flexUI::SetStyleNumberMutation{
+                       box.handle_for(*root), "opacity", 0.25});
+    flexUI::BoxMutationHost host(box);
+    flexUI::UiMutationEngine engine(host);
+    check(engine.apply(batch));
+    check_false(root->dirty_layout());
+    check(root->dirty_paint());
+    box.update();
+    check(std::fabs(root->computed_style->opacity - 0.25f) < 0.001f);
+
+    flexUI::UiMutationBatch invalid;
+    require_append(invalid,
+                   flexUI::SetTextMutation{box.handle_for(*root), "changed"});
+    require_append(invalid,
+                   flexUI::SetStyleNumberMutation{
+                       box.handle_for(*root), "visibility", 1.0});
+    const auto result = engine.apply(invalid);
+    check_false(static_cast<bool>(result));
+    check(result.error.code == flexUI::MutationErrorCode::InvalidType);
+    check(root->text().empty());
+    box.update();
+    check(std::fabs(root->computed_style->opacity - 0.25f) < 0.001f);
   }
 }

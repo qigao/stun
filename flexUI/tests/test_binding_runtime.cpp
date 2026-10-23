@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include <tinytest.hpp>
 
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -386,5 +387,45 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check(runtime.targets().unbind(binding.id));
     check(runtime.inputs().erase("enabled"));
     check_false(runtime.inputs().contains("enabled"));
+  }
+}
+
+spec("UiBindingRuntime projects numeric values through StylePropertyRegistry") {
+  it("applies and restores a descriptor-owned style override") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    box.set_root(root);
+    box.load_css("#root { opacity: 0.8; }");
+    box.update();
+
+    auto& runtime = box.bindings();
+    runtime.inputs().set_number("progress", 0.4);
+    const auto binding =
+        runtime.targets().bind_style_number(*root, "opacity", "progress * 0.5");
+    box.update();
+    check(std::fabs(root->computed_style->opacity - 0.2f) < 0.001f);
+
+    runtime.inputs().set_number("progress", 0.8);
+    box.update();
+    check(std::fabs(root->computed_style->opacity - 0.4f) < 0.001f);
+
+    check(runtime.targets().unbind(binding.id));
+    box.update();
+    check(std::fabs(root->computed_style->opacity - 0.8f) < 0.001f);
+  }
+
+  it("rejects unknown and nonnumeric registered properties") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    box.set_root(root);
+    auto& runtime = box.bindings();
+    runtime.inputs().set_number("value", 1.0);
+
+    check_throws_as(
+        runtime.targets().bind_style_number(*root, "missing", "value"),
+        std::invalid_argument);
+    check_throws_as(
+        runtime.targets().bind_style_number(*root, "visibility", "value"),
+        std::invalid_argument);
   }
 }

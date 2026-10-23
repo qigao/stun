@@ -15,6 +15,7 @@
 #define FLEXUI_ELEMENT_H
 
 #include "computed_style.h"
+#include "style_property.h"
 #include "widget.h"
 #include <flex/runtime/group.h>
 #include <algorithm>
@@ -133,6 +134,15 @@ public:
   const std::unordered_map<Symbol, std::string, SymbolHash>&
   custom_properties() const {
     return custom_properties_;
+  }
+  bool set_registered_style_number(const RegisteredStyleProperty& property,
+                                   float value);
+  bool remove_registered_style_number(RegisteredStylePropertyId property);
+  const float* registered_style_number(
+      RegisteredStylePropertyId property) const noexcept;
+  const std::unordered_map<RegisteredStylePropertyId, float>&
+  registered_style_numbers() const noexcept {
+    return registered_style_numbers_;
   }
 
   // ========== 伪状态操作 ==========
@@ -544,6 +554,8 @@ private:
   std::string class_attribute_;
   std::unordered_map<Symbol, std::string, SymbolHash> attributes_;
   std::unordered_map<Symbol, std::string, SymbolHash> custom_properties_;
+  std::unordered_map<RegisteredStylePropertyId, float>
+      registered_style_numbers_;
   std::unordered_set<Symbol, SymbolHash> pseudo_states_;
   std::string text_content_;
   ClickCallback onclick_;

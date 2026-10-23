@@ -8,6 +8,20 @@
 
 namespace meta_editor {
 
+std::vector<const flexUI::RegisteredStyleProperty*>
+WidgetPanel::inspectable_style_properties() {
+    std::vector<const flexUI::RegisteredStyleProperty*> properties;
+    properties.reserve(flexUI::registered_style_property_count());
+    for (std::size_t index = 0;
+         index < flexUI::registered_style_property_count(); ++index) {
+        if (const auto* property =
+                flexUI::registered_style_property_at(index)) {
+            properties.push_back(property);
+        }
+    }
+    return properties;
+}
+
 static const char* WIDGET_PANEL_CSS = R"(
 #widget-root {
     display: flex;

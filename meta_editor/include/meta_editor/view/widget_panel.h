@@ -16,9 +16,11 @@
 #include <flexUI/widgets/input_widget.h>
 #include <flexUI/widgets/label_widget.h>
 #include <flexUI/widgets/colorpicker_widget.h>
+#include <flexUI/style_property.h>
 #include <functional>
 #include <string>
 #include <memory>
+#include <vector>
 
 namespace meta_editor {
 
@@ -35,6 +37,9 @@ public:
 
     // Update panel content based on selection
     void update_from_selection();
+
+    static std::vector<const flexUI::RegisteredStyleProperty*>
+    inspectable_style_properties();
 
     // Callbacks
     using ValueChangeCallback = std::function<void(const std::string& property, float value)>;

@@ -1,9 +1,11 @@
 #include <flexUI/binding_runtime.h>
 
 #include <flexUI/element.h>
+#include <flexUI/style_property.h>
 #include <flexUI/text_value_widget.h>
 #include <flexUI/widget.h>
 
+#include <flex/core/cmeta_types.h>
 #include <flex/core/expr_mir.h>
 
 #include <algorithm>
@@ -88,10 +90,15 @@ struct CustomPropertyTarget {
   std::string suffix;
 };
 
+struct StyleNumberTarget {
+  const RegisteredStyleProperty* property = nullptr;
+  std::optional<float> previous;
+};
+
 using BindingTarget =
     std::variant<ClassTarget, ClassListTarget, UtilityTarget,
                  UtilityListTarget, AttributeTarget, TextTarget, ValueTarget,
-                 CustomPropertyTarget>;
+                 CustomPropertyTarget, StyleNumberTarget>;
 
 enum class BindingSource : std::uint8_t { StringInput, BoolExpression,
                                           NumberExpression };
@@ -120,9 +127,14 @@ std::string target_key(const Element& target, const BindingTarget& binding_targe
           prefix = "text:";
         } else if constexpr (std::is_same_v<T, ValueTarget>) {
           prefix = "value:";
-        } else {
+        } else if constexpr (std::is_same_v<T, CustomPropertyTarget>) {
           prefix = "custom-property:";
           name = value.name;
+        } else {
+          prefix = "style-property:";
+          name = value.property && value.property->css_name
+                     ? value.property->css_name
+                     : "";
         }
         return std::to_string(address) + ":" + prefix + name;
       },
@@ -532,11 +544,19 @@ struct UiBindingRuntime::Impl {
             target.widget->remove_edit_observer(target.observer_id);
             target.observer_id = 0;
             target.widget->set_text_value(target.previous);
-          } else {
+          } else if constexpr (std::is_same_v<T, CustomPropertyTarget>) {
             if (target.previous) {
               binding.element->set_custom_property(target.name, *target.previous);
             } else {
               binding.element->remove_custom_property(target.name);
+            }
+          } else if (target.property) {
+            if (target.previous) {
+              (void)binding.element->set_registered_style_number(
+                  *target.property, *target.previous);
+            } else {
+              (void)binding.element->remove_registered_style_number(
+                  target.property->id);
             }
           }
         },
@@ -820,6 +840,30 @@ UiBindingHandle UiBindingTargets::bind_custom_property(
   return runtime_->impl_->add_binding(std::move(binding));
 }
 
+UiBindingHandle UiBindingTargets::bind_style_number(
+    Element& target, std::string property_name,
+    std::string number_expression) {
+  const auto* property = find_registered_style_property(property_name);
+  if (!property) {
+    throw std::invalid_argument("unknown registered style property: " +
+                                property_name);
+  }
+  if (!property->write ||
+      !detail::style_property_accepts_type(*property, &cmeta_type_float)) {
+    throw std::invalid_argument("registered style property is not numeric: " +
+                                property_name);
+  }
+  UiBindingRuntime::Impl::Binding binding;
+  binding.element = &target;
+  const float* previous = target.registered_style_number(property->id);
+  binding.target =
+      StyleNumberTarget{property, previous ? std::optional<float>(*previous)
+                                           : std::nullopt};
+  binding.source = BindingSource::NumberExpression;
+  runtime_->impl_->compile_expression(number_expression, binding);
+  return runtime_->impl_->add_binding(std::move(binding));
+}
+
 bool UiBindingTargets::unbind(UiBindingId id) {
   auto it = std::find_if(runtime_->impl_->bindings.begin(),
                          runtime_->impl_->bindings.end(),
@@ -901,6 +945,14 @@ bool UiBindingRuntime::update() {
             } else if constexpr (std::is_same_v<T, CustomPropertyTarget>) {
               binding.element->set_custom_property(
                   target.name, format_number(result, target.suffix));
+            } else if constexpr (std::is_same_v<T, StyleNumberTarget>) {
+              const float scalar = static_cast<float>(result);
+              if (!std::isfinite(scalar) || !target.property ||
+                  !binding.element->set_registered_style_number(
+                      *target.property, scalar)) {
+                throw std::runtime_error(
+                    "UI style binding produced an invalid numeric value");
+              }
             }
           },
           binding.target);
