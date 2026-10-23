@@ -9359,3 +9359,165 @@ spec("StyleEngine applies supported flex shorthand forms from CSS") {
     check(approx_eq(basis_item->x(), 540.0f, 1.0f));
   }
 }
+
+spec("Box resolves transition property aliases through the style registry") {
+  it("runs") {
+    Box box(nullptr);
+    auto* elem = box.create("div", "target");
+    box.set_root(elem);
+    box.set_viewport(320.0f, 120.0f);
+
+    box.load_css(R"(
+      #target {
+        transform: translate(0, 0);
+        transition: transformX 0.2s linear;
+      }
+      #target:hover {
+        transform: translate(20px, 10px);
+      }
+    )");
+    box.update();
+
+    const auto* transform_x = detail::style_property_find("transform-x");
+    check_not_null(transform_x);
+    if (!transform_x) return;
+
+    const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
+    elem->set_hover(true);
+    box.update();
+    box.update_time(100.0f);
+
+    check(approx_eq(box.transitions().get_float(
+                        element_id, *transform_x,
+                        elem->computed_style->transform_x, box.time()),
+                    10.0f, 0.02f));
+    check(approx_eq(box.transitions().get(
+                        element_id, "transform-y",
+                        elem->computed_style->transform_y, box.time()),
+                    10.0f, 0.001f));
+  }
+}
+
+spec("Box derives transition all eligibility from registry metadata") {
+  it("runs") {
+    Box box(nullptr);
+    auto* root = box.create("div", "root");
+    auto* elem = box.create("div", "target");
+    auto* discrete = box.create("div", "discrete");
+    root->append(elem);
+    root->append(discrete);
+    box.set_root(root);
+    box.set_viewport(320.0f, 120.0f);
+
+    box.load_css(R"(
+      #target {
+        color: rgba(20, 40, 60, 1);
+        font-size: 10px;
+        transition: all 0.2s linear;
+      }
+      #target:hover {
+        color: rgba(120, 140, 160, 0.5);
+        font-size: 20px;
+      }
+      #discrete {
+        visibility: visible;
+        transition: all 0.2s linear;
+      }
+      #discrete:hover {
+        visibility: hidden;
+      }
+    )");
+    box.update();
+
+    const auto* color = detail::style_property_find("color");
+    const auto* font_size = detail::style_property_find("font-size");
+    check_not_null(color);
+    check_not_null(font_size);
+    if (!color || !font_size) return;
+
+    const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
+    const auto discrete_id = reinterpret_cast<std::uintptr_t>(discrete);
+    elem->set_hover(true);
+    discrete->set_hover(true);
+    box.update();
+
+    check(box.transitions().has_active(element_id, box.time()));
+    check_false(box.transitions().has_active(discrete_id, box.time()));
+
+    box.update_time(100.0f);
+    check(approx_eq(box.transitions().get_float(
+                        element_id, *font_size,
+                        elem->computed_style->font_size, box.time()),
+                    15.0f, 0.02f));
+    const Color mid = box.transitions().get_color(
+        element_id, *color, elem->computed_style->text_color, box.time());
+    require_color(mid, 70.0f / 255.0f, 90.0f / 255.0f,
+                  110.0f / 255.0f, 0.75f, 0.02f);
+  }
+}
+
+spec("Box starts each reflected property once with its last matching definition") {
+  it("runs") {
+    Box box(nullptr);
+    auto* elem = box.create("div", "target");
+    box.set_root(elem);
+    box.set_viewport(320.0f, 120.0f);
+
+    box.load_css(R"(
+      #target {
+        opacity: 1;
+        transition: all 1s linear, opacity 0.1s linear;
+      }
+      #target:hover {
+        opacity: 0.2;
+      }
+    )");
+    box.update();
+
+    const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
+    elem->set_hover(true);
+    box.update();
+    box.update_time(100.0f);
+
+    check_false(box.transitions().has_active(element_id, box.time()));
+    check(approx_eq(box.transitions().get(
+                        element_id, "opacity",
+                        elem->computed_style->opacity, box.time()),
+                    0.2f, 0.001f));
+  }
+}
+
+spec("Box preserves resolved custom background values for transitions") {
+  it("runs") {
+    Box box(nullptr);
+    auto* elem = box.create("div", "target");
+    box.set_root(elem);
+    box.set_viewport(320.0f, 120.0f);
+
+    box.load_css(R"(
+      #target {
+        --bg: rgba(20, 40, 60, 1);
+        transition: background-color 0.2s linear;
+      }
+      #target:hover {
+        --bg: rgba(120, 140, 160, 0.5);
+      }
+    )");
+    box.update();
+
+    const auto* background = detail::style_property_find("background-color");
+    check_not_null(background);
+    if (!background) return;
+
+    const auto element_id = reinterpret_cast<std::uintptr_t>(elem);
+    elem->set_hover(true);
+    box.update();
+    box.update_time(100.0f);
+
+    const Color mid = box.transitions().get_color(
+        element_id, *background, elem->computed_style->background_color,
+        box.time());
+    require_color(mid, 70.0f / 255.0f, 90.0f / 255.0f,
+                  110.0f / 255.0f, 0.75f, 0.02f);
+  }
+}

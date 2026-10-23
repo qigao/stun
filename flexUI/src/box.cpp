@@ -20,9 +20,11 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace flexUI {
 
@@ -347,39 +349,74 @@ void adjust_positioned_layout(Element* elem, float viewport_width,
   adjust_sticky_layout(elem);
 }
 
-void start_transition_if_changed(TransitionManager& transitions,
-                                 std::uintptr_t element_id,
-                                 const std::string& property,
-                                 float previous_value,
-                                 float target_value,
-                                 const TransitionDef& def,
-                                 float current_time_ms,
-                                 bool& started_any) {
-  const float current_value =
-      transitions.get(element_id, property, previous_value, current_time_ms);
-  if (std::fabs(current_value - target_value) > 0.0001f) {
-    transitions.start(element_id, property, current_value, target_value, def,
-                      current_time_ms);
-    started_any = true;
+bool transition_def_matches_property(
+    const TransitionDef& def,
+    const detail::StylePropertyDesc& property) {
+  if ((property.flags & detail::STYLE_PROPERTY_TRANSITIONABLE) == 0u) {
+    return false;
   }
+  if (def.property == "all") {
+    return true;
+  }
+  if (const auto* exact = detail::style_property_find(def.property)) {
+    return exact->id == property.id;
+  }
+  return property.transition_group &&
+         std::string_view(property.transition_group) == def.property;
 }
 
-void start_color_transition_if_changed(TransitionManager& transitions,
-                                       std::uintptr_t element_id,
-                                       const std::string& property_name,
-                                       const Color& previous_value,
-                                       const Color& target_value,
-                                       const TransitionDef& def,
-                                       float current_time_ms,
-                                       bool& started_any) {
-  const auto* property = detail::style_property_find(property_name);
-  if (!property) {
-    return;
+bool start_reflected_transition(
+    TransitionManager& transitions,
+    std::uintptr_t element_id,
+    const detail::StylePropertyDesc& property,
+    const ComputedStyle& previous_style,
+    const ComputedStyle& target_style,
+    const Color& previous_resolved_background,
+    const Color& target_resolved_background,
+    const TransitionDef& def,
+    float current_time_ms) {
+  if ((property.flags & detail::STYLE_PROPERTY_TRANSITIONABLE) == 0u) {
+    return false;
   }
-  if (transitions.start_color(element_id, *property, previous_value,
-                              target_value, def, current_time_ms)) {
-    started_any = true;
+
+  if (detail::style_value_type_matches(property.type, &cmeta_type_float)) {
+    float previous_value = 0.0f;
+    float target_value = 0.0f;
+    if (!detail::style_property_read(property, previous_style,
+                                     &cmeta_type_float, &previous_value) ||
+        !detail::style_property_read(property, target_style,
+                                     &cmeta_type_float, &target_value)) {
+      return false;
+    }
+    const float current_value = transitions.get_float(
+        element_id, property, previous_value, current_time_ms);
+    if (std::fabs(current_value - target_value) <= 0.0001f) {
+      return false;
+    }
+    return transitions.start_float(element_id, property, current_value,
+                                   target_value, def, current_time_ms);
   }
+
+  if (detail::style_value_type_matches(property.type,
+                                       &flex::cmeta_type_color)) {
+    Color previous_value;
+    Color target_value;
+    if (property.id == detail::StylePropertyId::BackgroundColor) {
+      previous_value = previous_resolved_background;
+      target_value = target_resolved_background;
+    } else if (!detail::style_property_read(
+                   property, previous_style, &flex::cmeta_type_color,
+                   &previous_value) ||
+               !detail::style_property_read(
+                   property, target_style, &flex::cmeta_type_color,
+                   &target_value)) {
+      return false;
+    }
+    return transitions.start_color(element_id, property, previous_value,
+                                   target_value, def, current_time_ms);
+  }
+
+  return false;
 }
 
 bool animation_spec_changed(const ComputedStyle& previous_style,
@@ -2006,143 +2043,26 @@ void Box::compute_styles(Element* elem, bool parent_recomputed) {
         resolved_element_background(*elem, previous_style);
     const Color target_bg =
         resolved_element_background(*elem, *elem->computed_style);
-    const Color previous_border = previous_style.border_color;
-    const Color target_border = elem->computed_style->border_color;
-    const Color previous_outline = previous_style.outline_color;
-    const Color target_outline = elem->computed_style->outline_color;
-    const Color previous_ring = previous_style.ring_color;
-    const Color target_ring = elem->computed_style->ring_color;
-    const Color previous_ring_offset = previous_style.ring_offset_color;
-    const Color target_ring_offset = elem->computed_style->ring_offset_color;
-    const BoxShadow& previous_shadow = previous_style.shadow;
-    const BoxShadow& target_shadow = elem->computed_style->shadow;
 
+    std::vector<const TransitionDef*> selected_defs(
+        detail::style_property_count(), nullptr);
     for (const auto& def : defs) {
-      if (def.property == "all" || def.property == "opacity") {
-        start_transition_if_changed(transitions_, element_id, "opacity",
-                                    previous_style.opacity,
-                                    elem->computed_style->opacity, def, time_ms_,
-                                    started_any);
+      for (std::size_t index = 0; index < selected_defs.size(); ++index) {
+        const auto* property = detail::style_property_at(index);
+        if (property && transition_def_matches_property(def, *property)) {
+          selected_defs[index] = &def;
+        }
       }
+    }
 
-      if (def.property == "all" || def.property == "transform") {
-        start_transition_if_changed(transitions_, element_id, "transform-x",
-                                    previous_style.transform_x,
-                                    elem->computed_style->transform_x, def,
-                                    time_ms_, started_any);
-        start_transition_if_changed(transitions_, element_id, "transform-y",
-                                    previous_style.transform_y,
-                                    elem->computed_style->transform_y, def,
-                                    time_ms_, started_any);
-        start_transition_if_changed(transitions_, element_id, "transform-scale",
-                                    previous_style.transform_scale,
-                                    elem->computed_style->transform_scale, def,
-                                    time_ms_, started_any);
-        start_transition_if_changed(transitions_, element_id,
-                                    "transform-scale-x",
-                                    previous_style.transform_scale_x,
-                                    elem->computed_style->transform_scale_x, def,
-                                    time_ms_, started_any);
-        start_transition_if_changed(transitions_, element_id,
-                                    "transform-scale-y",
-                                    previous_style.transform_scale_y,
-                                    elem->computed_style->transform_scale_y, def,
-                                    time_ms_, started_any);
-        start_transition_if_changed(transitions_, element_id, "transform-rotate",
-                                    previous_style.transform_rotate,
-                                    elem->computed_style->transform_rotate, def,
-                                    time_ms_, started_any);
-      }
-
-      if (def.property == "all" || def.property == "background-color") {
-        start_color_transition_if_changed(transitions_, element_id,
-                                          "background-color", previous_bg,
-                                          target_bg, def, time_ms_,
-                                          started_any);
-      }
-
-      if (def.property == "all" || def.property == "border-color") {
-        start_color_transition_if_changed(transitions_, element_id,
-                                          "border-color", previous_border,
-                                          target_border, def, time_ms_,
-                                          started_any);
-      }
-
-      if (def.property == "all" || def.property == "outline-width") {
-        start_transition_if_changed(transitions_, element_id, "outline-width",
-                                    previous_style.outline_width,
-                                    elem->computed_style->outline_width, def,
-                                    time_ms_, started_any);
-      }
-
-      if (def.property == "all" || def.property == "outline-offset") {
-        start_transition_if_changed(transitions_, element_id, "outline-offset",
-                                    previous_style.outline_offset,
-                                    elem->computed_style->outline_offset, def,
-                                    time_ms_, started_any);
-      }
-
-      if (def.property == "all" || def.property == "outline-color") {
-        start_color_transition_if_changed(transitions_, element_id,
-                                          "outline-color", previous_outline,
-                                          target_outline, def, time_ms_,
-                                          started_any);
-      }
-
-      if (def.property == "all" || def.property == "ring-width") {
-        start_transition_if_changed(transitions_, element_id, "ring-width",
-                                    previous_style.ring_width,
-                                    elem->computed_style->ring_width, def,
-                                    time_ms_, started_any);
-      }
-
-      if (def.property == "all" || def.property == "ring-offset") {
-        start_transition_if_changed(transitions_, element_id, "ring-offset",
-                                    previous_style.ring_offset,
-                                    elem->computed_style->ring_offset, def,
-                                    time_ms_, started_any);
-      }
-
-      if (def.property == "all" || def.property == "ring-color") {
-        start_color_transition_if_changed(transitions_, element_id,
-                                          "ring-color", previous_ring,
-                                          target_ring, def, time_ms_,
-                                          started_any);
-      }
-
-      if (def.property == "all" || def.property == "ring-offset-color") {
-        start_color_transition_if_changed(transitions_, element_id,
-                                          "ring-offset-color",
-                                          previous_ring_offset,
-                                          target_ring_offset, def, time_ms_,
-                                          started_any);
-      }
-
-      if (def.property == "all" || def.property == "box-shadow") {
-        start_transition_if_changed(transitions_, element_id,
-                                    "box-shadow-offset-x",
-                                    previous_shadow.offset_x,
-                                    target_shadow.offset_x, def, time_ms_,
-                                    started_any);
-        start_transition_if_changed(transitions_, element_id,
-                                    "box-shadow-offset-y",
-                                    previous_shadow.offset_y,
-                                    target_shadow.offset_y, def, time_ms_,
-                                    started_any);
-        start_transition_if_changed(transitions_, element_id,
-                                    "box-shadow-blur",
-                                    previous_shadow.blur_radius,
-                                    target_shadow.blur_radius, def, time_ms_,
-                                    started_any);
-        start_transition_if_changed(transitions_, element_id,
-                                    "box-shadow-spread",
-                                    previous_shadow.spread_radius,
-                                    target_shadow.spread_radius, def, time_ms_,
-                                    started_any);
-        start_color_transition_if_changed(transitions_, element_id,
-                                          "box-shadow-color", previous_shadow.color,
-                                          target_shadow.color, def, time_ms_,
-                                          started_any);
+    for (std::size_t index = 0; index < selected_defs.size(); ++index) {
+      const auto* property = detail::style_property_at(index);
+      const auto* def = selected_defs[index];
+      if (property && def &&
+          start_reflected_transition(
+              transitions_, element_id, *property, previous_style,
+              *elem->computed_style, previous_bg, target_bg, *def, time_ms_)) {
+        started_any = true;
       }
     }
 
