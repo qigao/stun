@@ -3,6 +3,7 @@
  */
 
 #include "tui_terminal_internal.h"
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -166,129 +167,280 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
 
 #else /* Unix */
 
+typedef enum {
+    TUI_INPUT_INCOMPLETE,
+    TUI_INPUT_IGNORED,
+    TUI_INPUT_EVENT
+} tui_input_result_t;
+
+static void input_consume(tui_terminal_t *term, size_t size) {
+    if (size < term->input_len) {
+        memmove(term->input_bytes, term->input_bytes + size,
+                term->input_len - size);
+    }
+    term->input_len -= size;
+}
+
+static void input_key(unsigned char ch, tui_event_t *event) {
+    event->type = TUI_EVENT_KEY;
+    event->ch = ch;
+    if (ch < 32u) {
+        if (ch == 27u) {
+            event->key = TUI_KEY_ESCAPE;
+        } else if (ch == 13u || ch == 10u) {
+            event->key = TUI_KEY_ENTER;
+            event->ch = '\n';
+        } else if (ch == 9u) {
+            event->key = TUI_KEY_TAB;
+            event->ch = '\t';
+        } else {
+            event->mod = TUI_MOD_CTRL;
+            event->ch = (uint32_t)ch + (uint32_t)'a' - 1u;
+        }
+    } else if (ch == 127u) {
+        event->key = TUI_KEY_BACKSPACE;
+    } else {
+        event->key = (tui_key_t)ch;
+    }
+}
+
+static bool parse_decimal(const unsigned char *bytes, size_t begin,
+                          size_t end, int *value) {
+    int parsed = 0;
+    if (begin == end) return false;
+    for (size_t i = begin; i < end; ++i) {
+        const unsigned char ch = bytes[i];
+        if (ch < '0' || ch > '9') return false;
+        const int digit = ch - '0';
+        if (parsed > (INT_MAX - digit) / 10) return false;
+        parsed = parsed * 10 + digit;
+    }
+    *value = parsed;
+    return true;
+}
+
+static bool parse_sgr_mouse(tui_terminal_t *term, size_t size,
+                            tui_event_t *event) {
+    const unsigned char *bytes = term->input_bytes;
+    size_t first = 3u;
+    size_t second = first;
+    size_t third;
+    int btn;
+    int x;
+    int y;
+
+    while (second < size && bytes[second] != ';') ++second;
+    if (second == size) return false;
+    third = second + 1u;
+    while (third < size && bytes[third] != ';') ++third;
+    if (third == size || size < third + 2u) return false;
+    if (!parse_decimal(bytes, first, second, &btn) ||
+        !parse_decimal(bytes, second + 1u, third, &x) ||
+        !parse_decimal(bytes, third + 1u, size - 1u, &y) ||
+        x <= 0 || y <= 0) {
+        return false;
+    }
+
+    event->x = x - 1;
+    event->y = y - 1;
+    event->type = bytes[size - 1u] == 'M' ? TUI_EVENT_MOUSE_PRESS :
+                                           TUI_EVENT_MOUSE_RELEASE;
+    if (btn & 64) {
+        event->key = (btn & 1) ? TUI_KEY_MOUSE_WHEEL_DOWN :
+                                 TUI_KEY_MOUSE_WHEEL_UP;
+    } else if (btn & 32) {
+        event->type = TUI_EVENT_MOUSE_MOVE;
+    } else {
+        switch (btn & 0x03) {
+            case 0: event->key = TUI_KEY_MOUSE_LEFT; break;
+            case 1: event->key = TUI_KEY_MOUSE_MIDDLE; break;
+            case 2: event->key = TUI_KEY_MOUSE_RIGHT; break;
+            default: event->key = TUI_KEY_MOUSE_RELEASE; break;
+        }
+    }
+    return true;
+}
+
+static tui_input_result_t decode_csi(tui_terminal_t *term,
+                                     tui_event_t *event) {
+    const unsigned char *bytes = term->input_bytes;
+    size_t size = 2u;
+
+    while (size < term->input_len &&
+           !(bytes[size] >= 0x40u && bytes[size] <= 0x7eu)) {
+        ++size;
+    }
+    if (size == term->input_len) {
+        if (term->input_len == sizeof(term->input_bytes)) {
+            input_consume(term, term->input_len);
+            return TUI_INPUT_IGNORED;
+        }
+        return TUI_INPUT_INCOMPLETE;
+    }
+    ++size; /* Include the final byte. */
+
+    if (size == 3u) {
+        switch (bytes[2]) {
+            case 'A': event->key = TUI_KEY_UP; break;
+            case 'B': event->key = TUI_KEY_DOWN; break;
+            case 'C': event->key = TUI_KEY_RIGHT; break;
+            case 'D': event->key = TUI_KEY_LEFT; break;
+            case 'H': event->key = TUI_KEY_HOME; break;
+            case 'F': event->key = TUI_KEY_END; break;
+            default: input_consume(term, size); return TUI_INPUT_IGNORED;
+        }
+        event->type = TUI_EVENT_KEY;
+        input_consume(term, size);
+        return TUI_INPUT_EVENT;
+    }
+
+    if (bytes[2] == '<' &&
+        (bytes[size - 1u] == 'M' || bytes[size - 1u] == 'm')) {
+        const bool decoded = term->mouse_enabled &&
+                             parse_sgr_mouse(term, size, event);
+        input_consume(term, size);
+        return decoded ? TUI_INPUT_EVENT : TUI_INPUT_IGNORED;
+    }
+
+    if (bytes[size - 1u] == '~') {
+        int number;
+        if (parse_decimal(bytes, 2u, size - 1u, &number)) {
+            switch (number) {
+                case 1: event->key = TUI_KEY_HOME; break;
+                case 2: event->key = TUI_KEY_INSERT; break;
+                case 3: event->key = TUI_KEY_DELETE; break;
+                case 4: event->key = TUI_KEY_END; break;
+                case 5: event->key = TUI_KEY_PAGE_UP; break;
+                case 6: event->key = TUI_KEY_PAGE_DOWN; break;
+                case 15: event->key = TUI_KEY_F5; break;
+                case 17: event->key = TUI_KEY_F6; break;
+                case 18: event->key = TUI_KEY_F7; break;
+                case 19: event->key = TUI_KEY_F8; break;
+                case 20: event->key = TUI_KEY_F9; break;
+                case 21: event->key = TUI_KEY_F10; break;
+                case 23: event->key = TUI_KEY_F11; break;
+                case 24: event->key = TUI_KEY_F12; break;
+                default: input_consume(term, size); return TUI_INPUT_IGNORED;
+            }
+            event->type = TUI_EVENT_KEY;
+            input_consume(term, size);
+            return TUI_INPUT_EVENT;
+        }
+    }
+
+    input_consume(term, size);
+    return TUI_INPUT_IGNORED;
+}
+
+static tui_input_result_t decode_one(tui_terminal_t *term,
+                                     tui_event_t *event) {
+    const unsigned char *bytes = term->input_bytes;
+    if (term->input_len == 0u) return TUI_INPUT_INCOMPLETE;
+
+    if (bytes[0] != 27u) {
+        input_key(bytes[0], event);
+        input_consume(term, 1u);
+        return TUI_INPUT_EVENT;
+    }
+    if (term->input_len == 1u) return TUI_INPUT_INCOMPLETE;
+
+    if (bytes[1] == '[') return decode_csi(term, event);
+    if (bytes[1] == 'O') {
+        if (term->input_len < 3u) return TUI_INPUT_INCOMPLETE;
+        event->type = TUI_EVENT_KEY;
+        switch (bytes[2]) {
+            case 'P': event->key = TUI_KEY_F1; break;
+            case 'Q': event->key = TUI_KEY_F2; break;
+            case 'R': event->key = TUI_KEY_F3; break;
+            case 'S': event->key = TUI_KEY_F4; break;
+            default: input_consume(term, 3u); return TUI_INPUT_IGNORED;
+        }
+        input_consume(term, 3u);
+        return TUI_INPUT_EVENT;
+    }
+
+    /* Preserve the following byte for the next event. */
+    input_key(bytes[0], event);
+    input_consume(term, 1u);
+    return TUI_INPUT_EVENT;
+}
+
+bool tui_terminal_input_push(tui_terminal_t *term, const void *data,
+                             size_t size) {
+    if (!term || (!data && size != 0u) ||
+        size > sizeof(term->input_bytes) - term->input_len) {
+        return false;
+    }
+    if (size != 0u) {
+        memcpy(term->input_bytes + term->input_len, data, size);
+        term->input_len += size;
+    }
+    return true;
+}
+
+bool tui_terminal_input_next(tui_terminal_t *term, tui_event_t *event) {
+    if (!term || !event) return false;
+    memset(event, 0, sizeof(*event));
+    for (;;) {
+        const tui_input_result_t result = decode_one(term, event);
+        if (result == TUI_INPUT_EVENT) return true;
+        if (result == TUI_INPUT_INCOMPLETE) return false;
+    }
+}
+
+bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event) {
+    if (!term || !event || term->input_len == 0u) return false;
+    if (tui_terminal_input_next(term, event)) return true;
+
+    memset(event, 0, sizeof(*event));
+    if (term->input_len == 1u && term->input_bytes[0] == 27u) {
+        input_key(term->input_bytes[0], event);
+        input_consume(term, 1u);
+        return true;
+    }
+    /* A timed-out control sequence is untrusted as a unit.  Do not replay
+     * its parameter bytes as ordinary key presses. */
+    input_consume(term, term->input_len);
+    return false;
+}
 
 bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
     if (!term || !event) return false;
-    
-    memset(event, 0, sizeof(*event));
-    
+
+    if (tui_terminal_input_next(term, event)) return true;
+
     /* Check resize signal */
     if (tui_terminal_consume_resize_pending()) {
+        memset(event, 0, sizeof(*event));
         event->type = TUI_EVENT_RESIZE;
         return true;
     }
-    
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(STDIN_FILENO, &fds);
-    
-    struct timeval tv = {0, 0};
-    if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0) {
-        if (tui_terminal_consume_resize_pending()) {
-            event->type = TUI_EVENT_RESIZE;
-            return true;
-        }
-        return false;
-    }
-    
-    char buf[32];
-    ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
-    if (n <= 0) return false;
-    
-    event->type = TUI_EVENT_KEY;
-    
-    /* Single byte */
-    if (n == 1) {
-        event->ch = (uint32_t)(unsigned char)buf[0];
-        if (event->ch < 32) {
-            if (event->ch == 27) event->key = TUI_KEY_ESCAPE;
-            else if (event->ch == 13 || event->ch == 10) { event->key = TUI_KEY_ENTER; event->ch = '\n'; }
-            else if (event->ch == 9) { event->key = TUI_KEY_TAB; event->ch = '\t'; }
-            else {
-                event->mod = TUI_MOD_CTRL;
-                event->ch = event->ch + 'a' - 1;
-            }
-        } else if (event->ch == 127) {
-            event->key = TUI_KEY_BACKSPACE;
-        } else {
-            event->key = (tui_key_t)event->ch;
-        }
-        return true;
-    }
-    
-    /* CSI sequences */
-    if (buf[0] == '\033' && buf[1] == '[') {
-        /* Arrow keys */
-        if (n == 3) {
-            switch (buf[2]) {
-                case 'A': event->key = TUI_KEY_UP; return true;
-                case 'B': event->key = TUI_KEY_DOWN; return true;
-                case 'C': event->key = TUI_KEY_RIGHT; return true;
-                case 'D': event->key = TUI_KEY_LEFT; return true;
-                case 'H': event->key = TUI_KEY_HOME; return true;
-                case 'F': event->key = TUI_KEY_END; return true;
-            }
-        }
-        
-        /* SGR mouse: \033[<btn;x;y[Mm] */
-        if (buf[2] == '<' && term->mouse_enabled) {
-            int btn = 0, x = 0, y = 0;
-            char type = 0;
-            if (sscanf(buf + 3, "%d;%d;%d%c", &btn, &x, &y, &type) == 4) {
-                event->x = x - 1;
-                event->y = y - 1;
-                event->type = (type == 'M') ? TUI_EVENT_MOUSE_PRESS : TUI_EVENT_MOUSE_RELEASE;
-                
-                int button = btn & 0x03;
-                if (btn & 64) {
-                    event->key = (btn & 1) ? TUI_KEY_MOUSE_WHEEL_DOWN : TUI_KEY_MOUSE_WHEEL_UP;
-                } else if (btn & 32) {
-                    event->type = TUI_EVENT_MOUSE_MOVE;
-                } else {
-                    switch (button) {
-                        case 0: event->key = TUI_KEY_MOUSE_LEFT; break;
-                        case 1: event->key = TUI_KEY_MOUSE_MIDDLE; break;
-                        case 2: event->key = TUI_KEY_MOUSE_RIGHT; break;
-                        default: event->key = TUI_KEY_MOUSE_RELEASE; break;
-                    }
-                }
+
+    for (;;) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+
+        /* Wait briefly only while disambiguating a partial escape sequence. */
+        struct timeval tv = {0, term->input_len != 0u ? 10000 : 0};
+        if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0) {
+            if (tui_terminal_consume_resize_pending()) {
+                memset(event, 0, sizeof(*event));
+                event->type = TUI_EVENT_RESIZE;
                 return true;
             }
+            return tui_terminal_input_flush(term, event);
         }
-        
-        /* Function keys, etc. */
-        int num = 0;
-        if (sscanf(buf + 2, "%d~", &num) == 1) {
-            switch (num) {
-                case 1: event->key = TUI_KEY_HOME; return true;
-                case 2: event->key = TUI_KEY_INSERT; return true;
-                case 3: event->key = TUI_KEY_DELETE; return true;
-                case 4: event->key = TUI_KEY_END; return true;
-                case 5: event->key = TUI_KEY_PAGE_UP; return true;
-                case 6: event->key = TUI_KEY_PAGE_DOWN; return true;
-                case 15: event->key = TUI_KEY_F5; return true;
-                case 17: event->key = TUI_KEY_F6; return true;
-                case 18: event->key = TUI_KEY_F7; return true;
-                case 19: event->key = TUI_KEY_F8; return true;
-                case 20: event->key = TUI_KEY_F9; return true;
-                case 21: event->key = TUI_KEY_F10; return true;
-                case 23: event->key = TUI_KEY_F11; return true;
-                case 24: event->key = TUI_KEY_F12; return true;
-            }
-        }
+
+        unsigned char buf[32];
+        const size_t available = sizeof(term->input_bytes) - term->input_len;
+        const size_t read_size = available < sizeof(buf) ? available :
+                                                            sizeof(buf);
+        const ssize_t n = read(STDIN_FILENO, buf, read_size);
+        if (n <= 0) return tui_terminal_input_flush(term, event);
+        if (!tui_terminal_input_push(term, buf, (size_t)n)) return false;
+        if (tui_terminal_input_next(term, event)) return true;
     }
-    
-    /* SS3 sequences (F1-F4) */
-    if (buf[0] == '\033' && buf[1] == 'O' && n == 3) {
-        switch (buf[2]) {
-            case 'P': event->key = TUI_KEY_F1; return true;
-            case 'Q': event->key = TUI_KEY_F2; return true;
-            case 'R': event->key = TUI_KEY_F3; return true;
-            case 'S': event->key = TUI_KEY_F4; return true;
-        }
-    }
-    
-    return false;
 }
 
 #endif
