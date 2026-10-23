@@ -17,6 +17,7 @@ on:
       - '.github/scripts/ci-affected.sh'
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -28,13 +29,30 @@ jobs:
     name: C11 Markdown change scope
     runs-on: ubuntu-24.04
     outputs:
+      source_sha: ${{ steps.run_head.outputs.sha }}
       affected: ${{ steps.scope.outputs.affected }}
     steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
+          [[ "$sha" =~ ^[0-9a-fA-F]{40}$ && ! "$sha" =~ ^0+$ ]]
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          printf 'RunHead=%s\n' "$sha"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ steps.run_head.outputs.sha }}
           fetch-depth: 1
           persist-credentials: false
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Classify latest PR update
         id: scope
         shell: bash
@@ -50,15 +68,20 @@ jobs:
     uses: ./.github/workflows/salts-sdk-releases.yml
 
   c11-headers:
-    needs: sdk-releases
+    needs: [changes, sdk-releases]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact Stun head
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.changes.outputs.source_sha }}
           persist-credentials: false
 
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Checkout canonical released Salts headers
         uses: actions/checkout@v4
         with:
@@ -106,7 +129,7 @@ jobs:
 
   c11-macos-windows-headers:
     name: C11 SDK compile / ${{ matrix.os }}
-    needs: sdk-releases
+    needs: [changes, sdk-releases]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -116,9 +139,14 @@ jobs:
       - name: Checkout exact Stun candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.changes.outputs.source_sha }}
           persist-credentials: false
 
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Checkout released Salts 2.3 headers
         uses: actions/checkout@v4
         with:
@@ -189,7 +217,7 @@ jobs:
 
   c11-windows-released-sdk-runtime:
     name: C11 native runtime / Windows x64 released Salts
-    needs: sdk-releases
+    needs: [changes, sdk-releases]
     runs-on: windows-2022
     permissions:
       contents: read
@@ -197,9 +225,14 @@ jobs:
       - name: Checkout exact Stun candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.changes.outputs.source_sha }}
           persist-credentials: false
 
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Restore immutable tagged Salts.Native release
         shell: bash
         env:
@@ -311,7 +344,7 @@ jobs:
 
   c11-macos-released-sdk-runtime:
     name: C11 native runtime / macOS ARM64 released Salts
-    needs: sdk-releases
+    needs: [changes, sdk-releases]
     runs-on: macos-15
     permissions:
       contents: read
@@ -319,9 +352,14 @@ jobs:
       - name: Checkout exact Stun candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.changes.outputs.source_sha }}
           persist-credentials: false
 
+      - name: Verify immutable Stun checkout
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
       - name: Restore canonical tagged Salts.Native macOS ARM64 SDK
         shell: bash
         env:
