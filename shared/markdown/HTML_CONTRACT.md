@@ -165,7 +165,8 @@ true expected-HTML matches on exact-head CI: #228, #229, #230, #232,
 diagnostic and the previously passing 256 example identities remain
 protected by their own strict nonregression gate.
 
-Known gaps: partial-marker lazy nesting (#251) and quote/list ownership
-(#235) are not qualified. C++ MarkdownWidget and Tango still retain
-their declared pre-cutover ownership and must not use this as a full
-CommonMark/GFM parity claim.
+The historical partial-marker and quote/list gaps in this checkpoint were
+subsequently qualified by the complete versioned gates. MarkdownWidget now
+uses the canonical C11 RichDoc parser. Tango integration remains a separate
+consumer/layout contract and must not be used to broaden the declared
+CommonMark/GFM claim.

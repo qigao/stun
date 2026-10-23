@@ -370,8 +370,8 @@ spec("MarkdownWidget Parsing") {
         check(md->child_count()==3u);
         if(md->child_count()==3u) check(md->children()[0]==original);
 
-        // A 1 MiB over-budget update MUST NOT silently use md::parse or
-        // publish an incomplete tree. Previously valid children remain.
+        // A 1 MiB over-budget update MUST NOT use a fallback parser or publish
+        // an incomplete tree. Previously valid children remain.
         std::string over_budget(1024u*1024u,'x');
         widget->set_markdown(over_budget);
         widget->update(0.0f,*md);

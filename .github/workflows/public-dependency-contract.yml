@@ -53,12 +53,12 @@ jobs:
             '.github/workflows/public-dependency-contract.yml' \
             '.github/scripts/ci-affected.sh'
 
-  # Fast architecture gate on every PR. The existing native released-SDK
-  # conformance and real Mesa/ASan/UBSan Widget runs remain mandatory;
-  # static checks alone cannot establish parser or runtime correctness.
+  # Fast repository-wide parser-ownership gate on every PR. The existing
+  # native released-SDK conformance remains mandatory; static checks alone
+  # cannot establish parser or runtime correctness.
   markdownwidget-single-c11-parser:
     needs: changes
-    name: MarkdownWidget sole C11 parser contract
+    name: Repository sole C11 parser contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact Stun source candidate
@@ -88,7 +88,7 @@ jobs:
             exit 1
           fi
 
-      - name: Reject legacy parser link or include reintroduction
+      - name: Reject retired Markdown parser reintroduction
         run: |
           set -euo pipefail
           python3 shared/markdown/tests/verify_single_markdown_parser.py
@@ -166,7 +166,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in             flex/modules/runtime/CMakeLists.txt             flex/modules/dsl/CMakeLists.txt             flexUI/CMakeLists.txt             tools/md/CMakeLists.txt             flexUI/examples/desktop_editor/CMakeLists.txt             flexUI/tests/CMakeLists.txt; do
+          for file in \
+            flex/modules/runtime/CMakeLists.txt \
+            flex/modules/dsl/CMakeLists.txt \
+            flexUI/CMakeLists.txt \
+            flexUI/examples/desktop_editor/CMakeLists.txt \
+            flexUI/tests/CMakeLists.txt; do
             if grep -n 'TurboUtils::Core' "$file"; then
               echo "legacy Core provider remains in $file" >&2
               exit 1
@@ -175,7 +180,7 @@ jobs:
           grep -Fq 'Salts::Core' flex/modules/runtime/CMakeLists.txt
           grep -Fq 'Salts::Core' flex/modules/dsl/CMakeLists.txt
           grep -Fq 'Salts::Core' flexUI/CMakeLists.txt
-          grep -Fq 'Salts::Core' tools/md/CMakeLists.txt
+          test ! -e tools/md/CMakeLists.txt
           if grep -n -E 'turbo_log_level_t|TURBO_LOG_LEVEL_' flex/include/flex/core/debug.h; then
             echo "legacy log-level API remains" >&2
             exit 1

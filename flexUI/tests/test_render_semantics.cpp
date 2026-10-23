@@ -10314,10 +10314,9 @@ spec("AvatarWidget keeps initials when image url is empty") {
 }
 
 
-// #186: Exercise the unchanged production MarkdownWidget/md::parse through
-// the *real* Box layout, shared text measurement, renderer and event routing.
-// The candidate C11 parser remains isolated in the existing oracle/Tango
-// tests, not a live fallback or an additional UI grammar.
+// #186: Exercise the production MarkdownWidget/C11 RichDoc path through the
+// *real* Box layout, shared text measurement, renderer and event routing.
+// Tango remains a separate consumer; there is no fallback grammar.
 spec("MarkdownWidget UI layout and read-only scroll contracts") {
   it("lays out rendered text and scrolls without modifying Markdown") {
     Box box(nullptr);
@@ -10861,9 +10860,8 @@ spec("MarkdownWidget UI layout and read-only scroll contracts") {
     check(widget->markdown()==tall);
   }
   // #186/#228: verify Unicode HEADING, TASK LIST and TABLE separated by
-  // a root-level thematic break. The shipping C++ md::parse fails to close
-  // LIST on a blank-only separator before a TABLE (tracked under #186).
-  // Exercise real Box layout, scroll and painting without a parser cutover.
+  // a root-level thematic break through the canonical C11 RichDoc path.
+  // Exercise real Box layout, scroll and painting after the parser cutover.
   it("paints Unicode GFM blocks across explicit root break and source replacement") {
     Box box(nullptr);
     auto* root=box.create("div","md-unicode-gfm-root-186");
