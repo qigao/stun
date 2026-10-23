@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Evaluate ONLY the files changed by the latest pull_request:synchronize update.
-# PR-level paths filters include the cumulative diff against master and can
-# re-run unrelated expensive suites on every commit of a long-lived PR.
+# Evaluate only the relevant pull-request diff: the latest update for
+# synchronize events, or the cumulative base-to-head diff when a PR is first
+# opened, reopened, or marked ready.  PR-level paths filters alone cannot make
+# that distinction and can re-run unrelated expensive suites.
 #
 # Fail OPEN (run the check) when GitHub event metadata, history or diff is
-# unavailable. On opened/reopened/ready_for_review, workflow_dispatch, push,
-# or an opt-in ci/full label, always run the complete applicable gate.
+# unavailable. workflow_dispatch, push, and an opt-in ci/full label always run
+# the complete applicable gate.
 set -euo pipefail
 
 emit() {
@@ -29,19 +30,33 @@ if [[ "$action" == "labeled" ]] && \
     emit false "unrelated pull request label"
     exit 0
 fi
-if [[ "$action" != "synchronize" ]]; then
-    emit true "pull request action: ${action:-unknown}"
-    exit 0
-fi
-
 if jq -e '[.pull_request.labels[]?.name] | index("ci/full") != null' \
     "$GITHUB_EVENT_PATH" >/dev/null 2>&1; then
     emit true "ci/full label requires exact-HEAD requalification"
     exit 0
 fi
 
-before="$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")"
-after="$(jq -r '.after // .pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+case "$action" in
+    synchronize)
+        before="$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")"
+        after="$(jq -r '.after // .pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+        diff_kind="latest push"
+        ;;
+    opened|reopened|ready_for_review)
+        before="$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH")"
+        after="$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+        diff_kind="pull request"
+        ;;
+    labeled)
+        emit true "ci/full label requires exact-HEAD requalification"
+        exit 0
+        ;;
+    *)
+        emit true "unsupported pull request action: ${action:-unknown}"
+        exit 0
+        ;;
+esac
+
 sha='^[0-9a-fA-F]{40}$'
 if [[ ! "$before" =~ $sha || ! "$after" =~ $sha ]] || \
     [[ "$before" =~ ^0+$ || "$after" =~ ^0+$ ]]; then
@@ -51,7 +66,7 @@ fi
 
 # The checkout must be the exact PR head, not GitHub's synthetic merge ref.
 if [[ "$(git rev-parse HEAD 2>/dev/null || :)" != "$after" ]]; then
-    emit true "checked-out HEAD differs from synchronize.after"
+    emit true "checked-out HEAD differs from pull request head"
     exit 0
 fi
 if ! git cat-file -e "$before^{commit}" 2>/dev/null; then
@@ -108,10 +123,10 @@ while IFS= read -r -d '' filename; do
         [[ "$glob" == '!'* ]] && continue
         # RHS intentionally acts as a Bash glob (including directory slashes).
         if [[ "$filename" == $glob ]]; then
-            emit true "latest push changed an applicable file"
+            emit true "$diff_kind changed an applicable file"
             exit 0
         fi
     done
 done < "$changed_paths"
 
-emit false "latest push does not touch this workflow's scope"
+emit false "$diff_kind does not touch this workflow's scope"

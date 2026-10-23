@@ -55,6 +55,17 @@ def synchronize(before, after):
     }
 
 
+def pull_request(action, base, head):
+    return {
+        "action": action,
+        "pull_request": {
+            "base": {"sha": base},
+            "head": {"sha": head},
+            "labels": [],
+        },
+    }
+
+
 def main():
     assert SCRIPT.is_file(), SCRIPT
     with tempfile.TemporaryDirectory(prefix="stun-ci-scope-") as tmp:
@@ -105,7 +116,16 @@ def main():
         assert check(directory, full, [
             "charts/*", "!charts/mermaid/flowchart/lexer.re",
         ])
+        # Initial and lifecycle PR events classify the cumulative base-to-head
+        # diff instead of unconditionally starting every expensive suite.
+        for action in ("opened", "reopened", "ready_for_review"):
+            initial = pull_request(action, before, after)
+            assert check(directory, initial, ["charts/mermaid/flowchart/*"])
+            assert not check(directory, initial, ["shared/gcanvas/*"])
+
+        # Missing metadata and unknown actions retain the fail-open contract.
         assert check(directory, {"action": "opened"}, ["shared/gcanvas/*"])
+        assert check(directory, {"action": "edited"}, ["shared/gcanvas/*"])
         assert check(directory, {"action": "synchronize"}, ["shared/gcanvas/*"])
         assert check(directory, event, ["shared/gcanvas/*"], event_name="push")
 
@@ -115,6 +135,12 @@ def main():
         event = synchronize(after, newer)
         assert check(directory, event, ["shared/gcanvas/*"])
         assert not check(directory, event, ["charts/mermaid/flowchart/*"])
+
+        # A newly opened PR uses the full branch delta, so scopes changed by
+        # separate commits are both retained in the initial qualification.
+        cumulative = pull_request("opened", before, newer)
+        assert check(directory, cumulative, ["shared/gcanvas/*"])
+        assert check(directory, cumulative, ["charts/mermaid/flowchart/*"])
 
         # A move away from an owned directory must be treated as a change to
         # that directory, even when Git can recognize the rename.
