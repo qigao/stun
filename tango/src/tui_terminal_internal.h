@@ -57,12 +57,23 @@ struct tui_terminal {
     struct sigaction orig_sigwinch;
     bool terminal_mode_changed;
     bool sigwinch_installed;
+
+    /* Bytes not yet decoded into an event.  This is intentionally a byte
+     * queue: Unicode scalar/grapheme decoding belongs to Salts::Unicode. */
+    unsigned char input_bytes[64];
+    size_t input_len;
 #endif
 };
 
 #ifndef _WIN32
 /* Consume a pending SIGWINCH notification on the terminal owner thread. */
 bool tui_terminal_consume_resize_pending(void);
+
+/* Private incremental-decoder seams used by the real-library tests. */
+bool tui_terminal_input_push(tui_terminal_t *term, const void *data,
+                             size_t size);
+bool tui_terminal_input_next(tui_terminal_t *term, tui_event_t *event);
+bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event);
 #endif
 
 #endif /* TANGO_TUI_TERMINAL_INTERNAL_H */

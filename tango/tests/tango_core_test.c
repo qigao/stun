@@ -168,6 +168,74 @@ static int test_terminal_output_limit_is_atomic(void) {
     return 0;
 }
 
+#ifndef _WIN32
+static int test_terminal_input_is_incremental(void) {
+    tui_terminal_t *terminal = tui_terminal_create();
+    tui_event_t event;
+    CHECK(terminal != NULL);
+
+    /* A split CSI sequence stays pending until its final byte arrives. */
+    CHECK(tui_terminal_input_push(terminal, "\033", 1u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "[", 1u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "A", 1u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_UP);
+
+    /* Bytes following the first event remain queued for later polls. */
+    CHECK(tui_terminal_input_push(terminal, "bc", 2u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.ch == 'b');
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.ch == 'c');
+    CHECK(!tui_terminal_input_next(terminal, &event));
+
+    /* SGR mouse fields may cross any read boundary and are parsed boundedly. */
+    terminal->mouse_enabled = true;
+    CHECK(tui_terminal_input_push(terminal, "\033[<0;", 5u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "12;7", 4u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "M", 1u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_MOUSE_PRESS);
+    CHECK(event.key == TUI_KEY_MOUSE_LEFT);
+    CHECK(event.x == 11 && event.y == 6);
+
+    /* Unknown complete sequences are skipped without hiding later input. */
+    CHECK(tui_terminal_input_push(terminal, "\033[999xq", 7u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.ch == 'q');
+
+    /* An unterminated sequence is bounded and the decoder recovers. */
+    unsigned char hostile[64];
+    hostile[0] = 27u;
+    hostile[1] = '[';
+    memset(hostile + 2, '1', sizeof(hostile) - 2u);
+    CHECK(tui_terminal_input_push(terminal, hostile, sizeof(hostile)));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(terminal->input_len == 0u);
+    CHECK(tui_terminal_input_push(terminal, "z", 1u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.ch == 'z');
+
+    /* A lone Escape is emitted only when the pending prefix is flushed. */
+    CHECK(tui_terminal_input_push(terminal, "\033", 1u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_flush(terminal, &event));
+    CHECK(event.key == TUI_KEY_ESCAPE);
+
+    /* A timed-out CSI prefix is discarded as one control sequence. */
+    CHECK(tui_terminal_input_push(terminal, "\033[12", 4u));
+    CHECK(!tui_terminal_input_flush(terminal, &event));
+    CHECK(terminal->input_len == 0u);
+
+    tui_terminal_destroy(terminal);
+    return 0;
+}
+#endif
+
 static int test_buffer_and_layout(void) {
     tui_buffer_t *buffer = tui_buffer_create(10, 3);
     CHECK(buffer != NULL);
@@ -268,6 +336,9 @@ int main(void) {
     if (test_terminal_link()) return 1;
     if (test_terminal_lifecycle_is_transactional()) return 1;
     if (test_terminal_output_limit_is_atomic()) return 1;
+#ifndef _WIN32
+    if (test_terminal_input_is_incremental()) return 1;
+#endif
     if (test_buffer_and_layout()) return 1;
     if (test_textarea_bounds()) return 1;
     puts("Tango native-core tests passed");
