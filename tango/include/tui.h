@@ -22,6 +22,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "tui_async.h"
+
 
 
 #ifdef __cplusplus
