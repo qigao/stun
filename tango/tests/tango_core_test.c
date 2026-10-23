@@ -674,6 +674,32 @@ static int test_terminal_renderer_rejects_forged_cells(void) {
     tui_buffer_mark_dirty(terminal->back, 2, 0);
     CHECK(expect_invalid_render(terminal, expected_front) == 0);
 
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->bg = TUI_COLOR(3, 2, 1);
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    /* The continuation background must also match its lead. */
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->ch = 'x';
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->grapheme_len = 1u;
+    tui_buffer_at(terminal->back, 2, 0)->grapheme[0] = 'x';
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
     terminal->initialized = false;
     tui_terminal_destroy(terminal);
     return 0;
