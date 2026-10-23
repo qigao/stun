@@ -3,6 +3,7 @@
  */
 
 #include "tui_terminal_internal.h"
+#include <salts_unicode.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -91,28 +92,85 @@ static bool output_append(tui_terminal_t* term, const char* str) {
 }
 
 /* UTF-8 encode */
-static bool output_append_utf8(tui_terminal_t* term, uint32_t cp) {
-    if (!output_ensure(term, 4u)) return false;
-    char* p = term->output + term->output_len;
-    
+static bool encode_display_scalar(uint32_t cp, char bytes[4], size_t* size) {
+    if (!size || cp > 0x10ffffu ||
+        (cp >= 0xd800u && cp <= 0xdfffu) ||
+        cp < 0x20u || (cp >= 0x7fu && cp <= 0x9fu)) return false;
     if (cp < 0x80) {
-        *p++ = (char)cp;
-        term->output_len += 1;
+        bytes[0] = (char)cp;
+        *size = 1u;
     } else if (cp < 0x800) {
-        *p++ = (char)(0xC0 | (cp >> 6));
-        *p++ = (char)(0x80 | (cp & 0x3F));
-        term->output_len += 2;
+        bytes[0] = (char)(0xC0 | (cp >> 6));
+        bytes[1] = (char)(0x80 | (cp & 0x3F));
+        *size = 2u;
     } else if (cp < 0x10000) {
-        *p++ = (char)(0xE0 | (cp >> 12));
-        *p++ = (char)(0x80 | ((cp >> 6) & 0x3F));
-        *p++ = (char)(0x80 | (cp & 0x3F));
-        term->output_len += 3;
+        bytes[0] = (char)(0xE0 | (cp >> 12));
+        bytes[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        bytes[2] = (char)(0x80 | (cp & 0x3F));
+        *size = 3u;
     } else {
-        *p++ = (char)(0xF0 | (cp >> 18));
-        *p++ = (char)(0x80 | ((cp >> 12) & 0x3F));
-        *p++ = (char)(0x80 | ((cp >> 6) & 0x3F));
-        *p++ = (char)(0x80 | (cp & 0x3F));
-        term->output_len += 4;
+        bytes[0] = (char)(0xF0 | (cp >> 18));
+        bytes[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        bytes[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        bytes[3] = (char)(0x80 | (cp & 0x3F));
+        *size = 4u;
+    }
+    return true;
+}
+
+static bool output_append_utf8(tui_terminal_t* term, uint32_t cp) {
+    char bytes[4];
+    size_t size = 0u;
+    if (!encode_display_scalar(cp, bytes, &size)) {
+        term->last_error = TUI_TERMINAL_ERROR_INVALID_STATE;
+        return false;
+    }
+    return output_append_bytes(term, bytes, size);
+}
+
+static bool terminal_cell_valid(const tui_buffer_t* buffer, int x, int y,
+                                const tui_cell_t* cell) {
+    if (!cell || cell->grapheme_len > TUI_CELL_GRAPHEME_CAPACITY ||
+        cell->span > TUI_CELL_SPAN_CONTINUATION) return false;
+
+    if (cell->span == TUI_CELL_SPAN_CONTINUATION) {
+        if (x <= 0 || cell->ch != 0u || cell->grapheme_len != 0u)
+            return false;
+        const tui_cell_t* lead = tui_buffer_at_const(buffer, x - 1, y);
+        return lead->span == TUI_CELL_SPAN_WIDE &&
+               lead->style == cell->style &&
+               tui_color_eq(lead->fg, cell->fg) &&
+               tui_color_eq(lead->bg, cell->bg);
+    }
+
+    int width;
+    if (cell->grapheme_len != 0u) {
+        width = tui_grapheme_width(cell->grapheme, cell->grapheme_len);
+        const vstr input = vstr_from_buf(cell->grapheme,
+                                         cell->grapheme_len);
+        size_t cursor = 0u;
+        salts_unicode_scalar first;
+        if (salts_unicode_utf8_next(input, &cursor, &first) !=
+                SALTS_UNICODE_OK ||
+            first.value != cell->ch) return false;
+    } else {
+        char encoded[4];
+        size_t encoded_size = 0u;
+        if (!encode_display_scalar(cell->ch, encoded, &encoded_size))
+            return false;
+        width = tui_grapheme_width(encoded, encoded_size);
+    }
+
+    if (width != (cell->span == TUI_CELL_SPAN_WIDE ? 2 : 1)) return false;
+    if (width == 2) {
+        if (x + 1 >= buffer->width) return false;
+        const tui_cell_t* continuation =
+            tui_buffer_at_const(buffer, x + 1, y);
+        if (continuation->span != TUI_CELL_SPAN_CONTINUATION ||
+            continuation->ch != 0u || continuation->grapheme_len != 0u ||
+            continuation->style != cell->style ||
+            !tui_color_eq(continuation->fg, cell->fg) ||
+            !tui_color_eq(continuation->bg, cell->bg)) return false;
     }
     return true;
 }
@@ -524,8 +582,7 @@ bool tui_terminal_render(tui_terminal_t* term) {
             const tui_cell_t* cell = tui_buffer_at_const(back, x, y);
             const tui_cell_t* prev = tui_buffer_at_const(front, x, y);
 
-            if (cell->grapheme_len > TUI_CELL_GRAPHEME_CAPACITY ||
-                cell->span > TUI_CELL_SPAN_CONTINUATION) {
+            if (!terminal_cell_valid(back, x, y, cell)) {
                 term->last_error = TUI_TERMINAL_ERROR_INVALID_STATE;
                 goto output_failed;
             }
