@@ -136,6 +136,12 @@ def main():
         assert check(directory, event, ["shared/gcanvas/*"])
         assert not check(directory, event, ["charts/mermaid/flowchart/*"])
 
+        # A newly opened PR uses the full branch delta, so scopes changed by
+        # separate commits are both retained in the initial qualification.
+        cumulative = pull_request("opened", before, newer)
+        assert check(directory, cumulative, ["shared/gcanvas/*"])
+        assert check(directory, cumulative, ["charts/mermaid/flowchart/*"])
+
         # A move away from an owned directory must be treated as a change to
         # that directory, even when Git can recognize the rename.
         (directory / "docs").mkdir()
