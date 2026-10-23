@@ -1022,32 +1022,124 @@ void tui_menu_draw(tui_buffer_t* buf, const tui_menu_t* menu, const tui_theme_t*
  * Textarea
  * ============================================================================ */
 
+static size_t textarea_boundary_at_or_before(vstr input, size_t requested) {
+    size_t cursor = 0u;
+    size_t boundary = 0u;
+    if (requested > input.len) requested = input.len;
+    while (cursor < input.len) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return boundary;
+        if (cursor > requested) break;
+        boundary = cursor;
+    }
+    return boundary;
+}
+
+static int textarea_column_to(vstr input, size_t requested) {
+    size_t cursor = 0u;
+    int column = 0;
+    requested = textarea_boundary_at_or_before(input, requested);
+    while (cursor < requested) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return -1;
+        const int width = tui_grapheme_width(cluster.data, cluster.len);
+        if (width < 0) return -1;
+        column += width;
+    }
+    return column;
+}
+
+static size_t textarea_boundary_for_column(vstr input, int requested) {
+    size_t cursor = 0u;
+    size_t boundary = 0u;
+    int column = 0;
+    if (requested <= 0) return 0u;
+    while (cursor < input.len) {
+        vstr cluster;
+        if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+            SALTS_UNICODE_OK) return boundary;
+        const int width = tui_grapheme_width(cluster.data, cluster.len);
+        if (width < 0 || column + width > requested) break;
+        column += width;
+        boundary = cursor;
+    }
+    return boundary;
+}
+
+static bool textarea_encode_scalar(uint32_t scalar, char bytes[4],
+                                   size_t* size) {
+    if (!size || scalar > 0x10ffffu ||
+        (scalar >= 0xd800u && scalar <= 0xdfffu) ||
+        scalar < 0x20u || (scalar >= 0x7fu && scalar <= 0x9fu)) return false;
+    if (scalar < 0x80u) {
+        bytes[0] = (char)scalar;
+        *size = 1u;
+    } else if (scalar < 0x800u) {
+        bytes[0] = (char)(0xc0u | (scalar >> 6));
+        bytes[1] = (char)(0x80u | (scalar & 0x3fu));
+        *size = 2u;
+    } else if (scalar < 0x10000u) {
+        bytes[0] = (char)(0xe0u | (scalar >> 12));
+        bytes[1] = (char)(0x80u | ((scalar >> 6) & 0x3fu));
+        bytes[2] = (char)(0x80u | (scalar & 0x3fu));
+        *size = 3u;
+    } else {
+        bytes[0] = (char)(0xf0u | (scalar >> 18));
+        bytes[1] = (char)(0x80u | ((scalar >> 12) & 0x3fu));
+        bytes[2] = (char)(0x80u | ((scalar >> 6) & 0x3fu));
+        bytes[3] = (char)(0x80u | (scalar & 0x3fu));
+        *size = 4u;
+    }
+    return true;
+}
+
 void tui_textarea_init(tui_textarea_t* ta) {
     memset(ta, 0, sizeof(*ta));
     ta->line_count = 1;
 }
 
 void tui_textarea_set_text(tui_textarea_t* ta, const char* text) {
+    if (!ta) return;
     memset(ta->lines, 0, sizeof(ta->lines));
-    ta->line_count = 0;
+    ta->line_count = 1;
     ta->cursor_x = 0;
     ta->cursor_y = 0;
-    
-    if (!text) { ta->line_count = 1; return; }
-    
-    int line = 0, col = 0;
-    while (*text && line < TUI_TEXTAREA_MAX_LINES) {
-        if (*text == '\n') {
-            /* Never advertise a line_count larger than the fixed array. */
-            if (line + 1 >= TUI_TEXTAREA_MAX_LINES) break;
-            line++;
-            col = 0;
-        } else if (col < TUI_TEXTAREA_LINE_LEN - 1) {
-            ta->lines[line][col++] = *text;
+
+    if (!text) return;
+
+    const char* segment = text;
+    int line = 0;
+    for (;;) {
+        const char* end = segment;
+        while (*end != '\0' && *end != '\n' && *end != '\r') ++end;
+
+        const vstr input = vstr_from_buf(segment, (size_t)(end - segment));
+        size_t cursor = 0u;
+        size_t accepted = 0u;
+        while (cursor < input.len) {
+            vstr cluster;
+            if (salts_unicode_grapheme_next(input, &cursor, &cluster) !=
+                SALTS_UNICODE_OK) {
+                memset(ta->lines, 0, sizeof(ta->lines));
+                ta->line_count = 1;
+                return;
+            }
+            if (cursor < TUI_TEXTAREA_LINE_LEN) accepted = cursor;
         }
-        text++;
+        if (line < TUI_TEXTAREA_MAX_LINES) {
+            memcpy(ta->lines[line], segment, accepted);
+            ta->lines[line][accepted] = '\0';
+        }
+
+        if (*end == '\0') break;
+        if (*end == '\r' && end[1] == '\n') ++end;
+        segment = end + 1;
+        if (line < TUI_TEXTAREA_MAX_LINES) ++line;
+        if (line < TUI_TEXTAREA_MAX_LINES) ta->line_count = line + 1;
+        else ta->line_count = TUI_TEXTAREA_MAX_LINES;
     }
-    ta->line_count = line + 1;
 }
 
 char* tui_textarea_get_text(const tui_textarea_t* ta) {
@@ -1071,36 +1163,60 @@ char* tui_textarea_get_text(const tui_textarea_t* ta) {
 }
 
 bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
-    if (!ta->focused) return false;
+    if (!ta || !event || !ta->focused) return false;
     if (event->type != TUI_EVENT_KEY) return false;
-    
-    int line_len = (int)strlen(ta->lines[ta->cursor_y]);
+
+    if (ta->line_count < 1) ta->line_count = 1;
+    if (ta->line_count > TUI_TEXTAREA_MAX_LINES)
+        ta->line_count = TUI_TEXTAREA_MAX_LINES;
+    if (ta->cursor_y < 0) ta->cursor_y = 0;
+    if (ta->cursor_y >= ta->line_count) ta->cursor_y = ta->line_count - 1;
+    ta->lines[ta->cursor_y][TUI_TEXTAREA_LINE_LEN - 1] = '\0';
+
+    size_t line_len = strlen(ta->lines[ta->cursor_y]);
+    vstr input = vstr_from_buf(ta->lines[ta->cursor_y], line_len);
+    ta->cursor_x = (int)textarea_boundary_at_or_before(
+        input, ta->cursor_x < 0 ? 0u : (size_t)ta->cursor_x);
     
     switch (event->key) {
         case TUI_KEY_UP:
             if (ta->cursor_y > 0) {
+                int column = textarea_column_to(input, (size_t)ta->cursor_x);
                 ta->cursor_y--;
-                int new_len = (int)strlen(ta->lines[ta->cursor_y]);
-                if (ta->cursor_x > new_len) ta->cursor_x = new_len;
+                ta->lines[ta->cursor_y][TUI_TEXTAREA_LINE_LEN - 1] = '\0';
+                vstr previous = vstr_from_cstr(ta->lines[ta->cursor_y]);
+                ta->cursor_x = (int)textarea_boundary_for_column(
+                    previous, column < 0 ? 0 : column);
             }
             return true;
         case TUI_KEY_DOWN:
             if (ta->cursor_y < ta->line_count - 1) {
+                int column = textarea_column_to(input, (size_t)ta->cursor_x);
                 ta->cursor_y++;
-                int new_len = (int)strlen(ta->lines[ta->cursor_y]);
-                if (ta->cursor_x > new_len) ta->cursor_x = new_len;
+                ta->lines[ta->cursor_y][TUI_TEXTAREA_LINE_LEN - 1] = '\0';
+                vstr next = vstr_from_cstr(ta->lines[ta->cursor_y]);
+                ta->cursor_x = (int)textarea_boundary_for_column(
+                    next, column < 0 ? 0 : column);
             }
             return true;
         case TUI_KEY_LEFT:
-            if (ta->cursor_x > 0) ta->cursor_x--;
-            else if (ta->cursor_y > 0) {
+            if (ta->cursor_x > 0) {
+                size_t cursor = (size_t)ta->cursor_x;
+                vstr cluster;
+                if (salts_unicode_grapheme_prev(input, &cursor, &cluster) ==
+                    SALTS_UNICODE_OK) ta->cursor_x = (int)cursor;
+            } else if (ta->cursor_y > 0) {
                 ta->cursor_y--;
                 ta->cursor_x = (int)strlen(ta->lines[ta->cursor_y]);
             }
             return true;
         case TUI_KEY_RIGHT:
-            if (ta->cursor_x < line_len) ta->cursor_x++;
-            else if (ta->cursor_y < ta->line_count - 1) {
+            if ((size_t)ta->cursor_x < line_len) {
+                size_t cursor = (size_t)ta->cursor_x;
+                vstr cluster;
+                if (salts_unicode_grapheme_next(input, &cursor, &cluster) ==
+                    SALTS_UNICODE_OK) ta->cursor_x = (int)cursor;
+            } else if (ta->cursor_y < ta->line_count - 1) {
                 ta->cursor_y++;
                 ta->cursor_x = 0;
             }
@@ -1109,7 +1225,7 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
             ta->cursor_x = 0;
             return true;
         case TUI_KEY_END:
-            ta->cursor_x = line_len;
+            ta->cursor_x = (int)line_len;
             return true;
         case TUI_KEY_ENTER:
             if (ta->line_count < TUI_TEXTAREA_MAX_LINES) {
@@ -1125,10 +1241,14 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
             return true;
         case TUI_KEY_BACKSPACE:
             if (ta->cursor_x > 0) {
-                memmove(&ta->lines[ta->cursor_y][ta->cursor_x - 1],
+                size_t start = (size_t)ta->cursor_x;
+                vstr cluster;
+                if (salts_unicode_grapheme_prev(input, &start, &cluster) !=
+                    SALTS_UNICODE_OK) return true;
+                memmove(&ta->lines[ta->cursor_y][start],
                         &ta->lines[ta->cursor_y][ta->cursor_x],
-                        line_len - ta->cursor_x + 1);
-                ta->cursor_x--;
+                        line_len - (size_t)ta->cursor_x + 1u);
+                ta->cursor_x = (int)start;
             } else if (ta->cursor_y > 0) {
                 size_t prev_len = strlen(ta->lines[ta->cursor_y - 1]);
                 size_t current_len = strlen(ta->lines[ta->cursor_y]);
@@ -1144,13 +1264,17 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
             }
             return true;
         case TUI_KEY_DELETE:
-            if (ta->cursor_x < line_len) {
+            if ((size_t)ta->cursor_x < line_len) {
+                size_t end = (size_t)ta->cursor_x;
+                vstr cluster;
+                if (salts_unicode_grapheme_next(input, &end, &cluster) !=
+                    SALTS_UNICODE_OK) return true;
                 memmove(&ta->lines[ta->cursor_y][ta->cursor_x],
-                        &ta->lines[ta->cursor_y][ta->cursor_x + 1],
-                        line_len - ta->cursor_x);
+                        &ta->lines[ta->cursor_y][end],
+                        line_len - end + 1u);
             } else if (ta->cursor_y < ta->line_count - 1) {
                 size_t next_len = strlen(ta->lines[ta->cursor_y + 1]);
-                if ((size_t)line_len + next_len >= TUI_TEXTAREA_LINE_LEN) return true;
+                if (line_len + next_len >= TUI_TEXTAREA_LINE_LEN) return true;
                 memcpy(ta->lines[ta->cursor_y] + line_len,
                        ta->lines[ta->cursor_y + 1], next_len + 1);
                 for (int i = ta->cursor_y + 1; i < ta->line_count - 1; i++) {
@@ -1160,14 +1284,31 @@ bool tui_textarea_handle(tui_textarea_t* ta, const tui_event_t* event) {
             }
             return true;
         default:
-            if (event->ch >= 32 && event->ch < 127 && line_len < TUI_TEXTAREA_LINE_LEN - 1) {
-                memmove(&ta->lines[ta->cursor_y][ta->cursor_x + 1],
+            break;
+    }
+
+    char encoded[4];
+    size_t encoded_size = 0u;
+    if (textarea_encode_scalar(event->ch, encoded, &encoded_size) &&
+        line_len + encoded_size < TUI_TEXTAREA_LINE_LEN) {
+        const size_t insertion_end = (size_t)ta->cursor_x + encoded_size;
+        memmove(&ta->lines[ta->cursor_y][insertion_end],
                         &ta->lines[ta->cursor_y][ta->cursor_x],
-                        line_len - ta->cursor_x + 1);
-                ta->lines[ta->cursor_y][ta->cursor_x] = (char)event->ch;
-                ta->cursor_x++;
-                return true;
-            }
+                line_len - (size_t)ta->cursor_x + 1u);
+        memcpy(&ta->lines[ta->cursor_y][ta->cursor_x], encoded,
+               encoded_size);
+
+        const vstr updated = vstr_from_buf(ta->lines[ta->cursor_y],
+                                           line_len + encoded_size);
+        size_t scan = 0u;
+        while (scan < updated.len) {
+            vstr cluster;
+            if (salts_unicode_grapheme_next(updated, &scan, &cluster) !=
+                SALTS_UNICODE_OK) return false;
+            if (scan >= insertion_end) break;
+        }
+        ta->cursor_x = (int)scan;
+        return true;
     }
     return false;
 }
@@ -1180,23 +1321,47 @@ void tui_textarea_draw(tui_buffer_t* buf, int x, int y, int width, int height,
     
     for (int row = 0; row < height && row + ta->scroll_y < ta->line_count; row++) {
         int line_idx = row + ta->scroll_y;
-        const char* line = ta->lines[line_idx];
-        int len = (int)strlen(line);
-        
-        for (int col = 0; col < width - 1 && col + ta->scroll_x < len; col++) {
-            char ch = line[col + ta->scroll_x];
-            tui_buffer_set(buf, x + col, y + row, tui_cell(ch, t.fg, t.bg));
+        const vstr line = vstr_from_cstr(ta->lines[line_idx]);
+        size_t cursor = textarea_boundary_at_or_before(
+            line, ta->scroll_x < 0 ? 0u : (size_t)ta->scroll_x);
+        int col = 0;
+        while (cursor < line.len && col < width) {
+            vstr cluster;
+            if (salts_unicode_grapheme_next(line, &cursor, &cluster) !=
+                SALTS_UNICODE_OK) break;
+            const int cluster_width =
+                tui_grapheme_width(cluster.data, cluster.len);
+            if (cluster_width < 0) break;
+            if (cluster_width == 0) continue;
+            if (cluster_width > width - col) break;
+            if (!tui_buffer_set_grapheme(buf, x + col, y + row,
+                                         cluster.data, cluster.len,
+                                         t.fg, t.bg,
+                                         TUI_STYLE_NONE)) break;
+            col += cluster_width;
         }
     }
     
     /* Cursor */
     if (ta->focused) {
-        int cx = x + ta->cursor_x - ta->scroll_x;
+        int cx = x;
         int cy = y + ta->cursor_y - ta->scroll_y;
+        if (ta->cursor_y >= 0 && ta->cursor_y < ta->line_count) {
+            const vstr line = vstr_from_cstr(ta->lines[ta->cursor_y]);
+            const size_t scroll = textarea_boundary_at_or_before(
+                line, ta->scroll_x < 0 ? 0u : (size_t)ta->scroll_x);
+            const size_t cursor = textarea_boundary_at_or_before(
+                line, ta->cursor_x < 0 ? 0u : (size_t)ta->cursor_x);
+            const int scroll_column = textarea_column_to(line, scroll);
+            const int cursor_column = textarea_column_to(line, cursor);
+            cx += cursor_column - scroll_column;
+        }
         if (cx >= x && cx < x + width && cy >= y && cy < y + height) {
             tui_cell_t* cell = tui_buffer_at(buf, cx, cy);
             if (cell) {
-                cell->style |= TUI_STYLE_REVERSE;
+                tui_cell_t cursor_cell = *cell;
+                cursor_cell.style |= TUI_STYLE_REVERSE;
+                tui_buffer_set(buf, cx, cy, cursor_cell);
             }
         }
     }
