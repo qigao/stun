@@ -1,0 +1,253 @@
+# Temporary candidate acceptance only; close this PR after recording results.
+# The published-SDK workflow and pinned Stun source remain unchanged.
+name: TurboScript 3.0.11 candidate / unchanged Stun contracts
+'on':
+  pull_request:
+    branches:
+    - master
+    paths:
+    - .github/workflows/turboscript-311-candidate.yml
+permissions:
+  contents: read
+  packages: read
+  actions: read
+concurrency:
+  group: stun-turboscript-311-candidate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  candidate:
+    name: Exact CI package / original Stun tests / ASan+UBSan+LSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      SALTS_RELEASE: v2.3.0-rc.17
+      SALTS_UTILS_RELEASE: v4.3.0-rc.11
+      QUALIFY_TURBOSCRIPT: 'true'
+      CANDIDATE_RUN: '39906294375'
+      CANDIDATE_ARTIFACT: '12481636996'
+      CANDIDATE_SHA: 76b2dd49829e33500d5e08404ecd1a60dc130fc4
+      CANDIDATE_VERSION: 3.0.11-ci.329.1
+      CANDIDATE_ZIP_SHA256: b1b6510348d7aa24555492e8171115920b313afc2066e0444f02b36c0d72a7a7
+      CANDIDATE_PACKAGE_SHA256: aa532bcead3553bc3ad6c3e3002baf23c809951308989f67d33bb04de08440ab
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+    - name: Define isolated SDK paths
+      shell: bash
+      run: |
+        printf 'SALTS_ROOT=%s/stun-flowchart-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        printf 'SALTS_UTILS_ROOT=%s/stun-flowchart-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        printf 'TURBOSCRIPT_ROOT=%s/stun-turboscript-native-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+        printf 'PACKAGES_ROOT=%s/stun-flowchart-native-nuget\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+    - name: Checkout exact Stun source candidate
+      uses: actions/checkout@v4
+      with:
+        ref: a936fba59784be4ce4ad2d495e74c3a8e856d3df
+        persist-credentials: false
+    - name: Verify exact source and resolved releases
+      shell: bash
+      env:
+        EXPECTED_STUN_SHA: a936fba59784be4ce4ad2d495e74c3a8e856d3df
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+        test -n "$SALTS_RELEASE" && test -n "$SALTS_UTILS_RELEASE"
+    - name: Download exact published native packages with curl
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$PACKAGES_ROOT"
+        curl_args=(--fail --silent --show-error --location --retry 3
+          --proto '=https' --proto-redir '=https'
+          --connect-timeout 15 --max-time 300
+          --user "$GITHUB_ACTOR:$GITHUB_TOKEN")
+        # Discover the NuGet v3 content endpoint; no managed runtime or
+        # dependency source checkout is needed to download native archives.
+        curl "${curl_args[@]}" 'https://nuget.pkg.github.com/qigao/index.json' \
+          --output "$RUNNER_TEMP/stun-native-package-index.json"
+        package_base="$(jq -er '
+          [.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"]
+          | unique
+          | if length == 1 and (.[0] | test("^https://nuget[.]pkg[.]github[.]com/qigao/[A-Za-z0-9/_-]*$"))
+            then .[0] else error("Missing or unexpected GitHub Packages content endpoint") end
+          ' "$RUNNER_TEMP/stun-native-package-index.json")"
+        download_package() {
+          local id="$1" version="${2#v}" archive
+          version="${version,,}"
+          [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
+          archive="$PACKAGES_ROOT/$id/$version/$id.$version.nupkg"
+          mkdir -p "$(dirname "$archive")"
+          curl "${curl_args[@]}" \
+            "${package_base%/}/$id/$version/$id.$version.nupkg" \
+            --output "$archive.part"
+          mv "$archive.part" "$archive"
+        }
+        download_package salts.native "$SALTS_RELEASE"
+        download_package saltsutils.native "$SALTS_UTILS_RELEASE"
+    - name: Verify official SHA256SUMS and restore isolated SDK
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/stun-flowchart-checks/salts" \
+                 "$RUNNER_TEMP/stun-flowchart-checks/utils"
+        gh release download "$SALTS_RELEASE" --repo qigao/salts \
+          --pattern SHA256SUMS --dir "$RUNNER_TEMP/stun-flowchart-checks/salts"
+        gh release download "$SALTS_UTILS_RELEASE" --repo qigao/salts-utils \
+          --pattern SHA256SUMS --dir "$RUNNER_TEMP/stun-flowchart-checks/utils"
+        python3 .github/scripts/restore-flowchart-sdk.py \
+          --packages "$PACKAGES_ROOT" --sdk "$SALTS_ROOT" \
+          --salts-release "$SALTS_RELEASE" \
+          --salts-utils-release "$SALTS_UTILS_RELEASE" \
+          --salts-checksums "$RUNNER_TEMP/stun-flowchart-checks/salts/SHA256SUMS" \
+          --salts-utils-checksums "$RUNNER_TEMP/stun-flowchart-checks/utils/SHA256SUMS"
+        printf 'LD_LIBRARY_PATH=%s/lib\n' "$SALTS_ROOT" >> "$GITHUB_ENV"
+    - name: Verify exact producer artifact and install CI candidate SDK
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/turboscript-candidate-proof"
+        proof="$RUNNER_TEMP/turboscript-candidate-proof"
+        gh api "repos/qigao/TurboScript/actions/runs/$CANDIDATE_RUN" > "$proof/run.json"
+        gh api "repos/qigao/TurboScript/actions/artifacts/$CANDIDATE_ARTIFACT" > "$proof/artifact.json"
+        curl --fail --silent --show-error --location --retry 3 \
+          --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 300 \
+          --header "Authorization: Bearer $GH_TOKEN" \
+          "https://api.github.com/repos/qigao/TurboScript/actions/artifacts/$CANDIDATE_ARTIFACT/zip" \
+          --output "$proof/candidate.zip"
+        python3 - <<'PYSDK'
+        import importlib.util
+        import json
+        import os
+        import xml.etree.ElementTree as ET
+        import zipfile
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location("sdk_restore", ".github/scripts/restore-flowchart-sdk.py")
+        sdk = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sdk)
+        proof = Path(os.environ["RUNNER_TEMP"]) / "turboscript-candidate-proof"
+        run = json.loads((proof / "run.json").read_text())
+        artifact = json.loads((proof / "artifact.json").read_text())
+        commit = os.environ["CANDIDATE_SHA"]
+        version = os.environ["CANDIDATE_VERSION"]
+        zip_sha = os.environ["CANDIDATE_ZIP_SHA256"]
+        sdk.require(run["id"] == int(os.environ["CANDIDATE_RUN"]) and
+                    run["head_sha"] == commit and run["event"] == "pull_request" and
+                    run["workflow_id"] == 364381929 and run["run_attempt"] == 1 and
+                    run["status"] == "completed" and run["conclusion"] == "success",
+                    "Producer run identity or completed acceptance mismatch")
+        sdk.require(artifact["id"] == int(os.environ["CANDIDATE_ARTIFACT"]) and
+                    artifact["name"] == "turboscript-native-nuget" and not artifact["expired"] and
+                    artifact["workflow_run"]["id"] == run["id"] and
+                    artifact["workflow_run"]["head_sha"] == commit and
+                    artifact["digest"] == "sha256:" + zip_sha,
+                    "Candidate artifact provenance mismatch")
+        sdk.require(sdk.digest(proof / "candidate.zip") == zip_sha, "Candidate ZIP digest mismatch")
+        name = f"TurboScript.Native.{version}.nupkg"
+        with zipfile.ZipFile(proof / "candidate.zip") as outer:
+            sdk.require(outer.namelist() == [name], "Unexpected candidate artifact members")
+            package = proof / name
+            package.write_bytes(outer.read(name))
+        sdk.require(sdk.digest(package) == os.environ["CANDIDATE_PACKAGE_SHA256"], "Candidate NuGet digest mismatch")
+        ns = {"n": "http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd"}
+        manifests = {}
+        with zipfile.ZipFile(package) as archive:
+            metadata = ET.fromstring(archive.read("TurboScript.Native.nuspec")).find("n:metadata", ns)
+            sdk.require(metadata.find("n:id", ns).text == "TurboScript.Native" and
+                        metadata.find("n:version", ns).text == version and
+                        metadata.find("n:repository", ns).get("commit") == commit,
+                        "Candidate NuGet identity mismatch")
+            for rid in ("linux-x64", "macos-arm64", "android-arm64-v8a"):
+                rows = archive.read(f"sdk/{rid}/turboscript-sdk-manifest.txt").decode().splitlines()
+                manifest = {}
+                for row in rows:
+                    key, value = row.split("=", 1)
+                    sdk.require(key not in manifest, "Duplicate manifest field")
+                    manifest[key] = value
+                required = {"version": version, "commit": commit, "rid": rid,
+                            "interpreter": "MIR", "jit": "MIR", "modules": "ON", "cli": "OFF",
+                            "salts_release": os.environ["SALTS_RELEASE"].removeprefix("v"),
+                            "salts_utils_release": os.environ["SALTS_UTILS_RELEASE"].removeprefix("v")}
+                sdk.require(all(manifest.get(key) == value for key, value in required.items()),
+                            f"Candidate SDK manifest mismatch for {rid}")
+                manifests[rid] = manifest
+        destination = Path(os.environ["TURBOSCRIPT_ROOT"])
+        destination.mkdir(parents=True, exist_ok=True)
+        sdk.require(not any(destination.iterdir()), "Candidate SDK destination must be empty")
+        sdk.extract_sdk_payload(package, destination)
+        provenance = {"kind": "ci-candidate-not-published-sdk", "commit": commit, "version": version,
+                      "run": run["id"], "artifact": artifact["id"], "zip_sha256": zip_sha,
+                      "package_sha256": sdk.digest(package), "manifests": manifests}
+        (destination / "turboscript-sdk-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+        print("Verified exact CI candidate:", json.dumps(provenance, sort_keys=True))
+        PYSDK
+        export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$TURBOSCRIPT_ROOT/lib"
+        printf 'LD_LIBRARY_PATH=%s\n' "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+        mkdir -p build/xml-runtime
+        readelf -d "$TURBOSCRIPT_ROOT/lib/libturbo_script.so"
+        ldd -r "$TURBOSCRIPT_ROOT/lib/libturbo_script.so" 2>&1 | tee build/xml-runtime/turboscript-loader.txt
+        if grep -E 'not found|undefined symbol' build/xml-runtime/turboscript-loader.txt; then
+          echo 'Published TurboScript dependency closure is unresolved' >&2
+          exit 1
+        fi
+        mapfile -t core_providers < <(awk '/libsalts[.]so/ {print $3}' build/xml-runtime/turboscript-loader.txt | sort -u)
+        test "${#core_providers[@]}" = 1
+        test "$(realpath "${core_providers[0]}")" = "$(realpath "$SALTS_ROOT/lib/libsalts.so")"
+    - name: Install minimal parser generator tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends re2c ninja-build nlohmann-json3-dev libfreetype-dev libstb-dev libpugixml-dev
+        re2c --version
+    - name: Restore pinned headless XML dependencies
+      id: xml_deps
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/stun-xml-runtime-deps
+        key: ${{ runner.os }}-${{ runner.arch }}-xml-runtime-v1-${{ hashFiles('flexUI/tests/xml-runtime-deps/CMakeLists.txt')
+          }}
+    - name: Build small upstream XML dependencies
+      if: steps.xml_deps.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        cmake -S flexUI/tests/xml-runtime-deps -B build/xml-deps -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=lib \
+          "-DCMAKE_INSTALL_PREFIX=$RUNNER_TEMP/stun-xml-runtime-deps"
+        cmake --build build/xml-deps --parallel 2
+        cmake --install build/xml-deps
+    - name: Execute unchanged Stun XML and interpreter/JIT contracts with strict sanitizers
+      shell: bash
+      run: |
+        set -euo pipefail
+        cmake -S flexUI/tests/xml-runtime-standalone -B build/xml-runtime -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          "-DSTUN_XML_RUNTIME_TURBOSCRIPT=$QUALIFY_TURBOSCRIPT" \
+          "-DTURBOSCRIPT_ROOT=$TURBOSCRIPT_ROOT" \
+          "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$RUNNER_TEMP/stun-xml-runtime-deps" \
+          -DSTB_INCLUDE_DIRS=/usr/include/stb
+        targets=(stun_xml_runtime_qualification)
+        if [[ "$QUALIFY_TURBOSCRIPT" == true ]]; then
+          targets+=(stun_turboscript_qualification)
+        fi
+        cmake --build build/xml-runtime --target "${targets[@]}" --parallel 2
+        ctest --test-dir build/xml-runtime --no-tests=error --verbose --output-on-failure \
+          --timeout 120 --output-junit build/xml-runtime/results.xml
+        git diff --exit-code
+    - name: Preserve candidate and unchanged-consumer evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: stun-turboscript-311-candidate-${{ github.event.pull_request.head.sha }}
+        retention-days: 7
+        if-no-files-found: error
+        path: |
+          ${{ runner.temp }}/turboscript-candidate-proof/*.json
+          ${{ runner.temp }}/stun-turboscript-native-sdk/turboscript-sdk-provenance.json
+          ${{ runner.temp }}/stun-flowchart-native-sdk/flowchart-sdk-provenance.json
+          build/xml-runtime/results.xml
+          build/xml-runtime/Testing/Temporary/LastTest.log
+          build/xml-runtime/turboscript-loader.txt
+          build/xml-runtime/compile_commands.json
