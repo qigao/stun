@@ -156,6 +156,8 @@ bool            tui_buffer_in_bounds(const tui_buffer_t* buf, int x, int y);
 /* Drawing primitives */
 void            tui_buffer_clear(tui_buffer_t* buf);
 void            tui_buffer_clear_color(tui_buffer_t* buf, tui_color_t bg);
+/* Normalizes valid scalar/grapheme cells to Tango's 1/2-column span policy.
+ * Invalid Unicode, terminal controls, and clipped wide cells are ignored. */
 void            tui_buffer_set(tui_buffer_t* buf, int x, int y, tui_cell_t cell);
 void            tui_buffer_set_char(tui_buffer_t* buf, int x, int y, uint32_t ch);
 /* Returns -1 for malformed input/not exactly one grapheme, otherwise Tango's
