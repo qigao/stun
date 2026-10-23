@@ -350,10 +350,12 @@ static int test_buffer_and_layout(void) {
 
 static char rendered[4096];
 static size_t rendered_len;
+static size_t rendered_write_calls;
 
 static bool capture_write(tui_terminal_t *terminal, const char *data,
                           size_t size) {
     (void)terminal;
+    ++rendered_write_calls;
     if (size > sizeof(rendered) - 1u - rendered_len) return false;
     memcpy(rendered + rendered_len, data, size);
     rendered_len += size;
@@ -525,6 +527,202 @@ static int test_terminal_render_contract(void) {
     CHECK(tui_terminal_last_error(terminal) ==
           TUI_TERMINAL_ERROR_INVALID_STATE);
     CHECK(rendered_len == 0u);
+
+    terminal->initialized = false;
+    tui_terminal_destroy(terminal);
+    return 0;
+}
+
+
+/* Every invalid public cell state must fail before any part of a frame is
+ * written or committed. Exercise malformed cells after a valid dirty prefix
+ * so a future early flush cannot leak a partial terminal frame. */
+static int expect_invalid_render(tui_terminal_t *terminal,
+                                 const tui_cell_t expected_front[3]) {
+    rendered_len = 0u;
+    rendered_write_calls = 0u;
+    CHECK(!tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) ==
+          TUI_TERMINAL_ERROR_INVALID_STATE);
+    CHECK(rendered_len == 0u);
+    CHECK(rendered_write_calls == 0u);
+    CHECK(terminal->output_len == 0u);
+    CHECK(tui_buffer_is_dirty(terminal->back));
+    for (int x = 0; x < 3; ++x) {
+        CHECK(tui_cell_eq(&expected_front[x],
+                          tui_buffer_at_const(terminal->front, x, 0)));
+    }
+    return 0;
+}
+
+static void prepare_invalid_render(tui_terminal_t *terminal) {
+    tui_buffer_clear(terminal->back);
+    tui_buffer_set(terminal->back, 0, 0,
+                   tui_cell('A', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(terminal->back, 1, 0,
+                   tui_cell('B', TUI_WHITE, TUI_BLACK));
+}
+
+static int test_terminal_renderer_rejects_forged_cells(void) {
+    tui_terminal_t *terminal = tui_terminal_create();
+    CHECK(terminal != NULL);
+    terminal->width = 3;
+    terminal->height = 1;
+    terminal->front = tui_buffer_create(3, 1);
+    terminal->back = tui_buffer_create(3, 1);
+    CHECK(terminal->front != NULL && terminal->back != NULL);
+    terminal->initialized = true;
+    terminal->color_mode = TUI_COLOR_TRUECOLOR;
+    terminal->write_output = capture_write;
+
+    tui_cell_t expected_front[3];
+    for (int x = 0; x < 3; ++x) {
+        expected_front[x] = *tui_buffer_at_const(terminal->front, x, 0);
+    }
+
+    /* C1 controls must be rejected even when a caller bypasses buffer APIs. */
+    prepare_invalid_render(terminal);
+    *tui_buffer_at(terminal->back, 2, 0) =
+        tui_cell(0x85u, TUI_WHITE, TUI_BLACK);
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* Surrogate and out-of-range scalars must never reach the renderer. */
+    {
+        static const uint32_t invalid_scalars[] = {0xd800u, 0x110000u};
+        for (size_t i = 0;
+             i < sizeof(invalid_scalars) / sizeof(invalid_scalars[0]); ++i) {
+            prepare_invalid_render(terminal);
+            *tui_buffer_at(terminal->back, 2, 0) =
+                tui_cell(invalid_scalars[i], TUI_WHITE, TUI_BLACK);
+            tui_buffer_mark_dirty(terminal->back, 2, 0);
+            CHECK(expect_invalid_render(terminal, expected_front) == 0);
+        }
+    }
+
+    /* Unknown cell-span values cannot be interpreted as single cells. */
+    prepare_invalid_render(terminal);
+    tui_cell_t forged = tui_cell('X', TUI_WHITE, TUI_BLACK);
+    forged.span = 0xffu;
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* An isolated UTF-8 continuation byte is not a renderable grapheme. */
+    prepare_invalid_render(terminal);
+    forged = tui_cell('X', TUI_WHITE, TUI_BLACK);
+    forged.grapheme_len = 1u;
+    forged.grapheme[0] = (char)0x80;
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* The owned grapheme bytes must begin with the cell's public scalar. */
+    prepare_invalid_render(terminal);
+    forged = tui_cell('X', TUI_WHITE, TUI_BLACK);
+    forged.grapheme_len = 1u;
+    forged.grapheme[0] = 'Y';
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* A cell cannot claim more owned grapheme bytes than its fixed storage. */
+    prepare_invalid_render(terminal);
+    forged = tui_cell('X', TUI_WHITE, TUI_BLACK);
+    forged.grapheme_len =
+        (uint8_t)(TUI_CELL_GRAPHEME_CAPACITY + 1u);
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* A single cell cannot contain two grapheme clusters. */
+    prepare_invalid_render(terminal);
+    forged = tui_cell('A', TUI_WHITE, TUI_BLACK);
+    forged.grapheme_len = 2u;
+    forged.grapheme[0] = 'A';
+    forged.grapheme[1] = 'B';
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* A wide scalar clipped at the right edge must not reach the terminal. */
+    prepare_invalid_render(terminal);
+    forged = tui_cell(0x4e2du, TUI_WHITE, TUI_BLACK);
+    forged.span = TUI_CELL_SPAN_WIDE;
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* A continuation cannot be orphaned from a wide leading cell. */
+    prepare_invalid_render(terminal);
+    forged = tui_cell(0u, TUI_WHITE, TUI_BLACK);
+    forged.span = TUI_CELL_SPAN_CONTINUATION;
+    *tui_buffer_at(terminal->back, 2, 0) = forged;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* A wide lead and continuation must have matching style and colors. */
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->style = TUI_STYLE_BOLD;
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->fg = TUI_COLOR(1, 2, 3);
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->bg = TUI_COLOR(3, 2, 1);
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    /* The continuation background must also match its lead. */
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->ch = 'x';
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    prepare_invalid_render(terminal);
+    CHECK(tui_buffer_set_grapheme(terminal->back, 1, 0, UTF8_CJK,
+                                  sizeof(UTF8_CJK) - 1u,
+                                  TUI_WHITE, TUI_BLACK, TUI_STYLE_NONE));
+    tui_buffer_at(terminal->back, 2, 0)->grapheme_len = 1u;
+    tui_buffer_at(terminal->back, 2, 0)->grapheme[0] = 'x';
+    tui_buffer_mark_dirty(terminal->back, 2, 0);
+    CHECK(expect_invalid_render(terminal, expected_front) == 0);
+
+    /* A repaired back buffer must be renderable after a rejected frame. */
+    tui_buffer_clear(terminal->back);
+    tui_buffer_set(terminal->back, 0, 0,
+                   tui_cell('A', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(terminal->back, 1, 0,
+                   tui_cell('B', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(terminal->back, 2, 0,
+                   tui_cell('C', TUI_WHITE, TUI_BLACK));
+    rendered_len = 0u;
+    rendered_write_calls = 0u;
+    CHECK(tui_terminal_render(terminal));
+    CHECK(tui_terminal_last_error(terminal) == TUI_TERMINAL_ERROR_NONE);
+    CHECK(rendered_write_calls == 1u);
+    CHECK(strstr(rendered, "ABC") != NULL);
+    CHECK(!tui_buffer_is_dirty(terminal->back));
+    for (int x = 0; x < 3; ++x) {
+        CHECK(tui_cell_eq(tui_buffer_at_const(terminal->back, x, 0),
+                          tui_buffer_at_const(terminal->front, x, 0)));
+    }
 
     terminal->initialized = false;
     tui_terminal_destroy(terminal);
@@ -839,6 +1037,7 @@ int main(void) {
     if (test_buffer_and_layout()) return 1;
     if (test_grapheme_cells()) return 1;
     if (test_terminal_render_contract()) return 1;
+    if (test_terminal_renderer_rejects_forged_cells()) return 1;
     if (test_layout_rejects_invalid_graphs()) return 1;
     if (test_input_grapheme_editing()) return 1;
     if (test_textarea_bounds()) return 1;
