@@ -274,6 +274,14 @@ static inline bool tui_event_is_ctrl(const tui_event_t* e, char c) {
 
 typedef struct tui_terminal tui_terminal_t;
 
+typedef enum {
+    TUI_TERMINAL_ERROR_NONE = 0,
+    TUI_TERMINAL_ERROR_INVALID_STATE,
+    TUI_TERMINAL_ERROR_OUTPUT_LIMIT,
+    TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION,
+    TUI_TERMINAL_ERROR_OUTPUT_IO
+} tui_terminal_error_t;
+
 tui_terminal_t* tui_terminal_create(void);
 void            tui_terminal_destroy(tui_terminal_t* term);
 bool            tui_terminal_init(tui_terminal_t* term);
@@ -294,7 +302,11 @@ void            tui_terminal_set_color_mode(tui_terminal_t* term, tui_color_mode
 tui_color_mode_t tui_terminal_get_color_mode(const tui_terminal_t* term);
 
 tui_buffer_t*   tui_terminal_buffer(tui_terminal_t* term);
-void            tui_terminal_render(tui_terminal_t* term);
+/* Render is failure-atomic with respect to the front buffer. On failure no
+ * generated frame is committed, and the back buffer remains dirty so a
+ * caller may retry. */
+bool            tui_terminal_render(tui_terminal_t* term);
+tui_terminal_error_t tui_terminal_last_error(const tui_terminal_t* term);
 void            tui_terminal_refresh(tui_terminal_t* term);
 void            tui_terminal_clear(tui_terminal_t* term);
 void            tui_terminal_clear_color(tui_terminal_t* term, tui_color_t bg);
