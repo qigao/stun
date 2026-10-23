@@ -583,6 +583,19 @@ static int test_terminal_renderer_rejects_forged_cells(void) {
     tui_buffer_mark_dirty(terminal->back, 2, 0);
     CHECK(expect_invalid_render(terminal, expected_front) == 0);
 
+    /* Surrogate and out-of-range scalars must never reach the renderer. */
+    {
+        static const uint32_t invalid_scalars[] = {0xd800u, 0x110000u};
+        for (size_t i = 0;
+             i < sizeof(invalid_scalars) / sizeof(invalid_scalars[0]); ++i) {
+            prepare_invalid_render(terminal);
+            *tui_buffer_at(terminal->back, 2, 0) =
+                tui_cell(invalid_scalars[i], TUI_WHITE, TUI_BLACK);
+            tui_buffer_mark_dirty(terminal->back, 2, 0);
+            CHECK(expect_invalid_render(terminal, expected_front) == 0);
+        }
+    }
+
     /* Unknown cell-span values cannot be interpreted as single cells. */
     prepare_invalid_render(terminal);
     tui_cell_t forged = tui_cell('X', TUI_WHITE, TUI_BLACK);
