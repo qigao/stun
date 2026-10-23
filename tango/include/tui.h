@@ -423,6 +423,7 @@ void            tui_widget_slider(tui_buffer_t* buf, int x, int y, int width, fl
 void            tui_widget_spinner(tui_buffer_t* buf, int x, int y, int frame, const tui_theme_t* theme);
 void            tui_widget_divider(tui_buffer_t* buf, int x, int y, int width, const tui_theme_t* theme);
 void            tui_widget_panel(tui_buffer_t* buf, int x, int y, int width, int height, const char* title, const tui_theme_t* theme);
+/* cursor is a UTF-8 byte offset and must identify a grapheme boundary. */
 void            tui_widget_input(tui_buffer_t* buf, int x, int y, int width, const char* text, int cursor, bool focused, const tui_theme_t* theme);
 void            tui_widget_badge(tui_buffer_t* buf, int x, int y, const char* text, tui_color_t bg_color, const tui_theme_t* theme);
 void            tui_widget_scrollbar_v(tui_buffer_t* buf, int x, int y, int height, float position, float visible_ratio, const tui_theme_t* theme);
@@ -439,8 +440,8 @@ static inline bool tui_rect_contains(int rx, int ry, int rw, int rh, int px, int
 /* Input field state */
 typedef struct {
     char    text[256];
-    int     cursor;
-    int     len;
+    int     cursor; /* UTF-8 byte offset kept on a grapheme boundary */
+    int     len;    /* UTF-8 byte length */
 } tui_input_state_t;
 
 void            tui_input_init(tui_input_state_t* state);
