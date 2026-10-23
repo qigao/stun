@@ -33,6 +33,7 @@
 #include <flexUI/widgets/splitter_widget.h>
 #include <flexUI/widgets/switch_widget.h>
 #include <flexUI/widgets/table_widget.h>
+#include <flex/core/cmeta_types.h>
 #include <flexUI/widgets/tabs_widget.h>
 #include <flexUI/widgets/textarea_widget.h>
 #include <flexUI/widgets/timepicker_widget.h>
@@ -6639,21 +6640,38 @@ spec("StyleEngine parses keyframes and animation shorthand from CSS") {
       }
     )");
   
-    const auto* keyframes = engine.keyframes("fade-in");
-    check(keyframes != nullptr);
-    check(keyframes->size() == 3);
-    if (keyframes->size() != 3) {
+    const auto* program = engine.keyframes("fade-in");
+    check_not_null(program);
+    if (!program) {
       return;
     }
-    check(approx_eq((*keyframes)[0].offset, 0.0f, 0.001f));
-    check(approx_eq((*keyframes)[1].offset, 0.5f, 0.001f));
-    check(approx_eq((*keyframes)[2].offset, 1.0f, 0.001f));
-    const auto opacity_it = (*keyframes)[0].properties.find("opacity");
-    check(opacity_it != (*keyframes)[0].properties.end());
-    check(opacity_it->second == "0");
-    const auto transform_it = (*keyframes)[2].properties.find("transform");
-    check(transform_it != (*keyframes)[2].properties.end());
-    check(transform_it->second == "translateX(20px)");
+    const auto* opacity =
+        program->find(detail::StylePropertyId::Opacity);
+    const auto* transform_x =
+        program->find(detail::StylePropertyId::TransformX);
+    check_not_null(opacity);
+    check_not_null(transform_x);
+    if (!opacity || !transform_x) {
+      return;
+    }
+    check(opacity->property == detail::style_property_find("opacity"));
+    check(opacity->keyframes.size() == 3);
+    check(transform_x->keyframes.size() == 2);
+    check(approx_eq(opacity->keyframes[0].offset, 0.0f, 0.001f));
+    check(approx_eq(opacity->keyframes[1].offset, 0.5f, 0.001f));
+    check(approx_eq(opacity->keyframes[2].offset, 1.0f, 0.001f));
+    const auto* initial_opacity =
+        std::get_if<float>(&opacity->keyframes[0].value.value);
+    const auto* final_transform =
+        std::get_if<float>(&transform_x->keyframes[1].value.value);
+    check_not_null(initial_opacity);
+    check_not_null(final_transform);
+    if (initial_opacity) {
+      check(approx_eq(*initial_opacity, 0.0f, 0.001f));
+    }
+    if (final_transform) {
+      check(approx_eq(*final_transform, 20.0f, 0.001f));
+    }
   
     Box box(nullptr);
     auto* elem = box.create("div", "elem");
@@ -6685,6 +6703,92 @@ spec("StyleEngine parses keyframes and animation shorthand from CSS") {
     check(elem->computed_style->animations.size() == 1);
     if (elem->computed_style->animations.size() != 1) {
       return;
+    }
+  }
+}
+
+spec("StyleEngine rejects invalid typed keyframe values during stylesheet load") {
+  it("runs") {
+    const std::vector<std::pair<std::string, std::string>> invalid_values = {
+        {"opacity", "red"},
+        {"transform", "translateX(red)"},
+        {"background-color", "12px"},
+    };
+    for (const auto& [property, value] : invalid_values) {
+      StyleEngine engine;
+      CssLoadOptions options;
+      options.source = "invalid-keyframes.css";
+      options.strict = true;
+      const std::string css =
+          "@keyframes invalid { from { " + property + ": " + value +
+          "; } to { opacity: 1; } }";
+      const auto result = engine.load_stylesheet(css, options);
+
+      check_false(result.applied);
+      check_true(result.has_errors());
+      check_null(engine.keyframes("invalid"));
+      check_false(result.diagnostics.empty());
+      if (!result.diagnostics.empty()) {
+        check(result.diagnostics.front().source == "invalid-keyframes.css");
+        check(result.diagnostics.front().property == property);
+      }
+    }
+  }
+}
+
+spec("StyleEngine compiles color and shadow keyframes into typed tracks") {
+  it("runs") {
+    StyleEngine engine;
+    engine.parse_css(R"(
+      @keyframes effects {
+        from {
+          background-color: #102030;
+          box-shadow: 1px 2px 3px 4px rgba(10, 20, 30, 0.25);
+        }
+        to {
+          background-color: #405060;
+          box-shadow: 5px 6px 7px 8px rgba(40, 50, 60, 0.75);
+        }
+      }
+    )");
+
+    const auto* program = engine.keyframes("effects");
+    check_not_null(program);
+    if (!program) {
+      return;
+    }
+    const auto* background =
+        program->find(detail::StylePropertyId::BackgroundColor);
+    const auto* blur =
+        program->find(detail::StylePropertyId::BoxShadowBlur);
+    const auto* shadow_color =
+        program->find(detail::StylePropertyId::BoxShadowColor);
+    check_not_null(background);
+    check_not_null(blur);
+    check_not_null(shadow_color);
+    if (!background || !blur || !shadow_color) {
+      return;
+    }
+    check(cmeta_type_equal(background->property->type,
+                           &flex::cmeta_type_color));
+    check(cmeta_type_equal(blur->property->type, &cmeta_type_float));
+    check(cmeta_type_equal(shadow_color->property->type,
+                           &flex::cmeta_type_color));
+    check(background->keyframes.size() == 2);
+    check(blur->keyframes.size() == 2);
+    check(shadow_color->keyframes.size() == 2);
+    const auto* final_blur =
+        std::get_if<float>(&blur->keyframes.back().value.value);
+    const auto* final_background =
+        std::get_if<Color>(&background->keyframes.back().value.value);
+    check_not_null(final_blur);
+    check_not_null(final_background);
+    if (final_blur) {
+      check(approx_eq(*final_blur, 7.0f, 0.001f));
+    }
+    if (final_background) {
+      require_color(*final_background, 0x40 / 255.0f, 0x50 / 255.0f,
+                    0x60 / 255.0f, 1.0f);
     }
   }
 }

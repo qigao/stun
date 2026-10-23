@@ -16,12 +16,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cctype>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
-#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -467,392 +465,47 @@ bool animation_play_state_changed(const ComputedStyle& previous_style,
   return false;
 }
 
-std::string trim_copy(const std::string& value) {
-  size_t start = 0;
-  while (start < value.size() &&
-         std::isspace(static_cast<unsigned char>(value[start]))) {
-    ++start;
+TransitionValue animation_base_value(
+    const Element& element, const ComputedStyle& style,
+    const detail::StylePropertyDesc& property) {
+  if (detail::style_value_type_matches(property.type, &cmeta_type_float)) {
+    float value = 0.0f;
+    if (detail::style_property_read(property, style, &cmeta_type_float,
+                                    &value)) {
+      return {&cmeta_type_float, flex::AnimValue{value}};
+    }
+  } else if (detail::style_value_type_matches(
+                 property.type, &flex::cmeta_type_color)) {
+    Color value;
+    if (property.id == detail::StylePropertyId::BackgroundColor) {
+      value = resolved_element_background(element, style);
+    } else if (!detail::style_property_read(
+                   property, style, &flex::cmeta_type_color, &value)) {
+      return {};
+    }
+    return {&flex::cmeta_type_color, flex::AnimValue{value}};
   }
-  size_t end = value.size();
-  while (end > start &&
-         std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-    --end;
-  }
-  return value.substr(start, end - start);
+  return {};
 }
 
-Color parse_animation_color(const std::string& value) {
-  const std::string trimmed = trim_copy(value);
-  if (trimmed.empty()) {
-    return {0.0f, 0.0f, 0.0f, 0.0f};
+std::vector<TypedAnimationPoint> animation_points_with_base(
+    const CompiledAnimationTrack& track,
+    const TransitionValue& base_value) {
+  std::vector<TypedAnimationPoint> points = track.keyframes;
+  if (points.empty() || !base_value.has_value()) {
+    return points;
   }
-  if (trimmed[0] == '#') {
-    std::string hex = trimmed.substr(1);
-    if (hex.size() == 3) {
-      hex = std::string(2, hex[0]) + std::string(2, hex[1]) +
-            std::string(2, hex[2]);
-    }
-    if (hex.size() == 6) {
-      unsigned int r, g, b;
-      std::sscanf(hex.c_str(), "%2x%2x%2x", &r, &g, &b);
-      return {r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
-    }
-    if (hex.size() == 8) {
-      unsigned int r, g, b, a;
-      std::sscanf(hex.c_str(), "%2x%2x%2x%2x", &r, &g, &b, &a);
-      return {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
-    }
+  if (points.front().offset > 0.0f) {
+    points.insert(points.begin(), {0.0f, base_value});
   }
-  if (trimmed.find("rgba") == 0 || trimmed.find("rgb") == 0) {
-    const size_t start = trimmed.find('(');
-    const size_t end = trimmed.find(')');
-    if (start != std::string::npos && end != std::string::npos && end > start) {
-      std::string inner = trimmed.substr(start + 1, end - start - 1);
-      for (char& ch : inner) {
-        if (ch == ',') {
-          ch = ' ';
-        }
-      }
-      std::istringstream stream(inner);
-      int r = 0;
-      int g = 0;
-      int b = 0;
-      float a = 1.0f;
-      stream >> r >> g >> b;
-      if (trimmed.find("rgba") == 0) {
-        stream >> a;
-      }
-      return {r / 255.0f, g / 255.0f, b / 255.0f, a};
-    }
+  if (points.back().offset < 1.0f) {
+    points.push_back({1.0f, base_value});
   }
-  return {0.0f, 0.0f, 0.0f, 1.0f};
+  return points;
 }
 
-float parse_animation_length(const std::string& value) {
-  const std::string trimmed = trim_copy(value);
-  if (trimmed.empty()) {
-    return 0.0f;
-  }
-  if (trimmed.size() >= 2 &&
-      trimmed.compare(trimmed.size() - 2, 2, "px") == 0) {
-    return std::stof(trimmed.substr(0, trimmed.size() - 2));
-  }
-  return std::stof(trimmed);
-}
-
-float parse_animation_angle_degrees(const std::string& value) {
-  std::string token = trim_copy(value);
-  std::transform(token.begin(), token.end(), token.begin(),
-                 [](unsigned char ch) {
-                   return static_cast<char>(std::tolower(ch));
-                 });
-  if (token.empty()) {
-    return 0.0f;
-  }
-  if (token.size() >= 3 &&
-      token.compare(token.size() - 3, 3, "deg") == 0) {
-    return std::stof(token.substr(0, token.size() - 3));
-  }
-  if (token.size() >= 3 &&
-      token.compare(token.size() - 3, 3, "rad") == 0) {
-    return std::stof(token.substr(0, token.size() - 3)) *
-           180.0f / 3.14159265f;
-  }
-  if (token.size() >= 4 &&
-      token.compare(token.size() - 4, 4, "turn") == 0) {
-    return std::stof(token.substr(0, token.size() - 4)) * 360.0f;
-  }
-  if (token.size() >= 4 &&
-      token.compare(token.size() - 4, 4, "grad") == 0) {
-    return std::stof(token.substr(0, token.size() - 4)) * 0.9f;
-  }
-  return std::stof(token);
-}
-
-struct TransformValues {
-  float x = 0.0f;
-  float y = 0.0f;
-  float scale = 1.0f;
-  float scale_x = 1.0f;
-  float scale_y = 1.0f;
-  float rotate = 0.0f;
-};
-
-TransformValues parse_animation_transform(const std::string& value) {
-  TransformValues result;
-  size_t i = 0;
-  while (i < value.size()) {
-    while (i < value.size() &&
-           std::isspace(static_cast<unsigned char>(value[i]))) {
-      ++i;
-    }
-    size_t fn_start = i;
-    while (i < value.size() &&
-           std::isalnum(static_cast<unsigned char>(value[i]))) {
-      ++i;
-    }
-    const std::string function = value.substr(fn_start, i - fn_start);
-    if (function.empty() || i >= value.size() || value[i] != '(') {
-      ++i;
-      continue;
-    }
-    size_t arg_start = ++i;
-    int depth = 1;
-    while (i < value.size() && depth > 0) {
-      if (value[i] == '(') {
-        ++depth;
-      } else if (value[i] == ')') {
-        --depth;
-        if (depth == 0) {
-          break;
-        }
-      }
-      ++i;
-    }
-    const std::string args_text = value.substr(arg_start, i - arg_start);
-    std::vector<std::string> args;
-    std::string current;
-    for (char ch : args_text) {
-      if (ch == ',') {
-        const std::string token = trim_copy(current);
-        if (!token.empty()) {
-          args.push_back(token);
-        }
-        current.clear();
-      } else {
-        current.push_back(ch);
-      }
-    }
-    const std::string tail = trim_copy(current);
-    if (!tail.empty()) {
-      args.push_back(tail);
-    }
-    std::string function_name = function;
-    std::transform(function_name.begin(), function_name.end(),
-                   function_name.begin(), [](unsigned char ch) {
-                     return static_cast<char>(std::tolower(ch));
-                   });
-    if (function_name == "translate" && !args.empty()) {
-      result.x = parse_animation_length(args[0]);
-      result.y = args.size() > 1 ? parse_animation_length(args[1]) : 0.0f;
-    } else if (function_name == "translate3d" && !args.empty()) {
-      result.x = parse_animation_length(args[0]);
-      result.y = args.size() > 1 ? parse_animation_length(args[1]) : 0.0f;
-    } else if (function_name == "translatex" && !args.empty()) {
-      result.x = parse_animation_length(args[0]);
-    } else if (function_name == "translatey" && !args.empty()) {
-      result.y = parse_animation_length(args[0]);
-    } else if (function_name == "scale" && !args.empty()) {
-      const float sx = std::stof(args[0]);
-      const float sy = args.size() > 1 ? std::stof(args[1]) : sx;
-      result.scale = sx == sy ? sx : 1.0f;
-      result.scale_x = sx;
-      result.scale_y = sy;
-    } else if (function_name == "scale3d" && !args.empty()) {
-      const float sx = std::stof(args[0]);
-      const float sy = args.size() > 1 ? std::stof(args[1]) : sx;
-      result.scale = sx == sy ? sx : 1.0f;
-      result.scale_x = sx;
-      result.scale_y = sy;
-    } else if (function_name == "scalex" && !args.empty()) {
-      result.scale_x = std::stof(args[0]);
-    } else if (function_name == "scaley" && !args.empty()) {
-      result.scale_y = std::stof(args[0]);
-    } else if ((function_name == "rotate" || function_name == "rotatez") &&
-               !args.empty()) {
-      result.rotate = parse_animation_angle_degrees(args[0]);
-    }
-    if (i < value.size()) {
-      ++i;
-    }
-  }
-  return result;
-}
-
-bool is_animation_color_token(const std::string& value) {
-  const std::string trimmed = trim_copy(value);
-  if (trimmed.empty()) {
-    return false;
-  }
-  if (trimmed[0] == '#') {
-    return true;
-  }
-  return trimmed.rfind("rgb(", 0) == 0 || trimmed.rfind("rgba(", 0) == 0;
-}
-
-BoxShadow parse_animation_box_shadow(const std::string& value, bool& ok) {
-  const std::string trimmed = trim_copy(value);
-  ok = false;
-  if (trimmed.empty() || trimmed == "none") {
-    ok = true;
-    return BoxShadow{};
-  }
-
-  std::vector<std::string> parts;
-  std::string current;
-  int paren_depth = 0;
-  for (char ch : trimmed) {
-    if (ch == '(') {
-      ++paren_depth;
-      current.push_back(ch);
-      continue;
-    }
-    if (ch == ')') {
-      if (paren_depth > 0) {
-        --paren_depth;
-      }
-      current.push_back(ch);
-      continue;
-    }
-    if (std::isspace(static_cast<unsigned char>(ch)) && paren_depth == 0) {
-      const std::string token = trim_copy(current);
-      if (!token.empty()) {
-        parts.push_back(token);
-      }
-      current.clear();
-      continue;
-    }
-    current.push_back(ch);
-  }
-  const std::string tail = trim_copy(current);
-  if (!tail.empty()) {
-    parts.push_back(tail);
-  }
-
-  BoxShadow shadow;
-  std::vector<float> lengths;
-  lengths.reserve(4);
-  for (const auto& part : parts) {
-    std::string lowered = part;
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (lowered == "inset") {
-      shadow.inset = true;
-      continue;
-    }
-    if (is_animation_color_token(lowered)) {
-      shadow.color = parse_animation_color(lowered);
-      continue;
-    }
-    try {
-      lengths.push_back(parse_animation_length(part));
-    } catch (...) {
-      return shadow;
-    }
-  }
-
-  if (lengths.size() < 2) {
-    return shadow;
-  }
-  shadow.offset_x = lengths[0];
-  shadow.offset_y = lengths[1];
-  if (lengths.size() >= 3) {
-    shadow.blur_radius = lengths[2];
-  }
-  if (lengths.size() >= 4) {
-    shadow.spread_radius = lengths[3];
-  }
-  ok = true;
-  return shadow;
-}
-
-void finalize_animation_points(std::map<float, float>& values, float base_value,
-                               std::vector<AnimationValuePoint>& out) {
-  if (values.empty()) {
-    return;
-  }
-  if (values.begin()->first > 0.0f) {
-    values.emplace(0.0f, base_value);
-  }
-  if (values.rbegin()->first < 1.0f) {
-    values.emplace(1.0f, base_value);
-  }
-  out.clear();
-  out.reserve(values.size());
-  for (const auto& [offset, value] : values) {
-    out.push_back(AnimationValuePoint{offset, value});
-  }
-}
-
-void register_typed_float_animation_track(
-    AnimationManager& animations, std::uintptr_t element_id,
-    const detail::StylePropertyDesc& property, float base_value,
-    const std::vector<AnimationKeyframeStep>& keyframes,
-    const AnimationDef& def, float current_time_ms,
-    const std::function<bool(const std::map<std::string, std::string>&,
-                             float&)>& extractor) {
-  std::map<float, float> values;
-  for (const auto& frame : keyframes) {
-    float sampled = 0.0f;
-    if (extractor(frame.properties, sampled)) {
-      values[frame.offset] = sampled;
-    }
-  }
-  std::vector<AnimationValuePoint> points;
-  finalize_animation_points(values, base_value, points);
-  if (!points.empty()) {
-    animations.start_float(element_id, property, points, def, current_time_ms);
-  }
-}
-
-void register_typed_float_animation_track(
-    AnimationManager& animations, std::uintptr_t element_id,
-    detail::StylePropertyId property_id, float base_value,
-    const std::vector<AnimationKeyframeStep>& keyframes,
-    const AnimationDef& def, float current_time_ms,
-    const std::function<bool(const std::map<std::string, std::string>&,
-                             float&)>& extractor) {
-  const auto* property = detail::style_property_descriptor(property_id);
-  if (!property || !property->type ||
-      !cmeta_type_equal(property->type, &cmeta_type_float)) {
-    return;
-  }
-  register_typed_float_animation_track(
-      animations, element_id, *property, base_value, keyframes, def,
-      current_time_ms, extractor);
-}
-
-void register_typed_color_animation_track(
-    AnimationManager& animations, std::uintptr_t element_id,
-    detail::StylePropertyId property_id, const Color& base_color,
-    const std::vector<AnimationKeyframeStep>& keyframes,
-    const AnimationDef& def, float current_time_ms,
-    const std::function<bool(const std::map<std::string, std::string>&,
-                             Color&)>& extractor) {
-  const auto* property = detail::style_property_descriptor(property_id);
-  if (!property || !property->type ||
-      !cmeta_type_equal(property->type, &flex::cmeta_type_color)) {
-    return;
-  }
-
-  std::map<float, Color> values;
-  for (const auto& frame : keyframes) {
-    Color color;
-    if (extractor(frame.properties, color)) {
-      values[frame.offset] = color;
-    }
-  }
-  if (values.empty()) {
-    return;
-  }
-  if (values.begin()->first > 0.0f) {
-    values.emplace(0.0f, base_color);
-  }
-  if (values.rbegin()->first < 1.0f) {
-    values.emplace(1.0f, base_color);
-  }
-
-  std::vector<TypedAnimationPoint> points;
-  points.reserve(values.size());
-  for (const auto& [offset, value] : values) {
-    points.push_back(
-        {offset, TransitionValue{&flex::cmeta_type_color,
-                                 flex::AnimValue{value}}});
-  }
-  animations.start_typed(element_id, *property, points, def, current_time_ms);
-}
-
-void register_element_animations(Box& box, Element* elem, StyleEngine& style_engine,
+void register_element_animations(Box& box, Element* elem,
+                                 StyleEngine& style_engine,
                                  float current_time_ms) {
   if (!elem || !elem->computed_style) {
     return;
@@ -888,8 +541,8 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
       continue;
     }
 
-    const auto* keyframes = style_engine.keyframes(entry.name);
-    if (!keyframes || keyframes->empty()) {
+    const auto* program = style_engine.keyframes(entry.name);
+    if (!program || program->tracks.empty()) {
       continue;
     }
 
@@ -903,284 +556,18 @@ void register_element_animations(Box& box, Element* elem, StyleEngine& style_eng
     def.direction = entry.direction;
     def.play_state = entry.play_state;
 
-    if (const auto* opacity_property =
-            detail::style_property_descriptor(detail::StylePropertyId::Opacity)) {
-      register_typed_float_animation_track(
-          box.animations(), element_id, *opacity_property, style.opacity,
-          *keyframes, def, current_time_ms,
-          [opacity_property](const auto& props, float& out) {
-            const auto it = props.find("opacity");
-            if (it == props.end()) {
-              return false;
-            }
-            const auto value =
-                detail::compile_css_literal(opacity_property, it->second);
-            if (!value.type ||
-                !cmeta_type_equal(value.type, &cmeta_type_float)) {
-              return false;
-            }
-            if (const auto* scalar = std::get_if<float>(&value.value)) {
-              out = *scalar;
-              return true;
-            }
-            return false;
-          });
+    for (const auto& track : program->tracks) {
+      if (!track.property || track.keyframes.empty()) {
+        continue;
+      }
+      const TransitionValue base =
+          animation_base_value(*elem, style, *track.property);
+      const auto points = animation_points_with_base(track, base);
+      if (!points.empty()) {
+        box.animations().start_typed(element_id, *track.property, points, def,
+                                     current_time_ms);
+      }
     }
-
-    register_typed_color_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BackgroundColor,
-        resolved_element_background(*elem, style), *keyframes, def,
-        current_time_ms,
-        [](const auto& props, Color& out) {
-          auto it = props.find("background-color");
-          if (it == props.end()) {
-            it = props.find("background");
-            if (it == props.end()) {
-              return false;
-            }
-          }
-          out = parse_animation_color(it->second);
-          return true;
-        });
-
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::TransformX,
-        style.transform_x, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("transform");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_transform(it->second).x;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::TransformY,
-        style.transform_y, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("transform");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_transform(it->second).y;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::TransformScale,
-        style.transform_scale, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("transform");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_transform(it->second).scale;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::TransformScaleX,
-        style.transform_scale_x, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("transform");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_transform(it->second).scale_x;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::TransformScaleY,
-        style.transform_scale_y, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("transform");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_transform(it->second).scale_y;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::TransformRotate,
-        style.transform_rotate, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("transform");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_transform(it->second).rotate;
-          return true;
-        });
-
-    register_typed_color_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BorderColor,
-        style.border_color, *keyframes, def, current_time_ms,
-        [](const auto& props, Color& out) {
-          auto it = props.find("border-color");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_color(it->second);
-          return true;
-        });
-
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::OutlineWidth,
-        style.outline_width, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("outline-width");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_length(it->second);
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::OutlineOffset,
-        style.outline_offset, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("outline-offset");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_length(it->second);
-          return true;
-        });
-    register_typed_color_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::OutlineColor,
-        style.outline_color, *keyframes, def, current_time_ms,
-        [](const auto& props, Color& out) {
-          auto it = props.find("outline-color");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_color(it->second);
-          return true;
-        });
-
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::RingWidth,
-        style.ring_width, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("ring-width");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_length(it->second);
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::RingOffset,
-        style.ring_offset, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("ring-offset");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_length(it->second);
-          return true;
-        });
-    register_typed_color_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::RingColor,
-        style.ring_color, *keyframes, def, current_time_ms,
-        [](const auto& props, Color& out) {
-          auto it = props.find("ring-color");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_color(it->second);
-          return true;
-        });
-    register_typed_color_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::RingOffsetColor,
-        style.ring_offset_color, *keyframes, def, current_time_ms,
-        [](const auto& props, Color& out) {
-          auto it = props.find("ring-offset-color");
-          if (it == props.end()) {
-            return false;
-          }
-          out = parse_animation_color(it->second);
-          return true;
-        });
-
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BoxShadowOffsetX,
-        style.shadow.offset_x, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("box-shadow");
-          if (it == props.end()) {
-            return false;
-          }
-          bool ok = false;
-          const BoxShadow shadow = parse_animation_box_shadow(it->second, ok);
-          if (!ok) {
-            return false;
-          }
-          out = shadow.offset_x;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BoxShadowOffsetY,
-        style.shadow.offset_y, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("box-shadow");
-          if (it == props.end()) {
-            return false;
-          }
-          bool ok = false;
-          const BoxShadow shadow = parse_animation_box_shadow(it->second, ok);
-          if (!ok) {
-            return false;
-          }
-          out = shadow.offset_y;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BoxShadowBlur,
-        style.shadow.blur_radius, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("box-shadow");
-          if (it == props.end()) {
-            return false;
-          }
-          bool ok = false;
-          const BoxShadow shadow = parse_animation_box_shadow(it->second, ok);
-          if (!ok) {
-            return false;
-          }
-          out = shadow.blur_radius;
-          return true;
-        });
-    register_typed_float_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BoxShadowSpread,
-        style.shadow.spread_radius, *keyframes, def, current_time_ms,
-        [](const auto& props, float& out) {
-          auto it = props.find("box-shadow");
-          if (it == props.end()) {
-            return false;
-          }
-          bool ok = false;
-          const BoxShadow shadow = parse_animation_box_shadow(it->second, ok);
-          if (!ok) {
-            return false;
-          }
-          out = shadow.spread_radius;
-          return true;
-        });
-    register_typed_color_animation_track(
-        box.animations(), element_id, detail::StylePropertyId::BoxShadowColor,
-        style.shadow.color, *keyframes, def, current_time_ms,
-        [](const auto& props, Color& out) {
-          auto it = props.find("box-shadow");
-          if (it == props.end()) {
-            return false;
-          }
-          bool ok = false;
-          const BoxShadow shadow = parse_animation_box_shadow(it->second, ok);
-          if (!ok) {
-            return false;
-          }
-          out = shadow.color;
-          return true;
-        });
   }
 }
 

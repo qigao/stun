@@ -95,8 +95,7 @@ public:
   bool remove_stylesheet(StylesheetId stylesheet_id);
   void apply_styles(Element* elem);
   bool matches(const Element* elem, const std::string& selector) const;
-  const std::vector<AnimationKeyframeStep>* keyframes(
-      const std::string& name) const;
+  const CompiledAnimationProgram* keyframes(const std::string& name) const;
   bool uses_pseudo_class(Symbol pseudo) const;
   void clear();
   void clear_baseline_styles();
