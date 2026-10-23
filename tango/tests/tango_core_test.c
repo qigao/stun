@@ -549,6 +549,10 @@ static int test_textarea_bounds(void) {
     ta->focused = true;
     tui_event_t backspace = key_event(TUI_KEY_BACKSPACE);
     tui_event_t del = key_event(TUI_KEY_DELETE);
+    tui_event_t left = key_event(TUI_KEY_LEFT);
+    tui_event_t right = key_event(TUI_KEY_RIGHT);
+    tui_event_t up = key_event(TUI_KEY_UP);
+    tui_event_t down = key_event(TUI_KEY_DOWN);
 
     /* Small joins still work. */
     tui_textarea_set_text(ta, "ab\ncd");
@@ -586,6 +590,76 @@ static int test_textarea_bounds(void) {
     CHECK(ta->line_count == 2);
     CHECK(strlen(ta->lines[0]) == 250);
     CHECK(strlen(ta->lines[1]) == 80);
+
+    /* Navigation and deletion operate on complete extended graphemes. */
+    tui_textarea_set_text(ta, UTF8_WOMAN_TECH "a" UTF8_E_ACUTE);
+    CHECK(tui_textarea_handle(ta, &right));
+    CHECK(ta->cursor_x == (int)(sizeof(UTF8_WOMAN_TECH) - 1u));
+    CHECK(tui_textarea_handle(ta, &right));
+    CHECK(ta->cursor_x == (int)(sizeof(UTF8_WOMAN_TECH) - 1u + 1u));
+    CHECK(tui_textarea_handle(ta, &right));
+    CHECK(ta->cursor_x == (int)strlen(ta->lines[0]));
+    CHECK(tui_textarea_handle(ta, &left));
+    CHECK(ta->cursor_x == (int)(sizeof(UTF8_WOMAN_TECH) - 1u + 1u));
+    CHECK(tui_textarea_handle(ta, &backspace));
+    CHECK(strcmp(ta->lines[0], UTF8_WOMAN_TECH UTF8_E_ACUTE) == 0);
+    CHECK(ta->cursor_x == (int)(sizeof(UTF8_WOMAN_TECH) - 1u));
+    ta->cursor_x = 0;
+    CHECK(tui_textarea_handle(ta, &del));
+    CHECK(strcmp(ta->lines[0], UTF8_E_ACUTE) == 0);
+
+    /* A combining scalar can merge into its neighbor, and is then deleted
+     * together with that complete grapheme. */
+    tui_textarea_set_text(ta, "e");
+    ta->cursor_x = 1;
+    tui_event_t acute = scalar_event(0x0301u);
+    CHECK(tui_textarea_handle(ta, &acute));
+    CHECK(strcmp(ta->lines[0], UTF8_E_ACUTE) == 0);
+    CHECK(ta->cursor_x == (int)(sizeof(UTF8_E_ACUTE) - 1u));
+    CHECK(tui_textarea_handle(ta, &backspace));
+    CHECK(ta->lines[0][0] == '\0' && ta->cursor_x == 0);
+
+    /* Vertical movement preserves terminal columns rather than byte offsets. */
+    tui_textarea_set_text(ta, UTF8_CJK "a\nabc");
+    ta->cursor_x = (int)(sizeof(UTF8_CJK) - 1u);
+    CHECK(tui_textarea_handle(ta, &down));
+    CHECK(ta->cursor_y == 1 && ta->cursor_x == 2);
+    CHECK(tui_textarea_handle(ta, &up));
+    CHECK(ta->cursor_y == 0 &&
+          ta->cursor_x == (int)(sizeof(UTF8_CJK) - 1u));
+
+    /* Setters accept CR/LF variants and never retain partial graphemes. */
+    tui_textarea_set_text(ta, "a\r\nb\rc");
+    CHECK(ta->line_count == 3);
+    CHECK(strcmp(ta->lines[0], "a") == 0);
+    CHECK(strcmp(ta->lines[1], "b") == 0);
+    CHECK(strcmp(ta->lines[2], "c") == 0);
+    char capacity_text[258];
+    memset(capacity_text, 'a', 254u);
+    memcpy(capacity_text + 254u, UTF8_CJK, sizeof(UTF8_CJK));
+    tui_textarea_set_text(ta, capacity_text);
+    CHECK(strlen(ta->lines[0]) == 254u);
+    CHECK(ta->lines[0][254] == '\0');
+    tui_textarea_set_text(ta, "\xF0\x28\x8C\x28");
+    CHECK(ta->line_count == 1 && ta->lines[0][0] == '\0');
+
+    /* Drawing uses display columns, including scroll normalization and the
+     * continuation half of a reversed wide cursor cell. */
+    tui_textarea_set_text(ta, UTF8_CJK "a");
+    ta->cursor_x = (int)(sizeof(UTF8_CJK) - 1u);
+    ta->scroll_x = 1;
+    tui_buffer_t *buffer = tui_buffer_create(6, 1);
+    CHECK(buffer != NULL);
+    tui_textarea_draw(buffer, 0, 0, 6, 1, ta, NULL);
+    CHECK(tui_buffer_at_const(buffer, 0, 0)->span == TUI_CELL_SPAN_WIDE);
+    CHECK(tui_buffer_at_const(buffer, 1, 0)->span ==
+          TUI_CELL_SPAN_CONTINUATION);
+    CHECK((tui_buffer_at_const(buffer, 2, 0)->style & TUI_STYLE_REVERSE) != 0);
+    ta->cursor_x = 0;
+    tui_textarea_draw(buffer, 0, 0, 6, 1, ta, NULL);
+    CHECK((tui_buffer_at_const(buffer, 0, 0)->style & TUI_STYLE_REVERSE) != 0);
+    CHECK((tui_buffer_at_const(buffer, 1, 0)->style & TUI_STYLE_REVERSE) != 0);
+    tui_buffer_destroy(buffer);
 
     /* Repeated newline input cannot produce an out-of-bounds line_count. */
     const size_t n = TUI_TEXTAREA_MAX_LINES + 2;
