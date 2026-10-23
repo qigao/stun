@@ -78,12 +78,16 @@ static bool output_ensure(tui_terminal_t* term, size_t need) {
     return true;
 }
 
-static bool output_append(tui_terminal_t* term, const char* str) {
-    size_t len = strlen(str);
+static bool output_append_bytes(tui_terminal_t* term, const char* bytes,
+                                size_t len) {
     if (!output_ensure(term, len)) return false;
-    memcpy(term->output + term->output_len, str, len);
+    memcpy(term->output + term->output_len, bytes, len);
     term->output_len += len;
     return true;
+}
+
+static bool output_append(tui_terminal_t* term, const char* str) {
+    return output_append_bytes(term, str, strlen(str));
 }
 
 /* UTF-8 encode */
@@ -367,7 +371,8 @@ bool tui_terminal_init(tui_terminal_t* term) {
     
     /* Mark front buffer as "invalid" to force first frame full render */
     {
-        tui_cell_t invalid = {0xFFFFFFFF, {255,255,255}, {255,255,255}, 0xFF};
+        tui_cell_t invalid = tui_cell_styled(
+            0xFFFFFFFFu, TUI_WHITE, TUI_WHITE, 0xFFu);
         size_t count = (size_t)front->width * (size_t)front->height;
         for (size_t i = 0; i < count; i++) {
             front->cells[i] = invalid;
@@ -518,8 +523,22 @@ bool tui_terminal_render(tui_terminal_t* term) {
         for (int x = min_x; x <= max_x; x++) {
             const tui_cell_t* cell = tui_buffer_at_const(back, x, y);
             const tui_cell_t* prev = tui_buffer_at_const(front, x, y);
+
+            if (cell->grapheme_len > TUI_CELL_GRAPHEME_CAPACITY ||
+                cell->span > TUI_CELL_SPAN_CONTINUATION) {
+                term->last_error = TUI_TERMINAL_ERROR_INVALID_STATE;
+                goto output_failed;
+            }
             
             if (tui_cell_eq(cell, prev)) continue;
+
+            /* A wide grapheme's bytes are emitted by its leading cell.  The
+             * terminal cursor has already advanced over this continuation. */
+            if (cell->span == TUI_CELL_SPAN_CONTINUATION) {
+                last_x = x;
+                last_y = y;
+                continue;
+            }
             
             /* Move cursor if not sequential */
             if (last_x != x - 1 || last_y != y) {
@@ -566,7 +585,10 @@ bool tui_terminal_render(tui_terminal_t* term) {
             }
             
             /* Output character */
-            if (cell->ch != 0) {
+            if (cell->grapheme_len != 0u) {
+                if (!output_append_bytes(term, cell->grapheme,
+                                         cell->grapheme_len)) goto output_failed;
+            } else if (cell->ch != 0) {
                 if (!output_append_utf8(term, cell->ch)) goto output_failed;
             }
             
@@ -600,7 +622,8 @@ tui_terminal_error_t tui_terminal_last_error(const tui_terminal_t* term) {
 void tui_terminal_refresh(tui_terminal_t* term) {
     if (!term || !term->initialized) return;
     /* Mark front buffer as invalid to force full redraw on next render */
-    tui_cell_t invalid = {0xFFFFFFFF, {255,255,255}, {255,255,255}, 0xFF};
+    tui_cell_t invalid = tui_cell_styled(
+        0xFFFFFFFFu, TUI_WHITE, TUI_WHITE, 0xFFu);
     size_t count = (size_t)term->front->width * (size_t)term->front->height;
     for (size_t i = 0; i < count; i++) {
         term->front->cells[i] = invalid;
