@@ -109,7 +109,7 @@ static void view_render(const void* model_ptr, tui_buffer_t* buf) {
     
     /* 1. Header */
     tui_layout_get_rect(lay, header, &x, &y, &w, &h);
-    tui_widget_panel(buf, x, y, w, h, "TurboNet TUI MVC Demo", &theme);
+    tui_widget_panel(buf, x, y, w, h, "Tango TUI MVC Demo", &theme);
     tui_buffer_text(buf, x + 2, y + 1, "Separated Model, View, and Controller", theme.fg, theme.bg);
     
     /* 2. Sidebar */

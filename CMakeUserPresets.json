@@ -10,7 +10,6 @@
             "cacheVariables": {
                 "SALTS_ROOT": "$penv{SALTS_ROOT}",
                 "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "TURBONET_ROOT": "C:/projects/cpp/external/pkgs/turbonet",
                 "TURBOSCRIPT_ROOT": "c:/projects/cpp/external/pkgs/turbo_script",
                 "TURBOHTTP_ROOT": "c:/projects/cpp/external/pkgs/turbohttp",
                 "RulesForge_ROOT": "c:/projects/cpp/external/pkgs/rules_forge",
@@ -36,7 +35,6 @@
             "cacheVariables": {
                 "SALTS_ROOT": "$penv{SALTS_ROOT}",
                 "SALTS_UTILS_ROOT": "$penv{SALTS_UTILS_ROOT}",
-                "TURBONET_ROOT": "/opt/turbonet",
                 "TURBOSCRIPT_ROOT": "/opt/turboscript",
                 "TURBOHTTP_ROOT": "/opt/turbohttp",
                 "RulesForge_ROOT": "/opt/rules_forge",

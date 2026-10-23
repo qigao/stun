@@ -154,8 +154,9 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
   转换为 `ScriptModuleError`，controller 继续负责 Faulted 状态迁移。
 - adapter 默认拒绝 native plugin；interrupt callback 同步运行于 UI owner thread。所有输入
   view 只借用到同步调用返回，TurboScript result 不越过 adapter 边界。
-- Windows 测试会复制 TurboScript 的直接 runtime DLL；CoroNet 当前安装包仍要求可发现配套
-  `ssl.dll`/`crypto.dll`，测试配置对此显式 fail fast。
+- Windows 测试只复制 TurboScript 自身的直接 runtime DLL；TurboScript 安装包必须通过其
+  CMake 导出声明当前 Salts/SaltsUtils 依赖，不再由 FlexUI 猜测或复制旧 CoroNet/BoringSSL
+  运行时。
 
 ## P4：Box 行为控制器集成（需确认 FlexUI API）
 

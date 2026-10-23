@@ -31,10 +31,6 @@ find_package(Threads REQUIRED)
 find_package(Salts CONFIG REQUIRED PATHS "${SALTS_ROOT}")
 find_package(SaltsUtils CONFIG REQUIRED PATHS "${SALTS_UTILS_ROOT}")
 
-if(STUN_BUILD_APPLICATIONS OR (WIN32 AND FLEXUI_ENABLE_TURBOSCRIPT))
-  find_package(TurboNet CONFIG REQUIRED PATHS "${TURBONET_ROOT}")
-endif()
-
 # Cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Sanitizers)

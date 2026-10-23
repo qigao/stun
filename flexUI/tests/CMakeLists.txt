@@ -351,35 +351,9 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
   if(WIN32)
     get_filename_component(
       _flexui_compiler_runtime_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    set(_flexui_turbonet_runtime_hints
-        "${TURBONET_ROOT}/bin"
-        "$ENV{VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/tools/boringssl")
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      list(PREPEND _flexui_turbonet_runtime_hints
-           "${TURBONET_ROOT}/debug/bin")
-    elseif(CMAKE_BUILD_TYPE)
-      list(PREPEND _flexui_turbonet_runtime_hints
-           "${TURBONET_ROOT}/release/bin")
-    endif()
-    find_file(
-      _flexui_boringssl_ssl NAMES ssl.dll
-      HINTS ${_flexui_turbonet_runtime_hints} NO_DEFAULT_PATH REQUIRED)
-    find_file(
-      _flexui_boringssl_crypto NAMES crypto.dll
-      HINTS ${_flexui_turbonet_runtime_hints} NO_DEFAULT_PATH REQUIRED)
-    get_filename_component(
-      _flexui_boringssl_runtime_dir "${_flexui_boringssl_ssl}" DIRECTORY)
-    get_filename_component(
-      _flexui_boringssl_crypto_dir "${_flexui_boringssl_crypto}" DIRECTORY)
-    if(NOT _flexui_boringssl_runtime_dir STREQUAL
-       _flexui_boringssl_crypto_dir)
-      message(FATAL_ERROR
-              "FlexUI TurboScript tests require ssl.dll and crypto.dll from one runtime directory")
-    endif()
     set_property(
       TEST test_turboscript_controller PROPERTY ENVIRONMENT_MODIFICATION
-      "PATH=path_list_prepend:${_flexui_compiler_runtime_dir}"
-      "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}")
+      "PATH=path_list_prepend:${_flexui_compiler_runtime_dir}")
   endif()
 endif()
 
@@ -527,8 +501,7 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
     set_property(
       TEST test_turboscript_application test_desktop_editor_controller
       PROPERTY ENVIRONMENT_MODIFICATION
-      "PATH=path_list_prepend:${_flexui_compiler_runtime_dir}"
-      "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}")
+      "PATH=path_list_prepend:${_flexui_compiler_runtime_dir}")
   endif()
 endif()
 
@@ -565,7 +538,6 @@ if(WIN32)
       TEST test_flexui_desktop_editor_smoke
       PROPERTY ENVIRONMENT_MODIFICATION
                "PATH=path_list_prepend:${_flexui_test_compiler_runtime_dir}"
-               "PATH=path_list_prepend:${_flexui_boringssl_runtime_dir}"
                "PATH=path_list_prepend:${SALTS_ROOT}/${CMAKE_INSTALL_BINDIR}"
 )
   endif()
