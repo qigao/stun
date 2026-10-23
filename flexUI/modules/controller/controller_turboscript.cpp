@@ -336,6 +336,20 @@ ScriptModuleError append_mutation(const turbo_script_value_view_t &encoded,
       return error;
     }
     mutation = std::move(value);
+  } else if (type == "set_style_number") {
+    if (auto field_error =
+            validate_fields(encoded, {"type", "target", "property", "value"},
+                            "set_style_number mutation");
+        field_error) {
+      return field_error;
+    }
+    SetStyleNumberMutation value;
+    if (!required_target(encoded, value.target, error) ||
+        !required_string(encoded, "property", value.property, error) ||
+        !required_number(encoded, "value", value.value, error)) {
+      return error;
+    }
+    mutation = std::move(value);
   } else if (type == "set_binding_number") {
     if (auto field_error =
             validate_fields(encoded, {"type", "name", "value"}, "set_binding_number mutation");

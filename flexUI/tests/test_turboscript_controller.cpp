@@ -4,6 +4,7 @@
 
 #include <tinytest.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -317,6 +318,7 @@ spec("FlexUI TurboScript controller adapter") {
         "map {type:\"remove_attribute\",target:event.target,name:\"old\"},"
         "map {type:\"set_classes\",target:event.target,classes:\"primary\"},"
         "map {type:\"set_utilities\",target:event.target,utilities:\"px-2\"},"
+        "map {type:\"set_style_number\",target:event.target,property:\"opacity\",value:0.75},"
         "map {type:\"set_binding_number\",name:\"progress\",value:0.5},"
         "map {type:\"set_binding_bool\",name:\"ready\",value:true},"
         "map {type:\"set_binding_string\",name:\"title\",value:\"Saved\"}),"
@@ -339,16 +341,25 @@ spec("FlexUI TurboScript controller adapter") {
     context.event = &event;
     const auto called = created.module->call(*resolved.handle, context);
     check(static_cast<bool>(called));
-    check_equal(called.mutations.size(), std::size_t{8});
+    check_equal(called.mutations.size(), std::size_t{9});
     check_equal(called.commands.size(), std::size_t{1});
-    if (called.mutations.size() == 8) {
+    if (called.mutations.size() == 9) {
       check(std::holds_alternative<flexUI::SetTextMutation>(called.mutations.mutations()[0]));
       const auto &text = std::get<flexUI::SetTextMutation>(called.mutations.mutations()[0]);
       check_equal(text.target.id, "save");
       check_equal(text.target.generation, std::uint64_t{7});
       check(text.text.empty());
+      check(std::holds_alternative<flexUI::SetStyleNumberMutation>(
+          called.mutations.mutations()[5]));
+      if (std::holds_alternative<flexUI::SetStyleNumberMutation>(
+              called.mutations.mutations()[5])) {
+        const auto& style = std::get<flexUI::SetStyleNumberMutation>(
+            called.mutations.mutations()[5]);
+        check_equal(style.property, "opacity");
+        check_equal(style.value, 0.75);
+      }
       check(std::holds_alternative<flexUI::SetBindingInputStringMutation>(
-          called.mutations.mutations()[7]));
+          called.mutations.mutations()[8]));
     }
     if (called.commands.size() == 1) {
       const auto &command = called.commands.commands()[0];
@@ -437,10 +448,14 @@ spec("FlexUI TurboScript controller adapter") {
     auto *save = box.create("button", "save");
     box.set_root(save);
     save->set_text("before");
+    box.load_css("#save { opacity: 0.9; }");
+    box.update();
 
     auto created = create_module("func save_document(event){return map {mutations:list("
                                  "map {type:\"set_text\",target:event.target,"
-                                 "text:\"committed by TurboScript\"})};};"
+                                 "text:\"committed by TurboScript\"},"
+                                 "map {type:\"set_style_number\",target:event.target,"
+                                 "property:\"opacity\",value:0.35})};};"
                                  "export(\"save_document\");",
                                  flexUI::TurboScriptExecutionMode::Interpreter);
     check(static_cast<bool>(created));
@@ -458,6 +473,8 @@ spec("FlexUI TurboScript controller adapter") {
     check(controller.mount());
     check(controller.dispatch(event));
     check_equal(save->text(), std::string("committed by TurboScript"));
+    box.update();
+    check(std::fabs(save->computed_style->opacity - 0.35f) < 0.001f);
     check(controller.state() == flexUI::ControllerState::Mounted);
     check(controller.unmount());
   }

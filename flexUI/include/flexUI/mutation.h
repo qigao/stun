@@ -36,6 +36,12 @@ struct SetUtilitiesMutation {
   std::string utilities;
 };
 
+struct SetStyleNumberMutation {
+  UiHandle target;
+  std::string property;
+  double value = 0.0;
+};
+
 struct SetBindingInputNumberMutation {
   std::string name;
   double value = 0.0;
@@ -54,7 +60,8 @@ struct SetBindingInputStringMutation {
 using UiMutation =
     std::variant<SetTextMutation, SetAttributeMutation,
                  RemoveAttributeMutation, SetClassesMutation,
-                 SetUtilitiesMutation, SetBindingInputNumberMutation,
+                 SetUtilitiesMutation, SetStyleNumberMutation,
+                 SetBindingInputNumberMutation,
                  SetBindingInputBoolMutation, SetBindingInputStringMutation>;
 
 struct MutationLimits {

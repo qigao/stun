@@ -100,6 +100,8 @@ class UiBindingTargets {
   UiBindingHandle bind_custom_property(Element& target, std::string property,
                                        std::string number_expression,
                                        std::string suffix);
+  UiBindingHandle bind_style_number(Element& target, std::string property,
+                                    std::string number_expression);
 
   bool unbind(UiBindingId id);
   void clear();

@@ -2,9 +2,13 @@
 
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/style_property.h>
+
+#include <flex/core/cmeta_types.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -52,6 +56,9 @@ struct PreparedElementState {
   std::optional<PreparedSelectorState> selectors;
   std::optional<AttributeMap> attributes;
   std::optional<std::string> text;
+  std::optional<std::unordered_map<RegisteredStylePropertyId, float>>
+      style_numbers;
+  std::uint32_t style_impact = detail::STYLE_IMPACT_NONE;
 };
 
 StringSet split_tokens(std::string_view value) {
@@ -181,6 +188,12 @@ public:
       if (state.text) {
         element.text_content_.swap(*state.text);
         element.mark_layout_dirty();
+      }
+      if (state.style_numbers) {
+        element.registered_style_numbers_.swap(*state.style_numbers);
+        element.mark_dirty(flex::DirtyFlags::Content);
+        box_.notify_dirty_style();
+        detail::mark_style_impact(element, state.style_impact);
       }
     }
   }
@@ -368,6 +381,35 @@ MutationPrepareResult BoxMutationHost::prepare(
               }
               selectors.utility_names = std::move(next);
               rebuild_selector_state(selectors);
+            } else if constexpr (std::is_same_v<T,
+                                                SetStyleNumberMutation>) {
+              const auto* property =
+                  find_registered_style_property(value.property);
+              if (!property) {
+                return prepare_error(
+                    MutationErrorCode::InvalidName, index,
+                    "unknown registered style property: " + value.property);
+              }
+              if (!property->write ||
+                  !detail::style_property_accepts_type(
+                      *property, &cmeta_type_float)) {
+                return prepare_error(
+                    MutationErrorCode::InvalidType, index,
+                    "registered style property is not numeric: " +
+                        value.property);
+              }
+              const float scalar = static_cast<float>(value.value);
+              if (!std::isfinite(scalar)) {
+                return prepare_error(
+                    MutationErrorCode::InvalidNumber, index,
+                    "style property number is outside float range");
+              }
+              if (!state.style_numbers) {
+                state.style_numbers =
+                    state.element->registered_style_numbers_;
+              }
+              (*state.style_numbers)[property->id] = scalar;
+              state.style_impact |= property->impact;
             }
             return std::nullopt;
           }

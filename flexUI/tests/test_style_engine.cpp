@@ -5,6 +5,7 @@
 #include <flexUI/detail/css_render_transform.h>
 #include <flexUI/element.h>
 #include <flexUI/style_engine.h>
+#include <flexUI/style_property.h>
 #include <flexUI/transition.h>
 #include <flexUI/widgets/accordion_widget.h>
 #include <flexUI/widgets/button_widget.h>
@@ -9623,5 +9624,24 @@ spec("Box preserves resolved custom background values for transitions") {
         box.time());
     require_color(mid, 70.0f / 255.0f, 90.0f / 255.0f,
                   110.0f / 255.0f, 0.75f, 0.02f);
+  }
+}
+
+spec("StylePropertyRegistry exposes one canonical read-only catalog") {
+  it("enumerates the same descriptors used by lookup aliases") {
+    check(registered_style_property_count() > 0);
+    for (std::size_t index = 0;
+         index < registered_style_property_count(); ++index) {
+      const auto* property = registered_style_property_at(index);
+      check_not_null(property);
+      if (!property) continue;
+      check(property->id != RegisteredStylePropertyId::Unknown);
+      check_not_null(property->css_name);
+      check(find_registered_style_property(property->css_name) == property);
+    }
+
+    check(find_registered_style_property("color") ==
+          find_registered_style_property("text-color"));
+    check_null(find_registered_style_property("not-a-style-property"));
   }
 }
