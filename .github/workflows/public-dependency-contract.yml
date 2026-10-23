@@ -166,7 +166,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in             flex/modules/runtime/CMakeLists.txt             flex/modules/dsl/CMakeLists.txt             flexUI/CMakeLists.txt             tools/md/CMakeLists.txt             flexUI/examples/desktop_editor/CMakeLists.txt             flexUI/tests/CMakeLists.txt; do
+          for file in \
+            flex/modules/runtime/CMakeLists.txt \
+            flex/modules/dsl/CMakeLists.txt \
+            flexUI/CMakeLists.txt \
+            flexUI/examples/desktop_editor/CMakeLists.txt \
+            flexUI/tests/CMakeLists.txt; do
             if grep -n 'TurboUtils::Core' "$file"; then
               echo "legacy Core provider remains in $file" >&2
               exit 1
@@ -175,7 +180,7 @@ jobs:
           grep -Fq 'Salts::Core' flex/modules/runtime/CMakeLists.txt
           grep -Fq 'Salts::Core' flex/modules/dsl/CMakeLists.txt
           grep -Fq 'Salts::Core' flexUI/CMakeLists.txt
-          grep -Fq 'Salts::Core' tools/md/CMakeLists.txt
+          test ! -e tools/md/CMakeLists.txt
           if grep -n -E 'turbo_log_level_t|TURBO_LOG_LEVEL_' flex/include/flex/core/debug.h; then
             echo "legacy log-level API remains" >&2
             exit 1
