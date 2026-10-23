@@ -3,6 +3,7 @@
  */
 
 #include "tui_terminal_internal.h"
+#include <salts_unicode.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -337,10 +338,34 @@ static tui_input_result_t decode_one(tui_terminal_t *term,
     const unsigned char *bytes = term->input_bytes;
     if (term->input_len == 0u) return TUI_INPUT_INCOMPLETE;
 
-    if (bytes[0] != 27u) {
+    if (bytes[0] < 0x80u && bytes[0] != 27u) {
         input_key(bytes[0], event);
         input_consume(term, 1u);
         return TUI_INPUT_EVENT;
+    }
+    if (bytes[0] >= 0x80u) {
+        const size_t max = term->input_len < 4u ? term->input_len : 4u;
+        for (size_t size = 1u; size <= max; ++size) {
+            const vstr input = vstr_from_buf((const char *)bytes, size);
+            salts_unicode_scalar scalar;
+            size_t cursor = 0u;
+            const salts_unicode_status status =
+                salts_unicode_utf8_next(input, &cursor, &scalar);
+            if (status == SALTS_UNICODE_OK && cursor == size) {
+                event->type = TUI_EVENT_KEY;
+                event->ch = scalar.value;
+                input_consume(term, size);
+                return TUI_INPUT_EVENT;
+            }
+        }
+        /* UTF-8 scalars are at most four bytes.  Once four bytes fail every
+         * canonical Salts prefix scan, the leading byte is malformed rather
+         * than incomplete; discard it and continue with queued input. */
+        if (term->input_len >= 4u) {
+            input_consume(term, 1u);
+            return TUI_INPUT_IGNORED;
+        }
+        return TUI_INPUT_INCOMPLETE;
     }
     if (term->input_len == 1u) return TUI_INPUT_INCOMPLETE;
 
@@ -398,9 +423,19 @@ bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event) {
         input_consume(term, 1u);
         return true;
     }
-    /* A timed-out control sequence is untrusted as a unit.  Do not replay
-     * its parameter bytes as ordinary key presses. */
-    input_consume(term, term->input_len);
+    if (term->input_bytes[0] == 27u) {
+        /* A timed-out control sequence is untrusted as a unit.  Do not replay
+         * its parameter bytes as ordinary key presses. */
+        input_consume(term, term->input_len);
+        return false;
+    }
+
+    /* Salts rejected an incomplete or malformed non-ASCII prefix.  Drop only
+     * invalid leading bytes, preserving a later valid scalar/key if present. */
+    while (term->input_len != 0u) {
+        input_consume(term, 1u);
+        if (tui_terminal_input_next(term, event)) return true;
+    }
     return false;
 }
 

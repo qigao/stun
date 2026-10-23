@@ -4,20 +4,31 @@ on:
   pull_request:
     paths:
       - 'tango/**'
+      - '.github/scripts/restore-tango-salts-sdk.py'
+      - '.github/scripts/tests/test_restore_tango_salts_sdk.py'
+      - '.github/workflows/salts-sdk-releases.yml'
       - '.github/workflows/tango-core.yml'
   push:
     branches: [master]
     paths:
       - 'tango/**'
+      - '.github/scripts/restore-tango-salts-sdk.py'
+      - '.github/scripts/tests/test_restore_tango_salts_sdk.py'
+      - '.github/workflows/salts-sdk-releases.yml'
       - '.github/workflows/tango-core.yml'
 
 permissions:
   actions: read
   contents: read
+  packages: read
 
 jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
   native-core:
     name: Native C / ${{ matrix.os }}
+    needs: sdk-releases
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,9 +55,85 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+
+      - name: Define immutable Salts SDK paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS:$RUNNER_ARCH" in
+            Linux:X64) rid=linux-x64 ;;
+            Linux:ARM64) rid=linux-arm64 ;;
+            macOS:X64) rid=macos-x64 ;;
+            macOS:ARM64) rid=macos-arm64 ;;
+            Windows:X64) rid=windows-x64 ;;
+            Windows:ARM64) rid=windows-arm64 ;;
+            *) echo "Unsupported Tango runner: $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+          printf 'SALTS_RID=%s\n' "$rid" >> "$GITHUB_ENV"
+          printf 'SALTS_ROOT=%s/tango-salts-sdk\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'SALTS_CHECKSUMS=%s/tango-salts-checksums/SHA256SUMS\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Download exact published Salts package with curl
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
+          SALTS_SOURCE_SHA: ${{ needs.sdk-releases.outputs.salts_sha }}
+        run: |
+          set -euo pipefail
+          version="${SALTS_RELEASE#v}"
+          version="$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')"
+          [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
+          package="$RUNNER_TEMP/Salts.Native.$version.nupkg"
+          curl_args=(--fail --silent --show-error --location --retry 3
+            --proto '=https' --proto-redir '=https'
+            --connect-timeout 15 --max-time 300
+            --user "$GITHUB_ACTOR:$GITHUB_TOKEN")
+          curl "${curl_args[@]}" 'https://nuget.pkg.github.com/qigao/index.json' \
+            --output "$RUNNER_TEMP/tango-package-index.json"
+          package_base="$(jq -er '
+            [.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"]
+            | unique
+            | if length == 1 and (.[0] | test("^https://nuget[.]pkg[.]github[.]com/qigao/[A-Za-z0-9/_-]*$"))
+              then .[0] else error("Missing or unexpected GitHub Packages endpoint") end
+            ' "$RUNNER_TEMP/tango-package-index.json")"
+          curl "${curl_args[@]}" \
+            "${package_base%/}/salts.native/$version/salts.native.$version.nupkg" \
+            --output "$package.part"
+          mv "$package.part" "$package"
+          mkdir -p "$(dirname "$SALTS_CHECKSUMS")"
+          gh release download "$SALTS_RELEASE" --repo qigao/salts \
+            --pattern SHA256SUMS --dir "$(dirname "$SALTS_CHECKSUMS")"
+          python .github/scripts/restore-tango-salts-sdk.py \
+            --package "$package" --checksums "$SALTS_CHECKSUMS" \
+            --sdk "$SALTS_ROOT" --rid "$SALTS_RID" \
+            --release "$SALTS_RELEASE" --source-sha "$SALTS_SOURCE_SHA"
+
+      - name: Test bounded Salts SDK restoration
+        shell: bash
+        run: python .github/scripts/tests/test_restore_tango_salts_sdk.py
+
       - name: Configure Tango standalone
-        run: cmake -S tango -B build/tango -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$SALTS_ROOT"
+          if [[ "$RUNNER_OS" == Windows ]]; then prefix="$(cygpath -w "$prefix")"; fi
+          cmake -S tango -B build/tango -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_PREFIX_PATH=$prefix" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
       - name: Build Tango and real static-link test
+        shell: bash
         run: cmake --build build/tango --config Debug --parallel 2
       - name: Run core regressions
-        run: ctest --test-dir build/tango -C Debug --output-on-failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux) export LD_LIBRARY_PATH="$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}" ;;
+            macOS) export DYLD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_ROOT/bin:${DYLD_LIBRARY_PATH:-}" ;;
+            Windows) export PATH="$(cygpath -w "$SALTS_ROOT/bin"):$PATH" ;;
+          esac
+          ctest --test-dir build/tango -C Debug --output-on-failure

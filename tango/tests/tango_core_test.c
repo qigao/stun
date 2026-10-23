@@ -231,6 +231,28 @@ static int test_terminal_input_is_incremental(void) {
     CHECK(!tui_terminal_input_flush(terminal, &event));
     CHECK(terminal->input_len == 0u);
 
+    /* UTF-8 scalar ownership stays in Salts::Unicode across split reads. */
+    CHECK(tui_terminal_input_push(terminal, "\xE4", 1u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "\xB8\xADx", 3u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_NONE);
+    CHECK(event.ch == 0x4E2Du);
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.ch == 'x');
+
+    /* Malformed UTF-8 never hides a later valid queued key. */
+    CHECK(tui_terminal_input_push(terminal, "\xC0q", 2u));
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_flush(terminal, &event));
+    CHECK(event.ch == 'q');
+    CHECK(terminal->input_len == 0u);
+
+    /* A timed-out partial scalar is discarded without emitting byte events. */
+    CHECK(tui_terminal_input_push(terminal, "\xE4\xB8", 2u));
+    CHECK(!tui_terminal_input_flush(terminal, &event));
+    CHECK(terminal->input_len == 0u);
+
     tui_terminal_destroy(terminal);
     return 0;
 }
