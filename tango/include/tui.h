@@ -465,6 +465,7 @@ void            tui_layout_destroy(tui_layout_t* lay);
 void            tui_layout_reset(tui_layout_t* lay);
 
 int             tui_layout_item(tui_layout_t* lay);
+/* Invalid handles, duplicate/reparenting inserts and cycles are ignored. */
 void            tui_layout_insert(tui_layout_t* lay, int parent, int child);
 
 void            tui_layout_set_size(tui_layout_t* lay, int id, int w, int h);
@@ -475,6 +476,8 @@ void            tui_layout_set_flags(tui_layout_t* lay, int id, uint32_t flags);
 void            tui_layout_set_margins(tui_layout_t* lay, int id, int l, int t, int r, int b);
 
 void            tui_layout_compute(tui_layout_t* lay, int root, int w, int h);
+/* Output pointers are optional; an invalid handle writes zero to each
+ * non-NULL output. */
 void            tui_layout_get_rect(tui_layout_t* lay, int id, int* x, int* y, int* w, int* h);
 
 /* ============================================================================
