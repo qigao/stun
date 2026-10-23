@@ -740,9 +740,9 @@ void            tui_menu_draw(tui_buffer_t* buf, const tui_menu_t* menu, const t
 typedef struct {
     char            lines[TUI_TEXTAREA_MAX_LINES][TUI_TEXTAREA_LINE_LEN];
     int             line_count;
-    int             cursor_x;
+    int             cursor_x; /* UTF-8 byte offset on a grapheme boundary */
     int             cursor_y;
-    int             scroll_x;
+    int             scroll_x; /* UTF-8 byte offset on a grapheme boundary */
     int             scroll_y;
     int             sel_start_x, sel_start_y;
     int             sel_end_x, sel_end_y;
