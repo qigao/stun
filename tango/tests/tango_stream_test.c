@@ -282,6 +282,17 @@ static int test_invalid_packet_owner_and_newline_tail(void) {
     CHECK(strcmp(tui_stream_tail(stream, 3u, &bytes),
                  "first\nsecond\nthird") == 0);
 
+    const char *slice = tui_stream_viewport(stream, 1u, 1u, &bytes);
+    CHECK(slice != NULL && bytes == strlen("second"));
+    CHECK(memcmp(slice, "second", bytes) == 0);
+    slice = tui_stream_viewport(stream, 1u, 2u, &bytes);
+    CHECK(slice != NULL && bytes == strlen("first"));
+    CHECK(memcmp(slice, "first", bytes) == 0);
+    slice = tui_stream_viewport(stream, 1u, 100u, &bytes);
+    CHECK(slice != NULL && bytes == strlen("first"));
+    CHECK(memcmp(slice, "first", bytes) == 0);
+    CHECK(tui_stream_viewport(stream, 0u, 0u, &bytes) == NULL);
+
     const tui_async_event_t mismatch = {
         TUI_STREAM_CHUNK, 1u, 5u, sizeof(tui_stream_packet_header_t)
     };
