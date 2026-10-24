@@ -86,6 +86,9 @@ static int test_fragmented_unicode_generation_and_cancel(void) {
 }
 
 static int test_capacity_control_and_grapheme_eviction(void) {
+    CHECK(tui_stream_create(42u, 1u, SIZE_MAX) == NULL);
+    CHECK(tui_stream_create(42u, SIZE_MAX, 1u) == NULL);
+    CHECK(tui_stream_create(0u, 9u, 12u) == NULL);
     tui_stream_t *stream = tui_stream_create(42u, 9u, 12u);
     tui_stream_snapshot_t stat;
     size_t bytes = 0u;
