@@ -172,18 +172,30 @@ const char *tui_stream_text(const tui_stream_t *stream, size_t *bytes) {
     return stream->text;
 }
 
-const char *tui_stream_tail(const tui_stream_t *stream, size_t max_lines,
-                            size_t *bytes) {
+const char *tui_stream_viewport(const tui_stream_t *stream, size_t max_lines,
+                                size_t scrollback_lines, size_t *bytes) {
     if (!stream || !bytes || !max_lines || !stream_owner(stream)) return NULL;
+    size_t end = stream->length;
+    for (size_t step = 0u; step < scrollback_lines; ++step) {
+        size_t pos = end;
+        while (pos > 0u && stream->text[pos - 1u] != '\n') --pos;
+        if (pos == 0u) break; /* Clamp to oldest retained line. */
+        end = pos - 1u;
+    }
     size_t start = 0u, lines = 0u;
-    for (size_t i = stream->length; i > 0u; --i) {
+    for (size_t i = end; i > 0u; --i) {
         if (stream->text[i - 1u] == '\n' && ++lines == max_lines) {
             start = i;
             break;
         }
     }
-    *bytes = stream->length - start;
+    *bytes = end - start;
     return stream->text + start;
+}
+
+const char *tui_stream_tail(const tui_stream_t *stream, size_t max_lines,
+                            size_t *bytes) {
+    return tui_stream_viewport(stream, max_lines, 0u, bytes);
 }
 
 tui_stream_status_t tui_stream_get_snapshot(const tui_stream_t *stream,
