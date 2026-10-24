@@ -7,6 +7,8 @@
 #include <flexUI/widgets/markdown_widget.h>
 #include <tui.h>
 #include "tui_async_wait_internal.h"
+#include "tui_app_internal.h"
+#include "tui_terminal_internal.h"
 
 #include <array>
 #include <chrono>
@@ -40,7 +42,8 @@ bool submit(tui_async_queue_t* queue, uint32_t type, uint64_t generation,
              sizeof(header) + chunk.size(), nullptr) == TUI_ASYNC_OK;
 }
 
-bool contains_visible_cells(const tui_buffer_t* buffer) {
+bool contains_visible_cells(const tui_buffer_t* buffer,
+                            uint32_t left = 'A', uint32_t right = 'B') {
     for (int y = 0; y < buffer->height; ++y) {
         for (int x = 0; x + 3 < buffer->width; ++x) {
             const auto* a = tui_buffer_at_const(buffer, x, y);
@@ -48,10 +51,10 @@ bool contains_visible_cells(const tui_buffer_t* buffer) {
             const auto* second = tui_buffer_at_const(buffer, x + 2, y);
             const auto* b = tui_buffer_at_const(buffer, x + 3, y);
             if (a && cjk && second && b &&
-                a->ch == 'A' && cjk->ch == 0x4e2du &&
+                a->ch == left && cjk->ch == 0x4e2du &&
                 cjk->span == TUI_CELL_SPAN_WIDE &&
                 second->span == TUI_CELL_SPAN_CONTINUATION &&
-                b->ch == 'B') return true;
+                b->ch == right) return true;
         }
     }
     return false;
@@ -61,6 +64,9 @@ bool contains_visible_cells(const tui_buffer_t* buffer) {
 struct FlexUIOwner {
     tui_stream_t* stream = nullptr;
     flexUI::MarkdownWidget* markdown = nullptr;
+    flexUI::Box* box = nullptr;
+    flexUI::Element* host = nullptr;
+    std::size_t views = 0u;
     std::size_t chunks = 0u;
     bool ended = false;
     bool ok = true;
@@ -68,6 +74,22 @@ struct FlexUIOwner {
 bool keyboard_noop(int, void*) { return true; }
 int input_noop(const tui_event_t*) { return -1; }
 void view_noop(const void*, tui_buffer_t*) {}
+bool mock_terminal_write(tui_terminal_t*, const char*, size_t) {
+    return true;
+}
+void owner_flexui_view(const void* context, tui_buffer_t* back) {
+    auto* owner = const_cast<FlexUIOwner*>(
+        static_cast<const FlexUIOwner*>(context));
+    if (!owner || !back || !owner->box || !owner->host ||
+        !owner->markdown) {
+        if (owner) owner->ok = false;
+        return;
+    }
+    ++owner->views;
+    owner->markdown->update(0.0f, *owner->host);
+    owner->box->invalidate();
+    owner->box->update();
+}
 bool owner_async_update(const tui_async_event_t* event,
                         const void* payload, void* context) {
     auto* owner = static_cast<FlexUIOwner*>(context);
@@ -232,6 +254,101 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
 
         tui_app_destroy(app);
         check(tui_stream_destroy(stream) == TUI_STREAM_OK);
+    }
+
+    it("runs real Tango wake, owner dispatch and FlexUI draw as one UI turn") {
+        // No physical console: Tango's real terminal buffers and failure-
+        // atomic terminal diff operate through a test-only output sink.
+        std::unique_ptr<tui_stream_t, decltype(&tui_stream_destroy)> stream(
+            tui_stream_create(kMessageId, 512u, 32u), &tui_stream_destroy);
+        check(stream != nullptr);
+        if (!stream) return;
+        FlexUIOwner owner{};
+        owner.stream = stream.get();
+        std::unique_ptr<tui_app_t, decltype(&tui_app_destroy)> app(
+            tui_app_create(&owner, keyboard_noop, owner_flexui_view,
+                           input_noop), &tui_app_destroy);
+        check(app != nullptr);
+        if (!app) return;
+        auto* terminal = tui_app_terminal(app.get());
+        terminal->width = 80;
+        terminal->height = 24;
+        terminal->front = tui_buffer_create(80, 24);
+        terminal->back = tui_buffer_create(80, 24);
+        check(terminal->front && terminal->back);
+        if (!terminal->front || !terminal->back) return;
+        terminal->initialized = true;
+        terminal->color_mode = TUI_COLOR_TRUECOLOR;
+        terminal->write_output = mock_terminal_write;
+
+        auto renderer = flex::tui_backend::create_renderer(terminal);
+        check(renderer != nullptr);
+        if (!renderer) {
+            terminal->initialized = false;
+            return;
+        }
+        flexUI::Box box(renderer.get());
+        owner.box = &box;
+        box.set_viewport(80.0f * 8.0f, 24.0f * 16.0f);
+        box.load_css("#root { width:100%; height:100%; display:flex; "
+                     "flex-direction:column; } "
+                     "#stream-output { width: 100%; }");
+        auto* root = box.create("div", "root");
+        auto* host = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "stream-output", "");
+        check(root && host && host->widget);
+        if (!root || !host || !host->widget) {
+            terminal->initialized = false;
+            return;
+        }
+        root->append(host);
+        box.set_root(root);
+        owner.host = host;
+        owner.markdown =
+            static_cast<flexUI::MarkdownWidget*>(host->widget);
+        check(tui_app_set_async_update(app.get(), owner_async_update));
+        auto* queue = tui_app_async_queue(app.get());
+        check(queue != nullptr);
+        if (!queue) {
+            terminal->initialized = false;
+            return;
+        }
+        app->needs_redraw = false;
+
+        bool posted = false;
+        std::thread producer([&] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(12));
+            posted = submit(queue, TUI_STREAM_BEGIN, 1u, {}) &&
+                submit(queue, TUI_STREAM_CHUNK, 1u, "A") &&
+                submit(queue, TUI_STREAM_CHUNK, 1u, "中") &&
+                submit(queue, TUI_STREAM_CHUNK, 1u, "B") &&
+                submit(queue, TUI_STREAM_END, 1u, {});
+        });
+        const auto wake = tui_async_wait_io(queue, kNoInputHandle, 1000);
+        producer.join();
+        check(posted && wake == TUI_ASYNC_WAIT_MESSAGE);
+        check(tui_app_dispatch_once(app.get()));
+        check(owner.ok && owner.ended && owner.chunks == 3u);
+        check(owner.views == 1u);
+        check(contains_visible_cells(terminal->front));
+        check(!app->needs_redraw);
+
+        // An idle owner turn must not rebuild/redraw on a periodic timer.
+        check(tui_app_dispatch_once(app.get()));
+        check(owner.views == 1u);
+
+        // Publication before entering the kernel wait uses the mailbox
+        // predicate and is not lost. The same owner completes a second frame.
+        check(submit(queue, TUI_STREAM_BEGIN, 2u, {}));
+        check(submit(queue, TUI_STREAM_CHUNK, 2u, "C中D"));
+        check(submit(queue, TUI_STREAM_END, 2u, {}));
+        check(tui_async_wait_io(queue, kNoInputHandle, 0) ==
+              TUI_ASYNC_WAIT_MESSAGE);
+        check(tui_app_dispatch_once(app.get()));
+        check(owner.ok && owner.views == 2u);
+        check(owner.markdown->markdown() == "C中D");
+        check(contains_visible_cells(terminal->front, 'C', 'D'));
+        terminal->initialized = false; // Synthetic terminal: no OS restore
     }
 
     it("converges incomplete GFM tables and fenced code across owner turns") {
