@@ -73,6 +73,24 @@ static void wake_locked(tui_async_queue_t *queue) {
 #endif
 }
 
+/* Clearing a retired wake while holding the same mutex that publishes
+ * messages avoids stale notifications and the post-before-sleep race. */
+static void wake_clear_locked(tui_async_queue_t *queue) {
+#ifdef _WIN32
+    if (!ResetEvent(queue->wake_event)) queue->wake_failed = true;
+#else
+    unsigned char bytes[64];
+    for (;;) {
+        const ssize_t n = read(queue->wake_read, bytes, sizeof(bytes));
+        if (n > 0) continue;
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+        queue->wake_failed = true;
+        break;
+    }
+#endif
+}
+
 #ifndef _WIN32
 static bool set_fd_flags(int fd) {
     const int flags = fcntl(fd, F_GETFL, 0);
@@ -255,6 +273,7 @@ tui_async_status_t tui_async_queue_try_pop(
     queue->head = queue->head + 1u == queue->capacity
         ? 0u : queue->head + 1u;
     --queue->count;
+    if (queue->count == 0u && !queue->closed) wake_clear_locked(queue);
     cmeta_mutex_unlock(&queue->mutex);
 
     *event_out = event;
