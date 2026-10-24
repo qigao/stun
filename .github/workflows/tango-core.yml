@@ -121,6 +121,7 @@ jobs:
           prefix="$SALTS_ROOT"
           if [[ "$RUNNER_OS" == Windows ]]; then prefix="$(cygpath -w "$prefix")"; fi
           cmake -S tango -B build/tango -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            -DTANGO_BUILD_CPP_INTEROP_TESTS=ON \
             "-DCMAKE_PREFIX_PATH=$prefix" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF

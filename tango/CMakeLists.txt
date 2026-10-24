@@ -62,6 +62,13 @@ endif()
 
 set_target_properties(${TARGET_NAME}  PROPERTIES FOLDER "tango")
 
+# Optional C++17 application consumer; never changes Tango's C11-only
+# compilation or imposes a C++ runtime on installed C clients.
+option(TANGO_BUILD_CPP_INTEROP_TESTS
+       "Build the C++17 owner/wakeup consumer test" OFF)
 if(BUILD_TESTING)
+    if(TANGO_BUILD_CPP_INTEROP_TESTS)
+        enable_language(CXX)
+    endif()
     add_subdirectory(tests)
 endif()

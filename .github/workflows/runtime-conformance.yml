@@ -88,12 +88,14 @@ jobs:
             'flex/tests/test_gcanvas_renderer.cpp' 'flex/tests/gcanvas-standalone/*' \
             'flex/include/flex/core/renderer.h' 'flexUI/include/flexUI/renderer.h'
 
-      - name: Detect headless XML runtime changes
+      - name: Detect headless XML and Streaming UI runtime changes
         id: xml_scope
         shell: bash
         run: |
           bash .github/scripts/ci-affected.sh \
             'flexUI/*' 'flex/*' 'shared/markdown/*' 'shared/gcanvas/*' \
+            'tango/*' 'tango/src/*' 'tango/include/*' 'tango/tests/*' \
+            '.github/workflows/tango-core.yml' \
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \
             'tools/lemon/*' 'cmake/Sanitizers.cmake' \
             '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'

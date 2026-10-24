@@ -3,6 +3,9 @@
 #define TANGO_TUI_ASYNC_WAIT_INTERNAL_H
 #include "tui_async.h"
 #include <stdint.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 typedef enum tui_async_wait_result {
     TUI_ASYNC_WAIT_MESSAGE = 1,
     TUI_ASYNC_WAIT_INPUT,
@@ -16,4 +19,7 @@ typedef enum tui_async_wait_result {
  */
 tui_async_wait_result_t tui_async_wait_io(
     tui_async_queue_t *queue, intptr_t native_input, int timeout_ms);
+#ifdef __cplusplus
+}
+#endif
 #endif

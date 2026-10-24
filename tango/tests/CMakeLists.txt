@@ -10,3 +10,13 @@ add_executable(tango_stream_test tango_stream_test.c)
 target_link_libraries(tango_stream_test PRIVATE tango)
 target_include_directories(tango_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 add_test(NAME tango_stream_test COMMAND tango_stream_test)
+
+if(TANGO_BUILD_CPP_INTEROP_TESTS)
+    find_package(Threads REQUIRED)
+    add_executable(tango_cpp_owner_bridge_test tango_cpp_owner_bridge_test.cpp)
+    target_link_libraries(tango_cpp_owner_bridge_test PRIVATE tango Threads::Threads)
+    target_include_directories(tango_cpp_owner_bridge_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+    target_compile_features(tango_cpp_owner_bridge_test PRIVATE cxx_std_17)
+    add_test(NAME tango_cpp_owner_bridge_test COMMAND tango_cpp_owner_bridge_test)
+endif()

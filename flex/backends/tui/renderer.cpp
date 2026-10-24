@@ -14,8 +14,10 @@ constexpr int kCharHeight = 16;
 
 class TuiRenderer final : public Renderer {
 public:
+    explicit TuiRenderer(tui_buffer_t* buffer)
+        : buf_(buffer) {}
     explicit TuiRenderer(tui_terminal_t* term)
-        : term_(term), buf_(tui_terminal_buffer(term)) {}
+        : TuiRenderer(tui_terminal_buffer(term)) {}
 
     void begin_frame(float w, float h, float) override {
         frame_w_ = w;
@@ -312,7 +314,6 @@ private:
             TUI_BLACK);
     }
 
-    tui_terminal_t* term_ = nullptr;
     tui_buffer_t* buf_ = nullptr;
     float frame_w_ = 0.0f;
     float frame_h_ = 0.0f;
@@ -343,6 +344,11 @@ bool register_backend() {
 
 std::unique_ptr<Renderer> create_renderer(tui_terminal_t* term) {
     return flex::create_tui_renderer(term);
+}
+
+std::unique_ptr<Renderer> create_buffer_renderer(tui_buffer_t* buffer) {
+    if (!buffer) return nullptr;
+    return std::make_unique<TuiRenderer>(buffer);
 }
 
 } // namespace tui_backend
