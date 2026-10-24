@@ -67,6 +67,12 @@ const char *tui_stream_text(const tui_stream_t *stream, size_t *bytes);
  * at most max_lines newline-delimited lines, no terminal output. */
 const char *tui_stream_tail(const tui_stream_t *stream, size_t max_lines,
                             size_t *bytes);
+/* Viewport over the retained text without allocating or copying.
+ * scrollback_lines=0 follows the newest line; 1 shows the previous line,
+ * clamping at the oldest retained content. The borrowed slice is counted;
+ * it is not NUL-terminated when scrolled back. Callers own scroll offset. */
+const char *tui_stream_viewport(const tui_stream_t *stream, size_t max_lines,
+                                size_t scrollback_lines, size_t *bytes);
 tui_stream_status_t tui_stream_get_snapshot(const tui_stream_t *stream,
                                             tui_stream_snapshot_t *out);
 tui_stream_status_t tui_stream_destroy(tui_stream_t *stream);
