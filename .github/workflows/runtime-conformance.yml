@@ -94,7 +94,8 @@ jobs:
         run: |
           bash .github/scripts/ci-affected.sh \
             'flexUI/*' 'flex/*' 'shared/markdown/*' 'shared/gcanvas/*' \
-            'tango/src/*' 'tango/include/*' \
+            'tango/*' 'tango/src/*' 'tango/include/*' 'tango/tests/*' \
+            '.github/workflows/tango-core.yml' \
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \
             'tools/lemon/*' 'cmake/Sanitizers.cmake' \
             '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
