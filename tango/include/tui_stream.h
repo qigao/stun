@@ -69,7 +69,7 @@ const char *tui_stream_tail(const tui_stream_t *stream, size_t max_lines,
                             size_t *bytes);
 tui_stream_status_t tui_stream_get_snapshot(const tui_stream_t *stream,
                                             tui_stream_snapshot_t *out);
-void tui_stream_destroy(tui_stream_t *stream);
+tui_stream_status_t tui_stream_destroy(tui_stream_t *stream);
 #ifdef __cplusplus
 }
 #endif
