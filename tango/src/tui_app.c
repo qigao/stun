@@ -4,6 +4,7 @@
  */
 #include "tui.h"
 #include "tui_terminal_internal.h"
+#include "tui_app_internal.h"
 #include "tui_async_wait_internal.h"
 
 #include <salts/thread.h>
@@ -107,6 +108,41 @@ void tui_app_destroy(tui_app_t* app) {
     free(app);
 }
 
+bool tui_app_dispatch_once(tui_app_t *app) {
+    if (!app || !app->async_queue ||
+        !tui_async_queue_is_owner(app->async_queue) || !app->terminal)
+        return false;
+    /* Bound keyboard processing to avoid starving streaming traffic. */
+    for (size_t i = 0u; i < TUI_APP_INPUT_BUDGET && app->running; ++i) {
+        tui_event_t event;
+        if (!tui_terminal_poll(app->terminal, &event)) break;
+        if (event.type == TUI_EVENT_RESIZE) {
+            app->needs_redraw = true;
+            continue;
+        }
+        const int msg = app->event_map(&event);
+        if (msg >= 0) {
+            app->running = app->update(msg, app->model);
+            app->needs_redraw = true;
+        }
+    }
+    (void)tui_app_pump_messages(app, TUI_APP_MESSAGE_BUDGET);
+    if (!app->running) break;
+
+    /* Exactly one render for this batch of input + async updates. */
+    if (app->needs_redraw) {
+        tui_buffer_t* back = tui_terminal_buffer(app->terminal);
+        app->view(app->model, back);
+        if (!tui_terminal_render(app->terminal)) {
+            app->running = false;
+            break;
+        }
+        app->needs_redraw = false;
+    }
+
+    return app->running;
+}
+
 void tui_app_run(tui_app_t* app) {
     if (!app || !app->async_queue ||
         !tui_async_queue_is_owner(app->async_queue))
@@ -132,33 +168,7 @@ void tui_app_run(tui_app_t* app) {
             app->needs_redraw = true;
         }
 
-        /* Bound keyboard processing to avoid starving streaming traffic. */
-        for (size_t i = 0u; i < TUI_APP_INPUT_BUDGET && app->running; ++i) {
-            tui_event_t event;
-            if (!tui_terminal_poll(app->terminal, &event)) break;
-            if (event.type == TUI_EVENT_RESIZE) {
-                app->needs_redraw = true;
-                continue;
-            }
-            const int msg = app->event_map(&event);
-            if (msg >= 0) {
-                app->running = app->update(msg, app->model);
-                app->needs_redraw = true;
-            }
-        }
-        (void)tui_app_pump_messages(app, TUI_APP_MESSAGE_BUDGET);
-        if (!app->running) break;
-
-        /* Exactly one render for this batch of input + async updates. */
-        if (app->needs_redraw) {
-            tui_buffer_t* back = tui_terminal_buffer(app->terminal);
-            app->view(app->model, back);
-            if (!tui_terminal_render(app->terminal)) {
-                app->running = false;
-                break;
-            }
-            app->needs_redraw = false;
-        }
+        if (!tui_app_dispatch_once(app)) break;
 
         /* Queue state is authoritative, not the wake byte/event. The wait
          * routine checks under the queue mutex immediately before sleeping;
