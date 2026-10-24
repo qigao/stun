@@ -1,6 +1,8 @@
 #include "tui_async.h"
 #include "tui.h"
 #include "tui_async_wait_internal.h"
+#include "tui_app_internal.h"
+#include "tui_terminal_internal.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -346,12 +348,77 @@ static int test_owner_message_dispatch_batches(void) {
     return 0;
 }
 
+typedef struct render_probe {
+    size_t updates;
+    size_t views;
+    size_t writes;
+} render_probe_t;
+
+static bool render_probe_write(tui_terminal_t *terminal,
+                               const char *bytes, size_t size) {
+    (void)terminal;
+    (void)bytes;
+    (void)size;
+    /* There must be one terminal frame for a batch, not one per message. */
+    return true;
+}
+
+static void render_probe_view(const void *context, tui_buffer_t *buffer) {
+    render_probe_t *probe = (render_probe_t *)context;
+    ++probe->views;
+    tui_buffer_set(buffer, 0, 0, tui_cell('A', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(buffer, 1, 0, tui_cell('B', TUI_WHITE, TUI_BLACK));
+    tui_buffer_set(buffer, 2, 0, tui_cell('C', TUI_WHITE, TUI_BLACK));
+}
+
+static bool render_probe_update(const tui_async_event_t *event,
+                                const void *payload, void *context) {
+    render_probe_t *probe = (render_probe_t *)context;
+    if (!event || !payload || event->payload_size != sizeof(uint32_t))
+        return false;
+    ++probe->updates;
+    return true;
+}
+
+static int test_one_render_for_async_burst(void) {
+    render_probe_t probe = {0};
+    tui_app_t *app = tui_app_create(&probe, app_keyboard,
+                                   render_probe_view, app_map);
+    CHECK(app != NULL);
+    CHECK(tui_app_set_async_update(app, render_probe_update));
+    tui_terminal_t *term = app->terminal;
+    term->width = 3;
+    term->height = 1;
+    term->front = tui_buffer_create(3, 1);
+    term->back = tui_buffer_create(3, 1);
+    CHECK(term->front && term->back);
+    term->initialized = true;
+    term->color_mode = TUI_COLOR_TRUECOLOR;
+    term->write_output = render_probe_write;
+    app->needs_redraw = false;
+    for (uint32_t i = 0u; i < 10u; ++i) {
+        CHECK(tui_async_queue_post(tui_app_async_queue(app), 1u, 1u,
+                  &i, sizeof(i), NULL) == TUI_ASYNC_OK);
+    }
+    CHECK(tui_app_dispatch_once(app));
+    CHECK(probe.updates == 10u && probe.views == 1u);
+    CHECK(!app->needs_redraw);
+    CHECK(tui_app_dispatch_once(app));
+    CHECK(probe.views == 1u);
+
+    /* Avoid physical terminal teardown in a synthetic output test. */
+    term->initialized = false;
+    tui_app_destroy(app);
+    return 0;
+}
+
 int main(void) {
     if (test_fifo_capacity_and_close() != 0) return 1;
     if (test_concurrent_producers_and_owner_affinity() != 0) return 1;
     if (test_real_kernel_wake_and_close() != 0) return 1;
     if (test_native_input_and_wake_multiplex() != 0) return 1;
     if (test_owner_message_dispatch_batches() != 0) return 1;
+    if (test_one_render_for_async_burst() != 0) return 1;
     puts("Tango async mailbox tests passed");
     return 0;
 }
