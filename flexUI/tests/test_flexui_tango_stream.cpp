@@ -167,6 +167,16 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // buffer must preserve the CJK wide-cell continuation.
         check(contains_visible_cells(buffer.get()));
 
+        // Resize must use the same FlexUI layout pipeline and native Tango
+        // renderer without recreating the message or its C11 projection.
+        tui_buffer_resize(buffer.get(), 48, 16);
+        check(buffer->width == 48 && buffer->height == 16);
+        box.set_viewport(48.0f * 8.0f, 16.0f * 16.0f);
+        box.invalidate();
+        box.update();
+        check(contains_visible_cells(buffer.get()));
+        check(widget->markdown() == "A中B");
+
         // After terminal state, late data must not modify either consumer.
         const char late[] = "late";
         std::array<unsigned char, sizeof(tui_stream_packet_header_t)+4u> stale{};
@@ -178,6 +188,116 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_stream_apply(stream, &old_chunk, stale.data()) ==
               TUI_STREAM_STALE);
         check(widget->markdown() == "A中B");
+
+        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+        check(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
+        check(tui_stream_destroy(stream) == TUI_STREAM_OK);
+    }
+
+    it("converges incomplete GFM tables and fenced code across owner turns") {
+        flexUI::Box box(nullptr);
+        auto* root = box.create("div", "markdown-batches");
+        auto* host = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "markdown", "");
+        check(root && host && host->widget);
+        if (!root || !host || !host->widget) return;
+        root->append(host);
+        box.set_root(root);
+        auto* widget = static_cast<flexUI::MarkdownWidget*>(host->widget);
+
+        const tui_async_queue_config_t config{16u, 128u};
+        auto* queue = tui_async_queue_create(&config);
+        auto* stream = tui_stream_create(kMessageId, 512u, 32u);
+        check(queue && stream);
+        if (!queue || !stream) {
+            if (stream) (void)tui_stream_destroy(stream);
+            if (queue) {
+                (void)tui_async_queue_close(queue);
+                (void)tui_async_queue_destroy(queue);
+            }
+            return;
+        }
+
+        const auto pump = [&](std::size_t expected) {
+            std::array<unsigned char, 128u> payload{};
+            tui_async_event_t event{};
+            std::size_t accepted = 0u;
+            for (;;) {
+                auto result = tui_async_queue_try_pop(
+                    queue, &event, payload.data(), payload.size());
+                if (result == TUI_ASYNC_EMPTY) break;
+                check(result == TUI_ASYNC_OK);
+                if (result != TUI_ASYNC_OK) break;
+                const auto stream_result = tui_stream_apply(
+                    stream, &event, payload.data());
+                if (stream_result == TUI_STREAM_STALE) continue;
+                check(stream_result == TUI_STREAM_OK);
+                if (stream_result != TUI_STREAM_OK) break;
+                ++accepted;
+                if (event.type == TUI_STREAM_BEGIN) {
+                    widget->set_markdown("");
+                } else if (event.type == TUI_STREAM_CHUNK) {
+                    const auto prefix = sizeof(tui_stream_packet_header_t);
+                    check(event.payload_size >= prefix);
+                    if (event.payload_size < prefix) break;
+                    const auto delta = std::string_view(
+                        reinterpret_cast<const char*>(payload.data() + prefix),
+                        event.payload_size - prefix);
+                    check(widget->append_markdown(delta) ==
+                          flexUI::MarkdownAppendStatus::Appended);
+                }
+            }
+            check(accepted == expected);
+            widget->update(0.0f, *host);
+        };
+
+        const std::string first = "# Title\n\n| H | V |\n|---|";
+        const std::string second = "---|\n| 中 | A |\n\n";
+        const std::string fence(3u, char(0x60));
+        const std::string code_start = fence + "c\nint x = 1;\n";
+        const std::string code_end = fence + "\n";
+        const std::string source = first + second + code_start + code_end;
+
+        check(submit(queue, TUI_STREAM_BEGIN, 4u, {}));
+        check(submit(queue, TUI_STREAM_CHUNK, 4u, first));
+        pump(2u);
+        check(widget->markdown() == first);
+
+        check(submit(queue, TUI_STREAM_CHUNK, 4u, second));
+        check(submit(queue, TUI_STREAM_CHUNK, 4u, code_start));
+        check(submit(queue, TUI_STREAM_CHUNK, 4u, code_end));
+        check(submit(queue, TUI_STREAM_END, 4u, {}));
+        pump(4u);
+        check(widget->markdown() == source);
+        check(host->child_count() == 3u);
+        if (host->child_count() == 3u) {
+            check(host->child_at(0u)->has_class(flex::Symbol("h1")));
+            check(host->child_at(1u)->has_class(flex::Symbol("md-table")));
+            check(host->child_at(2u)->has_class(flex::Symbol("md-code-block")));
+        }
+        flexUI::Box reference(nullptr);
+        auto* root_reference = reference.create("div", "reference");
+        auto* one_shot = reference.create_widget<flexUI::MarkdownWidget>(
+            "div", "md-reference", source);
+        check(root_reference && one_shot && one_shot->widget);
+        if (root_reference && one_shot && one_shot->widget) {
+            root_reference->append(one_shot);
+            reference.set_root(root_reference);
+            one_shot->widget->update(0.0f, *one_shot);
+            check(host->child_count() == one_shot->child_count());
+        }
+
+        // A new generation replaces the current projection. Once cancelled,
+        // a queued old chunk may still dequeue but must not reach FlexUI.
+        check(submit(queue, TUI_STREAM_BEGIN, 5u, {}));
+        check(submit(queue, TUI_STREAM_CHUNK, 5u, "# Cancelled\n"));
+        check(submit(queue, TUI_STREAM_CANCEL, 5u, {}));
+        check(submit(queue, TUI_STREAM_CHUNK, 5u, "late"));
+        pump(3u);
+        check(widget->markdown() == "# Cancelled\n");
+        tui_stream_snapshot_t snapshot{};
+        check(tui_stream_get_snapshot(stream, &snapshot) == TUI_STREAM_OK);
+        check(snapshot.state == TUI_STREAM_CANCELLED);
 
         check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
         check(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
