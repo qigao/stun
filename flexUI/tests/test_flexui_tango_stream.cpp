@@ -6,8 +6,10 @@
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
 #include <tui.h>
+#include "tui_async_wait_internal.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -18,6 +20,11 @@
 namespace {
 
 constexpr uint64_t kMessageId = 42u;
+#ifdef _WIN32
+constexpr intptr_t kNoInputHandle = 0;
+#else
+constexpr intptr_t kNoInputHandle = -1;
+#endif
 
 bool submit(tui_async_queue_t* queue, uint32_t type, uint64_t generation,
             std::string_view chunk) {
@@ -145,7 +152,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
 
         bool producer_ok = false;
         std::thread worker([&] {
-            // The UI Model and widget are never touched from this producer.
+            // The UI model and widget are never touched from this producer.
+            // Schedule real cross-thread publication after the owner begins
+            // waiting on the POSIX wake pipe or Windows waitable event.
+            std::this_thread::sleep_for(std::chrono::milliseconds(12));
             const char cjk[] = "中";
             producer_ok = submit(queue, TUI_STREAM_BEGIN, 1u, {}) &&
                 submit(queue, TUI_STREAM_CHUNK, 1u, "A") &&
@@ -156,8 +166,15 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 submit(queue, TUI_STREAM_CHUNK, 1u, "B") &&
                 submit(queue, TUI_STREAM_END, 1u, {});
         });
+        // Start empty: only the queue's kernel wake endpoint can unblock
+        // this owner wait; no busy polling, synthetic wake, or test condition
+        // variable is involved. The queue checks the predicate under its
+        // publication lock just before sleeping (post-before-wait is safe).
+        const auto wake_result = tui_async_wait_io(
+            queue, kNoInputHandle, 1000);
         worker.join();
         check(producer_ok);
+        check(wake_result == TUI_ASYNC_WAIT_MESSAGE);
 
         // Use the production Tango app's owner-affine message dispatch,
         // not a test-owned queue-draining implementation. One owner turn

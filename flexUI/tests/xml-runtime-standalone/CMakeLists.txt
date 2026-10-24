@@ -72,6 +72,11 @@ add_executable(test_flexui_tango_stream
   "${STUN_ROOT}/flexUI/tests/test_flexui_tango_stream.cpp")
 target_link_libraries(test_flexui_tango_stream PRIVATE
   flexUI flex_backend_tui tango Salts::TinyTest Threads::Threads)
+# Deliberately test the existing private platform wait entry, not a new
+# public or duplicated event-loop abstraction. The installed C core remains
+# independent of FlexUI/GUI/C++.
+target_include_directories(test_flexui_tango_stream PRIVATE
+  "${STUN_ROOT}/tango/src")
 add_test(NAME test_flexui_tango_stream COMMAND test_flexui_tango_stream)
 set_tests_properties(test_flexui_tango_stream PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_flexui_tango_stream)
