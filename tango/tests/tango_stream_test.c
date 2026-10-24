@@ -3,6 +3,8 @@
 #include "tui_app_internal.h"
 #include "tui_terminal_internal.h"
 
+#include <salts/thread.h>
+
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
