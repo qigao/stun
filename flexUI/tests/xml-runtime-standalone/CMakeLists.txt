@@ -26,9 +26,10 @@ foreach(option IN ITEMS GCANVAS_BUILD_OPENGL GCANVAS_BUILD_GLES
     GCANVAS_BUILD_WINDOW GCANVAS_BUILD_TESTS GCANVAS_BUILD_EXAMPLES
     FLEX_BUILD_RENDER_ENGINE_GCANVAS FLEX_BUILD_RENDER_ENGINE_NANOVG
     FLEX_BUILD_BACKEND_OPENGL FLEX_BUILD_BACKEND_VULKAN FLEX_BUILD_BACKEND_D2D
-    FLEX_BUILD_BACKEND_TUI FLEX_BUILD_BINARY FLEX_BUILD_TOOLS)
+    FLEX_BUILD_BINARY FLEX_BUILD_TOOLS)
   set(${option} OFF CACHE BOOL "Not part of headless XML qualification" FORCE)
 endforeach()
+set(FLEX_BUILD_BACKEND_TUI ON CACHE BOOL "Headless real Tango renderer integration" FORCE)
 # These production modules still use repository-root include paths.
 include_directories("${STUN_ROOT}/vendor/tinyfsm" "${STUN_ROOT}/vendor/mir"
   "${STUN_ROOT}/vendor/miniblas" "${STUN_ROOT}/tools/tree-sitter/plugins")
@@ -40,6 +41,7 @@ add_subdirectory("${STUN_ROOT}/vendor/mir" mir)
 add_subdirectory("${STUN_ROOT}/vendor/miniblas" miniblas)
 add_subdirectory("${STUN_ROOT}/shared/gcanvas" gcanvas)
 add_subdirectory("${STUN_ROOT}/shared/markdown" markdown)
+add_subdirectory("${STUN_ROOT}/tango" tango)
 add_subdirectory("${STUN_ROOT}/flex" flex)
 add_subdirectory("${STUN_ROOT}/flexUI" flexUI)
 target_link_libraries(flexUI PRIVATE Stun::UICore)
@@ -54,6 +56,26 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
+
+# The MarkdownWidget streaming consumer contract must run in the focused
+# headless production-runtime gate; parser conformance alone does not exercise
+# the FlexUI projection/lifecycle path.
+add_executable(test_markdown_widget "${STUN_ROOT}/flexUI/tests/test_markdown_widget.cpp")
+target_link_libraries(test_markdown_widget PRIVATE flexUI Salts::TinyTest)
+add_test(NAME test_markdown_widget COMMAND test_markdown_widget)
+set_tests_properties(test_markdown_widget PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_markdown_widget)
+
+# The same installed-SDK gate executes a real Tango mailbox, FlexUI Markdown
+# projection, and the actual Flex→Tango cell renderer with no host terminal.
+add_executable(test_flexui_tango_stream
+  "${STUN_ROOT}/flexUI/tests/test_flexui_tango_stream.cpp")
+target_link_libraries(test_flexui_tango_stream PRIVATE
+  flexUI flex_backend_tui tango Salts::TinyTest Threads::Threads)
+add_test(NAME test_flexui_tango_stream COMMAND test_flexui_tango_stream)
+set_tests_properties(test_flexui_tango_stream PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_flexui_tango_stream)
+
 if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas OR
    TARGET FlexUI::ControllerTurboScript)
   message(FATAL_ERROR "XML runtime gate must remain headless and independent of TurboScript JIT")
