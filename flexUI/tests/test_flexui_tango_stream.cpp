@@ -100,6 +100,7 @@ bool owner_async_update(const tui_async_event_t* event,
         return false;
     }
     if (event->type == TUI_STREAM_BEGIN) {
+        owner->ended = false;
         owner->markdown->set_markdown("");
     } else if (event->type == TUI_STREAM_CHUNK) {
         const auto prefix = sizeof(tui_stream_packet_header_t);
@@ -336,6 +337,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // An idle owner turn must not rebuild/redraw on a periodic timer.
         check(tui_app_dispatch_once(app.get()));
         check(owner.views == 1u);
+        // After the only burst has been drained the real wake must retire;
+        // subsequent idle turns must not spin on a stale pipe byte/event.
+        check(tui_async_wait_io(queue, kNoInputHandle, 0) ==
+              TUI_ASYNC_WAIT_TIMEOUT);
 
         // Publication before entering the kernel wait uses the mailbox
         // predicate and is not lost. The same owner completes a second frame.
@@ -345,7 +350,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_async_wait_io(queue, kNoInputHandle, 0) ==
               TUI_ASYNC_WAIT_MESSAGE);
         check(tui_app_dispatch_once(app.get()));
-        check(owner.ok && owner.views == 2u);
+        check(owner.ok && owner.ended && owner.views == 2u);
         check(owner.markdown->markdown() == "C中D");
         check(contains_visible_cells(terminal->front, 'C', 'D'));
         terminal->initialized = false; // Synthetic terminal: no OS restore
