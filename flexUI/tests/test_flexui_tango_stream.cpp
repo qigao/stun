@@ -12,6 +12,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -354,6 +355,86 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(owner.markdown->markdown() == "C中D");
         check(contains_visible_cells(terminal->front, 'C', 'D'));
         terminal->initialized = false; // Synthetic terminal: no OS restore
+    }
+
+    it("preserves user scroll-away and independent focus across Markdown updates") {
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 160.0f);
+        box.load_css(
+            "#root { width:320px; height:160px; display:flex; "
+            "flex-direction:column; } "
+            "#scroll { width:160px; height:64px; overflow-y:scroll; } "
+            "#document { width:160px; display:flex; flex-direction:column; } "
+            "#focus-target { width:70px; height:20px; }");
+        auto* root = box.create("div", "root");
+        auto* scroll = box.create("div", "scroll");
+        auto* doc = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "document", "");
+        auto* focus = box.create("button", "focus-target");
+        check(root && scroll && doc && doc->widget && focus);
+        if (!root || !scroll || !doc || !doc->widget || !focus) return;
+        root->append(scroll);
+        scroll->append(doc);
+        root->append(focus);
+        box.set_root(root);
+        auto* widget = static_cast<flexUI::MarkdownWidget*>(doc->widget);
+
+        std::string initial;
+        for (unsigned i = 0u; i < 40u; ++i)
+            initial += "Paragraph content for scrolling\n\n";
+        check(widget->append_markdown(initial) ==
+              flexUI::MarkdownAppendStatus::Appended);
+        widget->update(0.0f, *doc);
+        box.update();
+        check(scroll->can_scroll_y());
+        check(scroll->max_scroll_y() > 40.0f);
+        if (!scroll->can_scroll_y() || scroll->max_scroll_y() <= 40.0f)
+            return;
+
+        // A user who moved away from the tail must not be forced back by
+        // an unrelated content append, layout invalidation or resize.
+        check(scroll->set_scroll_offset(0.0f, 30.0f));
+        box.set_focus(focus);
+        check(box.focused_element() == focus);
+        const float before = scroll->scroll_y();
+        check(widget->append_markdown("New streaming paragraph\n\n") ==
+              flexUI::MarkdownAppendStatus::Appended);
+        widget->update(0.0f, *doc);
+        box.invalidate();
+        box.update();
+        check(std::fabs(scroll->scroll_y() - before) < 0.01f);
+        check(box.focused_element() == focus);
+        box.set_viewport(280.0f, 150.0f);
+        box.update();
+        check(std::fabs(scroll->scroll_y() - before) < 0.01f);
+        check(box.focused_element() == focus);
+    }
+
+    it("retires intermediate Markdown projections during repeated owner updates") {
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 120.0f);
+        auto* root = box.create("div", "root");
+        auto* host = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "repeated", "");
+        check(root && host && host->widget);
+        if (!root || !host || !host->widget) return;
+        root->append(host);
+        box.set_root(root);
+        auto* widget = static_cast<flexUI::MarkdownWidget*>(host->widget);
+        for (unsigned i = 0u; i < 120u; ++i) {
+            check(widget->append_markdown("x") ==
+                  flexUI::MarkdownAppendStatus::Appended);
+            widget->update(0.0f, *host);
+            box.update();
+            // This document has one paragraph regardless of stream length.
+            // Previously detached projections and style records must not
+            // accumulate across UI-owner turns.
+            check(host->child_count() == 1u);
+            check(box.owned_element_count() <= 32u);
+            check(box.cached_style_element_count() <= 32u);
+        }
+        check(widget->markdown() == std::string(120u, 'x'));
+        check(host->child_count() == 1u);
     }
 
     it("converges incomplete GFM tables and fenced code across owner turns") {
