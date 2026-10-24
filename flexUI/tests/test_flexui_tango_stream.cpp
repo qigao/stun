@@ -50,6 +50,49 @@ bool contains_visible_cells(const tui_buffer_t* buffer) {
     return false;
 }
 
+
+struct FlexUIOwner {
+    tui_stream_t* stream = nullptr;
+    flexUI::MarkdownWidget* markdown = nullptr;
+    std::size_t chunks = 0u;
+    bool ended = false;
+    bool ok = true;
+};
+bool keyboard_noop(int, void*) { return true; }
+int input_noop(const tui_event_t*) { return -1; }
+void view_noop(const void*, tui_buffer_t*) {}
+bool owner_async_update(const tui_async_event_t* event,
+                        const void* payload, void* context) {
+    auto* owner = static_cast<FlexUIOwner*>(context);
+    const auto status = tui_stream_apply(owner->stream, event, payload);
+    if (status == TUI_STREAM_STALE) return true;
+    if (status != TUI_STREAM_OK) {
+        owner->ok = false;
+        return false;
+    }
+    if (event->type == TUI_STREAM_BEGIN) {
+        owner->markdown->set_markdown("");
+    } else if (event->type == TUI_STREAM_CHUNK) {
+        const auto prefix = sizeof(tui_stream_packet_header_t);
+        if (event->payload_size < prefix) {
+            owner->ok = false;
+            return false;
+        }
+        const auto delta = std::string_view(
+            static_cast<const char*>(payload) + prefix,
+            event->payload_size - prefix);
+        if (owner->markdown->append_markdown(delta) !=
+            flexUI::MarkdownAppendStatus::Appended) {
+            owner->ok = false;
+            return false;
+        }
+        ++owner->chunks;
+    } else if (event->type == TUI_STREAM_END) {
+        owner->ended = true;
+    }
+    return true;
+}
+
 } // namespace
 
 spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
@@ -80,19 +123,25 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         box.set_root(root);
         auto* widget = static_cast<flexUI::MarkdownWidget*>(host->widget);
 
-        const tui_async_queue_config_t config{32u, 128u};
-        tui_async_queue_t* queue = tui_async_queue_create(&config);
         tui_stream_t* stream = tui_stream_create(kMessageId, 512u, 32u);
-        check(queue != nullptr && stream != nullptr);
-        if (!queue || !stream) {
-            if (stream) (void)tui_stream_destroy(stream);
-            if (queue) {
-                (void)tui_async_queue_close(queue);
-                (void)tui_async_queue_destroy(queue);
-            }
+        check(stream != nullptr);
+        if (!stream) return;
+        FlexUIOwner owner{stream, widget};
+        tui_app_t* app = tui_app_create(
+            &owner, keyboard_noop, view_noop, input_noop);
+        check(app != nullptr);
+        if (!app) {
+            (void)tui_stream_destroy(stream);
             return;
         }
-        check(tui_async_queue_is_owner(queue));
+        check(tui_app_set_async_update(app, owner_async_update));
+        tui_async_queue_t* queue = tui_app_async_queue(app);
+        check(queue != nullptr && tui_async_queue_is_owner(queue));
+        if (!queue) {
+            tui_app_destroy(app);
+            (void)tui_stream_destroy(stream);
+            return;
+        }
 
         bool producer_ok = false;
         std::thread worker([&] {
@@ -110,40 +159,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         worker.join();
         check(producer_ok);
 
-        std::array<unsigned char, 128u> payload{};
-        tui_async_event_t event{};
-        std::size_t accepted_chunks = 0u;
-        bool ended = false;
-        for (;;) {
-            const auto result = tui_async_queue_try_pop(
-                queue, &event, payload.data(), payload.size());
-            if (result == TUI_ASYNC_EMPTY) break;
-            check(result == TUI_ASYNC_OK);
-            if (result != TUI_ASYNC_OK) break;
-
-            // Order, generation, UTF-8 and terminal validity are checked by
-            // the same production Tango stream state as the plain-text UI.
-            const auto stream_result = tui_stream_apply(
-                stream, &event, payload.data());
-            check(stream_result == TUI_STREAM_OK);
-            if (stream_result != TUI_STREAM_OK) break;
-            if (event.type == TUI_STREAM_BEGIN) {
-                widget->set_markdown("");
-            } else if (event.type == TUI_STREAM_CHUNK) {
-                const std::size_t prefix = sizeof(tui_stream_packet_header_t);
-                check(event.payload_size >= prefix);
-                if (event.payload_size < prefix) break;
-                const auto delta = std::string_view(
-                    reinterpret_cast<const char*>(payload.data() + prefix),
-                    event.payload_size - prefix);
-                check(widget->append_markdown(delta) ==
-                      flexUI::MarkdownAppendStatus::Appended);
-                ++accepted_chunks;
-            } else if (event.type == TUI_STREAM_END) {
-                ended = true;
-            }
-        }
-        check(ended && accepted_chunks == 4u);
+        // Use the production Tango app's owner-affine message dispatch,
+        // not a test-owned queue-draining implementation. One owner turn
+        // consumes the full burst, then FlexUI lays out/renders once.
+        check(tui_app_pump_messages(app, 32u) == 6u);
+        check(owner.ok && owner.ended && owner.chunks == 4u);
 
         std::size_t text_size = 0u;
         const char* text = tui_stream_text(stream, &text_size);
@@ -183,14 +203,17 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         const tui_stream_packet_header_t header{kMessageId};
         std::memcpy(stale.data(), &header, sizeof(header));
         std::memcpy(stale.data()+sizeof(header), late, 4u);
+        tui_stream_snapshot_t stream_snapshot{};
+        check(tui_stream_get_snapshot(stream, &stream_snapshot) ==
+              TUI_STREAM_OK);
         const tui_async_event_t old_chunk{
-            TUI_STREAM_CHUNK, 1u, event.sequence + 1u, stale.size()};
+            TUI_STREAM_CHUNK, 1u, stream_snapshot.last_sequence + 1u,
+            stale.size()};
         check(tui_stream_apply(stream, &old_chunk, stale.data()) ==
               TUI_STREAM_STALE);
         check(widget->markdown() == "A中B");
 
-        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
-        check(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
+        tui_app_destroy(app);
         check(tui_stream_destroy(stream) == TUI_STREAM_OK);
     }
 
