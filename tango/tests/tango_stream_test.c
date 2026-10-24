@@ -320,11 +320,43 @@ static int test_invalid_packet_owner_and_newline_tail(void) {
     return 0;
 }
 
+static int test_ten_thousand_chunks_bounded(void) {
+    tui_stream_t *stream = tui_stream_create(42u, 64u, 16u);
+    CHECK(stream);
+    CHECK(apply(stream, TUI_STREAM_BEGIN, 1u, 1u, NULL, 0u) ==
+          TUI_STREAM_OK);
+    /* This is a real Unicode state/eviction soak, not a throughput claim.
+     * No persistent storage grows with the number of accepted chunks. */
+    for (uint64_t i = 0u; i < 10000u; ++i) {
+        CHECK(apply(stream, TUI_STREAM_CHUNK, 1u, i + 2u,
+                    "A中", strlen("A中")) == TUI_STREAM_OK);
+        if ((i % 101u) == 0u) {
+            tui_stream_snapshot_t snapshot;
+            CHECK(tui_stream_get_snapshot(stream, &snapshot) ==
+                  TUI_STREAM_OK);
+            CHECK(snapshot.retained_bytes <= 64u);
+            CHECK(snapshot.pending_utf8_bytes == 0u);
+        }
+    }
+    CHECK(apply(stream, TUI_STREAM_END, 1u, 10002u, NULL, 0u) ==
+          TUI_STREAM_OK);
+    tui_stream_snapshot_t snapshot;
+    CHECK(tui_stream_get_snapshot(stream, &snapshot) == TUI_STREAM_OK);
+    CHECK(snapshot.retained_bytes <= 64u);
+    CHECK(snapshot.discarded_bytes > 30000u);
+    CHECK(snapshot.state == TUI_STREAM_DONE);
+    size_t length = 0u;
+    CHECK(tui_stream_text(stream, &length) != NULL && length <= 64u);
+    CHECK(tui_stream_destroy(stream) == TUI_STREAM_OK);
+    return 0;
+}
+
 int main(void) {
     if (test_fragmented_unicode_generation_and_cancel()) return 1;
     if (test_capacity_control_and_grapheme_eviction()) return 1;
     if (test_real_async_stream_to_tango_cells()) return 1;
     if (test_invalid_packet_owner_and_newline_tail()) return 1;
+    if (test_ten_thousand_chunks_bounded()) return 1;
     puts("Tango streaming tests passed");
     return 0;
 }
