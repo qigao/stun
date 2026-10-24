@@ -10,9 +10,16 @@
 #include "../widget.h"
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace flexUI {
+
+enum class MarkdownAppendStatus {
+    Appended,
+    NoChange,
+    CapacityExceeded
+};
 
 /**
  * MarkdownWidget - Markdown renderer
@@ -23,6 +30,7 @@ namespace flexUI {
 class MarkdownWidget : public Widget {
 public:
     static constexpr std::size_t kDefaultMaxRenderElements = 16384u;
+    static constexpr std::size_t kMaxMarkdownBytes = 1024u * 1024u;
     explicit MarkdownWidget(
         const std::string& markdown = "",
         std::size_t max_render_elements = kDefaultMaxRenderElements);
@@ -36,6 +44,11 @@ public:
     // Markdown access
     const std::string& markdown() const { return markdown_; }
     void set_markdown(const std::string& markdown);
+
+    // UI-owner-thread only. Appends copied source bytes without parsing now;
+    // multiple calls coalesce into one projection at the next update(). The
+    // source is bounded, and a capacity rejection leaves it unchanged.
+    MarkdownAppendStatus append_markdown(std::string_view delta);
 
 private:
     void rebuild_elements(Element& elem);

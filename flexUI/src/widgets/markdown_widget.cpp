@@ -26,7 +26,6 @@
 namespace flexUI {
 namespace {
 
-constexpr size_t kMaxMarkdownBytes = 1024u * 1024u;
 constexpr size_t kMaxMarkdownNodes = 16384u;
 // Renderer-only providers do not receive an unbounded source or unlimited
 // byte-range hints. Larger code blocks still display all C11-owned text.
@@ -491,6 +490,23 @@ void MarkdownWidget::set_markdown(const std::string& markdown) {
     if (markdown_ == markdown) return;
     markdown_ = markdown;
     needs_rebuild_ = true;
+}
+
+MarkdownAppendStatus MarkdownWidget::append_markdown(std::string_view delta) {
+    if (delta.empty()) return MarkdownAppendStatus::NoChange;
+
+    // The parser rejects sources at or above the same bound. Check before
+    // subtraction to avoid overflow and reject before mutating the source.
+    if (markdown_.size() >= kMaxMarkdownBytes ||
+        delta.size() >= kMaxMarkdownBytes - markdown_.size()) {
+        return MarkdownAppendStatus::CapacityExceeded;
+    }
+
+    // std::string::append has a strong exception guarantee: if allocation
+    // fails, both the accepted source and the published projection stay valid.
+    markdown_.append(delta.data(), delta.size());
+    needs_rebuild_ = true;
+    return MarkdownAppendStatus::Appended;
 }
 
 void MarkdownWidget::rebuild_elements(Element& elem) {
