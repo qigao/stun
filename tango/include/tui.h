@@ -23,6 +23,7 @@
 #include <stddef.h>
 
 #include "tui_async.h"
+#include "tui_stream.h"
 
 
 
