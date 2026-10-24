@@ -59,6 +59,8 @@ static tui_stream_status_t stream_append(tui_stream_t *stream,
     /* Work in the preallocated staging arena. Published text and any
      * incomplete UTF-8 bytes remain untouched until validation finishes. */
     const size_t combined = stream->partial_size + byte_count;
+    if (stream->length)
+        memcpy(stream->scratch, stream->text, stream->length);
     char *fresh = stream->scratch + stream->length;
     if (stream->partial_size)
         memcpy(fresh, stream->partial, stream->partial_size);
@@ -104,7 +106,8 @@ static tui_stream_status_t stream_append(tui_stream_t *stream,
         memmove(stream->text, stream->scratch + remove, retained);
     stream->text[retained] = '\0';
     stream->length = retained;
-    stream->discarded += remove;
+    stream->discarded = remove > SIZE_MAX - stream->discarded
+        ? SIZE_MAX : stream->discarded + remove;
     stream->partial_size = combined - complete;
     if (stream->partial_size)
         memcpy(stream->partial, fresh + complete, stream->partial_size);
