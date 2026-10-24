@@ -412,6 +412,73 @@ static int test_one_render_for_async_burst(void) {
     return 0;
 }
 
+/* Concurrent producers must settle before owner destruction. Close may
+ * overlap try_post, but accepted work is never silently discarded. */
+typedef struct racing_producer {
+    tui_async_queue_t *queue;
+    size_t accepted;
+    size_t closed;
+    size_t full;
+    bool invalid;
+} racing_producer_t;
+
+static void racing_post_worker(void *arg) {
+    racing_producer_t *ctx = (racing_producer_t *)arg;
+    for (uint32_t n = 0u; n < 100u; ++n) {
+        const tui_async_status_t status = tui_async_queue_post(
+            ctx->queue, 1u, 1u, &n, sizeof(n), NULL);
+        if (status == TUI_ASYNC_OK) ++ctx->accepted;
+        else if (status == TUI_ASYNC_CLOSED) ++ctx->closed;
+        else if (status == TUI_ASYNC_FULL) ++ctx->full;
+        else ctx->invalid = true;
+        if ((n % 11u) == 0u) cmeta_thread_yield();
+    }
+}
+
+static int test_concurrent_close_preserves_admission(void) {
+    const tui_async_queue_config_t config = {64u, sizeof(uint32_t)};
+    tui_async_queue_t *queue = tui_async_queue_create(&config);
+    CHECK(queue != NULL);
+    cmeta_thread_t threads[4] = {0};
+    racing_producer_t producers[4] = {{0}};
+    for (size_t i = 0u; i < 4u; ++i) {
+        producers[i].queue = queue;
+        CHECK(cmeta_thread_create(&threads[i], racing_post_worker,
+                                  &producers[i]) == 0);
+    }
+    cmeta_thread_yield();
+    CHECK(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+    for (size_t i = 0u; i < 4u; ++i) {
+        CHECK(cmeta_thread_join(&threads[i]) == 0);
+    }
+    size_t accepted = 0u, closed = 0u, full = 0u;
+    for (size_t i = 0u; i < 4u; ++i) {
+        CHECK(!producers[i].invalid);
+        CHECK(producers[i].accepted + producers[i].closed +
+              producers[i].full == 100u);
+        accepted += producers[i].accepted;
+        closed += producers[i].closed;
+        full += producers[i].full;
+    }
+    tui_async_queue_stats_t stats = {0};
+    CHECK(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+    CHECK(stats.closed && stats.queued == accepted);
+    CHECK(stats.accepted == accepted);
+    CHECK(stats.rejected_full == full);
+    CHECK(stats.rejected_closed == closed);
+    uint64_t last_sequence = 0u;
+    for (size_t i = 0u; i < accepted; ++i) {
+        tui_async_event_t event = {0};
+        uint32_t value = 0u;
+        CHECK(tui_async_queue_try_pop(queue, &event, &value,
+                                      sizeof(value)) == TUI_ASYNC_OK);
+        CHECK(event.sequence == last_sequence + 1u);
+        last_sequence = event.sequence;
+    }
+    CHECK(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
+    return 0;
+}
+
 int main(void) {
     if (test_fifo_capacity_and_close() != 0) return 1;
     if (test_concurrent_producers_and_owner_affinity() != 0) return 1;
@@ -419,6 +486,7 @@ int main(void) {
     if (test_native_input_and_wake_multiplex() != 0) return 1;
     if (test_owner_message_dispatch_batches() != 0) return 1;
     if (test_one_render_for_async_burst() != 0) return 1;
+    if (test_concurrent_close_preserves_admission() != 0) return 1;
     puts("Tango async mailbox tests passed");
     return 0;
 }
