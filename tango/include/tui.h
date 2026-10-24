@@ -22,6 +22,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "tui_async.h"
+#include "tui_stream.h"
+
 
 
 #ifdef __cplusplus
@@ -382,6 +385,12 @@ typedef bool (*tui_update_fn)(int msg, void* model);
 typedef void (*tui_view_fn)(const void* model, tui_buffer_t* buf);
 typedef int  (*tui_event_map_fn)(const tui_event_t* event);
 
+/* Called exclusively on the UI owner. Return false to stop the app.
+ * Producer threads must not mutate the model or touch terminal cells.
+ * The payload is a borrowed, bounded copy, valid only for this callback. */
+typedef bool (*tui_async_update_fn)(const tui_async_event_t* event,
+                                    const void* payload, void* model);
+
 typedef struct {
     void*               model;
     tui_update_fn       update;
@@ -389,11 +398,27 @@ typedef struct {
     tui_event_map_fn    event_map;
     tui_terminal_t*     terminal;
     bool                owns_terminal;
+    /* Internal application transport and one-owner dispatch state.
+     * Applications must use API functions, not mutate these fields. */
+    tui_async_queue_t*  async_queue;
+    unsigned char*      async_buffer;
+    size_t              async_capacity;
+    tui_async_update_fn async_update;
+    bool                running;
+    bool                needs_redraw;
 } tui_app_t;
 
 tui_app_t*      tui_app_create(void* model, tui_update_fn update, tui_view_fn view, tui_event_map_fn event_map);
+/* Destroy only on the UI owner, after all producers/post->wake tails join. */
 void            tui_app_destroy(tui_app_t* app);
 void            tui_app_run(tui_app_t* app);
+/* Register before starting producers. The returned queue is borrowed until
+ * producers have quiesced and tui_app_destroy returns. */
+bool            tui_app_set_async_update(tui_app_t* app, tui_async_update_fn update);
+tui_async_queue_t* tui_app_async_queue(tui_app_t* app);
+/* Owner-only bounded batch. All callbacks run on the owner and coalesce one
+ * redraw; useful for an externally hosted UI event loop and for tests. */
+size_t          tui_app_pump_messages(tui_app_t* app, size_t budget);
 
 /* Access */
 void*           tui_app_model(tui_app_t* app);

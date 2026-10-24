@@ -20,6 +20,8 @@ set(TUI_SOURCES
     src/tui_terminal.c
     src/tui_input.c
     src/tui_app.c
+    src/tui_async.c
+    src/tui_stream.c
     src/tui_widgets.c
     src/tui_layout.c
     src/tui_advanced.c 
@@ -37,7 +39,10 @@ endif()
 if(NOT TARGET Salts::Unicode)
     message(FATAL_ERROR "Tango requires the canonical installed Salts::Unicode target")
 endif()
-target_link_libraries(${TARGET_NAME} PUBLIC Salts::Unicode)
+if(NOT TARGET Salts::Platform)
+    message(FATAL_ERROR "Tango async mailbox requires the installed Salts::Platform target")
+endif()
+target_link_libraries(${TARGET_NAME} PUBLIC Salts::Unicode Salts::Platform)
 
 # tui_advanced.c uses sqrtf; static consumers need the math dependency.
 if(UNIX)
