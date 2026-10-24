@@ -31,7 +31,8 @@ static bool stream_owner(const tui_stream_t *stream) {
 tui_stream_t *tui_stream_create(uint64_t message_id, size_t text_capacity,
                                 size_t max_chunk_bytes) {
     if (!message_id || !text_capacity || !max_chunk_bytes ||
-        text_capacity > SIZE_MAX - max_chunk_bytes - 4u)
+        max_chunk_bytes > SIZE_MAX - 4u ||
+        text_capacity > SIZE_MAX - 4u - max_chunk_bytes)
         return NULL;
     tui_stream_t *stream = (tui_stream_t *)calloc(1u, sizeof(*stream));
     if (!stream) return NULL;
