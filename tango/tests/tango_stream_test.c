@@ -46,7 +46,7 @@ static int test_fragmented_unicode_generation_and_cancel(void) {
           TUI_STREAM_OK);
     CHECK(strcmp(tui_stream_text(stream, &bytes), "中") == 0 && bytes == 3u);
 
-    /* This emoji is four Unicode scalars but one displayed grapheme.
+    /* This emoji is three Unicode scalars but one displayed grapheme.
      * Split its UTF-8 bytes across several real delivery boundaries. */
     const char *emoji = "👩‍💻";
     const size_t emoji_len = strlen(emoji);
@@ -224,10 +224,91 @@ static int test_real_async_stream_to_tango_cells(void) {
     return 0;
 }
 
+typedef struct stream_wrong_owner {
+    tui_stream_t *stream;
+    tui_stream_status_t apply_status;
+    tui_stream_status_t destroy_status;
+    tui_stream_status_t snapshot_status;
+} stream_wrong_owner_t;
+
+static void stream_wrong_owner_worker(void *ctx) {
+    stream_wrong_owner_t *test = (stream_wrong_owner_t *)ctx;
+    unsigned char bytes[sizeof(tui_stream_packet_header_t)] = {0};
+    const tui_stream_packet_header_t header = {42u};
+    memcpy(bytes, &header, sizeof(header));
+    const tui_async_event_t event = {
+        TUI_STREAM_BEGIN, 1u, 1u, sizeof(header)
+    };
+    tui_stream_snapshot_t out = {0};
+    test->apply_status = tui_stream_apply(test->stream, &event, bytes);
+    test->snapshot_status = tui_stream_get_snapshot(test->stream, &out);
+    test->destroy_status = tui_stream_destroy(test->stream);
+}
+
+static int test_invalid_packet_owner_and_newline_tail(void) {
+    tui_stream_t *stream = tui_stream_create(42u, 128u, 48u);
+    CHECK(stream != NULL);
+    stream_wrong_owner_t wrong = {0};
+    wrong.stream = stream;
+    cmeta_thread_t thread = NULL;
+    CHECK(cmeta_thread_create(&thread, stream_wrong_owner_worker, &wrong) == 0);
+    CHECK(cmeta_thread_join(&thread) == 0);
+    CHECK(wrong.apply_status == TUI_STREAM_NOT_OWNER);
+    CHECK(wrong.snapshot_status == TUI_STREAM_NOT_OWNER);
+    CHECK(wrong.destroy_status == TUI_STREAM_NOT_OWNER);
+
+    CHECK(apply(stream, TUI_STREAM_BEGIN, 1u, 1u, NULL, 0u) ==
+          TUI_STREAM_OK);
+    const unsigned char malformed[] = {0xffu, 'a', 'b', 'c'};
+    CHECK(apply(stream, TUI_STREAM_CHUNK, 1u, 2u,
+                malformed, sizeof(malformed)) == TUI_STREAM_INVALID);
+    const unsigned char c1_control[] = {0xc2u, 0x85u};
+    CHECK(apply(stream, TUI_STREAM_CHUNK, 1u, 3u,
+                c1_control, sizeof(c1_control)) == TUI_STREAM_INVALID);
+    size_t bytes = 10u;
+    CHECK(strcmp(tui_stream_text(stream, &bytes), "") == 0 && bytes == 0u);
+
+    CHECK(apply(stream, TUI_STREAM_CHUNK, 1u, 4u,
+                "first\nsecond\nthird", strlen("first\nsecond\nthird")) ==
+          TUI_STREAM_OK);
+    CHECK(strcmp(tui_stream_tail(stream, 1u, &bytes), "third") == 0);
+    CHECK(bytes == strlen("third"));
+    CHECK(strcmp(tui_stream_tail(stream, 2u, &bytes), "second\nthird") == 0);
+    CHECK(strcmp(tui_stream_tail(stream, 3u, &bytes),
+                 "first\nsecond\nthird") == 0);
+
+    const tui_async_event_t mismatch = {
+        TUI_STREAM_CHUNK, 1u, 5u, sizeof(tui_stream_packet_header_t)
+    };
+    tui_stream_packet_header_t other = {99u};
+    CHECK(tui_stream_apply(stream, &mismatch, &other) ==
+          TUI_STREAM_WRONG_MESSAGE);
+    CHECK(apply(stream, TUI_STREAM_END, 1u, 6u, NULL, 0u) ==
+          TUI_STREAM_OK);
+    CHECK(tui_stream_destroy(stream) == TUI_STREAM_OK);
+
+    tui_stream_t *clusters = tui_stream_create(42u, 3u, 8u);
+    CHECK(clusters != NULL);
+    CHECK(apply(clusters, TUI_STREAM_BEGIN, 1u, 1u, NULL, 0u) ==
+          TUI_STREAM_OK);
+    CHECK(apply(clusters, TUI_STREAM_CHUNK, 1u, 2u, "e", 1u) ==
+          TUI_STREAM_OK);
+    const unsigned char combining[] = {0xccu,0x81u};
+    CHECK(apply(clusters, TUI_STREAM_CHUNK, 1u, 3u,
+                combining, sizeof(combining)) == TUI_STREAM_OK);
+    CHECK(strcmp(tui_stream_text(clusters, &bytes), "é") == 0);
+    CHECK(apply(clusters, TUI_STREAM_CHUNK, 1u, 4u, "A", 1u) ==
+          TUI_STREAM_OK);
+    CHECK(strcmp(tui_stream_text(clusters, &bytes), "A") == 0);
+    CHECK(tui_stream_destroy(clusters) == TUI_STREAM_OK);
+    return 0;
+}
+
 int main(void) {
     if (test_fragmented_unicode_generation_and_cancel()) return 1;
     if (test_capacity_control_and_grapheme_eviction()) return 1;
     if (test_real_async_stream_to_tango_cells()) return 1;
+    if (test_invalid_packet_owner_and_newline_tail()) return 1;
     puts("Tango streaming tests passed");
     return 0;
 }
