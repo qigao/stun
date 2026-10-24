@@ -4,4 +4,5 @@ target_include_directories(tango_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 add_test(NAME tango_core_test COMMAND tango_core_test)
 add_executable(tango_async_queue_test tango_async_queue_test.c)
 target_link_libraries(tango_async_queue_test PRIVATE tango Salts::Platform)
+target_include_directories(tango_async_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 add_test(NAME tango_async_queue_test COMMAND tango_async_queue_test)
