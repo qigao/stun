@@ -1,4 +1,15 @@
 #include "tui_async.h"
+#include "tui.h"
+#include "tui_async_wait_internal.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#define NO_INPUT_HANDLE ((intptr_t)0)
+#else
+#include <unistd.h>
+#define NO_INPUT_HANDLE ((intptr_t)-1)
+#endif
+
 
 #include <salts/thread.h>
 
@@ -191,9 +202,156 @@ static int test_concurrent_producers_and_owner_affinity(void) {
     return 0;
 }
 
+/* A wake is a kernel notification, not an additional application queue. */
+typedef struct delayed_post {
+    tui_async_queue_t *queue;
+    uint32_t delay_ms;
+    tui_async_status_t result;
+} delayed_post_t;
+
+static void delayed_post_worker(void *arg) {
+    delayed_post_t *ctx = (delayed_post_t *)arg;
+    cmeta_sleep_ms(ctx->delay_ms);
+    const uint32_t payload = 0x12345678u;
+    ctx->result = tui_async_queue_post(ctx->queue, TEST_EVENT_TEXT, 4u,
+                                       &payload, sizeof(payload), NULL);
+}
+
+static void delayed_close_worker(void *arg) {
+    delayed_post_t *ctx = (delayed_post_t *)arg;
+    cmeta_sleep_ms(ctx->delay_ms);
+    ctx->result = tui_async_queue_close(ctx->queue);
+}
+
+static int test_real_kernel_wake_and_close(void) {
+    const tui_async_queue_config_t config = {8u, 16u};
+    tui_async_queue_t *queue = tui_async_queue_create(&config);
+    tui_async_event_t event = {0};
+    uint32_t payload = 0u;
+    cmeta_thread_t thread = NULL;
+    delayed_post_t producer = {queue, 5u, TUI_ASYNC_INVALID_ARGUMENT};
+    CHECK(queue != NULL);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 0) ==
+          TUI_ASYNC_WAIT_TIMEOUT);
+
+    CHECK(cmeta_thread_create(&thread, delayed_post_worker, &producer) == 0);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 1000) ==
+          TUI_ASYNC_WAIT_MESSAGE);
+    CHECK(cmeta_thread_join(&thread) == 0);
+    CHECK(producer.result == TUI_ASYNC_OK);
+    CHECK(tui_async_queue_try_pop(queue, &event, &payload, sizeof(payload)) ==
+          TUI_ASYNC_OK);
+    CHECK(event.sequence == 1u && payload == 0x12345678u);
+
+    /* Producer commits while the owner has not yet entered kernel wait. */
+    producer.delay_ms = 0u;
+    CHECK(cmeta_thread_create(&thread, delayed_post_worker, &producer) == 0);
+    CHECK(cmeta_thread_join(&thread) == 0);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 0) ==
+          TUI_ASYNC_WAIT_MESSAGE);
+    CHECK(tui_async_queue_try_pop(queue, &event, &payload, sizeof(payload)) ==
+          TUI_ASYNC_OK);
+
+    /* A closing producer must also wake a completely idle owner. */
+    delayed_post_t closer = {queue, 5u, TUI_ASYNC_INVALID_ARGUMENT};
+    CHECK(cmeta_thread_create(&thread, delayed_close_worker, &closer) == 0);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 1000) ==
+          TUI_ASYNC_WAIT_MESSAGE);
+    CHECK(cmeta_thread_join(&thread) == 0);
+    CHECK(closer.result == TUI_ASYNC_OK);
+    CHECK(tui_async_queue_post(queue, TEST_EVENT_TEXT, 4u,
+                               &payload, sizeof(payload), NULL) ==
+          TUI_ASYNC_CLOSED);
+    CHECK(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
+    return 0;
+}
+
+static int test_native_input_and_wake_multiplex(void) {
+    const tui_async_queue_config_t config = {2u, 8u};
+    tui_async_queue_t *queue = tui_async_queue_create(&config);
+    CHECK(queue != NULL);
+#ifdef _WIN32
+    HANDLE input = CreateEventW(NULL, TRUE, FALSE, NULL);
+    CHECK(input != NULL);
+    CHECK(SetEvent(input));
+    CHECK(tui_async_wait_io(queue, (intptr_t)input, 1000) ==
+          TUI_ASYNC_WAIT_INPUT);
+    CHECK(ResetEvent(input));
+    CHECK(CloseHandle(input));
+#else
+    int input[2];
+    CHECK(pipe(input) == 0);
+    const unsigned char byte = 'x';
+    CHECK(write(input[1], &byte, 1u) == 1);
+    CHECK(tui_async_wait_io(queue, (intptr_t)input[0], 1000) ==
+          TUI_ASYNC_WAIT_INPUT);
+    unsigned char read_byte = 0u;
+    CHECK(read(input[0], &read_byte, 1u) == 1 && read_byte == byte);
+    CHECK(close(input[0]) == 0);
+    CHECK(close(input[1]) == 0);
+#endif
+    CHECK(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+    CHECK(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
+    return 0;
+}
+
+typedef struct app_model {
+    size_t updates;
+    uint32_t last;
+} app_model_t;
+
+static bool app_keyboard(int msg, void *model) {
+    (void)msg;
+    (void)model;
+    return true;
+}
+static void app_view(const void *model, tui_buffer_t *buffer) {
+    (void)model;
+    (void)buffer;
+}
+static int app_map(const tui_event_t *event) {
+    (void)event;
+    return -1;
+}
+static bool app_async_update(const tui_async_event_t *event,
+                             const void *payload, void *model) {
+    app_model_t *app = (app_model_t *)model;
+    uint32_t value = 0u;
+    if (event->payload_size != sizeof(value)) return false;
+    memcpy(&value, payload, sizeof(value));
+    app->updates++;
+    app->last = value;
+    return true;
+}
+
+static int test_owner_message_dispatch_batches(void) {
+    app_model_t model = {0};
+    tui_app_t *app = tui_app_create(&model, app_keyboard, app_view, app_map);
+    CHECK(app != NULL);
+    CHECK(tui_app_set_async_update(app, app_async_update));
+    tui_async_queue_t *queue = tui_app_async_queue(app);
+    CHECK(queue != NULL);
+    app->needs_redraw = false;
+    for (uint32_t i = 1u; i <= 5u; ++i) {
+        CHECK(tui_async_queue_post(queue, TEST_EVENT_TEXT, 2u,
+                    &i, sizeof(i), NULL) == TUI_ASYNC_OK);
+    }
+    CHECK(tui_app_pump_messages(app, 3u) == 3u);
+    CHECK(model.updates == 3u && model.last == 3u);
+    CHECK(app->needs_redraw);
+    CHECK(tui_app_pump_messages(app, 32u) == 2u);
+    CHECK(model.updates == 5u && model.last == 5u);
+    CHECK(tui_app_pump_messages(app, 32u) == 0u);
+    tui_app_destroy(app);
+    return 0;
+}
+
 int main(void) {
     if (test_fifo_capacity_and_close() != 0) return 1;
     if (test_concurrent_producers_and_owner_affinity() != 0) return 1;
+    if (test_real_kernel_wake_and_close() != 0) return 1;
+    if (test_native_input_and_wake_multiplex() != 0) return 1;
+    if (test_owner_message_dispatch_batches() != 0) return 1;
     puts("Tango async mailbox tests passed");
     return 0;
 }
