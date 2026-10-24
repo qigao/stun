@@ -127,7 +127,7 @@ bool tui_app_dispatch_once(tui_app_t *app) {
         }
     }
     (void)tui_app_pump_messages(app, TUI_APP_MESSAGE_BUDGET);
-    if (!app->running) break;
+    if (!app->running) return false;
 
     /* Exactly one render for this batch of input + async updates. */
     if (app->needs_redraw) {
@@ -135,7 +135,7 @@ bool tui_app_dispatch_once(tui_app_t *app) {
         app->view(app->model, back);
         if (!tui_terminal_render(app->terminal)) {
             app->running = false;
-            break;
+            return false;
         }
         app->needs_redraw = false;
     }
