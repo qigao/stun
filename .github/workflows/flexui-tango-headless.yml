@@ -99,7 +99,7 @@ jobs:
             ' "$RUNNER_TEMP/flexui-tango-index.json")"
           fetch_package() {
             local name="$1" version="${2#v}"
-            version="${version,,}"
+            version="$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')"
             [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
             local archive="$PACKAGES_ROOT/$name/$version/$name.$version.nupkg"
             mkdir -p "$(dirname "$archive")"
