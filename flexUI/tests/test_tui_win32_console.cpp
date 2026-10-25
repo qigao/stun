@@ -18,6 +18,10 @@ struct ConsoleTest {
     bool attached = false;
     std::string last_phase = "setup";
     std::wstring last_screen;
+    std::string last_status;
+    unsigned last_count = 0;
+    bool last_tail = false, last_history = false;
+    int last_width = 0, last_height = 0;
 
     ~ConsoleTest() {
         if (child.hProcess) {
@@ -128,6 +132,10 @@ struct ConsoleTest {
                             text.substr(pos, text.find(L'\n', pos) - pos);
                         (void)swscanf(status.c_str(), L"Retained %u/12",
                                       &s.count);
+                        last_status.clear();
+                        for (wchar_t ch : status)
+                            last_status.push_back(ch >= 32 && ch <= 126 ?
+                                                  static_cast<char>(ch) : '?');
                         const std::wstring dims = L" | " +
                             std::to_wstring(s.width) + L"x" +
                             std::to_wstring(s.height) + L" | ";
@@ -140,6 +148,11 @@ struct ConsoleTest {
                 }
             }
         }
+        last_count = s.count;
+        last_tail = s.tail;
+        last_history = s.history;
+        last_width = s.width;
+        last_height = s.height;
         CloseHandle(h);
         return s;
     }
@@ -260,9 +273,12 @@ int main(int argc, char** argv) {
         const DWORD error = GetLastError();
         std::fprintf(stderr,
             "Win32 Console PTY-equivalent gate FAILED at '%s', OS=%lu, "
-            "last frame UTF-16 cells=%zu\n",
+            "last frame UTF-16 cells=%zu; status='%s'; "
+            "count=%u tail=%d scrollback=%d geometry=%dx%d\n",
             test.last_phase.c_str(), static_cast<unsigned long>(error),
-            test.last_screen.size());
+            test.last_screen.size(), test.last_status.c_str(),
+            test.last_count, test.last_tail ? 1 : 0,
+            test.last_history ? 1 : 0, test.last_width, test.last_height);
         return 4;
     }
     std::puts("real Win32 Console chat passed: KEY_EVENT Home/End, "
