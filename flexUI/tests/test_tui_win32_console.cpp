@@ -108,20 +108,30 @@ struct ConsoleTest {
             s.height = info.srWindow.Bottom - info.srWindow.Top + 1;
             if (s.width > 0 && s.width <= 256 &&
                 s.height > 0 && s.height <= 120) {
-                wchar_t line[256];
+                // Observe the whole rectangle in one OS call. Thirty
+                // separate per-row probes every 25ms can contend with native
+                // console output and change the behavior under test.
+                const COORD dims{static_cast<SHORT>(s.width),
+                                 static_cast<SHORT>(s.height)};
+                const COORD origin{0, 0};
+                SMALL_RECT rect = info.srWindow;
+                std::vector<CHAR_INFO> cells(
+                    static_cast<size_t>(s.width) *
+                    static_cast<size_t>(s.height));
+                s.ok = ReadConsoleOutputW(h, cells.data(), dims, origin,
+                                          &rect) != FALSE;
                 std::wstring text;
-                s.ok = true;
-                for (SHORT y = info.srWindow.Top; y <= info.srWindow.Bottom; ++y) {
-                    DWORD read = 0;
-                    COORD p{info.srWindow.Left, y};
-                    if (!ReadConsoleOutputCharacterW(
-                            h, line, static_cast<DWORD>(s.width), p, &read) ||
-                        read != static_cast<DWORD>(s.width)) {
-                        s.ok = false;
-                        break;
+                if (s.ok) {
+                    for (int y = 0; y < s.height; ++y) {
+                        for (int x = 0; x < s.width; ++x) {
+                            const auto ch = cells[
+                                static_cast<size_t>(y) *
+                                static_cast<size_t>(s.width) +
+                                static_cast<size_t>(x)].Char.UnicodeChar;
+                            text.push_back(ch ? ch : L' ');
+                        }
+                        text.push_back(L'\n');
                     }
-                    text.append(line, read);
-                    text.push_back(L'\n');
                 }
                 if (s.ok) {
                     last_screen = text;
@@ -166,7 +176,7 @@ struct ConsoleTest {
             if (s.ok && predicate(s)) return true;
             if (WaitForSingleObject(child.hProcess, 0) != WAIT_TIMEOUT)
                 return false;
-            Sleep(25);
+            Sleep(80);
         }
         return false;
     }
@@ -241,7 +251,7 @@ struct ConsoleTest {
         if (!send_key(VK_END) ||
             !await("END INPUT_RECORD makes visible tail", 6000,
                    [](const Screen& s) {return s.tail;})) return false;
-        if (!await(">= 6 actual rendered messages before wheel", 16000,
+        if (!await(">= 6 actual rendered messages before wheel", 22000,
                    [](const Screen& s) {return s.tail && s.count >= 6;}))
             return false;
         if (!send_wheel() ||
