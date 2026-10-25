@@ -374,9 +374,10 @@ public:
     }
     bool run_probe(const char* executable) {
         if (!setup(executable, true)) return false;
-        if (!await("independent ConPTY child output", 6000,
+        if (!await("independent ConPTY console and raw file output", 6000,
             [](const Screen& s) {
-                return s.contains("STUN_CONPTY_HOST_PROBE");
+                return s.contains("STUN_CONPTY_HOST_PROBE") &&
+                       s.contains("STUN_CONPTY_FILE_PROBE");
             }, true)) return false;
         if (WaitForSingleObject(process_.hProcess, 2000) != WAIT_OBJECT_0)
             return false;
@@ -421,11 +422,23 @@ int main(int argc, char** argv) {
         DWORD mode = 0;
         if (!output || output == INVALID_HANDLE_VALUE ||
             !GetConsoleMode(output, &mode)) return 21;
+        CONSOLE_SCREEN_BUFFER_INFO info{};
+        if (!GetConsoleScreenBufferInfo(output, &info)) return 23;
+        const int width = info.srWindow.Right - info.srWindow.Left + 1;
+        const int height = info.srWindow.Bottom - info.srWindow.Top + 1;
+        // This is the host-requested ConPTY size. An inherited CI console
+        // could accept WriteConsoleA while silently bypassing our pipe.
+        if (width != 80 || height != 24) return 24;
         static constexpr char marker[] = "STUN_CONPTY_HOST_PROBE\r\n";
         DWORD n = 0;
         if (!WriteConsoleA(output, marker, sizeof(marker) - 1u,
                            &n, nullptr) || n != sizeof(marker) - 1u)
             return 22;
+        static constexpr char raw[] = "STUN_CONPTY_FILE_PROBE\r\n";
+        n = 0;
+        if (!WriteFile(output, raw, sizeof(raw) - 1u,
+                       &n, nullptr) || n != sizeof(raw) - 1u)
+            return 25;
         return 0;
     }
     if (argc == 2 && std::strcmp(argv[1], "--selftest") == 0) {
