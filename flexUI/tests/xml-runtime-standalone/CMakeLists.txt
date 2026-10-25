@@ -102,8 +102,9 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
   # The separate native POSIX PTY gate runs the *ordinary* interactive
   # tui_app_run() branch: actual termios, kernel tty input, SIGWINCH and
   # alternate-screen/keyboard restoration. The synthetic smoke above does
-  # not substitute for this test. Start with Linux installed-SDK ASan/UBSan.
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # not substitute for this test. Run on POSIX Linux and macOS; Windows
+  # keeps the independent synthetic TUI + native Console acceptance gates.
+  if(UNIX)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_test(NAME tui_streaming_demo_posix_pty
       COMMAND "${Python3_EXECUTABLE}"

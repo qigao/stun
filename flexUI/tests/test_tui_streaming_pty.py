@@ -94,7 +94,9 @@ def run_test(executable):
             preexec_fn=make_controlling_terminal,
             close_fds=True,
             env={**os.environ, "TERM": "xterm-256color",
-                 "COLORTERM": "truecolor", "LC_ALL": "C.UTF-8"})
+                 "COLORTERM": "truecolor",
+                 "LC_ALL": ("en_US.UTF-8" if sys.platform == "darwin"
+                            else "C.UTF-8")})
 
         until("alternate screen and raw terminal entry",
               lambda: b"\x1b[?1049h" in output and

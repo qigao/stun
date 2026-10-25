@@ -275,7 +275,7 @@ jobs:
           cmake --build build/flexui-tango-cross --config Debug \
             --target test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo --parallel 2
 
-      - name: Run two independent native Streaming conformance tests
+      - name: Run native Markdown, Streaming, demo and POSIX PTY conformance
         shell: bash
         run: |
           set -euo pipefail
@@ -286,7 +286,7 @@ jobs:
           fi
           ctest --test-dir build/flexui-tango-cross -C Debug \
             --no-tests=error --output-on-failure --timeout 120 \
-            -R "^(test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_smoke)"
+            -R "^(test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty))"
 
       - name: Preserve exact-head cross-platform test evidence
         if: always()
