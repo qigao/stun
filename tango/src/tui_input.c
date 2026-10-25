@@ -129,7 +129,7 @@ bool tui_terminal_input_record(tui_terminal_t* term,
     }
     
     if (record->EventType == MOUSE_EVENT && term->mouse_enabled) {
-        MOUSE_EVENT_RECORD* me = &record->Event.MouseEvent;
+        const MOUSE_EVENT_RECORD* me = &record->Event.MouseEvent;
         event->x = me->dwMousePosition.X;
         event->y = me->dwMousePosition.Y;
         
