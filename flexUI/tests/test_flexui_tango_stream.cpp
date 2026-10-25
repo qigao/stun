@@ -10,6 +10,7 @@
 #include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/stream_scroll_follow.h>
 #include <tui.h>
+#include <tui_transcript.h>
 #include "tui_async_wait_internal.h"
 #include "tui_app_internal.h"
 #include "tui_terminal_internal.h"
@@ -136,13 +137,13 @@ bool owner_async_update(const tui_async_event_t* event,
 
 struct MultiStreamSlot {
     uint64_t message_id = 0u;
-    tui_stream_t* stream = nullptr;        // UI-owner lifetime
     flexUI::Element* host = nullptr;       // borrowed from Box, stable ID
     flexUI::MarkdownWidget* markdown = nullptr;
     bool dirty = false;
 };
 
 struct MultiStreamOwner {
+    tui_transcript_t* transcript = nullptr; // owner-only C11 registry
     std::array<MultiStreamSlot, 2u> slots{};
     flexUI::Box* box = nullptr;
     flexUI::Element* viewport = nullptr;
@@ -156,25 +157,33 @@ struct MultiStreamOwner {
 bool multi_stream_update(const tui_async_event_t* event,
                          const void* payload, void* context) {
     auto* owner = static_cast<MultiStreamOwner*>(context);
-    if (!owner || !event || !payload ||
+    if (!owner || !owner->transcript || !event || !payload ||
         event->payload_size < sizeof(tui_stream_packet_header_t)) {
         if (owner) owner->ok = false;
         return false;
     }
+
+    // C11 registry validates message identity, generation, ordering, bytes
+    // and terminal states. The C++ owner adapts only accepted UI deltas.
+    const auto result = tui_transcript_apply(
+        owner->transcript, event, payload, nullptr);
+    if (result == TUI_TRANSCRIPT_STALE) {
+        ++owner->stale;
+        return true;
+    }
+    if (result == TUI_TRANSCRIPT_UNKNOWN) {
+        ++owner->unknown;
+        return true;
+    }
+    if (result != TUI_TRANSCRIPT_OK) {
+        owner->ok = false;
+        return false;
+    }
+    ++owner->accepted;
     tui_stream_packet_header_t header{};
     std::memcpy(&header, payload, sizeof(header));
     for (auto& slot : owner->slots) {
         if (slot.message_id != header.message_id) continue;
-        const auto status = tui_stream_apply(slot.stream, event, payload);
-        if (status == TUI_STREAM_STALE) {
-            ++owner->stale;
-            return true;
-        }
-        if (status != TUI_STREAM_OK) {
-            owner->ok = false;
-            return false;
-        }
-        ++owner->accepted;
         if (event->type == TUI_STREAM_BEGIN) {
             slot.markdown->set_markdown("");
             slot.dirty = true;
@@ -192,10 +201,8 @@ bool multi_stream_update(const tui_async_event_t* event,
         }
         return true;
     }
-    // Bounded owner registry: an unknown message never creates a widget or
-    // stream implicitly and must not modify any known message.
-    ++owner->unknown;
-    return true;
+    owner->ok = false; // model ID without any widget mapping
+    return false;
 }
 
 void multi_stream_view(const void* context, tui_buffer_t*) {
@@ -654,29 +661,33 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         const auto handle41 = box.handle_for(*msg41);
         const auto handle42 = box.handle_for(*msg42);
 
-        tui_stream_t* stream41 = tui_stream_create(41u, 4096u, 32u);
-        tui_stream_t* stream42 = tui_stream_create(42u, 4096u, 32u);
-        check(stream41 && stream42);
-        if (!stream41 || !stream42) {
-            if (stream41) check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
-            if (stream42) check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
-            return;
-        }
+        tui_transcript_t* transcript = tui_transcript_create(
+            2u, 4096u, 32u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        uint64_t evicted = 999u;
+        check(tui_transcript_open(transcript, 41u, &evicted) ==
+              TUI_TRANSCRIPT_OK);
+        check(evicted == 0u);
+        check(tui_transcript_open(transcript, 42u, &evicted) ==
+              TUI_TRANSCRIPT_OK);
+        check(tui_transcript_count(transcript) == 2u);
         MultiStreamOwner owner{};
+        owner.transcript = transcript;
         owner.box = &box;
         owner.viewport = transcript;
         owner.slots[0] = {
-            41u, stream41, msg41,
+            41u, msg41,
             static_cast<flexUI::MarkdownWidget*>(msg41->widget), false};
         owner.slots[1] = {
-            42u, stream42, msg42,
+            42u, msg42,
             static_cast<flexUI::MarkdownWidget*>(msg42->widget), false};
         auto* app = tui_app_create(&owner, keyboard_noop,
                                    multi_stream_view, input_noop);
         check(app != nullptr);
         if (!app) {
-            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
-            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            
             return;
         }
         auto* term = tui_app_terminal(app);
@@ -687,8 +698,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(term->front && term->back);
         if (!term->front || !term->back) {
             tui_app_destroy(app);
-            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
-            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            
             return;
         }
         term->initialized = true;
@@ -700,8 +711,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         if (!queue) {
             term->initialized = false;
             tui_app_destroy(app);
-            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
-            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            
             return;
         }
         app->needs_redraw = false;
@@ -733,8 +744,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             transcript->max_scroll_y() <= 20.0f) {
             term->initialized = false;
             tui_app_destroy(app);
-            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
-            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            
             return;
         }
 
@@ -792,18 +803,28 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
 
         // Both native stream snapshots are independently settled despite
         // sharing one global mailbox with interleaved sequence numbers.
-        tui_stream_snapshot_t snap41{}, snap42{};
-        check(tui_stream_get_snapshot(stream41, &snap41) == TUI_STREAM_OK);
-        check(tui_stream_get_snapshot(stream42, &snap42) == TUI_STREAM_OK);
-        check(snap41.message_id == 41u && snap41.generation == 2u &&
-              snap41.state == TUI_STREAM_DONE);
-        check(snap42.message_id == 42u && snap42.generation == 2u &&
-              snap42.state == TUI_STREAM_DONE);
+        tui_transcript_message_t snap41{}, snap42{};
+        check(tui_transcript_get(transcript, 41u, &snap41) ==
+              TUI_TRANSCRIPT_OK);
+        check(tui_transcript_get(transcript, 42u, &snap42) ==
+              TUI_TRANSCRIPT_OK);
+        check(snap41.message_id == 41u &&
+              snap41.stream.generation == 2u &&
+              snap41.stream.state == TUI_STREAM_DONE);
+        check(snap42.message_id == 42u &&
+              snap42.stream.generation == 2u &&
+              snap42.stream.state == TUI_STREAM_DONE);
+        tui_transcript_message_t visible[2]{};
+        size_t visible_count = 99u;
+        check(tui_transcript_window(transcript, 0u, 2u, visible, 2u,
+                                    &visible_count) == TUI_TRANSCRIPT_OK);
+        check(visible_count == 2u && visible[0].message_id == 41u &&
+              visible[1].message_id == 42u);
         check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
         term->initialized = false; // synthetic sink has no terminal mode
         tui_app_destroy(app);
-        check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
-        check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+        
     }
 
     it("retires intermediate Markdown projections during repeated owner updates") {
