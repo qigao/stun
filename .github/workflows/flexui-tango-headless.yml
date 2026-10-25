@@ -77,6 +77,8 @@ jobs:
           $exe = Join-Path $env:RUNNER_TEMP 'stun-conpty-transport.exe'
           & cl.exe /nologo /std:c++17 /EHsc "/Fe:$exe" "flexUI/tests/test_tui_win32_conpty.cpp"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $exe --oracle-selftest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $exe --selftest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

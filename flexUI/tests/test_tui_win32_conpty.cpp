@@ -35,13 +35,27 @@ class Screen {
         x_ = y_ = 0;
     }
 
+    void newline() {
+        if (y_ + 1 < rows_) {
+            ++y_;
+        } else {
+            // VT LF on the bottom line scrolls the visible region.
+            cells_.erase(cells_.begin());
+            cells_.push_back(std::string(static_cast<size_t>(cols_), ' '));
+        }
+    }
+
     void put(char ch, int width = 1) {
         if (x_ >= cols_) {
             x_ = 0;
-            y_ = std::min(rows_ - 1, y_ + 1);
+            newline();
         }
-        if (x_ >= 0 && y_ >= 0 && y_ < rows_ && x_ < cols_)
-            cells_[static_cast<size_t>(y_)][static_cast<size_t>(x_)] = ch;
+        if (x_ >= 0 && y_ >= 0 && y_ < rows_ && x_ < cols_) {
+            auto& line = cells_[static_cast<size_t>(y_)];
+            line[static_cast<size_t>(x_)] = ch;
+            if (width == 2 && x_ + 1 < cols_)
+                line[static_cast<size_t>(x_ + 1)] = ' ';
+        }
         x_ += width;
     }
 
@@ -84,7 +98,20 @@ class Screen {
         } else if (code == 'D') {
             x_ = std::max(0, x_ - number(0));
         } else if (code == 'J' && (csi_ == "2" || csi_ == "3")) {
-            clear();
+            // ED erases cells; unlike alternate-screen entry it does NOT
+            // home the cursor. ConPTY often emits ED around reflows.
+            for (auto& line : cells_)
+                line.assign(static_cast<size_t>(cols_), ' ');
+        } else if (code == 'X') {
+            // ECH: erase N cells at cursor without moving it. ConPTY
+            // normalizes native WriteConsole output into CSI n X runs.
+            if (y_ >= 0 && y_ < rows_ && x_ >= 0 && x_ < cols_) {
+                const int count = std::min(number(0), cols_ - x_);
+                if (count > 0)
+                    cells_[static_cast<size_t>(y_)].replace(
+                        static_cast<size_t>(x_), static_cast<size_t>(count),
+                        static_cast<size_t>(count), ' ');
+            }
         } else if (code == 'K') {
             int first = 0, last = cols_;
             if (csi_ == "1") last = std::min(cols_, x_ + 1);
@@ -158,7 +185,7 @@ public:
                 } else if (b == '\r') {
                     x_ = 0;
                 } else if (b == '\n') {
-                    y_ = std::min(rows_ - 1, y_ + 1);
+                    newline();
                     x_ = 0;
                 } else if (b == '\b') {
                     x_ = std::max(0, x_ - 1);
@@ -482,6 +509,23 @@ public:
 
 } // namespace
 int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1], "--oracle-selftest") == 0) {
+        Screen screen;
+        auto feed = [&](const std::string& bytes) {
+            screen.feed(bytes.data(), bytes.size());
+        };
+        feed("\x1b[?1049h\x1b[1;1HOLD-BROKEN-HEADER");
+        feed("\x1b[1;1H\x1b[32X\x1b[1;1HFlexUI + Tango");
+        feed("\x1b[24;1HRetained 6/12 | tail | 80x24 |");
+        if (!screen.header() || !screen.mode("tail", 80, 24) ||
+            screen.count() != 6u) return 31;
+        screen.resize(52, 16);
+        feed("\x1b[16;1H\x1b[52X\x1b[16;1HRetained 6/12 | tail | 52x16 |");
+        if (!screen.header() || !screen.mode("tail", 52, 16) ||
+            screen.count() != 6u) return 32;
+        std::puts("Windows ConPTY VT ECH and resize oracle passed");
+        return 0;
+    }
     if (argc == 3 && std::strcmp(argv[1], "--probe-child") == 0) {
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
         DWORD mode = 0;
