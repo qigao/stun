@@ -184,7 +184,7 @@ jobs:
             vcpkg_root="$(cygpath -m "$VCPKG_ROOT")"
             deps_root="$(cygpath -m "$deps_root")"
           fi
-          compiler_args=()
+          compiler_args=(-DCMAKE_C_COMPILER=cc -DCMAKE_CXX_COMPILER=c++)
           if [[ "$RUNNER_OS" == Windows ]]; then
             compiler_args=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
           fi
@@ -209,7 +209,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          compiler_args=()
+          compiler_args=(-DCMAKE_C_COMPILER=cc -DCMAKE_CXX_COMPILER=c++)
           if [[ "$RUNNER_OS" == Windows ]]; then
             compiler_args=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
           fi
@@ -249,7 +249,7 @@ jobs:
           deps_root="$(native_path "$RUNNER_TEMP/flexui-tango-xml-deps")"
           re2c="$(native_path "$RE2C_TOOL")"
           export SALTS_ROOT="$prefix"
-          compiler_args=()
+          compiler_args=(-DCMAKE_C_COMPILER=cc -DCMAKE_CXX_COMPILER=c++)
           if [[ "$RUNNER_OS" == Windows ]]; then
             compiler_args=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
           fi
