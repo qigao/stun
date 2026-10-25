@@ -1,4 +1,5 @@
 #include "backends/tui/init.h"
+#include <salts_unicode.h>
 
 #include <algorithm>
 #include <cmath>
@@ -226,9 +227,64 @@ public:
 
     void draw_text(const std::string& text, float x, float y,
                    const std::string&, float, bool, const Color& color) override {
-        const int col = px_to_col(x + tx_);
-        const int row = px_to_row(y + ty_);
-        tui_buffer_text(buf_, col, row, text.c_str(), to_color(color), TUI_BLACK);
+        if (!buf_ || text.empty() || clip_.w <= 0.0f || clip_.h <= 0.0f)
+            return;
+
+        // Text is emitted as whole terminal cells. A scrolled Markdown
+        // child must not paint outside its parent's clip and overwrite the
+        // fixed header or footer. Reject partial-height rows and partial
+        // double-width graphemes rather than leaking into adjacent cells.
+        const int row = px_to_row_floor(y + ty_);
+        const int top = std::max(0, px_to_row_ceil(clip_.y));
+        const int bottom = std::min(buf_->height,
+            px_to_row_floor(clip_.y + clip_.h));
+        if (row < top || row >= bottom) return;
+
+        const int left = std::max(0, px_to_col_ceil(clip_.x));
+        const int right = std::min(buf_->width,
+            px_to_col_floor(clip_.x + clip_.w));
+        if (left >= right) return;
+
+        const int start_col = px_to_col_floor(x + tx_);
+        const tui_color_t fg = to_color(color);
+        // Common fully visible labels can use Tango's already-validated
+        // grapheme writer unchanged. UTF-8 bytes upper-bound cell width.
+        if (start_col >= left && start_col < right &&
+            text.size() <= static_cast<size_t>(right - start_col)) {
+            (void)tui_buffer_text(buf_, start_col, row, text.c_str(),
+                                  fg, TUI_BLACK);
+            return;
+        }
+
+        const vstr input = vstr_from_buf(text.data(), text.size());
+        size_t offset = 0u;
+        vstr cluster;
+        // Failure atomicity: validate all graphemes and Tango widths before
+        // publishing any clipped cell. Do not introduce a second UTF-8
+        // parser or invent an alternate glyph-width policy.
+        while (offset < input.len) {
+            if (salts_unicode_grapheme_next(input, &offset, &cluster) !=
+                    SALTS_UNICODE_OK ||
+                cluster.len > TUI_CELL_GRAPHEME_CAPACITY ||
+                tui_grapheme_width(cluster.data, cluster.len) < 0)
+                return;
+        }
+
+        int64_t col = start_col;
+        offset = 0u;
+        while (offset < input.len && col < right) {
+            if (salts_unicode_grapheme_next(input, &offset, &cluster) !=
+                    SALTS_UNICODE_OK) return;
+            const int width = tui_grapheme_width(cluster.data, cluster.len);
+            if (width <= 0) continue;
+            if (col >= left && col + width <= right) {
+                if (!tui_buffer_set_grapheme(buf_, static_cast<int>(col),
+                         row, cluster.data, cluster.len, fg, TUI_BLACK,
+                         TUI_STYLE_NONE))
+                    return;
+            }
+            col += width;
+        }
     }
 
     void draw_image(const std::string&, float, float, float, float) override {}

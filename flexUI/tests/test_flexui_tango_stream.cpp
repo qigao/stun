@@ -226,6 +226,73 @@ void multi_stream_view(const void* context, tui_buffer_t*) {
 } // namespace
 
 spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
+    it("clips scrolling TUI text before writing header/footer cells") {
+        std::unique_ptr<tui_buffer_t, decltype(&tui_buffer_destroy)> buffer(
+            tui_buffer_create(14, 8), &tui_buffer_destroy);
+        check(buffer != nullptr);
+        if (!buffer) return;
+        auto renderer = flex::tui_backend::create_buffer_renderer(buffer.get());
+        check(renderer != nullptr);
+        if (!renderer) return;
+
+        const flex::Color color(1.0f, 1.0f, 1.0f);
+        const auto draw = [&](const std::string& str, int col, int row) {
+            renderer->draw_text(str, static_cast<float>(col * 8),
+                static_cast<float>(row * 16), "", 14.0f, false, color);
+        };
+        const auto character = [&](int col, int row) -> uint32_t {
+            return tui_buffer_at_const(buffer.get(), col, row)->ch;
+        };
+        renderer->begin_frame(14.0f * 8.0f, 8.0f * 16.0f, 1.0f);
+        draw("HEADER", 0, 0);
+        draw("FOOTER", 0, 7);
+
+        // Transcript content scrolls under the fixed header/footer, but the
+        // renderer must honor the actual clip after translations.
+        renderer->save();
+        renderer->clip_rect(0.0f, 2.0f * 16.0f, 14.0f * 8.0f,
+                            4.0f * 16.0f);
+        draw("OUTSIDE_TOP", 0, 0);
+        draw("OUTSIDE_BOTTOM", 0, 7);
+        draw("OUTSIDE_NEGATIVE", 0, -1);
+        draw("VISIBLE", 0, 2);
+        renderer->restore();
+
+        check(character(0, 0) == 'H');
+        check(character(5, 0) == 'R');
+        check(character(0, 7) == 'F');
+        check(character(5, 7) == 'R');
+        check(character(0, 1) == ' ');
+        check(character(0, 6) == ' ');
+        check(character(0, 2) == 'V');
+
+        // A horizontal clip must never publish half of a wide CJK
+        // grapheme, nor draw any glyph in the preceding cell.
+        renderer->save();
+        renderer->clip_rect(2.0f * 8.0f, 3.0f * 16.0f,
+                            5.0f * 8.0f, 3.0f * 16.0f);
+        draw("A中BCDE", 0, 3);
+        draw("A中B", 4, 4);
+        draw("A中", 5, 5);
+        renderer->restore();
+        renderer->end_frame();
+
+        check(character(0, 3) == ' ');
+        check(character(1, 3) == ' ');
+        check(character(2, 3) == ' ');
+        check(character(3, 3) == 'B');
+        check(character(6, 3) == 'E');
+        check(character(4, 4) == 'A');
+        const auto* wide = tui_buffer_at_const(buffer.get(), 5, 4);
+        const auto* continuation = tui_buffer_at_const(buffer.get(), 6, 4);
+        check(wide->ch == 0x4e2du && wide->span == TUI_CELL_SPAN_WIDE);
+        check(continuation->span == TUI_CELL_SPAN_CONTINUATION);
+        check(character(7, 4) == ' ');
+        check(character(5, 5) == 'A');
+        check(character(6, 5) == ' '); // wide glyph straddles right clip
+        check(character(0, 0) == 'H' && character(0, 7) == 'F');
+    }
+
     it("consumes a worker-produced UTF-8 stream on one owner and draws real cells") {
         std::unique_ptr<tui_buffer_t, decltype(&tui_buffer_destroy)> buffer(
             tui_buffer_create(80, 24), &tui_buffer_destroy);

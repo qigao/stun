@@ -298,19 +298,8 @@ static bool platform_enter(tui_terminal_t* term) {
         term->input_cp_changed = true;
     }
 
-    /* Tango paints an explicitly addressed cell grid. Never allow writing
-     * a final-column cell (notably bottom-right during a full repaint) to
-     * implicitly wrap or scroll the console. ConPTY translates native
-     * WriteConsoleA output into VT, and such scrolling would invalidate the
-     * front-buffer coordinates without any model/layout change.
-     *
-     * DISABLE_NEWLINE_AUTO_RETURN alone delays the wrap but permits the
-     * next printable cell to scroll. Turn off ENABLE_WRAP_AT_EOL_OUTPUT for
-     * the lifetime of the terminal and restore orig_out_mode on cleanup.
-     * terminal_cell_valid rejects a wide grapheme in the final column. */
-    const DWORD out_mode = (term->orig_out_mode |
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN) &
-        ~ENABLE_WRAP_AT_EOL_OUTPUT;
+    const DWORD out_mode = term->orig_out_mode |
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
     const DWORD in_mode = (term->orig_in_mode | ENABLE_MOUSE_INPUT |
         ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE;
     if (!SetConsoleMode(term->h_out, out_mode)) goto failed;
