@@ -32,6 +32,11 @@ class Screen {
     unsigned wrap_mode_changes_ = 0u;
     unsigned bottom_auto_wraps_ = 0u;
     unsigned bottom_explicit_newlines_ = 0u;
+    unsigned all_auto_wraps_ = 0u;
+    unsigned auto_wraps_into_footer_ = 0u;
+    unsigned explicit_newlines_into_footer_ = 0u;
+    int last_auto_wrap_row_ = -1;
+    unsigned screen_erase_full_ = 0u;
 
     void clear() {
         cells_.assign(static_cast<size_t>(rows_),
@@ -40,6 +45,13 @@ class Screen {
     }
 
     void newline(bool implicit_wrap = false) {
+        if (implicit_wrap) {
+            ++all_auto_wraps_;
+            last_auto_wrap_row_ = y_;
+            if (y_ == rows_ - 3) ++auto_wraps_into_footer_;
+        } else if (y_ == rows_ - 3) {
+            ++explicit_newlines_into_footer_;
+        }
         if (y_ + 1 < rows_) {
             ++y_;
         } else {
@@ -120,6 +132,7 @@ class Screen {
             // ED 0/1/2 erase only the corresponding visible region and
             // never move the cursor (unlike alternate-screen entry).
             if (csi_ != "3") {
+                if (csi_ == "2") ++screen_erase_full_;
                 const bool before = csi_ == "1";
                 const bool all = csi_ == "2";
                 for (int row = 0; row < rows_; ++row) {
@@ -289,7 +302,17 @@ public:
                ", bottom-auto-wraps=" + std::to_string(bottom_auto_wraps_) +
                ", bottom-explicit-newlines=" +
                std::to_string(bottom_explicit_newlines_) +
-               ", entered-alt=" + std::to_string(entered_alt_ ? 1 : 0) +
+               ", auto-wraps-all=" + std::to_string(all_auto_wraps_) +
+               ", auto-wraps-into-footer=" +
+               std::to_string(auto_wraps_into_footer_) +
+               ", explicit-newlines-into-footer=" +
+               std::to_string(explicit_newlines_into_footer_) +
+               ", last-auto-wrap-row=" +
+               std::to_string(last_auto_wrap_row_) +
+               ", full-screen-erases=" + std::to_string(screen_erase_full_) +
+               ", lower='" + cells_[static_cast<size_t>(rows_ - 2)] +
+               "', bottom='" + cells_[static_cast<size_t>(rows_ - 1)] +
+               "', entered-alt=" + std::to_string(entered_alt_ ? 1 : 0) +
                ", left-alt=" + std::to_string(left_alt_ ? 1 : 0) +
                ", header=" + std::to_string(header() ? 1 : 0) +
                ", status='" + status() + "', preview='" + preview + "'";
@@ -628,6 +651,15 @@ int main(int argc, char** argv) {
         no_wrap.feed(edge.data(), edge.size());
         if (!no_wrap.header() || !no_wrap.mode("tail", 80, 24) ||
             no_wrap.count() != 12u) return 33;
+        // A last-column PRINT on the row before the footer (with DECAWM
+        // enabled) can overwrite the footer without reaching the bottom
+        // row, so bottom-only scroll counters are insufficient.
+        Screen wrap_near_footer;
+        const std::string sequence =
+            "\x1b[?1049h\x1b[22;80Hxy";
+        wrap_near_footer.feed(sequence.data(), sequence.size());
+        if (wrap_near_footer.auto_wraps_into_footer_ != 1u ||
+            wrap_near_footer.bottom_auto_wraps_ != 0u) return 34;
         std::puts("Windows ConPTY VT ECH/autowrap/scrollback oracle passed");
         return 0;
     }
