@@ -123,6 +123,17 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
     set_tests_properties(tui_streaming_demo_win32_console
       PROPERTIES TIMEOUT 80)
     add_dependencies(stun_xml_runtime_qualification test_tui_win32_console)
+
+    # Host-owned resize is distinct from native Console INPUT_RECORD.
+    # ResizePseudoConsole changes the actual child console dimensions;
+    # the separate supervisor verifies the unchanged demo's visible cells.
+    add_executable(test_tui_win32_conpty
+      "${STUN_ROOT}/flexUI/tests/test_tui_win32_conpty.cpp")
+    add_test(NAME tui_streaming_demo_win32_conpty
+      COMMAND test_tui_win32_conpty "$<TARGET_FILE:flexui_tui_streaming_demo>")
+    set_tests_properties(tui_streaming_demo_win32_conpty
+      PROPERTIES TIMEOUT 85)
+    add_dependencies(stun_xml_runtime_qualification test_tui_win32_conpty)
   endif()
 endif()
 
