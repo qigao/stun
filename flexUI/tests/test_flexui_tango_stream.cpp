@@ -632,7 +632,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             "#transcript { width:180px; height:72px; overflow-y:scroll; "
             "display:flex; flex-direction:column; } "
             "#message41, #message42 { width:180px; display:flex; "
-            "flex-direction:column; } "
+            "flex-direction:column; flex-shrink:0; } "
             "#other-focus { width:70px; height:20px; }");
         auto* root = box.create("div", "root");
         auto* transcript = box.create("div", "transcript");
