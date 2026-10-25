@@ -296,7 +296,8 @@ public:
     }
 
     template<typename Predicate>
-    bool await(const char* name, DWORD timeout_ms, Predicate expected) {
+    bool await(const char* name, DWORD timeout_ms, Predicate expected,
+               bool allow_exited = false) {
         phase_ = name;
         const ULONGLONG deadline = GetTickCount64() + timeout_ms;
         while (GetTickCount64() < deadline) {
@@ -305,7 +306,8 @@ public:
                 if (expected(display_)) return true;
             }
             if (output_limit_hit_ ||
-                WaitForSingleObject(process_.hProcess, 0) != WAIT_TIMEOUT)
+                (!allow_exited &&
+                 WaitForSingleObject(process_.hProcess, 0) != WAIT_TIMEOUT))
                 return false;
             Sleep(35);
         }
@@ -337,7 +339,7 @@ public:
         if (!GetExitCodeProcess(process_.hProcess, &exit_code) || exit_code != 0)
             return false;
         if (!await("alt buffer restoration", 3000,
-            [](const Screen &s) {return s.left_alt();})) return false;
+            [](const Screen &s) {return s.left_alt();}, true)) return false;
         return !output_limit_hit_;
     }
 };
