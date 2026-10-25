@@ -15,6 +15,10 @@
 #define TUI_TERMINAL_PASTE_LIMIT (1024u * 1024u)
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct tui_terminal;
 typedef bool (*tui_terminal_platform_fn)(struct tui_terminal *);
 typedef bool (*tui_terminal_write_fn)(struct tui_terminal *, const char *,
@@ -78,6 +82,10 @@ bool tui_terminal_input_push(tui_terminal_t *term, const void *data,
                              size_t size);
 bool tui_terminal_input_next(tui_terminal_t *term, tui_event_t *event);
 bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* TANGO_TUI_TERMINAL_INTERNAL_H */
