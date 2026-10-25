@@ -298,8 +298,15 @@ static bool platform_enter(tui_terminal_t* term) {
         term->input_cp_changed = true;
     }
 
-    const DWORD out_mode = term->orig_out_mode |
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+    /* Tango uses explicit cursor-addressed cell coordinates, including the
+     * bottom/right edges of the alternate buffer. Automatic end-of-line
+     * wrapping would scroll ConPTY's viewport independently of Tango's
+     * front buffer, losing fixed header/footer cells on long transcripts.
+     * Preserve all original mode flags except auto-wrap and restore the
+     * exact original mode on cleanup. */
+    const DWORD out_mode = (term->orig_out_mode |
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN) &
+        ~ENABLE_WRAP_AT_EOL_OUTPUT;
     const DWORD in_mode = (term->orig_in_mode | ENABLE_MOUSE_INPUT |
         ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE;
     if (!SetConsoleMode(term->h_out, out_mode)) goto failed;
