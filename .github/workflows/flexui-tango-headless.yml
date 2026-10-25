@@ -158,8 +158,35 @@ jobs:
           fi
           test -f "$vcpkg_bin"
           "$vcpkg_bin" install --classic --triplet "$VCPKG_TRIPLET" \
-            lexbor box2d tree-sitter nlohmann-json pugixml stb freetype
+            nlohmann-json pugixml stb freetype
           test -f "$vcpkg_root/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Restore pinned native XML dependency builds
+        id: xml_deps
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flexui-tango-xml-deps
+          key: flexui-tango-xml-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flexUI/tests/xml-runtime-deps/CMakeLists.txt') }}
+
+      - name: Build canonical Lexbor/Box2D/Tree-sitter versions
+        if: steps.xml_deps.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          vcpkg_root="$VCPKG_ROOT"
+          deps_root="$RUNNER_TEMP/flexui-tango-xml-deps"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            vcpkg_root="$(cygpath -u "$VCPKG_ROOT")"
+            deps_root="$(cygpath -m "$deps_root")"
+          fi
+          cmake -S flexUI/tests/xml-runtime-deps \
+            -B build/flexui-tango-deps -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=lib \
+            "-DCMAKE_TOOLCHAIN_FILE=$vcpkg_root/scripts/buildsystems/vcpkg.cmake" \
+            "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
+            "-DCMAKE_INSTALL_PREFIX=$deps_root"
+          cmake --build build/flexui-tango-deps --config Release --parallel 2
+          cmake --install build/flexui-tango-deps --config Release
 
       - uses: actions/checkout@v4
         with:
@@ -192,7 +219,7 @@ jobs:
           set -euo pipefail
           native_path() {
             if [[ "$RUNNER_OS" == Windows ]]; then
-              cygpath -w "$1"
+              cygpath -m "$1"
             else
               printf '%s\n' "$1"
             fi
@@ -204,6 +231,7 @@ jobs:
           prefix="$(native_path "$SALTS_ROOT")"
           toolchain="$(native_path "$vcpkg_root/scripts/buildsystems/vcpkg.cmake")"
           stb_root="$(native_path "$vcpkg_root/installed/$VCPKG_TRIPLET/include")"
+          deps_root="$(native_path "$RUNNER_TEMP/flexui-tango-xml-deps")"
           re2c="$(native_path "$RE2C_TOOL")"
           export SALTS_ROOT="$prefix"
           cmake -S flexUI/tests/xml-runtime-standalone \
@@ -211,7 +239,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             "-DCMAKE_TOOLCHAIN_FILE=$toolchain" \
             "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
-            "-DCMAKE_PREFIX_PATH=$prefix" \
+            "-DCMAKE_PREFIX_PATH=$prefix;$deps_root" \
             "-DRE2C_EXECUTABLE=$re2c" \
             "-DSTB_INCLUDE_DIRS=$stb_root" \
             -DENABLE_SANITIZER_ADDRESS=OFF \
