@@ -379,6 +379,13 @@ class ConptyAcceptance {
     Screen display_;
     size_t output_count_ = 0;
     std::string recent_vt_;
+    // Test-only replay evidence. Captured from the actual ConPTY pipe,
+    // independent of Screen's VT parser and the child's Console snapshot.
+    // Keep the first 96 KiB; the entire scripted 48-message run normally
+    // fits, with explicit truncation if future tests exceed this budget.
+    static constexpr size_t kVtCaptureLimit = 96u * 1024u;
+    std::string captured_vt_;
+    bool vt_capture_truncated_ = false;
     std::atomic<bool> output_limit_hit_{false};
     std::atomic<bool> reader_done_{false};
     std::atomic<DWORD> reader_error_{0};
@@ -408,6 +415,11 @@ class ConptyAcceptance {
                 break;
             }
             output_count_ += read;
+            const size_t room = kVtCaptureLimit - captured_vt_.size();
+            const size_t to_copy = std::min(room, static_cast<size_t>(read));
+            captured_vt_.append(chunk, to_copy);
+            if (to_copy != static_cast<size_t>(read))
+                vt_capture_truncated_ = true;
             recent_vt_.append(chunk, static_cast<size_t>(read));
             if (recent_vt_.size() > 2048)
                 recent_vt_.erase(0, recent_vt_.size() - 2048);
@@ -441,6 +453,35 @@ public:
             frame_report_path_.c_str());
     }
     std::string last_phase() const { return phase_; }
+    void dump_raw_vt_on_failure() {
+        // Diagnostic path only: print a bounded, lossless hexadecimal
+        // transcript into CTest LastTest.log. Raw control bytes must NOT
+        // be interpreted by the CI console while investigating the oracle.
+        std::string copy;
+        bool truncated = false;
+        {
+            std::lock_guard<std::mutex> guard(mutex_);
+            copy = captured_vt_;
+            truncated = vt_capture_truncated_;
+        }
+        std::fprintf(stderr,
+            "RAW_CONPTY_VT_HEX_BEGIN bytes=%zu truncated=%d\\n",
+            copy.size(), truncated ? 1 : 0);
+        constexpr char hex[] = "0123456789ABCDEF";
+        char row[257]{};
+        for (size_t start = 0; start < copy.size(); start += 128u) {
+            const size_t count = std::min<size_t>(128u, copy.size() - start);
+            for (size_t i = 0; i < count; ++i) {
+                const unsigned char b =
+                    static_cast<unsigned char>(copy[start + i]);
+                row[i * 2u] = hex[b >> 4u];
+                row[i * 2u + 1u] = hex[b & 15u];
+            }
+            row[count * 2u] = '\0';
+            std::fprintf(stderr, "RAW_CONPTY_VT_HEX %s\\n", row);
+        }
+        std::fputs("RAW_CONPTY_VT_HEX_END\\n", stderr);
+    }
     std::string diagnostic() {
         std::lock_guard<std::mutex> guard(mutex_);
         std::string independent_report;
@@ -821,6 +862,7 @@ int main(int argc, char** argv) {
             "%s, error=%lu\n",
             harness.last_phase().c_str(), harness.diagnostic().c_str(),
             static_cast<unsigned long>(GetLastError()));
+        if (!plain) harness.dump_raw_vt_on_failure();
         return 5;
     }
     std::puts("real Windows ConPTY accepted: host ResizePseudoConsole "
