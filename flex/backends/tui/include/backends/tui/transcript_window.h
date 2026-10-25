@@ -214,8 +214,10 @@ public:
   }
 
   // A message-ID anchor is stable through earlier settled-message evictions.
-  // If the anchor itself was evicted, clamp to oldest retained message. This
-  // bounded scan copies no native source and keeps no pointer to evicted data.
+  // If the anchor was evicted, clamp to oldest retained. An anchor newer than
+  // every retained message clamps to the latest bounded visible window:
+  // navigation must not unexpectedly jump back to the oldest entry.
+  // This bounded scan copies no native source or pointer to evicted data.
   Status show_from_id(const tui_transcript_t* transcript,
                       std::uint64_t first_message_id) {
     if (!transcript || !first_message_id) return Status::Invalid;
@@ -232,8 +234,12 @@ public:
         break;
       }
     }
-    return show_with_policy(
-        transcript, start == count ? 0u : start, ScrollPolicy::AnchorTop);
+    if (start == count) {
+      // Future/nonexistent high anchors follow the newest window. Zero
+      // retained items still project as an empty bounded viewport.
+      start = count > slots_.size() ? count - slots_.size() : 0u;
+    }
+    return show_with_policy(transcript, start, ScrollPolicy::AnchorTop);
   }
 
 private:

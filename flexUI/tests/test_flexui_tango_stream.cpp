@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -1060,6 +1061,22 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         }
         check(window.visible_host(136u) != nullptr);
         check(window.visible_host(135u) != nullptr);
+
+        // A caller-supplied message anchor above the latest retained ID
+        // must clamp to the newest two slots, not silently jump back to
+        // the oldest history. This was previously a hidden fallback to 0.
+        check(window.show(transcript_state, 0u) == Status::Updated);
+        check(window.visible_host(134u) != nullptr);
+        check(window.visible_host(136u) == nullptr);
+        check(window.show_from_id(transcript_state,
+                  std::numeric_limits<std::uint64_t>::max()) ==
+              Status::Updated);
+        check(window.visible_host(134u) == nullptr);
+        check(window.visible_host(135u) != nullptr);
+        check(window.visible_host(136u) != nullptr);
+        check(window.visible_count() == 2u);
+        check(viewport->child_count() == 2u);
+        check(box.owned_element_count() <= initial_owned + 64u);
         check(box.resolve_handle(retired_handle) == nullptr);
         check(box.resolve_handle(held_handle) == nullptr);
         check(box.focused_element() == focus);
