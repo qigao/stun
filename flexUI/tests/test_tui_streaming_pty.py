@@ -125,6 +125,17 @@ def run_test(executable):
         until("End changes actual UI to tail mode",
               lambda: b"tail" in output[before:], 5.0)
 
+        # Let enough independent messages arrive to exceed the five
+        # visible slots before testing older-message navigation. Otherwise
+        # wheel-up at the beginning of a one-message transcript is a
+        # legitimate no-op, not an input-decoder regression. Continue to
+        # drain PTY output while the scripted worker advances.
+        older_window_ready = time.monotonic() + 3.0
+        while time.monotonic() < older_window_ready:
+            pump(0.04)
+            require(child.poll() is None,
+                    "interactive child exited before wheel navigation")
+
         # Drive one native mouse wheel event. The SGR parser is invoked from
         # tui_terminal_poll(), not from a test-only decoder entry point.
         before = len(output)
