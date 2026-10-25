@@ -3,6 +3,7 @@
 #include "tui.h"
 #include "tui_app_internal.h"
 #include "tui_async_wait_internal.h"
+#include "tui_terminal_internal.h"
 
 #include <chrono>
 #include <cstdint>
@@ -18,11 +19,20 @@ constexpr intptr_t kNoInputHandle = -1;
 struct OwnerModel {
     int updates = 0;
     uint32_t latest = 0;
+    int views = 0;
 };
 
 extern "C" bool on_keyboard(int, void*) { return true; }
 extern "C" int map_keyboard(const tui_event_t*) { return -1; }
-extern "C" void on_view(const void*, tui_buffer_t*) {}
+extern "C" void on_view(const void* state, tui_buffer_t* buffer) {
+    auto* model = const_cast<OwnerModel*>(
+        static_cast<const OwnerModel*>(state));
+    ++model->views;
+    (void)tui_buffer_text(buffer, 0, 0, "A中B", TUI_WHITE, TUI_BLACK);
+}
+extern "C" bool mock_terminal_write(tui_terminal_t*, const char*, size_t) {
+    return true;
+}
 
 extern "C" bool on_async(const tui_async_event_t* event,
                           const void* payload, void* state) {
@@ -58,6 +68,22 @@ int main() {
         return 4;
     }
 
+    // Exercise the native terminal diff from a C++ owner, without touching
+    // the user's actual console. The real Tango core remains C11.
+    auto* terminal = tui_app_terminal(app);
+    terminal->width = 8;
+    terminal->height = 1;
+    terminal->front = tui_buffer_create(8, 1);
+    terminal->back = tui_buffer_create(8, 1);
+    if (!terminal->front || !terminal->back) {
+        tui_app_destroy(app);
+        return 6;
+    }
+    terminal->initialized = true;
+    terminal->color_mode = TUI_COLOR_TRUECOLOR;
+    terminal->write_output = mock_terminal_write;
+    app->needs_redraw = false;
+
     const uint32_t message = 0x2468ace0u;
     tui_async_status_t posted = TUI_ASYNC_INVALID_ARGUMENT;
     std::thread producer([&] {
@@ -71,22 +97,37 @@ int main() {
     producer.join();
     const bool delivered = (wake == TUI_ASYNC_WAIT_MESSAGE) &&
                            (posted == TUI_ASYNC_OK);
-    const bool pumped = (tui_app_pump_messages(app, 4u) == 1u);
+    const bool dispatched = tui_app_dispatch_once(app);
     const bool content_ok = (model.updates == 1 &&
-                             model.latest == message);
+                             model.latest == message &&
+                             model.views == 1);
+    const auto* a = tui_buffer_at_const(terminal->front, 0, 0);
+    const auto* cjk = tui_buffer_at_const(terminal->front, 1, 0);
+    const auto* tail = tui_buffer_at_const(terminal->front, 2, 0);
+    const auto* b = tui_buffer_at_const(terminal->front, 3, 0);
+    const bool cells_ok = a && cjk && tail && b &&
+        a->ch == 'A' && cjk->ch == 0x4e2du &&
+        cjk->span == TUI_CELL_SPAN_WIDE &&
+        tail->span == TUI_CELL_SPAN_CONTINUATION &&
+        b->ch == 'B';
+    const bool idle_frame = tui_app_dispatch_once(app) &&
+        model.views == 1;
     const bool wake_retired =
         (tui_async_wait_io(queue, kNoInputHandle, 0) ==
          TUI_ASYNC_WAIT_TIMEOUT);
     const bool idle = tui_app_pump_messages(app, 4u) == 0u;
 
-    // Cross-platform C++ callers may only borrow the queue. Shutdown is
-    // owned by the Tango UI thread after the producer has joined.
+    // The fake output sink has no platform mode to restore. Let the
+    // original native Tango owner clean up the buffers and queue.
+    terminal->initialized = false;
     tui_app_destroy(app);
-    if (!delivered || !pumped || !content_ok || !wake_retired || !idle) {
+    if (!delivered || !dispatched || !content_ok || !cells_ok ||
+        !idle_frame || !wake_retired || !idle) {
         std::fprintf(stderr,
-            "C++ Tango owner ABI regression: delivered=%d pumped=%d"
-            " content=%d retired=%d idle=%d\n",
-            delivered, pumped, content_ok, wake_retired, idle);
+            "C++ owner regression: wake=%d dispatch=%d content=%d"
+            " cells=%d idle_frame=%d retired=%d idle=%d\n",
+            delivered, dispatched, content_ok, cells_ok,
+            idle_frame, wake_retired, idle);
         return 5;
     }
     return 0;
