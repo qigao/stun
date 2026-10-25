@@ -102,9 +102,27 @@ public:
     Screen() { clear(); }
     void resize(int columns, int rows) {
         if (columns < 1 || columns > 256 || rows < 1 || rows > 120) return;
-        cols_ = columns;
+        // ConPTY resizes the presentation grid; the existing overlapping
+        // cells are not all necessarily re-emitted as VT output. Clearing
+        // the oracle here manufactures a blank screen that the actual
+        // terminal has not displayed. Preserve the top-left overlap and
+        // require the child to update the dimension-bearing status itself.
+        std::vector<std::string> updated(
+            static_cast<size_t>(rows),
+            std::string(static_cast<size_t>(columns), ' '));
+        const int kept_rows = std::min(rows_, rows);
+        const int kept_cols = std::min(cols_, columns);
+        for (int row = 0; row < kept_rows; ++row) {
+            updated[static_cast<size_t>(row)].replace(
+                0, static_cast<size_t>(kept_cols),
+                cells_[static_cast<size_t>(row)], 0,
+                static_cast<size_t>(kept_cols));
+        }
         rows_ = rows;
-        clear();
+        cols_ = columns;
+        cells_.swap(updated);
+        x_ = std::clamp(x_, 0, cols_ - 1);
+        y_ = std::clamp(y_, 0, rows_ - 1);
     }
     void feed(const char *bytes, size_t count) {
         for (size_t i = 0; i < count; ++i) {
