@@ -254,6 +254,27 @@ bool on_async(const tui_async_event_t* event, const void* packet, void* ptr) {
     return true;
 }
 
+/* Fixed-status cells must never create a second physical terminal row.
+ * In a ConPTY session an overlong label can scroll into a footer while
+ * Tango's front buffer still assumes those terminal cells are unchanged.
+ * Core progress is always first; optional help only appears when it fits.
+ * All displayed tokens are ASCII, so width in bytes equals TUI cell width. */
+std::string format_status(const Demo& d, int width, int height) {
+    std::string line = "Retained " +
+        std::to_string(tui_transcript_count(d.transcript)) +
+        "/12 | " + (d.following ? "tail" : "scrollback") +
+        " | " + std::to_string(width) + "x" + std::to_string(height) +
+        " | settled=" + std::to_string(d.last_settled_message) + " |";
+    constexpr std::string_view help = " q quit, c cancel, End follow";
+    if (width > 0) {
+        const auto columns = static_cast<std::size_t>(width);
+        if (line.size() + help.size() <= columns)
+            line.append(help.data(), help.size());
+        if (line.size() > columns) line.resize(columns);
+    }
+    return line;
+}
+
 void on_view(const void* ptr, tui_buffer_t* back) {
     auto& d = *const_cast<Demo*>(static_cast<const Demo*>(ptr));
     try {
@@ -293,14 +314,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             (void)tui_async_queue_close(tui_app_async_queue(d.app));
             return;
         }
-        if (d.status) {
-            d.status->set_text("Retained " +
-                std::to_string(tui_transcript_count(d.transcript)) +
-                "/12 | " + (d.following ? "tail" : "scrollback") +
-                " | " + std::to_string(w) + "x" + std::to_string(h) +
-                " | settled=" + std::to_string(d.last_settled_message) +
-                " | q quit, c cancel, arrows/wheel browse, End follow");
-        }
+        if (d.status) d.status->set_text(format_status(d, w, h));
         d.box->update();
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
         report_owned_ui_cells(d, back);
@@ -550,6 +564,14 @@ int headless_smoke() {
     // tui_app_dispatch_once uses for a real POSIX PTY or Win32 ConPTY resize.
     const bool prepared = tui_terminal_prepare_frame(term);
     if (prepared) on_view(&d, tui_terminal_buffer(term));
+    const auto narrow_status = format_status(d, 52, 16);
+    const auto normal_status = format_status(d, 80, 24);
+    const bool single_row_status = narrow_status.size() <= 52u &&
+        normal_status.size() <= 80u &&
+        narrow_status.find("Retained 12/12 | scrollback | 52x16 | settled=23 |") ==
+            0u &&
+        normal_status.find("Retained 12/12 | scrollback | 80x24 | settled=23 |") ==
+            0u;
     const bool resized = prepared && d.box &&
         term->front->width == 52 && term->front->height == 16 &&
         term->back->width == 52 && term->back->height == 16 &&
@@ -560,7 +582,7 @@ int headless_smoke() {
     shutdown(d);
     if (!okay || !at_tail || !bounded || !browsed || !did_cancel ||
         !anchored || !returned || !returned_oldest || !resized ||
-        frames < 3u)
+        !single_row_status || frames < 3u)
         return 4;
     std::puts("Tango/FlexUI streaming demo headless smoke passed");
     return 0;
