@@ -52,11 +52,14 @@ def extract(package, dest, rid):
             if source == prefix or prefix not in source.parents:
                 continue
             relative = source.relative_to(prefix)
-            require(relative.parts and not relative.is_absolute() and
-                    ".." not in relative.parts and
-                    "\\\\" not in str(relative) and
-                    "\\x00" not in str(relative),
-                    f"Unsafe package path: {info.filename}")
+            # ZIP paths are POSIX, but pathlib on Windows interprets a
+            # single backslash or a drive colon as path syntax. Reject both
+            # before touching the filesystem, not only ".." POSIX parts.
+            unsafe = (not relative.parts or relative.is_absolute() or
+                      any(part in ("", ".", "..") or
+                          chr(92) in part or chr(0) in part or ":" in part or
+                          part.endswith((" ", ".")) for part in relative.parts))
+            require(not unsafe, f"Unsafe package path: {info.filename}")
             require(relative not in seen,
                     f"Duplicate SDK entry: {info.filename}")
             seen.add(relative)
