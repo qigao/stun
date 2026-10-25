@@ -97,6 +97,16 @@ class RestoreSDKTest(unittest.TestCase):
             module.restore(self.args())
         self.assertFalse(self.sdk.exists())
 
+    def test_windows_backslash_escape_rejected(self):
+        self.valid()
+        self.make_archive("saltsutils.native", [
+            ("lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake", b"utils"),
+            (r"..\\..\\escape.txt", b"malicious")
+        ], self.utils)
+        with self.assertRaisesRegex(RuntimeError, "Unsafe package path"):
+            module.restore(self.args())
+        self.assertFalse(self.sdk.exists())
+
     def test_duplicate_entry_rejected(self):
         self.valid()
         self.make_archive("saltsutils.native", [
