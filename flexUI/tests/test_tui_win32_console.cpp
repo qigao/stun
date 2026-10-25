@@ -205,8 +205,18 @@ struct ConsoleTest {
     }
 
     bool live_modes() const {
-        DWORD im = 0, om = 0;
-        return GetConsoleMode(in, &im) && GetConsoleMode(out, &om) &&
+        DWORD im = 0, om = 0, active_mode = 0;
+        HANDLE active = CreateFileW(L"CONOUT$", GENERIC_READ,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                    nullptr, OPEN_EXISTING, 0, nullptr);
+        if (active == INVALID_HANDLE_VALUE) return false;
+        const bool active_read = GetConsoleMode(active, &active_mode) != FALSE;
+        CloseHandle(active);
+        const DWORD required = ENABLE_PROCESSED_OUTPUT |
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+        return active_read && (active_mode & required) == required &&
+            (active_mode & ENABLE_WRAP_AT_EOL_OUTPUT) == 0u &&
+            GetConsoleMode(in, &im) && GetConsoleMode(out, &om) &&
             (im & (ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT)) ==
                  (ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT) &&
             (im & ENABLE_QUICK_EDIT_MODE) == 0 &&

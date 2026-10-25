@@ -54,6 +54,7 @@ struct tui_terminal {
      * screen after ?1049h. Both dimensions and glyph output must target
      * the SAME buffer. Private state; no public ABI or second UI owner. */
     HANDLE h_active_out;
+    DWORD orig_active_out_mode;
     DWORD orig_out_mode;
     DWORD orig_in_mode;
     /* Owner-local Win32 INPUT_RECORD decode state. Never shared across
@@ -62,6 +63,7 @@ struct tui_terminal {
     DWORD last_mouse_button_state;
     UINT orig_output_cp;
     UINT orig_input_cp;
+    bool active_out_mode_changed;
     bool out_mode_changed;
     bool in_mode_changed;
     bool output_cp_changed;

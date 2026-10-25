@@ -251,6 +251,17 @@ static int quantize_256(tui_color_t c) {
  * ============================================================================ */
 
 #ifdef _WIN32
+/* Each Win32 console screen buffer owns its own output mode; a VT alternate
+ * buffer must not inherit assumptions made about the original h_out. */
+static bool restore_active_output_mode(tui_terminal_t* term) {
+    if (!term->active_out_mode_changed) return true;
+    if (!term->h_active_out ||
+        !SetConsoleMode(term->h_active_out, term->orig_active_out_mode))
+        return false;
+    term->active_out_mode_changed = false;
+    return true;
+}
+
 static bool platform_leave(tui_terminal_t* term) {
     bool ok = true;
     if (term->in_mode_changed) {
@@ -312,7 +323,8 @@ static bool platform_enter(tui_terminal_t* term) {
      * Preserve all original mode flags except auto-wrap and restore the
      * exact original mode on cleanup. */
     const DWORD out_mode = (term->orig_out_mode |
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN) &
+        ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+        DISABLE_NEWLINE_AUTO_RETURN) &
         ~ENABLE_WRAP_AT_EOL_OUTPUT;
     const DWORD in_mode = (term->orig_in_mode | ENABLE_MOUSE_INPUT |
         ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE;
@@ -473,14 +485,50 @@ bool tui_terminal_init(tui_terminal_t* term) {
     }
 
 #ifdef _WIN32
-    /* After ?1049h open the CURRENT active buffer, not the inherited
-     * handle, for both rendering and dimension reads. Leave the original
-     * handle untouched so platform_leave restores the original screen. */
+    /* ?1049h switches screen buffers. Output mode belongs to the buffer,
+     * not to the inherited h_out handle on which we enabled VT processing.
+     * The currently ACTIVE CONOUT$ must reject EOL wrapping as well, or
+     * repeated ConPTY frames can scroll over the fixed footer while the
+     * owner's cell diff still believes that row is unchanged. */
     HANDLE active = CreateFileW(L"CONOUT$",
                                 GENERIC_READ | GENERIC_WRITE,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 NULL, OPEN_EXISTING, 0, NULL);
-    if (active != INVALID_HANDLE_VALUE) term->h_active_out = active;
+    DWORD active_mode = 0u;
+    bool active_ready = false;
+    if (active != INVALID_HANDLE_VALUE) {
+        term->h_active_out = active;
+        if (GetConsoleMode(active, &active_mode)) {
+            term->orig_active_out_mode = active_mode;
+            const DWORD required = ENABLE_PROCESSED_OUTPUT |
+                ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+                DISABLE_NEWLINE_AUTO_RETURN;
+            const DWORD desired = (active_mode | required) &
+                ~ENABLE_WRAP_AT_EOL_OUTPUT;
+            if (desired == active_mode || SetConsoleMode(active, desired)) {
+                term->active_out_mode_changed = desired != active_mode;
+                DWORD confirmed = 0u;
+                active_ready = GetConsoleMode(active, &confirmed) &&
+                    (confirmed & required) == required &&
+                    (confirmed & ENABLE_WRAP_AT_EOL_OUTPUT) == 0u;
+            }
+        }
+    }
+    if (!active_ready) {
+        /* Fail closed: do not silently draw to the old screen. Return to
+         * the original console and release our two uncommitted buffers. */
+        (void)restore_active_output_mode(term);
+        if (term->h_active_out) {
+            CloseHandle(term->h_active_out);
+            term->h_active_out = NULL;
+        }
+        (void)write_raw_str(term, rollback_sequence);
+        if (term->platform_leave(term)) term->platform_active = false;
+        tui_buffer_destroy(front);
+        tui_buffer_destroy(back);
+        term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        return false;
+    }
 #endif
 
     tui_buffer_destroy(term->front);
@@ -508,6 +556,12 @@ bool tui_terminal_cleanup(tui_terminal_t* term) {
         term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
         ok = false;
     }
+#ifdef _WIN32
+    if (!restore_active_output_mode(term)) {
+        term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        ok = false;
+    }
+#endif
     if (!term->platform_leave(term)) {
         term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
         ok = false;

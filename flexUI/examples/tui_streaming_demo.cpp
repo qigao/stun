@@ -266,9 +266,15 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         // Installed-SDK real Console and ConPTY acceptance may never
         // silently fall back to an inherited inactive output buffer.
         // A synthetic headless smoke has no platform handles to inspect.
+        DWORD active_mode = 0u;
+        const DWORD required = ENABLE_PROCESSED_OUTPUT |
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
         if (term->platform_active &&
             (!term->h_active_out ||
-             term->h_active_out == INVALID_HANDLE_VALUE)) {
+             term->h_active_out == INVALID_HANDLE_VALUE ||
+             !GetConsoleMode(term->h_active_out, &active_mode) ||
+             (active_mode & required) != required ||
+             (active_mode & ENABLE_WRAP_AT_EOL_OUTPUT) != 0u)) {
             d.valid = false;
             return;
         }
