@@ -211,6 +211,7 @@ struct ConsoleTest {
                  (ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT) &&
             (im & ENABLE_QUICK_EDIT_MODE) == 0 &&
             (om & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 &&
+            (om & ENABLE_WRAP_AT_EOL_OUTPUT) == 0 &&
             GetConsoleCP() == CP_UTF8 && GetConsoleOutputCP() == CP_UTF8;
     }
 
@@ -265,7 +266,9 @@ struct ConsoleTest {
             !await("END INPUT_RECORD makes visible tail", 6000,
                    [](const Screen& s) {return s.tail;})) return false;
         if (!await(">= 6 actual rendered messages before wheel", 22000,
-                   [](const Screen& s) {return s.tail && s.count >= 6;}))
+                   [](const Screen& s) {
+                       return s.header && s.tail && s.count >= 6;
+                   }))
             return false;
         if (!send_wheel() ||
             !await("MOUSE_WHEELED visibly changes scrollback", 6000,
