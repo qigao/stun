@@ -465,7 +465,7 @@ public:
             truncated = vt_capture_truncated_;
         }
         std::fprintf(stderr,
-            "RAW_CONPTY_VT_HEX_BEGIN bytes=%zu truncated=%d\\n",
+            "RAW_CONPTY_VT_HEX_BEGIN bytes=%zu truncated=%d\n",
             copy.size(), truncated ? 1 : 0);
         constexpr char hex[] = "0123456789ABCDEF";
         char row[257]{};
@@ -478,9 +478,9 @@ public:
                 row[i * 2u + 1u] = hex[b & 15u];
             }
             row[count * 2u] = '\0';
-            std::fprintf(stderr, "RAW_CONPTY_VT_HEX %s\\n", row);
+            std::fprintf(stderr, "RAW_CONPTY_VT_HEX %s\n", row);
         }
-        std::fputs("RAW_CONPTY_VT_HEX_END\\n", stderr);
+        std::fputs("RAW_CONPTY_VT_HEX_END\n", stderr);
     }
     std::string diagnostic() {
         std::lock_guard<std::mutex> guard(mutex_);
