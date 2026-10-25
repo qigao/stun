@@ -202,7 +202,7 @@ void multi_stream_view(const void* context, tui_buffer_t*) {
     auto* owner = const_cast<MultiStreamOwner*>(
         static_cast<const MultiStreamOwner*>(context));
     if (!owner || !owner->box || !owner->viewport) return;
-    const auto follow = flexUI::StreamScrollFollow::capture(
+    const auto follow = flexUI::StreamScrollFollow::before_content_update(
         *owner->viewport);
     for (auto& slot : owner->slots) {
         if (!slot.dirty) continue;
