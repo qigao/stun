@@ -62,6 +62,12 @@ endif()
 
 set_target_properties(${TARGET_NAME}  PROPERTIES FOLDER "tango")
 
+# C++ is a test-only consumer: installed Tango remains a native C11 library.
+option(TANGO_BUILD_CPP_INTEROP_TESTS
+       "Build the C++17 owner/wakeup consumer test" OFF)
 if(BUILD_TESTING)
+    if(TANGO_BUILD_CPP_INTEROP_TESTS)
+        enable_language(CXX)
+    endif()
     add_subdirectory(tests)
 endif()
