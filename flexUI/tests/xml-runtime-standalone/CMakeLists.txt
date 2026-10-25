@@ -133,6 +133,14 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
       COMMAND test_tui_win32_conpty "$<TARGET_FILE:flexui_tui_streaming_demo>")
     set_tests_properties(tui_streaming_demo_win32_conpty
       PROPERTIES TIMEOUT 85)
+    # The instrumented route is diagnostic-only: the ordinary demo without
+    # a report file is also a required native test. Never let owner-side
+    # logging make an otherwise failing race appear qualified.
+    add_test(NAME tui_streaming_demo_win32_conpty_plain
+      COMMAND test_tui_win32_conpty --plain
+        "$<TARGET_FILE:flexui_tui_streaming_demo>")
+    set_tests_properties(tui_streaming_demo_win32_conpty_plain
+      PROPERTIES TIMEOUT 85)
     add_dependencies(stun_xml_runtime_qualification test_tui_win32_conpty)
   endif()
 endif()

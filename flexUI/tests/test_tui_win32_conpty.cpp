@@ -388,7 +388,8 @@ public:
             ", child_console_info='" + independent_report +
             "', owner_cell_frames='" + owner_cell_frames + "'";
     }
-    bool setup(const char* executable, bool probe = false) {
+    bool setup(const char* executable, bool probe = false,
+               bool frame_diagnostic = true) {
         phase_ = "CreatePseudoConsole/child";
         HANDLE conpty_in = nullptr, conpty_out = nullptr;
         SECURITY_ATTRIBUTES attrs{sizeof(attrs), nullptr, TRUE};
@@ -422,7 +423,7 @@ public:
         const BOOL attr_ok = UpdateProcThreadAttribute(attribute_list, 0,
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
             pseudo_, sizeof(HPCON), nullptr, nullptr);
-        if (!probe) {
+        if (!probe && frame_diagnostic) {
             char directory[MAX_PATH]{};
             char filename[MAX_PATH]{};
             const DWORD path_size = GetTempPathA(MAX_PATH, directory);
@@ -448,7 +449,7 @@ public:
                 command += L" --probe-child \"";
                 command += utf8_to_wide(probe_report_path_.c_str());
                 command += L"\"";
-            } else {
+            } else if (frame_diagnostic) {
                 command += L" --frame-report \"";
                 command += utf8_to_wide(frame_report_path_.c_str());
                 command += L"\"";
@@ -514,8 +515,8 @@ public:
         DWORD code = 999;
         return GetExitCodeProcess(process_.hProcess, &code) && code == 0;
     }
-    bool run(const char *executable) {
-        if (!setup(executable)) return false;
+    bool run(const char *executable, bool frame_diagnostic = true) {
+        if (!setup(executable, false, frame_diagnostic)) return false;
         if (!await("real 80x24 ConPTY terminal frame", 12000,
             [](const Screen &s) {return s.entered_alt() && s.header() &&
                                         s.mode("tail", 80, 24);})) return false;
@@ -620,9 +621,16 @@ int main(int argc, char** argv) {
         std::puts("Independent ConPTY host transport passed");
         return 0;
     }
-    if (argc != 2) return 2;
+    // The plain test runs the exact ordinary demo invocation, with no
+    // diagnostic file writes that could mask owner/ConPTY scheduling bugs.
+    // The separate default mode retains bounded owner-cell evidence for
+    // diagnosing a failure. Both enforce the same real host resize and
+    // onscreen header/footer restoration predicates.
+    const bool plain = argc == 3 &&
+        std::strcmp(argv[1], "--plain") == 0;
+    if (argc != 2 && !plain) return 2;
     ConptyAcceptance harness;
-    if (!harness.run(argv[1])) {
+    if (!harness.run(argv[plain ? 2 : 1], !plain)) {
         std::fprintf(stderr, "Win32 ConPTY resize acceptance failed at '%s', "
             "%s, error=%lu\n",
             harness.last_phase().c_str(), harness.diagnostic().c_str(),
