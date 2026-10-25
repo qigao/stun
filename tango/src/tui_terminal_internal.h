@@ -77,6 +77,10 @@ struct tui_terminal {
 #endif
 };
 
+/* Private pre-frame resize and invalidation. UI Owner invokes this before
+ * any view callback; terminal_render keeps it as an idempotent safeguard. */
+bool tui_terminal_prepare_frame(tui_terminal_t *term);
+
 #ifndef _WIN32
 /* Consume a pending SIGWINCH notification on the terminal owner thread. */
 bool tui_terminal_consume_resize_pending(void);

@@ -454,12 +454,15 @@ int headless_smoke() {
     // Reflow the actual terminal's two cell buffers after a size change.
     // The TUI renderer must borrow the current back buffer each frame,
     // and the Box viewport must agree with the new cell geometry.
-    tui_buffer_resize(term->front, 52, 16);
-    tui_buffer_resize(term->back, 52, 16);
     term->width = 52;
     term->height = 16;
-    on_view(&d, tui_terminal_buffer(term));
-    const bool resized = d.box &&
+    // Exercise the same private pre-view buffer reconfiguration that
+    // tui_app_dispatch_once uses for a real POSIX PTY or Win32 ConPTY resize.
+    const bool prepared = tui_terminal_prepare_frame(term);
+    if (prepared) on_view(&d, tui_terminal_buffer(term));
+    const bool resized = prepared && d.box &&
+        term->front->width == 52 && term->front->height == 16 &&
+        term->back->width == 52 && term->back->height == 16 &&
         d.box->viewport_width() == 52.0f * kCellWidth &&
         d.box->viewport_height() == 16.0f * kCellHeight &&
         tui_terminal_render(term) && rendered();

@@ -568,29 +568,48 @@ tui_buffer_t* tui_terminal_buffer(tui_terminal_t* term) {
  * Rendering
  * ============================================================================ */
 
-bool tui_terminal_render(tui_terminal_t* term) {
-    if (!term || !term->initialized || !term->front || !term->back) {
+/* A UI Owner frame must be laid out and drawn against the final native
+ * terminal dimensions. Resizing here, BEFORE view(), avoids discarding
+ * the just-rendered cells in tui_terminal_render(). This is private runtime
+ * state, not a new public Tango API or a second event loop. */
+bool tui_terminal_prepare_frame(tui_terminal_t* term) {
+    if (!term || !term->initialized || !term->front || !term->back ||
+        term->width <= 0 || term->height <= 0) {
         if (term) term->last_error = TUI_TERMINAL_ERROR_INVALID_STATE;
         return false;
     }
-    term->last_error = TUI_TERMINAL_ERROR_NONE;
-    
     tui_buffer_t* back = term->back;
     tui_buffer_t* front = term->front;
-    
-    /* Resize if needed */
-    if (back->width != term->width || back->height != term->height) {
-        tui_buffer_resize(back, term->width, term->height);
-        tui_buffer_resize(front, term->width, term->height);
-        if (back->width != term->width || back->height != term->height ||
-            front->width != term->width || front->height != term->height) {
-            term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
-            return false;
-        }
-        /* Force full redraw */
-        tui_buffer_clear(front);
-        tui_buffer_mark_all_dirty(back);
+    if (back->width == term->width && back->height == term->height &&
+        front->width == term->width && front->height == term->height)
+        return true;
+
+    tui_buffer_resize(back, term->width, term->height);
+    tui_buffer_resize(front, term->width, term->height);
+    if (back->width != term->width || back->height != term->height ||
+        front->width != term->width || front->height != term->height) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
+        return false;
     }
+
+    /* The physical console can preserve cells when its viewport changes.
+     * All new cells must compare unequal to the previous committed frame,
+     * even if the back buffer starts blank. Fail closed on a subsequent
+     * write: do not commit this front buffer until output succeeds. */
+    const tui_cell_t invalid = tui_cell_styled(
+        0xffffffffu, TUI_WHITE, TUI_WHITE, 0xffu);
+    const size_t count = (size_t)term->width * (size_t)term->height;
+    for (size_t i = 0u; i < count; ++i) front->cells[i] = invalid;
+    tui_buffer_mark_all_dirty(back);
+    return true;
+}
+
+bool tui_terminal_render(tui_terminal_t* term) {
+    if (!tui_terminal_prepare_frame(term)) return false;
+    term->last_error = TUI_TERMINAL_ERROR_NONE;
+
+    tui_buffer_t* back = term->back;
+    tui_buffer_t* front = term->front;
     
     if (!tui_buffer_is_dirty(back)) return true;
     
