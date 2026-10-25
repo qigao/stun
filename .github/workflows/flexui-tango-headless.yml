@@ -64,6 +64,11 @@ jobs:
           ref: ${{ steps.source.outputs.sha }}
           persist-credentials: false
 
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+        with:
+          arch: x64
+
       - name: Verify immutable checkout and restore script tests
         shell: bash
         run: |
@@ -179,9 +184,14 @@ jobs:
             vcpkg_root="$(cygpath -m "$VCPKG_ROOT")"
             deps_root="$(cygpath -m "$deps_root")"
           fi
+          compiler_args=()
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            compiler_args=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
+          fi
           cmake -S flexUI/tests/xml-runtime-deps \
             -B build/flexui-tango-deps -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=lib \
+            "${compiler_args[@]}" \
             "-DCMAKE_TOOLCHAIN_FILE=$vcpkg_root/scripts/buildsystems/vcpkg.cmake" \
             "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
             "-DCMAKE_INSTALL_PREFIX=$deps_root"
@@ -199,7 +209,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          compiler_args=()
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            compiler_args=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
+          fi
           cmake -S .ci/re2c -B build/re2c-headless -G Ninja \
+            "${compiler_args[@]}" \
             -DCMAKE_BUILD_TYPE=Release -DRE2C_BUILD_RE2D=OFF \
             -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF
           cmake --build build/re2c-headless --config Release --target re2c --parallel 2
@@ -234,9 +249,14 @@ jobs:
           deps_root="$(native_path "$RUNNER_TEMP/flexui-tango-xml-deps")"
           re2c="$(native_path "$RE2C_TOOL")"
           export SALTS_ROOT="$prefix"
+          compiler_args=()
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            compiler_args=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl)
+          fi
           cmake -S flexUI/tests/xml-runtime-standalone \
             -B build/flexui-tango-cross -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
+            "${compiler_args[@]}" \
             "-DCMAKE_TOOLCHAIN_FILE=$toolchain" \
             "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
             "-DCMAKE_PREFIX_PATH=$prefix;$deps_root" \
