@@ -268,6 +268,7 @@ class ConptyAcceptance {
     std::atomic<DWORD> reader_error_{0};
     std::string phase_ = "initialize";
     std::string probe_report_path_;
+    std::string frame_report_path_;
 
     static std::wstring utf8_to_wide(const char* path) {
         const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
@@ -320,6 +321,8 @@ public:
         if (process_.hProcess) CloseHandle(process_.hProcess);
         if (!probe_report_path_.empty()) (void)DeleteFileA(
             probe_report_path_.c_str());
+        if (!frame_report_path_.empty()) (void)DeleteFileA(
+            frame_report_path_.c_str());
     }
     std::string last_phase() const { return phase_; }
     std::string diagnostic() {
@@ -335,6 +338,27 @@ public:
                 if (ReadFile(f, content, sizeof(content) - 1, &got, nullptr))
                     independent_report.assign(content, got);
                 CloseHandle(f);
+            }
+        }
+        std::string owner_cell_frames;
+        if (!frame_report_path_.empty()) {
+            HANDLE report = CreateFileA(frame_report_path_.c_str(),
+                GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (report != INVALID_HANDLE_VALUE) {
+                LARGE_INTEGER file_size{};
+                if (GetFileSizeEx(report, &file_size)) {
+                    if (file_size.QuadPart > 1800)
+                        (void)SetFilePointer(report, -1800, nullptr, FILE_END);
+                    char latest[2048]{};
+                    DWORD got = 0;
+                    if (ReadFile(report, latest, sizeof(latest) - 1,
+                                 &got, nullptr))
+                        owner_cell_frames.assign(latest, got);
+                }
+                CloseHandle(report);
+                std::replace(owner_cell_frames.begin(),
+                             owner_cell_frames.end(), '\n', ';');
             }
         }
         DWORD child_exit = 999;
@@ -361,7 +385,8 @@ public:
             std::to_string(reader_error_.load()) + ", child_exit=" +
             std::to_string(child_exit) + ", output_limit=" +
             std::to_string(output_limit_hit_ ? 1 : 0) +
-            ", child_console_info='" + independent_report + "'";
+            ", child_console_info='" + independent_report +
+            "', owner_cell_frames='" + owner_cell_frames + "'";
     }
     bool setup(const char* executable, bool probe = false) {
         phase_ = "CreatePseudoConsole/child";
@@ -397,6 +422,15 @@ public:
         const BOOL attr_ok = UpdateProcThreadAttribute(attribute_list, 0,
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
             pseudo_, sizeof(HPCON), nullptr, nullptr);
+        if (!probe) {
+            char directory[MAX_PATH]{};
+            char filename[MAX_PATH]{};
+            const DWORD path_size = GetTempPathA(MAX_PATH, directory);
+            if (path_size == 0 || path_size >= MAX_PATH ||
+                !GetTempFileNameA(directory, "STF", 0, filename))
+                return false;
+            frame_report_path_ = filename;
+        }
         if (probe) {
             char directory[MAX_PATH]{};
             char filename[MAX_PATH]{};
@@ -413,6 +447,10 @@ public:
             if (probe) {
                 command += L" --probe-child \"";
                 command += utf8_to_wide(probe_report_path_.c_str());
+                command += L"\"";
+            } else {
+                command += L" --frame-report \"";
+                command += utf8_to_wide(frame_report_path_.c_str());
                 command += L"\"";
             }
             std::vector<wchar_t> cmd(command.begin(), command.end());

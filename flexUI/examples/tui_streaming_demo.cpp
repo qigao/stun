@@ -77,7 +77,64 @@ struct Demo {
     std::size_t rejected = 0u;
     bool following = true;
     bool valid = true;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+    // Optional CI-only owner-cell diagnostic; no callbacks, event transport
+    // or terminal output are changed. At most 96 bounded lines are written.
+    std::string frame_report_path;
+    unsigned frame_report_count = 0u;
+#endif
 };
+
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+void report_owned_ui_cells(Demo& d, const tui_buffer_t* buffer) {
+    if (d.frame_report_path.empty() || d.frame_report_count >= 96u ||
+        !buffer || buffer->height <= 0 || buffer->width <= 0) return;
+    const auto row_ascii = [&](int row) {
+        std::string result;
+        if (row < 0 || row >= buffer->height) return result;
+        const int width = std::min(buffer->width, 54);
+        for (int x = 0; x < width; ++x) {
+            const auto* cell = tui_buffer_at_const(buffer, x, row);
+            result.push_back(cell->ch >= 0x20u && cell->ch < 0x7fu ?
+                static_cast<char>(cell->ch) : '?');
+        }
+        return result;
+    };
+    const auto contains = [&](const char* needle) {
+        const auto length = std::strlen(needle);
+        if (length > static_cast<std::size_t>(buffer->width)) return false;
+        for (int y = 0; y < buffer->height; ++y)
+            for (int x = 0; x + static_cast<int>(length) <= buffer->width; ++x) {
+                bool equal = true;
+                for (std::size_t k = 0; k < length; ++k) {
+                    if (tui_buffer_at_const(buffer, x + static_cast<int>(k), y)->ch !=
+                            static_cast<std::uint32_t>(
+                                static_cast<unsigned char>(needle[k]))) {
+                        equal = false;
+                        break;
+                    }
+                }
+                if (equal) return true;
+            }
+        return false;
+    };
+    FILE* report = std::fopen(d.frame_report_path.c_str(), "a");
+    if (!report) return;
+    const auto top = row_ascii(0);
+    const auto lower = row_ascii(buffer->height - 2);
+    const auto bottom = row_ascii(buffer->height - 1);
+    (void)std::fprintf(report,
+        "accepted=%zu retained=%zu width=%d height=%d header=%d footer=%d "
+        "top='%s' lower='%s' bottom='%s'\n",
+        d.accepted, tui_transcript_count(d.transcript),
+        buffer->width, buffer->height,
+        contains("FlexUI + Tango") ? 1 : 0,
+        contains("Retained ") ? 1 : 0,
+        top.c_str(), lower.c_str(), bottom.c_str());
+    (void)std::fclose(report);
+    ++d.frame_report_count;
+}
+#endif
 
 int map_input(const tui_event_t* e) {
     if (!e) return -1;
@@ -185,7 +242,7 @@ bool on_async(const tui_async_event_t* event, const void* packet, void* ptr) {
     return true;
 }
 
-void on_view(const void* ptr, tui_buffer_t*) {
+void on_view(const void* ptr, tui_buffer_t* back) {
     auto& d = *const_cast<Demo*>(static_cast<const Demo*>(ptr));
     try {
         const auto* term = tui_app_terminal(d.app);
@@ -215,6 +272,9 @@ void on_view(const void* ptr, tui_buffer_t*) {
                 " | q quit, c cancel, arrows/wheel browse, End follow");
         }
         d.box->update();
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+        report_owned_ui_cells(d, back);
+#endif
     } catch (const std::exception&) {
         d.valid = false;
         (void)tui_async_queue_close(tui_app_async_queue(d.app));
@@ -494,8 +554,16 @@ int main(int argc, char** argv) {
         return 2;
 #endif
     }
-    if (argc != 1) return 2;
+    bool frame_diagnostic = false;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+    frame_diagnostic = argc == 3 &&
+        std::strcmp(argv[1], "--frame-report") == 0;
+#endif
+    if (argc != 1 && !frame_diagnostic) return 2;
     Demo d;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+    if (frame_diagnostic) d.frame_report_path = argv[2];
+#endif
     try {
         if (!initialize(d)) { shutdown(d); return 1; }
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
